@@ -1,7 +1,7 @@
 import "../global.css";
-import { Footer } from "@vercel/geistdocs/footer";
 import { Navbar } from "@vercel/geistdocs/navbar";
 import type { Metadata } from "next";
+import { Footer } from "@/components/geistdocs/footer";
 import { GeistdocsProvider } from "@/components/geistdocs/provider";
 import { config } from "@/lib/geistdocs/config";
 import { mono, sans } from "@/lib/geistdocs/fonts";
