@@ -224,7 +224,7 @@ describe("eve init smoke", () => {
     await expect(pathExists(join(projectDir, "app/page.tsx"))).resolves.toBe(true);
     await expect(pathExists(join(projectDir, "vercel.json"))).resolves.toBe(false);
     expect(await readFile(join(projectDir, "next.config.ts"), "utf8")).toContain(
-      "configureVercelOutput: false",
+      "export default withEve(nextConfig);",
     );
     const [installCall, devCall] = await fakePnpm.readCalls();
     expect(installCall?.args.slice(-3)).toEqual([

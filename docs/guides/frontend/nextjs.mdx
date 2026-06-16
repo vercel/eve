@@ -34,13 +34,12 @@ export default withEve(nextConfig, {
 
 All fields are optional.
 
-| Option                  | Type      | Default                | Purpose                                                                                                                                             |
-| ----------------------- | --------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eveRoot`               | `string`  | Next.js app root       | Path to the Eve app root, relative to `process.cwd()` unless absolute. Set it when the agent lives outside the Next.js project.                     |
-| `eveBuildCommand`       | `string`  | `"eve build"`          | Build command for the generated Eve Vercel service. Use it when the Eve service needs project-specific prework, without changing the Next.js build. |
-| `configureVercelOutput` | `boolean` | `true`                 | When `true`, `withEve` writes the `experimentalServices` entries for both apps to `.vercel/output/config.json`. Set to `false` to skip that step.   |
-| `servicePrefix`         | `string`  | `"/_eve_internal/eve"` | Private Vercel route namespace for the Eve service. Must match the Eve service's mount in your Vercel Build Output config when you set it manually. |
-| `devServerTimeoutMs`    | `number`  | `180000`               | Maximum time to wait for the Eve development server to become available.                                                                            |
+| Option               | Type     | Default                | Purpose                                                                                                                                             |
+| -------------------- | -------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `eveRoot`            | `string` | Next.js app root       | Path to the Eve app root, relative to `process.cwd()` unless absolute. Set it when the agent lives outside the Next.js project.                     |
+| `eveBuildCommand`    | `string` | `"eve build"`          | Build command for the generated Eve Vercel service. Use it when the Eve service needs project-specific prework, without changing the Next.js build. |
+| `servicePrefix`      | `string` | `"/_eve_internal/eve"` | Private Vercel route namespace for the Eve service. Must match the Eve service's mount in your Vercel Build Output config when you set it manually. |
+| `devServerTimeoutMs` | `number` | `180000`               | Maximum time to wait for the Eve development server to become available.                                                                            |
 
 For slow cold starts, increase the development timeout:
 

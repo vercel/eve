@@ -337,15 +337,10 @@ export default slackChannel({
 `;
 }
 
-function renderWebAppTemplate(
-  content: string,
-  appName: string,
-  configureVercelServices: boolean,
-): string {
-  const withEveOptions = configureVercelServices ? "" : ", { configureVercelOutput: false }";
+function renderWebAppTemplate(content: string, appName: string): string {
   return content
     .replaceAll("__EVE_INIT_APP_NAME__", appName)
-    .replaceAll("__EVE_INIT_WITH_EVE_OPTIONS__", withEveOptions);
+    .replaceAll("__EVE_INIT_WITH_EVE_OPTIONS__", "");
 }
 
 function withWebVercelServices(source: string): string {
@@ -500,7 +495,7 @@ async function ensureWebChannel(
     }
 
     const existed = await pathExists(filePath);
-    await writeTextFile(filePath, renderWebAppTemplate(content, appName, configureVercelServices), {
+    await writeTextFile(filePath, renderWebAppTemplate(content, appName), {
       force: true,
     });
     filesWritten.push(filePath);

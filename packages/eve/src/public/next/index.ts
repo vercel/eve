@@ -92,12 +92,6 @@ export interface WithEveOptions {
    */
   readonly eveBuildCommand?: string;
   /**
-   * Set to `false` to skip creating or updating Vercel Build Output config.
-   * When unset, `withEve` ensures `.vercel/output/config.json` contains
-   * `experimentalServices` for the Next.js app and Eve app.
-   */
-  readonly configureVercelOutput?: boolean;
-  /**
    * Private Vercel service prefix for the Eve deployment. Defaults to
    * {@link EVE_NEXT_SERVICE_PREFIX} (`/_eve_internal/eve`). `withEve` normalizes
    * the prefix (adds a leading slash, strips trailing slashes) and rejects a
@@ -249,7 +243,7 @@ async function resolveNextConfig<TConfig extends EveNextConfig>(
  *
  * In development, starts `eve dev --no-ui --port 0` for the Eve app and
  * rewrites Eve protocol endpoints to that local URL. In Vercel production,
- * rewrites to the private Eve service prefix from `.vercel/output/config.json`.
+ * rewrites to the resolved private Eve service prefix.
  * Outside Vercel production, serves an existing `.output/server/index.mjs` build
  * on a stable local port when present; otherwise set `EVE_NEXT_PRODUCTION_ORIGIN`
  * to the origin serving the Eve service namespace.
@@ -262,21 +256,16 @@ export function withEve<TConfig extends EveNextConfig>(
   const appRoot = resolveApplicationRoot(options.eveRoot);
   const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs);
   const servicePrefixInput = normalizeRoutePrefix(options.servicePrefix ?? EVE_NEXT_SERVICE_PREFIX);
-  const shouldConfigureVercelOutput = options.configureVercelOutput !== false;
 
   return async function eveNextConfig(phase, context) {
     const nextConfig = await resolveNextConfig(configOrFunction, phase, context);
     const existingRewrites = nextConfig.rewrites;
-    const configuredVercel = shouldConfigureVercelOutput
-      ? await ensureEveVercelOutputConfig({
-          appRoot,
-          eveBuildCommand: options.eveBuildCommand ?? DEFAULT_EVE_BUILD_COMMAND,
-          nextRoot,
-          servicePrefix: servicePrefixInput,
-        })
-      : {
-          servicePrefix: servicePrefixInput,
-        };
+    const configuredVercel = await ensureEveVercelOutputConfig({
+      appRoot,
+      eveBuildCommand: options.eveBuildCommand ?? DEFAULT_EVE_BUILD_COMMAND,
+      nextRoot,
+      servicePrefix: servicePrefixInput,
+    });
     const productionDestination = resolveProductionDestination(configuredVercel.servicePrefix);
 
     return {

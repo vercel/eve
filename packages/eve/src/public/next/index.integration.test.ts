@@ -38,7 +38,7 @@ describe("withEve Vercel config", () => {
     vi.unstubAllGlobals();
   });
 
-  it("creates Build Output experimentalServices when missing", async () => {
+  it("does not create Build Output config when no Vercel project is detected", async () => {
     const appRoot = await createTempAppRoot();
     process.chdir(appRoot);
     vi.stubEnv("NODE_ENV", "production");
@@ -47,26 +47,10 @@ describe("withEve Vercel config", () => {
 
     const config = await resolveConfig(withEve<TestConfig>({}));
     const rewrites = await config.rewrites?.();
-    const outputConfig = await readJsonFile(join(appRoot, ".vercel", "output", "config.json"));
 
-    expect(outputConfig).toEqual({
-      version: 3,
-      experimentalServices: {
-        eve: {
-          buildCommand: "eve build",
-          entrypoint: ".",
-          framework: "eve",
-          mount: EVE_NEXT_SERVICE_PREFIX,
-          type: "web",
-        },
-        web: {
-          entrypoint: ".",
-          framework: "nextjs",
-          mount: "/",
-          type: "web",
-        },
-      },
-    });
+    await expect(
+      readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),
+    ).rejects.toThrow();
     expect(getBeforeFiles(rewrites)).toContainEqual({
       destination: `${EVE_NEXT_SERVICE_PREFIX}/eve/v1/:path+`,
       source: "/eve/v1/:path+",
@@ -214,6 +198,8 @@ describe("withEve Vercel config", () => {
   it("accepts a custom Eve service build command", async () => {
     const appRoot = await createTempAppRoot();
     process.chdir(appRoot);
+    await mkdir(join(appRoot, ".vercel"), { recursive: true });
+    await writeFile(join(appRoot, ".vercel", "project.json"), "{}\n");
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_URL", "preview.example.com");
@@ -246,12 +232,9 @@ describe("withEve Vercel config", () => {
     });
     await writeFile(join(appRoot, ".output", "server", "index.mjs"), "process.exit(1);\n");
 
-    const config = await withEve<TestConfig>({}, { configureVercelOutput: false })(
-      "phase-production-build",
-      {
-        defaultConfig: {},
-      },
-    );
+    const config = await withEve<TestConfig>({})("phase-production-build", {
+      defaultConfig: {},
+    });
     const rewrites = await config.rewrites?.();
 
     expect(getBeforeFiles(rewrites)).toContainEqual({
@@ -286,7 +269,7 @@ describe("withEve Vercel config", () => {
       )}\n`,
     );
 
-    const config = await resolveConfig(withEve<TestConfig>({}, { configureVercelOutput: false }));
+    const config = await resolveConfig(withEve<TestConfig>({}));
     const rewrites = await config.rewrites?.();
 
     expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:49152/eve/v1/health", {

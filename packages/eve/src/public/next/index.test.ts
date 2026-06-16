@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("./vercel-output-config.js", () => ({
+  ensureEveVercelOutputConfig: vi.fn(async (input: { readonly servicePrefix: string }) => ({
+    servicePrefix: input.servicePrefix,
+  })),
+}));
+
 import {
   EVE_NEXT_SERVICE_PREFIX,
   withEve,
@@ -27,7 +33,7 @@ describe("withEve", () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_URL", "preview.example.com");
 
-    const config = await resolveConfig(withEve<TestConfig>({}, { configureVercelOutput: false }));
+    const config = await resolveConfig(withEve<TestConfig>({}));
     const rewrites = await config.rewrites?.();
 
     expect(isRewriteSections(rewrites)).toBe(true);
@@ -49,12 +55,9 @@ describe("withEve", () => {
     vi.stubEnv("VERCEL_URL", "preview.example.com");
 
     const config = await resolveConfig(
-      withEve<TestConfig>(
-        {
-          basePath: "/web",
-        },
-        { configureVercelOutput: false },
-      ),
+      withEve<TestConfig>({
+        basePath: "/web",
+      }),
     );
     const rewrites = await config.rewrites?.();
     const [eveRewrite] = getBeforeFiles(rewrites);
@@ -71,7 +74,7 @@ describe("withEve", () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_URL", "preview.example.com");
 
-    const config = await resolveConfig(withEve<TestConfig>({}, { configureVercelOutput: false }));
+    const config = await resolveConfig(withEve<TestConfig>({}));
     const rewrites = await config.rewrites?.();
 
     expect(getBeforeFiles(rewrites)).toContainEqual({
@@ -85,7 +88,7 @@ describe("withEve", () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_URL", "preview.example.com");
 
-    const config = await resolveConfig(withEve<TestConfig>({}, { configureVercelOutput: false }));
+    const config = await resolveConfig(withEve<TestConfig>({}));
     const rewrites = await config.rewrites?.();
     const beforeFiles = getBeforeFiles(rewrites);
 
@@ -99,7 +102,7 @@ describe("withEve", () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_URL", "preview.example.com");
 
-    const config = await resolveConfig(withEve<TestConfig>({}, { configureVercelOutput: false }));
+    const config = await resolveConfig(withEve<TestConfig>({}));
     const rewrites = await config.rewrites?.();
 
     expect(getBeforeFiles(rewrites)).toContainEqual({
@@ -112,7 +115,7 @@ describe("withEve", () => {
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("EVE_BASE_URL", " http://127.0.0.1:49152/ ");
 
-    const config = await resolveConfig(withEve<TestConfig>({}, { configureVercelOutput: false }));
+    const config = await resolveConfig(withEve<TestConfig>({}));
     const rewrites = await config.rewrites?.();
 
     expect(getBeforeFiles(rewrites)).toContainEqual({
@@ -126,7 +129,7 @@ describe("withEve", () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_URL", "http://preview.example.com");
 
-    const config = await resolveConfig(withEve<TestConfig>({}, { configureVercelOutput: false }));
+    const config = await resolveConfig(withEve<TestConfig>({}));
     const rewrites = await config.rewrites?.();
 
     expect(getBeforeFiles(rewrites)).toContainEqual({
@@ -140,7 +143,7 @@ describe("withEve", () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("EVE_NEXT_PRODUCTION_ORIGIN", "https://agent.example.com/root");
 
-    const config = await resolveConfig(withEve<TestConfig>({}, { configureVercelOutput: false }));
+    const config = await resolveConfig(withEve<TestConfig>({}));
     const rewrites = await config.rewrites?.();
 
     expect(getBeforeFiles(rewrites)).toContainEqual({
@@ -155,20 +158,17 @@ describe("withEve", () => {
     vi.stubEnv("VERCEL_URL", "preview.example.com");
 
     const config = await resolveConfig(
-      withEve<TestConfig>(
-        {
-          basePath: "/web",
-          async rewrites() {
-            return [
-              {
-                destination: "/legacy",
-                source: "/legacy",
-              },
-            ];
-          },
+      withEve<TestConfig>({
+        basePath: "/web",
+        async rewrites() {
+          return [
+            {
+              destination: "/legacy",
+              source: "/legacy",
+            },
+          ];
         },
-        { configureVercelOutput: false },
-      ),
+      }),
     );
     const rewrites = await config.rewrites?.();
 
@@ -194,27 +194,24 @@ describe("withEve", () => {
     vi.stubEnv("VERCEL_URL", "preview.example.com");
 
     const config = await resolveConfig(
-      withEve<TestConfig>(
-        {
-          async rewrites() {
-            return {
-              afterFiles: [
-                {
-                  destination: "/after",
-                  source: "/after",
-                },
-              ],
-              beforeFiles: [
-                {
-                  destination: "/before",
-                  source: "/before",
-                },
-              ],
-            };
-          },
+      withEve<TestConfig>({
+        async rewrites() {
+          return {
+            afterFiles: [
+              {
+                destination: "/after",
+                source: "/after",
+              },
+            ],
+            beforeFiles: [
+              {
+                destination: "/before",
+                source: "/before",
+              },
+            ],
+          };
         },
-        { configureVercelOutput: false },
-      ),
+      }),
     );
     const rewrites = await config.rewrites?.();
 
@@ -248,7 +245,6 @@ describe("withEve", () => {
       withEve<TestConfig>(
         {},
         {
-          configureVercelOutput: false,
           servicePrefix: "internal/eve",
         },
       ),
@@ -265,7 +261,7 @@ describe("withEve", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("EVE_NEXT_PRODUCTION_ORIGIN", "https://agent.example.com/root");
 
-    const config = await resolveConfig(withEve<TestConfig>({}, { configureVercelOutput: false }));
+    const config = await resolveConfig(withEve<TestConfig>({}));
     const rewrites = await config.rewrites?.();
 
     expect(getBeforeFiles(rewrites)).toContainEqual({
@@ -277,12 +273,9 @@ describe("withEve", () => {
   it("uses a stable local production port while Next.js is building outside Vercel", async () => {
     vi.stubEnv("NODE_ENV", "production");
 
-    const config = await withEve<TestConfig>({}, { configureVercelOutput: false })(
-      "phase-production-build",
-      {
-        defaultConfig: {},
-      },
-    );
+    const config = await withEve<TestConfig>({})("phase-production-build", {
+      defaultConfig: {},
+    });
     const rewrites = await config.rewrites?.();
 
     expect(getBeforeFiles(rewrites)).toContainEqual({
@@ -295,12 +288,9 @@ describe("withEve", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("EVE_NEXT_PRODUCTION_PORT", "51234");
 
-    const config = await withEve<TestConfig>({}, { configureVercelOutput: false })(
-      "phase-production-build",
-      {
-        defaultConfig: {},
-      },
-    );
+    const config = await withEve<TestConfig>({})("phase-production-build", {
+      defaultConfig: {},
+    });
     const rewrites = await config.rewrites?.();
 
     expect(getBeforeFiles(rewrites)).toContainEqual({

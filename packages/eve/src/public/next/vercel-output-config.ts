@@ -58,6 +58,7 @@ function resolveRelativeEntrypoint(fromRoot: string, toRoot: string): string {
 }
 
 async function resolveVercelOutputConfigLocation(nextRoot: string): Promise<{
+  readonly canWriteGeneratedOutput: boolean;
   readonly outputConfigPath: string;
   readonly projectRoot: string;
 }> {
@@ -67,6 +68,7 @@ async function resolveVercelOutputConfigLocation(nextRoot: string): Promise<{
 
   if (outputDirectory !== undefined) {
     return {
+      canWriteGeneratedOutput: true,
       outputConfigPath: join(outputDirectory, "config.json"),
       projectRoot,
     };
@@ -74,12 +76,14 @@ async function resolveVercelOutputConfigLocation(nextRoot: string): Promise<{
 
   if (vercelDirectory !== undefined) {
     return {
+      canWriteGeneratedOutput: true,
       outputConfigPath: join(vercelDirectory, "output", "config.json"),
       projectRoot,
     };
   }
 
   return {
+    canWriteGeneratedOutput: false,
     outputConfigPath: join(nextRoot, VERCEL_OUTPUT_CONFIG_FILE_NAME),
     projectRoot,
   };
@@ -178,7 +182,8 @@ export async function ensureEveVercelOutputConfig(input: {
   readonly nextRoot: string;
   readonly servicePrefix: string;
 }): Promise<EnsureVercelOutputConfigResult> {
-  const { outputConfigPath, projectRoot } = await resolveVercelOutputConfigLocation(input.nextRoot);
+  const { canWriteGeneratedOutput, outputConfigPath, projectRoot } =
+    await resolveVercelOutputConfigLocation(input.nextRoot);
   const rootVercelConfig = await readVercelServicesConfig(
     join(projectRoot, VERCEL_JSON_FILE_NAME),
     VERCEL_JSON_FILE_NAME,
@@ -207,6 +212,13 @@ export async function ensureEveVercelOutputConfig(input: {
     services: existingServices,
     servicePrefix: input.servicePrefix,
   });
+
+  if (!canWriteGeneratedOutput) {
+    return {
+      servicePrefix,
+    };
+  }
+
   const experimentalServices: Record<string, VercelServiceConfig> = {
     ...existingServices,
   };

@@ -23,7 +23,7 @@ function findMdxPackage() {
   const store = `${repoRoot}/node_modules/.pnpm`;
   let match;
   try {
-    match = readdirSync(store).find((d) => /^@mdx-js\+mdx@/.test(d));
+    match = readdirSync(store).find((d) => d.startsWith("@mdx-js+mdx@"));
   } catch {
     return null;
   }

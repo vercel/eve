@@ -22,10 +22,11 @@ server instead of letting `withEve()` start one:
 EVE_BASE_URL=http://localhost:3000 pnpm --filter web-chat-next-template dev
 ```
 
-On Vercel, `withEve()` writes generated `experimentalServices` to
-`.vercel/output/config.json` so Next.js deploys at `/` and the app-local Eve
-agent runs behind the private `/_eve_internal/eve` service prefix, then rewrites
-public Eve endpoints to that private service.
+When a linked Vercel project is detected, `withEve()` writes generated
+`experimentalServices` to `.vercel/output/config.json` so Next.js deploys at
+`/` and the app-local Eve agent runs behind the private
+`/_eve_internal/eve` service prefix, then rewrites public Eve endpoints to that
+private service.
 
 ## Scaffold Source
 

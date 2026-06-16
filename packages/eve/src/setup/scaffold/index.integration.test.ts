@@ -374,7 +374,7 @@ describe("ensureChannel", () => {
       code: "ENOENT",
     });
     await expect(readFile(join(projectRoot, "next.config.ts"), "utf8")).resolves.toContain(
-      "withEve(nextConfig, { configureVercelOutput: false })",
+      "withEve(nextConfig)",
     );
     await expect(readFile(join(projectRoot, "package.json"), "utf8")).resolves.toContain(
       '"dev": "next dev"',
@@ -403,7 +403,7 @@ describe("ensureChannel", () => {
     expect(result.filesWritten).toContain(join(projectRoot, "next.config.ts"));
     expect(result.competingNextConfigFiles).toEqual([join(projectRoot, "next.config.mjs")]);
     await expect(readFile(join(projectRoot, "next.config.ts"), "utf8")).resolves.toContain(
-      "withEve(nextConfig, { configureVercelOutput: false })",
+      "withEve(nextConfig)",
     );
     await expect(readFile(join(projectRoot, "next.config.mjs"), "utf8")).resolves.toBe(
       "export default {};\n",

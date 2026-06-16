@@ -275,7 +275,7 @@ describe("runInitCommand", () => {
     await expect(pathExists(join(projectPath, "app/page.tsx"))).resolves.toBe(true);
     await expect(pathExists(join(projectPath, "vercel.json"))).resolves.toBe(false);
     expect(await readFile(join(projectPath, "next.config.ts"), "utf8")).toContain(
-      "configureVercelOutput: false",
+      "export default withEve(nextConfig);",
     );
     expect(await readFile(join(projectPath, "package.json"), "utf8")).toContain('"eve": "^0.6.0"');
     // The compatibility extension stays limited to releases with the incomplete manifest.

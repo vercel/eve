@@ -314,10 +314,9 @@ describe("runChannelsAddCommand", () => {
       "AgentChat",
     );
     const nextConfig = await readFile(join(projectRoot, "next.config.ts"), "utf8");
-    expect(nextConfig).toContain("withEve");
+    expect(nextConfig).toContain("export default withEve(nextConfig);");
     // configureVercelServices stays pinned on for this command (R5): the
     // scaffold writes the services config even in an unlinked directory.
-    expect(nextConfig).not.toContain("configureVercelOutput");
     await expect(readFile(join(projectRoot, "vercel.json"), "utf8")).resolves.toContain(
       "experimentalServices",
     );
