@@ -200,7 +200,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("stops rendering and drains a running response before accepting another prompt", async () => {
+  it("interrupts a running response and returns to the prompt without exiting", async () => {
     const { screen, input, renderer } = makeRenderer();
     let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
     const abort = vi.fn();
@@ -225,32 +225,17 @@ describe("TerminalRenderer (inline scrollback)", () => {
       expect(screen.snapshot()).toContain("partial response");
     });
 
+    // The first Ctrl+C aborts the in-flight turn and unblocks the render
+    // loop even though the server stream never closes on its own. Draining
+    // instead would wait forever for an event that never arrives.
     input.ctrlC();
-
-    const stateBeforeBoundary = await Promise.race([
-      rendering.then(() => "settled" as const),
-      new Promise<"pending">((resolve) => {
-        setImmediate(() => resolve("pending"));
-      }),
-    ]);
-    const abortCallsBeforeBoundary = abort.mock.calls.length;
-
-    streamController?.enqueue({
-      type: "assistant-delta",
-      id: "t1",
-      delta: " hidden after interruption",
-    });
-    streamController?.enqueue({ type: "finish" });
-    streamController?.close();
-
     await expect(rendering).resolves.toBeUndefined();
-    expect(stateBeforeBoundary).toBe("pending");
-    expect(abortCallsBeforeBoundary).toBe(0);
+
     expect(abort).toHaveBeenCalledTimes(1);
     expect(screen.snapshot()).toContain("Interrupted");
-    expect(screen.snapshot()).not.toContain("hidden after interruption");
     expect(input.rawModes).toEqual([true]);
 
+    // Control returns to the prompt rather than exiting; the next prompt works.
     const nextPrompt = renderer.readPrompt();
     input.type("still here");
     input.enter();
