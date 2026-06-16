@@ -458,7 +458,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .command("dev")
     .description("Start the Eve development server or connect to an existing URL.")
     .option("--host <host>", "Host interface to bind")
-    .option("--port <port>", "Port to listen on (defaults to $PORT, then 3000)", parsePortOption)
+    .option("--port <port>", "Port to listen on (defaults to $PORT, then 2000)", parsePortOption)
     .option("-u, --url <url>", "Connect to an existing server URL", parseDevelopmentServerUrl)
     .option("--no-ui", "Start the server without an interactive UI")
     .option("--name <name>", "Title shown in the terminal UI (defaults to the app folder name)")

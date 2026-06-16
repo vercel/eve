@@ -1,5 +1,11 @@
 # eve
 
+## 0.9.8
+
+### Patch Changes
+
+- 603d6c3: Change the default `eve dev` port from 3000 to 2000 and update the CLI help and docs examples.
+
 ## 0.9.7
 
 ### Patch Changes

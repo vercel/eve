@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => {
   const listenerServer = {
     close: vi.fn(async () => undefined),
     ready: vi.fn(async () => undefined),
-    url: "http://localhost:3000/",
+    url: "http://localhost:2000/",
   };
   const devServer = {
     close: vi.fn(async () => undefined),
@@ -207,10 +207,10 @@ describe("startDevelopmentServer", () => {
     });
     Object.assign(mocks.nitro.options.devServer, {
       hostname: "127.0.0.1",
-      port: 0,
+      port: undefined,
     });
     Object.assign(mocks.listenerServer, {
-      url: "http://localhost:3000/",
+      url: "http://localhost:2000/",
     });
   });
 
@@ -257,17 +257,34 @@ describe("startDevelopmentServer", () => {
     expect(process.env.EVE_DEVELOPMENT_SANDBOX_RUN_ID).toBeUndefined();
   });
 
-  it("normalizes wildcard IPv6 listener URLs before exposing them to the REPL or workflow", async () => {
+  it("uses Eve's default port when no port is requested", async () => {
     const { startDevelopmentServer } = await import("./start-development-server.js");
-    Object.assign(mocks.listenerServer, {
-      url: "http://[::]:3000/",
+    Object.assign(mocks.nitro.options.devServer, {
+      port: 3000,
     });
 
     const server = await startDevelopmentServer("/tmp/eve-test");
 
-    expect(server.url).toBe("http://[::1]:3000/");
-    expect(process.env.WORKFLOW_LOCAL_BASE_URL).toBe("http://[::1]:3000");
-    expect(process.env.PORT).toBe("3000");
+    expect(mocks.devServer.listen).toHaveBeenCalledWith({
+      hostname: "127.0.0.1",
+      port: 2000,
+      silent: true,
+    });
+
+    await server.close();
+  });
+
+  it("normalizes wildcard IPv6 listener URLs before exposing them to the REPL or workflow", async () => {
+    const { startDevelopmentServer } = await import("./start-development-server.js");
+    Object.assign(mocks.listenerServer, {
+      url: "http://[::]:2000/",
+    });
+
+    const server = await startDevelopmentServer("/tmp/eve-test");
+
+    expect(server.url).toBe("http://[::1]:2000/");
+    expect(process.env.WORKFLOW_LOCAL_BASE_URL).toBe("http://[::1]:2000");
+    expect(process.env.PORT).toBe("2000");
 
     await server.close();
   });
@@ -279,10 +296,9 @@ describe("startDevelopmentServer", () => {
     });
     Object.assign(mocks.nitro.options.devServer, {
       hostname: undefined,
-      port: 3000,
     });
     Object.assign(mocks.listenerServer, {
-      url: "http://127.0.0.1:3001/",
+      url: "http://127.0.0.1:2001/",
     });
     mocks.listenerServer.ready
       .mockRejectedValueOnce(addressInUseError)
@@ -292,15 +308,15 @@ describe("startDevelopmentServer", () => {
 
     expect(mocks.devServer.listen).toHaveBeenNthCalledWith(1, {
       hostname: "127.0.0.1",
-      port: 3000,
+      port: 2000,
       silent: true,
     });
     expect(mocks.devServer.listen).toHaveBeenNthCalledWith(2, {
       hostname: "127.0.0.1",
-      port: 3001,
+      port: 2001,
       silent: true,
     });
-    expect(server.url).toBe("http://127.0.0.1:3001/");
+    expect(server.url).toBe("http://127.0.0.1:2001/");
 
     await server.close();
   });
@@ -346,13 +362,13 @@ describe("startDevelopmentServer", () => {
   it("normalizes wildcard IPv4 listener URLs before exposing them to the REPL or workflow", async () => {
     const { startDevelopmentServer } = await import("./start-development-server.js");
     Object.assign(mocks.listenerServer, {
-      url: "http://0.0.0.0:3000/",
+      url: "http://0.0.0.0:2000/",
     });
 
     const server = await startDevelopmentServer("/tmp/eve-test");
 
-    expect(server.url).toBe("http://127.0.0.1:3000/");
-    expect(process.env.WORKFLOW_LOCAL_BASE_URL).toBe("http://127.0.0.1:3000");
+    expect(server.url).toBe("http://127.0.0.1:2000/");
+    expect(process.env.WORKFLOW_LOCAL_BASE_URL).toBe("http://127.0.0.1:2000");
 
     await server.close();
   });

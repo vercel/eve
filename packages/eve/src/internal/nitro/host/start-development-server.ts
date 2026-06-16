@@ -383,12 +383,11 @@ export async function startDevelopmentServer(
     const hostname =
       options.host ?? nitro.options.devServer.hostname ?? DEFAULT_DEVELOPMENT_SERVER_HOST;
     const requestedPort = options.port ?? readEnvironmentPort();
-    const port = requestedPort ?? nitro.options.devServer.port;
     const retryOnAddressInUse = requestedPort === undefined;
     const server = await listenForDevelopmentServer({
       devServer,
       host: hostname,
-      port,
+      port: requestedPort,
       retryOnAddressInUse,
     });
 

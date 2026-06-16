@@ -77,7 +77,7 @@ Pass a bare URL as the only argument and the UI connects to that server instead 
 | Flag                                | Effect                                                                                    |
 | ----------------------------------- | ----------------------------------------------------------------------------------------- |
 | `--host <host>`                     | Host interface to bind                                                                    |
-| `--port <port>`                     | Port to listen on (defaults to `$PORT`, then `3000`)                                      |
+| `--port <port>`                     | Port to listen on (defaults to `$PORT`, then `2000`)                                      |
 | `-u, --url <url>`                   | Connect to an existing server URL instead of starting one                                 |
 | `--no-ui`                           | Start the server without an interactive UI                                                |
 | `--name <name>`                     | Title shown in the terminal UI (defaults to the app folder name)                          |

@@ -86,7 +86,7 @@ A handler-form session runs on the same durable runtime engine as any other sess
 In production the cron cadence is the only thing that fires a schedule, but waiting for the next tick gets old fast while iterating in `eve dev`. So the dev server mounts a one-shot dispatch route: fire a schedule by name, out of band, exactly once.
 
 ```sh
-curl -X POST http://localhost:3000/eve/v1/dev/schedules/heartbeat
+curl -X POST http://localhost:2000/eve/v1/dev/schedules/heartbeat
 # -> { "scheduleId": "heartbeat", "sessionIds": ["..."] }
 ```
 

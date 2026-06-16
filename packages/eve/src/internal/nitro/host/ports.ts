@@ -4,7 +4,7 @@
  */
 
 /** The port `eve dev` binds when none is requested. */
-export const DEFAULT_DEVELOPMENT_SERVER_PORT = 3000;
+export const DEFAULT_DEVELOPMENT_SERVER_PORT = 2000;
 
 /** How many consecutive ports the dev server tries past the default before giving up. */
 export const MAX_DEVELOPMENT_SERVER_PORT_ATTEMPTS = 10;
