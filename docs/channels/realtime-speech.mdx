@@ -1,0 +1,100 @@
+---
+title: "Realtime Speech"
+description: "Add long-lived browser speech sessions that call your Eve agent through normal durable turns."
+---
+
+Realtime Speech adds a microphone surface for agents without turning Eve into a long-running audio runtime. The browser keeps a realtime audio WebSocket open to AI Gateway. Eve serves the setup and turn routes that authenticate the caller, mint a short-lived Gateway client secret, and map each finalized utterance into one normal agent turn.
+
+`VoiceButton` is audio-first by default: it requests audio output from the realtime model and uses transcription events for visible text. Override `sessionConfig.outputModalities` only if you intentionally want a text-only or provider-specific realtime mode.
+
+## Install
+
+The server channel ships with Eve. The React microphone helper uses the AI SDK realtime hook, so install the optional peer in apps that render voice UI:
+
+```bash
+npm install eve@latest @ai-sdk/react
+```
+
+## Enable the channel
+
+Create `agent/channels/realtime-speech.ts`:
+
+```ts
+import { realtimeSpeechChannel } from "eve/channels/realtime-speech";
+import { localDev, vercelOidc } from "eve/channels/auth";
+
+export default realtimeSpeechChannel({
+  auth: [localDev(), vercelOidc()],
+});
+```
+
+Provide `AI_GATEWAY_API_KEY` in the server environment. The setup route uses it to mint a single-use `vcst_` realtime client secret, so the browser never receives a long-lived Gateway credential.
+
+## Add a microphone
+
+Render `VoiceButton` wherever it fits your UI:
+
+```tsx
+"use client";
+
+import { VoiceButton } from "eve/react/voice";
+
+export function ComposerActions() {
+  return <VoiceButton className="voice-button" />;
+}
+```
+
+For custom UI, use the headless hook:
+
+```tsx
+"use client";
+
+import { useEveVoice } from "eve/react/voice";
+
+export function CustomVoiceButton() {
+  const voice = useEveVoice();
+  const active = voice.status === "connected" || voice.status === "connecting";
+
+  return (
+    <button onClick={() => (active ? voice.stop() : void voice.start())}>
+      {active ? "Stop" : "Talk"}
+    </button>
+  );
+}
+```
+
+For non-React clients, use the transport-agnostic Eve client helper:
+
+```ts
+import { Client } from "eve/client";
+
+const client = new Client({ host: "https://my-agent.example.com" });
+const voice = client.voiceSession("voice-session-id");
+const reply = await voice.sendTranscript("What's the weather?");
+```
+
+## How it works
+
+- `POST /eve/v1/realtime-speech/setup` authenticates the request and returns a Gateway realtime token, tool definition, and `voiceSessionId`.
+- The browser opens the AI Gateway realtime WebSocket directly with the short-lived token.
+- The realtime model calls the `ash_turn` tool for each finalized user transcript.
+- `POST /eve/v1/realtime-speech/turn` sends that transcript to Eve with `voiceSessionId` as the continuation token.
+- Eve streams one normal agent turn and returns the reply text plus the next stream cursor.
+
+The speech transport can stay open for many utterances. Eve still sees discrete durable turns and parks between them, so history, tools, compaction, auth, and instrumentation behave the same as other channels.
+
+The realtime model is instructed to act only as a speech adapter: it calls Eve for every finalized utterance, stays silent while Eve runs tools, and then reads back Eve's result. Eve remains the assistant of record.
+
+## Options
+
+```ts
+export default realtimeSpeechChannel({
+  auth: [localDev(), vercelOidc()],
+  model: "openai/gpt-realtime-2",
+  expiresAfterSeconds: 300,
+});
+```
+
+`VoiceButton` and `useEveVoice` default to `/eve/v1/realtime-speech/setup` and `/eve/v1/realtime-speech/turn`. Override those URLs only if you changed the channel `basePath`.
+
+The default client session config uses `outputModalities: ["audio"]`, `inputAudioTranscription: {}`, and `outputAudioTranscription: {}`. This keeps the speech UX compatible with realtime providers that reject mixed `audio` + `text` output modalities while still letting the UI observe transcripts.

@@ -3,6 +3,7 @@ import { ClientError } from "#client/client-error.js";
 import { ClientSession } from "#client/session.js";
 import { createInitialSessionState } from "#client/session-utils.js";
 import { createClientUrl } from "#client/url.js";
+import { EveVoiceSession, type EveVoiceSessionState } from "#client/voice.js";
 import type {
   AgentInfoResult,
   ClientAuth,
@@ -116,6 +117,20 @@ export class Client {
       },
       resolved,
     );
+  }
+
+  /**
+   * Creates a realtime-speech channel client bound to this client's host and
+   * auth configuration. Browser UI hooks and terminal/audio clients can use the
+   * returned handle to map finalized transcripts into durable Eve turns.
+   */
+  voiceSession(state?: EveVoiceSessionState | string): EveVoiceSession {
+    const resolved = typeof state === "string" ? { streamIndex: 0, voiceSessionId: state } : state;
+
+    return new EveVoiceSession({
+      ...(resolved !== undefined ? { state: resolved } : {}),
+      fetch: (path, init) => this.fetch(path.toString(), init),
+    });
   }
 
   // ---------------------------------------------------------------------------

@@ -296,6 +296,19 @@ pre {
   margin-left: auto;
 }
 
+.voice-caption {
+  color: var(--fg-muted);
+  flex: 1;
+  font-size: 12px;
+  line-height: 1.35;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .send-button {
   background: none;
   border: 1px solid var(--border);
@@ -305,6 +318,88 @@ pre {
   height: 32px;
   padding: 0;
   width: 32px;
+}
+
+.voice-toggle-button {
+  align-items: center;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--fg-muted);
+  cursor: pointer;
+  display: inline-flex;
+  height: 32px;
+  justify-content: center;
+  padding: 0;
+  position: relative;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease,
+    opacity 160ms ease;
+  width: 32px;
+}
+
+.voice-toggle-button[data-voice-state="connecting"],
+.voice-toggle-button[data-voice-state="listening"],
+.voice-toggle-button[data-voice-state="user-speaking"],
+.voice-toggle-button[data-voice-state="assistant-speaking"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--fg-on-inverted);
+}
+
+.voice-toggle-button[data-voice-state="listening"] {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.voice-toggle-button[data-voice-state="user-speaking"] {
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent),
+    0 0 0 9px color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.voice-toggle-button[data-voice-state="user-speaking"]::after {
+  animation: voice-pulse 1.1s ease-out infinite;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
+  border-radius: inherit;
+  content: "";
+  inset: -6px;
+  pointer-events: none;
+  position: absolute;
+}
+
+.voice-toggle-button[data-voice-state="assistant-speaking"] {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 18%, transparent);
+}
+
+.voice-toggle-button[data-voice-state="error"] {
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--border));
+  color: var(--danger);
+}
+
+.voice-toggle-button:hover:enabled {
+  color: var(--fg);
+}
+
+.voice-toggle-button[data-voice-state="connecting"]:hover:enabled,
+.voice-toggle-button[data-voice-state="listening"]:hover:enabled,
+.voice-toggle-button[data-voice-state="user-speaking"]:hover:enabled,
+.voice-toggle-button[data-voice-state="assistant-speaking"]:hover:enabled {
+  color: var(--fg-on-inverted);
+  opacity: 0.85;
+}
+
+@keyframes voice-pulse {
+  from {
+    opacity: 0.72;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.22);
+  }
 }
 
 .send-button.ready {

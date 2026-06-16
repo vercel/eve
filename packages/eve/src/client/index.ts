@@ -9,6 +9,11 @@ export { defaultMessageReducer } from "#client/message-reducer.js";
 export { createDataUrlFilePart, createTextWithFileContent } from "#client/file-parts.js";
 export { MessageResponse } from "#client/message-response.js";
 export { ClientSession } from "#client/session.js";
+export {
+  EveVoiceSession,
+  EVE_VOICE_SETUP_ROUTE_PATH,
+  EVE_VOICE_TURN_ROUTE_PATH,
+} from "#client/voice.js";
 
 // ---------------------------------------------------------------------------
 // Client types
@@ -52,6 +57,13 @@ export type {
   StreamOptions,
   TokenValue,
 } from "#client/types.js";
+export type {
+  EveVoiceSessionOptions,
+  EveVoiceSessionState,
+  EveVoiceSetupResult,
+  EveVoiceTurnInput,
+  EveVoiceTurnResult,
+} from "#client/voice.js";
 
 export type {
   EveAgentReducer,

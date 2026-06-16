@@ -24,6 +24,9 @@ catalogs:
     '@ai-sdk/provider':
       specifier: 4.0.0-beta.19
       version: 4.0.0-beta.19
+    '@ai-sdk/react':
+      specifier: 4.0.0-beta.182
+      version: 4.0.0-beta.182
     '@types/node':
       specifier: 25.9.1
       version: 25.9.1
@@ -292,6 +295,9 @@ importers:
 
   apps/frameworks/next:
     dependencies:
+      '@ai-sdk/react':
+        specifier: 'catalog:'
+        version: 4.0.0-beta.182(react@19.2.6)(zod@4.4.3)
       '@auth/core':
         specifier: 0.41.2
         version: 0.41.2
@@ -769,6 +775,9 @@ importers:
       '@ai-sdk/provider':
         specifier: 'catalog:'
         version: 4.0.0-beta.19
+      '@ai-sdk/react':
+        specifier: 'catalog:'
+        version: 4.0.0-beta.182(react@19.2.6)(zod@4.4.3)
       '@chat-adapter/slack':
         specifier: 4.29.0
         version: 4.29.0(ai@7.0.0-beta.178(zod@4.4.3))(zod@4.4.3)
@@ -964,6 +973,12 @@ packages:
   '@ai-sdk/react@3.0.193':
     resolution: {integrity: sha512-El0jUZ/B7mvBHAD5rfSDqOAhWxutVTq7BCNhfGuwfDPT9SO0TMHybh2bMkieJQI7YOfl+qNBoWrRAOHHaFb99Q==}
     engines: {node: '>=18'}
+    peerDependencies:
+      react: ^18 || ~19.0.1 || ~19.1.2 || ^19.2.1
+
+  '@ai-sdk/react@4.0.0-beta.182':
+    resolution: {integrity: sha512-o9YwQ1QELhsuXcdg2ZfJ1GyHrtsXBSjMtlxdGnOW36Jkqiv0DT1yARI2PQKX0Ge0vsCNGIbPoJzNrkDzRTcG+g==}
+    engines: {node: '>=22'}
     peerDependencies:
       react: ^18 || ~19.0.1 || ~19.1.2 || ^19.2.1
 
@@ -12720,6 +12735,18 @@ snapshots:
     dependencies:
       '@ai-sdk/provider-utils': 4.0.27(zod@4.4.3)
       ai: 6.0.191(zod@4.4.3)
+      react: 19.2.6
+      swr: 2.4.1(react@19.2.6)
+      throttleit: 2.1.0
+    transitivePeerDependencies:
+      - zod
+
+  '@ai-sdk/react@4.0.0-beta.182(react@19.2.6)(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/mcp': 2.0.0-beta.66(zod@4.4.3)
+      '@ai-sdk/provider': 4.0.0-beta.19
+      '@ai-sdk/provider-utils': 5.0.0-beta.49(zod@4.4.3)
+      ai: 7.0.0-beta.178(zod@4.4.3)
       react: 19.2.6
       swr: 2.4.1(react@19.2.6)
       throttleit: 2.1.0

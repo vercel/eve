@@ -299,6 +299,40 @@ export default eveChannel();
 Point your frontend at the session routes Eve serves (\`/eve/v1/session\`) and stream responses with the Eve web client.`,
     configure: `The Eve channel is the lowest-friction way to talk to your agent, with no third-party provisioning required. Layer in auth and route protection as needed. See the [Eve channel docs](/docs/channels/eve) and the [Frontend guide](/docs/guides/frontend/overview).`,
   },
+  "realtime-speech": {
+    logo: "voice",
+    docsHref: "/docs/channels/realtime-speech",
+    keywords: ["voice", "audio", "realtime", "microphone", "ai gateway"],
+    install: `Install the framework and the AI SDK React realtime peer:
+
+\`\`\`bash
+npm install eve@latest @ai-sdk/react
+\`\`\``,
+    quickStart: `Create \`agent/channels/realtime-speech.ts\`:
+
+\`\`\`ts
+// agent/channels/realtime-speech.ts
+import { realtimeSpeechChannel } from "eve/channels/realtime-speech";
+import { localDev, vercelOidc } from "eve/channels/auth";
+
+export default realtimeSpeechChannel({
+  auth: [localDev(), vercelOidc()],
+});
+\`\`\`
+
+Then render a microphone wherever it fits your UI:
+
+\`\`\`tsx
+"use client";
+
+import { VoiceButton } from "eve/react/voice";
+
+export function ComposerActions() {
+  return <VoiceButton />;
+}
+\`\`\``,
+    configure: `Set \`AI_GATEWAY_API_KEY\` so the setup route can mint short-lived AI Gateway realtime client secrets. The browser keeps the realtime audio socket open, while each finalized utterance calls Eve's turn route with the same voice session id so your agent still runs normal durable turns.`,
+  },
 };
 
 /**
