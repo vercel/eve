@@ -51,6 +51,7 @@ import {
   detectSetupIssues,
   formatSetupIssuesLine,
   LOGIN_SETUP_ISSUE,
+  orderedSetupIssues,
   type BootDetection,
   type BootDetectionContext,
   type SetupIssue,
@@ -909,9 +910,13 @@ export class EveTUIRunner {
     this.#probeAuthIssue();
   }
 
-  /** Repaints the attention line from the cached detection + auth issues, or clears it. */
+  /**
+   * Repaints the attention line from the cached auth + detection issues, or
+   * clears it. {@link orderedSetupIssues} puts an unmet auth prerequisite
+   * (`/vc` or `/login`) ahead of the boot `/model` hint it gates.
+   */
   #paintSetupAttention(): void {
-    const issues = [...this.#bootIssues, ...(this.#authIssue ? [this.#authIssue] : [])];
+    const issues = orderedSetupIssues(this.#bootIssues, this.#authIssue);
     if (issues.length > 0) {
       this.#renderer.renderSetupWarning?.(formatSetupIssuesLine(issues));
     } else {

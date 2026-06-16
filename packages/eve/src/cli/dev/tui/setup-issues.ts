@@ -105,6 +105,21 @@ export async function detectSetupIssues(
 }
 
 /**
+ * Orders the attention line so the Vercel auth prerequisite (install the CLI
+ * via `/vc`, or log in via `/login`) precedes the boot detections. The boot
+ * `/model` hint is fixed by linking a project, which needs a working CLI and a
+ * logged-in session — so an unmet auth prerequisite has to clear first.
+ * Listing `/model` ahead of `/vc` would point the user at a step they can't
+ * complete yet.
+ */
+export function orderedSetupIssues(
+  bootIssues: readonly SetupIssue[],
+  authIssue: SetupIssue | undefined,
+): SetupIssue[] {
+  return [...(authIssue === undefined ? [] : [authIssue]), ...bootIssues];
+}
+
+/**
  * The attention line's body, mirroring Claude Code's
  * `1 setup issue: MCP · /doctor` shape; the renderer prefixes the warning
  * glyph and paints the command blue.
