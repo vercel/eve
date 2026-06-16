@@ -4,7 +4,7 @@ description: "Reach your agent from GitHub App webhooks, with @mention dispatch,
 type: integration
 ---
 
-The GitHub channel lets the agent work directly on a repository. Someone `@mentions` it in an issue, PR, or review comment, and the agent answers right there in the thread, with the PR diff already in context and the repo checked out into the sandbox. Under the hood it takes GitHub App webhooks at `/eve/v1/github`, checks the signature, figures out auth from whoever triggered the event, and replies on the native surface. See [Channels](./overview) for the contract this builds on.
+The GitHub channel lets the agent work directly on a repository. Someone `@mentions` it in an issue, PR, or review comment, and the agent answers right there in the thread, with the PR diff already in context and the repo checked out into the sandbox. It takes GitHub App webhooks at `/eve/v1/github`, checks the signature, derives auth from whoever triggered the event, and replies on the native surface. See [Channels](./overview) for the contract this builds on.
 
 ## Add the channel
 
@@ -21,26 +21,31 @@ export default githubChannel({
 });
 ```
 
-Every field falls back to an env var (`GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`; `botName` reads `GITHUB_APP_SLUG`), so you can drop the `credentials` block entirely once those are set. `appId`/`privateKey`/`webhookSecret` will also take a lazy resolver function if you'd rather fetch them on demand.
+Every field falls back to an env var, so you can drop the `credentials` block entirely once these are set:
+
+```bash
+GITHUB_APP_ID=...            # GitHub App id
+GITHUB_APP_PRIVATE_KEY=...   # GitHub App private key (PEM)
+GITHUB_WEBHOOK_SECRET=...    # verifies the webhook signature
+GITHUB_APP_SLUG=...          # supplies botName when it is not set in config
+```
+
+`appId`/`privateKey`/`webhookSecret` also take a lazy resolver function if you'd rather fetch them on demand.
 
 Point the GitHub App webhook URL at `https://<deployment>/eve/v1/github`. For mention-driven turns, subscribe to `issue_comment` and `pull_request_review_comment`; add `issues` / `pull_request` if you wire up their opt-in hooks. A comment that `@mention`s `botName` starts a turn.
 
-## Affordances
+## How the channel handles messages
 
-**Acknowledgement & replies.** When a turn starts, the channel drops an `eyes` reaction on the triggering comment (turn this off with `progress: { reactions: false }`). The reply comes back as a comment, on the timeline or in the review thread, and splits across multiple comments when it runs long. If the turn fails, you get a short error comment carrying an error id.
+### Dispatch
 
-**PR context.** Summon the agent on a PR and it always sees the diff. PR metadata and the changed-file patch land in `context`. Large generated files still show up in the list, but their patch body is dropped; add more paths to the skip list with `pullRequestContext.excludedFiles`.
-
-**Sandbox checkout.** Before the first model call, every triggered turn checks out the relevant ref into the sandbox, so `read_file`/`glob`/`grep`/`bash` all run against the real tree. The trick with the installation token is that it never enters the sandbox: `git` fetches a token-free URL, and the platform injects auth on egress at the firewall. That requires a firewall-capable backend (Vercel); the local backend skips checkout. Within a session, checkout is incremental across turns.
-
-**Inbound hooks** return `{ auth }` to dispatch, or `null` to ignore. Reach for `defaultGitHubAuth(ctx)` to derive auth from the actor.
+Inbound hooks return `{ auth }` to dispatch, or `null` to ignore. Use `defaultGitHubAuth(ctx)` to derive auth from the actor.
 
 ```ts
 import { defaultGitHubAuth, githubChannel } from "eve/channels/github";
 
 export default githubChannel({
   botName: "my-agent",
-  // Replaces the @mention gate. ctx.conversation.kind: "issue" | "pull_request" | "review_thread".
+  // Replaces the @mention gate. ctx.conversation.kind is "issue", "pull_request", or "review_thread".
   onComment: (ctx, comment) => ({ auth: defaultGitHubAuth(ctx) }),
   // Opt in; no default dispatch on these events.
   onIssue: (ctx, issue) => (issue.action === "opened" ? { auth: defaultGitHubAuth(ctx) } : null),
@@ -48,7 +53,33 @@ export default githubChannel({
 });
 ```
 
-**Arbitrary API calls.** For anything the channel doesn't wrap, call `ctx.github.request({ method, path, body })`; it carries installation-token auth.
+### Delivery
+
+When a turn starts, the channel adds an `eyes` reaction to the triggering comment (turn this off with `progress: { reactions: false }`). The reply comes back as a comment, on the timeline or in the review thread, and splits across multiple comments when it runs long. If the turn fails, you get a short error comment carrying an error id.
+
+### Human-in-the-loop (HITL)
+
+GitHub comments have no interactive button or card affordance. A human-in-the-loop (HITL) `input.requested` event is posted as a comment prompt, and the user's reply comment maps back to the pending input request. Declare an `events["input.requested"]` handler to customize the prompt.
+
+### Proactive sessions
+
+Start a session without an inbound mention through `receive(github, { message, target, auth })` from a schedule `run` handler, or `args.receive(github, ...)` from another channel. The target requires `owner`, `repo`, and exactly one of `issueNumber` or `pullRequestNumber`.
+
+### Attachments
+
+Inbound file attachments are not supported on this channel today. Repository contents reach the agent through the sandbox checkout below, not as message attachments.
+
+### PR context
+
+Summon the agent on a PR and it always sees the diff. PR metadata and the changed-file patch land in `context`. Large generated files still appear in the list, but their patch body is dropped; add more paths to the skip list with `pullRequestContext.excludedFiles`.
+
+### Sandbox checkout
+
+Before the first model call, every triggered turn checks out the relevant ref into the sandbox, so `read_file`/`glob`/`grep`/`bash` all run against the real tree. The installation token never enters the sandbox. `git` fetches a token-free URL, and the platform injects auth on egress at the firewall. That requires a firewall-capable backend (Vercel); the local backend skips checkout. Within a session, checkout is incremental across turns.
+
+### Arbitrary API calls
+
+For anything the channel doesn't wrap, call `ctx.github.request({ method, path, body })`. It carries installation-token auth.
 
 ## What to read next
 

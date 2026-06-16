@@ -3,36 +3,37 @@ title: "Assertions"
 description: "Run-level methods, t.check value assertions, the matcher mini-language, and gate vs soft severity."
 ---
 
-Assertions are how an eval grades what its `test(t)` function produced. Each one **records** a result onto `t` and returns a chainable handle — the runner reads the recorded results to compute the verdict, so a single run reports every failing assertion rather than dying on the first. There are two deterministic surfaces: run-level methods on `t`, and `t.check` for grading a specific value. For model-graded assertions, see [Judge](./judge).
+Assertions are how an eval grades what its `test(t)` function produced. Each one **records** a result onto `t` and returns a chainable handle. The runner reads the recorded results to compute the verdict, so a single run reports every failing assertion rather than dying on the first. There are two deterministic surfaces: run-level methods on `t`, and `t.check` for grading a specific value. For model-graded assertions, see [Judge](./judge).
 
 ## Run-level assertions
 
-Run-level assertions read the whole run, so they take no value. They are methods on `t` and gate by default.
+Run-level assertions read the whole run, so they take no value. They are methods on `t` and gate by default. Several key off whether a run **parked**: paused on an unanswered human-in-the-loop (HITL) input request, waiting for an approval or answer before it can continue.
 
-| Assertion                                           | Asserts                                                                           |
-| --------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `t.completed()`                                     | The run did not fail and did not park on unanswered HITL input                    |
-| `t.didNotFail()`                                    | No terminal failure and no `turn.failed`/`step.failed` events (parked runs pass)  |
-| `t.waiting()`                                       | The run parked on HITL input (for approval-shaped evals)                          |
-| `t.messageIncludes(token)`                          | Joined assistant text contains `token` (string or RegExp)                         |
-| `t.outputEquals(value)` / `t.outputMatches(schema)` | Deep equality / Standard Schema (e.g. Zod) validation of the parsed output        |
-| `t.calledTool(name, opts?)`                         | A matching tool call happened (`input`, `output`, `isError`, `times` constraints) |
-| `t.notCalledTool(name)`                             | No call to `name`                                                                 |
-| `t.toolOrder([...names])`                           | Tool names appear in order (other calls may interleave)                           |
-| `t.usedNoTools()`                                   | No tool calls at all                                                              |
-| `t.maxToolCalls(n)`                                 | At most `n` tool calls                                                            |
-| `t.noFailedActions()`                               | No tool, subagent, or skill action reported a failure                             |
-| `t.calledSubagent(name, opts?)`                     | A subagent delegation happened (`remoteUrl`, `output` constraints)                |
-| `t.event(predicate, label)`                         | Escape hatch: any predicate over the typed event stream                           |
+| Assertion                                           | Asserts                                                                                 |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `t.completed()`                                     | The run did not fail and did not park on unanswered HITL input                          |
+| `t.didNotFail()`                                    | No terminal failure and no `turn.failed`/`step.failed` events (parked runs pass)        |
+| `t.waiting()`                                       | The run parked on HITL input (for approval-shaped evals)                                |
+| `t.messageIncludes(token)`                          | Joined assistant text contains `token` (string or RegExp)                               |
+| `t.outputEquals(value)` / `t.outputMatches(schema)` | Deep equality or Standard Schema (e.g. Zod) validation of the agent's structured output |
+| `t.calledTool(name, opts?)`                         | A matching tool call happened (`input`, `output`, `isError`, `times` constraints)       |
+| `t.notCalledTool(name)`                             | No call to `name`                                                                       |
+| `t.toolOrder([...names])`                           | Tool names appear in order (other calls may interleave)                                 |
+| `t.usedNoTools()`                                   | No tool calls at all                                                                    |
+| `t.maxToolCalls(n)`                                 | At most `n` tool calls                                                                  |
+| `t.noFailedActions()`                               | No tool, subagent, or skill action reported a failure                                   |
+| `t.calledSubagent(name, opts?)`                     | A subagent delegation happened (`remoteUrl`, `output` constraints)                      |
+| `t.event(predicate, label)`                         | Escape hatch: any predicate over the typed event stream                                 |
 
-`t.completed()` subsumes `t.didNotFail()` — reach for `completed` unless you specifically want to allow a parked run.
+`t.completed()` subsumes `t.didNotFail()`, so reach for `completed` unless you specifically want to allow a parked run. The structured output that `t.outputEquals` and `t.outputMatches` read is the agent's structured output (see the [output schema guide](../guides/client/output-schema)).
 
 ```ts
 await t.send("What is the weather in Brooklyn?");
 t.completed();
 t.calledTool("get_weather");
-t.usedNoTools(); // mutually exclusive with the line above — pick the one you mean
 ```
+
+`t.calledTool` and `t.usedNoTools` are mutually exclusive; assert one or the other, never both in the same run.
 
 ## Value assertions with `t.check`
 
@@ -54,11 +55,11 @@ t.check(t.reply, similarity("Sunny, 72F")); // fuzzy 0–1 Levenshtein (soft)
 | `matches(schema)`      | validates against a Standard Schema              | gate    |
 | `similarity(expected)` | normalized Levenshtein similarity, 1 = identical | soft    |
 
-Pick the cheapest builder that captures what "correct" means. When exact match is too strict but a judge model is overkill, `similarity` is the middle ground; for nuanced grading, reach for the [judge](./judge).
+Pick the cheapest builder that captures what "correct" means. When exact match is too strict but a judge model is overkill, `similarity` is the middle ground. For nuanced grading, reach for the [judge](./judge).
 
 ## The matcher mini-language
 
-`t.calledTool` and `t.calledSubagent` take a matcher object — `{ input, output, isError, times }` for tools, `{ remoteUrl, output }` for subagents. Each field accepts a literal (objects partial-deep-match), a RegExp, or a function. A matcher function receives the value and returns either a boolean (acts as a predicate) or an expected value to compare against (handy for runner-assigned values like environment-provided URLs):
+`t.calledTool` and `t.calledSubagent` take a matcher object: `{ input, output, isError, times }` for tools, `{ remoteUrl, output }` for subagents. Each field accepts a literal (objects partial-deep-match), a RegExp, or a function. A matcher function receives the value and returns either a boolean (acts as a predicate) or an expected value to compare against (handy for runner-assigned values like environment-provided URLs):
 
 ```ts
 t.calledTool("bash", { input: { command: /^pwd/ }, isError: false, times: 1 });
@@ -73,9 +74,9 @@ t.calledSubagent("weather", {
 
 ## Run state and derived facts
 
-A turn that leaves the session open for a next message is the normal end state of a successful turn. Parking on unanswered HITL input is tracked separately — that is what `t.completed()` and `t.waiting()` key off.
+Beyond the raw `t.events` stream, the runner derives typed facts the assertions read: tool calls (name, input, output, error state), subagent calls, and HITL input requests. A turn that leaves the session open for a next message is the normal end state of a successful turn; parking on unanswered HITL input is tracked separately, and that is what `t.completed()` and `t.waiting()` key off.
 
-Beyond the raw `t.events` stream, the runner derives typed facts the assertions read: tool calls (name, input, output, error state), subagent calls, and HITL input requests. The built-in assertions cover almost everything; when you need to read the stream directly, `t.event(predicate, label)` is the escape hatch:
+The built-in assertions cover almost everything. When you need to read the stream directly, `t.event(predicate, label)` is the escape hatch:
 
 ```ts
 t.event(
@@ -87,11 +88,11 @@ t.event(
 
 ## Severity
 
-Every assertion returns a chainable handle. Severity rides on the assertion — there is no separate thresholds map to keep in sync.
+Every assertion returns a chainable handle. Severity rides on the assertion, so there is no separate thresholds map to keep in sync.
 
-- `.gate(threshold?)` — hard. A miss marks the eval `failed` and `eve eval` exits non-zero.
-- `.soft(threshold?)` — tracked data. A below-threshold miss marks the eval `scored`, fatal only under `--strict`. With no threshold, it is tracked-only and never fails.
-- `.atLeast(threshold)` — soft with a bar (equivalent to `.soft(threshold)`).
+- `.gate(threshold?)` is hard. A miss marks the eval `failed` and `eve eval` exits non-zero.
+- `.soft(threshold?)` is tracked data. A below-threshold miss marks the eval `scored`, fatal only under `--strict`. With no threshold, it is tracked-only and never fails.
+- `.atLeast(threshold)` is soft with a bar (equivalent to `.soft(threshold)`).
 
 The defaults are chosen so you rarely set severity. Run-level methods and `includes`/`equals`/`matches` are gates; `similarity` and every `t.judge.*` assertion are soft. Annotate only when you deviate:
 

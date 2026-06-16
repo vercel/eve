@@ -1,9 +1,9 @@
 ---
-title: "Overview"
+title: "TypeScript SDK Overview"
 description: "Call an Eve agent from TypeScript with Client, sessions, auth, and health checks."
 ---
 
-The `eve/client` entrypoint is the typed client for Eve's default HTTP API. Use it from scripts, server-to-server integrations, tests, evals, backend jobs, or custom UIs that want the session protocol without hand-writing the POST and NDJSON stream loop.
+The `eve/client` entrypoint is the typed client for Eve's default HTTP API. Use it from scripts, server-to-server integrations, tests, evals, backend jobs, or custom UIs that want the session protocol without hand-writing the POST and NDJSON (newline-delimited JSON) stream loop.
 
 For browser chat UIs, start with [`useEveAgent`](../frontend/overview). For wire-level details, read [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming). The client sits between those two: lower level than the frontend hooks, higher level than raw HTTP.
 
@@ -15,11 +15,11 @@ A `Client` binds one host, auth policy, header policy, and stream reconnection b
 import { Client } from "eve/client";
 
 const client = new Client({
-  host: "http://127.0.0.1:2000",
+  host: "http://127.0.0.1:3000",
 });
 ```
 
-`host` is the origin where the Eve routes are mounted. In a same-origin browser integration this is often `""`, but scripts and backend services usually name the full URL.
+`host` is the origin where the Eve routes are mounted. In a same-origin browser integration this is often `""`; scripts and backend services usually name the full URL.
 
 ## Check health
 

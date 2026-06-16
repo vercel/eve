@@ -1,15 +1,15 @@
 ---
 title: "Connections"
-description: "Expose external MCP and OpenAPI servers to the model: with connection tokens the model never sees."
+description: "Expose external MCP and OpenAPI servers to the model, with connection tokens the model never sees."
 ---
 
-A connection wires an agent into an external server you don't author: an MCP server (Linear, GitHub, a warehouse) or any HTTP API with an OpenAPI document. Eve handles the parts you'd otherwise hand-roll: it discovers the remote tools, surfaces them to the model, and brokers auth.
+A connection wires an agent into an external server you don't author, either an MCP server (Linear, GitHub, a warehouse) or any HTTP API with an OpenAPI document. Eve handles the parts you'd otherwise hand-roll, discovering the remote tools, surfacing them to the model, and brokering auth.
 
 Connections live under `agent/connections/`. The runtime name comes from the filename, so `agent/connections/linear.ts` registers as `"linear"`. The model never sees a connection's URL or credentials. It discovers tools through the built-in `connection__search` and calls them by their qualified name, `connection__<connection>__<tool>` (e.g. `connection__linear__list_issues`).
 
 ## MCP connections
 
-`defineMcpClientConnection` points at an MCP server. All you have to supply is a `url` and a `description`:
+`defineMcpClientConnection` points at an MCP server. Supply a `url` and a `description`:
 
 ```ts title="agent/connections/linear.ts"
 import { defineMcpClientConnection } from "eve/connections";
@@ -23,11 +23,11 @@ export default defineMcpClientConnection({
 });
 ```
 
-The `url` must speak Streamable HTTP or SSE. Write the `description` for the model, not for yourself. It shows up in `connection__search`, and the model leans on it to decide which connection to query.
+The `url` must speak Streamable HTTP or SSE. Write the `description` for the model, not for yourself. It shows up in `connection__search`, and the model uses it to decide which connection to query.
 
 ### Static-token auth
 
-`getToken` returns a `TokenResult` (`{ token, expiresAt? }`), and Eve sends it as `Authorization: Bearer <token>` on every request. Because it runs on each connection attempt, you can mint a fresh token from wherever you keep secrets: an env var, a secrets manager, an internal vault, or your own OAuth exchange. If the token has a known TTL, set `expiresAt` (milliseconds since epoch) and Eve refreshes ahead of time rather than waiting for a `401`.
+`getToken` returns a `TokenResult` (`{ token, expiresAt? }`), and Eve sends it as `Authorization: Bearer <token>` on every request. Because it runs on each connection attempt, you can mint a fresh token from wherever you keep secrets, including an env var, a secrets manager, an internal vault, or your own OAuth exchange. If the token has a known TTL, set `expiresAt` (milliseconds since epoch) and Eve refreshes ahead of time rather than waiting for a `401`.
 
 When `getToken` is the only auth, `principalType` defaults to `"app"`: one shared credential keyed across all sessions. Switch to `principalType: "user"` when each end-user carries their own token.
 
@@ -35,7 +35,7 @@ Eve resolves and caches connection tokens per step; they never land in conversat
 
 ### No auth
 
-Drop `auth` entirely for servers that need no token, like a localhost server during development or a public one:
+Drop `auth` entirely for servers that need no token, such as a localhost server during development or a public one:
 
 ```ts
 export default defineMcpClientConnection({
@@ -46,7 +46,7 @@ export default defineMcpClientConnection({
 
 ### Headers
 
-Reach for `headers` when the server wants a non-Bearer scheme (an API-key header) or some extra configuration. Headers stack on top of `auth`:
+Use `headers` when the server wants a non-Bearer scheme (an API-key header) or extra configuration. Headers stack on top of `auth`:
 
 ```ts
 export default defineMcpClientConnection({
@@ -58,7 +58,7 @@ export default defineMcpClientConnection({
 
 ### Tool filters
 
-To narrow which remote tools the model sees, set exactly one of `tools.allow` or `tools.block`. Filtered-out tools just don't appear in `connection__search`:
+To narrow which remote tools the model sees, set exactly one of `tools.allow` or `tools.block`. Filtered-out tools do not appear in `connection__search`:
 
 ```ts
 export default defineMcpClientConnection({
@@ -84,11 +84,11 @@ export default defineMcpClientConnection({
 });
 ```
 
-`never()` lets every call through, `once()` asks for approval the first time in a session, and `always()` asks every time. The pause and resume here is the same human-in-the-loop flow covered in [Tools](./tools).
+`never()` lets every call through, `once()` asks for approval the first time in a session, and `always()` asks every time. The pause and resume is the same human-in-the-loop flow covered in [Tools](./tools).
 
 ## OpenAPI connections
 
-`defineOpenAPIConnection` turns any OpenAPI 3.x or Swagger 2.0 document into connection tools, one per operation. Pass an HTTPS URL Eve fetches at runtime, or an inline parsed object:
+`defineOpenAPIConnection` turns any OpenAPI 3.x document into connection tools, one per operation. Pass an HTTPS URL Eve fetches at runtime, or an inline parsed object:
 
 ```ts title="agent/connections/petstore.ts"
 import { defineOpenAPIConnection } from "eve/connections";
@@ -104,10 +104,10 @@ Each operation becomes `connection__<connection>__<operationId>` (e.g. `connecti
 
 `auth`, `headers`, and `approval` work exactly as they do for MCP. There are two fields specific to OpenAPI:
 
-| Field        | Purpose                                                                                                                                             |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `baseUrl`    | Base URL operation paths resolve against. Optional; defaults to the document's first usable `servers` entry or Swagger `schemes`/`host`/`basePath`. |
-| `operations` | Filter keyed on `operationId` (`allow` or `block`). Mirrors `tools` on MCP connections, but names operations not tools.                             |
+| Field        | Purpose                                                                                                                 |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `baseUrl`    | Base URL operation paths resolve against. Optional; defaults to the document's first usable `servers` entry.            |
+| `operations` | Filter keyed on `operationId` (`allow` or `block`). Mirrors `tools` on MCP connections, but names operations not tools. |
 
 ## Interactive OAuth via Vercel Connect
 
@@ -128,7 +128,7 @@ export default defineMcpClientConnection({
 
 ## Self-hosted interactive OAuth
 
-Running your own OAuth? Use `defineInteractiveAuthorization` from `eve/connections`, which takes a three-method form. Eve mints a callback URL, parks the turn on a framework-owned webhook, and resumes once the token comes back. No Vercel Connect required. Interactive auth is always `principalType: "user"`, and the factory pins that for you.
+To run your own OAuth, use `defineInteractiveAuthorization` from `eve/connections`, which takes a three-method form and needs no Vercel Connect. Eve mints a callback URL, parks (durably suspends) the turn on a framework-owned webhook, and resumes once the token comes back. Interactive auth is always `principalType: "user"`, and the factory pins that for you.
 
 ```ts title="agent/connections/linear.ts"
 import {
@@ -168,9 +168,18 @@ export default defineMcpClientConnection({
 });
 ```
 
-`getToken` runs before every tool call. `startAuthorization` and `completeAuthorization` are both-or-neither: provide one without the other and you get a definition error. The `challenge` rides along verbatim on the `authorization.required` event. Set `url` for redirect/device flows, `userCode` for a device code, `instructions` as the call to action when there's no URL, and `displayName` for the human-readable provider name channels show on the sign-in affordance (e.g. "Salesforce"). Drop `resume` when the provider keeps flow state server-side, so nothing has to cross the step boundary.
+`getToken` runs before every tool call. `startAuthorization` and `completeAuthorization` are both-or-neither: provide one without the other and you get a definition error. The `challenge` rides along verbatim on the `authorization.required` event. Its fields:
 
-`displayName` is presentation-only — the connection's path-derived name still keys the authorization scope, token cache, and callback URL. You can also set `displayName` on the `auth` definition itself (e.g. `auth: { ...connect("sfdc"), displayName: "Salesforce" }`); that definition-level value wins over one the strategy stamps on the challenge, and channels fall back to title-casing the connection name when neither is set.
+| Field          | Purpose                                                                                   |
+| -------------- | ----------------------------------------------------------------------------------------- |
+| `url`          | The authorize URL for redirect or device flows.                                           |
+| `userCode`     | The device code, for device flows.                                                        |
+| `instructions` | The call to action when there's no URL.                                                   |
+| `displayName`  | Human-readable provider name channels show on the sign-in affordance (e.g. "Salesforce"). |
+
+Drop `resume` when the provider keeps flow state server-side, so nothing has to cross the step boundary.
+
+`displayName` is presentation-only. The connection's path-derived name still keys the authorization scope, token cache, and callback URL. You can also set `displayName` on the `auth` definition itself (e.g. `auth: { ...connect("sfdc"), displayName: "Salesforce" }`); that definition-level value wins over one the strategy stamps on the challenge, and channels fall back to title-casing the connection name when neither is set.
 
 ### Signaling authorization state
 
@@ -192,24 +201,31 @@ To narrow a caught error, use `isConnectionAuthorizationRequiredError(err)` and 
 
 ### Handling a revoked token mid-call
 
-`getToken` only runs _before_ a tool call, so a grant revoked while a tool is mid-flight first surfaces as a downstream `401` inside your `execute`. A plain throw there is just a tool error — the model sees a failure and the cached bearer sticks around. Instead, map a provider `401` to `ctx.requireAuth()` (or rethrow `ConnectionAuthorizationRequiredError`). Eve then evicts the rejected token from its per-step cache and re-runs the consent flow with a fresh one, exactly as it does for a connection whose server rejects the bearer.
+`getToken` only runs _before_ a tool call, so a grant revoked while a tool is mid-flight first surfaces as a downstream `401` inside your `execute`. A plain throw there is only a tool error, so the model sees a failure and the cached bearer sticks around. Instead, map a provider `401` to `ctx.requireAuth()` (or rethrow `ConnectionAuthorizationRequiredError`). Eve then evicts the rejected token from its per-step cache and re-runs the consent flow with a fresh one, exactly as it does for a connection whose server rejects the bearer.
 
 ```ts title="agent/tools/list_issues.ts"
-async execute(_input, ctx) {
-  const { token } = await ctx.getToken();
-  const res = await fetch("https://api.linear.app/graphql", {
-    headers: { authorization: `Bearer ${token}` },
-  });
-  // The grant was revoked since getToken ran: re-challenge instead of
-  // returning a dead-token error to the model.
-  if (res.status === 401) ctx.requireAuth();
-  return await res.json();
-}
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineTool({
+  description: "List open Linear issues.",
+  inputSchema: z.object({}),
+  async execute(_input, ctx) {
+    const { token } = await ctx.getToken();
+    const res = await fetch("https://api.linear.app/graphql", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    // The grant was revoked since getToken ran: re-challenge instead of
+    // returning a dead-token error to the model.
+    if (res.status === 401) ctx.requireAuth();
+    return await res.json();
+  },
+});
 ```
 
 ### Authorization and approval together
 
-A tool can require both sign-in (`auth`) and a human approval. Today the model's approval gate runs before the tool's `execute`, so the order the user sees is **approve, then sign in**. Eve records the approval on session state the moment it's granted, and that record survives the sign-in park — so when the turn resumes after authorization, the tool is not put through approval a second time. You get one approval and one sign-in, never a double prompt.
+A tool can require both sign-in (`auth`) and a human approval. The model's approval gate runs before the tool's `execute`, so the order the user sees is **approve, then sign in**. Eve records the approval on session state the moment it's granted, and that record survives the sign-in park, so when the turn resumes after authorization the tool is not put through approval again. You get one approval and one sign-in, never a double prompt.
 
 ## What to read next
 

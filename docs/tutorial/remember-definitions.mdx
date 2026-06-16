@@ -1,9 +1,9 @@
 ---
-title: "Step 6: Remember Definitions"
-description: "Use defineState to remember the team's metric glossary across turns."
+title: "Remember Definitions"
+description: "Part 6 of the Build an Agent tutorial. Use defineState to remember the team's metric glossary across turns."
 ---
 
-Every team has house definitions. “Active” means a purchase in the last 30 days, revenue is net of refunds, a “week” starts Monday. Re-explaining all of that on every turn is a waste. State gives the agent a place to keep it.
+Every team has house definitions for the analytics assistant. "Active" means a purchase in the last 30 days, revenue is net of refunds, a "week" starts Monday. Re-explaining all of that on every turn is a waste. State gives the agent a place to keep them.
 
 `defineState(name, initial)` creates a typed, named slot that survives across step and turn boundaries within a session. You read it with `get()` and change it with `update()`.
 
@@ -67,6 +67,6 @@ The second turn is a separate turn in the same session, yet the definition is st
 
 State is scoped to a session and isolated per agent, so a subagent starts with fresh state and never sees the parent's. Need to reset something each turn? Call `update(() => fresh)` in a lifecycle hook. More in [State](../guides/state).
 
-→ Next: [Step 7: Team playbooks](./team-playbooks)
+→ Next: [Team playbooks](./team-playbooks)
 
-Depth: [State](../guides/state)
+Learn more: [State](../guides/state)

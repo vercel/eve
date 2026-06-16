@@ -14,7 +14,7 @@ const features = [
       "Workflows survive crashes and restarts. Every step is checkpointed. Agents park when waiting, resume on the next message.",
     icon: <Database className="h-4 w-4 text-green-600" />,
     visual: <DurabilityVisual />,
-    href: "/docs/runs-and-streaming",
+    href: "/docs/concepts/sessions-runs-and-streaming",
   },
   {
     title: "Sandboxed Compute",
@@ -29,7 +29,7 @@ const features = [
     description: "One agent codebase deploys to web chat, Slack, API, cron, CLI, and custom apps.",
     icon: <MessageSquare className="h-4 w-4 text-cyan-600" />,
     visual: <ChannelsVisual />,
-    href: "/docs/channels",
+    href: "/docs/channels/overview",
   },
   {
     title: "Human-in-the-Loop",
@@ -37,7 +37,7 @@ const features = [
       "Tools that need confirmation trigger approval gates. Sessions park until resolved, then resume seamlessly.",
     icon: <Shield className="h-4 w-4 text-amber-600" />,
     visual: <HITLVisual />,
-    href: "/docs/human-in-the-loop",
+    href: "/docs/tools",
   },
   {
     title: "Subagents",
@@ -53,7 +53,7 @@ const features = [
       "Define test suites with scoring rubrics. Run evals on every deployment and on a schedule.",
     icon: <FlaskConical className="h-4 w-4 text-pink-600" />,
     visual: <EvalsVisual />,
-    href: "/docs/evals",
+    href: "/docs/evals/overview",
   },
 ];
 

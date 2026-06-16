@@ -1,15 +1,15 @@
 ---
-title: "Step 7: Team Playbooks"
-description: "Load the caller's team playbook with a dynamic skill keyed on the principal."
+title: "Team Playbooks"
+description: "Part 7 of the Build an Agent tutorial. Load the caller's team playbook with a dynamic skill keyed on the principal."
 ---
 
-The glossary from [Step 6](./remember-definitions) is per-session. But your teams have standing analysis conventions (Growth runs cohort retention a particular way, Finance has its own revenue-recognition rules), and those shouldn't bleed across tenants. Load the right team's playbook for whoever is asking.
+The glossary from [Step 6](./remember-definitions) is per-session. But your teams have standing analysis conventions for the analytics assistant (Growth runs cohort retention a particular way, Finance has its own revenue-recognition rules), and those shouldn't bleed across tenants. Load the right team's playbook for whoever is asking.
 
-A skill is an on-demand procedure: the model pulls it in with `load_skill` only when a turn actually needs it. Make it dynamic and the skill gets decided at runtime instead of baked in. A `defineDynamic` resolver reads the session and returns a `defineSkill` (or nothing). Here we key that decision on the caller's identity in `ctx.session.auth`.
+A skill is an on-demand procedure. The model pulls it in with `load_skill` only when a turn needs it. Make it dynamic and the skill gets decided at runtime instead of baked in. A `defineDynamic` resolver reads the session and returns a `defineSkill` (or nothing). Here you key that decision on the caller's identity in `ctx.session.auth`.
 
 ## A playbook per principal
 
-`ctx.session.auth.current` holds the most recent caller, or `null` if there isn't one. Its `attributes` are the claims your auth layer stamped on, team included. Read the team, look up that team's playbook, and emit a skill for it:
+`ctx.session.auth.current` holds the most recent caller, or `null` if there isn't one. Its `attributes` are the claims your auth layer stamped on, including the team. Read the team, look up that team's playbook, and emit a skill for it:
 
 ```ts title="agent/skills/team-playbook.ts"
 import { defineDynamic, defineSkill } from "eve/skills";
@@ -48,16 +48,39 @@ export default defineDynamic({
 });
 ```
 
-`session.started` fires once per session. The resolver reads the team a single time, and the resulting skill stays available for every turn that follows. Returning `null` produces no skill at all, so a caller with no team simply gets no playbook.
+`session.started` fires once per session. The resolver reads the team once, and the resulting skill stays available for every turn that follows. Returning `null` produces no skill, so a caller with no team gets no playbook.
 
 ## See it route
 
-A Growth user asks "what's our 8-week retention?" The model sees the playbook fits, calls `load_skill`, and applies the Growth conventions to that turn: weekly cohorts, no trial accounts. Ask the same question as a Finance user and you'll never see the Growth playbook. You get Finance's.
+The team comes from authenticated claims, which the auth layer stamps on in [Step 9](./ship-it). Until then `ctx.session.auth.current` has no `team`, so the resolver returns `null` and no playbook loads. To verify routing now, stamp a team in local dev. Add a dev-only entry to `agent/channels/eve.ts` ahead of `localDev()`, and remove it before Step 9 wires real auth:
 
-The team comes from authenticated claims, not from the message, so one tenant can't borrow another's playbook by asking nicely. (Those `attributes` are set by the auth layer in [Step 9](./ship-it).)
+```ts title="agent/channels/eve.ts"
+import { eveChannel } from "eve/channels/eve";
+import { localDev, placeholderAuth, vercelOidc, type AuthFn } from "eve/channels/auth";
+
+// Dev-only: stamp a team so Step 7's playbook resolver has something to read.
+// Remove before Step 9.
+const devTeam: AuthFn<Request> = () =>
+  process.env.NODE_ENV === "production"
+    ? null
+    : {
+        attributes: { team: "growth" },
+        authenticator: "dev-team",
+        principalId: "dev",
+        principalType: "user",
+      };
+
+export default eveChannel({
+  auth: [devTeam, localDev(), vercelOidc(), placeholderAuth()],
+});
+```
+
+Restart with `npm run dev` and ask "what's our 8-week retention?" The model sees the Growth playbook fits, calls `load_skill`, and applies the Growth conventions to that turn (weekly cohorts, no trial accounts). Switch `team` to `"finance"`, restart, and the same question routes to Finance's playbook instead.
+
+Because the team comes from authenticated claims, not from the message, one tenant can't borrow another's playbook through the message content.
 
 The same `defineDynamic` resolver drives dynamic tools and instructions too. For the full mechanism, see [Dynamic capabilities](../guides/dynamic-capabilities).
 
-→ Next: [Step 8: Guard the spend](./guard-the-spend)
+→ Next: [Guard the spend](./guard-the-spend)
 
-Depth: [Skills](../skills) · [Dynamic capabilities](../guides/dynamic-capabilities)
+Learn more: [Skills](../skills) · [Dynamic capabilities](../guides/dynamic-capabilities)

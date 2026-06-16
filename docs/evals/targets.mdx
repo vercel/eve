@@ -3,7 +3,7 @@ title: "Targets"
 description: "Point evals at a local dev server or a deployment with the same eval files."
 ---
 
-An eval target is always an HTTP URL. `eve eval` starts a local dev server, while `eve eval --url <url>` runs against an existing server or deployment — the same eval files work for both, which is what makes evals usable as end-to-end tests in CI.
+An eval target is always an HTTP URL. `eve eval` starts a local dev server, while `eve eval --url <url>` runs against an existing server or deployment. The same eval files work for both, which is what makes evals usable as end-to-end tests in CI.
 
 The runner polls `/eve/v1/health`, verifies `/eve/v1/info`, and exposes the live target as `t.target` inside the `test` function.
 
@@ -22,11 +22,22 @@ export default defineEval({
 });
 ```
 
-- `t.target.fetch(path, init)` performs an authenticated fetch against the target — useful for channel and webhook ingress.
+- `t.target.fetch(path, init)` performs an authenticated fetch against the target, useful for channel and webhook ingress. See [Authentication](#authentication) for how the runner authenticates.
 - `t.target.dispatchSchedule(id)` triggers a [schedule](../schedules) through the dev-only schedule route and returns the session ids it created. It works only against a target with dev routes enabled (the local `eve eval` dev server, or a deployment running in development mode), and throws otherwise.
-- `t.target.attachSession(sessionId, { startIndex? })` consumes one turn from a session created outside the eval — by a channel or a schedule — so its events feed the run-level assertions.
+- `t.target.attachSession(sessionId, { startIndex? })` consumes one turn from a session created outside the eval, by a channel or a schedule, so its events feed the run-level assertions. `startIndex` skips events before that position, so a session already partway through its stream resumes from where you left off rather than replaying from the start.
 
-Sessions attached this way are full `EveEvalSession`s: you can keep driving them with `send` and read their event streams. The run-level assertions on `t` (`t.completed()`, `t.calledTool(...)`) read the whole run, attached sessions included.
+Sessions attached this way are full `EveEvalSession`s: you can keep driving them with `send` and read their event streams. The run-level assertions on `t` (`t.completed()`, `t.calledTool(...)`) read the whole run, including attached sessions.
+
+## Authentication
+
+Local targets send no auth: `eve eval` owns the dev server it boots. A remote `--url` target connects with the same credentials as every other development client, resolved in this order:
+
+- A Vercel OIDC trusted-IDP token, sent as a per-request header. It bypasses Deployment Protection without a per-project secret, so a CI job with a pulled OIDC token reaches a protected preview deployment without extra setup.
+- An `x-vercel-protection-bypass` header, added when `VERCEL_AUTOMATION_BYPASS_SECRET` is set.
+- A bearer token resolved from the same OIDC cascade.
+- `EVE_EVAL_AUTH_TOKEN`, which overrides the bearer with a static token for targets whose auth is not OIDC-based.
+
+`t.target.fetch(path, init)` carries these same credentials, so channel and webhook ingress you exercise through it authenticates the same way the session protocol does.
 
 ## What to read next
 

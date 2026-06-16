@@ -1,9 +1,11 @@
 ---
-title: "Step 4: Connect a Warehouse"
-description: "Let each user connect their own warehouse over an OAuth MCP via Vercel Connect."
+title: "Connect a Warehouse"
+description: "Part 4 of the Build an Agent tutorial. Let each user connect their own warehouse over an OAuth MCP via Vercel Connect."
 ---
 
-The sample dataset got you running, but it's a stand-in. The next step is to point the agent at a real warehouse and let each user connect their own by signing in through their browser. That's what a connection is for: an MCP server the model reaches through tools, with auth that Eve drives for you.
+The sample dataset got the analytics assistant running, but it's a stand-in. Now point the agent at a real warehouse and let each user connect their own by signing in through their browser. That's what a connection is for. It's an MCP server the model reaches through tools, with auth that Eve drives for you.
+
+This step depends on Vercel Connect, which is in private beta. No Connect access? Keep the Step 3 sample dataset and read this step for the connection model. Steps 5 through 9 work against the sample dataset, so you can complete the tutorial without a warehouse.
 
 The filename sets the runtime name. Put the file at `agent/connections/warehouse.ts` and it registers as `"warehouse"`, with its tools surfaced as `connection__warehouse__<tool>`.
 
@@ -24,7 +26,14 @@ export default defineMcpClientConnection({
 
 `"warehouse"` is the UID you chose when registering the Connect client. By default this OAuth is user-scoped. Each end-user authorizes in their own browser, and Eve resolves that user's token before every tool call.
 
-Connect is in private beta. Once enabled: `npm install @vercel/connect`, create the Connect client (`vercel connect create <type> --name warehouse`), link it to your project, then `vercel link` and `vercel env pull` so `VERCEL_OIDC_TOKEN` is available locally. Full setup: [Connections](../connections).
+Once Connect is enabled on your account, wire it up:
+
+1. Install the package: `npm install @vercel/connect`.
+2. Create the Connect client: `vercel connect create <type> --name warehouse`.
+3. Link the client to your project.
+4. Run `vercel link` and `vercel env pull` so `VERCEL_OIDC_TOKEN` is available locally.
+
+For the full reference, see [Connections](../connections).
 
 ## What the user sees
 
@@ -34,7 +43,7 @@ Ask a question that needs the warehouse:
 How many enterprise customers signed up last month?
 ```
 
-The first time around, the model picks a warehouse tool but there's no token yet. So the turn parks and the channel shows a “Sign in” affordance. You authorize in the browser, and once the OAuth callback completes, the turn resumes from exactly that step (the durable parking from [Step 2](./how-it-runs)) and the query runs. Later calls in the session reuse the cached per-user token, so there's no prompt.
+The first time, the model picks a warehouse tool but there's no token yet, so the turn parks and the channel shows a "Sign in" affordance. You authorize in the browser, and once the OAuth callback completes, the turn resumes from exactly that step (the durable parking from [Step 2](./how-it-runs)) and the query runs. Later calls in the session reuse the cached per-user token, so there's no prompt.
 
 ## The token never reaches the model
 
@@ -42,6 +51,6 @@ Right before each request to the MCP server, Eve resolves the bearer and sends i
 
 If you want more control, gate the connection behind approval (`approval: once()`) or narrow which tools the model sees (`tools.allow`). See [Connections](../connections).
 
-→ Next: [Step 5: Run analysis](./run-analysis)
+→ Next: [Run analysis](./run-analysis)
 
-Depth: [Connections](../connections) · [Auth & route protection](../guides/auth-and-route-protection)
+Learn more: [Connections](../connections) · [Auth and route protection](../guides/auth-and-route-protection)

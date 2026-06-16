@@ -3,22 +3,22 @@ title: "Overview"
 description: "Put an Eve agent behind a browser chat UI with useEveAgent."
 ---
 
-The frontend helpers put a browser chat or agent UI on top of an Eve agent. `useEveAgent()` does the heavy lifting: it opens a durable session, sends turns, streams the reply back, and turns the raw event stream into render-ready state. React is the reference implementation, and [Vue](./use-eve-agent-vue) and [Svelte](./use-eve-agent-svelte) ship the same surface.
+The frontend helpers put a browser chat or agent UI on top of an Eve agent. `useEveAgent()` opens a durable session, sends turns, streams the reply back, and turns the raw event stream into render-ready state. React is the reference implementation; [Vue](./use-eve-agent-vue) and [Svelte](./use-eve-agent-svelte) ship the same surface.
 
 ## The integration model
 
-A browser UI is just a client of the agent's HTTP routes (the [Eve channel](../../channels/overview)). Two layers wire it up:
+A browser UI is a client of the agent's HTTP routes (the [Eve channel](../../channels/overview)). Two layers wire it up:
 
 - **The framework integration** mounts the Eve routes on your app's origin, so the browser never crosses a CORS boundary or reads an env var to find the agent. Pick yours: [Next.js](./nextjs) (`withEve`), [Nuxt](./nuxt) (the `eve/nuxt` module), or [SvelteKit](./sveltekit) (the `eveSvelteKit` Vite plugin). On any other stack the hook talks to same-origin `/eve/v1/*` routes directly, or you pass an explicit `host`.
 - **The hook** (`useEveAgent`) holds the session state, streaming, errors, and composer status. It defaults to same-origin Eve routes such as `/eve/v1/session`.
 
-For a guided setup, the [Guides](/docs/skills/eve-add-next) walk through the wiring step by step: [add a Next.js frontend to an existing Eve agent](/docs/skills/eve-add-next), or [add Eve to an existing Next.js app](/docs/skills/eve-add-agent).
+The per-framework pages below walk through the wiring step by step: [Next.js](./nextjs), [Nuxt](./nuxt), and [SvelteKit](./sveltekit).
 
 For scripts, server-to-server calls, evals, tests, or custom clients that do not need framework UI state, use the [TypeScript SDK](../client/overview) directly.
 
 ## Basic chat (React)
 
-The hook lives in `eve/react`. Render `data.messages`, gate the composer on `status`, and send text with `send`. That's the whole loop:
+The hook lives in `eve/react`. Render `data.messages`, gate the composer on `status`, and send text with `send`:
 
 ```tsx
 "use client";
@@ -72,7 +72,7 @@ export function Chat() {
 | `stop`    | Abort the active request.                                                      |
 | `reset`   | Clear local events, data, errors, and the local session cursor.                |
 
-Most chat UIs only need `data.messages` and `status`. Drop down to `events` when you want to render lower-level activity (tool calls, reasoning deltas) that the default reducer doesn’t surface.
+Most chat UIs only need `data.messages` and `status`. Drop down to `events` to render lower-level activity such as tool calls and reasoning deltas that the default reducer doesn't surface.
 
 `data.messages` are `EveMessage[]` following the AI SDK `UIMessage` convention, so they drop straight into any AI SDK UI primitive that accepts a `UIMessage[]`. Parts include user text, assistant text, reasoning, tool calls, tool results, and input requests.
 
@@ -96,7 +96,7 @@ await agent.send({
 });
 ```
 
-Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and `status` moves from `ready` to `submitted` to `streaming` and back. Call `stop()` to abort the active request. Call `reset()` to clear local state so the next send starts a fresh durable session.
+Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and `status` moves from `ready` to `submitted` to `streaming` and back. Call `stop()` to abort the active request, and `reset()` to clear local state so the next send starts a fresh durable session.
 
 ## Human-in-the-loop prompts
 
@@ -115,11 +115,11 @@ if (request) {
 }
 ```
 
-`request.prompt` and `request.options` give you what you need to render the approve and deny UI. The default reducer marks the part as responded right away, then updates it again once Eve streams the resumed result.
+`request.prompt` and `request.options` give you what you need to render the approve and deny UI. The default reducer marks the part as responded immediately, then updates it again once Eve streams the resumed result.
 
 ## Attach page context per turn
 
-`clientContext` adds ephemeral context for the next model call and nothing more. Strings (or an array of strings) become user-role context messages; an object is JSON-serialized into one. It rides along with a message or HITL response, so it never dispatches a turn on its own and never lands in durable session history. Pass it directly to `send()`:
+`clientContext` adds ephemeral context for the next model call only. Strings (or an array of strings) become user-role context messages; an object is JSON-serialized into one. It rides along with a message or HITL response, so it never dispatches a turn on its own and never lands in durable session history. Pass it directly to `send()`:
 
 ```tsx
 await agent.send({
@@ -182,11 +182,11 @@ const agent = useEveAgent({ reducer: toolCounter });
 // agent.data is ToolLog
 ```
 
-`reduce(data, event)` receives both authoritative Eve stream events and client projection events (`client.message.submitted`, `client.message.failed`, `client.input.responded`). Handle the client events too if you want optimistic and HITL state in your projection. Otherwise, just return `data` unchanged for them.
+`reduce(data, event)` receives both authoritative Eve stream events and client projection events (`client.message.submitted`, `client.message.failed`, `client.input.responded`). Handle the client events too if you want optimistic and HITL state in your projection. Otherwise, return `data` unchanged for them.
 
 ## Resumable sessions
 
-The browser conversation lives durably on the server. Persist the `session` cursor and you can pick it back up after a reload:
+The browser conversation lives durably on the server. Persist the `session` cursor to pick it back up after a reload:
 
 ```tsx
 const [initialSession] = useState(() => {
@@ -231,4 +231,4 @@ const agent = useEveAgent({
 - [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming): the event stream and session cursor
 - [Channels](../../channels/overview): the HTTP routes the hook talks to
 - [TypeScript SDK](../client/overview): the lower-level client underneath the frontend hooks
-- [Guides](/docs/skills/eve-add-next): step-by-step guides for wiring Eve into Next.js
+- [Next.js](./nextjs): step-by-step setup for wiring Eve into a Next.js app

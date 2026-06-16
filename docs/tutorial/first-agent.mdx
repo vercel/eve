@@ -1,22 +1,32 @@
 ---
-title: "Step 1: Your First Agent"
-description: "Scaffold the analytics assistant, give it an analyst persona, run it, and ask a question."
+title: "Your First Agent"
+description: "Part 1 of the Build an Agent tutorial. Scaffold the analytics assistant, give it an analyst persona, run it, and ask a question."
 ---
 
-This tutorial builds one app end to end: a data analytics assistant. You ask in natural language, and over the next nine steps it learns to query a warehouse, run analysis in a sandbox, remember your team’s metric definitions, and refuse to torch your query budget without asking.
+The Build an Agent tutorial constructs one app end to end, a data analytics assistant. You ask in natural language, and over the next nine steps it learns to query a warehouse, run analysis in a sandbox, remember your team's metric definitions, and refuse to exceed your query budget without asking.
 
 Step 1 gets it talking. The scaffold bundles a small sample dataset, so your first question works with zero setup.
 
-## Scaffold
+## Prerequisites
+
+- Node 24 or newer and npm.
+- A model credential. The scaffold's default model goes through the [Vercel AI Gateway](../getting-started), so you need `AI_GATEWAY_API_KEY` (or `VERCEL_OIDC_TOKEN` pulled via `vercel link`). A direct provider id like `anthropic/claude-opus-4.8` instead needs that provider's key, here `ANTHROPIC_API_KEY`.
+
+If you have not run Eve before, complete [Getting Started](../getting-started) first. Without a credential, "Run the agent" below fails when the runtime tries to reach the model; the dev TUI's `/model` flow walks you through pasting a key or linking a project.
+
+## Scaffold the agent
 
 ```bash
 npx eve@latest init analytics-assistant
+cd analytics-assistant
 ```
 
 The command writes the starter agent with Eve's default model and built-in HTTP API
 channel (`agent/channels/eve.ts`), installs dependencies, initializes Git, and
 starts the development server. Stop the server before continuing with the edits
-below. It does not create a Vercel project or deploy.
+below. It does not create a Vercel project or deploy. `init` creates the
+`analytics-assistant/` directory, so `cd` into it before running further
+commands.
 
 ## Set the model
 
@@ -45,20 +55,20 @@ You are a senior data analyst. You answer questions about the team's data.
 
 Instructions are identity and standing rules. On-demand procedures belong in skills (Step 7), and actions belong in tools (Step 3). See [Instructions](../instructions).
 
-## Run it
+## Run the agent
 
 ```bash
-eve dev
+npm run dev
 ```
 
-The local runtime boots and the dev TUI opens. Ask it something it can answer from general knowledge first:
+The `init` scaffold writes a `dev` script that runs the `eve dev` binary from the project's `node_modules`. The local runtime boots and the dev TUI opens. Ask it something it can answer from general knowledge first:
 
 ```text
 What's a good way to measure week-over-week retention?
 ```
 
-You’ll get a reply that follows the analyst persona. It can’t see your data yet (that’s Step 3). First, a look at what just happened under the hood.
+You get a reply that follows the analyst persona. It can't see your data yet (that comes in Step 3). First, a look at what happened under the hood.
 
-→ Next: [Step 2: How it runs](./how-it-runs)
+→ Next: [How it runs](./how-it-runs)
 
-Depth: [Getting Started](../getting-started) · [Instructions](../instructions)
+Learn more: [Getting Started](../getting-started) · [Instructions](../instructions)

@@ -1,11 +1,11 @@
 ---
 title: "agent.ts"
-description: "The agent's runtime config: defineAgent, the model, and compaction."
+description: "Set the agent's runtime config in agent.ts with defineAgent, including the model and compaction."
 ---
 
 An agent's `agent.ts` calls `defineAgent` (from `eve`) to set its runtime config.
 
-## A good default
+## Set the model
 
 A typical config selects a model:
 
@@ -20,7 +20,7 @@ export default defineAgent({
 The root `agent.ts` can be omitted when no runtime config is needed. In that case, Eve defaults
 to `anthropic/claude-sonnet-4.6`. When `agent.ts` is present, `model` is required.
 
-`model` can be a gateway model id string (which routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway)) or a provider-authored `LanguageModel`, when you want to call the provider directly, bypassing the gateway and configuring the model in code:
+`model` accepts a gateway model id string, which routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a provider-authored `LanguageModel`:
 
 ```ts title="agent/agent.ts"
 import { anthropic } from "@ai-sdk/anthropic";
@@ -33,7 +33,7 @@ export default defineAgent({
 
 ## Compaction
 
-Compaction summarizes older turns as you approach the context window. It is on by default, so you only touch it to tune when it kicks in. Lower `thresholdPercent` to compact sooner:
+Compaction summarizes older turns as you approach the context window. It's on by default, so you only tune when it kicks in. Lower `thresholdPercent` to compact sooner:
 
 ```ts title="agent/agent.ts"
 export default defineAgent({
@@ -46,25 +46,16 @@ export default defineAgent({
 
 See [Default harness](./concepts/default-harness#compaction) for how the loop applies it.
 
-## Other fields
+## Other defineAgent fields
 
-`defineAgent` takes a few more fields. For every field and its type, see the [TypeScript API](./reference/typescript-api).
+`defineAgent` takes a few more fields, all optional. For the exported types, see the [TypeScript API](./reference/typescript-api).
 
-### `modelOptions`
-
-Provider option overrides forwarded to the model call.
-
-### `experimental`
-
-Opt-in flags that can change or disappear in any release, so treat them as unstable. The main one is `codeMode`, which routes executable tools through a sandboxed code-execution wrapper.
-
-### `outputSchema`
-
-A structured return type for task-mode runs: a subagent, schedule, or remote job.
-
-### `build`
-
-Build packaging controls. `externalDependencies` keeps listed packages external while Eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.
+| Field          | Type                                    | Default     | Description                                                                                                                                                                                                                                              |
+| -------------- | --------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `modelOptions` | `AgentModelOptionsDefinition`           | none        | Provider option overrides forwarded to the model call.                                                                                                                                                                                                   |
+| `experimental` | `{ codeMode?: boolean }`                | flags unset | Opt-in flags that can change or disappear in any release. Treat them as unstable. `codeMode` routes executable tools through a sandboxed code-execution wrapper, where the model writes JavaScript that calls the tools inside the [sandbox](./sandbox). |
+| `outputSchema` | Standard Schema or a JSON Schema object | none        | Structured return type for task-mode runs (a subagent, schedule, or remote job). Interactive conversation turns ignore it unless the client supplies a per-message schema.                                                                               |
+| `build`        | `{ externalDependencies?: string[] }`   | none        | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while Eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                                 |
 
 ## Where adjacent settings live
 

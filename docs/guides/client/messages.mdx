@@ -12,7 +12,7 @@ Pass a string to `send()` for plain text:
 ```ts
 import { Client } from "eve/client";
 
-const client = new Client({ host: "http://127.0.0.1:2000" });
+const client = new Client({ host: "http://127.0.0.1:3000" });
 const session = client.session();
 
 const response = await session.send("What is the weather in Brooklyn?");
@@ -34,7 +34,7 @@ console.log(result.status, result.message);
 | `sessionId` | Session ID for streaming and inspection.                                       |
 | `data`      | Structured output when the turn requested an [output schema](./output-schema). |
 
-Failed runtime turns don't throw just because the stream includes `session.failed`. They return `status: "failed"`. Transport and route errors throw `ClientError`.
+When the stream includes `session.failed`, the turn returns `status: "failed"` rather than throwing. Transport and route errors throw `ClientError`.
 
 ## Send a full turn payload
 

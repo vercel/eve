@@ -3,7 +3,13 @@ title: "SvelteKit"
 description: "Run an Eve agent and a SvelteKit app as one project with the eveSvelteKit Vite plugin."
 ---
 
-`eve/sveltekit` lets you run a SvelteKit frontend and an Eve agent as one project instead of two services you have to keep in sync. The `eveSvelteKit()` Vite plugin puts both on one dev server and one Vercel deploy, and [`useEveAgent`](./use-eve-agent-svelte) finds the mounted routes on its own. No CORS config, no URL env vars.
+`eve/sveltekit` runs a SvelteKit frontend and an Eve agent as one project instead of two services. The `eveSvelteKit()` Vite plugin puts both on one dev server and one Vercel deploy, and [`useEveAgent`](./use-eve-agent-svelte) finds the mounted routes on its own. There's no CORS to configure and no URL env vars to keep in sync.
+
+## Prerequisites
+
+- The `eve` package installed in your project (`npm install eve@latest`).
+- An existing Eve agent directory. If you don't have one, start from [Getting started](../../getting-started).
+- A SvelteKit app to mount the agent in.
 
 ## Register the Vite plugin
 
@@ -31,6 +37,8 @@ export default defineConfig({
   ],
 });
 ```
+
+The plugin accepts only two options, `eveRoot` and `eveBuildCommand`.
 
 ## Call the binding
 
@@ -61,11 +69,20 @@ With the plugin in `vite.config.ts`, components call [`useEveAgent`](./use-eve-a
 </form>
 ```
 
-Out of the box the plugin uses a framework default channel. To set the route auth policy yourself, add `agent/channels/eve.ts` and swap `none()` for a helper like `vercelOidc()` on protected apps. See [Channels](../../channels/overview) and [Auth & route protection](../auth-and-route-protection).
+The default Eve channel is fail-closed. With no `agent/channels/eve.ts` authored, Eve registers `eveChannel({ auth: [localDev(), vercelOidc()] })`: `localDev()` opens the routes on localhost, `vercelOidc()` admits Vercel OIDC callers in production, and everything else gets a `401`. To set your own auth policy, add `agent/channels/eve.ts`:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel } from "eve/channels/eve";
+import { localDev, vercelOidc } from "eve/channels/auth";
+
+export default eveChannel({ auth: [localDev(), vercelOidc()] });
+```
+
+For a public demo, use `none()` (also from `eve/channels/auth`) to skip authentication. See [Channels](../../channels/overview) and [Auth & route protection](../auth-and-route-protection).
 
 ## Dev vs deploy topology
 
-- **Local dev.** `npm run dev` boots the Eve dev server next to SvelteKit and proxies the Eve routes to it, so the browser only ever hits the SvelteKit origin. `npm run build && npm run preview` behaves the same: the preview server gets its own Eve route proxy and either reuses the shared Eve server or starts one.
+- **Local dev.** `npm run dev` boots the Eve dev server next to SvelteKit and proxies the Eve routes to it, so the browser only ever hits the SvelteKit origin. `npm run build && npm run preview` behaves the same way: the preview server gets its own Eve route proxy and either reuses the shared Eve server or starts one.
 - **Vercel.** The SvelteKit app and the Eve runtime deploy as a single project. The web app is public; the Eve runtime sits behind it on the same origin. Use `eveBuildCommand` for a project-specific agent build:
 
   ```ts

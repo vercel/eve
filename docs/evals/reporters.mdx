@@ -1,11 +1,11 @@
 ---
 title: "Reporters"
-description: "Ship eval results to Braintrust experiments or JUnit XML — Eve runs and scores everything itself."
+description: "Ship eval results to Braintrust experiments or JUnit XML. Eve runs and scores everything itself."
 ---
 
-Eve runs and grades everything itself; reporters just ship the results out. The CLI prints a console summary by default — one line per eval, failed assertions with their messages — and reporters from `eve/evals/reporters` add destinations on top.
+Eve runs and grades everything itself; reporters ship the results out. The CLI prints a console summary by default (one line per eval, with failed assertions and their messages), and reporters from `eve/evals/reporters` add destinations on top.
 
-Reporters attach in two places. Declare them in `evals.config.ts` to observe **every** eval in the run — the usual choice for a shared destination like one Braintrust experiment, so you don't repeat the reporter in each file. Or list them on an individual eval's `reporters` to scope a destination to that eval (or to a group of evals that share one instance).
+Reporters attach in two places. Declare them in `evals.config.ts` to observe **every** eval in the run, the usual choice for a shared destination like one Braintrust experiment, so you don't repeat the reporter in each file. Or list them on an individual eval's `reporters` to scope a destination to that eval (or to a group of evals that share one instance).
 
 ## Braintrust
 
@@ -38,13 +38,13 @@ export default defineEval({
 
 The reporter config takes an optional `projectName` and `experimentName`, plus a base experiment (by name or id) to diff against. Gate assertions log as binary scores under a `gate:` prefix so experiments diff gate regressions the same way they diff soft-score regressions. Eval `metadata` rides along to reporters.
 
-A reporter instance observes the evals that reference it: share one instance across several evals — the config, a `shared.ts` export, or every entry of a dataset array — and their results land in a single experiment. Listing the same config reporter on an eval too does not double-report it.
+A reporter instance observes the evals that reference it. Share one instance across several evals (the config, a `shared.ts` export, or every entry of a dataset array) and their results land in a single experiment. Listing the same config reporter on an eval too does not double-report it.
 
-Braintrust needs its SDK installed in the app and credentials in the environment. Pass `--skip-report` to run the eval without shipping results (this also suppresses config reporters) — useful locally when iterating.
+Braintrust needs its SDK installed in the app and credentials in the environment: install the `braintrust` package (`npm install braintrust`) and set `BRAINTRUST_API_KEY`. Pass `--skip-report` to run the eval without shipping results, which also suppresses config reporters and is useful locally when iterating.
 
 ## JUnit
 
-`JUnit({ filePath })` writes JUnit XML for CI annotations. The `--junit <path>` CLI flag does the same thing without touching the eval file, which is usually the better fit — CI owns the output path, not the eval:
+`JUnit({ filePath })` writes JUnit XML for CI annotations. The `--junit <path>` CLI flag does the same thing without touching the eval file, usually the better fit because CI owns the output path, not the eval:
 
 ```bash
 eve eval --strict --junit .eve/junit.xml
@@ -54,7 +54,17 @@ Each eval becomes one `<testcase>` named by its path-derived id; failed gates an
 
 ## Custom reporters
 
-A reporter implements the `EvalReporter` interface from `eve/evals/reporters` and receives the same structured results the built-ins do. Reach for one only when a destination isn't covered — the per-run artifacts under `.eve/evals/` already capture everything for ad-hoc inspection.
+A reporter implements the `EvalReporter` interface from `eve/evals/reporters` and receives the same structured results the built-ins do. The runner calls three lifecycle methods, each of which may return a promise for async work like a remote upload:
+
+```ts
+interface EvalReporter {
+  onRunStart(evaluations: readonly EveEval[], target: EveEvalTarget): void | Promise<void>;
+  onEvalComplete(result: EveEvalResult): void | Promise<void>;
+  onRunComplete(summary: EveEvalRunSummary): void | Promise<void>;
+}
+```
+
+`onRunStart` fires once before any eval runs, `onEvalComplete` fires after each observed eval with its checks, scores, and verdict, and `onRunComplete` fires once with the aggregated summary. Reach for a custom reporter only when a destination isn't covered. The per-run artifacts under `.eve/evals/` already capture everything for ad-hoc inspection.
 
 ## What to read next
 

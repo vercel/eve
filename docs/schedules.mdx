@@ -1,9 +1,9 @@
 ---
 title: "Schedules"
-description: "Run an agent on a cron cadence: a fire-and-forget prompt, or a handler that hands work off to a channel."
+description: "Run an agent on a cron cadence, either a fire-and-forget prompt or a handler that hands work off to a channel."
 ---
 
-A schedule is how the agent starts work on its own clock instead of waiting for an inbound message. Daily digests, data syncs, cleanup sweeps, heartbeats: anything that should fire on a cadence. Each one is a single file under `agent/schedules/` carrying a cron expression. Schedules are root-only, so declared subagents cannot have a `schedules/` directory.
+A schedule starts the agent on its own clock instead of waiting for an inbound message. Use one for daily digests, data syncs, cleanup sweeps, heartbeats, or anything that should fire on a cadence. Each one is a single file under `agent/schedules/` carrying a cron expression. Schedules are root-only, so declared subagents cannot have a `schedules/` directory.
 
 The name comes from the path under `schedules/` (`agent/schedules/billing/sweep.ts` → `"billing/sweep"`), and nested directories are fine.
 
@@ -25,11 +25,13 @@ interface ScheduleHandlerArgs {
 }
 ```
 
-`defineSchedule` is just a pass-through for types. The compiler is what enforces the one-of rule.
+`defineSchedule` is a type-level pass-through. The compiler is what enforces the one-of rule.
+
+`cron` is a standard 5-field string (`minute hour day-of-month month day-of-week`) with minute granularity. On Vercel, each schedule becomes a Vercel Cron Job, and Vercel evaluates the expression in UTC, so `"0 9 * * 1-5"` fires at 09:00 UTC on weekdays. `eve dev` never fires schedules on their cron cadence. To trigger one while iterating, use the dispatch route below.
 
 ## Markdown form (fire-and-forget)
 
-This is the minimal schedule. Eve runs the agent on the prompt and throws away the output, though the agent can still call tools, write to backends, and log along the way. We call this task mode. A task-mode session runs to completion or fails; it cannot park to wait for a person or an OAuth sign-in.
+This is the minimal schedule. Eve runs the agent on the prompt and throws away the output, though the agent can still call tools, write to backends, and log along the way. We call this task mode. A task-mode session runs to completion or fails, and cannot park to wait for a person or an OAuth sign-in.
 
 ```ts title="agent/schedules/heartbeat.ts"
 import { defineSchedule } from "eve/schedules";
@@ -54,7 +56,7 @@ Sweep stale workflow state.
 
 ## Handler form (`run`)
 
-Reach for a handler when the schedule needs to deliver to a channel, branch on conditions, or compute its arguments at fire time. The handler is in full control. It has no channel of its own, so it passes the work to one with `receive`.
+Use a handler when the schedule needs to deliver to a channel, branch on conditions, or compute its arguments at fire time. The handler is in full control. It has no channel of its own, so it passes the work to one with `receive`.
 
 ```ts title="agent/schedules/daily-digest.ts"
 import { defineSchedule } from "eve/schedules";
@@ -75,30 +77,30 @@ export default defineSchedule({
 });
 ```
 
-- `receive(channel, { message, target, auth })`: starts a session on another channel. Same contract as a route handler’s `args.receive`.
-- `waitUntil(promise)`: extends the cron task’s lifetime so the parked session and any in-flight fetches settle before the task ends. Wrap the `receive` call in it.
+- `receive(channel, { message, target, auth })`: starts a session on another channel. Same contract as a route handler's `args.receive`.
+- `waitUntil(promise)`: extends the cron task's lifetime so the parked session and any in-flight fetches settle before the task ends. Wrap the `receive` call in it.
 - `appAuth`: the app principal (`{ authenticator: "app", principalId: "eve:app", principalType: "runtime" }`). Pass it as `receive(..., { auth: appAuth })` for work the agent does on its own behalf.
 
-A handler-form session runs on the same durable runtime engine as any other session, so it can park, for instance when the channel handoff is waiting for a Slack reply. Only markdown task mode is barred from waiting.
+A handler-form session runs on the same durable runtime engine as any other session, so it can park (durably suspend), for instance when the channel handoff is waiting for a Slack reply. Only markdown task mode is barred from waiting.
 
 ## Trigger a schedule while iterating
 
-In production the cron cadence is the only thing that fires a schedule, but waiting for the next tick gets old fast while iterating in `eve dev`. So the dev server mounts a one-shot dispatch route: fire a schedule by name, out of band, exactly once.
+The dev server mounts a one-shot dispatch route that fires a schedule by name, out of band, exactly once. Since `eve dev` never runs schedules on their cron cadence, this is how you trigger one without waiting for the next production tick.
 
 ```sh
-curl -X POST http://localhost:2000/eve/v1/dev/schedules/heartbeat
+curl -X POST http://localhost:3000/eve/v1/dev/schedules/heartbeat
 # -> { "scheduleId": "heartbeat", "sessionIds": ["..."] }
 ```
 
-`:scheduleId` is the path-derived schedule name (`agent/schedules/heartbeat.ts` → `heartbeat`; URL-encode the `/` in nested names). It runs the exact dispatch path the production cron handler uses and returns the started session ids as JSON, so you can subscribe to each one’s [stream](./concepts/sessions-runs-and-streaming) at `GET /eve/v1/session/:sessionId/stream`. An unknown id comes back `404` with `availableScheduleIds`, listing the schedules the app actually defines.
+`:scheduleId` is the path-derived schedule name (`agent/schedules/heartbeat.ts` → `heartbeat`; URL-encode the `/` in nested names). It runs the exact dispatch path the production cron handler uses and returns the started session ids as JSON, so you can subscribe to each one's [stream](./concepts/sessions-runs-and-streaming) at `GET /eve/v1/session/:sessionId/stream`. An unknown id comes back `404` with `availableScheduleIds`, listing the schedules the app actually defines.
 
 The route is dev-only. Production builds never mount it, and it needs no auth since the dev server is local-only.
 
 ## On Vercel
 
-Hosted Vercel builds turn every `defineSchedule(...)` into a Vercel Cron Job, with each `cron` written as an entry in `.vercel/output/config.json`. Confirm discovery under Settings → Cron Jobs and watch execution history under Observability → Cron Jobs. Per-run logs land under Observability → Logs.
+Hosted Vercel builds turn every `defineSchedule(...)` into a Vercel Cron Job, with each `cron` written as an entry in `.vercel/output/config.json`. Vercel evaluates these expressions in UTC. Confirm discovery under **Settings → Cron Jobs** and watch execution history under **Observability → Cron Jobs**. Per-run logs land under **Observability → Logs**.
 
 ## What to read next
 
-- Deliver schedule output to users → [Channels](./channels/overview)
-- Inspect a schedule run → [Sessions, runs & streaming](./concepts/sessions-runs-and-streaming)
+- [Channels](./channels/overview): deliver schedule output to users.
+- [Sessions, runs & streaming](./concepts/sessions-runs-and-streaming): inspect a schedule run.

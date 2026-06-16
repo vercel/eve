@@ -10,11 +10,11 @@ Eve exposes runtime state through the `ctx` parameter passed to tool `execute`, 
 - `ctx.getSkill(identifier)`: handle for a named skill visible to the current agent
 - `defineState(name, initial)`: typed durable state with `get()` and `update()` (imported from `eve/context`)
 
-These APIs work only inside active authored runtime execution such as tools, channel event handlers, and authored hooks. They throw when called outside a managed context.
+These APIs work only inside active authored runtime execution, including tools, channel event handlers, and authored hooks. They throw when called outside a managed context.
 
 ## `ctx.session`
 
-Use `ctx.session` when you need durable runtime metadata about the current execution.
+`ctx.session` exposes durable runtime metadata about the current execution.
 
 ```ts title="agent/tools/who_called_me.ts"
 import { defineTool } from "eve/tools";
@@ -46,7 +46,7 @@ Public session fields:
 - `turn.sequence`
 - optional `parent`
 
-Important behavior:
+Behavior:
 
 - `auth.current` is the caller for the active inbound turn.
 - `auth.initiator` is the caller that started the durable session.
@@ -63,14 +63,14 @@ const sandbox = await ctx.getSandbox();
 const result = await sandbox.run({ command: "npm test" });
 ```
 
-Important behavior:
+Behavior:
 
-- It takes no arguments: each agent has exactly one sandbox.
+- It takes no arguments. Each agent has exactly one sandbox.
 - It is async because Eve binds or restores sandbox state lazily.
 - It only works when sandbox access is attached to the active runtime path.
-- Visibility is node-local: a subagent sees its own sandbox, not the parent's.
+- Visibility is node-local. A subagent sees its own sandbox, not the parent's.
 
-`SandboxSession` also exposes `resolvePath(path)` for cases where authored code needs the live backend-native path for a logical `/workspace/...` location before passing it to shell code or a child process.
+`SandboxSession` also exposes `resolvePath(path)`, which returns the live backend-native path for a logical `/workspace/...` location. Use it when authored code needs that path before passing it to shell code or a child process.
 
 See [Sandbox](../sandbox) for lifecycle details.
 
@@ -83,20 +83,20 @@ const skill = ctx.getSkill("research");
 const notes = await skill.file("references/checklist.md").text();
 ```
 
-Important behavior:
+Behavior:
 
-- It is synchronous; file content is read lazily from the active sandbox.
+- It is synchronous. File content is read lazily from the active sandbox.
 - It only works when sandbox access is attached to the active runtime path.
 - `identifier` is the path-derived skill id.
 - Visibility follows the current agent's sandbox.
-- Missing skills surface when a file accessor reads a missing sandbox path.
+- A missing skill surfaces when a file accessor reads a missing sandbox path.
 - The returned handle exposes `name` and `file(relativePath)`.
 
 See [Skills](../skills) for the full authoring model.
 
 ## Custom state with `defineState`
 
-Use `defineState` when your agent needs durable typed state that tools, hooks, and channel handlers can share. State survives across workflow step boundaries. Declare the handle at module scope so every importer shares it:
+Use `defineState` when your agent needs durable typed state that tools, hooks, and channel handlers can share. State survives workflow step boundaries. Declare the handle at module scope so every importer shares it:
 
 ```ts title="agent/lib/budget.ts"
 import { defineState } from "eve/context";
@@ -139,7 +139,7 @@ The framework sets up a context container before invoking authored code:
 3. Authored code runs inside the managed scope, so `ctx` and `defineState` accessors resolve automatically.
 4. After the step, the framework commits mutable state (for example sandbox changes) back to the durable session.
 
-This lifecycle is fully managed by the framework. Authored code only needs to use `ctx` and the public accessors.
+The framework manages this lifecycle. Authored code only uses `ctx` and the public accessors.
 
 ## What to read next
 

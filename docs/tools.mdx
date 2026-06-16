@@ -3,7 +3,7 @@ title: "Tools"
 description: "Define typed actions the agent can call, and gate sensitive ones on human approval."
 ---
 
-A tool is a typed action the agent can call: hit an API, run a query, write a file. The action stays in code you control. Tools run in your app runtime (full `process.env`), not the [sandbox](./sandbox).
+A tool is a typed action the agent can call, such as hitting an API, running a query, or writing a file. The action stays in code you control. Tools run in your app runtime with full access to `process.env`, not in the [sandbox](./sandbox).
 
 ## Define a tool
 
@@ -33,7 +33,7 @@ When a tool returns structured data, add an optional `outputSchema`. With Zod or
 
 ### The `ctx` parameter
 
-`execute` gets a `ctx` carrying the runtime accessors you'll reach for:
+`execute` gets a `ctx` carrying the runtime accessors:
 
 - `ctx.session`: session metadata, turn, auth, parent lineage.
 - `ctx.getSandbox()`: the live [sandbox](./sandbox) handle.
@@ -41,13 +41,13 @@ When a tool returns structured data, add an optional `outputSchema`. With Zod or
 
 Running in the app runtime is what lets a tool import shared code from `lib/`, read `process.env`, and take part in Eve’s durable pause/resume model.
 
-Eve never runs authored tools during discovery: the model sees descriptors first, and only what it actually calls gets executed. Re-executing a step from the same input is idempotent, so tool side effects are not duplicated when a turn resumes after a crash.
+Eve never runs authored tools during discovery. The model sees descriptors first, and only what it actually calls gets executed. Completed steps never re-run; Eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval.
 
 ## Human-in-the-loop
 
-HITL is not a separate system. It is just a tool that pauses for a person before (or instead of) running. Gate one on approval with `needsApproval` and the helpers from `eve/tools/approval`:
+Human-in-the-loop (HITL) approval is a property of a tool that pauses for a person before (or instead of) running. Gate a tool on approval with `needsApproval` and the helpers from `eve/tools/approval`:
 
-```ts
+```ts title="agent/tools/refund_charge.ts"
 import { defineTool } from "eve/tools";
 import { always } from "eve/tools/approval";
 import { z } from "zod";
@@ -68,13 +68,13 @@ export default defineTool({
 | `once()`   | Require approval only the first time the tool runs in a session; auto-allow after. |
 | `always()` | Require approval before every call.                                                |
 
-When the decision depends on the input, pass your own predicate instead of a helper. It receives `{ toolName, toolInput, approvedTools }` and returns a boolean. To require approval only when an amount crosses a threshold:
+When the decision depends on the input, pass your own predicate instead of a helper. It receives `{ toolName, toolInput, approvedTools }` and returns a boolean. `toolInput` can be undefined, so guard the access. To require approval only when an amount crosses a threshold:
 
 ```ts
-needsApproval: ({ toolInput }) => toolInput.amount > 1000,
+needsApproval: ({ toolInput }) => (toolInput?.amount ?? 0) > 1000,
 ```
 
-### The pause and resume
+### How approval pause and resume works
 
 Approvals and questions share one protocol:
 
@@ -97,7 +97,7 @@ toModelOutput(output) {
 },
 ```
 
-It receives the full, typed `execute` return and only affects the model. Channel event handlers and hooks still get the full output on `action.result`, so a channel can render rich platform output (Slack Block Kit, say) the model never sees. Return `{ type: "text", value }` for a summary, or `{ type: "json", value }` for a smaller object.
+`toModelOutput` receives the full, typed `execute` return and only affects the model. Channel event handlers and hooks still get the full output on `action.result`, so a channel can render rich platform output (Slack Block Kit, say) the model never sees. Return `{ type: "text", value }` for a summary, or `{ type: "json", value }` for a smaller object.
 
 ## What to read next
 

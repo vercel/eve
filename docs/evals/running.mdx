@@ -15,7 +15,7 @@ eve eval --timeout 60000       # per-eval timeout in milliseconds
 eve eval --max-concurrency 4   # cap concurrent eval executions (default 8)
 eve eval --junit .eve/junit.xml  # write JUnit XML
 eve eval --list                # print discovered evals without running
-eve eval --verbose             # stream per-eval ctx.log lines to stdout
+eve eval --verbose             # stream per-eval t.log lines to stdout
 eve eval --json                # machine-readable output
 eve eval --skip-report         # skip config and eval-defined reporters (e.g. Braintrust)
 ```
@@ -27,7 +27,7 @@ Positional ids match exactly or by directory prefix: `eve eval weather` runs `ev
 | Code | Means                                                                           |
 | ---- | ------------------------------------------------------------------------------- |
 | `0`  | Every eval passed its gates (and soft thresholds, under `--strict`)             |
-| `1`  | Any eval failed — a failed gate, an execution error, or a strict threshold miss |
+| `1`  | Any eval failed (a failed gate, an execution error, or a strict threshold miss) |
 | `2`  | Configuration error                                                             |
 
 ## Artifacts

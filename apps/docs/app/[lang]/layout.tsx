@@ -5,20 +5,14 @@ import type { Metadata } from "next";
 import { GeistdocsProvider } from "@/components/geistdocs/provider";
 import { config } from "@/lib/geistdocs/config";
 import { mono, sans } from "@/lib/geistdocs/fonts";
+import { getSiteOrigin } from "@/lib/geistdocs/url";
 import { cn } from "@/lib/utils";
 
-/**
- * Site-wide metadata. The `robots` block emits
- * `<meta name="robots" content="noindex, nofollow">` into every page
- * while Eve is pre-1.0 and the docs are still in flux. Flip both
- * fields to `true` (and update `app/robots.ts` + the `X-Robots-Tag`
- * header in `next.config.ts`) when we're ready to invite search
- * traffic.
- */
 export const metadata: Metadata = {
+  metadataBase: new URL(getSiteOrigin()),
   robots: {
-    index: false,
-    follow: false,
+    index: true,
+    follow: true,
   },
 };
 

@@ -1,10 +1,10 @@
 ---
 title: "Microsoft Teams"
-description: "Reach your agent from Microsoft Teams via the Bot Framework Activity protocol, with Adaptive Card HITL."
+description: "Reach your agent from Microsoft Teams via the Bot Framework Activity protocol, with Adaptive Card human-in-the-loop prompts."
 type: integration
 ---
 
-The Teams channel lets your agent live inside Microsoft Teams as a bot. It takes Bot Framework Activity POSTs, checks the Bot Connector bearer JWT on each one, and routes message activities to your agent. HITL prompts come back as Adaptive Cards, and replies go out over the Bot Framework Connector REST API. See [Channels](./overview) for the contract this builds on.
+The Teams channel runs your agent inside Microsoft Teams as a bot. It takes Bot Framework Activity POSTs, checks the Bot Connector bearer JWT on each one, and routes message activities to your agent. Human-in-the-loop (HITL) prompts come back as Adaptive Cards, and replies go out over the Bot Framework Connector REST API. See [Channels](./overview) for the contract this builds on.
 
 ## Add the channel
 
@@ -22,9 +22,11 @@ MICROSOFT_TENANT_ID=...   # optional, single-tenant bots
 
 By default the channel mounts at `POST /eve/v1/teams`. Point your Azure Bot or Teams app messaging endpoint at that public URL. To mount somewhere else, pass `route: "/api/teams/activity"`.
 
-## Affordances
+## How the channel handles messages
 
-**Message dispatch.** The default `onMessage` handles two cases: personal-chat messages, and channel or group-chat messages that mention the bot directly. Ambient resource-specific-consent messages are dropped unless you override it. Before dispatch, Eve strips the mention, adds a `<teams_context>` block, and scopes channel and group threads by root activity id (`replyToId ?? id`).
+### Dispatch
+
+The default `onMessage` handles two cases: personal-chat messages, and channel or group-chat messages that mention the bot directly. Ambient resource-specific-consent messages are dropped unless you override it. Before dispatch, Eve strips the mention, adds a `<teams_context>` block, and scopes channel and group threads by root activity id (`replyToId ?? id`).
 
 ```ts
 import { defaultTeamsAuth, teamsChannel } from "eve/channels/teams";
@@ -37,11 +39,21 @@ export default teamsChannel({
 });
 ```
 
-**Delivery & HITL.** Replies post as Markdown (`textFormat: "markdown"`), with oversized text split across messages and a typing indicator sent on turn start and action requests. An `input.requested` event renders as an Adaptive Card. Buttons and options map to `Action.Submit`, selects to `Input.ChoiceSet`, and freeform to `Input.Text`. When the user submits, the activity converts to Eve `inputResponses` for you. For invokes that aren't HITL, handle them in `onInvoke(ctx, activity)`.
+### Delivery
 
-**Proactive sessions** need an existing conversation reference, because Teams v1 cannot create new chats by AAD user id. Pass `serviceUrl`, `conversationId`, etc. to `receive(teams, { target })`.
+Replies post as Markdown (`textFormat: "markdown"`), with oversized text split across messages and a typing indicator sent on turn start and action requests.
 
-**Files** are off by default. Opt in to enable personal-scope downloads and public media URLs:
+### Human-in-the-loop (HITL)
+
+A human-in-the-loop (HITL) `input.requested` event renders as an Adaptive Card. Buttons and options map to `Action.Submit`, selects to `Input.ChoiceSet`, and freeform to `Input.Text`. When the user submits, the activity converts to Eve `inputResponses` for you. For invokes that aren't HITL, handle them in `onInvoke(ctx, activity)`.
+
+### Proactive sessions
+
+Proactive sessions need an existing conversation reference, because the Bot Framework v1 surface cannot create new chats by Azure Active Directory (AAD) user id. Pass `serviceUrl`, `conversationId`, and the other reference fields to `receive(teams, { target })`.
+
+### Attachments
+
+Inbound files are off by default. Opt in to allow personal-scope downloads and public media URLs:
 
 ```ts
 export default teamsChannel({

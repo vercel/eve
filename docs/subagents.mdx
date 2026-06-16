@@ -1,9 +1,9 @@
 ---
 title: "Subagents"
-description: "Delegate work to child agents: a copy of the agent itself, or declared specialists with their own sandbox and skills."
+description: "Delegate work to child agents, either a copy of the agent itself or declared specialists with their own sandbox and skills."
 ---
 
-A subagent is a child agent that one agent delegates a focused subtask to. Split work out into one when you want it to run in parallel, when the child should see a narrower set of tools, or when a specialist needs its own identity. There are two kinds.
+A subagent is a child agent that one agent delegates a focused subtask to. Split work into one to run it in parallel, to give the child a narrower set of tools, or to give a specialist its own identity. There are two kinds, the built-in `agent` tool (a copy of the agent itself) and declared subagents (specialists with their own directory).
 
 ## The built-in `agent` tool
 
@@ -16,7 +16,7 @@ Every agent gets an `agent` tool by default. The model calls it to delegate a su
 }
 ```
 
-The copy shares the parent's sandbox and tools. A child's file writes are immediately visible to the parent, which is what makes parallel calls natural: fan out a few copies to fix different files at once. The copy inherits auth and connections, but starts with fresh conversation history and fresh state. If a declared subagent calls `agent`, the child is a copy of _that_ subagent, not the root.
+The copy shares the parent's sandbox and tools, and a child's file writes are immediately visible to the parent. That is what makes parallel calls natural: fan out a few copies to fix different files at once. The copy inherits auth and connections, but starts with fresh conversation history and fresh state. If a declared subagent calls `agent`, the child is a copy of _that_ subagent, not the root.
 
 An authored tool at `agent/tools/agent.ts` takes priority over the built-in.
 
@@ -47,30 +47,52 @@ agent/subagents/researcher/
 └── subagents/          # optional, nested subagents
 ```
 
-`schedules/` is not supported inside a declared subagent: schedules are root-only.
+`schedules/` is not supported inside a declared subagent. Schedules are root-only.
 
 ## The isolation boundary
 
-A declared subagent gets its own independent sandbox and its own `skills/` set. Neither crosses the parent boundary:
+A declared subagent inherits nothing from the root's authored slots. Discovery treats its directory as its own agent root, so it has only the instructions, tools, connections, skills, sandbox, hooks, and nested subagents authored under `agent/subagents/<id>/`. An absent slot falls back to the framework default, not to the root's version.
 
-- The child sees only skills authored under `agent/subagents/<id>/skills/`. Root `agent/skills/` stay out of reach during its turns. When two subagents need the same procedure, duplicate the markdown under each, or share typed helpers via `lib/`.
-- The child's sandbox does not inherit from the parent. It falls back to the framework default unless it authors `subagents/<id>/sandbox.ts`, or seeds files via `subagents/<id>/sandbox/workspace/`.
+| Slot         | Built-in `agent` tool         | Declared subagent                      |
+| ------------ | ----------------------------- | -------------------------------------- |
+| Instructions | Inherited (copy of the agent) | Own `instructions.{md,ts}`, optional   |
+| Tools        | Inherited                     | Own `tools/`                           |
+| Connections  | Inherited                     | Own `connections/`                     |
+| Skills       | Inherited                     | Own `skills/`                          |
+| Sandbox      | Shared with parent            | Own `sandbox/`, else framework default |
+| Hooks        | Inherited                     | Own `hooks/`                           |
+| State        | Fresh                         | Fresh                                  |
+| Channels     | Root-only                     | Root-only                              |
+| Schedules    | Root-only                     | Root-only                              |
 
-The built-in `agent` tool is the exception: its children share the parent's sandbox and tools because they are copies of the same agent working on the same files.
+For a declared subagent this means duplicating anything the child needs. When two subagents need the same procedure, copy the markdown under each `skills/` directory, or share typed helpers via `lib/`. The sandbox does not inherit from the parent; it falls back to the framework default unless the subagent authors `subagents/<id>/sandbox.ts` or seeds files via `subagents/<id>/sandbox/workspace/`.
 
-`defineState` is never shared, for either kind: each child starts with fresh durable state.
+The built-in `agent` tool is the exception. Its children share the parent's sandbox and tools because they are copies of the same agent working on the same files.
+
+`defineState` is never shared, for either kind. Each child starts with fresh durable state.
 
 ## What the parent sees
 
-Eve lowers every subagent (built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, outputSchema? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. Set `outputSchema` and the child runs in task mode, returning structured output as the tool result.
+Eve lowers every subagent (built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, outputSchema? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. Set `outputSchema` to run the child in task mode, returning structured output as the tool result.
+
+A declared subagent's tool name is the bare path-derived name, with no prefix. `agent/subagents/researcher/` registers as the tool `researcher`. Unlike connection tools (`connection__<connection>__<tool>`), it carries no namespace, so the model, approvals, logs, and evals all reference it by that name. Its input schema is:
+
+```ts
+{
+  message: string;       // all context the child needs; it never sees the parent's history
+  outputSchema?: object; // when set, the child runs in task mode and returns structured output
+}
+```
+
+Because the name lives in the same runtime tool namespace as authored tools, a subagent named `researcher` collides with a tool named `researcher`. Eve rejects the build rather than picking a winner, so keep subagent directory names distinct from tool names.
 
 Each delegated subagent spins up its own child session and stream. The parent stream carries only the control-plane events `subagent.called` and `subagent.completed`. To follow the child's full progress, read `subagent.called.data.childSessionId` and subscribe at `GET /eve/v1/session/:childSessionId/stream`.
 
 ## When to split
 
-Split out a subagent when the task needs a different prompt or specialist role, a narrower tool surface, or its own runtime context. Don't reach for one when a [skill](./skills) would do: if the agent can keep its identity and just needs an optional procedure, a skill is the lighter choice.
+Split out a subagent when the task needs a different prompt or specialist role, a narrower tool surface, or its own runtime context. Don't reach for one when a [skill](./skills) would do. If the agent can keep its identity and needs only an optional procedure, a skill is the lighter choice.
 
 ## What to read next
 
-- Call another Eve deployment as a subagent → [Remote agents](./guides/remote-agents)
-- Have the model orchestrate its subagents programmatically (fan-out, map-reduce) → [Dynamic workflows](./guides/dynamic-workflows)
+- [Remote agents](./guides/remote-agents): call another Eve deployment as a subagent.
+- [Dynamic workflows](./guides/dynamic-workflows): have the model orchestrate its subagents programmatically (fan-out, map-reduce).

@@ -1,26 +1,45 @@
 ---
 title: "CLI"
-description: "eve command reference: info, build, start, dev, eval."
+description: "Reference for every eve CLI command: init, info, build, start, dev, link, deploy, eval, and channels."
 ---
 
-The `eve` binary (`bin: eve`) runs from your app root, and every command loads `.env`/`.env.local` from that root before it does anything else.
+The `eve` binary (`bin: eve`) runs from your app root, and every command first loads `.env`/`.env.local` from that root. Running `eve` with no command runs `eve dev`.
 
 ## Commands
 
-| Command                   | Does                                                                                                                                        |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eve info`                | Print the resolved application: discovered tools, skills, subagents, schedules, channels, routes, artifact paths, and discovery diagnostics |
-| `eve build`               | Compile `.eve/` artifacts and build the host output; prints the output directory                                                            |
-| `eve start`               | Serve the built `.output/` app; prints the listening URL                                                                                    |
-| `eve dev`                 | Start the local dev server and open the terminal UI                                                                                         |
-| `eve dev <url>`           | Connect the UI to an existing server URL (e.g. a remote deployment) instead of booting a local server                                       |
-| `eve link`                | Link the directory to a Vercel project and pull AI Gateway credentials                                                                      |
-| `eve deploy`              | Deploy the agent to Vercel production (links first if needed)                                                                               |
-| `eve eval`                | Run evals against the local app or a remote target                                                                                          |
-| `eve channels add [kind]` | Scaffold a channel interactively, or by kind (`slack` \| `web`)                                                                             |
-| `eve channels list`       | List user-authored channels                                                                                                                 |
+| Command                   | Description                                                                                                                                           |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `eve init [target]`       | Scaffold a new agent, or add one to an existing project directory                                                                                     |
+| `eve info`                | Print the resolved application, including discovered tools, skills, subagents, schedules, channels, routes, artifact paths, and discovery diagnostics |
+| `eve build`               | Compile `.eve/` artifacts and build the host output; prints the output directory                                                                      |
+| `eve start`               | Serve the built `.output/` app; prints the listening URL                                                                                              |
+| `eve dev`                 | Start the local dev server and open the terminal UI                                                                                                   |
+| `eve dev <url>`           | Connect the UI to an existing server URL (e.g. a remote deployment) instead of booting a local server                                                 |
+| `eve link`                | Link the directory to a Vercel project and pull AI Gateway credentials                                                                                |
+| `eve deploy`              | Deploy the agent to Vercel production (links first if needed)                                                                                         |
+| `eve eval`                | Run evals against the local app or a remote target                                                                                                    |
+| `eve channels add [kind]` | Scaffold a channel interactively, or by kind (`slack` \| `web`)                                                                                       |
+| `eve channels list`       | List user-authored channels                                                                                                                           |
 
 When `eve build` fails on discovery errors, it prints the full diagnostics report (severity, message, source path) and the diagnostics artifact path.
+
+## `eve init`
+
+```bash
+eve init [target] [--channel-web-nextjs]
+```
+
+The optional `target` decides the mode:
+
+- A name (`eve init my-agent`) scaffolds a fresh project in a new `my-agent/` directory.
+- An existing directory, including `.` for the current one (`eve init .`), adds an agent to that project. The project needs a `package.json`, the `agent/` files must not exist yet, and the missing `eve`, `ai`, and `zod` dependencies are added without touching anything else.
+- Omitting the target scaffolds or updates the current directory, the same as `eve init .`.
+
+Either mode installs dependencies, initializes Git, and runs `eve dev` through the project's package manager.
+
+| Flag                   | Type | Default | Description                                                                                                                            |
+| ---------------------- | ---- | ------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `--channel-web-nextjs` | flag | off     | Add the Web Chat application (a Next.js app). Rejected when adding to an existing project; run `eve channels add web` there afterward. |
 
 ## `eve info`
 
@@ -28,11 +47,11 @@ When `eve build` fails on discovery errors, it prints the full diagnostics repor
 eve info [--json]
 ```
 
-| Flag     | Effect       |
-| -------- | ------------ |
-| `--json` | Emit as JSON |
+| Flag     | Type | Default | Description  |
+| -------- | ---- | ------- | ------------ |
+| `--json` | flag | off     | Emit as JSON |
 
-When something behaves unexpectedly, run this first. It confirms a file was discovered, lists the active surface, and surfaces discovery diagnostics, all faster than booting the dev server.
+Run this first when something behaves unexpectedly. It confirms a file was discovered, lists the active surface, and surfaces discovery diagnostics, all faster than booting the dev server.
 
 ## `eve build`
 
@@ -44,7 +63,7 @@ No flags. Compiles to `.eve/` and builds the host output, then prints the built 
 
 Useful artifacts written under `.eve/` (preserved even on partial failure):
 
-| Artifact                                       | Tells you                                            |
+| Artifact                                       | Description                                          |
 | ---------------------------------------------- | ---------------------------------------------------- |
 | `.eve/discovery/agent-discovery-manifest.json` | What Eve found on disk                               |
 | `.eve/discovery/diagnostics.json`              | Authored-shape errors and warnings                   |
@@ -58,10 +77,10 @@ Useful artifacts written under `.eve/` (preserved even on partial failure):
 eve start [--host <host>] [--port <port>]
 ```
 
-| Flag            | Effect                                               |
-| --------------- | ---------------------------------------------------- |
-| `--host <host>` | Host interface to bind                               |
-| `--port <port>` | Port to listen on (defaults to `$PORT`, then `3000`) |
+| Flag            | Type   | Default            | Description            |
+| --------------- | ------ | ------------------ | ---------------------- |
+| `--host <host>` | string | all interfaces     | Host interface to bind |
+| `--port <port>` | number | `$PORT`, then 3000 | Port to listen on      |
 
 Serves the previously built output. Prints the listening URL.
 
@@ -72,27 +91,27 @@ eve dev [options]
 eve dev https://your-app.vercel.app
 ```
 
-Pass a bare URL as the only argument and the UI connects to that server instead of booting a local one (same as `--url`). That's handy for smoke-testing a preview or production deployment. The interactive UI turns off in a non-TTY terminal.
+Pass a bare URL as the only argument and the UI connects to that server instead of booting a local one (same as `--url`), which lets you smoke-test a preview or production deployment. The interactive UI turns off in a non-TTY terminal.
 
-| Flag                                | Effect                                                                                    |
-| ----------------------------------- | ----------------------------------------------------------------------------------------- |
-| `--host <host>`                     | Host interface to bind                                                                    |
-| `--port <port>`                     | Port to listen on (defaults to `$PORT`, then `2000`)                                      |
-| `-u, --url <url>`                   | Connect to an existing server URL instead of starting one                                 |
-| `--no-ui`                           | Start the server without an interactive UI                                                |
-| `--name <name>`                     | Title shown in the terminal UI (defaults to the app folder name)                          |
-| `--input <text>`                    | Pre-fill the prompt input after launching the UI (editable; not auto-submitted)           |
-| `--tools <mode>`                    | Tool-call rendering: `full` \| `collapsed` \| `auto-collapsed` \| `hidden`                |
-| `--reasoning <mode>`                | Reasoning rendering: `full` \| `collapsed` \| `auto-collapsed` \| `hidden`                |
-| `--subagents <mode>`                | Subagent-section rendering: `full` \| `collapsed` \| `auto-collapsed` \| `hidden`         |
-| `--connection-auth <mode>`          | Connection-authorization rendering: `full` \| `collapsed` \| `auto-collapsed` \| `hidden` |
-| `--assistant-response-stats <mode>` | Assistant header statistic: `tokens` \| `tokensPerSecond`                                 |
-| `--context-size <tokens>`           | Model context window size, shown as a usage percentage                                    |
-| `--logs <mode>`                     | Server/agent logs to show: `all` \| `stderr` \| `sandbox` \| `none`                       |
+| Flag                                | Type   | Default            | Description                                                                               |
+| ----------------------------------- | ------ | ------------------ | ----------------------------------------------------------------------------------------- |
+| `--host <host>`                     | string | all interfaces     | Host interface to bind                                                                    |
+| `--port <port>`                     | number | `$PORT`, then 3000 | Port to listen on                                                                         |
+| `-u, --url <url>`                   | string | none               | Connect to an existing server URL instead of starting one                                 |
+| `--no-ui`                           | flag   | UI on              | Start the server without an interactive UI                                                |
+| `--name <name>`                     | string | app folder name    | Title shown in the terminal UI                                                            |
+| `--input <text>`                    | string | none               | Pre-fill the prompt input after launching the UI (editable, not auto-submitted)           |
+| `--tools <mode>`                    | enum   | `auto-collapsed`   | Tool-call rendering: `full` \| `collapsed` \| `auto-collapsed` \| `hidden`                |
+| `--reasoning <mode>`                | enum   | `full`             | Reasoning rendering: `full` \| `collapsed` \| `auto-collapsed` \| `hidden`                |
+| `--subagents <mode>`                | enum   | `auto-collapsed`   | Subagent-section rendering: `full` \| `collapsed` \| `auto-collapsed` \| `hidden`         |
+| `--connection-auth <mode>`          | enum   | `full`             | Connection-authorization rendering: `full` \| `collapsed` \| `auto-collapsed` \| `hidden` |
+| `--assistant-response-stats <mode>` | enum   | `tokensPerSecond`  | Assistant header statistic: `tokens` \| `tokensPerSecond`                                 |
+| `--context-size <tokens>`           | number | none               | Model context window size, shown as a usage percentage                                    |
+| `--logs <mode>`                     | enum   | `stderr`           | Server/agent logs to show: `all` \| `stderr` \| `sandbox` \| `none`                       |
 
 Local dev writes the active server process ID to `.eve/dev-process.pid`. If another `eve dev` starts for the same agent while that process is still running, Eve exits with a message that includes the command to stop the existing server.
 
-Local dev keeps immutable runtime source snapshots under `.eve/dev-runtime/snapshots/` so in-flight sessions keep a consistent code revision while new prompts pick up rebuilds. `eve dev` prunes stale runtime snapshots and old local sandbox templates in the background on startup; stopping `eve dev` and deleting `.eve/dev-runtime/snapshots/` or `.eve/sandbox-cache/local/templates/` is safe when you want a manual cleanup.
+Local dev keeps immutable runtime source snapshots under `.eve/dev-runtime/snapshots/` so in-flight sessions hold a consistent code revision while new prompts pick up rebuilds. On startup, `eve dev` prunes stale runtime snapshots and old local sandbox templates in the background. For manual cleanup, stop `eve dev` and delete `.eve/dev-runtime/snapshots/` or `.eve/sandbox-cache/local/templates/`.
 
 ## `eve link`
 
@@ -100,7 +119,7 @@ Local dev keeps immutable runtime source snapshots under `.eve/dev-runtime/snaps
 eve link
 ```
 
-Links the current directory to an existing Vercel project by selecting a team and then a project, then pulls the project's environment so an AI Gateway credential (`VERCEL_OIDC_TOKEN` or `AI_GATEWAY_API_KEY`) lands in `.env.local`, and verifies one actually did. Running it again re-links: the pickers always run, and the new choice wins. Interactive only — in CI, use `vercel link --project <name> --yes` instead. A running `eve dev` reloads env files automatically, so no restart is needed after the pull.
+Links the current directory to an existing Vercel project. You select a team and then a project, and Eve pulls the project's environment so an AI Gateway credential (`VERCEL_OIDC_TOKEN` or `AI_GATEWAY_API_KEY`) lands in `.env.local`, then verifies one actually did. Running it again re-links: the pickers always run, and the new choice wins. The command is interactive only; in CI, use `vercel link --project <name> --yes` instead. A running `eve dev` reloads env files automatically, so you don't need to restart after the pull.
 
 ## `eve deploy`
 
@@ -108,7 +127,7 @@ Links the current directory to an existing Vercel project by selecting a team an
 eve deploy
 ```
 
-Deploys the agent to Vercel production (`vercel deploy --prod`), installing dependencies first and pulling environment variables after. An already-linked project deploys with or without a TTY (non-interactive runs pass the non-interactive `vercel` flags); an unlinked directory walks the `eve link` pickers when a terminal is present, and exits with guidance otherwise.
+Deploys the agent to Vercel production (`vercel deploy --prod`), installing dependencies first and pulling environment variables after. An already-linked project deploys with or without a TTY (non-interactive runs pass the non-interactive `vercel` flags). An unlinked directory walks the `eve link` pickers when a terminal is present, and exits with guidance otherwise.
 
 ## `eve eval`
 
@@ -118,18 +137,45 @@ eve eval [evalId...] [--url <url>] [options]
 
 Runs all discovered evals when no eval ids are given; ids match exactly or by directory prefix (`eve eval weather` runs everything under `evals/weather/`). Exits `0` when every eval passed its checks, `1` when any eval failed (a failed check, an execution error, or a `--strict` threshold miss), `2` on configuration errors.
 
-| Flag                    | Effect                                         |
-| ----------------------- | ---------------------------------------------- |
-| `--url <url>`           | Remote agent URL (skip local host startup)     |
-| `--tag <tag...>`        | Run only evals carrying a tag                  |
-| `--strict`              | Below-threshold scores also fail the exit code |
-| `--list`                | Print discovered evals without running them    |
-| `--timeout <ms>`        | Per-eval timeout in milliseconds               |
-| `--max-concurrency <n>` | Max concurrent eval executions (default 8)     |
-| `--json`                | Output results as JSON                         |
-| `--skip-report`         | Skip eval-defined reporters (e.g. Braintrust)  |
+| Flag                    | Type   | Default | Description                                    |
+| ----------------------- | ------ | ------- | ---------------------------------------------- |
+| `--url <url>`           | string | none    | Remote agent URL (skip local host startup)     |
+| `--tag <tag...>`        | string | none    | Run only evals carrying a tag                  |
+| `--strict`              | flag   | off     | Below-threshold scores also fail the exit code |
+| `--list`                | flag   | off     | Print discovered evals without running them    |
+| `--timeout <ms>`        | number | none    | Per-eval timeout in milliseconds               |
+| `--max-concurrency <n>` | number | 8       | Max concurrent eval executions                 |
+| `--json`                | flag   | off     | Output results as JSON                         |
+| `--junit <path>`        | string | none    | Write JUnit XML results to a file              |
+| `--skip-report`         | flag   | off     | Skip eval-defined reporters (e.g. Braintrust)  |
+| `--verbose`             | flag   | off     | Stream per-eval `t.log` lines to stdout        |
 
 See [Evals](../evals/overview) for authoring evals.
+
+## `eve channels add`
+
+```bash
+eve channels add [kind] [-f] [-y]
+```
+
+Scaffolds a channel into `agent/channels/`. With no `kind` it prompts interactively; pass a `kind` (`slack` \| `web`) to scaffold one directly.
+
+| Flag          | Type | Default | Description                                               |
+| ------------- | ---- | ------- | --------------------------------------------------------- |
+| `-f, --force` | flag | off     | Overwrite existing channel files                          |
+| `-y, --yes`   | flag | off     | Assume yes for confirmations; requires an explicit `kind` |
+
+## `eve channels list`
+
+```bash
+eve channels list [--json]
+```
+
+Lists the user-authored channels in the current project.
+
+| Flag     | Type | Default | Description    |
+| -------- | ---- | ------- | -------------- |
+| `--json` | flag | off     | Output as JSON |
 
 ## Recommended loop
 

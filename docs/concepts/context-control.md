@@ -1,17 +1,11 @@
 ---
 title: "Context Control"
-description: "Control what the model sees and when: instructions, skills, the workspace, and subagents."
+description: "Control what an Eve agent's model sees and when, across instructions, skills, the workspace, and subagents."
 ---
 
-Eve gives you a few levers for controlling what the model sees and when it sees it.
+Eve gives you a few levers for controlling what the model sees and when. `instructions.md` (or `instructions.ts`) is always on, `skills/` are available but loaded on demand, and the workspace and sandbox are visible through tools rather than pasted into the prompt.
 
-The most useful mental model is:
-
-- `instructions.md` (or `instructions.ts`) is always on.
-- `skills/` are available but loaded on demand.
-- The workspace and sandbox are visible through tools, not pasted into the prompt.
-
-## 1. Base identity with `instructions.md`
+## Base identity with `instructions.md`
 
 Use `instructions.md` for the core contract of the agent.
 
@@ -22,9 +16,9 @@ used a tool.
 
 Keep this file focused on stable behavior that should apply on every turn.
 
-## 2. Compose instructions in TypeScript with `instructions.ts`
+## Compose instructions in TypeScript with `instructions.ts`
 
-When you want to build the instructions prompt from typed helpers, lib code, or environment-derived values, author it as a module instead of markdown.
+To build the instructions prompt from typed helpers, lib code, or environment-derived values, author it as a module instead of markdown.
 
 ```ts title="agent/instructions.ts"
 import { defineInstructions } from "eve/instructions";
@@ -37,13 +31,9 @@ export default defineInstructions({
 
 Module-backed instructions run once at build time. Eve captures the resulting markdown into the compiled manifest, so the runtime serves the same prompt every session without re-running the module.
 
-## 3. Load procedures on demand with `skills/`
+## Load procedures on demand with `skills/`
 
-Skills are not part of the always-on prompt by default.
-
-Instead, Eve advertises the available skills and adds a framework-owned `load_skill` tool. When the request clearly matches a skill description, or the user names a skill explicitly, the model activates that skill, and Eve appends the skill's markdown to the active instructions for later turn work.
-
-That is how you keep rich procedures available without bloating every turn.
+Skills stay out of the always-on prompt by default, which keeps rich procedures available without bloating every turn. Eve advertises the available skills and adds a framework-owned `load_skill` tool. When the request clearly matches a skill description, or the user names a skill explicitly, the model activates that skill, and Eve appends the skill's markdown to the active instructions for later turn work.
 
 ### Flat skill
 
@@ -62,48 +52,41 @@ When the task is novel or ambiguous, gather evidence first, then answer with the
 remaining uncertainty.
 ```
 
-Packaged skills are useful when you also want sibling files such as `references/`, `assets/`, or `scripts/` under the same skill directory. Those packaged paths show up under the runtime workspace root, so the model can inspect them with the normal file or shell tools instead of pasting all of that content into the prompt.
+Packaged skills are useful when you also want sibling files such as `references/`, `assets/`, or `scripts/` under the same skill directory. Those paths show up under the runtime workspace root, so the model can inspect them with the normal file or shell tools instead of pasting their content into the prompt.
 
 See [Skills](../skills) for the full authoring model and install notes.
 
-## 4. Put runtime files in the workspace, not the prompt
+## Put runtime files in the workspace, not the prompt
 
-Eve does not inline the entire authored surface into the prompt. Instead, it gives the model a shallow workspace hint and runtime tools to inspect deeper when needed. That keeps prompts smaller and makes file and command work explicit: skill files are available under the active workspace root, and the model can inspect them with the shared `bash` tool.
+Eve does not inline the entire authored surface into the prompt. Instead, it gives the model a shallow workspace hint and runtime tools to inspect deeper when needed. Skill files are available under the active workspace root, and the model inspects them with the shared `bash` tool, which keeps prompts smaller and makes file and command work explicit.
 
 See [Sandbox](../sandbox) for the workspace and sandbox model.
 
-## 5. Delegate to a specialist with a subagent
+## Delegate to a specialist with a subagent
 
-If a task deserves its own prompt and tool surface, use a local subagent instead of overloading the root agent. Subagents are a context-control tool too: they get their own `instructions.md`, their own tools, and their own sandbox, and they run inside their own delegated context instead of extending the root agent inline.
+If a task deserves its own prompt and tool surface, use a local subagent instead of overloading the root agent. Subagents are a context-control lever too. They get their own `instructions.md`, tools, and sandbox, and they run inside their own delegated context instead of extending the root agent inline.
 
 See [Subagents](../subagents).
 
 ## Dynamic context with `defineDynamic`
 
-The levers above are static: authored once, the same on every session. When the right context depends on who is calling (their team, tenant, plan, or feature flags), resolve it at runtime instead. `defineDynamic` in `agent/instructions/` returns the per-session system prompt, and `defineDynamic` in `agent/skills/` returns the set of skills a caller can load. Both read `ctx.session.auth` or channel metadata, so a caller on the billing team gets the billing instructions and playbook while nobody else sees them. See [Dynamic capabilities](../guides/dynamic-capabilities) for the resolver API and when each event fires.
+The levers above are static, authored once and the same on every session. When the right context depends on who is calling (their team, tenant, plan, or feature flags), resolve it at runtime instead. `defineDynamic` in `agent/instructions/` returns the per-session system prompt, and `defineDynamic` in `agent/skills/` returns the set of skills a caller can load. Both read `ctx.session.auth` or channel metadata, so a caller on the billing team gets the billing instructions and playbook while no one else sees them. See [Dynamic capabilities](../guides/dynamic-capabilities) for the resolver API and when each event fires.
 
-## Choosing the right lever
+## Recommended context layout
 
-Use:
+Pick the lever by what the context is for:
 
-- `instructions.md` for the agent's permanent identity.
+- `instructions.md` for the agent's permanent identity. Keep it short and stable.
 - `instructions.ts` when you need to compose the prompt from typed helpers at build time.
-- `skills/` for optional procedures that should load only when needed.
-- a subagent when the task needs a different specialist surface.
+- `skills/` for optional procedures that should load only when needed. Move long procedures here instead of into the always-on prompt.
+- `tools/` to expose typed integrations.
+- a subagent when the task needs a different specialist surface; use one only for real specialization boundaries.
 - the workspace or sandbox when the model should inspect files or run commands instead of relying on pasted instructions.
-
-## A good pattern
-
-For most agents:
-
-1. Keep `instructions.md` short and stable.
-2. Move long procedures into `skills/`.
-3. Expose typed integrations through `tools/`.
-4. Use subagents only for real specialization boundaries.
 
 ## What to read next
 
-- [Tools](../tools)
-- [Skills](../skills)
-- [Subagents](../subagents)
-- [Hooks](../guides/hooks)
+- [Tools](../tools): expose typed integrations the model can call.
+- [Skills](../skills): the full authoring model for on-demand procedures.
+- [Subagents](../subagents): delegate to a specialist with its own prompt and tools.
+- [Dynamic capabilities](../guides/dynamic-capabilities): resolve per-session instructions and skills with `defineDynamic`.
+- [Hooks](../guides/hooks): run code on session events to update the channel state that dynamic resolvers read.

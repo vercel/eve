@@ -638,7 +638,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .option("--json", "Output results as JSON")
     .option("--junit <path>", "Write JUnit XML results to a file")
     .option("--skip-report", "Skip eval-defined reporters (e.g. Braintrust)")
-    .option("--verbose", "Stream per-eval ctx.log lines to stdout")
+    .option("--verbose", "Stream per-eval t.log lines to stdout")
     .action(async (evalIds: string[], options: EvalCliOptions) => {
       const runEvalCommand = runtime.runEvalCommand ?? (await loadRunEvalCommand());
       await runEvalCommand(evalIds, options, logger);

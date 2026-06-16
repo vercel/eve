@@ -3,13 +3,13 @@ title: "Dynamic Capabilities"
 description: "Resolve tools, skills, and instructions at runtime with defineDynamic: the resolver events, execution order, and how dynamic tools survive step boundaries."
 ---
 
-Sometimes you can't name a tool until the session starts. `defineDynamic` resolves capabilities from a session event at runtime rather than declaring them up front, which is what you want when the right tools, skills, or instructions hinge on who the caller is, what tenant they belong to, feature flags, or external data. The [tools](../tools), [skills](../skills), and [instructions](../instructions) guides each point here for their dynamic form.
+`defineDynamic` resolves tools, skills, and instructions at runtime from a session event instead of declaring them up front. Reach for it when the right capabilities aren't known until the session starts, because they hinge on who the caller is, what tenant they belong to, feature flags, or external data. The [tools](../tools), [skills](../skills), and [instructions](../instructions) guides each point here for their dynamic form.
 
 ## Dynamic tools
 
 Pass `defineDynamic` an `events` object whose handlers return either a single `defineTool(...)`, a `Record<string, defineTool(...)>`, or `null` for no tools. Wrap every entry in `defineTool()`. The wrapper stamps them so their `execute` functions survive workflow step boundaries.
 
-The example below builds one tool per warehouse table. A map return names tools `slug__key`, so the model sees `query__orders`, `query__users`, and so on:
+The example below builds one tool per warehouse table. A map return names tools `slug__key`, so the model sees `query__orders`, `query__users`, and so on.
 
 ```ts title="agent/tools/query.ts"
 import { defineDynamic, defineTool } from "eve/tools";
@@ -33,6 +33,10 @@ export default defineDynamic({
 });
 ```
 
+### `execute` must be an inline function
+
+Write `execute` as an inline function expression, arrow, or method shorthand placed directly as the property value. The bundler transform does not detect `execute: myFn` or `execute: makeFn()`, so those tools work on the first step but do not survive replay (re-running a step after a crash or resume; see [Execution model & durability](../concepts/execution-model-and-durability)). On later steps the transform reconstructs each `execute` from its stored closure variables instead of re-running the resolver, which is why it has to be inline.
+
 ### Naming
 
 | Return shape              | File                       | Tool name(s)                      |
@@ -51,33 +55,45 @@ A single return produces one tool named after the file slug, identical to a stat
 | `turn.started`    | Once per turn          | Every model call in the turn    |
 | `step.started`    | Before each model call | That model call                 |
 
-**Limitation.** `execute` must be an inline function (function expression, arrow, or method shorthand written directly as the property value). `execute: myFn` or `execute: makeFn()` is not detected by the transform, so the tool works on the first step but won't survive replay.
-
 ### Execution order
 
-When a stream event fires, three things happen in order: the channel adapter handler runs and the event is written to the durable stream, then stream-event [hooks](./hooks) fire, then dynamic tool resolvers subscribed to that event run and update the tool set. The tool loop reads the current set right before each model call, so a mid-turn update is visible on the next call.
+When a stream event fires, three things happen in order.
+
+1. The channel adapter handler runs and the event is written to the durable stream.
+2. Stream-event [hooks](./hooks) fire.
+3. Dynamic tool resolvers subscribed to that event run and update the tool set.
+
+The tool loop reads the current set right before each model call, so a mid-turn update is visible on the next call.
 
 A single file can declare handlers for several events, and the most recently fired one owns that file's tool set. Re-resolve on `turn.started` to replace what `session.started` returned:
 
 ```ts title="agent/tools/catalog.ts"
+import { defineDynamic, defineTool } from "eve/tools";
+import { z } from "zod";
+import { runReadOnly, searchCatalog } from "../lib/catalog.js";
+
 export default defineDynamic({
   events: {
     "session.started": async (_event, ctx) => ({
       query: defineTool({
-        /* ... */
+        description: "Run a read-only query.",
+        inputSchema: z.object({ sql: z.string() }),
+        execute: ({ sql }) => runReadOnly(sql),
       }),
     }),
     // On each turn, re-resolve. Replaces this file's session.started tools for later calls.
     "turn.started": async (_event, ctx) => ({
       search: defineTool({
-        /* ... */
+        description: "Search the catalog.",
+        inputSchema: z.object({ term: z.string() }),
+        execute: ({ term }) => searchCatalog(term),
       }),
     }),
   },
 });
 ```
 
-Resolvers across files run concurrently. On later steps the bundler transform reconstructs each `execute` from its stored closure variables instead of re-running the resolver, which is why `execute` has to be inline.
+Resolvers across files run concurrently.
 
 ## Dynamic skills
 

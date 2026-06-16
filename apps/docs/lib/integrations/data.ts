@@ -297,7 +297,7 @@ export default eveChannel();
 \`\`\`
 
 Point your frontend at the session routes Eve serves (\`/eve/v1/session\`) and stream responses with the Eve web client.`,
-    configure: `The Eve channel is the lowest-friction way to talk to your agent, with no third-party provisioning required. Layer in auth and route protection as needed. See the [Eve channel docs](/docs/channels/eve) and the [Frontend guide](/docs/frontend).`,
+    configure: `The Eve channel is the lowest-friction way to talk to your agent, with no third-party provisioning required. Layer in auth and route protection as needed. See the [Eve channel docs](/docs/channels/eve) and the [Frontend guide](/docs/guides/frontend/overview).`,
   },
 };
 

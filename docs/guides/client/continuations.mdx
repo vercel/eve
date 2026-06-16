@@ -3,12 +3,12 @@ title: "Continuations"
 description: "Persist and resume Eve client sessions with continuation tokens, session IDs, and stream cursors."
 ---
 
-Eve hands back two different handles, and mixing them up is the most common mistake. The TypeScript client tracks both for you:
+Every Eve client turn returns two handles, and mixing them up is a common mistake. The TypeScript client tracks both for you:
 
 - `continuationToken`: the resume handle. Use it to send the next user turn.
 - `sessionId`: the stream-and-inspect handle. Use it to attach to event history.
 
-`ClientSession` also tracks `streamIndex`, the count of events already consumed. Together those fields make a `SessionState`.
+`ClientSession` also tracks `streamIndex`, the count of events already consumed. Together these three fields make a `SessionState`.
 
 ## Read and persist state
 
@@ -75,7 +75,7 @@ if (result.status === "completed") {
 }
 ```
 
-This matches the runtime contract: only waiting sessions can accept the next user input.
+This matches the runtime contract, where only waiting sessions can accept the next user input.
 
 ## Multiple sessions
 
@@ -99,7 +99,7 @@ The shared `Client` only owns host, auth, headers, and reconnect settings. Conve
 
 ## Reconnect an existing stream
 
-If a session already has a `sessionId`, `stream()` attaches to that stream from the saved cursor:
+When a session already has a `sessionId`, `session.stream()` reattaches to its stream from the saved cursor. Resuming a saved `SessionState` after a restart is the common reason to do this:
 
 ```ts
 const session = client.session(savedState);
@@ -109,15 +109,7 @@ for await (const event of session.stream()) {
 }
 ```
 
-Override the cursor when you want to replay from an earlier point:
-
-```ts
-for await (const event of session.stream({ startIndex: 0 })) {
-  console.log(event.type);
-}
-```
-
-`stream()` is for attaching to an existing run. To send new user input, use `send()`.
+`stream()` attaches to an existing run; to send new user input, use `send()`. For overriding the cursor with `startIndex` and the full reconnection model, see [Streaming](./streaming#open-a-stream-manually).
 
 ## What to read next
 
