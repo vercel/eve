@@ -36,7 +36,7 @@ const ROOTS = [
 
 const SIDEBAR_EXEMPT_PAGES = new Set([
   // Linked from the global footer instead of the docs sidebar.
-  "disclaimer.md",
+  "responsible-use.md",
 ]);
 
 // Only the top-level README.md is excluded. Nested READMEs (e.g.

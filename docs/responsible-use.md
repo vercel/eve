@@ -1,5 +1,5 @@
 ---
-title: "Disclaimer"
+title: "Responsible Use"
 description: "Deployer responsibility and safeguards to review before using Eve with sensitive, regulated, or production data."
 ---
 

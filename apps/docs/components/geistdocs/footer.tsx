@@ -29,9 +29,9 @@ export const Footer = ({
           </span>
           <Link
             className="font-medium text-gray-900 underline-offset-4 transition-colors hover:text-gray-1000 hover:underline"
-            href="/docs/disclaimer"
+            href="/docs/responsible-use"
           >
-            Disclaimer
+            Responsible Use
           </Link>
         </div>
         <div className="flex items-center gap-2">
