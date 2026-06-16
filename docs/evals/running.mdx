@@ -1,0 +1,58 @@
+---
+title: "Running Evals"
+description: "The eve eval CLI: flags, filters, exit codes, artifacts, and how to wire evals into CI."
+---
+
+`eve eval` discovers every `.eval.ts` file under `evals/`, boots a local dev server (or targets a remote one), runs the evals concurrently, and prints a per-eval summary.
+
+```bash
+eve eval                       # run all discovered evals locally
+eve eval weather smoke         # run selected evals (an id, or a directory prefix)
+eve eval --url https://<app>   # target a remote app instead of a local host
+eve eval --tag fast            # only evals carrying a tag
+eve eval --strict              # soft below-threshold assertions also fail the exit code
+eve eval --timeout 60000       # per-eval timeout in milliseconds
+eve eval --max-concurrency 4   # cap concurrent eval executions (default 8)
+eve eval --junit .eve/junit.xml  # write JUnit XML
+eve eval --list                # print discovered evals without running
+eve eval --verbose             # stream per-eval ctx.log lines to stdout
+eve eval --json                # machine-readable output
+eve eval --skip-report         # skip config and eval-defined reporters (e.g. Braintrust)
+```
+
+Positional ids match exactly or by directory prefix: `eve eval weather` runs `evals/weather.eval.ts`, every eval under `evals/weather/`, and every entry of an array-exported `weather.eval.ts`.
+
+## Exit codes
+
+| Code | Means                                                                           |
+| ---- | ------------------------------------------------------------------------------- |
+| `0`  | Every eval passed its gates (and soft thresholds, under `--strict`)             |
+| `1`  | Any eval failed — a failed gate, an execution error, or a strict threshold miss |
+| `2`  | Configuration error                                                             |
+
+## Artifacts
+
+Each run drops artifacts under `.eve/evals/<timestamp>/`: a run `summary.json`, a `results.jsonl` index, and per-eval assertion results, verdicts, captured event streams, and `t.log` lines under `evals/`. The console output stays tight on purpose; when an eval fails, the artifact has the full story.
+
+## CI
+
+A solid CI invocation is strict and machine-reportable:
+
+```bash
+eve eval --strict --junit .eve/junit.xml
+```
+
+- `--strict` turns soft threshold misses into failures, so score regressions block the merge.
+- `--junit` gives the CI provider per-eval annotations; upload the `.eve/evals/` directory as a failure artifact for the full event streams.
+
+Evals run against a live model, so the CI environment must provide the model-provider credentials. Against a deployed app, add `--url`:
+
+```bash
+eve eval --strict --url "$DEPLOY_URL" --junit .eve/junit.xml
+```
+
+## What to read next
+
+- [Targets](./targets): what `--url` interacts with
+- [Reporters](./reporters): Braintrust and JUnit output
+- [CLI reference](../reference/cli): the rest of the `eve` CLI

@@ -1,0 +1,23 @@
+{
+  "pages": [
+    "introduction",
+    "getting-started",
+    "---",
+    "agent-config",
+    "instructions",
+    "tools",
+    "skills",
+    "channels",
+    "connections",
+    "sandbox",
+    "subagents",
+    "schedules",
+    "evals",
+    "---",
+    "guides",
+    "concepts",
+    "---",
+    "reference",
+    "tutorial"
+  ]
+}

@@ -1,0 +1,111 @@
+---
+title: "useEveAgent (Svelte)"
+description: "Svelte 5 binding that drives an Eve agent session from the browser."
+---
+
+`useEveAgent()` from `eve/svelte` is the browser side of an Eve session in a Svelte 5 app. Call it once and you get a long-lived session you can send turns to, with every stream event projected into rune-friendly reactive data. On SvelteKit, the [Vite plugin](./sveltekit) wires up the routes. The [frontend overview](./overview) covers the model shared across frameworks.
+
+## Basic usage
+
+Import from `eve/svelte` and read the reactive getters directly. No `$` prefix:
+
+```svelte
+<script lang="ts">
+  import { useEveAgent } from "eve/svelte";
+
+  const agent = useEveAgent();
+</script>
+
+{#each agent.data.messages as message}
+  <p>{message.role}: {JSON.stringify(message.parts)}</p>
+{/each}
+```
+
+## What it returns
+
+| Property  | Type                 | Description                                                               |
+| --------- | -------------------- | ------------------------------------------------------------------------- |
+| `data`    | `TData`              | Projected state. With the default reducer, `EveMessageData` (`messages`). |
+| `status`  | `UseEveAgentStatus`  | `"ready"`, `"submitted"`, `"streaming"`, or `"error"`.                    |
+| `error`   | `Error \| undefined` | Last transport-level error.                                               |
+| `events`  | `readonly ...[]`     | Raw server events for this session.                                       |
+| `session` | `SessionState`       | Snapshot of session state.                                                |
+| `send`    | `(input) => Promise` | Send text or a full turn (multi-part, attachments, HITL responses).       |
+| `stop`    | `() => void`         | Abort the in-flight request.                                              |
+| `reset`   | `() => void`         | Clear state and start a new session.                                      |
+
+These state fields are reactive getters, so read them straight from templates, `$derived`, or `$effect`. They are not stores, so don't prefix them with `$`.
+
+## Send a message
+
+```svelte
+<script lang="ts">
+  import { useEveAgent } from "eve/svelte";
+
+  const agent = useEveAgent();
+  let message = $state("");
+
+  async function handleSubmit() {
+    const text = message.trim();
+    if (!text) return;
+    message = "";
+    await agent.send({ message: text });
+  }
+</script>
+
+<form onsubmit={(event) => {
+  event.preventDefault();
+  void handleSubmit();
+}}>
+  <input bind:value={message} placeholder="Type a message..." />
+  <button type="submit">Send</button>
+</form>
+```
+
+When a turn is more than plain text, reach for `send()`. Attachments follow the AI SDK `UserContent` format:
+
+```ts
+await agent.send({
+  message: [
+    { type: "text", text: "Describe this image." },
+    { type: "file", data: fileBytes, mediaType: "image/png" },
+  ],
+});
+```
+
+## Human-in-the-loop prompts
+
+A tool opts into approval with `needsApproval` ([Tools](../../tools)). When one fires, the pending request rides along on a `dynamic-tool` part of the latest message. Read it, then answer with `agent.send({ inputResponses })`. This find-and-answer flow is identical across frameworks, so the full example lives in the [Frontend overview](./overview#human-in-the-loop-prompts).
+
+## Stop, reset, and resume
+
+`stop()` aborts the in-flight stream. `reset()` wipes state and starts a fresh session. To resume across reloads, hand `initialSession` the state you saved earlier and use `onSessionChange` to persist the cursor as it advances:
+
+```ts
+const agent = useEveAgent({
+  initialSession: savedSessionState,
+  initialEvents: savedEvents,
+  onSessionChange: (session) => {
+    localStorage.setItem("eve-session", JSON.stringify(session));
+  },
+});
+```
+
+## Custom host and credentials
+
+Point `host` at an Eve server on a different origin, and pass credentials through `auth` or `headers`. When you supply a function, it re-resolves before every request:
+
+```ts
+const agent = useEveAgent({
+  host: "https://agent.example.com",
+  headers: async () => ({
+    authorization: `Bearer ${await getAccessToken()}`,
+  }),
+});
+```
+
+## What to read next
+
+- [SvelteKit](./sveltekit): Vite plugin setup
+- [Frontend overview](./overview): the shared integration model
+- [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming)

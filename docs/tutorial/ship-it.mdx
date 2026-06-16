@@ -1,0 +1,100 @@
+---
+title: "Step 9: Ship It"
+description: "Put a web dashboard on the agent with useEveAgent, replace placeholderAuth, and deploy to Vercel."
+---
+
+The assistant runs fine in the TUI. Now ship it for real: a web dashboard your team logs into, behind actual auth, deployed on Vercel. Three pieces to wire up: a React UI, the channel's auth, and the deploy itself.
+
+## A dashboard with `useEveAgent`
+
+The dashboard talks to the built-in Eve HTTP channel (`agent/channels/eve.ts`). On the browser side, `useEveAgent` takes care of session creation, streaming, and HITL. In a Next.js app, wrap the config and the routes get wired automatically:
+
+```ts title="next.config.ts"
+import type { NextConfig } from "next";
+import { withEve } from "eve/next";
+
+export default withEve({} satisfies NextConfig);
+```
+
+```tsx title="app/dashboard/chat.tsx"
+"use client";
+
+import { useEveAgent } from "eve/react";
+
+export function AnalyticsChat() {
+  const agent = useEveAgent();
+  const isBusy = agent.status === "submitted" || agent.status === "streaming";
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        const message = String(data.get("q") ?? "").trim();
+        if (message) void agent.send({ message });
+      }}
+    >
+      {agent.data.messages.map((message) => (
+        <article key={message.id}>
+          <header>{message.role}</header>
+          {message.parts.map((part, index) =>
+            part.type === "text" ? <p key={index}>{part.text}</p> : null,
+          )}
+        </article>
+      ))}
+      <input name="q" disabled={isBusy} placeholder="Ask about the data…" />
+      <button type="submit" disabled={isBusy}>
+        Ask
+      </button>
+    </form>
+  );
+}
+```
+
+`agent.data.messages` and `agent.status` cover most chat UIs. The hook also surfaces HITL prompts (the spend approval from [Step 8](./guard-the-spend)), so the dashboard can render approve/deny controls. Full API: [Frontend](../guides/frontend/overview).
+
+## Replace `placeholderAuth`
+
+The scaffold's channel ships with `placeholderAuth()`, which fails closed: it rejects production traffic so an unauthenticated app can't go live by accident. Swap it for your app's real auth before you deploy. Order matters here. List your app auth first, ahead of the catch-all helpers, so any entry that doesn't recognize the caller falls through to the next one:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel } from "eve/channels/eve";
+import { localDev, vercelOidc, type AuthFn } from "eve/channels/auth";
+import { authenticate } from "../lib/auth.js";
+
+const appAuth: AuthFn<Request> = async (request) => {
+  const user = await authenticate(request); // your cookie/session/provider
+  if (!user) return null;
+  return {
+    attributes: { team: user.team }, // the claim Step 7's playbook reads
+    principalType: "user",
+    principalId: user.id,
+    authenticator: "app",
+    issuer: "analytics-dashboard",
+  };
+};
+
+export default eveChannel({
+  auth: [appAuth, localDev(), vercelOidc()],
+});
+```
+
+That `team` attribute is exactly what the dynamic playbook in [Step 7](./team-playbooks) reads from `ctx.session.auth`. Identity is set in this one place and flows out to every capability from there.
+
+## Deploy
+
+```bash
+vercel deploy
+```
+
+On Vercel, the web app stays public and the Eve runtime sits behind it on the same origin, with the sandbox running on Vercel Sandbox. You can smoke-test the deployment without leaving the CLI:
+
+```bash
+eve dev https://your-analytics-app.vercel.app
+```
+
+That's the full assistant, deployed and authed. It queries the warehouse, runs analysis in a sandbox, charts the results, remembers your team's definitions, loads the right playbook per team, and asks before it spends.
+
+Depth: [Frontend](../guides/frontend/overview) · [Auth & route protection](../guides/auth-and-route-protection) · [Deployment](../guides/deployment)
+
+Go deeper on this same example in [Advanced](../guides/dynamic-capabilities): schema-derived dynamic tools, a read-only analyst subagent, and model-authored report workflows.

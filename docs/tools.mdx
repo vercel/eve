@@ -1,0 +1,107 @@
+---
+title: "Tools"
+description: "Define typed actions the agent can call, and gate sensitive ones on human approval."
+---
+
+A tool is a typed action the agent can call: hit an API, run a query, write a file. The action stays in code you control. Tools run in your app runtime (full `process.env`), not the [sandbox](./sandbox).
+
+## Define a tool
+
+The filename is the tool name the model sees. A file at `agent/tools/get_weather.ts` is exposed as `get_weather`.
+
+```ts title="agent/tools/get_weather.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Get the current weather for a city.",
+  inputSchema: z.object({ city: z.string().min(1) }),
+  async execute({ city }, ctx) {
+    return { city, condition: "Sunny", temperatureF: 72 };
+  },
+});
+```
+
+A tool definition needs:
+
+- a filename slug under `agent/tools/`, the model-facing name.
+- a `description`: what the tool does, written for the model.
+- an `inputSchema`: a Zod schema (or any Standard Schema, or a plain JSON Schema object). Required. For no input, pass `z.object({})`. Zod and Standard Schema infer the `input` type in `execute`. Plain JSON Schema types it as `Record<string, unknown>`.
+- an `execute(input, ctx)`: the implementation. May be sync or async.
+
+When a tool returns structured data, add an optional `outputSchema`. With Zod or Standard Schema it also types the `execute` return.
+
+### The `ctx` parameter
+
+`execute` gets a `ctx` carrying the runtime accessors you'll reach for:
+
+- `ctx.session`: session metadata, turn, auth, parent lineage.
+- `ctx.getSandbox()`: the live [sandbox](./sandbox) handle.
+- `ctx.getSkill(id)`: read a packaged [skill](./skills)'s metadata and files.
+
+Running in the app runtime is what lets a tool import shared code from `lib/`, read `process.env`, and take part in Eve’s durable pause/resume model.
+
+Eve never runs authored tools during discovery: the model sees descriptors first, and only what it actually calls gets executed. Re-executing a step from the same input is idempotent, so tool side effects are not duplicated when a turn resumes after a crash.
+
+## Human-in-the-loop
+
+HITL is not a separate system. It is just a tool that pauses for a person before (or instead of) running. Gate one on approval with `needsApproval` and the helpers from `eve/tools/approval`:
+
+```ts
+import { defineTool } from "eve/tools";
+import { always } from "eve/tools/approval";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Refund a charge.",
+  inputSchema: z.object({ chargeId: z.string(), amount: z.number() }),
+  needsApproval: always(), // or once() / never() / a predicate
+  async execute(input) {
+    return refund(input);
+  },
+});
+```
+
+| Helper     | Behavior                                                                           |
+| ---------- | ---------------------------------------------------------------------------------- |
+| `never()`  | Never require approval (the default when omitted).                                 |
+| `once()`   | Require approval only the first time the tool runs in a session; auto-allow after. |
+| `always()` | Require approval before every call.                                                |
+
+When the decision depends on the input, pass your own predicate instead of a helper. It receives `{ toolName, toolInput, approvedTools }` and returns a boolean. To require approval only when an amount crosses a threshold:
+
+```ts
+needsApproval: ({ toolInput }) => toolInput.amount > 1000,
+```
+
+### The pause and resume
+
+Approvals and questions share one protocol:
+
+1. The model requests input (an approval or an `ask_question`).
+2. Eve emits an `input.requested` stream event carrying the pending requests.
+3. The turn parks at `session.waiting`, durably, for as long as it takes.
+4. The client answers with `inputResponses` (structured, keyed by `requestId`) or a normal follow-up `message`. A follow-up whose text matches an option label (case-insensitive) resolves automatically.
+
+The run picks back up exactly where it parked, and channels render the request for you. The Slack adapter, for example, turns approvals into buttons and questions into select menus.
+
+See [Sessions, runs & streaming](./concepts/sessions-runs-and-streaming) for the event and resume contract.
+
+## Shape what the model sees with `toModelOutput`
+
+By default the model sees the full `execute` return. When a tool returns rich data a channel needs for rendering but the model only needs the gist, project it down with `toModelOutput`:
+
+```ts
+toModelOutput(output) {
+  return { type: "text", value: `Report for ${output.domain}: score ${output.score}.` };
+},
+```
+
+It receives the full, typed `execute` return and only affects the model. Channel event handlers and hooks still get the full output on `action.result`, so a channel can render rich platform output (Slack Block Kit, say) the model never sees. Return `{ type: "text", value }` for a summary, or `{ type: "json", value }` for a smaller object.
+
+## What to read next
+
+- [Skills](./skills): on-demand procedures the model loads when relevant
+- [Default harness](./concepts/default-harness): the built-in tools and how to override or disable them
+- [Dynamic capabilities](./guides/dynamic-capabilities): tools whose set is resolved per session with `defineDynamic`
+- [Auth & route protection](./guides/auth-and-route-protection): authenticate a tool to an external service

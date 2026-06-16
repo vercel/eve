@@ -1,0 +1,62 @@
+---
+title: "Twilio"
+description: "Reach your agent over SMS and speech-transcribed phone calls with Twilio."
+type: integration
+---
+
+The Twilio channel puts your agent on a phone number, so people can text it or call it. Inbound SMS arrives as a webhook. Inbound calls get answered with TwiML `<Gather input="speech">`, and the resulting transcript feeds the same Eve session that SMS uses, so a caller and a texter look identical downstream. Every request is checked against `X-Twilio-Signature` before anything else runs. The raw continuation token is `From:To`. See [Channels](./overview) for the contract this builds on.
+
+## Add the channel
+
+```ts title="agent/channels/twilio.ts"
+import { twilioChannel } from "eve/channels/twilio";
+
+export default twilioChannel({
+  allowFrom: "+15551234567",
+  messaging: { from: "+15557654321" },
+});
+```
+
+```bash
+TWILIO_ACCOUNT_SID=AC...   # required for default outbound SMS
+TWILIO_AUTH_TOKEN=...      # required for inbound signature verification
+```
+
+If you'd rather not use env vars, pass the same values via `credentials: { accountSid, authToken }`. The channel mounts three routes:
+
+- `POST /eve/v1/twilio/messages`: Messaging webhook
+- `POST /eve/v1/twilio/voice`: inbound call webhook
+- `POST /eve/v1/twilio/voice/transcription`: speech transcript callback
+
+Point your Twilio number's Messaging webhook at `/messages` and Voice webhook at `/voice`, using the exact public URL Twilio will call.
+
+## Affordances
+
+**`allowFrom` is required.** It gates who can reach the inbound hooks. Pass a single number, a list, an async resolver, or `"*"`. The wildcard is dangerous: only use it with an explicit check inside `onText`/`onVoice`.
+
+```ts
+export default twilioChannel({ allowFrom: ["+15551234567", "+15557654321"] });
+```
+
+**Hooks.** `onText` and `onVoiceTranscription` decide dispatch and `auth`: return `{ auth }` to proceed, or `null` to drop the message. `onVoice` fires the moment a call comes in. Return `null` to reject it, or return an object to override the spoken prompt, language, `<Say voice>`, and speech-recognition options.
+
+```ts
+export default twilioChannel({
+  allowFrom: ["+15551234567"],
+  onText: (ctx, message) => ({
+    auth: {
+      principalId: message.from,
+      principalType: "user",
+      authenticator: "twilio",
+      attributes: { to: message.to ?? "" },
+    },
+  }),
+});
+```
+
+**Delivery.** The default `message.completed` handler sends the reply as SMS through Twilio's Messages API. A reply to an inbound message can reuse the webhook's `To` as the sender, but a proactive send has nothing to reuse, so it needs `messaging.from` or `messaging.messagingServiceSid`. Behind a proxy, set `webhookUrl` so signature verification matches the exact configured URL, and `publicBaseUrl` so voice TwiML can build absolute callback URLs.
+
+## What to read next
+
+- [Channels overview](./overview): the channel contract and every built-in channel
+- [Auth & route protection](../guides/auth-and-route-protection): authenticating inbound traffic

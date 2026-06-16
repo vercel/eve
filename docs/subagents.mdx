@@ -1,0 +1,76 @@
+---
+title: "Subagents"
+description: "Delegate work to child agents: a copy of the agent itself, or declared specialists with their own sandbox and skills."
+---
+
+A subagent is a child agent that one agent delegates a focused subtask to. Split work out into one when you want it to run in parallel, when the child should see a narrower set of tools, or when a specialist needs its own identity. There are two kinds.
+
+## The built-in `agent` tool
+
+Every agent gets an `agent` tool by default. The model calls it to delegate a subtask to a copy of itself:
+
+```ts
+{
+  message: string;       // everything the child needs; it does not see the parent's history
+  outputSchema?: object; // when set, the child runs in task mode and returns structured output
+}
+```
+
+The copy shares the parent's sandbox and tools. A child's file writes are immediately visible to the parent, which is what makes parallel calls natural: fan out a few copies to fix different files at once. The copy inherits auth and connections, but starts with fresh conversation history and fresh state. If a declared subagent calls `agent`, the child is a copy of _that_ subagent, not the root.
+
+An authored tool at `agent/tools/agent.ts` takes priority over the built-in.
+
+## Declared subagents
+
+A declared subagent lives under `agent/subagents/<id>/` and uses the same `defineAgent` helper as the root. Its location under `subagents/` is the only thing that marks it as a subagent. Declare one when the child needs a clearly different prompt, role, or tool surface.
+
+```ts title="agent/subagents/researcher/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  description: "Investigate ambiguous questions before the parent agent responds.",
+  model: "anthropic/claude-opus-4.8",
+});
+```
+
+`description` is required. The parent reads it to decide whether to delegate, so the compiler rejects any subagent whose `agent.ts` leaves it out.
+
+Minimum files:
+
+```text
+agent/subagents/researcher/
+├── agent.ts            # required (must export a description)
+├── instructions.md     # or instructions.ts, optional
+├── tools/              # optional, its own tools
+├── skills/             # optional, its own skills
+├── sandbox/            # optional, its own sandbox + workspace seed
+└── subagents/          # optional, nested subagents
+```
+
+`schedules/` is not supported inside a declared subagent: schedules are root-only.
+
+## The isolation boundary
+
+A declared subagent gets its own independent sandbox and its own `skills/` set. Neither crosses the parent boundary:
+
+- The child sees only skills authored under `agent/subagents/<id>/skills/`. Root `agent/skills/` stay out of reach during its turns. When two subagents need the same procedure, duplicate the markdown under each, or share typed helpers via `lib/`.
+- The child's sandbox does not inherit from the parent. It falls back to the framework default unless it authors `subagents/<id>/sandbox.ts`, or seeds files via `subagents/<id>/sandbox/workspace/`.
+
+The built-in `agent` tool is the exception: its children share the parent's sandbox and tools because they are copies of the same agent working on the same files.
+
+`defineState` is never shared, for either kind: each child starts with fresh durable state.
+
+## What the parent sees
+
+Eve lowers every subagent (built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, outputSchema? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. Set `outputSchema` and the child runs in task mode, returning structured output as the tool result.
+
+Each delegated subagent spins up its own child session and stream. The parent stream carries only the control-plane events `subagent.called` and `subagent.completed`. To follow the child's full progress, read `subagent.called.data.childSessionId` and subscribe at `GET /eve/v1/session/:childSessionId/stream`.
+
+## When to split
+
+Split out a subagent when the task needs a different prompt or specialist role, a narrower tool surface, or its own runtime context. Don't reach for one when a [skill](./skills) would do: if the agent can keep its identity and just needs an optional procedure, a skill is the lighter choice.
+
+## What to read next
+
+- Call another Eve deployment as a subagent → [Remote agents](./guides/remote-agents)
+- Have the model orchestrate its subagents programmatically (fan-out, map-reduce) → [Dynamic workflows](./guides/dynamic-workflows)

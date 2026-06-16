@@ -1,0 +1,83 @@
+name: E2E Tests (Local)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "packages/eve/**"
+      - "pnpm-workspace.yaml"
+      - "pnpm-lock.yaml"
+      - "apps/fixtures/**"
+      - "e2e/**"
+      - ".github/workflows/e2e-local.yml"
+      - ".github/scripts/discover-e2e-fixtures.sh"
+
+concurrency:
+  group: e2e-local-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  discover-fixtures:
+    name: discover-fixtures
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.discover.outputs.matrix }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Discover eval fixtures
+        id: discover
+        run: .github/scripts/discover-e2e-fixtures.sh
+
+  e2e:
+    name: e2e-local (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    needs: discover-fixtures
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.discover-fixtures.outputs.matrix) }}
+
+    env:
+      AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+      EVE_EVAL_JUNIT_DIR: ${{ github.workspace }}/.junit
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Eve package
+        # Full build, not build:js: the deployed/runtime bundles must carry the
+        # stamped package version (scripts/stamp-version-tokens.mjs) and docs.
+        run: pnpm --filter eve run build
+
+      - name: Run fixture evals
+        run: |
+          mkdir -p "$EVE_EVAL_JUNIT_DIR"
+          cd "${{ matrix.dir }}"
+          pnpm exec eve eval --strict --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}.xml"
+
+      - name: Upload eval artifacts
+        if: failure()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v6
+        with:
+          name: eval-artifacts-${{ matrix.name }}
+          path: |
+            .junit
+            e2e/fixtures/*/.eve/evals
+            apps/fixtures/*/.eve/evals
+          if-no-files-found: ignore
+          retention-days: 7

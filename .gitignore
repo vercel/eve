@@ -1,0 +1,60 @@
+# Node and JS/TS builds
+node_modules/
+dist/
+/build/
+coverage/
+.turbo/
+.next/
+.vercel/
+.swc/
+*.tsbuildinfo
+
+# Dependency/tooling caches
+.pnpm-store/
+.bun/
+.npm/
+
+# Test artifacts
+.vitest/
+packages/eve/.workflow-vitest/
+packages/eve/.generated/
+playwright-report/
+test-results/
+
+# Package lifecycle artifacts (copied from the repo root at prepack)
+packages/eve/docs/
+packages/eve/LICENSE
+packages/eve/NOTICE
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+bun-error.log*
+
+# Environment files
+.env
+.env.*
+
+# OS files
+*.tgz
+.DS_Store
+Thumbs.db
+
+# IDE/editor
+.vscode/
+.idea/
+
+# Vercel/Temp build output
+.output/
+.eve/
+.workflow-data/
+
+# Geist
+.source
+
+# Vercel
+.vercel
+.env*.local
+.env*

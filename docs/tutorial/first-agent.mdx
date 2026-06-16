@@ -1,0 +1,64 @@
+---
+title: "Step 1: Your First Agent"
+description: "Scaffold the analytics assistant, give it an analyst persona, run it, and ask a question."
+---
+
+This tutorial builds one app end to end: a data analytics assistant. You ask in natural language, and over the next nine steps it learns to query a warehouse, run analysis in a sandbox, remember your team’s metric definitions, and refuse to torch your query budget without asking.
+
+Step 1 gets it talking. The scaffold bundles a small sample dataset, so your first question works with zero setup.
+
+## Scaffold
+
+```bash
+npx eve@latest init analytics-assistant
+```
+
+The command writes the starter agent with Eve's default model and built-in HTTP API
+channel (`agent/channels/eve.ts`), installs dependencies, initializes Git, and
+starts the development server. Stop the server before continuing with the edits
+below. It does not create a Vercel project or deploy.
+
+## Set the model
+
+`agent/agent.ts` holds the model and config. Use a capable model for analysis work:
+
+```ts
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+});
+```
+
+## Give it an analyst persona
+
+`agent/instructions.md` is the always-on system prompt. Replace the starter text with a standing identity for a data analyst:
+
+```md
+You are a senior data analyst. You answer questions about the team's data.
+
+- Prefer exact numbers to hand-waving. If you can compute it, compute it.
+- State the assumptions behind any number you report (date range, filters, grain).
+- Use the tools available to you rather than guessing. If you cannot answer from
+  the data, say so plainly.
+```
+
+Instructions are identity and standing rules. On-demand procedures belong in skills (Step 7), and actions belong in tools (Step 3). See [Instructions](../instructions).
+
+## Run it
+
+```bash
+eve dev
+```
+
+The local runtime boots and the dev TUI opens. Ask it something it can answer from general knowledge first:
+
+```text
+What's a good way to measure week-over-week retention?
+```
+
+You’ll get a reply that follows the analyst persona. It can’t see your data yet (that’s Step 3). First, a look at what just happened under the hood.
+
+→ Next: [Step 2: How it runs](./how-it-runs)
+
+Depth: [Getting Started](../getting-started) · [Instructions](../instructions)

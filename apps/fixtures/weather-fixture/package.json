@@ -1,0 +1,17 @@
+{
+  "name": "weather-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "eve dev",
+    "build": "eve build",
+    "start": "eve start",
+    "info": "eve info",
+    "typecheck": "tsgo --noEmit -p tsconfig.json",
+    "test:e2e": "eve eval --strict"
+  },
+  "dependencies": {
+    "eve": "workspace:*",
+    "zod": "catalog:"
+  }
+}

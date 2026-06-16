@@ -1,0 +1,94 @@
+---
+title: "SvelteKit"
+description: "Run an Eve agent and a SvelteKit app as one project with the eveSvelteKit Vite plugin."
+---
+
+`eve/sveltekit` lets you run a SvelteKit frontend and an Eve agent as one project instead of two services you have to keep in sync. The `eveSvelteKit()` Vite plugin puts both on one dev server and one Vercel deploy, and [`useEveAgent`](./use-eve-agent-svelte) finds the mounted routes on its own. No CORS config, no URL env vars.
+
+## Register the Vite plugin
+
+Add `eveSvelteKit()` before `sveltekit()`:
+
+```ts title="vite.config.ts"
+import { sveltekit } from "@sveltejs/kit/vite";
+import { eveSvelteKit } from "eve/sveltekit";
+import { defineConfig } from "vite";
+
+export default defineConfig({
+  plugins: [eveSvelteKit(), sveltekit()],
+});
+```
+
+The plugin looks for an `agent/` folder in the SvelteKit project root. Pass `eveRoot` when the agent lives elsewhere:
+
+```ts
+export default defineConfig({
+  plugins: [
+    eveSvelteKit({
+      eveRoot: "../my-agent",
+    }),
+    sveltekit(),
+  ],
+});
+```
+
+## Call the binding
+
+With the plugin in `vite.config.ts`, components call [`useEveAgent`](./use-eve-agent-svelte) from `eve/svelte` and don't pass a host:
+
+```svelte
+<script lang="ts">
+  import { useEveAgent } from "eve/svelte";
+
+  const agent = useEveAgent();
+  let message = $state("");
+  let isBusy = $derived(agent.status === "submitted" || agent.status === "streaming");
+
+  async function handleSubmit() {
+    const text = message.trim();
+    if (!text || isBusy) return;
+    message = "";
+    await agent.send({ message: text });
+  }
+</script>
+
+<form onsubmit={(event) => {
+  event.preventDefault();
+  void handleSubmit();
+}}>
+  <input bind:value={message} disabled={isBusy} />
+  <button type="submit" disabled={isBusy}>Send</button>
+</form>
+```
+
+Out of the box the plugin uses a framework default channel. To set the route auth policy yourself, add `agent/channels/eve.ts` and swap `none()` for a helper like `vercelOidc()` on protected apps. See [Channels](../../channels/overview) and [Auth & route protection](../auth-and-route-protection).
+
+## Dev vs deploy topology
+
+- **Local dev.** `npm run dev` boots the Eve dev server next to SvelteKit and proxies the Eve routes to it, so the browser only ever hits the SvelteKit origin. `npm run build && npm run preview` behaves the same: the preview server gets its own Eve route proxy and either reuses the shared Eve server or starts one.
+- **Vercel.** The SvelteKit app and the Eve runtime deploy as a single project. The web app is public; the Eve runtime sits behind it on the same origin. Use `eveBuildCommand` for a project-specific agent build:
+
+  ```ts
+  export default defineConfig({
+    plugins: [
+      eveSvelteKit({
+        eveBuildCommand: "npm run build:eve",
+      }),
+      sveltekit(),
+    ],
+  });
+  ```
+
+- **Non-Vercel hosts.** When the Eve service runs on a separate origin, pass `host` directly to `useEveAgent`:
+
+  ```ts
+  const agent = useEveAgent({
+    host: "https://agent.example.com",
+  });
+  ```
+
+## What to read next
+
+- [`useEveAgent` (Svelte)](./use-eve-agent-svelte): the binding API
+- [Auth & route protection](../auth-and-route-protection)
+- [Deployment](../deployment)

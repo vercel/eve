@@ -1,0 +1,152 @@
+---
+title: "Messages"
+description: "Send text, full turn payloads, client context, attachments, and HITL responses with eve/client."
+---
+
+`ClientSession` sends one turn at a time. A fresh session starts on the first send; later sends continue the same conversation as long as the previous turn left the session waiting.
+
+## Send text
+
+Pass a string to `send()` for plain text:
+
+```ts
+import { Client } from "eve/client";
+
+const client = new Client({ host: "http://127.0.0.1:3000" });
+const session = client.session();
+
+const response = await session.send("What is the weather in Brooklyn?");
+
+// Metadata is available as soon as the POST succeeds.
+console.log(response.sessionId, response.continuationToken);
+
+const result = await response.result();
+console.log(result.status, result.message);
+```
+
+`response.result()` consumes the event stream and returns a `MessageResult`:
+
+| Field       | Meaning                                                                        |
+| ----------- | ------------------------------------------------------------------------------ |
+| `message`   | Final assistant text for the turn, when one completed.                         |
+| `status`    | `"waiting"`, `"completed"`, or `"failed"`.                                     |
+| `events`    | All stream events observed during the turn.                                    |
+| `sessionId` | Session ID for streaming and inspection.                                       |
+| `data`      | Structured output when the turn requested an [output schema](./output-schema). |
+
+Failed runtime turns don't throw just because the stream includes `session.failed`. They return `status: "failed"`. Transport and route errors throw `ClientError`.
+
+## Send a full turn payload
+
+Use `send()` when you need more than plain text:
+
+```ts
+const response = await session.send({
+  message: "What should I do on this screen?",
+  clientContext: {
+    route: "/billing",
+    plan: "pro",
+    seatsUsed: 4,
+  },
+});
+
+await response.result();
+```
+
+`clientContext` is one-turn context for the next model call. Strings become user-role context messages, arrays of strings become multiple context messages, and objects are JSON-serialized into one context message. It isn't persisted to durable session history and doesn't dispatch a turn by itself.
+
+## Send attachments
+
+`send()` accepts AI SDK `UserContent`, so a message can mix text and file parts:
+
+```ts
+const response = await session.send({
+  message: [
+    { type: "text", text: "Summarize this report." },
+    {
+      type: "file",
+      data: reportDataUrl,
+      mediaType: "application/pdf",
+      filename: "report.pdf",
+    },
+  ],
+});
+
+await response.result();
+```
+
+For local files, read the file and send a base64 `data:` URL:
+
+```ts
+import { readFile } from "node:fs/promises";
+
+const bytes = await readFile("report.pdf");
+const reportDataUrl = `data:application/pdf;base64,${bytes.toString("base64")}`;
+
+const response = await session.send({
+  message: [
+    { type: "text", text: "Summarize this report." },
+    {
+      type: "file",
+      data: reportDataUrl,
+      mediaType: "application/pdf",
+      filename: "report.pdf",
+    },
+  ],
+});
+
+await response.result();
+```
+
+## Answer human input requests
+
+Tools can pause for approval or ask the user a question. The stream emits `input.requested` with one or more requests. Reply through the same session with `inputResponses`:
+
+```ts
+import type { InputRequest } from "eve/client";
+
+let pendingRequests: readonly InputRequest[] = [];
+
+const response = await session.send("Run the deployment checks.");
+
+for await (const event of response) {
+  if (event.type === "input.requested") {
+    pendingRequests = event.data.requests;
+  }
+}
+
+const resumed = await session.send({
+  inputResponses: pendingRequests.map((request) => ({
+    requestId: request.requestId,
+    optionId: "approve",
+  })),
+});
+
+await resumed.result();
+```
+
+You can send `message`, `inputResponses`, and `clientContext` together when the resumed turn needs both a human answer and follow-up text.
+
+## Single-use responses
+
+`MessageResponse` is single-use. Either aggregate it:
+
+```ts
+const result = await response.result();
+```
+
+Or stream it:
+
+```ts
+for await (const event of response) {
+  console.log(event.type);
+}
+```
+
+Don't do both on the same response. Once the stream is consumed, the `ClientSession` advances its cursor for the next turn.
+
+## What to read next
+
+- [Continuations](./continuations): how the session cursor advances
+- [Streaming](./streaming): handle events live instead of using `result()`
+- [Tools](../../tools): configure approvals and question prompts

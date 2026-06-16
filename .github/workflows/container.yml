@@ -1,0 +1,171 @@
+name: Container Image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - .github/workflows/container.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GHCR_REGISTRY: ghcr.io
+  GHCR_IMAGE_NAME: vercel/eve
+  VCR_REGISTRY: vcr.vercel.com
+  VCR_PROJECT_SLUG: eve-e2e
+  VCR_REPOSITORY: eve
+  VCR_TEAM_SLUG: curated-tests
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+
+      - name: Build and publish image to GitHub Container Registry
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.title=Eve Sandbox
+            org.opencontainers.image.description=Sandbox base image for Eve agents.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Validate VCR configuration
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          missing=0
+          for name in VERCEL_TOKEN; do
+            if [ -z "${!name}" ]; then
+              echo "::error::${name} must be configured to publish to VCR."
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Link Vercel project and pull OIDC token
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          pnpm dlx vercel@54.12.2 link --yes --project "$VCR_PROJECT_SLUG" --team "$VCR_TEAM_SLUG" --token "$VERCEL_TOKEN"
+          pnpm dlx vercel@54.12.2 env pull --yes --environment=preview --token "$VERCEL_TOKEN"
+
+          oidc_token="$(node -e '
+            const fs = require("node:fs");
+            const env = fs.readFileSync(".env.local", "utf8");
+
+            for (const line of env.split(/\r?\n/)) {
+              const match = line.match(/^\s*(?:export\s+)?VERCEL_OIDC_TOKEN\s*=\s*(.*)\s*$/);
+              if (!match) continue;
+
+              let value = match[1].trim();
+              if (
+                (value.startsWith("\"") && value.endsWith("\"")) ||
+                (value.startsWith("\047") && value.endsWith("\047"))
+              ) {
+                value = value.slice(1, -1);
+              }
+
+              process.stdout.write(value);
+              process.exit(0);
+            }
+
+            process.exit(1);
+          ')"
+
+          if [ -z "$oidc_token" ]; then
+            echo "::error::VERCEL_OIDC_TOKEN was not found in .env.local after pulling Vercel env."
+            exit 1
+          fi
+
+          echo "::add-mask::$oidc_token"
+          {
+            echo "VERCEL_OIDC_TOKEN<<EOF"
+            echo "$oidc_token"
+            echo "EOF"
+          } >>"$GITHUB_ENV"
+
+      - name: Log in to Vercel Container Registry
+        run: docker login vcr.vercel.com --username oidc --password "$VERCEL_OIDC_TOKEN"
+
+      - name: Prepare VCR tags
+        id: vcr-tags
+        run: |
+          image="${VCR_REGISTRY}/${VCR_TEAM_SLUG}/${VCR_PROJECT_SLUG}/${VCR_REPOSITORY}"
+          printf '%s\n' "${image}:latest" >"${RUNNER_TEMP}/vcr-tags"
+          {
+            echo "tags<<EOF"
+            cat "${RUNNER_TEMP}/vcr-tags"
+            echo "EOF"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Build and publish image to Vercel Container Registry
+        env:
+          DOCKER_BUILDKIT: "0"
+          VCR_TAGS: ${{ steps.vcr-tags.outputs.tags }}
+        run: |
+          build_args=()
+          while IFS= read -r tag; do
+            build_args+=("-t" "$tag")
+          done <<<"$VCR_TAGS"
+
+          docker build --platform linux/amd64 "${build_args[@]}" .
+
+          while IFS= read -r tag; do
+            docker push "$tag"
+          done <<<"$VCR_TAGS"

@@ -1,0 +1,22 @@
+{
+  "name": "framework-nuxt",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm --filter eve build && nuxt build",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "typecheck": "nuxt typecheck"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "eve": "workspace:*",
+    "nuxt": "^4.0.0",
+    "vue": "^3.5.0",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:"
+  }
+}

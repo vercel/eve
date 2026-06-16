@@ -1,0 +1,143 @@
+---
+title: "Streaming"
+description: "Consume Eve client stream events live, reconnect by event index, and aggregate turn results."
+---
+
+Every send starts with a POST and then reads the session's NDJSON event stream. `MessageResponse` gives you two ways to consume that stream: aggregate it with `result()` or iterate it live.
+
+## Aggregate a turn
+
+Use `result()` when you only need the final turn summary:
+
+```ts
+const response = await session.send("Summarize the latest forecast.");
+const result = await response.result();
+
+console.log(result.status);
+console.log(result.message);
+console.log(result.events.length);
+```
+
+This consumes the stream until the current turn boundary:
+
+- `session.waiting`
+- `session.completed`
+- `session.failed`
+
+## Stream events live
+
+Use `for await...of` when you want to render progress:
+
+```ts
+const response = await session.send("Draft a plan and show your work.");
+
+for await (const event of response) {
+  if (event.type === "message.appended") {
+    process.stdout.write(event.data.messageDelta);
+  }
+
+  if (event.type === "message.completed" && event.data.finishReason !== "tool-calls") {
+    console.log("\nfinal:", event.data.message);
+  }
+}
+```
+
+`message.appended` and `reasoning.appended` are incremental events. The completed forms, `message.completed` and `reasoning.completed`, are the compatibility path for clients that don't render deltas.
+
+## Handle event types
+
+Import event types from `eve/client` when you want exhaustiveness or helpers:
+
+```ts
+import type { HandleMessageStreamEvent } from "eve/client";
+import { isCurrentTurnBoundaryEvent } from "eve/client";
+
+function handleEvent(event: HandleMessageStreamEvent) {
+  if (isCurrentTurnBoundaryEvent(event)) {
+    console.log("turn settled:", event.type);
+  }
+}
+```
+
+The most common UI events are:
+
+| Event                | Use                                                              |
+| -------------------- | ---------------------------------------------------------------- |
+| `message.received`   | Confirm the user message landed.                                 |
+| `reasoning.appended` | Render reasoning deltas when the model provides them.            |
+| `message.appended`   | Render assistant text deltas.                                    |
+| `actions.requested`  | Show tool calls requested by the model.                          |
+| `action.result`      | Show tool call results.                                          |
+| `input.requested`    | Pause the UI for approval or a question answer.                  |
+| `result.completed`   | Read structured output from an [output schema](./output-schema). |
+| `session.waiting`    | Enable the composer for the next turn.                           |
+| `session.completed`  | Mark the conversation terminal.                                  |
+| `session.failed`     | Mark the conversation failed.                                    |
+
+For the complete event table, see [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming).
+
+## Reconnection
+
+The client reconnects after transient stream disconnects. It resumes from the number of events already consumed in the current session:
+
+```ts
+const client = new Client({
+  host: "https://agent.example.com",
+  maxReconnectAttempts: 5,
+});
+```
+
+`maxReconnectAttempts` is per turn. The default is `3`.
+
+## Open a stream manually
+
+Use `session.stream()` when you already have a session cursor and only need to attach to the existing stream:
+
+```ts
+const session = client.session({
+  continuationToken: "eve:6c8b1f2e-3d4a-4b9c-8e21-9f0a1b2c3d4e",
+  sessionId: "wrun_01ARYZ6S41TSV4RRFFQ69G5FAV",
+  streamIndex: 10,
+});
+
+for await (const event of session.stream()) {
+  console.log(event.type);
+}
+```
+
+Pass `startIndex` to override the stored cursor:
+
+```ts
+for await (const event of session.stream({ startIndex: 0 })) {
+  console.log(event.type);
+}
+```
+
+`stream()` throws if the session has no `sessionId`, because there's no stream to attach to before the first send.
+
+## Abort a request
+
+Pass an `AbortSignal` to cancel the POST or stream:
+
+```ts
+const controller = new AbortController();
+
+const response = await session.send({
+  message: "Run a long analysis.",
+  signal: controller.signal,
+});
+
+setTimeout(() => controller.abort(), 10_000);
+
+for await (const event of response) {
+  console.log(event.type);
+}
+```
+
+Once a response is aborted, create a new send for the next turn. Don't reuse the same `MessageResponse`.
+
+## What to read next
+
+- [Messages](./messages): the send APIs that create streams
+- [Continuations](./continuations): how stream cursors are persisted
+- [Output schema](./output-schema): consume `result.completed`

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "experimentalServices": {
+    "web": {
+      "entrypoint": ".",
+      "framework": "nuxtjs",
+      "routePrefix": "/"
+    },
+    "eve": {
+      "buildCommand": "eve build",
+      "entrypoint": ".",
+      "framework": "eve",
+      "routePrefix": "/_eve_internal/eve"
+    }
+  }
+}

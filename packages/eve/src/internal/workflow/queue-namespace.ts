@@ -1,0 +1,8 @@
+export const EVE_WORKFLOW_QUEUE_NAMESPACE = "eve";
+export const WORKFLOW_QUEUE_NAMESPACE_ENV = "WORKFLOW_QUEUE_NAMESPACE";
+export const EVE_WORKFLOW_QUEUE_PREFIX = `__${EVE_WORKFLOW_QUEUE_NAMESPACE}_wkf_workflow_`;
+export const EVE_WORKFLOW_QUEUE_TOPIC = `${EVE_WORKFLOW_QUEUE_PREFIX}*`;
+
+export function applyEveWorkflowQueueNamespace(): void {
+  process.env[WORKFLOW_QUEUE_NAMESPACE_ENV] = EVE_WORKFLOW_QUEUE_NAMESPACE;
+}

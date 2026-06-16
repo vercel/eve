@@ -1,0 +1,135 @@
+---
+title: "Output Schema"
+description: "Request structured results from Eve client turns and read typed data from MessageResult."
+---
+
+Pass `outputSchema` on a client turn when the caller needs structured data instead of only assistant text. The runtime makes the model satisfy the schema before the turn settles and emits the final payload as `result.completed`.
+
+## JSON Schema
+
+Raw JSON Schema objects work directly:
+
+```ts
+import { Client } from "eve/client";
+
+interface Summary {
+  title: string;
+  count: number;
+}
+
+const outputSchema = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    count: { type: "integer" },
+  },
+  required: ["title", "count"],
+} as const;
+
+const client = new Client({ host: "http://127.0.0.1:3000" });
+const session = client.session();
+
+const response = await session.send<Summary>({
+  message: "Summarize this turn.",
+  outputSchema,
+});
+
+const result = await response.result();
+
+console.log(result.data?.title);
+console.log(result.data?.count);
+```
+
+`result.data` is `undefined` when the turn did not produce a structured result.
+
+## Standard Schema
+
+The client also accepts Standard Schema implementations such as Zod, Valibot, and ArkType. The schema is lowered to JSON Schema before the request is sent:
+
+```ts
+import { z } from "zod";
+
+const summarySchema = z.object({
+  title: z.string(),
+  count: z.number().int(),
+});
+
+type Summary = z.infer<typeof summarySchema>;
+
+const response = await session.send<Summary>({
+  message: "Summarize this turn.",
+  outputSchema: summarySchema,
+});
+
+const { data } = await response.result();
+```
+
+The server is authoritative for validation. The client types `MessageResult.data` from your generic and schema, but it doesn't revalidate the streamed payload client-side.
+
+## Stream the result event
+
+If you consume events manually, read `result.completed`:
+
+```ts
+const response = await session.send<Summary>({
+  message: "Summarize this turn.",
+  outputSchema,
+});
+
+for await (const event of response) {
+  if (event.type === "result.completed") {
+    const summary = event.data.result as Summary;
+    console.log(summary.title);
+  }
+}
+```
+
+If more than one `result.completed` appears in the consumed event list, `result()` returns the most recent one as `data`.
+
+## Send payloads with output schema
+
+`outputSchema` works with string shorthand and object-form sends. Use object form when you need schema, headers, signal, context, attachments, or HITL responses:
+
+```ts
+const response = await session.send<Summary>({
+  message: "Summarize this PDF.",
+  clientContext: { reportId: "rpt_123" },
+  outputSchema,
+});
+
+const result = await response.result();
+```
+
+It also works on follow-up turns and HITL response turns:
+
+```ts
+const response = await session.send({
+  inputResponses: [{ requestId, optionId: "approve" }],
+  message: "Return the approved action as structured output.",
+  outputSchema,
+});
+
+const result = await response.result();
+```
+
+## Per-turn scope
+
+Client `outputSchema` is scoped to the turn that sends it. It doesn't become a permanent setting for the conversation:
+
+```ts
+const response = await session.send({ message: "Return a structured summary.", outputSchema });
+await response.result();
+
+const followUpResponse = await session.send("Now answer normally.");
+const followUp = await followUpResponse.result();
+
+console.log(followUp.data); // undefined unless this turn also requested a schema
+```
+
+For task-mode output that belongs to the agent or subagent definition itself, see [`agent.ts`](../../agent-config#outputschema) and [Subagents](../../subagents).
+
+## What to read next
+
+- [Messages](./messages): send turns with `send()`
+- [Streaming](./streaming): handle `result.completed` live
+- [`agent.ts`](../../agent-config#outputschema): configured task-mode output

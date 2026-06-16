@@ -1,0 +1,45 @@
+{
+  "name": "web-chat-next-template",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev",
+    "start": "next start",
+    "typecheck": "tsgo --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@radix-ui/react-use-controllable-state": "1.2.2",
+    "@shikijs/core": "4.1.0",
+    "@shikijs/engine-javascript": "4.1.0",
+    "@shikijs/engine-oniguruma": "4.1.0",
+    "@streamdown/cjk": "1.0.3",
+    "@streamdown/code": "1.1.1",
+    "@streamdown/math": "1.0.2",
+    "@streamdown/mermaid": "1.0.2",
+    "@tailwindcss/postcss": "4.3.0",
+    "ai": "catalog:",
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "cmdk": "1.1.1",
+    "eve": "workspace:*",
+    "lucide-react": "1.16.0",
+    "motion": "12.40.0",
+    "nanoid": "5.1.11",
+    "next": "catalog:",
+    "radix-ui": "1.4.3",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "shiki": "4.1.0",
+    "streamdown": "catalog:",
+    "tailwind-merge": "3.6.0",
+    "tailwindcss": "4.3.0",
+    "use-stick-to-bottom": "1.1.4",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:"
+  }
+}

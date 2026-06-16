@@ -1,0 +1,310 @@
+import type { Nitro } from "nitro/types";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { PreparedApplicationHost } from "./types.js";
+
+interface NitroStub {
+  hooks: {
+    hook(): void;
+  };
+  options: {
+    buildDir: string;
+    dev: boolean;
+    handlers: Nitro["options"]["handlers"];
+    rootDir: string;
+    virtual: Nitro["options"]["virtual"];
+  };
+  routing: {
+    sync(): void;
+  };
+}
+
+interface PreparedApplicationHostStub {
+  appRoot: string;
+  compileResult: {
+    manifest: {
+      channels: [];
+      config: Record<string, never>;
+    };
+    project: {
+      agentRoot: string;
+      appRoot: string;
+      layout: "nested";
+    };
+  };
+  compiledArtifacts: {
+    bootstrapPath: string;
+  };
+  scheduleRegistrations: [];
+  schedules: [];
+  workflowBuildDir: string;
+}
+
+const workflowBuilderMocks = vi.hoisted(() => ({
+  build: vi.fn(async () => {}),
+}));
+
+const fsMocks = vi.hoisted(() => ({
+  mkdir: vi.fn(async () => {}),
+  writeFile: vi.fn(async () => {}),
+}));
+
+vi.mock("node:fs/promises", () => fsMocks);
+
+vi.mock("../../application/package.js", () => ({
+  resolvePackageDependencyPath: (specifier: string) =>
+    `G:\\projects\\test-eve\\node_modules\\.pnpm\\${specifier}@1.0.0\\node_modules\\${specifier}\\dist\\index.js`,
+  resolvePackageRoot: () =>
+    "G:\\projects\\test-eve\\node_modules\\.pnpm\\eve@0.3.0\\node_modules\\eve",
+  resolvePackageSourceFilePath: (relativeSourcePath: string) =>
+    `G:\\projects\\test-eve\\node_modules\\.pnpm\\eve@0.3.0\\node_modules\\eve\\dist\\${relativeSourcePath
+      .replace(/\.[cm]?tsx?$/, ".js")
+      .replaceAll("/", "\\")}`,
+  resolveWorkflowModulePath: (specifier: string) =>
+    `G:\\projects\\test-eve\\node_modules\\.pnpm\\eve@0.3.0\\node_modules\\eve\\dist\\src\\compiled\\${specifier
+      .replace(/^workflow\/(?:api|runtime)$/, "@workflow\\core\\runtime")
+      .replace(/^workflow\/internal\/private$/, "@workflow\\core\\private")
+      .replaceAll("/", "\\")}.js`,
+}));
+
+vi.mock("../../workflow-bundle/builder.js", () => ({
+  WorkflowBundleBuilder: class {
+    build = workflowBuilderMocks.build;
+  },
+}));
+
+const { configureNitroRoutes } = await import("./configure-nitro-routes.js");
+const { EVE_HEALTH_ROUTE_PATH, EVE_INFO_ROUTE_PATH } = await import("#protocol/routes.js");
+
+function createNitroStub(
+  input: { buildDir?: string; dev?: boolean; rootDir?: string } = {},
+): Nitro {
+  const nitro: NitroStub = {
+    hooks: {
+      hook() {},
+    },
+    options: {
+      buildDir: input.buildDir ?? "G:\\projects\\test-eve\\.eve\\nitro",
+      dev: input.dev ?? false,
+      handlers: [],
+      rootDir: input.rootDir ?? "G:\\projects\\test-eve",
+      virtual: {},
+    },
+    routing: {
+      sync() {},
+    },
+  };
+
+  return nitro as never as Nitro;
+}
+
+function createPreparedHost(
+  input: { appRoot?: string; workflowBuildDir?: string } = {},
+): PreparedApplicationHost {
+  const appRoot = input.appRoot ?? "G:\\projects\\test-eve";
+
+  const preparedHost: PreparedApplicationHostStub = {
+    appRoot,
+    compileResult: {
+      manifest: {
+        channels: [],
+        config: {},
+      },
+      project: {
+        agentRoot: `${appRoot}\\agent`,
+        appRoot,
+        layout: "nested",
+      },
+    },
+    compiledArtifacts: {
+      bootstrapPath: `${appRoot}\\.eve\\compiled-artifacts-bootstrap.mjs`,
+    },
+    scheduleRegistrations: [],
+    schedules: [],
+    workflowBuildDir: input.workflowBuildDir ?? `${appRoot}\\.eve\\workflow-cache`,
+  };
+
+  return preparedHost as never as PreparedApplicationHost;
+}
+
+describe("configureNitroRoutes", () => {
+  beforeEach(() => {
+    fsMocks.mkdir.mockClear();
+    fsMocks.writeFile.mockClear();
+    workflowBuilderMocks.build.mockClear();
+  });
+
+  it("registers package-owned route files through file-url virtual handlers", async () => {
+    const nitro = createNitroStub();
+
+    await configureNitroRoutes(nitro, createPreparedHost(), {
+      surface: "app",
+    });
+
+    const healthHandler = nitro.options.handlers.find(
+      (handler) => handler.route === EVE_HEALTH_ROUTE_PATH,
+    );
+    expect(healthHandler?.handler).toBe(`#eve-route-handler/GET ${EVE_HEALTH_ROUTE_PATH}`);
+
+    const virtualSource = nitro.options.virtual[healthHandler?.handler ?? ""];
+    expect(virtualSource).toContain(
+      'import handler from "file:///G:/projects/test-eve/node_modules/.pnpm/eve@0.3.0/node_modules/eve/dist/src/internal/nitro/routes/health.js";',
+    );
+    expect(virtualSource).not.toContain('"G:\\');
+  });
+
+  it("registers workflow routes through physical handlers with relative bundle imports", async () => {
+    const root = "/tmp/eve-nitro-routes";
+    const buildDir = `${root}/nitro`;
+    const workflowBuildDir = `${root}/workflow-cache`;
+    const nitro = createNitroStub({ buildDir, dev: true, rootDir: root });
+
+    await configureNitroRoutes(
+      nitro,
+      createPreparedHost({
+        appRoot: root,
+        workflowBuildDir,
+      }),
+      {
+        surface: "flow",
+      },
+    );
+
+    const workflowHandler = nitro.options.handlers.find(
+      (handler) => handler.route === "/.well-known/workflow/v1/flow",
+    );
+    const expectedHandlerPath = `${buildDir}/workflow/workflows-handler.mjs`;
+
+    expect(workflowHandler?.handler).toBe(expectedHandlerPath);
+    expect(fsMocks.writeFile).toHaveBeenCalledWith(
+      expectedHandlerPath,
+      expect.stringContaining('import { POST } from "./workflows.mjs";'),
+    );
+    expect(workflowBuilderMocks.build).toHaveBeenCalledWith({
+      nitroStepOutfile: `${buildDir}/workflow/steps.mjs`,
+      nitroWorkflowOutfile: `${buildDir}/workflow/workflows.mjs`,
+    });
+    expect(nitro.options.virtual["#eve-workflow/workflows"]).toBeUndefined();
+  });
+
+  it("registers direct workflow queue handlers in dev mode so the worker bypasses HTTP dispatch", async () => {
+    const root = "/tmp/eve-nitro-direct-handlers";
+    const buildDir = `${root}/nitro`;
+    const nitro = createNitroStub({ buildDir, dev: true, rootDir: root });
+
+    await configureNitroRoutes(nitro, createPreparedHost({ appRoot: root }), {
+      surface: "all",
+    });
+
+    const workflowHandlerSource = readWriteFileSourceMatching("/workflow/workflows-handler.mjs");
+
+    expect(workflowHandlerSource).toContain('import { POST } from "./workflows.mjs";');
+    expect(workflowHandlerSource).toContain(
+      'import { getWorld as __eveGetWorkflowWorld } from "file:///G:/projects/test-eve/node_modules/.pnpm/eve@0.3.0/node_modules/eve/dist/src/compiled/@workflow/core/runtime.js";',
+    );
+    expect(workflowHandlerSource).toContain(
+      "const __eveWorkflowWorld = await __eveGetWorkflowWorld();",
+    );
+    expect(workflowHandlerSource).toContain(
+      '__eveWorkflowWorld.registerHandler("__eve_wkf_workflow_", POST);',
+    );
+    expect(readWriteFileSourceMatching("/workflow/steps-handler.mjs")).toBeUndefined();
+  });
+
+  it("registers the dev runtime artifact revision route only in dev mode", async () => {
+    const devNitro = createNitroStub({ dev: true });
+    const prodNitro = createNitroStub({ dev: false });
+
+    await configureNitroRoutes(devNitro, createPreparedHost(), {
+      surface: "app",
+    });
+    await configureNitroRoutes(prodNitro, createPreparedHost(), {
+      surface: "app",
+    });
+
+    expect(devNitro.options.handlers).toContainEqual({
+      handler: "#eve-route/eve/v1/dev/runtime-artifacts",
+      method: "GET",
+      route: "/eve/v1/dev/runtime-artifacts",
+    });
+    expect(devNitro.options.handlers).toContainEqual({
+      handler: "#eve-route/eve/v1/dev/runtime-artifacts/rebuild",
+      method: "POST",
+      route: "/eve/v1/dev/runtime-artifacts/rebuild",
+    });
+    expect(prodNitro.options.handlers).not.toContainEqual(
+      expect.objectContaining({
+        route: "/eve/v1/dev/runtime-artifacts",
+      }),
+    );
+    expect(prodNitro.options.handlers).not.toContainEqual(
+      expect.objectContaining({
+        route: "/eve/v1/dev/runtime-artifacts/rebuild",
+      }),
+    );
+  });
+
+  it("registers the agent info route for dev and production app builds", async () => {
+    const devNitro = createNitroStub({ dev: true });
+    const prodNitro = createNitroStub({ dev: false });
+
+    await configureNitroRoutes(devNitro, createPreparedHost(), {
+      surface: "app",
+    });
+    await configureNitroRoutes(prodNitro, createPreparedHost(), {
+      surface: "app",
+    });
+
+    expect(devNitro.options.handlers).toContainEqual({
+      handler: `#eve-route${EVE_INFO_ROUTE_PATH}`,
+      method: "GET",
+      route: EVE_INFO_ROUTE_PATH,
+    });
+    expect(prodNitro.options.handlers).toContainEqual({
+      handler: `#eve-route${EVE_INFO_ROUTE_PATH}`,
+      method: "GET",
+      route: EVE_INFO_ROUTE_PATH,
+    });
+    expect(devNitro.options.virtual[`#eve-route${EVE_INFO_ROUTE_PATH}`]).toContain(
+      '"mode":"development"',
+    );
+    expect(prodNitro.options.virtual[`#eve-route${EVE_INFO_ROUTE_PATH}`]).toContain(
+      '"mode":"production"',
+    );
+  });
+
+  it("does not register direct workflow queue handlers in production builds", async () => {
+    const root = "/tmp/eve-nitro-direct-handlers-prod";
+    const buildDir = `${root}/nitro`;
+    const workflowBuildDir = `${root}/workflow-cache`;
+    const nitro = createNitroStub({ buildDir, dev: false, rootDir: root });
+
+    await configureNitroRoutes(nitro, createPreparedHost({ appRoot: root, workflowBuildDir }), {
+      surface: "all",
+    });
+
+    const workflowHandlerSource = readWriteFileSourceMatching("/workflow/workflows-handler.mjs");
+
+    expect(workflowHandlerSource).toContain(
+      'import { POST } from "../../workflow-cache/workflows.mjs";',
+    );
+    expect(workflowHandlerSource).not.toContain("registerHandler");
+    expect(workflowHandlerSource).not.toContain("__eveGetWorkflowWorld");
+    expect(readWriteFileSourceMatching("/workflow/steps-handler.mjs")).toBeUndefined();
+  });
+});
+
+function readWriteFileSourceMatching(suffix: string): string | undefined {
+  const calls = fsMocks.writeFile.mock.calls as readonly unknown[][];
+  const call = calls.find((args) => {
+    const target = args[0];
+    return typeof target === "string" && target.replaceAll("\\", "/").endsWith(suffix);
+  });
+
+  if (call === undefined) {
+    return undefined;
+  }
+
+  const source = call[1];
+  return typeof source === "string" ? source : undefined;
+}

@@ -1,0 +1,27 @@
+@source "../../node_modules/@vercel/geistdocs/dist/**/*.js";
+@source "../../node_modules/streamdown/dist/*.js";
+@source "../**/*.{ts,tsx,mdx}";
+@source "../../components/**/*.{ts,tsx}";
+@source "../../../docs/**/*.{md,mdx}";
+
+html {
+  scroll-padding-top: 5rem;
+}
+
+/* Align docs content with navbar on mobile. */
+#nd-page {
+  @apply max-md:px-6;
+}
+
+/* TOC and footer links use gray-1000. */
+#nd-toc {
+  @apply text-gray-1000 md:pl-6;
+}
+
+#nd-toc a {
+  @apply text-gray-900 hover:text-gray-1000;
+}
+
+#nd-toc a[data-active="true"] {
+  @apply text-gray-1000;
+}

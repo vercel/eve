@@ -1,0 +1,59 @@
+---
+title: "Step 8: Guard the Spend"
+description: "Gate expensive queries with cost-based approval: the agent pauses, asks, and resumes."
+---
+
+A single warehouse query can scan terabytes and bill you for the privilege. So before the agent fires off an expensive scan, make it stop and check with you: for a costly query, the agent pauses, asks you, and resumes with your answer. That's human-in-the-loop, and you wire it up with one field on the tool.
+
+`needsApproval` runs before `execute`. Return `true` and the turn parks on an approval request; you answer, and the run picks up from that exact step. The function gets the tool input, so you can make the decision cost-based.
+
+## Estimate, then gate
+
+Add a cheap estimator (a real warehouse exposes a dry-run byte estimate, so keep the helper illustrative) and gate `run_sql` on it:
+
+```ts title="agent/lib/cost.ts"
+// Illustrative: a real warehouse exposes a dry-run byte estimate.
+export function estimateScanGb(sql: string): number {
+  return /\bwhere\b/i.test(sql) ? 1 : 200; // unfiltered scans are the expensive ones
+}
+```
+
+```ts title="agent/tools/run_sql.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+import { runReadOnlySql } from "../lib/sample-db.js";
+import { estimateScanGb } from "../lib/cost.js";
+
+const THRESHOLD_GB = 50;
+
+export default defineTool({
+  description: "Run a read-only SQL query against the warehouse.",
+  inputSchema: z.object({ sql: z.string() }),
+  // Cost-based gate: only the expensive queries need a human yes.
+  needsApproval: ({ toolInput }) => estimateScanGb(toolInput?.sql ?? "") > THRESHOLD_GB,
+  async execute({ sql }) {
+    const { columns, rows } = await runReadOnlySql(sql);
+    return { columns, rows: rows.slice(0, 500), truncated: rows.length > 500 };
+  },
+});
+```
+
+Cheap queries run straight through. A query estimated above the threshold trips the gate.
+
+## Pause, ask, resume
+
+Ask for something that forces a large unfiltered scan:
+
+```text
+Total revenue across all customers, all time, broken out by day.
+```
+
+The model proposes the query, `needsApproval` returns `true`, and the turn parks. The stream emits `input.requested`, then `session.waiting`. How the prompt looks depends on the channel: buttons in the TUI, Block Kit in Slack, a UI control on the web. Approve it and the run resumes from exactly that step, then the query runs. Deny it and the tool is skipped, with the model told why.
+
+Each session has exactly one active continuation. Answer an approval against a stale handle and it's rejected, so there's no way to double-resume the same parked turn.
+
+The same machinery backs the built-in `ask_question` tool, where the model asks you mid-turn, and per-connection approval via `approval: once()`. See [Tools: human-in-the-loop](../tools).
+
+→ Next: [Step 9: Ship it](./ship-it)
+
+Depth: [Tools: human-in-the-loop](../tools)

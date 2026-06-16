@@ -1,0 +1,63 @@
+{
+  "_description": "Baselines for framework mechanical lints. Each rule guard refuses to let new violations slip in beyond what is recorded here. Lower a count by removing offenders, never raise it. Empty allowlists/maps mean the rule is fully enforced.",
+  "rule13_spreadTernaryByFile": {
+    "packages/eve/src/public/channels/auth.ts": 7
+  },
+  "rule19_asyncLocalStorageAllowlist": [
+    "packages/eve/src/context/container.ts",
+    "packages/eve/src/public/channels/slack/slackChannel.ts",
+    "packages/eve/src/runtime/sessions/runtime-session.ts"
+  ],
+  "rule21_authoredNameAllowlist": [],
+  "rule23_unknownCastByFile": {
+    "apps/docs/components/geistdocs/code-block.tsx": 1,
+    "packages/eve/src/channel/adapter-context.ts": 1,
+    "packages/eve/src/compiler/manifest.ts": 1,
+    "packages/eve/src/evals/runner/reporters/braintrust.ts": 1,
+    "packages/eve/src/execution/await-authorization-orchestrator.test.ts": 1,
+    "packages/eve/src/execution/connection-auth-steps.ts": 1,
+    "packages/eve/src/execution/node-step.test.ts": 4,
+    "packages/eve/src/execution/workflow-entry.integration.test.ts": 1,
+    "packages/eve/src/execution/workflow-entry.ts": 1,
+    "packages/eve/src/harness/prompt-cache.test.ts": 6,
+    "packages/eve/src/harness/tool-loop-compaction-accounting.test.ts": 2,
+    "packages/eve/src/harness/tool-loop.test.ts": 16,
+    "packages/eve/src/harness/tool-result-pruning.ts": 1,
+    "packages/eve/src/internal/authored-definition/sandbox.ts": 1,
+    "packages/eve/src/internal/json-schema.ts": 1,
+    "packages/eve/src/internal/nitro/host/build-application.scenario.test.ts": 2,
+    "packages/eve/src/internal/nitro/host/create-application-nitro.scenario.test.ts": 2,
+    "packages/eve/src/internal/nitro/host/cron-handler-route.test.ts": 1,
+    "packages/eve/src/internal/nitro/host/dev-authored-source-watcher.scenario.test.ts": 2,
+    "packages/eve/src/internal/nitro/host/schedule-task-routes.test.ts": 1,
+    "packages/eve/src/internal/nitro/routes/runtime-artifacts.test.ts": 1,
+    "packages/eve/src/public/tools/define-bash-tool.ts": 1,
+    "packages/eve/src/public/tools/define-glob-tool.ts": 1,
+    "packages/eve/src/public/tools/define-grep-tool.ts": 1,
+    "packages/eve/src/public/tools/define-read-file-tool.ts": 1,
+    "packages/eve/src/public/tools/define-write-file-tool.ts": 1,
+    "packages/eve/src/public/tools/internal.ts": 1,
+    "packages/eve/src/runtime/agent/bootstrap-model-utils.ts": 3,
+    "packages/eve/src/runtime/agent/mock-model-adapter.test.ts": 1,
+    "packages/eve/src/runtime/agent/mock-model-adapter.ts": 1,
+    "packages/eve/src/runtime/framework-tools/connection-search-dynamic.ts": 1,
+    "packages/eve/src/runtime/resolve-sandbox.ts": 1,
+    "packages/eve/test/define-bash-tool.test.ts": 1,
+    "packages/eve/test/define-glob-tool.test.ts": 1,
+    "packages/eve/test/define-grep-tool.test.ts": 1,
+    "packages/eve/test/define-read-file-tool.test.ts": 1,
+    "packages/eve/test/define-write-file-tool.test.ts": 1
+  },
+  "rule25_installRuntimeArtifactsAllowlist": [
+    "packages/eve/src/internal/application/compiled-artifacts.ts",
+    "packages/eve/src/internal/testing/app-harness.ts",
+    "packages/eve/src/runtime/loaders/bundled-artifacts.ts",
+    "packages/eve/src/runtime/sessions/runtime-session.ts",
+    "packages/eve/src/context/accessors.integration.test.ts",
+    "packages/eve/src/execution/harness-tool-execution.integration.test.ts",
+    "packages/eve/src/execution/session-start.scenario.test.ts",
+    "packages/eve/src/internal/nitro/routes/runtime-artifacts.test.ts",
+    "packages/eve/test/scenarios/load-agent-info-data.scenario.test.ts",
+    "packages/eve/test/scenarios/runtime-loaders.scenario.test.ts"
+  ]
+}

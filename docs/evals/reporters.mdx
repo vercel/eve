@@ -1,0 +1,62 @@
+---
+title: "Reporters"
+description: "Ship eval results to Braintrust experiments or JUnit XML — Eve runs and scores everything itself."
+---
+
+Eve runs and grades everything itself; reporters just ship the results out. The CLI prints a console summary by default — one line per eval, failed assertions with their messages — and reporters from `eve/evals/reporters` add destinations on top.
+
+Reporters attach in two places. Declare them in `evals.config.ts` to observe **every** eval in the run — the usual choice for a shared destination like one Braintrust experiment, so you don't repeat the reporter in each file. Or list them on an individual eval's `reporters` to scope a destination to that eval (or to a group of evals that share one instance).
+
+## Braintrust
+
+`Braintrust(...)` uploads eval results to Braintrust experiments. Put one instance in the config so it covers the whole run:
+
+```ts title="evals/evals.config.ts"
+import { defineEvalConfig } from "eve/evals";
+import { Braintrust } from "eve/evals/reporters";
+
+export default defineEvalConfig({
+  judge: { model: "openai/gpt-5.4-mini" },
+  reporters: [Braintrust({ projectName: "weather-agent" })],
+});
+```
+
+Need a destination for only some evals? Attach it per eval instead:
+
+```ts title="evals/brooklyn-forecast.eval.ts"
+import { defineEval } from "eve/evals";
+import { Braintrust } from "eve/evals/reporters";
+
+export default defineEval({
+  reporters: [Braintrust({ projectName: "weather-agent" })],
+  async test(t) {
+    await t.send("What is the weather in Brooklyn?");
+    t.completed();
+  },
+});
+```
+
+The reporter config takes an optional `projectName` and `experimentName`, plus a base experiment (by name or id) to diff against. Gate assertions log as binary scores under a `gate:` prefix so experiments diff gate regressions the same way they diff soft-score regressions. Eval `metadata` rides along to reporters.
+
+A reporter instance observes the evals that reference it: share one instance across several evals — the config, a `shared.ts` export, or every entry of a dataset array — and their results land in a single experiment. Listing the same config reporter on an eval too does not double-report it.
+
+Braintrust needs its SDK installed in the app and credentials in the environment. Pass `--skip-report` to run the eval without shipping results (this also suppresses config reporters) — useful locally when iterating.
+
+## JUnit
+
+`JUnit({ filePath })` writes JUnit XML for CI annotations. The `--junit <path>` CLI flag does the same thing without touching the eval file, which is usually the better fit — CI owns the output path, not the eval:
+
+```bash
+eve eval --strict --junit .eve/junit.xml
+```
+
+Each eval becomes one `<testcase>` named by its path-derived id; failed gates and execution errors land as failure messages on the matching test case, so CI surfaces them inline.
+
+## Custom reporters
+
+A reporter implements the `EvalReporter` interface from `eve/evals/reporters` and receives the same structured results the built-ins do. Reach for one only when a destination isn't covered — the per-run artifacts under `.eve/evals/` already capture everything for ad-hoc inspection.
+
+## What to read next
+
+- [Running evals](./running): console output, `--json`, and artifacts
+- [Judge](./judge): what the reported numbers mean

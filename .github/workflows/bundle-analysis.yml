@@ -1,0 +1,274 @@
+name: Bundle Analysis
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - labeled
+    paths:
+      - ".github/workflows/bundle-analysis.yml"
+      - "apps/fixtures/weather-fixture/**"
+      - "package.json"
+      - "packages/eve/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "scripts/nitro-bundle-report-compare.mjs"
+      - "scripts/nitro-bundle-report-budget.mjs"
+      - "scripts/nitro-bundle-report.mjs"
+      - "scripts/package-publish-report.mjs"
+
+concurrency:
+  group: weather-fixture-bundle-analysis-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.head.repo.fork == false && (github.event.action != 'labeled' || github.event.label.name == 'acknowledge-bundle-warning')) }}
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    env:
+      BUNDLE_WARNING_ACK_LABEL: acknowledge-bundle-warning
+
+    steps:
+      - name: Resolve workflow mode
+        id: mode
+        env:
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_LABEL_NAME: ${{ github.event.label.name }}
+          PR_HAS_ACK_LABEL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'acknowledge-bundle-warning') }}
+        run: |
+          if [ "$EVENT_ACTION" = "labeled" ] && [ "$EVENT_LABEL_NAME" = "$BUNDLE_WARNING_ACK_LABEL" ]; then
+            echo "acknowledge_only=true" >> "$GITHUB_OUTPUT"
+            echo "acknowledged=true" >> "$GITHUB_OUTPUT"
+            echo "Bundle warning acknowledged by label; skipping regeneration." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "acknowledge_only=false" >> "$GITHUB_OUTPUT"
+            if [ "$EVENT_ACTION" != "synchronize" ] && [ "$PR_HAS_ACK_LABEL" = "true" ]; then
+              echo "acknowledged=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "acknowledged=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Clear stale bundle warning acknowledgement
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' && github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'acknowledge-bundle-warning') }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            try {
+              await github.rest.issues.removeLabel({
+                issue_number: context.issue.number,
+                name: process.env.BUNDLE_WARNING_ACK_LABEL,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+              });
+            } catch (error) {
+              if (error.status === 404) {
+                return;
+              }
+              throw error;
+            }
+
+            await core.summary
+              .addRaw(
+                `Removed \`${process.env.BUNDLE_WARNING_ACK_LABEL}\` so this commit must be acknowledged separately.`,
+              )
+              .write();
+
+      - name: Checkout code
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+
+      - name: Setup Node.js
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+
+      - name: Install dependencies
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare main baseline worktree
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' }}
+        id: baseline
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          BASELINE_ROOT="$RUNNER_TEMP/eve-main-baseline"
+          rm -rf "$BASELINE_ROOT"
+          git worktree add --detach "$BASELINE_ROOT" "$BASE_SHA"
+          echo "root=$BASELINE_ROOT" >> "$GITHUB_OUTPUT"
+          echo "label=main (${BASE_SHA:0:7})" >> "$GITHUB_OUTPUT"
+
+      - name: Install main baseline dependencies
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' }}
+        working-directory: ${{ steps.baseline.outputs.root }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Eve package on main baseline
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' }}
+        working-directory: ${{ steps.baseline.outputs.root }}
+        run: pnpm --filter eve build
+
+      - name: Resolve weather app on main baseline
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' }}
+        id: baseline_weather_app
+        working-directory: ${{ steps.baseline.outputs.root }}
+        run: |
+          if [ -d apps/fixtures/weather-fixture ]; then
+            echo "filter=weather-fixture" >> "$GITHUB_OUTPUT"
+            echo "path=apps/fixtures/weather-fixture" >> "$GITHUB_OUTPUT"
+          elif [ -d apps/weather-agent ]; then
+            echo "filter=weather-agent" >> "$GITHUB_OUTPUT"
+            echo "path=apps/weather-agent" >> "$GITHUB_OUTPUT"
+          else
+            echo "Could not find weather app in baseline checkout." >&2
+            exit 1
+          fi
+
+      - name: Build weather app on main baseline in Vercel mode
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' }}
+        id: baseline_build
+        continue-on-error: true
+        working-directory: ${{ steps.baseline.outputs.root }}
+        run: VERCEL=1 pnpm --filter "${{ steps.baseline_weather_app.outputs.filter }}" build
+
+      - name: Note skipped main baseline
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' && steps.baseline_build.outcome != 'success' }}
+        run: |
+          echo "Main baseline build failed; bundle analysis will run without a baseline comparison." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate main baseline bundle report
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' && steps.baseline_build.outcome == 'success' }}
+        env:
+          BASELINE_REPORT_JSON: ${{ runner.temp }}/weather-fixture-bundle-report-main.json
+        working-directory: ${{ steps.baseline.outputs.root }}
+        run: |
+          node ./scripts/nitro-bundle-report.mjs \
+            --app "${{ steps.baseline_weather_app.outputs.path }}" \
+            --app-label apps/fixtures/weather-fixture \
+            --package packages/eve \
+            --package-label packages/eve \
+            --output-json "$BASELINE_REPORT_JSON"
+
+      - name: Build Eve package
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
+        run: pnpm --filter eve build
+
+      - name: Build weather-fixture in Vercel mode
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
+        run: VERCEL=1 pnpm --filter weather-fixture build
+
+      - name: Generate bundle report
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
+        env:
+          BASELINE_REPORT_JSON: ${{ runner.temp }}/weather-fixture-bundle-report-main.json
+          BASELINE_REPORT_LABEL: ${{ steps.baseline.outputs.label }}
+          HAS_BASELINE_REPORT: ${{ github.event_name == 'pull_request' && steps.baseline_build.outcome == 'success' }}
+          BUNDLE_REPORT_JSON: ${{ runner.temp }}/weather-fixture-bundle-report.json
+          BUNDLE_REPORT_MARKDOWN: ${{ runner.temp }}/weather-fixture-bundle-report.md
+          BUNDLE_WARNING_ACKNOWLEDGED: ${{ steps.mode.outputs.acknowledged }}
+        run: |
+          report_args=()
+          if [ "$HAS_BASELINE_REPORT" = "true" ]; then
+            report_args=(
+              --baseline-json "$BASELINE_REPORT_JSON"
+              --baseline-label "$BASELINE_REPORT_LABEL"
+            )
+          fi
+          if [ "$BUNDLE_WARNING_ACKNOWLEDGED" = "true" ]; then
+            report_args+=(--size-budget-acknowledged)
+          fi
+
+          node ./scripts/nitro-bundle-report.mjs \
+            --app apps/fixtures/weather-fixture \
+            --app-label apps/fixtures/weather-fixture \
+            --package packages/eve \
+            --package-label packages/eve \
+            "${report_args[@]}" \
+            --output-json "$BUNDLE_REPORT_JSON" \
+            --output-markdown "$BUNDLE_REPORT_MARKDOWN"
+
+      - name: Publish job summary
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
+        env:
+          BUNDLE_REPORT_MARKDOWN: ${{ runner.temp }}/weather-fixture-bundle-report.md
+        run: cat "$BUNDLE_REPORT_MARKDOWN" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload bundle report artifact
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: weather-fixture-bundle-report
+          path: |
+            ${{ runner.temp }}/weather-fixture-bundle-report.json
+            ${{ runner.temp }}/weather-fixture-bundle-report.md
+
+      - name: Update pull request comment
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          BUNDLE_REPORT_MARKDOWN: ${{ runner.temp }}/weather-fixture-bundle-report.md
+        with:
+          script: |
+            const fs = require("node:fs");
+
+            const marker = "<!-- eve-weather-fixture-bundle-analysis -->";
+            const reportBody = fs.readFileSync(process.env.BUNDLE_REPORT_MARKDOWN, "utf8").trim();
+            const body = `${marker}\n${reportBody}`;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              per_page: 100,
+              repo: context.repo.repo,
+            });
+
+            const existingComment = comments.find(
+              (comment) => comment.user?.type === "Bot" && comment.body?.includes(marker),
+            );
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                body,
+                comment_id: existingComment.id,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+              });
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              body,
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+
+      - name: Enforce bundle size budget
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' }}
+        env:
+          BUNDLE_REPORT_JSON: ${{ runner.temp }}/weather-fixture-bundle-report.json
+          BUNDLE_WARNING_ACKNOWLEDGED: ${{ steps.mode.outputs.acknowledged }}
+        run: |
+          budget_args=(--report-json "$BUNDLE_REPORT_JSON")
+          if [ "$BUNDLE_WARNING_ACKNOWLEDGED" = "true" ]; then
+            budget_args+=(--acknowledged)
+          fi
+
+          node ./scripts/nitro-bundle-report-budget.mjs "${budget_args[@]}"

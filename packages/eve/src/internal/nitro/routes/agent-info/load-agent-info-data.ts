@@ -1,0 +1,126 @@
+import type { CompiledAgentManifest, CompiledSubagentNode } from "#compiler/manifest.js";
+import {
+  createBundledRuntimeCompiledArtifactsSource,
+  createDiskRuntimeCompiledArtifactsSource,
+  type RuntimeCompiledArtifactsSource,
+} from "#runtime/compiled-artifacts-source.js";
+import { readDevelopmentRuntimeArtifactsSnapshotRoot } from "#internal/nitro/dev-runtime-artifacts.js";
+import { readBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
+import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
+import { loadCompiledModuleMap } from "#runtime/loaders/module-map.js";
+import { resolveAgent } from "#runtime/resolve-agent.js";
+import { resolveSchedules } from "#runtime/schedules/resolve-schedule.js";
+import type {
+  ResolvedAgent,
+  ResolvedSandboxDefinition,
+  ResolvedSchedule,
+  ResolvedSkillDefinition,
+  ResolvedInstructions,
+} from "#runtime/types.js";
+
+/**
+ * Runtime data needed to build the package-owned `GET /eve/v1/info`
+ * inspection JSON.
+ */
+export interface AgentInfoData {
+  readonly agent: ResolvedAgent;
+  readonly manifest: CompiledAgentManifest;
+  readonly schedules: readonly ResolvedSchedule[];
+}
+
+export interface AgentInfoManifestData {
+  readonly manifest: CompiledAgentManifest;
+  readonly schedules: readonly ResolvedSchedule[];
+}
+
+/**
+ * Loads the resolved runtime data projected by `GET /eve/v1/info`.
+ */
+export async function loadAgentInfoData(input: {
+  readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
+}): Promise<AgentInfoData> {
+  return await loadAgentInfoDataFromArtifacts(input.compiledArtifactsSource);
+}
+
+/**
+ * Loads manifest-only runtime data for inspection surfaces that must not
+ * execute or import authored modules.
+ */
+export async function loadAgentInfoManifestData(input: {
+  readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
+}): Promise<AgentInfoManifestData> {
+  const manifest = await loadCompiledManifest({
+    compiledArtifactsSource: input.compiledArtifactsSource,
+  });
+  const schedules = await resolveSchedules({
+    manifest,
+  });
+
+  return {
+    manifest,
+    schedules,
+  };
+}
+
+/**
+ * Resolves the explicit runtime artifact source used by the package-owned
+ * `GET /eve/v1/info` handler.
+ */
+export function resolveAgentInfoCompiledArtifactsSource(
+  input: {
+    readonly appRoot?: string;
+    readonly dev?: boolean;
+    readonly devRuntimeArtifactsPointerPath?: string;
+  } = {},
+): RuntimeCompiledArtifactsSource {
+  if (input.dev === true && input.appRoot !== undefined) {
+    return createDiskRuntimeCompiledArtifactsSource(
+      readDevelopmentRuntimeArtifactsSnapshotRoot(input.devRuntimeArtifactsPointerPath) ??
+        input.appRoot,
+    );
+  }
+
+  if (readBundledCompiledArtifacts() !== null) {
+    return createBundledRuntimeCompiledArtifactsSource();
+  }
+
+  if (input.appRoot !== undefined) {
+    return createDiskRuntimeCompiledArtifactsSource(input.appRoot);
+  }
+
+  throw new Error("Eve agent info runtime data requires bundled artifacts or an app root.");
+}
+
+async function loadAgentInfoDataFromArtifacts(
+  compiledArtifactsSource: RuntimeCompiledArtifactsSource,
+): Promise<AgentInfoData> {
+  const [manifest, moduleMap] = await Promise.all([
+    loadCompiledManifest({
+      compiledArtifactsSource,
+    }),
+    loadCompiledModuleMap({
+      compiledArtifactsSource,
+    }),
+  ]);
+  const schedules = await resolveSchedules({
+    manifest,
+  });
+
+  return {
+    agent: await resolveAgent({
+      manifest,
+      moduleMap,
+    }),
+    manifest,
+    schedules,
+  };
+}
+
+export type {
+  CompiledAgentManifest,
+  CompiledSubagentNode,
+  ResolvedSandboxDefinition,
+  ResolvedSchedule,
+  ResolvedSkillDefinition,
+  ResolvedInstructions,
+};

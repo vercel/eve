@@ -1,0 +1,275 @@
+---
+title: "Custom Channels"
+description: "Author custom HTTP and WebSocket channels with routes, events, metadata, continuation tokens, and file uploads."
+---
+
+When Eve doesn't ship a channel for your surface, you build one. Custom channels let you expose HTTP or WebSocket endpoints, parse incoming requests, start or resume sessions, observe runtime events, and own delivery back to your platform.
+
+## File location and identity
+
+Custom channels live in `agent/channels/` at the root agent. Local subagents do not declare channels today.
+
+The channel file stem becomes the channel id, so `agent/channels/internal-webhook.ts` is addressed as `internal-webhook`. Channel files are module-backed: export the channel definition as the default export.
+
+## Define a channel
+
+```ts
+import { defineChannel, GET, POST } from "eve/channels";
+
+export default defineChannel({
+  routes: [
+    POST("/message", async (req, { send }) => {
+      const body = await req.json();
+      const session = await send(body.message, {
+        auth: null,
+        continuationToken: body.token,
+      });
+
+      return Response.json({ sessionId: session.id });
+    }),
+    GET("/sessions/:sessionId/stream", async (_req, { getSession, params }) => {
+      const session = getSession(params.sessionId);
+      const stream = await session.getEventStream();
+
+      return new Response(stream, {
+        headers: { "content-type": "text/event-stream" },
+      });
+    }),
+  ],
+  events: {
+    "message.completed"(event, channel, ctx) {
+      // deliver completed messages back to the surface that owns this channel
+    },
+  },
+});
+```
+
+`defineChannel({ routes, ... })` defines a channel. Routes are declared with the `POST()` and `GET()` helpers. Each route handler receives the raw `Request` and a helpers object:
+
+- `send(message, { auth, continuationToken, state? })`: start or resume a session. Returns a `Session`.
+- `getSession(sessionId)`: look up an existing session. The returned `Session` exposes `getEventStream({ startIndex? })` for streaming.
+- `params`: route parameters extracted from the path pattern.
+- `waitUntil(promise)`: extend the request lifetime for background work.
+
+Event handlers like `"message.completed"` are declared under the `events` key. They receive `(eventData, channel, ctx)`, where `channel` carries platform handles and session continuation operations, and `ctx` is the Eve `SessionContext`.
+
+## WebSocket routes
+
+Use `WS()` when a custom channel needs a WebSocket endpoint. The route handler runs once per upgrade request and returns lifecycle hooks for that connection:
+
+```ts
+import { defineChannel, WS } from "eve/channels";
+
+export default defineChannel({
+  routes: [
+    WS("/voice/ws", async (_req, { send }) => ({
+      async message(_peer, message) {
+        await send(message.text(), {
+          auth: null,
+          continuationToken: "voice-demo",
+        });
+      },
+    })),
+  ],
+});
+```
+
+`WS()` handlers receive the same helpers as HTTP route handlers: `send`, `getSession`, `receive`, `params`, `waitUntil`, and `requestIp`. The returned hooks are Eve-owned structural types compatible with Nitro/H3 websocket routing, including `upgrade`, `open`, `message`, `close`, and `error`.
+
+### Node upgrade server escape hatch
+
+Prefer the `WS()` lifecycle hooks above when you own the websocket behavior. Eve also exposes `createWebSocketUpgradeServer()` for the narrower case where a third-party SDK or framework expects to bind directly to a Node `http.Server` with `server.on("upgrade", ...)`.
+
+```ts
+import { defineChannel, WS, createWebSocketUpgradeServer } from "eve/channels";
+
+const bridge = createWebSocketUpgradeServer();
+
+thirdPartySdk.attach(bridge.server);
+
+export default defineChannel({
+  routes: [WS("/vendor/ws", bridge.route)],
+});
+```
+
+The bridge server does not listen on its own port. It receives only upgrade events that matched the Eve route, and only on hosts where Nitro exposes the raw Node upgrade request, socket, and head. Treat it as a compatibility adapter for libraries with server-binding APIs, not as the primary way to build websocket channels in Eve.
+
+## Cross-channel hand-off
+
+Route handlers can start a session on a different channel via `args.receive(channel, ...)`. Use this when an inbound request on one channel should pivot the conversation onto another, such as an incident webhook that opens an investigation thread in Slack.
+
+```ts
+import { defineChannel, POST } from "eve/channels";
+import slack from "./slack.js";
+
+export default defineChannel({
+  routes: [
+    POST("/incident", async (req, args) => {
+      const incident = await req.json();
+
+      args.waitUntil(
+        args.receive(slack, {
+          message: `Investigate ${incident.reference}: ${incident.title}`,
+          target: { channelId: "C0123ABC" },
+          auth: {
+            authenticator: "incidentio",
+            principalType: "service",
+            principalId: incident.actor.id,
+            attributes: { reference: incident.reference, severity: incident.severity },
+          },
+        }),
+      );
+
+      return new Response("ok");
+    }),
+  ],
+});
+```
+
+Semantics:
+
+- The target channel's authored `receive(input, { send })` hook owns the continuation-token format and initial state. Callers supply only `{ message, target, auth }`.
+- `auth` flows through to `session.auth.initiator` so the target's event handlers and the agent's tools can read who started the session.
+- Calling `args.receive(...)` does not also start a session on the current channel. The inbound channel's response is whatever the route handler returns explicitly.
+- The first argument is the target channel module's default export. Import it directly from `agent/channels/<name>.ts`. Identity is matched by reference.
+
+## Channel metadata
+
+Channels can project a subset of their adapter state as metadata available to instrumentation resolvers, dynamic tool resolvers, and dynamic skill or instruction resolvers. Define a `metadata(state)` function on the channel config:
+
+```ts
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  state: {
+    topic: null as string | null,
+    contextMessages: [] as string[],
+    internalCounter: 0,
+  },
+
+  metadata(state) {
+    return {
+      topic: state.topic,
+      contextMessages: state.contextMessages,
+    };
+  },
+
+  routes: [
+    POST("/start", async (req, { send }) => {
+      const body = await req.json();
+      await send(body.message, {
+        auth: null,
+        continuationToken: body.token,
+        state: { topic: body.topic, contextMessages: body.context, internalCounter: 0 },
+      });
+
+      return new Response("ok");
+    }),
+  ],
+  events: {
+    "turn.started"(_event, ctx) {
+      ctx.state.internalCounter += 1;
+    },
+  },
+});
+```
+
+The projection is re-evaluated whenever adapter state changes after channel event handlers run. Dynamic tool resolvers read it via `ctx.channel.metadata` and narrow it with `isChannel`. See [Dynamic capabilities](../guides/dynamic-capabilities) for the full consumption pattern.
+
+When a parent agent dispatches a subagent, the framework forwards the parent's channel metadata projection to the child. The same `metadata(state)` projector also serves instrumentation metadata resolvers.
+
+## Continuation tokens
+
+Each call to `send(message, { auth, continuationToken, state? })` from a channel route addresses a session by its channel-local raw token. The framework prepends the channel name, derived from the file stem under `agent/channels/`, before handing the token to the runtime.
+
+```ts
+import { slackContinuationToken } from "eve/channels/slack";
+import { twilioContinuationToken } from "eve/channels/twilio";
+
+slackContinuationToken("C0123ABC", "1800000000.001234"); // "C0123ABC:1800000000.001234"
+twilioContinuationToken("+15551234567", "+15557654321"); // "+15551234567:+15557654321"
+```
+
+Custom channels write their own function that joins the identity fields. The framework does not derive anything for you: the channel owns its token format.
+
+When the identity that should address a session is not known until later, the channel can re-key the parked session by calling `ctx.session.setContinuationToken(...)` from a handler. Pass the channel-local raw token; the runtime preserves the current channel namespace.
+
+```ts
+import { defineChannel } from "eve/channels";
+
+defineChannel<{ ref: string | null }>({
+  state: { ref: null },
+  context(state, session) {
+    return {
+      state,
+      registerAnchor(ref: string) {
+        state.ref = ref;
+        session.setContinuationToken(ref);
+      },
+    };
+  },
+  events: {
+    "message.completed"(_event, ctx) {
+      if (!ctx.state.ref) ctx.registerAnchor(mintRef());
+    },
+  },
+  routes: [
+    /* ... */
+  ],
+});
+```
+
+The workflow runtime disposes the current park hook at the next step boundary and registers a new one at the new token. Inbound deliveries already addressed to the old token are dropped, so coordinate with your senders to use the new token.
+
+## File uploads
+
+`send()` accepts `string | UserContent`. To include file attachments, pass a `UserContent` array mixing text and file parts:
+
+```ts
+await send(
+  [
+    { type: "text", text: body.message },
+    { type: "file", data: imageBytes, mediaType: "image/png" },
+  ],
+  { auth, continuationToken },
+);
+```
+
+For platforms like Slack where files sit behind authenticated URLs, put a `URL` object in `FilePart.data` and declare `fetchFile` on the channel config:
+
+```ts
+defineChannel({
+  fetchFile(url) {
+    if (!url.startsWith("https://files.slack.com/")) return null;
+    return fetch(url, { headers: { authorization: `Bearer ${token}` } })
+      .then((r) => r.arrayBuffer())
+      .then((b) => ({ bytes: Buffer.from(b) }));
+  },
+
+  routes: [
+    POST("/webhook", async (req, { send }) => {
+      await send(
+        [
+          { type: "text", text: message.text },
+          ...message.attachments.map((a) => ({
+            type: "file" as const,
+            data: new URL(a.url),
+            mediaType: a.mediaType,
+          })),
+        ],
+        { auth, continuationToken, state },
+      );
+    }),
+  ],
+});
+```
+
+The `URL` object survives the queue boundary as a string and is reconstituted inside the workflow step. The staging pipeline calls `fetchFile(url)`: return bytes to stage the file to the sandbox, or return `null` to let the URL pass through to the model provider.
+
+The framework handles staging bytes to the sandbox, enforcing upload policy, hydrating files for the model call, and reconstituting `URL` objects after queue serialization.
+
+## What to read next
+
+- [Channels overview](./overview)
+- [Dynamic capabilities](../guides/dynamic-capabilities)
+- [Auth & route protection](../guides/auth-and-route-protection)

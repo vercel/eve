@@ -1,0 +1,82 @@
+---
+title: "Nuxt"
+description: "Run an Eve agent and a Nuxt app as one project with the eve/nuxt module."
+---
+
+The `eve/nuxt` module folds a Nuxt frontend and an Eve agent into a single project: one dev server, one Vercel deploy. The auto-imported [`useEveAgent`](./use-eve-agent-vue) composable finds the mounted routes on its own, so you skip the usual CORS headaches and URL env vars.
+
+## Register the module
+
+```ts title="nuxt.config.ts"
+export default defineNuxtConfig({
+  modules: ["eve/nuxt"],
+});
+```
+
+The module looks for an `agent/` folder in the Nuxt project root. Pass `eveRoot` when the agent lives elsewhere:
+
+```ts
+export default defineNuxtConfig({
+  modules: ["eve/nuxt"],
+  eve: {
+    eveRoot: "../my-agent",
+  },
+});
+```
+
+## Call the composable
+
+`useEveAgent` (`eve/vue`) is auto-imported, so a component can call it without an explicit import and without naming a host:
+
+```vue
+<script setup lang="ts">
+const { status, send } = useEveAgent();
+
+const isBusy = computed(() => status.value === "submitted" || status.value === "streaming");
+
+const message = ref("");
+
+async function handleSubmit() {
+  const text = message.value.trim();
+  if (!text || isBusy.value) return;
+  message.value = "";
+  await send({ message: text });
+}
+</script>
+
+<template>
+  <form @submit.prevent="handleSubmit">
+    <input v-model="message" :disabled="isBusy" />
+    <button type="submit" :disabled="isBusy">Send</button>
+  </form>
+</template>
+```
+
+Out of the box the module gives Eve a framework default channel. When you want to pick the route auth policy yourself, add `agent/channels/eve.ts` and swap `none()` for a helper like `vercelOidc()` on protected apps. See [Channels](../../channels/overview) and [Auth & route protection](../auth-and-route-protection).
+
+## Dev vs deploy topology
+
+- **Local dev.** `npm run dev` starts the Eve dev server next to `nuxt dev` and proxies the Eve routes through it. As far as the browser knows, everything is the Nuxt origin.
+- **Vercel.** A single Vercel project carries both the Nuxt app and the Eve runtime. The web app stays public; the runtime sits behind it on the same origin. Set `eveBuildCommand` when the agent needs its own build step:
+
+  ```ts
+  export default defineNuxtConfig({
+    modules: ["eve/nuxt"],
+    eve: {
+      eveBuildCommand: "npm run build:eve",
+    },
+  });
+  ```
+
+- **Non-Vercel hosts.** Point Nuxt at a separate Eve origin with `EVE_NUXT_PRODUCTION_ORIGIN`. To override the local port (it defaults to `4274`), use `EVE_NUXT_PRODUCTION_PORT`:
+
+  ```bash
+  EVE_NUXT_PRODUCTION_ORIGIN=https://agent.example.com npm run build
+  EVE_NUXT_PRODUCTION_PORT=5000 npm run build && npm run preview
+  ```
+
+## What to read next
+
+- [`useEveAgent` (Vue)](./use-eve-agent-vue): the composable API
+- [Auth & route protection](../auth-and-route-protection)
+- [Deployment](../deployment)

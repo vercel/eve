@@ -1,0 +1,59 @@
+---
+title: "Overview"
+description: "How users reach your agent: the channel contract, the base Eve HTTP channel, and authoring custom channels."
+---
+
+A channel is the edge adapter between a platform and your agent, and its job is deliberately small. It does exactly three things: normalizes platform input into a user message, owns the `continuationToken` (the resume handle for a conversation on that surface), and decides delivery (how, where, and whether a response goes back).
+
+Eve ships a base HTTP channel plus first-class platform channels, and you can author your own. Browse the full set in the [Integrations](/integrations) gallery.
+
+## Where channels live
+
+Channel files live under `agent/channels/` in the root agent. The file stem is the channel id: `agent/channels/intake.ts` is addressed as `intake`. Export the channel as the module's default export. Local subagents do not declare channels.
+
+```text
+agent/
+  agent.ts
+  channels/
+    eve.ts
+    slack.ts
+    intake.ts
+```
+
+Scaffold a channel file with `eve channels add` (interactive), or pass a kind: `eve channels add slack` or `eve channels add web`. You can also author the file by hand.
+
+## The Eve HTTP channel (default)
+
+Eve's canonical HTTP session API: the routes the terminal UI, [`useEveAgent`](../guides/frontend/overview), and `curl` all talk to. It is enabled by default, even with no `agent/channels/eve.ts` file. Add that file only to override the defaults, most often the route auth policy. See [Eve channel](./eve) for the routes, auth, and customization.
+
+## Custom channels
+
+When Eve doesn't ship a channel for your surface, build one with `defineChannel` from `eve/channels`: route handlers (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `WS`), an `events` map, and a `send` call inside a handler to start or resume a session. See [Custom channels](./custom) for the full walkthrough, including WebSocket routes, cross-channel hand-off, channel metadata, continuation tokens, and file uploads.
+
+## Relationship to the Chat SDK
+
+Eve uses the Chat SDK's **card-builder components** (Cards, Buttons, Actions, etc.) for composing rich Slack messages. When you build a card with the [Slack channel](./slack), the underlying primitives come from the Chat SDK and get converted to Slack Block Kit at post time.
+
+Eve does **not** use the Chat SDK's runtime. The `Chat`, `Adapter`, and `Thread` primitives are never imported or reachable through Eve's public API. Eve's channel layer (webhook handling, signature verification, event parsing, and thread management) is implemented inside Eve itself. In short: building Slack messages feels just like Chat SDK cards, but wiring a channel means authoring against Eve's `defineChannel(...)` API, not a Chat SDK adapter.
+
+## Which channel?
+
+| You want…                                   | Use                                                        |
+| ------------------------------------------- | ---------------------------------------------------------- |
+| A web app / browser chat UI                 | Eve channel + [`useEveAgent`](../guides/frontend/overview) |
+| Local tooling, SDK clients, `curl`          | Eve channel (default)                                      |
+| Slack mentions, DMs, buttons                | [Slack](./slack)                                           |
+| Discord slash commands, components          | [Discord](./discord)                                       |
+| Microsoft Teams messages + Adaptive Cards   | [Teams](./teams)                                           |
+| Telegram bot messages                       | [Telegram](./telegram)                                     |
+| SMS or speech-transcribed phone calls       | [Twilio](./twilio)                                         |
+| GitHub @mentions, PR review with checkout   | [GitHub](./github)                                         |
+| Linear issue delegation and Agent Sessions  | [Linear](./linear)                                         |
+| Anything else (internal webhook, WebSocket) | Custom channel (`defineChannel`, above)                    |
+
+## What to read next
+
+- [Slack](./slack): the most common platform channel, end to end
+- [Custom channels](./custom): build a channel for any surface with `defineChannel`
+- [Frontend](../guides/frontend/overview): browser chat on the Eve channel with `useEveAgent`
+- [Integrations](/integrations): browse every built-in channel and connection in one gallery

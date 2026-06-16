@@ -1,0 +1,56 @@
+{
+  "name": "eve-monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Monorepo for Eve, a filesystem-first framework for durable backend agents on Vercel.",
+  "workspaces": [
+    "apps/*",
+    "apps/*/*",
+    "e2e/fixtures/*",
+    "packages/*"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "turbo run build --filter='./packages/*'",
+    "changeset": "changeset",
+    "check:deps": "syncpack lint",
+    "dev": "node ./scripts/dev.mjs",
+    "docs:check": "node ./scripts/check-docs.mjs",
+    "fix:deps": "syncpack fix-mismatches && syncpack format",
+    "fmt": "oxfmt",
+    "guard:fixtures": "node ./scripts/guard-test-fixtures.mjs",
+    "guard:invariants": "node ./scripts/guard-invariants.mjs",
+    "lint": "oxlint --fix",
+    "prepare": "simple-git-hooks",
+    "test": "pnpm test:unit && pnpm test:integration",
+    "test:e2e": "turbo run test:e2e --concurrency=1",
+    "test:integration": "turbo run test:integration",
+    "test:scenario": "turbo run test:scenario",
+    "test:unit": "turbo run test:unit",
+    "typecheck": "turbo run typecheck",
+    "version-packages": "changeset version",
+    "release": "pnpm build && node ./scripts/assert-changeset-publish-packages.mjs && changeset publish",
+    "test:tui": "pnpm --filter eve run test:tui"
+  },
+  "devDependencies": {
+    "@changesets/cli": "2.31.0",
+    "@types/node": "catalog:",
+    "@typescript/native-preview": "catalog:",
+    "ai": "catalog:",
+    "gray-matter": "4.0.3",
+    "oxfmt": "0.52.0",
+    "oxlint": "1.67.0",
+    "simple-git-hooks": "2.13.1",
+    "syncpack": "15.3.1",
+    "turbo": "2.9.16",
+    "vercel": "54.12.2",
+    "vitest": "catalog:"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "node ./scripts/pre-commit-fmt.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@11.5.2"
+}

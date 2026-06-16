@@ -1,0 +1,24 @@
+---
+title: "Step 2: How It Runs"
+description: "Session, turn, and durable steps: what you just watched, and why it survives a crash."
+---
+
+You sent one message and got one answer. Here's the model behind that, in three words.
+
+**session** → your whole conversation (durable, can span days)
+**turn** → one message you send and the work it triggers
+**step** → a durable checkpoint within the turn
+
+Each turn runs as a durable workflow, and Eve saves progress at every step. Restart in the middle of a turn and it picks up from the last completed step, without re-running your tool calls. A turn that's waiting on you (an approval, a question) resumes whenever you answer, even if that's much later.
+
+That's why the features in the rest of this tutorial work the way they do:
+
+- The warehouse sign-in in Step 4 parks the turn until you authorize in the browser. A few minutes is fine.
+- The metric glossary in Step 6 survives across turns. State is checkpointed at step boundaries, so it sticks.
+- The spend approval in Step 8 pauses the turn on your yes/no, then picks up exactly where it left off.
+
+Your job is to author capabilities: tools, instructions, channels, skills. Eve drives the model↔tool loop and decides when a turn continues, waits, or ends. You never write that loop yourself.
+
+→ Next: [Step 3: Query sample data](./query-sample-data)
+
+Depth: [Execution model & durability](../concepts/execution-model-and-durability)

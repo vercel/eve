@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+# Queue runs instead of cancelling: aborting a run mid-`changeset publish`
+# can leave npm with only some of the packages published.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          # Full history: `changeset version` runs `git fetch --deepen` loops on
+          # shallow clones (to find the commit that added each changeset), and those
+          # in-flight packfiles crash the github-api commit (isomorphic-git
+          # "Could not read packfile .tmp-*-pack-*").
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `commitMode: github-api` commits through @changesets/ghcommit, which
+      # reads the repo with isomorphic-git. Unlike git itself, isomorphic-git
+      # tries to parse every *.pack file in .git/objects/pack — including
+      # stale temp packfiles left behind when a fetch is interrupted or
+      # retried during checkout — and fails with "Could not read packfile
+      # at … .tmp-<pid>-pack-<sha>.pack". Drop any temp packs first.
+      - name: Remove stale git temp packfiles
+        run: rm -f .git/objects/pack/.tmp-* .git/objects/pack/tmp_*
+
+      - name: Create release pull request or publish
+        uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
+        with:
+          version: pnpm version-packages
+          publish: pnpm release
+          commitMode: github-api
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

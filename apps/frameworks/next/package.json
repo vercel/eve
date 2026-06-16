@@ -1,0 +1,35 @@
+{
+  "name": "framework-next",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "pnpm --filter eve build && pnpm build:next",
+    "dev": "next dev",
+    "dev:eve": "eve dev",
+    "build:eve": "eve build",
+    "build:next": "next build",
+    "lint": "eslint",
+    "typecheck": "tsgo"
+  },
+  "dependencies": {
+    "@auth/core": "0.41.2",
+    "@vercel/connect": "catalog:",
+    "@vercel/oidc": "3.4.1",
+    "ai": "catalog:",
+    "eve": "workspace:*",
+    "next": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.0",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "eslint": "10.4.0",
+    "eslint-config-next": "16.2.6",
+    "tailwindcss": "4.3.0",
+    "typescript": "catalog:"
+  }
+}

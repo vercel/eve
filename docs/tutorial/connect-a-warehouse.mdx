@@ -1,0 +1,47 @@
+---
+title: "Step 4: Connect a Warehouse"
+description: "Let each user connect their own warehouse over an OAuth MCP via Vercel Connect."
+---
+
+The sample dataset got you running, but it's a stand-in. The next step is to point the agent at a real warehouse and let each user connect their own by signing in through their browser. That's what a connection is for: an MCP server the model reaches through tools, with auth that Eve drives for you.
+
+The filename sets the runtime name. Put the file at `agent/connections/warehouse.ts` and it registers as `"warehouse"`, with its tools surfaced as `connection__warehouse__<tool>`.
+
+## Declare the connection
+
+The warehouse exposes a generic SQL MCP behind OAuth. Pass `connect()` from `@vercel/connect/eve` as the auth, and Vercel Connect handles the OAuth flow, stores the tokens, and refreshes them for you:
+
+```ts title="agent/connections/warehouse.ts"
+import { connect } from "@vercel/connect/eve";
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.your-warehouse.example/sse",
+  description: "The team's data warehouse: run read-only SQL and list tables and columns.",
+  auth: connect("warehouse"),
+});
+```
+
+`"warehouse"` is the UID you chose when registering the Connect client. By default this OAuth is user-scoped. Each end-user authorizes in their own browser, and Eve resolves that user's token before every tool call.
+
+Connect is in private beta. Once enabled: `npm install @vercel/connect`, create the Connect client (`vercel connect create <type> --name warehouse`), link it to your project, then `vercel link` and `vercel env pull` so `VERCEL_OIDC_TOKEN` is available locally. Full setup: [Connections](../connections).
+
+## What the user sees
+
+Ask a question that needs the warehouse:
+
+```text
+How many enterprise customers signed up last month?
+```
+
+The first time around, the model picks a warehouse tool but there's no token yet. So the turn parks and the channel shows a “Sign in” affordance. You authorize in the browser, and once the OAuth callback completes, the turn resumes from exactly that step (the durable parking from [Step 2](./how-it-runs)) and the query runs. Later calls in the session reuse the cached per-user token, so there's no prompt.
+
+## The token never reaches the model
+
+Right before each request to the MCP server, Eve resolves the bearer and sends it as `Authorization: Bearer <token>`. The model only ever sees tool names, descriptions, and results. The credential stays out of its reach.
+
+If you want more control, gate the connection behind approval (`approval: once()`) or narrow which tools the model sees (`tools.allow`). See [Connections](../connections).
+
+→ Next: [Step 5: Run analysis](./run-analysis)
+
+Depth: [Connections](../connections) · [Auth & route protection](../guides/auth-and-route-protection)

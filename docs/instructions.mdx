@@ -1,0 +1,58 @@
+---
+title: "Instructions"
+description: "Author the agent's always-on system prompt with instructions.md or instructions.ts."
+---
+
+Instructions are the always-on system prompt. Use them for whatever should hold on every turn: a rule, a persona, a constraint. This is the agent's permanent identity, not a procedure it pulls in when the moment calls for it.
+
+Eve prepends the instructions to every model call in the session.
+
+## Author instructions
+
+In the simplest case, instructions are a markdown file at the agent root. Whatever you write is the prompt.
+
+```md title="agent/instructions.md"
+You are a concise assistant. Use tools when they are available.
+```
+
+Keep this file to stable behavior that applies on every turn: identity, tone, standing rules.
+
+## Markdown vs TypeScript
+
+A static prompt belongs in markdown (`agent/instructions.md`). Switch to a TypeScript module (`agent/instructions.ts`) once you need to build the prompt from typed helpers, `lib/` code, or build-time values.
+
+```ts title="agent/instructions.ts"
+import { defineInstructions } from "eve/instructions";
+import { buildInstructionsPrompt } from "./lib/prompts.js";
+
+export default defineInstructions({
+  markdown: buildInstructionsPrompt(),
+});
+```
+
+`defineInstructions` takes one field, `markdown`, which is the resolved prompt text. A module-backed prompt runs once at build time. Eve captures the resulting markdown into the compiled manifest, so the runtime serves the same prompt every session and never re-runs the module.
+
+Got more than one file? An `agent/instructions/` directory works too. Use either `instructions.md` or `instructions.ts` at the agent root, not both.
+
+## How it differs from skills
+
+Instructions and [skills](./skills) both feed text into the model's context. The difference is timing:
+
+|                           | Loaded                                       | Use for                                              |
+| ------------------------- | -------------------------------------------- | ---------------------------------------------------- |
+| `instructions.md` / `.ts` | Always on, every turn                        | Permanent identity and standing rules                |
+| `agent/skills/*`          | On demand, when the model calls `load_skill` | Optional procedures that should not bloat every turn |
+
+Keep instructions short and stable. Long or situational procedures belong in skills, where they only enter context when the request calls for them. See [Skills](./skills).
+
+Instructions never run code. When you need typed executable behavior, reach for a [tool](./tools).
+
+## Dynamic instructions
+
+Need the prompt resolved at runtime from session context (auth, tenant, channel)? Wrap `defineInstructions` in a `defineDynamic` resolver. See [Dynamic capabilities](./guides/dynamic-capabilities).
+
+## What to read next
+
+- [Tools](./tools): typed actions, the next capability to add
+- [Context control](./concepts/context-control): all the levers for what the model sees
+- [Skills](./skills): on-demand procedures, the counterpart to always-on instructions

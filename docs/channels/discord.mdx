@@ -1,0 +1,74 @@
+---
+title: "Discord"
+description: "Reach your agent from Discord HTTP Interactions: slash commands, components, and modals."
+type: integration
+---
+
+The Discord channel wires your agent into Discord's HTTP Interactions: slash and application commands, message components, and modal submissions. The hard part Discord forces on you is the three-second ACK deadline, so the channel verifies the Ed25519 signature headers, acknowledges the command right away, and runs the actual Eve work in the background. See [Channels](./overview) for the contract this builds on.
+
+## Add the channel
+
+```ts title="agent/channels/discord.ts"
+import { discordChannel } from "eve/channels/discord";
+
+export default discordChannel();
+```
+
+```bash
+DISCORD_PUBLIC_KEY=...      # verifies X-Signature-Ed25519 + X-Signature-Timestamp
+DISCORD_APPLICATION_ID=...  # edits the deferred response and sends followups
+DISCORD_BOT_TOKEN=...       # proactive messages + fallback + typing indicators
+```
+
+If you'd rather not use env vars, pass the same values through `credentials: { applicationId, botToken, publicKey }`. The route is `POST /eve/v1/discord` by default. Paste that public URL into your Discord application's Interactions Endpoint URL.
+
+## Register a command
+
+Registering commands is on you, not the channel. Use Discord's API or the Developer Portal. If you give the command a string option named `message`, it lines up with Eve's default prompt extraction:
+
+```bash
+curl -X PUT "https://discord.com/api/v10/applications/$DISCORD_APPLICATION_ID/commands" \
+  -H "Authorization: Bot $DISCORD_BOT_TOKEN" -H "Content-Type: application/json" \
+  -d '[{"name":"ask","description":"Ask the Eve agent","type":1,
+    "options":[{"name":"message","description":"What should the agent do?","type":3,"required":true}]}]'
+```
+
+Use guild commands during development for faster propagation.
+
+## Affordances
+
+`onCommand(ctx, interaction)` is where you decide whether to dispatch and under what `auth`. Return `{ auth }` to proceed or `null` to drop the interaction. Out of the box, auth comes from the invoking user.
+
+```ts
+import { discordChannel } from "eve/channels/discord";
+
+export default discordChannel({
+  onCommand: (ctx, interaction) => ({
+    auth: {
+      principalId: interaction.user.id,
+      principalType: "user",
+      authenticator: "discord",
+      attributes: { channel_id: interaction.channelId, guild_id: interaction.guildId ?? "" },
+    },
+  }),
+  events: {
+    "message.completed"(event, ctx) {
+      if (event.finishReason === "tool-calls") return;
+      if (event.message) ctx.discord.post(event.message);
+    },
+  },
+});
+```
+
+**Delivery.** The default `message.completed` handler edits the deferred response for the first reply and sends followups after that. If the interaction token gets rejected, it falls back to a bot-authenticated channel message. Long text is split to Discord's 2000-char limit, and generated messages default to `allowed_mentions: { parse: [] }`.
+
+**Typing** fires on `turn.started` and `actions.requested`, but only when a bot token is present. In custom hooks, call `ctx.discord.startTyping()` yourself.
+
+**HITL** shows up as Discord components. Confirmations and options become buttons, `display: "select"` becomes a string select, and freeform input becomes a button that opens a modal. When the user responds, the parked session resumes on its own.
+
+**Proactive sessions** go through `receive(discord, { message, target, auth })` from a schedule `run` handler, or `args.receive(discord, ...)` from another channel. Either way you need `DISCORD_BOT_TOKEN`.
+
+## What to read next
+
+- [Channels overview](./overview): the channel contract and every built-in channel
+- [Auth & route protection](../guides/auth-and-route-protection): authenticating inbound traffic

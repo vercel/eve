@@ -1,0 +1,4 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "tmp=\"$(mktemp -d)\" && pnpm --filter ../../packages/eve pack --pack-destination \"$tmp\" && mkdir -p public && cp \"$tmp\"/eve-*.tgz public/eve.tgz && pnpm build"
+}

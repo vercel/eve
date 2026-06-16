@@ -1,0 +1,72 @@
+---
+title: "Step 6: Remember Definitions"
+description: "Use defineState to remember the team's metric glossary across turns."
+---
+
+Every team has house definitions. “Active” means a purchase in the last 30 days, revenue is net of refunds, a “week” starts Monday. Re-explaining all of that on every turn is a waste. State gives the agent a place to keep it.
+
+`defineState(name, initial)` creates a typed, named slot that survives across step and turn boundaries within a session. You read it with `get()` and change it with `update()`.
+
+## Define the glossary slot
+
+```ts title="agent/lib/glossary.ts"
+import { defineState } from "eve/context";
+
+export interface Glossary {
+  readonly terms: Readonly<Record<string, string>>;
+}
+
+export const glossary = defineState<Glossary>("analytics.glossary", () => ({
+  terms: {},
+}));
+```
+
+## Tools to read and write it
+
+```ts title="agent/tools/define_metric.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+import { glossary } from "../lib/glossary.js";
+
+export default defineTool({
+  description: "Record the team's definition of a metric so it persists across turns.",
+  inputSchema: z.object({ term: z.string(), meaning: z.string() }),
+  async execute({ term, meaning }) {
+    glossary.update((g) => ({ terms: { ...g.terms, [term]: meaning } }));
+    return glossary.get();
+  },
+});
+```
+
+```ts title="agent/tools/recall_metrics.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+import { glossary } from "../lib/glossary.js";
+
+export default defineTool({
+  description: "Read the team's recorded metric definitions.",
+  inputSchema: z.object({}),
+  async execute() {
+    return glossary.get();
+  },
+});
+```
+
+## See it persist
+
+```text
+> For us, an active customer is one with a purchase in the last 30 days.
+  Remember that.
+  → calls define_metric("active customer", "purchase in the last 30 days")
+
+> How many active customers do we have?
+  → recalls the definition, writes the matching SQL, answers
+```
+
+The second turn is a separate turn in the same session, yet the definition is still there. State checkpoints at step boundaries, so it's the same durability from [Step 2](./how-it-runs), now applied to your own data.
+
+State is scoped to a session and isolated per agent, so a subagent starts with fresh state and never sees the parent's. Need to reset something each turn? Call `update(() => fresh)` in a lifecycle hook. More in [State](../guides/state).
+
+→ Next: [Step 7: Team playbooks](./team-playbooks)
+
+Depth: [State](../guides/state)

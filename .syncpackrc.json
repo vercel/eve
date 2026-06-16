@@ -1,0 +1,56 @@
+{
+  "$schema": "./node_modules/syncpack/schema.json",
+  "source": [
+    "package.json",
+    "packages/*/package.json",
+    "apps/*/package.json",
+    "!**/dist/**",
+    "!**/templates/**"
+  ],
+  "versionGroups": [
+    {
+      "label": "docs intentionally pins its own ai / @ai-sdk/react versions",
+      "dependencies": ["ai", "@ai-sdk/react"],
+      "packages": ["eve-docs"],
+      "isIgnored": true
+    },
+    {
+      "label": "Workspace packages must use the workspace: protocol",
+      "dependencies": ["eve-*", "eve"],
+      "dependencyTypes": ["dev", "prod", "peer"],
+      "pinVersion": "workspace:*"
+    },
+    {
+      "label": "eve host peer ranges are intentionally broad",
+      "dependencies": ["next", "react"],
+      "packages": ["eve"],
+      "dependencyTypes": ["peer"],
+      "isIgnored": true
+    },
+    {
+      "label": "Shared third-party deps must use the catalog: protocol",
+      "policy": "catalog",
+      "dependencies": [
+        "@ai-sdk/**",
+        "@types/node",
+        "@typescript/native-preview",
+        "ai",
+        "next",
+        "@types/react",
+        "@types/react-dom",
+        "picocolors",
+        "react",
+        "react-dom",
+        "streamdown",
+        "vitest",
+        "zod"
+      ],
+      "dependencyTypes": ["dev", "prod", "peer"]
+    },
+    {
+      "label": "Other dependencies are not enforced",
+      "dependencies": ["**"],
+      "isIgnored": true
+    }
+  ]
+}

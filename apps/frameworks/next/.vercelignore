@@ -1,0 +1,10 @@
+.output
+.swc
+.eve
+.turbo
+.agents
+.github
+.workflow-data
+dist
+research
+node_modules

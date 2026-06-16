@@ -1,0 +1,64 @@
+name: Bug report
+description: Report a reproducible bug in Eve.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Please fill out the sections below so we can reproduce and fix the issue quickly.
+  - type: input
+    id: eve-version
+    attributes:
+      label: Eve version
+      description: Output of `npm ls eve` in your project (or the version from your lockfile).
+      placeholder: "eve@0.7.0"
+    validations:
+      required: true
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version
+      description: Output of `node --version`.
+      placeholder: "v24.x.x"
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Where does the bug occur?
+      multiple: true
+      options:
+        - Local dev (`eve dev`)
+        - Build (`eve build`)
+        - Production (`eve start` / deployed)
+        - Scaffolding (`eve init`)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what the bug is, including any error output.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: |
+        A minimal reproduction helps us fix the issue much faster. Link a repository if possible, or list the exact steps (agent directory layout, commands run, etc.).
+      placeholder: |
+        1. `npx eve@latest init my-agent`
+        2. Add a tool at `agent/tools/...`
+        3. Run `eve dev`
+        4. See error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen instead.
+    validations:
+      required: true

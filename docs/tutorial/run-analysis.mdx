@@ -1,0 +1,86 @@
+---
+title: "Step 5: Run Analysis"
+description: "Seed the warehouse schema into the sandbox workspace, then compute and chart beyond SQL."
+---
+
+SQL tells you the numbers, but a cohort curve, a forecast, or a chart needs real computation. That's what the sandbox is for: an isolated bash environment with a `/workspace` filesystem. Every agent gets exactly one.
+
+There are two pieces. First seed reference files the model can read, then compute against them.
+
+## Seed the schema into the workspace
+
+Mount the warehouse schema into the sandbox so the model isn't guessing at table shapes. Seeding uses the folder sandbox layout: anything under `agent/sandbox/workspace/` lands in the live `/workspace` cwd at session bootstrap.
+
+```text
+agent/sandbox/
+  workspace/
+    schema.sql        ← lands at /workspace/schema.sql
+    notes/grain.md    ← lands at /workspace/notes/grain.md
+```
+
+```sql
+-- agent/sandbox/workspace/schema.sql
+-- Reference only: table shapes the analyst can read before writing queries.
+CREATE TABLE orders     (id INT, customer_id INT, amount_cents INT, created_at DATE);
+CREATE TABLE customers  (id INT, name TEXT, plan TEXT, signed_up_at DATE);
+```
+
+Top-level workspace entries get advertised to the model automatically, so it knows `schema.sql` is there to read. No `agent/sandbox/sandbox.ts` required. A `workspace/` folder keeps the default sandbox and just seeds your files into it.
+
+## Compute and chart in the sandbox
+
+The built-in `bash`, `read_file`, and `write_file` tools already target the sandbox. When you write your own analysis steps, grab a live handle with `ctx.getSandbox()`:
+
+```ts title="agent/tools/chart_series.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineTool({
+  description:
+    "Plot a time series to a PNG in the workspace. Pass {date, value} points; " +
+    "returns the chart path.",
+  inputSchema: z.object({
+    title: z.string(),
+    points: z.array(z.object({ date: z.string(), value: z.number() })),
+  }),
+  async execute({ title, points }, ctx) {
+    const sandbox = await ctx.getSandbox();
+    await sandbox.writeTextFile({
+      path: "analysis/series.json",
+      content: JSON.stringify({ title, points }),
+    });
+    await sandbox.writeTextFile({
+      path: "analysis/plot.py",
+      content: [
+        "import json, matplotlib",
+        "matplotlib.use('Agg')",
+        "import matplotlib.pyplot as plt",
+        "d = json.load(open('series.json'))",
+        "plt.plot([p['date'] for p in d['points']], [p['value'] for p in d['points']])",
+        "plt.title(d['title']); plt.savefig('chart.png')",
+      ].join("\n"),
+    });
+    const root = sandbox.resolvePath("analysis");
+    await sandbox.run({ command: `cd ${JSON.stringify(root)} && python plot.py` });
+    return { chart: `${root}/chart.png` };
+  },
+});
+```
+
+Now ask for something past plain SQL:
+
+```text
+Plot weekly revenue for the last 8 weeks.
+```
+
+The model queries the warehouse (Step 4) for the numbers, checks `schema.sql` to get the grain right, then calls `chart_series` to render the PNG in `/workspace`.
+
+## Secrets stay out of the sandbox
+
+The sandbox has no `process.env` and no access to your app's secrets. Your warehouse token lives in the app runtime, and firewall brokering is the only path it takes to the warehouse host. It never enters the sandbox process.
+
+The local backend runs the sandbox on your laptop during `eve dev`; on Vercel it runs on Vercel Sandbox. Lifecycle, backends, and network policy are in [Sandbox](../sandbox).
+
+→ Next: [Step 6: Remember definitions](./remember-definitions)
+
+Depth: [Sandbox](../sandbox)

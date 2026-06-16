@@ -1,0 +1,187 @@
+import { Buffer } from "node:buffer";
+import { setTimeout as sleep } from "node:timers/promises";
+
+import { Client } from "eve/client";
+import { EveTUIRunner, MockScreen, MockUserInput } from "./lib/tui.ts";
+
+import { run } from "./lib/run.ts";
+import { theme } from "./lib/theme.ts";
+
+/**
+ * Multi-message subagent smoke driving `apps/fixtures/weather-fixture` and its
+ * `stock-price` subagent. The subagent emits a pre-tool message
+ * ("I'll look up..."), calls `get_stock_price` (which has
+ * `needsApproval: () => true`), and then emits a post-tool message
+ * with the result. This is the real-world flow that broke the earlier
+ * stepIndex-keyed implementation, both pre and post messages were
+ * landing under `stepIndex: 0` and collapsing into one box.
+ *
+ * Pass conditions:
+ *   1. A `◆ stock-price subagent` region header exists.
+ *   2. The child's `get_stock_price` tool row renders nested inside the
+ *      subagent's `│` rule gutter (proves the child tool surfaces under
+ *      the subagent flow).
+ *   3. NO parent-level `get_stock_price` tool row exists (proves the
+ *      parent-tool suppression for child tool calls removes the stale
+ *      block, not just blocks future renders).
+ *   4. The price (178.92) appears inside the nested subagent region.
+ *   5. The parent's final assistant reply (a top-level `▲` section)
+ *      also contains the price.
+ */
+
+const TICKER = "GOOG";
+const PRICE = "178.92";
+process.env.EVE_TUI_UNICODE = "1";
+
+run({ app: "weather-fixture", kind: "local-build" }, async (target) => {
+  const client = new Client({ host: target.baseUrl });
+  const session = client.session();
+  const screen = new MockScreen({ columns: 140, rows: 60 });
+  const input = new MockUserInput();
+  const runner = new EveTUIRunner({
+    session,
+    client,
+    screen,
+    userInput: input,
+    name: "Weather subagent smoke",
+  });
+
+  const runPromise = runner.run().catch((error: unknown) => {
+    if (error instanceof Error && error.message === "Interrupted") {
+      return;
+    }
+    throw error;
+  });
+
+  await screen.waitForText("❯", 5_000);
+
+  // Delegate explicitly. An implicit prompt ("what is the value of GOOG?")
+  // leaves the choice to the model, which may answer directly instead of
+  // delegating; naming the subagent keeps the flow this smoke exercises
+  // deterministic. The price itself is fixed by the subagent's fixture tool.
+  input.type(
+    `Use the stock-price subagent with message 'Call the get_stock_price tool with ticker "${TICKER}".'. When it finishes, include the exact stock price in your reply.`,
+  );
+  input.enter();
+
+  // The subagent region header should appear once the parent delegates.
+  await waitForCondition(() => screen.snapshot().includes("stock-price subagent"), {
+    timeoutMs: 120_000,
+    label: "subagent region header",
+    onTimeout: () => screen.snapshot(),
+  });
+  console.log(theme.muted("[tui-weather] subagent region header appeared"));
+
+  // Approve the get_stock_price tool when prompted. The TUI parks on a
+  // y/n approval prompt, match the question smoke's handshake delay
+  // so the server's resume hook is registered before we reply.
+  await waitForCondition(
+    () =>
+      screen.snapshot().includes("Approve get_stock_price?") ||
+      screen.snapshot().includes("Approve get stock price?"),
+    {
+      timeoutMs: 120_000,
+      label: "approval prompt for get_stock_price",
+      onTimeout: () => screen.snapshot(),
+    },
+  );
+  await sleep(500);
+  input.emit("data", Buffer.from("y"));
+  console.log(theme.muted("[tui-weather] approved get_stock_price"));
+
+  // Price should appear in the body once the child unblocks.
+  await waitForCondition(() => screen.snapshot().includes(PRICE), {
+    timeoutMs: 120_000,
+    label: `price ${PRICE} renders in the body`,
+    onTimeout: () => screen.snapshot(),
+  });
+  console.log(theme.muted(`[tui-weather] price ${PRICE} landed in body`));
+
+  // The child's tool row renders nested inside the subagent's `│`
+  // rule gutter — the line carries both the rule glyph and the tool name.
+  await waitForCondition(() => /│.*get_stock_price/u.test(screen.snapshot()), {
+    timeoutMs: 60_000,
+    label: "nested subagent tool row",
+  });
+  console.log(theme.muted("[tui-weather] nested subagent tool row rendered"));
+
+  // The price must render inside the nested subagent region (tool result
+  // or post-tool message), proving child output reaches the parent TUI.
+  await waitForCondition(
+    () =>
+      screen
+        .snapshot()
+        .split("\n")
+        .some((line) => line.includes("│") && line.includes(PRICE)),
+    {
+      timeoutMs: 120_000,
+      label: `price ${PRICE} inside the nested subagent region`,
+      onTimeout: () => screen.snapshot(),
+    },
+  );
+  console.log(theme.muted("[tui-weather] price rendered inside the subagent region"));
+
+  // Wait for the parent's follow-up assistant section (top-level `▲`
+  // prose, not nested under the rule gutter) to echo the price.
+  await waitForCondition(() => assistantSectionContains(screen.snapshot(), PRICE), {
+    timeoutMs: 120_000,
+    label: "parent assistant reply with price",
+    onTimeout: () => screen.snapshot(),
+  });
+
+  const finalSnapshot = screen.snapshot();
+
+  // No parent-level tool row for the child's call should remain: a tool
+  // row at the parent level starts with a status glyph at column 0
+  // (e.g. `✓ get_stock_price`), while the legitimate one is prefixed by
+  // the subagent's `│` rule. Assistant prose lines start with `▲ ` or
+  // indentation, so they cannot false-positive here.
+  const parentToolRowRegex = /^[^\s│▲▌] get_stock_price/mu;
+  if (parentToolRowRegex.test(finalSnapshot)) {
+    throw new Error(
+      `Final screen still contains a parent-level tool row for the child's get_stock_price call. The nested subagent region should be the only place it appears.\n\n${finalSnapshot}`,
+    );
+  }
+  console.log(theme.muted("[tui-weather] no stale parent-level get_stock_price tool row"));
+
+  if (finalSnapshot.includes("Error")) {
+    throw new Error(`Final screen contains an Error section:\n${finalSnapshot}`);
+  }
+
+  input.ctrlC();
+  await runPromise;
+});
+
+/**
+ * True when a top-level assistant section (a `▲ `-prefixed line and its
+ * two-space-indented continuations) contains `needle`.
+ */
+function assistantSectionContains(snapshot: string, needle: string): boolean {
+  const lines = snapshot.split("\n");
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line === undefined || !line.startsWith("▲ ")) continue;
+    let body = line.slice(2);
+    for (let next = index + 1; next < lines.length; next += 1) {
+      const continuation = lines[next];
+      if (continuation === undefined || !continuation.startsWith("  ")) break;
+      body += `\n${continuation}`;
+    }
+    if (body.includes(needle)) return true;
+  }
+  return false;
+}
+
+async function waitForCondition(
+  predicate: () => boolean,
+  options: { timeoutMs: number; label: string; intervalMs?: number; onTimeout?: () => string },
+): Promise<void> {
+  const intervalMs = options.intervalMs ?? 100;
+  const deadline = Date.now() + options.timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await sleep(intervalMs);
+  }
+  const extra = options.onTimeout?.() ?? "";
+  throw new Error(`Timed out waiting for: ${options.label}${extra ? `\n\n${extra}` : ""}`);
+}

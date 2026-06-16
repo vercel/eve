@@ -1,0 +1,82 @@
+---
+title: "Eve"
+description: "The default HTTP API for an agent: session routes, auth, and customization."
+---
+
+The Eve channel is the framework's default HTTP API. It's what the terminal UI, [`useEveAgent`](../guides/frontend/overview), `curl`, and any SDK client talk to when they start sessions, send messages, and stream events. `eveChannel()` mounts the canonical session routes under `/eve/v1/session*`, and they are enabled by default even when `agent/channels/eve.ts` does not exist.
+
+Reach for it when something needs HTTP access to your agent: local tooling, a browser frontend, the terminal UI, or another API client. Most apps never write this file. Add `agent/channels/eve.ts` only to override the defaults, usually the route auth policy:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel } from "eve/channels/eve";
+import { localDev, vercelOidc } from "eve/channels/auth";
+
+export default eveChannel({
+  auth: [localDev(), vercelOidc()],
+});
+```
+
+## Routes
+
+The channel exposes the routes that create sessions, send follow-ups, and stream events:
+
+- `GET /eve/v1/health`
+- `POST /eve/v1/session` (start a session)
+- `POST /eve/v1/session/:sessionId` (send a follow-up)
+- `GET /eve/v1/session/:sessionId/stream` (stream events, NDJSON)
+
+See [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming) for the request and stream flow.
+
+## Authentication
+
+The `auth` option decides who can call these routes. The built-in helpers are meant for development and trusted infrastructure:
+
+- `localDev()` accepts requests during local development.
+- `vercelOidc()` lets the local CLI reach a deployed agent, and lets other internal deployments from your team call it.
+
+Neither admits browser users or external clients in production. For a public app, wire the channel to your own auth (Clerk, Auth.js, or your own OIDC/JWT verification).
+
+`eve init` scaffolds an `agent/channels/eve.ts` with a production placeholder so you replace it before going live. The generated channel allows Vercel OIDC and localhost, and includes `placeholderAuth()`, which returns a setup-focused 401 in production until you swap it for real auth. Delete the file and Eve falls back to `[localDev(), vercelOidc()]`, which still does not admit browser users in production.
+
+For the full auth model and helper list, see [Auth & route protection](../guides/auth-and-route-protection).
+
+## Customization
+
+Use `onMessage` to add request-specific context before the agent sees the user message, and `events` to observe stream events from sessions this channel created:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel, defaultEveAuth } from "eve/channels/eve";
+import { localDev, vercelOidc } from "eve/channels/auth";
+
+export default eveChannel({
+  auth: [localDev(), vercelOidc()],
+  onMessage(ctx, message) {
+    const callerId = ctx.eve.caller?.principalId ?? "anonymous";
+    return {
+      auth: defaultEveAuth(ctx),
+      context: [`HTTP caller ${callerId} sent: ${message}`],
+    };
+  },
+  events: {
+    "message.completed"(event, channel, ctx) {
+      console.log("Eve response completed", {
+        continuationToken: channel.continuationToken,
+        sessionId: ctx.session.id,
+      });
+    },
+  },
+});
+```
+
+## Clients
+
+The browser side of this API lives in the [Frontend](../guides/frontend/overview) docs, where `useEveAgent` drives the Eve channel from React UI.
+
+For scripts, server-to-server calls, evals, tests, and custom clients, use the [TypeScript SDK](../guides/client/overview). It wraps the session routes, continuation token, stream cursor, and reconnect loop.
+
+## What to read next
+
+- [Frontend](../guides/frontend/overview): drive the Eve channel from browser UI with `useEveAgent`
+- [TypeScript SDK](../guides/client/overview): call the Eve channel from TypeScript
+- [Auth & route protection](../guides/auth-and-route-protection): the route auth policy
+- [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming): the routes this channel exposes

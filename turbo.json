@@ -1,0 +1,152 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "envMode": "strict",
+  "globalDependencies": [".nvmrc", "pnpm-workspace.yaml", "tsconfig.json"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "env": ["VERCEL"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!.eve/**",
+        "!.next/**",
+        "!.nuxt/**",
+        "!.output/**",
+        "!.svelte-kit/**",
+        "!.turbo/**",
+        "!.workflow-data/**",
+        "!node_modules/**"
+      ],
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**", ".output/**", ".vercel/output/**"]
+    },
+    "build:types": {
+      "dependsOn": ["^build:types"],
+      "inputs": [
+        "**/*.ts",
+        "**/*.tsx",
+        "**/*.cts",
+        "**/*.mts",
+        "**/*.d.ts",
+        "tsconfig*.json",
+        "package.json",
+        "!.eve/**",
+        "!.next/**",
+        "!.nuxt/**",
+        "!.output/**",
+        "!.svelte-kit/**",
+        "!.turbo/**",
+        "!.workflow-data/**",
+        "!node_modules/**"
+      ],
+      "outputs": ["dist/**/*.d.ts", "dist/**/*.d.ts.map"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "test": {
+      "cache": false,
+      "env": ["EVE_EXPERIMENTAL_CODE_MODE"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!.eve/**",
+        "!.next/**",
+        "!.nuxt/**",
+        "!.output/**",
+        "!.svelte-kit/**",
+        "!.turbo/**",
+        "!.workflow-data/**",
+        "!node_modules/**"
+      ],
+      "outputs": []
+    },
+    "test:e2e": {
+      "cache": false,
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!.eve/**",
+        "!.next/**",
+        "!.nuxt/**",
+        "!.output/**",
+        "!.svelte-kit/**",
+        "!.turbo/**",
+        "!.workflow-data/**",
+        "!node_modules/**"
+      ],
+      "outputs": []
+    },
+    "test:integration": {
+      "cache": false,
+      "env": ["EVE_EXPERIMENTAL_CODE_MODE"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!.eve/**",
+        "!.next/**",
+        "!.nuxt/**",
+        "!.output/**",
+        "!.svelte-kit/**",
+        "!.turbo/**",
+        "!.workflow-data/**",
+        "!node_modules/**"
+      ],
+      "outputs": []
+    },
+    "test:scenario": {
+      "cache": false,
+      "env": ["EVE_EXPERIMENTAL_CODE_MODE"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!.eve/**",
+        "!.next/**",
+        "!.nuxt/**",
+        "!.output/**",
+        "!.svelte-kit/**",
+        "!.turbo/**",
+        "!.workflow-data/**",
+        "!node_modules/**"
+      ],
+      "outputs": []
+    },
+    "test:unit": {
+      "cache": false,
+      "env": ["EVE_EXPERIMENTAL_CODE_MODE"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!.eve/**",
+        "!.next/**",
+        "!.nuxt/**",
+        "!.output/**",
+        "!.svelte-kit/**",
+        "!.turbo/**",
+        "!.workflow-data/**",
+        "!node_modules/**"
+      ],
+      "outputs": []
+    },
+    "typecheck": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "**/*.ts",
+        "**/*.tsx",
+        "**/*.cts",
+        "**/*.mts",
+        "**/*.d.ts",
+        "**/*.js",
+        "**/*.mjs",
+        "**/*.cjs",
+        "**/*.jsx",
+        "tsconfig*.json",
+        "package.json",
+        "!.eve/**",
+        "!.next/**",
+        "!.nuxt/**",
+        "!.output/**",
+        "!.svelte-kit/**",
+        "!.turbo/**",
+        "!.workflow-data/**",
+        "!node_modules/**"
+      ],
+      "outputs": []
+    }
+  }
+}

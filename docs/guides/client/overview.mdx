@@ -1,0 +1,116 @@
+---
+title: "Overview"
+description: "Call an Eve agent from TypeScript with Client, sessions, auth, and health checks."
+---
+
+The `eve/client` entrypoint is the typed client for Eve's default HTTP API. Use it from scripts, server-to-server integrations, tests, evals, backend jobs, or custom UIs that want the session protocol without hand-writing the POST and NDJSON stream loop.
+
+For browser chat UIs, start with [`useEveAgent`](../frontend/overview). For wire-level details, read [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming). The client sits between those two: lower level than the frontend hooks, higher level than raw HTTP.
+
+## Create a client
+
+A `Client` binds one host, auth policy, header policy, and stream reconnection budget:
+
+```ts
+import { Client } from "eve/client";
+
+const client = new Client({
+  host: "http://127.0.0.1:3000",
+});
+```
+
+`host` is the origin where the Eve routes are mounted. In a same-origin browser integration this is often `""`, but scripts and backend services usually name the full URL.
+
+## Check health
+
+Use `health()` when a script needs to fail early before creating a session:
+
+```ts
+const health = await client.health();
+console.log(health.status, health.workflowId);
+```
+
+Non-2xx responses throw `ClientError`, which carries the HTTP `status` and response `body`.
+
+## Authentication
+
+Pass `auth` when the [Eve channel](../../channels/eve) route requires credentials:
+
+```ts
+const client = new Client({
+  host: "https://agent.example.com",
+  auth: {
+    bearer: async () => await getAccessToken(),
+  },
+});
+```
+
+Bearer values and Basic auth passwords can be strings or functions. Functions run before every HTTP call, including stream reconnects:
+
+```ts
+const client = new Client({
+  host: "https://agent.example.com",
+  auth: {
+    basic: {
+      username: "agent-client",
+      password: async () => await getRotatingSecret(),
+    },
+  },
+});
+```
+
+Use `headers` for route-specific credentials such as bypass tokens or tenant hints. Like `auth`, it can be static or dynamic:
+
+```ts
+const client = new Client({
+  host: "https://agent.example.com",
+  headers: async () => ({
+    "x-vercel-protection-bypass": await getBypassToken(),
+  }),
+});
+```
+
+Per-request headers can be attached to an individual turn:
+
+```ts
+const response = await session.send({
+  message: "Run the check.",
+  headers: { "x-request-id": requestId },
+});
+
+await response.result();
+```
+
+## Sessions
+
+Create a `ClientSession` for each conversation:
+
+```ts
+const session = client.session();
+```
+
+A client can own many sessions at once. Each session tracks its own `sessionId`, `continuationToken`, and stream cursor:
+
+```ts
+const alice = client.session();
+const bob = client.session();
+
+const aliceResponse = await alice.send("Summarize account A.");
+await aliceResponse.result();
+
+const bobResponse = await bob.send("Summarize account B.");
+await bobResponse.result();
+```
+
+The next pages cover the session lifecycle:
+
+- [Messages](./messages): send turns and collect results
+- [Continuations](./continuations): persist and resume sessions
+- [Streaming](./streaming): render events as they arrive
+- [Output schema](./output-schema): request structured results
+
+## What to read next
+
+- [Eve channel](../../channels/eve): the HTTP API this client calls
+- [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming): the raw HTTP contract
+- [Frontend](../frontend/overview): browser UI with `useEveAgent`
