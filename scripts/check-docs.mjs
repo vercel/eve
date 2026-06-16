@@ -90,6 +90,7 @@ function collectNavReferences(rootDir) {
           continue;
         }
         if (entry === "---") continue;
+        if (/^---.+---$/.test(entry)) continue; // labeled separator: ---Group name---
         if (entry.startsWith("[")) continue; // [Title](url) custom link
         const slug = entry.startsWith("!") ? entry.slice(1) : entry;
         const key = relDir ? `${relDir}/${slug}` : slug;
@@ -178,6 +179,61 @@ for (const root of ROOTS) {
     }
   }
 }
+
+// 3. Internal links resolve. Every relative (./ ../) or site-absolute (/docs/)
+//    markdown link in a doc page must point at a real doc page or folder.
+//    fumadocs renders broken links as dead clicks; CI should catch them.
+function checkLinks(rootDir) {
+  const files = walkMarkdown(rootDir);
+  const slugs = new Set();
+  const dirs = new Set();
+  for (const abs of files) {
+    const rel = relative(rootDir, abs).split("\\").join("/");
+    slugs.add(rel.replace(/\.mdx?$/, ""));
+    let d = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
+    while (d) {
+      dirs.add(d);
+      d = d.includes("/") ? d.slice(0, d.lastIndexOf("/")) : "";
+    }
+  }
+  const linkRe = /\]\((\s*[^)]+?)\s*\)/g;
+  for (const abs of files) {
+    const rel = relative(rootDir, abs).split("\\").join("/");
+    if (isExcluded(rel)) continue;
+    const dirOfFile = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
+    const source = readFileSync(abs, "utf8");
+    let m;
+    while ((m = linkRe.exec(source)) !== null) {
+      let target = m[1].trim();
+      if (!target) continue;
+      // Only validate doc-internal links.
+      const isRel = target.startsWith("./") || target.startsWith("../");
+      const isSite = target.startsWith("/docs/") || target === "/docs";
+      if (!isRel && !isSite) continue; // external, mailto, #anchor, bare /eve/* runtime route, etc.
+      target = target.split("#")[0].split("?")[0];
+      if (!target) continue; // pure in-page anchor
+      let resolvedSlug;
+      if (isSite) {
+        resolvedSlug = target.replace(/^\/docs\/?/, "");
+      } else {
+        const base = dirOfFile ? `${rootDir}/${dirOfFile}` : rootDir;
+        resolvedSlug = relative(rootDir, resolve(base, target)).split("\\").join("/");
+      }
+      resolvedSlug = resolvedSlug.replace(/\/$/, "").replace(/\.mdx?$/, "");
+      if (resolvedSlug === "" || resolvedSlug === ".") continue; // docs root / index
+      if (slugs.has(resolvedSlug)) continue;
+      if (slugs.has(`${resolvedSlug}/index`)) continue;
+      if (dirs.has(resolvedSlug)) continue; // folder link (sidebar group)
+      failures.push({
+        root: "docs",
+        file: rel,
+        issue: `broken internal link → \`${m[1].trim()}\` (resolves to \`${resolvedSlug}\`, no such page)`,
+      });
+    }
+  }
+}
+
+checkLinks(ROOTS[0].dir);
 
 if (failures.length === 0) {
   process.stdout.write(

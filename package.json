@@ -15,7 +15,7 @@
     "changeset": "changeset",
     "check:deps": "syncpack lint",
     "dev": "node ./scripts/dev.mjs",
-    "docs:check": "node ./scripts/check-docs.mjs",
+    "docs:check": "node ./scripts/check-docs.mjs && node ./scripts/check-doc-snippets.mjs && node ./scripts/check-doc-mdx.mjs",
     "fix:deps": "syncpack fix-mismatches && syncpack format",
     "fmt": "oxfmt",
     "guard:fixtures": "node ./scripts/guard-test-fixtures.mjs",
