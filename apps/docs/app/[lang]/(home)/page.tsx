@@ -22,7 +22,7 @@ const HomePage = () => (
     <section className="relative flex flex-col items-center px-4 pb-32 pt-32 text-center sm:px-12">
       <Link
         href={betaAgreementHref}
-        className="mb-6 rounded-full border border-amber-300 px-3 py-1 font-medium text-amber-700 text-xs transition-colors hover:bg-amber-50"
+        className="mb-6 rounded-full border border-blue-300 px-3 py-1 font-medium text-blue-700 text-xs transition-colors hover:bg-blue-50"
       >
         Beta
       </Link>
