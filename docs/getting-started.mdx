@@ -152,12 +152,7 @@ If a coding agent (Claude Code, Cursor, and the like) is doing the setup, hand i
   the user the dev command instead of starting the interactive server.
 </CopyPrompt>
 
-Once `eve` is a dependency, the full docs are bundled in the package, so the agent can read them locally without fetching anything:
-
-- Docs: `node_modules/eve/docs/`
-
-`eve init [name]` creates the base agent; `eve init`, `eve init .`, and `eve init ./` do the same in the current empty directory; `eve init .` adds one to a non-empty existing app. Add `--channel-web-nextjs` for Web Chat, or run
-`eve channels add slack` later from an interactive terminal.
+Once `eve` is installed, the complete docs ship at `node_modules/eve/docs/`, so the agent can read them locally instead of fetching anything.
 
 ## What to read next
 
