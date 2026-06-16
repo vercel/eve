@@ -15,6 +15,7 @@ const target = createEvalTargetHandle({
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 function createTestEval(test: (t: EveEvalContext) => unknown, id = "test-eval"): EveEval {
@@ -22,6 +23,29 @@ function createTestEval(test: (t: EveEvalContext) => unknown, id = "test-eval"):
 }
 
 describe("executeTask", () => {
+  it("exposes a sleep helper with a one-second default", async () => {
+    vi.useFakeTimers();
+    let settled = false;
+
+    const execution = executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        await t.sleep();
+        settled = true;
+      }, "sleep"),
+    });
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(settled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    const { result } = await execution;
+
+    expect(settled).toBe(true);
+    expect(result.status).toBe("completed");
+  });
+
   it("runs a scripted eval with HITL helpers", async () => {
     const server = createScriptedServer([
       {

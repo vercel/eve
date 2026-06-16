@@ -70,6 +70,7 @@ export function createEvalContext(deps: {
       return replyMessage();
     },
     log: deps.log,
+    sleep: (ms) => sleep(ms, deps.signal),
     newSession: () => deps.manager.newSession(),
 
     // Run-level assertions (lazy; default gate).
@@ -115,4 +116,26 @@ function promptText(input: SendTurnInput): string {
   if (typeof input === "string") return input;
   const message = (input as { readonly message?: unknown }).message;
   return typeof message === "string" ? message : "";
+}
+
+function sleep(ms = 1_000, signal?: AbortSignal): Promise<void> {
+  if (!Number.isFinite(ms) || ms < 0) {
+    throw new Error("sleep() duration must be a non-negative finite number.");
+  }
+
+  if (signal?.aborted) {
+    return Promise.reject(signal.reason);
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timeout);
+        reject(signal.reason);
+      },
+      { once: true },
+    );
+  });
 }

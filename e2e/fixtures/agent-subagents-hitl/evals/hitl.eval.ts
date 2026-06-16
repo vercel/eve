@@ -34,6 +34,8 @@ export default defineEval({
     // The child's approval request must surface on the parent stream.
     t.expectInputRequests({ toolName: "get_stock_price" });
 
+    await t.sleep();
+
     const resumed = await t.respondAll("approve");
     resumed.expectOk();
 

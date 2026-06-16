@@ -274,6 +274,8 @@ export interface EveEvalContext extends EveEvalSession {
   readonly reply: string | null;
   /** Structured eval log hook. */
   log(message: string): void;
+  /** Pause the eval task, defaulting to 1 second, while respecting the eval timeout signal. */
+  sleep(ms?: number): Promise<void>;
   /** Create an additional independent session against the same target. */
   newSession(): EveEvalSession;
 
