@@ -10,7 +10,7 @@ export const EVE_STREAM_FORMAT_HEADER = "x-eve-stream-format";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "15";
+export const EVE_MESSAGE_STREAM_VERSION = "16";
 
 /**
  * Eve-owned finish reason for one completed assistant step.
@@ -39,8 +39,12 @@ export interface HandleMessageStreamEventMeta {
 
 /**
  * Normalized completion status for one emitted runtime action result.
+ *
+ * `rejected` marks a tool call the user (or a policy) denied at a HITL
+ * approval gate: it never executed, so it is neither a success nor a
+ * runtime failure.
  */
-export type ActionResultStatus = "completed" | "failed";
+export type ActionResultStatus = "completed" | "failed" | "rejected";
 
 /**
  * Stable failure payload projected onto `action.result`.
@@ -785,14 +789,22 @@ export function createInputRequestedEvent(input: {
 
 /**
  * Creates the `action.result` event for one runtime action result.
+ *
+ * Pass `rejected: true` for a tool call denied at a HITL approval gate. The
+ * call never executed, so the outcome is forced to `rejected` rather than
+ * derived from the synthesized denial output.
  */
 export function createActionResultEvent(input: {
+  readonly rejected?: boolean;
   readonly result: RuntimeActionResult;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
 }): ActionResultStreamEvent {
-  const outcome = normalizeActionResultOutcome(input.result);
+  const outcome =
+    input.rejected === true
+      ? { error: buildActionResultError(input.result), status: "rejected" as const }
+      : normalizeActionResultOutcome(input.result);
 
   return {
     data: {
