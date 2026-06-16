@@ -1,4 +1,20 @@
-# Eve
+<div align="center">
+  <a href="https://github.com/vercel/eve">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset=".github/assets/eve.svg">
+      <img alt="Eve logo" src=".github/assets/eve.svg" height="128">
+    </picture>
+  </a>
+  <h1>Eve</h1>
+
+<a href="https://vercel.com"><img alt="Vercel logo" src="https://img.shields.io/badge/MADE%20BY%20Vercel-000000.svg?style=for-the-badge&logo=Vercel&labelColor=000"></a>
+<a href="https://www.npmjs.com/package/eve"><img alt="NPM version" src="https://img.shields.io/npm/v/eve.svg?style=for-the-badge&labelColor=000000"></a>
+<a href="https://github.com/vercel/eve/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/npm/l/eve.svg?style=for-the-badge&labelColor=000000"></a>
+<a href="https://github.com/vercel/eve/discussions"><img alt="Join the community on GitHub" src="https://img.shields.io/badge/Join%20the%20community-blueviolet.svg?style=for-the-badge&logo=Github&labelColor=000000&logoWidth=20"></a>
+
+</div>
+
+## Getting Started
 
 Eve is a filesystem-first framework for durable backend agents on Vercel.
 
