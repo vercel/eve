@@ -5,8 +5,6 @@ description: "Reference for every eve CLI command: init, info, build, start, dev
 
 The `eve` binary (`bin: eve`) runs from your app root, and every command first loads `.env`/`.env.local` from that root. Running `eve` with no command runs `eve dev`.
 
-Eve is currently a preview and subject to the Vercel beta terms; the framework, APIs, documentation, and behavior may change before general availability.
-
 ## Commands
 
 | Command                   | Description                                                                                                                                           |
