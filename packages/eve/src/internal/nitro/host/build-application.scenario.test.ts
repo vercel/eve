@@ -336,7 +336,7 @@ describe("buildApplication", () => {
     expect((summary.agent as { name: string }).name).toBe("scenario-test-agent");
   });
 
-  it("normalizes Eve function output behind a non-Next host service", async () => {
+  it("normalizes eve function output behind a non-Next host service", async () => {
     vi.stubEnv("VERCEL", "1");
     const appRoot = await createScratchDirectory("eve-build-application-vercel-nuxt-");
     const flowOutputDir = join(appRoot, ".eve", "nitro-output", "flow");

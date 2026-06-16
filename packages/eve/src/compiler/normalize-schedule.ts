@@ -28,7 +28,7 @@ export async function compileScheduleDefinition(
     source.sourceKind === "markdown"
       ? normalizeScheduleDefinition(
           source.definition,
-          `Expected the compiled schedule definition at "${source.logicalPath}" to match the public Eve shape.`,
+          `Expected the compiled schedule definition at "${source.logicalPath}" to match the public eve shape.`,
         )
       : normalizeScheduleDefinition(
           await loadModuleBackedDefinition({
@@ -37,7 +37,7 @@ export async function compileScheduleDefinition(
             kind: "schedule",
             source,
           }),
-          `Expected the schedule export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public Eve shape.`,
+          `Expected the schedule export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
         );
 
   const compiled: CompiledScheduleDefinition = {

@@ -11,7 +11,7 @@ async function discoverDeclarationFiles({ distDir }) {
   return (
     files
       .map((file) => relative(distDir, file).replaceAll("\\", "/"))
-      // Eve flattens dist/workflow/index.js to workflow.js, so workflow.d.ts
+      // eve flattens dist/workflow/index.js to workflow.js, so workflow.d.ts
       // is owned by the shim entry below instead of upstream's VM-runner file.
       .filter((file) => file !== "workflow.d.ts")
       .sort()

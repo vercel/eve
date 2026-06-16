@@ -181,12 +181,12 @@ function messageActivity(input: { readonly conversationType: string }): Record<s
     ...baseActivity(input),
     entities: [
       {
-        mentioned: { id: "BOT", name: "Eve Bot" },
-        text: "<at>Eve Bot</at>",
+        mentioned: { id: "BOT", name: "eve Bot" },
+        text: "<at>eve Bot</at>",
         type: "mention",
       },
     ],
-    text: input.conversationType === "personal" ? "hello" : "<at>Eve Bot</at> hello",
+    text: input.conversationType === "personal" ? "hello" : "<at>eve Bot</at> hello",
     textFormat: "xml",
     type: "message",
   };
@@ -202,7 +202,7 @@ function baseActivity(input: { readonly conversationType: string }): Record<stri
     conversation: { conversationType: input.conversationType, id: "CONV" },
     from: { id: "USER", name: "Ada" },
     id: "ACTIVITY_1",
-    recipient: { id: "BOT", name: "Eve Bot" },
+    recipient: { id: "BOT", name: "eve Bot" },
     serviceUrl: "https://smba.example.test/teams",
   };
 }

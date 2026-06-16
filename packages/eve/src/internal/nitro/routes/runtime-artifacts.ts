@@ -30,7 +30,7 @@ export function resolveNitroCompiledArtifactsSource(
   if (isDevelopment && appRoot !== undefined) {
     if (config.moduleMapLoaderPath === undefined) {
       throw new Error(
-        'Eve Nitro development routes require "moduleMapLoaderPath" in the artifacts config.',
+        'eve Nitro development routes require "moduleMapLoaderPath" in the artifacts config.',
       );
     }
 
@@ -52,6 +52,6 @@ export function resolveNitroCompiledArtifactsSource(
   }
 
   throw new Error(
-    "Eve Nitro route requires bundled artifacts or an Eve Nitro runtime configuration app root.",
+    "eve Nitro route requires bundled artifacts or an eve Nitro runtime configuration app root.",
   );
 }

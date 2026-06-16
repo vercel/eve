@@ -35,7 +35,7 @@ describe("eve CLI bootstrap", () => {
         runCommand,
       }),
     ).rejects.toThrow(
-      "Eve requires Node.js >=24. You are running v23.11.0. " +
+      "eve requires Node.js >=24. You are running v23.11.0. " +
         "Please install a compatible Node.js version and try again.",
     );
 
@@ -81,7 +81,7 @@ describe("eve CLI bootstrap", () => {
         nodeEngineRequirement: ">=24 <26",
         nodeVersion: "v26.0.0",
       }),
-    ).rejects.toThrow("Eve requires Node.js >=24 <26. You are running v26.0.0.");
+    ).rejects.toThrow("eve requires Node.js >=24 <26. You are running v26.0.0.");
 
     expect(exists).not.toHaveBeenCalled();
     expect(importModule).not.toHaveBeenCalled();
@@ -258,7 +258,7 @@ describe("eve CLI bootstrap", () => {
         runCommand,
       }),
     ).rejects.toThrow(
-      `Eve package at ${bootstrapOptions.packageRoot} does not include the sources required to rebuild the CLI.`,
+      `eve package at ${bootstrapOptions.packageRoot} does not include the sources required to rebuild the CLI.`,
     );
 
     expect(runCommand).not.toHaveBeenCalled();

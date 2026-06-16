@@ -180,7 +180,7 @@ describe("linearChannel inbound Agent Session events", () => {
     });
   });
 
-  it("resolves prompted events into input responses when the latest elicitation has Eve metadata", async () => {
+  it("resolves prompted events into input responses when the latest elicitation has eve metadata", async () => {
     const elicitation = renderLinearInputRequests([
       makeRequest({
         options: [

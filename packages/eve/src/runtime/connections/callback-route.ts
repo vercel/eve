@@ -16,7 +16,7 @@
  *
  * Owning this route in the framework - instead of routing the IdP at the
  * workflow runtime's raw `/.well-known/workflow/v1/webhook/:token` -
- * keeps the public surface namespaced under Eve and lets the framework
+ * keeps the public surface namespaced under eve and lets the framework
  * decide delivery policy (auth, throttling, logging) for connection
  * callbacks without leaking generic workflow primitives to the public
  * internet.

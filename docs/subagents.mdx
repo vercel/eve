@@ -75,7 +75,7 @@ The built-in `agent` tool is the exception. Its children share the parent's sand
 
 ## What the parent sees
 
-Eve lowers every subagent (built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, outputSchema? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. Set `outputSchema` to run the child in task mode, returning structured output as the tool result.
+eve lowers every subagent (built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, outputSchema? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. Set `outputSchema` to run the child in task mode, returning structured output as the tool result.
 
 A declared subagent's tool name is the bare path-derived name, with no prefix. `agent/subagents/researcher/` registers as the tool `researcher`. Unlike connection tools (`connection__<connection>__<tool>`), it carries no namespace, so the model, approvals, logs, and evals all reference it by that name. Its input schema is:
 
@@ -86,7 +86,7 @@ A declared subagent's tool name is the bare path-derived name, with no prefix. `
 }
 ```
 
-Because the name lives in the same runtime tool namespace as authored tools, a subagent named `researcher` collides with a tool named `researcher`. Eve rejects the build rather than picking a winner, so keep subagent directory names distinct from tool names.
+Because the name lives in the same runtime tool namespace as authored tools, a subagent named `researcher` collides with a tool named `researcher`. eve rejects the build rather than picking a winner, so keep subagent directory names distinct from tool names.
 
 Do not rely on subagent delegation by itself as an approval boundary. Put sensitive tools behind `needsApproval`, connection approval, route/session authorization, or other controls wherever those tools can be called.
 
@@ -98,5 +98,5 @@ Split out a subagent when the task needs a different prompt or specialist role, 
 
 ## What to read next
 
-- [Remote agents](./guides/remote-agents): call another Eve deployment as a subagent.
+- [Remote agents](./guides/remote-agents): call another eve deployment as a subagent.
 - [Dynamic workflows](./guides/dynamic-workflows): have the model orchestrate its subagents programmatically (fan-out, map-reduce).

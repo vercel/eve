@@ -2,7 +2,7 @@
  * Runtime context helpers for authored code.
  *
  * These APIs work only inside active authored runtime execution such as
- * tools and other Eve-invoked callbacks.
+ * tools and other eve-invoked callbacks.
  *
  * @example
  * ```ts

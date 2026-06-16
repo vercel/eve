@@ -188,7 +188,7 @@ describe("applySandboxToolSet", () => {
     // `message` callback Node binds to the invocation that first created the
     // worker. experimental-ai-sdk-code-mode >= 1.0.11 re-enters the originating
     // invocation's AsyncLocalStorage context before dispatching host callbacks,
-    // so Eve no longer re-pins context in the wrapper. The wrapper must stay
+    // so eve no longer re-pins context in the wrapper. The wrapper must stay
     // transparent: it observes whatever context the caller provides, never a
     // context captured at build time. The cross-invocation worker guarantee is
     // covered by the package's own regression test.

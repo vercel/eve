@@ -109,7 +109,7 @@ function findNearestPackageRoot(startDirectory: string): string {
 }
 
 /**
- * Resolves the installed Eve package root.
+ * Resolves the installed eve package root.
  */
 export function resolvePackageRoot(): string {
   // Canonicalize the current module path so workspace symlinks such as
@@ -130,7 +130,7 @@ function rewriteSourceFilePathForBuild(relativeSourcePath: string): string {
 }
 
 /**
- * Resolves one package-owned source file from the currently executing Eve installation.
+ * Resolves one package-owned source file from the currently executing eve installation.
  *
  * Source checkouts use `src/...` paths so local tests exercise live source files.
  * Installed or built package executions use `dist/src/...` so published builds do
@@ -147,7 +147,7 @@ export function resolvePackageSourceFilePath(relativeSourcePath: string): string
 }
 
 /**
- * Resolves one package-owned source directory from the currently executing Eve installation.
+ * Resolves one package-owned source directory from the currently executing eve installation.
  */
 export function resolvePackageSourceDirectoryPath(relativeSourcePath: string): string {
   const packageBuildRoot = resolvePackageBuildRoot();
@@ -210,7 +210,7 @@ function tryReadInstalledPackageInfo(
 }
 
 /**
- * Resolves the installed Eve package identity from package.json.
+ * Resolves the installed eve package identity from package.json.
  */
 export function resolveInstalledPackageInfo(): InstalledPackageInfo {
   if (cachedPackageInfo) {
@@ -252,11 +252,11 @@ export function resolveInstalledPackageInfo(): InstalledPackageInfo {
 }
 
 /**
- * Resolves a Workflow runtime module from Eve's narrowed Workflow dependencies.
+ * Resolves a Workflow runtime module from eve's narrowed Workflow dependencies.
  *
- * Older Workflow builder output still uses `workflow/*` specifiers. Eve maps
+ * Older Workflow builder output still uses `workflow/*` specifiers. eve maps
  * those historical specifiers to the smaller `@workflow/*` packages it actually
- * needs, plus an Eve-owned builtins module for response body step helpers.
+ * needs, plus an eve-owned builtins module for response body step helpers.
  */
 export function resolveWorkflowModulePath(specifier: string): string {
   if (specifier === "workflow") {

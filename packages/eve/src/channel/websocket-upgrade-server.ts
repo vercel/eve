@@ -26,12 +26,12 @@ interface NodeWebSocketUpgradeRequest extends WebSocketUpgradeRequest {
 
 /**
  * Escape hatch for SDKs and frameworks that need a Node HTTP server-shaped
- * upgrade target inside an Eve `WS()` route.
+ * upgrade target inside an eve `WS()` route.
  *
- * Prefer normal `WS()` lifecycle hooks for Eve-owned websocket behavior. Use
+ * Prefer normal `WS()` lifecycle hooks for eve-owned websocket behavior. Use
  * this bridge only when an integration expects to register
  * `httpServer.on("upgrade", ...)` handlers itself. The server is intentionally
- * not listening on a port; Eve forwards only the matched route's raw Node
+ * not listening on a port; eve forwards only the matched route's raw Node
  * upgrade into it.
  */
 export interface WebSocketUpgradeServerBridge {

@@ -275,7 +275,7 @@ describe("eve build process output", () => {
     expect(result.signal).toBeNull();
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain(
-      'Expected the tool export "default" from "tools/bad.ts" to match the public Eve shape.',
+      'Expected the tool export "default" from "tools/bad.ts" to match the public eve shape.',
     );
     expect(result.stderr).not.toContain("Diagnostics artifact:");
   }, 120_000);

@@ -195,7 +195,7 @@ export function deployProject(
       if (productionUrl !== undefined) {
         log.info(`Production URL: ${productionUrl}`);
       } else {
-        log.warning("Deployment succeeded, but Eve could not verify its production URL.");
+        log.warning("Deployment succeeded, but eve could not verify its production URL.");
       }
       const deployedProject = projectResolutionFromDeployResult(project, {
         deployed: true,

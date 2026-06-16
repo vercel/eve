@@ -701,7 +701,7 @@ export interface VerifyVercelOidcOptions {
  * - Tokens with an `external_sub` claim authenticate as
  *   `principalType: "user"` when they match the current `VERCEL_PROJECT_ID`
  *   (if set) and `VERCEL_TARGET_ENV` / `VERCEL_ENV` (if set). `external_sub`
- *   becomes the Eve subject, `external_iss` or `connector_id` the Eve issuer
+ *   becomes the eve subject, `external_iss` or `connector_id` the eve issuer
  *   when present, and string-valued OIDC profile claims (`name`, `picture`,
  *   `email`) are exposed as auth attributes.
  * - Tokens from other Vercel projects are accepted **only** when their `sub`

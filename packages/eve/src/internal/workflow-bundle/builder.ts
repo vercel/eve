@@ -112,7 +112,7 @@ export class WorkflowBundleBuilder {
     const workflowsOutfile = join(this.#outDir, "workflows.mjs");
     const { manifest: workflowsManifest } = await this.createWorkflowsBundle({
       discoveredEntries,
-      // Eve owns dev rebuilds through `dev-authored-source-watcher`.
+      // eve owns dev rebuilds through `dev-authored-source-watcher`.
       keepInterimBundleContext: false,
       outfile: workflowsOutfile,
       bundleFinalOutput: false,

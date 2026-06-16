@@ -62,8 +62,8 @@ function hasDeclaredDependency(packageJson: unknown, dependencyName: string): bo
 }
 
 /**
- * Adds an Eve agent to an existing package: writes the `agent/` files, adds
- * missing runtime dependencies, reconciles `engines.node` with Eve's
+ * Adds an eve agent to an existing package: writes the `agent/` files, adds
+ * missing runtime dependencies, reconciles `engines.node` with eve's
  * requirement, and applies the selected package manager's project
  * configuration. Other host configuration (tsconfig, scripts, ignore files)
  * remains untouched. All conflicts are gathered and reported before anything
@@ -75,7 +75,7 @@ export async function addAgentToProject(
   const packageJsonPath = join(options.projectRoot, "package.json");
   if (!(await pathExists(packageJsonPath))) {
     throw new Error(
-      `Cannot add an Eve agent to "${options.projectRoot}" because it has no package.json. ` +
+      `Cannot add an eve agent to "${options.projectRoot}" because it has no package.json. ` +
         "Run `eve init <name>` to create a new project instead.",
     );
   }
@@ -92,7 +92,7 @@ export async function addAgentToProject(
   }
   if (conflicts.length > 0) {
     throw new Error(
-      `Cannot add an Eve agent to "${options.projectRoot}" because it already has: ` +
+      `Cannot add an eve agent to "${options.projectRoot}" because it already has: ` +
         `${conflicts.join(", ")}. Move them aside first.`,
     );
   }

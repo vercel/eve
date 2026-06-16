@@ -79,7 +79,7 @@ describe("startProductionServer", () => {
     mocks.existsSync.mockReturnValueOnce(false);
 
     await expect(startProductionServer("/tmp/app")).rejects.toThrow(
-      'Missing Eve build output at /tmp/app/.output/server/index.mjs. Run "eve build" before "eve start".',
+      'Missing eve build output at /tmp/app/.output/server/index.mjs. Run "eve build" before "eve start".',
     );
 
     expect(mocks.spawn).not.toHaveBeenCalled();

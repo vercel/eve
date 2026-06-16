@@ -624,7 +624,7 @@ const REMOVED_CLI_REFERENCES = [
     replacement: "`eve init <name>`",
   },
   { pattern: /\bcreate-eve\b/i, replacement: "`eve init`" },
-  { pattern: /\beve\s+setup\b/i, replacement: "the dedicated current Eve command" },
+  { pattern: /\beve\s+setup\b/i, replacement: "the dedicated current eve command" },
 ];
 
 /**
@@ -657,7 +657,7 @@ async function checkRule31RemovedCliReferences() {
         rule: 31,
         file: posix,
         line: index + 1,
-        message: `references a removed Eve CLI entry point. Replace it with ${removed.replacement}. Historical mentions belong only in changelogs or changesets.`,
+        message: `references a removed eve CLI entry point. Replace it with ${removed.replacement}. Historical mentions belong only in changelogs or changesets.`,
       });
     });
   }

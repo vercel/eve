@@ -3,7 +3,7 @@ title: "Auth & Route Protection"
 description: "Secure your agent's HTTP routes with an ordered auth walk, verifier helpers, and connection OAuth via Vercel Connect."
 ---
 
-Eve has two independent auth systems:
+eve has two independent auth systems:
 
 - **Route auth** (inbound) decides who can reach your agent's HTTP routes. It runs at the channel layer, gating the request before any model work runs.
 - **Tool and connection auth** (outbound) is how your agent signs in to an external service it calls, like an OAuth MCP server. It happens later, when a tool or connection actually reaches out.
@@ -18,7 +18,7 @@ The route-auth policy lives on the HTTP channel factory (`agent/channels/eve.ts`
 - `POST /eve/v1/session/:sessionId`
 - `GET /eve/v1/session/:sessionId/stream`
 
-These routes are protected by the channel's auth policy. Eve fails closed by default: production browser traffic is rejected unless you configure an authenticator that accepts it, and anonymous access requires an explicit `none()`.
+These routes are protected by the channel's auth policy. eve fails closed by default: production browser traffic is rejected unless you configure an authenticator that accepts it, and anonymous access requires an explicit `none()`.
 
 `GET /eve/v1/health` is always public and skips the walk entirely, so load balancers and uptime monitors can probe it without credentials.
 
@@ -33,7 +33,7 @@ export default eveChannel({
 
 ## The ordered auth walk
 
-`auth` takes a single `AuthFn` or an array that Eve walks in order. Each entry has three possible outcomes:
+`auth` takes a single `AuthFn` or an array that eve walks in order. Each entry has three possible outcomes:
 
 - returns a `SessionAuthContext`: accept the request and stop the walk
 - returns `null` / `undefined`: skip to the next entry
@@ -92,7 +92,7 @@ Any other thrown error follows the normal channel failure path. When building a 
 | `httpBasic(...)` | Operator or service access via a shared username/password.                |
 | `jwtHmac(...)`   | You control a shared-secret JWT signer.                                   |
 | `jwtEcdsa(...)`  | You verify asymmetric JWTs minted by another system.                      |
-| `oidc(...)`      | You want Eve to verify OIDC-issued tokens from an arbitrary issuer.       |
+| `oidc(...)`      | You want eve to verify OIDC-issued tokens from an arbitrary issuer.       |
 
 Exercise caution for agents that process non-public, sensitive, regulated, or production data unless you have implemented other access controls.
 
@@ -199,7 +199,7 @@ export default eveChannel({
 });
 ```
 
-In production, `placeholderAuth()` returns a structured `401` so a generated web chat app can say "auth isn't configured yet" instead of throwing an internal error. Replace it before a browser caller submits a production request: swap in your app's `AuthFn` or one of the shipped helpers. Delete the authored channel file entirely and Eve falls back to the framework default `[localDev(), vercelOidc()]`, which also rejects production browser traffic.
+In production, `placeholderAuth()` returns a structured `401` so a generated web chat app can say "auth isn't configured yet" instead of throwing an internal error. Replace it before a browser caller submits a production request: swap in your app's `AuthFn` or one of the shipped helpers. Delete the authored channel file entirely and eve falls back to the framework default `[localDev(), vercelOidc()]`, which also rejects production browser traffic.
 
 Keep secret values (`ROUTE_AUTH_BASIC_PASSWORD`, signing keys) in environment variables. Route-auth secrets never land in compiled artifacts. The runtime re-materializes them from the authored channel definition at boot.
 
@@ -218,7 +218,7 @@ Route auth does not enforce session ownership. If multiple users or tenants can 
 
 ## Tool and connection auth
 
-Tool and connection auth is how your agent reaches an external service that wants an interactive sign-in, like an OAuth MCP server. Both a connection and an individual tool can declare an `auth` strategy; Eve drives the sign-in, caches the token per step, and re-runs the call once the caller authorizes.
+Tool and connection auth is how your agent reaches an external service that wants an interactive sign-in, like an OAuth MCP server. Both a connection and an individual tool can declare an `auth` strategy; eve drives the sign-in, caches the token per step, and re-runs the call once the caller authorizes.
 
 ### On a connection
 

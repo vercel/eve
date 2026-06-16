@@ -11,7 +11,7 @@ const SCENARIO_CACHE_ROOT = join(tmpdir(), "eve-scenario-cache");
 const SHARED_TARBALLS_ROOT = join(SCENARIO_CACHE_ROOT, "shared-tarballs");
 
 /**
- * Vitest `globalSetup` that packs the Eve package exactly once before any
+ * Vitest `globalSetup` that packs the eve package exactly once before any
  * scenario worker boots. The resulting tarball path is exposed to workers
  * through `process.env.EVE_SCENARIO_EVE_TARBALL_PATH` so
  * `materializeScenarioApp()` can reuse it instead of racing to run

@@ -1,10 +1,10 @@
 import type * as CodeModeModule from "#compiled/experimental-ai-sdk-code-mode/index.js";
 
-/** Internal AI SDK tool name used for Eve's code-mode wrapper. */
+/** Internal AI SDK tool name used for eve's code-mode wrapper. */
 export const CODE_MODE_TOOL_NAME = "code_mode";
 
 /**
- * Model-facing tool name for Eve's `Workflow` orchestration wrapper — a
+ * Model-facing tool name for eve's `Workflow` orchestration wrapper — a
  * code-mode sandbox restricted to subagent and remote-agent calls. Reserved so
  * authored tools cannot collide with it.
  */
@@ -44,7 +44,7 @@ export function isCodeModeEnvEnabled(
 
 /**
  * Resolves the effective code-mode setting for one agent. The authored
- * `experimental.codeMode` flag wins; when omitted, Eve falls back to the
+ * `experimental.codeMode` flag wins; when omitted, eve falls back to the
  * {@link isCodeModeEnvEnabled} environment backstop.
  */
 export function resolveCodeModeEnabled(

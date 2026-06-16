@@ -41,7 +41,7 @@ export interface SandboxSeedFile {
  * Diagnostic tags attached to provider-owned sandbox resources.
  *
  * Built-in backends may forward these into their hosting platform's
- * native tagging system. Eve supplies stable tags such as the active
+ * native tagging system. eve supplies stable tags such as the active
  * agent, channel, and session id so sandboxes can be found and
  * attributed in provider dashboards.
  */
@@ -66,7 +66,7 @@ export interface SandboxBackendRuntimeContext {
  */
 export interface SandboxBackendCreateInput {
   /**
-   * Reusable template key to open this session from. `null` means Eve
+   * Reusable template key to open this session from. `null` means eve
    * intentionally skipped template prewarm because the sandbox has no
    * `bootstrap()` and no seed files, so the backend should create a
    * fresh session from its default base runtime.
@@ -123,7 +123,7 @@ export interface SandboxBackendPrewarmResult {
  *
  * A `SandboxBackend` is a value an author attaches to a
  * {@link SandboxDefinition} to choose which underlying runtime hosts the
- * sandbox. Eve ships built-in backends (`docker()`,
+ * sandbox. eve ships built-in backends (`docker()`,
  * `justbash()`, `microsandbox()`,
  * `vercel()`, and the availability-aware
  * `defaultSandbox()`), but the interface is public so authors can write
@@ -152,7 +152,7 @@ export interface SandboxBackend<BO = Record<string, never>, SO = Record<string, 
    */
   create(input: SandboxBackendCreateInput): Promise<SandboxBackendHandle<SO>>;
   /**
-   * Build-time prewarm hook. Eve invokes this for every authored
+   * Build-time prewarm hook. eve invokes this for every authored
    * sandbox in the compiled graph before serving traffic so the backend
    * can capture reusable template state. Idempotent against existing state
    * keyed by `templateKey`.

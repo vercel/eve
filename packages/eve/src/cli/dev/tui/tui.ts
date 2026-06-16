@@ -15,7 +15,7 @@ import type { TuiDisplayOptions } from "./types.js";
  */
 export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
   /**
-   * The Eve server URL the TUI connects to — either the in-process dev
+   * The eve server URL the TUI connects to — either the in-process dev
    * server started by `eve dev`, or a remote `--url` target.
    */
   readonly serverUrl: string;

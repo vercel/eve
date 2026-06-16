@@ -1,6 +1,6 @@
 # App fixtures
 
-These apps are shared development fixtures. They are real Eve apps that CI or
+These apps are shared development fixtures. They are real eve apps that CI or
 local smokes may build and boot, so package names are part of the test target
 surface.
 

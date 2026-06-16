@@ -89,7 +89,7 @@ export interface RailLog extends ChannelSetupLog {
   settle(): void;
 }
 
-/** Options for the shared live rail log used by both Eve onboarding entry points. */
+/** Options for the shared live rail log used by both eve onboarding entry points. */
 export interface RailLogOptions {
   colors: PromptColors;
   output: PromptOutput;

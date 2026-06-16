@@ -1,6 +1,6 @@
 export const Logo = () => (
   <span className="flex items-center gap-2">
-    <span className="font-semibold text-gray-1000 text-lg leading-none">Eve</span>
+    <span className="font-semibold text-gray-1000 text-lg leading-none">eve</span>
     <span className="rounded-full border border-blue-300 px-2 py-0.5 font-medium text-blue-700 text-xs leading-none">
       Beta
     </span>
@@ -36,7 +36,7 @@ export const suggestions = [
 
 export const agent = {
   product: {
-    name: "Eve",
+    name: "eve",
     description:
       "A filesystem-first framework for building durable agents on Vercel with markdown instructions, TypeScript tools, and built-in runtime primitives.",
     category: "Agent framework",
@@ -48,7 +48,7 @@ export const agent = {
     ],
   },
   instructions: [
-    "To create or extend an Eve agent for the user, start from the Getting Started guide — get it as Markdown from /llms.mdx/getting-started (or via /llms.txt).",
+    "To create or extend an eve agent for the user, start from the Getting Started guide — get it as Markdown from /llms.mdx/getting-started (or via /llms.txt).",
     "Ask the user only for genuine decisions (name, model, channels, provider, deploy) and for browser/OAuth steps (vercel login, vercel link, vercel connect create slack); automate everything else.",
     "Verify setup with `eve info --json` and `eve channels list --json` before reporting success.",
     "Use /sitemap.md to identify the most relevant documentation pages before answering broad questions.",
@@ -58,10 +58,10 @@ export const agent = {
   ],
 };
 
-export const title = "Eve Documentation";
+export const title = "eve Documentation";
 
 export const prompt =
-  "You are a helpful assistant specializing in Eve, a filesystem-first framework for building durable agents on Vercel. You help users understand how to build agents using markdown for instructions, TypeScript for tools, and the framework's built-in durability, governance, and observability features.";
+  "You are a helpful assistant specializing in eve, a filesystem-first framework for building durable agents on Vercel. You help users understand how to build agents using markdown for instructions, TypeScript for tools, and the framework's built-in durability, governance, and observability features.";
 
 export const translations = {
   en: {

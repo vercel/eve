@@ -3,7 +3,7 @@ title: "Project Layout"
 description: "Authored slots under agent/ and the path-derived naming rule."
 ---
 
-Eve builds an agent by walking the filesystem under `agent/`. Each directory is an authored slot, and the slot a file lands in determines how Eve loads it.
+eve builds an agent by walking the filesystem under `agent/`. Each directory is an authored slot, and the slot a file lands in determines how eve loads it.
 
 ## Naming rule
 
@@ -64,7 +64,7 @@ The Subagents column states whether a local subagent (`subagents/<id>/`) can aut
 
 ## What reaches the runtime workspace
 
-Eve does not mount the whole tree. Only two sources land in the sandbox workspace:
+eve does not mount the whole tree. Only two sources land in the sandbox workspace:
 
 - `skills/` files → `/workspace/skills/...`
 - `agent/sandbox/workspace/**` → `/workspace/...` at session bootstrap
@@ -111,9 +111,9 @@ my-agent/
 
 Prefer the nested layout. It keeps the app root separate from the authored surface.
 
-## Why didn't Eve discover my file?
+## Why didn't eve discover my file?
 
-Run `eve info`. It lists the discovered surface and prints discovery diagnostics. From there, check that the file sits in the right authored slot (per the slot table above) and that the root-vs-subagent boundary is valid. Eve also writes inspectable artifacts under `.eve/`. See the debugging artifacts in [instrumentation.ts](../guides/instrumentation) and the [CLI](./cli) reference.
+Run `eve info`. It lists the discovered surface and prints discovery diagnostics. From there, check that the file sits in the right authored slot (per the slot table above) and that the root-vs-subagent boundary is valid. eve also writes inspectable artifacts under `.eve/`. See the debugging artifacts in [instrumentation.ts](../guides/instrumentation) and the [CLI](./cli) reference.
 
 ## What to read next
 

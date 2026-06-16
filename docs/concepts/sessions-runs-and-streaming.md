@@ -3,7 +3,7 @@ title: "Sessions, Runs & Streaming"
 description: "The session and run contract you touch: continuation tokens, stream handles, the NDJSON event stream, and reconnecting."
 ---
 
-Every Eve app speaks the same stable HTTP API to a [durable session](./execution-model-and-durability). This page is the contract you hold: the handles you get back, the events you stream, and how to reconnect.
+Every eve app speaks the same stable HTTP API to a [durable session](./execution-model-and-durability). This page is the contract you hold: the handles you get back, the events you stream, and how to reconnect.
 
 ## The two handles
 
@@ -14,7 +14,7 @@ Two handles do two jobs, and mixing them up is the most common mistake. One hand
 
 A session has one active continuation at a time: each follow-up uses the current `continuationToken`, and a stale one is rejected.
 
-React, Vue, and Svelte apps reach for [`useEveAgent()`](../guides/frontend/overview) instead of calling these routes by hand. Next.js and Nuxt apps can proxy them to the Eve runtime from the same origin.
+React, Vue, and Svelte apps reach for [`useEveAgent()`](../guides/frontend/overview) instead of calling these routes by hand. Next.js and Nuxt apps can proxy them to the eve runtime from the same origin.
 
 ## Start a session
 
@@ -24,7 +24,7 @@ curl -X POST http://127.0.0.1:3000/eve/v1/session \
   -d '{"message":"Summarize the latest forecast."}'
 ```
 
-Eve responds right away. The JSON body carries a `sessionId` and a `continuationToken`, and the `x-eve-session-id` header names the durable session to stream.
+eve responds right away. The JSON body carries a `sessionId` and a `continuationToken`, and the `x-eve-session-id` header names the durable session to stream.
 
 ## Stream a session
 

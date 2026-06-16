@@ -36,14 +36,14 @@ export interface SendPayload {
   readonly message?: string | UserContent;
   readonly inputResponses?: readonly InputResponse[];
   /**
-   * Context strings contributed by the channel. Eve appends each entry
+   * Context strings contributed by the channel. eve appends each entry
    * as a `role: "user"` message to `session.history` before the delivery
    * message and persists it across the session.
    */
   readonly context?: readonly string[];
   /**
    * Run-scoped JSON schema the turn's result must match. Orthogonal to
-   * {@link BaseSendOptions.mode}: Eve enforces the schema in either mode; mode
+   * {@link BaseSendOptions.mode}: eve enforces the schema in either mode; mode
    * only decides the failure behavior. A conversation run parks recoverably and
    * waits for more input; a task run (which cannot wait) finishes as an error.
    */
@@ -266,8 +266,8 @@ export function DELETE<TState = undefined>(
  * Declares a WebSocket channel route.
  *
  * The handler runs once per upgrade request and returns lifecycle hooks for
- * that connection. The hooks are Eve-owned structural types so channel authors
- * can use CrossWS-compatible helpers without Eve exposing CrossWS directly.
+ * that connection. The hooks are eve-owned structural types so channel authors
+ * can use CrossWS-compatible helpers without eve exposing CrossWS directly.
  */
 export function WS<TState = undefined>(
   path: string,

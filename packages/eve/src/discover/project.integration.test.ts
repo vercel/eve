@@ -62,7 +62,7 @@ describe("resolveDiscoveryProject (memory)", () => {
     });
   });
 
-  it("raises a structured resolution error when no Eve agent root can be found", async () => {
+  it("raises a structured resolution error when no eve agent root can be found", async () => {
     const project = buildMemoryAgentProject({
       appFiles: {
         "README.md": "not an agent",

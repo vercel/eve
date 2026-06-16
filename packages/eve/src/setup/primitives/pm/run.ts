@@ -213,7 +213,7 @@ export async function runPackageManagerInstall(
   return spawnPackageManager(kind, projectRoot, strategy.installArguments(installOptions), options);
 }
 
-/** The argv that runs the locally installed Eve binary's `dev` command. */
+/** The argv that runs the locally installed eve binary's `dev` command. */
 export function eveDevArguments(kind: PackageManagerKind): readonly string[] {
   return getPackageManagerStrategy(kind).devArguments();
 }

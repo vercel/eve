@@ -13,7 +13,7 @@ export interface RuntimeCompilerArtifactPaths {
 }
 
 /**
- * Resolves the stable Eve artifact paths for one application root without
+ * Resolves the stable eve artifact paths for one application root without
  * depending on Node path helpers.
  */
 export function resolveRuntimeCompilerArtifactPaths(appRoot: string): RuntimeCompilerArtifactPaths {

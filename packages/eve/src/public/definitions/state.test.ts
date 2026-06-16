@@ -11,7 +11,7 @@ describe("defineState", () => {
   it("get() throws outside ALS", () => {
     const counter = defineState("test.get.throws", () => ({ count: 0 }));
 
-    expect(() => counter.get()).toThrow(/No active Eve context/);
+    expect(() => counter.get()).toThrow(/No active eve context/);
   });
 
   it("rejects names using the reserved eve. prefix", () => {
@@ -43,7 +43,7 @@ describe("defineState", () => {
   it("update() throws outside ALS", () => {
     const counter = defineState("test.update.throws", () => ({ count: 0 }));
 
-    expect(() => counter.update((s) => ({ count: s.count + 1 }))).toThrow(/No active Eve context/);
+    expect(() => counter.update((s) => ({ count: s.count + 1 }))).toThrow(/No active eve context/);
   });
 
   it("separate handles with different names are independent", () => {

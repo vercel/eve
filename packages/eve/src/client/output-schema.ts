@@ -6,7 +6,7 @@ import type { JsonObject } from "#shared/json.js";
 
 /**
  * Normalizes a client-supplied output schema into the wire-safe JSON Schema
- * representation accepted by Eve message routes.
+ * representation accepted by eve message routes.
  */
 export function normalizeOutputSchemaForRequest<TOutput>(
   schema: StandardJSONSchemaV1<unknown, TOutput> | JsonObject | undefined,

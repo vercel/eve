@@ -65,11 +65,11 @@ Useful artifacts written under `.eve/` (preserved even on partial failure):
 
 | Artifact                                       | Description                                          |
 | ---------------------------------------------- | ---------------------------------------------------- |
-| `.eve/discovery/agent-discovery-manifest.json` | What Eve found on disk                               |
+| `.eve/discovery/agent-discovery-manifest.json` | What eve found on disk                               |
 | `.eve/discovery/diagnostics.json`              | Authored-shape errors and warnings                   |
-| `.eve/compile/compiled-agent-manifest.json`    | The serialized authored surface Eve loads at runtime |
+| `.eve/compile/compiled-agent-manifest.json`    | The serialized authored surface eve loads at runtime |
 | `.eve/compile/compile-metadata.json`           | Build-time metadata and paths                        |
-| `.eve/compile/module-map.mjs`                  | Compiled module entrypoints Eve imports at runtime   |
+| `.eve/compile/module-map.mjs`                  | Compiled module entrypoints eve imports at runtime   |
 
 ## `eve start`
 
@@ -109,7 +109,7 @@ Pass a bare URL as the only argument and the UI connects to that server instead 
 | `--context-size <tokens>`           | number | none               | Model context window size, shown as a usage percentage                                    |
 | `--logs <mode>`                     | enum   | `stderr`           | Server/agent logs to show: `all` \| `stderr` \| `sandbox` \| `none`                       |
 
-Local dev writes the active server process ID to `.eve/dev-process.pid`. If another `eve dev` starts for the same agent while that process is still running, Eve exits with a message that includes the command to stop the existing server.
+Local dev writes the active server process ID to `.eve/dev-process.pid`. If another `eve dev` starts for the same agent while that process is still running, eve exits with a message that includes the command to stop the existing server.
 
 Local dev keeps immutable runtime source snapshots under `.eve/dev-runtime/snapshots/` so in-flight sessions hold a consistent code revision while new prompts pick up rebuilds. On startup, `eve dev` prunes stale runtime snapshots and old local sandbox templates in the background. For manual cleanup, stop `eve dev` and delete `.eve/dev-runtime/snapshots/` or `.eve/sandbox-cache/local/templates/`.
 
@@ -119,7 +119,7 @@ Local dev keeps immutable runtime source snapshots under `.eve/dev-runtime/snaps
 eve link
 ```
 
-Links the current directory to an existing Vercel project. You select a team and then a project, and Eve pulls the project's environment so an AI Gateway credential (`VERCEL_OIDC_TOKEN` or `AI_GATEWAY_API_KEY`) lands in `.env.local`, then verifies one actually did. Running it again re-links: the pickers always run, and the new choice wins. The command is interactive only; in CI, use `vercel link --project <name> --yes` instead. A running `eve dev` reloads env files automatically, so you don't need to restart after the pull.
+Links the current directory to an existing Vercel project. You select a team and then a project, and eve pulls the project's environment so an AI Gateway credential (`VERCEL_OIDC_TOKEN` or `AI_GATEWAY_API_KEY`) lands in `.env.local`, then verifies one actually did. Running it again re-links: the pickers always run, and the new choice wins. The command is interactive only; in CI, use `vercel link --project <name> --yes` instead. A running `eve dev` reloads env files automatically, so you don't need to restart after the pull.
 
 ## `eve deploy`
 

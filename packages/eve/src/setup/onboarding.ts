@@ -57,7 +57,7 @@ export interface OnboardingBoxesOptions {
   targetDirectory?: string;
   /** Scaffold into cwd or targetDirectory instead of creating a child directory. */
   inPlace?: boolean;
-  /** Allow the in-place scaffold to replace Eve scaffold files that already exist. */
+  /** Allow the in-place scaffold to replace eve scaffold files that already exist. */
   overwriteExisting?: boolean;
   /** Skip the post-channel Vercel deployment entirely. */
   presetNoDeploy?: boolean;
@@ -67,7 +67,7 @@ export interface OnboardingBoxesOptions {
    * setup remains an interactive/onboarding handoff, not a headless flow.
    */
   headless?: boolean;
-  /** Eve package metadata baked into the scaffolded `package.json`. */
+  /** eve package metadata baked into the scaffolded `package.json`. */
   evePackage?: EvePackageContract;
 }
 
@@ -134,7 +134,7 @@ export function composeOnboardingBoxes(options: OnboardingBoxesOptions): AnySetu
       presetName: options.presetName,
       targetDirectory: options.targetDirectory,
       inPlace: options.inPlace,
-      // Only headless re-runs converge onto an existing Eve project directory;
+      // Only headless re-runs converge onto an existing eve project directory;
       // interactive runs keep refusing so a human notices the collision.
       resumeExisting: options.headless,
     }),

@@ -43,7 +43,7 @@ export async function resolveChannelDefinition(
     });
     const channelDefinition = normalizeChannelDefinition(
       resolvedExportValue,
-      `Expected the channel export "${definition.exportName ?? "default"}" from "${definition.logicalPath}" to match the public Eve shape.`,
+      `Expected the channel export "${definition.exportName ?? "default"}" from "${definition.logicalPath}" to match the public eve shape.`,
     );
 
     const sourceRef = createResolvedModuleSourceRef({

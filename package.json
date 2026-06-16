@@ -2,7 +2,7 @@
   "name": "eve-monorepo",
   "version": "0.0.0",
   "private": true,
-  "description": "Monorepo for Eve, a filesystem-first framework for durable backend agents on Vercel.",
+  "description": "Monorepo for eve, a filesystem-first framework for durable backend agents on Vercel.",
   "workspaces": [
     "apps/*",
     "apps/*/*",

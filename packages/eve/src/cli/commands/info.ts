@@ -219,7 +219,7 @@ export async function printApplicationInfo(
     [
       renderCliBanner(theme, {
         subtitle: "Resolved application paths and the active message contract.",
-        title: "Eve Info",
+        title: "eve Info",
       }),
       "",
       renderCliSection(theme, {

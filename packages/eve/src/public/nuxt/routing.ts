@@ -1,7 +1,7 @@
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 
 /**
- * Private route namespace used when a Vercel deployment hosts Eve as a
+ * Private route namespace used when a Vercel deployment hosts eve as a
  * separate experimental service behind the Nuxt app.
  */
 export const EVE_NUXT_SERVICE_PREFIX = "/_eve_internal/eve";
@@ -19,7 +19,7 @@ export function normalizeRoutePrefix(prefix: string): string {
   const prefixed = prefix.startsWith("/") ? prefix : `/${prefix}`;
   const normalized = prefixed.replace(/\/+$/, "");
   if (normalized.length === 0) {
-    throw new Error("Eve Nuxt service prefix cannot resolve to the root route.");
+    throw new Error("eve Nuxt service prefix cannot resolve to the root route.");
   }
   return normalized;
 }
@@ -39,7 +39,7 @@ export function normalizeOrigin(origin: string): string {
 }
 
 /**
- * Resolve the local production port the module proxies to when an Eve service
+ * Resolve the local production port the module proxies to when an eve service
  * runs alongside a non-Vercel Nuxt deployment. Defaults to
  * {@link DEFAULT_EVE_NUXT_PRODUCTION_PORT}.
  */
@@ -63,15 +63,15 @@ export interface EveVercelRewriteRoute {
   readonly dest: string;
   /**
    * Re-run route matching against the rewritten `dest`. Required so the
-   * rewritten Eve service path is routed to the sibling Eve service instead of
+   * rewritten eve service path is routed to the sibling eve service instead of
    * being resolved inside the host service's own filesystem (which 404s).
    */
   readonly check: true;
 }
 
 /**
- * Build the edge-level Vercel rewrite that forwards Eve transport requests
- * (`/eve/v1/**`) to the Eve service prefix (`/_eve_internal/eve/eve/v1/**`).
+ * Build the edge-level Vercel rewrite that forwards eve transport requests
+ * (`/eve/v1/**`) to the eve service prefix (`/_eve_internal/eve/eve/v1/**`).
  *
  * Mirrors the Next.js integration's `beforeFiles` rewrite. A Nitro runtime
  * `proxy` route rule cannot reach a sibling Vercel service — the proxied
@@ -88,7 +88,7 @@ export function createEveVercelRewriteRoute(servicePrefix: string): EveVercelRew
 }
 
 /**
- * Resolve the proxy destination for Eve routes in production.
+ * Resolve the proxy destination for eve routes in production.
  *
  * On Vercel the destination is the private service prefix. Off Vercel it is an
  * explicit origin override (`EVE_NUXT_PRODUCTION_ORIGIN`) or a local port.

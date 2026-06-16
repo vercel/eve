@@ -112,7 +112,7 @@ function parseCompileMetadata(value: unknown, metadataPath: string): CompileMeta
 
   if (!parsed.success) {
     throw new LoadCompileMetadataError(
-      `Expected "${metadataPath}" to contain valid Eve compile metadata. ${formatValidationError(parsed.error)}`,
+      `Expected "${metadataPath}" to contain valid eve compile metadata. ${formatValidationError(parsed.error)}`,
       metadataPath,
     );
   }

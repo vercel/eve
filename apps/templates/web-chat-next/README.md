@@ -1,6 +1,6 @@
 # Web Chat Next template
 
-A small Next.js app that acts as the source for Eve's generated Web Chat template.
+A small Next.js app that acts as the source for eve's generated Web Chat template.
 
 ## Usage
 
@@ -11,11 +11,11 @@ pnpm --filter web-chat-next-template dev
 ```
 
 The Next.js config uses `withEve()` from `eve/next`. In local
-development it starts the app-local Eve agent on a random available port and
-rewrites same-origin Eve endpoints like `/eve/v1/session` to that server, so
+development it starts the app-local eve agent on a random available port and
+rewrites same-origin eve endpoints like `/eve/v1/session` to that server, so
 the client component can use `useEveAgent()` without configuring a host.
 
-Set `EVE_BASE_URL` before starting Next.js to reuse an already-running Eve
+Set `EVE_BASE_URL` before starting Next.js to reuse an already-running eve
 server instead of letting `withEve()` start one:
 
 ```bash
@@ -24,8 +24,8 @@ EVE_BASE_URL=http://localhost:3000 pnpm --filter web-chat-next-template dev
 
 When a linked Vercel project is detected, `withEve()` writes generated
 `experimentalServices` to `.vercel/output/config.json` so Next.js deploys at
-`/` and the app-local Eve agent runs behind the private
-`/_eve_internal/eve` service prefix, then rewrites public Eve endpoints to that
+`/` and the app-local eve agent runs behind the private
+`/_eve_internal/eve` service prefix, then rewrites public eve endpoints to that
 private service.
 
 ## Scaffold Source

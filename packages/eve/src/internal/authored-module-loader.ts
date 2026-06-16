@@ -69,7 +69,7 @@ function getChannelModuleCache(): Map<string, unknown> | undefined {
  * same `node_modules/.cache/.../<hash>.mjs` file: one call's
  * `writeFile` can truncate the bundle while another's `import()` is
  * still resolving it, surfacing as intermittent
- * "Expected … to match the public Eve shape" failures during
+ * "Expected … to match the public eve shape" failures during
  * compilation.
  *
  * The map only holds in-flight promises; once a load settles the entry

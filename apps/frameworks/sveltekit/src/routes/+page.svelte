@@ -3,10 +3,10 @@
 </script>
 
 <svelte:head>
-  <title>Eve Agent</title>
+  <title>eve Agent</title>
   <meta
     name="description"
-    content="Ask an Eve agent questions and inspect streamed reasoning and tool calls."
+    content="Ask an eve agent questions and inspect streamed reasoning and tool calls."
   />
 </svelte:head>
 

@@ -88,9 +88,9 @@ async function createFakePnpmEnvironment(scratch: string): Promise<{
     ...withoutCodingAgentMarkers(baseEnv),
     EVE_INIT_PNPM_LOG: logPath,
     GIT_AUTHOR_EMAIL: "eve-init@example.com",
-    GIT_AUTHOR_NAME: "Eve Init",
+    GIT_AUTHOR_NAME: "eve Init",
     GIT_COMMITTER_EMAIL: "eve-init@example.com",
-    GIT_COMMITTER_NAME: "Eve Init",
+    GIT_COMMITTER_NAME: "eve Init",
     npm_execpath: fakePnpmPath,
   };
 
@@ -134,9 +134,9 @@ async function createFakeNpmEnvironment(scratch: string): Promise<{
     ...withoutCodingAgentMarkers(baseEnv),
     EVE_INIT_NPM_LOG: logPath,
     GIT_AUTHOR_EMAIL: "eve-init@example.com",
-    GIT_AUTHOR_NAME: "Eve Init",
+    GIT_AUTHOR_NAME: "eve Init",
     GIT_COMMITTER_EMAIL: "eve-init@example.com",
-    GIT_COMMITTER_NAME: "Eve Init",
+    GIT_COMMITTER_NAME: "eve Init",
     npm_config_user_agent: "npm/11.0.0 node/v24.0.0 darwin arm64",
     npm_execpath: fakeNpmPath,
   };
@@ -200,7 +200,7 @@ describe("eve init smoke", () => {
     await expect(pathExists(join(projectDir, ".git"))).resolves.toBe(true);
     await expect(
       runFile("git", ["log", "-1", "--pretty=%s"], { cwd: projectDir }),
-    ).resolves.toMatchObject({ stdout: "Initial commit from Eve\n" });
+    ).resolves.toMatchObject({ stdout: "Initial commit from eve\n" });
     await expect(
       runFile("git", ["ls-files", "--error-unmatch", "pnpm-lock.yaml"], { cwd: projectDir }),
     ).resolves.toMatchObject({ stdout: "pnpm-lock.yaml\n" });

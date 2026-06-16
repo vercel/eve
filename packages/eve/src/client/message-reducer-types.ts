@@ -1,14 +1,14 @@
 import type { InputResponse } from "#runtime/input/types.js";
 
 /**
- * UIMessage-compatible Eve message projection for chat and agent UIs.
+ * UIMessage-compatible eve message projection for chat and agent UIs.
  */
 export interface EveMessageData {
   readonly messages: readonly EveMessage[];
 }
 
 /**
- * Eve-owned message shape that follows the AI SDK UIMessage convention.
+ * eve-owned message shape that follows the AI SDK UIMessage convention.
  */
 export interface EveMessage {
   readonly id: string;
@@ -156,7 +156,7 @@ export type EveDynamicToolPart = {
 );
 
 /**
- * Eve-specific metadata attached to an {@link EveDynamicToolPart}. `eve.kind`
+ * eve-specific metadata attached to an {@link EveDynamicToolPart}. `eve.kind`
  * classifies the action (`"tool-call"`, `"subagent-call"`, `"load-skill"`, or
  * `"unknown"`), `eve.name` is the resolved action name, and `eve.inputRequest`
  * and `eve.inputResponse` store the HITL prompt and submitted response when the

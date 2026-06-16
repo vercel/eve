@@ -49,7 +49,7 @@ export async function runLinkCommand(
   }
 
   const prompter = dependencies.createPrompter?.() ?? createPrompter();
-  prompter.intro("Link your Eve agent to Vercel");
+  prompter.intro("Link your eve agent to Vercel");
   try {
     const result = await runLinkFlow({ appRoot, prompter, deps: dependencies.flowDeps });
     prompter.outro(result.kind === "cancelled" ? "Cancelled." : "Project linked.");

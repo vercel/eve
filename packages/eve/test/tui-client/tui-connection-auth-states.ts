@@ -7,7 +7,7 @@ import { theme } from "./lib/theme.ts";
 
 /**
  * Drives the full `authorization.*` lifecycle through the
- * runner + renderer without spinning up a real Eve server. The other
+ * runner + renderer without spinning up a real eve server. The other
  * smoke (`tui-connection-auth.ts`) covers the realistic `_required`
  * path through a live runtime, but the live runtime cannot easily
  * emit `_completed` in this repo (interactive auth

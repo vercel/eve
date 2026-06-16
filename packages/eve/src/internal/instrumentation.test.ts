@@ -100,7 +100,7 @@ describe("resolveInstrumentationProjection", () => {
     expect(log.warn).toHaveBeenCalledTimes(2);
   });
 
-  it("warns and returns undefined for a record outside the Eve JSON contract", () => {
+  it("warns and returns undefined for a record outside the eve JSON contract", () => {
     const log = fakeLogger();
 
     expect(

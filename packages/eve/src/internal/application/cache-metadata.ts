@@ -6,7 +6,7 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 const EVE_CACHE_METADATA_FILE = "eve-cache.json";
 
 /**
- * Clears one Eve-owned cache directory when its recorded Eve version is missing
+ * Clears one eve-owned cache directory when its recorded eve version is missing
  * or differs from the currently installed package version.
  */
 export async function prepareEveVersionedCacheDirectory(directoryPath: string): Promise<void> {
@@ -24,7 +24,7 @@ export async function prepareEveVersionedCacheDirectory(directoryPath: string): 
 }
 
 /**
- * Writes the current installed Eve version into one Eve-owned cache directory.
+ * Writes the current installed eve version into one eve-owned cache directory.
  */
 export async function writeEveVersionedCacheMetadata(directoryPath: string): Promise<void> {
   await mkdir(directoryPath, {

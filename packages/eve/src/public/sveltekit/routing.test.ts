@@ -62,7 +62,7 @@ describe("normalizeOrigin", () => {
 });
 
 describe("createEveVercelRewrite", () => {
-  it("rewrites the Eve transport prefix onto the service prefix", () => {
+  it("rewrites the eve transport prefix onto the service prefix", () => {
     expect(createEveVercelRewrite(EVE_SVELTEKIT_SERVICE_PREFIX)).toEqual({
       source: `${EVE_PROTOCOL_PREFIX}/:path*`,
       destination: `${EVE_SVELTEKIT_SERVICE_PREFIX}${EVE_PROTOCOL_PREFIX}/:path*`,

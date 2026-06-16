@@ -8,7 +8,7 @@ type JsonSchemaDirection = "input" | "output";
 
 /**
  * Normalizes one Standard Schema or JSON Schema definition into plain JSON
- * Schema data that can cross Eve runtime and client boundaries.
+ * Schema data that can cross eve runtime and client boundaries.
  */
 export function normalizeJsonSchemaDefinition(
   value: StandardJSONSchemaV1 | Record<string, unknown> | unknown,

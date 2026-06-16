@@ -85,7 +85,7 @@ export function createAuthorizedToolExecute(input: {
 
       // The resolved bearer was rejected (a downstream 401 mapped to
       // requireAuth, or getToken re-reporting Required). Drop it from
-      // every cache layer — Eve's per-step cache and the strategy's own
+      // every cache layer — eve's per-step cache and the strategy's own
       // (e.g. the @vercel/connect token cache) — so the
       // re-authorization re-resolves a genuinely fresh token instead of
       // re-reading the rejected one. Mirrors the MCP client.

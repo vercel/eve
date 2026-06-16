@@ -22,7 +22,7 @@ export interface ExecuteEvalOptions {
   /** Overrides the eval's own `timeoutMs` when set (CLI `--timeout`). */
   readonly timeoutMs?: number;
   /**
-   * Pre-configured client for communicating with the Eve agent.
+   * Pre-configured client for communicating with the eve agent.
    * The CLI constructs this once with the appropriate auth and headers,
    * and every eval creates fresh sessions from it.
    */

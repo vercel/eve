@@ -456,7 +456,7 @@ describe("ensureChannel", () => {
     expect(result.filesWritten).toContain(pnpmWorkspacePath);
   });
 
-  test("adds the Eve release age exclusion to an existing pnpm workspace exclusion list", async () => {
+  test("adds the eve release age exclusion to an existing pnpm workspace exclusion list", async () => {
     const projectRoot = await createTempDir();
     const pnpmWorkspacePath = join(projectRoot, "pnpm-workspace.yaml");
     await writeFile(
@@ -560,7 +560,7 @@ describe("listAuthoredChannels", () => {
 });
 
 describe("scaffoldBaseProject", () => {
-  test("writes a base Eve project with explicit versions", async () => {
+  test("writes a base eve project with explicit versions", async () => {
     const targetDirectory = await createTempDir();
     const projectRoot = await scaffoldBaseProject({
       projectName: "demo-agent",

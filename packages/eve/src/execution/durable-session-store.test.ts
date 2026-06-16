@@ -78,7 +78,7 @@ describe("durable-session-store cross-version contract", () => {
   });
 
   it("preserves unrecognized DurableSessionState fields via spread (forward compat)", () => {
-    // Hypothetical state shape introduced by a newer Eve version.
+    // Hypothetical state shape introduced by a newer eve version.
     const futureState: DurableSessionState & { futureFlag: { hint: string } } = {
       continuationToken: "http:test",
       emissionState: { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "" },

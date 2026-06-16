@@ -56,7 +56,7 @@ const WORKFLOW_TRANSFORM_PATCHED = Symbol("eve.workflow-transform-patched");
 const WORKFLOW_CACHE_PATH_FRAGMENT = "/.eve/workflow-cache/";
 
 /**
- * Packages Eve itself pulls into hosted application output that must stay
+ * Packages eve itself pulls into hosted application output that must stay
  * external so Nitro/rolldown does not try to inline platform-specific
  * `.node` binaries (which would fail with a UTF-8 decode error).
  *
@@ -196,7 +196,7 @@ function createDevelopmentWatchOptions(appRoot: string): { ignored: string[] } |
   }
 
   return {
-    // Eve's authored-source watcher owns app code rebuilds. If Nitro/Rollup
+    // eve's authored-source watcher owns app code rebuilds. If Nitro/Rollup
     // also watches those files it can reload the worker while a workflow
     // stream is waiting on a tool result, which surfaces as ECONNRESET.
     ignored: [appRoot, join(appRoot, "**")],
@@ -577,7 +577,7 @@ function addInstrumentationModuleSideEffectsPlugin(
 }
 
 /**
- * Extends the Workflow Nitro transform exclusion list to include Eve's
+ * Extends the Workflow Nitro transform exclusion list to include eve's
  * package-owned workflow cache directory.
  *
  * Without this patch, the Workflow transform can re-process the already-built
@@ -631,7 +631,7 @@ function patchWorkflowTransformExcludePath(nitro: Nitro, workflowBuildDir: strin
 
 /**
  * Creates one configured Nitro instance for either production build or dev
- * hosting of an Eve application.
+ * hosting of an eve application.
  *
  * `surface` narrows the mounted routes for isolated production builds.
  * `outputDir` lets callers stage those isolated builds into separate Nitro
@@ -745,7 +745,7 @@ export async function createApplicationNitro(
   }
 
   // Resolve bare `workflow/*` specifiers during Nitro's Rollup bundling so
-  // pre-built workflow modules (whose imports target Eve's installed copies)
+  // pre-built workflow modules (whose imports target eve's installed copies)
   // resolve correctly in production builds where Node resolution from the
   // workflow cache directory is not available.
   if (includesWorkflowSurface(surface)) {

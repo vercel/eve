@@ -30,7 +30,7 @@ describe("schedule registration", () => {
     ).toEqual([
       {
         cron: "0 0 * * 0",
-        description: 'Run Eve schedule "cleanup" from "schedules/cleanup.md".',
+        description: 'Run eve schedule "cleanup" from "schedules/cleanup.md".',
         logicalPath: "schedules/cleanup.md",
         scheduleId: "cleanup",
         sourceId: "schedules/cleanup.md",
@@ -38,7 +38,7 @@ describe("schedule registration", () => {
       },
       {
         cron: "0 8 * * *",
-        description: 'Run Eve schedule "daily-digest" from "schedules/daily-digest.mjs".',
+        description: 'Run eve schedule "daily-digest" from "schedules/daily-digest.mjs".',
         logicalPath: "schedules/daily-digest.mjs",
         scheduleId: "daily-digest",
         sourceId: "schedules/daily-digest.mjs",

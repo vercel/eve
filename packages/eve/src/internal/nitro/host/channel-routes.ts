@@ -28,7 +28,7 @@ interface ChannelRouteNitro {
 }
 
 /**
- * One Nitro route registration for an Eve channel.
+ * One Nitro route registration for an eve channel.
  */
 export interface NitroChannelRouteRegistration {
   readonly method: ChannelRouteMethod;
@@ -90,7 +90,7 @@ export function computeChannelRouteRegistrations(
 }
 
 /**
- * Registers virtual Nitro handlers for the provided Eve channel routes.
+ * Registers virtual Nitro handlers for the provided eve channel routes.
  */
 export function registerChannelVirtualHandlers(
   nitro: Pick<ChannelRouteNitro, "options">,
@@ -109,7 +109,7 @@ export function registerChannelVirtualHandlers(
 }
 
 /**
- * Replaces the currently-mounted Eve channel virtual handlers when the route
+ * Replaces the currently-mounted eve channel virtual handlers when the route
  * set changes.
  */
 export function syncChannelVirtualHandlers(

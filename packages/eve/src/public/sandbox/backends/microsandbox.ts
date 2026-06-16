@@ -13,7 +13,7 @@ import type {
  * network policies and credential brokering.
  *
  * Supported hosts: macOS on Apple Silicon, or Linux (glibc) with KVM
- * enabled. The `microsandbox` package is not bundled with Eve. When it
+ * enabled. The `microsandbox` package is not bundled with eve. When it
  * (or its VM runtime) is missing, `eve dev` installs both
  * automatically (disable with `setup: { autoInstall: false }`);
  * production processes fail with actionable errors instead.

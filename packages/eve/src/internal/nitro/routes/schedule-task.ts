@@ -7,7 +7,7 @@ import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifa
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 
 /**
- * Dispatches one Eve authored schedule via the execution engine.
+ * Dispatches one eve authored schedule via the execution engine.
  *
  * Fire-and-forget: the workflow runtime owns terminal completion and
  * its own failure observability. The task return value reports which

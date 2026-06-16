@@ -2,7 +2,7 @@
   "name": "@vercel/eve-catalog",
   "version": "0.0.1",
   "private": true,
-  "description": "Single source of truth for Eve integration identity (channels and connections).",
+  "description": "Single source of truth for eve integration identity (channels and connections).",
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": false,

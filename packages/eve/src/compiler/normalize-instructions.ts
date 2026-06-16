@@ -46,7 +46,7 @@ export async function compileInstructionsEntry(
   if (source.sourceKind === "markdown") {
     const definition = normalizeInstructionsDefinition(
       source.definition,
-      `Expected the compiled instructions definition at "${source.logicalPath}" to match the public Eve shape.`,
+      `Expected the compiled instructions definition at "${source.logicalPath}" to match the public eve shape.`,
     );
     return {
       kind: "instructions",
@@ -84,7 +84,7 @@ export async function compileInstructionsEntry(
 
   const definition = normalizeInstructionsDefinition(
     exportValue,
-    `Expected the instructions export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public Eve shape.`,
+    `Expected the instructions export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
   );
 
   return {

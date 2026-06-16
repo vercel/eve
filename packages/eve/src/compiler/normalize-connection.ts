@@ -40,7 +40,7 @@ export async function compileConnectionDefinition(
     source,
   });
   const protocol = readConnectionProtocol(loaded);
-  const message = `Expected the connection export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public Eve shape.`;
+  const message = `Expected the connection export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`;
 
   const shared = {
     connectionName: source.connectionName,

@@ -19,7 +19,7 @@ describe.skipIf(onWindows)("createMicrosandboxSandboxBackend", () => {
     expect(createMicrosandboxSandboxBackend().name).toBe("microsandbox");
   });
 
-  it("defaults to Eve's published sandbox runtime image", () => {
+  it("defaults to eve's published sandbox runtime image", () => {
     expect(MICROSANDBOX_DEFAULT_IMAGE).toBe("ghcr.io/vercel/eve:latest");
     expect(resolveMicrosandboxOptions(undefined).image).toBe(MICROSANDBOX_DEFAULT_IMAGE);
   });

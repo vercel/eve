@@ -1593,7 +1593,7 @@ describe("createToolLoopHarness", () => {
   it("skips AI-SDK-marked invalid tool calls so a malformed JSON payload does not crash the harness", async () => {
     // Simulates the AI SDK fallback path: when the model emits unparsable
     // JSON for a tool call, `parseToolCall` returns a DynamicToolCall with
-    // `invalid: true, dynamic: true, input: <raw string>`. Eve must not
+    // `invalid: true, dynamic: true, input: <raw string>`. eve must not
     // project this into a RuntimeActionRequest (parseJsonObject would
     // throw on a string) and must not surface the call via
     // actions.requested — the AI SDK feeds the error back to the model
@@ -3800,7 +3800,7 @@ describe("createToolLoopHarness", () => {
         {
           content: [
             {
-              input: { query: "Eve release note current" },
+              input: { query: "eve release note current" },
               providerExecuted: true,
               toolCallId,
               toolName: "web_search",
@@ -3857,7 +3857,7 @@ describe("createToolLoopHarness", () => {
     setupMockAgent({
       content: [
         {
-          input: { query: "Eve release note current" },
+          input: { query: "eve release note current" },
           providerExecuted: true,
           toolCallId,
           toolName: "web_search",
@@ -3875,7 +3875,7 @@ describe("createToolLoopHarness", () => {
       finishReason: "stop",
       fullStreamParts: [
         {
-          input: { query: "Eve release note current" },
+          input: { query: "eve release note current" },
           providerExecuted: true,
           toolCallId,
           toolName: "web_search",
@@ -3896,7 +3896,7 @@ describe("createToolLoopHarness", () => {
           {
             content: [
               {
-                input: { query: "Eve release note current" },
+                input: { query: "eve release note current" },
                 providerExecuted: true,
                 toolCallId,
                 toolName: "web_search",
@@ -3917,7 +3917,7 @@ describe("createToolLoopHarness", () => {
       text: "Search result captured.",
       toolCalls: [
         {
-          input: { query: "Eve release note current" },
+          input: { query: "eve release note current" },
           providerExecuted: true,
           toolCallId,
           toolName: "web_search",
@@ -3926,7 +3926,7 @@ describe("createToolLoopHarness", () => {
       ],
       toolResults: [
         {
-          input: { query: "Eve release note current" },
+          input: { query: "eve release note current" },
           output: webSearchOutput,
           providerExecuted: true,
           toolCallId,
@@ -3957,7 +3957,7 @@ describe("createToolLoopHarness", () => {
           actions: [
             {
               callId: toolCallId,
-              input: { query: "Eve release note current" },
+              input: { query: "eve release note current" },
               kind: "tool-call",
               toolName: "web_search",
             },
@@ -4001,7 +4001,7 @@ describe("createToolLoopHarness", () => {
     setupMockAgent({
       content: [
         {
-          input: { query: "Eve release note current" },
+          input: { query: "eve release note current" },
           providerExecuted: true,
           toolCallId,
           toolName: "web_search",
@@ -4011,7 +4011,7 @@ describe("createToolLoopHarness", () => {
       finishReason: "stop",
       fullStreamParts: [
         {
-          input: { query: "Eve release note current" },
+          input: { query: "eve release note current" },
           providerExecuted: true,
           toolCallId,
           toolName: "web_search",
@@ -4019,7 +4019,7 @@ describe("createToolLoopHarness", () => {
         },
         {
           error: new Error("Search failed"),
-          input: { query: "Eve release note current" },
+          input: { query: "eve release note current" },
           providerExecuted: true,
           toolCallId,
           toolName: "web_search",
@@ -4032,7 +4032,7 @@ describe("createToolLoopHarness", () => {
           {
             content: [
               {
-                input: { query: "Eve release note current" },
+                input: { query: "eve release note current" },
                 providerExecuted: true,
                 toolCallId,
                 toolName: "web_search",
@@ -4046,7 +4046,7 @@ describe("createToolLoopHarness", () => {
       text: "",
       toolCalls: [
         {
-          input: { query: "Eve release note current" },
+          input: { query: "eve release note current" },
           providerExecuted: true,
           toolCallId,
           toolName: "web_search",

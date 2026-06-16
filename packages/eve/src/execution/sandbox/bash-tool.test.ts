@@ -34,8 +34,8 @@ describe("executeBashOnSandbox", () => {
       stdout: "weather-codes.md\n",
       truncated: false,
     });
-    expect(log).toHaveBeenCalledWith("Eve: starting sandbox command: ls -la /workspace");
-    expect(log).toHaveBeenCalledWith("Eve: sandbox command finished (exit 0): ls -la /workspace");
+    expect(log).toHaveBeenCalledWith("eve: starting sandbox command: ls -la /workspace");
+    expect(log).toHaveBeenCalledWith("eve: sandbox command finished (exit 0): ls -la /workspace");
   });
 });
 

@@ -395,7 +395,7 @@ export async function resolvePendingRuntimeActions(input: {
 }
 
 /**
- * Projects one AI SDK tool call into the Eve runtime-action contract.
+ * Projects one AI SDK tool call into the eve runtime-action contract.
  */
 export function createRuntimeActionRequestFromToolCall(input: {
   readonly toolCall: TypedToolCall<ToolSet>;

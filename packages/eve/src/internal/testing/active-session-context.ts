@@ -72,7 +72,7 @@ function buildSession(init: ActiveSessionInit): Session {
 }
 
 /**
- * Runs `fn` with an Eve {@link ContextContainer} bound to the active
+ * Runs `fn` with an eve {@link ContextContainer} bound to the active
  * async scope.
  */
 export async function runWithActiveSessionContext<T>(

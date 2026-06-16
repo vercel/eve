@@ -55,7 +55,7 @@ export const discoverDiagnosticsSummarySchema = z
   .strict();
 
 /**
- * Root-resolution error code emitted when discovery cannot locate an Eve agent.
+ * Root-resolution error code emitted when discovery cannot locate an eve agent.
  */
 export const DISCOVER_PROJECT_NOT_FOUND = "discover/project-not-found";
 

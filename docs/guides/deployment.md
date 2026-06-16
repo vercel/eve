@@ -1,9 +1,9 @@
 ---
 title: "Deployment"
-description: "A production checklist for shipping an Eve agent on Vercel, covering build output, env and secrets, sandbox backend, prewarm, auth, deploy, and verify."
+description: "A production checklist for shipping an eve agent on Vercel, covering build output, env and secrets, sandbox backend, prewarm, auth, deploy, and verify."
 ---
 
-Eve runs the same way locally and on Vercel, so taking an agent from `eve dev` to production is mostly mechanical. Work through this checklist in order.
+eve runs the same way locally and on Vercel, so taking an agent from `eve dev` to production is mostly mechanical. Work through this checklist in order.
 
 ## 1. Build
 
@@ -13,7 +13,7 @@ Eve runs the same way locally and on Vercel, so taking an agent from `eve dev` t
 eve build
 ```
 
-When `VERCEL` is set (every hosted Vercel build sets it), `eve build` writes the Vercel output bundle under `.vercel/output`. A plain local `eve build` skips that bundle. Either way you get Eve's compiled framework artifacts under `.eve/`, including the discovery manifest, compiled manifest, diagnostics, and module map. Open those to see which authored surface a deployment will load. For the artifact guide and what to do when `eve build` fails, see [Observability](./instrumentation).
+When `VERCEL` is set (every hosted Vercel build sets it), `eve build` writes the Vercel output bundle under `.vercel/output`. A plain local `eve build` skips that bundle. Either way you get eve's compiled framework artifacts under `.eve/`, including the discovery manifest, compiled manifest, diagnostics, and module map. Open those to see which authored surface a deployment will load. For the artifact guide and what to do when `eve build` fails, see [Observability](./instrumentation).
 
 ## 2. Environment variables and secrets
 
@@ -37,11 +37,11 @@ export default defineSandbox({
 });
 ```
 
-Leave `backend` off and Eve falls back to `defaultBackend()`, which picks the Vercel backend on hosted builds and the local backend everywhere else. One definition, both environments.
+Leave `backend` off and eve falls back to `defaultBackend()`, which picks the Vercel backend on hosted builds and the local backend everywhere else. One definition, both environments.
 
 ## 4. Build-time sandbox prewarm
 
-During hosted builds, Eve prewarms reusable Vercel sandbox templates so the first session doesn't pay the cold-start cost:
+During hosted builds, eve prewarms reusable Vercel sandbox templates so the first session doesn't pay the cold-start cost:
 
 - Prewarm runs only when both `VERCEL` and `VERCEL_DEPLOYMENT_ID` are present.
 - A sandbox with no `bootstrap()` and no workspace seed files gets skipped.
@@ -103,9 +103,9 @@ Once the agent is deployed, the platform auto-detects `eve` as the framework and
 
 Agent Runs is separate from the OpenTelemetry exporters configured in [Observability](./instrumentation). Those still work and are the recommended path if you want spans in Braintrust, Datadog, or another third-party backend.
 
-## How Eve sits behind a host framework
+## How eve sits behind a host framework
 
-You can deploy an Eve app on its own, or mount it inside a host web framework that owns the rest of the site (marketing pages, a dashboard, other API routes). The host keeps its own routing and serves Eve's routes through the framework integration. Either way, the agent surface and HTTP contract are identical. For mounting Eve in Next.js (`withEve`) and the other supported frameworks, see [Frontend](./frontend/nextjs).
+You can deploy an eve app on its own, or mount it inside a host web framework that owns the rest of the site (marketing pages, a dashboard, other API routes). The host keeps its own routing and serves eve's routes through the framework integration. Either way, the agent surface and HTTP contract are identical. For mounting eve in Next.js (`withEve`) and the other supported frameworks, see [Frontend](./frontend/nextjs).
 
 ## Checklist
 

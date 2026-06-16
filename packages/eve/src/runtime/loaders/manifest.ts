@@ -72,7 +72,7 @@ function parseCompiledManifest(value: unknown, manifestPath: string): CompiledAg
 
   if (!parsed.success) {
     throw new LoadCompiledManifestError(
-      `Expected "${manifestPath}" to contain a valid compiled Eve agent manifest. ${formatValidationError(parsed.error)}`,
+      `Expected "${manifestPath}" to contain a valid compiled eve agent manifest. ${formatValidationError(parsed.error)}`,
       manifestPath,
     );
   }

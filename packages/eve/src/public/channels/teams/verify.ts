@@ -1,7 +1,7 @@
 /**
  * Microsoft Teams inbound Bot Framework request verification.
  *
- * Teams sends bot activities through the Bot Connector service. Eve verifies
+ * Teams sends bot activities through the Bot Connector service. eve verifies
  * the bearer JWT against Bot Connector OpenID keys and the bot's Microsoft
  * app id before dispatching any activity to the runtime.
  */
@@ -22,7 +22,7 @@ const BOT_CONNECTOR_ISSUER = "https://api.botframework.com";
 /**
  * Caller-supplied inbound webhook verifier. Replaces Bot Connector JWT
  * verification when a trusted integration authenticates forwarded requests
- * before they reach Eve.
+ * before they reach eve.
  *
  * Return a falsy value to reject the request (verification throws), a string
  * to accept and use that string as the verified body, or any other truthy

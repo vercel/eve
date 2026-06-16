@@ -1,26 +1,26 @@
-# Eve
+# eve
 
-Eve is a filesystem-first framework for durable backend agents on Vercel.
+eve is a filesystem-first framework for durable backend agents on Vercel.
 
 You author an agent as a directory on disk. The directory is the contract — markdown for the parts a human should read like a spec, TypeScript for the parts that benefit from real types and runtime behavior.
 
-The framework is called Eve. The published npm package is `eve`. The CLI binary is `eve`.
+The framework is called eve. The published npm package is `eve`. The CLI binary is `eve`.
 
 ## Preview Terms and Safeguards
 
-Eve is currently a preview and subject to the Vercel beta terms; the framework, APIs, documentation, and behavior may change before general availability.
+eve is currently a preview and subject to the Vercel beta terms; the framework, APIs, documentation, and behavior may change before general availability.
 
 As the deployer, it is your responsibility to ensure your agent complies with applicable laws.
 
 You are responsible for configuring approval policies, tool restrictions, connection scopes, route/session authorization, sandbox controls, telemetry exports, and other safeguards appropriate for your use case.
 
-Before using Eve with non-public, sensitive, regulated, or production data, review which default tools, custom tools, MCP tools, shell/file/web tools, connected services, subagents, schedules, and external actions are available to the agent.
+Before using eve with non-public, sensitive, regulated, or production data, review which default tools, custom tools, MCP tools, shell/file/web tools, connected services, subagents, schedules, and external actions are available to the agent.
 
 Require human approval or other safeguards for sensitive, irreversible, regulated, financial, healthcare, employment, housing, legal, safety-impacting, user-impacting, or external side-effecting actions.
 
-Unless you configure stricter controls, Eve agents may operate with permissive settings, including tool execution without human approval where approval is omitted and sandbox network egress that is not deny-all. Do not rely on model behavior alone to prevent sensitive or irreversible actions.
+Unless you configure stricter controls, eve agents may operate with permissive settings, including tool execution without human approval where approval is omitted and sandbox network egress that is not deny-all. Do not rely on model behavior alone to prevent sensitive or irreversible actions.
 
-## What Eve Prioritizes
+## What eve Prioritizes
 
 - Markdown-first authoring for instructions and procedures
 - TypeScript where typed runtime behavior matters
@@ -122,7 +122,7 @@ export default defineAgent({
 npx eve@latest init my-agent
 ```
 
-`eve init` writes a new agent with Eve's default model. Pass `--channel-web-nextjs` to add the
+`eve init` writes a new agent with eve's default model. Pass `--channel-web-nextjs` to add the
 Web Chat application. It installs dependencies, initializes Git, and starts the
 development server. Targeting an existing project directory (`eve init .`) adds
 the agent files and missing dependencies instead. It does not create a Vercel
@@ -138,7 +138,7 @@ CLI commands:
 
 ## Deploying
 
-Eve is built for Vercel. The runtime is Nitro + Vercel Workflows. Read [`./docs/guides/deployment.md`](./docs/guides/deployment.md) for the deployment path, environment variables, and Vercel-specific configuration.
+eve is built for Vercel. The runtime is Nitro + Vercel Workflows. Read [`./docs/guides/deployment.md`](./docs/guides/deployment.md) for the deployment path, environment variables, and Vercel-specific configuration.
 
 ## Read Next
 
@@ -157,9 +157,9 @@ By runtime concern: [Sessions and Streaming](./docs/concepts/sessions-runs-and-s
 
 ## Architecture (Internals)
 
-You do not need this section to author an Eve agent — it documents the public HTTP protocol contracts so Eve composes predictably with other systems.
+You do not need this section to author an eve agent — it documents the public HTTP protocol contracts so eve composes predictably with other systems.
 
-Eve's internal split is:
+eve's internal split is:
 
 - the **channel** normalizes inbound transport, applies auth and delivery policy, and owns `continuationToken`
 - the **harness** does one unit of AI work and returns `{ session, next }`

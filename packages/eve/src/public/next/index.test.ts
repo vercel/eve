@@ -28,7 +28,7 @@ describe("withEve", () => {
     vi.unstubAllEnvs();
   });
 
-  it("emits Eve rewrites through beforeFiles when no user rewrites exist", async () => {
+  it("emits eve rewrites through beforeFiles when no user rewrites exist", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_URL", "preview.example.com");
@@ -69,7 +69,7 @@ describe("withEve", () => {
     expect(eveRewrite).not.toHaveProperty("basePath");
   });
 
-  it("adds production Vercel rewrites to the private Eve service namespace", async () => {
+  it("adds production Vercel rewrites to the private eve service namespace", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_URL", "preview.example.com");
@@ -83,7 +83,7 @@ describe("withEve", () => {
     });
   });
 
-  it("only rewrites Eve-prefixed non-index routes", async () => {
+  it("only rewrites eve-prefixed non-index routes", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_URL", "preview.example.com");
@@ -97,7 +97,7 @@ describe("withEve", () => {
     expect(beforeFiles.every((rewrite) => rewrite.source.startsWith("/eve/v1/"))).toBe(true);
   });
 
-  it("rewrites authored channel routes under the Eve protocol prefix", async () => {
+  it("rewrites authored channel routes under the eve protocol prefix", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_URL", "preview.example.com");
@@ -188,7 +188,7 @@ describe("withEve", () => {
     });
   });
 
-  it("prepends Eve rewrites to beforeFiles when user rewrites use sections", async () => {
+  it("prepends eve rewrites to beforeFiles when user rewrites use sections", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_URL", "preview.example.com");

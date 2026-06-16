@@ -117,7 +117,7 @@ export async function findSlackConnector(
 }
 
 /**
- * Outcome of pointing a connector's trigger destination at this project's Eve
+ * Outcome of pointing a connector's trigger destination at this project's eve
  * route. Detach and attach are reported separately because attach must not run
  * while an old trigger destination may still exist. A `detach-failed` connector
  * is left in a known-stale state the caller surfaces with manual recovery steps.
@@ -128,7 +128,7 @@ export type SlackConnectorAttachmentResult =
   | { state: "attach-failed" };
 
 /**
- * Replaces the connector's default trigger destination with the Eve route:
+ * Replaces the connector's default trigger destination with the eve route:
  * detach the existing destination first, then attach this project. Either
  * subprocess failing short-circuits so a half-configured connector is reported
  * rather than silently left pointing at the wrong place.
@@ -279,7 +279,7 @@ export async function cleanupCreatedAttempt(
   }
 
   context.log.warning(
-    "Vercel returned no connector UID for the abandoned Slack Connect request, so Eve cannot prove that request was cancelled. No connector was removed; do not retry until the browser request is no longer usable.",
+    "Vercel returned no connector UID for the abandoned Slack Connect request, so eve cannot prove that request was cancelled. No connector was removed; do not retry until the browser request is no longer usable.",
   );
   const inventory = await listSlackConnectors(context.deps, context.projectRoot, context.onOutput);
   if (inventory.state === "failed") return { state: "failed", connectorUids: [] };

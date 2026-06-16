@@ -9,7 +9,7 @@ import type {
 const STANDARD_PROJECTED_CLAIM_KEYS = new Set(["aud", "exp", "iat", "iss", "jti", "nbf", "sub"]);
 
 /**
- * Returns the normalized string-valued JWT claim projection used by Eve's
+ * Returns the normalized string-valued JWT claim projection used by eve's
  * runtime auth layer.
  */
 function normalizeJwtClaims(payload: JWTPayload): RouteAuthAttributes {
@@ -84,7 +84,7 @@ export function areTokenClaimMatchersSatisfied(
 }
 
 /**
- * Creates a normalized JWT-backed Eve principal from a verified payload.
+ * Creates a normalized JWT-backed eve principal from a verified payload.
  */
 export function createJwtAuthenticatedCallerPrincipal(input: {
   readonly authenticator: AuthenticatedCallerPrincipal["authenticator"];

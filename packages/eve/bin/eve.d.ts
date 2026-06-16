@@ -71,7 +71,7 @@ export function ensureBuiltCli(
 ): Promise<string>;
 
 /**
- * Runs the compiled Eve CLI, building the workspace package on demand when needed.
+ * Runs the compiled eve CLI, building the workspace package on demand when needed.
  */
 export function runEveCli(
   argv?: string[],

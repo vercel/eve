@@ -3,7 +3,7 @@ title: "Connections"
 description: "Expose external MCP and OpenAPI servers to the model, with connection tokens the model never sees."
 ---
 
-A connection wires an agent into an external server you don't author, either an MCP server (Linear, GitHub, a warehouse) or any HTTP API with an OpenAPI document. Eve handles the parts you'd otherwise hand-roll, discovering the remote tools, surfacing them to the model, and brokering auth.
+A connection wires an agent into an external server you don't author, either an MCP server (Linear, GitHub, a warehouse) or any HTTP API with an OpenAPI document. eve handles the parts you'd otherwise hand-roll, discovering the remote tools, surfacing them to the model, and brokering auth.
 
 Connections live under `agent/connections/`. The runtime name comes from the filename, so `agent/connections/linear.ts` registers as `"linear"`. The model never sees a connection's URL or credentials. It discovers tools through the built-in `connection__search` and calls them by their qualified name, `connection__<connection>__<tool>` (e.g. `connection__linear__list_issues`).
 
@@ -27,11 +27,11 @@ The `url` must speak Streamable HTTP or SSE. Write the `description` for the mod
 
 ### Static-token auth
 
-`getToken` returns a `TokenResult` (`{ token, expiresAt? }`), and Eve sends it as `Authorization: Bearer <token>` on every request. Because it runs on each connection attempt, you can mint a fresh token from wherever you keep secrets, including an env var, a secrets manager, an internal vault, or your own OAuth exchange. If the token has a known TTL, set `expiresAt` (milliseconds since epoch) and Eve refreshes ahead of time rather than waiting for a `401`.
+`getToken` returns a `TokenResult` (`{ token, expiresAt? }`), and eve sends it as `Authorization: Bearer <token>` on every request. Because it runs on each connection attempt, you can mint a fresh token from wherever you keep secrets, including an env var, a secrets manager, an internal vault, or your own OAuth exchange. If the token has a known TTL, set `expiresAt` (milliseconds since epoch) and eve refreshes ahead of time rather than waiting for a `401`.
 
 When `getToken` is the only auth, `principalType` defaults to `"app"`: one shared credential keyed across all sessions. Switch to `principalType: "user"` when each end-user carries their own token.
 
-Eve resolves and caches connection tokens per step; they never land in conversation history or reach the model.
+eve resolves and caches connection tokens per step; they never land in conversation history or reach the model.
 
 ### No auth
 
@@ -44,7 +44,7 @@ export default defineMcpClientConnection({
 });
 ```
 
-We recommend using no-auth connections only for services that are intentionally public, local-only, or otherwise protected outside Eve. Do not use no-auth connections for sensitive third-party services.
+We recommend using no-auth connections only for services that are intentionally public, local-only, or otherwise protected outside eve. Do not use no-auth connections for sensitive third-party services.
 
 ### Headers
 
@@ -92,7 +92,7 @@ For connection tools that can create, modify, delete, transmit, purchase, messag
 
 ## OpenAPI connections
 
-`defineOpenAPIConnection` turns any OpenAPI 3.x document into connection tools, one per operation. Pass an HTTPS URL Eve fetches at runtime, or an inline parsed object:
+`defineOpenAPIConnection` turns any OpenAPI 3.x document into connection tools, one per operation. Pass an HTTPS URL eve fetches at runtime, or an inline parsed object:
 
 ```ts title="agent/connections/petstore.ts"
 import { defineOpenAPIConnection } from "eve/connections";
@@ -104,7 +104,7 @@ export default defineOpenAPIConnection({
 });
 ```
 
-Each operation becomes `connection__<connection>__<operationId>` (e.g. `connection__petstore__getInventory`). When an operation has no `operationId`, Eve derives a deterministic `<method>_<sanitized-path>` name instead.
+Each operation becomes `connection__<connection>__<operationId>` (e.g. `connection__petstore__getInventory`). When an operation has no `operationId`, eve derives a deterministic `<method>_<sanitized-path>` name instead.
 
 `auth`, `headers`, and `approval` work exactly as they do for MCP. There are two fields specific to OpenAPI:
 
@@ -115,7 +115,7 @@ Each operation becomes `connection__<connection>__<operationId>` (e.g. `connecti
 
 ## Interactive OAuth via Vercel Connect
 
-When the server uses OAuth and you want each end-user to sign in through their own browser, turn on interactive authorization with [Vercel Connect](https://vercel.com/docs/connect). The `connect()` helper from `@vercel/connect/eve` handles consent, encrypted token storage, and refresh, then hooks all of that into Eve's authorization flow:
+When the server uses OAuth and you want each end-user to sign in through their own browser, turn on interactive authorization with [Vercel Connect](https://vercel.com/docs/connect). The `connect()` helper from `@vercel/connect/eve` handles consent, encrypted token storage, and refresh, then hooks all of that into eve's authorization flow:
 
 ```ts title="agent/connections/linear.ts"
 import { connect } from "@vercel/connect/eve";
@@ -132,7 +132,7 @@ export default defineMcpClientConnection({
 
 ## Self-hosted interactive OAuth
 
-To run your own OAuth, use `defineInteractiveAuthorization` from `eve/connections`, which takes a three-method form and needs no Vercel Connect. Eve mints a callback URL, parks (durably suspends) the turn on a framework-owned webhook, and resumes once the token comes back. Interactive auth is always `principalType: "user"`, and the factory pins that for you.
+To run your own OAuth, use `defineInteractiveAuthorization` from `eve/connections`, which takes a three-method form and needs no Vercel Connect. eve mints a callback URL, parks (durably suspends) the turn on a framework-owned webhook, and resumes once the token comes back. Interactive auth is always `principalType: "user"`, and the factory pins that for you.
 
 ```ts title="agent/connections/linear.ts"
 import {
@@ -205,7 +205,7 @@ To narrow a caught error, use `isConnectionAuthorizationRequiredError(err)` and 
 
 ### Handling a revoked token mid-call
 
-`getToken` only runs _before_ a tool call, so a grant revoked while a tool is mid-flight first surfaces as a downstream `401` inside your `execute`. A plain throw there is only a tool error, so the model sees a failure and the cached bearer sticks around. Instead, map a provider `401` to `ctx.requireAuth()` (or rethrow `ConnectionAuthorizationRequiredError`). Eve then evicts the rejected token from its per-step cache and re-runs the consent flow with a fresh one, exactly as it does for a connection whose server rejects the bearer.
+`getToken` only runs _before_ a tool call, so a grant revoked while a tool is mid-flight first surfaces as a downstream `401` inside your `execute`. A plain throw there is only a tool error, so the model sees a failure and the cached bearer sticks around. Instead, map a provider `401` to `ctx.requireAuth()` (or rethrow `ConnectionAuthorizationRequiredError`). eve then evicts the rejected token from its per-step cache and re-runs the consent flow with a fresh one, exactly as it does for a connection whose server rejects the bearer.
 
 ```ts title="agent/tools/list_issues.ts"
 import { defineTool } from "eve/tools";
@@ -229,11 +229,11 @@ export default defineTool({
 
 ### Authorization and approval together
 
-A tool can require both sign-in (`auth`) and a human approval. The model's approval gate runs before the tool's `execute`, so the order the user sees is **approve, then sign in**. Eve records the approval on session state the moment it's granted, and that record survives the sign-in park, so when the turn resumes after authorization the tool is not put through approval again. You get one approval and one sign-in, never a double prompt.
+A tool can require both sign-in (`auth`) and a human approval. The model's approval gate runs before the tool's `execute`, so the order the user sees is **approve, then sign in**. eve records the approval on session state the moment it's granted, and that record survives the sign-in park, so when the turn resumes after authorization the tool is not put through approval again. You get one approval and one sign-in, never a double prompt.
 
 ## What to read next
 
-- [Integrations](/integrations): browse every channel and connection Eve ships, in one gallery.
+- [Integrations](/integrations): browse every channel and connection eve ships, in one gallery.
 - [Tools](./tools): authored tools live alongside connection-provided tools; the same approval helpers apply.
 - [Auth & route protection](./guides/auth-and-route-protection): the full interactive-OAuth flow with Vercel Connect.
 - [Security model](./concepts/security-model): how connection credentials stay out of the model's reach.

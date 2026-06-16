@@ -1,7 +1,7 @@
 /**
  * Discord HITL component rendering + decode helpers.
  *
- * Discord components carry a `custom_id` with a 100-character cap. Eve
+ * Discord components carry a `custom_id` with a 100-character cap. eve
  * encodes only the request id and, for buttons, the selected option id.
  */
 
@@ -165,8 +165,8 @@ export function isDiscordFreeformComponent(customId: string): boolean {
 }
 
 /**
- * Decodes an Eve HITL component interaction into input responses. Empty array
- * if the custom id is not an Eve HITL id; otherwise one response from the
+ * Decodes an eve HITL component interaction into input responses. Empty array
+ * if the custom id is not an eve HITL id; otherwise one response from the
  * encoded option id (buttons) or the first selected value (selects).
  */
 export function deriveComponentInputResponses(
@@ -188,7 +188,7 @@ export function deriveComponentInputResponses(
 }
 
 /**
- * Decodes an Eve freeform modal submission into a single text input response.
+ * Decodes an eve freeform modal submission into a single text input response.
  * Empty array unless the custom id matches the freeform prefix and the freeform
  * text field is present.
  */

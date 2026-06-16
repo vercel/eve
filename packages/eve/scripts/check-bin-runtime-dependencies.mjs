@@ -69,7 +69,7 @@ if (violations.length > 0) {
   for (const violation of violations) {
     process.stderr.write(
       `${violation.path} imports "${violation.specifier}", but "${violation.dependency}" is not ` +
-        "declared in package.json dependencies. Eve's bin files ship unbundled, so every bare " +
+        "declared in package.json dependencies. eve's bin files ship unbundled, so every bare " +
         "import must be available in production installs.\n",
     );
   }

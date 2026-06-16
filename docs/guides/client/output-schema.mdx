@@ -1,6 +1,6 @@
 ---
 title: "Output Schema"
-description: "Request structured results from Eve client turns and read typed data from MessageResult."
+description: "Request structured results from eve client turns and read typed data from MessageResult."
 ---
 
 Pass `outputSchema` on a client turn when the caller needs structured data instead of only assistant text. The runtime makes the model satisfy the schema before the turn settles, then emits the final payload as `result.completed`.

@@ -120,7 +120,7 @@ jobs:
         working-directory: ${{ steps.baseline.outputs.root }}
         run: pnpm install --frozen-lockfile
 
-      - name: Build Eve package on main baseline
+      - name: Build eve package on main baseline
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' }}
         working-directory: ${{ steps.baseline.outputs.root }}
         run: pnpm --filter eve build
@@ -169,7 +169,7 @@ jobs:
             --package-label packages/eve \
             --output-json "$BASELINE_REPORT_JSON"
 
-      - name: Build Eve package
+      - name: Build eve package
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
         run: pnpm --filter eve build
 

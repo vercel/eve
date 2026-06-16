@@ -101,7 +101,7 @@ const channelPresentations: Record<string, ChannelPresentation> = {
     logo: "slack",
     docsHref: "/docs/channels/slack",
     keywords: ["chat", "messaging", "bot", "webhook"],
-    install: `The Eve CLI scaffolds the channel for you. \`eve channels add slack\` writes \`agent/channels/slack.ts\`, adds \`@vercel/connect\`, and runs the Connect setup flow:
+    install: `The eve CLI scaffolds the channel for you. \`eve channels add slack\` writes \`agent/channels/slack.ts\`, adds \`@vercel/connect\`, and runs the Connect setup flow:
 
 \`\`\`bash
 eve channels add slack
@@ -130,7 +130,7 @@ Link the project and pull OIDC env vars so Connect can authenticate locally:
 vercel link
 vercel env pull
 \`\`\``,
-    configure: `Create a Slack Connect client and copy its UID (for example \`slack/my-agent\`), then attach this project as the webhook trigger destination at the route Eve serves (\`/eve/v1/slack\`):
+    configure: `Create a Slack Connect client and copy its UID (for example \`slack/my-agent\`), then attach this project as the webhook trigger destination at the route eve serves (\`/eve/v1/slack\`):
 
 \`\`\`bash
 vercel connect create slack --triggers
@@ -158,7 +158,7 @@ export default discordChannel({
   publicKey: () => process.env.DISCORD_PUBLIC_KEY!,
 });
 \`\`\``,
-    configure: `Create a Discord application, add a bot, and set the interactions endpoint URL to the route Eve serves (\`/eve/v1/discord\`). Provide the bot token and public key through environment variables. See the [Discord channel docs](/docs/channels/discord) for intents and slash-command setup.`,
+    configure: `Create a Discord application, add a bot, and set the interactions endpoint URL to the route eve serves (\`/eve/v1/discord\`). Provide the bot token and public key through environment variables. See the [Discord channel docs](/docs/channels/discord) for intents and slash-command setup.`,
   },
   teams: {
     logo: "teams",
@@ -180,7 +180,7 @@ export default teamsChannel({
   appPassword: () => process.env.TEAMS_APP_PASSWORD!,
 });
 \`\`\``,
-    configure: `Register an Azure Bot, configure the messaging endpoint to Eve's route (\`/eve/v1/teams\`), and supply the app ID and password via environment variables. See the [Teams channel docs](/docs/channels/teams) for the full provisioning checklist.`,
+    configure: `Register an Azure Bot, configure the messaging endpoint to eve's route (\`/eve/v1/teams\`), and supply the app ID and password via environment variables. See the [Teams channel docs](/docs/channels/teams) for the full provisioning checklist.`,
   },
   telegram: {
     logo: "telegram",
@@ -201,7 +201,7 @@ export default telegramChannel({
   botToken: () => process.env.TELEGRAM_BOT_TOKEN!,
 });
 \`\`\``,
-    configure: `Create a bot with [@BotFather](https://t.me/botfather), then register the webhook to point at Eve's route (\`/eve/v1/telegram\`). Store the bot token in an environment variable. See the [Telegram channel docs](/docs/channels/telegram) for group privacy and command setup.`,
+    configure: `Create a bot with [@BotFather](https://t.me/botfather), then register the webhook to point at eve's route (\`/eve/v1/telegram\`). Store the bot token in an environment variable. See the [Telegram channel docs](/docs/channels/telegram) for group privacy and command setup.`,
   },
   twilio: {
     logo: "twilio",
@@ -223,7 +223,7 @@ export default twilioChannel({
   authToken: () => process.env.TWILIO_AUTH_TOKEN!,
 });
 \`\`\``,
-    configure: `In the Twilio console, point your messaging service or phone number webhook at Eve's route (\`/eve/v1/twilio\`). Provide the account SID and auth token via environment variables. See the [Twilio channel docs](/docs/channels/twilio) for SMS vs. WhatsApp specifics.`,
+    configure: `In the Twilio console, point your messaging service or phone number webhook at eve's route (\`/eve/v1/twilio\`). Provide the account SID and auth token via environment variables. See the [Twilio channel docs](/docs/channels/twilio) for SMS vs. WhatsApp specifics.`,
   },
   github: {
     logo: "github",
@@ -246,7 +246,7 @@ export default githubChannel({
   webhookSecret: () => process.env.GITHUB_WEBHOOK_SECRET!,
 });
 \`\`\``,
-    configure: `Create a GitHub App, subscribe to issue and pull-request events, and set the webhook URL to Eve's route (\`/eve/v1/github\`). Provide the app ID, private key, and webhook secret through environment variables. See the [GitHub channel docs](/docs/channels/github) for required permissions.`,
+    configure: `Create a GitHub App, subscribe to issue and pull-request events, and set the webhook URL to eve's route (\`/eve/v1/github\`). Provide the app ID, private key, and webhook secret through environment variables. See the [GitHub channel docs](/docs/channels/github) for required permissions.`,
   },
   "linear-agent": {
     logo: "linear",
@@ -270,13 +270,13 @@ export default linearChannel({
   },
 });
 \`\`\``,
-    configure: `Create a Linear OAuth app with Agent Session events enabled, make the app assignable and mentionable, and point the webhook at Eve's route (\`/eve/v1/linear\`). Provide the app access token and webhook secret through environment variables. See the [Linear channel docs](/docs/channels/linear) for scopes and Agent Activity behavior.`,
+    configure: `Create a Linear OAuth app with Agent Session events enabled, make the app assignable and mentionable, and point the webhook at eve's route (\`/eve/v1/linear\`). Provide the app access token and webhook secret through environment variables. See the [Linear channel docs](/docs/channels/linear) for scopes and Agent Activity behavior.`,
   },
   eve: {
     logo: "eve",
     docsHref: "/docs/channels/eve",
     keywords: ["web", "chat", "ui", "embed", "frontend"],
-    install: `The Eve CLI scaffolds the full Next.js web chat app alongside \`agent/channels/eve.ts\`:
+    install: `The eve CLI scaffolds the full Next.js web chat app alongside \`agent/channels/eve.ts\`:
 
 \`\`\`bash
 eve channels add web
@@ -287,7 +287,7 @@ To wire it up by hand instead, install the framework:
 \`\`\`bash
 npm install eve@latest
 \`\`\``,
-    quickStart: `The Eve channel is on by default. Add \`agent/channels/eve.ts\` only when you want to override the default session routes or auth:
+    quickStart: `The eve channel is on by default. Add \`agent/channels/eve.ts\` only when you want to override the default session routes or auth:
 
 \`\`\`ts
 // agent/channels/eve.ts
@@ -296,8 +296,8 @@ import { eveChannel } from "eve/channels/eve";
 export default eveChannel();
 \`\`\`
 
-Point your frontend at the session routes Eve serves (\`/eve/v1/session\`) and stream responses with the Eve web client.`,
-    configure: `The Eve channel is the lowest-friction way to talk to your agent, with no third-party provisioning required. Layer in auth and route protection as needed. See the [Eve channel docs](/docs/channels/eve) and the [Frontend guide](/docs/guides/frontend/overview).`,
+Point your frontend at the session routes eve serves (\`/eve/v1/session\`) and stream responses with the eve web client.`,
+    configure: `The eve channel is the lowest-friction way to talk to your agent, with no third-party provisioning required. Layer in auth and route protection as needed. See the [eve channel docs](/docs/channels/eve) and the [Frontend guide](/docs/guides/frontend/overview).`,
   },
 };
 

@@ -90,7 +90,7 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
         compiledArtifactsSource: input.compiledArtifactsSource,
         log: (message) =>
           logDevelopmentSandbox(
-            `Eve: sandbox template "${formatNodeLabel(input.nodeId)}" (${backend.name}): ${message}`,
+            `eve: sandbox template "${formatNodeLabel(input.nodeId)}" (${backend.name}): ${message}`,
           ),
       });
       await waitForSandboxTemplatePrewarmLock({
@@ -98,7 +98,7 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
         backendName: backend.name,
         log: (message) =>
           logDevelopmentSandbox(
-            `Eve: sandbox template "${formatNodeLabel(input.nodeId)}" (${backend.name}): ${message}`,
+            `eve: sandbox template "${formatNodeLabel(input.nodeId)}" (${backend.name}): ${message}`,
           ),
         templateKey: keys.templateKey,
       });
@@ -117,8 +117,8 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
     };
 
     const handle = await withDevelopmentSandboxProgress(
-      `Eve: opening sandbox session "${formatNodeLabel(input.nodeId)}" on backend "${backend.name}"...`,
-      `Eve: opening sandbox session "${formatNodeLabel(input.nodeId)}" on backend "${backend.name}"`,
+      `eve: opening sandbox session "${formatNodeLabel(input.nodeId)}" on backend "${backend.name}"...`,
+      `eve: opening sandbox session "${formatNodeLabel(input.nodeId)}" on backend "${backend.name}"`,
       async () =>
         await createBackendHandleWithPrewarmRetry({
           appRoot,
@@ -199,10 +199,10 @@ async function createBackendHandleWithPrewarmRetry(input: {
     await waitForSandboxTemplatePrewarmLock({
       appRoot: input.appRoot,
       backendName: input.backend.name,
-      log: (message) => logDevelopmentSandbox(`Eve: ${message}`),
+      log: (message) => logDevelopmentSandbox(`eve: ${message}`),
       templateKey: input.createInput.templateKey,
     });
-    logDevelopmentSandbox("Eve: sandbox template is ready; retrying sandbox creation...");
+    logDevelopmentSandbox("eve: sandbox template is ready; retrying sandbox creation...");
     return await input.backend.create(input.createInput);
   }
 }

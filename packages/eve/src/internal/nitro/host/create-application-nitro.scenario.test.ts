@@ -287,7 +287,7 @@ describe("createApplicationNitro", () => {
     });
   });
 
-  it("sets the Eve framework version on Vercel app-surface build output config", async () => {
+  it("sets the eve framework version on Vercel app-surface build output config", async () => {
     vi.stubEnv("VERCEL", "1");
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
@@ -354,7 +354,7 @@ describe("createApplicationNitro", () => {
     });
   });
 
-  it("clears Nitro build cache output from a different Eve version", async () => {
+  it("clears Nitro build cache output from a different eve version", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-nitro-version-cache-"));
 
     try {

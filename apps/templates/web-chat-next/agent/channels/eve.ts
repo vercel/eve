@@ -5,7 +5,7 @@ export default eveChannel({
   auth: [
     // Open on localhost for `eve dev` and the REPL; ignored in production.
     localDev(),
-    // Lets the Eve TUI and your Vercel deployments reach the deployed agent.
+    // Lets the eve TUI and your Vercel deployments reach the deployed agent.
     vercelOidc(),
     // This placeholder will not allow browser requests in production.
     // Replace it with your app's auth provider, like Auth.js or Clerk,

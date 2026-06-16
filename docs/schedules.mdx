@@ -31,7 +31,7 @@ interface ScheduleHandlerArgs {
 
 ## Markdown form (fire-and-forget)
 
-This is the minimal schedule. Eve runs the agent on the prompt and throws away the output, though the agent can still call tools, write to backends, and log along the way. We call this task mode. A task-mode session runs to completion or fails, and cannot park to wait for a person or an OAuth sign-in.
+This is the minimal schedule. eve runs the agent on the prompt and throws away the output, though the agent can still call tools, write to backends, and log along the way. We call this task mode. A task-mode session runs to completion or fails, and cannot park to wait for a person or an OAuth sign-in.
 
 ```ts title="agent/schedules/heartbeat.ts"
 import { defineSchedule } from "eve/schedules";

@@ -79,7 +79,7 @@ export function assertCanAddSelectedChannels(
     );
     if (conflictingOwner !== undefined) {
       throw new Error(
-        `Cannot scaffold Web Chat because agent/${conflictingOwner} already defines POST ${EVE_CREATE_SESSION_ROUTE_PATH}. Web Chat scaffolds the same Eve session routes.`,
+        `Cannot scaffold Web Chat because agent/${conflictingOwner} already defines POST ${EVE_CREATE_SESSION_ROUTE_PATH}. Web Chat scaffolds the same eve session routes.`,
       );
     }
   }

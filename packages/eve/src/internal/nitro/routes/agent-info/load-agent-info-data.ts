@@ -88,7 +88,7 @@ export function resolveAgentInfoCompiledArtifactsSource(
     return createDiskRuntimeCompiledArtifactsSource(input.appRoot);
   }
 
-  throw new Error("Eve agent info runtime data requires bundled artifacts or an app root.");
+  throw new Error("eve agent info runtime data requires bundled artifacts or an app root.");
 }
 
 async function loadAgentInfoDataFromArtifacts(

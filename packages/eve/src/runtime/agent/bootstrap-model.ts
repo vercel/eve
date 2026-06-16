@@ -52,7 +52,7 @@ function createBootstrapModelResult(
   prompt: BootstrapPrompt,
   modelId: string,
 ): BootstrapGenerateResult {
-  const lastUserMessage = getLastUserPromptText(prompt) ?? "Hello from Eve";
+  const lastUserMessage = getLastUserPromptText(prompt) ?? "Hello from eve";
   const text = `Bootstrap reply: ${lastUserMessage}`;
 
   return createBootstrapGenerateResult({

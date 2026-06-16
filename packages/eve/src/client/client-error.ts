@@ -1,7 +1,7 @@
 import { isObject } from "#shared/guards.js";
 
 /**
- * Error thrown when the Eve server returns a non-successful HTTP response.
+ * Error thrown when the eve server returns a non-successful HTTP response.
  */
 export class ClientError extends Error {
   /**

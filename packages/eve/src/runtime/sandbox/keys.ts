@@ -81,7 +81,7 @@ export async function createRuntimeSandboxTemplateKey(input: {
 }
 
 /**
- * Resolves the Eve package version that participates in template keys.
+ * Resolves the eve package version that participates in template keys.
  *
  * Build-time prewarm and deployed runtime must derive the same key, but a
  * bundled runtime cannot resolve the installed package.json and may fall back

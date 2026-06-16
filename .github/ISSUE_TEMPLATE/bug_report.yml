@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible bug in Eve.
+description: Report a reproducible bug in eve.
 labels: ["bug"]
 body:
   - type: markdown
@@ -9,7 +9,7 @@ body:
   - type: input
     id: eve-version
     attributes:
-      label: Eve version
+      label: eve version
       description: Output of `npm ls eve` in your project (or the version from your lockfile).
       placeholder: "eve@0.7.0"
     validations:

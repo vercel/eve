@@ -215,7 +215,7 @@ function startSpinner(logger: InitCliLogger, message: string): { stop(): void } 
 }
 
 /**
- * Creates a new Eve agent (`target` is a project name), or adds one to an
+ * Creates a new eve agent (`target` is a project name), or adds one to an
  * existing project (`target` is a directory), without prompts or external
  * provisioning.
  *

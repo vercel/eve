@@ -20,7 +20,7 @@ import type { SessionContext } from "#public/definitions/callback-context.js";
 const log = createLogger("github.defaults");
 
 /**
- * Projects a GitHub webhook actor into an Eve {@link SessionAuthContext}. Sets `principalId` to
+ * Projects a GitHub webhook actor into an eve {@link SessionAuthContext}. Sets `principalId` to
  * `github:<sender.id>`, `principalType` to `"service"` for bot senders and `"user"` otherwise, and
  * copies conversation and repository metadata into `attributes`. Reuse it when composing a custom
  * `onComment` hook.

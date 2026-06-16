@@ -117,18 +117,18 @@ export async function copyNitroFunctionDirectory(input: {
 }
 
 /**
- * Keeps only Eve-owned Vercel function output and rewrites Eve route function
- * symlinks to a shared Eve-owned server function.
+ * Keeps only eve-owned Vercel function output and rewrites eve route function
+ * symlinks to a shared eve-owned server function.
  *
  * Nitro emits generic app routes such as `index.func -> ./__server.func` for
- * Eve's standalone landing page. In a multi-service Next.js deployment those
+ * eve's standalone landing page. In a multi-service Next.js deployment those
  * root aliases collide with Next's own functions. The Next integration only
- * proxies Eve's `/eve/v1/**` transport routes, so Vercel output should expose
- * those route functions and workflow trigger functions, not Eve's root page.
+ * proxies eve's `/eve/v1/**` transport routes, so Vercel output should expose
+ * those route functions and workflow trigger functions, not eve's root page.
  *
  * Nitro also dedupes every route function through `__server.func`. Preserve
- * that model by copying the shared target once into the Eve-owned tree and
- * repointing Eve route aliases at it before pruning the root target.
+ * that model by copying the shared target once into the eve-owned tree and
+ * repointing eve route aliases at it before pruning the root target.
  */
 export async function normalizeEveVercelFunctionOutput(
   outputDir: string,

@@ -60,7 +60,7 @@ function gatewayTarget(modelId: string): string {
 
 /**
  * Reads the upstream provider slug from a `providerOptions.gateway.byok` block
- * (the convention Eve scaffolds for forwarding a provider key to the gateway).
+ * (the convention eve scaffolds for forwarding a provider key to the gateway).
  * Returns the first provider key, or undefined when no byok block is present.
  */
 function readByokProvider(providerOptions?: Record<string, JsonObject>): string | undefined {

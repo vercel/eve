@@ -81,7 +81,7 @@ interface PendingMessageSubmission {
 }
 
 /**
- * Framework-agnostic state machine for an Eve agent session.
+ * Framework-agnostic state machine for an eve agent session.
  *
  * Manages the send/stream lifecycle, optimistic projection, and subscriber
  * notification; framework integrations (React, Vue) wrap it with their own
@@ -147,7 +147,7 @@ export class EveAgentStore<TData> {
 
   async send<TOutput = unknown>(input: SendTurnPayload<TOutput>): Promise<void> {
     if (this.#status === "streaming" || this.#status === "submitted") {
-      throw new Error("Eve session is already processing a turn.");
+      throw new Error("eve session is already processing a turn.");
     }
 
     const operationId = this.#startOperation();
@@ -241,7 +241,7 @@ export class EveAgentStore<TData> {
 
   #createOwnedSession(): ClientSession {
     if (!this.#createSession) {
-      throw new Error("Cannot create an owned Eve session from an external session.");
+      throw new Error("Cannot create an owned eve session from an external session.");
     }
     return this.#createSession();
   }

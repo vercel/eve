@@ -90,7 +90,7 @@ export interface DiscordChannelState {
 
 /** Discord channel credentials. */
 export interface DiscordChannelCredentials extends DiscordCredentials {
-  /** Custom inbound webhook verifier. When supplied, Eve skips the `DISCORD_PUBLIC_KEY` fallback and delegates verification to it. */
+  /** Custom inbound webhook verifier. When supplied, eve skips the `DISCORD_PUBLIC_KEY` fallback and delegates verification to it. */
   readonly webhookVerifier?: DiscordWebhookVerifier;
 }
 
@@ -167,7 +167,7 @@ export interface DiscordHandle {
   readonly applicationId: string | undefined;
   /** Discord channel id. */
   readonly channelId: string;
-  /** Current Eve conversation id, usually the Discord anchor message id. */
+  /** Current eve conversation id, usually the Discord anchor message id. */
   readonly conversationId: string;
   /** Discord guild id when known. */
   readonly guildId: string | undefined;

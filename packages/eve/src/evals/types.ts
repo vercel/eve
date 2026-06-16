@@ -76,7 +76,7 @@ export interface EveEvalSessionResult {
 }
 
 /**
- * Full result of executing one eval against an Eve agent.
+ * Full result of executing one eval against an eve agent.
  */
 export interface EveEvalTaskResult {
   /**
@@ -104,7 +104,7 @@ export interface EveEvalTaskResult {
   readonly sessions?: readonly EveEvalSessionResult[];
   /**
    * Runtime identity metadata captured from the `session.started` stream event.
-   * Present when the Eve server populates the event with its runtime metadata.
+   * Present when the eve server populates the event with its runtime metadata.
    */
   readonly runtimeIdentity?: RuntimeIdentity;
 }
@@ -178,7 +178,7 @@ export interface EveEvalSession {
   readonly pendingInputRequests: readonly InputRequest[];
   /** Serializable cursor for resuming this session. */
   readonly state: SessionState;
-  /** Eve session id after the first successful send. */
+  /** eve session id after the first successful send. */
   readonly sessionId: string | undefined;
   /** Assert the last turn parked on HITL input and return matching requests. */
   expectInputRequests(filter?: {
@@ -237,8 +237,8 @@ export interface JudgeOpts {
 /**
  * Braintrust autoevals graders, bound to the resolved judge model. The grader
  * family is named so its semantics are explicit: `factuality`'s consistency
- * buckets and `closedQA`'s yes/no grading are autoevals' behavior, not Eve's.
- * These are Eve-owned wrappers, not the raw library.
+ * buckets and `closedQA`'s yes/no grading are autoevals' behavior, not eve's.
+ * These are eve-owned wrappers, not the raw library.
  */
 export interface AutoevalsJudges {
   factuality(expected: string, opts?: JudgeOpts): AssertionHandle;
@@ -306,7 +306,7 @@ export interface EveEvalContext extends EveEvalSession {
 }
 
 /**
- * Describes the Eve server an eval runs against.
+ * Describes the eve server an eval runs against.
  */
 export interface EveEvalTarget {
   /**

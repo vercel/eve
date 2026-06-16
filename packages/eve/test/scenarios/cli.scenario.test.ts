@@ -241,7 +241,7 @@ describe("runCli", () => {
     await runCli(["info"], logger);
 
     expect(logger.log).toHaveBeenCalled();
-    expect(getLogOutput(logger)).toContain("Eve Info");
+    expect(getLogOutput(logger)).toContain("eve Info");
     expect(getLogOutput(logger)).toContain("Application");
     expect(getLogOutput(logger)).toContain("Workflow ID");
     expect(getLogOutput(logger)).toContain(`POST ${EVE_CREATE_SESSION_ROUTE_PATH}`);
@@ -249,7 +249,7 @@ describe("runCli", () => {
     expect(getLogOutput(logger)).toContain(`GET ${EVE_MESSAGE_STREAM_ROUTE_PATTERN}`);
   });
 
-  it("prints compiled discovery metadata when run inside an Eve app", async () => {
+  it("prints compiled discovery metadata when run inside an eve app", async () => {
     const fixtureApp = await scenarioApp(WEATHER_AGENT_DESCRIPTOR);
     const resolvedFixtureRoot = await realpath(fixtureApp.appRoot);
     const previousCwd = process.cwd();
@@ -381,7 +381,7 @@ describe("runCli", () => {
 
     try {
       await expect(runCli(["start"], logger)).rejects.toThrow(
-        `Missing Eve build output at ${join(
+        `Missing eve build output at ${join(
           resolvedWorkspaceRoot,
           ".output",
           "server",

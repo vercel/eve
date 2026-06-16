@@ -34,7 +34,7 @@ await provision("tools-sandbox", async (ctx) => {
 });
 
 /**
- * Builds an author snapshot outside Eve: create a standalone Vercel Sandbox,
+ * Builds an author snapshot outside eve: create a standalone Vercel Sandbox,
  * write a fresh marker token outside `/workspace`, snapshot it, and delete
  * the seed. The fixture's sandbox definition rebinds its backend to
  * `vercel({ source: { type: "snapshot", snapshotId } })` when

@@ -1,28 +1,28 @@
-# Eve Public Docs
+# eve Public Docs
 
-This folder is for app authors using Eve as a framework.
+This folder is for app authors using eve as a framework.
 
-If you want to understand how to build agents with Eve, start here.
+If you want to understand how to build agents with eve, start here.
 
 Important naming note:
 
-- The framework is called Eve.
+- The framework is called eve.
 - The current published package name is `eve`.
 - The CLI binary is `eve`.
 
 ## Legal and safeguards
 
-Eve is currently a preview and subject to the Vercel beta terms; the framework, APIs, documentation, and behavior may change before general availability.
+eve is currently a preview and subject to the Vercel beta terms; the framework, APIs, documentation, and behavior may change before general availability.
 
 As the deployer, it is your responsibility to ensure your agent complies with applicable laws.
 
 You are responsible for configuring approval policies, tool restrictions, connection scopes, route/session authorization, sandbox controls, telemetry exports, and other safeguards appropriate for your use case.
 
-Before using Eve with non-public, sensitive, regulated, or production data, review which default tools, custom tools, MCP tools, shell/file/web tools, connected services, subagents, schedules, and external actions are available to the agent.
+Before using eve with non-public, sensitive, regulated, or production data, review which default tools, custom tools, MCP tools, shell/file/web tools, connected services, subagents, schedules, and external actions are available to the agent.
 
 Require human approval or other safeguards for sensitive, irreversible, regulated, financial, healthcare, employment, housing, legal, safety-impacting, user-impacting, or external side-effecting actions.
 
-Unless you configure stricter controls, Eve agents may operate with permissive settings, including tool execution without human approval where approval is omitted and sandbox network egress that is not deny-all. Do not rely on model behavior alone to prevent sensitive or irreversible actions.
+Unless you configure stricter controls, eve agents may operate with permissive settings, including tool execution without human approval where approval is omitted and sandbox network egress that is not deny-all. Do not rely on model behavior alone to prevent sensitive or irreversible actions.
 
 Casing convention:
 
@@ -56,7 +56,7 @@ Read in this order:
 
 ## The public mental model
 
-Eve is a filesystem-first framework for durable backend agents.
+eve is a filesystem-first framework for durable backend agents.
 
 You author an agent as files on disk:
 
@@ -71,7 +71,7 @@ You author an agent as files on disk:
 - recurring jobs in `schedules/`
 - additive runtime config in `agent.ts`
 
-Eve then gives you:
+eve then gives you:
 
 - a stable HTTP message route
 - optional channel webhook routes
@@ -89,7 +89,7 @@ know:
 - the harness does one unit of AI work and decides whether to continue, wait, or finish
 - the runtime persists session state, streams events, and owns workflow orchestration
 
-That is why Eve exposes two identifiers:
+That is why eve exposes two identifiers:
 
 - `continuationToken` for the next user message
 - `sessionId` for streaming and inspection

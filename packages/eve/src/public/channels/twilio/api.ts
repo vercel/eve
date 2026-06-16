@@ -3,7 +3,7 @@
  *
  * Requests use Twilio's normal `application/x-www-form-urlencoded`
  * body encoding and HTTP Basic auth. No Twilio SDK dependency is
- * required or exposed through Eve public APIs.
+ * required or exposed through eve public APIs.
  */
 
 import { resolveTwilioAuthToken, type TwilioAuthToken } from "#public/channels/twilio/verify.js";

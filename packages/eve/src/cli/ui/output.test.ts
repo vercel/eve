@@ -75,8 +75,8 @@ describe("CLI renderers", () => {
   it("sanitize banner and section fields before rendering", () => {
     const theme = createCliTheme({ color: false });
 
-    expect(renderCliBanner(theme, { subtitle: `sub${dcs}title`, title: `Ev${oscTitle}e` })).toBe(
-      "Eve\n===\nsubtitle",
+    expect(renderCliBanner(theme, { subtitle: `sub${dcs}title`, title: `ev${oscTitle}e` })).toBe(
+      "eve\n===\nsubtitle",
     );
     expect(
       renderCliSection(theme, {

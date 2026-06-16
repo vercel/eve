@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { loadDeclaration } from "../_shared.mjs";
 
 /**
- * Vendor config for `@vercel/oidc`. Eve uses only `getVercelOidcToken`,
+ * Vendor config for `@vercel/oidc`. eve uses only `getVercelOidcToken`,
  * so the declaration narrows the upstream surface to that single function
  * (the multi-file `dist/` declaration tree is intentionally not copied).
  *

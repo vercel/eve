@@ -1,4 +1,4 @@
-# Contributing to Eve
+# Contributing to eve
 
 Thanks for your interest in contributing! This guide covers everything you need to get the repo running locally and land a change.
 

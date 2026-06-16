@@ -11,7 +11,7 @@ The analytics assistant sent one message and got one answer. Three terms describ
 | **turn**    | One message you send and the work it triggers.    |
 | **step**    | A durable checkpoint within the turn.             |
 
-Each turn runs as a durable workflow, and Eve saves progress at every step. Completed steps never re-run; Eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval. A turn that's waiting on you (an approval, a question) resumes whenever you answer, even if that's much later.
+Each turn runs as a durable workflow, and eve saves progress at every step. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval. A turn that's waiting on you (an approval, a question) resumes whenever you answer, even if that's much later.
 
 That's why the features in the rest of this tutorial work the way they do:
 
@@ -19,7 +19,7 @@ That's why the features in the rest of this tutorial work the way they do:
 - The metric glossary in Step 6 survives across turns. State is checkpointed at step boundaries, so it sticks.
 - The spend approval in Step 8 pauses the turn on your yes/no, then picks up exactly where it left off.
 
-You author capabilities, including tools, instructions, channels, and skills. Eve drives the model-to-tool loop and decides when a turn continues, waits, or ends. You never write that loop yourself.
+You author capabilities, including tools, instructions, channels, and skills. eve drives the model-to-tool loop and decides when a turn continues, waits, or ends. You never write that loop yourself.
 
 → Next: [Step 3: Query sample data](./query-sample-data)
 

@@ -31,7 +31,7 @@ const KNOWN_AUTHORIZATION_KEYS = [
   "principalType",
   "startAuthorization",
   // Optional metadata marker that auth-provider helpers may attach so
-  // downstream tooling (eg. the Eve compiler / Vercel dashboard) can
+  // downstream tooling (eg. the eve compiler / Vercel dashboard) can
   // detect Vercel Connect-backed connections without opening the
   // closure state of `getToken`. The runtime never reads it; it
   // survives `normalizeAuthorizationSpec` so consumers can pick it

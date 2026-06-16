@@ -195,7 +195,7 @@ interface AuthorizationDefinitionBase {
    * Optional metadata marker attached by `connect()` from
    * `@vercel/connect/eve` so downstream tooling can detect Vercel
    * Connect-backed connections at compile time without inspecting
-   * `getToken`'s closure state. Examples: a future Eve compiler step
+   * `getToken`'s closure state. Examples: a future eve compiler step
    * that surfaces connector identifiers in build output, or the Vercel
    * dashboard rendering deep links to a connector's settings page.
    *
@@ -225,13 +225,13 @@ interface AuthorizationDefinitionBase {
 
   /**
    * Optional best-effort invalidation of any token cache the strategy
-   * owns *below* Eve's per-step cache, for the given `principal`.
+   * owns *below* eve's per-step cache, for the given `principal`.
    *
-   * Eve always drops its own per-step entry when a resolved bearer is
+   * eve always drops its own per-step entry when a resolved bearer is
    * rejected (a downstream `401` mapped to `ctx.requireAuth()`, or the
    * MCP server rejecting the token). But a strategy frequently sits on a
    * second, longer-lived cache — most notably the `@vercel/connect`
-   * in-process token cache — that Eve cannot see. Without this hook the
+   * in-process token cache — that eve cannot see. Without this hook the
    * re-authorization re-reads the same revoked-but-unexpired credential
    * from that lower layer and the tool keeps failing.
    *

@@ -2,7 +2,7 @@
   "name": "eve-docs",
   "version": "0.0.1",
   "private": true,
-  "description": "Eve documentation site.",
+  "description": "eve documentation site.",
   "type": "module",
   "scripts": {
     "build": "next build",
