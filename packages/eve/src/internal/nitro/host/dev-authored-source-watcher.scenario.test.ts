@@ -191,8 +191,8 @@ describe("startAuthoredSourceWatcher", () => {
       expect(ignored("/repo/packages/eve/build/index.js")).toBe(true);
       expect(ignored("/repo/packages/eve/dist/src/cli/run.js")).toBe(true);
       expect(ignored("/repo/packages/eve/node_modules")).toBe(true);
-      expect(ignored("/repo/apps/fixtures/weather-fixture/node_modules/eve")).toBe(true);
-      expect(ignored("/repo/apps/fixtures/weather-fixture/agent/tools/get_weather.ts")).toBe(false);
+      expect(ignored("/repo/apps/fixtures/weather-agent/node_modules/eve")).toBe(true);
+      expect(ignored("/repo/apps/fixtures/weather-agent/agent/tools/get_weather.ts")).toBe(false);
     } finally {
       await watcher.close();
     }

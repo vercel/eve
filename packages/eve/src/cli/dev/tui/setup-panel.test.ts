@@ -146,7 +146,7 @@ describe("renderSelectQuestion", () => {
     const text = renderSelectQuestion(
       {
         kind: "single",
-        message: "Already linked to weather-fixture in Acme",
+        message: "Already linked to weather-agent in Acme",
         options: lone,
         select: initialSelectState({ options: lone }),
       },
@@ -181,7 +181,7 @@ describe("renderSelectQuestion", () => {
         message: "Where will you chat with your agent?",
         options,
         notices: [
-          { tone: "warning", text: "Overwrote /tmp/weather-fixture" },
+          { tone: "warning", text: "Overwrote /tmp/weather-agent" },
           { tone: "success", text: "Scaffolded channel: web" },
         ],
         select: initialSelectState({ options }),
@@ -197,11 +197,9 @@ describe("renderSelectQuestion", () => {
     expect(rows).toContain("  ✓ Web Chat");
     expect(rows).toContain("  ◦ Slack       · Creates slackbot and deploys to Vercel");
     expect(rows).toContain("    Done");
-    expect(rows).toContain("  ⚠ Overwrote /tmp/weather-fixture");
+    expect(rows).toContain("  ⚠ Overwrote /tmp/weather-agent");
     expect(rows).toContain("  ✓ Scaffolded channel: web");
-    expect(rows.indexOf("    Done")).toBeLessThan(
-      rows.indexOf("  ⚠ Overwrote /tmp/weather-fixture"),
-    );
+    expect(rows.indexOf("    Done")).toBeLessThan(rows.indexOf("  ⚠ Overwrote /tmp/weather-agent"));
     expect(rows.at(-1)).toContain("↑/↓ move · enter to select · esc to cancel");
 
     const coloredRow = renderSelectQuestion(
@@ -344,12 +342,12 @@ describe("renderSelectQuestion", () => {
 
   it("renders the hovered editable row as a live field with the caret after the name", () => {
     const options = [
-      { value: "new", label: "Create a new project", hint: "Named 'weather-fixture'" },
+      { value: "new", label: "Create a new project", hint: "Named 'weather-agent'" },
       { value: "link", label: "Link an existing project" },
     ];
     const baseEdit = {
       optionValue: "new",
-      defaultValue: "weather-fixture",
+      defaultValue: "weather-agent",
       formatHint: (value: string) => `Named '${value}'`,
       caretVisible: true,
     };
@@ -362,13 +360,13 @@ describe("renderSelectQuestion", () => {
         message: "Vercel project",
         options,
         select: initialSelectState({ options }),
-        edit: { ...baseEdit, editor: lineOf("weather-fixture") },
+        edit: { ...baseEdit, editor: lineOf("weather-agent") },
       },
       theme,
       80,
     );
-    expect(hover.join("\n")).toContain("Named 'weather-fixture▏'");
-    expect(hover.join("\n")).not.toContain("'▏weather-fixture'");
+    expect(hover.join("\n")).toContain("Named 'weather-agent▏'");
+    expect(hover.join("\n")).not.toContain("'▏weather-agent'");
     expect(hover.at(-1)).toContain("type to rename");
 
     // Caret off (blink) collapses to nothing — no stray space before the quote.
@@ -378,13 +376,13 @@ describe("renderSelectQuestion", () => {
         message: "Vercel project",
         options,
         select: initialSelectState({ options }),
-        edit: { ...baseEdit, caretVisible: false, editor: lineOf("weather-fixture") },
+        edit: { ...baseEdit, caretVisible: false, editor: lineOf("weather-agent") },
       },
       theme,
       80,
     );
-    expect(hoverOff.join("\n")).toContain("Named 'weather-fixture'");
-    expect(hoverOff.join("\n")).not.toContain("Named 'weather-fixture '");
+    expect(hoverOff.join("\n")).toContain("Named 'weather-agent'");
+    expect(hoverOff.join("\n")).not.toContain("Named 'weather-agent '");
 
     // A backspaced field renders the shortened name with the caret at its end.
     const edited = renderSelectQuestion(
@@ -403,7 +401,7 @@ describe("renderSelectQuestion", () => {
 
   it("hides the rename caret and hint when the cursor is off the editable row", () => {
     const options = [
-      { value: "new", label: "Create a new project", hint: "Named 'weather-fixture'" },
+      { value: "new", label: "Create a new project", hint: "Named 'weather-agent'" },
       { value: "link", label: "Link an existing project" },
     ];
     const rows = renderSelectQuestion(
@@ -415,7 +413,7 @@ describe("renderSelectQuestion", () => {
         select: { ...initialSelectState({ options }), cursor: 1 },
         edit: {
           optionValue: "new",
-          defaultValue: "weather-fixture",
+          defaultValue: "weather-agent",
           formatHint: (value: string) => `Named '${value}'`,
           caretVisible: true,
           editor: lineOf(""),
@@ -425,8 +423,8 @@ describe("renderSelectQuestion", () => {
       80,
     );
     // The editable row shows its plain static hint — no caret injected.
-    expect(rows.join("\n")).toContain("Named 'weather-fixture'");
-    expect(rows.join("\n")).not.toContain("weather-fixture▏");
+    expect(rows.join("\n")).toContain("Named 'weather-agent'");
+    expect(rows.join("\n")).not.toContain("weather-agent▏");
     expect(rows.at(-1)).not.toContain("type to rename");
   });
 
@@ -477,7 +475,7 @@ describe("renderSelectQuestion", () => {
     const linked = renderSelectQuestion(
       {
         kind: "single",
-        message: "This directory is already linked to\nweather-fixture-001 in Internal Playground",
+        message: "This directory is already linked to\nweather-agent-001 in Internal Playground",
         options: OPTIONS,
         select: initialSelectState({ options: OPTIONS }),
       },
@@ -487,7 +485,7 @@ describe("renderSelectQuestion", () => {
 
     expect(stacked[0]).toBe("  \x1b[1mConfigure the agent's model\x1b[22m");
     expect(linked[0]).toBe("  This directory is already linked to");
-    expect(linked[1]).toBe("  \x1b[1mweather-fixture-001 in Internal Playground\x1b[22m");
+    expect(linked[1]).toBe("  \x1b[1mweather-agent-001 in Internal Playground\x1b[22m");
   });
 
   it("keeps a stacked hint dim across an embedded bold span", () => {

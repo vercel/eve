@@ -7,8 +7,8 @@ const commands = [
   },
   {
     // Port 0 asks the OS to allocate an available port atomically.
-    args: ["--filter", "weather-fixture", "run", "dev", "--no-ui", "--port", "0"],
-    label: "weather-fixture",
+    args: ["--filter", "weather-agent", "run", "dev", "--no-ui", "--port", "0"],
+    label: "weather-agent",
   },
 ];
 

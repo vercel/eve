@@ -77,7 +77,7 @@ describe("createTuiPrompter", () => {
         ],
         editable: {
           value: "new",
-          defaultValue: "weather-fixture",
+          defaultValue: "weather-agent",
           formatHint: (value) => `Named '${value}'`,
         },
       }),

@@ -160,9 +160,9 @@ describe("resolveTuiTitle", () => {
       resolveTuiTitle({
         name: undefined,
         remoteServerUrl: undefined,
-        appRoot: "/x/apps/fixtures/weather-fixture",
+        appRoot: "/x/apps/fixtures/weather-agent",
       }),
-    ).toBe("Weather Fixture");
+    ).toBe("Weather Agent");
   });
 
   it("uses the remote host when connecting to a URL", () => {

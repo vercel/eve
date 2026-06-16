@@ -15,7 +15,7 @@ export function formatConnectionsSection(
   return [
     "## Connections",
     "",
-    "You have direct access to the following external services through connected MCP servers.",
+    "You have direct access to the following external services through connected MCP servers and OpenAPI HTTP APIs.",
     "When the user's request relates to any of these services, use them instead of web search or general knowledge.",
     "",
     "Available connections:",

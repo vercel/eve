@@ -24,15 +24,30 @@ export function parseSpecDocument(text: string): unknown {
 }
 
 /**
- * Picks a base URL from an OpenAPI document's `servers` array.
+ * Picks a base URL from an OpenAPI document.
  *
- * Returns the first server whose URL resolves to an absolute `http(s)`
- * origin: `{var}` placeholders are substituted with each variable's
- * `default`, and a relative URL (e.g. `/api/v3`) is resolved against
- * `specSource` when the spec was supplied as a URL. Returns `undefined`
- * when no entry yields an absolute URL.
+ * OpenAPI 3.x documents use `servers`; Swagger 2.0 documents use
+ * `schemes`/`host`/`basePath`. Returns `undefined` when neither shape
+ * yields an absolute HTTP(S) URL.
  */
 export function extractServerUrl(
+  document: Record<string, unknown>,
+  specSource: string | Record<string, unknown> | undefined,
+): string | undefined {
+  const openApiUrl = extractOpenApiServerUrl(document, specSource);
+  if (openApiUrl !== undefined) {
+    return openApiUrl;
+  }
+  return extractSwaggerBaseUrl(document, specSource);
+}
+
+/**
+ * Returns the first OpenAPI 3.x server whose URL resolves to an absolute
+ * `http(s)` origin: `{var}` placeholders are substituted with each
+ * variable's `default`, and a relative URL (e.g. `/api/v3`) is resolved
+ * against `specSource` when the spec was supplied as a URL.
+ */
+function extractOpenApiServerUrl(
   document: Record<string, unknown>,
   specSource: string | Record<string, unknown> | undefined,
 ): string | undefined {
@@ -59,6 +74,54 @@ export function extractServerUrl(
     }
   }
   return undefined;
+}
+
+/** Builds the Swagger 2.0 base URL from `schemes`, `host`, and `basePath`. */
+function extractSwaggerBaseUrl(
+  document: Record<string, unknown>,
+  specSource: string | Record<string, unknown> | undefined,
+): string | undefined {
+  const basePath = typeof document.basePath === "string" ? document.basePath : "";
+  const host = typeof document.host === "string" && document.host.length > 0 ? document.host : "";
+  const specUrl =
+    typeof specSource === "string" && URL.canParse(specSource) ? new URL(specSource) : undefined;
+  const scheme = extractSwaggerScheme(document) ?? specUrl?.protocol.replace(/:$/, "") ?? "https";
+
+  if (host.length > 0) {
+    return `${scheme}://${host}${normalizeBasePath(basePath)}`;
+  }
+
+  if (specUrl !== undefined) {
+    const url = new URL(normalizeBasePath(basePath) || "/", specUrl.origin);
+    const text = url.toString();
+    return text.endsWith("/") && normalizeBasePath(basePath).length === 0
+      ? text.slice(0, -1)
+      : text;
+  }
+
+  return undefined;
+}
+
+/** Picks the first HTTP(S) scheme from a Swagger 2.0 `schemes` array. */
+function extractSwaggerScheme(document: Record<string, unknown>): "http" | "https" | undefined {
+  const schemes = document.schemes;
+  if (!isArray(schemes)) {
+    return undefined;
+  }
+  for (const scheme of schemes) {
+    if (scheme === "https" || scheme === "http") {
+      return scheme;
+    }
+  }
+  return undefined;
+}
+
+function normalizeBasePath(basePath: string): string {
+  const trimmed = basePath.trim();
+  if (trimmed.length === 0 || trimmed === "/") {
+    return "";
+  }
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }
 
 /** Replaces `{name}` placeholders in a server URL with each variable's `default`. */

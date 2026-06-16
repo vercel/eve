@@ -32,7 +32,7 @@ The repo is a pnpm workspace orchestrated with [Turborepo](https://turborepo.com
 pnpm dev
 ```
 
-This runs the `eve` package build in watch mode alongside the [`apps/fixtures/weather-fixture`](./apps/fixtures/weather-fixture) fixture on an OS-assigned available localhost port. The fixture prints the selected URL at startup.
+This runs the `eve` package build in watch mode alongside the [`apps/fixtures/weather-agent`](./apps/fixtures/weather-agent) fixture on an OS-assigned available localhost port. The fixture prints the selected URL at startup.
 
 ## Testing
 

@@ -90,5 +90,5 @@ That is why Eve exposes two identifiers:
 
 ## Good companions in this repo
 
-- Weather-focused smoke/dev fixture: [`../../apps/fixtures/weather-fixture`](../../apps/fixtures/weather-fixture)
+- Weather-focused smoke/dev fixture: [`../../apps/fixtures/weather-agent`](../../apps/fixtures/weather-agent)
 - Public API source of truth: [`../../packages/eve/src/public/index.ts`](../../packages/eve/src/public/index.ts)

@@ -372,7 +372,7 @@ describe("nitro bundle report", () => {
     const { collectNitroBundleReport, renderNitroBundleReportMarkdown } =
       await loadBundleReportModule();
     const report = await collectNitroBundleReport({
-      appLabel: "apps/fixtures/weather-fixture",
+      appLabel: "apps/fixtures/weather-agent",
       appRoot,
       packageLabel: "packages/eve",
       packageRoot,
@@ -425,7 +425,7 @@ describe("nitro bundle report", () => {
     );
     expect(report.publishedPackage?.packedSizeBytes).toBeGreaterThan(0);
     expect(report.publishedPackage?.unpackedSizeBytes).toBeGreaterThan(0);
-    expect(markdown).toContain("## Bundle + Package Summary: `apps/fixtures/weather-fixture`");
+    expect(markdown).toContain("## Bundle + Package Summary: `apps/fixtures/weather-agent`");
     expect(markdown).toContain("**Key takeaways**");
     expect(markdown).toContain("| Area | Metric | Value |");
     expect(markdown).toContain("<summary>Build Metadata</summary>");
@@ -469,7 +469,7 @@ describe("nitro bundle report", () => {
     expect(markdown).toContain("🔎 Traced packages:");
     expect(markdown).toContain("📦 Bundled files:");
     expect(markdown).toContain("**🧾 Vercel Config**");
-    expect(markdown).toContain("`apps/fixtures/weather-fixture`");
+    expect(markdown).toContain("`apps/fixtures/weather-agent`");
     expect(markdown).toContain("| Runtime | Unique function payloads | 1 |");
     expect(markdown).not.toContain("| Runtime | Static assets |");
     expect(markdown).toContain("<code>/__server</code>");
@@ -490,13 +490,13 @@ describe("nitro bundle report", () => {
     const { collectNitroBundleReport, compareNitroBundleReports, renderNitroBundleReportMarkdown } =
       await loadBundleReportModule();
     const baselineReport = await collectNitroBundleReport({
-      appLabel: "apps/fixtures/weather-fixture",
+      appLabel: "apps/fixtures/weather-agent",
       appRoot: baselineFixture.appRoot,
       packageLabel: "packages/eve",
       packageRoot: baselineFixture.packageRoot,
     });
     const collectedCurrentReport = await collectNitroBundleReport({
-      appLabel: "apps/fixtures/weather-fixture",
+      appLabel: "apps/fixtures/weather-agent",
       appRoot: currentFixture.appRoot,
       packageLabel: "packages/eve",
       packageRoot: currentFixture.packageRoot,
@@ -624,7 +624,7 @@ describe("nitro bundle report", () => {
     const { collectNitroBundleReport, compareNitroBundleReports, renderNitroBundleReportMarkdown } =
       await loadBundleReportModule();
     const baselineReport = await collectNitroBundleReport({
-      appLabel: "apps/fixtures/weather-fixture",
+      appLabel: "apps/fixtures/weather-agent",
       appRoot: fixture.appRoot,
       packageLabel: "packages/eve",
       packageRoot: fixture.packageRoot,
@@ -676,7 +676,7 @@ describe("nitro bundle report", () => {
     const { collectNitroBundleReport, compareNitroBundleReports, renderNitroBundleReportMarkdown } =
       await loadBundleReportModule();
     const baselineReport = await collectNitroBundleReport({
-      appLabel: "apps/fixtures/weather-fixture",
+      appLabel: "apps/fixtures/weather-agent",
       appRoot: fixture.appRoot,
       packageLabel: "packages/eve",
       packageRoot: fixture.packageRoot,
@@ -754,7 +754,7 @@ describe("nitro bundle report", () => {
     const { collectNitroBundleReport, renderNitroBundleReportMarkdown } =
       await loadBundleReportModule();
     const report = await collectNitroBundleReport({
-      appLabel: "apps/fixtures/weather-fixture",
+      appLabel: "apps/fixtures/weather-agent",
       appRoot,
       packageLabel: "packages/eve",
       packageRoot,
@@ -776,7 +776,7 @@ describe("nitro bundle report", () => {
     const { collectNitroBundleReport, compareNitroBundleReports, renderNitroBundleReportMarkdown } =
       await loadBundleReportModule();
     const report = await collectNitroBundleReport({
-      appLabel: "apps/fixtures/weather-fixture",
+      appLabel: "apps/fixtures/weather-agent",
       appRoot: fixture.appRoot,
       packageLabel: "packages/eve",
       packageRoot: fixture.packageRoot,

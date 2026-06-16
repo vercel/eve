@@ -5,7 +5,8 @@ import { isObject } from "#shared/guards.js";
 /**
  * How the connection's resolved credential is placed on a request,
  * derived from the operation's effective `security` requirement and the
- * document's `securitySchemes`.
+ * document's `securitySchemes` (OpenAPI 3.x) or `securityDefinitions`
+ * (Swagger 2.0).
  *
  * - `bearer` — `Authorization: Bearer <token>` (the default; also covers
  *   `oauth2` / `openIdConnect`, whose access tokens are bearer tokens).
@@ -40,11 +41,7 @@ export function resolveSecurity(
   if (requirement === undefined || requirement.length === 0) {
     return undefined;
   }
-  const components = isObject(document.components) ? document.components : undefined;
-  const schemes =
-    components !== undefined && isObject(components.securitySchemes)
-      ? components.securitySchemes
-      : undefined;
+  const schemes = getSecuritySchemes(document);
   if (schemes === undefined) {
     return undefined;
   }
@@ -69,6 +66,16 @@ export function resolveSecurity(
   return undefined;
 }
 
+function getSecuritySchemes(
+  document: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const components = isObject(document.components) ? document.components : undefined;
+  if (components !== undefined && isObject(components.securitySchemes)) {
+    return components.securitySchemes;
+  }
+  return isObject(document.securityDefinitions) ? document.securityDefinitions : undefined;
+}
+
 /** Maps one OpenAPI security scheme object to a {@link SecurityPlacement}. */
 function mapSecurityScheme(scheme: Record<string, unknown>): SecurityPlacement | undefined {
   if (scheme.type === "apiKey") {
@@ -85,6 +92,9 @@ function mapSecurityScheme(scheme: Record<string, unknown>): SecurityPlacement |
   if (scheme.type === "http") {
     const httpScheme = typeof scheme.scheme === "string" ? scheme.scheme.toLowerCase() : "";
     return httpScheme === "basic" ? { kind: "basic" } : { kind: "bearer" };
+  }
+  if (scheme.type === "basic") {
+    return { kind: "basic" };
   }
   if (scheme.type === "oauth2" || scheme.type === "openIdConnect") {
     return { kind: "bearer" };

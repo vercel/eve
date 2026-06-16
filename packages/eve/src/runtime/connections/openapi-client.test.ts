@@ -52,6 +52,49 @@ const SPEC: Record<string, unknown> = {
   },
 };
 
+const SWAGGER_SPEC: Record<string, unknown> = {
+  swagger: "2.0",
+  info: { title: "Swagger API", version: "1.0.0" },
+  host: "api.example.com",
+  basePath: "/v1",
+  schemes: ["https"],
+  paths: {
+    "/items/{id}": {
+      get: {
+        operationId: "getItem",
+        summary: "Read an item",
+        parameters: [
+          { name: "id", in: "path", required: true, type: "string" },
+          { name: "includeDetails", in: "query", type: "boolean" },
+          { name: "tags", in: "query", type: "array", items: { type: "string" } },
+        ],
+        responses: { "200": { description: "ok" } },
+      },
+    },
+    "/items": {
+      post: {
+        operationId: "createSwaggerItem",
+        parameters: [
+          {
+            name: "item",
+            in: "body",
+            required: true,
+            schema: { $ref: "#/definitions/NewItem" },
+          },
+        ],
+        responses: { "201": { description: "created" } },
+      },
+    },
+  },
+  definitions: {
+    NewItem: {
+      type: "object",
+      properties: { name: { type: "string" } },
+      required: ["name"],
+    },
+  },
+};
+
 function makeConnection(
   overrides: Partial<ResolvedConnectionDefinition> = {},
 ): ResolvedConnectionDefinition {
@@ -96,12 +139,41 @@ describe("OpenApiConnectionClient", () => {
     });
   });
 
+  it("builds input schemas from Swagger 2.0 top-level parameters", async () => {
+    const client = new OpenApiConnectionClient(makeConnection({ spec: SWAGGER_SPEC, url: "" }));
+    const metadata = await client.getToolMetadata();
+    const getItem = metadata.find((m) => m.name === "getItem");
+
+    expect(getItem?.inputSchema).toMatchObject({
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        includeDetails: { type: "boolean" },
+        tags: { type: "array", items: { type: "string" } },
+      },
+      required: ["id"],
+    });
+  });
+
   it("dereferences a $ref request body under the body property", async () => {
     const client = new OpenApiConnectionClient(makeConnection());
     const metadata = await client.getToolMetadata();
     const createProject = metadata.find((m) => m.name === "createProject");
 
     expect(createProject?.inputSchema).toMatchObject({
+      properties: {
+        body: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
+      },
+      required: ["body"],
+    });
+  });
+
+  it("dereferences Swagger 2.0 body parameters under the body property", async () => {
+    const client = new OpenApiConnectionClient(makeConnection({ spec: SWAGGER_SPEC, url: "" }));
+    const metadata = await client.getToolMetadata();
+    const createItem = metadata.find((m) => m.name === "createSwaggerItem");
+
+    expect(createItem?.inputSchema).toMatchObject({
       properties: {
         body: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
       },
@@ -346,6 +418,29 @@ describe("OpenApiConnectionClient", () => {
     expect(String(calledUrl)).toBe("https://api.example.com/v1/projects/prj_1");
   });
 
+  it("derives the base URL from Swagger 2.0 schemes, host, and basePath", async () => {
+    const fetchMock = vi.fn(
+      async (_url: unknown, _init: RequestInit) =>
+        new Response(JSON.stringify({ id: "itm_1" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new OpenApiConnectionClient(makeConnection({ spec: SWAGGER_SPEC, url: "" }));
+    await client.executeTool("getItem", {
+      id: "itm_1",
+      includeDetails: true,
+      tags: ["alpha", "beta"],
+    });
+
+    const [calledUrl] = fetchMock.mock.calls[0]!;
+    expect(String(calledUrl)).toBe(
+      "https://api.example.com/v1/items/itm_1?includeDetails=true&tags=alpha&tags=beta",
+    );
+  });
+
   it("lets an explicit baseUrl override the spec servers", async () => {
     const fetchMock = vi.fn(
       async (_url: unknown, _init: RequestInit) => new Response(null, { status: 200 }),
@@ -581,6 +676,31 @@ describe("OpenApiConnectionClient", () => {
 
     const [, init] = fetchMock.mock.calls[0]!;
     expect((init.headers as Record<string, string>).Authorization).toBe("Basic dXNlcjpwYXNz");
+  });
+
+  it("places credentials from Swagger 2.0 securityDefinitions", async () => {
+    const spec: Record<string, unknown> = {
+      ...SWAGGER_SPEC,
+      security: [{ appKey: [] }],
+      securityDefinitions: { appKey: { type: "apiKey", in: "query", name: "app_key" } },
+    };
+    const fetchMock = vi.fn(
+      async (_url: unknown, _init: RequestInit) => new Response(null, { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new OpenApiConnectionClient(
+      makeConnection({
+        spec,
+        url: "",
+        authorization: { getToken: async () => ({ token: "secret" }), principalType: "app" },
+      }),
+    );
+    await client.executeTool("getItem", { id: "itm_1" });
+
+    const [calledUrl, init] = fetchMock.mock.calls[0]!;
+    expect(String(calledUrl)).toBe("https://api.example.com/v1/items/itm_1?app_key=secret");
+    expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
   });
 
   it("keeps Bearer auth for http bearer and oauth2 schemes", async () => {

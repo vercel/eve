@@ -251,7 +251,7 @@ export function resolveDevUiMode(input: {
 /**
  * Resolves the terminal UI's header title: an explicit `--name`, else the
  * remote server's host (for `--url`), else the humanized app-folder name
- * (e.g. `apps/fixtures/weather-fixture` → "Weather Fixture"). Returns `undefined` when
+ * (e.g. `apps/fixtures/weather-agent` → "Weather Agent"). Returns `undefined` when
  * nothing meaningful can be derived, so the runner falls back to its own
  * default.
  */

@@ -8,7 +8,7 @@ import { run } from "./lib/run.ts";
 import { theme } from "./lib/theme.ts";
 
 /**
- * Multi-message subagent smoke driving `apps/fixtures/weather-fixture` and its
+ * Multi-message subagent smoke driving `e2e/fixtures/agent-subagents-hitl` and its
  * `stock-price` subagent. The subagent emits a pre-tool message
  * ("I'll look up..."), calls `get_stock_price` (which has
  * `needsApproval: () => true`), and then emits a post-tool message
@@ -33,7 +33,7 @@ const TICKER = "GOOG";
 const PRICE = "178.92";
 process.env.EVE_TUI_UNICODE = "1";
 
-run({ app: "weather-fixture", kind: "local-build" }, async (target) => {
+run({ app: "agent-subagents-hitl", kind: "local-build" }, async (target) => {
   const client = new Client({ host: target.baseUrl });
   const session = client.session();
   const screen = new MockScreen({ columns: 140, rows: 60 });

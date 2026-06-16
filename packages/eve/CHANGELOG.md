@@ -1,5 +1,11 @@
 # eve
 
+## 0.9.6
+
+### Patch Changes
+
+- 08c9bb5: OpenAPI connections now accept Swagger 2.0 documents, including `schemes`/`host`/`basePath`, top-level parameter schemas, body parameters, and `securityDefinitions`. This lets agents connect directly to APIs such as Transport for London's public Swagger spec.
+
 ## 0.9.5
 
 ### Patch Changes

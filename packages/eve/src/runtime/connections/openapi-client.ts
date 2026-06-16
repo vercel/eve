@@ -29,6 +29,25 @@ interface OpenApiToolCache {
   readonly baseUrl: string;
 }
 
+const SWAGGER_PARAMETER_SCHEMA_KEYS = [
+  "default",
+  "enum",
+  "exclusiveMaximum",
+  "exclusiveMinimum",
+  "format",
+  "items",
+  "maximum",
+  "maxItems",
+  "maxLength",
+  "minimum",
+  "minItems",
+  "minLength",
+  "multipleOf",
+  "pattern",
+  "type",
+  "uniqueItems",
+] as const;
+
 /**
  * Result of executing an OpenAPI operation. Returned to the model as the
  * tool result so it can react to the status and body of any response,
@@ -41,8 +60,8 @@ export interface OpenApiToolResult {
 }
 
 /**
- * A {@link ConnectionClient} that turns an OpenAPI 3.x document into
- * connection tools.
+ * A {@link ConnectionClient} that turns an OpenAPI 3.x or Swagger 2.0
+ * document into connection tools.
  *
  * Created lazily per-connection per-session. On first use it loads the
  * document (fetching it when `spec` is a URL), dereferences local
@@ -161,7 +180,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
       return fromServers;
     }
     throw new Error(
-      `OpenAPI connection "${this.#connection.connectionName}" has no base URL: set "baseUrl" or ensure the document declares an absolute "servers" entry.`,
+      `OpenAPI connection "${this.#connection.connectionName}" has no base URL: set "baseUrl" or ensure the document declares an absolute "servers" entry or Swagger "host".`,
     );
   }
 
@@ -234,8 +253,13 @@ export class OpenApiConnectionClient implements ConnectionClient {
         const toolName = uniqueName(operationName(operationValue, method, pathTemplate), usedNames);
 
         const opParams = isArray(operationValue.parameters) ? operationValue.parameters : [];
-        const parameters = this.#resolveParameters(document, [...sharedParams, ...opParams]);
-        const requestBody = this.#resolveRequestBody(document, operationValue.requestBody);
+        const rawParameters = [...sharedParams, ...opParams];
+        const parameters = this.#resolveParameters(document, rawParameters);
+        const requestBody = this.#resolveRequestBody(
+          document,
+          operationValue.requestBody,
+          rawParameters,
+        );
 
         operations.push({
           toolName,
@@ -275,9 +299,7 @@ export class OpenApiConnectionClient implements ConnectionClient {
       if (typeof resolved.name !== "string") {
         continue;
       }
-      const schema = isObject(resolved.schema)
-        ? (derefSchema(document, resolved.schema) as Record<string, unknown>)
-        : {};
+      const schema = this.#resolveParameterSchema(document, resolved);
       params.push({
         name: resolved.name,
         location,
@@ -292,30 +314,67 @@ export class OpenApiConnectionClient implements ConnectionClient {
   #resolveRequestBody(
     document: Record<string, unknown>,
     raw: unknown,
+    rawParameters: readonly unknown[] = [],
   ): OpenApiRequestBody | undefined {
-    if (!isObject(raw)) {
-      return undefined;
+    if (isObject(raw)) {
+      const resolved = deref(document, raw);
+      if (isObject(resolved) && isObject(resolved.content)) {
+        const content = resolved.content;
+        const contentType =
+          "application/json" in content ? "application/json" : Object.keys(content)[0];
+        if (contentType !== undefined) {
+          const media = content[contentType];
+          const schema =
+            isObject(media) && isObject(media.schema)
+              ? (derefSchema(document, media.schema) as Record<string, unknown>)
+              : {};
+          return {
+            required: resolved.required === true,
+            contentType,
+            schema,
+          };
+        }
+      }
     }
-    const resolved = deref(document, raw);
-    if (!isObject(resolved) || !isObject(resolved.content)) {
-      return undefined;
+    return this.#resolveSwaggerBodyParameter(document, rawParameters);
+  }
+
+  #resolveParameterSchema(
+    document: Record<string, unknown>,
+    parameter: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (isObject(parameter.schema)) {
+      return derefSchema(document, parameter.schema) as Record<string, unknown>;
     }
-    const content = resolved.content;
-    const contentType =
-      "application/json" in content ? "application/json" : Object.keys(content)[0];
-    if (contentType === undefined) {
-      return undefined;
+
+    const schema: Record<string, unknown> = {};
+    for (const key of SWAGGER_PARAMETER_SCHEMA_KEYS) {
+      if (parameter[key] !== undefined) {
+        schema[key] = parameter[key];
+      }
     }
-    const media = content[contentType];
-    const schema =
-      isObject(media) && isObject(media.schema)
-        ? (derefSchema(document, media.schema) as Record<string, unknown>)
+    return derefSchema(document, schema) as Record<string, unknown>;
+  }
+
+  #resolveSwaggerBodyParameter(
+    document: Record<string, unknown>,
+    rawParameters: readonly unknown[],
+  ): OpenApiRequestBody | undefined {
+    for (const entry of rawParameters) {
+      const resolved = isObject(entry) ? deref(document, entry) : entry;
+      if (!isObject(resolved) || resolved.in !== "body") {
+        continue;
+      }
+      const schema = isObject(resolved.schema)
+        ? (derefSchema(document, resolved.schema) as Record<string, unknown>)
         : {};
-    return {
-      required: resolved.required === true,
-      contentType,
-      schema,
-    };
+      return {
+        required: resolved.required === true,
+        contentType: "application/json",
+        schema,
+      };
+    }
+    return undefined;
   }
 
   async #request(

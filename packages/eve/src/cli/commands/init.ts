@@ -230,9 +230,9 @@ export async function runInitCommand(
   const rawTarget = target ?? CURRENT_DIRECTORY_PROJECT_NAME;
   const currentDirectoryTarget = isCurrentDirectoryTarget(rawTarget);
   const existingDirectory = currentDirectoryTarget
-    ? (await pathExists(join(resolve(parentDirectory), "package.json"))
-        ? resolve(parentDirectory)
-        : undefined)
+    ? (await pathExists(join(resolve(parentDirectory), "package.json")))
+      ? resolve(parentDirectory)
+      : undefined
     : await resolveTargetDirectory(parentDirectory, rawTarget);
 
   // A fresh project is owned by the manager that launched the CLI (`npx`,

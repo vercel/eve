@@ -88,7 +88,7 @@ export default defineMcpClientConnection({
 
 ## OpenAPI connections
 
-`defineOpenAPIConnection` turns any OpenAPI 3.x document into connection tools, one per operation. Pass an HTTPS URL Eve fetches at runtime, or an inline parsed object:
+`defineOpenAPIConnection` turns any OpenAPI 3.x or Swagger 2.0 document into connection tools, one per operation. Pass an HTTPS URL Eve fetches at runtime, or an inline parsed object:
 
 ```ts title="agent/connections/petstore.ts"
 import { defineOpenAPIConnection } from "eve/connections";
@@ -104,10 +104,10 @@ Each operation becomes `connection__<connection>__<operationId>` (e.g. `connecti
 
 `auth`, `headers`, and `approval` work exactly as they do for MCP. There are two fields specific to OpenAPI:
 
-| Field        | Purpose                                                                                                                 |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| `baseUrl`    | Base URL operation paths resolve against. Optional; defaults to the document's first usable `servers` entry.            |
-| `operations` | Filter keyed on `operationId` (`allow` or `block`). Mirrors `tools` on MCP connections, but names operations not tools. |
+| Field        | Purpose                                                                                                                                             |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `baseUrl`    | Base URL operation paths resolve against. Optional; defaults to the document's first usable `servers` entry or Swagger `schemes`/`host`/`basePath`. |
+| `operations` | Filter keyed on `operationId` (`allow` or `block`). Mirrors `tools` on MCP connections, but names operations not tools.                             |
 
 ## Interactive OAuth via Vercel Connect
 

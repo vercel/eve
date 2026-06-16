@@ -135,5 +135,5 @@ Start here:
 ## Repo Guide
 
 - [`packages/eve/README.md`](packages/eve/README.md) is the package-facing overview
-- [`apps/fixtures/weather-fixture`](apps/fixtures/weather-fixture) is the weather-focused fixture used by local dev, smokes, and bundle analysis
+- [`apps/fixtures/weather-agent`](apps/fixtures/weather-agent) is the weather-focused fixture used by local dev, smokes, and bundle analysis
 - [`packages/eve/src/public/index.ts`](packages/eve/src/public/index.ts) is the public API source of truth

@@ -64,8 +64,9 @@ model-provider credentials.
 
 ## Fixtures
 
-E2E fixtures live under `e2e/fixtures/*` plus the shared
-`apps/fixtures/weather-fixture` app.
+E2E fixtures live under `e2e/fixtures/*`. Fixture discovery also accepts
+`apps/fixtures/*` apps with an `evals/` directory, but shared development apps
+should stay out of the e2e matrix unless they intentionally own evals.
 
 When adding e2e coverage:
 

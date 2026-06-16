@@ -10,7 +10,8 @@ import { stampDefinitionKey } from "#public/tool-result-narrowing.js";
 
 /**
  * The OpenAPI document backing the connection: either an HTTPS URL the
- * runtime fetches on first use, or an already-parsed OpenAPI 3.x object.
+ * runtime fetches on first use, or an already-parsed OpenAPI 3.x /
+ * Swagger 2.0 object.
  */
 export type OpenAPISpecSource = string | Record<string, unknown>;
 
@@ -34,8 +35,8 @@ export type OpenAPISpecSource = string | Record<string, unknown>;
  */
 export interface OpenAPIConnectionDefinition {
   /**
-   * The OpenAPI 3.x document. Pass an HTTPS URL to fetch and parse at
-   * runtime, or an inline parsed object.
+   * The OpenAPI 3.x or Swagger 2.0 document. Pass an HTTPS URL to fetch
+   * and parse at runtime, or an inline parsed object.
    */
   readonly spec: OpenAPISpecSource;
   /**
@@ -43,10 +44,11 @@ export interface OpenAPIConnectionDefinition {
    * `https://api.example.com`).
    *
    * Optional: when omitted, the runtime uses the document's first usable
-   * `servers` entry. It fills server-variable `{var}` placeholders from
+   * `servers` entry (OpenAPI 3.x) or `schemes`/`host`/`basePath`
+   * (Swagger 2.0). It fills server-variable `{var}` placeholders from
    * each variable's `default`, and resolves a relative server URL
    * against the spec's URL. Provide `baseUrl` when the document has no
-   * absolute `servers` entry, or to override it.
+   * derivable base URL, or to override it.
    */
   readonly baseUrl?: string;
   /**

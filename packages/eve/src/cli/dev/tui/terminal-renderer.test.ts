@@ -1251,13 +1251,13 @@ describe("TerminalRenderer setup panel", () => {
     const answer = renderer.setupFlow.readEditableSelect?.({
       message: "Vercel project",
       options: [
-        { value: "new", label: "Create a new project", hint: "Named 'weather-fixture'" },
+        { value: "new", label: "Create a new project", hint: "Named 'weather-agent'" },
         { value: "link", label: "Link an existing project" },
       ],
       initialValue: "new",
       editable: {
         value: "new",
-        defaultValue: "weather-fixture",
+        defaultValue: "weather-agent",
         formatHint: (value) => `Named '${value}'`,
       },
     });
@@ -1265,19 +1265,19 @@ describe("TerminalRenderer setup panel", () => {
 
     // Hovering the editable row is already a live field — no → to enter.
     expect(screen.snapshot()).toContain("type to rename");
-    expect(screen.snapshot()).toContain("Named 'weather-fixture");
+    expect(screen.snapshot()).toContain("Named 'weather-agent");
     // Backspace edits the seeded default in place, exactly like typing.
     input.backspace();
     input.backspace();
-    // "re" trimmed off the end of the seeded default.
-    expect(screen.snapshot()).not.toContain("weather-fixture");
+    // "nt" trimmed off the end of the seeded default.
+    expect(screen.snapshot()).not.toContain("weather-agent");
     input.type("!");
-    expect(screen.snapshot()).toContain("Named 'weather-fixtu!");
+    expect(screen.snapshot()).toContain("Named 'weather-age!");
     input.enter();
     await expect(answer).resolves.toEqual({
       kind: "edited",
       value: "new",
-      text: "weather-fixtu!",
+      text: "weather-age!",
     });
     renderer.shutdown();
   });
@@ -1288,13 +1288,13 @@ describe("TerminalRenderer setup panel", () => {
     const answer = renderer.setupFlow.readEditableSelect?.({
       message: "Vercel project",
       options: [
-        { value: "new", label: "Create a new project", hint: "Named 'weather-fixture'" },
+        { value: "new", label: "Create a new project", hint: "Named 'weather-agent'" },
         { value: "link", label: "Link an existing project" },
       ],
       initialValue: "new",
       editable: {
         value: "new",
-        defaultValue: "weather-fixture",
+        defaultValue: "weather-agent",
         formatHint: (value) => `Named '${value}'`,
       },
     });
@@ -1363,7 +1363,7 @@ describe("TerminalRenderer setup flow session", () => {
     renderer.setupFlow.begin("/deploy");
     renderer.setupFlow.renderLine("Project name unavailable", "warning");
     renderer.setupFlow.renderLine(
-      'Vercel project "weather-fixture" already exists. Choose a different project name.',
+      'Vercel project "weather-agent" already exists. Choose a different project name.',
       "warning",
     );
     renderer.setupFlow.end({ preserveDiagnostics: false });
@@ -1444,7 +1444,7 @@ describe("TerminalRenderer setup flow session", () => {
     await expect(second).resolves.toEqual(["slack"]);
 
     renderer.setupFlow.renderLine("Scaffolding Web Chat channel files...", "info");
-    renderer.setupFlow.renderLine("Overwrote /tmp/weather-fixture", "warning");
+    renderer.setupFlow.renderLine("Overwrote /tmp/weather-agent", "warning");
     renderer.setupFlow.renderLine("Scaffolded channel: web", "success");
     renderer.setupFlow.renderLine("Dependency installation failed.", "error");
     const third = renderer.setupFlow.readSelect({
@@ -1461,10 +1461,8 @@ describe("TerminalRenderer setup flow session", () => {
     expect(snapshot).not.toContain("✓ Terminal UI");
     expect(snapshot).toContain("✓ Web Chat");
     expect(snapshot).toContain("Slack       · Creates slackbot and deploys to Vercel");
-    expect(snapshot.indexOf("Done")).toBeLessThan(
-      snapshot.indexOf("Overwrote /tmp/weather-fixture"),
-    );
-    expect(snapshot.indexOf("Overwrote /tmp/weather-fixture")).toBeLessThan(
+    expect(snapshot.indexOf("Done")).toBeLessThan(snapshot.indexOf("Overwrote /tmp/weather-agent"));
+    expect(snapshot.indexOf("Overwrote /tmp/weather-agent")).toBeLessThan(
       snapshot.indexOf("Scaffolded channel: web"),
     );
     expect(snapshot.indexOf("Scaffolded channel: web")).toBeLessThan(snapshot.indexOf("↑/↓ move"));

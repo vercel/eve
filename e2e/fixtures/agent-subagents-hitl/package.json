@@ -1,17 +1,21 @@
 {
-  "name": "weather-fixture",
+  "name": "agent-subagents-hitl",
+  "version": "0.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "eve dev",
     "build": "eve build",
+    "dev": "eve dev",
     "start": "eve start",
-    "info": "eve info",
-    "typecheck": "tsgo --noEmit -p tsconfig.json",
+    "typecheck": "eve build && tsgo",
     "test:e2e": "eve eval --strict"
   },
   "dependencies": {
     "eve": "workspace:*",
     "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@typescript/native-preview": "catalog:"
   }
 }
