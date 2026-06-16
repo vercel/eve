@@ -3,6 +3,7 @@ name: Release
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 # Queue runs instead of cancelling: aborting a run mid-`changeset publish`
 # can leave npm with only some of the packages published.
