@@ -93,6 +93,10 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
     throw new Error(`Final screen contains an Error section:\n${finalSnapshot}`);
   }
 
+  // The turn is complete; wait until the runner is back at the prompt so
+  // Ctrl+C exits the session. A Ctrl+C mid-stream now only interrupts the
+  // turn and returns to the prompt (Claude Code's two-step exit).
+  await screen.waitForText("❯", 30_000);
   input.ctrlC();
   await runPromise;
 });
