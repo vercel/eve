@@ -4,6 +4,7 @@ FROM ubuntu:26.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG NODE_MAJOR=24
+ARG PNPM_VERSION=11.5.2
 
 LABEL org.opencontainers.image.description="Sandbox base image for Eve agents."
 LABEL org.opencontainers.image.source="https://github.com/vercel/eve"
@@ -20,12 +21,14 @@ RUN set -eux; \
     ca-certificates \
     curl \
     dnsutils \
+    gpgv \
     git \
     jq \
     python-is-python3 \
     python3 \
     ripgrep \
     sudo \
+    unzip \
     xz-utils \
     zstd; \
   arch="$(dpkg --print-architecture)"; \
@@ -44,18 +47,22 @@ RUN set -eux; \
   tar -xJf "${node_file}" -C /usr/local --strip-components=1; \
   rm "${node_file}" "${shasums}"; \
   rm -rf /usr/local/include/node /usr/local/share/doc /usr/local/share/man; \
+  npm install -g "pnpm@${PNPM_VERSION}"; \
   apt-get purge -y --auto-remove xz-utils; \
   rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*; \
   npm cache clean --force; \
   node --version; \
   npm --version; \
+  pnpm --version; \
   python --version; \
   python3 --version; \
   dig -v; \
+  gpgv --version | head -1; \
   git --version; \
   jq --version; \
   rg --version | head -1; \
   sudo -V | head -1; \
+  unzip -v | head -1; \
   zstd --version
 
 RUN set -eux; \
