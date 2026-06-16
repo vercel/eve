@@ -251,7 +251,7 @@ export function resolveDevUiMode(input: {
 /**
  * Resolves the terminal UI's header title: an explicit `--name`, else the
  * remote server's host (for `--url`), else the humanized app-folder name
- * (e.g. `apps/fixtures/weather-fixture` → "Weather Fixture"). Returns `undefined` when
+ * (e.g. `apps/fixtures/weather-agent` → "Weather Agent"). Returns `undefined` when
  * nothing meaningful can be derived, so the runner falls back to its own
  * default.
  */
@@ -396,10 +396,12 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     });
 
   program
-    .command("init <target>")
+    // Optional: a missing target scaffolds or updates the current directory,
+    // matching `eve init .`.
+    .command("init [target]")
     .description("Create a new Eve agent, or add one to an existing project directory.")
     .option("--channel-web-nextjs", "Add the Web Chat application (Next.js)")
-    .action(async (target: string, options: { channelWebNextjs?: boolean }) => {
+    .action(async (target: string | undefined, options: { channelWebNextjs?: boolean }) => {
       const { runInitCommand } = await import("#cli/commands/init.js");
       await runInitCommand(logger, appRoot, target, options);
     });
@@ -456,7 +458,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .command("dev")
     .description("Start the Eve development server or connect to an existing URL.")
     .option("--host <host>", "Host interface to bind")
-    .option("--port <port>", "Port to listen on (defaults to $PORT, then 3000)", parsePortOption)
+    .option("--port <port>", "Port to listen on (defaults to $PORT, then 2000)", parsePortOption)
     .option("-u, --url <url>", "Connect to an existing server URL", parseDevelopmentServerUrl)
     .option("--no-ui", "Start the server without an interactive UI")
     .option("--name <name>", "Title shown in the terminal UI (defaults to the app folder name)")

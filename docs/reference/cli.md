@@ -9,7 +9,7 @@ The `eve` binary (`bin: eve`) runs from your app root, and every command first l
 
 | Command                   | Description                                                                                                                                           |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eve init <target>`       | Scaffold a new agent, or add one to an existing project directory                                                                                     |
+| `eve init [target]`       | Scaffold a new agent, or add one to an existing project directory                                                                                     |
 | `eve info`                | Print the resolved application, including discovered tools, skills, subagents, schedules, channels, routes, artifact paths, and discovery diagnostics |
 | `eve build`               | Compile `.eve/` artifacts and build the host output; prints the output directory                                                                      |
 | `eve start`               | Serve the built `.output/` app; prints the listening URL                                                                                              |
@@ -26,13 +26,14 @@ When `eve build` fails on discovery errors, it prints the full diagnostics repor
 ## `eve init`
 
 ```bash
-eve init <target> [--channel-web-nextjs]
+eve init [target] [--channel-web-nextjs]
 ```
 
-The `<target>` argument decides the mode:
+The optional `target` decides the mode:
 
 - A name (`eve init my-agent`) scaffolds a fresh project in a new `my-agent/` directory.
 - An existing directory, including `.` for the current one (`eve init .`), adds an agent to that project. The project needs a `package.json`, the `agent/` files must not exist yet, and the missing `eve`, `ai`, and `zod` dependencies are added without touching anything else.
+- Omitting the target scaffolds or updates the current directory, the same as `eve init .`.
 
 Either mode installs dependencies, initializes Git, and runs `eve dev` through the project's package manager.
 
