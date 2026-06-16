@@ -1,5 +1,5 @@
 ---
-title: "Legal"
+title: "Disclaimer"
 description: "Deployer responsibility and safeguards to review before using Eve with sensitive, regulated, or production data."
 ---
 
