@@ -155,11 +155,20 @@ describe("executeReadFileOnSandbox", () => {
   });
 
   it("empty file with offset > 1 errors", async () => {
+    const access = createFakeAccess({ "/workspace/empty.ts": "" });
+    const sandbox = (await access.get())!;
+
+    const ctx = new ContextContainer();
+    ctx.set(SandboxKey, access);
+    ctx.set(ReadFileStateKey, { byTarget: {} });
+
     await expect(
-      runInContext({ "/workspace/empty.ts": "" }, (sandbox) =>
+      contextStorage.run(ctx, () =>
         executeReadFileOnSandbox(sandbox, { filePath: "/workspace/empty.ts", offset: 2 }),
       ),
     ).rejects.toThrow("offset 2 is past the end of the file (0 lines)");
+
+    expect(ctx.require(ReadFileStateKey).byTarget).toEqual({});
   });
 
   // ---------------------------------------------------------------------------

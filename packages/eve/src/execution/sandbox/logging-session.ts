@@ -8,6 +8,7 @@ import type {
   SandboxWriteTextFileOptions,
 } from "#shared/sandbox-session.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
+import { truncateTail } from "#execution/sandbox/truncate-output.js";
 
 const MAX_LOG_VALUE_LENGTH = 240;
 const BOOTSTRAP_FAILURE_EXIT_CODE = 1;
@@ -64,11 +65,19 @@ function formatBootstrapRunFailure(
     command,
     "",
     "stdout:",
-    result.stdout,
+    formatCapturedOutput("stdout", result.stdout),
     "",
     "stderr:",
-    result.stderr,
+    formatCapturedOutput("stderr", result.stderr),
   ].join("\n");
+}
+
+function formatCapturedOutput(stream: "stderr" | "stdout", output: string): string {
+  const truncated = truncateTail(output);
+  if (!truncated.truncated) {
+    return truncated.output;
+  }
+  return `[${stream} truncated: showing last ${truncated.outputLines} of ${truncated.totalLines} lines]\n${truncated.output}`;
 }
 
 function formatCommand(command: string): string {

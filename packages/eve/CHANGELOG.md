@@ -1,5 +1,13 @@
 # eve
 
+## 0.9.4
+
+### Patch Changes
+
+- 285386b: Limit sandbox bootstrap failure stdout and stderr in thrown errors so large install logs cannot inflate workflow memory usage.
+- 3e9b8d9: Allow `write_file` to overwrite an existing empty file after it has been successfully read with `read_file`.
+- aa1f593: Vendor semver for the Eve CLI bootstrap so production installs no longer need semver as a runtime dependency.
+
 ## 0.9.3
 
 ### Patch Changes

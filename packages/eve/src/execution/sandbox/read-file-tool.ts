@@ -98,7 +98,7 @@ export async function executeReadFileOnSandbox(
       ? allLines.length - 1
       : allLines.length;
 
-  // ── Handle empty file ───────────────────────────────────────────────
+  // ── Validate offset against file length ─────────────────────────────
   if (totalLines === 0) {
     if (effectiveOffset > 1) {
       throw new Error(
@@ -106,16 +106,7 @@ export async function executeReadFileOnSandbox(
           "Use the default offset to read an empty file.",
       );
     }
-    return {
-      content: "",
-      path: normalizedPath,
-      totalLines: 0,
-      truncated: false,
-    };
-  }
-
-  // ── Validate offset against file length ─────────────────────────────
-  if (effectiveOffset > totalLines) {
+  } else if (effectiveOffset > totalLines) {
     throw new Error(`offset ${effectiveOffset} is past the end of the file (${totalLines} lines).`);
   }
 
@@ -130,6 +121,16 @@ export async function executeReadFileOnSandbox(
 
   const targetKey = buildReadFileTargetKey(normalizedPath);
   setReadFileStamp(loadContext(), targetKey, stamp);
+
+  // ── Handle empty file ───────────────────────────────────────────────
+  if (totalLines === 0) {
+    return {
+      content: "",
+      path: normalizedPath,
+      totalLines: 0,
+      truncated: false,
+    };
+  }
 
   // ── Apply offset and limit ──────────────────────────────────────────
   const startIndex = effectiveOffset - 1;

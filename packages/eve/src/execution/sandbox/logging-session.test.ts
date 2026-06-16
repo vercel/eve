@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createLoggingSandboxSession } from "#execution/sandbox/logging-session.js";
+import { MAX_OUTPUT_LINES } from "#execution/sandbox/truncate-output.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
 describe("createLoggingSandboxSession", () => {
@@ -48,6 +49,41 @@ describe("createLoggingSandboxSession", () => {
         "install failed\nmissing package\n",
       ].join("\n"),
     );
+  });
+
+  it("truncates bootstrap failure stdout and stderr", async () => {
+    const stdout = Array.from({ length: MAX_OUTPUT_LINES + 2 }, (_, i) => `stdout ${i + 1}`).join(
+      "\n",
+    );
+    const stderr = Array.from({ length: MAX_OUTPUT_LINES + 3 }, (_, i) => `stderr ${i + 1}`).join(
+      "\n",
+    );
+    const session = createTestSession({
+      exitCode: 1,
+      stderr,
+      stdout,
+    });
+    const wrapped = createLoggingSandboxSession({ session });
+
+    let message = "";
+    try {
+      await wrapped.run({ command: "python -m pip install packages" });
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(message).toContain(
+      `[stdout truncated: showing last ${MAX_OUTPUT_LINES} of ${MAX_OUTPUT_LINES + 2} lines]`,
+    );
+    expect(message).toContain("stdout 3");
+    expect(message).toContain(`stdout ${MAX_OUTPUT_LINES + 2}`);
+    expect(message).not.toContain("stdout 1\n");
+    expect(message).toContain(
+      `[stderr truncated: showing last ${MAX_OUTPUT_LINES} of ${MAX_OUTPUT_LINES + 3} lines]`,
+    );
+    expect(message).toContain("stderr 4");
+    expect(message).toContain(`stderr ${MAX_OUTPUT_LINES + 3}`);
+    expect(message).not.toContain("stderr 1\n");
   });
 });
 

@@ -125,6 +125,30 @@ describe("executeWriteFileOnSandbox", () => {
     expect(files["/workspace/foo.ts"]).toBe("updated");
   });
 
+  it("overwrites an empty existing file after reading it", async () => {
+    const { access, files, session } = createFakeAccess({
+      "/workspace/empty.ts": "",
+    });
+
+    const ctx = new ContextContainer();
+    ctx.set(SandboxKey, access);
+    ctx.set(ReadFileStateKey, { byTarget: {} });
+
+    const result = (await contextStorage.run(ctx, async () => {
+      await executeReadFileOnSandbox(session, {
+        filePath: "/workspace/empty.ts",
+      });
+
+      return executeWriteFileOnSandbox(session, {
+        filePath: "/workspace/empty.ts",
+        content: "updated",
+      });
+    })) as WriteFileResult;
+
+    expect(result.existed).toBe(true);
+    expect(files["/workspace/empty.ts"]).toBe("updated");
+  });
+
   // ---------------------------------------------------------------------------
   // Reject overwrite without prior read
   // ---------------------------------------------------------------------------
