@@ -1,9 +1,9 @@
 ---
 title: "Security Model"
-description: "Trust boundaries, where secrets live, how credentials reach hosts, and what fails closed by default."
+description: "Eve's trust boundaries, where secrets live, how credentials reach hosts, and what fails closed by default."
 ---
 
-Your agent runs across two contexts, with a trust boundary drawn between them and every secret kept on the trusted side. This page is the mental model to use when you're deciding what an agent (and the model driving it) is allowed to reach.
+Your Eve agent runs across two contexts, with a trust boundary between them and every secret kept on the trusted side. Use this mental model when deciding what an agent (and the model driving it) is allowed to reach.
 
 ## Trust boundaries
 
@@ -16,13 +16,13 @@ Your agent runs across two contexts, with a trust boundary drawn between them an
 
 The app runtime is the trusted side. Your tool implementations, model calls, connections, state, and durable execution all run here, with `process.env` and full Node.js available. (On Vercel, this is a Vercel Function.)
 
-The sandbox is the isolated side. The model runs shell commands there through the built-in `bash`, `read_file`, `write_file`, `glob`, and `grep` tools. It gets its own `/workspace` filesystem, but no `process.env`, no secrets, and no path back into the app runtime. (On Vercel, each sandbox is a [Vercel Sandbox](https://vercel.com/docs/sandbox) microVM with hardware-level isolation.) The only thing that actually executes in the sandbox is shell commands. Even the built-in `bash`/`read_file`/`write_file` tools live in the app runtime and _proxy_ into the sandbox. The model sees tool definitions and results, never your secrets.
+The sandbox is the isolated side. The model runs shell commands there through the built-in `bash`, `read_file`, `write_file`, `glob`, and `grep` tools. It gets its own `/workspace` filesystem, but no `process.env`, no secrets, and no path back into the app runtime. (On Vercel, each sandbox is a [Vercel Sandbox](https://vercel.com/docs/sandbox) microVM with hardware-level isolation.) Only shell commands execute in the sandbox. Even the built-in `bash`/`read_file`/`write_file` tools live in the app runtime and _proxy_ into the sandbox. The model sees tool definitions and results, never your secrets.
 
 A concrete trace makes the boundary clear. When the model calls a custom `charge_card` tool, its `execute` runs in the app runtime, reads `process.env.STRIPE_KEY`, calls Stripe, and returns `{ ok: true }`. The model sees only `{ ok: true }`: the key never leaves the app runtime, and nothing about the call touches the sandbox. The built-in `write_file` is the mirror image, running in the app runtime and proxying the write into the sandbox `/workspace`. Either way the model drives the work through tool calls and their results, never by holding a credential or reaching the runtime directly.
 
 ## Credential brokering
 
-Sometimes the model needs _authenticated_ network access from inside the sandbox, like a `git clone` of a private repo or an authenticated `curl`, and there's no [tool](../tools) or [connection](../connections) to route it through. That's what credential brokering is for. On the Vercel Sandbox backend, auth headers get injected at the sandbox's network firewall for matching domains. The secret stays in the app runtime; the sandbox process only ever sees the response. See [Vercel Sandbox Credential Brokering](https://vercel.com/docs/sandbox/concepts/firewall#credentials-brokering) for the platform mechanism, and [Sandbox](../sandbox) for the Eve policy API.
+Credential brokering gives the model _authenticated_ network access from inside the sandbox, like a `git clone` of a private repo or an authenticated `curl`, when there's no [tool](../tools) or [connection](../connections) to route it through. On the Vercel Sandbox backend, auth headers get injected at the sandbox's network firewall for matching domains. The secret stays in the app runtime; the sandbox process only ever sees the response. See [Vercel Sandbox Credential Brokering](https://vercel.com/docs/sandbox/concepts/firewall#credentials-brokering) for the platform mechanism, and [Sandbox](../sandbox) for the Eve policy API.
 
 ## Connection credentials
 
@@ -30,7 +30,7 @@ Sometimes the model needs _authenticated_ network access from inside the sandbox
 
 ## Channel verification
 
-A [channel](../channels/overview) is your agent's front door, which makes authenticating inbound traffic its job. The built-in platform channels follow two rules here, and so must any channel you write yourself:
+A [channel](../channels/overview) is your agent's front door, so authenticating inbound traffic is its job. The built-in platform channels follow two rules, and so must any channel you write yourself:
 
 - **Verify signatures in constant time.** Platform channels (Slack, GitHub,
   Telegram, Twilio) verify the platform's HMAC signature over the raw request body
@@ -46,11 +46,11 @@ A custom channel that accepts dashboard-style webhooks should follow the same sh
 
 ## Authored markdown is data
 
-[Skill](../skills) and [schedule](../schedules) files are markdown with YAML frontmatter, and Eve treats that frontmatter strictly as data. The code-capable engines (`---js` / `---javascript`, which would `eval()` the frontmatter body the moment the file is parsed) are disabled. A fence like that throws rather than running. Frontmatter has to parse to a plain YAML object.
+[Skill](../skills) and [schedule](../schedules) files are markdown with YAML frontmatter, and Eve treats that frontmatter strictly as data. The code-capable engines (`---js` / `---javascript`, which would `eval()` the frontmatter body the moment the file is parsed) are disabled, so such a fence throws rather than running. Frontmatter has to parse to a plain YAML object.
 
 ## Auth fails closed
 
-Routes reject unauthenticated traffic by default: if no `AuthFn` in the walk accepts the request, it gets a `401`, and admitting anonymous callers takes an explicit `none()`. The scaffold's `placeholderAuth()` keeps a half-configured app closed in production until you replace it. See [Auth & route protection](../guides/auth-and-route-protection) for the full walk and verifiers.
+Routes reject unauthenticated traffic by default. If no `AuthFn` in the walk accepts the request, it gets a `401`, and admitting anonymous callers takes an explicit `none()`. The scaffold's `placeholderAuth()` keeps a half-configured app closed in production until you replace it. See [Auth & route protection](../guides/auth-and-route-protection) for the full walk and verifiers.
 
 ## Pre-production checklist
 
@@ -75,5 +75,5 @@ Before exposing an agent to real traffic:
 
 - [Auth & route protection](../guides/auth-and-route-protection): the full auth walk and verifier helpers
 - [Sandbox](../sandbox): backends, network policy, and brokering config
-- [Execution model & durability](./execution-model-and-durability): how durable sessions run
+- [Execution model and durability](./execution-model-and-durability): how durable sessions run
 - [Connections](../connections): static-token and OAuth connections

@@ -3,13 +3,13 @@ title: "Overview"
 description: "Define repeatable scored checks for an Eve agent with defineEval and run them with eve eval."
 ---
 
-An eval is a scored check that runs your agent against real sessions and grades the result. Use it to catch regressions when you change a prompt or a tool: drive the agent through one or more turns, then assert on what it did — the run completed, the right tool ran, the reply contains the right text — and optionally ship the results to Braintrust.
+An eval is a scored check that runs your agent against real sessions and grades the result, catching regressions when you change a prompt or a tool. Drive the agent through one or more turns, assert on what it did (the run completed, the right tool ran, the reply contains the right text), and optionally ship the results to Braintrust.
 
-Evals exercise the same HTTP surface your users hit. The runner boots (or targets) a real agent server, drives sessions through the [TypeScript client](../guides/client/overview) protocol, and grades what comes back — so a passing eval means the agent actually booted, accepted a request, and produced the result you asserted.
+Evals exercise the same HTTP surface your users hit. The runner boots (or targets) a real agent server, drives sessions through the [TypeScript client](../guides/client/overview) protocol, and grades what comes back, so a passing eval means the agent booted, accepted a request, and produced the result you asserted.
 
 ## `defineEval`
 
-Eve discovers evals under the app-root `evals/` directory, in `.eval.ts` files. Each file is exactly one eval — one graded case. The file path is the eval's identity, so you don't author an `id` or `name`; directories group related evals (`evals/weather/brooklyn-forecast.eval.ts` → id `weather/brooklyn-forecast`).
+Eve discovers evals under the app-root `evals/` directory, in `.eval.ts` files. Each file is one eval by default. A file can also default-export an array to fan out over a dataset (see [Cases](./cases)). The file path is the eval's identity, so you don't author an `id` or `name`. Directories group related evals (`evals/weather/brooklyn-forecast.eval.ts` becomes id `weather/brooklyn-forecast`).
 
 ```text
 my-agent/
@@ -40,7 +40,7 @@ export default defineEval({
 });
 ```
 
-`test` is the only required field. The rest are optional: `description`, `judge`, `tags`, `metadata`, `timeoutMs`, `reporters`. The init template adds `evals/**/*.ts` to `tsconfig.json`, so your eval code type-checks alongside the app.
+`test` is the only required field. The rest are optional: `description`, `judge`, `tags`, `metadata`, `timeoutMs`, and `reporters`. The init template adds `evals/**/*.ts` to `tsconfig.json`, so your eval code type-checks alongside the app.
 
 ## `evals.config.ts`
 
@@ -56,11 +56,11 @@ export default defineEvalConfig({
 });
 ```
 
-Everything is optional. `judge` sets the default model for [LLM-as-judge](./judge) assertions (`t.judge.*`) — only evals that use them need it, so a tree of fully deterministic evals can omit it entirely. `reporters`, `maxConcurrency`, and `timeoutMs` round out the defaults. Config `reporters` observe every eval in the run — set one `Braintrust()` here instead of adding it to each eval. CLI flags (`--max-concurrency`, `--timeout`) and per-eval values take precedence over the config defaults.
+Everything is optional. `judge` sets the default model for [LLM-as-judge](./judge) assertions (`t.judge.*`); a tree of fully deterministic evals can omit it. `reporters`, `maxConcurrency`, and `timeoutMs` round out the defaults. Config `reporters` observe every eval in the run, so set one `Braintrust()` here instead of adding it to each eval. CLI flags (`--max-concurrency`, `--timeout`) and per-eval values take precedence over the config defaults.
 
 ## The `t` context
 
-`t` is both the driver and the assertion surface. There are no separate `input`, `run`, `checks`, or `scores` fields — you write ordinary control flow, sending turns and asserting inline.
+`t` is both the driver and the assertion surface. There are no separate `input`, `run`, `checks`, or `scores` fields. You write ordinary control flow, sending turns and asserting inline.
 
 - **Drive** the agent: `t.send(...)`, `t.respond(...)`, `t.respondAll(...)`, `t.sendFile(...)`, `t.expectInputRequests(...)`, `t.newSession()`. Read what came back with `t.reply` (the last assistant message), `t.sessionId`, and `t.events`. See [Cases](./cases).
 - **Assert** with three surfaces, covered next.
@@ -69,16 +69,16 @@ Everything is optional. `judge` sets the default model for [LLM-as-judge](./judg
 
 Each surface matches a genuinely different kind of judgment:
 
-- **Run-level methods** read the whole run — `t.completed()`, `t.calledTool("get_weather")`, `t.usedNoTools()`, `t.toolOrder([...])`. They take no value because they observe the run itself. See [Assertions](./assertions).
-- **`t.check(value, assertion)`** grades an explicit value with a deterministic builder from `eve/evals/expect` — `t.check(t.reply, includes("sunny"))`. Grade `t.reply`, an intermediate draft, parsed JSON — anything. See [Assertions](./assertions).
-- **`t.judge.autoevals.*`** is the LLM-as-judge surface — `t.judge.autoevals.closedQA("cites a source")`. It grades `t.reply` by default and uses the configured judge model, never the agent under test. See [Judge](./judge).
+- **Run-level methods** read the whole run, like `t.completed()`, `t.calledTool("get_weather")`, `t.usedNoTools()`, and `t.toolOrder([...])`. They take no value because they observe the run itself. See [Assertions](./assertions).
+- **`t.check(value, assertion)`** grades an explicit value with a deterministic builder from `eve/evals/expect`, such as `t.check(t.reply, includes("sunny"))`. Grade `t.reply`, an intermediate draft, parsed JSON, or anything else. See [Assertions](./assertions).
+- **`t.judge.autoevals.*`** is the LLM-as-judge surface, like `t.judge.autoevals.closedQA("cites a source")`. It grades `t.reply` by default and uses the configured judge model, never the agent under test. See [Judge](./judge).
 
 ## Gate vs soft
 
-Every assertion returns a chainable handle, so severity rides on the assertion itself — there is no separate thresholds map:
+Every assertion returns a chainable handle, so severity rides on the assertion itself. There is no separate thresholds map.
 
 - **Gates** are hard. A failed gate marks the eval `failed` and `eve eval` exits non-zero. Run-level methods, `includes`, `equals`, and `matches` are gates by default.
-- **Soft** assertions are tracked data. They land in reports and artifacts, and a below-threshold soft assertion marks the eval `scored` — visible but not fatal, unless you pass `--strict`. `similarity` and every `t.judge.*` assertion are soft by default. A soft assertion with no threshold is tracked-only and never fails.
+- **Soft** assertions are tracked data. They land in reports and artifacts, and a below-threshold soft assertion marks the eval `scored` (visible but not fatal, unless you pass `--strict`). `similarity` and every `t.judge.*` assertion are soft by default. A soft assertion with no threshold is tracked-only and never fails.
 
 Override per assertion: `.gate(threshold?)` promotes to a hard gate, `.soft(threshold?)` demotes to tracked, and `.atLeast(threshold)` is a soft assertion with a bar.
 
@@ -89,7 +89,7 @@ t.judge.autoevals.closedQA("cites a source"); // soft, tracked (no threshold)
 t.judge.autoevals.factuality(reference).atLeast(0.7); // soft, gated under --strict at 0.7
 ```
 
-## Run it
+## Run evals with eve eval
 
 ```bash
 eve eval                       # run all discovered evals against a local dev server
@@ -101,7 +101,9 @@ Exit code `0` means every eval passed its gates. See [Running evals](./running) 
 
 ## A good baseline
 
-Most apps do fine with a few small smoke evals. Assert behavior with `t.completed()` plus one or two content checks, keep dataset fixtures in `evals/data/`, and only reach for a judge or Braintrust once you actually need fuzzy grading or shared result review. In CI, run `eve eval --strict` so soft threshold misses fail the build too.
+Most apps do fine with a few small smoke evals. Assert behavior with `t.completed()` plus one or two content checks, keep dataset fixtures in `evals/data/`, and reach for a judge or Braintrust only when you need fuzzy grading or shared result review. In CI, run `eve eval --strict` so soft threshold misses fail the build too.
+
+## What to read next
 
 The rest of this section covers each piece:
 
@@ -111,8 +113,4 @@ The rest of this section covers each piece:
 - [Targets](./targets): local vs remote targets for the same eval files
 - [Reporters](./reporters): Braintrust experiments and JUnit XML
 - [Running evals](./running): the `eve eval` CLI, exit codes, and artifacts
-
-## What to read next
-
-- [Cases](./cases): author your first evals
 - [Tools](../tools): the surface most evals assert on

@@ -1,11 +1,11 @@
 ---
 title: "Eve"
-description: "The default HTTP API for an agent: session routes, auth, and customization."
+description: "The default HTTP API for an agent, covering session routes, auth, and customization."
 ---
 
 The Eve channel is the framework's default HTTP API. It's what the terminal UI, [`useEveAgent`](../guides/frontend/overview), `curl`, and any SDK client talk to when they start sessions, send messages, and stream events. `eveChannel()` mounts the canonical session routes under `/eve/v1/session*`, and they are enabled by default even when `agent/channels/eve.ts` does not exist.
 
-Reach for it when something needs HTTP access to your agent: local tooling, a browser frontend, the terminal UI, or another API client. Most apps never write this file. Add `agent/channels/eve.ts` only to override the defaults, usually the route auth policy:
+Reach for it when something needs HTTP access to your agent, including local tooling, a browser frontend, the terminal UI, or another API client. Most apps never write this file. Add `agent/channels/eve.ts` only to override the defaults, usually the route auth policy.
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -18,18 +18,36 @@ export default eveChannel({
 
 ## Routes
 
-The channel exposes the routes that create sessions, send follow-ups, and stream events:
+The channel exposes routes that create sessions, send follow-ups, and stream events:
 
 - `GET /eve/v1/health`
 - `POST /eve/v1/session` (start a session)
 - `POST /eve/v1/session/:sessionId` (send a follow-up)
 - `GET /eve/v1/session/:sessionId/stream` (stream events, NDJSON)
 
-See [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming) for the request and stream flow.
+Start a session with a minimal body. The response returns `sessionId` and the `continuationToken` you reuse for follow-ups:
+
+```bash
+curl -X POST https://<deployment>/eve/v1/session \
+  -H "Content-Type: application/json" \
+  -d '{"message":"What is the weather in Paris?"}'
+# {"continuationToken":"eve:7f3c...","ok":true,"sessionId":"ses_01h..."}
+```
+
+Stream that session's events as newline-delimited JSON (`application/x-ndjson; charset=utf-8`), one event object per line:
+
+```bash
+curl -N https://<deployment>/eve/v1/session/ses_01h.../stream
+# {"type":"turn.started",...}
+# {"type":"text.delta","delta":"It is "}
+# {"type":"message.completed",...}
+```
+
+See [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming) for the full request and stream flow, including the complete event set.
 
 ## Authentication
 
-The `auth` option decides who can call these routes. The built-in helpers are meant for development and trusted infrastructure:
+The `auth` option decides who can call these routes. The built-in helpers cover development and trusted infrastructure:
 
 - `localDev()` accepts requests during local development.
 - `vercelOidc()` lets the local CLI reach a deployed agent, and lets other internal deployments from your team call it.
@@ -58,7 +76,7 @@ export default eveChannel({
     };
   },
   events: {
-    "message.completed"(event, channel, ctx) {
+    "message.completed"(eventData, channel, ctx) {
       console.log("Eve response completed", {
         continuationToken: channel.continuationToken,
         sessionId: ctx.session.id,

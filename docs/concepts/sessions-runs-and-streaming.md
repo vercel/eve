@@ -7,7 +7,7 @@ Every Eve app speaks the same stable HTTP API to a [durable session](./execution
 
 ## The two handles
 
-Two handles do two jobs here, and mixing them up is the most common mistake. One handle creates and resumes a session; a different one streams and inspects it.
+Two handles do two jobs, and mixing them up is the most common mistake. One handle creates and resumes a session; a different one streams and inspects it.
 
 - **`continuationToken`**: the resume handle. Use it to send a follow-up message to the same conversation. Owned by the channel.
 - **`sessionId` / `runId`**: the stream-and-inspect handle. Use it to attach to the event stream and watch a run. Owned by the runtime.
@@ -19,17 +19,17 @@ React, Vue, and Svelte apps reach for [`useEveAgent()`](../guides/frontend/overv
 ## Start a session
 
 ```bash
-curl -X POST http://127.0.0.1:2000/eve/v1/session \
+curl -X POST http://127.0.0.1:3000/eve/v1/session \
   -H 'content-type: application/json' \
   -d '{"message":"Summarize the latest forecast."}'
 ```
 
-Eve responds right away. The JSON body carries a `sessionId` and a `continuationToken`, and the `x-eve-session-id` header tells you which durable session to stream.
+Eve responds right away. The JSON body carries a `sessionId` and a `continuationToken`, and the `x-eve-session-id` header names the durable session to stream.
 
 ## Stream a session
 
 ```bash
-curl http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream
+curl http://127.0.0.1:3000/eve/v1/session/<sessionId>/stream
 ```
 
 The stream is newline-delimited JSON (NDJSON), one event per line:
@@ -75,7 +75,7 @@ A delegated subagent publishes progress on its own child-session stream. The par
 Once the session is waiting (you'll see `session.waiting`), POST your follow-up to the session endpoint with the stored continuation token:
 
 ```bash
-curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId> \
+curl -X POST http://127.0.0.1:3000/eve/v1/session/<sessionId> \
   -H 'content-type: application/json' \
   -d '{"continuationToken":"<token>","message":"Now send the short version."}'
 ```
@@ -86,10 +86,10 @@ For deterministic ordering, send one follow-up at a time and wait for the next `
 
 ## Reconnect and rewind
 
-The stream is durable. Every event is recorded before a step completes, so it's all replayable. Pass `startIndex` to reconnect by event count and pick up where you dropped off, or rewind to the start:
+The stream is durable. Every event is recorded before a step completes, so the whole stream is replayable. Pass `startIndex` to reconnect by event count and pick up where you dropped off, or rewind to the start:
 
 ```bash
-curl "http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream?startIndex=<count>"
+curl "http://127.0.0.1:3000/eve/v1/session/<sessionId>/stream?startIndex=<count>"
 ```
 
 ## Use the client from TypeScript
@@ -103,7 +103,7 @@ Start with the [TypeScript SDK](../guides/client/overview) guide. It covers basi
 `GET /eve/v1/info` returns a JSON inspection snapshot for the running agent: model, instructions, authored and framework tools, skills, channels, schedules, subagents, sandbox, connections, hooks, workflow, and workspace metadata. Local development accepts loopback requests; deployed Vercel targets require the route's OIDC auth.
 
 ```bash
-curl http://127.0.0.1:2000/eve/v1/info
+curl http://127.0.0.1:3000/eve/v1/info
 ```
 
 The route uses the same default auth chain as the eve channel (`[localDev(), vercelOidc()]`). Locally it answers anonymously; a deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection).
@@ -117,7 +117,7 @@ Every stream event runs four steps, in this order:
 3. **Hooks**: authored [hooks](../guides/hooks) subscribed to the event fire.
 4. **Dynamic resolvers**: [dynamic](../guides/dynamic-capabilities) tool, skill, and instruction resolvers fire, and `ctx.channel.metadata` already holds the freshly projected metadata from step 2.
 
-The order isn't incidental, it's structural. By the time a resolver or hook reads channel metadata, the channel has already updated its state and the projection is current.
+The order is structural, not incidental. By the time a resolver or hook reads channel metadata, the channel has already updated its state and the projection is current.
 
 ## What to read next
 

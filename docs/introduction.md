@@ -5,7 +5,7 @@ description: "How an Eve agent is laid out as files, what runs when a message ar
 
 Eve is a framework for building durable agents as ordinary files in a TypeScript project.
 
-Instead of describing your whole agent in one large configuration object, you give each part a clear home: instructions go in one file, tools in one folder, channels in another. Eve discovers that structure and turns it into an agent that runs locally, serves HTTP, connects to other platforms, and keeps working across many turns.
+Instead of one large configuration object, each part of your agent gets a clear home. Instructions go in one file, tools in one folder, channels in another. Eve discovers that structure and turns it into an agent that runs locally, serves HTTP, connects to other platforms, and keeps working across many turns.
 
 ## An Eve project at a glance
 
@@ -37,9 +37,7 @@ Start with only `instructions.md` and `agent.ts`. Add the other folders when the
 
 ## The files are the interface
 
-Eve is [filesystem-first](./reference/project-layout): a file's location says what it does, and its path usually gives it a name.
-
-For example, this file:
+Eve is [filesystem-first](./reference/project-layout). A file's location says what it does, and its path usually gives it a name. For example, this file:
 
 ```text
 agent/tools/get_weather.ts
@@ -64,7 +62,7 @@ There is no separate registry to keep in sync. Add the file and Eve discovers it
 
 ## What happens when a message arrives
 
-Whether a message comes from a web app, the terminal, or Slack, the same flow runs. Eve turns the platform input into a message, gives the model its instructions, skills, tools, and conversation history, runs the work (calling tools and subagents as needed), saves the session and streams events, then delivers the result back in the form the platform expects.
+The same flow runs whether a message comes from a web app, the terminal, or Slack. Eve turns the platform input into a message, gives the model its instructions, skills, tools, and conversation history, runs the work (calling tools and subagents as needed), saves the session and streams events, then delivers the result back in the form the platform expects.
 
 That keeps agent behavior portable. Your weather tool does not need to know whether the question came from a browser or from Slack.
 
@@ -72,13 +70,13 @@ That keeps agent behavior portable. Your weather tool does not need to know whet
 
 An Eve session is more than one request and one response. It can:
 
-- stream progress while work is happening
-- call tools and subagents
-- pause for [approval or a human answer](./tools)
-- resume after that answer arrives
-- keep durable state across turns
+- Stream progress while work is happening
+- Call tools and subagents
+- Pause for [approval or a human answer](./tools)
+- Resume after that answer arrives
+- Keep durable state across turns
 
-Under the hood, Eve uses the open-source [Workflow SDK](https://workflow-sdk.dev) to make sessions durable, resumable, and crash-safe. Eve handles that machinery so your tools can focus on the work itself.
+Under the hood, Eve uses the open-source [Workflow SDK](https://workflow-sdk.dev) to make sessions durable, resumable, and crash-safe. Eve handles that machinery so your tools focus on the work itself.
 
 ## Grow the project by adding capabilities
 
@@ -93,7 +91,7 @@ As the agent grows, each concern still has a predictable home:
 | [`schedules/`](./schedules)     | Recurring or scheduled work                      |
 | `lib/`                          | Shared code imported by the other agent files    |
 
-The result stays readable before it runs: the directory tells you what the agent can do.
+The result stays readable before it runs. The directory tells you what the agent can do.
 
 ## What to read next
 

@@ -3,7 +3,13 @@ title: "Next.js"
 description: "Run an Eve agent and a Next.js app as one project with withEve."
 ---
 
-`eve/next` lets you ship a Next.js frontend and an Eve agent as a single project. Wrap your config with `withEve()` and the two run together: one dev server, one Vercel deploy. [`useEveAgent`](./overview) finds the mounted routes on its own, so there's no CORS to fight and no URL env vars to keep in sync.
+`eve/next` ships a Next.js frontend and an Eve agent as a single project. Wrap your config with `withEve()` to run both from one dev server and one Vercel deploy. [`useEveAgent`](./overview) finds the mounted routes on its own, so there's no CORS to configure and no URL env vars to keep in sync.
+
+## Prerequisites
+
+- The `eve` package installed in your project (`npm install eve@latest`).
+- An existing Eve agent directory. If you don't have one, start from [Getting started](../../getting-started).
+- A Next.js app to mount the agent in.
 
 ## Wrap the Next.js config
 
@@ -16,7 +22,7 @@ const nextConfig: NextConfig = {};
 export default withEve(nextConfig);
 ```
 
-By default `withEve()` looks for an `agent/` folder next to your Next.js project root. If the agent lives somewhere else, point at it with `eveRoot`:
+By default `withEve()` looks for an `agent/` folder inside your Next.js project root. If the agent lives somewhere else, point at it with `eveRoot`:
 
 ```ts
 export default withEve(nextConfig, {
@@ -28,15 +34,15 @@ export default withEve(nextConfig, {
 
 All fields are optional.
 
-| Option                  | Type      | Default                | Purpose                                                                                                                                                 |
-| ----------------------- | --------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eveRoot`               | `string`  | Next.js app root       | Path to the Eve app root, relative to `process.cwd()` unless absolute. Set it when the agent lives outside the Next.js project.                         |
-| `eveBuildCommand`       | `string`  | `"eve build"`          | Build command for the generated Eve Vercel service. Use it when the Eve service needs project-specific prework, without changing the Next.js build.     |
-| `configureVercelOutput` | `boolean` | `true`                 | Set to `false` to skip creating or updating `.vercel/output/config.json`. By default `withEve` writes the `experimentalServices` entries for both apps. |
-| `servicePrefix`         | `string`  | `"/_eve_internal/eve"` | Private Vercel route namespace for the Eve service. Must match the Eve service's mount in your Vercel Build Output config when you set it manually.     |
-| `devServerTimeoutMs`    | `number`  | `180000`               | Maximum time to wait for the Eve development server to become available.                                                                                |
+| Option                  | Type      | Default                | Purpose                                                                                                                                             |
+| ----------------------- | --------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `eveRoot`               | `string`  | Next.js app root       | Path to the Eve app root, relative to `process.cwd()` unless absolute. Set it when the agent lives outside the Next.js project.                     |
+| `eveBuildCommand`       | `string`  | `"eve build"`          | Build command for the generated Eve Vercel service. Use it when the Eve service needs project-specific prework, without changing the Next.js build. |
+| `configureVercelOutput` | `boolean` | `true`                 | When `true`, `withEve` writes the `experimentalServices` entries for both apps to `.vercel/output/config.json`. Set to `false` to skip that step.   |
+| `servicePrefix`         | `string`  | `"/_eve_internal/eve"` | Private Vercel route namespace for the Eve service. Must match the Eve service's mount in your Vercel Build Output config when you set it manually. |
+| `devServerTimeoutMs`    | `number`  | `180000`               | Maximum time to wait for the Eve development server to become available.                                                                            |
 
-For unusually slow cold starts, increase the development timeout:
+For slow cold starts, increase the development timeout:
 
 ```ts
 export default withEve(nextConfig, {
@@ -46,7 +52,7 @@ export default withEve(nextConfig, {
 
 ## Call the hook
 
-With `withEve()` in `next.config.ts`, the Eve routes are same-origin, so client code can call [`useEveAgent`](./overview) without naming a host. Cookie-based auth just works, whether that's Auth.js or any session cookie, since the browser already sends those cookies on every Eve request. For non-cookie schemes, attach the credentials yourself:
+With `withEve()` in `next.config.ts`, the Eve routes are same-origin, so client code can call [`useEveAgent`](./overview) without naming a host. Cookie-based auth (Auth.js or any session cookie) needs no extra wiring, since the browser already sends those cookies on every Eve request. For non-cookie schemes, attach the credentials yourself:
 
 ```tsx
 const agent = useEveAgent({
@@ -56,7 +62,16 @@ const agent = useEveAgent({
 });
 ```
 
-Before deploying a user-facing app, add `agent/channels/eve.ts` so production requests run your app's auth policy. See [Channels](../../channels/overview) and [Auth & route protection](../auth-and-route-protection).
+The default Eve channel is fail-closed. With no `agent/channels/eve.ts` authored, Eve registers `eveChannel({ auth: [localDev(), vercelOidc()] })`: `localDev()` opens the routes on localhost, `vercelOidc()` admits Vercel OIDC callers in production, and everything else gets a `401`. To run your app's own auth policy, add `agent/channels/eve.ts`:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel } from "eve/channels/eve";
+import { localDev, vercelOidc } from "eve/channels/auth";
+
+export default eveChannel({ auth: [localDev(), vercelOidc()] });
+```
+
+For a public demo, use `none()` (also from `eve/channels/auth`) to skip authentication. See [Channels](../../channels/overview) and [Auth & route protection](../auth-and-route-protection).
 
 ## Dev vs deploy topology
 
@@ -69,13 +84,13 @@ Before deploying a user-facing app, add `agent/channels/eve.ts` so production re
   });
   ```
 
-- **Local production build.** `next build && next start` proxies Eve routes to `http://127.0.0.1:4274`. Change the port with `EVE_NEXT_PRODUCTION_PORT`:
+- **Local production build.** `next build && next start` serves the Eve runtime from its built `.output/server/index.mjs` on a stable local port (`4274`) and proxies the Eve routes to it. Run `eve build` first so that output exists. Change the port with `EVE_NEXT_PRODUCTION_PORT`:
 
   ```bash
   EVE_NEXT_PRODUCTION_PORT=5000 npm run build && npm start
   ```
 
-- **Non-Vercel hosts.** If the Eve service lives on a separate origin, tell Next.js where to find it with `EVE_NEXT_PRODUCTION_ORIGIN`:
+- **Non-Vercel hosts.** When the Eve service lives on a separate origin, tell Next.js where to find it with `EVE_NEXT_PRODUCTION_ORIGIN`:
 
   ```bash
   EVE_NEXT_PRODUCTION_ORIGIN=https://agent.example.com npm run build

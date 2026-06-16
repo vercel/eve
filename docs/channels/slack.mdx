@@ -4,7 +4,7 @@ description: "Reach your agent from Slack app mentions and DMs, with thread anch
 type: integration
 ---
 
-The Slack channel puts your agent inside a workspace: it answers `@mentions` and DMs, replies in threads, shows typing indicators, and turns HITL prompts into buttons. Use it when the conversation should happen where your team already works. Credentials run through [Vercel Connect](../guides/auth-and-route-protection), which handles both the outbound bot token and inbound webhook verification, so there's no `SLACK_BOT_TOKEN` or `SLACK_SIGNING_SECRET` for you to manage. See [Channels](./overview) for the contract this builds on.
+The Slack channel puts your agent inside a workspace. It answers `@mentions` and DMs, replies in threads, shows typing indicators, and turns human-in-the-loop (HITL) prompts into buttons. Use it when the conversation should happen where your team already works. Credentials run through [Vercel Connect](../guides/auth-and-route-protection), which handles both the outbound bot token and inbound webhook verification, so there's no `SLACK_BOT_TOKEN` or `SLACK_SIGNING_SECRET` for you to manage. See [Channels](./overview) for the contract this builds on.
 
 ## Set up Connect
 
@@ -17,9 +17,9 @@ vercel connect detach <uid> --yes
 vercel connect attach <uid> --triggers --trigger-path /eve/v1/slack --yes
 ```
 
-`--triggers` turns on Slack Event Subscriptions; without it, Slack never delivers `app_mention` or `message.im`. `--trigger-path /eve/v1/slack` must match the channel route, since Eve doesn't serve the default Connect path. You can also create the client from the [Connect dashboard](https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Go+to+Connect).
+`FF_CONNECT_ENABLED=1` turns on the Connect commands, which are feature-flagged in the Vercel CLI today. The `create` step provisions a destination at the default Connect path. `detach` then `attach --trigger-path /eve/v1/slack` re-points the trigger at the Eve Slack route, since Eve does not serve the default Connect path. `--triggers` turns on Slack Event Subscriptions; without it, Slack never delivers `app_mention` or `message.im`. You can also create the client from the [Connect dashboard](https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Go+to+Connect).
 
-## Add the channel file
+## Add the channel
 
 Scaffold the channel and its dependency with `eve channels add slack`, or set it up by hand:
 
@@ -36,67 +36,94 @@ export default slackChannel({
 });
 ```
 
-`connectSlackCredentials` returns `{ botToken, webhookVerifier }`. That keeps token rotation, multi-workspace tenancy, and request verification inside Connect rather than your code. Deploy once the trigger destination and channel file are ready:
+`connectSlackCredentials` returns `{ botToken, webhookVerifier }`, keeping token rotation, multi-workspace tenancy, and request verification inside Connect rather than your code. Deploy once the trigger destination and channel file are ready:
 
 ```bash
 VERCEL_USE_EXPERIMENTAL_FRAMEWORKS=1 vercel deploy --prod
 ```
 
-## Affordances
+`VERCEL_USE_EXPERIMENTAL_FRAMEWORKS=1` lets the Vercel CLI recognize Eve as a framework during the build. Eve's own setup commands set the same flag.
 
-**Inbound hooks** decide whether to dispatch a turn and with what `auth`. Return `{ auth }` to dispatch, `null` to drop, or `{ auth, context }` to inject background into history.
+## How the channel handles messages
+
+### Dispatch
+
+Inbound hooks decide whether to dispatch a turn and with what `auth`. Return `{ auth }` to dispatch, `null` to drop, or `{ auth, context }` to inject background into history.
 
 - `onAppMention(ctx, message)` handles `app_mention` events. The default derives workspace-scoped auth and posts a `Thinking…` indicator.
 - `onDirectMessage(ctx, message)` handles `message.im` events (needs `im:history` scope). Bot-authored messages and edits are filtered out first.
 - `onInteraction(action, ctx)` handles `block_actions` callbacks not consumed by HITL.
 
-**Thread context.** You get the triggering mention by default, but not the earlier replies in the thread. Pull them in with `loadThreadContextMessages` and return them as `context`, which Eve appends to history as user messages the model sees on every later turn. Use `since: "last-agent-reply"` so repeated mentions in one thread only inject what is new:
+You get the triggering mention by default, but not the earlier replies in the thread. Pull them in with `loadThreadContextMessages` and return them as `context`, which Eve appends to history as user messages the model sees on every later turn. Use `since: "last-agent-reply"` so repeated mentions in one thread inject only what is new:
 
 ```ts
-async onAppMention(ctx, message) {
-  const auth = defaultSlackAuth(message, ctx);
-  const prior = await loadThreadContextMessages(ctx.thread, message, { since: "last-agent-reply" });
-  if (prior.length === 0) return { auth };
-  const transcript = prior.map((m) => `${m.isMe ? "you" : (m.user ?? "user")}: ${m.markdown}`).join("\n");
-  return { auth, context: [`Recent thread messages since your last reply:\n\n${transcript}`] };
-}
-```
+import { defaultSlackAuth, loadThreadContextMessages, slackChannel } from "eve/channels/slack";
+import { connectSlackCredentials } from "@vercel/connect/eve";
 
-**Thread anchoring.** When a session starts without a `threadTs` (say, from a schedule or `args.receive(slack, ...)`), it anchors on the first agent post, and later posts and mentions resume that same session. Pass `initialMessage` with a `Card` to land a structured anchor first instead. `threadTs` and `initialMessage` are mutually exclusive.
-
-**Typing indicators** post out of the box: `Thinking…` on inbound, `Working…` on `turn.started`, tool status on `actions.requested`. Override any handler to customize.
-
-**HITL** renders as Slack buttons/selects; submissions resume the parked session.
-
-**Authorization prompts are private.** A sign-in challenge (OAuth URL, device code) is a credential. Anyone who completes it binds their identity to the session's connection. The default `authorization.required` handler delivers the challenge ephemerally to the triggering user, device code included, and posts a public link-free status only when it has no user to target. The handler receives a private-delivery context with `postEphemeral`, `postDirectMessage` (needs the `im:write` scope), and `state`. There is, intentionally, no public `post` and no raw API access.
-
-```ts
-events: {
-  "authorization.required"(event, ctx) {
-    const userId = ctx.state.triggeringUserId;
-    if (!userId || !event.authorization?.url) return;
-    return ctx.postDirectMessage(userId, `Sign in to continue: ${event.authorization.url}`);
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  async onAppMention(ctx, message) {
+    const auth = defaultSlackAuth(message, ctx);
+    const prior = await loadThreadContextMessages(ctx.thread, message, {
+      since: "last-agent-reply",
+    });
+    if (prior.length === 0) return { auth };
+    const transcript = prior
+      .map((m) => `${m.isMe ? "you" : (m.user ?? "user")}: ${m.markdown}`)
+      .join("\n");
+    return { auth, context: [`Recent thread messages since your last reply:\n\n${transcript}`] };
   },
-},
+});
 ```
+
+### Delivery
+
+The default handlers reply in-thread and show progress. Typing indicators post automatically: `Thinking…` on inbound, `Working…` on `turn.started`, tool status on `actions.requested`. Override `onAppMention` or the `events` handlers to customize.
+
+When a session starts without a `threadTs` (say, from a schedule or `receive(slack, ...)`), it anchors on the first agent post, and later posts and mentions resume that same session. Pass `initialMessage` with a `Card` to land a structured anchor first instead. `threadTs` and `initialMessage` are mutually exclusive.
+
+The example below overrides `onAppMention` to gate on an authored message and posts the completed reply to the thread. Event handlers receive `(eventData, channel, ctx)`, with Slack platform handles on `channel.thread` and `channel.slack`:
 
 ```ts
 import { defaultSlackAuth, slackChannel } from "eve/channels/slack";
+import { connectSlackCredentials } from "@vercel/connect/eve";
 
 export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
   onAppMention: (ctx, message) =>
     message.author ? { auth: defaultSlackAuth(message, ctx) } : null,
   events: {
-    "message.completed"(event, ctx) {
-      if (event.finishReason === "tool-calls") return;
-      if (event.message) ctx.thread.post(event.message);
+    "message.completed"(eventData, channel, ctx) {
+      if (eventData.finishReason === "tool-calls") return;
+      if (eventData.message) channel.thread.post(eventData.message);
     },
   },
 });
 ```
 
-Event handlers receive `(eventData, ctx)` with platform handles on `ctx.thread` and `ctx.slack`.
+### Human-in-the-loop (HITL)
+
+HITL renders as Slack buttons and selects. When the user responds, the parked session (paused awaiting input) resumes.
+
+Authorization prompts are private. A sign-in challenge (OAuth URL, device code) is a credential. Anyone who completes it binds their identity to the session's connection. The default `authorization.required` handler delivers the challenge ephemerally to the triggering user, device code included, and posts a public link-free status only when it has no user to target. The handler receives a private-delivery context with `postEphemeral`, `postDirectMessage` (needs the `im:write` scope), and `state`. There is, intentionally, no public `post` and no raw API access.
+
+```ts
+events: {
+  "authorization.required"(eventData, channel) {
+    const userId = channel.state.triggeringUserId;
+    if (!userId || !eventData.authorization?.url) return;
+    return channel.postDirectMessage(userId, `Sign in to continue: ${eventData.authorization.url}`);
+  },
+},
+```
+
+### Proactive sessions
+
+Start a session without an inbound message through `receive(slack, { message, target, auth })` from a schedule `run` handler, or `args.receive(slack, ...)` from another channel. The proactive target shape is `{ channelId }`.
+
+### Attachments
+
+Inbound files behind authenticated Slack URLs are staged with `fetchFile`. See [File uploads](./custom#file-uploads) for the `fetchFile` contract.
 
 ## What to read next
 

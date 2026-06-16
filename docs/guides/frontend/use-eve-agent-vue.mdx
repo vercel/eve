@@ -3,7 +3,7 @@ title: "useEveAgent (Vue)"
 description: "Vue composable that drives an Eve agent session from the browser."
 ---
 
-`useEveAgent()` from `eve/vue` is how a Vue app talks to an Eve session. It opens a long-lived session and sends turns, and it folds every stream event into reactive data you can bind in a template. Nuxt auto-imports it through the [module](./nuxt), and the [frontend overview](./overview) covers the shared model.
+`useEveAgent()` from `eve/vue` is how a Vue app talks to an Eve session. It opens a long-lived session, sends turns, and folds every stream event into reactive data you can bind in a template. Nuxt auto-imports it through the [module](./nuxt), and the [frontend overview](./overview) covers the shared model.
 
 ## Basic usage
 
@@ -25,18 +25,18 @@ const { data } = useEveAgent();
 
 ## What it returns
 
-| Property  | Type                              | Description                                                               |
-| --------- | --------------------------------- | ------------------------------------------------------------------------- |
-| `data`    | `ComputedRef<TData>`              | Projected state. With the default reducer, `EveMessageData` (`messages`). |
-| `status`  | `ComputedRef<UseEveAgentStatus>`  | `"ready"`, `"submitted"`, `"streaming"`, or `"error"`.                    |
-| `error`   | `ComputedRef<Error \| undefined>` | Last transport-level error.                                               |
-| `events`  | `ComputedRef<...>`                | Raw server events for this session.                                       |
-| `session` | `ComputedRef<SessionState>`       | Snapshot of session state.                                                |
-| `send`    | `(input) => Promise`              | Send text or a full turn (multi-part, attachments, HITL responses).       |
-| `stop`    | `() => void`                      | Abort the in-flight request.                                              |
-| `reset`   | `() => void`                      | Clear state and start a new session.                                      |
+| Property  | Type                                               | Description                                                               |
+| --------- | -------------------------------------------------- | ------------------------------------------------------------------------- |
+| `data`    | `ComputedRef<TData>`                               | Projected state. With the default reducer, `EveMessageData` (`messages`). |
+| `status`  | `ComputedRef<UseEveAgentStatus>`                   | `"ready"`, `"submitted"`, `"streaming"`, or `"error"`.                    |
+| `error`   | `ComputedRef<Error \| undefined>`                  | Last transport-level error.                                               |
+| `events`  | `ComputedRef<readonly HandleMessageStreamEvent[]>` | Raw server events for this session.                                       |
+| `session` | `ComputedRef<SessionState>`                        | Snapshot of session state.                                                |
+| `send`    | `(input: SendTurnPayload) => Promise<void>`        | Send text or a full turn (multi-part, attachments, HITL responses).       |
+| `stop`    | `() => void`                                       | Abort the in-flight request.                                              |
+| `reset`   | `() => void`                                       | Clear state and start a new session.                                      |
 
-The first five are `ComputedRef`s; the rest are methods. Destructure whatever you need: refs keep their reactivity through destructuring. Read them with `.value` in `<script>`, and unwrapped in `<template>`.
+The first five are `ComputedRef`s; the rest are methods. Destructure whatever you need, since refs keep their reactivity through destructuring. Read them with `.value` in `<script>`, and unwrapped in `<template>`.
 
 ## Send a message
 
@@ -64,7 +64,7 @@ async function handleSubmit() {
 </template>
 ```
 
-For anything beyond plain text, reach for `send()`. Attachments follow the AI SDK `UserContent` format:
+For anything beyond plain text, reach for `send()`. Attachments follow the AI SDK `UserContent` format. Send file data as a base64 `data:` URL so it survives the JSON transport:
 
 ```vue
 <script setup lang="ts">
@@ -75,10 +75,12 @@ const { send } = useEveAgent();
 async function onFileChange(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0];
   if (!file) return;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const base64 = btoa(String.fromCodePoint(...bytes));
   await send({
     message: [
       { type: "text", text: "Describe this image." },
-      { type: "file", data: new Uint8Array(await file.arrayBuffer()), mediaType: file.type },
+      { type: "file", data: `data:${file.type};base64,${base64}`, mediaType: file.type },
     ],
   });
 }
@@ -87,7 +89,30 @@ async function onFileChange(event: Event) {
 
 ## Human-in-the-loop prompts
 
-A tool opts into approval with `needsApproval` ([Tools](../../tools)). When it triggers, the pending request shows up as a `dynamic-tool` part on the latest message. Read it and answer with `send({ inputResponses })`. That find-and-answer flow is the same across every framework, so the full example lives in the [Frontend overview](./overview#human-in-the-loop-prompts).
+A tool opts into approval with `needsApproval` ([Tools](../../tools)). When it triggers, the pending request shows up as a `dynamic-tool` part on the latest message at `part.toolMetadata?.eve?.inputRequest`. Read it, then answer through the same session with `send({ inputResponses })`:
+
+```ts
+import type { EveDynamicToolPart, EveMessagePart } from "eve/vue";
+
+const { data, send } = useEveAgent();
+
+const isDynamicToolPart = (part: EveMessagePart): part is EveDynamicToolPart =>
+  part.type === "dynamic-tool";
+
+const request = data.value.messages
+  .at(-1)
+  ?.parts.filter(isDynamicToolPart)
+  .map((part) => part.toolMetadata?.eve?.inputRequest)
+  .find((value) => value !== undefined);
+
+if (request) {
+  await send({
+    inputResponses: [{ requestId: request.requestId, optionId: "approve" }],
+  });
+}
+```
+
+The find-and-answer flow is the same across every framework. The [React hook reference](./overview) covers the longer walkthrough.
 
 ## Stop, reset, and resume
 
@@ -115,6 +140,74 @@ const agent = useEveAgent({
   }),
 });
 ```
+
+## Attach page context per turn
+
+`clientContext` adds ephemeral context for the next model call and nothing more. Strings (or an array of strings) become user-role context messages; an object is JSON-serialized into one. It rides along with a message or HITL response, never dispatches a turn on its own, and never lands in durable session history. Pass it to `send()`:
+
+```ts
+await send({
+  message: "What should I do on this screen?",
+  clientContext: { route: "/billing", plan: "pro", seatsUsed: 4 },
+});
+```
+
+To attach the same context to every turn without threading it through each call site, pass `prepareSend`. It runs right before each send and returns the (possibly augmented) turn:
+
+```ts
+const agent = useEveAgent({
+  prepareSend: (input) => ({
+    ...input,
+    clientContext: { route: location.pathname },
+  }),
+});
+```
+
+## Lifecycle callbacks
+
+The composable takes a few per-turn callbacks:
+
+- `onEvent(event)`: fires for each Eve stream event as it arrives.
+- `onError(error)`: fires with the last `Error` when a turn fails.
+- `onFinish(snapshot)`: fires with the final snapshot once a turn settles.
+- `onSessionChange(session)`: fires when the session cursor advances. Persist it to resume across reloads.
+
+```ts
+const agent = useEveAgent({
+  onEvent: (event) => console.debug(event.type),
+  onError: (error) => console.error(error.message),
+  onFinish: (snapshot) => console.log(snapshot.status),
+});
+```
+
+Two more options tune turn behavior:
+
+- `optimistic` (default `true`): projects submitted user messages into `data` before Eve confirms them with a `message.received` event. These are reducer-facing projection events only; `events` stays the authoritative Eve stream.
+- `maxReconnectAttempts` (default `3`): stream reconnection budget per turn.
+
+## Custom reducer
+
+The default reducer projects events into `{ messages }` (`EveMessageData`). To shape `data` differently, pass a `reducer` implementing `EveAgentReducer<TData>`:
+
+```ts
+import { useEveAgent } from "eve/vue";
+import type { EveAgentReducer } from "eve/vue";
+
+interface ToolLog {
+  readonly toolCalls: number;
+}
+
+const toolCounter: EveAgentReducer<ToolLog> = {
+  initial: () => ({ toolCalls: 0 }),
+  reduce: (data, event) =>
+    event.type === "actions.requested" ? { toolCalls: data.toolCalls + 1 } : data,
+};
+
+const agent = useEveAgent({ reducer: toolCounter });
+// agent.data.value is ToolLog
+```
+
+`reduce(data, event)` receives both authoritative Eve stream events and client projection events (`client.message.submitted`, `client.message.failed`, `client.input.responded`). Handle the client events too if you want optimistic and HITL state in your projection. Otherwise, return `data` unchanged for them.
 
 ## What to read next
 

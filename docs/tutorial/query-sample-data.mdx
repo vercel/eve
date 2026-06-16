@@ -1,13 +1,13 @@
 ---
-title: "Step 3: Query Sample Data"
-description: "Add a run_sql tool over the bundled sample dataset and watch the tool loop."
+title: "Query Sample Data"
+description: "Part 3 of the Build an Agent tutorial. Add a run_sql tool over the bundled sample dataset and watch the tool loop."
 ---
 
-Right now the agent can hold a conversation but it can't see a single row of data. So give it a tool. A tool is the action primitive: typed input goes in, your code runs, structured output comes back. The name the model sees is just the filename, so `agent/tools/run_sql.ts` becomes the tool `run_sql`.
+The analytics assistant can hold a conversation, but it can't see a single row of data. Give it a tool. A tool is the action primitive. Typed input goes in, your code runs, structured output comes back. The name the model sees is the filename, so `agent/tools/run_sql.ts` becomes the tool `run_sql`.
 
 ## A tiny sample dataset
 
-To make the first query work without any setup, bundle a small in-memory dataset under `agent/lib/`. Keep it tiny. This is throwaway scaffolding, not the real warehouse (that comes in Step 4).
+To make the first query work without setup, bundle a small in-memory dataset under `agent/lib/`. Keep it tiny. This is throwaway scaffolding, not the real warehouse (that comes in Step 4).
 
 ```ts title="agent/lib/sample-db.ts"
 // A toy SQLite-in-memory stand-in. Swap for your real warehouse in Step 4.
@@ -42,7 +42,7 @@ export async function runReadOnlySql(sql: string) {
 }
 ```
 
-## The tool
+## Define the run_sql tool
 
 ```ts title="agent/tools/run_sql.ts"
 import { defineTool } from "eve/tools";
@@ -68,7 +68,7 @@ Tools run in your app runtime with full `process.env`, not in the sandbox. The `
 
 ## Watch the tool loop
 
-Restart `eve dev` and ask:
+Restart the dev server with `npm run dev` and ask:
 
 ```text
 Which customer has spent the most, and how much?
@@ -76,6 +76,6 @@ Which customer has spent the most, and how much?
 
 Watch the loop play out in the TUI. The model emits a `run_sql` call, Eve runs your `execute`, and the rows come back as a tool result. The model reads them and answers with a real number. Eve drove the whole loop. All you supplied was the tool.
 
-→ Next: [Step 4: Connect a warehouse](./connect-a-warehouse)
+→ Next: [Connect a warehouse](./connect-a-warehouse)
 
-Depth: [Tools](../tools)
+Learn more: [Tools](../tools)

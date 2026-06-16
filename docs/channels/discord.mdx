@@ -1,10 +1,10 @@
 ---
 title: "Discord"
-description: "Reach your agent from Discord HTTP Interactions: slash commands, components, and modals."
+description: "Reach your agent from Discord HTTP Interactions, including slash commands, components, and modals."
 type: integration
 ---
 
-The Discord channel wires your agent into Discord's HTTP Interactions: slash and application commands, message components, and modal submissions. The hard part Discord forces on you is the three-second ACK deadline, so the channel verifies the Ed25519 signature headers, acknowledges the command right away, and runs the actual Eve work in the background. See [Channels](./overview) for the contract this builds on.
+The Discord channel wires your agent into Discord's HTTP Interactions, including slash and application commands, message components, and modal submissions. Discord enforces a three-second ACK deadline, so the channel verifies the Ed25519 signature headers, acknowledges the command right away, and runs the Eve work in the background. See [Channels](./overview) for the contract this builds on.
 
 ## Add the channel
 
@@ -20,11 +20,11 @@ DISCORD_APPLICATION_ID=...  # edits the deferred response and sends followups
 DISCORD_BOT_TOKEN=...       # proactive messages + fallback + typing indicators
 ```
 
-If you'd rather not use env vars, pass the same values through `credentials: { applicationId, botToken, publicKey }`. The route is `POST /eve/v1/discord` by default. Paste that public URL into your Discord application's Interactions Endpoint URL.
+To skip env vars, pass the same values through `credentials: { applicationId, botToken, publicKey }`. The route is `POST /eve/v1/discord` by default. Paste that public URL into your Discord application's Interactions Endpoint URL.
 
 ## Register a command
 
-Registering commands is on you, not the channel. Use Discord's API or the Developer Portal. If you give the command a string option named `message`, it lines up with Eve's default prompt extraction:
+Registering commands is on you, not the channel. Use Discord's API or the Developer Portal. A string option named `message` lines up with Eve's default prompt extraction:
 
 ```bash
 curl -X PUT "https://discord.com/api/v10/applications/$DISCORD_APPLICATION_ID/commands" \
@@ -35,9 +35,11 @@ curl -X PUT "https://discord.com/api/v10/applications/$DISCORD_APPLICATION_ID/co
 
 Use guild commands during development for faster propagation.
 
-## Affordances
+## How the channel handles messages
 
-`onCommand(ctx, interaction)` is where you decide whether to dispatch and under what `auth`. Return `{ auth }` to proceed or `null` to drop the interaction. Out of the box, auth comes from the invoking user.
+### Dispatch
+
+`onCommand(ctx, interaction)` decides whether to dispatch and under what `auth`. Return `{ auth }` to proceed or `null` to drop the interaction. By default, auth comes from the invoking user. Event handlers receive `(eventData, channel, ctx)`, with Discord platform handles on `channel.discord`:
 
 ```ts
 import { discordChannel } from "eve/channels/discord";
@@ -52,21 +54,31 @@ export default discordChannel({
     },
   }),
   events: {
-    "message.completed"(event, ctx) {
-      if (event.finishReason === "tool-calls") return;
-      if (event.message) ctx.discord.post(event.message);
+    "message.completed"(eventData, channel, ctx) {
+      if (eventData.finishReason === "tool-calls") return;
+      if (eventData.message) channel.discord.post(eventData.message);
     },
   },
 });
 ```
 
-**Delivery.** The default `message.completed` handler edits the deferred response for the first reply and sends followups after that. If the interaction token gets rejected, it falls back to a bot-authenticated channel message. Long text is split to Discord's 2000-char limit, and generated messages default to `allowed_mentions: { parse: [] }`.
+### Delivery
 
-**Typing** fires on `turn.started` and `actions.requested`, but only when a bot token is present. In custom hooks, call `ctx.discord.startTyping()` yourself.
+The default `message.completed` handler edits the deferred response for the first reply and sends followups after that. If the interaction token is rejected, it falls back to a bot-authenticated channel message. Long text is split to Discord's 2000-char limit, and generated messages default to `allowed_mentions: { parse: [] }`.
 
-**HITL** shows up as Discord components. Confirmations and options become buttons, `display: "select"` becomes a string select, and freeform input becomes a button that opens a modal. When the user responds, the parked session resumes on its own.
+Typing fires on `turn.started` and `actions.requested`, but only when a bot token is present. In custom hooks, call `channel.discord.startTyping()` yourself.
 
-**Proactive sessions** go through `receive(discord, { message, target, auth })` from a schedule `run` handler, or `args.receive(discord, ...)` from another channel. Either way you need `DISCORD_BOT_TOKEN`.
+### Human-in-the-loop (HITL)
+
+HITL renders as Discord components. Confirmations and options become buttons, `display: "select"` becomes a string select, and freeform input becomes a button that opens a modal. When the user responds, the parked session (paused awaiting input) resumes.
+
+### Proactive sessions
+
+Start a session without an inbound interaction through `receive(discord, { message, target, auth })` from a schedule `run` handler, or `args.receive(discord, ...)` from another channel. The proactive target shape is `{ channelId, conversationId?, initialMessage? }`. Either path needs `DISCORD_BOT_TOKEN`.
+
+### Attachments
+
+Inbound file attachments are not supported on this channel today.
 
 ## What to read next
 

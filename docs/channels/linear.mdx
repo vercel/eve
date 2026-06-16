@@ -4,7 +4,7 @@ description: "Reach your agent through Linear Agent Sessions, with native Agent 
 type: integration
 ---
 
-The Linear channel uses Linear's Agent Session surface rather than ordinary comments. Users delegate work to the agent from Linear, Eve receives `AgentSessionEvent` webhooks at `/eve/v1/linear`, and the channel replies with native Agent Activities: `thought`, `action`, `elicitation`, `response`, and `error`.
+The Linear channel uses Linear's Agent Session surface rather than ordinary comments. Users delegate work to the agent from Linear, Eve receives `AgentSessionEvent` webhooks at `/eve/v1/linear`, and the channel replies with native Agent Activities, including `thought`, `action`, `elicitation`, `response`, and `error`. See [Channels](./overview) for the contract this builds on.
 
 ## Add the channel
 
@@ -24,7 +24,7 @@ LINEAR_AGENT_ACCESS_TOKEN=lin_api_... # posts Agent Activities and creates proac
 LINEAR_WEBHOOK_SECRET=...             # verifies Linear-Signature
 ```
 
-If you'd rather not use env vars, pass the same values through `credentials: { accessToken, webhookSecret }`. Both fields also accept lazy resolver functions. The access token falls back to `LINEAR_AGENT_ACCESS_TOKEN`, `LINEAR_ACCESS_TOKEN`, `LINEAR_API_KEY`, or `LINEAR_API_TOKEN`; the webhook secret falls back to `LINEAR_WEBHOOK_SECRET`.
+The sample passes credentials explicitly. To rely on env vars instead, drop the `credentials` block: the access token falls back to `LINEAR_AGENT_ACCESS_TOKEN`, `LINEAR_ACCESS_TOKEN`, `LINEAR_API_KEY`, or `LINEAR_API_TOKEN`, and the webhook secret falls back to `LINEAR_WEBHOOK_SECRET`. Both fields also accept lazy resolver functions.
 
 ## Configure Linear
 
@@ -38,25 +38,31 @@ For Linear's agent surface, configure the OAuth authorize URL with `actor=app` a
 
 Linear sends webhook signatures in `Linear-Signature`; Eve verifies the HMAC over the raw body and rejects stale `webhookTimestamp` values. If a trusted gateway verifies Linear before the request reaches Eve, pass `credentials.webhookVerifier` instead of a webhook secret.
 
-## Affordances
+## How the channel handles messages
 
-**Agent Session dispatch.** The default hook dispatches `created` and `prompted` Agent Session events. Eve adds a Linear context block with the agent session, issue, comment, and organization identifiers, then continues the same session with `agent-session:<id>`.
+### Dispatch
 
-**Native progress and replies.** Turn start posts an ephemeral `thought`, tool calls post ephemeral `action` activities, final assistant text posts a durable `response`, and failures post `error` activities. When the model emits text before a tool call, Eve buffers the first non-empty line and uses it as the next ephemeral Linear `thought`, mirroring Slack's typing-status behavior.
+The default hook dispatches `created` and `prompted` Agent Session events. Eve adds a Linear context block with the agent session, issue, comment, and organization identifiers, then continues the same session with `agent-session:<id>`.
 
-**Human input.** Eve input requests are rendered as Linear `elicitation` activities. When the user replies to the Agent Session, the channel resolves that prompt back to the pending Eve input request and resumes with `inputResponses`.
+### Delivery
 
-**API handle.** Event handlers receive `channel.linear`, which exposes `createActivity`, `listActivities`, and `updateSession` for custom Agent Activity delivery and Agent Session metadata.
+Turn start posts an ephemeral `thought`, tool calls post ephemeral `action` activities, final assistant text posts a durable `response`, and failures post `error` activities. When the model emits text before a tool call, Eve buffers the first non-empty line and uses it as the next ephemeral Linear `thought`, mirroring Slack's typing-status behavior.
 
-**Proactive sessions.** `receive(linear, { target })` accepts an existing `agentSessionId`, or can create a new Agent Session on an `issueId` or root `commentId` before sending the message.
+### Human-in-the-loop (HITL)
 
-```ts
-await receive(linear, {
-  auth: null,
-  message: "Summarize the current status and risks.",
-  target: { issueId: "issue-id" },
-});
-```
+Human-in-the-loop (HITL) input requests render as Linear `elicitation` activities. When the user replies to the Agent Session, the channel resolves that prompt back to the pending Eve input request and resumes with `inputResponses`.
+
+### Proactive sessions
+
+Start a session without an inbound webhook with `receive(linear, { target })`. See [Proactive sessions](#proactive-sessions) below for the target shape and examples.
+
+### Attachments
+
+Inbound file attachments are not supported on this channel today.
+
+### API handle
+
+Event handlers receive `channel.linear`, which exposes `createActivity`, `listActivities`, and `updateSession` for custom Agent Activity delivery and Agent Session metadata.
 
 ## Custom hooks
 
@@ -73,7 +79,7 @@ export default linearChannel({
 });
 ```
 
-Restrict dispatch to a subset of Linear teams or projects by inspecting `event.agentSession.issue` in `onAgentSession`. Add extra context by returning `context` alongside auth.
+Restrict dispatch to a subset of Linear teams or projects by inspecting `event.agentSession.issue` in `onAgentSession`. Add extra context by returning `context` alongside `auth`.
 
 ```ts
 import { defaultLinearAuth, linearChannel } from "eve/channels/linear";
@@ -96,16 +102,16 @@ import { linearChannel } from "eve/channels/linear";
 
 export default linearChannel({
   events: {
-    async "message.completed"(event, channel) {
-      if (event.finishReason === "tool-calls" || !event.message) return;
+    async "message.completed"(eventData, channel) {
+      if (eventData.finishReason === "tool-calls" || !eventData.message) return;
       await channel.linear.createActivity({
-        body: `Done.\n\n${event.message}`,
+        body: `Done.\n\n${eventData.message}`,
         type: "response",
       });
     },
-    async "input.requested"(event, channel) {
+    async "input.requested"(eventData, channel) {
       await channel.linear.createActivity({
-        body: event.requests.map((request) => request.prompt).join("\n\n"),
+        body: eventData.requests.map((request) => request.prompt).join("\n\n"),
         type: "elicitation",
       });
     },
@@ -123,7 +129,7 @@ await channel.linear.updateSession({
 
 ## Proactive sessions
 
-Use the channel's `receive` target to continue an existing Agent Session or create one from a Linear issue or root comment.
+Use the channel's `receive` target to continue an existing Agent Session or create one from a Linear issue or root comment. The target accepts an existing `agentSessionId`, or an `issueId` or root `commentId` to create a new session before sending the message. The example below runs from a schedule; a route handler uses the same target shape through its own `receive` helper.
 
 ```ts
 import { defineSchedule } from "eve/schedules";
@@ -147,20 +153,7 @@ export default defineSchedule({
 });
 ```
 
-Route handlers can use the same target shape through their `receive` helper:
-
-```ts
-await receive(linear, {
-  auth: null,
-  message: "Post a concise status update with blockers and next actions.",
-  target: {
-    issueId: "EVE-123",
-    initialActivity: "Preparing the status update.",
-  },
-});
-```
-
-For issue/comment targets, the channel calls Linear's proactive Agent Session mutations before starting the Eve turn. For an existing `agentSessionId`, it skips session creation and only seeds the continuation token.
+For issue or comment targets, the channel calls Linear's proactive Agent Session mutations before starting the Eve turn. For an existing `agentSessionId`, it skips session creation and only seeds the continuation token.
 
 ## What to read next
 

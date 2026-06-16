@@ -3,13 +3,13 @@ title: "Custom Channels"
 description: "Author custom HTTP and WebSocket channels with routes, events, metadata, continuation tokens, and file uploads."
 ---
 
-When Eve doesn't ship a channel for your surface, you build one. Custom channels let you expose HTTP or WebSocket endpoints, parse incoming requests, start or resume sessions, observe runtime events, and own delivery back to your platform.
+When Eve doesn't ship a channel for your surface, you build one. Custom channels expose HTTP or WebSocket endpoints, parse incoming requests, start or resume sessions, observe runtime events, and own delivery back to your platform.
 
 ## File location and identity
 
 Custom channels live in `agent/channels/` at the root agent. Local subagents do not declare channels today.
 
-The channel file stem becomes the channel id, so `agent/channels/internal-webhook.ts` is addressed as `internal-webhook`. Channel files are module-backed: export the channel definition as the default export.
+The channel file stem becomes the channel id, so `agent/channels/internal-webhook.ts` is addressed as `internal-webhook`. Export the channel definition as the module's default export.
 
 ## Define a channel
 
@@ -32,7 +32,7 @@ export default defineChannel({
       const stream = await session.getEventStream();
 
       return new Response(stream, {
-        headers: { "content-type": "text/event-stream" },
+        headers: { "content-type": "application/x-ndjson; charset=utf-8" },
       });
     }),
   ],
@@ -44,14 +44,16 @@ export default defineChannel({
 });
 ```
 
-`defineChannel({ routes, ... })` defines a channel. Routes are declared with the `POST()` and `GET()` helpers. Each route handler receives the raw `Request` and a helpers object:
+Declare routes with the `POST()` and `GET()` helpers. Each route handler receives the raw `Request` and a helpers object:
 
-- `send(message, { auth, continuationToken, state? })`: start or resume a session. Returns a `Session`.
-- `getSession(sessionId)`: look up an existing session. The returned `Session` exposes `getEventStream({ startIndex? })` for streaming.
-- `params`: route parameters extracted from the path pattern.
-- `waitUntil(promise)`: extend the request lifetime for background work.
+- `send(message, { auth, continuationToken, state? })` starts or resumes a session. Returns a `Session`.
+- `getSession(sessionId)` looks up an existing session. The returned `Session` exposes `getEventStream({ startIndex? })` for streaming.
+- `receive(channel, ...)` hands inbound work to a different channel for cross-channel hand-off.
+- `params` holds route parameters extracted from the path pattern.
+- `waitUntil(promise)` extends the request lifetime for background work.
+- `requestIp` is the client IP, or `null` when the host cannot provide it.
 
-Event handlers like `"message.completed"` are declared under the `events` key. They receive `(eventData, channel, ctx)`, where `channel` carries platform handles and session continuation operations, and `ctx` is the Eve `SessionContext`.
+Event handlers like `"message.completed"` are declared under the `events` key. They receive `(eventData, channel, ctx)`, where `eventData` is the event payload, `channel` carries platform handles and session continuation operations, and `ctx` is the Eve `SessionContext`. Every channel kind shares this signature. The one exception is `session.failed`, which receives only `(eventData, channel)` with no `ctx`.
 
 ## WebSocket routes
 
@@ -92,7 +94,7 @@ export default defineChannel({
 });
 ```
 
-The bridge server does not listen on its own port. It receives only upgrade events that matched the Eve route, and only on hosts where Nitro exposes the raw Node upgrade request, socket, and head. Treat it as a compatibility adapter for libraries with server-binding APIs, not as the primary way to build websocket channels in Eve.
+The bridge server does not listen on its own port. It receives only upgrade events that matched the Eve route, and only on hosts where Nitro exposes the raw Node upgrade request, socket, and head. Treat it as a compatibility adapter for libraries with server-binding APIs, not the primary way to build websocket channels in Eve.
 
 ## Cross-channel hand-off
 
@@ -135,7 +137,7 @@ Semantics:
 
 ## Channel metadata
 
-Channels can project a subset of their adapter state as metadata available to instrumentation resolvers, dynamic tool resolvers, and dynamic skill or instruction resolvers. Define a `metadata(state)` function on the channel config:
+A channel can project a subset of its adapter state as metadata, available to instrumentation resolvers, dynamic tool resolvers, and dynamic skill or instruction resolvers. Define a `metadata(state)` function on the channel config:
 
 ```ts
 import { defineChannel, POST } from "eve/channels";
@@ -167,8 +169,8 @@ export default defineChannel({
     }),
   ],
   events: {
-    "turn.started"(_event, ctx) {
-      ctx.state.internalCounter += 1;
+    "turn.started"(eventData, channel) {
+      channel.state.internalCounter += 1;
     },
   },
 });
@@ -190,12 +192,16 @@ slackContinuationToken("C0123ABC", "1800000000.001234"); // "C0123ABC:1800000000
 twilioContinuationToken("+15551234567", "+15557654321"); // "+15551234567:+15557654321"
 ```
 
-Custom channels write their own function that joins the identity fields. The framework does not derive anything for you: the channel owns its token format.
+Custom channels write their own function that joins the identity fields. The framework derives nothing for you; the channel owns its token format.
 
-When the identity that should address a session is not known until later, the channel can re-key the parked session by calling `ctx.session.setContinuationToken(...)` from a handler. Pass the channel-local raw token; the runtime preserves the current channel namespace.
+When the identity that should address a session is not known until later, the channel can re-key the parked session by calling `session.setContinuationToken(...)`. Pass the channel-local raw token; the runtime preserves the current channel namespace.
+
+The `context(state, session)` config option builds the per-step `channel` argument handed to every event handler. It receives the channel's live adapter `state` and a `SessionHandle`, and returns the channel-owned context (thread handles, API clients, late-bound callbacks). The framework injects [`ChannelSessionOps`](#define-a-channel) and passes the result as the second positional argument to each handler. Closing over `session` lets the factory register callbacks that re-key the session later. State mutations made through the returned context are written back to adapter state.
 
 ```ts
 import { defineChannel } from "eve/channels";
+
+import { mintRef } from "./refs.js";
 
 defineChannel<{ ref: string | null }>({
   state: { ref: null },
@@ -209,8 +215,8 @@ defineChannel<{ ref: string | null }>({
     };
   },
   events: {
-    "message.completed"(_event, ctx) {
-      if (!ctx.state.ref) ctx.registerAnchor(mintRef());
+    "message.completed"(eventData, channel) {
+      if (!channel.state.ref) channel.registerAnchor(mintRef());
     },
   },
   routes: [
@@ -264,7 +270,7 @@ defineChannel({
 });
 ```
 
-The `URL` object survives the queue boundary as a string and is reconstituted inside the workflow step. The staging pipeline calls `fetchFile(url)`: return bytes to stage the file to the sandbox, or return `null` to let the URL pass through to the model provider.
+The `URL` object survives the queue boundary as a string and is reconstituted inside the workflow step. The staging pipeline calls `fetchFile` with the URL serialized as a string (the URL's `href`), which is why the example matches on `url.startsWith(...)`. Return bytes to stage the file to the sandbox, or `null` to let the URL pass through to the model provider.
 
 The framework handles staging bytes to the sandbox, enforcing upload policy, hydrating files for the model call, and reconstituting `URL` objects after queue serialization.
 

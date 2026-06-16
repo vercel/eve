@@ -3,7 +3,7 @@ title: "Streaming"
 description: "Consume Eve client stream events live, reconnect by event index, and aggregate turn results."
 ---
 
-Every send starts with a POST and then reads the session's NDJSON event stream. `MessageResponse` gives you two ways to consume that stream: aggregate it with `result()` or iterate it live.
+Every `ClientSession.send()` call posts the turn, then reads the session's NDJSON (newline-delimited JSON) event stream. `MessageResponse` gives you two ways to consume that stream, aggregating it with `result()` or iterating it live.
 
 ## Aggregate a turn
 
@@ -42,7 +42,7 @@ for await (const event of response) {
 }
 ```
 
-`message.appended` and `reasoning.appended` are incremental events. The completed forms, `message.completed` and `reasoning.completed`, are the compatibility path for clients that don't render deltas.
+`message.appended` and `reasoning.appended` are incremental delta events. Their completed forms, `message.completed` and `reasoning.completed`, are the compatibility path for clients that don't render deltas.
 
 ## Handle event types
 
@@ -117,21 +117,22 @@ for await (const event of session.stream({ startIndex: 0 })) {
 
 ## Abort a request
 
-Pass an `AbortSignal` to cancel the POST or stream:
+Pass an `AbortSignal` to cancel the POST or stream. Arm the timeout before awaiting `send()` so it covers the POST as well as the stream:
 
 ```ts
 const controller = new AbortController();
+const timeout = setTimeout(() => controller.abort(), 10_000);
 
 const response = await session.send({
   message: "Run a long analysis.",
   signal: controller.signal,
 });
 
-setTimeout(() => controller.abort(), 10_000);
-
 for await (const event of response) {
   console.log(event.type);
 }
+
+clearTimeout(timeout);
 ```
 
 Once a response is aborted, create a new send for the next turn. Don't reuse the same `MessageResponse`.

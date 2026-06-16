@@ -26,5 +26,5 @@ pnpm --filter framework-sveltekit dev
 `vercel.json` declares two services: the SvelteKit app at `/` and Eve behind
 the private `/_eve_internal/eve` service prefix, with rewrites exposing the
 public `/eve/v1/*` endpoints. See
-[the SvelteKit frontend docs](../../../docs/frontend/sveltekit.mdx) for
+[the SvelteKit frontend docs](../../../docs/guides/frontend/sveltekit.mdx) for
 details.

@@ -3,7 +3,7 @@ title: "Judge"
 description: "Grade evals with an LLM judge via t.judge.autoevals, set thresholds on the assertion, and configure the judge model."
 ---
 
-When no deterministic [assertion](./assertions) captures what "good" means — factual correctness, summary quality, free-form criteria — grade the run with an LLM judge. The `t.judge.*` assertions are the only model-backed ones, and they use a judge model that is resolved separately from the agent under test: Eve only uses it for scoring, never to swap out the agent.
+When no deterministic [assertion](./assertions) captures what "good" means (factual correctness, summary quality, free-form criteria), grade the run with an LLM judge. The `t.judge.*` assertions are the only model-backed ones, and they use a judge model that is resolved separately from the agent under test. Eve only uses it for scoring, never to swap out the agent.
 
 ```ts
 import { defineEval } from "eve/evals";
@@ -19,7 +19,7 @@ export default defineEval({
 
 ## The graders
 
-The judges live under `t.judge.autoevals` — the namespace names the [Braintrust autoevals](https://github.com/braintrustdata/autoevals) grader family, so the factuality and closedQA semantics are autoevals', not Eve-invented. Each grades `t.reply` by default and is soft by default (tracked, no gate):
+The judges live under `t.judge.autoevals`. The namespace names the [Braintrust autoevals](https://github.com/braintrustdata/autoevals) grader family, so the factuality and closedQA semantics are autoevals', not Eve-invented. Each grader scores `t.reply` by default and is soft by default (tracked, no gate):
 
 | Grader                                   | Grades                                                                                 |
 | ---------------------------------------- | -------------------------------------------------------------------------------------- |
@@ -30,8 +30,8 @@ The judges live under `t.judge.autoevals` — the namespace names the [Braintrus
 
 The reference or criteria is the positional argument. An options object follows:
 
-- `on` — the value to grade, defaulting to `t.reply`. Pass an intermediate draft or parsed value to grade it instead.
-- `model` / `modelOptions` — a per-call judge override (see below).
+- `on` is the value to grade, defaulting to `t.reply`. Pass an intermediate draft or parsed value to grade it instead.
+- `model` and `modelOptions` are a per-call judge override (see below).
 
 ```ts
 const draft = await t.send("Draft the welcome email.");
@@ -40,11 +40,11 @@ t.judge.autoevals.closedQA("professional tone", { on: draft.message }).atLeast(0
 
 ## Soft scoring and thresholds
 
-Judge assertions are soft, so the threshold rides on the assertion handle — there is no separate thresholds map:
+Judge assertions are soft, so the threshold rides on the assertion handle. There is no separate thresholds map:
 
-- **No threshold** — tracked-only. The score lands in reports and artifacts and never fails the eval. Use it to watch a metric without gating on it.
-- `.atLeast(threshold)` — a soft bar. A below-threshold score marks the eval `scored`, fatal only under `eve eval --strict`.
-- `.gate(threshold)` — promote a judge to a hard gate that fails the eval outright.
+- **No threshold** is tracked-only. The score lands in reports and artifacts and never fails the eval. Use it to watch a metric without gating on it.
+- `.atLeast(threshold)` is a soft bar. A below-threshold score marks the eval `scored`, fatal only under `eve eval --strict`.
+- `.gate(threshold)` promotes a judge to a hard gate that fails the eval outright.
 
 ```ts
 t.judge.autoevals.closedQA("cites a source"); // tracked, never fails
@@ -58,9 +58,9 @@ A judge runs once per assertion and burns tokens, so reach for one only when not
 
 The judge model is resolved once when the runner builds `t`. It is **never** the model under test. Three levels resolve innermost-wins:
 
-1. **Per-call** — `t.judge.autoevals.closedQA("…", { model, modelOptions })`.
-2. **Per-eval** — `defineEval({ judge: { model, modelOptions }, test })`.
-3. **Project default** — `defineEvalConfig({ judge: { model, modelOptions } })` in `evals.config.ts`.
+1. **Per-call**: `t.judge.autoevals.closedQA("…", { model, modelOptions })`.
+2. **Per-eval**: `defineEval({ judge: { model, modelOptions }, test })`.
+3. **Project default**: `defineEvalConfig({ judge: { model, modelOptions } })` in `evals.config.ts`.
 
 ```ts title="evals/evals.config.ts"
 import { defineEvalConfig } from "eve/evals";
@@ -78,14 +78,14 @@ export default defineEval({
   async test(t) {
     await t.send("Explain quantum tunneling to a 10-year-old.");
     t.judge.autoevals.factuality(reference).atLeast(0.7);
-    t.judge.autoevals.closedQA("is concise", { model: "anthropic/claude-haiku-4-5" }); // cheaper, per-call
+    t.judge.autoevals.closedQA("is concise", { model: "anthropic/claude-haiku-4.5" }); // cheaper, per-call
   },
 });
 ```
 
-`judge` in `evals.config.ts` is optional — a tree of fully deterministic evals can omit it. But calling `t.judge.*` with no judge model resolved is a fail-fast error at eval definition time.
+`judge` in `evals.config.ts` is optional, and a tree of fully deterministic evals can omit it. Calling `t.judge.*` with no judge model resolved records a failed gate: the runner scores the assertion after the `test` function runs, the missing model throws, and the eval fails with that message.
 
-A **string model id** (e.g. `"anthropic/claude-opus-4.8"`) routes through the Vercel AI Gateway and needs `AI_GATEWAY_API_KEY` or `VERCEL_OIDC_TOKEN` in the environment; an **AI SDK `LanguageModel` instance** is used directly. With a model configured but no credentials, a judge-backed eval **skips visibly** like other real-model legs, so mock-model fixture runs stay green. For provider-specific judge settings, use `modelOptions.providerOptions`.
+A **string model id** (e.g. `"anthropic/claude-opus-4.8"`) routes through the Vercel AI Gateway and needs `AI_GATEWAY_API_KEY` or `VERCEL_OIDC_TOKEN` in the environment. An **AI SDK `LanguageModel` instance** is used directly. With a model configured but no credentials, a judge-backed eval **skips visibly** rather than failing, so the run reports the skip instead of a spurious error. For provider-specific judge settings, use `modelOptions.providerOptions`.
 
 ## What to read next
 

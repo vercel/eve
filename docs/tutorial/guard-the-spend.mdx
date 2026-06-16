@@ -1,15 +1,17 @@
 ---
-title: "Step 8: Guard the Spend"
-description: "Gate expensive queries with cost-based approval: the agent pauses, asks, and resumes."
+title: "Guard the Spend"
+description: "Part 8 of the Build an Agent tutorial. Gate expensive queries with cost-based approval. The agent pauses, asks, and resumes."
 ---
 
-A single warehouse query can scan terabytes and bill you for the privilege. So before the agent fires off an expensive scan, make it stop and check with you: for a costly query, the agent pauses, asks you, and resumes with your answer. That's human-in-the-loop, and you wire it up with one field on the tool.
+A single warehouse query can scan terabytes and run up the bill. So before the analytics assistant fires off an expensive scan, make it stop and check with you. The agent pauses, asks you, and resumes with your answer. That's human-in-the-loop, and you wire it up with one field on the tool.
 
 `needsApproval` runs before `execute`. Return `true` and the turn parks on an approval request; you answer, and the run picks up from that exact step. The function gets the tool input, so you can make the decision cost-based.
 
 ## Estimate, then gate
 
-Add a cheap estimator (a real warehouse exposes a dry-run byte estimate, so keep the helper illustrative) and gate `run_sql` on it:
+This step keeps `run_sql` on the Step 3 sample dataset so you can demo the gate locally. With a real warehouse you'd gate the warehouse connection tool from Step 4 the same way, on a dry-run byte estimate instead of the toy heuristic below.
+
+Add a cheap estimator and gate `run_sql` on it:
 
 ```ts title="agent/lib/cost.ts"
 // Illustrative: a real warehouse exposes a dry-run byte estimate.
@@ -27,7 +29,7 @@ import { estimateScanGb } from "../lib/cost.js";
 const THRESHOLD_GB = 50;
 
 export default defineTool({
-  description: "Run a read-only SQL query against the warehouse.",
+  description: "Run a read-only SQL query against the analytics tables.",
   inputSchema: z.object({ sql: z.string() }),
   // Cost-based gate: only the expensive queries need a human yes.
   needsApproval: ({ toolInput }) => estimateScanGb(toolInput?.sql ?? "") > THRESHOLD_GB,
@@ -48,12 +50,12 @@ Ask for something that forces a large unfiltered scan:
 Total revenue across all customers, all time, broken out by day.
 ```
 
-The model proposes the query, `needsApproval` returns `true`, and the turn parks. The stream emits `input.requested`, then `session.waiting`. How the prompt looks depends on the channel: buttons in the TUI, Block Kit in Slack, a UI control on the web. Approve it and the run resumes from exactly that step, then the query runs. Deny it and the tool is skipped, with the model told why.
+The model proposes the query, `needsApproval` returns `true`, and the turn parks. The stream emits `input.requested`, then `session.waiting`. How the prompt looks depends on the channel, whether buttons in the TUI, Block Kit in Slack, or a UI control on the web. Approve it and the run resumes from exactly that step, then the query runs. Deny it and the tool is skipped, with the model told why.
 
 Each session has exactly one active continuation. Answer an approval against a stale handle and it's rejected, so there's no way to double-resume the same parked turn.
 
-The same machinery backs the built-in `ask_question` tool, where the model asks you mid-turn, and per-connection approval via `approval: once()`. See [Tools: human-in-the-loop](../tools).
+The same machinery backs the built-in `ask_question` tool, where the model asks you mid-turn, and per-connection approval via `approval: once()`. See [Tools and human-in-the-loop](../tools).
 
-→ Next: [Step 9: Ship it](./ship-it)
+→ Next: [Ship it](./ship-it)
 
-Depth: [Tools: human-in-the-loop](../tools)
+Learn more: [Tools and human-in-the-loop](../tools)

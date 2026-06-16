@@ -1,15 +1,15 @@
 ---
-title: "Step 5: Run Analysis"
-description: "Seed the warehouse schema into the sandbox workspace, then compute and chart beyond SQL."
+title: "Run Analysis"
+description: "Part 5 of the Build an Agent tutorial. Seed the warehouse schema into the sandbox workspace, then compute and chart beyond SQL."
 ---
 
-SQL tells you the numbers, but a cohort curve, a forecast, or a chart needs real computation. That's what the sandbox is for: an isolated bash environment with a `/workspace` filesystem. Every agent gets exactly one.
+SQL tells the analytics assistant the numbers, but a cohort curve, a forecast, or a chart needs real computation. That's what the sandbox is for. It's an isolated bash environment with a `/workspace` filesystem, and every agent gets exactly one.
 
-There are two pieces. First seed reference files the model can read, then compute against them.
+This takes two pieces. First seed reference files the model can read, then compute against them.
 
 ## Seed the schema into the workspace
 
-Mount the warehouse schema into the sandbox so the model isn't guessing at table shapes. Seeding uses the folder sandbox layout: anything under `agent/sandbox/workspace/` lands in the live `/workspace` cwd at session bootstrap.
+Mount the warehouse schema into the sandbox so the model isn't guessing at table shapes. Seeding uses the folder sandbox layout, where anything under `agent/sandbox/workspace/` lands in the live `/workspace` cwd at session bootstrap.
 
 ```text
 agent/sandbox/
@@ -25,7 +25,7 @@ CREATE TABLE orders     (id INT, customer_id INT, amount_cents INT, created_at D
 CREATE TABLE customers  (id INT, name TEXT, plan TEXT, signed_up_at DATE);
 ```
 
-Top-level workspace entries get advertised to the model automatically, so it knows `schema.sql` is there to read. No `agent/sandbox/sandbox.ts` required. A `workspace/` folder keeps the default sandbox and just seeds your files into it.
+Top-level workspace entries get advertised to the model automatically, so it knows `schema.sql` is there to read. No `agent/sandbox/sandbox.ts` required. A `workspace/` folder keeps the default sandbox and seeds your files into it.
 
 ## Compute and chart in the sandbox
 
@@ -67,13 +67,15 @@ export default defineTool({
 });
 ```
 
-Now ask for something past plain SQL:
+This tool shells out to `python` with matplotlib, which the sandbox base image does not preinstall. Install the runtime in sandbox bootstrap (or bake it into a custom image) so `python plot.py` resolves. See [Sandbox](../sandbox) for where bootstrap runs.
+
+Now ask for something past plain SQL. If you skipped Step 4, this still works against the Step 3 sample dataset:
 
 ```text
-Plot weekly revenue for the last 8 weeks.
+Plot total order revenue per customer.
 ```
 
-The model queries the warehouse (Step 4) for the numbers, checks `schema.sql` to get the grain right, then calls `chart_series` to render the PNG in `/workspace`.
+The model queries for the numbers (the warehouse from Step 4, or the sample dataset if you skipped it), checks `schema.sql` to get the grain right, then calls `chart_series` to render the PNG in `/workspace`.
 
 ## Secrets stay out of the sandbox
 
@@ -81,6 +83,6 @@ The sandbox has no `process.env` and no access to your app's secrets. Your wareh
 
 The local backend runs the sandbox on your laptop during `eve dev`; on Vercel it runs on Vercel Sandbox. Lifecycle, backends, and network policy are in [Sandbox](../sandbox).
 
-→ Next: [Step 6: Remember definitions](./remember-definitions)
+→ Next: [Remember definitions](./remember-definitions)
 
-Depth: [Sandbox](../sandbox)
+Learn more: [Sandbox](../sandbox)

@@ -54,7 +54,7 @@ A few non-`define*` helpers round out the set: `disableTool` and `ExperimentalWo
 
 ## Runtime context (`ctx`)
 
-`ctx` is passed to your tool `execute`, hook handlers, and channel event handlers. It is live only while authored code is actually running, so reaching for it at module top level throws. See [Session context](../guides/session-context) for the full model.
+`ctx` is passed to your tool `execute`, hook handlers, and channel event handlers. It is live only while authored code is running, so reaching for it at module top level throws. See [Session context](../guides/session-context) for the full model.
 
 | Member                     | Use                                                                           |
 | -------------------------- | ----------------------------------------------------------------------------- |

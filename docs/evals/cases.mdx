@@ -3,11 +3,11 @@ title: "Cases"
 description: "Author single-turn and multi-turn evals with test(t), and fan one file out over a dataset."
 ---
 
-Each eval file is one graded case. The runner executes its `test(t)` function against the target, captures every event, and computes a verdict from the [assertions](./assertions) you recorded. Every eval — single-turn, multi-turn, HITL, or dataset-driven — is the same shape: one `async test(t)` function that drives the agent and asserts inline.
+Each eval file is one graded case by default, and a single file can fan out over a dataset by default-exporting an array (covered below). The runner executes each `test(t)` function against the target, captures every event, and computes a verdict from the [assertions](./assertions) you recorded. Every eval shares one shape, whether single-turn, multi-turn, human-in-the-loop (HITL), or dataset-driven: one `async test(t)` function that drives the agent and asserts inline.
 
 ## Single-turn evals
 
-The common case sends one turn and asserts on the reply. `t.send(input)` resolves once the turn settles; `t.reply` is the last assistant message:
+The common case sends one turn and asserts on the reply. `t.send(input)` resolves once the turn settles, and `t.reply` is the last assistant message:
 
 ```ts title="evals/weather/brooklyn-forecast.eval.ts"
 import { defineEval } from "eve/evals";
@@ -22,7 +22,7 @@ export default defineEval({
 });
 ```
 
-Some evals only care about behavior, not text — assert on the run and skip the content check entirely:
+Some evals only care about behavior, not text. Assert on the run and skip the content check entirely:
 
 ```ts title="evals/weather/no-tools-for-greetings.eval.ts"
 import { defineEval } from "eve/evals";
@@ -43,7 +43,7 @@ Identity is the file path, so directories are the grouping mechanism. `evals/wea
 ```text
 evals/
 ├── weather/
-│   ├── shared.ts                    # helpers — not an eval
+│   ├── shared.ts                    # helpers, not an eval
 │   ├── brooklyn-forecast.eval.ts
 │   └── no-tools-for-greetings.eval.ts
 └── smoke.eval.ts
@@ -51,7 +51,7 @@ evals/
 
 ## Multi-turn evals
 
-Drive several turns in sequence — branching, HITL approvals, structured output, attachments, multiple sessions. Because assertions live in the function, an intermediate value is just a local variable: judge a draft before the next turn overwrites it, then keep going.
+Drive several turns in sequence for branching, HITL approvals, structured output, attachments, or multiple sessions. Because assertions live in the function, an intermediate value is a local variable. Judge a draft before the next turn overwrites it, then keep going.
 
 ```ts title="evals/draft-then-send.eval.ts"
 import { defineEval } from "eve/evals";
@@ -69,7 +69,7 @@ export default defineEval({
 });
 ```
 
-Bespoke preconditions that no built-in assertion expresses are plain `throw`s — a thrown error marks the eval `failed` with the message in the result:
+For a precondition no built-in assertion expresses, `throw`. A thrown error marks the eval `failed` with the message in the result:
 
 ```ts title="evals/session-continuity.eval.ts"
 import { defineEval } from "eve/evals";
@@ -96,22 +96,22 @@ export default defineEval({
 
 `t` drives the primary session; `t.newSession()` returns an independent `EveEvalSession` against the same target, whose events feed the same run-level assertions.
 
-- `t.send(input)` sends a turn and waits for it to settle. It accepts the same input as `ClientSession.send()` — a string or a structured message — and resolves to a turn carrying `.message` and `.expectOk()`.
+- `t.send(input)` sends a turn and waits for it to settle. It accepts the same input as `ClientSession.send()` (a string or a structured message) and resolves to a turn carrying `.message` and `.expectOk()`.
 - `t.sendFile(text, path, mediaType?)` attaches a local file as a data URL.
 - `t.expectInputRequests(filter?)` asserts the previous turn parked on HITL input and returns the pending requests.
 - `t.respond(...responses)` answers specific pending input requests and sends them as the next turn.
 - `t.respondAll(optionId)` answers every pending input request with the same option and sends the responses as the next turn.
 - `t.reply` is the last assistant message (or `null`); `t.sessionId` is the current session id; `t.events` is the full typed event stream captured so far.
 
-Each `send` (and `respond`/`respondAll`) resolves to a turn whose `expectOk()` throws only when the turn ended failed — a session left open for a next message is the normal end state of a successful turn.
+Each `send` (and `respond`/`respondAll`) resolves to a turn whose `expectOk()` throws only when the turn ended failed. A session left open for a next message is the normal end state of a successful turn.
 
 Events from every session are captured in the result and artifacts. `t.log(message)` records debug lines into the eval artifact; `--verbose` also streams them to stdout as evals run. `t.signal` is an `AbortSignal` that fires on timeout.
 
-For driving sessions created outside the eval — by a channel webhook or a schedule — see [Targets](./targets).
+For driving sessions created outside the eval, by a channel webhook or a schedule, see [Targets](./targets).
 
 ## Datasets: exporting an array
 
-To fan one file out over a dataset, default-export an array of `defineEval(...)` values. Eval modules are ESM, so top-level `await` can load anything. Ids derive from the file name plus a zero-padded index (`sql/0000`, `sql/0001`, …, in array order). The loaders (`loadJson`, `loadYaml` from `eve/evals/loaders`) parse fixture files relative to the app root:
+To fan one file out over a dataset, default-export an array of `defineEval(...)` values. Eval modules are ESM, so top-level `await` can load anything. Ids derive from the file name plus a zero-padded index in array order (`sql/0000`, `sql/0001`, and so on). The loaders (`loadJson`, `loadYaml` from `eve/evals/loaders`) parse fixture files relative to the app root:
 
 ```ts title="evals/sql.eval.ts"
 import { defineEval } from "eve/evals";

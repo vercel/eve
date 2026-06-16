@@ -3,16 +3,16 @@ title: "Auth & Route Protection"
 description: "Secure your agent's HTTP routes with an ordered auth walk, verifier helpers, and connection OAuth via Vercel Connect."
 ---
 
-Eve has two separate auth concerns, and this page covers both:
+Eve has two independent auth systems:
 
-- **Route auth** (inbound): who is allowed to reach your agent's HTTP routes. It runs at the channel layer.
-- **Tool and connection auth** (outbound): how your agent signs in to an external service it calls, like an OAuth MCP server.
+- **Route auth** (inbound) decides who can reach your agent's HTTP routes. It runs at the channel layer, gating the request before any model work runs.
+- **Tool and connection auth** (outbound) is how your agent signs in to an external service it calls, like an OAuth MCP server. It happens later, when a tool or connection actually reaches out.
 
-They are independent. Route auth gates the request before any model work runs; tool and connection auth happens later, when a tool or connection actually reaches out. Start with route auth.
+Start with route auth.
 
 ## Route auth
 
-Route auth runs at the channel layer. The policy lives on the HTTP channel factory (`agent/channels/eve.ts`) and guards three routes:
+The route-auth policy lives on the HTTP channel factory (`agent/channels/eve.ts`) and guards three routes:
 
 - `POST /eve/v1/session`
 - `POST /eve/v1/session/:sessionId`
@@ -64,7 +64,7 @@ export default eveChannel({
 
 Put your own providers ahead of the catch-all helpers. Any entry that doesn't recognize the caller returns `null`, and the walk moves on.
 
-Want a precise status instead of a skip? Throw:
+To reject with a precise status instead of skipping, throw:
 
 ```ts
 import { ForbiddenError, UnauthenticatedError } from "eve/channels/auth";
@@ -76,7 +76,7 @@ throw new UnauthenticatedError({
 throw new ForbiddenError({ message: "Not allowed on this workspace." }); // 403
 ```
 
-Any other thrown error follows the normal channel failure path. Building a custom channel on `defineChannel`? Call `routeAuth(request, auth)` from `eve/channels/auth` to reuse the same walk semantics.
+Any other thrown error follows the normal channel failure path. When building a custom channel on `defineChannel`, call `routeAuth(request, auth)` from `eve/channels/auth` to reuse the same walk semantics.
 
 ## Verifier helpers
 
@@ -106,7 +106,7 @@ Auth fails closed: routes reject unauthenticated traffic by default, and the OID
 
 #### `subjects` patterns and `vercelSubject(...)`
 
-Each `subjects` entry is matched against the token's `sub` claim, which Vercel shapes as `owner:<team>:project:<name>:environment:<env>`. Hand-writing that string is a footgun: a typo silently rejects every caller, and an over-broad `*` wildcard silently lets unrelated ones in. Build the pattern with `vercelSubject(...)` instead. It rejects malformed input at construction time and forces an explicit `environment` (defaulting to `"production"`):
+Each `subjects` entry is matched against the token's `sub` claim, which Vercel shapes as `owner:<team>:project:<name>:environment:<env>`. Hand-writing that string is a footgun: a typo silently rejects every caller, and an over-broad `*` wildcard silently lets unrelated ones in. Build the pattern with `vercelSubject(...)` instead. It rejects malformed input at construction time, and defaults `environment` to `"production"` when you omit it, so an unspecified environment cannot silently accept preview or development tokens:
 
 ```ts
 import { vercelOidc, vercelSubject } from "eve/channels/auth";
@@ -205,14 +205,14 @@ Inside runtime code, `ctx.session.auth` carries the result of the channel's rout
 
 - `auth.current`: the caller on the active inbound turn.
 - `auth.initiator`: the caller that started the durable session.
-- A follow-up message updates `auth.current` but leaves `auth.initiator` alone. So when a different caller follows up on the same session, `auth.current` tracks the new caller for that turn while `auth.initiator` stays pinned to whoever started it.
+- A follow-up message updates `auth.current` but leaves `auth.initiator` alone. When a different caller follows up on the same session, `auth.current` tracks the new caller for that turn while `auth.initiator` stays pinned to whoever started it.
 - Both are `null` only on internal runtime paths (subagents, for instance) that never went through an authored route. HTTP traffic always populates `auth.current`, since the walk either accepts with a `SessionAuthContext` or returns `401`.
 
-Use the principal on `auth.current` (or `auth.initiator`) to scope tools, resolve [dynamic capabilities](./dynamic-capabilities) per principal, or enforce tenant boundaries. There's no second per-session ownership ACL stacked on top of route auth: access is decided at the HTTP boundary, and the durable session just carries the caller snapshot forward into your runtime code.
+Use the principal on `auth.current` (or `auth.initiator`) to scope tools, resolve [dynamic capabilities](./dynamic-capabilities) per principal, or enforce tenant boundaries. There's no second per-session ownership ACL stacked on top of route auth. Access is decided at the HTTP boundary, and the durable session carries the caller snapshot forward into your runtime code.
 
 ## Tool and connection auth
 
-Route auth decides who reaches your agent. Tool and connection auth is the flip side: how your agent reaches an external service that wants an interactive sign-in, like an OAuth MCP server. Both a connection and an individual tool can declare an `auth` strategy; Eve drives the sign-in, caches the token per step, and re-runs the call once the caller authorizes.
+Tool and connection auth is how your agent reaches an external service that wants an interactive sign-in, like an OAuth MCP server. Both a connection and an individual tool can declare an `auth` strategy; Eve drives the sign-in, caches the token per step, and re-runs the call once the caller authorizes.
 
 ### On a connection
 
@@ -263,7 +263,7 @@ Declaring `auth` adds two accessors to the tool's `ctx`:
 
 Throw `ConnectionAuthorizationRequiredError` anywhere in `execute` (directly, via `requireAuth()`, or implicitly from `getToken()`) and you trigger the consent flow, keyed by the tool's name. Calling either accessor on a tool that does not declare `auth` throws.
 
-By default the sign-in affordance title-cases the tool's path-derived name — a tool file named `sfdc_lookup.ts` renders "Sign in with Sfdc_lookup". Set `displayName` on the `auth` definition to control what users see instead: `auth: { ...connect("sfdc"), displayName: "Salesforce" }`. It is presentation-only; the tool's name still keys the authorization scope, token cache, and callback URL, and a definition-level `displayName` wins over one the strategy stamps on the challenge.
+By default the sign-in affordance title-cases the tool's path-derived name, so a tool file named `sfdc_lookup.ts` renders "Sign in with Sfdc_lookup". Set `displayName` on the `auth` definition to control what users see instead, for example `auth: { ...connect("sfdc"), displayName: "Salesforce" }`. It is presentation-only. The tool's name still keys the authorization scope, token cache, and callback URL, and a definition-level `displayName` wins over one the strategy stamps on the challenge.
 
 ## What to read next
 

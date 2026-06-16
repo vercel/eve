@@ -1,13 +1,13 @@
 ---
 title: "The Harness"
-description: "The out-of-the-box agent loop and the built-in tools every Eve agent ships with, plus how to override or disable them."
+description: "The out-of-the-box Eve agent loop and the built-in tools every agent ships with, plus how to override or disable them."
 ---
 
-The default harness is what every Eve agent ships with: the framework-owned agent loop, plus a set of built-in tools the model can call without you writing a line. You extend the base harness with capabilities specific to your agent. The loop itself, how a turn runs and checkpoints and resumes, lives in [Execution model & durability](./execution-model-and-durability).
+The default harness is what every Eve agent ships with. It includes the framework-owned agent loop plus a set of built-in tools the model can call without you writing a line. You extend it with capabilities specific to your agent. The loop itself, how a turn runs and checkpoints and resumes, lives in [Execution model and durability](./execution-model-and-durability).
 
 ## Compaction
 
-A long session eventually fills the model's context window. The harness handles that for you: once the conversation crosses a fraction of the window (`thresholdPercent`, `0.9` by default), it summarizes the older turns into a compact form and keeps going, so the session continues instead of overflowing. The summary uses the active turn model unless you override it. Tune when and how it kicks in under [`compaction`](../agent-config#compaction) in `agent.ts`:
+The harness keeps a long session from overflowing the model's context window. Once the conversation crosses a fraction of the window (`thresholdPercent`, `0.9` by default), it summarizes the older turns into a compact form and keeps going. The summary uses the active turn model unless you override it. Tune when and how it kicks in under [`compaction`](../agent-config#compaction) in `agent.ts`:
 
 ```ts title="agent/agent.ts"
 export default defineAgent({
@@ -18,11 +18,11 @@ export default defineAgent({
 });
 ```
 
-Compaction also preserves the framework's own tool state automatically. When the harness compacts history, it resets read-before-write tracking (so a write afterward re-reads the file whose read evidence was summarized away) and re-injects the active todo list, so the model keeps its task list across the summary. There is no per-tool hook to configure.
+Compaction also preserves the framework's own tool state automatically. It resets read-before-write tracking (so a write afterward re-reads the file whose read evidence was summarized away) and re-injects the active todo list, so the model keeps its task list across the summary. There is no per-tool hook to configure.
 
 ## Built-in tools
 
-These ship with every agent, no imports. Discovery never runs them: the harness shows the model the tool descriptors first, then executes only what the model actually calls. The shell and file tools run inside the agent's single [sandbox](../sandbox); the rest run in the app runtime.
+These ship with every agent, no imports. The harness shows the model the tool descriptors first, then executes only what the model actually calls; discovery never runs them. The shell and file tools (`bash`, `read_file`, `write_file`, `glob`, `grep`) live in the app runtime and proxy their work into the agent's single [sandbox](../sandbox); the rest run in the app runtime. The "Where it runs" column below names where each tool's effect lands.
 
 | Tool                | Does                                                                                                                                                              | Where it runs |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
@@ -48,7 +48,7 @@ Notes:
 
 ## Override a default
 
-Author a tool at the same slug and it takes over the built-in of that name. The file `agent/tools/write_file.ts` replaces the built-in `write_file` just by existing:
+Author a tool at the same slug and it takes over the built-in of that name. The file `agent/tools/write_file.ts` replaces the built-in `write_file` by existing:
 
 ```ts title="agent/tools/write_file.ts"
 import { defineTool } from "eve/tools";
@@ -63,7 +63,7 @@ export default defineTool({
 });
 ```
 
-The framework defaults are importable from `eve/tools/defaults` (`bash`, `readFile`, `writeFile`, `glob`, `grep`, `webFetch`, `webSearch`, `todo`, `loadSkill`), so you can spread, wrap, or patch them. Skip the spread and your replacement owns its own context: a fresh `defineTool` for `todo` won't inherit the framework's durable state key.
+The framework defaults are importable from `eve/tools/defaults` (`bash`, `readFile`, `writeFile`, `glob`, `grep`, `webFetch`, `webSearch`, `todo`, `loadSkill`), so you can spread, wrap, or patch them. Skip the spread and your replacement owns its own context. A fresh `defineTool` for `todo` won't inherit the framework's durable state key.
 
 ## Disable a default
 
@@ -75,11 +75,19 @@ import { disableTool } from "eve/tools";
 export default disableTool();
 ```
 
-Misspell the filename so it matches no known framework tool and it fails at resolve time, instead of silently doing nothing.
+If the filename matches no known framework tool, resolution fails instead of silently doing nothing, so a typo surfaces at build time rather than removing the wrong tool.
+
+## When to override, disable, or author a new tool
+
+Three moves shape the harness. The right one depends on whether the model should keep the built-in capability.
+
+- **Override** when you want the same capability with different behavior. Spread the default from `eve/tools/defaults` and wrap it (logging, an extra guard, a different backend), and the model still sees a tool by that name. Spreading keeps the default's description, schema, and any framework state, such as the `todo` tool's durable state key. Drop the spread and your replacement owns its own context, losing that wiring.
+- **Disable** when the model should not have the capability at all. A `disableTool()` sentinel removes the built-in, and the model never sees it. Reach for this to lock down `bash` or `web_fetch` in an agent that should not run shell commands or fetch arbitrary URLs.
+- **Author a new tool** when you want a capability the harness does not ship. Give it a fresh slug under `agent/tools/` and it joins the built-ins instead of replacing one. See [Tools](../tools) for the authoring model.
 
 ## The opt-in `Workflow` tool
 
-There's also an experimental `Workflow` tool, shipped but off by default. To turn it on, re-export the opt-in marker from `agent/tools/workflow.ts`:
+An experimental `Workflow` tool ships but stays off by default. To turn it on, re-export the opt-in marker from `agent/tools/workflow.ts`:
 
 ```ts
 export { ExperimentalWorkflow as default } from "eve/tools";

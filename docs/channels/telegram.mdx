@@ -1,10 +1,10 @@
 ---
 title: "Telegram"
-description: "Reach your agent from Telegram bot webhooks, with inline-keyboard HITL and attachments."
+description: "Reach your agent from Telegram bot webhooks, with inline-keyboard human-in-the-loop prompts and attachments."
 type: integration
 ---
 
-The Telegram channel puts your agent behind a Telegram bot. It takes Bot API webhooks, checks the `X-Telegram-Bot-Api-Secret-Token` header before it trusts anything, and routes the messages it cares about (private chats plus group messages that address the bot) to a reply over `sendMessage`. See [Channels](./overview) for the contract this builds on.
+The Telegram channel puts your agent behind a Telegram bot. It takes Bot API webhooks, checks the `X-Telegram-Bot-Api-Secret-Token` header before trusting anything, and routes the messages it cares about (private chats plus group messages that address the bot) to a reply over `sendMessage`. See [Channels](./overview) for the contract this builds on.
 
 ## Add the channel
 
@@ -31,15 +31,31 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
        "allowed_updates":["message","callback_query"]}'
 ```
 
-## Affordances
+## How the channel handles messages
 
-**Dispatch.** In a private chat, text, captions, photos, and documents all go through. Groups are stricter. Only three things wake the bot: a command (`/ask`, `/ask@my_bot`), an `@my_bot` mention (when `botUsername` is set), or a reply to one of the bot's own messages. Everything else gets ignored. Forum topics carry `message_thread_id` in the continuation token, so each topic stays on its own thread. Need custom auth or filtering? Override `onMessage`. Group privacy mode itself lives in BotFather, not here.
+### Dispatch
 
-**Delivery.** The default `message.completed` handler sends plain text via `sendMessage`. It passes no `parse_mode`, so any Markdown shows up literally. Replies longer than Telegram's 4096-char limit get split across messages. Custom handlers reach for `ctx.telegram`.
+In a private chat, text, captions, photos, and documents all go through. Groups are stricter. Only three things wake the bot: a command (`/ask`, `/ask@my_bot`), an `@my_bot` mention (when `botUsername` is set), or a reply to one of the bot's own messages. Everything else is ignored.
 
-**HITL** turns option requests into inline-keyboard buttons and freeform requests into `ForceReply`. Telegram caps `callback_data` at 64 bytes, so Eve keeps compact callback ids in channel state instead. It acknowledges its own callbacks with `answerCallbackQuery`; anything it doesn't recognize goes to `onCallbackQuery`.
+Forum topics carry `message_thread_id` in the continuation token, so each topic stays on its own thread.
 
-**Attachments** are inbound photos and documents. Eve fetches them on demand via `getFile`, only when an upload policy allows the type:
+To customize auth or filtering, override `onMessage`. Group privacy mode itself lives in BotFather, not here.
+
+### Delivery
+
+The default `message.completed` handler sends plain text via `sendMessage`. It passes no `parse_mode`, so any Markdown shows up literally. Replies longer than Telegram's 4096-char limit are split across messages. Custom handlers use `channel.telegram`.
+
+### Human-in-the-loop (HITL)
+
+Human-in-the-loop (HITL) turns option requests into inline-keyboard buttons and freeform requests into `ForceReply`. Telegram caps `callback_data` at 64 bytes, so Eve keeps compact callback ids in channel state instead. It acknowledges its own callbacks with `answerCallbackQuery`; anything it doesn't recognize goes to `onCallbackQuery`.
+
+### Proactive sessions
+
+Start a session without an inbound message through `receive(telegram, { message, target, auth })` from a schedule `run` handler, or `args.receive(telegram, ...)` from another channel. `target.chatId` is required. Add `messageThreadId` to land in a specific forum topic.
+
+### Attachments
+
+Inbound photos and documents are supported. Eve fetches them on demand via `getFile`, only when an upload policy allows the type:
 
 ```ts
 export default telegramChannel({
@@ -47,8 +63,6 @@ export default telegramChannel({
   uploadPolicy: { allowedMediaTypes: ["image/*", "application/pdf"], maxBytes: 10 * 1024 * 1024 },
 });
 ```
-
-**Proactive sessions** start with `receive(telegram, { message, target, auth })` from a schedule `run` handler, or `args.receive(telegram, ...)` when you're kicking off from another channel. `target.chatId` is required. Add `messageThreadId` to land in a specific forum topic.
 
 ## What to read next
 
