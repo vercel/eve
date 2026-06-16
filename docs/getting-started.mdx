@@ -24,9 +24,9 @@ You also need a model credential. Set the provider or gateway key your model str
 
 ## Manual installation
 
-The quick start uses `eve init` for a guided scaffold. The target can also be an existing project directory (`eve init .`): the project must have a `package.json`, the `agent/` files must not exist yet, and `eve init` adds the missing `eve`, `ai`, and `zod` dependencies. The generated Eve dependency and Node engine come from the same Eve release; the engine is the lowest complete major supported by that release (e.g. `24.x`). An existing range is kept only when every version it permits stays within that major; otherwise Eve replaces it with the pinned major and prints a warning. Either way the final handoff runs the `eve dev` binary through the project's package manager, never the project's own `dev` script.
+The quick start uses `eve init` for a guided scaffold; `eve init .` does the same inside an existing project, adding the `eve`, `ai`, and `zod` dependencies and a compatible Node engine for you.
 
-To wire Eve into an existing app yourself instead, make sure the app declares a compatible Node runtime in `package.json`:
+To wire Eve in by hand, declare a compatible Node runtime in `package.json`:
 
 ```json
 {
@@ -36,7 +36,7 @@ To wire Eve into an existing app yourself instead, make sure the app declares a 
 }
 ```
 
-Then add only the dependency and author the two files the runtime needs:
+Then install Eve and author the two files the runtime needs:
 
 ```bash
 npm install eve@latest
@@ -127,29 +127,7 @@ Attach to the session stream:
 curl http://127.0.0.1:3000/eve/v1/session/<sessionId>/stream
 ```
 
-The stream is NDJSON. Expect lifecycle events such as:
-
-- `session.started`
-- `turn.started`
-- `message.received`
-- `step.started`
-- `actions.requested`
-- `action.result`
-- `subagent.called`
-- `subagent.completed`
-- `reasoning.appended`
-- `reasoning.completed`
-- `message.appended`
-- `message.completed`
-- `step.completed`
-- `turn.completed`
-- `session.waiting`
-- `session.completed`
-- `session.failed`
-
-`reasoning.appended` and `message.appended` are optional live-streaming events. Clients that can't surface incremental output can ignore them and rely on `reasoning.completed` and `message.completed`.
-
-`message.completed.data.finishReason` tells you whether assistant text is interim tool-call narration or a terminal reply, and `step.completed.data.usage` carries token usage. When a parent delegates to a subagent, `subagent.called.data.childSessionId` gives you the child session id, so you can subscribe to that child stream and watch the delegated work.
+The stream is NDJSON, one lifecycle event per line. See [Sessions, runs & streaming](./concepts/sessions-runs-and-streaming) for the full list of events and what each one carries.
 
 ## Send a follow-up message
 
