@@ -24,7 +24,7 @@ const HomePage = () => (
         href={betaAgreementHref}
         className="mb-6 rounded-full border border-amber-300 px-3 py-1 font-medium text-amber-700 text-xs transition-colors hover:bg-amber-50"
       >
-        Public preview
+        Beta
       </Link>
       <h1 className="max-w-3xl text-5xl font-bold text-gray-1000 sm:text-6xl xl:text-7xl">
         The Framework
