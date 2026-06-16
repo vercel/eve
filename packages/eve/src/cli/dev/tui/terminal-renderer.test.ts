@@ -200,6 +200,66 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("stops rendering and drains a running response before accepting another prompt", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const abort = vi.fn();
+    const rendering = renderer.renderStream(
+      {
+        abort,
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(controller) {
+            streamController = controller;
+          },
+        }),
+      },
+      { submittedPrompt: "start a long response", continueSession: true },
+    );
+
+    streamController?.enqueue({
+      type: "assistant-delta",
+      id: "t1",
+      delta: "partial response",
+    });
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("partial response");
+    });
+
+    input.ctrlC();
+
+    const stateBeforeBoundary = await Promise.race([
+      rendering.then(() => "settled" as const),
+      new Promise<"pending">((resolve) => {
+        setImmediate(() => resolve("pending"));
+      }),
+    ]);
+    const abortCallsBeforeBoundary = abort.mock.calls.length;
+
+    streamController?.enqueue({
+      type: "assistant-delta",
+      id: "t1",
+      delta: " hidden after interruption",
+    });
+    streamController?.enqueue({ type: "finish" });
+    streamController?.close();
+
+    await expect(rendering).resolves.toBeUndefined();
+    expect(stateBeforeBoundary).toBe("pending");
+    expect(abortCallsBeforeBoundary).toBe(0);
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(screen.snapshot()).toContain("Interrupted");
+    expect(screen.snapshot()).not.toContain("hidden after interruption");
+    expect(input.rawModes).toEqual([true]);
+
+    const nextPrompt = renderer.readPrompt();
+    input.type("still here");
+    input.enter();
+    await expect(nextPrompt).resolves.toBe("still here");
+
+    renderer.shutdown();
+    expect(input.rawModes).toEqual([true, false]);
+  });
+
   it("renders reused stream block ids across separate prompt turns", async () => {
     const { screen, renderer } = makeRenderer();
 

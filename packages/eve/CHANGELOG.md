@@ -1,5 +1,11 @@
 # eve
 
+## 0.9.7
+
+### Patch Changes
+
+- aa27e10: Keep `eve dev` open when Ctrl+C interrupts a running agent response without ending the session. Eve stops rendering further output and drains the turn to its natural boundary before returning to the prompt.
+
 ## 0.9.6
 
 ### Patch Changes

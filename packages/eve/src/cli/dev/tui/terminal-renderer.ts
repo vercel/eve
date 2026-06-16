@@ -91,7 +91,6 @@ import {
   formatTokenFlow,
   nextKey,
   stripPromptControlCharacters,
-  takeUntil,
   type TerminalKey,
 } from "./stream-format.js";
 
@@ -311,7 +310,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #keyBuffer = "";
   #keyFlushTimer?: ReturnType<typeof setTimeout>;
   #onResize?: () => void;
-  #resolveStreamInterrupt?: () => void;
   #painting = false;
   #paintAgain = false;
 
@@ -583,9 +581,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#startTicker();
     this.#paint();
 
-    const streamInterrupted = new Promise<void>((resolve) => {
-      this.#resolveStreamInterrupt = resolve;
-    });
     this.#consumeKey = (key) => this.#handleStreamingKey(key);
     this.#attachInput();
     const turnState: RenderTurnState = {
@@ -596,14 +591,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
     };
 
     try {
-      for await (const event of takeUntil(iterateTUIStream(result.events), streamInterrupted)) {
-        if (this.#interrupted) break;
+      for await (const event of iterateTUIStream(result.events)) {
+        if (this.#interrupted) continue;
         this.#applyStreamEvent(event, displayModes, turnState);
       }
     } catch (error) {
       this.#addErrorBlock("Error", toErrorMessage(error));
     } finally {
-      this.#resolveStreamInterrupt = undefined;
       if (this.#interrupted) result.abort?.();
       this.#detachInput();
       this.#stopTicker();
@@ -612,13 +606,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#finalizeAllBlocks();
       this.#paint();
 
-      if (this.#interrupted || !options?.continueSession) {
+      if (!options?.continueSession) {
         this.#stop();
       }
-    }
-
-    if (this.#interrupted) {
-      throw interruptedError();
     }
   }
 
@@ -1764,8 +1754,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#paint();
         break;
       case "ctrl-c":
-        this.#interrupted = true;
-        this.#resolveStreamInterrupt?.();
+        if (!this.#interrupted) {
+          this.#interrupted = true;
+          this.#status = "Interrupted";
+          this.#paint();
+        }
         break;
       default:
         break;
