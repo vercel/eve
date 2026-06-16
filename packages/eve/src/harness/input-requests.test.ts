@@ -467,6 +467,138 @@ describe("resolvePendingInput", () => {
     });
   });
 
+  it("returns a rejected action for an explicitly denied approval", () => {
+    const session = setPendingInputBatch({
+      event: { sequence: 5, stepIndex: 1, turnId: "turn_0" },
+      requests: [
+        {
+          action: {
+            callId: "approval-call",
+            input: { command: "pwd" },
+            kind: "tool-call",
+            toolName: "bash",
+          },
+          allowFreeform: false,
+          display: "confirmation",
+          options: [
+            { id: "approve", label: "Yes" },
+            { id: "deny", label: "No" },
+          ],
+          prompt: "Approve tool call: bash",
+          requestId: "approval-1",
+        } satisfies InputRequest,
+      ],
+      responseMessages: [],
+      session: createHarnessSession(),
+    });
+
+    const result = resolvePendingInput({
+      stepInput: {
+        inputResponses: [{ requestId: "approval-1", optionId: "deny" }],
+      },
+      session,
+    });
+
+    expect(result.outcome).toBe("resolved");
+    expect(result.rejectedActions).toEqual({
+      event: { sequence: 5, stepIndex: 1, turnId: "turn_0" },
+      results: [
+        {
+          callId: "approval-call",
+          isError: true,
+          kind: "tool-result",
+          output: {
+            code: "TOOL_EXECUTION_DENIED",
+            message: "Tool execution was denied.",
+          },
+          toolName: "bash",
+        },
+      ],
+    });
+  });
+
+  it("does not return a rejected action when an approval is granted", () => {
+    const session = setPendingInputBatch({
+      event: { sequence: 5, stepIndex: 1, turnId: "turn_0" },
+      requests: [
+        {
+          action: {
+            callId: "approval-call",
+            input: { command: "pwd" },
+            kind: "tool-call",
+            toolName: "bash",
+          },
+          allowFreeform: false,
+          display: "confirmation",
+          options: [
+            { id: "approve", label: "Yes" },
+            { id: "deny", label: "No" },
+          ],
+          prompt: "Approve tool call: bash",
+          requestId: "approval-1",
+        } satisfies InputRequest,
+      ],
+      responseMessages: [],
+      session: createHarnessSession(),
+    });
+
+    const result = resolvePendingInput({
+      stepInput: {
+        inputResponses: [{ requestId: "approval-1", optionId: "approve" }],
+      },
+      session,
+    });
+
+    expect(result.outcome).toBe("resolved");
+    expect(result.rejectedActions).toBeUndefined();
+  });
+
+  it("returns a rejected action when a pending approval is auto-denied by a follow-up message", () => {
+    const session = setPendingInputBatch({
+      event: { sequence: 7, stepIndex: 2, turnId: "turn_1" },
+      requests: [
+        {
+          action: {
+            callId: "approval-call",
+            input: { command: "pwd" },
+            kind: "tool-call",
+            toolName: "bash",
+          },
+          allowFreeform: false,
+          display: "confirmation",
+          options: [
+            { id: "approve", label: "Yes" },
+            { id: "deny", label: "No" },
+          ],
+          prompt: "Approve tool call: bash",
+          requestId: "approval-1",
+        } satisfies InputRequest,
+      ],
+      responseMessages: [],
+      session: createHarnessSession(),
+    });
+
+    const result = resolvePendingInput({
+      stepInput: { message: "Never mind, do something else." },
+      session,
+    });
+
+    expect(result.outcome).toBe("resolved");
+    expect(result.rejectedActions?.event).toEqual({ sequence: 7, stepIndex: 2, turnId: "turn_1" });
+    expect(result.rejectedActions?.results).toEqual([
+      {
+        callId: "approval-call",
+        isError: true,
+        kind: "tool-result",
+        output: {
+          code: "TOOL_EXECUTION_DENIED",
+          message: "Ignored because the user continued without responding.",
+        },
+        toolName: "bash",
+      },
+    ]);
+  });
+
   it("falls back to tool name when no approvalKey is provided", () => {
     const session = setPendingInputBatch({
       requests: [

@@ -1,6 +1,9 @@
 import type { ModelMessage, ToolSet, TypedToolCall } from "ai";
 
-import type { RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
+import type {
+  RuntimeToolCallActionRequest,
+  RuntimeToolResultActionResult,
+} from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import { parseJsonObject } from "#shared/json.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
@@ -12,14 +15,37 @@ const DEFERRED_STEP_INPUT_KEY = "eve.runtime.deferredStepInput";
 
 const IGNORED_INPUT_REASON = "Ignored because the user continued without responding.";
 
+const TOOL_EXECUTION_DENIED_CODE = "TOOL_EXECUTION_DENIED";
+const TOOL_EXECUTION_DENIED_MESSAGE = "Tool execution was denied.";
+
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
+
+/**
+ * Stream-emit coordinates carried so a parked batch's resolution can attribute
+ * its events to the turn and step that requested the input.
+ */
+interface PendingInputBatchEvent {
+  readonly sequence: number;
+  readonly stepIndex: number;
+  readonly turnId: string;
+}
 
 /**
  * Serializable pending input batch stored on the session state.
  */
 interface PendingInputBatch {
+  readonly event?: PendingInputBatchEvent;
   readonly requests: readonly InputRequest[];
   readonly responseMessages: readonly ModelMessage[];
+}
+
+/**
+ * Denied tool-call approvals from one resolved batch, ready for the caller to
+ * emit as `rejected` `action.result` events against the originating turn.
+ */
+export interface RejectedActionBatch {
+  readonly event: PendingInputBatchEvent;
+  readonly results: readonly RuntimeToolResultActionResult[];
 }
 
 /**
@@ -129,16 +155,17 @@ export function resolvePendingInput(input: {
       messages.push({ content: toolParts, role: "tool" });
     }
 
+    const rejectedActions = buildRejectedActionBatch(pendingBatch, []);
     session = clearPendingInputBatch(session);
 
     if (pendingBatch.requests.some((request) => isApprovalRequest(request))) {
       session = queueDeferredStepInput(session, {
         message: stepInput.message,
       });
-      return { deferredMessage: true, outcome: "resolved", messages, session };
+      return { deferredMessage: true, outcome: "resolved", messages, rejectedActions, session };
     }
 
-    return { outcome: "resolved", messages, session };
+    return { outcome: "resolved", messages, rejectedActions, session };
   }
 
   // Record approved tools before clearing the batch.
@@ -157,6 +184,7 @@ export function resolvePendingInput(input: {
     messages.push({ content: toolParts, role: "tool" });
   }
 
+  const rejectedActions = buildRejectedActionBatch(pendingBatch, responses);
   session = clearPendingInputBatch(session);
 
   // AI SDK cannot process tool-approval responses and a new user message
@@ -170,16 +198,17 @@ export function resolvePendingInput(input: {
       message: stepInput.message,
     });
 
-    return { deferredMessage: true, outcome: "resolved", messages, session };
+    return { deferredMessage: true, outcome: "resolved", messages, rejectedActions, session };
   }
 
-  return { outcome: "resolved", messages, session };
+  return { outcome: "resolved", messages, rejectedActions, session };
 }
 
 type ResolvePendingInputResult = {
   readonly deferredMessage?: boolean;
   readonly outcome: "resolved" | "continue" | "unresolved";
   readonly messages: ModelMessage[];
+  readonly rejectedActions?: RejectedActionBatch;
   readonly session: HarnessSession;
 };
 
@@ -215,12 +244,14 @@ function getPendingInputBatch(state: SessionStateMap | undefined): PendingInputB
  * Stores one pending HITL batch on the session until the user responds.
  */
 export function setPendingInputBatch(input: {
+  readonly event?: PendingInputBatchEvent;
   readonly requests: readonly InputRequest[];
   readonly responseMessages: readonly ModelMessage[];
   readonly session: HarnessSession;
 }): HarnessSession {
   const state = { ...input.session.state };
   state[PENDING_INPUT_BATCH_KEY] = {
+    event: input.event,
     requests: [...input.requests],
     responseMessages: [...input.responseMessages],
   } satisfies PendingInputBatch;
@@ -326,6 +357,59 @@ function recordApprovedTools(input: {
 // Tool response building
 // ---------------------------------------------------------------------------
 
+/**
+ * Resolves whether an approval request was granted and, when auto-denied
+ * because the user continued without responding, the reason to record.
+ */
+function resolveApprovalOutcome(response: InputResponse | undefined): {
+  readonly approved: boolean;
+  readonly reason: string | undefined;
+} {
+  return {
+    approved: response?.optionId === "approve",
+    reason: response === undefined ? IGNORED_INPUT_REASON : undefined,
+  };
+}
+
+/**
+ * Builds one rejected `action.result` payload per denied tool-call approval so
+ * the stream records denials that otherwise live only in model history.
+ */
+function buildRejectedActionBatch(
+  batch: PendingInputBatch,
+  responses: readonly InputResponse[],
+): RejectedActionBatch | undefined {
+  if (batch.event === undefined) {
+    return undefined;
+  }
+
+  const responseMap = new Map(responses.map((r) => [r.requestId, r]));
+  const results: RuntimeToolResultActionResult[] = [];
+  for (const request of batch.requests) {
+    if (!isApprovalRequest(request)) {
+      continue;
+    }
+
+    const { approved, reason } = resolveApprovalOutcome(responseMap.get(request.requestId));
+    if (approved) {
+      continue;
+    }
+
+    results.push({
+      callId: request.action.callId,
+      isError: true,
+      kind: "tool-result",
+      output: {
+        code: TOOL_EXECUTION_DENIED_CODE,
+        message: reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
+      },
+      toolName: request.action.toolName,
+    });
+  }
+
+  return results.length > 0 ? { event: batch.event, results } : undefined;
+}
+
 function buildToolResponseParts(
   batch: PendingInputBatch,
   responses: readonly InputResponse[],
@@ -344,8 +428,7 @@ function buildToolResponsePartsForRequest(
   response: InputResponse | undefined,
 ): ToolResponsePart[] {
   if (isApprovalRequest(request)) {
-    const approved = response?.optionId === "approve";
-    const reason = response === undefined ? IGNORED_INPUT_REASON : undefined;
+    const { approved, reason } = resolveApprovalOutcome(response);
     const parts: ToolResponsePart[] = [
       {
         approvalId: request.requestId,

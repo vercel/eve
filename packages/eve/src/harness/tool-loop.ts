@@ -31,6 +31,7 @@ import { buildDynamicTools } from "#context/build-dynamic-tools.js";
 import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
 import { toErrorMessage } from "#shared/errors.js";
 import {
+  createActionResultEvent,
   createCompactionCompletedEvent,
   createCompactionRequestedEvent,
   createInputRequestedEvent,
@@ -457,6 +458,24 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     });
     if (pending.outcome === "unresolved") {
       return { next: null, session: pending.session };
+    }
+
+    // Surface denied tool-call approvals as rejected `action.result` events.
+    // The denial otherwise lives only in model history, so consumers (e.g.
+    // observability) never see the tool call resolve. Attributed to the turn
+    // that requested approval via the parked batch's emit coordinates.
+    if (emit && pending.rejectedActions) {
+      for (const result of pending.rejectedActions.results) {
+        await emit(
+          createActionResultEvent({
+            rejected: true,
+            result,
+            sequence: pending.rejectedActions.event.sequence,
+            stepIndex: pending.rejectedActions.event.stepIndex,
+            turnId: pending.rejectedActions.event.turnId,
+          }),
+        );
+      }
     }
 
     // --- Turn preamble ------------------------------------------------------
@@ -1470,6 +1489,11 @@ async function handleStepResult(input: {
 
   if (inputRequests.length > 0) {
     let parkedSession = setPendingInputBatch({
+      event: {
+        sequence: emissionState.sequence,
+        stepIndex: emissionState.stepIndex,
+        turnId: emissionState.turnId,
+      },
       requests: inputRequests,
       responseMessages,
       session: { ...baseSession, history: [...promptMessages] },
@@ -1969,6 +1993,11 @@ async function parkOnCodeModeInterrupt(input: {
     });
 
     let parkedSession = setPendingInputBatch({
+      event: {
+        sequence: input.emissionState.sequence,
+        stepIndex: input.emissionState.stepIndex,
+        turnId: input.emissionState.turnId,
+      },
       requests: approvalRequests,
       responseMessages: approvalMessages,
       session: setPendingCodeModeInterrupt({

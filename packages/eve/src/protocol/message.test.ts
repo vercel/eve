@@ -14,7 +14,7 @@ import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 
 describe("message stream protocol", () => {
   it("pins the stream version for timed session events", () => {
-    expect(EVE_MESSAGE_STREAM_VERSION).toBe("15");
+    expect(EVE_MESSAGE_STREAM_VERSION).toBe("16");
   });
 
   it("creates result.completed events", () => {
@@ -168,6 +168,28 @@ describe("message stream protocol", () => {
       status: "failed",
       stepIndex: 1,
       turnId: "turn_0",
+    });
+  });
+
+  it("marks denied action results as rejected", () => {
+    const event = createActionResultEvent({
+      rejected: true,
+      result: {
+        callId: "approval-call",
+        isError: true,
+        kind: "tool-result",
+        output: { code: "TOOL_EXECUTION_DENIED", message: "Tool execution was denied." },
+        toolName: "bash",
+      },
+      sequence: 2,
+      stepIndex: 0,
+      turnId: "turn_0",
+    });
+
+    expect(event.data.status).toBe("rejected");
+    expect(event.data.error).toEqual({
+      code: "TOOL_EXECUTION_DENIED",
+      message: "Tool execution was denied.",
     });
   });
 });
