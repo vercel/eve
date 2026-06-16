@@ -33,7 +33,7 @@ export interface RunEvalsOptions {
   readonly maxConcurrency?: number;
   /** Overrides every eval's `timeoutMs` when set (CLI `--timeout`). */
   readonly timeoutMs?: number;
-  /** Receives `ctx.log` lines as evals run (used by `--verbose`). */
+  /** Receives `t.log` lines as evals run (used by `--verbose`). */
   readonly onEvalLog?: (evalId: string, message: string) => void;
 }
 
