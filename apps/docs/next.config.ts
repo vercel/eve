@@ -30,29 +30,6 @@ const config: NextConfig = {
     ],
   },
 
-  /**
-   * Belt-and-suspenders crawler block: also send the `noindex, nofollow`
-   * directive on every response as an HTTP header so non-HTML routes
-   * (rss feeds, llms.txt, OpenGraph images, the sitemap itself) inherit
-   * the same policy as the `<meta name="robots">` tag in the root
-   * layout. Drop this block — and the matching `disallow: "/"` in
-   * `app/robots.ts` and `metadata.robots` in `app/[lang]/layout.tsx` —
-   * when we're ready for search traffic.
-   */
-  async headers() {
-    return [
-      {
-        source: "/:path*",
-        headers: [
-          {
-            key: "X-Robots-Tag",
-            value: "noindex, nofollow",
-          },
-        ],
-      },
-    ];
-  },
-
   async redirects() {
     return [
       {
