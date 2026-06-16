@@ -159,6 +159,40 @@ describe("runInitCommand", () => {
     expect(output.messages[3]).toContain("$ eve dev --input /model");
   });
 
+  it.each([undefined, ".", "./"] as const)(
+    "scaffolds the current empty directory when target is %j",
+    async (target) => {
+      const projectPath = await mkdtemp(join(tmpdir(), "eve-init-current-"));
+      const output = logger();
+      const deps = dependencies();
+
+      await runInitCommand(output, projectPath, target, {}, deps);
+
+      expect(await readFile(join(projectPath, "agent/agent.ts"), "utf8")).toContain(
+        DEFAULT_AGENT_MODEL_ID,
+      );
+      expect(JSON.parse(await readFile(join(projectPath, "package.json"), "utf8"))).toMatchObject({
+        name: expect.stringMatching(/^eve-init-current-/),
+      });
+      await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(true);
+      expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+        "pnpm",
+        projectPath,
+        expect.objectContaining({ bypassMinimumReleaseAge: true }),
+      );
+      expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
+      expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
+        "exec",
+        "eve",
+        "dev",
+        "--input",
+        "/model",
+      ]);
+      expect(output.messages[0]).toContain("Created an eve agent in ");
+      expect(output.messages[0]).toContain(projectPath);
+    },
+  );
+
   it.each([
     ["npm", ["exec", "--", "eve", "dev", "--input", "/model"]],
     ["yarn", ["eve", "dev", "--input", "/model"]],
@@ -457,7 +491,7 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
   });
 
-  it("logs setup instructions under the invoking launcher and scaffolds nothing when a coding agent omits the target", async () => {
+  it("scaffolds the current directory for a coding agent that omits the target", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-agent-bare-"));
     const output = logger();
     const deps = dependencies();
@@ -466,27 +500,17 @@ describe("runInitCommand", () => {
 
     await runInitCommand(output, parentDirectory, undefined, {}, deps);
 
-    // The instruction branch logs exactly one block; its prose is asserted by
-    // the agent-instructions unit test. Here we pin the branch and the launcher
-    // prefix `resolveInitCommand` derives from the invoking manager.
-    expect(output.messages).toHaveLength(1);
-    expect(output.messages[0]).toContain("pnpm dlx eve init");
-    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
-    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
-    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
-  });
-
-  it("rejects a bare human run the way the required argument did", async () => {
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-human-bare-"));
-    const output = logger();
-    const deps = dependencies();
-
-    await expect(runInitCommand(output, parentDirectory, undefined, {}, deps)).rejects.toThrow(
-      "missing required argument 'target'",
+    expect(await readFile(join(parentDirectory, "agent/agent.ts"), "utf8")).toContain(
+      DEFAULT_AGENT_MODEL_ID,
     );
-
-    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
+    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+      "pnpm",
+      parentDirectory,
+      expect.anything(),
+    );
+    expect(deps.tryInitializeGit).toHaveBeenCalledWith(parentDirectory);
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+    expect(output.messages.join("\n")).toContain("Do not start `eve dev`");
   });
 
   it("scaffolds and initializes Git for a coding agent but does not spawn the dev server", async () => {

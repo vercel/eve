@@ -396,9 +396,8 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     });
 
   program
-    // Optional only at the commander layer: a coding-agent launch with no
-    // target gets setup instructions from the command itself, which still
-    // rejects a bare human run (see `runInitCommand`).
+    // Optional: a missing target scaffolds or updates the current directory,
+    // matching `eve init .`.
     .command("init [target]")
     .description("Create a new Eve agent, or add one to an existing project directory.")
     .option("--channel-web-nextjs", "Add the Web Chat application (Next.js)")

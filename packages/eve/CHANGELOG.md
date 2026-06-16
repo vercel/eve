@@ -1,5 +1,11 @@
 # eve
 
+## 0.9.5
+
+### Patch Changes
+
+- 7c45498: Allow `eve init` with no target, `eve init .`, and `eve init ./` to scaffold a full agent in the current empty directory. Existing package directories still use the add-agent flow.
+
 ## 0.9.4
 
 ### Patch Changes

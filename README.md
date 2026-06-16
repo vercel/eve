@@ -107,14 +107,16 @@ npx eve@latest init my-agent
 
 The command creates the project, installs its dependencies, initializes Git,
 and starts the development server. Add `--channel-web-nextjs` to scaffold the Web Chat
-application. Targeting an existing project directory (`eve init .`) adds the agent
-files and missing dependencies to it instead. `eve init` does not create or link
-a Vercel project.
+application. If you already created an empty directory, run `eve init`,
+`eve init .`, or `eve init ./` from inside it to run the same full scaffold there,
+including `package.json`. In a non-empty existing app, `eve init .` adds the
+agent files and missing dependencies instead; that add-agent flow requires an
+existing `package.json`. `eve init` does not create or link a Vercel project.
 
 Useful commands:
 
 - `eve info` shows discovery results and compiled artifacts
-- `eve init <name>` creates a new agent
+- `eve init [name]` creates a new agent
 - `eve build` compiles `.eve/` and builds the host output
 - `eve start` serves the built `.output/` app
 - `eve dev` starts the local runtime and interactive terminal UI

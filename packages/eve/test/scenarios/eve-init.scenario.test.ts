@@ -301,28 +301,62 @@ describe("eve init smoke", () => {
     ]);
   });
 
-  it("prints intent-collection instructions to a coding agent that omits the target", async () => {
+  it("scaffolds the current empty directory for a coding agent that omits the target", async () => {
     const scratch = await createScratchDirectory("eve-init-agent-bare-");
-    const fakePnpm = await createFakePnpmEnvironment(scratch);
+    const fakePnpmRoot = await createScratchDirectory("eve-init-agent-bare-pnpm-");
+    const fakePnpm = await createFakePnpmEnvironment(fakePnpmRoot);
 
     const result = await runEveBin(scratch, ["init"], { ...fakePnpm.env, AI_AGENT: "claude" });
 
-    // The real binary, with real agent detection, takes the instruction branch
-    // and never installs. One anchor confirms the template rendered; its full
-    // prose is the agent-instructions unit test's job.
     expect(result.exitCode, result.stderr).toBe(0);
-    expect(result.stdout).toContain("questions one at a time");
-    await expect(fakePnpm.readCalls()).rejects.toThrow(); // no install, no log file
+    const canonicalProjectDir = await realpath(scratch);
+    expect(await readFile(join(scratch, "agent/agent.ts"), "utf8")).toContain(
+      DEFAULT_AGENT_MODEL_ID,
+    );
+    expect(await fakePnpm.readCalls()).toEqual([
+      {
+        args: [
+          "--dir",
+          canonicalProjectDir,
+          "install",
+          "--no-frozen-lockfile",
+          "--config.minimum-release-age=0",
+        ],
+        cwd: canonicalProjectDir,
+      },
+    ]);
+    expect(result.stdout).toContain("Do not start `eve dev`");
   });
 
-  it("rejects a bare run without a coding agent the way the required argument did", async () => {
+  it("scaffolds the current empty directory when the target is omitted", async () => {
     const scratch = await createScratchDirectory("eve-init-human-bare-");
-    const fakePnpm = await createFakePnpmEnvironment(scratch);
+    const fakePnpmRoot = await createScratchDirectory("eve-init-human-bare-pnpm-");
+    const fakePnpm = await createFakePnpmEnvironment(fakePnpmRoot);
 
     const result = await runEveBin(scratch, ["init"], fakePnpm.env);
 
-    expect(result.exitCode).not.toBe(0);
-    expect(result.stderr).toContain("missing required argument 'target'");
+    expect(result.exitCode, result.stderr).toBe(0);
+    const canonicalProjectDir = await realpath(scratch);
+    expect(await readFile(join(scratch, "agent/agent.ts"), "utf8")).toContain(
+      DEFAULT_AGENT_MODEL_ID,
+    );
+    await expect(pathExists(join(scratch, ".git"))).resolves.toBe(true);
+    expect(await fakePnpm.readCalls()).toEqual([
+      {
+        args: [
+          "--dir",
+          canonicalProjectDir,
+          "install",
+          "--no-frozen-lockfile",
+          "--config.minimum-release-age=0",
+        ],
+        cwd: canonicalProjectDir,
+      },
+      {
+        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev", "--input", "/model"],
+        cwd: canonicalProjectDir,
+      },
+    ]);
   });
 
   it("scaffolds for a coding agent but prints the dev command instead of starting the TUI", async () => {

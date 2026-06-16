@@ -1,5 +1,5 @@
-import { mkdtemp, rename, rm, stat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { mkdtemp, readdir, rename, rm, stat } from "node:fs/promises";
+import { basename, join, resolve } from "node:path";
 
 import pc from "picocolors";
 
@@ -23,7 +23,7 @@ import {
 import { addAgentToProject } from "#setup/scaffold/create/add-to-project.js";
 import { ensureChannel, scaffoldBaseProject } from "#setup/scaffold/index.js";
 
-import { initAgentDevHandoff, initAgentInstructions } from "./agent-instructions.js";
+import { initAgentDevHandoff } from "./agent-instructions.js";
 import { tryInitializeGit } from "./init-git.js";
 
 export interface InitCliLogger {
@@ -60,6 +60,9 @@ const defaultDependencies: InitCommandDependencies = {
   tryInitializeGit,
 };
 
+const CURRENT_DIRECTORY_PROJECT_NAME = ".";
+const ALLOWED_CREATE_IN_PLACE_ENTRIES = new Set([".DS_Store", ".git", ".gitkeep", ".hg"]);
+
 /** Resolves `target` to an existing directory, or undefined for name mode. */
 async function resolveTargetDirectory(
   parentDirectory: string,
@@ -68,6 +71,30 @@ async function resolveTargetDirectory(
   const targetPath = resolve(parentDirectory, target);
   const stats = await stat(targetPath).catch(() => undefined);
   return stats?.isDirectory() ? targetPath : undefined;
+}
+
+function isCurrentDirectoryTarget(target: string): boolean {
+  return /^\.(?:[/\\]+\.?)*$/u.test(target.trim());
+}
+
+async function assertCanScaffoldInPlace(targetRoot: string): Promise<void> {
+  const entries = await readdir(targetRoot);
+  const blocking = entries.filter((entry) => !ALLOWED_CREATE_IN_PLACE_ENTRIES.has(entry));
+  if (blocking.length === 0) {
+    return;
+  }
+
+  const visible = blocking.slice(0, 5).join(", ");
+  const suffix = blocking.length > 5 ? `, and ${blocking.length - 5} more` : "";
+  throw new Error(
+    `Cannot create project in current directory because it is not empty. Found: ${visible}${suffix}. Use an empty directory.`,
+  );
+}
+
+async function moveDirectoryContents(sourceRoot: string, targetRoot: string): Promise<void> {
+  for (const entry of await readdir(sourceRoot)) {
+    await rename(join(sourceRoot, entry), join(targetRoot, entry));
+  }
 }
 
 /**
@@ -107,18 +134,6 @@ function resolveScaffoldPackageManager(dependencies: InitCommandDependencies): P
   return dependencies.detectInvokingPackageManager() ?? "pnpm";
 }
 
-const PACKAGE_RUNNERS: Record<PackageManagerKind, string> = {
-  bun: "bunx",
-  npm: "npx",
-  pnpm: "pnpm dlx",
-  yarn: "yarn dlx",
-};
-
-function resolveInitCommand(dependencies: InitCommandDependencies): string {
-  const manager = dependencies.detectInvokingPackageManager();
-  return manager === undefined ? "eve init" : `${PACKAGE_RUNNERS[manager]} eve init`;
-}
-
 async function scaffoldProject(
   parentDirectory: string,
   projectName: string,
@@ -127,15 +142,19 @@ async function scaffoldProject(
   dependencies: InitCommandDependencies,
 ): Promise<string> {
   const parentPath = resolve(parentDirectory);
-  const projectPath = join(parentPath, projectName);
-  if (await pathExists(projectPath)) {
+  const createInPlace = projectName === CURRENT_DIRECTORY_PROJECT_NAME;
+  const projectPath = createInPlace ? parentPath : join(parentPath, projectName);
+  if (createInPlace) {
+    await assertCanScaffoldInPlace(projectPath);
+  } else if (await pathExists(projectPath)) {
     throw new Error(`Cannot create project because "${projectPath}" already exists.`);
   }
 
   const stagingDirectory = await mkdtemp(join(parentPath, ".eve-init-"));
   try {
+    const stagedProjectName = createInPlace ? basename(projectPath) : projectName;
     const stagedProjectPath = await dependencies.scaffoldBaseProject({
-      projectName,
+      projectName: stagedProjectName,
       model: DEFAULT_AGENT_MODEL_ID,
       packageManager,
       targetDirectory: stagingDirectory,
@@ -150,7 +169,11 @@ async function scaffoldProject(
       });
     }
 
-    await rename(stagedProjectPath, projectPath);
+    if (createInPlace) {
+      await moveDirectoryContents(stagedProjectPath, projectPath);
+    } else {
+      await rename(stagedProjectPath, projectPath);
+    }
     return projectPath;
   } finally {
     await rm(stagingDirectory, { recursive: true, force: true });
@@ -193,10 +216,8 @@ function startSpinner(logger: InitCliLogger, message: string): { stop(): void } 
  * existing project (`target` is a directory), without prompts or external
  * provisioning.
  *
- * Runs launched by a coding agent diverge twice: with no `target` they get the
- * recipe for collecting one from the user instead of a scaffold under an
- * invented name, and after scaffolding they get the dev command printed
- * instead of spawned, since the dev TUI would wedge the launching agent.
+ * Runs launched by a coding agent get the dev command printed instead of
+ * spawned after scaffolding, since the dev TUI would wedge the launching agent.
  */
 export async function runInitCommand(
   logger: InitCliLogger,
@@ -206,30 +227,25 @@ export async function runInitCommand(
   dependencies: InitCommandDependencies = defaultDependencies,
 ): Promise<void> {
   const agentLaunched = await dependencies.isCodingAgentLaunch();
-  if (target === undefined) {
-    if (agentLaunched) {
-      logger.log(
-        initAgentInstructions({
-          initCommand: resolveInitCommand(dependencies),
-        }),
-      );
-      return;
-    }
-    // `target` is optional only so the agent path above can run; a human
-    // omitting it gets the same error commander raised when it was required.
-    throw new Error("missing required argument 'target'");
-  }
-
-  const existingDirectory = await resolveTargetDirectory(parentDirectory, target);
+  const rawTarget = target ?? CURRENT_DIRECTORY_PROJECT_NAME;
+  const currentDirectoryTarget = isCurrentDirectoryTarget(rawTarget);
+  const existingDirectory = currentDirectoryTarget
+    ? (await pathExists(join(resolve(parentDirectory), "package.json"))
+        ? resolve(parentDirectory)
+        : undefined)
+    : await resolveTargetDirectory(parentDirectory, rawTarget);
 
   // A fresh project is owned by the manager that launched the CLI (`npx`,
   // `pnpm dlx`, `yarn dlx`), defaulting to pnpm for a direct binary run; an
   // existing project keeps whatever manager it already uses.
   let packageManager: PackageManagerKind;
   let projectPath: string;
+  let freshScaffold: boolean;
   if (existingDirectory === undefined) {
     packageManager = resolveScaffoldPackageManager(dependencies);
-    const projectName = parseProjectName(target);
+    const projectName = currentDirectoryTarget
+      ? CURRENT_DIRECTORY_PROJECT_NAME
+      : parseProjectName(rawTarget);
     projectPath = await scaffoldProject(
       parentDirectory,
       projectName,
@@ -237,11 +253,13 @@ export async function runInitCommand(
       options,
       dependencies,
     );
+    freshScaffold = true;
     logger.log(`${pc.green("✓")} Created an ${EVE_WORDMARK} agent in ${pc.bold(projectPath)}`);
   } else {
     const addition = await addToExistingProject(existingDirectory, options, dependencies);
     packageManager = addition.packageManager;
     projectPath = existingDirectory;
+    freshScaffold = false;
     logger.log(`${pc.green("✓")} Added an ${EVE_WORDMARK} agent to ${pc.bold(projectPath)}`);
     if (addition.nodeEngineOverride !== undefined) {
       logger.log(pc.yellow(`⚠ ${formatNodeEngineOverrideWarning(addition.nodeEngineOverride)}`));
@@ -274,7 +292,7 @@ export async function runInitCommand(
 
   // Git is initialized only for a freshly created project; an existing
   // project's history is its own.
-  if (existingDirectory === undefined) {
+  if (freshScaffold) {
     const gitResult = dependencies.tryInitializeGit(projectPath);
     if (gitResult.kind === "failed") {
       logger.error(pc.yellow(`Git initialization failed: ${gitResult.reason}`));
@@ -294,7 +312,6 @@ export async function runInitCommand(
   // Strictly the eve binary, never the project's dev script, which in an
   // existing app may start unrelated processes. Exec-style runs do not echo
   // the command the way run-scripts do, so the handoff line is printed here.
-  const freshScaffold = existingDirectory === undefined;
   const devArguments = freshScaffold
     ? [...eveDevArguments(packageManager), "--input", "/model"]
     : eveDevArguments(packageManager);

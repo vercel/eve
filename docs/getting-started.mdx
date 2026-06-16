@@ -24,7 +24,7 @@ You also need a model credential. Set the provider or gateway key your model str
 
 ## Manual installation
 
-The quick start uses `eve init` for a guided scaffold; `eve init .` does the same inside an existing project, adding the `eve`, `ai`, and `zod` dependencies and a compatible Node engine for you.
+The quick start uses `eve init` for a guided scaffold. Run `npx eve@latest init <name>` from a parent directory, or create an empty directory first and run `eve init`, `eve init .`, or `eve init ./` inside it to run the same full scaffold there, including `package.json`. To add Eve to a non-empty existing app, use `npx eve@latest init .`: that add-agent flow requires a `package.json` and no existing `agent/` files yet, and Eve adds the missing `eve`, `ai`, and `zod` dependencies for you. Eve also ensures a compatible Node engine (for example `24.x`) is present; if an existing range is too narrow for the release, Eve updates it and warns you. Either way the final handoff runs the `eve dev` binary through the package manager, not the project’s own `dev` script.
 
 To wire Eve in by hand, declare a compatible Node runtime in `package.json`:
 
@@ -146,8 +146,8 @@ See [Sessions, runs & streaming](./concepts/sessions-runs-and-streaming) for the
 If a coding agent (Claude Code, Cursor, and the like) is doing the setup, hand it this prompt:
 
 <CopyPrompt text="Set up an Eve agent for the user. Ask one question at a time. Use your prompt tools when available and do not guess. First ask what the agent should do. Then ask whether to create a new project or add it to an existing directory. For a new project, propose a name and ask the user to confirm it, then ask whether it should include Web Chat. Run `npx eve@latest init <target>`, adding `--channel-web-nextjs` if the user wants Web Chat. After scaffolding, read the relevant guide in `<project>/node_modules/eve/docs/`, replace the placeholder in `<project>/agent/instructions.md` with the purpose the user gave you, and do not start `eve dev` because it is interactive. Give the user the exact dev command printed by init.">
-  Set up an Eve agent by asking what it should do, whether to create a new project or use an
-  existing directory, and whether a new project should include Web Chat, one question at a time.
+  Set up an Eve agent by asking what it should do, whether to create a new project, scaffold the
+  current empty directory, or add Eve to an existing app, and whether a new project should include Web Chat, one question at a time.
   Run `npx eve@latest init <target>`, read the bundled docs, fill in agent/instructions.md, and give
   the user the dev command instead of starting the interactive server.
 </CopyPrompt>
@@ -156,7 +156,7 @@ Once `eve` is a dependency, the full docs are bundled in the package, so the age
 
 - Docs: `node_modules/eve/docs/`
 
-`eve init <name>` creates the base agent; `eve init .` adds one to an existing project. Add `--channel-web-nextjs` for Web Chat, or run
+`eve init [name]` creates the base agent; `eve init`, `eve init .`, and `eve init ./` do the same in the current empty directory; `eve init .` adds one to a non-empty existing app. Add `--channel-web-nextjs` for Web Chat, or run
 `eve channels add slack` later from an interactive terminal.
 
 ## What to read next
