@@ -179,26 +179,6 @@ function modelMenuRows(
   return [modelRow, providerRow, { value: "done", label: "Done" }];
 }
 
-/** The menu's per-action outcome notices; each lap keeps only the latest. */
-function applyModelNotice(outcome: ApplyModelOutcome): SelectNotice {
-  switch (outcome.kind) {
-    case "changed":
-      return { tone: "success", text: `Model changed to ${outcome.to}` };
-    case "unchanged":
-      return { tone: "info", text: `Model is already ${outcome.model}` };
-    case "rejected":
-      return { tone: "warning", text: outcome.message };
-  }
-}
-
-function providerNotice(provider: ModelProviderStatus): SelectNotice {
-  // Short on purpose: the menu's provider row already names the project and
-  // team, and the full status hint overflows the panel width.
-  return provider.kind === "unset"
-    ? { tone: "warning", text: "Provider updated — no gateway credential detected yet." }
-    : { tone: "success", text: "Connected to AI Gateway" };
-}
-
 /**
  * Reads the provider status the menu shows. Detection order matters: a linked
  * project subsumes any pulled credential (the link is what the user manages),
@@ -240,10 +220,8 @@ export async function detectModelProviderStatus(
  * choice into `agent.ts` (activation is the dev server's HMR watcher).
  * The provider row runs {@link runVercelFlow} — the provider gate (AI
  * Gateway or your own), then link-or-paste-a-key.
- * Each sub-flow lands back on the repainted menu; Done or Esc leaves. A
- * cancelled sub-flow also returns to the menu. Esc after something completed
- * reports it exactly like the channels flow (the effects already happened);
- * only an empty exit folds to cancelled.
+ * Completed model and provider changes return to the prompt with their result.
+ * Cancelled flows and external-provider instructions return to the menu.
  */
 export async function runModelFlow(input: {
   appRoot: string;
@@ -281,10 +259,6 @@ export async function runModelFlow(input: {
 
   let lastApply: ApplyModelOutcome | undefined;
   let providerOutcome: ModelProviderOutcome | undefined;
-  // One notice per action kind, each overwritten by its latest outcome — two
-  // model changes in a row leave a single "Model changed to …" line.
-  let modelNotice: SelectNotice | undefined;
-  let provNotice: SelectNotice | undefined;
   // Explains, once, why every row is inert for an external-provider model.
   const externalNotice: SelectNotice | undefined =
     routing?.kind === "external"
@@ -294,11 +268,7 @@ export async function runModelFlow(input: {
         }
       : undefined;
 
-  // The menu opens on the most useful selectable row: an unconfigured provider
-  // (the agent can't run without it) leads on the first lap; otherwise the model
-  // row when it can be edited, else the provider row, else Done. Completing a
-  // sub-flow lands the cursor on Done; a cancelled sub-flow leaves it where it
-  // came from.
+  // Start at the first useful row. Cancellation keeps the current row.
   let nextSelection: ModelMenuRow =
     provider.kind === "unset" && routing?.kind !== "external"
       ? "provider"
@@ -316,7 +286,7 @@ export async function runModelFlow(input: {
         options: modelMenuRows(current, provider, routing, editable),
         hintLayout: "stacked",
         initialValue: nextSelection,
-        notices: [externalNotice, modelNotice, provNotice].filter((notice) => notice !== undefined),
+        notices: externalNotice === undefined ? [] : [externalNotice],
       });
     } catch (error) {
       if (!(error instanceof WizardCancelledError)) throw error;
@@ -333,21 +303,14 @@ export async function runModelFlow(input: {
         signal,
         deps: deps.selectModel,
       });
-      if (slug !== undefined) {
-        signal?.throwIfAborted();
-        lastApply = await deps.applyModel({ appRoot, slug });
-        signal?.throwIfAborted();
-        // The notice distinguishes success from a rejected slug; the menu
-        // hint alone would show an unchanged model with no explanation.
-        modelNotice = applyModelNotice(lastApply);
-        // The applied slug is authoritative for the hint — the compiled
-        // state the read reports lags behind the HMR recompile.
-        if (lastApply.kind === "changed") current = lastApply.to;
-        nextSelection = "done";
-      } else {
+      if (slug === undefined) {
         nextSelection = "model";
+        continue;
       }
-      continue;
+      signal?.throwIfAborted();
+      lastApply = await deps.applyModel({ appRoot, slug });
+      signal?.throwIfAborted();
+      break;
     }
 
     const result = await deps.runVercelFlow({ appRoot, prompter, signal });
@@ -358,9 +321,7 @@ export async function runModelFlow(input: {
       nextSelection = "provider";
       continue;
     }
-    // The external-provider branch only showed instructions (any gateway link
-    // is untouched), so it earns no outcome, notice, or status re-read — but
-    // the user did make a provider choice, so the menu lands on Done.
+    // External-provider setup only shows instructions, so keep the menu open.
     if ("outcome" in result) {
       nextSelection = "done";
       continue;
@@ -371,8 +332,7 @@ export async function runModelFlow(input: {
     signal?.throwIfAborted();
     providerOutcome = { status: provider };
     if (result.credential !== undefined) providerOutcome.credential = result.credential;
-    provNotice = providerNotice(provider);
-    nextSelection = "done";
+    break;
   }
 
   if (lastApply === undefined && providerOutcome === undefined) {

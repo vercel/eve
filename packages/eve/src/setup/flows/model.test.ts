@@ -255,9 +255,9 @@ describe("runModelFlow", () => {
     });
   });
 
-  it("applies the pick, then repaints with the new hint and a success notice", async () => {
+  it("applies the model and returns to the prompt", async () => {
     const { prompter, menuPaints, selectMessages } = scriptedPrompter({
-      menu: ["model", "esc"],
+      menu: ["model"],
       picker: ["openai/gpt-5.5"],
     });
     const deps = flowDeps();
@@ -267,45 +267,15 @@ describe("runModelFlow", () => {
       modelMessage: `Model changed to ${pc.bold("openai/gpt-5.5")}. Live on your next prompt.`,
     });
 
-    expect(selectMessages).toEqual([
-      MODEL_MENU_MESSAGE,
-      "Which model should your agent use?",
-      MODEL_MENU_MESSAGE,
-    ]);
+    expect(selectMessages).toEqual([MODEL_MENU_MESSAGE, "Which model should your agent use?"]);
+    expect(menuPaints).toHaveLength(1);
     expect(deps.applyModel).toHaveBeenCalledWith({ appRoot: APP_ROOT, slug: "openai/gpt-5.5" });
-    // The applied slug is authoritative for the hint — no compiled-state
-    // re-read (which would race the HMR recompile).
     expect(deps.readCurrentModel).toHaveBeenCalledTimes(1);
-    expect(menuPaints[1]?.options[0]).toEqual({
-      value: "model",
-      label: "Change model",
-      hint: "openai/gpt-5.5",
-    });
-    expect(menuPaints[1]?.notices).toEqual([
-      { tone: "success", text: "Model changed to openai/gpt-5.5" },
-    ]);
   });
 
-  it("keeps only the latest model-change notice", async () => {
+  it("returns a rejection without repainting the menu", async () => {
     const { prompter, menuPaints } = scriptedPrompter({
-      menu: ["model", "model", "esc"],
-      picker: ["openai/gpt-5.5", "anthropic/claude-sonnet-4.6"],
-    });
-    const deps = flowDeps();
-
-    await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
-      kind: "done",
-      modelMessage: `Model changed to ${pc.bold("anthropic/claude-sonnet-4.6")}. Live on your next prompt.`,
-    });
-
-    expect(menuPaints[2]?.notices).toEqual([
-      { tone: "success", text: "Model changed to anthropic/claude-sonnet-4.6" },
-    ]);
-  });
-
-  it("paints a warning notice for a rejected slug and keeps the old hint", async () => {
-    const { prompter, menuPaints } = scriptedPrompter({
-      menu: ["model", "esc"],
+      menu: ["model"],
       picker: ["openai/gpt-5.5"],
     });
     const deps = flowDeps({
@@ -319,12 +289,11 @@ describe("runModelFlow", () => {
       modelMessage: "Couldn't confirm the id.",
     });
 
-    expect(menuPaints[1]?.options[0]?.hint).toBe("anthropic/claude-sonnet-4.6");
-    expect(menuPaints[1]?.notices).toEqual([{ tone: "warning", text: "Couldn't confirm the id." }]);
+    expect(menuPaints).toHaveLength(1);
   });
 
-  it("runs the provider sub-flow, re-detects the status, and posts its notice", async () => {
-    const { prompter, menuPaints } = scriptedPrompter({ menu: ["provider", "esc"] });
+  it("returns to the prompt after provider setup", async () => {
+    const { prompter, menuPaints } = scriptedPrompter({ menu: ["provider"] });
     const detectProviderStatus = vi
       .fn<ModelFlowDeps["detectProviderStatus"]>()
       .mockResolvedValueOnce({ kind: "unset" })
@@ -344,12 +313,7 @@ describe("runModelFlow", () => {
 
     expect(runVercelFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
     expect(detectProviderStatus).toHaveBeenCalledTimes(2);
-    expect(menuPaints[1]?.options[1]).toEqual({
-      value: "provider",
-      label: "Change provider",
-      hint: `AI Gateway (Linked to ${pc.bold("my-agent")})`,
-    });
-    expect(menuPaints[1]?.notices).toEqual([{ tone: "success", text: "Connected to AI Gateway" }]);
+    expect(menuPaints).toHaveLength(1);
   });
 
   it("treats the external-provider branch as informational — no notice, no outcome", async () => {
@@ -412,31 +376,6 @@ describe("runModelFlow", () => {
       await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
 
       expect(menuPaints[0]?.initialValue).toBe("model");
-    });
-
-    it("lands on Done after a model change", async () => {
-      const { prompter, menuPaints } = scriptedPrompter({
-        menu: ["model", "esc"],
-        picker: ["openai/gpt-5.5"],
-      });
-
-      await runModelFlow({ appRoot: APP_ROOT, prompter, deps: flowDeps() });
-
-      expect(menuPaints[0]?.initialValue).toBe("provider");
-      expect(menuPaints[1]?.initialValue).toBe("done");
-    });
-
-    it("lands on Done after a completed provider sub-flow", async () => {
-      const { prompter, menuPaints } = scriptedPrompter({ menu: ["provider", "esc"] });
-      const deps = flowDeps({
-        runVercelFlow: vi.fn(
-          async () => ({ kind: "done", credential: "AI_GATEWAY_API_KEY" }) as const,
-        ),
-      });
-
-      await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
-
-      expect(menuPaints[1]?.initialValue).toBe("done");
     });
 
     it("lands on Done after the external-provider branch", async () => {

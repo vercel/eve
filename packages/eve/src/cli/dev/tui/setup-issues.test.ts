@@ -6,6 +6,7 @@ import {
   detectSetupIssues,
   formatSetupIssuesLine,
   LOGIN_SETUP_ISSUE,
+  orderedSetupIssues,
   type BootDetectionContext,
 } from "./setup-issues.js";
 
@@ -105,5 +106,24 @@ describe("formatSetupIssuesLine", () => {
     expect(formatSetupIssuesLine([CLI_MISSING_SETUP_ISSUE])).toBe(
       "1 setup issue: Vercel CLI not found · /vc",
     );
+  });
+});
+
+describe("orderedSetupIssues", () => {
+  it("puts the auth prerequisite before the boot detections", () => {
+    const modelIssue = { label: "model provider not linked", command: "/model" };
+    expect(orderedSetupIssues([modelIssue], CLI_MISSING_SETUP_ISSUE)).toEqual([
+      CLI_MISSING_SETUP_ISSUE,
+      modelIssue,
+    ]);
+    expect(orderedSetupIssues([modelIssue], LOGIN_SETUP_ISSUE)).toEqual([
+      LOGIN_SETUP_ISSUE,
+      modelIssue,
+    ]);
+  });
+
+  it("returns the boot issues unchanged when no auth prerequisite is unmet", () => {
+    const boot = [{ label: "AI Gateway credentials missing", command: "/model" }];
+    expect(orderedSetupIssues(boot, undefined)).toEqual(boot);
   });
 });

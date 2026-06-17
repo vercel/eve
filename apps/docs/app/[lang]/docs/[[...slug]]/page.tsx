@@ -3,6 +3,7 @@ import { createDocsPage } from "@vercel/geistdocs/pages/docs";
 import type { MDXComponents } from "mdx/types";
 import { getMDXComponents } from "@/components/geistdocs/mdx-components";
 import { config } from "@/lib/geistdocs/config";
+import { staticOgImage } from "@/lib/geistdocs/og";
 import { geistdocsSource } from "@/lib/geistdocs/source";
 import { getSiteOrigin } from "@/lib/geistdocs/url";
 
@@ -12,12 +13,15 @@ const docsPage = createDocsPage({
     const components: MDXComponents = link ? { a: link } : {};
     return getMDXComponents(components);
   },
-  metadata: ({ metadata, page }) => ({
+  metadata: ({ metadata }) => ({
     ...metadata,
     metadataBase: new URL(getSiteOrigin()),
     openGraph: {
       ...metadata.openGraph,
-      images: geistdocsSource.getPageImage(page).url,
+      // Override with the static OG image for now. To restore dynamic per-page
+      // OG generation, add `page` back to the destructure above and swap the
+      // line below back to: images: geistdocsSource.getPageImage(page).url,
+      images: [staticOgImage],
     },
   }),
   source: geistdocsSource,

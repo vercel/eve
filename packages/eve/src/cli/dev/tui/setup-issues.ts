@@ -104,6 +104,14 @@ export async function detectSetupIssues(
   return results.flat();
 }
 
+/** Places the auth issue before boot-time setup issues. */
+export function orderedSetupIssues(
+  bootIssues: readonly SetupIssue[],
+  authIssue: SetupIssue | undefined,
+): SetupIssue[] {
+  return authIssue === undefined ? [...bootIssues] : [authIssue, ...bootIssues];
+}
+
 /**
  * The attention line's body, mirroring Claude Code's
  * `1 setup issue: MCP · /doctor` shape; the renderer prefixes the warning

@@ -51,6 +51,7 @@ import {
   detectSetupIssues,
   formatSetupIssuesLine,
   LOGIN_SETUP_ISSUE,
+  orderedSetupIssues,
   type BootDetection,
   type BootDetectionContext,
   type SetupIssue,
@@ -911,7 +912,7 @@ export class EveTUIRunner {
 
   /** Repaints the attention line from the cached detection + auth issues, or clears it. */
   #paintSetupAttention(): void {
-    const issues = [...this.#bootIssues, ...(this.#authIssue ? [this.#authIssue] : [])];
+    const issues = orderedSetupIssues(this.#bootIssues, this.#authIssue);
     if (issues.length > 0) {
       this.#renderer.renderSetupWarning?.(formatSetupIssuesLine(issues));
     } else {
