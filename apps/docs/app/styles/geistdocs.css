@@ -13,6 +13,16 @@ html {
   @apply max-md:px-6;
 }
 
+/*
+ * On mobile the sticky MobileDocsBar abuts the navbar via a negative top
+ * margin, which would otherwise overlap and clip the page breadcrumb rendered
+ * above it. Hide the breadcrumb on mobile so the bar sits flush under the
+ * navbar; it stays visible on desktop, where the bar is hidden.
+ */
+#nd-page > .text-fd-muted-foreground:first-child {
+  @apply max-md:hidden;
+}
+
 /* TOC and footer links use gray-1000. */
 #nd-toc {
   @apply text-gray-1000 md:pl-6;
