@@ -1,8 +1,18 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   buildAgentInfoResponseFromManifest: vi.fn(() => ({ kind: "eve-agent-info", version: 1 })),
-  loadAgentInfoManifestData: vi.fn(async () => ({ manifest: {}, schedules: [] })),
+  getVercelOidcToken: vi.fn(),
+  loadAgentInfoManifestData: vi.fn(async () => ({
+    manifest: {
+      config: {
+        model: {
+          routing: { kind: "gateway", target: "openai" },
+        },
+      },
+    },
+    schedules: [],
+  })),
   localDev: vi.fn(() => "local-dev-auth"),
   resolveAgentInfoCompiledArtifactsSource: vi.fn(() => ({
     appRoot: "/tmp/app/.eve/dev-runtime/snapshots/current/app",
@@ -10,6 +20,10 @@ const mocks = vi.hoisted(() => ({
   })),
   routeAuth: vi.fn(async () => ({ principal: "local-dev" })),
   vercelOidc: vi.fn(() => "vercel-oidc-auth"),
+}));
+
+vi.mock("#compiled/@vercel/oidc/index.js", () => ({
+  getVercelOidcToken: mocks.getVercelOidcToken,
 }));
 
 vi.mock("#internal/nitro/routes/agent-info/build-agent-info-response-from-manifest.js", () => ({
@@ -27,48 +41,88 @@ vi.mock("#public/channels/auth.js", () => ({
   vercelOidc: mocks.vercelOidc,
 }));
 
+const ROUTE_INPUT = {
+  appRoot: "/tmp/app",
+  dev: true,
+  devRuntimeArtifactsPointerPath: "/tmp/app/.eve/dev-runtime/current.json",
+  mode: "development",
+  moduleMapLoaderPath: "/tmp/eve/src/internal/authored-module-map-loader.ts",
+} as const;
+
+const GATEWAY_MANIFEST_DATA = {
+  manifest: {
+    config: {
+      model: {
+        routing: { kind: "gateway" as const, target: "openai" },
+      },
+    },
+  },
+  schedules: [],
+};
+
+async function requestAgentInfo(): Promise<Response> {
+  const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
+
+  return await handleAgentInfoRequest(ROUTE_INPUT, new Request("http://127.0.0.1/eve/v1/info"));
+}
+
 describe("handleAgentInfoRequest", () => {
-  it("resolves info from the dev runtime artifact source", async () => {
-    // Determinism: the route reads gateway credentials from process.env.
+  beforeEach(() => {
     vi.stubEnv("AI_GATEWAY_API_KEY", "");
     vi.stubEnv("VERCEL_OIDC_TOKEN", "");
-    const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
+    mocks.buildAgentInfoResponseFromManifest.mockClear();
+    mocks.getVercelOidcToken.mockReset();
+    mocks.getVercelOidcToken.mockRejectedValue(new Error("not linked"));
+    mocks.loadAgentInfoManifestData.mockReset();
+    mocks.loadAgentInfoManifestData.mockResolvedValue(GATEWAY_MANIFEST_DATA);
+    mocks.resolveAgentInfoCompiledArtifactsSource.mockClear();
+  });
 
-    const response = await handleAgentInfoRequest(
-      {
-        appRoot: "/tmp/app",
-        dev: true,
-        devRuntimeArtifactsPointerPath: "/tmp/app/.eve/dev-runtime/current.json",
-        mode: "development",
-        moduleMapLoaderPath: "/tmp/eve/src/internal/authored-module-map-loader.ts",
-      },
-      new Request("http://127.0.0.1/eve/v1/info"),
-    );
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("resolves info from the dev runtime artifact source", async () => {
+    const response = await requestAgentInfo();
 
     expect(response.status).toBe(200);
-    expect(mocks.resolveAgentInfoCompiledArtifactsSource).toHaveBeenCalledWith({
-      appRoot: "/tmp/app",
-      dev: true,
-      devRuntimeArtifactsPointerPath: "/tmp/app/.eve/dev-runtime/current.json",
-      mode: "development",
-      moduleMapLoaderPath: "/tmp/eve/src/internal/authored-module-map-loader.ts",
-    });
+    expect(mocks.resolveAgentInfoCompiledArtifactsSource).toHaveBeenCalledWith(ROUTE_INPUT);
     expect(mocks.loadAgentInfoManifestData).toHaveBeenCalledWith({
       compiledArtifactsSource: {
         appRoot: "/tmp/app/.eve/dev-runtime/snapshots/current/app",
         kind: "disk",
       },
     });
-    expect(mocks.buildAgentInfoResponseFromManifest).toHaveBeenCalledWith(
-      {
-        manifest: {},
-        schedules: [],
-      },
-      {
-        mode: "development",
-        gatewayCredentials: { apiKey: false, oidc: false },
-      },
-    );
-    vi.unstubAllEnvs();
+    expect(mocks.buildAgentInfoResponseFromManifest).toHaveBeenCalledWith(GATEWAY_MANIFEST_DATA, {
+      mode: "development",
+      gatewayCredentials: { apiKey: false, oidc: false },
+    });
+    expect(mocks.getVercelOidcToken).toHaveBeenCalledOnce();
+  });
+
+  it("reports linked-project OIDC resolved by the Vercel SDK", async () => {
+    mocks.getVercelOidcToken.mockResolvedValue("linked-project-token");
+
+    const response = await requestAgentInfo();
+
+    expect(response.status).toBe(200);
+    expect(mocks.buildAgentInfoResponseFromManifest).toHaveBeenCalledWith(GATEWAY_MANIFEST_DATA, {
+      mode: "development",
+      gatewayCredentials: { apiKey: false, oidc: true },
+    });
+    expect(mocks.getVercelOidcToken).toHaveBeenCalledOnce();
+  });
+
+  it("does not resolve OIDC when an AI Gateway API key is present", async () => {
+    vi.stubEnv("AI_GATEWAY_API_KEY", "gateway-key");
+
+    const response = await requestAgentInfo();
+
+    expect(response.status).toBe(200);
+    expect(mocks.buildAgentInfoResponseFromManifest).toHaveBeenCalledWith(GATEWAY_MANIFEST_DATA, {
+      mode: "development",
+      gatewayCredentials: { apiKey: true, oidc: false },
+    });
+    expect(mocks.getVercelOidcToken).not.toHaveBeenCalled();
   });
 });

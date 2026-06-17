@@ -624,6 +624,14 @@ export async function linkProject(
       runVercel(["link", "--project", project.id, ...scope, "--yes"], {
         cwd: projectRoot,
         onOutput,
+        // The plan already names the team and project, so the link needs no
+        // input. eve strips the coding-agent env markers (so the CLI does not
+        // mis-react to the agent driving it), which also stops the CLI from
+        // auto-enabling its agent non-interactive default — left with an
+        // inherited TTY it would prompt (e.g. the MCP/plugin setup question)
+        // and read stdin, wedging the dev TUI. Force non-interactive: it both
+        // passes `--non-interactive` and closes the child's stdin.
+        nonInteractive: true,
         signal: options.signal,
       }),
   );

@@ -45,9 +45,16 @@ export interface BootDetection {
 const modelProvider: BootDetection = {
   id: "model-provider",
   async detect({ appRoot, env, info }) {
-    // An external-provider model is reached with its own provider key; gateway
-    // linking/credentials don't apply and /model can't edit it.
-    if (info?.agent.model.routing?.kind === "external") {
+    const endpoint = info?.agent.model.endpoint;
+    const isEndpointExternal =
+      endpoint?.kind === "external" ||
+      (endpoint === undefined && info?.agent.model.routing?.kind === "external");
+    const isAIGatewayConnected = endpoint?.kind === "gateway" && endpoint.connected;
+
+    // The running server owns endpoint readiness. Fall back to routing and
+    // local credential checks only when talking to a legacy server that did
+    // not return the composed endpoint state.
+    if (isEndpointExternal || isAIGatewayConnected) {
       return [];
     }
     if (env.AI_GATEWAY_API_KEY || env.VERCEL_OIDC_TOKEN) {

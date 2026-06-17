@@ -17,9 +17,20 @@ function context(overrides: Partial<BootDetectionContext> = {}): BootDetectionCo
 type AgentInfo = NonNullable<BootDetectionContext["info"]>;
 
 /** A minimal but fully-typed `/eve/v1/info` payload carrying a routing decision. */
-function infoWithRouting(routing: AgentInfo["agent"]["model"]["routing"]): AgentInfo {
+function infoWithRouting(
+  routing: AgentInfo["agent"]["model"]["routing"],
+  endpoint?: AgentInfo["agent"]["model"]["endpoint"],
+): AgentInfo {
+  const model: AgentInfo["agent"]["model"] =
+    endpoint === undefined ? { id: "m", routing } : { endpoint, id: "m", routing };
+
   return {
-    agent: { agentRoot: "/a", appRoot: "/a", model: { id: "m", routing }, name: "Agent" },
+    agent: {
+      agentRoot: "/a",
+      appRoot: "/a",
+      model,
+      name: "Agent",
+    },
     capabilities: { devRoutes: true },
     channels: { authored: [], available: [], disabledFramework: [], framework: [] },
     connections: [],
@@ -60,6 +71,15 @@ describe("BOOT_DETECTIONS", () => {
   it("stays quiet for an external-provider model — gateway linking/credentials don't apply", async () => {
     const info = infoWithRouting({ kind: "external", provider: "anthropic" });
     // No gateway env credentials and the unlinked appRoot would otherwise flag.
+    expect(await detectSetupIssues(context({ info }))).toEqual([]);
+  });
+
+  it("stays quiet when the runtime resolved linked-project OIDC", async () => {
+    const info = infoWithRouting(
+      { kind: "gateway", target: "openai" },
+      { kind: "gateway", connected: true, credential: "oidc" },
+    );
+
     expect(await detectSetupIssues(context({ info }))).toEqual([]);
   });
 
