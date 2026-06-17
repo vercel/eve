@@ -262,6 +262,30 @@ describe("createDockerSandboxBackend create", () => {
     ).rejects.toThrow(SandboxTemplateNotProvisionedError);
   });
 
+  it("throws SandboxTemplateNotProvisionedError when a template-backed container fails to start", async () => {
+    const appRoot = await createScratchDirectory("eve-docker-sandbox-");
+    const { cli } = createFakeDockerCli((args) => {
+      if (isContainerInspect(args)) {
+        return { exitCode: 1, stderr: "No such container" };
+      }
+      if (isImageInspect(args, TEMPLATE_IMAGE)) {
+        return { exitCode: 0, stdout: "sha256:abc\n" };
+      }
+      if (args[0] === "run") {
+        return { exitCode: 1, stderr: "template-backed container failed to start" };
+      }
+      return undefined;
+    });
+
+    await expect(
+      createEngine({ cli }).create({
+        runtimeContext: { appRoot },
+        sessionKey: SESSION_KEY,
+        templateKey: TEMPLATE_KEY,
+      }),
+    ).rejects.toThrow(SandboxTemplateNotProvisionedError);
+  });
+
   it("creates a session container from the template image with labels and tags", async () => {
     const appRoot = await createScratchDirectory("eve-docker-sandbox-");
     const previousRunId = process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV];
