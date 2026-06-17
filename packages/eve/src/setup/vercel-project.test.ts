@@ -455,7 +455,7 @@ describe("linkProject", () => {
     expect(mockedRunVercel).toHaveBeenNthCalledWith(
       1,
       ["link", "--project", "prj_new", "--scope", "team-a", "--yes"],
-      { cwd: "/tmp/eve-agent", onOutput: expect.any(Function) },
+      { cwd: "/tmp/eve-agent", onOutput: expect.any(Function), nonInteractive: true },
     );
   });
 });

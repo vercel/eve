@@ -4,7 +4,7 @@ description: "Define typed actions the agent can call, and gate sensitive ones o
 url: /tools
 ---
 
-A tool is a typed action the agent can call, such as hitting an API, running a query, or writing a file. The action stays in code you control. Tools run in your app runtime with full access to `process.env`, not in the [sandbox](../sandbox).
+A tool is a typed action the agent can call, such as hitting an API, running a query, or writing a file. The action stays in code you control. Tools run in your app runtime with full access to `process.env`, not in the [sandbox](/docs/sandbox).
 
 ## Define a tool
 
@@ -37,8 +37,8 @@ When a tool returns structured data, add an optional `outputSchema`. With Zod or
 `execute` gets a `ctx` carrying the runtime accessors:
 
 - `ctx.session`: session metadata, turn, auth, parent lineage.
-- `ctx.getSandbox()`: the live [sandbox](../sandbox) handle.
-- `ctx.getSkill(id)`: read a packaged [skill](../skills)'s metadata and files.
+- `ctx.getSandbox()`: the live [sandbox](/docs/sandbox) handle.
+- `ctx.getSkill(id)`: read a packaged [skill](/docs/skills)'s metadata and files.
 
 Running in the app runtime is what lets a tool import shared code from `lib/`, read `process.env`, and take part in eve’s durable pause/resume model.
 
@@ -82,7 +82,7 @@ Do not return secrets, credentials, unnecessary personal data, or unbounded sens
 ## What to read next
 
 - [Human-in-the-loop](./human-in-the-loop): gate a tool on approval, or have the agent ask a question
-- [Skills](../skills): on-demand procedures the model loads when relevant
-- [Default harness](../concepts/default-harness): the built-in tools and how to override or disable them
-- [Dynamic capabilities](../guides/dynamic-capabilities): tools whose set is resolved per session with `defineDynamic`
-- [Auth & route protection](../guides/auth-and-route-protection): authenticate a tool to an external service
+- [Skills](/docs/skills): on-demand procedures the model loads when relevant
+- [Default harness](/docs/concepts/default-harness): the built-in tools and how to override or disable them
+- [Dynamic capabilities](/docs/guides/dynamic-capabilities): tools whose set is resolved per session with `defineDynamic`
+- [Auth & route protection](/docs/guides/auth-and-route-protection): authenticate a tool to an external service
