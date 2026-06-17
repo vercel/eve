@@ -165,16 +165,11 @@ jobs:
       - name: Build and publish image to Vercel Container Registry
         if: github.event_name != 'pull_request'
         env:
-          DOCKER_BUILDKIT: "0"
           VCR_TAGS: ${{ steps.vcr-tags.outputs.tags }}
         run: |
-          build_args=()
+          outputs=()
           while IFS= read -r tag; do
-            build_args+=("-t" "$tag")
+            outputs+=("--output" "type=image,name=${tag},push=true,oci-mediatypes=true,compression=zstd,compression-level=3,force-compression=true")
           done <<<"$VCR_TAGS"
 
-          docker build --platform linux/amd64 "${build_args[@]}" .
-
-          while IFS= read -r tag; do
-            docker push "$tag"
-          done <<<"$VCR_TAGS"
+          docker buildx build --platform linux/amd64 "${outputs[@]}" .
