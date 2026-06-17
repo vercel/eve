@@ -95,6 +95,32 @@ export function buildToolSet(input: {
 }
 
 /**
+ * Builds a ToolSet from an ordered list of harness definitions.
+ *
+ * The first definition for a name wins, matching the dynamic-tool scope
+ * ordering where step tools override turn/session tools.
+ */
+export function buildToolSetFromDefinitions(input: {
+  readonly approvedTools?: ReadonlySet<string>;
+  readonly capabilities?: SessionCapabilities;
+  readonly disabledProviderTools?: ReadonlySet<string>;
+  readonly tools: readonly HarnessToolDefinition[];
+}): ToolSet {
+  const tools = new Map<string, HarnessToolDefinition>();
+  for (const definition of input.tools) {
+    if (!tools.has(definition.name)) {
+      tools.set(definition.name, definition);
+    }
+  }
+  return buildToolSet({
+    approvedTools: input.approvedTools,
+    capabilities: input.capabilities,
+    disabledProviderTools: input.disabledProviderTools,
+    tools,
+  });
+}
+
+/**
  * Wraps a tool's `execute` so a returned {@link AuthorizationSignal} is
  * stashed out-of-band ({@link stashToolInterrupt}) for the park detector while
  * the AI SDK records an opaque {@link AuthorizationPendingModelOutput} that

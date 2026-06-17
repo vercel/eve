@@ -3,7 +3,7 @@ import { type FilePart, jsonSchema, type LanguageModel, ToolLoopAgent, type User
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { SessionDynamicInstructionsKey } from "#context/keys.js";
+import { LiveStepToolsKey, SessionDynamicInstructionsKey } from "#context/keys.js";
 import { ChannelInstrumentationKey, SandboxKey } from "#context/keys.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
@@ -550,6 +550,45 @@ describe("createToolLoopHarness", () => {
     expect(agentCall).toBeDefined();
     expect(agentCall!.tools).toHaveProperty("add");
     expect(agentCall!.tools).not.toHaveProperty("code_mode");
+  });
+
+  it("preserves approval gates on step-scoped dynamic tools", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const needsApproval = vi.fn(() => true);
+    const ctx = new ContextContainer();
+    ctx.setVirtualContext(LiveStepToolsKey, [
+      {
+        description: "Get TfL line status.",
+        execute: vi.fn().mockResolvedValue({ ok: true }),
+        inputSchema: jsonSchema({ type: "object" }),
+        name: "connection__tfl__getLineStatus",
+        needsApproval,
+      },
+    ]);
+
+    const config = createTestConfig("conversation", undefined, { codeMode: false });
+    const runStep = createToolLoopHarness(config);
+    await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "Hi" }));
+
+    const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as
+      | { tools: Record<string, { needsApproval?: (toolInput: unknown) => Promise<boolean> }> }
+      | undefined;
+    expect(agentCall).toBeDefined();
+    const dynamicTool = agentCall!.tools.connection__tfl__getLineStatus!;
+
+    await expect(dynamicTool.needsApproval?.({ line: "victoria" })).resolves.toBe(true);
+    expect(needsApproval).toHaveBeenCalledExactlyOnceWith({
+      approvedTools: new Set(),
+      toolInput: { line: "victoria" },
+      toolName: "connection__tfl__getLineStatus",
+    });
   });
 
   it("preserves a user-authored web_search tool instead of replacing it with the provider tool", async () => {

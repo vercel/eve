@@ -1,10 +1,11 @@
 import { jsonSchema, tool } from "ai";
 import { describe, expect, it } from "vitest";
 
-import { applySandboxToolSet } from "#harness/code-mode.js";
+import { applySandboxToolSet, buildSandboxHostTools } from "#harness/code-mode.js";
 import { CODE_MODE_SURFACE, WORKFLOW_SURFACE } from "#harness/sandbox-surface.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
+import { LiveStepToolsKey } from "#context/keys.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { buildToolSet } from "#harness/tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
@@ -276,6 +277,29 @@ describe("applySandboxToolSet", () => {
 
     expect(observedSession).toBe("call-session");
     expect(result).toBe(true);
+  });
+
+  it("preserves dynamic tool approval gates in sandbox host tools", async () => {
+    const needsApproval = () => true;
+    const ctx = new ContextContainer();
+    ctx.setVirtualContext(LiveStepToolsKey, [
+      {
+        description: "Requires approval.",
+        execute: async () => "ok",
+        inputSchema: jsonSchema({ type: "object" }),
+        name: "connection__tfl__getLineStatus",
+        needsApproval,
+      },
+    ]);
+
+    const hostTools = await contextStorage.run(ctx, () =>
+      buildSandboxHostTools({ tools: new Map() }),
+    );
+    const guardedTool = hostTools.connection__tfl__getLineStatus as {
+      needsApproval?: (input: unknown) => Promise<boolean> | boolean;
+    };
+
+    await expect(guardedTool.needsApproval?.({ line: "victoria" })).resolves.toBe(true);
   });
 
   it("dual-routes runtime action tools to both modelTools and hostTools", async () => {

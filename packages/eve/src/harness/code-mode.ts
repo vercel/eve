@@ -15,7 +15,7 @@ import {
 import { loadCodeModeModule, type CodeModeOptions } from "#shared/code-mode.js";
 import { ALL_SANDBOX_SURFACES, type SandboxSurface } from "#harness/sandbox-surface.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
-import { buildToolSet } from "#harness/tools.js";
+import { buildToolSet, buildToolSetFromDefinitions } from "#harness/tools.js";
 
 /**
  * Framework tools that must never enter a sandbox — they stay directly callable
@@ -163,13 +163,13 @@ export async function buildSandboxHostTools(input: {
   const ctx = contextStorage.getStore();
   if (ctx !== undefined) {
     const dynamicTools = buildDynamicTools(ctx);
-    for (const def of dynamicTools) {
-      flatTools[def.name] ??= {
-        description: def.description,
-        inputSchema: def.inputSchema,
-        execute: def.execute,
-        outputSchema: def.outputSchema,
-      };
+    const dynamicToolSet = buildToolSetFromDefinitions({
+      approvedTools: input.approvedTools,
+      capabilities: input.capabilities,
+      tools: dynamicTools,
+    });
+    for (const [name, toolDefinition] of Object.entries(dynamicToolSet)) {
+      flatTools[name] ??= toolDefinition;
     }
   }
 

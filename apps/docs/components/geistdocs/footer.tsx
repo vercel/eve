@@ -34,9 +34,7 @@ export const Footer = ({
           </Link>
         </div>
         <div className="flex items-center gap-2">
-          <p className="text-center sm:text-left text-gray-800 text-sm">
-            {copyright}
-          </p>
+          <p className="text-center sm:text-left text-gray-800 text-sm">{copyright}</p>
           {hasMultipleLanguages ? <LanguageSelector /> : null}
           <Button asChild size="icon-sm" type="button" variant="ghost">
             <a href="/rss.xml" rel="noopener" target="_blank">

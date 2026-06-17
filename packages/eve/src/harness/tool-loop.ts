@@ -142,7 +142,7 @@ import {
   isInvalidToolCall,
 } from "#harness/step-hooks.js";
 import { pruneToolResults } from "#harness/tool-result-pruning.js";
-import { buildToolSetWithProviderTools } from "#harness/tools.js";
+import { buildToolSetFromDefinitions, buildToolSetWithProviderTools } from "#harness/tools.js";
 import {
   CODE_MODE_TOOL_NAME,
   loadCodeModeModule,
@@ -652,13 +652,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       if (ctx !== undefined) {
         const dynamicTools = buildDynamicTools(ctx);
-        for (const def of dynamicTools) {
-          flatTools[def.name] ??= {
-            description: def.description,
-            inputSchema: def.inputSchema,
-            execute: def.execute,
-            outputSchema: def.outputSchema,
-          };
+        const dynamicToolSet = buildToolSetFromDefinitions({
+          approvedTools,
+          capabilities: config.capabilities,
+          disabledProviderTools: opts.disabledProviderTools,
+          tools: dynamicTools,
+        });
+        for (const [name, toolDefinition] of Object.entries(dynamicToolSet)) {
+          flatTools[name] ??= toolDefinition;
         }
       }
 
