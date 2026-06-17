@@ -45,13 +45,7 @@ npx eve@latest init my-agent
 ```
 
 This creates a new `my-agent` directory, installs its dependencies, initializes Git, and starts
-the interactive terminal UI. For a new project, add `--channel-web-nextjs` to also scaffold the
-Web Chat application. Press <kbd>Ctrl</kbd>+<kbd>C</kbd> to stop the UI, then enter the generated
-project:
-
-```bash
-cd my-agent
-```
+the interactive terminal UI.
 
 To add Eve to an existing project, pass a path:
 
