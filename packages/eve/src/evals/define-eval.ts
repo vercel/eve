@@ -1,7 +1,7 @@
 import type { EveEvalDefinition, EveEvalInput } from "#evals/types.js";
 
 /**
- * Defines one Eve eval. Each eval file is exactly one case: an imperative
+ * Defines one eve eval. Each eval file is exactly one case: an imperative
  * `test(t)` function that drives the agent (`t.send`, `t.respond`, …) and
  * asserts on what it produced (`t.completed()`, `t.check(...)`,
  * `t.judge.autoevals.*`). Organize related evals with directory nesting under

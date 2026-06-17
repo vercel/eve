@@ -14,7 +14,7 @@ import type {
 } from "#client/types.js";
 
 /**
- * HTTP client for talking to a deployed Eve agent.
+ * HTTP client for talking to a deployed eve agent.
  *
  * A single client is bound to one host and auth configuration. It can create
  * many concurrent {@link ClientSession | sessions}, each tracking their own
@@ -36,7 +36,7 @@ export class Client {
   }
 
   /**
-   * Checks the health of the Eve agent server.
+   * Checks the health of the eve agent server.
    *
    * @throws {ClientError} If the server returns a non-successful status.
    */
@@ -76,7 +76,7 @@ export class Client {
   }
 
   /**
-   * Performs an authenticated fetch against a path on this Eve target.
+   * Performs an authenticated fetch against a path on this eve target.
    *
    * This is the raw escape hatch for framework-owned routes (for example
    * channel ingress or dev-only schedule dispatch) while preserving the same

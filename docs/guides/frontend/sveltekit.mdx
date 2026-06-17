@@ -1,14 +1,14 @@
 ---
 title: "SvelteKit"
-description: "Run an Eve agent and a SvelteKit app as one project with the eveSvelteKit Vite plugin."
+description: "Run an eve agent and a SvelteKit app as one project with the eveSvelteKit Vite plugin."
 ---
 
-`eve/sveltekit` runs a SvelteKit frontend and an Eve agent as one project instead of two services. The `eveSvelteKit()` Vite plugin puts both on one dev server and one Vercel deploy, and [`useEveAgent`](./use-eve-agent-svelte) finds the mounted routes on its own. There's no CORS to configure and no URL env vars to keep in sync.
+`eve/sveltekit` runs a SvelteKit frontend and an eve agent as one project instead of two services. The `eveSvelteKit()` Vite plugin puts both on one dev server and one Vercel deploy, and [`useEveAgent`](./use-eve-agent-svelte) finds the mounted routes on its own. There's no CORS to configure and no URL env vars to keep in sync.
 
 ## Prerequisites
 
 - The `eve` package installed in your project (`npm install eve@latest`).
-- An existing Eve agent directory. If you don't have one, start from [Getting started](../../getting-started).
+- An existing eve agent directory. If you don't have one, start from [Getting started](../../getting-started).
 - A SvelteKit app to mount the agent in.
 
 ## Register the Vite plugin
@@ -69,7 +69,7 @@ With the plugin in `vite.config.ts`, components call [`useEveAgent`](./use-eve-a
 </form>
 ```
 
-The default Eve channel is fail-closed. With no `agent/channels/eve.ts` authored, Eve registers `eveChannel({ auth: [localDev(), vercelOidc()] })`: `localDev()` opens the routes on localhost, `vercelOidc()` admits Vercel OIDC callers in production, and everything else gets a `401`. To set your own auth policy, add `agent/channels/eve.ts`:
+The default eve channel is fail-closed. With no `agent/channels/eve.ts` authored, eve registers `eveChannel({ auth: [localDev(), vercelOidc()] })`: `localDev()` opens the routes on localhost, `vercelOidc()` admits Vercel OIDC callers in production, and everything else gets a `401`. To set your own auth policy, add `agent/channels/eve.ts`:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -82,8 +82,8 @@ For a public demo, use `none()` (also from `eve/channels/auth`) to skip authenti
 
 ## Dev vs deploy topology
 
-- **Local dev.** `npm run dev` boots the Eve dev server next to SvelteKit and proxies the Eve routes to it, so the browser only ever hits the SvelteKit origin. `npm run build && npm run preview` behaves the same way: the preview server gets its own Eve route proxy and either reuses the shared Eve server or starts one.
-- **Vercel.** The SvelteKit app and the Eve runtime deploy as a single project. The web app is public; the Eve runtime sits behind it on the same origin. Use `eveBuildCommand` for a project-specific agent build:
+- **Local dev.** `npm run dev` boots the eve dev server next to SvelteKit and proxies the eve routes to it, so the browser only ever hits the SvelteKit origin. `npm run build && npm run preview` behaves the same way: the preview server gets its own eve route proxy and either reuses the shared eve server or starts one.
+- **Vercel.** The SvelteKit app and the eve runtime deploy as a single project. The web app is public; the eve runtime sits behind it on the same origin. Use `eveBuildCommand` for a project-specific agent build:
 
   ```ts
   export default defineConfig({
@@ -96,7 +96,7 @@ For a public demo, use `none()` (also from `eve/channels/auth`) to skip authenti
   });
   ```
 
-- **Non-Vercel hosts.** When the Eve service runs on a separate origin, pass `host` directly to `useEveAgent`:
+- **Non-Vercel hosts.** When the eve service runs on a separate origin, pass `host` directly to `useEveAgent`:
 
   ```ts
   const agent = useEveAgent({

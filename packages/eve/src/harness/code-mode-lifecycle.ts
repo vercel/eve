@@ -19,7 +19,7 @@ type EmitCodeModeLifecycleEvent = (event: HandleMessageStreamEvent) => Promise<v
 
 /**
  * Builds code-mode lifecycle hooks that project nested host tool calls onto
- * Eve's existing action event stream.
+ * eve's existing action event stream.
  */
 export function createCodeModeLifecycle(input: {
   readonly emit: EmitCodeModeLifecycleEvent;

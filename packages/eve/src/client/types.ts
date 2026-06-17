@@ -35,7 +35,7 @@ export type ClientAuth =
  */
 export interface ClientOptions {
   /**
-   * Base URL of the Eve agent server.
+   * Base URL of the eve agent server.
    */
   readonly host: string;
 

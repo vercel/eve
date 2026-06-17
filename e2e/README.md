@@ -79,7 +79,7 @@ When adding e2e coverage:
 
 ## CI
 
-`.github/workflows/e2e-local.yml` builds the Eve package once per matrix leg,
+`.github/workflows/e2e-local.yml` builds the eve package once per matrix leg,
 then runs one fixture directory:
 
 ```sh

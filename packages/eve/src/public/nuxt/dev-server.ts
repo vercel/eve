@@ -158,7 +158,7 @@ async function acquireEveDevServerLock(appRoot: string): Promise<() => Promise<v
       await removeStaleEveDevServerLock(lockPath);
       if (Date.now() > deadline) {
         throw new Error(
-          `Timed out after ${DEV_SERVER_REGISTRY_TIMEOUT_MS}ms waiting for another Nuxt process to start Eve.`,
+          `Timed out after ${DEV_SERVER_REGISTRY_TIMEOUT_MS}ms waiting for another Nuxt process to start eve.`,
         );
       }
       await delay(DEV_SERVER_REGISTRY_POLL_MS);
@@ -186,7 +186,7 @@ function startServerProcess(input: {
       child.kill();
       reject(
         new Error(
-          `Timed out after ${DEFAULT_SERVER_READY_TIMEOUT_MS}ms waiting for Eve to print its server URL.`,
+          `Timed out after ${DEFAULT_SERVER_READY_TIMEOUT_MS}ms waiting for eve to print its server URL.`,
         ),
       );
     }, DEFAULT_SERVER_READY_TIMEOUT_MS);
@@ -204,7 +204,7 @@ function startServerProcess(input: {
       cleanup();
       reject(
         new Error(
-          `Eve server process exited before printing its server URL (code ${String(code)}, signal ${String(signal)}).`,
+          `eve server process exited before printing its server URL (code ${String(code)}, signal ${String(signal)}).`,
         ),
       );
     };
@@ -256,9 +256,9 @@ function startEveDevServer(appRoot: string): Promise<EveProcessHandle> {
 }
 
 /**
- * Resolve a shared Eve dev server for {@link appRoot}, reusing a healthy
+ * Resolve a shared eve dev server for {@link appRoot}, reusing a healthy
  * registered server when one exists and otherwise spawning a new one behind a
- * cross-process lock so concurrent Nuxt processes don't each boot Eve.
+ * cross-process lock so concurrent Nuxt processes don't each boot eve.
  */
 export async function resolveSharedEveDevServer(appRoot: string): Promise<EveProcessHandle> {
   const registeredOrigin = await readUsableEveDevServerRegistry(appRoot);

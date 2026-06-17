@@ -709,7 +709,7 @@ describe("verifyVercelOidc", () => {
         owner: "stranger",
         owner_id: "team_stranger",
         project: "stranger-agent",
-        // Different project ID than the deployed Eve app.
+        // Different project ID than the deployed eve app.
         project_id: "prj_other",
         sub: "owner:stranger:project:stranger-agent:environment:production",
       });

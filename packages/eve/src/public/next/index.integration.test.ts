@@ -95,7 +95,7 @@ describe("withEve Vercel config", () => {
     ).rejects.toThrow();
   });
 
-  it("uses an already configured root Eve service prefix", async () => {
+  it("uses an already configured root eve service prefix", async () => {
     const appRoot = await createTempAppRoot();
     process.chdir(appRoot);
     vi.stubEnv("NODE_ENV", "production");
@@ -136,7 +136,7 @@ describe("withEve Vercel config", () => {
     });
   });
 
-  it("uses an already configured Build Output Eve service prefix", async () => {
+  it("uses an already configured Build Output eve service prefix", async () => {
     const appRoot = await createTempAppRoot();
     process.chdir(appRoot);
     vi.stubEnv("NODE_ENV", "production");
@@ -195,7 +195,7 @@ describe("withEve Vercel config", () => {
     });
   });
 
-  it("accepts a custom Eve service build command", async () => {
+  it("accepts a custom eve service build command", async () => {
     const appRoot = await createTempAppRoot();
     process.chdir(appRoot);
     await mkdir(join(appRoot, ".vercel"), { recursive: true });
@@ -223,7 +223,7 @@ describe("withEve Vercel config", () => {
     });
   });
 
-  it("does not start a local Eve build while Next.js is building", async () => {
+  it("does not start a local eve build while Next.js is building", async () => {
     const appRoot = await createTempAppRoot();
     process.chdir(appRoot);
     vi.stubEnv("NODE_ENV", "production");

@@ -57,7 +57,7 @@ export interface ThemeColors {
  * the terminal can't be trusted with wide/box-drawing characters).
  */
 export interface ThemeGlyphs {
-  /** `▲` — the Vercel/Eve brand mark; prefixes the agent's own output. */
+  /** `▲` — the Vercel/eve brand mark; prefixes the agent's own output. */
   brand: string;
   /** `▌` — left gutter bar marking a user message. */
   user: string;

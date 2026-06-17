@@ -21,7 +21,7 @@ TELEGRAM_BOT_TOKEN=123456:...        # replies, typing, callbacks, proactive sen
 TELEGRAM_WEBHOOK_SECRET_TOKEN=...    # must match the secret_token you register
 ```
 
-You can pass the same values via `credentials: { botToken, webhookSecretToken }`. The channel mounts `POST /eve/v1/telegram`. Register the deployed URL yourself; Eve does not call `setWebhook`:
+You can pass the same values via `credentials: { botToken, webhookSecretToken }`. The channel mounts `POST /eve/v1/telegram`. Register the deployed URL yourself; eve does not call `setWebhook`:
 
 ```bash
 curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
@@ -47,7 +47,7 @@ The default `message.completed` handler sends plain text via `sendMessage`. It p
 
 ### Human-in-the-loop (HITL)
 
-Human-in-the-loop (HITL) turns option requests into inline-keyboard buttons and freeform requests into `ForceReply`. Telegram caps `callback_data` at 64 bytes, so Eve keeps compact callback ids in channel state instead. It acknowledges its own callbacks with `answerCallbackQuery`; anything it doesn't recognize goes to `onCallbackQuery`.
+Human-in-the-loop (HITL) turns option requests into inline-keyboard buttons and freeform requests into `ForceReply`. Telegram caps `callback_data` at 64 bytes, so eve keeps compact callback ids in channel state instead. It acknowledges its own callbacks with `answerCallbackQuery`; anything it doesn't recognize goes to `onCallbackQuery`.
 
 ### Proactive sessions
 
@@ -55,7 +55,7 @@ Start a session without an inbound message through `receive(telegram, { message,
 
 ### Attachments
 
-Inbound photos and documents are supported. Eve fetches them on demand via `getFile`, only when an upload policy allows the type:
+Inbound photos and documents are supported. eve fetches them on demand via `getFile`, only when an upload policy allows the type:
 
 ```ts
 export default telegramChannel({

@@ -101,10 +101,10 @@ export function registerDefinitionSource(key: string, entry: DefinitionSourceEnt
     if (existing.kind !== "ambiguous") {
       console.warn(
         [
-          `Eve could not assign a unique toolResultFrom identity for ${JSON.stringify(key)}.`,
+          `eve could not assign a unique toolResultFrom identity for ${JSON.stringify(key)}.`,
           `Conflicting definitions: ${formatDefinitionSourceForWarning(existing)} and ${formatDefinitionSourceForWarning(entry)}.`,
           "Multiple authored definitions share that fallback identity, so toolResultFrom will not match through it.",
-          "Use the original definition object loaded by Eve so source-derived identity can be used instead.",
+          "Use the original definition object loaded by eve so source-derived identity can be used instead.",
         ].join(" "),
       );
     }

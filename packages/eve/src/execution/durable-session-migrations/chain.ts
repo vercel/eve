@@ -53,7 +53,7 @@ export function runMigrationChain<TOut extends { readonly version: number }>(inp
   if (current.version > input.targetVersion) {
     throw new Error(
       `${input.label}: encountered version ${current.version}, which is newer than the supported version ${input.targetVersion}. ` +
-        `This usually indicates the wire was written by a newer Eve deployment than the one reading it.`,
+        `This usually indicates the wire was written by a newer eve deployment than the one reading it.`,
     );
   }
   while (current.version < input.targetVersion) {

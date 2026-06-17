@@ -28,7 +28,7 @@ interface SessionContext {
 }
 
 /**
- * One conversation with an Eve agent.
+ * One conversation with an eve agent.
  *
  * A session tracks conversation state (continuation token, session ID, stream
  * cursor) automatically across {@link send} calls. Read the state from

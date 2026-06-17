@@ -20,7 +20,7 @@ export async function compileSandboxDefinition(
   source: SandboxSourceRef,
   options: ModuleBackedDefinitionLoadOptions = {},
 ): Promise<CompiledSandboxDefinition> {
-  const message = `Expected the sandbox export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public Eve shape.`;
+  const message = `Expected the sandbox export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`;
   const normalized = normalizeSandboxDefinition(
     await loadModuleBackedDefinition({
       agentRoot,

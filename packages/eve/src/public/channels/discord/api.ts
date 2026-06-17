@@ -1,6 +1,6 @@
 /**
  * Minimal Discord REST API wrapper. The channel talks directly to Discord's
- * JSON HTTP API rather than exposing a third-party SDK through Eve.
+ * JSON HTTP API rather than exposing a third-party SDK through eve.
  */
 
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
@@ -210,7 +210,7 @@ export async function createDiscordFollowupMessage(
 }
 
 /**
- * JSON body for the Discord message endpoints Eve calls. When
+ * JSON body for the Discord message endpoints eve calls. When
  * `allowed_mentions` is omitted, channel write helpers default it to
  * {@link DISCORD_NO_MENTIONS} (no pings); set it explicitly to allow mentions.
  */

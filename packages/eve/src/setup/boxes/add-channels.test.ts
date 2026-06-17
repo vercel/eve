@@ -299,10 +299,10 @@ describe("addChannels box", () => {
 
     expect(prompter.log.warning).toHaveBeenCalledWith("Overwrote /tmp/project/app/page.tsx");
     expect(prompter.log.warning).toHaveBeenCalledWith(
-      'Overrode package.json engines.node from "22.x" to "24.x" because the previous value was not confined to the Node.js major selected by Eve.',
+      'Overrode package.json engines.node from "22.x" to "24.x" because the previous value was not confined to the Node.js major selected by eve.',
     );
     expect(prompter.log.warning).toHaveBeenCalledWith(
-      "Found competing Next.js config at /tmp/project/next.config.mjs; merge any needed settings into next.config.ts and remove it before starting the preview, or Next.js may ignore the generated Eve rewrite.",
+      "Found competing Next.js config at /tmp/project/next.config.mjs; merge any needed settings into next.config.ts and remove it before starting the preview, or Next.js may ignore the generated eve rewrite.",
     );
   });
 

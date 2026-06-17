@@ -77,13 +77,13 @@ export interface SandboxRemovePathOptions {
 }
 
 /**
- * Public Eve-owned sandbox session exposed to authored lifecycle hooks.
+ * Public eve-owned sandbox session exposed to authored lifecycle hooks.
  *
  * The eight I/O methods (`run`, `spawn`, `readFile`, `readBinaryFile`,
  * `readTextFile`, `writeFile`, `writeBinaryFile`, `writeTextFile`) are
  * pulled directly from the AI SDK {@link AiSdkSandbox} type, so authored
  * code that targets either surface uses identical signatures. `id` and
- * `resolvePath` are Eve-specific extensions that the runtime relies on
+ * `resolvePath` are eve-specific extensions that the runtime relies on
  * for caching and `/workspace` path anchoring.
  *
  * Relative paths resolve from `/workspace`, the live working directory

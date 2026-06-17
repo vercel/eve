@@ -9,7 +9,7 @@ function assertDevelopmentServerProtocol(url: URL, value: string): void {
 }
 
 /**
- * Parse and normalize an Eve server URL for the development REPL.
+ * Parse and normalize an eve server URL for the development REPL.
  */
 export function parseDevelopmentServerUrl(value: string): string {
   const normalizedValue = value.trim();

@@ -1,5 +1,5 @@
 /**
- * Stable framework-owned route prefix reserved for Eve's runtime transport
+ * Stable framework-owned route prefix reserved for eve's runtime transport
  * surfaces.
  */
 export const EVE_ROUTE_PREFIX = "/eve/v1";
@@ -12,7 +12,7 @@ export const EVE_HEALTH_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/health`;
 /**
  * Stable framework-owned route exposing the JSON inspection payload for
  * the current agent. Nitro registers this route with the application
- * surface, and the handler uses the same default auth chain as the Eve
+ * surface, and the handler uses the same default auth chain as the eve
  * channel: local development accepts loopback requests, while deployed
  * Vercel targets require OIDC.
  */
@@ -83,7 +83,7 @@ export function createEveDevDispatchSchedulePath(scheduleId: string): string {
  * via `resumeHook(token, payload)`.
  *
  * The route is unauthenticated by design: an OAuth IdP follows this URL
- * via a 3xx redirect from the user's browser with no Eve credentials
+ * via a 3xx redirect from the user's browser with no eve credentials
  * attached. The token is the unguessable capability that authorizes the
  * resume; anyone who has it can deliver the callback payload, which is
  * exactly what the IdP needs to do.

@@ -20,7 +20,7 @@ export function createAuthoredModuleBundleError(modulePath: string, error: unkno
     )
   ) {
     hints.push(
-      "If this comes from an asset import, Eve only supports assets that Rolldown can emit for a Node ESM bundle; otherwise load the file through fs/import.meta.url or externalize the package.",
+      "If this comes from an asset import, eve only supports assets that Rolldown can emit for a Node ESM bundle; otherwise load the file through fs/import.meta.url or externalize the package.",
     );
   }
 

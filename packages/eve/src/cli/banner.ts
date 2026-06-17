@@ -5,7 +5,7 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 export const EVE_WORDMARK = "eve";
 export const EVE_BETA_TERMS_URL = "https://vercel.com/docs/release-phases/public-beta-agreement";
 export const EVE_PREVIEW_NOTICE =
-  "Eve is currently a preview and subject to the Vercel beta terms; the framework, APIs, documentation, and behavior may change before general availability.";
+  "eve is currently a preview and subject to the Vercel beta terms; the framework, APIs, documentation, and behavior may change before general availability.";
 
 /**
  * The boot banner shared by every CLI command that announces itself: the eve

@@ -2,7 +2,7 @@ import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { InputResponse } from "#runtime/input/types.js";
 
 /**
- * Client-side reducer event emitted before Eve confirms a submitted user
+ * Client-side reducer event emitted before eve confirms a submitted user
  * message with a `message.received` stream event.
  */
 export interface ClientMessageSubmittedEvent {
@@ -16,7 +16,7 @@ export interface ClientMessageSubmittedEvent {
 
 /**
  * Client-side reducer event emitted when a submitted user message fails before
- * Eve confirms it with a `message.received` stream event.
+ * eve confirms it with a `message.received` stream event.
  */
 export interface ClientMessageFailedEvent {
   readonly data: {
@@ -43,9 +43,9 @@ export interface ClientInputRespondedEvent {
 }
 
 /**
- * Event consumed by Eve agent reducers.
+ * Event consumed by eve agent reducers.
  *
- * Server events are authoritative Eve stream events. They include text,
+ * Server events are authoritative eve stream events. They include text,
  * reasoning, tool/action requests and results, HITL input requests, connection
  * authorization events, subagent events, and session lifecycle events. Client
  * events are projection-only events created by client state machines for local
@@ -58,7 +58,7 @@ export type EveAgentReducerEvent =
   | HandleMessageStreamEvent;
 
 /**
- * Projects Eve stream events into accumulated consumer data.
+ * Projects eve stream events into accumulated consumer data.
  */
 export interface EveAgentReducer<TData> {
   /**

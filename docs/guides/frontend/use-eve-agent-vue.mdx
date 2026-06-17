@@ -1,9 +1,9 @@
 ---
 title: "useEveAgent (Vue)"
-description: "Vue composable that drives an Eve agent session from the browser."
+description: "Vue composable that drives an eve agent session from the browser."
 ---
 
-`useEveAgent()` from `eve/vue` is how a Vue app talks to an Eve session. It opens a long-lived session, sends turns, and folds every stream event into reactive data you can bind in a template. Nuxt auto-imports it through the [module](./nuxt), and the [frontend overview](./overview) covers the shared model.
+`useEveAgent()` from `eve/vue` is how a Vue app talks to an eve session. It opens a long-lived session, sends turns, and folds every stream event into reactive data you can bind in a template. Nuxt auto-imports it through the [module](./nuxt), and the [frontend overview](./overview) covers the shared model.
 
 ## Basic usage
 
@@ -130,7 +130,7 @@ const agent = useEveAgent({
 
 ## Custom host and credentials
 
-When your Eve server lives somewhere other than the same origin, point at it with `host` and attach credentials through `auth` or `headers`. Pass a function and it re-resolves before each request:
+When your eve server lives somewhere other than the same origin, point at it with `host` and attach credentials through `auth` or `headers`. Pass a function and it re-resolves before each request:
 
 ```ts
 const agent = useEveAgent({
@@ -167,7 +167,7 @@ const agent = useEveAgent({
 
 The composable takes a few per-turn callbacks:
 
-- `onEvent(event)`: fires for each Eve stream event as it arrives.
+- `onEvent(event)`: fires for each eve stream event as it arrives.
 - `onError(error)`: fires with the last `Error` when a turn fails.
 - `onFinish(snapshot)`: fires with the final snapshot once a turn settles.
 - `onSessionChange(session)`: fires when the session cursor advances. Persist it to resume across reloads.
@@ -182,7 +182,7 @@ const agent = useEveAgent({
 
 Two more options tune turn behavior:
 
-- `optimistic` (default `true`): projects submitted user messages into `data` before Eve confirms them with a `message.received` event. These are reducer-facing projection events only; `events` stays the authoritative Eve stream.
+- `optimistic` (default `true`): projects submitted user messages into `data` before eve confirms them with a `message.received` event. These are reducer-facing projection events only; `events` stays the authoritative eve stream.
 - `maxReconnectAttempts` (default `3`): stream reconnection budget per turn.
 
 ## Custom reducer
@@ -207,7 +207,7 @@ const agent = useEveAgent({ reducer: toolCounter });
 // agent.data.value is ToolLog
 ```
 
-`reduce(data, event)` receives both authoritative Eve stream events and client projection events (`client.message.submitted`, `client.message.failed`, `client.input.responded`). Handle the client events too if you want optimistic and HITL state in your projection. Otherwise, return `data` unchanged for them.
+`reduce(data, event)` receives both authoritative eve stream events and client projection events (`client.message.submitted`, `client.message.failed`, `client.input.responded`). Handle the client events too if you want optimistic and HITL state in your projection. Otherwise, return `data` unchanged for them.
 
 ## What to read next
 

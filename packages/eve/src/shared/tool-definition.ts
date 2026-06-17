@@ -70,7 +70,7 @@ export interface PublicToolDefinitionWithExecuteFn<
 }
 
 /**
- * Eve-owned shape for the model-facing tool result produced by
+ * eve-owned shape for the model-facing tool result produced by
  * `toModelOutput`. Structurally compatible with the AI SDK's
  * `ToolResultOutput` so the harness can forward it without conversion.
  */

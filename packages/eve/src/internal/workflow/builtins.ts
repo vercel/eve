@@ -1,8 +1,8 @@
 /**
- * Built-in Workflow response body steps used by Eve-owned workflow bundles.
+ * Built-in Workflow response body steps used by eve-owned workflow bundles.
  *
  * These mirror Workflow's tiny `workflow/internal/builtins` module without
- * requiring Eve to depend on Workflow's umbrella package.
+ * requiring eve to depend on Workflow's umbrella package.
  */
 export async function __builtin_response_array_buffer(
   this: Request | Response,
@@ -40,7 +40,7 @@ function formatUnknownError(error: unknown): string {
  * dispatches into the workflow runtime with the step id
  * `"__builtin_set_attributes"`; the runtime walks the deployment's step
  * registry to resolve it, so the step has to live inside an
- * Eve-vendored builtins module that the registry visits. The Eve bundler
+ * eve-vendored builtins module that the registry visits. The eve bundler
  * already pulls this file in via `resolveWorkflowModulePath("workflow/internal/builtins")`,
  * so adding the function here is sufficient to register it.
  *

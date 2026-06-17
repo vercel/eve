@@ -12,7 +12,7 @@ function createDevelopmentServerBaseUrl(serverUrl: string): URL {
 }
 
 /**
- * Resolves one Eve route against the configured development server URL.
+ * Resolves one eve route against the configured development server URL.
  *
  * Test-only helper.
  */

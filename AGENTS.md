@@ -3,11 +3,11 @@
 Guidance for coding agents (and humans) working in this repository. For setup,
 PR workflow, and release process, see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
-## About Eve
+## About eve
 
-Eve is a filesystem-first framework for durable backend AI agents. You author
+eve is a filesystem-first framework for durable backend AI agents. You author
 an agent as a directory on disk — instructions, skills, tools, connections,
-channels, subagents, and schedules are all files — and Eve compiles and runs it.
+channels, subagents, and schedules are all files — and eve compiles and runs it.
 See the [README](./README.md) for the full overview and
 [`docs/`](./docs) for user-facing documentation.
 
@@ -55,12 +55,12 @@ or scenario fixtures. Nothing is done until `typecheck`, `lint`, `fmt`,
 2. **Small modules over big helpers.** Favor composable primitives with narrow
    responsibilities. Split files that carry multiple concerns.
 
-3. **Wrap third-party dependencies.** Do not expose third-party APIs as Eve
-   public APIs. Wrap them in Eve-owned surfaces so internals can change freely.
+3. **Wrap third-party dependencies.** Do not expose third-party APIs as eve
+   public APIs. Wrap them in eve-owned surfaces so internals can change freely.
    Add runtime `dependencies` only as a last resort: prefer vendoring code or
    generated artifacts into the repository and listing the source package under
    `devDependencies`. The `eve` package should aim to keep `nitro` as its only
-   runtime dependency. This keeps Eve installs as small as possible and avoids
+   runtime dependency. This keeps eve installs as small as possible and avoids
    exposure to hijacked nested dependencies that are not pinned directly in the
    main lockfile.
 
@@ -173,7 +173,7 @@ claiming verification passed. See [`e2e/README.md`](./e2e/README.md).
 ## Changesets
 
 Every PR that touches the published `eve` package must include a
-changeset (`pnpm changeset`). Because Eve is pre-1.0, use `patch` in most
+changeset (`pnpm changeset`). Because eve is pre-1.0, use `patch` in most
 cases, including bug fixes and new features. Use `minor` only when the change
 breaks a public API. Write the body for someone reading release notes — what
 changed and what they'll see differently, in 1–2 sentences.

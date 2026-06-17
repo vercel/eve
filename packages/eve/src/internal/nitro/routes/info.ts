@@ -55,7 +55,7 @@ async function resolveGatewayCredentialPresence(
 /**
  * Builds the package-owned JSON inspection response for the current agent.
  *
- * The route keeps the same default auth chain as the Eve channel:
+ * The route keeps the same default auth chain as the eve channel:
  * local development requests are accepted by hostname, while deployed
  * Vercel targets require a valid OIDC bearer.
  */

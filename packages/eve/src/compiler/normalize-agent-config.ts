@@ -39,8 +39,8 @@ export async function compileAgentConfig(
           source: configModule,
         }),
     configModule === undefined
-      ? `Expected the default agent config to match the public Eve shape.`
-      : `Expected the agent config export "${configModule.exportName ?? "default"}" from "${configModulePath}" to match the public Eve shape.`,
+      ? `Expected the default agent config to match the public eve shape.`
+      : `Expected the agent config export "${configModule.exportName ?? "default"}" from "${configModulePath}" to match the public eve shape.`,
   );
   const model = await normalizeAuthoredModelReference({
     modelCatalog: context.modelCatalog,

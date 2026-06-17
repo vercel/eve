@@ -28,7 +28,7 @@ export function deserializeUrlFilePart(data: string): URL {
 
 /**
  * Framework-internal `FilePart.data` ref schemes (`eve-url:`, `eve-sandbox:`,
- * `eve-attachment:`). Eve produces these during its own serialization and
+ * `eve-attachment:`). eve produces these during its own serialization and
  * staging; an inbound channel payload must never carry one. The staging
  * pipeline trusts the scheme prefix and reconstitutes such a string into a
  * privileged sandbox/attachment read, so a caller-supplied ref is an

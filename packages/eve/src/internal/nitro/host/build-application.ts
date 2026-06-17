@@ -56,11 +56,11 @@ function normalizeServicePrefix(service: Record<string, unknown>): string {
 }
 
 /**
- * Resolve the route prefix an Eve service is mounted under when it is
+ * Resolve the route prefix an eve service is mounted under when it is
  * co-deployed behind a host web service (Next.js, Nuxt, SvelteKit etc.).
  *
  * Any service whose framework is not `eve` is treated as a host that proxies
- * Eve's transport routes behind a prefix. A standalone Eve deployment (no host
+ * eve's transport routes behind a prefix. A standalone eve deployment (no host
  * service) returns `undefined` so its output stays routable at the root.
  */
 function resolveCoDeployedEveServicePrefix(input: {
@@ -225,7 +225,7 @@ async function buildVercelNitroSurface(
 }
 
 /**
- * Builds the production Nitro output for an Eve application.
+ * Builds the production Nitro output for an eve application.
  */
 export async function buildApplication(rootDir: string): Promise<string> {
   const preparedHost = await prepareApplicationHost(rootDir);

@@ -9,7 +9,7 @@ import type { JustBashSandboxCreateOptions } from "#public/sandbox/just-bash-san
  * real binaries (`git`, `node`, package managers) and no network
  * isolation.
  *
- * The `just-bash` package is not bundled with Eve. When it is missing,
+ * The `just-bash` package is not bundled with eve. When it is missing,
  * `eve dev` installs it into the application automatically (disable
  * with `autoInstall: false`); production processes fail with an
  * actionable install error instead. Configuring this backend pins it

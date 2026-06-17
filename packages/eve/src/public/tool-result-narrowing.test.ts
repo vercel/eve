@@ -159,7 +159,7 @@ describe("toolResultFrom", () => {
     expect(warn).toHaveBeenCalledOnce();
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining(
-        'Eve could not assign a unique toolResultFrom identity for "tool:Run the shared action."',
+        'eve could not assign a unique toolResultFrom identity for "tool:Run the shared action."',
       ),
     );
     expect(warn).toHaveBeenCalledWith(
@@ -256,7 +256,7 @@ describe("toolResultFrom", () => {
     expect(warn).toHaveBeenCalledOnce();
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining(
-        'Eve could not assign a unique toolResultFrom identity for "connection:https://mcp.example.test"',
+        'eve could not assign a unique toolResultFrom identity for "connection:https://mcp.example.test"',
       ),
     );
     expect(warn).toHaveBeenCalledWith(

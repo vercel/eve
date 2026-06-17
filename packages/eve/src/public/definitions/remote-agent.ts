@@ -5,7 +5,7 @@ import { EVE_CREATE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import type { JsonObject } from "#shared/json.js";
 
 /**
- * Public definition for a remote Eve agent. The compiler lowers it to a
+ * Public definition for a remote eve agent. The compiler lowers it to a
  * subagent tool.
  */
 export interface RemoteAgentDefinition {
@@ -24,18 +24,18 @@ export interface RemoteAgentDefinition {
    */
   readonly outputSchema?: StandardJSONSchemaV1<unknown, unknown> | JsonObject;
   /**
-   * Route Eve appends to `url` for the create-session request. Defaults to the
+   * Route eve appends to `url` for the create-session request. Defaults to the
    * framework create-session route (`/eve/v1/session`).
    */
   readonly path: string;
   /**
-   * Base URL of the remote Eve deployment to call.
+   * Base URL of the remote eve deployment to call.
    */
   readonly url: string;
 }
 
 /**
- * Authored input that {@link defineRemoteAgent} accepts. Eve derives identity
+ * Authored input that {@link defineRemoteAgent} accepts. eve derives identity
  * from the file path under `agent/subagents/`; authored definitions do not
  * carry a `name` field.
  */
@@ -44,7 +44,7 @@ export type RemoteAgentDefinitionInput = Omit<RemoteAgentDefinition, "kind" | "p
 };
 
 /**
- * Defines a remote Eve agent that the parent can call as a subagent tool. The
+ * Defines a remote eve agent that the parent can call as a subagent tool. The
  * compiler lowers it at compile time from the file path under `agent/subagents/`.
  *
  * Stamps `kind: "remote"` and, when `path` is omitted, defaults it to the

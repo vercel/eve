@@ -1,9 +1,9 @@
 ---
 title: "Continuations"
-description: "Persist and resume Eve client sessions with continuation tokens, session IDs, and stream cursors."
+description: "Persist and resume eve client sessions with continuation tokens, session IDs, and stream cursors."
 ---
 
-Every Eve client turn returns two handles, and mixing them up is a common mistake. The TypeScript client tracks both for you:
+Every eve client turn returns two handles, and mixing them up is a common mistake. The TypeScript client tracks both for you:
 
 - `continuationToken`: the resume handle. Use it to send the next user turn.
 - `sessionId`: the stream-and-inspect handle. Use it to attach to event history.
@@ -115,4 +115,4 @@ for await (const event of session.stream()) {
 
 - [Streaming](./streaming): stream events and reconnect by index
 - [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming): the raw HTTP contract
-- [Eve channel](../../channels/eve): where continuation tokens come from
+- [eve channel](../../channels/eve): where continuation tokens come from

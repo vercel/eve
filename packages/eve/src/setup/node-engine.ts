@@ -2,7 +2,7 @@ import semver from "#compiled/semver/index.js";
 
 const { Range, intersects, minVersion, subset, validRange } = semver;
 
-/** An authored Node.js engine value replaced by Eve's selected scaffold major. */
+/** An authored Node.js engine value replaced by eve's selected scaffold major. */
 export interface NodeEngineOverride {
   previous: unknown;
   next: string;
@@ -42,21 +42,21 @@ function nextAllowedMajor(requiredRange: string, currentMajor: number): number |
 
 /**
  * The single-major `engines.node` value a generated project should declare,
- * derived from Eve's required range — e.g. `">=24"` → `"24.x"`. A scaffolded
+ * derived from eve's required range — e.g. `">=24"` → `"24.x"`. A scaffolded
  * app is a deployment artifact, not a library: Vercel reads `engines.node` to
  * pick the build's Node and resolves an open range to the newest *supported*
  * major, so `">=24"` would float onto a future major as Vercel widens its set,
  * whereas `"24.x"` stays on major 24 while still taking minor/patch updates.
- * Eve's own package keeps the open range; only generated apps pin.
+ * eve's own package keeps the open range; only generated apps pin.
  */
 export function pinnedNodeEngineMajor(requiredRange: string): string {
   const normalized = validRange(requiredRange);
   if (normalized === null) {
-    throw new Error(`Eve declares an invalid Node.js engine range: "${requiredRange}".`);
+    throw new Error(`eve declares an invalid Node.js engine range: "${requiredRange}".`);
   }
   const floor = minVersion(normalized);
   if (floor === null) {
-    throw new Error(`Eve declares an empty Node.js engine range: "${requiredRange}".`);
+    throw new Error(`eve declares an empty Node.js engine range: "${requiredRange}".`);
   }
 
   let candidateMajor: number | undefined = floor.major;
@@ -69,13 +69,13 @@ export function pinnedNodeEngineMajor(requiredRange: string): string {
   }
 
   throw new Error(
-    `Eve's Node.js engine range "${requiredRange}" cannot be represented by a major pin without widening it.`,
+    `eve's Node.js engine range "${requiredRange}" cannot be represented by a major pin without widening it.`,
   );
 }
 
 /**
  * Reconciles an authored `engines.node` value with the single Node.js major
- * selected for scaffolded Eve projects. Existing ranges are preserved only
+ * selected for scaffolded eve projects. Existing ranges are preserved only
  * when every version they permit remains inside that selected major.
  */
 export function reconcileNodeEngine(
@@ -100,10 +100,10 @@ function formatPackageJsonValue(value: unknown): string {
   return JSON.stringify(value) ?? String(value);
 }
 
-/** Formats the warning shown when Eve replaces an incompatible Node.js engine value. */
+/** Formats the warning shown when eve replaces an incompatible Node.js engine value. */
 export function formatNodeEngineOverrideWarning(override: NodeEngineOverride): string {
   return (
     `Overrode package.json engines.node from ${formatPackageJsonValue(override.previous)} ` +
-    `to "${override.next}" because the previous value was not confined to the Node.js major selected by Eve.`
+    `to "${override.next}" because the previous value was not confined to the Node.js major selected by eve.`
   );
 }

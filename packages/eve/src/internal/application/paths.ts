@@ -81,9 +81,9 @@ export function resolveWorkflowBuildDirectory(appRoot: string): string {
 
 /*
  * Defensive cleanup: removes legacy sibling cache directories whose recorded
- * eveVersion does not match the currently installed Eve. Earlier versions
+ * eveVersion does not match the currently installed eve. Earlier versions
  * keyed the cache directory by `appRoot + workflowId` (which embedded the
- * Eve version), so an upgrade left one or more orphaned directories on
+ * eve version), so an upgrade left one or more orphaned directories on
  * disk. Without this sweep those directories can still be picked up by
  * downstream build steps and bake stale step IDs (e.g.
  * `step//eve@0.18.3//...`) into a freshly built dev bundle.

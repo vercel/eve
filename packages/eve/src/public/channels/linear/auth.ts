@@ -1,7 +1,7 @@
 /**
  * Linear channel credential resolvers.
  *
- * Eve keeps Linear access tokens out of model-visible context. Channel helpers
+ * eve keeps Linear access tokens out of model-visible context. Channel helpers
  * resolve them only when verifying inbound webhooks or calling Linear's
  * GraphQL API to emit Agent Activities.
  */

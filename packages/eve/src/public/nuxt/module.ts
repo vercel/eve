@@ -21,30 +21,30 @@ export { EVE_NUXT_SERVICE_PREFIX };
 const DEFAULT_EVE_BUILD_COMMAND = "eve build";
 
 /**
- * Options for the Eve Nuxt module.
+ * Options for the eve Nuxt module.
  */
 export interface EveNuxtModuleOptions {
   /**
-   * Path to the Eve application root, resolved relative to the Nuxt project
+   * Path to the eve application root, resolved relative to the Nuxt project
    * root unless absolute. Defaults to the Nuxt project root. The dev server is
-   * spawned here and written as the Eve service entrypoint in `vercel.json`
+   * spawned here and written as the eve service entrypoint in `vercel.json`
    * (relative to the Nuxt root).
    */
   eveRoot?: string;
   /**
-   * Build command for the generated Eve Vercel service. Defaults to `"eve build"`.
+   * Build command for the generated eve Vercel service. Defaults to `"eve build"`.
    */
   eveBuildCommand?: string;
   /**
    * Set to `false` to skip creating or updating `vercel.json`. By default the
    * module ensures `vercel.json` contains `experimentalServices` for the Nuxt
-   * app and Eve app.
+   * app and eve app.
    */
   configureVercelJson?: boolean;
   /**
-   * Private Vercel service prefix Eve transport is proxied to. Defaults to
+   * Private Vercel service prefix eve transport is proxied to. Defaults to
    * {@link EVE_NUXT_SERVICE_PREFIX}. When `configureVercelJson` is enabled, it
-   * is written as the Eve service `routePrefix`, but an existing `routePrefix`
+   * is written as the eve service `routePrefix`, but an existing `routePrefix`
    * in `vercel.json` takes precedence. Normalized to a leading-slash,
    * no-trailing-slash route; cannot resolve to `/`.
    */
@@ -75,7 +75,7 @@ interface NitroVercelConfigHost {
 }
 
 /**
- * Resolve the destination Eve routes proxy to. In dev this is an explicit
+ * Resolve the destination eve routes proxy to. In dev this is an explicit
  * `EVE_BASE_URL` or a shared dev server spawned on demand; in production it is
  * the Vercel private service or a configured origin/port.
  *
@@ -106,12 +106,12 @@ async function resolveEveProxyTarget(input: {
 }
 
 /**
- * Nuxt module that wires an Eve agent into a Nuxt app. Register under `modules`
+ * Nuxt module that wires an eve agent into a Nuxt app. Register under `modules`
  * (configured via the `eve` config key). It auto-imports the `useEveAgent()`
- * composable, routes Eve transport requests (`/eve/v1/**`) to the Eve service
+ * composable, routes eve transport requests (`/eve/v1/**`) to the eve service
  * (a shared dev server spawned on demand in dev, a Vercel sibling service or a
  * configured origin/port in production), and unless `configureVercelJson` is
- * `false`, ensures `vercel.json` declares both the Nuxt and Eve services.
+ * `false`, ensures `vercel.json` declares both the Nuxt and eve services.
  * Requires Nuxt >= 4.0.0. Configure via {@link EveNuxtModuleOptions}.
  */
 export default defineNuxtModule<EveNuxtModuleOptions>({
@@ -133,9 +133,9 @@ export default defineNuxtModule<EveNuxtModuleOptions>({
     // without an explicit import, matching Nuxt's composable conventions.
     addImports({ name: "useEveAgent", from: "eve/vue" });
 
-    // On Vercel the Eve app deploys as a sibling experimental service. A Nitro
+    // On Vercel the eve app deploys as a sibling experimental service. A Nitro
     // runtime `proxy` rule can't reach it — the proxied request loops back into
-    // the Nuxt function and 404s — so route Eve transport at the edge via a
+    // the Nuxt function and 404s — so route eve transport at the edge via a
     // build-config rewrite, mirroring the Next.js integration.
     if (!nuxt.options.dev && process.env.VERCEL) {
       const rewrite = createEveVercelRewriteRoute(servicePrefix);
@@ -151,7 +151,7 @@ export default defineNuxtModule<EveNuxtModuleOptions>({
       };
     } else {
       // Dev (and non-Vercel production, which proxies to an absolute origin):
-      // booting the shared Eve dev server can take a while, so defer it out of
+      // booting the shared eve dev server can take a while, so defer it out of
       // module setup. `modules:done` still runs before Nitro is configured, so
       // the proxy route rule is registered in time while other modules' setup
       // isn't blocked behind the spawn.

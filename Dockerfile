@@ -6,7 +6,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG NODE_MAJOR=24
 ARG PNPM_VERSION=11.5.2
 
-LABEL org.opencontainers.image.description="Sandbox base image for Eve agents."
+LABEL org.opencontainers.image.description="Sandbox base image for eve agents."
 LABEL org.opencontainers.image.source="https://github.com/vercel/eve"
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]

@@ -16,7 +16,7 @@ const CLOSED_FRONTMATTER_PATTERN = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/;
  * gray-matter ships a built-in `javascript` frontmatter engine that runs
  * `eval()` on the frontmatter body, so a document whose opening fence is
  * `---javascript` (or `---js`) would execute arbitrary code the instant it is
- * parsed — before any of Eve's validators run. Authored markdown (skills,
+ * parsed — before any of eve's validators run. Authored markdown (skills,
  * schedules, instructions) is treated as data, so we disable the code-capable
  * engines and pin the default language to YAML; a JavaScript frontmatter fence
  * now throws instead of evaluating.
@@ -98,7 +98,7 @@ function parseMarkdownDocument(source: string): ParsedMarkdownDocument {
 export function lowerInstructionsMarkdown(markdown: string): InstructionsDefinition {
   return normalizeInstructionsDefinition(
     { markdown },
-    "Expected authored instructions markdown to match the public Eve shape.",
+    "Expected authored instructions markdown to match the public eve shape.",
   );
 }
 
@@ -157,7 +157,7 @@ export function lowerScheduleMarkdown(source: string): ScheduleDefinition {
   return defineSchedule(
     normalizeScheduleDefinition(
       rawDefinition,
-      "Expected authored schedule markdown to match the public Eve shape.",
+      "Expected authored schedule markdown to match the public eve shape.",
     ),
   );
 }
@@ -194,7 +194,7 @@ export function lowerSkillMarkdown(
   return defineSkill(
     normalizeSkillDefinition(
       rawDefinition,
-      "Expected authored skill markdown to match the public Eve shape.",
+      "Expected authored skill markdown to match the public eve shape.",
     ),
   );
 }
@@ -228,8 +228,8 @@ function applyOptionalSkillFrontmatter(
 
 /**
  * Removes frontmatter keys that the broader Agent Skills format permits but
- * Eve deliberately does not consume. Skill identity is path-derived, so an
- * authored `name` is meaningless to Eve; we drop it silently rather than
+ * eve deliberately does not consume. Skill identity is path-derived, so an
+ * authored `name` is meaningless to eve; we drop it silently rather than
  * letting it surface as an unknown-key error during normalization.
  */
 const IGNORED_SKILL_FRONTMATTER_KEYS = ["name"];

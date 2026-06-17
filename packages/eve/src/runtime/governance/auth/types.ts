@@ -11,7 +11,7 @@ import type {
 export type RouteAuthAttributes = RuntimeSessionAuthAttributes;
 
 /**
- * One authenticated caller normalized into Eve-owned runtime metadata.
+ * One authenticated caller normalized into eve-owned runtime metadata.
  */
 export interface AuthenticatedCallerPrincipal {
   readonly attributes: RouteAuthAttributes;

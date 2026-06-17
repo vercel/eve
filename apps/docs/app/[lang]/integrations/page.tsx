@@ -5,7 +5,7 @@ import { Gallery } from "./components/gallery";
 
 const title = "Integrations";
 const description =
-  "Browse every third-party service Eve connects to: messaging channels and MCP connections, each with install, quick start, and configuration steps.";
+  "Browse every third-party service eve connects to: messaging channels and MCP connections, each with install, quick start, and configuration steps.";
 
 export const metadata: Metadata = {
   title,
@@ -21,7 +21,7 @@ const IntegrationsPage = () => (
         Integrations
       </h1>
       <p className="mt-5 max-w-2xl text-gray-900 text-lg">
-        Connect Eve to the services your agent needs, including messaging channels and tool
+        Connect eve to the services your agent needs, including messaging channels and tool
         connections over MCP or OpenAPI.
       </p>
     </section>

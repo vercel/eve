@@ -257,7 +257,7 @@ describe("startDevelopmentServer", () => {
     expect(process.env.EVE_DEVELOPMENT_SANDBOX_RUN_ID).toBeUndefined();
   });
 
-  it("uses Eve's default port when no port is requested", async () => {
+  it("uses eve's default port when no port is requested", async () => {
     const { startDevelopmentServer } = await import("./start-development-server.js");
     Object.assign(mocks.nitro.options.devServer, {
       port: 3000,
@@ -339,7 +339,7 @@ describe("startDevelopmentServer", () => {
 
     await expect(startDevelopmentServer("/tmp/eve-test")).rejects.toThrow(
       [
-        `A dev server is already running for this Eve agent (pid ${process.pid}).`,
+        `A dev server is already running for this eve agent (pid ${process.pid}).`,
         `To stop it, run: ${
           process.platform === "win32" ? "taskkill /PID" : "kill"
         } ${process.pid}`,

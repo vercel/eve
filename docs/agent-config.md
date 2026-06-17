@@ -17,7 +17,7 @@ export default defineAgent({
 });
 ```
 
-The root `agent.ts` can be omitted when no runtime config is needed. In that case, Eve defaults
+The root `agent.ts` can be omitted when no runtime config is needed. In that case, eve defaults
 to `anthropic/claude-sonnet-4.6`. When `agent.ts` is present, `model` is required.
 
 `model` accepts a gateway model id string, which routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a provider-authored `LanguageModel`:
@@ -57,7 +57,7 @@ See [Default harness](./concepts/default-harness#compaction) for how the loop ap
 | `modelOptions` | `AgentModelOptionsDefinition`           | none        | Provider option overrides forwarded to the model call.                                                                                                                                                                                                   |
 | `experimental` | `{ codeMode?: boolean }`                | flags unset | Opt-in flags that can change or disappear in any release. Treat them as unstable. `codeMode` routes executable tools through a sandboxed code-execution wrapper, where the model writes JavaScript that calls the tools inside the [sandbox](./sandbox). |
 | `outputSchema` | Standard Schema or a JSON Schema object | none        | Structured return type for task-mode runs (a subagent, schedule, or remote job). Interactive conversation turns ignore it unless the client supplies a per-message schema.                                                                               |
-| `build`        | `{ externalDependencies?: string[] }`   | none        | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while Eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                                 |
+| `build`        | `{ externalDependencies?: string[] }`   | none        | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                                 |
 
 `codeMode` is experimental and may change or be removed.
 

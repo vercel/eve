@@ -62,7 +62,7 @@ afterEach(() => {
 });
 
 describe("runDeployCommand", () => {
-  test("refuses a directory without an Eve agent", async () => {
+  test("refuses a directory without an eve agent", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "eve-deploy-empty-"));
     const logger = new TestLogger();
 
@@ -72,7 +72,7 @@ describe("runDeployCommand", () => {
     });
 
     expect(logger.errors).toEqual([
-      "No Eve agent in this directory. Run `eve init <name>`, then run this command from inside the new project.",
+      "No eve agent in this directory. Run `eve init <name>`, then run this command from inside the new project.",
     ]);
     expect(process.exitCode).toBe(1);
   });

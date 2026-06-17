@@ -20,10 +20,10 @@ export interface ScaffoldOptions {
   evePackage?: EvePackageContract;
   /** Parent directory the project folder is created inside. Defaults to cwd. */
   targetDirectory?: string;
-  /** Allow the in-place scaffold to replace Eve scaffold files that already exist. */
+  /** Allow the in-place scaffold to replace eve scaffold files that already exist. */
   overwriteExisting?: boolean;
   /**
-   * Headless mode: a headless re-run over an existing Eve project skips
+   * Headless mode: a headless re-run over an existing eve project skips
    * scaffolding (idempotent re-entry); an interactive run always scaffolds and
    * lets `scaffoldBaseProject` own the in-place conflict rules. The box prompts
    * for nothing, so this dispatch comes from the composition site.
@@ -33,7 +33,7 @@ export interface ScaffoldOptions {
 }
 
 /**
- * Whether the run is headless. A headless re-run over an existing Eve project
+ * Whether the run is headless. A headless re-run over an existing eve project
  * skips scaffolding (idempotent re-entry); an interactive run always scaffolds.
  */
 export interface ScaffoldInput {
@@ -43,7 +43,7 @@ export interface ScaffoldInput {
 /**
  * THE SCAFFOLD BOX: writes the base agent template into the path resolved by
  * the target box. It prompts for nothing; the gather only records which mode
- * ran, because a headless re-run on an already-scaffolded Eve project skips the
+ * ran, because a headless re-run on an already-scaffolded eve project skips the
  * write and continues setup instead of failing.
  */
 export function scaffold(options: ScaffoldOptions): SetupBox<SetupState, ScaffoldInput, string> {
@@ -54,7 +54,7 @@ export function scaffold(options: ScaffoldOptions): SetupBox<SetupState, Scaffol
 
     async gather(): Promise<ScaffoldInput> {
       // No questions: the only difference between modes is whether a re-run over
-      // an existing Eve project skips the write, a composition-time fact.
+      // an existing eve project skips the write, a composition-time fact.
       return { headless: options.headless ?? false };
     },
 
@@ -65,7 +65,7 @@ export function scaffold(options: ScaffoldOptions): SetupBox<SetupState, Scaffol
         : state.agentName;
       const projectPath = requireProjectPath(state);
       if (input.headless && !options.overwriteExisting && (await deps.isEveProject(projectPath))) {
-        prompter.log.message("Existing Eve project detected; continuing setup...");
+        prompter.log.message("Existing eve project detected; continuing setup...");
         return projectPath;
       }
 

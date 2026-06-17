@@ -29,7 +29,7 @@ export type {
 /**
  * The shape passed to {@link defineSandbox}: a discriminated union over
  * whether a `bootstrap` hook is present. `backend` is optional here (it is
- * required on the shared base): when omitted, Eve substitutes
+ * required on the shared base): when omitted, eve substitutes
  * `defaultBackend()` at runtime. `BO`/`SO` type the options for the
  * bootstrap-use and session-use functions respectively.
  */

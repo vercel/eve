@@ -3,7 +3,7 @@ title: "Instructions"
 description: "Author the agent's always-on system prompt with instructions.md or instructions.ts."
 ---
 
-Instructions are the always-on system prompt, the agent's permanent identity rather than a procedure it pulls in when the moment calls for it. Use them for anything that should hold on every turn, such as a rule, a persona, or a constraint. Eve prepends the instructions to every model call in the session.
+Instructions are the always-on system prompt, the agent's permanent identity rather than a procedure it pulls in when the moment calls for it. Use them for anything that should hold on every turn, such as a rule, a persona, or a constraint. eve prepends the instructions to every model call in the session.
 
 ## Author instructions
 
@@ -28,11 +28,11 @@ export default defineInstructions({
 });
 ```
 
-`defineInstructions` takes one field, `markdown`, the resolved prompt text. A module-backed prompt runs once at build time. Eve captures the resulting markdown into the compiled manifest, so the runtime serves the same prompt every session and never re-runs the module.
+`defineInstructions` takes one field, `markdown`, the resolved prompt text. A module-backed prompt runs once at build time. eve captures the resulting markdown into the compiled manifest, so the runtime serves the same prompt every session and never re-runs the module.
 
 ## Split instructions across a directory
 
-For more than one file, add an `agent/instructions/` directory. Eve reads its entries non-recursively and accepts both `.md` files and `.ts` modules (a `.ts` file can wrap `defineInstructions` or `defineDynamic`). Entries combine in alphabetical order by filename (`localeCompare`).
+For more than one file, add an `agent/instructions/` directory. eve reads its entries non-recursively and accepts both `.md` files and `.ts` modules (a `.ts` file can wrap `defineInstructions` or `defineDynamic`). Entries combine in alphabetical order by filename (`localeCompare`).
 
 A flat `agent/instructions.md` (or `.ts`) at the agent root and the directory can coexist. The root file's content comes first, then the sorted directory entries. You cannot author both `instructions.md` and `instructions.ts` at the root; that pairing is a build error.
 
@@ -57,7 +57,7 @@ To resolve the prompt at runtime from session context (auth, tenant, or channel)
 
 As the deployer, it is your responsibility to ensure your agent complies with applicable laws.
 
-Where an Eve agent communicates with people, you may be required to disclose that they are interacting with an automated AI system where law requires it. Eve does not add this disclosure automatically; configure it in your instructions and/or channel responses.
+Where an eve agent communicates with people, you may be required to disclose that they are interacting with an automated AI system where law requires it. eve does not add this disclosure automatically; configure it in your instructions and/or channel responses.
 
 ## What to read next
 

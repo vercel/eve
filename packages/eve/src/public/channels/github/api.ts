@@ -1,7 +1,7 @@
 /**
  * Minimal GitHub REST/GraphQL wrapper used by the GitHub channel.
  *
- * Eve exposes channel-owned helper types and functions instead of leaking a
+ * eve exposes channel-owned helper types and functions instead of leaking a
  * third-party SDK through public channel APIs.
  */
 

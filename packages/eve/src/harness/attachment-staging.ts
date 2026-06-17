@@ -141,7 +141,7 @@ export async function hydrateSandboxAttachments(
   const sandboxAccess = loadContext().get(SandboxKey);
   if (sandboxAccess === undefined) {
     throw new Error(
-      "Cannot hydrate sandbox-ref FilePart: no SandboxKey is bound on the active Eve context. " +
+      "Cannot hydrate sandbox-ref FilePart: no SandboxKey is bound on the active eve context. " +
         "Hydration must run inside a step scope with the framework sandbox provider installed.",
     );
   }

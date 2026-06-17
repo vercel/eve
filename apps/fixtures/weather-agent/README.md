@@ -1,8 +1,8 @@
 # Weather agent
 
-The weather-focused Eve fixture. It backs the repo root `pnpm dev`, the
+The weather-focused eve fixture. It backs the repo root `pnpm dev`, the
 bundle-analysis workflow, and manual smoke testing as a small representative
-Eve app:
+eve app:
 
 - `agent/agent.ts` — model config (`openai/gpt-5.5` with adaptive
   thinking)

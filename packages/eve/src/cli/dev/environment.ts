@@ -27,7 +27,7 @@ interface DevelopmentEnvironmentLoader {
 const developmentEnvironmentLoaders = new Map<string, DevelopmentEnvironmentLoader>();
 
 /**
- * Returns the local development environment files Eve loads from an
+ * Returns the local development environment files eve loads from an
  * application root, ordered from highest to lowest precedence.
  */
 export function getDevelopmentEnvironmentFilePaths(appRoot: string): string[] {

@@ -116,7 +116,7 @@ export interface ChannelDefinition<
   /**
    * Builds the per-step channel context handed to `events` and `deliver`.
    * Receives the live {@link SessionHandle}, so a factory can close over it to
-   * register late-bound callbacks. Eve writes state mutations made inside the
+   * register late-bound callbacks. eve writes state mutations made inside the
    * returned context back through `adapter.state`.
    *
    * Return the channel-owned context (thread handles, API clients, etc.). The
@@ -143,7 +143,7 @@ export interface ChannelDefinition<
    * Channel-owned metadata exposed to instrumentation callbacks. This is the
    * channel's public observability surface, not a dump of durable adapter state,
    * so keep it small. Return an object of JSON primitives, arrays, and plain
-   * objects: Eve omits `undefined` properties and drops projections containing
+   * objects: eve omits `undefined` properties and drops projections containing
    * values such as `Date` or `Map`.
    */
   readonly metadata?: (state: NonNullable<TState>) => TMetadata;

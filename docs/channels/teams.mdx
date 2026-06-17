@@ -26,7 +26,7 @@ By default the channel mounts at `POST /eve/v1/teams`. Point your Azure Bot or T
 
 ### Dispatch
 
-The default `onMessage` handles two cases: personal-chat messages, and channel or group-chat messages that mention the bot directly. Ambient resource-specific-consent messages are dropped unless you override it. Before dispatch, Eve strips the mention, adds a `<teams_context>` block, and scopes channel and group threads by root activity id (`replyToId ?? id`).
+The default `onMessage` handles two cases: personal-chat messages, and channel or group-chat messages that mention the bot directly. Ambient resource-specific-consent messages are dropped unless you override it. Before dispatch, eve strips the mention, adds a `<teams_context>` block, and scopes channel and group threads by root activity id (`replyToId ?? id`).
 
 ```ts
 import { defaultTeamsAuth, teamsChannel } from "eve/channels/teams";
@@ -45,7 +45,7 @@ Replies post as Markdown (`textFormat: "markdown"`), with oversized text split a
 
 ### Human-in-the-loop (HITL)
 
-A human-in-the-loop (HITL) `input.requested` event renders as an Adaptive Card. Buttons and options map to `Action.Submit`, selects to `Input.ChoiceSet`, and freeform to `Input.Text`. When the user submits, the activity converts to Eve `inputResponses` for you. For invokes that aren't HITL, handle them in `onInvoke(ctx, activity)`.
+A human-in-the-loop (HITL) `input.requested` event renders as an Adaptive Card. Buttons and options map to `Action.Submit`, selects to `Input.ChoiceSet`, and freeform to `Input.Text`. When the user submits, the activity converts to eve `inputResponses` for you. For invokes that aren't HITL, handle them in `onInvoke(ctx, activity)`.
 
 ### Proactive sessions
 

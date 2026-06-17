@@ -22,7 +22,7 @@ export interface MaterializableSkillPackage {
 }
 
 /**
- * Normalizes one named skill package into the concrete files Eve writes to
+ * Normalizes one named skill package into the concrete files eve writes to
  * workspace resources or the live sandbox.
  */
 export function normalizeSkillPackage(input: NamedSkillDefinition): MaterializableSkillPackage {
@@ -125,7 +125,7 @@ export function assertSafeSkillPackageName(name: string): void {
 
 function assertSafeSkillPackageFilePath(relativePath: string): void {
   if (relativePath === "SKILL.md") {
-    throw new Error('Skill package files must not include "SKILL.md"; Eve generates it.');
+    throw new Error('Skill package files must not include "SKILL.md"; eve generates it.');
   }
 
   if (

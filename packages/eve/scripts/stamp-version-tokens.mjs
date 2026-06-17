@@ -29,7 +29,7 @@ async function resolveCatalogVersion(packageName) {
 
 // These tokens are authored in source so scaffold templates can pin the same
 // versions as the package build. The setup scaffold (src/setup/scaffold) is now
-// part of the Eve source, so its templates ride into the CLI bundle; this stamp
+// part of the eve source, so its templates ride into the CLI bundle; this stamp
 // rewrites them in the final bundled output after rolldown has emitted every chunk.
 // Source of truth for the engine range scaffolded projects declare. Fail loudly
 // rather than stamp `undefined` into a generated package.json. Kept in sync with

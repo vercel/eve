@@ -47,7 +47,7 @@ export function normalizeInstrumentationChannelKind(
  * Returns the JSON object the projector produced. Returns `undefined`
  * without warning for a no-op `undefined`, or with a warning when it threw,
  * returned a `Promise`, returned an incorrect shape, or included values
- * outside Eve's JSON contract. Every rejection path is warning-only so
+ * outside eve's JSON contract. Every rejection path is warning-only so
  * instrumentation can never break the turn. Per-value shaping (for example
  * reserved-key filtering) is left to the caller, since the channel and
  * harness expose different value shapes.

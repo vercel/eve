@@ -5,7 +5,7 @@ import type { Nitro } from "nitro/types";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 
 /**
- * Builds an unguessable route path for Eve's Vercel cron handler.
+ * Builds an unguessable route path for eve's Vercel cron handler.
  *
  * Vercel cron jobs hit a single configurable path (default `/_vercel/cron`)
  * for every scheduled tick, identifying the schedule via the
@@ -13,7 +13,7 @@ import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
  * relies on the user setting a `CRON_SECRET` env var to authenticate
  * incoming requests.
  *
- * Eve sidesteps the manual env var by giving each build a unique random
+ * eve sidesteps the manual env var by giving each build a unique random
  * handler path under the framework's protocol prefix — the path itself is
  * the secret. Vercel's cron infra reads the path from the deploy's
  * `config.crons[]` so the platform always knows where to POST, and the same
@@ -31,7 +31,7 @@ export function createEveCronHandlerRoute(): string {
 }
 
 /**
- * Applies Eve's unguessable cron handler route to a Nitro instance built
+ * Applies eve's unguessable cron handler route to a Nitro instance built
  * with the Vercel preset.
  *
  * The Vercel preset reads `nitro.options.vercel.cronHandlerRoute` at two

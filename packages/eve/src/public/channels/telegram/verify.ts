@@ -19,7 +19,7 @@ export type TelegramWebhookSecretToken = string | (() => string | Promise<string
 /**
  * Caller-supplied inbound webhook verifier. Use it instead of
  * Telegram's secret-token header when an integration authenticates
- * forwarded webhooks before they reach Eve.
+ * forwarded webhooks before they reach eve.
  *
  * The return value selects how the channel handles the request: return a
  * falsy value to reject the request, a string to accept it and use that

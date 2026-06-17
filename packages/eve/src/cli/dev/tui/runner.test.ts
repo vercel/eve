@@ -543,7 +543,7 @@ describe("EveTUIRunner initial input", () => {
 });
 
 describe("EveTUIRunner native continuation state", () => {
-  it("continues an input request from Eve-native turn state", async () => {
+  it("continues an input request from eve-native turn state", async () => {
     const prompts: Array<string | undefined> = ["approve this", undefined];
     const session = sessionYieldingTurns([
       [

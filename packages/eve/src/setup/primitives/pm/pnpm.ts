@@ -15,7 +15,7 @@ export const PNPM_WORKSPACE_CONTENT = [
   "  - eve",
   "allowBuilds:",
   "  sharp: false",
-  "# Compatibility for Eve releases with an incomplete runtime manifest.",
+  "# Compatibility for eve releases with an incomplete runtime manifest.",
   "packageExtensions:",
   '  "eve@>=0.6.0-beta.13 <=0.7.0":',
   "    dependencies:",

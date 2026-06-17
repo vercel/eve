@@ -3,7 +3,7 @@ import type { NetworkPolicy } from "#compiled/@vercel/sandbox/index.js";
 /**
  * Firewall network policy applied to a live sandbox session.
  *
- * Eve-owned alias of the backend network-policy shape. Use it to restrict
+ * eve-owned alias of the backend network-policy shape. Use it to restrict
  * egress (`"deny-all"`, an allow-list) or to broker credentials onto
  * outgoing requests. A per-domain `transform` injects headers at the
  * firewall so secrets never enter the sandbox process:

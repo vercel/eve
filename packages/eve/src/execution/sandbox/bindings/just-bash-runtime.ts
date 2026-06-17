@@ -45,8 +45,8 @@ let justBashModulePromise: Promise<JustBashModule> | undefined;
 
 /**
  * Loads `just-bash` from the application's own dependency tree. The
- * package is intentionally not bundled with Eve — the backend is
- * opt-in — so when it is missing Eve installs it into the project
+ * package is intentionally not bundled with eve — the backend is
+ * opt-in — so when it is missing eve installs it into the project
  * during `eve dev` (unless `autoInstall: false`) and otherwise fails
  * with an actionable install error.
  */
@@ -60,7 +60,7 @@ async function loadJustBashModule(input: {
     importModule: async () => await import("just-bash"),
     missingMessage:
       "The just-bash sandbox backend requires the `just-bash` package, which is not bundled " +
-      "with Eve. Install it in your application (for example `pnpm add -D just-bash`), or use " +
+      "with eve. Install it in your application (for example `pnpm add -D just-bash`), or use " +
       "docker() / defaultSandbox() instead.",
     packageName: JUST_BASH_PACKAGE_NAME,
   }).catch((error: unknown) => {

@@ -3,7 +3,7 @@
  * by the {@link ContextKey} constructor so `deserializeContext` can resolve
  * string names back to typed keys without an explicit list.
  *
- * Rooted on `globalThis` so Nitro-inlined Eve and disk-imported Eve share one
+ * Rooted on `globalThis` so Nitro-inlined eve and disk-imported eve share one
  * registry. Each Nitro workflow chunk can carry its own evaluated copy of
  * `key.ts`; without a shared registry, a key registered by one chunk is
  * invisible to `resolveKey()` in another, and `serializeContext` /

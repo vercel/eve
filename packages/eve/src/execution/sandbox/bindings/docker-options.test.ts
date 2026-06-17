@@ -7,7 +7,7 @@ import {
 } from "#execution/sandbox/bindings/docker-options.js";
 
 describe("resolveDockerSandboxOptions", () => {
-  it("defaults to Eve's published sandbox runtime image with permissive networking", () => {
+  it("defaults to eve's published sandbox runtime image with permissive networking", () => {
     expect(resolveDockerSandboxOptions()).toEqual({
       env: {},
       image: DEFAULT_DOCKER_SANDBOX_IMAGE,

@@ -311,7 +311,7 @@ describe("SlackThread.refresh", () => {
     vi.unstubAllGlobals();
   });
 
-  it("hydrates recent messages with the Eve-owned Slack thread shape", async () => {
+  it("hydrates recent messages with the eve-owned Slack thread shape", async () => {
     const { thread } = buildSlackBinding({
       botToken: "xoxb-test",
       channelId: "C01",

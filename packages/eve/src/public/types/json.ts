@@ -1,5 +1,5 @@
 /**
- * Shared JSON primitive used by public Eve APIs that need to declare
+ * Shared JSON primitive used by public eve APIs that need to declare
  * author-supplied values as JSON-serializable.
  *
  * The canonical use site is {@link AuthorizationDefinition}, whose

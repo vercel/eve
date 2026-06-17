@@ -8,7 +8,7 @@ The Slack channel puts your agent inside a workspace. It answers `@mentions` and
 
 ## Set up Connect
 
-Create a Slack Connect client and copy its UID (e.g. `slack/my-agent`), then attach this project as the trigger destination at Eve's Slack route:
+Create a Slack Connect client and copy its UID (e.g. `slack/my-agent`), then attach this project as the trigger destination at eve's Slack route:
 
 ```bash
 npm install -g vercel@latest && export FF_CONNECT_ENABLED=1
@@ -17,7 +17,7 @@ vercel connect detach <uid> --yes
 vercel connect attach <uid> --triggers --trigger-path /eve/v1/slack --yes
 ```
 
-`FF_CONNECT_ENABLED=1` turns on the Connect commands, which are feature-flagged in the Vercel CLI today. The `create` step provisions a destination at the default Connect path. `detach` then `attach --trigger-path /eve/v1/slack` re-points the trigger at the Eve Slack route, since Eve does not serve the default Connect path. `--triggers` turns on Slack Event Subscriptions; without it, Slack never delivers `app_mention` or `message.im`. You can also create the client from the [Connect dashboard](https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Go+to+Connect).
+`FF_CONNECT_ENABLED=1` turns on the Connect commands, which are feature-flagged in the Vercel CLI today. The `create` step provisions a destination at the default Connect path. `detach` then `attach --trigger-path /eve/v1/slack` re-points the trigger at the eve Slack route, since eve does not serve the default Connect path. `--triggers` turns on Slack Event Subscriptions; without it, Slack never delivers `app_mention` or `message.im`. You can also create the client from the [Connect dashboard](https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Go+to+Connect).
 
 ## Add the channel
 
@@ -42,7 +42,7 @@ export default slackChannel({
 VERCEL_USE_EXPERIMENTAL_FRAMEWORKS=1 vercel deploy --prod
 ```
 
-`VERCEL_USE_EXPERIMENTAL_FRAMEWORKS=1` lets the Vercel CLI recognize Eve as a framework during the build. Eve's own setup commands set the same flag.
+`VERCEL_USE_EXPERIMENTAL_FRAMEWORKS=1` lets the Vercel CLI recognize eve as a framework during the build. eve's own setup commands set the same flag.
 
 ## How the channel handles messages
 
@@ -54,7 +54,7 @@ Inbound hooks decide whether to dispatch a turn and with what `auth`. Return `{ 
 - `onDirectMessage(ctx, message)` handles `message.im` events (needs `im:history` scope). Bot-authored messages and edits are filtered out first.
 - `onInteraction(action, ctx)` handles `block_actions` callbacks not consumed by HITL.
 
-You get the triggering mention by default, but not the earlier replies in the thread. Pull them in with `loadThreadContextMessages` and return them as `context`, which Eve appends to history as user messages the model sees on every later turn. Use `since: "last-agent-reply"` so repeated mentions in one thread inject only what is new:
+You get the triggering mention by default, but not the earlier replies in the thread. Pull them in with `loadThreadContextMessages` and return them as `context`, which eve appends to history as user messages the model sees on every later turn. Use `since: "last-agent-reply"` so repeated mentions in one thread inject only what is new:
 
 ```ts
 import { defaultSlackAuth, loadThreadContextMessages, slackChannel } from "eve/channels/slack";

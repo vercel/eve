@@ -1,6 +1,6 @@
-# SvelteKit with Eve demo
+# SvelteKit with eve demo
 
-A SvelteKit app with an embedded Eve agent, integrated through the
+A SvelteKit app with an embedded eve agent, integrated through the
 `eveSvelteKit()` Vite plugin:
 
 ```ts
@@ -12,7 +12,7 @@ export default defineConfig({
 ```
 
 The agent lives in `agent/` (instructions, tools, channels). The UI in
-`src/lib/` is a small agent console built on Eve's Svelte hooks, with
+`src/lib/` is a small agent console built on eve's Svelte hooks, with
 streaming, reasoning, and tool-call rendering.
 
 ## Run locally
@@ -23,7 +23,7 @@ pnpm --filter framework-sveltekit dev
 
 ## Deploy
 
-`vercel.json` declares two services: the SvelteKit app at `/` and Eve behind
+`vercel.json` declares two services: the SvelteKit app at `/` and eve behind
 the private `/_eve_internal/eve` service prefix, with rewrites exposing the
 public `/eve/v1/*` endpoints. See
 [the SvelteKit frontend docs](../../../docs/guides/frontend/sveltekit.mdx) for
