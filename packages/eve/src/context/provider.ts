@@ -38,4 +38,9 @@ export interface FrameworkContextProvider<T> {
 
   /** Adds provider-owned durable effects to a successfully committed harness step. */
   decorateStepResult?(value: T, result: StepResult): StepResult | Promise<StepResult>;
+
+  /**
+   * Releases step-local resources after commit, or after the step fails.
+   */
+  dispose?(value: T): void | Promise<void>;
 }

@@ -25,6 +25,12 @@ export interface SandboxBackendHandle<SO = Record<string, never>> {
    * when the backend supports durable sessions.
    */
   shutdown(): Promise<void>;
+  /**
+   * Releases step-local resources (e.g. brokered credentials) at the
+   * end of a step without stopping the underlying compute. Backends
+   * without step-scoped resources may omit this.
+   */
+  dispose?(): Promise<void>;
 }
 
 /**

@@ -61,9 +61,10 @@ function createTestRegistry(
   };
 }
 
-function createBackend(): SandboxBackend {
+function createBackend(onCreate?: () => void): SandboxBackend {
   const sandbox = mockSandbox({ id: "sbx_session_auth" });
   const create = vi.fn(async (input: SandboxBackendCreateInput) => {
+    onCreate?.();
     return {
       captureState: async () => ({
         backendName: "test",
@@ -82,7 +83,7 @@ function createBackend(): SandboxBackend {
 
 async function ensure(input: {
   readonly compiledArtifactsSource?: RuntimeCompiledArtifactsSource;
-  readonly runOnSession?: (callback: () => Promise<void>) => Promise<void>;
+  readonly runOnSession?: <T>(callback: () => Promise<T>) => Promise<T>;
   readonly registry: RuntimeSandboxRegistry;
   readonly state?: SandboxState;
   readonly tags?: Record<string, string>;
@@ -250,7 +251,10 @@ describe("ensureSandboxAccess", () => {
       observedSession = loadContext().require(SessionKey);
       observedSessionId = input.ctx.session.id;
     });
-    const backend = createBackend();
+    let observedCreateSession: Session | undefined;
+    const backend = createBackend(() => {
+      observedCreateSession = loadContext().require(SessionKey);
+    });
     const registry = createTestRegistry({ onSession }, backend);
 
     const access = await ensure({
@@ -259,6 +263,7 @@ describe("ensureSandboxAccess", () => {
     });
     await access.get();
 
+    expect(observedCreateSession).toBe(session);
     expect(observedSession).toBe(session);
     expect(observedSessionId).toBe("session_1");
     expect(onSession).toHaveBeenCalledWith({
@@ -272,7 +277,7 @@ describe("ensureSandboxAccess", () => {
   it("reattaches with persisted metadata and skips onSession when the session key matches", async () => {
     const ctx = new ContextContainer();
     ctx.set(SessionKey, createSession());
-    const runOnSession = async (callback: () => Promise<void>) =>
+    const runOnSession = async <T>(callback: () => Promise<T>) =>
       await contextStorage.run(ctx, callback);
     const onSession = vi.fn();
     const backend = createBackend();

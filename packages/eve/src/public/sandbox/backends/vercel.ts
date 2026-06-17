@@ -1,5 +1,6 @@
 import { createVercelSandbox } from "#execution/sandbox/bindings/vercel.js";
 import type { SandboxBackend } from "#public/definitions/sandbox-backend.js";
+import type { SandboxCredentialMap } from "#public/sandbox/credentials.js";
 import type {
   VercelSandboxBootstrapUseOptions,
   VercelSandboxOptions,
@@ -30,11 +31,18 @@ import type {
  * `sandbox.update(...)`; those settings persist into the snapshot.
  * `onSession({ use })` applies its options to the live session via the
  * SDK's `update` under the hood, overriding any overlapping field
- * from `opts`. `sessionCreateOptions`, when provided, is resolved only
- * when creating a fresh live session and can attach session-specific Drives.
+ * from `opts`. A brokered function-form `networkPolicy` remains
+ * framework-owned and is re-applied after `onSession({ use })`.
+ * `sessionCreateOptions`, when provided, is resolved only when creating
+ * a fresh live session and can attach session-specific Drives.
+ *
+ * A `credentials` map paired with a function-form `networkPolicy` resolves
+ * non-interactive credentials for the active principal on every step and
+ * injects them through the Vercel Sandbox firewall. Brokered credentials are
+ * replaced with empty values after the step completes.
  */
-export function vercel(
-  opts?: VercelSandboxOptions,
+export function vercel<C extends SandboxCredentialMap = Record<string, never>>(
+  opts?: VercelSandboxOptions<C>,
 ): SandboxBackend<VercelSandboxBootstrapUseOptions, VercelSandboxSessionUseOptions> {
   const { sessionCreateOptions, ...createOptions } = opts ?? {};
   return createVercelSandbox({

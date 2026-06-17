@@ -29,7 +29,7 @@ export interface EnsureSandboxAccessInput {
   readonly nodeId: string;
   readonly registry: RuntimeSandboxRegistry;
   readonly sessionId: string;
-  readonly runOnSession?: (callback: () => Promise<void>) => Promise<void>;
+  readonly runOnSession?: <T>(callback: () => Promise<T>) => Promise<T>;
   readonly state: SandboxState | null;
   readonly tags?: SandboxBackendTags;
 }
@@ -128,16 +128,19 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
       templateKey: keys.templateKey,
     };
 
-    const handle = await withDevelopmentSandboxProgress(
-      `eve: opening sandbox session "${formatNodeLabel(input.nodeId)}" on backend "${backend.name}"...`,
-      `eve: opening sandbox session "${formatNodeLabel(input.nodeId)}" on backend "${backend.name}"`,
+    const handle = await runOnSession(
       async () =>
-        await createBackendHandleWithPrewarmRetry({
-          appRoot,
-          backend,
-          compiledArtifactsSource: input.compiledArtifactsSource,
-          createInput,
-        }),
+        await withDevelopmentSandboxProgress(
+          `eve: opening sandbox session "${formatNodeLabel(input.nodeId)}" on backend "${backend.name}"...`,
+          `eve: opening sandbox session "${formatNodeLabel(input.nodeId)}" on backend "${backend.name}"`,
+          async () =>
+            await createBackendHandleWithPrewarmRetry({
+              appRoot,
+              backend,
+              compiledArtifactsSource: input.compiledArtifactsSource,
+              createInput,
+            }),
+        ),
     );
     trackActiveSandboxHandle({
       backendName: backend.name,
@@ -155,12 +158,11 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
     return handle;
   }
 
-  async function runOnSession(callback: () => Promise<void>): Promise<void> {
+  async function runOnSession<T>(callback: () => Promise<T>): Promise<T> {
     if (input.runOnSession !== undefined) {
-      await input.runOnSession(callback);
-      return;
+      return await input.runOnSession(callback);
     }
-    await callback();
+    return await callback();
   }
 
   return {
@@ -176,6 +178,12 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
         initialized,
         session: persistedSession,
       };
+    },
+    async dispose() {
+      if (handlePromise !== undefined) {
+        const handle = await handlePromise.catch(() => null);
+        await handle?.dispose?.();
+      }
     },
     async get(): Promise<SandboxSession | null> {
       const handle = await getHandle();

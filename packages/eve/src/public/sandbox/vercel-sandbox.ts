@@ -1,4 +1,9 @@
 import type * as Vercel from "#compiled/@vercel/sandbox/index.js";
+import type {
+  ResolvedSandboxCredentials,
+  SandboxCredentialMap,
+} from "#public/sandbox/credentials.js";
+import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 
 type VercelCreateOptions = NonNullable<Parameters<typeof Vercel.Sandbox.create>[0]>;
 
@@ -14,7 +19,14 @@ type VercelSandboxAuthorCreateOptions<T> = T extends unknown
   : never;
 
 /**
- * Options accepted by `vercel(opts)`. Forwarded to Vercel
+ * Static network policy or a per-step builder receiving brokered credentials.
+ */
+export type VercelSandboxNetworkPolicy<C extends SandboxCredentialMap> =
+  | SandboxNetworkPolicy
+  | ((credentials: ResolvedSandboxCredentials<C>) => SandboxNetworkPolicy);
+
+/**
+ * Create options accepted by `vercel(opts)`. Forwarded to Vercel
  * Sandbox creation for every fresh sandbox the framework creates
  * (template at prewarm time, session at first-time session-create).
  * Skipped on resume (`Sandbox.get`) since no create happens there.
@@ -24,6 +36,9 @@ type VercelSandboxAuthorCreateOptions<T> = T extends unknown
  * required packages before authored bootstrap code runs. Template-backed
  * session creates receive it at creation time because the template
  * already contains the prepared base runtime.
+ *
+ * A `credentials` map paired with a function-form `networkPolicy` opts
+ * into eve-managed credential brokering.
  *
  * Framework-injected fields (`name`, `onResume`, `persistent`, `signal`)
  * are excluded: the framework owns those and overrides any
@@ -42,7 +57,23 @@ type VercelSandboxAuthorCreateOptions<T> = T extends unknown
  * snapshot, force a template rebuild (e.g. by changing the sandbox
  * definition so its template key changes).
  */
-export type VercelSandboxCreateOptions = VercelSandboxAuthorCreateOptions<VercelCreateOptions>;
+export type VercelSandboxCreateOptions<C extends SandboxCredentialMap = Record<string, never>> =
+  Omit<VercelSandboxAuthorCreateOptions<VercelCreateOptions>, "networkPolicy"> & {
+    /**
+     * Non-interactive credentials resolved for the active principal on every
+     * step. Tokens are injected by the Vercel Sandbox firewall and never enter
+     * the sandbox filesystem or environment.
+     */
+    readonly credentials?: C;
+    /**
+     * Static policy, or a builder called with the resolved credentials.
+     *
+     * A function-form policy requires at least one credential. Unavailable
+     * credentials are represented by an empty token so stale credentials are
+     * replaced while the authored egress restrictions remain in force.
+     */
+    readonly networkPolicy?: VercelSandboxNetworkPolicy<NoInfer<C>>;
+  };
 
 /** Access mode for a Drive mounted into a Vercel Sandbox. */
 export type VercelSandboxMountMode = Vercel.SandboxMountMode;
@@ -64,15 +95,16 @@ export interface VercelSandboxSessionCreateContext {
 }
 
 /** Options accepted by `vercel(opts)`. */
-export type VercelSandboxOptions = VercelSandboxCreateOptions & {
-  /**
-   * Resolves options that apply only to fresh live sessions. It is not called
-   * while prewarming templates or resuming an existing sandbox.
-   */
-  readonly sessionCreateOptions?: (
-    context: VercelSandboxSessionCreateContext,
-  ) => Promise<VercelSandboxSessionCreateOptions> | VercelSandboxSessionCreateOptions;
-};
+export type VercelSandboxOptions<C extends SandboxCredentialMap = Record<string, never>> =
+  VercelSandboxCreateOptions<C> & {
+    /**
+     * Resolves options that apply only to fresh live sessions. It is not called
+     * while prewarming templates or resuming an existing sandbox.
+     */
+    readonly sessionCreateOptions?: (
+      context: VercelSandboxSessionCreateContext,
+    ) => Promise<VercelSandboxSessionCreateOptions> | VercelSandboxSessionCreateOptions;
+  };
 
 /**
  * Options accepted by the Vercel backend's `bootstrap({ use })` hook.
