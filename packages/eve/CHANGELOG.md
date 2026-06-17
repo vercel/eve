@@ -1,5 +1,11 @@
 # eve
 
+## 0.11.4
+
+### Patch Changes
+
+- e5b777b: Resolve AI Gateway OIDC readiness through Vercel's token resolver so `eve dev` recognizes projects linked by the Vercel CLI without requiring an environment pull or showing a missing-credentials setup issue.
+
 ## 0.11.3
 
 ### Patch Changes
