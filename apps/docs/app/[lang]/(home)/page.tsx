@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Installer } from "@/components/geistdocs/installer";
+import { staticOgImage } from "@/lib/geistdocs/og";
 import { ArchitectureDiagram } from "./components/architecture";
 import { CTA } from "./components/cta";
 import { FeatureGrid } from "./components/feature-grid";
@@ -15,6 +16,17 @@ const betaAgreementHref = "https://vercel.com/docs/release-phases/public-beta-ag
 export const metadata: Metadata = {
   title,
   description: `${tagline} ${description}`,
+  openGraph: {
+    title,
+    description: `${tagline} ${description}`,
+    images: [staticOgImage],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title,
+    description: `${tagline} ${description}`,
+    images: [staticOgImage],
+  },
 };
 
 const HomePage = () => (
