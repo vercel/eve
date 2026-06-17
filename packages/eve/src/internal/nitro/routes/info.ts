@@ -45,10 +45,8 @@ async function resolveGatewayCredentialPresence(
   }
 
   try {
-    return {
-      apiKey: false,
-      oidc: hasEnvValue(await getVercelOidcToken()),
-    };
+    await getVercelOidcToken();
+    return { apiKey: false, oidc: true };
   } catch {
     return { apiKey: false, oidc: false };
   }

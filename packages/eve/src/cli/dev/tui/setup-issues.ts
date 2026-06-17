@@ -46,15 +46,15 @@ const modelProvider: BootDetection = {
   id: "model-provider",
   async detect({ appRoot, env, info }) {
     const endpoint = info?.agent.model.endpoint;
+    const isEndpointExternal =
+      endpoint?.kind === "external" ||
+      (endpoint === undefined && info?.agent.model.routing?.kind === "external");
+    const isAIGatewayConnected = endpoint?.kind === "gateway" && endpoint.connected;
 
     // The running server owns endpoint readiness. Fall back to routing and
     // local credential checks only when talking to a legacy server that did
     // not return the composed endpoint state.
-    if (
-      endpoint?.kind === "external" ||
-      (endpoint?.kind === "gateway" && endpoint.connected) ||
-      (endpoint === undefined && info?.agent.model.routing?.kind === "external")
-    ) {
+    if (isEndpointExternal || isAIGatewayConnected) {
       return [];
     }
     if (env.AI_GATEWAY_API_KEY || env.VERCEL_OIDC_TOKEN) {
