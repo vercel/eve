@@ -3,7 +3,7 @@ title: "Session Context"
 description: "Runtime helpers: ctx.session, ctx.getSandbox, ctx.getSkill, and defineState."
 ---
 
-Eve exposes runtime state through the `ctx` parameter passed to tool `execute`, hook handlers, and channel event handlers:
+eve exposes runtime state through the `ctx` parameter passed to tool `execute`, hook handlers, and channel event handlers:
 
 - `ctx.session`: session metadata, turn, auth, and parent lineage
 - `ctx.getSandbox()`: live sandbox handle for the current agent
@@ -66,7 +66,7 @@ const result = await sandbox.run({ command: "npm test" });
 Behavior:
 
 - It takes no arguments. Each agent has exactly one sandbox.
-- It is async because Eve binds or restores sandbox state lazily.
+- It is async because eve binds or restores sandbox state lazily.
 - It only works when sandbox access is attached to the active runtime path.
 - Visibility is node-local. A subagent sees its own sandbox, not the parent's.
 
@@ -119,7 +119,7 @@ export const budget = defineState<BudgetState>("myapp.budget", () => ({
 Safe places:
 
 - inside `defineTool(...).execute(input, ctx)`
-- inside authored callbacks Eve runs inside the runtime
+- inside authored callbacks eve runs inside the runtime
 - after asynchronous boundaries inside the same authored execution chain
 
 Unsafe places:
@@ -128,7 +128,7 @@ Unsafe places:
 - build scripts
 - discovery-time code paths
 
-If you call them outside an active Eve runtime context, they throw immediately with a message explaining the required scope.
+If you call them outside an active eve runtime context, they throw immediately with a message explaining the required scope.
 
 ## How it works
 

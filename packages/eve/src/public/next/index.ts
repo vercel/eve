@@ -7,7 +7,7 @@ import { resolveEveDestinationPrefix } from "./server.js";
 import { ensureEveVercelOutputConfig } from "./vercel-output-config.js";
 
 /**
- * Default private route namespace for hosting Eve as a separate experimental
+ * Default private route namespace for hosting eve as a separate experimental
  * Vercel service behind the Next.js app. {@link WithEveOptions.servicePrefix}
  * defaults to this value.
  */
@@ -75,27 +75,27 @@ export type EveNextConfigInput<TConfig extends EveNextConfig = EveNextConfig> =
  */
 export interface WithEveOptions {
   /**
-   * Maximum time in milliseconds to wait for the Eve development server to
+   * Maximum time in milliseconds to wait for the eve development server to
    * start, including waiting for another Next.js process to start it. Defaults
    * to 180000 (three minutes).
    */
   readonly devServerTimeoutMs?: number;
   /**
-   * Path to the Eve application root, relative to `process.cwd()` unless
+   * Path to the eve application root, relative to `process.cwd()` unless
    * absolute. Defaults to the Next.js app root.
    */
   readonly eveRoot?: string;
   /**
-   * Build command for the generated Eve Vercel service. Defaults to `eve build`.
-   * Use this when the Eve service needs project-specific prework before the
+   * Build command for the generated eve Vercel service. Defaults to `eve build`.
+   * Use this when the eve service needs project-specific prework before the
    * framework build, without changing the Next.js service build command.
    */
   readonly eveBuildCommand?: string;
   /**
-   * Private Vercel service prefix for the Eve deployment. Defaults to
+   * Private Vercel service prefix for the eve deployment. Defaults to
    * {@link EVE_NEXT_SERVICE_PREFIX} (`/_eve_internal/eve`). `withEve` normalizes
    * the prefix (adds a leading slash, strips trailing slashes) and rejects a
-   * prefix that resolves to the root route. The prefix must match the Eve
+   * prefix that resolves to the root route. The prefix must match the eve
    * service's mount in Vercel Build Output config.
    */
   readonly servicePrefix?: string;
@@ -115,7 +115,7 @@ function resolveDevServerTimeout(timeoutMs: number | undefined): number | undefi
   }
 
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    throw new Error("Eve Next.js development server timeout must be a positive number.");
+    throw new Error("eve Next.js development server timeout must be a positive number.");
   }
 
   return timeoutMs;
@@ -126,7 +126,7 @@ function normalizeRoutePrefix(prefix: string): string {
   const normalized = prefixed.replace(/\/+$/, "");
 
   if (normalized.length === 0) {
-    throw new Error("Eve Next.js service prefix cannot resolve to the root route.");
+    throw new Error("eve Next.js service prefix cannot resolve to the root route.");
   }
 
   return normalized;
@@ -238,15 +238,15 @@ async function resolveNextConfig<TConfig extends EveNextConfig>(
 }
 
 /**
- * Wraps a Next.js config so same-origin Eve endpoints proxy to a separate Eve
+ * Wraps a Next.js config so same-origin eve endpoints proxy to a separate eve
  * service.
  *
- * In development, starts `eve dev --no-ui --port 0` for the Eve app and
- * rewrites Eve protocol endpoints to that local URL. In Vercel production,
- * rewrites to the resolved private Eve service prefix.
+ * In development, starts `eve dev --no-ui --port 0` for the eve app and
+ * rewrites eve protocol endpoints to that local URL. In Vercel production,
+ * rewrites to the resolved private eve service prefix.
  * Outside Vercel production, serves an existing `.output/server/index.mjs` build
  * on a stable local port when present; otherwise set `EVE_NEXT_PRODUCTION_ORIGIN`
- * to the origin serving the Eve service namespace.
+ * to the origin serving the eve service namespace.
  */
 export function withEve<TConfig extends EveNextConfig>(
   configOrFunction: EveNextConfigInput<TConfig>,

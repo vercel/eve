@@ -1,5 +1,5 @@
 // Public setup primitives remain available for programmatic onboarding flows,
-// even though Eve currently exposes no setup wizard command.
+// even though eve currently exposes no setup wizard command.
 export { type OutputSink, type SetupBox, WizardCancelledError } from "./step.js";
 export { InteractionRequired } from "./ask.js";
 export {

@@ -46,7 +46,7 @@ export type StreamEventHooks = {
  * Public hook definition authored in `agent/hooks/*.ts`.
  *
  * Hook files declare stream-event subscribers (under `events:`) that
- * fire after Eve has accepted and durably recorded each event.
+ * fire after eve has accepted and durably recorded each event.
  * Handlers are observe-only: they cannot inject model context. To
  * contribute runtime model messages, use `defineDynamic` +
  * `defineInstructions` in `agent/instructions/`.

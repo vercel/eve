@@ -85,7 +85,7 @@ export const VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER = "x-vercel-trusted-oidc-idp-t
 export const VERCEL_OIDC_TOKEN_HEADER = "x-vercel-oidc-token";
 
 /**
- * Header values accepted by Eve's development client helpers.
+ * Header values accepted by eve's development client helpers.
  */
 export type DevelopmentRequestHeaders =
   | Headers
@@ -103,7 +103,7 @@ function isEveRouteUrl(url: URL): boolean {
 
 /**
  * Creates request headers for one service-issued development request and
- * opportunistically refreshes a linked local Vercel OIDC token for Eve-owned
+ * opportunistically refreshes a linked local Vercel OIDC token for eve-owned
  * routes when no explicit authorization header is present.
  */
 export async function createDevelopmentRequestHeadersAsync(input: {
@@ -149,7 +149,7 @@ function attachEveRouteOidcHeaders(headers: Headers, oidcToken: string): void {
 }
 
 /**
- * Resolves an OIDC token for an Eve-owned request, asking
+ * Resolves an OIDC token for an eve-owned request, asking
  * `@vercel/oidc` for a freshly-issued token when the CLI is linked to a
  * Vercel project. Falls back to the forwarded runtime header or the
  * `VERCEL_OIDC_TOKEN` environment variable.
@@ -172,7 +172,7 @@ async function resolveEveRouteOidcToken(
 }
 
 /**
- * Returns `true` when an Eve-route request should attempt to attach a
+ * Returns `true` when an eve-route request should attempt to attach a
  * Vercel OIDC token. Local dev servers do not need (and cannot validate)
  * the token, so this returns `false` for them.
  */

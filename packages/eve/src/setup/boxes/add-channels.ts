@@ -148,7 +148,7 @@ export interface AddChannelsOptions {
    */
   headless?: boolean;
   /**
-   * Eve package metadata for the scaffolded web `package.json`. When omitted,
+   * eve package metadata for the scaffolded web `package.json`. When omitted,
    * every package value comes from the build-stamped defaults.
    */
   evePackage?: EvePackageContract;
@@ -231,7 +231,7 @@ function warnCompetingNextConfigFiles(
 ): void {
   for (const filePath of files ?? []) {
     log.warning(
-      `Found competing Next.js config at ${filePath}; merge any needed settings into next.config.ts and remove it before starting the preview, or Next.js may ignore the generated Eve rewrite.`,
+      `Found competing Next.js config at ${filePath}; merge any needed settings into next.config.ts and remove it before starting the preview, or Next.js may ignore the generated eve rewrite.`,
     );
   }
 }

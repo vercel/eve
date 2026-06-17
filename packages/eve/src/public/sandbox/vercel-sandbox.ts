@@ -10,7 +10,7 @@ import type {
  * Skipped on resume (`Sandbox.get`) since no create happens there.
  *
  * `networkPolicy` is deferred until after framework-owned base setup
- * for fresh templates and template-less sessions, so Eve can install
+ * for fresh templates and template-less sessions, so eve can install
  * required packages before authored bootstrap code runs. Template-backed
  * session creates receive it at creation time because the template
  * already contains the prepared base runtime.
@@ -24,7 +24,7 @@ import type {
  * base layer for the template. Framework setup, bootstrap, and seed
  * files all run on top, and the resulting
  * framework-owned snapshot is what every later session derives from,
- * so `source` is stripped from the session-create path. Eve does not
+ * so `source` is stripped from the session-create path. eve does not
  * detect external snapshot changes; to pick up a rebuilt external
  * snapshot, force a template rebuild (e.g. by changing the sandbox
  * definition so its template key changes).

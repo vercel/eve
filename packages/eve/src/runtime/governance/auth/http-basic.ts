@@ -6,7 +6,7 @@ import type {
 } from "#runtime/governance/auth/types.js";
 
 /**
- * Verifies one HTTP Basic credential against a resolved Eve strategy.
+ * Verifies one HTTP Basic credential against a resolved eve strategy.
  */
 export function authenticateHttpBasicStrategy(input: {
   readonly authorization: string;

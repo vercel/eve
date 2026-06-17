@@ -236,7 +236,7 @@ describe("ensureSandboxAccess", () => {
     );
   });
 
-  it("runs onSession inside the active Eve context", async () => {
+  it("runs onSession inside the active eve context", async () => {
     const ctx = new ContextContainer();
     const session = createSession();
     ctx.set(SessionKey, session);

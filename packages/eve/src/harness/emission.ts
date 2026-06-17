@@ -285,7 +285,7 @@ export async function emitTurnEpilogue(
 // ---------------------------------------------------------------------------
 
 /**
- * Maps an AI SDK finish reason string to the Eve-owned
+ * Maps an AI SDK finish reason string to the eve-owned
  * {@link AssistantStepFinishReason} union. Unknown values become `"other"`.
  */
 export function normalizeAssistantStepFinishReason(

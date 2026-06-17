@@ -4,7 +4,7 @@ import { defineConfig } from "vitest/config";
  * Tier 3 — Vercel deployment tests.
  *
  * Tests that deploy to real infrastructure (Vercel) and exercise the public
- * shape of Eve from outside the repository. These are the slowest and most
+ * shape of eve from outside the repository. These are the slowest and most
  * externally dependent tests in the suite. They run sequentially and are
  * expected to be gated by credentials provided from CI secrets.
  */

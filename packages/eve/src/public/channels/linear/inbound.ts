@@ -157,7 +157,7 @@ export function messageFromLinearAgentSessionEvent(event: LinearAgentSessionEven
   return "Linear agent session started.";
 }
 
-/** Formats Linear issue/session context as an Eve context block. */
+/** Formats Linear issue/session context as an eve context block. */
 export function formatLinearContextBlock(event: LinearAgentSessionEvent): string {
   const session = event.agentSession;
   const issue = session.issue;

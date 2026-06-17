@@ -84,7 +84,7 @@ export async function prewarmSandboxes(input: PrewarmSandboxesInput): Promise<vo
       return await backend.prewarm(prewarmInput);
     });
 
-  input.log?.(`Eve: initializing ${formatSandboxTemplateCount(targets.length)}...`);
+  input.log?.(`eve: initializing ${formatSandboxTemplateCount(targets.length)}...`);
 
   const results = await Promise.all(
     targets.map(async ({ backend, label, input: prewarmInput }) => {
@@ -92,7 +92,7 @@ export async function prewarmSandboxes(input: PrewarmSandboxesInput): Promise<vo
         if (!shouldLogSandboxPrewarmProgress(message)) {
           return;
         }
-        input.log?.(`Eve: sandbox template "${label}" (${backend.name}): ${message}`);
+        input.log?.(`eve: sandbox template "${label}" (${backend.name}): ${message}`);
       };
       let result: SandboxBackendPrewarmResult;
       try {
@@ -114,7 +114,7 @@ export async function prewarmSandboxes(input: PrewarmSandboxesInput): Promise<vo
         );
       } catch (error) {
         input.log?.(
-          `Eve: failed to initialize sandbox template "${label}" on backend "${backend.name}": ${toErrorMessage(error)}`,
+          `eve: failed to initialize sandbox template "${label}" on backend "${backend.name}": ${toErrorMessage(error)}`,
         );
         throw error;
       }
@@ -123,7 +123,7 @@ export async function prewarmSandboxes(input: PrewarmSandboxesInput): Promise<vo
   );
   const reusedCount = results.filter((result) => result.reused).length;
   input.log?.(
-    `Eve: initialized ${formatSandboxTemplateCount(targets.length)} (${reusedCount} reused, ${
+    `eve: initialized ${formatSandboxTemplateCount(targets.length)} (${reusedCount} reused, ${
       targets.length - reusedCount
     } built).`,
   );

@@ -69,7 +69,7 @@ export async function dispatchChannelRequest(
       response = await matchedChannel.fetch(event.req, ctx);
     }
   } catch (error) {
-    // Without this a handler throw is only Nitro's default 5xx, with no Eve log.
+    // Without this a handler throw is only Nitro's default 5xx, with no eve log.
     const errorId = logError(log, "channel handler threw", error, {
       routeKey,
       channel: matchedChannel.name,

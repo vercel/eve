@@ -76,7 +76,7 @@ function parseCompiledModuleMap(value: unknown, moduleMapPath: string): Compiled
 
   if (!parsed.success) {
     throw new LoadCompiledModuleMapError(
-      `Expected "${moduleMapPath}" to export a valid compiled Eve module map. ${formatValidationError(parsed.error)}`,
+      `Expected "${moduleMapPath}" to export a valid compiled eve module map. ${formatValidationError(parsed.error)}`,
       moduleMapPath,
     );
   }

@@ -219,7 +219,7 @@ function once(child: ChildProcess, event: "exit"): Promise<void> {
 }
 
 /**
- * Starts a built Nitro server for an Eve application.
+ * Starts a built Nitro server for an eve application.
  */
 export async function startProductionServer(
   rootDir: string,
@@ -233,7 +233,7 @@ export async function startProductionServer(
 
   if (!existsSync(serverEntry)) {
     throw new Error(
-      `Missing Eve build output at ${serverEntry}. Run "eve build" before "eve start".`,
+      `Missing eve build output at ${serverEntry}. Run "eve build" before "eve start".`,
     );
   }
 
@@ -323,7 +323,7 @@ export async function startProductionServer(
     await terminate(child);
 
     if (isRecord(error) && error.name === "AbortError") {
-      throw new Error("Timed out waiting for built Eve server to respond.", { cause: error });
+      throw new Error("Timed out waiting for built eve server to respond.", { cause: error });
     }
 
     throw error;

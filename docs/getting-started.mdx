@@ -1,12 +1,12 @@
 ---
 title: "Getting Started"
-description: "Install Eve, scaffold your first agent, give it a tool, and run it locally."
+description: "Install eve, scaffold your first agent, give it a tool, and run it locally."
 ---
 
-Eve is a filesystem-first framework for durable agents. You write capabilities under `agent/`, and Eve runs the model loop, persists every session, and serves the agent over HTTP and platform channels. You'll scaffold an app, add a tool, run it locally, then create, stream, and continue a session over HTTP.
+eve is a filesystem-first framework for durable agents. You write capabilities under `agent/`, and eve runs the model loop, persists every session, and serves the agent over HTTP and platform channels. You'll scaffold an app, add a tool, run it locally, then create, stream, and continue a session over HTTP.
 
 <Callout>
-  Eve is currently in beta and subject to the [Vercel beta
+  eve is currently in beta and subject to the [Vercel beta
   terms](https://vercel.com/docs/release-phases/public-beta-agreement); the framework, APIs,
   documentation, and behavior may change before general availability.
 </Callout>
@@ -28,7 +28,7 @@ If you skip this, the dev TUI flags the missing credential and its `/model` comm
 
 ## Quick start
 
-`npx` runs `eve init` without installing Eve first:
+`npx` runs `eve init` without installing eve first:
 
 ```bash
 npx eve@latest init my-agent
@@ -36,7 +36,7 @@ npx eve@latest init my-agent
 
 The command:
 
-- Creates an npm-managed child directory and uses Eve's default model
+- Creates an npm-managed child directory and uses eve's default model
 - Installs dependencies and initializes Git
 - Starts the development server and opens the interactive [terminal UI](./guides/dev-tui)
 
@@ -44,11 +44,11 @@ Type a message and watch the model loop run. Pass `--channel-web-nextjs` to add 
 
 `eve init` holds the terminal, so stop it with Ctrl+C to get your shell back before editing the generated agent. The command does not create a Vercel project or deploy.
 
-To add Eve to an existing project, run `eve init .` from a directory that already has a `package.json` and no `agent/` files yet. Eve adds the missing `eve`, `ai`, and `zod` dependencies without touching anything else the project owns. The Eve dependency and the Node engine come from the same release. Eve pins `engines.node` to the lowest major that release supports (for example `24.x`). It keeps an existing range only when every version that range allows stays within that major; otherwise it replaces the range and prints a warning.
+To add eve to an existing project, run `eve init .` from a directory that already has a `package.json` and no `agent/` files yet. eve adds the missing `eve`, `ai`, and `zod` dependencies without touching anything else the project owns. The eve dependency and the Node engine come from the same release. eve pins `engines.node` to the lowest major that release supports (for example `24.x`). It keeps an existing range only when every version that range allows stays within that major; otherwise it replaces the range and prints a warning.
 
 ## Manual installation
 
-To wire Eve into an existing app by hand instead of using `eve init`, first declare a compatible Node runtime in `package.json`:
+To wire eve into an existing app by hand instead of using `eve init`, first declare a compatible Node runtime in `package.json`:
 
 ```json
 {
@@ -135,7 +135,7 @@ The same CLI can point at a deployment. `npx eve dev https://your-app.vercel.app
 
 ## Send a message
 
-Every Eve app exposes the same stable HTTP API. Start a durable session:
+Every eve app exposes the same stable HTTP API. Start a durable session:
 
 ```bash
 curl -X POST http://127.0.0.1:3000/eve/v1/session \
@@ -186,8 +186,8 @@ See [Sessions, runs and streaming](./concepts/sessions-runs-and-streaming) for t
 
 If a coding agent (Claude Code, Cursor, and the like) is doing the setup, hand it this prompt:
 
-<CopyPrompt text="Set up an Eve agent for the user. Eve is a filesystem-first TypeScript framework for durable agents, published as the npm package eve. Read its docs: once eve is installed they are bundled in the package at node_modules/eve/docs; before eve is installed, read the published Introduction and Getting Started pages. If the project has no Eve app, scaffold one with `npx eve@latest init <name>`; add `--channel-web-nextjs` only when the user wants Web Chat. The init command installs dependencies, initializes Git, and starts the dev server, so run it in a controllable process and stop it with Ctrl+C before editing. To add Eve to an existing app, run `eve init .`, or install the dependencies by hand with `npm install eve@latest ai zod` (init adds ai and zod; the by-hand path needs all three). Make sure agent/agent.ts and agent/instructions.md exist, then add a first typed tool at agent/tools/get_weather.ts using defineTool from eve/tools with a Zod inputSchema and an inline execute. Start the dev server again, then exercise the HTTP API: create a session with POST /eve/v1/session, attach to GET /eve/v1/session/:id/stream, and send a follow-up with the returned continuationToken. Verify with the project's typecheck, adapt model and provider choices to the project, and do not commit unless the user asks.">
-  Set up an Eve agent: read the Eve docs (bundled at node_modules/eve/docs once eve is
+<CopyPrompt text="Set up an eve agent for the user. eve is a filesystem-first TypeScript framework for durable agents, published as the npm package eve. Read its docs: once eve is installed they are bundled in the package at node_modules/eve/docs; before eve is installed, read the published Introduction and Getting Started pages. If the project has no eve app, scaffold one with `npx eve@latest init <name>`; add `--channel-web-nextjs` only when the user wants Web Chat. The init command installs dependencies, initializes Git, and starts the dev server, so run it in a controllable process and stop it with Ctrl+C before editing. To add eve to an existing app, run `eve init .`, or install the dependencies by hand with `npm install eve@latest ai zod` (init adds ai and zod; the by-hand path needs all three). Make sure agent/agent.ts and agent/instructions.md exist, then add a first typed tool at agent/tools/get_weather.ts using defineTool from eve/tools with a Zod inputSchema and an inline execute. Start the dev server again, then exercise the HTTP API: create a session with POST /eve/v1/session, attach to GET /eve/v1/session/:id/stream, and send a follow-up with the returned continuationToken. Verify with the project's typecheck, adapt model and provider choices to the project, and do not commit unless the user asks.">
+  Set up an eve agent: read the eve docs (bundled at node_modules/eve/docs once eve is
   installed), scaffold with `npx eve@latest init <name>` (or `npm install eve@latest ai zod` in an existing app), add
   a typed tool at agent/tools/get_weather.ts, run it with `npm run dev`, then create a session, stream
   it, and send a follow-up.

@@ -25,7 +25,7 @@ interface PendingLocalTargetRecord {
   readonly target: Promise<TestTarget>;
 }
 
-/** Creates an environment that starts local Eve app servers on demand. */
+/** Creates an environment that starts local eve app servers on demand. */
 export function createLocalTestEnvironment(
   options: CreateLocalTestEnvironmentOptions = {},
 ): LocalTestEnvironment {

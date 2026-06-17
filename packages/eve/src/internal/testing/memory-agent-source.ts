@@ -3,7 +3,7 @@ import { posix } from "node:path";
 import { createMemoryProjectSource, type ProjectSource } from "#discover/project-source.js";
 
 /**
- * Declarative description of an in-memory Eve project used by integration
+ * Declarative description of an in-memory eve project used by integration
  * tests that exercise the `discover/` and `compile/` pipelines.
  *
  * The shape mirrors the authored grammar — tests author paths relative to

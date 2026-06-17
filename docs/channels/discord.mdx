@@ -4,7 +4,7 @@ description: "Reach your agent from Discord HTTP Interactions, including slash c
 type: integration
 ---
 
-The Discord channel wires your agent into Discord's HTTP Interactions, including slash and application commands, message components, and modal submissions. Discord enforces a three-second ACK deadline, so the channel verifies the Ed25519 signature headers, acknowledges the command right away, and runs the Eve work in the background. See [Channels](./overview) for the contract this builds on.
+The Discord channel wires your agent into Discord's HTTP Interactions, including slash and application commands, message components, and modal submissions. Discord enforces a three-second ACK deadline, so the channel verifies the Ed25519 signature headers, acknowledges the command right away, and runs the eve work in the background. See [Channels](./overview) for the contract this builds on.
 
 ## Add the channel
 
@@ -24,12 +24,12 @@ To skip env vars, pass the same values through `credentials: { applicationId, bo
 
 ## Register a command
 
-Registering commands is on you, not the channel. Use Discord's API or the Developer Portal. A string option named `message` lines up with Eve's default prompt extraction:
+Registering commands is on you, not the channel. Use Discord's API or the Developer Portal. A string option named `message` lines up with eve's default prompt extraction:
 
 ```bash
 curl -X PUT "https://discord.com/api/v10/applications/$DISCORD_APPLICATION_ID/commands" \
   -H "Authorization: Bot $DISCORD_BOT_TOKEN" -H "Content-Type: application/json" \
-  -d '[{"name":"ask","description":"Ask the Eve agent","type":1,
+  -d '[{"name":"ask","description":"Ask the eve agent","type":1,
     "options":[{"name":"message","description":"What should the agent do?","type":3,"required":true}]}]'
 ```
 

@@ -37,7 +37,7 @@ let rolldownPromise: Promise<RolldownModule> | undefined;
 let rolldownParseAstPromise: Promise<RolldownParseAstModule> | undefined;
 
 /**
- * Loads Rolldown from Nitro's dependency tree so Eve does not carry a second
+ * Loads Rolldown from Nitro's dependency tree so eve does not carry a second
  * native bundler package in its own install footprint.
  */
 function loadNitroRolldown(): Promise<RolldownModule> {

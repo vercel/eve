@@ -56,7 +56,7 @@ Research complex weather questions before replying.`;
 
   it("silently ignores authored name fields in skill markdown frontmatter", () => {
     // SKILL.md files in the broader Agent Skills ecosystem typically declare
-    // `name`; Eve derives identity from the file path, so we accept and drop
+    // `name`; eve derives identity from the file path, so we accept and drop
     // the field rather than rejecting otherwise-valid skill markdown.
     const markdown = `---
 name: get-weather
@@ -98,7 +98,7 @@ description: Use the weather tool before answering forecast questions.
 category: routing
 ---
 When the user asks about weather, call the weather tool before answering.`),
-    ).toThrow("Expected authored skill markdown to match the public Eve shape.");
+    ).toThrow("Expected authored skill markdown to match the public eve shape.");
   });
 
   it("derives flat skill metadata from plain markdown when no frontmatter is present", () => {
@@ -161,7 +161,7 @@ What's the temp in NYC?`;
 description: nope
 ---
 body`),
-    ).toThrow("Expected authored schedule markdown to match the public Eve shape.");
+    ).toThrow("Expected authored schedule markdown to match the public eve shape.");
   });
 
   it("rejects run frontmatter in schedule markdown", () => {
@@ -183,7 +183,7 @@ cron: "*/5 * * * *"
 name: not-allowed
 ---
 body`),
-    ).toThrow("Expected authored schedule markdown to match the public Eve shape.");
+    ).toThrow("Expected authored schedule markdown to match the public eve shape.");
   });
 
   it("rejects skill markdown frontmatter without a closing delimiter", () => {

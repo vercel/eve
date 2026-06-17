@@ -1,5 +1,5 @@
 // Minimal declaration for the vendored slice of `@vercel/detect-agent`.
-// Eve only asks "was this launch agent-driven?", so the per-agent name
+// eve only asks "was this launch agent-driven?", so the per-agent name
 // union upstream declares is collapsed to `string`; widen this if a
 // future caller branches on specific agents.
 

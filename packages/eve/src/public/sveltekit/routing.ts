@@ -1,7 +1,7 @@
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 
 /**
- * Private route namespace for hosting Eve as a separate experimental Vercel
+ * Private route namespace for hosting eve as a separate experimental Vercel
  * service behind the SvelteKit app.
  */
 export const EVE_SVELTEKIT_SERVICE_PREFIX = "/_eve_internal/eve";
@@ -15,7 +15,7 @@ export function normalizeRoutePrefix(prefix: string): string {
   const prefixed = prefix.startsWith("/") ? prefix : `/${prefix}`;
   const normalized = prefixed.replace(/\/+$/, "");
   if (normalized.length === 0) {
-    throw new Error("Eve SvelteKit service prefix cannot resolve to the root route.");
+    throw new Error("eve SvelteKit service prefix cannot resolve to the root route.");
   }
   return normalized;
 }
@@ -35,8 +35,8 @@ export function normalizeOrigin(origin: string): string {
 }
 
 /**
- * A Vercel rewrite that forwards Eve transport requests (`/eve/v1/**`) to the
- * private Eve service prefix (`/_eve_internal/eve/eve/v1/**`).
+ * A Vercel rewrite that forwards eve transport requests (`/eve/v1/**`) to the
+ * private eve service prefix (`/_eve_internal/eve/eve/v1/**`).
  */
 export interface EveVercelRewrite {
   readonly destination: string;
@@ -44,8 +44,8 @@ export interface EveVercelRewrite {
 }
 
 /**
- * Build the Vercel rewrite that forwards browser Eve transport requests to the
- * sibling Eve service.
+ * Build the Vercel rewrite that forwards browser eve transport requests to the
+ * sibling eve service.
  */
 export function createEveVercelRewrite(servicePrefix: string): EveVercelRewrite {
   return {

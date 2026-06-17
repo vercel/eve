@@ -91,7 +91,7 @@ function partKey(part: EveMessagePart, index: number): string {
         v-if="isEmpty"
         class="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-16 text-center"
       >
-        <h1 class="text-xl font-medium tracking-tight">Eve Agent</h1>
+        <h1 class="text-xl font-medium tracking-tight">eve Agent</h1>
         <p class="max-w-sm text-sm text-muted-foreground">
           Ask for the weather in Vienna, or tell the agent to explain the tools it called.
         </p>

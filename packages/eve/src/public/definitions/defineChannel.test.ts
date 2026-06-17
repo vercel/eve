@@ -48,7 +48,7 @@ describe("defineChannel", () => {
     expect(adapter.fetchFile).toBeUndefined();
   });
 
-  it("declares websocket routes with an Eve-owned route discriminator", () => {
+  it("declares websocket routes with an eve-owned route discriminator", () => {
     const channel = defineChannel({
       routes: [
         WS("/ws", () => ({

@@ -180,7 +180,7 @@ function cleanupFailureResult(
  * Runs one provisioning attempt end to end. A new connector completes when the
  * CLI's browser verifier succeeds (or connector details prove the workspace
  * connection first). A reused connector must expose workspace metadata before
- * Eve attaches this project's trigger route.
+ * eve attaches this project's trigger route.
  * `onCreated` fires the instant a fresh connector exists so an aborted attempt
  * can remove exactly what it made. The `phase` seam lets each caller route
  * progress through its own transient status surface.
@@ -227,7 +227,7 @@ async function runAttempt(input: {
     if (created.state === "failed") return { state: "create-failed" };
     if (created.state === "unresolved") {
       log.warning(
-        "Vercel did not return an exact Slack connector UID for this request, so Eve cannot attach or remove it safely.",
+        "Vercel did not return an exact Slack connector UID for this request, so eve cannot attach or remove it safely.",
       );
       return { state: "unresolved" };
     }
@@ -308,7 +308,7 @@ async function raceAttemptAgainstChoice(input: {
 }
 
 /**
- * Creates or reuses a Slack connector and points its event destination at Eve.
+ * Creates or reuses a Slack connector and points its event destination at eve.
  * A successful `connect create` is the completion boundary for a new browser
  * flow. Existing connectors are verified through their team-scoped detail
  * payload before attachment.
@@ -345,13 +345,13 @@ export async function provisionSlackbot(
   options.signal?.throwIfAborted();
   if (existing.state === "failed") {
     log.warning(
-      `Could not inspect existing Slack connectors, so Eve did not create another one. ${existing.message}`,
+      `Could not inspect existing Slack connectors, so eve did not create another one. ${existing.message}`,
     );
     return { state: "connector-lookup-failed" };
   }
   if (projectId === undefined && existing.connectorUids.size > 0) {
     log.warning(
-      "Could not verify which Slack connectors belong to this Vercel project, so Eve did not create another one. Restore `.vercel/project.json`, then try again.",
+      "Could not verify which Slack connectors belong to this Vercel project, so eve did not create another one. Restore `.vercel/project.json`, then try again.",
     );
     return { state: "connector-lookup-failed" };
   }
@@ -454,7 +454,7 @@ export async function provisionSlackbot(
     });
     const notInstalled = (): ProvisionSlackbotResult => {
       log.warning(
-        `The existing Slack connector \`${attempt.ref.uid}\` is not connected to a Slack workspace. Eve did not remove it because this run did not create it. If its original browser request is still open, complete it; otherwise run \`vercel connect remove ${attempt.ref.uid} --disconnect-all --yes\` before trying again.`,
+        `The existing Slack connector \`${attempt.ref.uid}\` is not connected to a Slack workspace. eve did not remove it because this run did not create it. If its original browser request is still open, complete it; otherwise run \`vercel connect remove ${attempt.ref.uid} --disconnect-all --yes\` before trying again.`,
       );
       return {
         state: "existing-not-installed",
@@ -537,7 +537,7 @@ export async function provisionSlackbot(
     // the browser. A user action aborts the attempt and removes its connector.
     const prompt = awaitChoice({
       status: "Waiting for Slack setup to finish...",
-      context: "Complete setup in the browser, then wait while Eve verifies the connection",
+      context: "Complete setup in the browser, then wait while eve verifies the connection",
       actions: [
         { value: "retry", label: "Did your browser not open? Try again" },
         { value: "cancel", label: "Cancel" },
@@ -591,7 +591,7 @@ export async function provisionSlackbot(
       options.signal?.throwIfAborted();
       if (inventory.state === "failed") {
         log.warning(
-          `Could not inspect existing Slack connectors, so Eve did not create another one. ${inventory.message}`,
+          `Could not inspect existing Slack connectors, so eve did not create another one. ${inventory.message}`,
         );
         return { state: "finished", result: { state: "connector-lookup-failed" } };
       }

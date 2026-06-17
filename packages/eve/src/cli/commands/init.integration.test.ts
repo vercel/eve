@@ -107,7 +107,7 @@ afterEach(() => {
 });
 
 describe("runInitCommand", () => {
-  it("creates the base agent with the runtime default model and invoking Eve dependency", async () => {
+  it("creates the base agent with the runtime default model and invoking eve dependency", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-base-"));
     const output = logger();
     const deps = dependencies();
@@ -264,7 +264,7 @@ describe("runInitCommand", () => {
     );
   });
 
-  it("adds Web Chat without Vercel configuration and preserves the invoking Eve dependency", async () => {
+  it("adds Web Chat without Vercel configuration and preserves the invoking eve dependency", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-web-"));
     const output = logger();
     const deps = dependencies();

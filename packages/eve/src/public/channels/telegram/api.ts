@@ -2,7 +2,7 @@
  * Minimal Telegram Bot API wrapper for the Telegram channel.
  *
  * The channel talks directly to Telegram's JSON HTTP API instead of
- * exposing a third-party SDK through Eve public surfaces.
+ * exposing a third-party SDK through eve public surfaces.
  */
 
 import { parseJsonObject, type JsonObject } from "#shared/json.js";

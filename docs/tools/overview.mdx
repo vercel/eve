@@ -40,9 +40,9 @@ When a tool returns structured data, add an optional `outputSchema`. With Zod or
 - `ctx.getSandbox()`: the live [sandbox](../sandbox) handle.
 - `ctx.getSkill(id)`: read a packaged [skill](../skills)'s metadata and files.
 
-Running in the app runtime is what lets a tool import shared code from `lib/`, read `process.env`, and take part in Eve’s durable pause/resume model.
+Running in the app runtime is what lets a tool import shared code from `lib/`, read `process.env`, and take part in eve’s durable pause/resume model.
 
-Eve never runs authored tools during discovery. The model sees descriptors first, and only what it actually calls gets executed. Completed steps never re-run; Eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval.
+eve never runs authored tools during discovery. The model sees descriptors first, and only what it actually calls gets executed. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval.
 
 ## Gate a tool on human approval
 
@@ -63,7 +63,7 @@ export default defineTool({
 });
 ```
 
-Approval is one half of Eve's [human-in-the-loop](./human-in-the-loop) model — the page covers the `always/once/never` helpers, input-dependent predicates, and how a gated call pauses and resumes durably.
+Approval is one half of eve's [human-in-the-loop](./human-in-the-loop) model — the page covers the `always/once/never` helpers, input-dependent predicates, and how a gated call pauses and resumes durably.
 
 ## Shape what the model sees with `toModelOutput`
 

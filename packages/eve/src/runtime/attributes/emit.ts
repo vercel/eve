@@ -94,7 +94,7 @@ export function truncateForTag(value: string, maxBytes = EVE_ATTRIBUTE_VALUE_MAX
 }
 
 /**
- * Writes a batch of Eve-owned attributes to the active workflow run.
+ * Writes a batch of eve-owned attributes to the active workflow run.
  *
  * Reserved-namespace contract:
  * - All keys must use the `$eve.` prefix (the workflow runtime would
@@ -116,7 +116,7 @@ export function truncateForTag(value: string, maxBytes = EVE_ATTRIBUTE_VALUE_MAX
  * Failure policy: tag writes are observability metadata, not load-bearing
  * state. A failure inside the runtime (transient network, schema bug,
  * missing world adapter) is logged once per process and then swallowed
- * so the Eve session it tagged is unaffected.
+ * so the eve session it tagged is unaffected.
  *
  * Must be called from inside a `"use workflow"` or `"use step"` body —
  * the runtime throws a `FatalError` outside those contexts.

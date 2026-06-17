@@ -40,7 +40,7 @@ export async function compileSkillSource(
   if (source.sourceKind === "markdown") {
     const definition = normalizeSkillDefinition(
       source.definition,
-      `Expected the compiled skill definition at "${source.logicalPath}" to match the public Eve shape.`,
+      `Expected the compiled skill definition at "${source.logicalPath}" to match the public eve shape.`,
     );
     return {
       kind: "skill",
@@ -88,7 +88,7 @@ export async function compileSkillSource(
 
   const definition = normalizeSkillDefinition(
     exportValue,
-    `Expected the skill export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public Eve shape.`,
+    `Expected the skill export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
   );
 
   return {

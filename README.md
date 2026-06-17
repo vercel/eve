@@ -2,10 +2,10 @@
   <a href="https://github.com/vercel/eve">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset=".github/assets/eve.svg">
-      <img alt="Eve logo" src=".github/assets/eve.svg" height="128">
+      <img alt="eve logo" src=".github/assets/eve.svg" height="128">
     </picture>
   </a>
-  <h1>Eve</h1>
+  <h1>eve</h1>
 
 <a href="https://vercel.com"><img alt="Vercel logo" src="https://img.shields.io/badge/MADE%20BY%20Vercel-000000.svg?style=for-the-badge&logo=Vercel&labelColor=000"></a>
 <a href="https://www.npmjs.com/package/eve"><img alt="NPM version" src="https://img.shields.io/npm/v/eve.svg?style=for-the-badge&labelColor=000000"></a>
@@ -14,12 +14,12 @@
 
 </div>
 
-Eve is a filesystem-first framework for durable AI agents. Core agent capabilities live in
+eve is a filesystem-first framework for durable AI agents. Core agent capabilities live in
 conventional locations, so projects are easier to inspect, extend, and operate.
 
 ## The filesystem is the authoring interface
 
-A typical Eve agent has this structure:
+A typical eve agent has this structure:
 
 ```text
 my-agent/
@@ -47,7 +47,7 @@ npx eve@latest init my-agent
 This creates a new `my-agent` directory, installs its dependencies, initializes Git, and starts
 the interactive terminal UI.
 
-To add Eve to an existing project, pass a path:
+To add eve to an existing project, pass a path:
 
 ```bash
 cd myapp
@@ -103,7 +103,7 @@ walkthrough.
 
 ## Community
 
-The Eve community lives on [GitHub Discussions](https://github.com/vercel/eve/discussions),
+The eve community lives on [GitHub Discussions](https://github.com/vercel/eve/discussions),
 where you can ask questions, share ideas, and show what you've built.
 
 ## Contributing
@@ -122,5 +122,5 @@ Please do not open public issues for security vulnerabilities. Instead, follow
 
 ## Beta terms
 
-Eve is currently in beta and subject to the [Vercel beta terms](https://vercel.com/docs/release-phases/public-beta-agreement);
+eve is currently in beta and subject to the [Vercel beta terms](https://vercel.com/docs/release-phases/public-beta-agreement);
 the framework, APIs, documentation, and behavior may change before general availability.

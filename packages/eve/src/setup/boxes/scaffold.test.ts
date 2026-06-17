@@ -100,7 +100,7 @@ describe("scaffold box", () => {
     );
   });
 
-  it("headless re-run on an existing Eve project skips scaffolding and continues", async () => {
+  it("headless re-run on an existing eve project skips scaffolding and continues", async () => {
     const deps = fakeDeps({ isEveProject: vi.fn(async () => true) });
     const prompter = createPrompter();
     const box = scaffold({ prompter, evePackage: TEST_EVE_PACKAGE, headless: true, deps });
@@ -109,12 +109,12 @@ describe("scaffold box", () => {
 
     expect(deps.scaffoldBaseProject).not.toHaveBeenCalled();
     expect(prompter.log.message).toHaveBeenCalledWith(
-      "Existing Eve project detected; continuing setup...",
+      "Existing eve project detected; continuing setup...",
     );
     expect(next.projectPath).toEqual({ kind: "resolved", inPlace: false, path: "/tmp/my-agent" });
   });
 
-  it("interactive run scaffolds even when the directory is already an Eve project", async () => {
+  it("interactive run scaffolds even when the directory is already an eve project", async () => {
     const deps = fakeDeps({ isEveProject: vi.fn(async () => true) });
     const box = scaffold({ prompter: createPrompter(), evePackage: TEST_EVE_PACKAGE, deps });
 
@@ -124,7 +124,7 @@ describe("scaffold box", () => {
     expect(deps.scaffoldBaseProject).toHaveBeenCalledTimes(1);
   });
 
-  it("headless overwriteExisting re-scaffolds an existing Eve project and warns per overwrite", async () => {
+  it("headless overwriteExisting re-scaffolds an existing eve project and warns per overwrite", async () => {
     const deps = fakeDeps({ isEveProject: vi.fn(async () => true) });
     const prompter = createPrompter();
     const box = scaffold({

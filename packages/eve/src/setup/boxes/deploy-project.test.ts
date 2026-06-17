@@ -217,7 +217,7 @@ describe("deployProject box", () => {
     const next = await runHeadless([box], pendingState(), silentSink);
 
     expect(prompter.log.warning).toHaveBeenCalledWith(
-      "Deployment succeeded, but Eve could not verify its production URL.",
+      "Deployment succeeded, but eve could not verify its production URL.",
     );
     expect(prompter.log.error).not.toHaveBeenCalled();
     expect(next.project).toEqual({ kind: "linked", projectId: "prj_demo" });

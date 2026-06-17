@@ -5,13 +5,13 @@ import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
  *
  * The microsandbox backend runs sandboxes in lightweight local VMs via
  * [microsandbox](https://www.npmjs.com/package/microsandbox). Options
- * are Eve-owned rather than a raw passthrough so the public surface can
+ * are eve-owned rather than a raw passthrough so the public surface can
  * stay stable while the underlying runtime evolves. Supported hosts:
  * macOS on Apple Silicon, or Linux (glibc) with KVM enabled.
  */
 export interface MicrosandboxCreateOptions {
   /**
-   * OCI image used as the base runtime. Eve prepares this image with
+   * OCI image used as the base runtime. eve prepares this image with
    * Bash, the framework workspace, and the sandbox user before authored
    * bootstrap code runs. Install authored runtime tools such as Node,
    * Python, or ripgrep in sandbox bootstrap or provide them through a
@@ -30,7 +30,7 @@ export interface MicrosandboxCreateOptions {
   readonly pullPolicy?: "always" | "if-missing" | "never";
   /**
    * Installation behavior for the microsandbox npm package and its VM
-   * runtime. By default Eve installs both automatically when missing —
+   * runtime. By default eve installs both automatically when missing —
    * the npm package with the project's package manager (during
    * `eve dev` only), the runtime via microsandbox's own installer.
    */

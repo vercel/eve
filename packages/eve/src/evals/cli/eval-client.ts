@@ -37,7 +37,7 @@ export function resolveEvalClientOptions(
 }
 
 /**
- * Creates the Eve {@link Client} for an eval target from
+ * Creates the eve {@link Client} for an eval target from
  * {@link resolveEvalClientOptions}.
  */
 export function createEvalClient(target: Pick<EveEvalTargetHandle, "kind" | "url">): Client {

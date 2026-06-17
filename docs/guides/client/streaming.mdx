@@ -1,6 +1,6 @@
 ---
 title: "Streaming"
-description: "Consume Eve client stream events live, reconnect by event index, and aggregate turn results."
+description: "Consume eve client stream events live, reconnect by event index, and aggregate turn results."
 ---
 
 Every `ClientSession.send()` call posts the turn, then reads the session's NDJSON (newline-delimited JSON) event stream. `MessageResponse` gives you two ways to consume that stream, aggregating it with `result()` or iterating it live.

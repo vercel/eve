@@ -32,7 +32,7 @@ const FILE_TRANSFORMS: Record<string, ReadonlyArray<readonly [string, string]>> 
   "app/_components/agent-chat.tsx": [
     ['const AGENT_NAME = "eve-agent";', 'const AGENT_NAME = "__EVE_INIT_APP_NAME__";'],
   ],
-  "app/layout.tsx": [['  title: "Eve Next.js Starter",', '  title: "__EVE_INIT_APP_NAME__",']],
+  "app/layout.tsx": [['  title: "eve Next.js Starter",', '  title: "__EVE_INIT_APP_NAME__",']],
   "next.config.ts": [
     [
       "export default withEve(nextConfig);",

@@ -80,7 +80,7 @@ async function materializeNode(input: {
   for (const workspace of input.manifest.sandboxWorkspaces) {
     if (workspace.rootEntries.some((entry) => entry === "skills/" || entry === "skills")) {
       throw new Error(
-        `Sandbox workspace "${workspace.logicalPath}" cannot define "skills" because Eve manages that workspace entry.`,
+        `Sandbox workspace "${workspace.logicalPath}" cannot define "skills" because eve manages that workspace entry.`,
       );
     }
   }

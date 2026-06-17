@@ -242,7 +242,7 @@ export function extractGitHubCommentTrigger(input: {
   return { kind: "mention", message, token: mention[0] };
 }
 
-/** Parses GitHub webhook headers and body into an Eve-owned event shape. */
+/** Parses GitHub webhook headers and body into an eve-owned event shape. */
 export function parseGitHubWebhookEvent(input: {
   readonly body: string;
   readonly contentType?: string;

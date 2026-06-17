@@ -234,7 +234,7 @@ function formatReachabilityFailure({
   const sections = [
     "Channel and harness production code must stay workflow-agnostic.",
     "A channel or harness file can transitively reach vendored Workflow primitives.",
-    "Move the workflow primitive call behind a runtime/execution-owned helper, then have the channel or harness depend on that Eve-owned boundary instead.",
+    "Move the workflow primitive call behind a runtime/execution-owned helper, then have the channel or harness depend on that eve-owned boundary instead.",
   ];
 
   if (violations.length > 0) {

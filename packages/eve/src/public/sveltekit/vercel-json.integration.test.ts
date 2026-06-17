@@ -51,7 +51,7 @@ describe("ensureEveVercelJson", () => {
     });
   });
 
-  it("resolves the Eve entrypoint relative to the SvelteKit root", async () => {
+  it("resolves the eve entrypoint relative to the SvelteKit root", async () => {
     const svelteKitRoot = await createTempRoot();
     const appRoot = join(svelteKitRoot, "agent");
 
@@ -86,7 +86,7 @@ describe("ensureEveVercelJson", () => {
     });
   });
 
-  it("preserves an already-configured Eve service and reuses its prefix", async () => {
+  it("preserves an already-configured eve service and reuses its prefix", async () => {
     const svelteKitRoot = await createTempRoot();
     const existing = {
       $schema: "https://openapi.vercel.sh/vercel.json",

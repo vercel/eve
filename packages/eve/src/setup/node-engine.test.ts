@@ -7,7 +7,7 @@ import {
 } from "./node-engine.js";
 
 describe("reconcileNodeEngine", () => {
-  // Each row is the authored `engines.node` value reconciled against Eve's
+  // Each row is the authored `engines.node` value reconciled against eve's
   // ">=24" requirement (pinned major "24.x") and the result it must produce.
   it.each<[unknown, NodeEngineReconciliation]>([
     // Confined to the scaffolded major → kept as authored.

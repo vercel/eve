@@ -3,7 +3,7 @@
  * "Authentication Required" challenge that fronts protected previews and
  * production deployments.
  *
- * When the Eve development client (`eve dev --url …`) targets a deployment
+ * When the eve development client (`eve dev --url …`) targets a deployment
  * that has Deployment Protection enabled and no valid bypass header is
  * attached, Vercel returns an HTML SSO challenge instead of routing the
  * request to the function. The raw HTML body is unhelpful in a CLI

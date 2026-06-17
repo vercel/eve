@@ -1,8 +1,8 @@
 /**
- * Public, versioned summary of an Eve agent emitted by `eve`
+ * Public, versioned summary of an eve agent emitted by `eve`
  * during `eve build`.
  *
- * This schema is the stable contract between Eve and Vercel platform
+ * This schema is the stable contract between eve and Vercel platform
  * surfaces (eg. the dashboard's project overview card). It is intentionally
  * smaller and more conservative than the internal {@link CompiledAgentManifest}
  * — only fields safe to render in product UI live here, and the schema is
@@ -40,10 +40,10 @@ export const VERCEL_EVE_AGENT_SUMMARY_KIND = "vercel-eve-agent-summary" as const
 export const VERCEL_EVE_AGENT_SUMMARY_VERSION = 3;
 
 /**
- * Output path (relative to the agent's `appRoot`) where Eve writes the
+ * Output path (relative to the agent's `appRoot`) where eve writes the
  * summary file at build time.
  *
- * Lives under `.eve/` — the existing Eve-internal cache namespace that
+ * Lives under `.eve/` — the existing eve-internal cache namespace that
  * already holds `nitro/`, `nitro-output/`, `sandbox-cache/`, etc. (see
  * `packages/eve/src/internal/application/paths.ts`). Intentionally
  * outside `.vercel/output/` so the file is not part of the Build Output
@@ -54,7 +54,7 @@ export const VERCEL_EVE_AGENT_SUMMARY_VERSION = 3;
 export const VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH = ".eve/agent-summary.json";
 
 /**
- * Display category Eve exposes to the dashboard for one channel chip. Built
+ * Display category eve exposes to the dashboard for one channel chip. Built
  * from the channel's reported {@link CompiledChannelDefinition.adapterKind}.
  */
 export type VercelEveChannelType = "slack" | "http" | "webhook" | "unknown";
@@ -192,7 +192,7 @@ export interface VercelEveDiagnosticsSummary {
 }
 
 /**
- * Versioned public summary of one Eve agent, emitted into the Vercel Build
+ * Versioned public summary of one eve agent, emitted into the Vercel Build
  * Output during `eve build` and ingested by Vercel as deployment metadata.
  */
 export interface VercelEveAgentSummary {

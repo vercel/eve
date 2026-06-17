@@ -390,8 +390,8 @@ describe("prewarmAppSandboxes", () => {
     // authored default.
     expect(events.templateKeys).toHaveLength(1);
     expect(log.mock.calls.map(([message]) => message)).toEqual([
-      "Eve: initializing 1 sandbox template...",
-      "Eve: initialized 1 sandbox template (0 reused, 1 built).",
+      "eve: initializing 1 sandbox template...",
+      "eve: initialized 1 sandbox template (0 reused, 1 built).",
     ]);
     expect(log).not.toHaveBeenCalledWith(expect.stringContaining("framework"));
     expect([...events.bootstrapCommands]).toEqual(["echo default-bootstrap"]);

@@ -3,11 +3,11 @@ title: "Skills"
 description: "Author load-on-demand procedures the model pulls into context with load_skill."
 ---
 
-A skill is a model-loadable procedure that follows the `SKILL.md` convention. It is a markdown document, optionally a packaged directory with supporting files, that the model pulls into context on demand rather than carrying on every turn. Eve advertises each skill's description, and the model loads the full body only when a turn calls for it. This is progressive disclosure, the same model the broader Agent Skills standard uses, so a skill authored against that standard ports over as-is.
+A skill is a model-loadable procedure that follows the `SKILL.md` convention. It is a markdown document, optionally a packaged directory with supporting files, that the model pulls into context on demand rather than carrying on every turn. eve advertises each skill's description, and the model loads the full body only when a turn calls for it. This is progressive disclosure, the same model the broader Agent Skills standard uses, so a skill authored against that standard ports over as-is.
 
 ## How loading works
 
-Eve scans the files under `agent/skills/` and exposes each one's description to the model alongside a framework-owned `load_skill` tool. When a request matches a skill's description (or you name the skill outright), the model calls `load_skill`, and Eve appends that skill's markdown to the active turn's context.
+eve scans the files under `agent/skills/` and exposes each one's description to the model alongside a framework-owned `load_skill` tool. When a request matches a skill's description (or you name the skill outright), the model calls `load_skill`, and eve appends that skill's markdown to the active turn's context.
 
 The description is a routing hint, not a label. Write it as the task that should trigger activation:
 
@@ -25,7 +25,7 @@ The smallest skill is a flat markdown file. The content is the procedure, and th
 Use the weather tool before answering forecast or temperature questions.
 ```
 
-A flat markdown skill can skip the `description` frontmatter. When it does, Eve advertises the first non-empty, non-code-fence line of the body with any leading `#`, `>`, `*`, or `-` marker stripped. If the body has no such line, Eve falls back to the literal `Instructions for the <name> skill.`, which is a weak routing hint, so add a `description` when you want the model to route on intent.
+A flat markdown skill can skip the `description` frontmatter. When it does, eve advertises the first non-empty, non-code-fence line of the body with any leading `#`, `>`, `*`, or `-` marker stripped. If the body has no such line, eve falls back to the literal `Instructions for the <name> skill.`, which is a weak routing hint, so add a `description` when you want the model to route on intent.
 
 A packaged skill is a directory with a `SKILL.md` plus sibling files like `references/`, `assets/`, and `scripts/`. The packaged `SKILL.md` must carry `description` frontmatter; it has no filename slug to fall back on.
 
@@ -53,7 +53,7 @@ export default defineSkill({
 });
 ```
 
-Eve generates `SKILL.md` from `markdown`, and each `files` entry becomes a package-relative sibling. Start with plain markdown and move to `defineSkill` only when you hit its limits.
+eve generates `SKILL.md` from `markdown`, and each `files` entry becomes a package-relative sibling. Start with plain markdown and move to `defineSkill` only when you hit its limits.
 
 ## Skills are scoped per agent
 

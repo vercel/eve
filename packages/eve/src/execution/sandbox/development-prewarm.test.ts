@@ -111,7 +111,7 @@ describe("development sandbox prewarm coordination", () => {
       appRoot,
       compiledArtifactsSource,
     });
-    prewarmLog?.('Eve: sandbox template "root" (microsandbox): preparing base runtime inside VM');
+    prewarmLog?.('eve: sandbox template "root" (microsandbox): preparing base runtime inside VM');
 
     const logs: string[] = [];
     const wait = waitForDevelopmentSandboxPrewarm({
@@ -120,15 +120,15 @@ describe("development sandbox prewarm coordination", () => {
       log: (message) => logs.push(message),
     });
     await Promise.resolve();
-    prewarmLog?.('Eve: sandbox template "root" (microsandbox): apt-get update');
+    prewarmLog?.('eve: sandbox template "root" (microsandbox): apt-get update');
 
     prewarm.resolve();
     await wait;
 
     expect(logs).toEqual(
       expect.arrayContaining([
-        'Eve: sandbox template "root" (microsandbox): preparing base runtime inside VM',
-        'Eve: sandbox template "root" (microsandbox): apt-get update',
+        'eve: sandbox template "root" (microsandbox): preparing base runtime inside VM',
+        'eve: sandbox template "root" (microsandbox): apt-get update',
       ]),
     );
   });
@@ -147,23 +147,23 @@ describe("development sandbox prewarm coordination", () => {
       appRoot,
       compiledArtifactsSource,
     });
-    prewarmLog?.('Eve: built sandbox template "root" on backend "docker".');
+    prewarmLog?.('eve: built sandbox template "root" on backend "docker".');
 
     const logs: string[] = [];
     const unsubscribe = subscribeDevelopmentSandboxPrewarmLogs({
       appRoot,
       log: (message) => logs.push(message),
     });
-    prewarmLog?.('Eve: sandbox template "root" (docker): apt-get update');
+    prewarmLog?.('eve: sandbox template "root" (docker): apt-get update');
 
     unsubscribe();
-    prewarmLog?.('Eve: sandbox template "root" (docker): apt-get install curl');
+    prewarmLog?.('eve: sandbox template "root" (docker): apt-get install curl');
     prewarm.resolve();
     await prewarm.promise;
 
     expect(logs).toEqual([
-      'Eve: built sandbox template "root" on backend "docker".',
-      'Eve: sandbox template "root" (docker): apt-get update',
+      'eve: built sandbox template "root" on backend "docker".',
+      'eve: sandbox template "root" (docker): apt-get update',
     ]);
   });
 
@@ -171,7 +171,7 @@ describe("development sandbox prewarm coordination", () => {
     const appRoot = "/tmp/eve-completed-app";
     const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(appRoot);
     mocks.prewarmAppSandboxes.mockImplementationOnce(async (input) => {
-      input.log?.('Eve: built sandbox template "root" on backend "docker".');
+      input.log?.('eve: built sandbox template "root" on backend "docker".');
     });
 
     startDevelopmentSandboxPrewarmInBackground({
@@ -192,7 +192,7 @@ describe("development sandbox prewarm coordination", () => {
       log: (message) => secondLogs.push(message),
     });
 
-    expect(firstLogs).toEqual(['Eve: built sandbox template "root" on backend "docker".']);
+    expect(firstLogs).toEqual(['eve: built sandbox template "root" on backend "docker".']);
     expect(secondLogs).toEqual([]);
   });
 

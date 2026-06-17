@@ -33,7 +33,7 @@ export interface PackageManagerStrategy {
   readonly scaffoldFiles: Readonly<Record<string, string>>;
   /** Adds or reconciles manager-owned configuration in an existing project. */
   applyProjectConfiguration(projectRoot: string): Promise<PackageManagerConfigurationResult>;
-  /** Arguments that run the project-local Eve development command. */
+  /** Arguments that run the project-local eve development command. */
   devArguments(): readonly string[];
   /** Arguments that install project dependencies. */
   installArguments(options: PackageManagerInstallOptions): readonly string[];

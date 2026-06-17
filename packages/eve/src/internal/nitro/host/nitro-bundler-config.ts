@@ -68,7 +68,7 @@ function onNitroBundlerLog(
 }
 
 /**
- * Creates Eve-owned Nitro bundler overrides that must apply to both Rollup
+ * Creates eve-owned Nitro bundler overrides that must apply to both Rollup
  * and Rolldown hosted builds.
  */
 export function createNitroBundlerConfig(plugins: readonly object[]): Record<string, unknown> {

@@ -1,5 +1,5 @@
 /**
- * Build-time catalog of known Eve connections. Each entry drives both the
+ * Build-time catalog of known eve connections. Each entry drives both the
  * `eve connections add` picker and the per-entry scaffold template.
  *
  * Connection *identity* (slug, label, transport, description) is owned by

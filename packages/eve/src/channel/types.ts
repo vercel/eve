@@ -28,7 +28,7 @@ export interface SessionTurn {
 }
 
 /**
- * Lineage metadata for the Eve parent execution that delegated this session.
+ * Lineage metadata for the eve parent execution that delegated this session.
  *
  * `sessionId` and `turn` describe the **immediate** parent that dispatched
  * this child. `rootSessionId` denormalizes the top of the dispatch chain so
@@ -181,7 +181,7 @@ export interface SessionCallback {
 // ---------------------------------------------------------------------------
 
 /**
- * Runtime capabilities granted to one Eve session.
+ * Runtime capabilities granted to one eve session.
  *
  * Capabilities describe what the session may do mid-turn: a session-level
  * contract, orthogonal to {@link RunInput.mode} which decides done-vs-park on

@@ -1,4 +1,4 @@
-# Set up an Eve agent
+# Set up an eve agent
 
 Ask the user these questions one at a time. Use the coding harness's prompt
 tools when available. Do not guess.

@@ -11,7 +11,7 @@ type CliMessageTone =
   | "warning";
 
 /**
- * Shared color palette used by the Eve CLI.
+ * Shared color palette used by the eve CLI.
  */
 export interface CliTheme {
   readonly color: boolean;

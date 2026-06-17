@@ -61,7 +61,7 @@ export function createScheduleRegistrations(
   const registrations = schedules
     .map((schedule) => ({
       cron: schedule.cron,
-      description: `Run Eve schedule "${schedule.name}" from "${schedule.logicalPath}".`,
+      description: `Run eve schedule "${schedule.name}" from "${schedule.logicalPath}".`,
       logicalPath: schedule.logicalPath,
       scheduleId: schedule.name,
       sourceId: schedule.sourceId,

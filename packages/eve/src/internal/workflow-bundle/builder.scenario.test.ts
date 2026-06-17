@@ -162,7 +162,7 @@ describe("WorkflowBundleBuilder", () => {
     }
   });
 
-  it("clears workflow cache output from a different Eve version", async () => {
+  it("clears workflow cache output from a different eve version", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-version-cache-"));
     const outDir = join(tempRoot, "workflow-build");
     const stepFilePath = join(tempRoot, "steps", "ping.ts");

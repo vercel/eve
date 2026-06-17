@@ -30,13 +30,13 @@ interface ActionDescriptor {
 }
 
 /**
- * Creates a UIMessage-compatible Eve reducer for chat and agent UIs.
+ * Creates a UIMessage-compatible eve reducer for chat and agent UIs.
  *
- * The returned projection keeps Eve-owned types while following the AI SDK
+ * The returned projection keeps eve-owned types while following the AI SDK
  * `messages[].parts[]` rendering convention used by AI Elements. It projects
  * text, reasoning, tool calls, tool results, tool approvals, and submitted
  * HITL responses. Connection authorization stream events remain available to
- * custom reducers through the reducer event contract until Eve has a dedicated
+ * custom reducers through the reducer event contract until eve has a dedicated
  * message-part shape for authorization UI.
  */
 export function defaultMessageReducer(): EveAgentReducer<EveMessageData> {

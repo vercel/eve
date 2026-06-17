@@ -1,5 +1,5 @@
 /**
- * Shared identity for Eve integrations. This package is the single source of
+ * Shared identity for eve integrations. This package is the single source of
  * truth for *which* integrations exist (channels and connections) and how a
  * connection is wired (transport + model-facing description).
  *
@@ -46,9 +46,9 @@ export interface ConnectionIdentity {
   openapi?: OpenApiTransport;
 }
 
-/** Which Eve surfaces an integration is available on today. */
+/** Which eve surfaces an integration is available on today. */
 export interface IntegrationSurfaces {
-  /** The Eve CLI can scaffold this integration without further work. */
+  /** The eve CLI can scaffold this integration without further work. */
   scaffoldable: boolean;
   /** Listed in the docs integrations gallery. */
   gallery: boolean;
@@ -77,12 +77,12 @@ export function connectionProtocols(connection: ConnectionIdentity): ConnectionP
 }
 
 /**
- * The canonical set of Eve integrations. Order is display order. Each entry
+ * The canonical set of eve integrations. Order is display order. Each entry
  * carries only shared identity; the scaffolder and docs overlay their own
  * surface-specific data keyed by {@link IntegrationEntry.slug}.
  *
  * `surfaces.scaffoldable` reflects what the CLI can scaffold today: Slack and
- * Eve Web Chat for channels, and every curated connection. The remaining
+ * eve Web Chat for channels, and every curated connection. The remaining
  * channels are runtime modules that are still configured by hand, so they
  * appear in the gallery but not the CLI picker.
  */
@@ -138,7 +138,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
   },
   {
     slug: "eve",
-    name: "Eve Web Chat",
+    name: "eve Web Chat",
     kind: "channel",
     tagline: "Embed a first-party web chat UI backed by your agent.",
     surfaces: { scaffoldable: true, gallery: true },

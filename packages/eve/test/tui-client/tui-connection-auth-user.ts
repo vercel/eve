@@ -17,7 +17,7 @@ import { theme } from "./lib/theme.ts";
 
 /**
  * End-to-end proof that a user-principal MCP connection drives a
- * real OAuth 2.1 + PKCE flow through Eve's
+ * real OAuth 2.1 + PKCE flow through eve's
  * `requestAuthorization` / `getAuthorizationResult` API, with an
  * actual token exchange against an external IdP and an authenticated
  * MCP request after the resume.

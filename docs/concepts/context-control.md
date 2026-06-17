@@ -1,9 +1,9 @@
 ---
 title: "Context Control"
-description: "Control what an Eve agent's model sees and when, across instructions, skills, the workspace, and subagents."
+description: "Control what an eve agent's model sees and when, across instructions, skills, the workspace, and subagents."
 ---
 
-Eve gives you a few levers for controlling what the model sees and when. `instructions.md` (or `instructions.ts`) is always on, `skills/` are available but loaded on demand, and the workspace and sandbox are visible through tools rather than pasted into the prompt.
+eve gives you a few levers for controlling what the model sees and when. `instructions.md` (or `instructions.ts`) is always on, `skills/` are available but loaded on demand, and the workspace and sandbox are visible through tools rather than pasted into the prompt.
 
 ## Base identity with `instructions.md`
 
@@ -29,11 +29,11 @@ export default defineInstructions({
 });
 ```
 
-Module-backed instructions run once at build time. Eve captures the resulting markdown into the compiled manifest, so the runtime serves the same prompt every session without re-running the module.
+Module-backed instructions run once at build time. eve captures the resulting markdown into the compiled manifest, so the runtime serves the same prompt every session without re-running the module.
 
 ## Load procedures on demand with `skills/`
 
-Skills stay out of the always-on prompt by default, which keeps rich procedures available without bloating every turn. Eve advertises the available skills and adds a framework-owned `load_skill` tool. When the request clearly matches a skill description, or the user names a skill explicitly, the model activates that skill, and Eve appends the skill's markdown to the active instructions for later turn work.
+Skills stay out of the always-on prompt by default, which keeps rich procedures available without bloating every turn. eve advertises the available skills and adds a framework-owned `load_skill` tool. When the request clearly matches a skill description, or the user names a skill explicitly, the model activates that skill, and eve appends the skill's markdown to the active instructions for later turn work.
 
 ### Flat skill
 
@@ -58,7 +58,7 @@ See [Skills](../skills) for the full authoring model and install notes.
 
 ## Put runtime files in the workspace, not the prompt
 
-Eve does not inline the entire authored surface into the prompt. Instead, it gives the model a shallow workspace hint and runtime tools to inspect deeper when needed. Skill files are available under the active workspace root, and the model inspects them with the shared `bash` tool, which keeps prompts smaller and makes file and command work explicit.
+eve does not inline the entire authored surface into the prompt. Instead, it gives the model a shallow workspace hint and runtime tools to inspect deeper when needed. Skill files are available under the active workspace root, and the model inspects them with the shared `bash` tool, which keeps prompts smaller and makes file and command work explicit.
 
 See [Sandbox](../sandbox) for the workspace and sandbox model.
 

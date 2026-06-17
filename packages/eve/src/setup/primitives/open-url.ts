@@ -27,7 +27,7 @@ export function parseWebUrl(candidate: string): string | undefined {
 
 /**
  * Opens a URL in the user's default browser, best-effort and fire-and-forget.
- * Used where Eve owns the hand-off (e.g. pointing the user at their Slack
+ * Used where eve owns the hand-off (e.g. pointing the user at their Slack
  * workspace after a deploy) rather than relying on a child CLI to open it. A
  * missing or failing opener is never fatal: callers still print the URL for the
  * user to open by hand.

@@ -1909,7 +1909,7 @@ async function continuePendingCodeModeInterrupt(input: {
  * Parks the turn on a code-mode host interrupt. Stores the interrupt on the
  * single pending slot, then runs the kind-specific side effect: connection-auth
  * surfaces the authorization challenges and parks on pending authorization;
- * approval surfaces the nested tool's approval request through Eve's existing
+ * approval surfaces the nested tool's approval request through eve's existing
  * input-request UX.
  */
 function replaceCodeModeToolResult(
@@ -1985,7 +1985,7 @@ async function parkOnCodeModeInterrupt(input: {
     return { next: null, session: parkedSession };
   }
 
-  // Approval: surface the nested tool's approval request as an Eve input
+  // Approval: surface the nested tool's approval request as an eve input
   // request so the existing approval UX drives the resume.
   if (isCodeModeApprovalInterrupt(interrupt)) {
     const approvalMessages = toCodeModeApprovalMessages(interrupt);

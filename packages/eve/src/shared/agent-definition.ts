@@ -4,7 +4,7 @@ import type { JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 
 /**
- * Optional overrides that Eve forwards to the AI SDK model runtime call for
+ * Optional overrides that eve forwards to the AI SDK model runtime call for
  * this model.
  */
 export interface AgentModelOptionsDefinition {
@@ -43,7 +43,7 @@ export type InternalAgentModelDefinition = {
 /**
  * The model handle you assign to an agent's `model` field. This is the AI SDK
  * `LanguageModel` value (for example, the result of a provider or gateway
- * model call), not an Eve-authored definition object.
+ * model call), not an eve-authored definition object.
  */
 export type PublicAgentModelDefinition = LanguageModel;
 
@@ -51,21 +51,21 @@ export interface InternalAgentCompactionDefinition {
   /**
    * Optional model used only for generating compaction summaries.
    *
-   * When omitted, Eve uses the active turn model for the summary call.
+   * When omitted, eve uses the active turn model for the summary call.
    */
   model?: InternalAgentModelDefinition;
   /**
    * Fraction of the primary model context window that triggers compaction.
    *
-   * Eve defaults to `0.9` when this is omitted.
+   * eve defaults to `0.9` when this is omitted.
    */
   thresholdPercent?: number;
 }
 
 /**
  * Configures conversation compaction: when the model context window fills past
- * `thresholdPercent`, Eve summarizes earlier turns to reclaim space. Every
- * field is optional; omit the block to use Eve's defaults.
+ * `thresholdPercent`, eve summarizes earlier turns to reclaim space. Every
+ * field is optional; omit the block to use eve's defaults.
  */
 export interface PublicAgentCompactionDefinition {
   /**
@@ -73,20 +73,20 @@ export interface PublicAgentCompactionDefinition {
    * in tokens.
    *
    * Same escape hatch as the agent-level `modelContextWindowTokens`. When set,
-   * Eve uses this value verbatim and skips the AI Gateway lookup for the
+   * eve uses this value verbatim and skips the AI Gateway lookup for the
    * compaction summary model.
    */
   readonly modelContextWindowTokens?: number;
   /**
    * Optional model used only for generating compaction summaries.
    *
-   * When omitted, Eve uses the active turn model for the summary call.
+   * When omitted, eve uses the active turn model for the summary call.
    */
   readonly model?: PublicAgentModelDefinition;
   /**
    * Fraction of the primary model context window that triggers compaction.
    *
-   * Eve defaults to `0.9` when this is omitted.
+   * eve defaults to `0.9` when this is omitted.
    */
   readonly thresholdPercent?: number;
 }
@@ -105,7 +105,7 @@ export interface AgentExperimentalDefinition {
    * instead of exposing them directly to the model. The model writes
    * JavaScript that calls the tools inside the sandbox.
    *
-   * When unset, Eve falls back to the `EVE_EXPERIMENTAL_CODE_MODE`
+   * When unset, eve falls back to the `EVE_EXPERIMENTAL_CODE_MODE`
    * environment variable (`"1"` enables it) for backwards compatibility.
    */
   readonly codeMode?: boolean;
@@ -119,8 +119,8 @@ export interface AgentExperimentalDefinition {
  */
 export interface AgentBuildDefinition {
   /**
-   * Additional imported package names that Eve should keep external and trace
-   * into hosted build output. Eve also keeps matching imports external while
+   * Additional imported package names that eve should keep external and trace
+   * into hosted build output. eve also keeps matching imports external while
    * compiling authored TypeScript modules such as tools, channels, and
    * schedules.
    *
@@ -174,10 +174,10 @@ export type PublicAgentDefinition = {
   /**
    * Optional override for the primary model's context window size, in tokens.
    *
-   * Escape hatch for cases where Eve cannot resolve the model's metadata via
+   * Escape hatch for cases where eve cannot resolve the model's metadata via
    * the AI Gateway model catalog (e.g. a custom or unlisted model id). When
-   * set, Eve uses this value verbatim and skips the AI Gateway lookup. Prefer
-   * leaving this unset so Eve can stay in sync with provider metadata.
+   * set, eve uses this value verbatim and skips the AI Gateway lookup. Prefer
+   * leaving this unset so eve can stay in sync with provider metadata.
    */
   readonly modelContextWindowTokens?: number;
   readonly modelOptions?: AgentModelOptionsDefinition;

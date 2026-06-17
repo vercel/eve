@@ -46,7 +46,7 @@ export function createPromptCommandHandler(
             formatApplyModelOutcome,
             modelChangeRefusalForUneditableModel,
           } = await import("#setup/flows/model.js");
-          // A source-backed model (an SDK model call) isn't a string literal Eve
+          // A source-backed model (an SDK model call) isn't a string literal eve
           // can rewrite; refuse with a clear reason rather than silently no-op.
           const checkRefusal = options.modelChangeRefusal ?? modelChangeRefusalForUneditableModel;
           const refusal = await checkRefusal(appRoot);

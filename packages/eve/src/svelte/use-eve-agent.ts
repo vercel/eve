@@ -23,7 +23,7 @@ export type { PrepareSend };
 export type UseEveAgentStatus = EveAgentStoreStatus;
 
 /**
- * Immutable point-in-time view of an Eve agent session: projected `data`, the
+ * Immutable point-in-time view of an eve agent session: projected `data`, the
  * last `error`, the raw `events` stream, the `session` cursor, and `status`.
  * `useEveAgent` passes this snapshot to the `onFinish` callback.
  */
@@ -33,7 +33,7 @@ export type UseEveAgentSnapshot<TData> = EveAgentStoreSnapshot<TData>;
  * Reactive return value from `useEveAgent`.
  *
  * The state properties are Svelte 5 rune-friendly getters. Read them from a
- * template, `$derived`, or `$effect` and Svelte will update when Eve streams
+ * template, `$derived`, or `$effect` and Svelte will update when eve streams
  * new events.
  */
 export interface UseEveAgentReturn<TData> {
@@ -56,7 +56,7 @@ export interface UseEveAgentReturn<TData> {
 }
 
 /**
- * Configuration for a Svelte Eve agent session.
+ * Configuration for a Svelte eve agent session.
  *
  * Read once when `useEveAgent` creates its store; create a new binding to
  * change host, reducer, or session. To rotate credentials or headers without
@@ -75,9 +75,9 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    */
   readonly headers?: HeadersValue;
   /**
-   * Base URL for Eve client requests. Empty targets same-origin Eve routes
+   * Base URL for eve client requests. Empty targets same-origin eve routes
    * such as `/eve/v1/...`; a same-origin prefix like `/api` routes through an
-   * app-owned proxy; an absolute origin hits an Eve server directly.
+   * app-owned proxy; an absolute origin hits an eve server directly.
    *
    * @default ""
    */
@@ -93,10 +93,10 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    */
   readonly maxReconnectAttempts?: number;
   /**
-   * Project submitted user messages before Eve confirms them with a
+   * Project submitted user messages before eve confirms them with a
    * `message.received` stream event. Optimistic events are reducer-facing
    * projection only and never appear in `events`, which stays the
-   * authoritative Eve stream.
+   * authoritative eve stream.
    *
    * @default true
    */
@@ -183,7 +183,7 @@ export function useEveAgent<TData>(
 ): UseEveAgentReturn<TData>;
 
 /**
- * Svelte 5 binding that drives an Eve session and projects its events into
+ * Svelte 5 binding that drives an eve session and projects its events into
  * rune-friendly reactive data.
  *
  * Without a `reducer`, projects to {@link EveMessageData} via

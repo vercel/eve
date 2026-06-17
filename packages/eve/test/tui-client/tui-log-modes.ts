@@ -53,7 +53,7 @@ async function snapshotForMode(mode: "all" | "stderr" | "sandbox" | "none"): Pro
   // them immediately.
   process.stdout.write(`${STDOUT_MARK}\n`);
   process.stderr.write(`${STDERR_MARK}\n`);
-  process.stdout.write(`Eve: sandbox ${SANDBOX_MARK}\n`);
+  process.stdout.write(`eve: sandbox ${SANDBOX_MARK}\n`);
   const snapshot = screen.snapshot();
 
   input.type("/exit");

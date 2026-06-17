@@ -14,7 +14,7 @@ const state: PrintState = {
 
 /**
  * Renders one stream event to stdout in a way that's pleasant to watch
- * live. Mirrors the visual language of the Eve CLI REPL:
+ * live. Mirrors the visual language of the eve CLI REPL:
  *
  * - Reasoning streams as blue inline text.
  * - Assistant replies stream as default terminal text after a muted

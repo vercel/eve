@@ -232,7 +232,7 @@ describe("selectChannels box", () => {
 
   it("runs validateSelection on the preset path before recording the selection", async () => {
     const validateSelection = vi.fn(async () => {
-      throw new Error("existing Eve session channel");
+      throw new Error("existing eve session channel");
     });
     const box = selectChannels({
       asker: headlessAsker(),
@@ -242,7 +242,7 @@ describe("selectChannels box", () => {
     });
 
     await expect(runInteractive([box], createDefaultSetupState(), silentSink)).rejects.toThrow(
-      "existing Eve session channel",
+      "existing eve session channel",
     );
     expect(validateSelection).toHaveBeenCalledWith(["web"]);
   });

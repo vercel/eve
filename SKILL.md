@@ -1,13 +1,13 @@
 ---
 name: eve
-description: Build durable backend AI agents with the Eve framework. Use when creating, editing, or debugging an Eve project — agent instructions, skills, tools, connections, channels, sandboxes, subagents, schedules, or evals.
+description: Build durable backend AI agents with the eve framework. Use when creating, editing, or debugging an eve project — agent instructions, skills, tools, connections, channels, sandboxes, subagents, schedules, or evals.
 ---
 
-# Eve
+# eve
 
-Eve is a filesystem-first framework for durable backend AI agents. An agent is
+eve is a filesystem-first framework for durable backend AI agents. An agent is
 a directory on disk — instructions, skills, tools, connections, channels,
-subagents, and schedules are all files — and Eve compiles and runs it.
+subagents, and schedules are all files — and eve compiles and runs it.
 
 ## Source of truth
 
@@ -20,7 +20,7 @@ node_modules/eve/docs/
 ```
 
 Start with `node_modules/eve/docs/README.md`. It contains the full
-index and recommended reading order. Before writing any Eve code, read the
+index and recommended reading order. Before writing any eve code, read the
 relevant guide there first.
 
 If `eve` is not installed yet, install it (`npm install eve`) or scaffold a new

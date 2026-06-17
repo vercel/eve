@@ -36,7 +36,7 @@ export type GatewayKeyValidation =
   | { kind: "inconclusive"; message: string };
 
 /**
- * Confirms an `AI_GATEWAY_API_KEY` authenticates before Eve saves it, by making
+ * Confirms an `AI_GATEWAY_API_KEY` authenticates before eve saves it, by making
  * one account-scoped request to the gateway (`getCredits`). That endpoint
  * rejects a bad key with a 401; the model catalog (`getAvailableModels`) is
  * public and would accept any key, so it cannot validate.

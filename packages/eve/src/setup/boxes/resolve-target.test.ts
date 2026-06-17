@@ -82,7 +82,7 @@ describe("resolveTarget box", () => {
     );
   });
 
-  it("resumes an existing Eve project when the composition opted in (headless re-runs)", async () => {
+  it("resumes an existing eve project when the composition opted in (headless re-runs)", async () => {
     mockedPathExists.mockImplementation(async (path) => path === "/tmp/parent/demo-agent");
     mockedIsEveProject.mockResolvedValue(true);
     const box = resolveTarget({
@@ -99,7 +99,7 @@ describe("resolveTarget box", () => {
     });
   });
 
-  it("still refuses an existing directory that is not an Eve project, even when resumable", async () => {
+  it("still refuses an existing directory that is not an eve project, even when resumable", async () => {
     mockedPathExists.mockImplementation(async (path) => path === "/tmp/parent/demo-agent");
     mockedIsEveProject.mockResolvedValue(false);
     const box = resolveTarget({

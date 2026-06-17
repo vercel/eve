@@ -16,7 +16,7 @@ const FINAL_OUTPUT_TOOL_DESCRIPTION =
  *
  * The tool has no `execute`: calling it is the terminal signal the harness
  * intercepts to surface the structured result. Its input is provider-constrained
- * to the schema during generation, exactly like every other Eve tool input.
+ * to the schema during generation, exactly like every other eve tool input.
  */
 export function buildFinalOutputTool(schema: JsonObject): Tool {
   return {

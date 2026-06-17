@@ -3,7 +3,7 @@ title: "Custom Channels"
 description: "Author custom HTTP and WebSocket channels with routes, events, metadata, continuation tokens, and file uploads."
 ---
 
-When Eve doesn't ship a channel for your surface, you build one. Custom channels expose HTTP or WebSocket endpoints, parse incoming requests, start or resume sessions, observe runtime events, and own delivery back to your platform.
+When eve doesn't ship a channel for your surface, you build one. Custom channels expose HTTP or WebSocket endpoints, parse incoming requests, start or resume sessions, observe runtime events, and own delivery back to your platform.
 
 ## File location and identity
 
@@ -53,7 +53,7 @@ Declare routes with the `POST()` and `GET()` helpers. Each route handler receive
 - `waitUntil(promise)` extends the request lifetime for background work.
 - `requestIp` is the client IP, or `null` when the host cannot provide it.
 
-Event handlers like `"message.completed"` are declared under the `events` key. They receive `(eventData, channel, ctx)`, where `eventData` is the event payload, `channel` carries platform handles and session continuation operations, and `ctx` is the Eve `SessionContext`. Every channel kind shares this signature. The one exception is `session.failed`, which receives only `(eventData, channel)` with no `ctx`.
+Event handlers like `"message.completed"` are declared under the `events` key. They receive `(eventData, channel, ctx)`, where `eventData` is the event payload, `channel` carries platform handles and session continuation operations, and `ctx` is the eve `SessionContext`. Every channel kind shares this signature. The one exception is `session.failed`, which receives only `(eventData, channel)` with no `ctx`.
 
 ## WebSocket routes
 
@@ -76,11 +76,11 @@ export default defineChannel({
 });
 ```
 
-`WS()` handlers receive the same helpers as HTTP route handlers: `send`, `getSession`, `receive`, `params`, `waitUntil`, and `requestIp`. The returned hooks are Eve-owned structural types compatible with Nitro/H3 websocket routing, including `upgrade`, `open`, `message`, `close`, and `error`.
+`WS()` handlers receive the same helpers as HTTP route handlers: `send`, `getSession`, `receive`, `params`, `waitUntil`, and `requestIp`. The returned hooks are eve-owned structural types compatible with Nitro/H3 websocket routing, including `upgrade`, `open`, `message`, `close`, and `error`.
 
 ### Node upgrade server escape hatch
 
-Prefer the `WS()` lifecycle hooks above when you own the websocket behavior. Eve also exposes `createWebSocketUpgradeServer()` for the narrower case where a third-party SDK or framework expects to bind directly to a Node `http.Server` with `server.on("upgrade", ...)`.
+Prefer the `WS()` lifecycle hooks above when you own the websocket behavior. eve also exposes `createWebSocketUpgradeServer()` for the narrower case where a third-party SDK or framework expects to bind directly to a Node `http.Server` with `server.on("upgrade", ...)`.
 
 ```ts
 import { defineChannel, WS, createWebSocketUpgradeServer } from "eve/channels";
@@ -94,7 +94,7 @@ export default defineChannel({
 });
 ```
 
-The bridge server does not listen on its own port. It receives only upgrade events that matched the Eve route, and only on hosts where Nitro exposes the raw Node upgrade request, socket, and head. Treat it as a compatibility adapter for libraries with server-binding APIs, not the primary way to build websocket channels in Eve.
+The bridge server does not listen on its own port. It receives only upgrade events that matched the eve route, and only on hosts where Nitro exposes the raw Node upgrade request, socket, and head. Treat it as a compatibility adapter for libraries with server-binding APIs, not the primary way to build websocket channels in eve.
 
 ## Cross-channel hand-off
 

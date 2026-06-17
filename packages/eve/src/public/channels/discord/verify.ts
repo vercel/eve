@@ -20,7 +20,7 @@ export type DiscordPublicKey = string | (() => string | Promise<string>);
 /**
  * Caller-supplied inbound webhook verifier. Replaces Ed25519 verification
  * when an integration authenticates forwarded webhooks before they reach
- * Eve. Receives the request and raw body.
+ * eve. Receives the request and raw body.
  *
  * Return a falsy value to reject the request. Return a string to accept it
  * and use that string as the (possibly rewritten) body. Return any other

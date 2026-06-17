@@ -1,5 +1,5 @@
 /**
- * Teams Adaptive Card rendering and decode helpers for Eve HITL prompts.
+ * Teams Adaptive Card rendering and decode helpers for eve HITL prompts.
  */
 
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
@@ -21,7 +21,7 @@ import { parseJsonObject } from "#shared/json.js";
 /** Adaptive Card attachment content type used by Teams. */
 export const TEAMS_ADAPTIVE_CARD_CONTENT_TYPE = "application/vnd.microsoft.card.adaptive";
 
-/** Hidden data property used by Eve HITL Adaptive Card actions. */
+/** Hidden data property used by eve HITL Adaptive Card actions. */
 export const TEAMS_HITL_DATA_KEY = "eve_input";
 
 /** ChoiceSet input id used for select-style HITL requests. */
@@ -104,13 +104,13 @@ export function renderAnsweredInputRequestMessage(input: {
   };
 }
 
-/** Returns true when a Teams activity carries an Eve HITL submit payload. */
+/** Returns true when a Teams activity carries an eve HITL submit payload. */
 export function isTeamsInputResponseActivity(activity: TeamsActivity): boolean {
   return deriveTeamsInputResponses(activity).length > 0;
 }
 
 /**
- * Decodes the Eve HITL submit payload from a Teams activity. Returns a single
+ * Decodes the eve HITL submit payload from a Teams activity. Returns a single
  * `InputResponse` (option selection, freeform text, or a bare requestId
  * acknowledgement), or an empty array when the activity has no recognizable
  * HITL payload or requestId.

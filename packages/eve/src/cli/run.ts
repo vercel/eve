@@ -354,7 +354,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
 
   program
     .name("eve")
-    .description("Build and run an Eve application.")
+    .description("Build and run an eve application.")
     .version(packageVersion)
     .showHelpAfterError()
     .exitOverride()
@@ -399,7 +399,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     // Optional: a missing target scaffolds or updates the current directory,
     // matching `eve init .`.
     .command("init [target]")
-    .description("Create a new Eve agent, or add one to an existing project directory.")
+    .description("Create a new eve agent, or add one to an existing project directory.")
     .option("--channel-web-nextjs", "Add the Web Chat application (Next.js)")
     .action(async (target: string | undefined, options: { channelWebNextjs?: boolean }) => {
       const { runInitCommand } = await import("#cli/commands/init.js");
@@ -410,7 +410,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
 
   program
     .command("build")
-    .description("Build the current Eve application.")
+    .description("Build the current eve application.")
     .action(async () => {
       const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
 
@@ -429,7 +429,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
 
   program
     .command("start")
-    .description("Start a built Eve application.")
+    .description("Start a built eve application.")
     .option("--host <host>", "Host interface to bind")
     .option("--port <port>", "Port to listen on (defaults to $PORT, then 3000)", parsePortOption)
     .action(async (options: ProductionCliOptions) => {
@@ -456,7 +456,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
 
   program
     .command("dev")
-    .description("Start the Eve development server or connect to an existing URL.")
+    .description("Start the eve development server or connect to an existing URL.")
     .option("--host <host>", "Host interface to bind")
     .option("--port <port>", "Port to listen on (defaults to $PORT, then 2000)", parsePortOption)
     .option("-u, --url <url>", "Connect to an existing server URL", parseDevelopmentServerUrl)
@@ -624,7 +624,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
 
   program
     .command("eval")
-    .description("Run evals against an Eve agent.")
+    .description("Run evals against an eve agent.")
     .argument(
       "[evalIds...]",
       "Eval ids (or directory prefixes) to run (all discovered evals when omitted)",
@@ -648,7 +648,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
 }
 
 /**
- * Runs the Eve CLI entrypoint.
+ * Runs the eve CLI entrypoint.
  */
 export async function runCli(
   argv: string[] = process.argv.slice(2),

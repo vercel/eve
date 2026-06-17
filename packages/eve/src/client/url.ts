@@ -1,9 +1,9 @@
 /**
- * Builds a fetchable URL from a caller-provided host and an Eve route path.
+ * Builds a fetchable URL from a caller-provided host and an eve route path.
  *
  * `host` may be an absolute origin (`https://agent.example.com`) or a
  * same-origin prefix (`/api`). Prefixes are important for browser clients that
- * talk to an app-owned proxy instead of the Eve deployment directly.
+ * talk to an app-owned proxy instead of the eve deployment directly.
  */
 export function createClientUrl(
   host: string,

@@ -11,7 +11,7 @@ import {
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 describe("createEveCronHandlerRoute", () => {
-  it("returns a route under the Eve protocol prefix with a random base64url suffix", () => {
+  it("returns a route under the eve protocol prefix with a random base64url suffix", () => {
     const route = createEveCronHandlerRoute();
 
     expect(route.startsWith(`${EVE_ROUTE_PREFIX}/cron/`)).toBe(true);

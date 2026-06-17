@@ -640,7 +640,7 @@ function resolveVercelSandboxTags(
   if (count > VERCEL_SANDBOX_TAG_LIMIT) {
     throw new Error(
       `Vercel Sandbox supports at most ${VERCEL_SANDBOX_TAG_LIMIT} tags. ` +
-        'Eve reserves "agent", "channel", and "sessionId"; remove or consolidate custom tags passed to vercel().',
+        'eve reserves "agent", "channel", and "sessionId"; remove or consolidate custom tags passed to vercel().',
     );
   }
 

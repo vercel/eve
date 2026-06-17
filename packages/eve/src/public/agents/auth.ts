@@ -13,7 +13,7 @@ export type OutboundAuthFn = () => Promise<{
 }>;
 
 /**
- * Eve-owned mirror of the `@vercel/oidc` token lookup options forwarded to
+ * eve-owned mirror of the `@vercel/oidc` token lookup options forwarded to
  * {@link vercelOidc}.
  */
 export interface VercelOidcOptions {

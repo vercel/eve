@@ -27,7 +27,7 @@ export function buildCallbackContext(): SessionContext {
       const access = ctx.get(SandboxKey);
       if (access === undefined) {
         throw new Error(
-          "Eve sandbox runtime access is unavailable in the current async context. " +
+          "eve sandbox runtime access is unavailable in the current async context. " +
             "Call ctx.getSandbox() only from authored runtime functions such as tools, hooks, and channel events.",
         );
       }
@@ -43,7 +43,7 @@ export function buildCallbackContext(): SessionContext {
       const access = ctx.get(SandboxKey);
       if (access === undefined) {
         throw new Error(
-          "Eve sandbox runtime access is unavailable in the current async context. " +
+          "eve sandbox runtime access is unavailable in the current async context. " +
             "Call ctx.getSkill() only from authored runtime functions such as tools, hooks, and channel events.",
         );
       }

@@ -23,7 +23,7 @@ import type {
  * the author's snapshot, git revision, or tarball becomes the base
  * layer of the template. Bootstrap, seed files, and framework setup
  * still run on top, and every session derives from the resulting
- * Eve-owned snapshot. `source` is stripped from session creates so the
+ * eve-owned snapshot. `source` is stripped from session creates so the
  * framework's snapshot always wins.
  *
  * `bootstrap({ use })` applies its options to the template via
