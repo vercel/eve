@@ -4,7 +4,7 @@ import { basename, join, resolve } from "node:path";
 import pc from "picocolors";
 
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
-import { EVE_PREVIEW_NOTICE, EVE_WORDMARK } from "#cli/banner.js";
+import { EVE_WORDMARK } from "#cli/banner.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { SPINNER_FRAME_MS, SPINNER_FRAMES } from "#setup/cli/rail-log.js";
 import { formatNodeEngineOverrideWarning, type NodeEngineOverride } from "#setup/node-engine.js";
@@ -62,9 +62,6 @@ const defaultDependencies: InitCommandDependencies = {
 
 const CURRENT_DIRECTORY_PROJECT_NAME = ".";
 const ALLOWED_CREATE_IN_PLACE_ENTRIES = new Set([".DS_Store", ".git", ".gitkeep", ".hg"]);
-function withPublicBetaNotice(message: string): string {
-  return `${message}\n${pc.dim(EVE_PREVIEW_NOTICE)}`;
-}
 
 /** Resolves `target` to an existing directory, or undefined for name mode. */
 async function resolveTargetDirectory(
@@ -257,21 +254,13 @@ export async function runInitCommand(
       dependencies,
     );
     freshScaffold = true;
-    logger.log(
-      withPublicBetaNotice(
-        `${pc.green("✓")} Created an ${EVE_WORDMARK} agent in ${pc.bold(projectPath)}`,
-      ),
-    );
+    logger.log(`${pc.green("✓")} Created an ${EVE_WORDMARK} agent in ${pc.bold(projectPath)}`);
   } else {
     const addition = await addToExistingProject(existingDirectory, options, dependencies);
     packageManager = addition.packageManager;
     projectPath = existingDirectory;
     freshScaffold = false;
-    logger.log(
-      withPublicBetaNotice(
-        `${pc.green("✓")} Added an ${EVE_WORDMARK} agent to ${pc.bold(projectPath)}`,
-      ),
-    );
+    logger.log(`${pc.green("✓")} Added an ${EVE_WORDMARK} agent to ${pc.bold(projectPath)}`);
     if (addition.nodeEngineOverride !== undefined) {
       logger.log(pc.yellow(`⚠ ${formatNodeEngineOverrideWarning(addition.nodeEngineOverride)}`));
     }

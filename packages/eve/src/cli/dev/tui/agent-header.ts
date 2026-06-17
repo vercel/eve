@@ -54,7 +54,9 @@ export function buildAgentHeader(input: AgentHeaderInput): string[] {
   const brand = c.bold("eve");
   lines.push(` ${brand} ${c.dim(truncate(name, Math.max(8, width - 8)))}`);
   lines.push(
-    ` ${c.dim(truncate(`Public preview: ${EVE_BETA_TERMS_URL}`, Math.max(8, width - 2)))}`,
+    ` ${c.dim(
+      truncate(`eve is currently in preview: ${EVE_BETA_TERMS_URL}`, Math.max(8, width - 2)),
+    )}`,
   );
 
   if (info && (info.diagnostics.discoveryErrors > 0 || info.diagnostics.discoveryWarnings > 0)) {

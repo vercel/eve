@@ -112,7 +112,7 @@ const INFO: AgentInfoResult = {
 
 describe("buildAgentHeader", () => {
   const theme = createTheme({ color: false, unicode: false });
-  const previewLine = ` Public preview: ${EVE_BETA_TERMS_URL}`;
+  const previewLine = ` eve is currently in preview: ${EVE_BETA_TERMS_URL}`;
 
   it("renders the brand line with the agent name and preview label", () => {
     const lines = buildAgentHeader({ name: "agent-subagents", info: INFO, theme, width: 120 });
@@ -134,6 +134,23 @@ describe("buildAgentHeader", () => {
 
     const remote = buildAgentHeader({ name: "weather-agent", info: INFO, theme, width: 120 });
     expect(remote.join("\n")).not.toContain("/channels");
+  });
+
+  it("keeps the preview URL visible and plain on a color terminal (no OSC 8 escape)", () => {
+    const colorTheme = createTheme({ color: true, unicode: false });
+    const lines = buildAgentHeader({
+      name: "weather-agent",
+      info: INFO,
+      theme: colorTheme,
+      width: 120,
+    });
+    const preview = lines.find((line) => line.includes("eve is currently in preview"))!;
+
+    // The bare URL stays visible so the terminal's own URL matcher makes it
+    // ⌘/ctrl-clickable. OSC 8 explicit hyperlinks are deliberately avoided —
+    // their click handling is unreliable (e.g. Ghostty bug #11907).
+    expect(preview).toContain(EVE_BETA_TERMS_URL);
+    expect(preview).not.toContain("\x1b]8;;");
   });
 
   it("keeps the discovery-diagnostics line when the compiler reported problems", () => {
