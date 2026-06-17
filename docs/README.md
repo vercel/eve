@@ -40,7 +40,7 @@ Read in this order:
 5. [TypeScript API](./reference/typescript-api.md)
 6. [Context Control](./concepts/context-control.md)
 7. [Skills](./skills.mdx)
-8. [Tools](./tools.mdx)
+8. [Tools](./tools/overview.mdx)
 9. [Connections](./connections.mdx)
 10. [Sandboxes](./sandbox.mdx)
 11. [Channels](./channels/overview.mdx)

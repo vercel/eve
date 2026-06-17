@@ -1,9 +1,10 @@
 ---
 title: "Tools"
 description: "Define typed actions the agent can call, and gate sensitive ones on human approval."
+url: /tools
 ---
 
-A tool is a typed action the agent can call, such as hitting an API, running a query, or writing a file. The action stays in code you control. Tools run in your app runtime with full access to `process.env`, not in the [sandbox](./sandbox).
+A tool is a typed action the agent can call, such as hitting an API, running a query, or writing a file. The action stays in code you control. Tools run in your app runtime with full access to `process.env`, not in the [sandbox](../sandbox).
 
 ## Define a tool
 
@@ -36,16 +37,16 @@ When a tool returns structured data, add an optional `outputSchema`. With Zod or
 `execute` gets a `ctx` carrying the runtime accessors:
 
 - `ctx.session`: session metadata, turn, auth, parent lineage.
-- `ctx.getSandbox()`: the live [sandbox](./sandbox) handle.
-- `ctx.getSkill(id)`: read a packaged [skill](./skills)'s metadata and files.
+- `ctx.getSandbox()`: the live [sandbox](../sandbox) handle.
+- `ctx.getSkill(id)`: read a packaged [skill](../skills)'s metadata and files.
 
 Running in the app runtime is what lets a tool import shared code from `lib/`, read `process.env`, and take part in Eve’s durable pause/resume model.
 
 Eve never runs authored tools during discovery. The model sees descriptors first, and only what it actually calls gets executed. Completed steps never re-run; Eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval.
 
-## Human-in-the-loop
+## Gate a tool on human approval
 
-Human-in-the-loop (HITL) approval is a property of a tool that pauses for a person before (or instead of) running. Gate a tool on approval with `needsApproval` and the helpers from `eve/tools/approval`:
+A tool can require a person to sign off before it runs. Set `needsApproval` with the helpers from `eve/tools/approval`:
 
 ```ts title="agent/tools/refund_charge.ts"
 import { defineTool } from "eve/tools";
@@ -62,32 +63,7 @@ export default defineTool({
 });
 ```
 
-| Helper     | Behavior                                                                           |
-| ---------- | ---------------------------------------------------------------------------------- |
-| `never()`  | Never require approval (the default when omitted).                                 |
-| `once()`   | Require approval only the first time the tool runs in a session; auto-allow after. |
-| `always()` | Require approval before every call.                                                |
-
-By default, omitted `needsApproval` behaves like `never()`, so tool calls may execute without human approval. Require human approval or other safeguards for sensitive, irreversible, regulated, financial, healthcare, employment, housing, legal, safety-impacting, user-impacting, or external side-effecting actions.
-
-When the decision depends on the input, pass your own predicate instead of a helper. It receives `{ toolName, toolInput, approvedTools }` and returns a boolean. `toolInput` can be undefined, so guard the access. To require approval only when an amount crosses a threshold:
-
-```ts
-needsApproval: ({ toolInput }) => (toolInput?.amount ?? 0) > 1000,
-```
-
-### How approval pause and resume works
-
-Approvals and questions share one protocol:
-
-1. The model requests input (an approval or an `ask_question`).
-2. Eve emits an `input.requested` stream event carrying the pending requests.
-3. The turn parks at `session.waiting`, durably, for as long as it takes.
-4. The client answers with `inputResponses` (structured, keyed by `requestId`) or a normal follow-up `message`. A follow-up whose text matches an option label (case-insensitive) resolves automatically.
-
-The run picks back up exactly where it parked, and channels render the request for you. The Slack adapter, for example, turns approvals into buttons and questions into select menus.
-
-See [Sessions, runs & streaming](./concepts/sessions-runs-and-streaming) for the event and resume contract.
+Approval is one half of Eve's [human-in-the-loop](./human-in-the-loop) model — the page covers the `always/once/never` helpers, input-dependent predicates, and how a gated call pauses and resumes durably.
 
 ## Shape what the model sees with `toModelOutput`
 
@@ -105,7 +81,8 @@ Do not return secrets, credentials, unnecessary personal data, or unbounded sens
 
 ## What to read next
 
-- [Skills](./skills): on-demand procedures the model loads when relevant
-- [Default harness](./concepts/default-harness): the built-in tools and how to override or disable them
-- [Dynamic capabilities](./guides/dynamic-capabilities): tools whose set is resolved per session with `defineDynamic`
-- [Auth & route protection](./guides/auth-and-route-protection): authenticate a tool to an external service
+- [Human-in-the-loop](./human-in-the-loop): gate a tool on approval, or have the agent ask a question
+- [Skills](../skills): on-demand procedures the model loads when relevant
+- [Default harness](../concepts/default-harness): the built-in tools and how to override or disable them
+- [Dynamic capabilities](../guides/dynamic-capabilities): tools whose set is resolved per session with `defineDynamic`
+- [Auth & route protection](../guides/auth-and-route-protection): authenticate a tool to an external service
