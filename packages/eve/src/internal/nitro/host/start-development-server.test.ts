@@ -58,6 +58,11 @@ const mocks = vi.hoisted(() => {
     rm: vi.fn(async (path: string) => {
       files.delete(path);
     }),
+    stat: vi.fn(async (path: string) => {
+      if (!files.has(path)) {
+        throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      }
+    }),
     startDevelopmentSandboxPrewarmInBackground: vi.fn(() => undefined),
     pruneLocalSandboxTemplatesInBackground: vi.fn(() => undefined),
     stopDevelopmentSandboxResources: vi.fn(async () => undefined),
@@ -78,6 +83,7 @@ vi.mock("node:fs/promises", () => ({
   mkdir: mocks.mkdir,
   readFile: mocks.readFile,
   rm: mocks.rm,
+  stat: mocks.stat,
   writeFile: mocks.writeFile,
 }));
 
@@ -153,6 +159,7 @@ function createSocket(): Socket {
 }
 
 const developmentProcessIdPath = join("/tmp/eve-test", ".eve", "dev-process.pid");
+const developmentServerMetadataPath = join("/tmp/eve-test", ".eve", "dev-server.json");
 
 async function startServer(): Promise<{
   close(): Promise<void>;
@@ -327,10 +334,15 @@ describe("startDevelopmentServer", () => {
     const server = await startDevelopmentServer("/tmp/eve-test");
 
     expect(mocks.files.get(developmentProcessIdPath)).toBe(`${process.pid}\n`);
+    expect(JSON.parse(mocks.files.get(developmentServerMetadataPath) ?? "{}")).toMatchObject({
+      pid: process.pid,
+      url: "http://localhost:2000/",
+    });
 
     await server.close();
 
     expect(mocks.files.has(developmentProcessIdPath)).toBe(false);
+    expect(mocks.files.has(developmentServerMetadataPath)).toBe(false);
   });
 
   it("refuses to start when the agent already has a running dev process", async () => {
@@ -340,6 +352,35 @@ describe("startDevelopmentServer", () => {
     await expect(startDevelopmentServer("/tmp/eve-test")).rejects.toThrow(
       [
         `A dev server is already running for this eve agent (pid ${process.pid}).`,
+        "To connect to the existing instance, run: pnpm exec eve dev http://localhost:PORT",
+        `To stop it, run: ${
+          process.platform === "win32" ? "taskkill /PID" : "kill"
+        } ${process.pid}`,
+      ].join("\n"),
+    );
+    expect(mocks.createApplicationNitro).not.toHaveBeenCalled();
+  });
+
+  it("prints a copyable connect command with the detected package manager and server URL", async () => {
+    const { startDevelopmentServer } = await import("./start-development-server.js");
+    mocks.files.set(
+      join("/tmp/eve-test", "package.json"),
+      JSON.stringify({ packageManager: "npm@10.0.0" }),
+    );
+    mocks.files.set(developmentProcessIdPath, `${process.pid}\n`);
+    mocks.files.set(
+      developmentServerMetadataPath,
+      JSON.stringify({
+        pid: process.pid,
+        updatedAt: "2026-06-17T00:00:00.000Z",
+        url: "http://127.0.0.1:4321/",
+      }),
+    );
+
+    await expect(startDevelopmentServer("/tmp/eve-test")).rejects.toThrow(
+      [
+        `A dev server is already running for this eve agent (pid ${process.pid}).`,
+        "To connect to the existing instance, run: npm exec -- eve dev http://127.0.0.1:4321/",
         `To stop it, run: ${
           process.platform === "win32" ? "taskkill /PID" : "kill"
         } ${process.pid}`,
