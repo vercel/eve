@@ -14,12 +14,12 @@
 
 </div>
 
-Eve is a filesystem-first framework for building durable AI agents. Its conventions
-keep collaboration predictable and streamlines agent implementation and operations.
+Eve is a filesystem-first framework for durable AI agents. Core agent capabilities live in
+conventional locations, so projects are easier to inspect, extend, and operate.
 
-### The filesystem is the interface
+## The filesystem is the authoring interface
 
-A typical Eve agent looks something like:
+A typical Eve agent has this structure:
 
 ```text
 my-agent/
@@ -28,24 +28,30 @@ my-agent/
     ├── instructions.md     # Required: the always-on system prompt
     ├── tools/              # Optional: typed functions the model can call
     │   └── get_weather.ts
-    ├── skills/             # Optional: SKILL.md procedures loaded on demand
+    ├── skills/             # Optional: procedures loaded on demand
     │   └── plan_a_trip.md
-    ├── channels/           # Optional: message channels — HTTP, Slack, Discord
+    ├── channels/           # Optional: message channels (HTTP, Slack, Discord)
     │   └── slack.ts
-    └── schedules/          # Optional: recurring jobs (cron)
+    └── schedules/          # Optional: recurring cron jobs
         └── weekly_recap.ts
 ```
 
-Refer to the [documentation](https://beta.eve.dev/docs) to learn more about how Eve works.
+Read the [documentation](https://beta.eve.dev/docs) for the full project layout and guides.
 
-## Quick Start
+## Quick start
 
 ```bash
 npx eve@latest init my-agent
 ```
 
 This creates a new `my-agent` directory, installs its dependencies, initializes Git, and starts
-the interactive terminal UI. Add `--channel-web-nextjs` to also scaffold the Web Chat application.
+the interactive terminal UI. For a new project, add `--channel-web-nextjs` to also scaffold the
+Web Chat application. Press <kbd>Ctrl</kbd>+<kbd>C</kbd> to stop the UI, then enter the generated
+project:
+
+```bash
+cd my-agent
+```
 
 To add Eve to an existing project, pass a path:
 
@@ -55,24 +61,25 @@ npx eve@latest init .
 ```
 
 > [!NOTE]
-> `eve` is distributed with its full documentation, so agents can easily read it locally from `node_modules/eve/docs`.
+> The `eve` package includes its full documentation, so coding agents can read it locally from
+> `node_modules/eve/docs`.
 
 ### A minimal example
 
-To build a simple weather bot, you'd create an `agent` directory with an `agent/instructions.md` file:
+The generated project includes an `agent` directory. Replace `agent/instructions.md` with:
 
 ```md
-You are a weather-focused assistant. Be concise and accurate, and write like a television weatherman.
+You are a concise weather demo assistant. Tell users that the weather data is mocked.
 ```
 
-Then give it a tool to reach a weather service, `agent/tools/get_weather.ts`:
+Add a mock weather tool at `agent/tools/get_weather.ts`:
 
 ```ts
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 export default defineTool({
-  description: "Get the current weather for a city.",
+  description: "Return mock weather data for a city.",
   inputSchema: z.object({ city: z.string().min(1) }),
   async execute({ city }) {
     return { city, condition: "Sunny", temperatureF: 72 };
@@ -80,7 +87,7 @@ export default defineTool({
 });
 ```
 
-And, to choose the model, `agent/agent.ts`:
+Choose the model in `agent/agent.ts`:
 
 ```ts
 import { defineAgent } from "eve";
@@ -90,9 +97,15 @@ export default defineAgent({
 });
 ```
 
-That's a working agent. Eve also gives you human-in-the-loop, subagents, schedules, and more
-as it grows. Check out [guides](https://beta.eve.dev/docs/tutorial/first-agent) to follow
-through examples.
+For a new scaffold, start the agent again:
+
+```bash
+npm run dev
+```
+
+That's a working agent. Add human-in-the-loop prompts, subagents, and schedules as needed.
+Follow the [first-agent tutorial](https://beta.eve.dev/docs/tutorial/first-agent) for a complete
+walkthrough.
 
 ## Community
 
@@ -113,7 +126,7 @@ Please do not open public issues for security vulnerabilities. Instead, follow
 [SECURITY.md](SECURITY.md) and report responsibly to
 [responsible.disclosure@vercel.com](mailto:responsible.disclosure@vercel.com).
 
-## Beta Terms
+## Beta terms
 
 Eve is currently in beta and subject to the [Vercel beta terms](https://vercel.com/docs/release-phases/public-beta-agreement);
 the framework, APIs, documentation, and behavior may change before general availability.
