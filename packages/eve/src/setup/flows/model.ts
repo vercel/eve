@@ -220,11 +220,8 @@ export async function detectModelProviderStatus(
  * choice into `agent.ts` (activation is the dev server's HMR watcher).
  * The provider row runs {@link runVercelFlow} — the provider gate (AI
  * Gateway or your own), then link-or-paste-a-key.
- * A completed model change or provider setup leaves the menu for the main
- * prompt, carrying its outcome as the command's reply line (the effects already
- * happened, exactly like the channels flow). A cancelled sub-flow — or the
- * own-key branch, which only shows instructions — repaints the menu instead;
- * Done or Esc there folds to cancelled.
+ * Completed model and provider changes return to the prompt with their result.
+ * Cancelled flows and external-provider instructions return to the menu.
  */
 export async function runModelFlow(input: {
   appRoot: string;
@@ -271,12 +268,7 @@ export async function runModelFlow(input: {
         }
       : undefined;
 
-  // The menu opens on the most useful selectable row: an unconfigured provider
-  // (the agent can't run without it) leads on the first lap; otherwise the model
-  // row when it can be edited, else the provider row, else Done. A completed
-  // change or provider setup exits the menu, so the cursor only matters on a
-  // repaint: a cancelled sub-flow stays on its row, the own-key branch lands on
-  // Done.
+  // Start at the first useful row. Cancellation keeps the current row.
   let nextSelection: ModelMenuRow =
     provider.kind === "unset" && routing?.kind !== "external"
       ? "provider"
@@ -311,7 +303,6 @@ export async function runModelFlow(input: {
         signal,
         deps: deps.selectModel,
       });
-      // A cancelled picker changed nothing; repaint the menu on the model row.
       if (slug === undefined) {
         nextSelection = "model";
         continue;
@@ -319,9 +310,6 @@ export async function runModelFlow(input: {
       signal?.throwIfAborted();
       lastApply = await deps.applyModel({ appRoot, slug });
       signal?.throwIfAborted();
-      // The action completed: leave the menu for the main prompt. The apply
-      // outcome (changed, unchanged, or a rejected slug) surfaces there as the
-      // command's reply line.
       break;
     }
 
@@ -333,9 +321,7 @@ export async function runModelFlow(input: {
       nextSelection = "provider";
       continue;
     }
-    // The external-provider branch only showed instructions (any gateway link
-    // is untouched), so nothing changed on disk: it earns no outcome or status
-    // re-read, and the menu stays open on Done rather than exiting.
+    // External-provider setup only shows instructions, so keep the menu open.
     if ("outcome" in result) {
       nextSelection = "done";
       continue;
@@ -346,7 +332,6 @@ export async function runModelFlow(input: {
     signal?.throwIfAborted();
     providerOutcome = { status: provider };
     if (result.credential !== undefined) providerOutcome.credential = result.credential;
-    // The action completed: leave the menu for the main prompt.
     break;
   }
 

@@ -104,19 +104,12 @@ export async function detectSetupIssues(
   return results.flat();
 }
 
-/**
- * Orders the attention line so the Vercel auth prerequisite (install the CLI
- * via `/vc`, or log in via `/login`) precedes the boot detections. The boot
- * `/model` hint is fixed by linking a project, which needs a working CLI and a
- * logged-in session — so an unmet auth prerequisite has to clear first.
- * Listing `/model` ahead of `/vc` would point the user at a step they can't
- * complete yet.
- */
+/** Places the auth issue before boot-time setup issues. */
 export function orderedSetupIssues(
   bootIssues: readonly SetupIssue[],
   authIssue: SetupIssue | undefined,
 ): SetupIssue[] {
-  return [...(authIssue === undefined ? [] : [authIssue]), ...bootIssues];
+  return authIssue === undefined ? [...bootIssues] : [authIssue, ...bootIssues];
 }
 
 /**

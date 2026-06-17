@@ -255,7 +255,7 @@ describe("runModelFlow", () => {
     });
   });
 
-  it("applies the pick and returns to the prompt without repainting the menu", async () => {
+  it("applies the model and returns to the prompt", async () => {
     const { prompter, menuPaints, selectMessages } = scriptedPrompter({
       menu: ["model"],
       picker: ["openai/gpt-5.5"],
@@ -267,15 +267,13 @@ describe("runModelFlow", () => {
       modelMessage: `Model changed to ${pc.bold("openai/gpt-5.5")}. Live on your next prompt.`,
     });
 
-    // The completed change exits straight to the main prompt: one menu paint,
-    // then the catalog picker, with no repaint to land on Done.
     expect(selectMessages).toEqual([MODEL_MENU_MESSAGE, "Which model should your agent use?"]);
     expect(menuPaints).toHaveLength(1);
     expect(deps.applyModel).toHaveBeenCalledWith({ appRoot: APP_ROOT, slug: "openai/gpt-5.5" });
     expect(deps.readCurrentModel).toHaveBeenCalledTimes(1);
   });
 
-  it("exits with the rejection message when the applied slug is rejected", async () => {
+  it("returns a rejection without repainting the menu", async () => {
     const { prompter, menuPaints } = scriptedPrompter({
       menu: ["model"],
       picker: ["openai/gpt-5.5"],
@@ -286,8 +284,6 @@ describe("runModelFlow", () => {
       ),
     });
 
-    // A rejected apply still completes the action: the menu exits and the
-    // rejection surfaces as the command's reply line, not an in-menu notice.
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
       kind: "done",
       modelMessage: "Couldn't confirm the id.",
@@ -296,7 +292,7 @@ describe("runModelFlow", () => {
     expect(menuPaints).toHaveLength(1);
   });
 
-  it("runs the provider sub-flow, re-detects the status, and returns to the prompt", async () => {
+  it("returns to the prompt after provider setup", async () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["provider"] });
     const detectProviderStatus = vi
       .fn<ModelFlowDeps["detectProviderStatus"]>()
@@ -316,8 +312,6 @@ describe("runModelFlow", () => {
     });
 
     expect(runVercelFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
-    // Status is re-read once after the sub-flow (plus the initial menu read),
-    // then the completed setup exits without repainting the menu.
     expect(detectProviderStatus).toHaveBeenCalledTimes(2);
     expect(menuPaints).toHaveLength(1);
   });
