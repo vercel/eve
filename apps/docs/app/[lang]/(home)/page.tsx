@@ -7,7 +7,7 @@ import { CTA } from "./components/cta";
 import { FeatureGrid } from "./components/feature-grid";
 import { FileTree } from "./components/file-tree";
 
-const title = "Eve";
+const title = "eve";
 const tagline = "Like Next.js for web apps, but for agents.";
 const description =
   "Markdown for instructions and skills, TypeScript for tools. Durable by default.";

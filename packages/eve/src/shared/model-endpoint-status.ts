@@ -4,10 +4,10 @@
  * dev TUI status bar, or any other consumer of `/eve/v1/info`) shows and gates
  * on three states:
  *
- * - `external`: a direct provider endpoint, not the gateway. Eve makes no
+ * - `external`: a direct provider endpoint, not the gateway. eve makes no
  *   connectedness claim, since the provider key lives in the agent's own code
  *   rather than the gateway's credentials, and model selection is disabled
- *   because Eve cannot rewrite the authored source.
+ *   because eve cannot rewrite the authored source.
  * - `gateway` + `connected: true`: routed through the Vercel AI Gateway with a
  *   resolvable credential (`api-key` from `AI_GATEWAY_API_KEY`, else `oidc`).
  * - `gateway` + `connected: false`: routed through the gateway with neither a

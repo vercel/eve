@@ -1,6 +1,6 @@
 # Framework apps
 
-These apps verify Eve's frontend framework integrations and act as runnable examples for maintainers.
+These apps verify eve's frontend framework integrations and act as runnable examples for maintainers.
 
 - `framework-next` covers `eve/next` and `withEve()`.
 - `framework-nuxt` covers the `eve/nuxt` module.

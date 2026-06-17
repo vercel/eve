@@ -88,7 +88,7 @@ export async function resolveScopedToken(input: ScopedAuthorization): Promise<To
  * Called when an already-resolved bearer is rejected (a downstream
  * `401`, or an explicit `requireAuth()` after a failed call) so the
  * re-authorization attempt does not re-read the stale token. Drops two
- * layers: Eve's per-step cache, and — via the strategy's optional
+ * layers: eve's per-step cache, and — via the strategy's optional
  * {@link AuthorizationDefinition.evict} hook — any cache the strategy
  * itself owns (e.g. the `@vercel/connect` in-process token cache). The
  * single shared eviction path here means both authored tools and MCP

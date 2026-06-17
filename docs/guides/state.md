@@ -42,7 +42,7 @@ export default defineTool({
 });
 ```
 
-`get()` and `update()` require an active Eve context. Calling them outside tools, hooks, or framework-managed code throws.
+`get()` and `update()` require an active eve context. Calling them outside tools, hooks, or framework-managed code throws.
 
 ## Reset state between turns
 

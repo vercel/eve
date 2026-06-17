@@ -146,14 +146,14 @@ afterEach(() => {
 });
 
 describe("runChannelsAddCommand", () => {
-  test("refuses a directory without an Eve agent using the shared init guidance", async () => {
+  test("refuses a directory without an eve agent using the shared init guidance", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "eve-channels-empty-"));
     const logger = new TestLogger();
 
     await runChannelsAddCommand(logger, projectRoot, { kind: "web", options: {} });
 
     expect(logger.errors).toEqual([
-      "No Eve agent in this directory. Run `eve init <name>`, then run this command from inside the new project.",
+      "No eve agent in this directory. Run `eve init <name>`, then run this command from inside the new project.",
     ]);
     expect(process.exitCode).toBe(1);
   });
@@ -339,7 +339,7 @@ describe("runChannelsAddCommand", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  test("does not scaffold Web Chat over an existing Eve session channel", async () => {
+  test("does not scaffold Web Chat over an existing eve session channel", async () => {
     const projectRoot = await createAgentProject();
     const logger = new TestLogger();
     const authModulePath = sourceImportSpecifier("../../public/channels/auth.ts");
@@ -370,7 +370,7 @@ describe("runChannelsAddCommand", () => {
 
     await expect(readFile(join(projectRoot, "agent/channels/web.ts"), "utf8")).rejects.toThrow();
     expect(logger.errors).toEqual([
-      "Cannot scaffold Web Chat because agent/channels/custom.ts already defines POST /eve/v1/session. Web Chat scaffolds the same Eve session routes.",
+      "Cannot scaffold Web Chat because agent/channels/custom.ts already defines POST /eve/v1/session. Web Chat scaffolds the same eve session routes.",
     ]);
     expect(process.exitCode).toBe(1);
   });

@@ -13,7 +13,7 @@ Step 1 scaffolded the agent without a web frontend. Add one now with `eve channe
 npx eve channels add web
 ```
 
-This adds a Next.js app (`next.config.ts`, `app/page.tsx`, `app/_components/`) wired to the existing Eve channel, plus the chat UI components and their dependencies. Run `npm install` afterward to install the added packages. The generated `next.config.ts` wraps your config with `withEve`, which wires the Eve routes automatically:
+This adds a Next.js app (`next.config.ts`, `app/page.tsx`, `app/_components/`) wired to the existing eve channel, plus the chat UI components and their dependencies. Run `npm install` afterward to install the added packages. The generated `next.config.ts` wraps your config with `withEve`, which wires the eve routes automatically:
 
 ```ts title="next.config.ts"
 import type { NextConfig } from "next";
@@ -26,7 +26,7 @@ export default withEve(nextConfig);
 
 ## A dashboard with `useEveAgent`
 
-The dashboard talks to the built-in Eve HTTP channel (`agent/channels/eve.ts`). On the browser side, `useEveAgent` handles session creation, streaming, and HITL. The scaffold renders its chat from `app/_components/agent-chat.tsx`, mounted by `app/page.tsx`. That component is fuller than you need to start, so replace its contents with this minimal version:
+The dashboard talks to the built-in eve HTTP channel (`agent/channels/eve.ts`). On the browser side, `useEveAgent` handles session creation, streaming, and HITL. The scaffold renders its chat from `app/_components/agent-chat.tsx`, mounted by `app/page.tsx`. That component is fuller than you need to start, so replace its contents with this minimal version:
 
 ```tsx title="app/_components/agent-chat.tsx"
 "use client";
@@ -125,7 +125,7 @@ That `team` attribute is exactly what the dynamic playbook in [Step 7](./team-pl
 vercel deploy
 ```
 
-On Vercel, the web app stays public and the Eve runtime sits behind it on the same origin, with the sandbox running on Vercel Sandbox. You can smoke-test the deployment without leaving the CLI:
+On Vercel, the web app stays public and the eve runtime sits behind it on the same origin, with the sandbox running on Vercel Sandbox. You can smoke-test the deployment without leaving the CLI:
 
 ```bash
 npx eve dev https://your-analytics-app.vercel.app
@@ -138,7 +138,7 @@ That's the full assistant, deployed and authed. It queries the warehouse, runs a
 Across the nine steps you built and shipped one agent, and along the way you used:
 
 - **Tools** to give the model typed actions (`run_sql`, `chart_series`, `define_metric`).
-- **Connections** to reach a warehouse over an OAuth MCP, with per-user tokens Eve resolves for you.
+- **Connections** to reach a warehouse over an OAuth MCP, with per-user tokens eve resolves for you.
 - **The sandbox** to compute and chart beyond SQL in an isolated `/workspace`.
 - **State** (`defineState`) to remember the team's glossary across turns.
 - **Dynamic skills** (`defineDynamic`) to load the right team playbook per caller.

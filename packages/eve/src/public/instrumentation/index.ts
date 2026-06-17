@@ -89,7 +89,7 @@ export interface InstrumentationModelInput {
 }
 
 /**
- * Input passed to `events["step.started"]`. Eve runs the callback after
+ * Input passed to `events["step.started"]`. eve runs the callback after
  * building the final model input for this attempt and before constructing
  * the AI SDK model call.
  */
@@ -102,7 +102,7 @@ export interface InstrumentationStepStartedEventInput {
 }
 
 /**
- * Result of a `step.started` callback. Eve merges `runtimeContext` into the
+ * Result of a `step.started` callback. eve merges `runtimeContext` into the
  * AI SDK telemetry span; child spans inherit the values. Keys beginning with
  * `eve.` and non-JSON-serializable values are dropped. Return `undefined` to
  * contribute no context.
@@ -164,7 +164,7 @@ export interface InstrumentationDefinition {
 }
 
 /**
- * Export the result as the default export of `agent/instrumentation.ts`. Eve
+ * Export the result as the default export of `agent/instrumentation.ts`. eve
  * reads these settings at server startup and applies them to every AI SDK
  * model call. The `setup` callback runs later with the resolved agent name,
  * not during `defineInstrumentation` itself.

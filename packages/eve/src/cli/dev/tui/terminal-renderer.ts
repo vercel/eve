@@ -295,7 +295,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #typeahead?: CommandTypeaheadState;
   #working = false;
   #status: string = STATUS.processing;
-  #title = "Eve";
+  #title = "eve";
   #isInteractive = false;
   #interrupted = false;
   #caretVisible = true;
@@ -2765,11 +2765,11 @@ function leadsWithGap(block: Block, previous: PreviousBlock | undefined): boolea
 
 function parseSandboxLogLine(line: string): string | undefined {
   const trimmed = line.trim();
-  if (!trimmed.startsWith("Eve: ")) {
+  if (!trimmed.startsWith("eve: ")) {
     return undefined;
   }
 
-  const message = trimmed.slice("Eve: ".length);
+  const message = trimmed.slice("eve: ".length);
   return /\bsandbox\b/i.test(message) && !isLowValueSandboxLogLine(message) ? message : undefined;
 }
 

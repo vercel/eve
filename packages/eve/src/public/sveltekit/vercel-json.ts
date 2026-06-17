@@ -78,10 +78,10 @@ function hasRewrite(rewrites: readonly EveVercelRewrite[], rewrite: EveVercelRew
 }
 
 /**
- * Ensure `vercel.json` declares the SvelteKit web service and the Eve agent
+ * Ensure `vercel.json` declares the SvelteKit web service and the eve agent
  * service so a Vercel deployment ships both from one project.
  *
- * Existing services are preserved untouched; an already-configured Eve
+ * Existing services are preserved untouched; an already-configured eve
  * service's `routePrefix` wins over {@link input.servicePrefix}. The file is
  * only rewritten when the resulting config differs from what is on disk.
  */

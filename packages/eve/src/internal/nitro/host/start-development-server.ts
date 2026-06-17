@@ -164,7 +164,7 @@ async function writeDevelopmentProcessId(appRoot: string): Promise<() => Promise
   if (activeProcessId !== undefined) {
     throw new Error(
       [
-        `A dev server is already running for this Eve agent (pid ${activeProcessId}).`,
+        `A dev server is already running for this eve agent (pid ${activeProcessId}).`,
         `To stop it, run: ${formatKillCommand(activeProcessId)}`,
       ].join("\n"),
     );
@@ -333,7 +333,7 @@ async function listenForDevelopmentServer(input: {
 }
 
 /**
- * Starts the development Nitro server for an Eve application.
+ * Starts the development Nitro server for an eve application.
  *
  * Authored schedules are never registered with Nitro's cron scheduler in
  * dev mode. To fire one authored schedule on demand, `POST` the dev-only

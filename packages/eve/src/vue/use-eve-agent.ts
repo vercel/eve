@@ -23,7 +23,7 @@ export type { PrepareSend };
 export type UseEveAgentStatus = EveAgentStoreStatus;
 
 /**
- * Point-in-time projected state for an Eve agent session (`data`, `error`,
+ * Point-in-time projected state for an eve agent session (`data`, `error`,
  * `events`, `session`, `status`).
  *
  * `useEveAgent` passes this shape to callbacks such as `onFinish`, but exposes
@@ -54,7 +54,7 @@ export interface UseEveAgentReturn<TData> {
 }
 
 /**
- * Configuration for creating or binding a Vue Eve agent session.
+ * Configuration for creating or binding a Vue eve agent session.
  *
  * Session configuration is read once when the composable creates its internal
  * store; to change the host, reducer, or session, remount the component. For
@@ -71,11 +71,11 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
   /** Custom headers; a function value is resolved per request. */
   readonly headers?: HeadersValue;
   /**
-   * Base URL used for Eve client requests.
+   * Base URL used for eve client requests.
    *
-   * By default, requests target same-origin Eve routes such as `/eve/v1/...`.
+   * By default, requests target same-origin eve routes such as `/eve/v1/...`.
    * Pass a same-origin prefix such as `/api` to use an app-owned proxy, or an
-   * absolute origin to talk to an Eve server directly.
+   * absolute origin to talk to an eve server directly.
    *
    * @default ""
    */
@@ -87,11 +87,11 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
   /** Maximum SSE reconnection attempts per turn. @default 3 */
   readonly maxReconnectAttempts?: number;
   /**
-   * Project submitted user messages before Eve confirms them with a
+   * Project submitted user messages before eve confirms them with a
    * `message.received` stream event.
    *
    * Optimistic events are reducer-facing projection events only. They are not
-   * exposed through `events`, which remains the authoritative Eve stream.
+   * exposed through `events`, which remains the authoritative eve stream.
    *
    * @default true
    */
@@ -119,7 +119,7 @@ export function useEveAgent<TData>(
 ): UseEveAgentReturn<TData>;
 
 /**
- * Vue composable that drives one Eve session and projects its event stream into
+ * Vue composable that drives one eve session and projects its event stream into
  * reactive UI state.
  *
  * Without a `reducer`, events project into `EveMessageData` via

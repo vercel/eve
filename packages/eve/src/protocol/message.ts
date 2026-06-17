@@ -13,7 +13,7 @@ export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
 export const EVE_MESSAGE_STREAM_VERSION = "16";
 
 /**
- * Eve-owned finish reason for one completed assistant step.
+ * eve-owned finish reason for one completed assistant step.
  *
  * `tool-calls` is the only non-terminal assistant step in the current
  * tool-loop harness. All other values indicate the assistant step ended the
@@ -73,7 +73,7 @@ export interface SubagentSessionInvocationMetadata {
  * Runtime identity metadata attached to the `session.started` event.
  *
  * The server populates this at run time so remote eval processes and
- * reporters receive authoritative metadata about the Eve instance
+ * reporters receive authoritative metadata about the eve instance
  * serving the run.
  */
 export interface RuntimeIdentity {

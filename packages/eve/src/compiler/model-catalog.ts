@@ -36,7 +36,7 @@ export type CatalogModelProvider = z.infer<typeof catalogModelProviderSchema>;
 export type CatalogModel = z.infer<typeof catalogModelSchema>;
 
 /**
- * Stable runtime model limits that Eve can embed in compiled artifacts without
+ * Stable runtime model limits that eve can embed in compiled artifacts without
  * resolving provider metadata at runtime.
  */
 export type CompiledRuntimeModelLimits = z.infer<typeof compiledRuntimeModelLimitsSchema>;

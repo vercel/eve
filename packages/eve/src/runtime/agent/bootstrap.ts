@@ -38,7 +38,7 @@ export interface RuntimeTurnAgent {
  * Static system prompt for the bootstrap runtime path.
  */
 export const BOOTSTRAP_RUNTIME_SYSTEM_PROMPT =
-  "You are the Eve bootstrap agent. Be concise, stay grounded in the current conversation, and do not assume tools are available unless the runtime provides them.";
+  "You are the eve bootstrap agent. Be concise, stay grounded in the current conversation, and do not assume tools are available unless the runtime provides them.";
 
 /**
  * Creates the runtime-owned turn-preparation shape from a resolved authored

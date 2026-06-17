@@ -1,15 +1,15 @@
 ---
 title: "instrumentation.ts"
-description: "Trace an agent with OpenTelemetry in instrumentation.ts, read the workflow run tags Eve emits, and debug discovery with eve info and the common-failures table."
+description: "Trace an agent with OpenTelemetry in instrumentation.ts, read the workflow run tags eve emits, and debug discovery with eve info and the common-failures table."
 ---
 
-`instrumentation.ts` is where you configure how an Eve agent is observed. The framework auto-discovers `agent/instrumentation.ts` and runs it at server startup before any agent code. Its presence implicitly enables telemetry, so there is no separate `isEnabled` toggle.
+`instrumentation.ts` is where you configure how an eve agent is observed. The framework auto-discovers `agent/instrumentation.ts` and runs it at server startup before any agent code. Its presence implicitly enables telemetry, so there is no separate `isEnabled` toggle.
 
 If you intend to export telemetry, review the exporter destination, data categories, and required legal approvals before enabling telemetry.
 
 ## Three observability surfaces
 
-Eve observes an agent through three distinct surfaces. They do not all live in this file, and they write to different places:
+eve observes an agent through three distinct surfaces. They do not all live in this file, and they write to different places:
 
 | Surface                          | Configured in `instrumentation.ts`?                         | What it is                                                                                                                                                    |
 | -------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -17,7 +17,7 @@ Eve observes an agent through three distinct surfaces. They do not all live in t
 | **OpenTelemetry export**         | Yes: `setup`, `recordInputs`, `recordOutputs`, `functionId` | Where AI SDK spans are exported and what they record.                                                                                                         |
 | **Runtime context events**       | Yes: `events["step.started"]`                               | Per-model-call values written into the AI SDK's runtime context, which the AI SDK carries onto its spans.                                                     |
 
-The two configurable surfaces send AI SDK spans to your OpenTelemetry backend. Workflow run tags are a separate system, queryable in the Workflow dashboard rather than on your OTel spans. The sections below cover what you configure here; [Workflow run tags](#workflow-run-tags) documents what Eve emits on its own.
+The two configurable surfaces send AI SDK spans to your OpenTelemetry backend. Workflow run tags are a separate system, queryable in the Workflow dashboard rather than on your OTel spans. The sections below cover what you configure here; [Workflow run tags](#workflow-run-tags) documents what eve emits on its own.
 
 ## Define instrumentation
 
@@ -60,7 +60,7 @@ The third configurable surface, [runtime context events](#runtime-context), atta
 
 ## Runtime context
 
-_Runtime context_ is an [AI SDK concept](https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text): a user-defined object that flows through a generation lifecycle. Eve exposes it through `events["step.started"]`, a callback that runs once Eve has assembled the model input for an attempt and returns `{ runtimeContext }`. Because Eve registers the AI SDK's OpenTelemetry integration with runtime context enabled, those returned values ride onto the model-call span and its children. The field is named `runtimeContext`, not `metadata`, because AI SDK v7 carries per-call attributes on runtime context rather than a dedicated metadata field.
+_Runtime context_ is an [AI SDK concept](https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text): a user-defined object that flows through a generation lifecycle. eve exposes it through `events["step.started"]`, a callback that runs once eve has assembled the model input for an attempt and returns `{ runtimeContext }`. Because eve registers the AI SDK's OpenTelemetry integration with runtime context enabled, those returned values ride onto the model-call span and its children. The field is named `runtimeContext`, not `metadata`, because AI SDK v7 carries per-call attributes on runtime context rather than a dedicated metadata field.
 
 Use it when the values depend on the current session, turn, step, channel, or model input:
 
@@ -94,7 +94,7 @@ The callback receives:
 - `channel`: the channel's `kind` and the metadata projected by the active channel
 - `modelInput`: the final instructions and messages passed to the model call
 
-A channel exposes its identity through `kind`, the discriminant you narrow on. For authored channels it is `channel:<name>`, where `<name>` is the channel's filename under `agent/channels/`, so `agent/channels/support.ts` is `channel:support`. Framework channels use `http`, `schedule`, or `subagent`, and an unrecognized or absent kind normalizes to `unknown`. The kind is also emitted as the `eve.channel.kind` span attribute. Eve emits compiler-owned typings keyed by the channel filename, so you can narrow either by checking `input.channel.kind === "channel:support"` or by using `isChannel(input.channel, supportChannel)`.
+A channel exposes its identity through `kind`, the discriminant you narrow on. For authored channels it is `channel:<name>`, where `<name>` is the channel's filename under `agent/channels/`, so `agent/channels/support.ts` is `channel:support`. Framework channels use `http`, `schedule`, or `subagent`, and an unrecognized or absent kind normalizes to `unknown`. The kind is also emitted as the `eve.channel.kind` span attribute. eve emits compiler-owned typings keyed by the channel filename, so you can narrow either by checking `input.channel.kind === "channel:support"` or by using `isChannel(input.channel, supportChannel)`.
 
 Channel metadata is channel-owned. Built-in channels expose only the fields they choose to make observable; Slack, for example, projects `channelId`, `teamId`, `threadTs`, and `triggeringUserId` from its durable channel state. User-authored channels expose their own projection by returning `metadata(state)` from `defineChannel`. Runtime instrumentation never falls back to raw channel state.
 
@@ -113,11 +113,11 @@ ai.eve.turn  {eve.session.id}
   +-- ai.streamText                           step 3 (final text)
 ```
 
-Eve creates the `ai.eve.turn` parent span per turn and passes enriched telemetry to the AI SDK so model calls and tool executions are traced automatically. Session, turn, step, and channel context is injected as the framework half of the runtime context (`eve.version`, `eve.session.id`, `eve.environment`, `eve.turn.id`, `eve.turn.sequence`, `eve.step.index`, `eve.channel.kind`) and rides onto the spans alongside any values your `events["step.started"]` callback returns under `runtimeContext`.
+eve creates the `ai.eve.turn` parent span per turn and passes enriched telemetry to the AI SDK so model calls and tool executions are traced automatically. Session, turn, step, and channel context is injected as the framework half of the runtime context (`eve.version`, `eve.session.id`, `eve.environment`, `eve.turn.id`, `eve.turn.sequence`, `eve.step.index`, `eve.channel.kind`) and rides onto the spans alongside any values your `events["step.started"]` callback returns under `runtimeContext`.
 
 ## Workflow run tags
 
-Separately from OpenTelemetry, Eve tags every workflow run with reserved `$eve.*` attributes. These live on the Vercel Workflow run, queryable in the Workflow dashboard, not on OTel spans, and you do not configure them: they are framework-owned and emitted automatically on every session, turn, and subagent run, whether or not an `instrumentation.ts` file is present. Authored code cannot set or override the `$eve.` namespace.
+Separately from OpenTelemetry, eve tags every workflow run with reserved `$eve.*` attributes. These live on the Vercel Workflow run, queryable in the Workflow dashboard, not on OTel spans, and you do not configure them: they are framework-owned and emitted automatically on every session, turn, and subagent run, whether or not an `instrumentation.ts` file is present. Authored code cannot set or override the `$eve.` namespace.
 
 They let a dashboard reconstruct the tree of runs behind a single agent invocation and surface model and token usage without reading run bodies.
 
@@ -144,14 +144,14 @@ Note: By default, telemetry records full message history and model outputs You m
 
 ## Debugging
 
-`eve info` is the fastest way to see what Eve actually picked up: the active tools, skills, subagents, schedules, routes, and discovery diagnostics. Eve also writes inspectable artifacts under `.eve/`, kept even when discovery hits errors:
+`eve info` is the fastest way to see what eve actually picked up: the active tools, skills, subagents, schedules, routes, and discovery diagnostics. eve also writes inspectable artifacts under `.eve/`, kept even when discovery hits errors:
 
 | Artifact                        | Tells you                                   |
 | ------------------------------- | ------------------------------------------- |
-| `agent-discovery-manifest.json` | what Eve found on disk                      |
+| `agent-discovery-manifest.json` | what eve found on disk                      |
 | `diagnostics.json`              | authored-shape errors and warnings          |
-| `compiled-agent-manifest.json`  | the serialized surface Eve loads at runtime |
-| `module-map.mjs`                | compiled module entrypoints Eve imports     |
+| `compiled-agent-manifest.json`  | the serialized surface eve loads at runtime |
+| `module-map.mjs`                | compiled module entrypoints eve imports     |
 
 When `eve build` fails on discovery errors, the CLI prints the full diagnostics report (severity, message, source path) and the path to the diagnostics artifact.
 

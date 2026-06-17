@@ -7,7 +7,7 @@ import type {
 } from "#public/sandbox/docker-sandbox.js";
 
 /**
- * Default base image for the Docker backend: Eve's published sandbox
+ * Default base image for the Docker backend: eve's published sandbox
  * runtime image.
  */
 export const DEFAULT_DOCKER_SANDBOX_IMAGE = "ghcr.io/vercel/eve:latest";

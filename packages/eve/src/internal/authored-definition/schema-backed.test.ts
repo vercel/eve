@@ -10,7 +10,7 @@ import {
 import { once } from "#public/tools/approval/approval-helpers.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
 
-const FAILURE_MESSAGE = "Expected the tool export to match the public Eve shape.";
+const FAILURE_MESSAGE = "Expected the tool export to match the public eve shape.";
 
 describe("normalizeToolDefinition", () => {
   it("returns a tool entry for a real defineTool default export", () => {

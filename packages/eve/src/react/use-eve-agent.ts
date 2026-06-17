@@ -16,7 +16,7 @@ import type { ClientAuth, HeadersValue, SendTurnPayload, SessionState } from "#c
 export type { PrepareSend };
 
 /**
- * Lifecycle status of an Eve agent session.
+ * Lifecycle status of an eve agent session.
  *
  * - `"ready"`: idle, accepting a new turn.
  * - `"submitted"`: a turn was sent, no stream events received yet.
@@ -26,7 +26,7 @@ export type { PrepareSend };
 export type UseEveAgentStatus = EveAgentStoreStatus;
 
 /**
- * Snapshot of an Eve agent session: `data` (the reducer projection), `events`
+ * Snapshot of an eve agent session: `data` (the reducer projection), `events`
  * (the authoritative server stream), `session` (resumable cursor), `status`,
  * and `error`.
  */
@@ -45,7 +45,7 @@ export interface UseEveAgentHelpers<TData> extends UseEveAgentSnapshot<TData> {
 }
 
 /**
- * Configuration for creating or binding a React Eve agent session.
+ * Configuration for creating or binding a React eve agent session.
  *
  * Session configuration is read when the hook creates its internal store;
  * remount the component to point at a different host, reducer, or session.
@@ -58,11 +58,11 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
   readonly auth?: ClientAuth;
   readonly headers?: HeadersValue;
   /**
-   * Base URL for Eve client requests.
+   * Base URL for eve client requests.
    *
-   * Defaults to same-origin Eve routes such as `/eve/v1/...`. Pass a same-origin
+   * Defaults to same-origin eve routes such as `/eve/v1/...`. Pass a same-origin
    * prefix such as `/api` for an app-owned proxy, or an absolute origin to talk
-   * to an Eve server directly.
+   * to an eve server directly.
    *
    * @default ""
    */
@@ -71,11 +71,11 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
   readonly initialSession?: SessionState;
   readonly maxReconnectAttempts?: number;
   /**
-   * Project submitted user messages before Eve confirms them with a
+   * Project submitted user messages before eve confirms them with a
    * `message.received` stream event.
    *
    * Optimistic events are reducer-facing projection events only. They are not
-   * exposed through `events`, which remains the authoritative Eve stream.
+   * exposed through `events`, which remains the authoritative eve stream.
    *
    * @default true
    */
@@ -93,7 +93,7 @@ export function useEveAgent<TData>(
 ): UseEveAgentHelpers<TData>;
 
 /**
- * React hook that drives an Eve session and projects its event stream into UI data.
+ * React hook that drives an eve session and projects its event stream into UI data.
  *
  * Returns the current snapshot (`data`, `events`, `session`, `status`, `error`)
  * plus the commands `send`, `stop`, and `reset`. With no reducer, `data` is the

@@ -44,7 +44,7 @@ export async function compileToolEntry(
       kind: "tool",
       source,
     }),
-    `Expected the tool export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public Eve shape.`,
+    `Expected the tool export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
   );
   const toolName = stripLogicalPathExtension(source.logicalPath)
     .replace(/^tools\//, "")

@@ -164,7 +164,7 @@ async function loadVendoredSemver(options, dependencies = {}) {
     }
 
     if (!(await exists(semverPath))) {
-      throw new Error(`Building Eve's vendored dependencies did not produce ${semverPath}.`);
+      throw new Error(`Building eve's vendored dependencies did not produce ${semverPath}.`);
     }
 
     const module = await importModule(pathToFileURL(semverPath).href);
@@ -183,7 +183,7 @@ async function assertSupportedNodeVersion(
   const semver = await loadVendoredSemver(options, dependencies);
 
   if (semver.validRange(requiredRange) === null) {
-    throw new Error(`Eve declares an invalid Node.js engine range: "${requiredRange}".`);
+    throw new Error(`eve declares an invalid Node.js engine range: "${requiredRange}".`);
   }
   if (semver.satisfies(version, requiredRange)) {
     return;
@@ -191,7 +191,7 @@ async function assertSupportedNodeVersion(
 
   throw new Error(
     [
-      `Eve requires Node.js ${requiredRange}.`,
+      `eve requires Node.js ${requiredRange}.`,
       `You are running ${version}.`,
       "Please install a compatible Node.js version and try again.",
     ].join(" "),
@@ -270,7 +270,7 @@ export async function ensureBuiltCli(overrides = {}, dependencies = {}) {
 
   if (!packageCanBuildCli) {
     throw new Error(
-      `Eve package at ${options.packageRoot} does not include the sources required to rebuild the CLI.`,
+      `eve package at ${options.packageRoot} does not include the sources required to rebuild the CLI.`,
     );
   }
 
@@ -295,7 +295,7 @@ export async function ensureBuiltCli(overrides = {}, dependencies = {}) {
 }
 
 /**
- * Runs the compiled Eve CLI, building the workspace package on demand when needed.
+ * Runs the compiled eve CLI, building the workspace package on demand when needed.
  */
 export async function runEveCli(argv = process.argv.slice(2), overrides = {}, dependencies = {}) {
   const options = createBootstrapOptions(overrides);
@@ -311,7 +311,7 @@ export async function runEveCli(argv = process.argv.slice(2), overrides = {}, de
   const cliModule = await importModule(pathToFileURL(cliEntrypointPath).href);
 
   if (typeof cliModule.runCli !== "function") {
-    throw new Error(`The Eve CLI module at ${cliEntrypointPath} does not export runCli().`);
+    throw new Error(`The eve CLI module at ${cliEntrypointPath} does not export runCli().`);
   }
 
   await cliModule.runCli(argv);

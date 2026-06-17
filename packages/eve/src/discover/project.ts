@@ -28,7 +28,7 @@ export interface ResolvedDiscoveryProject {
 }
 
 /**
- * Error raised when discovery cannot resolve an Eve agent root from a
+ * Error raised when discovery cannot resolve an eve agent root from a
  * {@link ProjectSource}.
  */
 export class DiscoveryProjectResolutionError extends Error {
@@ -42,7 +42,7 @@ export class DiscoveryProjectResolutionError extends Error {
 }
 
 /**
- * Resolves the nearest Eve app root and agent root from an arbitrary
+ * Resolves the nearest eve app root and agent root from an arbitrary
  * starting path.
  *
  * By default the resolver walks the real filesystem. Callers that want to
@@ -96,7 +96,7 @@ export async function resolveDiscoveryProject(
   throw new DiscoveryProjectResolutionError(
     createDiscoverErrorDiagnostic({
       code: DISCOVER_PROJECT_NOT_FOUND,
-      message: `Could not resolve an Eve agent root from "${startDirectory}".`,
+      message: `Could not resolve an eve agent root from "${startDirectory}".`,
       sourcePath: startDirectory,
     }),
   );

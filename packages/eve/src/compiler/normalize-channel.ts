@@ -45,7 +45,7 @@ export async function compileChannelDefinition(
 
   const definition = normalizeChannelDefinition(
     rawValue,
-    `Expected the channel export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public Eve shape.`,
+    `Expected the channel export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
   );
 
   return definition.routes.map((route) => ({

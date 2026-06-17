@@ -1,7 +1,7 @@
 import pc from "picocolors";
 
 /**
- * Smoke-test color palette. Mirrors the Eve CLI REPL's theme (see
+ * Smoke-test color palette. Mirrors the eve CLI REPL's theme (see
  * `packages/eve/src/cli/ui/output.ts`) so the visual language is
  * consistent: reasoning in blue, secondary output in dim gray,
  * failures in red, assistant replies in default terminal text.

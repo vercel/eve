@@ -452,7 +452,7 @@ describe("provisionSlackbot", () => {
     expect(mockedRunVercel).toHaveBeenCalledTimes(1);
   });
 
-  it("resolves the UID from create JSON, then attaches the Eve trigger route", async () => {
+  it("resolves the UID from create JSON, then attaches the eve trigger route", async () => {
     mockHappyPathProvision();
 
     await expect(provisionSlackbot(createTestLog(), "/tmp/eve-agent", "my-agent")).resolves.toEqual(
@@ -927,7 +927,7 @@ describe("provisionSlackbot", () => {
 
     await expect(provisioning).rejects.toMatchObject({ name: "AbortError" });
     expect(log.warning).toHaveBeenCalledWith(
-      "Vercel returned no connector UID for the abandoned Slack Connect request, so Eve cannot prove that request was cancelled. No connector was removed; do not retry until the browser request is no longer usable.",
+      "Vercel returned no connector UID for the abandoned Slack Connect request, so eve cannot prove that request was cancelled. No connector was removed; do not retry until the browser request is no longer usable.",
     );
   });
 
@@ -1220,7 +1220,7 @@ describe("provisionSlackbot", () => {
       expect.anything(),
     );
     expect(log.warning).toHaveBeenCalledWith(
-      "The existing Slack connector `slack/my-agent` is not connected to a Slack workspace. Eve did not remove it because this run did not create it. If its original browser request is still open, complete it; otherwise run `vercel connect remove slack/my-agent --disconnect-all --yes` before trying again.",
+      "The existing Slack connector `slack/my-agent` is not connected to a Slack workspace. eve did not remove it because this run did not create it. If its original browser request is still open, complete it; otherwise run `vercel connect remove slack/my-agent --disconnect-all --yes` before trying again.",
     );
   });
 
@@ -1271,7 +1271,7 @@ describe("provisionSlackbot", () => {
     controller.abort();
     workspace.resolve({ ok: true, stdout: createSlackConnectorJson("slack/my-agent") });
 
-    // The wait was interrupted, not concluded: the abort propagates and Eve never
+    // The wait was interrupted, not concluded: the abort propagates and eve never
     // claims the connector is disconnected (it never finished checking).
     await expect(provisioning).rejects.toMatchObject({ name: "AbortError" });
     expect(log.warning).not.toHaveBeenCalledWith(

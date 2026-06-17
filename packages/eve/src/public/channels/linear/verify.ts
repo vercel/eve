@@ -12,7 +12,7 @@ const log = createLogger("linear.verify");
 /**
  * Caller-supplied inbound webhook verifier. Use it as an alternative to
  * Linear's HMAC secret, for example when a trusted proxy authenticates the
- * request before it reaches Eve.
+ * request before it reaches eve.
  *
  * - Throw / reject / return falsy: request rejected.
  * - Return a string: request accepted and that string replaces the raw body.

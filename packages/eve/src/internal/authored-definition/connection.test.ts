@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { normalizeMcpClientConnectionDefinition } from "#internal/authored-definition/connection.js";
 
-const MSG = "Expected the connection export to match the public Eve shape.";
+const MSG = "Expected the connection export to match the public eve shape.";
 
 function validInput(overrides: Record<string, unknown> = {}) {
   return {

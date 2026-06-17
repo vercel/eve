@@ -104,7 +104,7 @@ export function defineHook<T = unknown>(): {
  * Sleeps from inside workflow-body code.
  */
 export function sleep(): never {
-  throw new Error("`sleep()` is not available in Eve workflow body bundles");
+  throw new Error("`sleep()` is not available in eve workflow body bundles");
 }
 
 /**
@@ -125,11 +125,11 @@ export function getStepMetadata(): never {
  * Options accepted by {@link experimental_setAttributes}.
  *
  * Mirrors `ExperimentalSetAttributesOptions` from `@workflow/core` so the
- * Eve workflow-body bundle does not have to pull the real type in.
+ * eve workflow-body bundle does not have to pull the real type in.
  */
 export interface ExperimentalSetAttributesOptions {
   /**
-   * Permit attribute keys that start with the reserved `$` prefix. Eve
+   * Permit attribute keys that start with the reserved `$` prefix. eve
    * framework code passes `true` so it can write the `$eve.*` namespace;
    * authored agent code never calls this shim directly.
    */
@@ -137,7 +137,7 @@ export interface ExperimentalSetAttributesOptions {
 }
 
 /**
- * Workflow-body implementation of `experimental_setAttributes` for the Eve
+ * Workflow-body implementation of `experimental_setAttributes` for the eve
  * bundle. Mirrors the dispatch path of `@workflow/core`'s workflow-body
  * export (`dist/workflow/set-attributes.js`):
  *
@@ -145,7 +145,7 @@ export interface ExperimentalSetAttributesOptions {
  *    runtime expects (`undefined` -> `null` to clear a key).
  * 2. Resolve the workflow runtime's step dispatcher from
  *    `globalThis[Symbol.for("WORKFLOW_USE_STEP")]` (the same global symbol
- *    Eve already relies on to materialize `"use step"` proxies).
+ *    eve already relies on to materialize `"use step"` proxies).
  * 3. Invoke the builtin `__builtin_set_attributes` step with the changes,
  *    which the runtime records on the active workflow run.
  *

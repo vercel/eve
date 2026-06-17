@@ -76,7 +76,7 @@ async function loadSourceBackedRuntimeModelReference(
   );
   const normalizedDefinition = normalizeAgentDefinition(
     definition,
-    `Expected the authored agent config export "${reference.source.exportName ?? "default"}" from "${reference.source.logicalPath}" to match the public Eve shape.`,
+    `Expected the authored agent config export "${reference.source.exportName ?? "default"}" from "${reference.source.logicalPath}" to match the public eve shape.`,
   );
   const model = normalizedDefinition.model;
 

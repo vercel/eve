@@ -31,7 +31,7 @@ export interface ApplicationInspection {
 
 /**
  * Resolves application details, compile artifacts, and the active message
- * contract for one Eve application root.
+ * contract for one eve application root.
  */
 export async function inspectApplication(appRoot: string): Promise<ApplicationInspection> {
   const compiledState = await loadCompiledApplicationState(appRoot);

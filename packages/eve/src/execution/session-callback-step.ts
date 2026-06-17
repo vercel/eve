@@ -15,7 +15,7 @@ const log = createLogger("execution.session-callback");
  * instead of being reported as a successful terminal step. Throwing is
  * intentional: this function runs as a durable Workflow step, so rejection
  * hands retry/failure policy back to the Workflow orchestrator rather than
- * letting Eve falsely mark the callback delivery as complete.
+ * letting eve falsely mark the callback delivery as complete.
  */
 export async function fireSessionCallbackStep(input: {
   readonly error?: unknown;

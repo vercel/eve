@@ -174,7 +174,7 @@ describe("runModelFlow", () => {
   it("disables only Change model for a gateway-routed SDK model call, keeping the provider row", async () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
     const deps = flowDeps({
-      // `gateway("…")` instance: gateway-routed, but not a string literal Eve can rewrite.
+      // `gateway("…")` instance: gateway-routed, but not a string literal eve can rewrite.
       readCurrentModel: vi.fn(async () => ({
         id: "anthropic/claude-sonnet-4.6",
         routing: { kind: "gateway", target: "anthropic" } as const,

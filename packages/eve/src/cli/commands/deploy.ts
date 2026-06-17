@@ -42,7 +42,7 @@ export async function runDeployCommand(
   }
 
   const prompter = dependencies.createPrompter?.() ?? createPrompter();
-  prompter.intro("Deploy your Eve agent to Vercel");
+  prompter.intro("Deploy your eve agent to Vercel");
   try {
     const result = await runDeployFlow({
       appRoot,

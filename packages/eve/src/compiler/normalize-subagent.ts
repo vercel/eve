@@ -223,7 +223,7 @@ function compileRemoteAgent(input: {
   const moduleSource = createSubagentConfigModuleSourceRef(input.source, configModule);
   const definition = normalizeRemoteAgentDefinition(
     input.value,
-    `Expected the remote agent config export "${configModule.exportName ?? "default"}" from "${moduleSource.logicalPath}" to match the public Eve shape.`,
+    `Expected the remote agent config export "${configModule.exportName ?? "default"}" from "${moduleSource.logicalPath}" to match the public eve shape.`,
   );
 
   return {

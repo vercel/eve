@@ -35,7 +35,7 @@ import { parseJsonObject, type JsonObject } from "#shared/json.js";
 const log = createLogger("eve.channel");
 
 /**
- * Event-handler channel context exposed by `eveChannel({ events })`. The default Eve HTTP channel
+ * Event-handler channel context exposed by `eveChannel({ events })`. The default eve HTTP channel
  * has no platform-specific state, so handlers receive session continuation operations plus the `SessionContext` third arg from {@link ChannelEvents}.
  */
 export type EveEventContext = ChannelSessionOps;
@@ -43,7 +43,7 @@ export type EveEventContext = ChannelSessionOps;
 /** Runtime stream-event handlers supported by `eveChannel({ events })`. */
 export type EveChannelEvents = ChannelEvents<EveEventContext>;
 
-/** Low-level Eve HTTP handle exposed to `eveChannel({ onMessage })`. */
+/** Low-level eve HTTP handle exposed to `eveChannel({ onMessage })`. */
 export interface EveHandle {
   /** Route-auth result for the request; `onMessage` chooses session auth by returning `{ auth }`. */
   readonly caller: SessionAuthContext | null;
@@ -94,7 +94,7 @@ export interface EveChannelInput {
    */
   readonly uploadPolicy?: UploadPolicyInput;
   /**
-   * Pre-dispatch hook for inbound Eve HTTP messages. Runs after route auth and body
+   * Pre-dispatch hook for inbound eve HTTP messages. Runs after route auth and body
    * parsing, before runtime dispatch.
    */
   readonly onMessage?: (
@@ -102,7 +102,7 @@ export interface EveChannelInput {
     message: string | UserContent,
   ) => EveMessageResultOrPromise;
   /**
-   * Runtime stream-event handlers for the default Eve HTTP channel. Handlers receive
+   * Runtime stream-event handlers for the default eve HTTP channel. Handlers receive
    * the event data, {@link EveEventContext}, and `SessionContext` (the same shape as custom channels).
    */
   readonly events?: EveChannelEvents;
@@ -116,7 +116,7 @@ export interface EveChannelInput {
 export interface EveChannel extends Channel {}
 
 /**
- * Builds the default Eve HTTP channel: a {@link defineChannel} instance serving the
+ * Builds the default eve HTTP channel: a {@link defineChannel} instance serving the
  * built-in `/eve/v1` routes (POST creates a session, POST delivers a follow-up, GET
  * streams a session's NDJSON event feed). Every route runs {@link EveChannelInput.auth}
  * via {@link routeAuth} before dispatching. Default-export the result as your

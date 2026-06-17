@@ -294,7 +294,7 @@ function createFollowUpToolCallResult(input: {
 }
 
 function createAssistantMessage(prompt: BootstrapPrompt): string {
-  const lastUserMessage = getLastUserPromptText(prompt) ?? "Hello from Eve";
+  const lastUserMessage = getLastUserPromptText(prompt) ?? "Hello from eve";
   const systemLabels = getSystemPromptLabels(prompt);
   const systemProbe = resolveSystemProbe(prompt);
   const fixtureToken = resolveMockFixtureToken(prompt);
@@ -327,7 +327,7 @@ function formatToolResultReply(result: BootstrapToolResult, prompt: BootstrapPro
     return `Used local weather tool for ${result.output.city}: ${result.output.condition}, ${result.output.temperatureF}F. ${result.output.summary}`;
   }
 
-  const lastUserMessage = getLastUserPromptText(prompt) ?? "Hello from Eve";
+  const lastUserMessage = getLastUserPromptText(prompt) ?? "Hello from eve";
 
   return `Used ${result.toolName} for "${lastUserMessage}": ${formatToolOutput(result.output)}`;
 }

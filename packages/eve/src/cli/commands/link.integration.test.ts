@@ -99,7 +99,7 @@ afterEach(() => {
 });
 
 describe("runLinkCommand", () => {
-  test("refuses a directory without an Eve agent", async () => {
+  test("refuses a directory without an eve agent", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "eve-link-empty-"));
     const logger = new TestLogger();
 
@@ -109,7 +109,7 @@ describe("runLinkCommand", () => {
     });
 
     expect(logger.errors).toEqual([
-      "No Eve agent in this directory. Run `eve init <name>`, then run this command from inside the new project.",
+      "No eve agent in this directory. Run `eve init <name>`, then run this command from inside the new project.",
     ]);
     expect(process.exitCode).toBe(1);
   });
@@ -147,7 +147,7 @@ describe("runLinkCommand", () => {
 
     expect(logger.errors).toEqual([]);
     expect(process.exitCode).toBeUndefined();
-    expect(fake.prompter.intro).toHaveBeenCalledWith("Link your Eve agent to Vercel");
+    expect(fake.prompter.intro).toHaveBeenCalledWith("Link your eve agent to Vercel");
     expect(fake.prompter.outro).toHaveBeenCalledWith("Project linked.");
     expect(flowDeps.linkProject?.linkProject).toHaveBeenCalled();
   });

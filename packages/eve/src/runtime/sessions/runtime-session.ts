@@ -4,7 +4,7 @@ import type { BundledCompiledArtifacts } from "#runtime/loaders/bundled-artifact
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 
 /**
- * Process-scoped container for mutable runtime state owned by one Eve
+ * Process-scoped container for mutable runtime state owned by one eve
  * deployment.
  *
  * Holds installed compiled artifacts and compiled-agent bundle caches.
@@ -50,7 +50,7 @@ export function createRuntimeSession(id: string = "test-session"): RuntimeSessio
 /**
  * Process-global storage for the current `RuntimeSession`.
  *
- * Rooted on `globalThis` so Nitro-inlined Eve and disk-imported Eve share
+ * Rooted on `globalThis` so Nitro-inlined eve and disk-imported eve share
  * the same process default while tests still get async-scoped overrides.
  */
 const RUNTIME_SESSION_STORAGE_GLOBAL_KEY = Symbol.for("eve.runtime-session-storage");

@@ -780,9 +780,9 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
 
-    process.stdout.write('Eve: sandbox template "root" (microsandbox): checking cached snapshot\n');
-    process.stdout.write("Eve: initializing 3 sandbox templates...\n");
-    process.stdout.write('Eve: built sandbox template "root" on backend "microsandbox".\n');
+    process.stdout.write('eve: sandbox template "root" (microsandbox): checking cached snapshot\n');
+    process.stdout.write("eve: initializing 3 sandbox templates...\n");
+    process.stdout.write('eve: built sandbox template "root" on backend "microsandbox".\n');
     process.stdout.write("ordinary stdout log\n");
     renderer.shutdown();
 
@@ -809,7 +809,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
 
-    process.stdout.write('Eve: built sandbox template "root" on backend "microsandbox".\n');
+    process.stdout.write('eve: built sandbox template "root" on backend "microsandbox".\n');
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
@@ -829,7 +829,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
 
-    process.stdout.write('Eve: built sandbox template "root" on backend "microsandbox".\n');
+    process.stdout.write('eve: built sandbox template "root" on backend "microsandbox".\n');
     process.stdout.write("ordinary stdout log\n");
     renderer.shutdown();
 
@@ -852,9 +852,9 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
 
-    renderer.renderSandboxLog?.('Eve: sandbox template "root" (docker): checking Docker daemon');
-    renderer.renderSandboxLog?.("Eve: initializing 3 sandbox templates...");
-    renderer.renderSandboxLog?.('Eve: built sandbox template "root" on backend "docker".');
+    renderer.renderSandboxLog?.('eve: sandbox template "root" (docker): checking Docker daemon');
+    renderer.renderSandboxLog?.("eve: initializing 3 sandbox templates...");
+    renderer.renderSandboxLog?.('eve: built sandbox template "root" on backend "docker".');
     renderer.renderSandboxLog?.("ordinary stdout log");
     renderer.shutdown();
 

@@ -1,8 +1,8 @@
 /**
- * Optional sandbox engine packages Eve's runtime references through
+ * Optional sandbox engine packages eve's runtime references through
  * lazy dynamic imports. Bundlers follow literal dynamic imports like
  * static imports — so without intervention mere *resolvability* (for
- * example Eve's own workspace devDependencies) would pull them into
+ * example eve's own workspace devDependencies) would pull them into
  * every hosted build. The source of truth for whether an application
  * opted in is its compiled sandbox config: the backend names captured
  * into the manifest at compile time.

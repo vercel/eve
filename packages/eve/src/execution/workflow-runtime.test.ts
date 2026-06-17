@@ -38,7 +38,7 @@ afterEach(() => {
 });
 
 describe("workflowEntryReference", () => {
-  it("uses the installed Eve package identity for the runtime workflow id", () => {
+  it("uses the installed eve package identity for the runtime workflow id", () => {
     const packageInfo = resolveInstalledPackageInfo();
 
     // The runtime references intentionally omit the `@<pkg.version>`

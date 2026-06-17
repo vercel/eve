@@ -115,7 +115,7 @@ export function normalizeAuthorizationSpec(
  * parsed marker when present and well-formed, otherwise `undefined`.
  *
  * The marker is opaque to the runtime — it exists so downstream tooling
- * (eg. the Eve compiler / Vercel dashboard) can attribute the auth
+ * (eg. the eve compiler / Vercel dashboard) can attribute the auth
  * back to a Vercel Connect connector without inspecting `getToken`'s
  * closure state. Validation is lenient (a malformed marker is dropped,
  * not thrown) so a misbehaving auth provider can't fail an otherwise-

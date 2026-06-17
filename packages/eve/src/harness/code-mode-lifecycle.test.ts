@@ -30,7 +30,7 @@ function createTools(): HarnessToolMap {
 }
 
 describe("createCodeModeLifecycle", () => {
-  it("emits nested tool calls and results as Eve action events", async () => {
+  it("emits nested tool calls and results as eve action events", async () => {
     const events: HandleMessageStreamEvent[] = [];
     const lifecycle = createCodeModeLifecycle({
       emit: async (event) => {
@@ -374,7 +374,7 @@ describe("createCodeModeLifecycle", () => {
     });
 
     // The bridge handler runs every callback under the re-entered invocation
-    // context — the guarantee the package provides on Eve's behalf.
+    // context — the guarantee the package provides on eve's behalf.
     const result = await contextStorage.run(invocationSession, async () => {
       // 1. execute_sql runs under the invocation context.
       const executeSql = hostTools.execute_sql as {

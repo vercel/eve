@@ -94,7 +94,7 @@ describe("readLocalProductionPort", () => {
 });
 
 describe("createEveVercelRewriteRoute", () => {
-  it("rewrites the Eve transport prefix onto the service prefix", () => {
+  it("rewrites the eve transport prefix onto the service prefix", () => {
     expect(createEveVercelRewriteRoute(EVE_NUXT_SERVICE_PREFIX)).toEqual({
       src: `^${EVE_PROTOCOL_PREFIX}/(.*)$`,
       dest: `${EVE_NUXT_SERVICE_PREFIX}${EVE_PROTOCOL_PREFIX}/$1`,

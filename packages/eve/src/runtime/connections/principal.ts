@@ -88,7 +88,7 @@ export function resolveConnectionPrincipal(
       message:
         ctx === undefined
           ? `Connection "${connectionName}" declares principalType "user" ` +
-            `but was invoked outside an Eve context, so no user principal can be resolved.`
+            `but was invoked outside an eve context, so no user principal can be resolved.`
           : `Connection "${connectionName}" declares principalType "user" ` +
             `but the active session has no authenticated user principal.`,
       reason: "principal_required",

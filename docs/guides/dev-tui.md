@@ -1,6 +1,6 @@
 ---
 title: "Dev TUI"
-description: "Drive an Eve agent locally in an interactive terminal UI. Chat, stream, approve tools, answer questions, tune the display, and point it at a deployment."
+description: "Drive an eve agent locally in an interactive terminal UI. Chat, stream, approve tools, answer questions, tune the display, and point it at a deployment."
 ---
 
 `eve dev` boots the local runtime and drops you into an interactive terminal UI. You chat with the agent, watch it stream, approve its tool calls, and answer the questions it asks back.
@@ -46,7 +46,7 @@ Each command echoes as an invocation line, asks through a bordered panel that ta
 
 ### Configure the model and provider
 
-Bare `/model` opens the configure menu. "Change model" runs the same searchable model picker setup uses (the Vercel AI Gateway catalog, pre-selected on the model the runtime is serving). A model change is written into your agent's authored source, and the command reports success only after Eve confirms the new id. `/model <provider/model-id>` applies one directly, skipping the menu.
+Bare `/model` opens the configure menu. "Change model" runs the same searchable model picker setup uses (the Vercel AI Gateway catalog, pre-selected on the model the runtime is serving). A model change is written into your agent's authored source, and the command reports success only after eve confirms the new id. `/model <provider/model-id>` applies one directly, skipping the menu.
 
 The provider row opens the provider questions: which model provider to use, and how to connect. Picking something other than Vercel AI Gateway shows wiring instructions for your own provider and stops there, leaving any existing setup untouched. For Vercel AI Gateway, you either paste your own `AI_GATEWAY_API_KEY` (saved straight to `.env.local`) or connect via a project. Connecting via a project asks for a Vercel team, opens that team's existing-project list (picking again re-links), then pulls the project's environment so an AI Gateway credential lands in `.env.local`. The dev server reloads env files automatically, with no restart needed.
 

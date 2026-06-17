@@ -59,7 +59,7 @@ export interface ModelFlowDeps {
  * How the agent's model is backed right now, as far as the local directory
  * shows: a linked Vercel project, a gateway credential in an env file, or
  * nothing detectable. An external provider (own ANTHROPIC_API_KEY etc.)
- * leaves no marker Eve owns, so it reads as `unset`.
+ * leaves no marker eve owns, so it reads as `unset`.
  */
 export type ModelProviderStatus =
   | { kind: "unset" }
@@ -121,7 +121,7 @@ function providerStatusHint(
 /**
  * The two-row configure menu. The two rows answer independent questions.
  *
- * The model row keys off `editable`: Eve can rewrite `model` only when it is a
+ * The model row keys off `editable`: eve can rewrite `model` only when it is a
  * string literal, so an SDK model call (`gateway(...)` / `anthropic(...)`) is
  * disabled regardless of how it routes. The provider row keys off routing: an
  * external endpoint disables it (gateway credentials don't apply); a gateway
@@ -443,7 +443,7 @@ export async function changeAgentModel(input: {
  * Returns a rejection message when `slug` is malformed or absent from the
  * model catalog, or null when it is safe to apply.
  *
- * UX note: `/model` only reports success after Eve confirms the id. A real
+ * UX note: `/model` only reports success after eve confirms the id. A real
  * turn still needs Gateway/provider access, so treating an offline catalog as
  * success would give a false "model changed" result.
  */

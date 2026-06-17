@@ -57,7 +57,7 @@ export function startDevelopmentSandboxPrewarmInBackground(input: {
     .catch((error) => {
       recordPrewarmLog(
         record,
-        `Eve: failed to initialize sandbox templates in the background: ${toErrorMessage(error)}`,
+        `eve: failed to initialize sandbox templates in the background: ${toErrorMessage(error)}`,
         input.log,
       );
     })

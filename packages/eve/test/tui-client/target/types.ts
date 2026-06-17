@@ -1,6 +1,6 @@
 import type { AgentServerHandle, AgentServerMode } from "../lib/server.ts";
 
-/** Starts one local Eve app server for a smoke-test target. */
+/** Starts one local eve app server for a smoke-test target. */
 export type StartTestAgentServer = (input: {
   readonly appName: string;
   readonly mode?: AgentServerMode;

@@ -1,9 +1,9 @@
 ---
 title: "Remote Agents"
-description: "Call another Eve deployment as a subagent with defineRemoteAgent: same lowered tool shape, outbound auth, durable callback dispatch."
+description: "Call another eve deployment as a subagent with defineRemoteAgent: same lowered tool shape, outbound auth, durable callback dispatch."
 ---
 
-`defineRemoteAgent` calls a separately deployed Eve agent as if it were a local subagent. Reach for it when the specialist you delegate to is a separately owned agent behind its own URL rather than a directory in your repo.
+`defineRemoteAgent` calls a separately deployed eve agent as if it were a local subagent. Reach for it when the specialist you delegate to is a separately owned agent behind its own URL rather than a directory in your repo.
 
 The file lives under `agent/subagents/`, so its tool name is derived from the path. There's no `name` field.
 
@@ -22,7 +22,7 @@ export default defineRemoteAgent({
 
 | Parameter      | Type                            | Required | Default           | Description                                                                                                                                     |
 | -------------- | ------------------------------- | -------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `url`          | `string`                        | Yes      | n/a               | Base URL of the remote Eve deployment to call.                                                                                                  |
+| `url`          | `string`                        | Yes      | n/a               | Base URL of the remote eve deployment to call.                                                                                                  |
 | `description`  | `string`                        | Yes      | n/a               | Model-visible delegation description.                                                                                                           |
 | `auth`         | `OutboundAuthFn`                | No       | none              | Outbound auth hook from `eve/agents/auth`.                                                                                                      |
 | `headers`      | `HeadersValue`                  | No       | none              | Static or lazily resolved request headers.                                                                                                      |
@@ -43,7 +43,7 @@ A remote agent lowers to the same `{ message, outputSchema? }` tool shape as a l
 | `bearer(token)`                 | `Authorization: Bearer <token>` (static or lazily resolved)                  |
 | `basic({ username, password })` | `Authorization: Basic …`                                                     |
 
-If you are calling another Vercel-deployed Eve agent, reach for `vercelOidc()`. The remote verifies the OIDC token to authorize the caller. See [Auth & route protection](./auth-and-route-protection) for the receiving side.
+If you are calling another Vercel-deployed eve agent, reach for `vercelOidc()`. The remote verifies the OIDC token to authorize the caller. See [Auth & route protection](./auth-and-route-protection) for the receiving side.
 
 ## How remote dispatch and callbacks work
 

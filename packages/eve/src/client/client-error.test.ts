@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { ClientError } from "#client/client-error.js";
 
 describe("ClientError", () => {
-  it("uses structured Eve JSON error bodies as the public message", () => {
+  it("uses structured eve JSON error bodies as the public message", () => {
     const error = new ClientError(
       401,
       JSON.stringify({

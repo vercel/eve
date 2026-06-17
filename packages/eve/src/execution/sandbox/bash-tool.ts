@@ -82,7 +82,7 @@ async function runWithDevelopmentSandboxProgress(
   sandbox: SandboxSession,
   command: string,
 ): Promise<Awaited<ReturnType<SandboxSession["run"]>>> {
-  logDevelopmentSandboxCommand(`Eve: starting sandbox command: ${formatCommand(command)}`);
+  logDevelopmentSandboxCommand(`eve: starting sandbox command: ${formatCommand(command)}`);
   if (!isEveDevEnvironment()) {
     return await sandbox.run({ command });
   }
@@ -91,7 +91,7 @@ async function runWithDevelopmentSandboxProgress(
   const timer = setInterval(() => {
     const elapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
     logDevelopmentSandboxCommand(
-      `Eve: waiting for sandbox command (${elapsedSeconds}s elapsed): ${formatCommand(command)}`,
+      `eve: waiting for sandbox command (${elapsedSeconds}s elapsed): ${formatCommand(command)}`,
     );
   }, 5_000);
   timer.unref?.();
@@ -99,11 +99,11 @@ async function runWithDevelopmentSandboxProgress(
   try {
     const result = await sandbox.run({ command });
     logDevelopmentSandboxCommand(
-      `Eve: sandbox command finished (exit ${result.exitCode}): ${formatCommand(command)}`,
+      `eve: sandbox command finished (exit ${result.exitCode}): ${formatCommand(command)}`,
     );
     return result;
   } catch (error) {
-    logDevelopmentSandboxCommand(`Eve: sandbox command failed: ${formatCommand(command)}`);
+    logDevelopmentSandboxCommand(`eve: sandbox command failed: ${formatCommand(command)}`);
     throw error;
   } finally {
     clearInterval(timer);

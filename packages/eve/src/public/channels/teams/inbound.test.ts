@@ -21,7 +21,7 @@ describe("Teams inbound parsing", () => {
     const activity = parseTeamsActivity(
       messageActivity({
         conversationType: "channel",
-        text: "<at>Eve Bot</at> <b>status</b><br>please",
+        text: "<at>eve Bot</at> <b>status</b><br>please",
       }),
     );
     expect(activity).toMatchObject({
@@ -76,14 +76,14 @@ function messageActivity(input: {
     conversation: { conversationType: input.conversationType, id: "CONV" },
     entities: [
       {
-        mentioned: { id: "BOT", name: "Eve Bot" },
-        text: "<at>Eve Bot</at>",
+        mentioned: { id: "BOT", name: "eve Bot" },
+        text: "<at>eve Bot</at>",
         type: "mention",
       },
     ],
     from: { id: "USER", name: "Ada" },
     id: "ACTIVITY_1",
-    recipient: { id: "BOT", name: "Eve Bot" },
+    recipient: { id: "BOT", name: "eve Bot" },
     serviceUrl: "https://smba.example.test/teams",
     text: input.text ?? "hello",
     textFormat: "xml",

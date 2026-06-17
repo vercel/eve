@@ -164,7 +164,7 @@ export function App() {
             </div>
           ) : (
             <div className="empty-state">
-              <h1 className="wordmark">Eve Agent</h1>
+              <h1 className="wordmark">eve Agent</h1>
               {composerForm}
             </div>
           )}

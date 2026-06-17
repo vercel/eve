@@ -5,7 +5,7 @@ import { loadContext } from "#context/container.js";
  * Typed handle returned by {@link defineState}. Reads and updates a
  * named context slot.
  *
- * All operations require an active Eve context (ALS scope) and throw
+ * All operations require an active eve context (ALS scope) and throw
  * when called outside one.
  */
 export interface StateHandle<T> {
@@ -24,7 +24,7 @@ const RESERVED_STATE_NAME_PREFIX = "eve.";
  * The name must not start with the reserved `"eve."` prefix (reserved
  * for framework context keys); doing so throws.
  *
- * All operations require an active Eve context. Calling `get()` or
+ * All operations require an active eve context. Calling `get()` or
  * `update()` outside of tools, hooks, or other framework-managed code
  * throws.
  *
@@ -43,7 +43,7 @@ const RESERVED_STATE_NAME_PREFIX = "eve.";
 export function defineState<T>(name: string, initial: () => T): StateHandle<T> {
   if (name.startsWith(RESERVED_STATE_NAME_PREFIX)) {
     throw new Error(
-      `defineState() name "${name}" uses the reserved "${RESERVED_STATE_NAME_PREFIX}" prefix, which Eve reserves for its own framework context keys (e.g. "eve.channel", "eve.bundle"). Colliding with one silently corrupts context serialization. Use your own namespace, e.g. "my-agent.${name.slice(RESERVED_STATE_NAME_PREFIX.length)}".`,
+      `defineState() name "${name}" uses the reserved "${RESERVED_STATE_NAME_PREFIX}" prefix, which eve reserves for its own framework context keys (e.g. "eve.channel", "eve.bundle"). Colliding with one silently corrupts context serialization. Use your own namespace, e.g. "my-agent.${name.slice(RESERVED_STATE_NAME_PREFIX.length)}".`,
     );
   }
 

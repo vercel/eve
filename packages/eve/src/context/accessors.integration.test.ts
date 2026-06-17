@@ -18,7 +18,7 @@ import type { SandboxSession } from "#public/definitions/sandbox.js";
 
 describe("buildCallbackContext – session", () => {
   it("throws when no authored runtime session is active", () => {
-    expect(() => buildCallbackContext()).toThrow("No active Eve context");
+    expect(() => buildCallbackContext()).toThrow("No active eve context");
   });
 
   it("returns the active session identity across async boundaries", async () => {
@@ -77,7 +77,7 @@ describe("buildCallbackContext – session", () => {
 
 describe("buildCallbackContext – getSandbox", () => {
   it("throws when no authored runtime context is active", () => {
-    expect(() => buildCallbackContext()).toThrow("No active Eve context");
+    expect(() => buildCallbackContext()).toThrow("No active eve context");
   });
 
   it("returns the active authored sandbox across async boundaries", async () => {
@@ -126,7 +126,7 @@ describe("buildCallbackContext – getSandbox", () => {
 
 describe("buildCallbackContext – getSkill", () => {
   it("throws when no authored runtime context is active", () => {
-    expect(() => buildCallbackContext()).toThrow("No active Eve context");
+    expect(() => buildCallbackContext()).toThrow("No active eve context");
   });
 
   it("throws when authored runtime execution does not include skill access", async () => {
@@ -134,7 +134,7 @@ describe("buildCallbackContext – getSkill", () => {
 
     await expect(
       runtime.runAsSession({}, () => buildCallbackContext().getSkill("semantic-model")),
-    ).rejects.toThrow("Eve sandbox runtime access is unavailable in the current async context.");
+    ).rejects.toThrow("eve sandbox runtime access is unavailable in the current async context.");
   });
 
   it("resolves visible skill files across async boundaries", async () => {

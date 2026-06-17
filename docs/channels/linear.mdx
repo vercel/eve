@@ -4,7 +4,7 @@ description: "Reach your agent through Linear Agent Sessions, with native Agent 
 type: integration
 ---
 
-The Linear channel uses Linear's Agent Session surface rather than ordinary comments. Users delegate work to the agent from Linear, Eve receives `AgentSessionEvent` webhooks at `/eve/v1/linear`, and the channel replies with native Agent Activities, including `thought`, `action`, `elicitation`, `response`, and `error`. See [Channels](./overview) for the contract this builds on.
+The Linear channel uses Linear's Agent Session surface rather than ordinary comments. Users delegate work to the agent from Linear, eve receives `AgentSessionEvent` webhooks at `/eve/v1/linear`, and the channel replies with native Agent Activities, including `thought`, `action`, `elicitation`, `response`, and `error`. See [Channels](./overview) for the contract this builds on.
 
 ## Add the channel
 
@@ -36,21 +36,21 @@ https://<deployment>/eve/v1/linear
 
 For Linear's agent surface, configure the OAuth authorize URL with `actor=app` and grant the app scopes that let it appear as an agent in Linear, including `app:assignable` and `app:mentionable`. Subscribe to the `AgentSessionEvent` webhook category so Linear sends `created` events when the agent is delegated or mentioned and `prompted` events when the user continues the session.
 
-Linear sends webhook signatures in `Linear-Signature`; Eve verifies the HMAC over the raw body and rejects stale `webhookTimestamp` values. If a trusted gateway verifies Linear before the request reaches Eve, pass `credentials.webhookVerifier` instead of a webhook secret.
+Linear sends webhook signatures in `Linear-Signature`; eve verifies the HMAC over the raw body and rejects stale `webhookTimestamp` values. If a trusted gateway verifies Linear before the request reaches eve, pass `credentials.webhookVerifier` instead of a webhook secret.
 
 ## How the channel handles messages
 
 ### Dispatch
 
-The default hook dispatches `created` and `prompted` Agent Session events. Eve adds a Linear context block with the agent session, issue, comment, and organization identifiers, then continues the same session with `agent-session:<id>`.
+The default hook dispatches `created` and `prompted` Agent Session events. eve adds a Linear context block with the agent session, issue, comment, and organization identifiers, then continues the same session with `agent-session:<id>`.
 
 ### Delivery
 
-Turn start posts an ephemeral `thought`, tool calls post ephemeral `action` activities, final assistant text posts a durable `response`, and failures post `error` activities. When the model emits text before a tool call, Eve buffers the first non-empty line and uses it as the next ephemeral Linear `thought`, mirroring Slack's typing-status behavior.
+Turn start posts an ephemeral `thought`, tool calls post ephemeral `action` activities, final assistant text posts a durable `response`, and failures post `error` activities. When the model emits text before a tool call, eve buffers the first non-empty line and uses it as the next ephemeral Linear `thought`, mirroring Slack's typing-status behavior.
 
 ### Human-in-the-loop (HITL)
 
-Human-in-the-loop (HITL) input requests render as Linear `elicitation` activities. When the user replies to the Agent Session, the channel resolves that prompt back to the pending Eve input request and resumes with `inputResponses`.
+Human-in-the-loop (HITL) input requests render as Linear `elicitation` activities. When the user replies to the Agent Session, the channel resolves that prompt back to the pending eve input request and resumes with `inputResponses`.
 
 ### Proactive sessions
 
@@ -153,7 +153,7 @@ export default defineSchedule({
 });
 ```
 
-For issue or comment targets, the channel calls Linear's proactive Agent Session mutations before starting the Eve turn. For an existing `agentSessionId`, it skips session creation and only seeds the continuation token.
+For issue or comment targets, the channel calls Linear's proactive Agent Session mutations before starting the eve turn. For an existing `agentSessionId`, it skips session creation and only seeds the continuation token.
 
 ## What to read next
 

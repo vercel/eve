@@ -2,7 +2,7 @@ import { resolveTextToResponses } from "#channel/resolve-text.js";
 import type { LinearAgentActivityRecord } from "#public/channels/linear/api.js";
 import type { InputOption, InputRequest, InputResponse } from "#runtime/input/types.js";
 
-/** Hidden marker embedded in Eve-created Linear elicitation bodies. */
+/** Hidden marker embedded in eve-created Linear elicitation bodies. */
 export const LINEAR_HITL_MARKER_PREFIX = "<!-- eve-input:";
 export const LINEAR_HITL_MARKER_SUFFIX = " -->";
 
@@ -18,14 +18,14 @@ interface LinearStoredInputRequest {
   requestId: string;
 }
 
-/** Renders Eve input requests as one Linear elicitation body. */
+/** Renders eve input requests as one Linear elicitation body. */
 export function renderLinearInputRequests(requests: readonly InputRequest[]): string {
   const marker = encodeLinearHitlMarker(requests.map(storableRequest));
   const rendered = requests.map(renderLinearInputRequest).join("\n\n");
   return `${rendered}\n\n${marker}`;
 }
 
-/** Resolves a Linear user prompt against the latest Eve-created elicitation marker. */
+/** Resolves a Linear user prompt against the latest eve-created elicitation marker. */
 export function resolveLinearPromptInputResponses(input: {
   readonly activities: readonly LinearAgentActivityRecord[];
   readonly body: string;
@@ -35,7 +35,7 @@ export function resolveLinearPromptInputResponses(input: {
   return resolveTextToResponses(input.body, marker.requests.map(toInputRequest));
 }
 
-/** Strips Eve's hidden HITL marker from a body before user-facing assertions/logging. */
+/** Strips eve's hidden HITL marker from a body before user-facing assertions/logging. */
 export function stripLinearHitlMarker(body: string): string {
   const start = body.indexOf(LINEAR_HITL_MARKER_PREFIX);
   if (start === -1) return body;

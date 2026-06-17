@@ -1,5 +1,5 @@
 /**
- * Stable root directory for every workspace Eve exposes to agents and
+ * Stable root directory for every workspace eve exposes to agents and
  * sandbox backends.
  *
  * This is both the model-facing logical path and the live `bash` cwd

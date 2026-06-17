@@ -13,16 +13,16 @@ export { EVE_SVELTEKIT_SERVICE_PREFIX };
 const DEFAULT_EVE_BUILD_COMMAND = "eve build";
 
 /**
- * Options for the Eve SvelteKit Vite plugin.
+ * Options for the eve SvelteKit Vite plugin.
  */
 export interface EveSvelteKitPluginOptions {
   /**
-   * Path to the Eve application root, relative to the SvelteKit project root
+   * Path to the eve application root, relative to the SvelteKit project root
    * unless absolute. Defaults to the SvelteKit project root.
    */
   readonly eveRoot?: string;
   /**
-   * Build command for the generated Eve Vercel service.
+   * Build command for the generated eve Vercel service.
    * Defaults to `"eve build"`.
    */
   readonly eveBuildCommand?: string;
@@ -30,12 +30,12 @@ export interface EveSvelteKitPluginOptions {
    * Set to `false` to skip creating or updating `vercel.json`.
    *
    * By default the plugin ensures `vercel.json` contains `experimentalServices`
-   * for the SvelteKit app and Eve app.
+   * for the SvelteKit app and eve app.
    */
   readonly configureVercelJson?: boolean;
   /**
-   * Private Vercel service prefix for the Eve deployment. Must match the
-   * Eve service's `routePrefix` in `vercel.json`. Defaults to
+   * Private Vercel service prefix for the eve deployment. Must match the
+   * eve service's `routePrefix` in `vercel.json`. Defaults to
    * {@link EVE_SVELTEKIT_SERVICE_PREFIX} (`"/_eve_internal/eve"`).
    */
   readonly servicePrefix?: string;
@@ -71,15 +71,15 @@ async function resolveEveDevProxyTarget(appRoot: string): Promise<string> {
 }
 
 /**
- * Vite plugin for running an Eve agent alongside a SvelteKit app.
+ * Vite plugin for running an eve agent alongside a SvelteKit app.
  *
- * In development and local preview, `eveSvelteKit` proxies Eve protocol
- * endpoints to a local Eve server. It resolves the server in order: the
- * `EVE_BASE_URL` env var if set, then a healthy shared Eve dev server already
+ * In development and local preview, `eveSvelteKit` proxies eve protocol
+ * endpoints to a local eve server. It resolves the server in order: the
+ * `EVE_BASE_URL` env var if set, then a healthy shared eve dev server already
  * running for the app, then a freshly spawned `eve dev --no-ui --port 0`.
  *
  * During builds, unless `configureVercelJson` is `false`, it ensures
- * `vercel.json` deploys the SvelteKit app and Eve agent as sibling Vercel
+ * `vercel.json` deploys the SvelteKit app and eve agent as sibling Vercel
  * services.
  */
 export function eveSvelteKit(options: EveSvelteKitPluginOptions = {}): Plugin {

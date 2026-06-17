@@ -3,7 +3,7 @@
  *
  * The native Teams channel talks directly to the Bot Framework Activity
  * protocol instead of exposing BotBuilder or Teams SDK objects through
- * Eve public APIs.
+ * eve public APIs.
  */
 
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
@@ -47,7 +47,7 @@ export interface TeamsApiOptions {
   readonly fetch?: TeamsFetch;
   /**
    * Microsoft OAuth host for the client-credentials token flow. Defaults to
-   * `https://login.microsoftonline.com`. Eve ignores it when
+   * `https://login.microsoftonline.com`. eve ignores it when
    * `credentials.tokenProvider` is set.
    */
   readonly loginBaseUrl?: string;
@@ -83,7 +83,7 @@ export interface TeamsMention {
   readonly type: "mention";
 }
 
-/** Bot Framework/Teams attachment shape supported by Eve-owned APIs. */
+/** Bot Framework/Teams attachment shape supported by eve-owned APIs. */
 export interface TeamsAttachment {
   readonly content?: JsonObject;
   readonly contentType: string;
@@ -91,7 +91,7 @@ export interface TeamsAttachment {
   readonly name?: string;
 }
 
-/** JSON body supported by Teams message endpoints used by Eve. */
+/** JSON body supported by Teams message endpoints used by eve. */
 export interface TeamsMessageBody {
   readonly attachments?: readonly TeamsAttachment[];
   readonly channelData?: JsonObject;

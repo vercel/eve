@@ -172,7 +172,7 @@ function assertRootServicesAreComplete(input: {
   }
 
   throw new Error(
-    `${VERCEL_JSON_FILE_NAME} already defines experimentalServices, so withEve cannot add generated services through ${VERCEL_OUTPUT_CONFIG_FILE_NAME}. Add both the Next.js and Eve services to ${VERCEL_JSON_FILE_NAME}, or remove experimentalServices from ${VERCEL_JSON_FILE_NAME}.`,
+    `${VERCEL_JSON_FILE_NAME} already defines experimentalServices, so withEve cannot add generated services through ${VERCEL_OUTPUT_CONFIG_FILE_NAME}. Add both the Next.js and eve services to ${VERCEL_JSON_FILE_NAME}, or remove experimentalServices from ${VERCEL_JSON_FILE_NAME}.`,
   );
 }
 

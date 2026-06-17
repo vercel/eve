@@ -6,7 +6,7 @@
 .cache
 dist
 
-# Eve runtime data
+# eve runtime data
 .eve
 .workflow-data
 

@@ -30,11 +30,11 @@ describe("createHeadlessPrompter", () => {
   test("routes log output to the sink", () => {
     const lines: string[] = [];
     const prompter = createHeadlessPrompter((text) => lines.push(text));
-    prompter.intro("Create a new Eve agent", "subtitle");
+    prompter.intro("Create a new eve agent", "subtitle");
     prompter.log.success("scaffolded");
     prompter.log.error("boom");
     prompter.outro("done");
-    expect(lines).toEqual(["Create a new Eve agent: subtitle", "scaffolded", "boom", "done"]);
+    expect(lines).toEqual(["Create a new eve agent: subtitle", "scaffolded", "boom", "done"]);
   });
 });
 

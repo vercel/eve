@@ -77,7 +77,7 @@ async function runAddChannelsFlow(
   }
 
   const prompter = dependencies.createPrompter?.() ?? createPrompter();
-  prompter.intro("Add channels to your Eve agent");
+  prompter.intro("Add channels to your eve agent");
   prompter.log.message("Checking the current Vercel project...");
   // The detected on-disk link is the only seeded fact; there are no onboarding
   // plans in this command, so the rest of the state keeps its defaults. The

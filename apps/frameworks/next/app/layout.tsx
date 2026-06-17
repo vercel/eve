@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Next.js + Eve",
+  title: "Next.js + eve",
 };
 
 export default function RootLayout({

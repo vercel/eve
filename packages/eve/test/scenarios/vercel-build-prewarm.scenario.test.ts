@@ -47,8 +47,8 @@ describe("Vercel build-time sandbox prewarm", () => {
     );
     expect([...events.commands].sort()).toEqual(["echo child-bootstrap", "echo root-bootstrap"]);
     expect(log.mock.calls.map(([message]) => message)).toEqual([
-      "Eve: initializing 2 sandbox templates...",
-      "Eve: initialized 2 sandbox templates (0 reused, 2 built).",
+      "eve: initializing 2 sandbox templates...",
+      "eve: initialized 2 sandbox templates (0 reused, 2 built).",
     ]);
   });
 

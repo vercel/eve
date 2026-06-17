@@ -44,7 +44,7 @@ export interface SandboxSessionContext<O = Record<string, never>> {
 }
 
 /**
- * Resolves a build-time revalidation key for a bootstrap snapshot. Eve
+ * Resolves a build-time revalidation key for a bootstrap snapshot. eve
  * evaluates it during compile/build and freezes the result into compiled
  * artifacts. Supply one only for external inputs that affect bootstrap
  * output; authored source and managed seeds are tracked automatically.
@@ -83,7 +83,7 @@ interface SandboxDefinitionBase<BO = Record<string, never>, SO = Record<string, 
    * });
    * ```
    *
-   * When this field is omitted, Eve substitutes `defaultSandbox()` at
+   * When this field is omitted, eve substitutes `defaultSandbox()` at
    * runtime, which picks the best available backend: `vercel()`
    * on hosted Vercel (where `process.env.VERCEL` is set), then Docker,
    * microsandbox, or just-bash
@@ -108,7 +108,7 @@ export interface SandboxDefinitionWithBootstrap<
   bootstrap(input: SandboxBootstrapContext<BO>): Promise<void> | void;
   /**
    * Optional build-time revalidation key for the reusable sandbox
-   * snapshot produced by {@link bootstrap}. Eve evaluates this
+   * snapshot produced by {@link bootstrap}. eve evaluates this
    * function during compile/build, stores the resolved string in
    * compiled artifacts, and uses that frozen value for both prewarm and
    * runtime session create. Authored sandbox source and

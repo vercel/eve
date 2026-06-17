@@ -176,7 +176,7 @@ describe("resolveConnectionPrincipal", () => {
       const err = error as ConnectionAuthorizationFailedError;
       expect(err.reason).toBe("principal_required");
       expect(err.retryable).toBe(false);
-      expect(err.message).toMatch(/outside an Eve context/);
+      expect(err.message).toMatch(/outside an eve context/);
     }
   });
 });

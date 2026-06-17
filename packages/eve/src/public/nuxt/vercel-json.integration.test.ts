@@ -45,7 +45,7 @@ describe("ensureEveVercelJson", () => {
     });
   });
 
-  it("resolves the Eve entrypoint relative to the Nuxt root", async () => {
+  it("resolves the eve entrypoint relative to the Nuxt root", async () => {
     const nuxtRoot = await createTempRoot();
     const appRoot = join(nuxtRoot, "agent");
 
@@ -80,7 +80,7 @@ describe("ensureEveVercelJson", () => {
     });
   });
 
-  it("preserves an already-configured Eve service and reuses its prefix", async () => {
+  it("preserves an already-configured eve service and reuses its prefix", async () => {
     const nuxtRoot = await createTempRoot();
     const existing = {
       $schema: "https://openapi.vercel.sh/vercel.json",

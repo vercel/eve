@@ -34,7 +34,7 @@ afterEach(() => {
 });
 
 describe("eveSvelteKit", () => {
-  it("configures Vite dev server proxy to a shared Eve server", async () => {
+  it("configures Vite dev server proxy to a shared eve server", async () => {
     const plugin = eveSvelteKit();
     const result = (await getConfigHook(plugin)(
       {
@@ -61,7 +61,7 @@ describe("eveSvelteKit", () => {
     });
   });
 
-  it("configures Vite preview proxy and starts Eve for local production preview", async () => {
+  it("configures Vite preview proxy and starts eve for local production preview", async () => {
     const plugin = eveSvelteKit();
     const result = (await getConfigHook(plugin)(
       {

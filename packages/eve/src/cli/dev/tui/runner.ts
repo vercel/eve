@@ -396,7 +396,7 @@ export class EveTUIRunner {
   /**
    * approval-id → input-request map populated as `input.requested` events
    * stream in. Used to translate the renderer's approval responses back into
-   * Eve `InputResponse[]` payloads on the next `send()`.
+   * eve `InputResponse[]` payloads on the next `send()`.
    */
   readonly #pendingInputRequests = new Map<string, InputRequest>();
   /**
@@ -442,7 +442,7 @@ export class EveTUIRunner {
     this.#session = options.session;
     if (options.client !== undefined) this.#client = options.client;
     this.#renderer = createRenderer(options);
-    this.#name = options.name ?? "Eve";
+    this.#name = options.name ?? "eve";
     this.#tools = options.tools ?? "full";
     this.#reasoning = options.reasoning ?? "full";
     this.#subagents = options.subagents ?? "full";
@@ -1399,8 +1399,8 @@ type EveStreamTranslatorInput = {
 };
 
 /**
- * Reduces one Eve session-stream turn into renderer-native TUI events.
- * Eve events name assistant/reasoning sections by `turnId` + `stepIndex`;
+ * Reduces one eve session-stream turn into renderer-native TUI events.
+ * eve events name assistant/reasoning sections by `turnId` + `stepIndex`;
  * those ids become stable block ids in the terminal renderer.
  */
 async function* eveEventsToTUIStream(
@@ -1859,7 +1859,7 @@ function reasoningPartId(turnId: string, stepIndex: number): string {
 /**
  * Per-part-key accumulation state for one assistant text or reasoning trace.
  *
- * Eve names parts by `turnId:stepIndex`, but the harness reuses `stepIndex`
+ * eve names parts by `turnId:stepIndex`, but the harness reuses `stepIndex`
  * across the model calls of one turn (the post-park call restarts at the same
  * index). `generation` disambiguates: each fresh model call that reuses a
  * completed key opens generation N+1, which renders as its own block.

@@ -2,7 +2,7 @@ import type { H3Event } from "nitro";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 
 /**
- * Nitro route for Eve's health endpoint.
+ * Nitro route for eve's health endpoint.
  *
  * The health endpoint is intentionally always-public so platform load
  * balancers and uptime monitors can probe it without credentials.

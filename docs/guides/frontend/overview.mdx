@@ -1,16 +1,16 @@
 ---
 title: "Overview"
-description: "Put an Eve agent behind a browser chat UI with useEveAgent."
+description: "Put an eve agent behind a browser chat UI with useEveAgent."
 ---
 
-The frontend helpers put a browser chat or agent UI on top of an Eve agent. `useEveAgent()` opens a durable session, sends turns, streams the reply back, and turns the raw event stream into render-ready state. React is the reference implementation; [Vue](./use-eve-agent-vue) and [Svelte](./use-eve-agent-svelte) ship the same surface.
+The frontend helpers put a browser chat or agent UI on top of an eve agent. `useEveAgent()` opens a durable session, sends turns, streams the reply back, and turns the raw event stream into render-ready state. React is the reference implementation; [Vue](./use-eve-agent-vue) and [Svelte](./use-eve-agent-svelte) ship the same surface.
 
 ## The integration model
 
-A browser UI is a client of the agent's HTTP routes (the [Eve channel](../../channels/overview)). Two layers wire it up:
+A browser UI is a client of the agent's HTTP routes (the [eve channel](../../channels/overview)). Two layers wire it up:
 
-- **The framework integration** mounts the Eve routes on your app's origin, so the browser never crosses a CORS boundary or reads an env var to find the agent. Pick yours: [Next.js](./nextjs) (`withEve`), [Nuxt](./nuxt) (the `eve/nuxt` module), or [SvelteKit](./sveltekit) (the `eveSvelteKit` Vite plugin). On any other stack the hook talks to same-origin `/eve/v1/*` routes directly, or you pass an explicit `host`.
-- **The hook** (`useEveAgent`) holds the session state, streaming, errors, and composer status. It defaults to same-origin Eve routes such as `/eve/v1/session`.
+- **The framework integration** mounts the eve routes on your app's origin, so the browser never crosses a CORS boundary or reads an env var to find the agent. Pick yours: [Next.js](./nextjs) (`withEve`), [Nuxt](./nuxt) (the `eve/nuxt` module), or [SvelteKit](./sveltekit) (the `eveSvelteKit` Vite plugin). On any other stack the hook talks to same-origin `/eve/v1/*` routes directly, or you pass an explicit `host`.
+- **The hook** (`useEveAgent`) holds the session state, streaming, errors, and composer status. It defaults to same-origin eve routes such as `/eve/v1/session`.
 
 The per-framework pages below walk through the wiring step by step: [Next.js](./nextjs), [Nuxt](./nuxt), and [SvelteKit](./sveltekit).
 
@@ -66,7 +66,7 @@ export function Chat() {
 | `data`    | Projected UI state from the reducer. Defaults to `{ messages }`.               |
 | `status`  | `"ready"`, `"submitted"`, `"streaming"`, or `"error"`. Drives the composer.    |
 | `error`   | The last `Error` thrown, if any.                                               |
-| `events`  | Raw Eve stream events for this session.                                        |
+| `events`  | Raw eve stream events for this session.                                        |
 | `session` | Serializable session cursor (`sessionId`, `continuationToken`, `streamIndex`). |
 | `send`    | Send text or the full turn payload (multi-part messages, HITL responses).      |
 | `stop`    | Abort the active request.                                                      |
@@ -115,7 +115,7 @@ if (request) {
 }
 ```
 
-`request.prompt` and `request.options` give you what you need to render the approve and deny UI. The default reducer marks the part as responded immediately, then updates it again once Eve streams the resumed result.
+`request.prompt` and `request.options` give you what you need to render the approve and deny UI. The default reducer marks the part as responded immediately, then updates it again once eve streams the resumed result.
 
 ## Attach page context per turn
 
@@ -143,7 +143,7 @@ const agent = useEveAgent({
 
 On top of `onSessionChange`, the hook takes a few per-turn callbacks:
 
-- `onEvent(event)`: fires for each Eve stream event as it arrives.
+- `onEvent(event)`: fires for each eve stream event as it arrives.
 - `onError(error)`: fires with the last `Error` when a turn fails.
 - `onFinish(snapshot)`: fires with the final `{ data, status, session, ... }` snapshot once a turn settles.
 
@@ -157,7 +157,7 @@ const agent = useEveAgent({
 
 Two more options tune turn behavior:
 
-- `optimistic` (default `true`): projects submitted user messages into `data` before Eve confirms them with a `message.received` event. These are reducer-facing projection events only. `events` stays the authoritative Eve stream.
+- `optimistic` (default `true`): projects submitted user messages into `data` before eve confirms them with a `message.received` event. These are reducer-facing projection events only. `events` stays the authoritative eve stream.
 - `maxReconnectAttempts` (default `3`): stream reconnection budget per turn.
 
 ## Custom reducer
@@ -182,7 +182,7 @@ const agent = useEveAgent({ reducer: toolCounter });
 // agent.data is ToolLog
 ```
 
-`reduce(data, event)` receives both authoritative Eve stream events and client projection events (`client.message.submitted`, `client.message.failed`, `client.input.responded`). Handle the client events too if you want optimistic and HITL state in your projection. Otherwise, return `data` unchanged for them.
+`reduce(data, event)` receives both authoritative eve stream events and client projection events (`client.message.submitted`, `client.message.failed`, `client.input.responded`). Handle the client events too if you want optimistic and HITL state in your projection. Otherwise, return `data` unchanged for them.
 
 ## Resumable sessions
 
@@ -206,7 +206,7 @@ Store the full `session` object (`sessionId`, `continuationToken`, `streamIndex`
 
 ## Custom hosts and headers
 
-Pass `host` when the Eve server isn't same-origin, and pass `auth` or `headers` when the channel needs credentials. Function values are re-resolved before every HTTP request, reconnects included:
+Pass `host` when the eve server isn't same-origin, and pass `auth` or `headers` when the channel needs credentials. Function values are re-resolved before every HTTP request, reconnects included:
 
 ```tsx
 const agent = useEveAgent({
@@ -231,4 +231,4 @@ const agent = useEveAgent({
 - [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming): the event stream and session cursor
 - [Channels](../../channels/overview): the HTTP routes the hook talks to
 - [TypeScript SDK](../client/overview): the lower-level client underneath the frontend hooks
-- [Next.js](./nextjs): step-by-step setup for wiring Eve into a Next.js app
+- [Next.js](./nextjs): step-by-step setup for wiring eve into a Next.js app

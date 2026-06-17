@@ -1,7 +1,7 @@
 import { z } from "#compiled/zod/index.js";
 
 /**
- * Runtime-owned authenticator kinds projected into Eve session auth metadata.
+ * Runtime-owned authenticator kinds projected into eve session auth metadata.
  */
 export type RuntimeSessionAuthenticator = "http-basic" | "jwt-hmac" | "jwt-ecdsa" | "oidc";
 

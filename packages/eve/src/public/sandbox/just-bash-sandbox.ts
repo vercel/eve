@@ -4,7 +4,7 @@
  * The just-bash backend runs the workspace under the pure-JS `just-bash`
  * interpreter with a virtual filesystem — no daemon or VM required, but
  * no real binaries either. The `just-bash` package is not bundled with
- * Eve; it is loaded lazily from the application install.
+ * eve; it is loaded lazily from the application install.
  */
 export interface JustBashSandboxCreateOptions {
   /**

@@ -41,7 +41,7 @@ export interface ResolveTargetOptions {
   /** Force scaffolding into the target directory instead of a `./<name>` child. */
   inPlace?: boolean;
   /**
-   * Treat an existing `./<name>` that is already an Eve project as resumable
+   * Treat an existing `./<name>` that is already an eve project as resumable
    * instead of refusing it. Composed on for headless runs so re-runs converge;
    * interactive runs keep refusing so a human notices the collision.
    */
@@ -103,7 +103,7 @@ function deriveInPlaceProjectName(targetDirectory: string | undefined): string {
  * place or into a new `./<name>` child. The current-vs-new question only fires
  * when the target directory already looks like a project; otherwise creating a
  * new directory is the announced default. A headless re-run resumes an
- * existing Eve project directory instead of refusing it (composed via
+ * existing eve project directory instead of refusing it (composed via
  * `resumeExisting`), so re-runs converge.
  */
 export function resolveTarget(
@@ -115,7 +115,7 @@ export function resolveTarget(
 
   /**
    * Throws if `./<name>` already exists under `parent`, unless the composition
-   * opted into resuming an existing Eve project there (headless re-runs). Used
+   * opted into resuming an existing eve project there (headless re-runs). Used
    * for the "create a new directory" branch, where clobbering an existing
    * folder is unsafe.
    */

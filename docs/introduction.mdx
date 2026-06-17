@@ -1,21 +1,21 @@
 ---
 title: "Introduction"
-description: "How an Eve agent is laid out as files, what runs when a message arrives, and the building blocks you add as it grows."
+description: "How an eve agent is laid out as files, what runs when a message arrives, and the building blocks you add as it grows."
 ---
 
-Eve is a framework for building durable agents as ordinary files in a TypeScript project.
+eve is a framework for building durable agents as ordinary files in a TypeScript project.
 
-Instead of one large configuration object, each part of your agent gets a clear home. Instructions go in one file, tools in one folder, channels in another. Eve discovers that structure and turns it into an agent that runs locally, serves HTTP, connects to other platforms, and keeps working across many turns.
+Instead of one large configuration object, each part of your agent gets a clear home. Instructions go in one file, tools in one folder, channels in another. eve discovers that structure and turns it into an agent that runs locally, serves HTTP, connects to other platforms, and keeps working across many turns.
 
 <Callout>
-  Eve is currently in beta and subject to the [Vercel beta
+  eve is currently in beta and subject to the [Vercel beta
   terms](https://vercel.com/docs/release-phases/public-beta-agreement); the framework, APIs,
   documentation, and behavior may change before general availability.
 </Callout>
 
-## An Eve project at a glance
+## An eve project at a glance
 
-A small Eve app looks like this:
+A small eve app looks like this:
 
 ```text
 my-agent/
@@ -31,7 +31,7 @@ my-agent/
         └── slack.ts
 ```
 
-You can understand most Eve projects by reading that tree:
+You can understand most eve projects by reading that tree:
 
 - `instructions.md` tells the agent who it is and how it should behave.
 - [`agent.ts`](./agent-config) chooses the model and configures runtime options.
@@ -43,7 +43,7 @@ Start with only `instructions.md` and `agent.ts`. Add the other folders when the
 
 ## The files are the interface
 
-Eve is [filesystem-first](./reference/project-layout). A file's location says what it does, and its path usually gives it a name. For example, this file:
+eve is [filesystem-first](./reference/project-layout). A file's location says what it does, and its path usually gives it a name. For example, this file:
 
 ```text
 agent/tools/get_weather.ts
@@ -64,17 +64,17 @@ export default defineTool({
 });
 ```
 
-There is no separate registry to keep in sync. Add the file and Eve discovers it; move or rename it and its identity moves with it. See [Tools](./tools) for the complete API.
+There is no separate registry to keep in sync. Add the file and eve discovers it; move or rename it and its identity moves with it. See [Tools](./tools) for the complete API.
 
 ## What happens when a message arrives
 
-The same flow runs whether a message comes from a web app, the terminal, or Slack. Eve turns the platform input into a message, gives the model its instructions, skills, tools, and conversation history, runs the work (calling tools and subagents as needed), saves the session and streams events, then delivers the result back in the form the platform expects.
+The same flow runs whether a message comes from a web app, the terminal, or Slack. eve turns the platform input into a message, gives the model its instructions, skills, tools, and conversation history, runs the work (calling tools and subagents as needed), saves the session and streams events, then delivers the result back in the form the platform expects.
 
 That keeps agent behavior portable. Your weather tool does not need to know whether the question came from a browser or from Slack.
 
 ## Durable by default
 
-An Eve session is more than one request and one response. It can:
+An eve session is more than one request and one response. It can:
 
 - Stream progress while work is happening
 - Call tools and subagents
@@ -82,7 +82,7 @@ An Eve session is more than one request and one response. It can:
 - Resume after that answer arrives
 - Keep durable state across turns
 
-Under the hood, Eve uses the open-source [Workflow SDK](https://workflow-sdk.dev) to make sessions durable, resumable, and crash-safe. Eve handles that machinery so your tools focus on the work itself.
+Under the hood, eve uses the open-source [Workflow SDK](https://workflow-sdk.dev) to make sessions durable, resumable, and crash-safe. eve handles that machinery so your tools focus on the work itself.
 
 ## Grow the project by adding capabilities
 

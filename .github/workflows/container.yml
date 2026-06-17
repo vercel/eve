@@ -71,8 +71,8 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: |
-            org.opencontainers.image.title=Eve Sandbox
-            org.opencontainers.image.description=Sandbox base image for Eve agents.
+            org.opencontainers.image.title=eve Sandbox
+            org.opencontainers.image.description=Sandbox base image for eve agents.
             org.opencontainers.image.source=https://github.com/vercel/eve
           cache-from: type=gha
           cache-to: type=gha,mode=max

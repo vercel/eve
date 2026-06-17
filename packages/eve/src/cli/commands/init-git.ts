@@ -76,7 +76,7 @@ export function tryInitializeGit(projectPath: string): GitInitResult {
     }
 
     execSync("git add -A", { cwd: projectPath, stdio: "ignore", timeout: GIT_TIMEOUT_MS });
-    execSync('git commit -m "Initial commit from Eve"', {
+    execSync('git commit -m "Initial commit from eve"', {
       cwd: projectPath,
       stdio: "ignore",
       timeout: GIT_TIMEOUT_MS,

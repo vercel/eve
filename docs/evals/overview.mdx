@@ -1,6 +1,6 @@
 ---
 title: "Overview"
-description: "Define repeatable scored checks for an Eve agent with defineEval and run them with eve eval."
+description: "Define repeatable scored checks for an eve agent with defineEval and run them with eve eval."
 ---
 
 An eval is a scored check that runs your agent against real sessions and grades the result, catching regressions when you change a prompt or a tool. Drive the agent through one or more turns, assert on what it did (the run completed, the right tool ran, the reply contains the right text), and optionally ship the results to Braintrust.
@@ -9,7 +9,7 @@ Evals exercise the same HTTP surface your users hit. The runner boots (or target
 
 ## `defineEval`
 
-Eve discovers evals under the app-root `evals/` directory, in `.eval.ts` files. Each file is one eval by default. A file can also default-export an array to fan out over a dataset (see [Cases](./cases)). The file path is the eval's identity, so you don't author an `id` or `name`. Directories group related evals (`evals/weather/brooklyn-forecast.eval.ts` becomes id `weather/brooklyn-forecast`).
+eve discovers evals under the app-root `evals/` directory, in `.eval.ts` files. Each file is one eval by default. A file can also default-export an array to fan out over a dataset (see [Cases](./cases)). The file path is the eval's identity, so you don't author an `id` or `name`. Directories group related evals (`evals/weather/brooklyn-forecast.eval.ts` becomes id `weather/brooklyn-forecast`).
 
 ```text
 my-agent/

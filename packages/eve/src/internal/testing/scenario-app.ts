@@ -29,7 +29,7 @@ const SCENARIO_AI_PACKAGE_VERSION = resolvePackageVersion("ai");
  * dev server, or `compileAgent` against real files) materialize a descriptor
  * into a fresh temporary directory via {@link materializeScenarioApp}. The
  * descriptor captures every file the test needs; the helper wires up the
- * package manifest, the Eve tarball dependency, and (when requested) an
+ * package manifest, the eve tarball dependency, and (when requested) an
  * installed `node_modules/` tree.
  *
  * Descriptors are the single source of truth for fixture content — the
@@ -280,7 +280,7 @@ const EVE_SCENARIO_EVE_TARBALL_PATH_ENV = "EVE_SCENARIO_EVE_TARBALL_PATH";
 let cachedScenarioEveTarballPromise: Promise<string> | null = null;
 
 /**
- * Returns the on-disk path to the Eve tarball used by scenario apps.
+ * Returns the on-disk path to the eve tarball used by scenario apps.
  *
  * When the scenario vitest config's `globalSetup`
  * (`test/setup/pack-scenario-tarball.ts`) has run, the tarball is packed
@@ -354,7 +354,7 @@ async function resolveScenarioEveTarballFileName(): Promise<string> {
 let cachedScenarioWorkerCacheDirectoryPromise: Promise<string> | null = null;
 
 /**
- * Returns a per-worker cache directory used to store the Eve tarball and the
+ * Returns a per-worker cache directory used to store the eve tarball and the
  * installed dependency templates. The directory is created on demand and
  * scoped by `VITEST_WORKER_ID` so concurrent workers cannot corrupt each
  * other's caches.

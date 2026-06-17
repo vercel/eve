@@ -51,11 +51,11 @@ describe("schedule task routes", () => {
     expect(nitro.options.experimental.tasks).toBe(true);
     expect(nitro.options.tasks).toEqual({
       "eve.schedule.c2NoZWR1bGVzL2RhaWx5LWRpZ2VzdC5tanM": {
-        description: 'Run Eve schedule "daily-digest" from "schedules/daily-digest.mjs".',
+        description: 'Run eve schedule "daily-digest" from "schedules/daily-digest.mjs".',
         handler: "#eve-schedule-task/eve.schedule.c2NoZWR1bGVzL2RhaWx5LWRpZ2VzdC5tanM",
       },
       "eve.schedule.c2NoZWR1bGVzL3dlZWtseS1jbGVhbnVwLm1qcw": {
-        description: 'Run Eve schedule "weekly-cleanup" from "schedules/weekly-cleanup.mjs".',
+        description: 'Run eve schedule "weekly-cleanup" from "schedules/weekly-cleanup.mjs".',
         handler: "#eve-schedule-task/eve.schedule.c2NoZWR1bGVzL3dlZWtseS1jbGVhbnVwLm1qcw",
       },
     });
@@ -99,7 +99,7 @@ describe("schedule task routes", () => {
     expect(nitro.options.virtual).toEqual({});
   });
 
-  it("removes only Eve-owned task entries, virtual modules, and cron mappings", () => {
+  it("removes only eve-owned task entries, virtual modules, and cron mappings", () => {
     const nitro = createNitroStub({
       scheduledTasks: {
         "0 8 * * *": ["eve.schedule.example", "user-task"],

@@ -24,7 +24,7 @@ afterEach(() => {
 });
 
 describe("createDevelopmentRequestHeadersAsync", () => {
-  it("adds the Vercel protection bypass header for preview-scoped Eve routes", async () => {
+  it("adds the Vercel protection bypass header for preview-scoped eve routes", async () => {
     vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "secret_123");
     vi.mocked(getVercelOidcToken).mockRejectedValue(new Error("not linked"));
 
@@ -39,7 +39,7 @@ describe("createDevelopmentRequestHeadersAsync", () => {
     expect(headers.get(VERCEL_PROTECTION_BYPASS_HEADER)).toBe("secret_123");
   });
 
-  it("skips the bypass header for non-Eve routes", async () => {
+  it("skips the bypass header for non-eve routes", async () => {
     vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "secret_123");
 
     const headers = await createDevelopmentRequestHeadersAsync({
@@ -140,7 +140,7 @@ describe("createDevelopmentRequestHeadersAsync", () => {
     expect(headers.has("authorization")).toBe(false);
   });
 
-  it("does not call getVercelOidcToken when the target Eve route is on localhost", async () => {
+  it("does not call getVercelOidcToken when the target eve route is on localhost", async () => {
     vi.mocked(getVercelOidcToken).mockResolvedValue("oidc_token_456");
 
     const headers = await createDevelopmentRequestHeadersAsync({

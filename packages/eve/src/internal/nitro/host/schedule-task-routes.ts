@@ -9,7 +9,7 @@ import type { NitroArtifactsConfigInput } from "#internal/nitro/host/artifacts-c
 
 /**
  * Virtual id prefix used for the synthetic Nitro task module emitted for each
- * Eve authored schedule. Each registered task points at its own virtual id so
+ * eve authored schedule. Each registered task points at its own virtual id so
  * Rollup can resolve the generated `defineTask({...})` source without writing
  * a physical handler file.
  */
@@ -79,7 +79,7 @@ export function registerScheduleTaskHandlers(
 }
 
 /**
- * Replaces the currently-registered Eve schedule task handlers when the
+ * Replaces the currently-registered eve schedule task handlers when the
  * compiled authored schedule set changes.
  *
  * Returns `true` when the registration set changed (and the caller should
@@ -102,7 +102,7 @@ export function syncScheduleTaskHandlers(
 }
 
 /**
- * Removes every Eve-owned schedule task entry, virtual handler module, and
+ * Removes every eve-owned schedule task entry, virtual handler module, and
  * cron entry from the Nitro options. Used by the dev watcher before
  * re-registering the latest compiled set.
  */

@@ -233,7 +233,7 @@ async function acquireEveDevServerLock(
 
       if (Date.now() > deadline) {
         throw new Error(
-          `Timed out after ${timeoutMs}ms waiting for another Next.js process to start Eve.`,
+          `Timed out after ${timeoutMs}ms waiting for another Next.js process to start eve.`,
         );
       }
 
@@ -258,7 +258,7 @@ function isLoopbackHostname(hostname: string): boolean {
 function parseLocalServerOrigin(urlText: string): string | undefined {
   const url = URL.parse(urlText);
   // Dev-server discovery reads mixed subprocess output. Build metadata and
-  // dependency warnings can print unrelated URLs before Eve reports its listener,
+  // dependency warnings can print unrelated URLs before eve reports its listener,
   // but withEve only owns the app-local loopback server it started.
   if (
     url === null ||
@@ -304,7 +304,7 @@ function startServerProcess(input: {
       child.kill();
       reject(
         new Error(
-          `Timed out after ${input.timeoutMs ?? DEFAULT_SERVER_READY_TIMEOUT_MS}ms waiting for Eve to print its server URL.`,
+          `Timed out after ${input.timeoutMs ?? DEFAULT_SERVER_READY_TIMEOUT_MS}ms waiting for eve to print its server URL.`,
         ),
       );
     }, input.timeoutMs ?? DEFAULT_SERVER_READY_TIMEOUT_MS);
@@ -322,7 +322,7 @@ function startServerProcess(input: {
       cleanup();
       reject(
         new Error(
-          `Eve server process exited before printing its server URL (code ${String(code)}, signal ${String(signal)}).`,
+          `eve server process exited before printing its server URL (code ${String(code)}, signal ${String(signal)}).`,
         ),
       );
     };

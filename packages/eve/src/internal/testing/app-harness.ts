@@ -21,7 +21,7 @@ import {
 import type { MockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 
 /**
- * Declarative, in-memory Eve app stand-in used by integration tests.
+ * Declarative, in-memory eve app stand-in used by integration tests.
  */
 
 /**

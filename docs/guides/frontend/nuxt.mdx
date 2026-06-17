@@ -1,14 +1,14 @@
 ---
 title: "Nuxt"
-description: "Run an Eve agent and a Nuxt app as one project with the eve/nuxt module."
+description: "Run an eve agent and a Nuxt app as one project with the eve/nuxt module."
 ---
 
-The `eve/nuxt` module runs a Nuxt frontend and an Eve agent as a single project from one dev server and one Vercel deploy. The auto-imported [`useEveAgent`](./use-eve-agent-vue) composable finds the mounted routes on its own, so there's no CORS to configure and no URL env vars to keep in sync.
+The `eve/nuxt` module runs a Nuxt frontend and an eve agent as a single project from one dev server and one Vercel deploy. The auto-imported [`useEveAgent`](./use-eve-agent-vue) composable finds the mounted routes on its own, so there's no CORS to configure and no URL env vars to keep in sync.
 
 ## Prerequisites
 
 - The `eve` package installed in your project (`npm install eve@latest`).
-- An existing Eve agent directory. If you don't have one, start from [Getting started](../../getting-started).
+- An existing eve agent directory. If you don't have one, start from [Getting started](../../getting-started).
 - A Nuxt app to mount the agent in.
 
 ## Register the module
@@ -60,7 +60,7 @@ async function handleSubmit() {
 </template>
 ```
 
-The default Eve channel is fail-closed. With no `agent/channels/eve.ts` authored, Eve registers `eveChannel({ auth: [localDev(), vercelOidc()] })`: `localDev()` opens the routes on localhost, `vercelOidc()` admits Vercel OIDC callers in production, and everything else gets a `401`. To run your own auth policy, add `agent/channels/eve.ts`:
+The default eve channel is fail-closed. With no `agent/channels/eve.ts` authored, eve registers `eveChannel({ auth: [localDev(), vercelOidc()] })`: `localDev()` opens the routes on localhost, `vercelOidc()` admits Vercel OIDC callers in production, and everything else gets a `401`. To run your own auth policy, add `agent/channels/eve.ts`:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -73,8 +73,8 @@ For a public demo, use `none()` (also from `eve/channels/auth`) to skip authenti
 
 ## Dev vs deploy topology
 
-- **Local dev.** `npm run dev` starts the Eve dev server next to `nuxt dev` and proxies the Eve routes through it. As far as the browser knows, everything is the Nuxt origin.
-- **Vercel.** A single Vercel project carries both the Nuxt app and the Eve runtime. The web app stays public; the runtime sits behind it on the same origin. Set `eveBuildCommand` when the agent needs its own build step:
+- **Local dev.** `npm run dev` starts the eve dev server next to `nuxt dev` and proxies the eve routes through it. As far as the browser knows, everything is the Nuxt origin.
+- **Vercel.** A single Vercel project carries both the Nuxt app and the eve runtime. The web app stays public; the runtime sits behind it on the same origin. Set `eveBuildCommand` when the agent needs its own build step:
 
   ```ts
   export default defineNuxtConfig({
@@ -85,7 +85,7 @@ For a public demo, use `none()` (also from `eve/channels/auth`) to skip authenti
   });
   ```
 
-- **Non-Vercel hosts.** Point Nuxt at a separate Eve origin with `EVE_NUXT_PRODUCTION_ORIGIN`. To override the local port (default `4274`), use `EVE_NUXT_PRODUCTION_PORT`:
+- **Non-Vercel hosts.** Point Nuxt at a separate eve origin with `EVE_NUXT_PRODUCTION_ORIGIN`. To override the local port (default `4274`), use `EVE_NUXT_PRODUCTION_PORT`:
 
   ```bash
   EVE_NUXT_PRODUCTION_ORIGIN=https://agent.example.com npm run build

@@ -88,7 +88,7 @@ async function readRegisteredOrigin(appRoot: string): Promise<string> {
     await readFile(join(appRoot, ".eve", "next-dev-server.json"), "utf8"),
   ) as { readonly origin?: unknown };
   if (typeof registry.origin !== "string") {
-    throw new Error("Eve dev server registry did not record a string origin.");
+    throw new Error("eve dev server registry did not record a string origin.");
   }
   return registry.origin;
 }

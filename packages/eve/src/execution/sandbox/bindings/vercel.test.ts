@@ -81,7 +81,7 @@ afterEach(() => {
 });
 
 describe("createVercelSandbox", () => {
-  it("creates fresh Vercel sandboxes through the SDK with the Eve image", async () => {
+  it("creates fresh Vercel sandboxes through the SDK with the eve image", async () => {
     const templateSandbox = createMockSandbox({ name: "template-key" });
     const fetch = vi.fn();
     const sandboxModule = {
@@ -659,7 +659,7 @@ describe("createVercelSandbox", () => {
     /*
      * The real Vercel SDK pre-populates `currentSnapshotId` on a
      * freshly-created sandbox when the create call passed a snapshot
-     * source. The template sandbox mock mirrors that — if Eve's
+     * source. The template sandbox mock mirrors that — if eve's
      * "template already has a snapshot, reuse it" guard fires on a
      * newly-created template, it returns the author's snapshotId
      * instead of running bootstrap/seed/`sandbox.snapshot()`, so the
@@ -717,7 +717,7 @@ describe("createVercelSandbox", () => {
      * `sandbox.snapshot()`) leaves a named template sandbox in the
      * project whose `currentSnapshotId` is still the author's source
      * snapshot. Without explicit handling, `getNamedSandbox` would
-     * find it and Eve would treat the author's snapshot as the
+     * find it and eve would treat the author's snapshot as the
      * framework's prewarmed snapshot, skipping setup/bootstrap/seeds
      * forever. This test pins that we ignore that exact value and
      * proceed with prewarm on the existing sandbox.
@@ -1016,7 +1016,7 @@ describe("createVercelSandbox", () => {
     }
   });
 
-  it("adds Eve sandbox tags to Vercel template and session creation", async () => {
+  it("adds eve sandbox tags to Vercel template and session creation", async () => {
     const templateSandbox = createMockSandbox({ name: "template" });
     const sessionSandbox = createMockSandbox({ name: "session" });
     const create = vi

@@ -19,15 +19,15 @@ export const DEFAULT_ZOD_PACKAGE_VERSION = "__ZOD_VERSION__";
 const DEFAULT_TSGO_PACKAGE_VERSION = "__TSGO_VERSION__";
 
 /**
- * The Eve package metadata that generated projects consume together. Keeping
+ * The eve package metadata that generated projects consume together. Keeping
  * the dependency version and Node.js requirement in one value prevents a
- * scaffold from installing one Eve release while declaring another release's
+ * scaffold from installing one eve release while declaring another release's
  * runtime contract.
  */
 export interface EvePackageContract {
-  /** Eve dependency version or npm specifier written to the generated package. */
+  /** eve dependency version or npm specifier written to the generated package. */
   version: string;
-  /** The matching Eve release's authored `package.json` `engines.node` value. */
+  /** The matching eve release's authored `package.json` `engines.node` value. */
   nodeEngine: string;
 }
 
@@ -36,7 +36,7 @@ export const DEFAULT_EVE_PACKAGE_CONTRACT: EvePackageContract = {
   nodeEngine: "__NODE_ENGINE__",
 };
 
-/** Resolves a stamped or explicitly supplied Eve package contract. */
+/** Resolves a stamped or explicitly supplied eve package contract. */
 export function resolveEvePackageContract(
   contract: EvePackageContract = DEFAULT_EVE_PACKAGE_CONTRACT,
 ): EvePackageContract {
@@ -235,9 +235,9 @@ dist
 .nitro
 dist
 `,
-  "AGENTS.md": `# Eve Agent App
+  "AGENTS.md": `# eve Agent App
 
-This project uses the Eve framework. Before writing code, always read the relevant guide in \`node_modules/eve/docs/\`.
+This project uses the eve framework. Before writing code, always read the relevant guide in \`node_modules/eve/docs/\`.
 `,
   "CLAUDE.md": `@AGENTS.md
 `,

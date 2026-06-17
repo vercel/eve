@@ -424,7 +424,7 @@ async function restoreMicrosandboxSessionSnapshot(input: {
 
 const MICROSANDBOX_MISSING_PACKAGE_MESSAGE =
   "The microsandbox sandbox backend requires the `microsandbox` package, which is not bundled " +
-  "with Eve. Install it in your application (for example `pnpm add -D microsandbox`), or use " +
+  "with eve. Install it in your application (for example `pnpm add -D microsandbox`), or use " +
   "docker() / vercel() instead.";
 
 /**

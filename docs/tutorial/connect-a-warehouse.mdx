@@ -3,7 +3,7 @@ title: "Connect a Warehouse"
 description: "Part 4 of the Build an Agent tutorial. Let each user connect their own warehouse over an OAuth MCP via Vercel Connect."
 ---
 
-The sample dataset got the analytics assistant running, but it's a stand-in. Now point the agent at a real warehouse and let each user connect their own by signing in through their browser. That's what a connection is for. It's an MCP server the model reaches through tools, with auth that Eve drives for you.
+The sample dataset got the analytics assistant running, but it's a stand-in. Now point the agent at a real warehouse and let each user connect their own by signing in through their browser. That's what a connection is for. It's an MCP server the model reaches through tools, with auth that eve drives for you.
 
 This step depends on Vercel Connect, which is in private beta. No Connect access? Keep the Step 3 sample dataset and read this step for the connection model. Steps 5 through 9 work against the sample dataset, so you can complete the tutorial without a warehouse.
 
@@ -24,7 +24,7 @@ export default defineMcpClientConnection({
 });
 ```
 
-`"warehouse"` is the UID you chose when registering the Connect client. By default this OAuth is user-scoped. Each end-user authorizes in their own browser, and Eve resolves that user's token before every tool call.
+`"warehouse"` is the UID you chose when registering the Connect client. By default this OAuth is user-scoped. Each end-user authorizes in their own browser, and eve resolves that user's token before every tool call.
 
 Once Connect is enabled on your account, wire it up:
 
@@ -47,7 +47,7 @@ The first time, the model picks a warehouse tool but there's no token yet, so th
 
 ## The token never reaches the model
 
-Right before each request to the MCP server, Eve resolves the bearer and sends it as `Authorization: Bearer <token>`. The model only ever sees tool names, descriptions, and results. The credential stays out of its reach.
+Right before each request to the MCP server, eve resolves the bearer and sends it as `Authorization: Bearer <token>`. The model only ever sees tool names, descriptions, and results. The credential stays out of its reach.
 
 If you want more control, gate the connection behind approval (`approval: once()`) or narrow which tools the model sees (`tools.allow`). See [Connections](../connections).
 

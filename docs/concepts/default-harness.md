@@ -1,9 +1,9 @@
 ---
 title: "The Harness"
-description: "The out-of-the-box Eve agent loop and the built-in tools every agent ships with, plus how to override or disable them."
+description: "The out-of-the-box eve agent loop and the built-in tools every agent ships with, plus how to override or disable them."
 ---
 
-The default harness is what every Eve agent ships with. It includes the framework-owned agent loop plus a set of built-in tools the model can call without you writing a line. You extend it with capabilities specific to your agent. The loop itself, how a turn runs and checkpoints and resumes, lives in [Execution model and durability](./execution-model-and-durability).
+The default harness is what every eve agent ships with. It includes the framework-owned agent loop plus a set of built-in tools the model can call without you writing a line. You extend it with capabilities specific to your agent. The loop itself, how a turn runs and checkpoints and resumes, lives in [Execution model and durability](./execution-model-and-durability).
 
 ## Compaction
 

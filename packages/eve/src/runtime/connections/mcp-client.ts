@@ -220,7 +220,7 @@ export class McpConnectionClient implements ConnectionClient {
 
   /**
    * Best-effort removal of the rejected bearer for this connection's
-   * resolved principal, across both Eve's per-step cache and the
+   * resolved principal, across both eve's per-step cache and the
    * strategy's own cache (e.g. `@vercel/connect`). Delegates to the
    * shared {@link evictScopedToken} so MCP connections and authored
    * tools invalidate identically. No-op outside a runtime scope or when

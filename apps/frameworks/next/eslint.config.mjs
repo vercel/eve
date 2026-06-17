@@ -13,7 +13,7 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Chat UI is a thin wrapper around the Eve runtime HTTP surface. Skip the
+    // Chat UI is a thin wrapper around the eve runtime HTTP surface. Skip the
     // Next.js lints here so it can stay focused on the agent transport contract.
     "app/_chat/**",
   ]),

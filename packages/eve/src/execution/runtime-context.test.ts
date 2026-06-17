@@ -94,7 +94,7 @@ describe("contextStorage", () => {
 
 describe("loadContext", () => {
   it("throws when called outside of a context scope", () => {
-    expect(() => loadContext()).toThrow("No active Eve context");
+    expect(() => loadContext()).toThrow("No active eve context");
   });
 });
 

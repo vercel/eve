@@ -15,7 +15,7 @@ const DEFAULT_DEPLOYMENT_READY_ATTEMPTS = 30;
 const DEFAULT_DEPLOYMENT_READY_WAIT_MS = 2_000;
 
 /**
- * One deployed test app prepared from a fixture copy and an Eve tarball.
+ * One deployed test app prepared from a fixture copy and an eve tarball.
  */
 export interface TarballVercelDeploymentFixture {
   readonly appRoot: string;
@@ -38,7 +38,7 @@ export interface CreateTarballVercelDeploymentFixtureInput {
 
 /**
  * Materializes the descriptor into a fresh temporary directory, wires the
- * app to depend on the locally packed Eve tarball, deploys it to Vercel,
+ * app to depend on the locally packed eve tarball, deploys it to Vercel,
  * and returns the deployment URL.
  */
 export async function createTarballVercelDeploymentFixture(
