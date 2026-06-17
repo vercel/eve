@@ -1,4 +1,4 @@
-import type { EveEvalTurn } from "eve/evals";
+import type { HandleMessageStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 const SEARCH_TOOL = "connection__search";
@@ -31,14 +31,20 @@ export default defineEval({
     if (!optionIds.includes("approve") || !optionIds.includes("deny")) {
       throw new Error(`Expected approve/deny options, got [${optionIds.join(", ")}].`);
     }
-    if (parked.toolCalls.some((call) => call.name === TFL_APPROVAL_JOURNEY_MODES_TOOL)) {
+    if (toolResultOutputs(parked.events, TFL_APPROVAL_JOURNEY_MODES_TOOL).length > 0) {
       throw new Error("Approval-gated OpenAPI tool executed before approval.");
     }
 
     const approved = await t.respondAll("approve");
     approved.expectOk();
 
-    const output = requireToolOutput(approved, TFL_APPROVAL_JOURNEY_MODES_TOOL);
+    const outputs = toolResultOutputs(t.events, TFL_APPROVAL_JOURNEY_MODES_TOOL);
+    if (outputs.length !== 1) {
+      throw new Error(
+        `Expected "${TFL_APPROVAL_JOURNEY_MODES_TOOL}" to execute exactly once after approval; saw ${outputs.length}.`,
+      );
+    }
+    const [output] = outputs;
     const modes = extractModeNames(output.body);
     if (!modes.has("bus") || !modes.has("tube")) {
       throw new Error(
@@ -48,26 +54,33 @@ export default defineEval({
 
     t.didNotFail();
     t.completed();
-    t.toolOrder([SEARCH_TOOL, TFL_APPROVAL_JOURNEY_MODES_TOOL]);
     t.calledTool(SEARCH_TOOL, { isError: false });
-    t.calledTool(TFL_APPROVAL_JOURNEY_MODES_TOOL, { isError: false, times: 1 });
     t.messageIncludes(/\bbus\b/iu);
     t.messageIncludes(/\btube\b/iu);
   },
 });
 
-function requireToolOutput(turn: EveEvalTurn, toolName: string): Record<string, unknown> {
-  const call = turn.toolCalls.find((candidate) => candidate.name === toolName);
-  if (call === undefined) {
-    const seen = turn.toolCalls.map((candidate) => candidate.name).join(", ");
-    throw new Error(`Expected a "${toolName}" call in this turn; saw [${seen}].`);
+function toolResultOutputs(
+  events: readonly HandleMessageStreamEvent[],
+  toolName: string,
+): Record<string, unknown>[] {
+  const outputs: Record<string, unknown>[] = [];
+  for (const event of events) {
+    if (event.type !== "action.result" || event.data.status === "rejected") {
+      continue;
+    }
+    const result = event.data.result;
+    if (result.kind !== "tool-result" || result.toolName !== toolName) {
+      continue;
+    }
+    if (typeof result.output !== "object" || result.output === null) {
+      throw new Error(
+        `Expected object output from "${toolName}"; got ${JSON.stringify(result.output)}.`,
+      );
+    }
+    outputs.push(result.output as Record<string, unknown>);
   }
-  if (typeof call.output !== "object" || call.output === null) {
-    throw new Error(
-      `Expected object output from "${toolName}"; got ${JSON.stringify(call.output)}.`,
-    );
-  }
-  return call.output as Record<string, unknown>;
+  return outputs;
 }
 
 function extractModeNames(body: unknown): Set<string> {
