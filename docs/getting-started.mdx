@@ -20,7 +20,7 @@ eve is a filesystem-first framework for durable agents. You write capabilities u
 The scaffold's default model is `anthropic/claude-sonnet-4.6`, which routes through the Vercel AI Gateway. Set one of these before you run the agent:
 
 - A gateway model id needs `AI_GATEWAY_API_KEY`, or a `VERCEL_OIDC_TOKEN` pulled with `vercel link`.
-- A direct provider id needs that provider's key, derived from the model prefix. For example, `anthropic/claude-...` needs `ANTHROPIC_API_KEY`.
+- A direct provider model uses that provider's AI SDK package and API key. For example, `anthropic("claude-...")` from `@ai-sdk/anthropic` needs `ANTHROPIC_API_KEY`.
 
 You are responsible for selecting a model, provider, and channel appropriate for your data and use case, and for complying with each provider's terms (as listed per model) and data-processing requirements.
 

@@ -10,7 +10,7 @@ Step 1 gets it talking. The scaffold bundles a small sample dataset, so your fir
 ## Prerequisites
 
 - Node 24 or newer and npm.
-- A model credential. The scaffold's default model goes through the [Vercel AI Gateway](../getting-started), so you need `AI_GATEWAY_API_KEY` (or `VERCEL_OIDC_TOKEN` pulled via `vercel link`). A direct provider id like `anthropic/claude-opus-4.8` instead needs that provider's key, here `ANTHROPIC_API_KEY`.
+- A model credential. The scaffold's default model goes through the [Vercel AI Gateway](../getting-started), so you need `AI_GATEWAY_API_KEY` (or `VERCEL_OIDC_TOKEN` pulled via `vercel link`). A direct provider model like `anthropic("claude-opus-4.8")` instead needs that provider's AI SDK package and key, here `@ai-sdk/anthropic` and `ANTHROPIC_API_KEY`.
 
 If you have not run eve before, complete [Getting Started](../getting-started) first. Without a credential, "Run the agent" below fails when the runtime tries to reach the model; the dev TUI's `/model` flow walks you through pasting a key or linking a project.
 

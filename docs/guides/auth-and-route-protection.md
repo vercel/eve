@@ -31,6 +31,8 @@ export default eveChannel({
 });
 ```
 
+`vercelOidc()` is a convenience for Vercel-hosted agents and Vercel-to-Vercel callers, not a requirement. If your app already has users, sessions, API keys, or an identity provider, put that authenticator in the `auth` walk instead. Custom `AuthFn` entries are first-class and can fully replace Vercel OIDC.
+
 ## The ordered auth walk
 
 `auth` takes a single `AuthFn` or an array that eve walks in order. Each entry has three possible outcomes:
@@ -64,7 +66,7 @@ export default eveChannel({
 });
 ```
 
-Put your own providers ahead of the catch-all helpers. Any entry that doesn't recognize the caller returns `null`, and the walk moves on.
+Put your own providers ahead of the catch-all helpers. Any entry that doesn't recognize the caller returns `null`, and the walk moves on. On non-Vercel hosts, omit `vercelOidc()` unless you specifically want to accept Vercel-issued tokens.
 
 To reject with a precise status instead of skipping, throw:
 
@@ -200,6 +202,8 @@ export default eveChannel({
 ```
 
 In production, `placeholderAuth()` returns a structured `401` so a generated web chat app can say "auth isn't configured yet" instead of throwing an internal error. Replace it before a browser caller submits a production request: swap in your app's `AuthFn` or one of the shipped helpers. Delete the authored channel file entirely and eve falls back to the framework default `[localDev(), vercelOidc()]`, which also rejects production browser traffic.
+
+You do not have to keep `vercelOidc()` in the final policy. For a self-hosted app, an app-embedded frontend, or any deployment that uses a non-Vercel identity system, use `httpBasic()`, `jwtHmac()`, `jwtEcdsa()`, generic `oidc()`, or a custom `AuthFn` that maps your verified user/session/API key into a `SessionAuthContext`.
 
 Keep secret values (`ROUTE_AUTH_BASIC_PASSWORD`, signing keys) in environment variables. Route-auth secrets never land in compiled artifacts. The runtime re-materializes them from the authored channel definition at boot.
 

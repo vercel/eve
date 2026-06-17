@@ -157,7 +157,7 @@ export default defineSandbox({
 
 `justbash()` needs no daemon or VM, but commands run in a simulated bash with a virtual filesystem under `.eve/sandbox-cache/`, with no real binaries (`git`, `node`, package managers) and no network isolation. The `just-bash` package is an optional peer dependency, so `eve dev` installs it into your application automatically when missing (disable with `autoInstall: false`); production processes fail with an actionable install error instead.
 
-You can also write your own backend. A `SandboxBackend` is an object with a `name`, a `create`, and an optional `prewarm`. See the `SandboxBackend*` types on `eve/sandbox`.
+You can also write your own backend. A `SandboxBackend` is an adapter object with a `name`, a `create`, and an optional `prewarm`. It can point at your own container runner, VM pool, internal sandbox service, or another isolation layer, as long as it returns the `SandboxSession` operations eve needs. See the `SandboxBackend*` types on `eve/sandbox`.
 
 ## Lifecycle
 

@@ -27,7 +27,7 @@ interface ScheduleHandlerArgs {
 
 `defineSchedule` is a type-level pass-through. The compiler is what enforces the one-of rule.
 
-`cron` is a standard 5-field string (`minute hour day-of-month month day-of-week`) with minute granularity. On Vercel, each schedule becomes a Vercel Cron Job, and Vercel evaluates the expression in UTC, so `"0 9 * * 1-5"` fires at 09:00 UTC on weekdays. `eve dev` never fires schedules on their cron cadence. To trigger one while iterating, use the dispatch route below.
+`cron` is a standard 5-field string (`minute hour day-of-month month day-of-week`) with minute granularity. On Vercel, each schedule becomes a Vercel Cron Job, and Vercel evaluates the expression in UTC, so `"0 9 * * 1-5"` fires at 09:00 UTC on weekdays. `eve dev` never fires schedules on their cron cadence. A built app served with `eve start` does run production scheduled tasks. To trigger one while iterating in dev, use the dispatch route below.
 
 ## Markdown form (fire-and-forget)
 
@@ -99,6 +99,12 @@ The route is dev-only. Production builds never mount it, and it needs no auth si
 ## On Vercel
 
 Hosted Vercel builds turn every `defineSchedule(...)` into a Vercel Cron Job, with each `cron` written as an entry in `.vercel/output/config.json`. Vercel evaluates these expressions in UTC. Confirm discovery under **Settings → Cron Jobs** and watch execution history under **Observability → Cron Jobs**. Per-run logs land under **Observability → Logs**.
+
+## Self-deployed hosts
+
+Production builds register schedules as Nitro scheduled tasks. On Vercel, Nitro's Vercel preset wires those task registrations into Vercel Cron for you. Outside Vercel, the standard `eve build && eve start` path serves Nitro's Node output and starts Nitro's schedule runner, so the tasks fire on their cron cadence while that process is running.
+
+The gotcha is custom hosting. If you adapt the generated output to a process manager, container platform, or Nitro preset that only serves HTTP and does not start Nitro's scheduled task runner, the schedule definitions still compile, but they will not fire automatically. In that case, run eve through `eve start`, use a host that supports Nitro scheduled tasks, or trigger the same work from your own scheduler through an authenticated route, channel handoff, or application-specific job runner. The dev dispatch route above is only for `eve dev`; production builds do not mount it.
 
 ## What to read next
 
