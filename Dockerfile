@@ -16,6 +16,7 @@ ENV LC_ALL=C.UTF-8
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 RUN set -eux; \
+  printf 'APT::Sandbox::User "root";\n' >/etc/apt/apt.conf.d/99eve-sandbox-user; \
   apt-get update; \
   apt-get install -y --no-install-recommends \
     ca-certificates \
