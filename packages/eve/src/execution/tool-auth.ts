@@ -20,8 +20,11 @@ import {
 } from "#public/connections/errors.js";
 import type {
   ToolAuthProvider,
+  ToolAuthProviderEntry,
+  ToolAuthProviderMap,
   ToolAuthScopeOptions,
   ToolContext,
+  ToolTokenResults,
 } from "#public/definitions/tool.js";
 import { type AuthorizationChallenge, requestAuthorization } from "#harness/authorization.js";
 import {
@@ -166,6 +169,16 @@ function buildToolContext(input: {
         toolScope: scope,
       });
     },
+    async getTokens<TProviders extends ToolAuthProviderMap>(
+      providers: TProviders,
+    ): Promise<ToolTokenResults<TProviders>> {
+      return await resolveInlineTokens({
+        inlineAuthState,
+        justAuthorizedScopes,
+        providers,
+        toolScope: scope,
+      });
+    },
     requireAuth(provider?: ToolAuthProvider, options?: ToolAuthScopeOptions): never {
       if (provider === undefined) {
         if (topLevelScoped === undefined) throw noAuthError(scope);
@@ -186,6 +199,70 @@ function buildToolContext(input: {
       ]);
     },
   };
+}
+
+async function resolveInlineTokens<TProviders extends ToolAuthProviderMap>(input: {
+  readonly toolScope: string;
+  readonly providers: TProviders;
+  readonly justAuthorizedScopes: Set<string>;
+  readonly inlineAuthState: InlineAuthState;
+}): Promise<ToolTokenResults<TProviders>> {
+  const entries = Object.entries(input.providers) as Array<
+    [keyof TProviders & string, ToolAuthProviderEntry]
+  >;
+  const settled = await Promise.allSettled(
+    entries.map(async ([key, entry]) => {
+      const { options, provider } = parseProviderEntry(entry);
+      const token = await resolveInlineToken({
+        inlineAuthState: input.inlineAuthState,
+        justAuthorizedScopes: input.justAuthorizedScopes,
+        options,
+        provider,
+        toolScope: input.toolScope,
+      });
+      return [key, token] as const;
+    }),
+  );
+
+  const results: Partial<Record<keyof TProviders, TokenResult>> = {};
+  const requests: ToolAuthorizationRequiredRequest[] = [];
+  let firstError: unknown;
+
+  settled.forEach((entry) => {
+    if (entry.status === "fulfilled") {
+      const [key, token] = entry.value;
+      results[key] = token;
+      return;
+    }
+
+    if (isToolAuthorizationRequiredError(entry.reason)) {
+      requests.push(...entry.reason.requests);
+      return;
+    }
+
+    firstError ??= entry.reason;
+  });
+
+  if (firstError !== undefined) {
+    throw firstError;
+  }
+
+  if (requests.length > 0) {
+    throw new ToolAuthorizationRequiredError(requests);
+  }
+
+  return results as ToolTokenResults<TProviders>;
+}
+
+function parseProviderEntry(input: ToolAuthProviderEntry): {
+  readonly provider: ToolAuthProvider;
+  readonly options?: ToolAuthScopeOptions;
+} {
+  if (Array.isArray(input)) {
+    const [provider, options] = input as readonly [ToolAuthProvider, ToolAuthScopeOptions?];
+    return { options, provider };
+  }
+  return { provider: input as ToolAuthProvider };
 }
 
 async function resolveInlineToken(input: {

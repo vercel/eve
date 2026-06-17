@@ -53,6 +53,16 @@ export type ToolAuthDefinition =
 
 export type ToolAuthProvider = ToolAuthDefinition;
 
+export type ToolAuthProviderEntry =
+  | ToolAuthProvider
+  | readonly [provider: ToolAuthProvider, options?: ToolAuthScopeOptions];
+
+export type ToolAuthProviderMap = Readonly<Record<string, ToolAuthProviderEntry>>;
+
+export type ToolTokenResults<TProviders extends ToolAuthProviderMap> = {
+  readonly [K in keyof TProviders]: TokenResult;
+};
+
 /**
  * Controls how an inline tool auth provider is scoped and presented.
  *
@@ -94,6 +104,16 @@ export type ToolContext = SessionContext & {
    * `connect("...")` from `@vercel/connect/eve`.
    */
   getToken(provider: ToolAuthProvider, options?: ToolAuthScopeOptions): Promise<TokenResult>;
+  /**
+   * Resolves several inline providers concurrently and aggregates any missing
+   * interactive authorizations into one consent step.
+   *
+   * Each provider value can be either a provider directly or a
+   * `[provider, options]` tuple.
+   */
+  getTokens<TProviders extends ToolAuthProviderMap>(
+    providers: TProviders,
+  ): Promise<ToolTokenResults<TProviders>>;
   /**
    * Signals that the caller must complete this tool's authorization flow
    * before proceeding. Throws `ConnectionAuthorizationRequiredError`, which

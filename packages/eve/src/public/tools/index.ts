@@ -11,11 +11,14 @@ export {
   isDisabledToolSentinel,
   isEnableWorkflowToolSentinel,
   type NeedsApprovalContext,
+  type ToolAuthProviderEntry,
+  type ToolAuthProviderMap,
   type ToolAuthProvider,
   type ToolAuthScopeOptions,
   type ToolDefinition,
   type ToolContext,
   type ToolModelOutput,
+  type ToolTokenResults,
   ExperimentalWorkflow,
 } from "#public/definitions/tool.js";
 export type {

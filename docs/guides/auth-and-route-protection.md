@@ -276,11 +276,12 @@ export default defineTool({
   description: "Sync GitHub context into Linear.",
   inputSchema: z.object({ issueId: z.string() }),
   async execute({ issueId }, ctx) {
-    const { token: githubToken } = await ctx.getToken(githubAuth, {
-      displayName: "GitHub",
-    });
-    const { token: linearToken } = await ctx.getToken(linearAuth, {
-      displayName: "Linear",
+    const {
+      github: { token: githubToken },
+      linear: { token: linearToken },
+    } = await ctx.getTokens({
+      github: [githubAuth, { displayName: "GitHub" }],
+      linear: [linearAuth, { displayName: "Linear" }],
     });
 
     const repo = await fetch("https://api.github.com/user/repos", {
@@ -297,12 +298,15 @@ The tool's `ctx` exposes two auth accessors:
 
 - `ctx.getToken()` resolves the bearer for the declared strategy, checking the per-step token cache first. With an interactive strategy, a cache miss suspends the turn on a framework-owned callback URL, shows a "Sign in" affordance, and re-runs the tool once the OAuth callback completes.
 - `ctx.getToken(provider, options?)` resolves an inline provider such as `connect("github")`. It uses the same cache, callback, and sign-in machinery, but scopes the flow to that provider instead of the tool's top-level `auth`.
+- `ctx.getTokens({ key: provider })` resolves several inline providers concurrently. If more than one provider needs interactive authorization, eve surfaces one consent step containing every missing provider instead of prompting one at a time.
 - `ctx.requireAuth()` throws `ConnectionAuthorizationRequiredError` to gate the tool on authorization before any token resolves. The runtime turns that into the same consent prompt.
 - `ctx.requireAuth(provider, options?)` does the same for an inline provider. Use it after a downstream `401` rejects a token returned by `ctx.getToken(provider)`.
 
 Throw `ConnectionAuthorizationRequiredError` anywhere in `execute` (directly, via `requireAuth()`, or implicitly from `getToken()`) and you trigger the consent flow, keyed by the tool's name. Calling a no-arg accessor on a tool that does not declare `auth` throws; pass a provider to use inline auth from a plain tool.
 
 By default the sign-in affordance title-cases the tool's path-derived name, so a tool file named `sfdc_lookup.ts` renders "Sign in with Sfdc_lookup". Set `displayName` on the `auth` definition to control what users see instead, for example `auth: { ...connect("sfdc"), displayName: "Salesforce" }`. It is presentation-only. The tool's name still keys the authorization scope, token cache, and callback URL, and a definition-level `displayName` wins over one the strategy stamps on the challenge.
+
+`Promise.all([ctx.getToken(a), ctx.getToken(b)])` is fine when both tokens resolve. When both providers might be missing authorization, prefer `ctx.getTokens(...)`: JavaScript rejects `Promise.all` on the first rejection, so the runtime only sees one missing auth request and may prompt for the providers sequentially.
 
 Inline providers derive a stable tool-qualified scope from Vercel Connect metadata when available. If you pass multiple custom providers that do not carry provider metadata, give each one an explicit `scope`, for example `ctx.getToken(auth, { scope: "github" })`.
 

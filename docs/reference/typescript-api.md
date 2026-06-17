@@ -63,6 +63,7 @@ A few non-`define*` helpers round out the set: `disableTool` and `ExperimentalWo
 | `ctx.getSkill(identifier)`  | Handle for a named skill visible to the current agent                         |
 | `ctx.getToken()`            | Resolve the bearer token for a tool's declared `auth` (throws without `auth`) |
 | `ctx.getToken(provider)`    | Resolve a bearer token for an inline auth provider such as `connect("...")`   |
+| `ctx.getTokens({ ... })`    | Resolve several inline providers and aggregate missing authorization prompts  |
 | `ctx.requireAuth()`         | Force the tool's declared authorization flow before proceeding                |
 | `ctx.requireAuth(provider)` | Re-challenge an inline provider, commonly after a downstream `401`            |
 

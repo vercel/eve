@@ -163,6 +163,48 @@ describe("tool-hosted authorization", () => {
     expect(result).toEqual({ github: "github-token", linear: "linear-token" });
   });
 
+  it("resolves and caches multiple inline providers with ctx.getTokens()", async () => {
+    let githubCalls = 0;
+    let linearCalls = 0;
+    const githubAuth: AuthorizationDefinition = {
+      principalType: "app",
+      vercelConnect: { connector: "oauth/github" },
+      async getToken(): Promise<TokenResult> {
+        githubCalls += 1;
+        return { token: `github-${githubCalls}` };
+      },
+    };
+    const linearAuth: AuthorizationDefinition = {
+      principalType: "app",
+      vercelConnect: { connector: "oauth/linear" },
+      async getToken(): Promise<TokenResult> {
+        linearCalls += 1;
+        return { token: `linear-${linearCalls}` };
+      },
+    };
+    const tool = authoredTool({
+      name: "sync_ticket",
+      async execute(_input, ctx) {
+        const first = await ctx.getTokens({ github: githubAuth, linear: linearAuth });
+        const second = await ctx.getTokens({ github: githubAuth, linear: linearAuth });
+        return {
+          first: { github: first.github.token, linear: first.linear.token },
+          second: { github: second.github.token, linear: second.linear.token },
+        };
+      },
+    });
+    const runtime = createTestRuntime({ tools: [tool] });
+
+    const result = await runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {}));
+
+    expect(result).toEqual({
+      first: { github: "github-1", linear: "linear-1" },
+      second: { github: "github-1", linear: "linear-1" },
+    });
+    expect(githubCalls).toBe(1);
+    expect(linearCalls).toBe(1);
+  });
+
   it("rejects multiple anonymous inline providers without explicit scopes", async () => {
     const githubAuth: AuthorizationDefinition = {
       principalType: "app",
@@ -242,6 +284,74 @@ describe("tool-hosted authorization", () => {
       name: "sync_ticket__oauth_linear",
       challenge: { displayName: "Linear", url: "https://idp.example/auth" },
     });
+  });
+
+  it("aggregates inline provider challenges with ctx.getTokens()", async () => {
+    const githubAuth: AuthorizationDefinition = {
+      principalType: "user",
+      vercelConnect: { connector: "oauth/github" },
+      async getToken(): Promise<TokenResult> {
+        throw requiredError();
+      },
+      async startAuthorization() {
+        return {
+          challenge: { url: "https://idp.example/github" },
+          resume: { provider: "github" },
+        };
+      },
+      async completeAuthorization(): Promise<TokenResult> {
+        return { token: "github-minted" };
+      },
+    };
+    const linearAuth: AuthorizationDefinition = {
+      principalType: "user",
+      vercelConnect: { connector: "oauth/linear" },
+      async getToken(): Promise<TokenResult> {
+        throw requiredError();
+      },
+      async startAuthorization() {
+        return {
+          challenge: { url: "https://idp.example/linear" },
+          resume: { provider: "linear" },
+        };
+      },
+      async completeAuthorization(): Promise<TokenResult> {
+        return { token: "linear-minted" };
+      },
+    };
+    const tool = authoredTool({
+      name: "sync_ticket",
+      async execute(_input, ctx) {
+        return await ctx.getTokens({
+          github: [githubAuth, { displayName: "GitHub" }],
+          linear: [linearAuth, { displayName: "Linear" }],
+        });
+      },
+    });
+    const runtime = createTestRuntime({ tools: [tool] });
+
+    const result = await runtime.runAsSession(
+      { sessionId: "session_inline_auth_many" },
+      async () => {
+        seedUserPrincipal();
+        loadContext().set(CallbackBaseUrlKey, "https://app.example");
+        return runtime.executeTool(tool, {});
+      },
+    );
+
+    expect(isAuthorizationSignal(result)).toBe(true);
+    if (!isAuthorizationSignal(result)) throw new Error("expected signal");
+    expect(result.challenges).toHaveLength(2);
+    expect(result.challenges).toMatchObject([
+      {
+        name: "sync_ticket__oauth_github",
+        challenge: { displayName: "GitHub", url: "https://idp.example/github" },
+      },
+      {
+        name: "sync_ticket__oauth_linear",
+        challenge: { displayName: "Linear", url: "https://idp.example/linear" },
+      },
+    ]);
   });
 
   it("parks the turn with a challenge when getToken throws Required", async () => {
