@@ -13,7 +13,7 @@ eve runs the same way locally, on Vercel, and on a long-running Node host, so ta
 eve build
 ```
 
-When `VERCEL` is set (every hosted Vercel build sets it), `eve build` writes the Vercel output bundle under `.vercel/output`. A plain local `eve build` skips that bundle. Either way you get eve's compiled framework artifacts under `.eve/`, including the discovery manifest, compiled manifest, diagnostics, and module map. Open those to see which authored surface a deployment will load. For the artifact guide and what to do when `eve build` fails, see [Observability](./instrumentation).
+When `VERCEL` is set (every hosted Vercel build sets it), `eve build` writes the [Vercel Build Output](https://vercel.com/docs/build-output-api) bundle under `.vercel/output`. A plain local `eve build` skips that bundle. Either way you get eve's compiled framework artifacts under `.eve/`, including the discovery manifest, compiled manifest, diagnostics, and module map. Open those to see which authored surface a deployment will load. For the artifact guide and what to do when `eve build` fails, see [Observability](./instrumentation).
 
 ### How portability works
 
@@ -27,7 +27,7 @@ Eve does not expose Workflow world selection as a public app API today. Future r
 
 Set these in your deployment environment or secret manager, never in source or compiled artifacts:
 
-- **A model credential.** The lowest-setup Vercel option is the Vercel AI Gateway. Link a Vercel project, and gateway model ids like `anthropic/claude-opus-4.8` authenticate through Vercel OIDC, with no provider keys to manage. Outside Vercel, either set `AI_GATEWAY_API_KEY` for gateway-routed models or configure a direct provider model and set that provider's key, for example `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`.
+- **A model credential.** The lowest-setup Vercel option is the Vercel AI Gateway. Link a Vercel project, and gateway model ids like `anthropic/claude-opus-4.8` authenticate through Vercel OIDC, with no provider keys to manage. Outside Vercel, either set `AI_GATEWAY_API_KEY` for gateway-routed models or configure a direct provider model with an [AI SDK provider package](https://ai-sdk.dev/docs/foundations/providers-and-models) and set that provider's key, for example `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`.
 - **Route-auth secrets**, for example `ROUTE_AUTH_BASIC_PASSWORD` and any JWT/OIDC signing keys referenced by your channel's `auth` (see [Auth and route protection](./auth-and-route-protection)).
 
 Route-auth secrets are never serialized into the compiled discovery or module-map artifacts. The runtime re-materializes them from the authored channel definition instead. If your deployment sits behind Vercel preview protection and you want to drive it with `eve dev`, set `VERCEL_AUTOMATION_BYPASS_SECRET` locally before launching.
@@ -48,7 +48,7 @@ export default defineAgent({
 
 That works on Vercel with project OIDC or anywhere else with `AI_GATEWAY_API_KEY`. Passing a provider key through `modelOptions.providerOptions.gateway.byok` also still sends the request through the Gateway; it only changes which upstream key the Gateway uses.
 
-To avoid the Gateway entirely, install the AI SDK package for the provider you want to call, pass that provider's model object, and set that provider's normal environment variable:
+To avoid the Gateway entirely, install the [AI SDK package](https://ai-sdk.dev/docs/foundations/providers-and-models) for the provider you want to call, pass that provider's model object, and set that provider's normal environment variable:
 
 ```bash
 npm install @ai-sdk/anthropic
