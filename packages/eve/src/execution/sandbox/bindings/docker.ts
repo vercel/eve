@@ -233,16 +233,26 @@ export function createDockerSandboxBackend(
           );
         }
 
-        await startDockerContainer({
-          cli,
-          containerName,
-          image,
-          initialNetworkPolicy:
-            createInput.templateKey === null ? "allow-all" : options.networkPolicy,
-          options,
-          role: "session",
-          tags: createInput.tags,
-        });
+        try {
+          await startDockerContainer({
+            cli,
+            containerName,
+            image,
+            initialNetworkPolicy:
+              createInput.templateKey === null ? "allow-all" : options.networkPolicy,
+            options,
+            role: "session",
+            tags: createInput.tags,
+          });
+        } catch (error) {
+          if (createInput.templateKey !== null) {
+            throw new SandboxTemplateNotProvisionedError({
+              backendName: DOCKER_BACKEND_NAME,
+              templateKey: createInput.templateKey,
+            });
+          }
+          throw error;
+        }
 
         if (createInput.templateKey === null) {
           await runDockerBaseSetup(cli, containerName);

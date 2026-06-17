@@ -38,13 +38,15 @@ describe.skipIf(process.platform === "win32")("connectMicrosandbox", () => {
       version: 2,
     };
 
-    const vm = await connectMicrosandbox({
-      metadata,
-      metadataPath: "/tmp/eve-microsandbox-session/metadata.json",
-      module: runtime.module,
-      options: resolveMicrosandboxOptions({ image: MICROSANDBOX_DEFAULT_IMAGE }),
-      sessionKey: "session-key",
-    });
+    const vm = expectConnected(
+      await connectMicrosandbox({
+        metadata,
+        metadataPath: "/tmp/eve-microsandbox-session/metadata.json",
+        module: runtime.module,
+        options: resolveMicrosandboxOptions({ image: MICROSANDBOX_DEFAULT_IMAGE }),
+        sessionKey: "session-key",
+      }),
+    );
 
     await vm.setNetworkPolicy("deny-all");
 
@@ -70,13 +72,15 @@ describe.skipIf(process.platform === "win32")("connectMicrosandbox", () => {
       version: 2,
     };
 
-    const vm = await connectMicrosandbox({
-      metadata,
-      metadataPath: "/tmp/eve-microsandbox-session/metadata.json",
-      module: runtime.module,
-      options: resolveMicrosandboxOptions({ image: MICROSANDBOX_DEFAULT_IMAGE }),
-      sessionKey: "session-key",
-    });
+    const vm = expectConnected(
+      await connectMicrosandbox({
+        metadata,
+        metadataPath: "/tmp/eve-microsandbox-session/metadata.json",
+        module: runtime.module,
+        options: resolveMicrosandboxOptions({ image: MICROSANDBOX_DEFAULT_IMAGE }),
+        sessionKey: "session-key",
+      }),
+    );
 
     const captured = await vm.captureState("options-hash");
 
@@ -103,13 +107,15 @@ describe.skipIf(process.platform === "win32")("connectMicrosandbox", () => {
     };
 
     try {
-      const vm = await connectMicrosandbox({
-        metadata,
-        metadataPath: "/tmp/eve-microsandbox-session/metadata.json",
-        module: runtime.module,
-        options: resolveMicrosandboxOptions({ image: MICROSANDBOX_DEFAULT_IMAGE }),
-        sessionKey: "session-key",
-      });
+      const vm = expectConnected(
+        await connectMicrosandbox({
+          metadata,
+          metadataPath: "/tmp/eve-microsandbox-session/metadata.json",
+          module: runtime.module,
+          options: resolveMicrosandboxOptions({ image: MICROSANDBOX_DEFAULT_IMAGE }),
+          sessionKey: "session-key",
+        }),
+      );
 
       const captured = await vm.captureState("options-hash");
 
@@ -160,6 +166,28 @@ describe.skipIf(process.platform === "win32")("connectMicrosandbox", () => {
         stateSnapshotName: "eve-sbx-state-existing",
       }),
     );
+  });
+
+  it("returns null when a stopped session snapshot disappeared", async () => {
+    const sandbox = createMockMicrosandbox();
+    const runtime = createMockMicrosandboxModule(sandbox, { status: "stopped" });
+    const metadata: MicrosandboxSessionMetadata = {
+      networkPolicy: "allow-all",
+      optionsHash: "options-hash",
+      sandboxName: "eve-sbx-ses-old",
+      stateSnapshotName: "eve-sbx-state-missing",
+      version: 2,
+    };
+
+    await expect(
+      connectMicrosandbox({
+        metadata,
+        metadataPath: "/tmp/eve-microsandbox-session/metadata.json",
+        module: runtime.module,
+        options: resolveMicrosandboxOptions({ image: MICROSANDBOX_DEFAULT_IMAGE }),
+        sessionKey: "session-key",
+      }),
+    ).resolves.toBeNull();
   });
 });
 
@@ -266,6 +294,13 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs = 100): Promise<T> 
   }
 }
 
+function expectConnected(vm: MicrosandboxVm | null): MicrosandboxVm {
+  if (vm === null) {
+    throw new Error("Expected microsandbox reconnect to return a VM.");
+  }
+  return vm;
+}
+
 function createMockMicrosandboxModule(
   sandbox: ReturnType<typeof createMockMicrosandbox>,
   options: { readonly snapshots?: readonly string[]; readonly status?: string } = {},
@@ -301,7 +336,7 @@ function createMockMicrosandboxModule(
     Snapshot: {
       async get(snapshotName: string) {
         if (!snapshots.has(snapshotName)) {
-          throw new Error(`snapshot ${snapshotName} not found`);
+          throw new Error(`snapshot store unavailable for ${snapshotName}`);
         }
         return {};
       },

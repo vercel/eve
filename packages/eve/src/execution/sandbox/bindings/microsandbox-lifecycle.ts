@@ -21,6 +21,7 @@ import {
   createPreparedMicrosandbox,
   createProviderName,
   doesPathExist,
+  isMicrosandboxNotFoundError,
   loadMicrosandboxModule,
   type MicrosandboxVm,
   removeSnapshotIfExists,
@@ -204,12 +205,14 @@ export async function createMicrosandboxHandle(input: {
       sessionKey: input.createInput.sessionKey,
       tags: sessionTags,
     });
-    return cacheHandle(
-      activeSessionKey,
-      createHandle(sandbox, input.backendName, input.optionsHash, () => {
-        activeMicrosandboxSessionHandles.delete(activeSessionKey);
-      }),
-    );
+    if (sandbox !== null) {
+      return cacheHandle(
+        activeSessionKey,
+        createHandle(sandbox, input.backendName, input.optionsHash, () => {
+          activeMicrosandboxSessionHandles.delete(activeSessionKey);
+        }),
+      );
+    }
   }
 
   let snapshotName: string | null = null;
@@ -240,16 +243,31 @@ export async function createMicrosandboxHandle(input: {
     "eve-sbx-ses",
     `${input.createInput.sessionKey}:${randomUUID()}`,
   );
-  const sandbox = await createPreparedMicrosandbox({
-    fromSnapshot: snapshotName ?? undefined,
-    module,
-    name: sandboxName,
-    networkPolicy: input.options.networkPolicy,
-    options: input.options,
-    sessionKey: input.createInput.sessionKey,
-    setupBaseRuntime: snapshotName === null,
-    tags: sessionTags,
-  });
+  let sandbox: MicrosandboxVm;
+  try {
+    sandbox = await createPreparedMicrosandbox({
+      fromSnapshot: snapshotName ?? undefined,
+      module,
+      name: sandboxName,
+      networkPolicy: input.options.networkPolicy,
+      options: input.options,
+      sessionKey: input.createInput.sessionKey,
+      setupBaseRuntime: snapshotName === null,
+      tags: sessionTags,
+    });
+  } catch (error) {
+    if (
+      snapshotName !== null &&
+      input.createInput.templateKey !== null &&
+      isMicrosandboxNotFoundError(error)
+    ) {
+      throw new SandboxTemplateNotProvisionedError({
+        backendName: input.backendName,
+        templateKey: input.createInput.templateKey,
+      });
+    }
+    throw error;
+  }
 
   await sandbox.writeMetadata(metadataPath, input.optionsHash);
   return cacheHandle(

@@ -777,7 +777,7 @@ describe("createVercelSandbox", () => {
         json: {
           error: {
             code: "bad_request",
-            message: "Snapshot expired or deleted.",
+            message: "Resource is gone.",
           },
         },
         response: { status: 410 },
@@ -838,6 +838,45 @@ describe("createVercelSandbox", () => {
       name: "session-key",
       source: { snapshotId: "template-key-snapshot", type: "snapshot" },
     });
+  });
+
+  it("rebuilds a Vercel template when the named sandbox disappears during prewarm", async () => {
+    const staleTemplate = createMockSandbox({ name: "template-key" });
+    const freshTemplate = createMockSandbox({ name: "template-key" });
+    const missingTemplateError = Object.assign(new Error("Status code 404 is not ok"), {
+      response: { status: 404 },
+    });
+    vi.mocked(staleTemplate.snapshot).mockRejectedValueOnce(missingTemplateError);
+
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(staleTemplate)
+      .mockResolvedValueOnce(freshTemplate);
+    const sandboxModule = {
+      Sandbox: {
+        create,
+        get: vi.fn().mockResolvedValue(null),
+      },
+    };
+    const log = vi.fn();
+
+    const backend = createTestVercelSandbox({
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+
+    await expect(
+      backend.prewarm({
+        log,
+        runtimeContext: { appRoot: "/tmp/test-app-root" },
+        seedFiles: [],
+        templateKey: "template-key",
+      }),
+    ).resolves.toEqual({ reused: false });
+
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(staleTemplate.snapshot).toHaveBeenCalledTimes(1);
+    expect(freshTemplate.snapshot).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith("cached template disappeared; rebuilding sandbox template");
   });
 
   it("resumes a stopped session sandbox via Sandbox.get instead of creating a new one", async () => {

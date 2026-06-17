@@ -42,20 +42,17 @@ import {
   type VercelSandboxCreateParams,
   type VercelSandboxModule,
 } from "#execution/sandbox/bindings/vercel-create-sdk.js";
-import { isVercelSnapshotUnavailableError } from "#execution/sandbox/bindings/vercel-errors.js";
+import {
+  isVercelSandboxMissingError,
+  isVercelSnapshotUnavailableError,
+} from "#execution/sandbox/bindings/vercel-errors.js";
 import { getNamedVercelSandbox } from "#execution/sandbox/bindings/vercel-lookup.js";
 
-/**
- * Construction input for {@link createVercelSandbox}. Internal —
- * the public surface is the `vercel()` factory under
- * `eve/sandbox`.
- */
 export interface CreateVercelSandboxInput {
   readonly createSandbox?: CreateVercelSandbox;
   readonly createOptions?: SandboxCreateOptions;
   readonly loadSandboxModule?: () => Promise<VercelSandboxModule>;
 }
-
 /**
  * Creates the Vercel-backed sandbox backend.
  *
@@ -108,7 +105,10 @@ export function createVercelSandbox(
           tags,
         });
       } catch (error) {
-        if (template !== null && isVercelSnapshotUnavailableError(error)) {
+        if (
+          template !== null &&
+          (isVercelSnapshotUnavailableError(error) || isVercelSandboxMissingError(error))
+        ) {
           prewarmedTemplates.delete(template.templateKey);
           const staleTemplate = await getNamedVercelSandbox({
             createOptions,
@@ -139,7 +139,7 @@ export function createVercelSandbox(
     ): Promise<SandboxBackendPrewarmResult> {
       let outcome: EnsureTemplateOutcome;
       try {
-        outcome = await ensureTemplate({
+        outcome = await ensureTemplateWithUnavailableRetry({
           bootstrap: prewarmInput.bootstrap,
           createOptions,
           createSandbox,
@@ -182,6 +182,20 @@ interface EnsureTemplateInput {
   readonly seedFiles: ReadonlyArray<SandboxSeedFile>;
   readonly tags?: SandboxBackendTags;
   readonly templateKey: string;
+}
+
+async function ensureTemplateWithUnavailableRetry(
+  input: EnsureTemplateInput,
+): Promise<EnsureTemplateOutcome> {
+  try {
+    return await ensureTemplate(input);
+  } catch (error) {
+    if (!isVercelSnapshotUnavailableError(error) && !isVercelSandboxMissingError(error)) {
+      throw error;
+    }
+    input.log?.("cached template disappeared; rebuilding sandbox template");
+    return await ensureTemplate(input);
+  }
 }
 
 async function readTemplate(input: {

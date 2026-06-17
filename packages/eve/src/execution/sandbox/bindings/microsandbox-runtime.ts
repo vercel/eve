@@ -333,13 +333,16 @@ export async function connectMicrosandbox(input: {
   readonly options: ResolvedMicrosandboxOptions;
   readonly sessionKey: string;
   readonly tags?: SandboxBackendTags;
-}): Promise<MicrosandboxVm> {
+}): Promise<MicrosandboxVm | null> {
   let handle;
   try {
     handle = await input.module.Sandbox.get(input.metadata.sandboxName);
   } catch (error) {
-    if (!isMicrosandboxNotFoundError(error) || input.metadata.stateSnapshotName === undefined) {
+    if (!isMicrosandboxNotFoundError(error)) {
       throw error;
+    }
+    if (input.metadata.stateSnapshotName === undefined) {
+      return null;
     }
     return await restoreMicrosandboxSessionSnapshot(input);
   }
@@ -380,14 +383,12 @@ async function restoreMicrosandboxSessionSnapshot(input: {
   readonly options: ResolvedMicrosandboxOptions;
   readonly sessionKey: string;
   readonly tags?: SandboxBackendTags;
-}): Promise<MicrosandboxVm> {
+}): Promise<MicrosandboxVm | null> {
   if (
     input.metadata.stateSnapshotName === undefined ||
     !(await snapshotExists(input.module, input.metadata.stateSnapshotName))
   ) {
-    throw new Error(
-      `Microsandbox session snapshot is missing for sandbox "${input.metadata.sandboxName}".`,
-    );
+    return null;
   }
 
   const sandboxName = createProviderName("eve-sbx-ses", `${input.sessionKey}:${randomUUID()}`);
@@ -536,11 +537,8 @@ export async function snapshotExists(
   try {
     await module.Snapshot.get(snapshotName);
     return true;
-  } catch (error) {
-    if (isMicrosandboxNotFoundError(error)) {
-      return false;
-    }
-    throw error;
+  } catch {
+    return false;
   }
 }
 
@@ -652,7 +650,7 @@ async function removeSandboxIfExists(
   }
 }
 
-function isMicrosandboxNotFoundError(error: unknown): boolean {
+export function isMicrosandboxNotFoundError(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
   }
