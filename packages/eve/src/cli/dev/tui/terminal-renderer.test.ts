@@ -245,6 +245,30 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(input.rawModes).toEqual([true, false]);
   });
 
+  it("inserts a bracketed paste intact and submits it with its newlines", async () => {
+    const { input, renderer } = makeRenderer();
+
+    const prompt = renderer.readPrompt();
+    input.send("\x1b[200~first line\nsecond line\x1b[201~");
+    input.enter();
+
+    expect(await prompt).toBe("first line\nsecond line");
+    renderer.shutdown();
+  });
+
+  it("inserts a newline on Shift+Enter and submits the whole multi-line buffer", async () => {
+    const { input, renderer } = makeRenderer();
+
+    const prompt = renderer.readPrompt();
+    input.type("line one");
+    input.send("\x1b[27;2;13~"); // Shift+Enter (xterm modifyOtherKeys)
+    input.type("line two");
+    input.enter();
+
+    expect(await prompt).toBe("line one\nline two");
+    renderer.shutdown();
+  });
+
   it("renders reused stream block ids across separate prompt turns", async () => {
     const { screen, renderer } = makeRenderer();
 

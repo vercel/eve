@@ -29,6 +29,8 @@ const CLEAR_SCROLLBACK = `${ESC}[3J`;
 const CURSOR_HOME = `${ESC}[H`;
 const SYNC_START = `${ESC}[?2026h`;
 const SYNC_END = `${ESC}[?2026l`;
+const BRACKETED_PASTE_ON = `${ESC}[?2004h`;
+const BRACKETED_PASTE_OFF = `${ESC}[?2004l`;
 
 export interface LiveRegionOutput {
   write(chunk: string): boolean;
@@ -57,6 +59,21 @@ export class LiveRegion {
 
   showCursor(): void {
     this.#write(SHOW_CURSOR);
+  }
+
+  /**
+   * Enables the terminal's bracketed-paste mode (DEC private mode 2004) through
+   * the bound original `write`, so the sequence reaches the terminal instead of
+   * being swallowed by the renderer's foreign-output capture (which monkeypatches
+   * `process.stdout.write`).
+   */
+  enableBracketedPaste(): void {
+    this.#write(BRACKETED_PASTE_ON);
+  }
+
+  /** Disables bracketed-paste mode, restoring the terminal default. */
+  disableBracketedPaste(): void {
+    this.#write(BRACKETED_PASTE_OFF);
   }
 
   /** Writes a newline through the bound (original) write. */

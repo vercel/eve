@@ -91,6 +91,8 @@ export interface ThemeGlyphs {
   hrule: string;
   /** `▏` — the synthetic input caret. */
   caret: string;
+  /** `⏎` — marks a newline inside a pasted multi-line prompt. */
+  newline: string;
   /** `·` — inline separator for header / status segments. */
   dot: string;
   /** `…` — truncation marker. */
@@ -119,6 +121,7 @@ const UNICODE_GLYPHS: ThemeGlyphs = {
   elbow: "⎿",
   hrule: "▔",
   caret: "▏",
+  newline: "⏎",
   dot: "·",
   ellipsis: "…",
   arrowUp: "↑",
@@ -143,6 +146,7 @@ const ASCII_GLYPHS: ThemeGlyphs = {
   elbow: "`-",
   hrule: "=",
   caret: "_",
+  newline: "\\n",
   dot: "-",
   ellipsis: "...",
   arrowUp: "^",

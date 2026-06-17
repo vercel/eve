@@ -1658,6 +1658,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (this.#input.isTTY) {
       this.#input.setRawMode?.(true);
       this.#input.resume();
+      // Enable bracketed paste (DEC private mode 2004) so the terminal wraps
+      // pasted text in \x1b[200~ … \x1b[201~; the decoder then inserts a
+      // multi-line paste intact instead of each newline submitting the prompt.
+      // Routed through the live region's original `write` so the foreign-output
+      // capture installed just above can't swallow the control sequence.
+      this.#live.enableBracketedPaste();
     }
 
     this.#onResize = () => this.#paint();
@@ -1691,6 +1697,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#live.newline();
 
     if (this.#input.isTTY) {
+      // Disable bracketed paste, restoring the terminal to how we found it.
+      this.#live.disableBracketedPaste();
       this.#input.setRawMode?.(false);
       this.#input.pause();
     }
@@ -2359,7 +2367,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
         isCommand && segment.length > 0 ? c.blue(segment) : segment;
       const caret = this.#caretVisible ? c.cyan(this.#theme.glyph.caret) : " ";
       const ghost = inlineHint ? c.dim(` ${inlineHint}`) : "";
-      const body = `${style(before)}${caret}${style(after)}${ghost}`;
+      // A pasted multi-line prompt keeps its real newlines in the buffer (and on
+      // submit); show each as a dim glyph so this single input row never emits a
+      // literal newline into the live region.
+      const showNewlines = (segment: string): string =>
+        segment.includes("\n")
+          ? segment.replaceAll("\n", c.dim(this.#theme.glyph.newline))
+          : segment;
+      const body = `${style(showNewlines(before))}${caret}${style(showNewlines(after))}${ghost}`;
       rows.push(...promptInputRows(body, width, this.#theme, true));
       this.#pushStatusLine(rows, width);
       return rows;

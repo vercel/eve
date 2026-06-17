@@ -63,12 +63,15 @@ The prompt input behaves like a shell line editor.
 | Key                                            | Action                                                                                                            |
 | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `Enter`                                        | Send the message.                                                                                                 |
+| `Shift+Enter` / `Alt+Enter`                    | Insert a newline without sending (needs a terminal that reports modified keys).                                   |
 | `Ctrl+C`                                       | Interrupt a running turn, or quit at the prompt.                                                                  |
 | `↑` / `↓`                                      | Cycle through the messages you have sent this session.                                                            |
 | `←` / `→`, `Home` / `End`, `Ctrl+A` / `Ctrl+E` | Move the caret.                                                                                                   |
 | `Ctrl+U` / `Ctrl+K` / `Ctrl+W`                 | Kill the whole line, the rest of the line, or the previous word.                                                  |
 | `Ctrl+L`                                       | Cycle the log display mode (`none → all → stderr → sandbox → none`) and briefly show the mode in the status line. |
 | `Ctrl+R`                                       | Redraw the screen.                                                                                                |
+
+Pasting multi-line text inserts it intact: the prompt enables bracketed paste, so embedded newlines stay in the message (shown inline as `⏎`) rather than submitting at the first line. `Enter` still sends.
 
 If a turn fails terminally (the server session dies or the connection drops), the TUI starts a fresh session and notes it inline so you can keep going. Server-side context resets with the old session.
 

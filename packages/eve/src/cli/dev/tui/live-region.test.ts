@@ -38,4 +38,12 @@ describe("LiveRegion", () => {
     live.clear();
     expect(screen.snapshot()).toBe("");
   });
+
+  it("toggles bracketed paste mode through the bound write", () => {
+    const { screen, live } = setup();
+    live.enableBracketedPaste();
+    expect(screen.rawOutput()).toContain("\x1b[?2004h");
+    live.disableBracketedPaste();
+    expect(screen.rawOutput()).toContain("\x1b[?2004l");
+  });
 });

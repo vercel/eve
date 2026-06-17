@@ -5,11 +5,23 @@ import {
   formatTokenFlow,
   nextKey,
   parseKey,
+  sanitizePastedText,
   stripPromptControlCharacters,
   takeUntil,
 } from "./stream-format.js";
 
 const FLOW_GLYPHS = { arrowUp: "↑", arrowDown: "↓" };
+
+describe("sanitizePastedText", () => {
+  it("keeps newlines and tabs but drops other control characters and ESC", () => {
+    expect(sanitizePastedText("a\tb\nc")).toBe("a\tb\nc");
+    expect(sanitizePastedText("a\x1b[31mb\x07c")).toBe("a[31mbc");
+  });
+
+  it("normalizes CRLF and lone CR to LF", () => {
+    expect(sanitizePastedText("a\r\nb\rc")).toBe("a\nb\nc");
+  });
+});
 
 describe("formatCompactTokenCount", () => {
   it("keeps small counts plain and abbreviates with one trimmed decimal", () => {
@@ -58,6 +70,35 @@ describe("nextKey", () => {
 
   it("takes a printable run as a single character token", () => {
     expect(nextKey("hello")).toEqual({ key: { type: "character", value: "hello" }, consumed: 5 });
+  });
+
+  it("decodes a bracketed paste as one token, preserving newlines", () => {
+    const buffer = "\x1b[200~first\nsecond\x1b[201~";
+    expect(nextKey(buffer)).toEqual({
+      key: { type: "paste", value: "first\nsecond" },
+      consumed: buffer.length,
+    });
+  });
+
+  it("waits for the bracketed-paste end marker before decoding", () => {
+    expect(nextKey("\x1b[200~still arriving")).toEqual({ consumed: 0, incomplete: true });
+  });
+
+  it("re-tokenizes input that follows a bracketed paste", () => {
+    const buffer = "\x1b[200~hi\x1b[201~\r";
+    const token = nextKey(buffer);
+    expect(token).toEqual({ key: { type: "paste", value: "hi" }, consumed: buffer.length - 1 });
+    expect(nextKey(buffer.slice(token.consumed))).toEqual({ key: { type: "enter" }, consumed: 1 });
+  });
+
+  it("decodes Shift+Enter as a newline (insert, not submit)", () => {
+    expect(nextKey("\x1b[27;2;13~")).toEqual({ key: { type: "newline" }, consumed: 10 });
+    expect(nextKey("\x1b[13;2u")).toEqual({ key: { type: "newline" }, consumed: 7 });
+  });
+
+  it("decodes Alt+Enter as a newline while a bare Enter still submits", () => {
+    expect(nextKey("\x1b\r")).toEqual({ key: { type: "newline" }, consumed: 2 });
+    expect(nextKey("\r")).toEqual({ key: { type: "enter" }, consumed: 1 });
   });
 
   it("stops a printable run at a control byte", () => {

@@ -8,6 +8,8 @@ import type { AssistantResponseStatsMode } from "./types.js";
 
 export type TerminalKey =
   | { type: "character"; value: string }
+  | { type: "paste"; value: string }
+  | { type: "newline" }
   | { type: "backspace" }
   | { type: "delete" }
   | { type: "enter" }
@@ -41,6 +43,27 @@ export interface KeyToken {
 // Final byte of a CSI escape sequence (`ESC [ … <final>`), range 0x40–0x7e.
 const CSI_FINAL = /[\u0040-\u007e]/u;
 
+// Bracketed paste markers (DEC private mode 2004). The terminal wraps pasted
+// text in these so an embedded newline inserts literally instead of submitting.
+const PASTE_START = "\x1B[200~";
+const PASTE_END = "\x1B[201~";
+
+/**
+ * Sanitizes bracketed-paste content for the prompt: preserves newlines and tabs
+ * (the whole point of multi-line paste), normalizes CR/CRLF to LF, and drops
+ * other C0 controls, DEL, and any embedded ESC so a paste cannot smuggle escape
+ * sequences into the line.
+ */
+export function sanitizePastedText(text: string): string {
+  let printable = "";
+  for (const character of text.replace(/\r\n?/gu, "\n")) {
+    if (character === "\n" || character === "\t" || (character >= " " && character !== "\x7f")) {
+      printable += character;
+    }
+  }
+  return printable;
+}
+
 /** Removes C0 control characters and DEL from text intended for the prompt. */
 export function stripPromptControlCharacters(text: string): string {
   let printable = "";
@@ -72,12 +95,27 @@ export function nextKey(buffer: string): KeyToken {
       return { key: parseKey(Buffer.from(buffer.slice(0, 3))), consumed: 3 };
     }
     if (second === "[") {
+      // Bracketed paste: capture everything between the start and end markers as
+      // one chunk so embedded newlines insert literally instead of each one
+      // submitting the line. Wait for the closing marker if it hasn't arrived.
+      if (buffer.startsWith(PASTE_START)) {
+        const end = buffer.indexOf(PASTE_END, PASTE_START.length);
+        if (end === -1) return { consumed: 0, incomplete: true };
+        return {
+          key: { type: "paste", value: sanitizePastedText(buffer.slice(PASTE_START.length, end)) },
+          consumed: end + PASTE_END.length,
+        };
+      }
       for (let i = 2; i < buffer.length; i += 1) {
         if (CSI_FINAL.test(buffer[i]!)) {
           return { key: parseKey(Buffer.from(buffer.slice(0, i + 1))), consumed: i + 1 };
         }
       }
       return { consumed: 0, incomplete: true };
+    }
+    // Alt/Option+Enter (ESC + CR/LF) inserts a newline instead of submitting.
+    if (second === "\r" || second === "\n") {
+      return { key: { type: "newline" }, consumed: 2 };
     }
     // `ESC` + another byte (e.g. Alt+key): surface the Escape and re-tokenize.
     return { key: { type: "escape" }, consumed: 1 };
@@ -124,6 +162,11 @@ export function parseKey(chunk: Buffer): TerminalKey {
     case "\r":
     case "\n":
       return { type: "enter" };
+    // Shift+Enter: insert a newline instead of submitting. Terminals report it
+    // as xterm modifyOtherKeys (`CSI 27 ; 2 ; 13 ~`) or the kitty/CSI-u form.
+    case "\x1b[27;2;13~":
+    case "\x1b[13;2u":
+      return { type: "newline" };
     case "\u007f":
     case "\b":
       return { type: "backspace" };

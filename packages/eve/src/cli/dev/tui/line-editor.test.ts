@@ -25,6 +25,20 @@ describe("line editing", () => {
     expect(line).toEqual({ text: "hello", cursor: 4 });
   });
 
+  it("inserts a paste, newlines and all, at the caret", () => {
+    expect(applyLineEditorKey(lineOf(""), { type: "paste", value: "one\ntwo" })).toEqual({
+      text: "one\ntwo",
+      cursor: 7,
+    });
+  });
+
+  it("inserts a newline keystroke (Shift+Enter) at the caret", () => {
+    expect(applyLineEditorKey(lineOf("a"), { type: "newline" })).toEqual({
+      text: "a\n",
+      cursor: 2,
+    });
+  });
+
   it("backspaces the character before the caret", () => {
     const line = backspace({ text: "abc", cursor: 2 });
     expect(line).toEqual({ text: "ac", cursor: 1 });
