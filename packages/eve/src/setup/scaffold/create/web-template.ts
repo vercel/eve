@@ -78,7 +78,9 @@ export const WEB_APP_TEMPLATE_FILES = {
 export const WEB_APP_TEMPLATE_PACKAGE_JSON = {
   scripts: {
     build: "next build",
+    "build:eve": "eve build",
     dev: "next dev",
+    "dev:eve": "eve dev",
     start: "next start",
     typecheck: "tsgo --noEmit -p tsconfig.json",
   },
