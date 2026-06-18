@@ -65,7 +65,7 @@ async function loadFullBundle(
   };
 }
 
-async function loadRuntimeCompiledModuleMap(
+export async function loadRuntimeCompiledModuleMap(
   compiledArtifactsSource: RuntimeCompiledArtifactsSource,
 ): Promise<CompiledModuleMap> {
   if (
