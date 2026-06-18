@@ -25,8 +25,9 @@ const defaultDependencies: LinkCommandDependencies = {
 
 /**
  * `eve link`: pick a Vercel team and project (re-linking when one is already
- * linked), run `vercel link`, then pull env so the AI Gateway credential lands
- * in `.env.local`. The flow itself is {@link runLinkFlow}, shared with the dev
+ * linked), write the selected Vercel project link, then pull env so the AI
+ * Gateway credential lands in `.env.local`. The flow itself is
+ * {@link runLinkFlow}, shared with the dev
  * TUI `/model` menu's provider row. Interactive only: the pickers are the point of the command,
  * so a non-TTY run refuses with guidance instead of guessing a project.
  */

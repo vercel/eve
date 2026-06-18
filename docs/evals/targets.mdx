@@ -30,12 +30,14 @@ Sessions attached this way are full `EveEvalSession`s: you can keep driving them
 
 ## Authentication
 
-Local targets send no auth: `eve eval` owns the dev server it boots. A remote `--url` target connects with the same credentials as every other development client, resolved in this order:
+Local targets send no auth: `eve eval` owns the dev server it boots. For a remote `--url`, eve first asks Vercel to resolve that exact HTTPS origin under the account linked in `.vercel/project.json`. Ambient Vercel credentials are sent only when that lookup succeeds; an arbitrary URL remains anonymous.
 
-- A Vercel OIDC trusted-IDP token, sent as a per-request header. It bypasses Deployment Protection without a per-project secret, so a CI job with a pulled OIDC token reaches a protected preview deployment without extra setup.
-- An `x-vercel-protection-bypass` header, added when `VERCEL_AUTOMATION_BYPASS_SECRET` is set.
-- A bearer token resolved from the same OIDC cascade.
-- `EVE_EVAL_AUTH_TOKEN`, which overrides the bearer with a static token for targets whose auth is not OIDC-based.
+After verification, eve sends the available Vercel credentials:
+
+- The resolved OIDC token as both the bearer and Vercel trusted-IDP header.
+- `VERCEL_AUTOMATION_BYPASS_SECRET`, when set, as the Protection Bypass for Automation header.
+
+`EVE_EVAL_AUTH_TOKEN` is an explicit bearer override for targets whose auth is not Vercel OIDC. Credential-bearing clients do not follow redirects, so those headers cannot be forwarded to another origin.
 
 `t.target.fetch(path, init)` carries these same credentials, so channel and webhook ingress you exercise through it authenticates the same way the session protocol does.
 

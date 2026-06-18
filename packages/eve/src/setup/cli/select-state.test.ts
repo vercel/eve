@@ -161,7 +161,7 @@ describe("reduceSelect", () => {
   });
 
   it("includes the Submit row in the navigation cycle when enabled", () => {
-    const ctx = context({ submitRow: true });
+    const ctx = context({ trailingRow: "submit" });
     // Down from the last option lands on the Submit row (one past the options).
     expect(reduceSelect({ ...initial, cursor: 2 }, { type: "down" }, ctx).cursor).toBe(3);
     // Down from the Submit row wraps back to the first option.
@@ -170,14 +170,30 @@ describe("reduceSelect", () => {
     expect(reduceSelect({ ...initial, cursor: 0 }, { type: "up" }, ctx).cursor).toBe(3);
   });
 
+  it("includes the query action after partial local matches", () => {
+    const ctx = context({ trailingRow: "query-action" });
+    const filtered: SelectState = { ...initial, filter: "g", cursor: 1 };
+
+    expect(filterOptions(OPTIONS, filtered.filter).map((option) => option.label)).toEqual([
+      "GPT",
+      "Gemini",
+    ]);
+    expect(reduceSelect(filtered, { type: "down" }, ctx).cursor).toBe(2);
+    expect(reduceSelect({ ...filtered, cursor: 0 }, { type: "up" }, ctx).cursor).toBe(2);
+  });
+
   it("ignores toggle on the Submit row", () => {
-    const ctx = context({ submitRow: true });
+    const ctx = context({ trailingRow: "submit" });
     const state: SelectState = { filter: "", cursor: 3, selected: new Set(["openai/gpt"]) };
     expect([...reduceSelect(state, { type: "toggle" }, ctx).selected]).toEqual(["openai/gpt"]);
   });
 
   it("re-homes onto the Submit row when a filter hides every option", () => {
-    const next = reduceSelect(initial, { type: "char", char: "z" }, context({ submitRow: true }));
+    const next = reduceSelect(
+      initial,
+      { type: "char", char: "z" },
+      context({ trailingRow: "submit" }),
+    );
     // No visible options, so the Submit row index is 0.
     expect(next.cursor).toBe(0);
     expect(selectValueAtCursor(filterOptions(OPTIONS, next.filter), next.cursor)).toBeUndefined();
@@ -226,7 +242,7 @@ describe("initialSelectState", () => {
         { value: "a", label: "A", disabled: true },
         { value: "b", label: "B", disabled: true },
       ],
-      submitRow: true,
+      trailingRow: "submit",
     });
     expect(state.cursor).toBe(2);
   });

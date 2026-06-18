@@ -11,17 +11,18 @@ import {
   mergeProjectResolution,
   type ProjectResolution,
 } from "../project-resolution.js";
-import type { Prompter } from "../prompter.js";
+import type { EditableSelectResult, Prompter } from "../prompter.js";
 import type {
   ArgsHeadlessAiGateway,
   ArgsHeadlessProject,
   ProvisioningMode,
   ResolvedAiGateway,
   ResolvedVercelProject,
+  ResolvedVercelProjectSpec,
   SetupState,
   WiringMode,
 } from "../state.js";
-import type { SetupBox } from "../step.js";
+import { StepBackError, type SetupBox } from "../step.js";
 import {
   assertNewProjectNameAvailable,
   isVercelAuthenticated,
@@ -30,6 +31,7 @@ import {
   pickTeam,
   requireAuth,
   resolveTeam,
+  type PickTeamOptions,
   validateTeam,
   withNetworkSpinner,
 } from "../vercel-project.js";
@@ -279,129 +281,147 @@ export function resolveProvisioning(
       );
     }
 
-    if (deployVercel) {
-      await deps.requireAuth(parent(), prompter, { signal });
-      const team = await deps.pickTeam(prompter, parent(), undefined, { signal });
-      const projectOptions = [
-        {
-          value: "new" as const,
-          label: "Create a new project",
-          hint: `Named ${agentName}`,
-        },
-        { value: "link" as const, label: "Link an existing project" },
-      ];
-      const editableChoice =
-        options.projectSelection !== "existing-only" && options.prompter.selectEditable
+    if (!deployVercel) {
+      const credential = await options.asker.ask(
+        select<"api-key" | "local">({
+          key: "credential",
+          message: "How should your agent reach the model?",
+          options: [
+            {
+              id: "api-key",
+              value: "api-key",
+              label: "Use my own AI Gateway API key",
+              hint: "AI_GATEWAY_API_KEY",
+            },
+            {
+              id: "local",
+              value: "local",
+              label: "Use my own provider API key",
+              hint: byokProviderEnvVar(state.modelId),
+            },
+          ],
+          recommended: "api-key",
+          required: true,
+        }),
+      );
+      if (credential === "api-key") {
+        const apiGatewayKey = await options.asker.ask(
+          text({
+            key: "gateway-api-key",
+            message: "Enter your AI_GATEWAY_API_KEY",
+            sensitive: true,
+            validate: (value) => (value.trim().length === 0 ? "API key cannot be empty." : null),
+            required: true,
+          }),
+        );
+        return {
+          vercelProject: { kind: "none" },
+          aiGateway: { kind: "byok", apiGatewayKey },
+          modelWiring: "gateway",
+        };
+      }
+      return {
+        vercelProject: { kind: "none" },
+        aiGateway: { kind: "byop" },
+        modelWiring: "self",
+      };
+    }
+
+    await deps.requireAuth(parent(), prompter, { signal });
+    let previousChoice: "new" | "link" = "new";
+    let previousName = agentName;
+    const resolveForTeam = async (team: string): Promise<ResolvedVercelProjectSpec> => {
+      if (options.projectSelection === "existing-only") {
+        const picked = await deps.pickProject(prompter, parent(), team, {
+          allowCreateWhenEmpty: false,
+          signal,
+        });
+        return { kind: "existing", project: picked.project, team };
+      }
+
+      while (true) {
+        const projectOptions = [
+          {
+            value: "new" as const,
+            label: "Create a new project",
+            hint: `Named ${previousName}`,
+          },
+          { value: "link" as const, label: "Link an existing project" },
+        ];
+        const editableChoice: EditableSelectResult<"new" | "link"> | undefined = options.prompter
+          .selectEditable
           ? await options.prompter.selectEditable<"new" | "link">({
               message: "Vercel project",
               options: projectOptions,
-              initialValue: "new",
+              initialValue: previousChoice,
               editable: {
                 value: "new",
-                defaultValue: agentName,
+                defaultValue: previousName,
                 formatHint: (value) => `Named ${value}`,
                 validate: (value) =>
                   value.trim().length === 0 ? "Project name cannot be empty." : undefined,
               },
             })
           : undefined;
-      const choice =
-        options.projectSelection === "existing-only"
-          ? "link"
-          : (editableChoice?.value ??
-            (await options.asker.ask(
-              select<"new" | "link">({
-                key: "vercel-project",
-                message: "Vercel project",
-                options: [
-                  {
-                    id: "new",
-                    value: "new",
-                    label: "Create a new project",
-                    hint: `Named ${agentName}`,
-                  },
-                  { id: "link", value: "link", label: "Link an existing project" },
-                ],
-                recommended: "new",
-                required: true,
-              }),
-            )));
-      if (choice === "new") {
-        const requestedName = editableChoice?.kind === "edited" ? editableChoice.text : agentName;
-        const project = await deps.pickNewProjectName(prompter, parent(), team, requestedName, {
-          signal,
-        });
+        const choice: "new" | "link" =
+          editableChoice?.value ??
+          (await options.asker.ask(
+            select<"new" | "link">({
+              key: "vercel-project",
+              message: "Vercel project",
+              options: [
+                {
+                  id: "new",
+                  value: "new",
+                  label: "Create a new project",
+                  hint: `Named ${agentName}`,
+                },
+                { id: "link", value: "link", label: "Link an existing project" },
+              ],
+              recommended: "new",
+              required: true,
+            }),
+          ));
+        const requestedName =
+          editableChoice?.kind === "edited" ? editableChoice.text : previousName;
+
+        try {
+          if (choice === "new") {
+            const project = await deps.pickNewProjectName(prompter, parent(), team, requestedName, {
+              signal,
+            });
+            return { kind: "new", project, team };
+          }
+          const picked = await deps.pickProject(prompter, parent(), team, { signal });
+          return {
+            kind: picked.exists ? "existing" : "new",
+            project: picked.project,
+            team,
+          };
+        } catch (error) {
+          if (!(error instanceof StepBackError)) throw error;
+          previousChoice = choice;
+          previousName = requestedName;
+        }
+      }
+    };
+
+    let previousTeam: string | undefined;
+    while (true) {
+      const teamOptions: PickTeamOptions = { signal };
+      if (previousTeam !== undefined) teamOptions.initialValue = previousTeam;
+      const team = await deps.pickTeam(prompter, parent(), undefined, teamOptions);
+      try {
         return {
-          vercelProject: { kind: "new", project, team },
+          vercelProject: await resolveForTeam(team),
           aiGateway: { kind: "inherit" },
           modelWiring: "gateway",
         };
+      } catch (error) {
+        if (!(error instanceof StepBackError)) throw error;
+        previousTeam = team;
       }
-      const pickedProject = await deps.pickProject(prompter, parent(), team, {
-        allowCreateWhenEmpty: options.projectSelection !== "existing-only",
-        signal,
-      });
-      return {
-        vercelProject: {
-          kind: pickedProject.exists ? "existing" : "new",
-          project: pickedProject.project,
-          team,
-        },
-        aiGateway: { kind: "inherit" },
-        modelWiring: "gateway",
-      };
     }
-
-    // No Vercel project: the agent still needs a credential for the model it
-    // picked earlier, so the provider hint is derived from that model.
-    const credential = await options.asker.ask(
-      select<"api-key" | "local">({
-        key: "credential",
-        message: "How should your agent reach the model?",
-        options: [
-          {
-            id: "api-key",
-            value: "api-key",
-            label: "Use my own AI Gateway API key",
-            hint: "AI_GATEWAY_API_KEY",
-          },
-          {
-            id: "local",
-            value: "local",
-            label: "Use my own provider API key",
-            hint: byokProviderEnvVar(state.modelId),
-          },
-        ],
-        recommended: "api-key",
-        required: true,
-      }),
-    );
-    if (credential === "api-key") {
-      // Sensitive text: the interactive base renders it through the password
-      // prompt (masked), every other rung coerces it as plain text. The
-      // question's validate runs in both bases.
-      const apiGatewayKey = await options.asker.ask(
-        text({
-          key: "gateway-api-key",
-          message: "Enter your AI_GATEWAY_API_KEY",
-          sensitive: true,
-          validate: (value) => (value.trim().length === 0 ? "API key cannot be empty." : null),
-          required: true,
-        }),
-      );
-      return {
-        vercelProject: { kind: "none" },
-        aiGateway: { kind: "byok", apiGatewayKey },
-        modelWiring: "gateway",
-      };
-    }
-    // "Use my own provider API key": no managed credential. The scaffold writes
-    // an inline provider `byok` block and the model prompt is skipped.
-    return {
-      vercelProject: { kind: "none" },
-      aiGateway: { kind: "byop" },
-      modelWiring: "self",
-    };
   }
 
   return {

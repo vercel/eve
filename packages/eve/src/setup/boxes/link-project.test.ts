@@ -17,7 +17,11 @@ function fakeDeps(overrides: Partial<LinkProjectDeps> = {}): LinkProjectDeps {
       kind: "linked" as const,
       projectId: "prj_my_agent",
     })),
-    resolveProjectByNameOrId: vi.fn(async () => ({ id: "prj_my_agent", name: "my-agent" })),
+    resolveProjectByNameOrId: vi.fn(async () => ({
+      id: "prj_my_agent",
+      name: "my-agent",
+      accountId: "team_1",
+    })),
     unresolvedProject: vi.fn(() => ({ kind: "unresolved" as const })),
     ...overrides,
   };

@@ -10,7 +10,9 @@ import {
   railFor,
   runSelectComponent,
   type ChannelSetupAwaitChoice,
+  type PromptOptionNotice,
   type PromptState,
+  type SelectQueryAction,
 } from "#setup/cli/index.js";
 import { createRailLog, type RailSpinner } from "#setup/cli/index.js";
 import pc from "picocolors";
@@ -41,6 +43,7 @@ export interface SelectOption<T extends PrompterValue> {
    * is highlighted during navigation. Hidden once a choice is submitted.
    */
   description?: string;
+  notice?: PromptOptionNotice;
   /** Cursor-pointer/active-label accent; "warning" turns them yellow for an attention row. */
   accent?: "warning";
   disabled?: boolean;
@@ -75,19 +78,20 @@ export interface SelectOption<T extends PrompterValue> {
   featured?: boolean;
 }
 
-/**
- * An outcome line from an earlier lap of a looping menu, shown with the
- * repainted question: the TUI panel renders it beneath the options, the CLI
- * prints it to scrollback before the prompt.
- */
+/** Context shown with a question, including outcomes from an earlier menu pass. */
 export interface SelectNotice {
   tone: "success" | "info" | "warning" | "error";
   text: string;
 }
 
+/** Semantic tone applied to a select question by renderers that support it. */
+export type SelectMessageTone = "warning";
+
 /** Options common to every {@link Prompter.select} call. */
 export interface SelectCommonOptions<T extends PrompterValue> {
   message: string;
+  /** Paint the question as a warning instead of using the renderer's default emphasis. */
+  messageTone?: SelectMessageTone;
   options: SelectOption<T>[];
   /**
    * Add a type-ahead filter line. The filter is a case-insensitive substring
@@ -111,7 +115,7 @@ export interface SelectCommonOptions<T extends PrompterValue> {
    * completion action (e.g. the `/channels` task list).
    */
   hintLayout?: "stacked" | "inline";
-  /** Outcome lines from earlier laps of a looping menu. */
+  /** Context shown with the question. */
   notices?: readonly SelectNotice[];
 }
 
@@ -128,6 +132,21 @@ export interface MultiSelectOptions<T extends PrompterValue> extends SelectCommo
   /** Pre-mark these values as selected. */
   initialValues?: T[];
 }
+
+/** Searchable single-select with an explicit action for external lookup. */
+export type SearchSelectOptions<T extends PrompterValue> = Omit<
+  SingleSelectOptions<T>,
+  "search"
+> & {
+  /** Seed text restored after an external lookup reopens the picker. */
+  initialQuery?: string;
+  /** Label prefix for the virtual query-action row, e.g. "Search for". */
+  queryActionLabel: string;
+};
+
+export type SearchSelectResult<T extends PrompterValue> =
+  | { kind: "selected"; value: T }
+  | SelectQueryAction;
 
 /** Result of a single-select whose one row can be edited inline. */
 export type EditableSelectResult<T extends PrompterValue> =
@@ -182,6 +201,10 @@ export interface Prompter {
    */
   select<T extends PrompterValue>(opts: SingleSelectOptions<T>): Promise<T>;
   select<T extends PrompterValue>(opts: MultiSelectOptions<T>): Promise<T[]>;
+  /** Returns the query when the user selects the external lookup row. */
+  searchSelect?<T extends PrompterValue>(
+    opts: SearchSelectOptions<T>,
+  ): Promise<SearchSelectResult<T>>;
   /**
    * TUI enhancement for a select row whose secondary value becomes an inline
    * editor while focused. Typing and editing keys update it directly. Optional
@@ -444,7 +467,38 @@ export function createPrompter(): Prompter {
         }),
       );
       resolvedCount += 1;
+      if (typeof result === "object" && !Array.isArray(result)) {
+        throw new Error("Ordinary select unexpectedly returned a query action.");
+      }
       return result;
+    },
+
+    async searchSelect<T extends PrompterValue>(
+      opts: SearchSelectOptions<T>,
+    ): Promise<SearchSelectResult<T>> {
+      log.settle();
+      printNotices(opts.notices);
+      const result = guardCancel(
+        await runSelectComponent<T>({
+          message: opts.message,
+          options: opts.options,
+          multiple: false,
+          search: true,
+          required: opts.required ?? false,
+          placeholder: opts.placeholder,
+          defaultValue: opts.initialValue,
+          initialQuery: opts.initialQuery,
+          queryActionLabel: opts.queryActionLabel,
+          leadingRail: resolvedCount === 0 ? "white" : "green",
+          attachGuard: (prompt) => attachQuitGuard(prompt),
+        }),
+      );
+      resolvedCount += 1;
+      if (typeof result === "object" && !Array.isArray(result)) return result;
+      if (Array.isArray(result)) {
+        throw new Error("Search select unexpectedly returned multiple values.");
+      }
+      return { kind: "selected", value: result };
     },
 
     async acknowledge(opts) {

@@ -1,14 +1,28 @@
 import type { ChannelSetupChoice, ChannelSetupChoiceOptions } from "#setup/cli/index.js";
-import type { SelectNotice } from "#setup/prompter.js";
+import type { SelectMessageTone, SelectNotice } from "#setup/prompter.js";
 
 import type { SetupPanelOption } from "./setup-panel.js";
+
+/**
+ * Resolution of a read* prompt when the user pressed Esc to step back one
+ * prompt (dev TUI only). Distinct from `undefined` (Ctrl-C / hard cancel) so
+ * {@link createTuiPrompter} can raise a `StepBackError` rather than a plain
+ * cancel. A reversible sequence catches the former to re-ask the prior step.
+ */
+export const BACK: unique symbol = Symbol("setup-step-back");
+export type Back = typeof BACK;
 
 export type SetupEditableSelectResult =
   | { kind: "selected"; value: string }
   | { kind: "edited"; value: string; text: string };
 
+export type SetupQuerySearchResult =
+  | { kind: "selected"; value: string }
+  | { kind: "query"; query: string };
+
 interface SetupSelectRequestBase {
   message: string;
+  messageTone?: SelectMessageTone;
   options: readonly SetupPanelOption[];
   notices?: readonly SelectNotice[];
 }
@@ -22,6 +36,14 @@ interface SetupSearchSelectRequest extends SetupSelectRequestBase {
   kind: "search";
   initialValue?: string;
   placeholder?: string;
+}
+
+export interface SetupQuerySearchRequest extends SetupSelectRequestBase {
+  kind: "query-search";
+  initialValue?: string;
+  initialQuery?: string;
+  placeholder?: string;
+  queryActionLabel: string;
 }
 
 interface SetupMultiSelectRequest extends SetupSelectRequestBase {
@@ -49,9 +71,12 @@ export type SetupSelectRequest =
   | SetupSearchableMultiSelectRequest;
 
 export interface SetupFlowRenderer {
-  begin(title: string): void;
+  begin(title: string, description?: readonly string[]): void;
   end(options?: { preserveDiagnostics?: boolean }): void;
-  readSelect(options: SetupSelectRequest): Promise<readonly string[] | undefined>;
+  readSelect(options: SetupSelectRequest): Promise<readonly string[] | undefined | Back>;
+  readQuerySelect(
+    options: SetupQuerySearchRequest,
+  ): Promise<SetupQuerySearchResult | undefined | Back>;
   readEditableSelect(options: {
     message: string;
     options: readonly SetupPanelOption[];
@@ -62,7 +87,7 @@ export interface SetupFlowRenderer {
       formatHint: (value: string) => string;
       validate?: (value: string) => string | undefined;
     };
-  }): Promise<SetupEditableSelectResult | undefined>;
+  }): Promise<SetupEditableSelectResult | undefined | Back>;
   readText(options: {
     message: string;
     placeholder?: string;
@@ -70,7 +95,7 @@ export interface SetupFlowRenderer {
     mask?: boolean;
     validate?: (value: string) => string | undefined;
     notices?: readonly SelectNotice[];
-  }): Promise<string | undefined>;
+  }): Promise<string | undefined | Back>;
   readAcknowledge(options: { message: string; lines: readonly string[] }): Promise<void>;
   /**
    * Presents an inert context row and a separate action menu beside the live
@@ -97,6 +122,7 @@ export interface SetupFlowRenderer {
 export type SetupFlowPrompterRenderer = Pick<
   SetupFlowRenderer,
   | "readSelect"
+  | "readQuerySelect"
   | "readEditableSelect"
   | "readText"
   | "readAcknowledge"

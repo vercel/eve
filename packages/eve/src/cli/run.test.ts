@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { resolveDevUiMode, resolveTuiDisplayOptions, resolveTuiTitle, runCli } from "#cli/run.js";
+import {
+  renderRemoteConnectionLine,
+  resolveDevUiMode,
+  resolveTuiDisplayOptions,
+  resolveTuiTitle,
+  runCli,
+} from "#cli/run.js";
+import { createCliTheme } from "#cli/ui/output.js";
 
 async function withInteractiveTerminal<T>(fn: () => Promise<T>): Promise<T> {
   const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
@@ -55,7 +62,11 @@ describe("eve dev --input", () => {
     expect(runDevelopmentTui).toHaveBeenCalledWith(
       expect.objectContaining({
         initialInput: "/model",
-        serverUrl: "https://example.com/",
+        target: {
+          kind: "remote",
+          serverUrl: "https://example.com/",
+          workspaceRoot: process.cwd(),
+        },
       }),
     );
   });
@@ -95,7 +106,11 @@ describe("eve dev --logs", () => {
     expect(runDevelopmentTui).toHaveBeenCalledWith(
       expect.objectContaining({
         logs: "sandbox",
-        serverUrl: "https://example.com/",
+        target: {
+          kind: "remote",
+          serverUrl: "https://example.com/",
+          workspaceRoot: process.cwd(),
+        },
       }),
     );
   });
@@ -165,14 +180,14 @@ describe("resolveTuiTitle", () => {
     ).toBe("Weather Agent");
   });
 
-  it("uses the remote host when connecting to a URL", () => {
+  it("prefixes the remote host when connecting to a URL", () => {
     expect(
       resolveTuiTitle({
         name: undefined,
         remoteServerUrl: "https://example.com:8080",
         appRoot: "/x",
       }),
-    ).toBe("example.com:8080");
+    ).toBe("remote@example.com:8080");
   });
 
   it("prefers an explicit --name over both", () => {
@@ -183,5 +198,16 @@ describe("resolveTuiTitle", () => {
         appRoot: "/x/weather-agent",
       }),
     ).toBe("Custom");
+  });
+});
+
+describe("renderRemoteConnectionLine", () => {
+  it("renders the arrow and colors only the normalized URL cyan", () => {
+    expect(
+      renderRemoteConnectionLine(
+        createCliTheme({ color: true }),
+        "https://inbound.playground-vercel.tools/",
+      ),
+    ).toBe("↗ connecting to \u001B[36mhttps://inbound.playground-vercel.tools/\u001B[39m");
   });
 });

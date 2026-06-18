@@ -4,6 +4,7 @@ import { ClientError } from "#client/client-error.js";
 import {
   formatVercelAuthChallengeMessage,
   isVercelAuthChallenge,
+  vercelTrustedSourcesErrorCode,
 } from "#services/dev-client/vercel-auth-error.js";
 
 /**
@@ -29,6 +30,14 @@ describe("isVercelAuthChallenge", () => {
     // structured-clone deserialization, a TypeScript-erased plain
     // object) lose their prototype but keep the `body` field.
     expect(isVercelAuthChallenge({ body: VERCEL_SSO_CHALLENGE_BODY, status: 401 })).toBe(true);
+  });
+
+  it("requires HTTP 401 and the complete Vercel challenge signature", () => {
+    expect(isVercelAuthChallenge(new ClientError(500, VERCEL_SSO_CHALLENGE_BODY))).toBe(false);
+    expect(
+      isVercelAuthChallenge(new ClientError(401, "<title>Authentication Required</title>")),
+    ).toBe(false);
+    expect(isVercelAuthChallenge({ body: VERCEL_SSO_CHALLENGE_BODY })).toBe(false);
   });
 
   it("returns false for non-error inputs", () => {
@@ -65,6 +74,7 @@ describe("formatVercelAuthChallengeMessage", () => {
     });
 
     expect(message).toContain("https://example.vercel.app");
+    expect(message).toContain("/vc:auth");
     expect(message).toContain("VERCEL_AUTOMATION_BYPASS_SECRET");
     expect(message).toContain("Disable Deployment Protection");
     // Documentation pointer keeps the message actionable when neither
@@ -79,5 +89,23 @@ describe("formatVercelAuthChallengeMessage", () => {
 
     expect(message).not.toContain("<");
     expect(message).not.toContain("doctype");
+  });
+});
+
+describe("vercelTrustedSourcesErrorCode", () => {
+  it("extracts the stable code without retaining the request id", () => {
+    expect(
+      vercelTrustedSourcesErrorCode(
+        [
+          "The caller environment is not permitted.",
+          "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH",
+          "iad1::request-id",
+        ].join("\n\n"),
+      ),
+    ).toBe("TRUSTED_SOURCES_ENVIRONMENT_MISMATCH");
+  });
+
+  it("returns undefined for an unrelated error", () => {
+    expect(vercelTrustedSourcesErrorCode("Unavailable")).toBeUndefined();
   });
 });

@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { WizardCancelledError } from "#setup/step.js";
+import { StepBackError, WizardCancelledError } from "#setup/step.js";
 
+import { BACK, type Back } from "./setup-flow.js";
 import { createTuiPrompter, type TuiPrompterRenderer } from "./tui-prompter.js";
 
 function fakeRenderer(overrides: Partial<TuiPrompterRenderer> = {}): TuiPrompterRenderer {
   return {
     readSelect: vi.fn(async () => []),
+    readQuerySelect: vi.fn(async () => undefined),
     readEditableSelect: vi.fn(async () => undefined),
     readText: vi.fn(async () => ""),
     readAcknowledge: vi.fn(async () => {}),
@@ -58,6 +60,82 @@ describe("createTuiPrompter", () => {
     );
   });
 
+  it("returns a query action without decoding it as an option", async () => {
+    const renderer = fakeRenderer({
+      readQuerySelect: vi.fn(async () => ({ kind: "query" as const, query: "inbound" })),
+    });
+    const prompter = createTuiPrompter(renderer);
+
+    await expect(
+      prompter.searchSelect?.({
+        message: "Project to link",
+        options: [{ value: "alpha", label: "alpha" }],
+        queryActionLabel: "Search for",
+      }),
+    ).resolves.toEqual({ kind: "query", query: "inbound" });
+    expect(renderer.readQuerySelect).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "query-search", queryActionLabel: "Search for" }),
+    );
+  });
+
+  it("preserves an option-attached notice when encoding values for the setup panel", async () => {
+    const renderer = fakeRenderer({
+      readSelect: vi.fn(async () => ["option-0"]),
+    });
+    const prompter = createTuiPrompter(renderer);
+
+    await prompter.select({
+      message: "This directory is currently linked to weather-agent in Acme.",
+      options: [
+        {
+          value: "continue",
+          label: "Continue",
+          notice: {
+            tone: "warning",
+            lines: [
+              "Refreshing authentication replaces .env.local.",
+              "Changing projects also replaces .vercel/project.json.",
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(renderer.readSelect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: [
+          expect.objectContaining({
+            value: "option-0",
+            notice: {
+              tone: "warning",
+              lines: [
+                "Refreshing authentication replaces .env.local.",
+                "Changing projects also replaces .vercel/project.json.",
+              ],
+            },
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("preserves a warning question tone for the setup panel", async () => {
+    const renderer = fakeRenderer({
+      readSelect: vi.fn(async () => ["option-0"]),
+    });
+    const prompter = createTuiPrompter(renderer);
+
+    await prompter.select({
+      message: "This directory is currently linked.",
+      messageTone: "warning",
+      options: [{ value: "continue", label: "Continue" }],
+    });
+
+    expect(renderer.readSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ messageTone: "warning" }),
+    );
+  });
+
   it("round-trips an inline-edited select value", async () => {
     const renderer = fakeRenderer({
       readEditableSelect: vi.fn(async () => ({
@@ -95,6 +173,40 @@ describe("createTuiPrompter", () => {
       prompter.select({ message: "Pick", options: [{ value: "a", label: "A" }] }),
     ).rejects.toBeInstanceOf(WizardCancelledError);
     await expect(prompter.text({ message: "Name" })).rejects.toBeInstanceOf(WizardCancelledError);
+  });
+
+  it("raises StepBackError when a panel resolves to BACK (Esc)", async () => {
+    const back = async (): Promise<Back> => BACK;
+    const renderer = fakeRenderer({
+      readSelect: vi.fn(back),
+      readText: vi.fn(back),
+      readQuerySelect: vi.fn(back),
+      readEditableSelect: vi.fn(back),
+    });
+    const prompter = createTuiPrompter(renderer);
+
+    const selectError = await prompter
+      .select({ message: "Pick", options: [{ value: "a", label: "A" }] })
+      .catch((e: unknown) => e);
+    expect(selectError).toBeInstanceOf(StepBackError);
+    // A StepBackError is a WizardCancelledError, so non-reversible callers fold it.
+    expect(selectError).toBeInstanceOf(WizardCancelledError);
+
+    await expect(prompter.text({ message: "Name" })).rejects.toBeInstanceOf(StepBackError);
+    await expect(
+      prompter.searchSelect?.({
+        message: "Project",
+        options: [{ value: "a", label: "A" }],
+        queryActionLabel: "Search for",
+      }),
+    ).rejects.toBeInstanceOf(StepBackError);
+    await expect(
+      prompter.selectEditable?.({
+        message: "Vercel project",
+        options: [{ value: "new", label: "Create a new project" }],
+        editable: { value: "new", defaultValue: "agent", formatHint: (v) => v },
+      }),
+    ).rejects.toBeInstanceOf(StepBackError);
   });
 
   it("masks passwords through the text panel", async () => {

@@ -4,12 +4,20 @@ import type {
   MultiSelectOptions,
   Prompter,
   PrompterValue,
+  SearchSelectOptions,
+  SearchSelectResult,
   SingleSelectOptions,
 } from "#setup/prompter.js";
 import { createSelectOptionCodec } from "#setup/cli/select-option-codec.js";
-import { WizardCancelledError } from "#setup/step.js";
+import { StepBackError, WizardCancelledError } from "#setup/step.js";
 
-import type { SetupFlowPrompterRenderer, SetupSelectRequest } from "./setup-flow.js";
+import { BACK } from "./setup-flow.js";
+import type {
+  Back,
+  SetupFlowPrompterRenderer,
+  SetupQuerySearchRequest,
+  SetupSelectRequest,
+} from "./setup-flow.js";
 
 /**
  * The renderer slice the TUI-native prompter drives: the bordered setup
@@ -24,7 +32,11 @@ function setupSelectRequest<T extends PrompterValue>(
   options: SetupSelectRequest["options"],
   encode: (value: T) => string,
 ): SetupSelectRequest {
-  const base = { message: opts.message, options };
+  const base: Pick<SetupSelectRequest, "message" | "messageTone" | "options"> = {
+    message: opts.message,
+    options,
+  };
+  if (opts.messageTone !== undefined) base.messageTone = opts.messageTone;
   const withNotices = <Request extends SetupSelectRequest>(request: Request): Request => {
     if (opts.notices !== undefined) request.notices = opts.notices;
     return request;
@@ -84,7 +96,12 @@ function setupSelectRequest<T extends PrompterValue>(
  * the opening and closing of a TUI flow.
  */
 export function createTuiPrompter(renderer: TuiPrompterRenderer): Prompter {
-  function guardCancel<T>(value: T | undefined): T {
+  // Esc resolves a panel to BACK (step back one prompt); Ctrl-C / hard cancel
+  // resolves to undefined. A reversible flow catches StepBackError to re-ask the
+  // prior step; everywhere else it folds to a cancel via its WizardCancelledError
+  // base, returning to chat.
+  function guardCancel<T>(value: T | undefined | Back): T {
+    if (value === BACK) throw new StepBackError();
     if (value === undefined) throw new WizardCancelledError();
     return value;
   }
@@ -107,11 +124,35 @@ export function createTuiPrompter(renderer: TuiPrompterRenderer): Prompter {
     return value;
   }
 
+  async function searchSelect<T extends PrompterValue>(
+    opts: SearchSelectOptions<T>,
+  ): Promise<SearchSelectResult<T>> {
+    const codec = createSelectOptionCodec(opts.options);
+    const request: SetupQuerySearchRequest = {
+      kind: "query-search",
+      message: opts.message,
+      options: codec.options,
+      queryActionLabel: opts.queryActionLabel,
+    };
+    if (opts.initialValue !== undefined) {
+      request.initialValue = codec.encode(opts.initialValue);
+    }
+    if (opts.initialQuery !== undefined) request.initialQuery = opts.initialQuery;
+    if (opts.placeholder !== undefined) request.placeholder = opts.placeholder;
+    if (opts.notices !== undefined) request.notices = opts.notices;
+
+    const result = guardCancel(await renderer.readQuerySelect(request));
+    return result.kind === "query"
+      ? result
+      : { kind: "selected", value: codec.decode(result.value) };
+  }
+
   function line(tone: "info" | "success" | "warning" | "error") {
     return (text: string): void => renderer.renderLine(text, tone);
   }
 
   return {
+    searchSelect,
     async text(opts) {
       const request: Parameters<TuiPrompterRenderer["readText"]>[0] = {
         message: opts.message,

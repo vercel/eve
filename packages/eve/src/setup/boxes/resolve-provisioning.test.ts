@@ -19,7 +19,7 @@ import {
   type ProvisioningMode,
   type SetupState,
 } from "../state.js";
-import type { OutputSink } from "../step.js";
+import { StepBackError, type OutputSink } from "../step.js";
 import { runHeadless, runInteractive } from "../runner.js";
 import {
   resolveProvisioning,
@@ -250,6 +250,85 @@ describe("resolveProvisioning box", () => {
       kind: "new",
       project: "typed-agent",
       team: "team",
+    });
+  });
+
+  it("steps back to the project-kind question when the project picker is escaped", async () => {
+    // Esc on the project picker raises StepBackError; the reversible runner
+    // re-asks the create-or-link step (consuming a second "link") rather than
+    // aborting, and pickTeam — an earlier step — is not re-run.
+    const deps = fakeDeps();
+    let projectAttempts = 0;
+    deps.pickProject = vi.fn(async () => {
+      projectAttempts += 1;
+      if (projectAttempts === 1) throw new StepBackError();
+      return { project: "existing-project", exists: true };
+    });
+    const box = makeBox({
+      prompter: createPrompter({ selectValues: ["vercel", "link", "link"] }),
+      targetDirectory: "/tmp/parent",
+      mode: { headless: false },
+      deps,
+    });
+
+    const result = await runInteractive([box], stateWithAgentName("my-agent"), silentSink);
+
+    expect(result.kind).toBe("done");
+    if (result.kind !== "done") return;
+    expect(result.state.vercelProject).toEqual({
+      kind: "existing",
+      project: "existing-project",
+      team: "team",
+    });
+    expect(deps.pickProject).toHaveBeenCalledTimes(2);
+    expect(deps.pickTeam).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores the project choice and edited name after stepping back through team", async () => {
+    const deps = fakeDeps();
+    deps.pickTeam = vi
+      .fn<ResolveProvisioningDeps["pickTeam"]>()
+      .mockResolvedValueOnce("team-a")
+      .mockResolvedValueOnce("team-b");
+    let projectAttempts = 0;
+    deps.pickNewProjectName = vi.fn(async (_prompter, _parent, _team, project) => {
+      projectAttempts += 1;
+      if (projectAttempts === 1) throw new StepBackError();
+      return project;
+    });
+    const prompter = createPrompter({ selectValues: ["vercel"] });
+    let choiceAttempts = 0;
+    prompter.selectEditable = async <T extends PrompterValue>(
+      opts: EditableSelectOptions<T>,
+    ): Promise<EditableSelectResult<T>> => {
+      choiceAttempts += 1;
+      if (choiceAttempts === 1) {
+        return { kind: "edited", value: opts.editable.value, text: "custom-project" };
+      }
+      if (choiceAttempts === 2) throw new StepBackError();
+      expect(opts.initialValue).toBe(opts.editable.value);
+      expect(opts.editable.defaultValue).toBe("custom-project");
+      return { kind: "selected", value: opts.editable.value };
+    };
+    const box = makeBox({
+      prompter,
+      targetDirectory: "/tmp/parent",
+      mode: { headless: false },
+      deps,
+    });
+
+    const result = await runInteractive([box], stateWithAgentName("my-agent"), silentSink);
+
+    expect(result.kind).toBe("done");
+    if (result.kind !== "done") return;
+    expect(result.state.vercelProject).toEqual({
+      kind: "new",
+      project: "custom-project",
+      team: "team-b",
+    });
+    expect(deps.pickTeam).toHaveBeenNthCalledWith(2, expect.anything(), "/tmp/parent", undefined, {
+      signal: undefined,
+      initialValue: "team-a",
     });
   });
 

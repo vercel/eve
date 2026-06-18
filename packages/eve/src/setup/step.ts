@@ -16,6 +16,23 @@ export class WizardCancelledError extends Error {
 }
 
 /**
+ * Thrown when the user asks to step *back* one prompt (dev-TUI Esc) inside a
+ * reversible sequence. A subclass of {@link WizardCancelledError} on purpose:
+ * a reversible runner catches `StepBackError` specifically to re-ask the
+ * previous step, but anywhere it is not caught — backing past the first step,
+ * or Esc in a non-reversible prompt — the existing `WizardCancelledError`
+ * handling folds it to a clean cancel (back to chat). The CLI prompter never
+ * throws this; its quit-guard throws the base error, so shared flows stay
+ * linear under `eve link` / `eve init`.
+ */
+export class StepBackError extends WizardCancelledError {
+  constructor() {
+    super();
+    this.name = "StepBackError";
+  }
+}
+
+/**
  * A unit of work reusable by programmatic setup and channel-management flows.
  * Every box has ONE gather for every mode: it asks its questions through an
  * injected `Asker`, whose composed stack (interactive base, headless base,

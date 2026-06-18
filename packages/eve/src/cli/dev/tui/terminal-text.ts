@@ -1,7 +1,9 @@
 const ansiEscape = String.fromCharCode(27);
+const ansiReset = `${ansiEscape}[0m`;
 
 export const ansiPattern = new RegExp(`${ansiEscape}\\[[0-?]*[ -/]*[@-~]`, "g");
 export const ansiPrefixPattern = new RegExp(`^${ansiEscape}\\[[0-?]*[ -/]*[@-~]`);
+const ansiSgrPattern = new RegExp(`${ansiEscape}\\[[0-9;:]*m`);
 
 export function stripAnsi(input: string): string {
   return stripTerminalControls(input.replaceAll(ansiPattern, ""));
@@ -105,6 +107,13 @@ export function sliceVisible(input: string, width: number): string {
   }
 
   return output;
+}
+
+/** Truncates one rendered row and prevents an open SGR span from bleeding below it. */
+export function clipVisible(input: string, width: number): string {
+  if (visibleLength(input) <= width) return input;
+  const clipped = sliceVisible(input, width);
+  return ansiSgrPattern.test(clipped) ? `${clipped}${ansiReset}` : clipped;
 }
 
 /**

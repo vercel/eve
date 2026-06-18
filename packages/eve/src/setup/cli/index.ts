@@ -9,7 +9,12 @@ export {
   withPhase,
 } from "./channel-setup-prompter.js";
 export { createPromptCommandOutput, type PromptCommandLog } from "./command-output.js";
-export { runSelectComponent, SelectComponent, type SelectGuard } from "./select-component.js";
+export {
+  runSelectComponent,
+  SelectComponent,
+  type SelectQueryAction,
+  type SelectGuard,
+} from "./select-component.js";
 export { createSelectOptionCodec, type SelectOptionCodec } from "./select-option-codec.js";
 export {
   CORNER,
@@ -28,6 +33,7 @@ export {
   renderSelectPrompt,
   type PromptColors,
   type PromptOption,
+  type PromptOptionNotice,
   type PromptState,
   type PromptValue,
 } from "./prompt-ui.js";

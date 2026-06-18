@@ -16,30 +16,22 @@
 
 import type { ChannelSetupAction, PromptOption } from "#setup/cli/index.js";
 import { renderOptionRow, resolveOptionRowState } from "#setup/cli/option-row.js";
-import { filterOptions, submitRowIndex, type SelectState } from "#setup/cli/select-state.js";
-import type { SelectNotice } from "#setup/prompter.js";
+import { filterOptions, trailingRowIndex, type SelectState } from "#setup/cli/select-state.js";
+import type { SelectMessageTone, SelectNotice } from "#setup/prompter.js";
 
 import { visibleLine, type LineState } from "./line-editor.js";
+import { appendOptionNoticeRows, appendSelectNotices, toneGlyph } from "./setup-panel-notice.js";
 import type { Theme } from "./theme.js";
-import { sliceVisible, visibleLength, wrapVisibleLine } from "./terminal-text.js";
-
-function clip(line: string, width: number): string {
-  if (visibleLength(line) <= width) {
-    return line;
-  }
-  const sliced = sliceVisible(line, width);
-  // Truncation can cut a color span before its close; reset so the open
-  // style cannot bleed into every row painted below.
-  return sliced.includes("\x1b[") ? `${sliced}\x1b[0m` : sliced;
-}
+import { clipVisible as clip, wrapVisibleLine } from "./terminal-text.js";
 
 /** One row of a setup select panel; the shared prompt-option shape. */
 export type SetupPanelOption = PromptOption<string>;
 
 interface SetupQuestionPanelBase {
   message: string;
+  messageTone?: SelectMessageTone;
   error?: string;
-  /** Outcome lines from earlier menu laps, shown beneath the options. */
+  /** Context shown beneath the options. */
   notices?: readonly SelectNotice[];
 }
 
@@ -69,6 +61,11 @@ interface SetupEditableRow {
 type SetupOptionSelectPanelState =
   | (SetupSelectPanelBase & { kind: "single" })
   | (SetupSelectPanelBase & { kind: "search"; placeholder?: string })
+  | (SetupSelectPanelBase & {
+      kind: "query-search";
+      placeholder?: string;
+      queryActionLabel: string;
+    })
   | (SetupSelectPanelBase & { kind: "multi" })
   | (SetupSelectPanelBase & { kind: "searchable-multi"; placeholder?: string })
   | (SetupSelectPanelBase & { kind: "stacked" })
@@ -133,6 +130,8 @@ export type FlowPanelContent =
 export interface FlowPanelState {
   /** The invoked command, e.g. "/deploy". Empty renders no title row. */
   title: string;
+  /** Explanatory copy rendered between the title and the active flow content. */
+  description?: readonly string[];
   lines: readonly FlowPanelLine[];
   content: FlowPanelContent;
 }
@@ -160,20 +159,6 @@ function dimWithEmphasis(text: string, theme: Theme): string {
   return theme.colors.dim(text.replaceAll(BOLD_OR_DIM_CLOSE, `${BOLD_OR_DIM_CLOSE}${DIM_OPEN}`));
 }
 
-function toneGlyph(tone: FlowPanelLine["tone"], theme: Theme): string {
-  const c = theme.colors;
-  switch (tone) {
-    case "success":
-      return c.green(theme.glyph.success);
-    case "warning":
-      return c.yellow(theme.glyph.warning);
-    case "error":
-      return c.red(theme.glyph.error);
-    case "info":
-      return c.dim(theme.glyph.dot);
-  }
-}
-
 /**
  * Paints the bordered flow panel. Everything a running command produces lives
  * here — progress, questions, the status spinner — and the panel vanishes
@@ -187,6 +172,15 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
     rows.push(`  ${c.bold(state.title)}`);
   }
   rows.push("");
+
+  if (state.description !== undefined && state.description.length > 0) {
+    for (const paragraph of state.description) {
+      for (const line of wrapVisibleLine(paragraph, Math.max(1, width - 3))) {
+        rows.push(`  ${line}`);
+      }
+    }
+    rows.push("");
+  }
 
   const recent = state.lines.slice(-FLOW_PANEL_LINE_CAP);
   for (const line of recent) {
@@ -284,6 +278,13 @@ function selectPresentation(state: SetupOptionSelectPanelState): SelectPresentat
         layout: "plain",
         edit: undefined,
       };
+    case "query-search":
+      return {
+        selection: "single",
+        filter: { placeholder: state.placeholder },
+        layout: "plain",
+        edit: undefined,
+      };
     case "multi":
       return {
         selection: "multiple",
@@ -322,12 +323,20 @@ function selectPresentation(state: SetupOptionSelectPanelState): SelectPresentat
   }
 }
 
-function selectMessageRows(message: string, layout: SelectLayout, theme: Theme): string[] {
+function selectMessageRows(
+  message: string,
+  layout: SelectLayout,
+  tone: SelectMessageTone | undefined,
+  theme: Theme,
+): string[] {
   if (message === "") return [];
 
   const rows = message.split("\n").map((line, index) => {
     const emphasized = layout === "stacked" || index > 0;
-    return `  ${emphasized ? theme.colors.bold(line) : line}`;
+    let painted = line;
+    if (tone === "warning") painted = theme.colors.yellow(line);
+    else if (emphasized) painted = theme.colors.bold(line);
+    return `  ${painted}`;
   });
   rows.push("");
   return rows;
@@ -350,14 +359,6 @@ function selectViewSize(input: {
     return Math.min(input.featuredLead, SEARCH_VIEW_SIZE);
   }
   return SEARCH_VIEW_SIZE;
-}
-
-function noticeBody(notice: SelectNotice, layout: SelectLayout, theme: Theme): string {
-  if (notice.tone === "info") return theme.colors.dim(notice.text);
-  if (notice.tone === "success" && layout === "task-list") {
-    return theme.colors.bold(notice.text);
-  }
-  return notice.text;
 }
 
 function editableOption(
@@ -413,9 +414,20 @@ function appendSelectOptionRows(input: {
   cursor: number;
   visibleLabelWidth: number;
   theme: Theme;
+  width: number;
 }): void {
-  const { rows, state, presentation, visible, start, end, cursor, visibleLabelWidth, theme } =
-    input;
+  const {
+    rows,
+    state,
+    presentation,
+    visible,
+    start,
+    end,
+    cursor,
+    visibleLabelWidth,
+    theme,
+    width,
+  } = input;
   const c = theme.colors;
 
   for (let index = start; index < end; index += 1) {
@@ -444,6 +456,9 @@ function appendSelectOptionRows(input: {
     if (stackedHint !== undefined) {
       rows.push(`${" ".repeat(4)}${dimWithEmphasis(stackedHint, theme)}`);
     }
+    if (option.notice !== undefined) {
+      appendOptionNoticeRows(rows, option.notice, theme, width);
+    }
     // Disabled descriptions explain why an inert row cannot be selected, so
     // keep them visible even though the cursor skips that row.
     if (option.description !== undefined && (option.disabled === true || isCursor)) {
@@ -461,30 +476,6 @@ function appendSubmitRow(rows: string[], cursor: number, submitIndex: number, th
   rows.push("", `  ${pointer} ${label}`);
 }
 
-function appendSelectNotices(
-  rows: string[],
-  notices: readonly SelectNotice[] | undefined,
-  layout: SelectLayout,
-  theme: Theme,
-  width: number,
-): void {
-  if (notices === undefined || notices.length === 0) return;
-  rows.push("");
-  for (const notice of notices) {
-    // Notices sit inside the option grid (column 2), not the panel gutter —
-    // a column-0 glyph would jut out of the list it annotates. Continuation
-    // lines hang under the notice text rather than under its glyph.
-    const glyph = toneGlyph(notice.tone, theme);
-    const hangingIndent = " ".repeat(visibleLength(glyph) + 1);
-    const textWidth = Math.max(1, width - 2 - visibleLength(glyph) - 1);
-    const wrapped = wrapVisibleLine(notice.text, textWidth);
-    for (const [index, line] of wrapped.entries()) {
-      const body = noticeBody({ ...notice, text: line }, layout, theme);
-      rows.push(index === 0 ? `  ${glyph} ${body}` : `  ${hangingIndent}${body}`);
-    }
-  }
-}
-
 function selectFooterHints(
   presentation: SelectPresentation,
   visible: readonly SetupPanelOption[],
@@ -498,7 +489,7 @@ function selectFooterHints(
   hints.push("↑/↓ move");
   hints.push(presentation.selection === "multiple" ? "space to toggle" : "enter to select");
   if (presentation.selection === "multiple") hints.push("enter on Submit to confirm");
-  hints.push("esc to cancel");
+  hints.push("esc to go back");
   return hints;
 }
 
@@ -544,12 +535,19 @@ export function renderSelectQuestion(
   const visible = presentation.filter
     ? filterOptions(state.options, state.select.filter)
     : state.options;
-  const submitIndex = presentation.selection === "multiple" ? submitRowIndex(visible) : -1;
+  const submitIndex = presentation.selection === "multiple" ? trailingRowIndex(visible) : -1;
   const cursor = state.select.cursor;
+  const query = state.select.filter.trim();
+  const queryActionLabel =
+    state.kind === "query-search" && query.length > 0
+      ? `${state.queryActionLabel} '${query}'`
+      : undefined;
+  const queryActionIndex = visible.length;
+  const rowCount = visible.length + (queryActionLabel === undefined ? 0 : 1);
 
   // An empty message (e.g. a panel-titled menu) contributes no header rows;
   // the panel's own spacing does the separating.
-  const rows = selectMessageRows(state.message, presentation.layout, theme);
+  const rows = selectMessageRows(state.message, presentation.layout, state.messageTone, theme);
 
   if (presentation.filter !== undefined) {
     rows.push(`  ${searchFilter(state.select.filter, presentation.filter.placeholder, theme)}`);
@@ -561,42 +559,55 @@ export function renderSelectQuestion(
     search: presentation.filter !== undefined,
     filter: state.select.filter,
     featuredLead,
-    optionCount: visible.length,
+    optionCount: rowCount,
   });
   const start = Math.max(
     0,
-    Math.min(cursor - Math.floor(viewSize / 2), Math.max(0, visible.length - viewSize)),
+    Math.min(cursor - Math.floor(viewSize / 2), Math.max(0, rowCount - viewSize)),
   );
-  const end = Math.min(start + viewSize, visible.length);
+  const end = Math.min(start + viewSize, rowCount);
+  const optionStart = Math.min(start, visible.length);
+  const optionEnd = Math.min(end, visible.length);
   // Hints sit in a shared column: every visible row pads its label out to the
   // widest label in view so the `· hint` tab-aligns, regardless of whether the
   // hint is persistent or shown only under the cursor.
   // The hint column aligns only to rows that actually show a hint — padding to a
   // longer label that carries no hint would open a gap before a lone hint.
   const visibleLabelWidth = visible
-    .slice(start, end)
+    .slice(optionStart, optionEnd)
     .filter((option) => option.hint !== undefined || option.focusHint !== undefined)
     .reduce((width, option) => Math.max(width, option.label.length), 0);
 
-  if (visible.length === 0) {
-    rows.push(`  ${c.dim("(no matches)")}`);
-  }
+  if (rowCount === 0) rows.push(`  ${c.dim("(no matches)")}`);
 
   appendSelectOptionRows({
     rows,
     state,
     presentation,
     visible,
-    start,
-    end,
+    start: optionStart,
+    end: optionEnd,
     cursor,
     visibleLabelWidth,
     theme,
+    width,
   });
+  if (queryActionLabel !== undefined && queryActionIndex >= start && queryActionIndex < end) {
+    rows.push(
+      `  ${optionRow({
+        option: { value: query, label: queryActionLabel },
+        isCursor: cursor === queryActionIndex,
+        isChecked: false,
+        placeholder: false,
+        theme,
+      })}`,
+    );
+  }
   appendSubmitRow(rows, cursor, submitIndex, theme);
 
-  if (visible.length > end - start) {
-    rows.push(`  ${c.dim(`↑↓ ${visible.length} options, showing ${start + 1}–${end}`)}`);
+  if (rowCount > end - start) {
+    const noun = queryActionLabel === undefined ? "options" : "choices";
+    rows.push(`  ${c.dim(`↑↓ ${rowCount} ${noun}, showing ${start + 1}–${end}`)}`);
   }
 
   appendSelectNotices(rows, state.notices, presentation.layout, theme, width);
@@ -640,7 +651,7 @@ export function renderTextQuestion(
     rows.push("", `  ${c.red(state.error)}`);
   }
 
-  rows.push(...questionFooter(["enter to submit", "esc to cancel"], theme));
+  rows.push(...questionFooter(["enter to submit", "esc to go back"], theme));
   return rows.map((row) => clip(row, width));
 }
 

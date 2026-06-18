@@ -24,6 +24,12 @@ export interface PromptColors {
   yellow(text: string): string;
 }
 
+/** Persistent context rendered directly beneath the option it qualifies. */
+export interface PromptOptionNotice {
+  readonly tone: "warning";
+  readonly lines: readonly [string, ...string[]];
+}
+
 /** A selectable item rendered by the shared multi-select prompt. */
 export interface PromptOption<T extends PromptValue> {
   value: T;
@@ -38,6 +44,7 @@ export interface PromptOption<T extends PromptValue> {
    * choice is submitted only the label remains.
    */
   description?: string;
+  notice?: PromptOptionNotice;
   /** Cursor-pointer/active-label accent; "warning" turns them yellow for an attention row. */
   accent?: "warning";
   disabled?: boolean;
@@ -447,6 +454,8 @@ export function renderSearchableSelect<T extends PromptValue>(input: {
   viewSize?: number;
   /** Submit-row label, e.g. "Skip" while an optional checklist is empty. */
   submitLabel?: string;
+  /** Label prefix for the trailing row that submits a nonblank external query. */
+  queryActionLabel?: string;
 }): string {
   const { colors } = input;
   const rail = railFor(input.state, colors);
@@ -477,10 +486,16 @@ export function renderSearchableSelect<T extends PromptValue>(input: {
   const baseViewSize = input.viewSize ?? SEARCHABLE_VIEW_SIZE;
   const viewSize =
     input.filter === "" && featuredLead > 0 ? Math.min(featuredLead, baseViewSize) : baseViewSize;
-  // In a multi-select, the index one past the options is the Submit row; a
-  // single-select cursor past the end is stale and re-homes to the top.
-  const onSubmitRow = input.multiple && input.cursor >= input.options.length;
-  const cursor = !onSubmitRow && input.cursor >= input.options.length ? 0 : input.cursor;
+  const query = input.filter.trim();
+  const queryActionLabel =
+    !input.multiple && input.queryActionLabel !== undefined && query.length > 0
+      ? `${input.queryActionLabel} '${query}'`
+      : undefined;
+  const queryActionIndex = input.options.length;
+  const rowCount = input.options.length + (queryActionLabel === undefined ? 0 : 1);
+  const onSubmitRow = input.multiple && input.cursor === input.options.length;
+  const onQueryAction = queryActionLabel !== undefined && input.cursor === queryActionIndex;
+  const cursor = !onSubmitRow && !onQueryAction && input.cursor >= rowCount ? 0 : input.cursor;
 
   let filterInput = colors.inverse(" ");
   if (input.filter.length > 0) {
@@ -491,41 +506,61 @@ export function renderSearchableSelect<T extends PromptValue>(input: {
 
   const start = Math.max(
     0,
-    Math.min(cursor - Math.floor(viewSize / 2), Math.max(0, input.options.length - viewSize)),
+    Math.min(cursor - Math.floor(viewSize / 2), Math.max(0, rowCount - viewSize)),
   );
-  const end = Math.min(start + viewSize, input.options.length);
-  const window = input.options.slice(start, end);
+  const end = Math.min(start + viewSize, rowCount);
+  const optionStart = Math.min(start, input.options.length);
+  const optionEnd = Math.min(end, input.options.length);
+  const window = input.options.slice(optionStart, optionEnd);
+  const showQueryAction =
+    queryActionLabel !== undefined && queryActionIndex >= start && queryActionIndex < end;
 
-  const width = labelColumnWidth(window);
-  const optionLines =
-    window.length === 0
-      ? colors.dim("(no matches)")
-      : window
-          .map((option, index) => {
-            const isCursor = !onSubmitRow && index + start === cursor;
-            const row = optionRow(option, {
-              colors,
-              isCursor,
-              isChecked: input.multiple && selectedSet.has(option.value),
-              // Search gates the placeholder dot off, matching the dev TUI.
-              placeholder: false,
-              hintPadding: width - option.label.length,
-            });
-            return `${row}${descriptionLine(option, isCursor, rail, colors)}`;
-          })
-          .join(`\n${rail}  `);
+  const width = Math.max(
+    labelColumnWidth(window),
+    showQueryAction ? (queryActionLabel?.length ?? 0) : 0,
+  );
+  const optionLines = window.map((option, index) => {
+    const isCursor = !onSubmitRow && index + optionStart === cursor;
+    const row = optionRow(option, {
+      colors,
+      isCursor,
+      isChecked: input.multiple && selectedSet.has(option.value),
+      // Search gates the placeholder dot off, matching the dev TUI.
+      placeholder: false,
+      hintPadding: width - option.label.length,
+    });
+    return `${row}${descriptionLine(option, isCursor, rail, colors)}`;
+  });
+  if (showQueryAction && queryActionLabel !== undefined) {
+    optionLines.push(
+      optionRow(
+        { value: query, label: queryActionLabel },
+        {
+          colors,
+          isCursor: onQueryAction,
+          isChecked: false,
+          placeholder: false,
+          hintPadding: 0,
+        },
+      ),
+    );
+  }
+  const renderedOptions =
+    optionLines.length === 0 ? colors.dim("(no matches)") : optionLines.join(`\n${rail}  `);
 
   const submitLine = input.multiple
     ? `\n${rail}\n${rail}  ${renderSubmitRow(onSubmitRow, colors, input.submitLabel)}`
     : "";
 
   const moreFooter =
-    input.options.length > window.length
-      ? `\n${rail}  ${colors.dim(`↑↓ ${input.options.length} options, showing ${start + 1}–${end}`)}`
+    rowCount > end - start
+      ? `\n${rail}  ${colors.dim(
+          `↑↓ ${rowCount} ${queryActionLabel === undefined ? "options" : "choices"}, showing ${start + 1}–${end}`,
+        )}`
       : "";
 
   const help = searchableHelpLine(rail, colors, input.multiple);
-  const body = `${rail}  ${colors.dim(" ")} ${filterInput}\n${rail}  ${optionLines}${submitLine}${moreFooter}${help}`;
+  const body = `${rail}  ${colors.dim(" ")} ${filterInput}\n${rail}  ${renderedOptions}${submitLine}${moreFooter}${help}`;
 
   if (input.state === "error") {
     return `${head.trim()}\n${body}\n${cornerFor(input.state, colors)}  ${colors.red(input.error ?? "")}\n`;

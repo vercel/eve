@@ -17,6 +17,7 @@ export {
 export {
   captureVercel,
   runVercel,
+  type CaptureVercelOptions,
   type RunVercelOptions,
   type VercelCaptureFailure,
   type VercelCaptureResult,

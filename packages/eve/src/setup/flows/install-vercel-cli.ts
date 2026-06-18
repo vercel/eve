@@ -55,13 +55,9 @@ async function withSpinner<T>(
 }
 
 /**
- * THE INSTALL FLOW for the dev TUI's `/vc`: the fix command for the
- * "Vercel CLI not found" diagnostic, so every diagnostic has a matching
- * command. Short-circuits when the CLI already resolves; otherwise runs a
- * global install with the project's package manager, streaming output to the
- * rail, then re-probes. A global install can exit clean yet leave the binary
- * off PATH (pnpm/yarn global bins commonly aren't), so success is confirmed by
- * the re-probe, not the exit code alone.
+ * Installs the Vercel CLI globally with the project's package manager. A clean
+ * install exit is not enough because the global bin may still be off PATH, so
+ * the flow probes the command again before reporting success.
  */
 export async function runInstallVercelCliFlow(input: {
   appRoot: string;

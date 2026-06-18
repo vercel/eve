@@ -38,8 +38,8 @@ export type LinkFlowResult =
 /**
  * THE LINK FLOW, shared by `eve link` and the dev TUI `/model` menu's provider row (its
  * "Connect via a project" branch): the same
- * team/project pickers onboarding uses, then the actual `vercel link`, then a
- * `vercel env pull` so the AI Gateway credential lands in `.env.local`.
+ * team/project pickers onboarding uses, then the selected Vercel project link,
+ * then a `vercel env pull` so the AI Gateway credential lands in `.env.local`.
  *
  * Re-link semantics: an already-linked directory shows its current link as a
  * gate — one "Link to another project" option; Esc keeps the link and folds

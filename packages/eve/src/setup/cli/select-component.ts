@@ -15,8 +15,10 @@ import {
   initialSelectState,
   orderedSelection,
   reduceSelect,
+  selectCursorRow,
   selectValueAtCursor,
-  submitRowIndex,
+  trailingRowIndex,
+  type SelectContext,
   type SelectEvent,
   type SelectState,
 } from "./select-state.js";
@@ -29,6 +31,14 @@ import {
 export interface SelectGuard {
   note(): string | undefined;
 }
+
+/** Explicit request to resolve the current nonblank filter externally. */
+export interface SelectQueryAction {
+  kind: "query";
+  query: string;
+}
+
+const QUERY_ACTION_VALUE = "\0query-action";
 
 function toPromptState(state: State): PromptState {
   return state;
@@ -46,6 +56,7 @@ export class SelectComponent extends Prompt<string | string[]> {
   readonly multiple: boolean;
   readonly search: boolean;
   readonly required: boolean;
+  readonly queryActionLabel?: string;
   filter = "";
   optionCursor = 0;
   selectedSet = new Set<string>();
@@ -55,6 +66,7 @@ export class SelectComponent extends Prompt<string | string[]> {
     multiple: boolean;
     search: boolean;
     required: boolean;
+    queryActionLabel?: string;
     initial: SelectState;
     render: (this: Omit<SelectComponent, "prompt">) => string | undefined;
   }) {
@@ -63,6 +75,7 @@ export class SelectComponent extends Prompt<string | string[]> {
     this.multiple = input.multiple;
     this.search = input.search;
     this.required = input.required;
+    this.queryActionLabel = input.queryActionLabel;
     this.filter = input.initial.filter;
     this.optionCursor = input.initial.cursor;
     this.selectedSet = input.initial.selected;
@@ -95,9 +108,26 @@ export class SelectComponent extends Prompt<string | string[]> {
     return filterOptions(this.options, this.filter);
   }
 
+  private selectContext(): SelectContext {
+    if (this.multiple) return { options: this.options, trailingRow: "submit" };
+    if (this.queryActionLabel !== undefined) {
+      return { options: this.options, trailingRow: "query-action" };
+    }
+    return { options: this.options };
+  }
+
+  /** Nonblank query accepted from the focused external-lookup row. */
+  queryActionQuery(): string | undefined {
+    const row = selectCursorRow(
+      { filter: this.filter, cursor: this.optionCursor, selected: this.selectedSet },
+      this.selectContext(),
+    );
+    return row?.kind === "query-action" ? row.query : undefined;
+  }
+
   /** True when the multi-select cursor sits on the trailing Submit row. */
   onSubmitRow(): boolean {
-    return this.multiple && this.optionCursor === submitRowIndex(this.visibleOptions());
+    return this.multiple && this.optionCursor === trailingRowIndex(this.visibleOptions());
   }
 
   /**
@@ -123,6 +153,7 @@ export class SelectComponent extends Prompt<string | string[]> {
    */
   protected override _shouldSubmit(): boolean {
     if (!this.multiple) {
+      if (this.queryActionQuery() !== undefined) return true;
       const option = this.visibleOptions()[this.optionCursor];
       return option?.completed !== true;
     }
@@ -146,6 +177,8 @@ export class SelectComponent extends Prompt<string | string[]> {
         .map((option) => option.label);
       return labels.length > 0 ? labels.join(", ") : pc.dim("(none selected)");
     }
+    const query = this.queryActionQuery();
+    if (query !== undefined) return query;
     const value = selectValueAtCursor(this.visibleOptions(), this.optionCursor);
     return value === undefined ? "" : this.labelForValue(value);
   }
@@ -160,6 +193,7 @@ export class SelectComponent extends Prompt<string | string[]> {
         ? "Select at least one option, then press enter."
         : undefined;
     }
+    if (this.queryActionQuery() !== undefined) return undefined;
     return selectValueAtCursor(this.visibleOptions(), this.optionCursor) === undefined
       ? "Type to match an option, then press enter."
       : undefined;
@@ -169,7 +203,7 @@ export class SelectComponent extends Prompt<string | string[]> {
     const next = reduceSelect(
       { filter: this.filter, cursor: this.optionCursor, selected: this.selectedSet },
       event,
-      { options: this.options, submitRow: this.multiple },
+      this.selectContext(),
     );
     this.filter = next.filter;
     this.optionCursor = next.cursor;
@@ -178,9 +212,14 @@ export class SelectComponent extends Prompt<string | string[]> {
   }
 
   private refreshValue(): void {
-    this.value = this.multiple
-      ? orderedSelection(this.options, this.selectedSet)
-      : selectValueAtCursor(this.visibleOptions(), this.optionCursor);
+    if (this.multiple) {
+      this.value = orderedSelection(this.options, this.selectedSet);
+      return;
+    }
+    this.value =
+      this.queryActionQuery() === undefined
+        ? selectValueAtCursor(this.visibleOptions(), this.optionCursor)
+        : QUERY_ACTION_VALUE;
   }
 }
 
@@ -209,6 +248,7 @@ function renderSelectComponent(
       footerNote,
       error: self.error,
       submitLabel: self.submitLabel(),
+      queryActionLabel: self.queryActionLabel,
     });
   }
 
@@ -258,17 +298,24 @@ export async function runSelectComponent<T extends PromptValue>(input: {
   placeholder?: string;
   defaultValue?: T;
   initialValues?: readonly T[];
+  /** Seed text restored when a previous external lookup reopens this picker. */
+  initialQuery?: string;
+  /** Adds a trailing action that submits the nonblank filter for external lookup. */
+  queryActionLabel?: string;
   leadingRail: "white" | "green";
   attachGuard?: (prompt: SelectComponent) => SelectGuard;
-}): Promise<T | T[] | symbol> {
+}): Promise<T | T[] | SelectQueryAction | symbol> {
   const codec = createSelectOptionCodec(input.options);
 
-  const initial = initialSelectState({
+  const initialInput: Parameters<typeof initialSelectState>[0] = {
     options: codec.options,
     defaultValue: input.defaultValue === undefined ? undefined : codec.encode(input.defaultValue),
     initialValues: input.initialValues?.map((value) => codec.encode(value)),
-    submitRow: input.multiple,
-  });
+    filter: input.initialQuery,
+  };
+  if (input.multiple) initialInput.trailingRow = "submit";
+  else if (input.queryActionLabel !== undefined) initialInput.trailingRow = "query-action";
+  const initial = initialSelectState(initialInput);
 
   let promptRef: SelectComponent | undefined;
   let guard: SelectGuard | undefined;
@@ -278,6 +325,7 @@ export async function runSelectComponent<T extends PromptValue>(input: {
     multiple: input.multiple,
     search: input.search,
     required: input.required,
+    queryActionLabel: input.queryActionLabel,
     initial,
     render() {
       if (!promptRef) return "";
@@ -295,6 +343,8 @@ export async function runSelectComponent<T extends PromptValue>(input: {
 
   const result = await prompt.prompt();
   if (isCancel(result)) return result;
+  const query = prompt.queryActionQuery();
+  if (query !== undefined) return { kind: "query", query };
   if (result === undefined) {
     throw new Error("Select prompt returned no value.");
   }

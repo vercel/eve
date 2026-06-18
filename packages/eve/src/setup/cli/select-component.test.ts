@@ -21,6 +21,7 @@ function makeSelect(input: {
   search?: boolean;
   required?: boolean;
   options?: PromptOption<string>[];
+  queryActionLabel?: string;
 }): TestSelect {
   const options = input.options ?? OPTIONS;
   return new TestSelect({
@@ -28,7 +29,11 @@ function makeSelect(input: {
     multiple: input.multiple,
     search: input.search ?? false,
     required: input.required ?? false,
-    initial: initialSelectState({ options, submitRow: input.multiple }),
+    queryActionLabel: input.queryActionLabel,
+    initial: initialSelectState({
+      options,
+      trailingRow: input.multiple ? "submit" : undefined,
+    }),
     render: () => "",
   });
 }
@@ -66,6 +71,37 @@ describe("SelectComponent enter routing", () => {
     select.emit("key", "c", { name: "c" });
 
     expect(select.filter).toBe("w c");
+  });
+
+  test("query-capable search submits a nonblank filter with no local match", () => {
+    const select = makeSelect({
+      multiple: false,
+      search: true,
+      queryActionLabel: "Search for",
+    });
+
+    for (const char of "inbound") select.emit("key", char, { name: char });
+
+    expect(select.visibleOptions()).toEqual([]);
+    expect(select.queryActionQuery()).toBe("inbound");
+    expect(select.submitError()).toBeUndefined();
+    expect(select.shouldSubmit()).toBe(true);
+  });
+
+  test("query-capable search reaches the external action after a local match", () => {
+    const select = makeSelect({
+      multiple: false,
+      search: true,
+      queryActionLabel: "Search for",
+    });
+
+    for (const char of "web") select.emit("key", char, { name: char });
+    select.emit("cursor", "down");
+
+    expect(select.visibleOptions().map((option) => option.label)).toEqual(["Web Chat"]);
+    expect(select.optionCursor).toBe(1);
+    expect(select.queryActionQuery()).toBe("web");
+    expect(select.shouldSubmit()).toBe(true);
   });
 
   test("multi-select search keeps space as the toggle key, not a filter character", () => {

@@ -16,6 +16,7 @@ import {
   pickProject,
   pickTeam,
   requireAuth,
+  searchProjects,
   validateTeam,
 } from "./vercel-project.js";
 
@@ -26,6 +27,13 @@ vi.mock("#setup/primitives/index.js", async (importOriginal) => {
     captureVercel: vi.fn(),
     runVercel: vi.fn(),
   };
+});
+
+const mockedWriteProjectLink = vi.hoisted(() => vi.fn());
+
+vi.mock("./project-resolution.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./project-resolution.js")>();
+  return { ...original, writeProjectLink: mockedWriteProjectLink };
 });
 
 const mockedCaptureVercel = vi.mocked(captureVercel);
@@ -57,6 +65,8 @@ beforeEach(() => {
   mockedCaptureVercel.mockReset();
   mockedRunVercel.mockReset();
   mockedRunVercel.mockResolvedValue(true);
+  mockedWriteProjectLink.mockReset();
+  mockedWriteProjectLink.mockResolvedValue(undefined);
 });
 
 describe("listTeams", () => {
@@ -82,7 +92,60 @@ describe("listTeams", () => {
     });
   });
 
-  it("filters invalid team entries and rejects invalid output", async () => {
+  it("drains every team page and deduplicates by team slug", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(
+        captured(
+          JSON.stringify({
+            teams: [
+              { id: "team_a", slug: "team-a", name: "Team A", current: true },
+              { id: "team_shared", slug: "shared", name: "Shared", current: false },
+            ],
+            pagination: { next: 123 },
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        captured(
+          JSON.stringify({
+            teams: [
+              { id: "team_shared", slug: "shared", name: "Shared", current: false },
+              { id: "team_b", slug: "team-b", name: "Team B", current: false },
+            ],
+            pagination: { next: null },
+          }),
+        ),
+      );
+
+    await expect(listTeams("/tmp/eve-agent")).resolves.toEqual([
+      { slug: "team-a", name: "Team A", current: true },
+      { slug: "shared", name: "Shared", current: false },
+      { slug: "team-b", name: "Team B", current: false },
+    ]);
+    expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
+      2,
+      ["teams", "ls", "--format", "json", "--next", "123"],
+      { cwd: "/tmp/eve-agent", signal: undefined },
+    );
+  });
+
+  it("rejects a repeated team cursor", async () => {
+    mockedCaptureVercel.mockResolvedValue(
+      captured(
+        JSON.stringify({
+          teams: [{ id: "team_a", slug: "team-a", name: "Team A", current: true }],
+          pagination: { next: 123 },
+        }),
+      ),
+    );
+
+    await expect(listTeams("/tmp/eve-agent")).rejects.toThrow(
+      "repeated pagination cursor for Vercel teams",
+    );
+    expect(mockedCaptureVercel).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects an entire team page when one entry is invalid", async () => {
     mockedCaptureVercel.mockResolvedValueOnce(
       captured(
         JSON.stringify({
@@ -93,14 +156,19 @@ describe("listTeams", () => {
         }),
       ),
     );
-    await expect(listTeams("/tmp/eve-agent")).resolves.toEqual([
-      { slug: "valid-team", name: "Valid Team", current: true },
-    ]);
+    await expect(listTeams("/tmp/eve-agent")).rejects.toThrow(
+      "Could not read teams from Vercel CLI JSON output.",
+    );
 
     mockedCaptureVercel.mockResolvedValueOnce(captured("not json"));
     await expect(listTeams("/tmp/eve-agent")).rejects.toThrow(
       "Could not parse teams JSON from Vercel CLI output.",
     );
+  });
+
+  it("rejects a failed team capture", async () => {
+    mockedCaptureVercel.mockResolvedValueOnce(failedCapture("", "team lookup failed"));
+    await expect(listTeams("/tmp/eve-agent")).rejects.toThrow("Could not list Vercel teams.");
   });
 });
 
@@ -127,26 +195,131 @@ describe("listProjects", () => {
     );
 
     await expect(listProjects("/tmp/eve-agent", "current-team")).resolves.toEqual([
-      { name: "eve-agent", id: "prj_eve" },
+      { name: "eve-agent", id: "prj_eve", updatedAt: 1 },
     ]);
     expect(mockedCaptureVercel).toHaveBeenCalledWith(
-      ["project", "ls", "--format", "json", "--scope", "current-team"],
-      { cwd: "/tmp/eve-agent" },
+      ["api", "/v9/projects?limit=20", "--scope", "current-team", "--raw"],
+      { cwd: "/tmp/eve-agent", signal: undefined, timeoutMs: 15_000 },
     );
   });
 
-  it("filters invalid project entries and rejects failed capture", async () => {
-    mockedCaptureVercel.mockResolvedValueOnce(
+  it("returns the bounded first page without draining the pagination cursor", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(
+        captured(
+          JSON.stringify({
+            projects: [{ name: "newer-project", id: "prj_newer", updatedAt: 200 }],
+            pagination: { next: 1_781_736_726_064 },
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        captured(
+          JSON.stringify({
+            projects: [{ name: "older-project", id: "prj_older", updatedAt: 100 }],
+            pagination: { next: null },
+          }),
+        ),
+      );
+
+    await expect(listProjects("/tmp/eve-agent", "current-team")).resolves.toEqual([
+      { name: "newer-project", id: "prj_newer", updatedAt: 200 },
+    ]);
+    expect(mockedCaptureVercel).toHaveBeenCalledTimes(1);
+    expect(mockedCaptureVercel).toHaveBeenCalledWith(
+      ["api", "/v9/projects?limit=20", "--scope", "current-team", "--raw"],
+      { cwd: "/tmp/eve-agent", timeoutMs: 15_000 },
+    );
+  });
+
+  it("performs a scoped server-side name search for a specific query", async () => {
+    mockedCaptureVercel.mockResolvedValue(
       captured(
         JSON.stringify({
-          projects: [{ name: "valid-project", id: "prj_valid" }, { name: "invalid-project" }],
+          projects: [{ name: "inbound-agent", id: "prj_inbound", updatedAt: 1 }],
+          pagination: { next: null },
         }),
       ),
     );
-    await expect(listProjects("/tmp/eve-agent", "current-team")).resolves.toEqual([
-      { name: "valid-project", id: "prj_valid" },
-    ]);
 
+    await expect(
+      searchProjects("/tmp/eve-agent", "current-team", "inbound agent"),
+    ).resolves.toEqual([{ name: "inbound-agent", id: "prj_inbound", updatedAt: 1 }]);
+    expect(mockedCaptureVercel).toHaveBeenCalledWith(
+      ["api", "/v9/projects?limit=20&search=inbound%20agent", "--scope", "current-team", "--raw"],
+      { cwd: "/tmp/eve-agent", timeoutMs: 15_000 },
+    );
+  });
+
+  it("drains every page of an explicit scoped search", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(
+        captured(
+          JSON.stringify({
+            projects: [{ name: "newer-project", id: "prj_newer", updatedAt: 200 }],
+            pagination: { next: 1_781_736_726_064 },
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        captured(
+          JSON.stringify({
+            projects: [{ name: "older-project", id: "prj_older", updatedAt: 100 }],
+            pagination: { next: null },
+          }),
+        ),
+      );
+
+    await expect(searchProjects("/tmp/eve-agent", "current-team", "agent")).resolves.toEqual([
+      { name: "newer-project", id: "prj_newer", updatedAt: 200 },
+      { name: "older-project", id: "prj_older", updatedAt: 100 },
+    ]);
+    expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
+      2,
+      [
+        "api",
+        "/v9/projects?limit=20&search=agent&until=1781736726064",
+        "--scope",
+        "current-team",
+        "--raw",
+      ],
+      { cwd: "/tmp/eve-agent", signal: undefined, timeoutMs: 15_000 },
+    );
+  });
+
+  it("rejects a repeated project-search cursor instead of returning partial results", async () => {
+    mockedCaptureVercel.mockResolvedValue(
+      captured(
+        JSON.stringify({
+          projects: [{ name: "agent", id: "prj_agent", updatedAt: 1 }],
+          pagination: { next: 123 },
+        }),
+      ),
+    );
+
+    await expect(searchProjects("/tmp/eve-agent", "current-team", "agent")).rejects.toThrow(
+      "repeated pagination cursor",
+    );
+    expect(mockedCaptureVercel).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects an entire project page when one entry is invalid", async () => {
+    mockedCaptureVercel.mockResolvedValueOnce(
+      captured(
+        JSON.stringify({
+          projects: [
+            { name: "valid-project", id: "prj_valid", updatedAt: 1 },
+            { name: "invalid-project" },
+          ],
+        }),
+      ),
+    );
+    await expect(listProjects("/tmp/eve-agent", "current-team")).rejects.toThrow(
+      "Could not read projects from Vercel CLI JSON output.",
+    );
+  });
+
+  it("rejects a failed project capture", async () => {
     mockedCaptureVercel.mockResolvedValueOnce({
       ok: false,
       failure: {
@@ -289,9 +462,53 @@ describe("pickTeam", () => {
 });
 
 describe("pickProject", () => {
+  it("orders the initial page and merged search results by most recently updated", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(
+        captured(
+          JSON.stringify({
+            projects: [
+              { name: "initial-old", id: "prj_initial_old", updatedAt: 100 },
+              { name: "initial-new", id: "prj_initial_new", updatedAt: 300 },
+            ],
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        captured(
+          JSON.stringify({
+            projects: [
+              { name: "search-old", id: "prj_search_old", updatedAt: 200 },
+              { name: "search-new", id: "prj_search_new", updatedAt: 400 },
+            ],
+          }),
+        ),
+      );
+    const search = vi
+      .fn()
+      .mockResolvedValueOnce({ kind: "query", query: "search" })
+      .mockResolvedValueOnce({ kind: "selected", value: "search-new" });
+    const { prompter } = createFakePrompter({ search });
+
+    await expect(pickProject(prompter, "/tmp/eve-agent", "team-a")).resolves.toEqual({
+      project: "search-new",
+      exists: true,
+    });
+    expect(search.mock.calls[0]?.[0].options).toEqual([
+      { value: "initial-new", label: "initial-new" },
+      { value: "initial-old", label: "initial-old" },
+    ]);
+    expect(search.mock.calls[1]?.[0].options).toEqual([
+      { value: "search-new", label: "search-new" },
+      { value: "initial-new", label: "initial-new" },
+      { value: "search-old", label: "search-old" },
+      { value: "initial-old", label: "initial-old" },
+    ]);
+  });
+
   it("labels the spinner with the team and stops it before selection", async () => {
     mockedCaptureVercel.mockResolvedValue(
-      captured(JSON.stringify({ projects: [{ name: "p1", id: "prj_p1" }] })),
+      captured(JSON.stringify({ projects: [{ name: "p1", id: "prj_p1", updatedAt: 1 }] })),
     );
     const stop = vi.fn();
     const spinner = vi.fn((_message: string) => ({ stop }));
@@ -305,12 +522,88 @@ describe("pickProject", () => {
     expect(spinner.mock.calls[0]?.[0]).toContain("team-a");
     expect(stop).toHaveBeenCalledTimes(1);
   });
+
+  it("searches the team only after the local filter has no match", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(
+        captured(JSON.stringify({ projects: [{ name: "alpha", id: "prj_alpha", updatedAt: 1 }] })),
+      )
+      .mockResolvedValueOnce(
+        captured(
+          JSON.stringify({
+            projects: [{ name: "inbound-agent", id: "prj_inbound", updatedAt: 2 }],
+          }),
+        ),
+      );
+    const search = vi
+      .fn()
+      .mockResolvedValueOnce({ kind: "query", query: "inbound" })
+      .mockResolvedValueOnce({ kind: "selected", value: "inbound-agent" });
+    const { prompter } = createFakePrompter({ search });
+
+    await expect(pickProject(prompter, "/tmp/eve-agent", "team-a")).resolves.toEqual({
+      project: "inbound-agent",
+      exists: true,
+    });
+    expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
+      2,
+      ["api", "/v9/projects?limit=20&search=inbound", "--scope", "team-a", "--raw"],
+      { cwd: "/tmp/eve-agent", signal: undefined, timeoutMs: 15_000 },
+    );
+    expect(search).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        initialQuery: "inbound",
+        options: expect.arrayContaining([{ value: "inbound-agent", label: "inbound-agent" }]),
+      }),
+    );
+  });
+
+  it("keeps an unmatched server query editable with an inline notice", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(
+        captured(JSON.stringify({ projects: [{ name: "alpha", id: "prj_alpha", updatedAt: 1 }] })),
+      )
+      .mockResolvedValueOnce(captured(JSON.stringify({ projects: [] })))
+      .mockResolvedValueOnce(
+        captured(
+          JSON.stringify({
+            projects: [{ name: "beta-agent", id: "prj_beta", updatedAt: 2 }],
+          }),
+        ),
+      );
+    const search = vi
+      .fn()
+      .mockResolvedValueOnce({ kind: "query", query: "missing" })
+      .mockResolvedValueOnce({ kind: "query", query: "beta" })
+      .mockResolvedValueOnce({ kind: "selected", value: "beta-agent" });
+    const { prompter } = createFakePrompter({ search });
+
+    const message = "Which project is https://agent.example.com/ part of?";
+    await expect(pickProject(prompter, "/tmp/eve-agent", "team-a", { message })).resolves.toEqual({
+      project: "beta-agent",
+      exists: true,
+    });
+    expect(search).toHaveBeenNthCalledWith(1, expect.objectContaining({ message }));
+    expect(search).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        initialQuery: "missing",
+        message,
+        notices: [{ tone: "warning", text: 'No projects matched "missing" in team-a.' }],
+      }),
+    );
+  });
 });
 
 describe("pickNewProjectName", () => {
   it("prompts for a replacement when the default project name already exists", async () => {
     mockedCaptureVercel
-      .mockResolvedValueOnce(captured(JSON.stringify({ id: "prj_existing", name: "my-agent" })))
+      .mockResolvedValueOnce(
+        captured(
+          JSON.stringify({ id: "prj_existing", name: "my-agent", accountId: "team_account" }),
+        ),
+      )
       .mockResolvedValueOnce(
         failedCapture(
           JSON.stringify({ error: { code: "not_found", message: "Project not found" } }),
@@ -342,7 +635,7 @@ describe("pickNewProjectName", () => {
 describe("assertNewProjectNameAvailable", () => {
   it("uses an exact project lookup instead of a paginated list", async () => {
     mockedCaptureVercel.mockResolvedValue(
-      captured(JSON.stringify({ id: "prj_existing", name: "my-agent" })),
+      captured(JSON.stringify({ id: "prj_existing", name: "my-agent", accountId: "team_account" })),
     );
 
     await expect(
@@ -380,7 +673,7 @@ describe("assertNewProjectNameAvailable", () => {
 describe("linkProject", () => {
   it("fails a new-project plan when that project name already exists", async () => {
     mockedCaptureVercel.mockResolvedValue(
-      captured(JSON.stringify({ id: "prj_existing", name: "my-agent" })),
+      captured(JSON.stringify({ id: "prj_existing", name: "my-agent", accountId: "team_account" })),
     );
     const { prompter } = createFakePrompter();
 
@@ -421,7 +714,9 @@ describe("linkProject", () => {
           JSON.stringify({ error: { code: "not_found", message: "Project not found" } }),
         ),
       )
-      .mockResolvedValueOnce(captured(JSON.stringify({ id: "prj_new", name: "my-agent" })));
+      .mockResolvedValueOnce(
+        captured(JSON.stringify({ id: "prj_new", name: "my-agent", accountId: "team_account" })),
+      );
     const { prompter } = createFakePrompter();
 
     await expect(
@@ -452,11 +747,12 @@ describe("linkProject", () => {
       ],
       { cwd: "/tmp/eve-agent", onOutput: expect.any(Function) },
     );
-    expect(mockedRunVercel).toHaveBeenNthCalledWith(
-      1,
-      ["link", "--project", "prj_new", "--scope", "team-a", "--yes"],
-      { cwd: "/tmp/eve-agent", onOutput: expect.any(Function), nonInteractive: true },
-    );
+    expect(mockedRunVercel).not.toHaveBeenCalled();
+    expect(mockedWriteProjectLink).toHaveBeenCalledWith({
+      projectRoot: "/tmp/eve-agent",
+      link: { projectId: "prj_new", orgId: "team_account", projectName: "my-agent" },
+      signal: undefined,
+    });
   });
 });
 
@@ -464,7 +760,7 @@ describe("linkProject", () => {
 function stubVercel(responses: {
   whoami?: string;
   teams?: { name: string; slug: string; current: boolean }[];
-  projects?: { name: string; id: string }[];
+  projects?: { name: string; id: string; updatedAt: number }[];
 }): void {
   mockedCaptureVercel.mockImplementation(async (args): Promise<VercelCaptureResult> => {
     const failed = (): VercelCaptureResult => ({
@@ -482,7 +778,7 @@ function stubVercel(responses: {
         ? failed()
         : { ok: true, stdout: JSON.stringify({ teams: responses.teams }) };
     }
-    if (args[0] === "project" && args[1] === "ls") {
+    if (args[0] === "api" && args[1]?.startsWith("/v9/projects?")) {
       return responses.projects === undefined
         ? failed()
         : { ok: true, stdout: JSON.stringify({ projects: responses.projects }) };
@@ -530,14 +826,41 @@ describe("pickTeam selection", () => {
 
     await expect(pickTeam(prompter, "/tmp/parent", undefined)).resolves.toBe("solo");
   });
+
+  it("shows the single team when the caller needs an explicit project target", async () => {
+    stubVercel({ teams: [{ name: "Solo", slug: "solo", current: true }] });
+    const { prompter, selectMessages } = answeringPrompter({ selects: ["solo"] });
+
+    await expect(
+      pickTeam(prompter, "/tmp/parent", undefined, { promptWhenSingle: true }),
+    ).resolves.toBe("solo");
+    expect(selectMessages).toEqual(["Select your team"]);
+  });
+
+  it("uses a caller-supplied team question", async () => {
+    stubVercel({
+      teams: [
+        { name: "Current", slug: "current", current: true },
+        { name: "Other", slug: "other", current: false },
+      ],
+    });
+    const { prompter, selectMessages } = answeringPrompter({ selects: ["other"] });
+
+    await expect(
+      pickTeam(prompter, "/tmp/parent", undefined, {
+        message: "Which team does https://agent.example.com/ belong to?",
+      }),
+    ).resolves.toBe("other");
+    expect(selectMessages).toEqual(["Which team does https://agent.example.com/ belong to?"]);
+  });
 });
 
 describe("pickProject selection", () => {
   it("returns an existing selection as exists:true", async () => {
     stubVercel({
       projects: [
-        { name: "alpha", id: "prj_a" },
-        { name: "beta", id: "prj_b" },
+        { name: "alpha", id: "prj_a", updatedAt: 1 },
+        { name: "beta", id: "prj_b", updatedAt: 2 },
       ],
     });
     const { prompter, selectMessages } = answeringPrompter({ selects: ["beta"] });
@@ -547,6 +870,23 @@ describe("pickProject selection", () => {
       exists: true,
     });
     expect(selectMessages).toEqual(["Project to link"]);
+  });
+
+  it("uses a caller-supplied project question in the select fallback", async () => {
+    stubVercel({
+      projects: [
+        { name: "alpha", id: "prj_a", updatedAt: 1 },
+        { name: "beta", id: "prj_b", updatedAt: 2 },
+      ],
+    });
+    const { prompter, selectMessages } = answeringPrompter({ selects: ["beta"] });
+
+    await expect(
+      pickProject(prompter, "/tmp/parent", "team", {
+        message: "Which project is https://agent.example.com/ part of?",
+      }),
+    ).resolves.toEqual({ project: "beta", exists: true });
+    expect(selectMessages).toEqual(["Which project is https://agent.example.com/ part of?"]);
   });
 
   it("returns a typed-in name as exists:false when no projects exist", async () => {

@@ -17,6 +17,7 @@ const mockedSpawn = vi.mocked(spawn);
  * streams, close/error events, and a spyable `kill`.
  */
 type ChildProcessDouble = ChildProcess & {
+  stdin: PassThrough;
   stdout: PassThrough;
   stderr: PassThrough;
   kill: ReturnType<typeof vi.fn<(signal?: NodeJS.Signals | number) => boolean>>;
@@ -24,6 +25,7 @@ type ChildProcessDouble = ChildProcess & {
 
 function createChildProcess(): ChildProcessDouble {
   const child = new EventEmitter() as ChildProcessDouble;
+  child.stdin = new PassThrough();
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
   child.kill = vi.fn((_signal?: NodeJS.Signals | number) => true);
@@ -139,6 +141,62 @@ describe("runVercel", () => {
   });
 });
 
+describe("signal close", () => {
+  test("runVercel reports a signal as failure", async () => {
+    const child = createChildProcess();
+    mockSpawnReturn(child);
+    const onOutput = vi.fn();
+
+    const result = runVercel(["deploy"], { cwd: "/tmp/eve-agent", onOutput });
+    child.emit("close", null, "SIGTERM");
+
+    await expect(result).resolves.toBe(false);
+    expect(onOutput).toHaveBeenCalledWith({
+      stream: "stderr",
+      text: "vercel deploy terminated by signal SIGTERM.",
+    });
+  });
+
+  test("runVercelCaptureStdout reports a signal as failure", async () => {
+    const child = createChildProcess();
+    mockSpawnReturn(child);
+    const onOutput = vi.fn();
+
+    const result = runVercelCaptureStdout(["login"], {
+      cwd: "/tmp/eve-agent",
+      onOutput,
+    });
+    child.stdout.emit("data", Buffer.from("partial"));
+    child.emit("close", null, "SIGINT");
+
+    await expect(result).resolves.toEqual({ ok: false, stdout: "partial" });
+    expect(onOutput).toHaveBeenCalledWith({
+      stream: "stderr",
+      text: "vercel login terminated by signal SIGINT.",
+    });
+  });
+
+  test("captureVercel preserves the signal failure", async () => {
+    const child = createChildProcess();
+    mockSpawnReturn(child);
+
+    const result = captureVercel(["whoami"], { cwd: "/tmp/eve-agent" });
+    child.stdout.emit("data", Buffer.from("partial"));
+    child.emit("close", null, "SIGTERM");
+
+    await expect(result).resolves.toEqual({
+      ok: false,
+      failure: {
+        code: null,
+        signal: "SIGTERM",
+        stdout: "partial",
+        stderr: "",
+        message: "vercel whoami terminated by signal SIGTERM.",
+      },
+    });
+  });
+});
+
 describe("timeoutMs", () => {
   test("runVercelCaptureStdout settles as a failure and kills a stalled child", async () => {
     vi.useFakeTimers();
@@ -229,6 +287,27 @@ describe("timeoutMs", () => {
 });
 
 describe("captureVercel", () => {
+  test("writes a request body to stdin", async () => {
+    const child = createChildProcess();
+    mockSpawnReturn(child);
+    const chunks: Buffer[] = [];
+    child.stdin.on("data", (chunk: Buffer) => chunks.push(chunk));
+
+    const result = captureVercel(["api", "/v9/projects/example", "--input", "-"], {
+      cwd: "/tmp/eve-agent",
+      stdin: '{"trustedSources":{}}',
+    });
+    child.emit("close", 0);
+
+    await expect(result).resolves.toEqual({ ok: true, stdout: "" });
+    expect(mockedSpawn).toHaveBeenCalledWith(
+      "vercel",
+      ["api", "/v9/projects/example", "--input", "-"],
+      expect.objectContaining({ stdio: ["pipe", "pipe", "pipe"] }),
+    );
+    expect(Buffer.concat(chunks).toString("utf8")).toBe('{"trustedSources":{}}');
+  });
+
   test("resolves with stdout on a clean exit", async () => {
     const child = createChildProcess();
     mockSpawnReturn(child);

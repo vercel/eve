@@ -26,15 +26,15 @@ export interface LinkProjectOptions {
 
 /**
  * THE PROJECT BOX. Executes the resolved Vercel project plan after scaffolding,
- * once the project directory exists (so `vercel link` can write `.vercel/`).
+ * once the project directory exists (so its `.vercel/` link can be written).
  * The gather prompts for nothing: every decision was made up front by the
  * resolve-provisioning box, so `perform` owns all the work.
  *
  * The plan is authoritative. The box always re-links to the planned project so
  * a stale or mismatched `.vercel` link can never silently win over the choice
- * made up front. `vercel link --project X --yes` is an idempotent rewrite, so
- * re-runs stay safe. The resolution read back from `.vercel/project.json` lands
- * in `state.project`, which every later box reads.
+ * made up front. Writing the selected project metadata is idempotent, so
+ * re-runs stay safe. The resolution read back from `.vercel/project.json`
+ * lands in `state.project`, which every later box reads.
  *
  * Named `linkVercelProject` because the setup island also exports the
  * `linkProject` executor helper this box drives.

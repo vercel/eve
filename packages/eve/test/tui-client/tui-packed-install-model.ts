@@ -45,7 +45,7 @@ interface PackedTuiHarness {
     send(sequence: string): void;
     ctrlC(): void;
   };
-  createPromptCommandHandler: (options: { appRoot?: string }) => unknown;
+  createPromptCommandHandler: (options: { target: { kind: "local"; appRoot: string } }) => unknown;
 }
 
 void (async () => {
@@ -105,7 +105,9 @@ void (async () => {
       userInput: input,
       name: "Packed install model command",
       appRoot: consumerRoot,
-      promptCommandHandler: createPromptCommandHandler({ appRoot: consumerRoot }),
+      promptCommandHandler: createPromptCommandHandler({
+        target: { kind: "local", appRoot: consumerRoot },
+      }),
     });
     const runPromise = runner.run();
 

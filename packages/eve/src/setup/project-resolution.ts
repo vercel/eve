@@ -1,5 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { z } from "zod";
 
 import { captureVercel } from "./primitives/run-vercel.js";
 
@@ -14,9 +15,83 @@ export interface DeploymentInfo {
   productionUrl?: string;
 }
 
-interface VercelProjectJson {
-  projectId?: unknown;
-  orgId?: unknown;
+const VercelProjectLinkSchema = z.object({
+  projectId: z.string().min(1),
+  orgId: z.string().min(1),
+  projectName: z.string().min(1).optional(),
+});
+
+/** Project and team identifiers from a valid on-disk Vercel link. */
+export type VercelProjectLink = z.infer<typeof VercelProjectLinkSchema>;
+
+interface ResolvedVercelProjectLink extends VercelProjectLink {
+  readonly projectName: string;
+}
+
+interface WriteProjectLinkInput {
+  readonly projectRoot: string;
+  readonly link: ResolvedVercelProjectLink;
+  readonly signal?: AbortSignal;
+}
+
+const VERCEL_DIRECTORY_README = `> Why do I have a folder named ".vercel" in my project?
+The ".vercel" folder is created when you link a directory to a Vercel project.
+
+> What does the "project.json" file contain?
+The "project.json" file contains:
+- The ID of the Vercel project that you linked ("projectId")
+- The ID of the user or team your Vercel project is owned by ("orgId")
+
+> Should I commit the ".vercel" folder?
+No, you should not share the ".vercel" folder with anyone.
+Upon creation, it will be automatically added to your ".gitignore" file.
+`;
+
+async function ensureVercelIgnored(
+  projectRoot: string,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  try {
+    const path = join(projectRoot, ".gitignore");
+    const current = await readFile(path, "utf8").catch(() => "");
+    const newline = current.includes("\r\n") ? "\r\n" : "\n";
+    if (current.split(/\r?\n/u).includes(".vercel")) return;
+    const separator = current.length === 0 || current.endsWith(newline) ? "" : newline;
+    await writeFile(path, `${current}${separator}.vercel${newline}`, { encoding: "utf8", signal });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    // Match `vercel link`: the project link remains valid when updating the
+    // auxiliary ignore file is not possible.
+  }
+}
+
+/** Writes the Vercel CLI's project-scoped link files without invoking plugin onboarding. */
+export async function writeProjectLink(input: WriteProjectLinkInput): Promise<void> {
+  input.signal?.throwIfAborted();
+  const vercelDirectory = join(input.projectRoot, ".vercel");
+  await mkdir(vercelDirectory, { recursive: true });
+  input.signal?.throwIfAborted();
+  await writeFile(
+    join(vercelDirectory, "project.json"),
+    `${JSON.stringify(input.link, null, 2)}\n`,
+    { encoding: "utf8", signal: input.signal },
+  );
+  await writeFile(join(vercelDirectory, "README.txt"), VERCEL_DIRECTORY_README, {
+    encoding: "utf8",
+    signal: input.signal,
+  });
+  await ensureVercelIgnored(input.projectRoot, input.signal);
+}
+
+/** Reads the linked Vercel project and team ids from `.vercel/project.json`. */
+export async function readProjectLink(projectPath: string): Promise<VercelProjectLink | undefined> {
+  try {
+    const raw = await readFile(join(projectPath, ".vercel", "project.json"), "utf8");
+    const parsed = VercelProjectLinkSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 interface VercelApiProject {
@@ -68,25 +143,9 @@ export async function detectDeployment(
   options: ProjectDetectionOptions = {},
 ): Promise<DeploymentInfo> {
   options.signal?.throwIfAborted();
-  let projectJsonRaw: string;
-  try {
-    projectJsonRaw = await readFile(join(projectPath, ".vercel", "project.json"), "utf8");
-  } catch {
-    return { state: "unlinked" };
-  }
-
-  let projectJson: VercelProjectJson;
-  try {
-    projectJson = JSON.parse(projectJsonRaw) as VercelProjectJson;
-  } catch {
-    return { state: "unlinked" };
-  }
-
-  const projectId = typeof projectJson.projectId === "string" ? projectJson.projectId : undefined;
-  const orgId = typeof projectJson.orgId === "string" ? projectJson.orgId : undefined;
-  if (!projectId || !orgId) {
-    return { state: "unlinked" };
-  }
+  const link = await readProjectLink(projectPath);
+  if (link === undefined) return { state: "unlinked" };
+  const { projectId, orgId } = link;
 
   const productionUrl = await fetchProductionAlias(projectId, orgId, projectPath, options);
   options.signal?.throwIfAborted();
@@ -148,21 +207,9 @@ export async function detectProjectIdentity(
   options: ProjectDetectionOptions = {},
 ): Promise<ProjectIdentity | undefined> {
   options.signal?.throwIfAborted();
-  let projectJsonRaw: string;
-  try {
-    projectJsonRaw = await readFile(join(projectPath, ".vercel", "project.json"), "utf8");
-  } catch {
-    return undefined;
-  }
-  let projectJson: VercelProjectJson;
-  try {
-    projectJson = JSON.parse(projectJsonRaw) as VercelProjectJson;
-  } catch {
-    return undefined;
-  }
-  const projectId = typeof projectJson.projectId === "string" ? projectJson.projectId : undefined;
-  const orgId = typeof projectJson.orgId === "string" ? projectJson.orgId : undefined;
-  if (!projectId || !orgId) return undefined;
+  const link = await readProjectLink(projectPath);
+  if (link === undefined) return undefined;
+  const { projectId, orgId } = link;
 
   // Independent lookups; fetched concurrently because this read gates the
   // first paint of every surface that names the link (/model, the dashboard).

@@ -7,7 +7,12 @@ import { eveCliBanner } from "#cli/banner.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
 import { LOG_DISPLAY_MODES, parseLogDisplayMode } from "#cli/dev/tui/log-display-mode.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
-import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
+import {
+  createCliTheme,
+  renderCliTaggedLine,
+  sanitizeForTerminal,
+  type CliTheme,
+} from "#cli/ui/output.js";
 import type {
   AssistantResponseStatsMode,
   LogDisplayMode,
@@ -60,7 +65,12 @@ interface CliRuntimeDependencies {
     options?: { json?: boolean },
   ): Promise<void>;
   runDevelopmentTui(
-    input: { serverUrl: string; appRoot?: string; initialInput?: string } & TuiDisplayOptions,
+    input: {
+      target:
+        | { kind: "local"; serverUrl: string; appRoot: string }
+        | { kind: "remote"; serverUrl: string; workspaceRoot: string };
+      initialInput?: string;
+    } & TuiDisplayOptions,
   ): Promise<void>;
   runEvalCommand(
     evalIds: readonly string[],
@@ -250,7 +260,7 @@ export function resolveDevUiMode(input: {
 
 /**
  * Resolves the terminal UI's header title: an explicit `--name`, else the
- * remote server's host (for `--url`), else the humanized app-folder name
+ * `remote@<host>` (for `--url`), else the humanized app-folder name
  * (e.g. `apps/fixtures/weather-agent` → "Weather Agent"). Returns `undefined` when
  * nothing meaningful can be derived, so the runner falls back to its own
  * default.
@@ -266,7 +276,7 @@ export function resolveTuiTitle(input: {
 
   if (input.remoteServerUrl !== undefined) {
     try {
-      return new URL(input.remoteServerUrl).host;
+      return `remote@${new URL(input.remoteServerUrl).host}`;
     } catch {
       return undefined;
     }
@@ -274,6 +284,11 @@ export function resolveTuiTitle(input: {
 
   const humanized = humanizeProjectName(basename(input.appRoot));
   return humanized.length > 0 ? humanized : undefined;
+}
+
+/** Renders the one-line handoff from the CLI banner into a remote TUI. */
+export function renderRemoteConnectionLine(theme: CliTheme, serverUrl: string): string {
+  return `↗ connecting to ${theme.accent(sanitizeForTerminal(serverUrl))}`;
 }
 
 function humanizeProjectName(name: string): string {
@@ -521,12 +536,12 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
         const title = resolveTuiTitle({ name: options.name, remoteServerUrl, appRoot });
         if (title !== undefined) display.name = title;
         const tuiInput: Parameters<CliRuntimeDependencies["runDevelopmentTui"]>[0] = {
-          serverUrl,
+          target:
+            remoteServerUrl === undefined
+              ? { kind: "local", serverUrl, appRoot }
+              : { kind: "remote", serverUrl, workspaceRoot: appRoot },
           ...display,
         };
-        if (remoteServerUrl === undefined) {
-          tuiInput.appRoot = appRoot;
-        }
         if (options.input !== undefined) {
           tuiInput.initialInput = options.input;
         }
@@ -534,13 +549,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       };
 
       if (remoteServerUrl) {
-        logger.log(
-          renderCliTaggedLine(theme, {
-            message: `connecting to ${remoteServerUrl}`,
-            tag: "dev",
-            tone: "info",
-          }),
-        );
+        logger.log(renderRemoteConnectionLine(theme, remoteServerUrl));
 
         if (mode === "headless") {
           logger.log(

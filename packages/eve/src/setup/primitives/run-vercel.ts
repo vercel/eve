@@ -97,6 +97,36 @@ function abortMessage(args: string[]): string {
   return `vercel ${args.join(" ")} was aborted.`;
 }
 
+type ChildCloseOutcome =
+  | { readonly kind: "success" }
+  | { readonly kind: "exit"; readonly code: number }
+  | { readonly kind: "signal"; readonly signal: NodeJS.Signals }
+  | { readonly kind: "unknown" };
+
+function classifyChildClose(
+  code: number | null,
+  signal: NodeJS.Signals | null | undefined,
+): ChildCloseOutcome {
+  if (signal !== null && signal !== undefined) return { kind: "signal", signal };
+  if (code === 0) return { kind: "success" };
+  if (code !== null) return { kind: "exit", code };
+  return { kind: "unknown" };
+}
+
+function closeFailureMessage(
+  args: string[],
+  outcome: Exclude<ChildCloseOutcome, { kind: "success" }>,
+): string {
+  switch (outcome.kind) {
+    case "exit":
+      return `vercel ${args.join(" ")} exited with code ${outcome.code}.`;
+    case "signal":
+      return `vercel ${args.join(" ")} terminated by signal ${outcome.signal}.`;
+    case "unknown":
+      return `vercel ${args.join(" ")} terminated without an exit code.`;
+  }
+}
+
 function isAbortError(error: NodeJS.ErrnoException, signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true || error.name === "AbortError" || error.code === "ABORT_ERR";
 }
@@ -212,20 +242,21 @@ export async function runVercel(args: string[], options: RunVercelOptions): Prom
         settle(false);
       }
     });
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       disarmAbort();
       disarmDeadline();
       if (options.signal?.aborted === true) {
         settle(false);
         return;
       }
+      const outcome = classifyChildClose(code, signal);
       // After a timeout has settled the run, the eventual kill-driven exit
       // must not inject a second, stale diagnostic into the renderer.
-      if (!settled && code !== 0 && code !== null) {
+      if (!settled && outcome.kind !== "success") {
         outputBuffer?.flush();
-        reportFailure(`vercel ${args.join(" ")} exited with code ${code}.`);
+        reportFailure(closeFailureMessage(args, outcome));
       }
-      settle(code === 0);
+      settle(outcome.kind === "success");
     });
   });
 }
@@ -306,19 +337,20 @@ export async function runVercelCaptureStdout(
       );
       settle(false);
     });
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       disarmAbort();
       disarmDeadline();
       if (options.signal?.aborted === true) {
         settle(false);
         return;
       }
+      const outcome = classifyChildClose(code, signal);
       // After a timeout has settled the run, the eventual kill-driven exit
       // must not inject a second, stale diagnostic into the renderer.
-      if (!settled && code !== 0 && code !== null) {
-        reportFailure(`vercel ${args.join(" ")} exited with code ${code}.`);
+      if (!settled && outcome.kind !== "success") {
+        reportFailure(closeFailureMessage(args, outcome));
       }
-      settle(code === 0);
+      settle(outcome.kind === "success");
     });
   });
 }
@@ -327,6 +359,8 @@ export async function runVercelCaptureStdout(
 export interface VercelCaptureFailure {
   /** Process exit code, or `null` when killed by a signal; absent for a spawn error (the process never ran). */
   code?: number | null;
+  /** Signal that terminated the child, when Node reports one. */
+  signal?: NodeJS.Signals;
   /** `error.code` from a spawn failure, e.g. `"ENOENT"` when `vercel` is not on `PATH`. */
   errno?: string;
   /** Captured stderr (best-effort); empty when the process never ran. */
@@ -347,6 +381,11 @@ export type VercelCaptureResult =
   | { ok: true; stdout: string }
   | { ok: false; failure: VercelCaptureFailure };
 
+/** Options for a captured Vercel CLI call, including an optional stdin body. */
+export interface CaptureVercelOptions extends RunVercelOptions {
+  stdin?: string;
+}
+
 /**
  * Runs a Vercel CLI lookup and captures stdout.
  *
@@ -356,7 +395,7 @@ export type VercelCaptureResult =
  */
 export async function captureVercel(
   args: string[],
-  options: RunVercelOptions,
+  options: CaptureVercelOptions,
 ): Promise<VercelCaptureResult> {
   if (options.signal?.aborted === true) {
     return {
@@ -378,7 +417,7 @@ export async function captureVercel(
       [...invocation.commandArgs, ...commandArgs(args, options.nonInteractive)],
       {
         cwd,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
         env: buildSpawnEnv(options.extraEnv ?? {}),
         signal: options.signal,
       },
@@ -391,6 +430,12 @@ export async function captureVercel(
       stderrChunks.push(chunk.toString("utf8"));
       outputBuffer?.write("stderr", chunk);
     });
+    if (options.stdin !== undefined) {
+      // A child may exit before reading stdin. Ignore the resulting EPIPE so
+      // the caller receives the child's exit failure.
+      child.stdin?.on("error", () => {});
+      child.stdin?.end(options.stdin);
+    }
 
     let settled = false;
     function fail(failure: VercelCaptureFailure, report = true): void {
@@ -432,7 +477,7 @@ export async function captureVercel(
             : `vercel ${args.join(" ")} failed: ${error.message}`,
       });
     });
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       disarmAbort();
       disarmDeadline();
       if (options.signal?.aborted === true) {
@@ -447,13 +492,16 @@ export async function captureVercel(
         );
         return;
       }
-      if (code !== 0 && code !== null) {
-        fail({
-          code,
+      const outcome = classifyChildClose(code, signal);
+      if (outcome.kind !== "success") {
+        const failure: VercelCaptureFailure = {
+          code: outcome.kind === "exit" ? outcome.code : null,
           stdout: stdoutChunks.join(""),
           stderr: stderrChunks.join(""),
-          message: `vercel ${args.join(" ")} exited with code ${code}.`,
-        });
+          message: closeFailureMessage(args, outcome),
+        };
+        if (outcome.kind === "signal") failure.signal = outcome.signal;
+        fail(failure);
         return;
       }
       succeed();

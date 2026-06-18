@@ -157,8 +157,8 @@ function vercelChannelBlocker(
   authStatus: VercelAuthStatus,
   projectLinked: boolean,
 ): string | undefined {
-  if (authStatus === "cli-missing") return "Vercel CLI not found, see /vc";
-  if (authStatus === "logged-out") return "Log in to Vercel first, see /login";
+  if (authStatus === "cli-missing") return "Vercel CLI not found, see /vc:install";
+  if (authStatus === "logged-out") return "Log in to Vercel first, see /vc:login";
   if (authStatus === "unavailable") return "Couldn't reach Vercel, check your connection";
   if (!projectLinked) return "Requires Vercel account, see /model";
   return undefined;

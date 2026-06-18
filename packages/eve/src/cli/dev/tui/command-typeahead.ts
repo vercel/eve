@@ -7,7 +7,7 @@
  */
 
 import type { PromptCommandSpec } from "./prompt-commands.js";
-import { sliceVisible, visibleLength } from "./terminal-text.js";
+import { clipVisible } from "./terminal-text.js";
 import type { Theme } from "./theme.js";
 
 /**
@@ -152,5 +152,5 @@ export function renderCommandSuggestions(
     return `${cursor} ${name}${c.dim(detail)}${pad}${c.dim(spec.description)}`;
   });
 
-  return rows.map((row) => (visibleLength(row) > width ? sliceVisible(row, width) : row));
+  return rows.map((row) => clipVisible(row, width));
 }

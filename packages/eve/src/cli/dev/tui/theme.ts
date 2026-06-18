@@ -40,6 +40,7 @@ export interface ThemeColors {
   bold: Style;
   dim: Style;
   italic: Style;
+  inverse: Style;
   white: Style;
   gray: Style;
   cyan: Style;
@@ -184,6 +185,7 @@ export function createTheme(options: CreateThemeOptions = {}): Theme {
       bold: ansi(1, 22, color),
       dim: ansi(2, 22, color),
       italic: ansi(3, 23, color),
+      inverse: ansi(7, 27, color),
       white: ansi(97, 39, color),
       gray: ansi(90, 39, color),
       cyan: ansi(36, 39, color),

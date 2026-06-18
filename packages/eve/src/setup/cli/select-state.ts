@@ -19,22 +19,56 @@ export type SelectEvent =
   | { type: "down" }
   | { type: "toggle" };
 
+/** Virtual row appended after the filtered options. */
+export type SelectTrailingRow = "submit" | "query-action";
+
 /** Inputs that stay fixed across a single select session. */
 export interface SelectContext {
   /** Selectable entries, including any disabled ones (the cursor skips them). */
   options: readonly PromptOption<string>[];
   /**
-   * Appends a virtual Submit row after the visible options. The cursor can
-   * land on it (index `visible.length`, see {@link submitRowIndex}) but it
-   * carries no value: `toggle` ignores it and {@link selectValueAtCursor}
-   * reads `undefined`. Multi-selects use it as the explicit confirm target.
+   * Appends a virtual row after the visible options. Submit is always present;
+   * query-action is present only for a nonblank filter.
    */
-  submitRow?: boolean;
+  trailingRow?: SelectTrailingRow;
 }
 
-/** Cursor index of the virtual Submit row: one past the visible options. */
-export function submitRowIndex(visible: readonly PromptOption<string>[]): number {
+/** Cursor index of a virtual trailing row: one past the visible options. */
+export function trailingRowIndex(visible: readonly PromptOption<string>[]): number {
   return visible.length;
+}
+
+export type SelectCursorRow =
+  | { readonly kind: "option"; readonly option: PromptOption<string> }
+  | { readonly kind: "submit" }
+  | { readonly kind: "query-action"; readonly query: string };
+
+function activeTrailingRow(
+  trailingRow: SelectTrailingRow | undefined,
+  filter: string,
+): SelectTrailingRow | undefined {
+  if (trailingRow !== "query-action") return trailingRow;
+  return filter.trim().length > 0 ? trailingRow : undefined;
+}
+
+/** Row addressed by the cursor after filtering and virtual-row expansion. */
+export function selectCursorRow(
+  state: SelectState,
+  context: SelectContext,
+): SelectCursorRow | undefined {
+  const visible = filterOptions(context.options, state.filter);
+  const option = visible[state.cursor];
+  if (option !== undefined) return { kind: "option", option };
+  if (state.cursor !== trailingRowIndex(visible)) return undefined;
+
+  switch (activeTrailingRow(context.trailingRow, state.filter)) {
+    case "submit":
+      return { kind: "submit" };
+    case "query-action":
+      return { kind: "query-action", query: state.filter.trim() };
+    case undefined:
+      return undefined;
+  }
 }
 
 /**
@@ -72,10 +106,14 @@ function isActionable(option: PromptOption<string>): boolean {
  * First focusable index in a visible list. Falls back to the Submit row when
  * every entry is non-interactive and one exists, otherwise to 0.
  */
-function firstFocusableIndex(visible: readonly PromptOption<string>[], submitRow: boolean): number {
+function firstFocusableIndex(
+  visible: readonly PromptOption<string>[],
+  trailingRow: SelectTrailingRow | undefined,
+  filter: string,
+): number {
   const index = visible.findIndex(isFocusable);
   if (index >= 0) return index;
-  return submitRow ? submitRowIndex(visible) : 0;
+  return activeTrailingRow(trailingRow, filter) === undefined ? 0 : trailingRowIndex(visible);
 }
 
 /**
@@ -86,14 +124,16 @@ function stepCursor(
   visible: readonly PromptOption<string>[],
   cursor: number,
   delta: number,
-  submitRow: boolean,
+  trailingRow: SelectTrailingRow | undefined,
+  filter: string,
 ): number {
-  const total = visible.length + (submitRow ? 1 : 0);
+  const hasTrailingRow = activeTrailingRow(trailingRow, filter) !== undefined;
+  const total = visible.length + (hasTrailingRow ? 1 : 0);
   if (total === 0) return cursor;
   let next = cursor;
   for (let i = 0; i < total; i += 1) {
     next = (next + delta + total) % total;
-    if (submitRow && next === submitRowIndex(visible)) return next;
+    if (hasTrailingRow && next === trailingRowIndex(visible)) return next;
     const option = visible[next];
     if (option && isFocusable(option)) return next;
   }
@@ -113,14 +153,17 @@ export function reduceSelect(
   event: SelectEvent,
   context: SelectContext,
 ): SelectState {
-  const submitRow = context.submitRow === true;
   switch (event.type) {
     case "char": {
       const filter = state.filter + event.char;
       return {
         ...state,
         filter,
-        cursor: firstFocusableIndex(filterOptions(context.options, filter), submitRow),
+        cursor: firstFocusableIndex(
+          filterOptions(context.options, filter),
+          context.trailingRow,
+          filter,
+        ),
       };
     }
     case "backspace": {
@@ -129,14 +172,18 @@ export function reduceSelect(
       return {
         ...state,
         filter,
-        cursor: firstFocusableIndex(filterOptions(context.options, filter), submitRow),
+        cursor: firstFocusableIndex(
+          filterOptions(context.options, filter),
+          context.trailingRow,
+          filter,
+        ),
       };
     }
     case "up":
     case "down": {
       const visible = filterOptions(context.options, state.filter);
       const delta = event.type === "up" ? -1 : 1;
-      const cursor = stepCursor(visible, state.cursor, delta, submitRow);
+      const cursor = stepCursor(visible, state.cursor, delta, context.trailingRow, state.filter);
       return cursor === state.cursor ? state : { ...state, cursor };
     }
     case "toggle": {
@@ -162,11 +209,11 @@ export function initialSelectState(input: {
   filter?: string;
   defaultValue?: string;
   initialValues?: readonly string[];
-  submitRow?: boolean;
+  trailingRow?: SelectTrailingRow;
 }): SelectState {
   const filter = input.filter ?? "";
   const visible = filterOptions(input.options, filter);
-  let cursor = firstFocusableIndex(visible, input.submitRow === true);
+  let cursor = firstFocusableIndex(visible, input.trailingRow, filter);
   if (input.defaultValue !== undefined) {
     const index = visible.findIndex(
       (option) => isFocusable(option) && option.value === input.defaultValue,

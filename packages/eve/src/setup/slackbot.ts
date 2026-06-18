@@ -21,11 +21,11 @@ import {
   CONNECT_LOOKUP_TIMEOUT_MS,
   fetchSlackWorkspace,
   findSlackConnector,
-  readProjectLink,
   listSlackConnectors,
   type SlackConnectLifecycleDeps,
   type SlackConnectorCleanupResult,
 } from "./slack-connect-lifecycle.js";
+import { readProjectLink } from "./project-resolution.js";
 
 // Re-exported so the Connect parsers remain importable from the provisioning
 // entry point (and unit-testable alongside it).

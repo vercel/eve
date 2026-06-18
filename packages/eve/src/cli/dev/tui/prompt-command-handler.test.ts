@@ -2,6 +2,7 @@ import pc from "picocolors";
 import { describe, expect, it, vi } from "vitest";
 
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
+import type { RemoteConnectionController } from "./remote-connection.js";
 import type { AgentTUIRenderer, PromptCommandHandlerContext } from "./runner.js";
 import type { SetupFlowRenderer } from "./setup-flow.js";
 
@@ -14,6 +15,7 @@ function context(renderer: Partial<AgentTUIRenderer> = {}): PromptCommandHandler
       ...renderer,
     },
     title: "Weather Agent",
+    trigger: "command",
   };
 }
 
@@ -22,6 +24,7 @@ function setupFlowRenderer() {
     begin: vi.fn(),
     end: vi.fn(),
     readSelect: vi.fn(async () => undefined),
+    readQuerySelect: vi.fn(async () => undefined),
     readEditableSelect: vi.fn(async () => undefined),
     readText: vi.fn(async () => undefined),
     readAcknowledge: vi.fn(async () => {}),
@@ -43,7 +46,7 @@ describe("createPromptCommandHandler", () => {
         ({ kind: "changed", to: slug }) as const,
     );
     const handler = createPromptCommandHandler({
-      appRoot: APP_ROOT,
+      target: { kind: "local", appRoot: APP_ROOT },
       applyModel,
       modelChangeRefusal: async () => null,
     });
@@ -68,7 +71,7 @@ describe("createPromptCommandHandler", () => {
         ({ kind: "changed", to: slug }) as const,
     );
     const handler = createPromptCommandHandler({
-      appRoot: APP_ROOT,
+      target: { kind: "local", appRoot: APP_ROOT },
       applyModel,
       modelChangeRefusal: async () => "Model is pinned to the external provider `anthropic`.",
     });
@@ -84,7 +87,10 @@ describe("createPromptCommandHandler", () => {
   it("sends a bare /model down the setup-flow path, not a bespoke picker", async () => {
     const applyModel = vi.fn(async () => ({ kind: "rejected", message: "unused" }) as const);
     const readInputQuestion = vi.fn(async () => ({ optionId: "openai/gpt-5" }));
-    const handler = createPromptCommandHandler({ appRoot: APP_ROOT, applyModel });
+    const handler = createPromptCommandHandler({
+      target: { kind: "local", appRoot: APP_ROOT },
+      applyModel,
+    });
 
     // No setupFlow on the renderer: the flow path reports itself instead of
     // falling back to the old readInputQuestion picker.
@@ -99,12 +105,111 @@ describe("createPromptCommandHandler", () => {
   });
 
   it("reports that model changes need the local dev server", async () => {
-    const handler = createPromptCommandHandler({});
+    const handler = createPromptCommandHandler({
+      target: {
+        kind: "remote",
+        workspaceRoot: APP_ROOT,
+        host: "example.com",
+        serverUrl: "https://example.com/",
+      },
+    });
 
     await expect(
       handler.handle({ type: "extension", name: "model", argument: "" }, context()),
     ).resolves.toEqual({
       message: "/model needs eve dev running the local server (it is not available with --url).",
+    });
+  });
+
+  it("reports a login that completed before remote authentication was cancelled", async () => {
+    const setupFlow = setupFlowRenderer();
+    const remoteConnection: RemoteConnectionController = {
+      current: () => ({
+        target: {
+          serverUrl: "https://example.com",
+          host: "example.com",
+          workspaceRoot: APP_ROOT,
+        },
+        connection: {
+          state: "auth-required",
+          challenge: { kind: "eve-oidc" },
+        },
+      }),
+      check: async () => ({
+        state: "auth-required",
+        challenge: { kind: "eve-oidc" },
+      }),
+      authenticate: async () => ({
+        kind: "cancelled",
+        completedMutations: [{ kind: "vercel-login" }],
+      }),
+      reportFailure: () => ({ state: "checking" }),
+      dispose() {},
+    };
+    const handler = createPromptCommandHandler({
+      target: {
+        kind: "remote",
+        workspaceRoot: APP_ROOT,
+        host: "example.com",
+        serverUrl: "https://example.com/",
+      },
+    });
+
+    await expect(
+      handler.handle(
+        { type: "extension", name: "vc:auth", argument: "" },
+        {
+          ...context({ setupFlow }),
+          remoteConnection,
+        },
+      ),
+    ).resolves.toEqual({
+      message:
+        "/vc:auth cancelled after logging in to Vercel. No project, Trusted Sources, or environment changes were made.",
+    });
+  });
+
+  it("reports mutations that completed before /vc:auth was interrupted", async () => {
+    const setupFlow = {
+      ...setupFlowRenderer(),
+      waitForInterrupt: () => ({ promise: Promise.resolve(), dispose: vi.fn() }),
+    } satisfies SetupFlowRenderer;
+    const remoteConnection: RemoteConnectionController = {
+      current: () => ({
+        target: {
+          serverUrl: "https://example.com",
+          host: "example.com",
+          workspaceRoot: APP_ROOT,
+        },
+        connection: { state: "auth-required", challenge: { kind: "eve-oidc" } },
+      }),
+      check: async () => ({
+        state: "auth-required",
+        challenge: { kind: "eve-oidc" },
+      }),
+      authenticate: async () => ({
+        kind: "cancelled",
+        completedMutations: [{ kind: "environment-pulled", path: ".env.local" }],
+      }),
+      reportFailure: () => ({ state: "checking" }),
+      dispose() {},
+    };
+    const handler = createPromptCommandHandler({
+      target: {
+        kind: "remote",
+        workspaceRoot: APP_ROOT,
+        host: "example.com",
+        serverUrl: "https://example.com/",
+      },
+    });
+
+    await expect(
+      handler.handle(
+        { type: "extension", name: "vc:auth", argument: "" },
+        { ...context({ setupFlow }), remoteConnection },
+      ),
+    ).resolves.toEqual({
+      message: "/vc:auth interrupted. Completed before interruption: refreshed .env.local.",
     });
   });
 
@@ -115,7 +220,9 @@ describe("createPromptCommandHandler", () => {
 
     try {
       const setupFlow = setupFlowRenderer();
-      const handler = createPromptCommandHandler({ appRoot: APP_ROOT });
+      const handler = createPromptCommandHandler({
+        target: { kind: "local", appRoot: APP_ROOT },
+      });
 
       await expect(
         handler.handle({ type: "extension", name: "model", argument: "" }, context({ setupFlow })),

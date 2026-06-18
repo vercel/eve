@@ -51,7 +51,7 @@ async function runPendingDeployCycle(): Promise<void> {
     name: "TUI status line",
     appRoot,
     promptCommandHandler: createPromptCommandHandler({
-      appRoot,
+      target: { kind: "local", appRoot },
       flows: {
         runChannelsFlow: async () => ({ kind: "done", addedChannels: ["slack"] }),
         runDeployFlow: async () => ({ kind: "deployed" }),
@@ -109,7 +109,9 @@ async function runUnlinkedShowsNoVercelSegment(): Promise<void> {
     userInput: input,
     name: "TUI status line unlinked",
     appRoot,
-    promptCommandHandler: createPromptCommandHandler({ appRoot }),
+    promptCommandHandler: createPromptCommandHandler({
+      target: { kind: "local", appRoot },
+    }),
   });
   const runPromise = runner.run();
 

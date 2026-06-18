@@ -357,6 +357,43 @@ describe("renderSearchableSelect", () => {
     expect(rendered).not.toContain("to confirm");
   });
 
+  test("zero local matches render the external search as the selected row", () => {
+    const rendered = renderSearchableSelect({
+      colors: styledColors,
+      state: "active",
+      message: "Vercel project to link",
+      multiple: false,
+      filter: "inbound",
+      options: [],
+      cursor: 0,
+      selectedValues: [],
+      submitDisplay: "",
+      queryActionLabel: "Search for",
+    });
+
+    expect(rendered).toContain("<cyan>▷</cyan> <cyan>Search for 'inbound'</cyan>");
+    expect(rendered).not.toContain("(no local matches)");
+    expect(rendered).toContain("<cyan>enter</cyan><dim> to select</dim>");
+  });
+
+  test("partial local matches keep the external search visible and focusable", () => {
+    const rendered = renderSearchableSelect({
+      colors: styledColors,
+      state: "active",
+      message: "Vercel project to link",
+      multiple: false,
+      filter: "alpha",
+      options: [{ value: "alpha-local", label: "alpha-local" }],
+      cursor: 1,
+      selectedValues: [],
+      submitDisplay: "",
+      queryActionLabel: "Search for",
+    });
+
+    expect(rendered).toContain("alpha-local");
+    expect(rendered).toContain("<cyan>▷</cyan> <cyan>Search for 'alpha'</cyan>");
+  });
+
   test("multi-select: the cursor one past the options highlights the Submit row", () => {
     const rendered = renderSearchableSelect({
       colors: styledColors,

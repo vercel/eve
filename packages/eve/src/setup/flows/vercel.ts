@@ -47,7 +47,7 @@ function projectConnectionOption(authStatus: VercelAuthStatus): SelectOption<Gat
   const option: SelectOption<GatewayConnection> = {
     value: "project",
     label: "Connect via a project",
-    hint: "vercel link + env pull",
+    hint: "project link + env pull",
   };
 
   switch (authStatus) {
@@ -57,14 +57,14 @@ function projectConnectionOption(authStatus: VercelAuthStatus): SelectOption<Gat
       return {
         ...option,
         disabled: true,
-        disabledReason: "Vercel CLI not found, see /vc",
+        disabledReason: "Vercel CLI not found, see /vc:install",
         disabledReasonTone: "warning",
       };
     case "logged-out":
       return {
         ...option,
         disabled: true,
-        disabledReason: "Log in to Vercel first, see /login",
+        disabledReason: "Log in to Vercel first, see /vc:login",
         disabledReasonTone: "warning",
       };
     case "unavailable":

@@ -4,6 +4,7 @@ import {
   formatPromptCommandHelp,
   isPromptControlCommand,
   parsePromptCommand,
+  promptCommandsFor,
   PROMPT_COMMANDS,
 } from "./prompt-commands.js";
 
@@ -34,14 +35,19 @@ describe("parsePromptCommand", () => {
   });
 
   it("parses the setup commands", () => {
-    expect(parsePromptCommand("/vc")).toEqual({
+    expect(parsePromptCommand("/vc:install")).toEqual({
       type: "extension",
-      name: "vc",
+      name: "vc:install",
       argument: "",
     });
-    expect(parsePromptCommand("/login")).toEqual({
+    expect(parsePromptCommand("/vc:login")).toEqual({
       type: "extension",
-      name: "login",
+      name: "vc:login",
+      argument: "",
+    });
+    expect(parsePromptCommand("/vc:auth")).toEqual({
+      type: "extension",
+      name: "vc:auth",
       argument: "",
     });
     expect(parsePromptCommand("/channels")).toEqual({
@@ -77,11 +83,48 @@ describe("parsePromptCommand", () => {
   it("rejects near-misses and ordinary prompts", () => {
     expect(parsePromptCommand("/models")).toBeNull();
     expect(parsePromptCommand("/vercel")).toBeNull();
+    expect(parsePromptCommand("/vc")).toBeNull();
     expect(parsePromptCommand("/channels extra")).toBeNull();
     expect(parsePromptCommand("tell me about /channels")).toBeNull();
     expect(parsePromptCommand("/")).toBeNull();
     expect(parsePromptCommand("")).toBeNull();
     expect(parsePromptCommand("hello")).toBeNull();
+  });
+});
+
+describe("promptCommandsFor", () => {
+  it("exposes project commands only for local sessions", () => {
+    const names = promptCommandsFor("local").map((command) => command.name);
+    expect(names).toContain("model");
+    expect(names).toContain("channels");
+    expect(names).toContain("deploy");
+    expect(names).not.toContain("vc:auth");
+  });
+
+  it("exposes remote OIDC auth only for remote sessions", () => {
+    const names = promptCommandsFor("remote").map((command) => command.name);
+    expect(names).toContain("vc:install");
+    expect(names).toContain("vc:login");
+    expect(names).toContain("vc:auth");
+    expect(names).not.toContain("model");
+    expect(names).not.toContain("channels");
+    expect(names).not.toContain("deploy");
+  });
+
+  it("filters discovery without weakening global recognition", () => {
+    const remote = promptCommandsFor("remote");
+    expect(parsePromptCommand("/vc:auth")).toEqual({
+      type: "extension",
+      name: "vc:auth",
+      argument: "",
+    });
+    expect(parsePromptCommand("/model")).toEqual({
+      type: "extension",
+      name: "model",
+      argument: "",
+    });
+    expect(formatPromptCommandHelp(remote)).toContain("/vc:auth");
+    expect(formatPromptCommandHelp(remote)).not.toContain("/model");
   });
 });
 

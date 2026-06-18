@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import pc from "picocolors";
 
 import { initialSelectState } from "#setup/cli/select-state.js";
 import { lineOf } from "./line-editor.js";
@@ -23,6 +24,7 @@ describe("renderFlowPanel", () => {
     const rows = renderFlowPanel(
       {
         title: "/deploy",
+        description: ["First line of context.", "Second line of context."],
         lines: [
           { text: "Creating Vercel project…", tone: "info" },
           { text: "Linked", tone: "success" },
@@ -39,6 +41,10 @@ describe("renderFlowPanel", () => {
 
     expect(rows[0]).toBe("▔".repeat(60));
     expect(rows[1]).toBe("   /deploy");
+    expect(rows[2]).toBe("");
+    expect(rows[3]).toBe("   First line of context.");
+    expect(rows[4]).toBe("   Second line of context.");
+    expect(rows[5]).toBe("");
     expect(text).toContain("   · Creating Vercel project…");
     expect(text).toContain("   ✓ Linked");
     expect(text).toContain("   ▷ Create a new project");
@@ -101,6 +107,24 @@ describe("renderFlowPanel", () => {
 });
 
 describe("renderSelectQuestion", () => {
+  it("preserves a blue URL in a picker question", () => {
+    const colors = pc.createColors(true);
+    const serverUrl = "https://agent.example.com/";
+    const options = [{ value: "team", label: "Team" }];
+    const rows = renderSelectQuestion(
+      {
+        kind: "single",
+        message: `Which team does ${colors.blue(serverUrl)} belong to?`,
+        options,
+        select: initialSelectState({ options }),
+      },
+      colorTheme,
+      100,
+    );
+
+    expect(rows[0]).toContain(`\x1b[34m${serverUrl}\x1b[39m`);
+  });
+
   it("paints an unnumbered single-select with one state-glyph column", () => {
     const rows = renderSelectQuestion(
       {
@@ -121,7 +145,7 @@ describe("renderSelectQuestion", () => {
     expect(text).toContain("  ▷ Create a new project · fastest");
     expect(text).toContain("    Link an existing project");
     expect(text).not.toContain("1.");
-    expect(text).toContain("esc to cancel");
+    expect(text).toContain("esc to go back");
   });
 
   it("uses the theme's ASCII option placeholder", () => {
@@ -200,7 +224,7 @@ describe("renderSelectQuestion", () => {
     expect(rows).toContain("  ⚠ Overwrote /tmp/weather-agent");
     expect(rows).toContain("  ✓ Scaffolded channel: web");
     expect(rows.indexOf("    Done")).toBeLessThan(rows.indexOf("  ⚠ Overwrote /tmp/weather-agent"));
-    expect(rows.at(-1)).toContain("↑/↓ move · enter to select · esc to cancel");
+    expect(rows.at(-1)).toContain("↑/↓ move · enter to select · esc to go back");
 
     const coloredRow = renderSelectQuestion(
       {
@@ -226,7 +250,7 @@ describe("renderSelectQuestion", () => {
         kind: "multi",
         message: "Select channels",
         options: OPTIONS,
-        select: initialSelectState({ options: OPTIONS, submitRow: true }),
+        select: initialSelectState({ options: OPTIONS, trailingRow: "submit" }),
       },
       theme,
       60,
@@ -456,8 +480,72 @@ describe("renderSelectQuestion", () => {
       "",
       "  ✓ Model changed to openai/gpt-5.5",
       "",
-      "  ↑/↓ move · enter to select · esc to cancel",
+      "  ↑/↓ move · enter to select · esc to go back",
     ]);
+  });
+
+  it("renders the linked-project warning under the project-change option", () => {
+    const options = [
+      {
+        value: "current",
+        label: "Use current project",
+        hint: "inbound in Internal Playground",
+      },
+      {
+        value: "change",
+        label: "Select another Vercel project",
+        notice: {
+          tone: "warning" as const,
+          lines: ["Updates .env.local and .vercel/project.json"] as const,
+        },
+      },
+      { value: "cancel", label: "Cancel" },
+    ];
+    const state = {
+      kind: "stacked" as const,
+      message: "Authenticate v.vercel.tools",
+      options,
+      select: initialSelectState({ options, defaultValue: "change" }),
+    };
+
+    expect(renderSelectQuestion(state, theme, 100)).toEqual([
+      "  Authenticate v.vercel.tools",
+      "",
+      "  ◦ Use current project",
+      "    inbound in Internal Playground",
+      "",
+      "  ▷ Select another Vercel project",
+      "    ⚠ Updates .env.local and .vercel/project.json",
+      "",
+      "  ◦ Cancel",
+      "",
+      "  ↑/↓ move · enter to select · esc to go back",
+    ]);
+
+    const colored = renderSelectQuestion(state, colorTheme, 100);
+    expect(colored).toContain(
+      "    \x1b[33m⚠\x1b[39m \x1b[2mUpdates .env.local and .vercel/project.json\x1b[22m",
+    );
+  });
+
+  it("renders a warning heading in yellow without inheriting stacked-heading bold", () => {
+    const colors = pc.createColors(true);
+    const options = [{ value: "continue", label: "Continue" }];
+    const rows = renderSelectQuestion(
+      {
+        kind: "stacked",
+        message: `This directory is currently linked to inbound in ${colors.bold("Internal Playground")}.`,
+        messageTone: "warning",
+        options,
+        select: initialSelectState({ options }),
+      },
+      colorTheme,
+      100,
+    );
+
+    expect(rows[0]).toBe(
+      `  \x1b[33mThis directory is currently linked to inbound in \x1b[1mInternal Playground\x1b[22m.\x1b[39m`,
+    );
   });
 
   it("owns emphasis for stacked and multiline select headings", () => {
@@ -517,7 +605,7 @@ describe("renderSelectQuestion", () => {
     const select = initialSelectState({
       options: OPTIONS,
       initialValues: ["link"],
-      submitRow: true,
+      trailingRow: "submit",
     });
     const text = renderSelectQuestion(
       {
@@ -559,13 +647,50 @@ describe("renderSelectQuestion", () => {
     expect(text).not.toContain("Model 12");
   });
 
+  it("renders a scoped lookup as the selected row when no local option matches", () => {
+    const options = [{ value: "alpha", label: "Alpha" }];
+    const text = renderSelectQuestion(
+      {
+        kind: "query-search",
+        message: "Project to link",
+        options,
+        queryActionLabel: "Search for",
+        select: initialSelectState({ options, filter: "inbound" }),
+      },
+      theme,
+      60,
+    ).join("\n");
+
+    expect(text).toContain("▷ Search for 'inbound'");
+    expect(text).not.toContain("(no local matches)");
+    expect(text).toContain("enter to select");
+  });
+
+  it("renders the scoped lookup after partial local matches", () => {
+    const options = [{ value: "alpha-local", label: "Alpha local" }];
+    const text = renderSelectQuestion(
+      {
+        kind: "query-search",
+        message: "Project to link",
+        options,
+        queryActionLabel: "Search for",
+        select: { ...initialSelectState({ options, filter: "alpha" }), cursor: 1 },
+      },
+      theme,
+      60,
+    ).join("\n");
+
+    expect(text).toContain("Alpha local");
+    expect(text).toContain("▷ Search for 'alpha'");
+  });
+
   it("paints a validation error inside the question", () => {
     const text = renderSelectQuestion(
       {
         kind: "multi",
         message: "Select channels",
         options: OPTIONS,
-        select: initialSelectState({ options: OPTIONS, submitRow: true }),
+        select: initialSelectState({ options: OPTIONS, trailingRow: "submit" }),
         error: "Select at least one option, then submit.",
       },
       theme,
@@ -637,7 +762,7 @@ describe("renderTextQuestion", () => {
     expect(rows[0]).toBe("  Project name");
     // The input line sits directly under the message — no blank row between.
     expect(rows[1]).toContain("my-agent");
-    expect(text).toContain("enter to submit · esc to cancel");
+    expect(text).toContain("enter to submit · esc to go back");
   });
 
   it("paints notices above the message, gone with the question", () => {

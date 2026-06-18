@@ -37,10 +37,8 @@ export interface LoginFlowDeps {
 
 const defaultDeps: LoginFlowDeps = {
   getVercelAuthStatus,
-  // `--non-interactive` (stdin ignored) makes `vercel login` run the OAuth/SSO
-  // web flow with no terminal method menu: it prints the URL (streamed to the
-  // rail via onOutput) and polls the browser. That is what lets the TUI stay
-  // live and wait, exactly like `vercel connect create`.
+  // Closing stdin makes `vercel login` use the browser flow without opening
+  // its terminal method menu.
   runVercelLogin: ({ cwd, onOutput, signal }) =>
     runVercel(["login"], {
       cwd,
@@ -64,14 +62,7 @@ async function withSpinner<T>(
   }
 }
 
-/**
- * Runs `vercel login` while the dev TUI stays live, mirroring the Slack Connect
- * browser wait: an interactive prompter races the login subprocess against a
- * "Cancel" action (the browser OAuth runs without the terminal, so the panel
- * keeps painting and the user can bail); a plain/headless prompter just runs it
- * behind an ephemeral spinner. Returns the CLI's success, or `"cancelled"` when
- * the user stops waiting first.
- */
+/** Runs browser login while the TUI races it against a Cancel action. */
 async function runVercelLoginWithControls(
   deps: LoginFlowDeps,
   appRoot: string,
@@ -110,12 +101,7 @@ async function runVercelLoginWithControls(
   }
 }
 
-/**
- * THE LOGIN FLOW for the dev TUI's `/login`. Short-circuits when already
- * authenticated; otherwise runs `vercel login` as a browser flow the TUI waits
- * on (see {@link runVercelLoginWithControls}) and re-probes after, so a
- * half-finished or abandoned login reports `failed`, never a false success.
- */
+/** Runs browser login and verifies the resulting Vercel CLI session. */
 export async function runLoginFlow(input: {
   appRoot: string;
   prompter: Prompter;

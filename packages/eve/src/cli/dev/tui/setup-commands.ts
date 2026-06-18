@@ -7,6 +7,7 @@ import {
 } from "#setup/flows/install-vercel-cli.js";
 import { runLoginFlow, type LoginFlowResult } from "#setup/flows/login.js";
 import { runModelFlow, type ModelProviderOutcome } from "#setup/flows/model.js";
+import { runRemoteAuthFlow, type RemoteAuthFlowResult } from "#setup/flows/remote-auth.js";
 import { openUrl } from "#setup/primitives/open-url.js";
 import type { Prompter } from "#setup/prompter.js";
 import { slackMessageDeepLink } from "#setup/slack-connect.js";
@@ -14,6 +15,7 @@ import { WizardCancelledError } from "#setup/step.js";
 
 import { createTuiPrompter, type TuiPrompterRenderer } from "./tui-prompter.js";
 import type { PromptCommandExtensionName } from "./prompt-commands.js";
+import type { RemoteAuthAttempt, RemoteTarget } from "./remote-connection.js";
 import type { SetupFlowRenderer } from "./setup-flow.js";
 import type { VercelStatusEffect } from "./vercel-status.js";
 
@@ -27,21 +29,39 @@ export type TuiSetupCommand = PromptCommandExtensionName;
  * unanchored in the panel.
  */
 export const SETUP_FLOW_TITLES: Record<TuiSetupCommand, string> = {
-  vc: "Install the Vercel CLI",
-  login: "Log in to Vercel",
+  "vc:install": "Install the Vercel CLI",
+  "vc:login": "Log in to Vercel",
+  "vc:auth": "Authenticate via Vercel OIDC",
   model: "Configure the agent model",
   channels: "Agent channels",
   deploy: "Deploy to Vercel",
+};
+
+/** Explanatory copy that stays visible across every question in a setup flow. */
+export const SETUP_FLOW_DESCRIPTIONS: Partial<Record<TuiSetupCommand, readonly string[]>> = {
+  "vc:auth": [
+    "Connecting to this remote agent requires a Vercel OIDC token from a linked project.",
+  ],
 };
 
 /** The prompter surface plus the working-state interrupt trap a command races against. */
 export type TuiSetupCommandRenderer = TuiPrompterRenderer &
   Pick<SetupFlowRenderer, "waitForInterrupt">;
 
+export type TuiSetupCommandTarget =
+  | { readonly kind: "local"; readonly appRoot: string }
+  | ({ readonly kind: "remote" } & RemoteTarget);
+
 export interface TuiSetupCommandInput {
   command: TuiSetupCommand;
-  /** The local project the in-process dev server is running. */
-  appRoot: string;
+  /** The workspace whose Vercel CLI state the command may inspect or mutate. */
+  target: TuiSetupCommandTarget;
+  /** Whether this auth attempt may need a same-team Trusted Sources rule. */
+  configureTrustedSources?: boolean;
+  /** Cancels the command when its owning connection/session is disposed. */
+  signal?: AbortSignal;
+  /** Lets an outer operation retain Ctrl-C/Esc ownership through post-flow verification. */
+  interruptMode?: "internal" | "external";
   /** The renderer surface the TUI-native prompter drives. */
   renderer: TuiSetupCommandRenderer;
   /** Test seam; defaults to the real TUI-native prompter over `renderer`. */
@@ -54,6 +74,7 @@ export interface TuiSetupCommandInput {
 export interface TuiSetupFlows {
   runInstallVercelCliFlow: typeof runInstallVercelCliFlow;
   runLoginFlow: typeof runLoginFlow;
+  runRemoteAuthFlow: typeof runRemoteAuthFlow;
   runModelFlow: typeof runModelFlow;
   runChannelsFlow: typeof runChannelsFlow;
   runDeployFlow: typeof runDeployFlow;
@@ -65,6 +86,8 @@ export interface TuiSetupCommandResult {
   preserveFlowDiagnostics: boolean;
   /** Status-line effect of this command, when it changed link/deploy state. */
   vercelEffect?: VercelStatusEffect;
+  /** Credential attempt consumed by the remote connection controller. */
+  remoteAuthAttempt?: RemoteAuthAttempt;
 }
 
 /**
@@ -79,6 +102,8 @@ function muteableRenderer(
   return {
     readSelect: (options) =>
       isMuted() ? Promise.resolve(undefined) : renderer.readSelect(options),
+    readQuerySelect: (options) =>
+      isMuted() ? Promise.resolve(undefined) : renderer.readQuerySelect(options),
     readEditableSelect: (options) =>
       isMuted() ? Promise.resolve(undefined) : renderer.readEditableSelect(options),
     readText: (options) => (isMuted() ? Promise.resolve(undefined) : renderer.readText(options)),
@@ -116,14 +141,22 @@ export async function runTuiSetupCommand(
   const { command } = input;
   let interrupted = false;
   const controller = new AbortController();
+  const abortFromOwner = (): void => {
+    interrupted = true;
+    controller.abort(input.signal?.reason);
+  };
+  if (input.signal?.aborted === true) abortFromOwner();
+  else input.signal?.addEventListener("abort", abortFromOwner, { once: true });
   const prompter = (input.createPrompter ?? createTuiPrompter)(
     muteableRenderer(input.renderer, () => interrupted),
   );
 
-  const interrupt = input.renderer.waitForInterrupt();
+  const interrupt =
+    input.interruptMode === "external" ? undefined : input.renderer.waitForInterrupt();
   const INTERRUPTED = Symbol("interrupted");
   const execution = executeSetupCommand(input, prompter, controller.signal);
   try {
+    if (interrupt === undefined) return await execution;
     const outcome = await Promise.race([execution, interrupt.promise.then(() => INTERRUPTED)]);
     if (outcome !== INTERRUPTED) return outcome as TuiSetupCommandResult;
     interrupted = true;
@@ -134,9 +167,16 @@ export async function runTuiSetupCommand(
       preserveFlowDiagnostics: true,
     };
     if (settled.vercelEffect !== undefined) result.vercelEffect = settled.vercelEffect;
+    if (command === "vc:auth") {
+      result.remoteAuthAttempt = settled.remoteAuthAttempt ?? {
+        kind: "cancelled",
+        completedMutations: [],
+      };
+    }
     return result;
   } finally {
-    interrupt.dispose();
+    input.signal?.removeEventListener("abort", abortFromOwner);
+    interrupt?.dispose();
     // A flow that threw or was abandoned mid-wait must not leave the footer spinning.
     input.renderer.setStatus(undefined);
   }
@@ -148,10 +188,12 @@ async function executeSetupCommand(
   prompter: Prompter,
   signal: AbortSignal,
 ): Promise<TuiSetupCommandResult> {
-  const { command, appRoot } = input;
+  const { command, target } = input;
+  const projectRoot = target.kind === "local" ? target.appRoot : target.workspaceRoot;
   const flows: TuiSetupFlows = {
     runInstallVercelCliFlow,
     runLoginFlow,
+    runRemoteAuthFlow,
     runModelFlow,
     runChannelsFlow,
     runDeployFlow,
@@ -160,15 +202,36 @@ async function executeSetupCommand(
 
   try {
     switch (command) {
-      case "vc": {
+      case "vc:install": {
         return installVercelCliResultMessage(
-          await flows.runInstallVercelCliFlow({ appRoot, prompter, signal }),
+          await flows.runInstallVercelCliFlow({ appRoot: projectRoot, prompter, signal }),
         );
       }
-      case "login": {
-        return loginResultMessage(await flows.runLoginFlow({ appRoot, prompter, signal }));
+      case "vc:login": {
+        return loginResultMessage(
+          await flows.runLoginFlow({ appRoot: projectRoot, prompter, signal }),
+        );
+      }
+      case "vc:auth": {
+        if (target.kind !== "remote") {
+          return {
+            message: "/vc:auth is available only while connected to a remote server.",
+            preserveFlowDiagnostics: true,
+          };
+        }
+        return remoteAuthResultMessage(
+          await flows.runRemoteAuthFlow({
+            workspaceRoot: target.workspaceRoot,
+            serverUrl: target.serverUrl,
+            configureTrustedSources: input.configureTrustedSources === true,
+            prompter,
+            signal,
+          }),
+        );
       }
       case "model": {
+        if (target.kind !== "local") return localOnlyResult(command);
+        const { appRoot } = target;
         const result = await flows.runModelFlow({ appRoot, prompter, signal });
         if (result.kind === "cancelled") {
           return { message: "/model cancelled.", preserveFlowDiagnostics: false };
@@ -193,6 +256,8 @@ async function executeSetupCommand(
         return outcome;
       }
       case "channels": {
+        if (target.kind !== "local") return localOnlyResult(command);
+        const { appRoot } = target;
         const result = await flows.runChannelsFlow({ appRoot, prompter, signal });
         switch (result.kind) {
           case "failed":
@@ -219,6 +284,8 @@ async function executeSetupCommand(
         }
       }
       case "deploy": {
+        if (target.kind !== "local") return localOnlyResult(command);
+        const { appRoot } = target;
         const result = await flows.runDeployFlow({ appRoot, prompter, interactive: true, signal });
         if (result.kind === "cancelled") {
           return { message: "/deploy cancelled.", preserveFlowDiagnostics: true };
@@ -239,10 +306,14 @@ async function executeSetupCommand(
     }
   } catch (error) {
     if (error instanceof WizardCancelledError) {
-      return {
+      const cancelled: TuiSetupCommandResult = {
         message: `/${command} cancelled.`,
         preserveFlowDiagnostics: command !== "model",
       };
+      if (command === "vc:auth") {
+        cancelled.remoteAuthAttempt = { kind: "cancelled", completedMutations: [] };
+      }
+      return cancelled;
     }
     // Provisioning steps (link, deploy, Slack) throw a Vercel human action when
     // `whoami` fails or a scope is denied. Route it to the in-TUI fix instead of
@@ -274,11 +345,11 @@ function vercelActionOutcome(error: unknown, command: string): TuiSetupCommandRe
 function vercelActionMessage(kind: string, command: string): string | undefined {
   switch (kind) {
     case "vercel-login":
-      return `You're not logged in to Vercel — run /login, then retry /${command}.`;
+      return `You're not logged in to Vercel. Run /vc:login, then retry /${command}.`;
     case "vercel-forbidden":
-      return `Vercel denied access to that team — run /login to re-authenticate (for example to complete SSO), or pick a team you can access, then retry /${command}.`;
+      return `Vercel denied access to that team. Run /vc:login to re-authenticate, or pick a team you can access, then retry /${command}.`;
     case "vercel-cli-missing":
-      return `The Vercel CLI isn't installed — run /vc to install it, then retry /${command}.`;
+      return `The Vercel CLI isn't installed. Run /vc:install, then retry /${command}.`;
     default:
       return undefined;
   }
@@ -342,7 +413,7 @@ async function runDeployAndChat(
 function installVercelCliResultMessage(result: InstallVercelCliResult): TuiSetupCommandResult {
   switch (result.kind) {
     case "cancelled":
-      return { message: "/vc cancelled.", preserveFlowDiagnostics: false };
+      return { message: "/vc:install cancelled.", preserveFlowDiagnostics: false };
     case "already":
       return { message: "The Vercel CLI is already installed.", preserveFlowDiagnostics: false };
     case "failed":
@@ -353,7 +424,7 @@ function installVercelCliResultMessage(result: InstallVercelCliResult): TuiSetup
       };
     case "installed":
       return {
-        message: "Installed the Vercel CLI. Run /login next.",
+        message: "Installed the Vercel CLI. Run /vc:login next.",
         preserveFlowDiagnostics: false,
         // The CLI now resolves, so the status line's identity probe can run.
         vercelEffect: { kind: "refresh-identity" },
@@ -365,17 +436,17 @@ function installVercelCliResultMessage(result: InstallVercelCliResult): TuiSetup
 function loginResultMessage(result: LoginFlowResult): TuiSetupCommandResult {
   switch (result.kind) {
     case "cancelled":
-      return { message: "/login cancelled.", preserveFlowDiagnostics: false };
+      return { message: "/vc:login cancelled.", preserveFlowDiagnostics: false };
     case "already":
       return { message: "You're already logged in to Vercel.", preserveFlowDiagnostics: false };
     case "cli-missing":
       return {
-        message: "The Vercel CLI isn't installed — run /vc to install it, then retry /login.",
+        message: "The Vercel CLI isn't installed. Run /vc:install, then retry /vc:login.",
         preserveFlowDiagnostics: true,
       };
     case "failed":
       return {
-        message: "Vercel login didn't complete — run /login to try again.",
+        message: "Vercel login didn't complete. Run /vc:login to try again.",
         preserveFlowDiagnostics: true,
       };
     case "logged-in":
@@ -388,10 +459,40 @@ function loginResultMessage(result: LoginFlowResult): TuiSetupCommandResult {
       };
     case "unavailable":
       return {
-        message: "Couldn't reach Vercel — check your connection, then retry /login.",
+        message: "Couldn't reach Vercel. Check your connection, then retry /vc:login.",
         preserveFlowDiagnostics: true,
       };
   }
+}
+
+function remoteAuthResultMessage(result: RemoteAuthFlowResult): TuiSetupCommandResult {
+  switch (result.kind) {
+    case "credential":
+      return {
+        message: "Vercel OIDC credential refreshed.",
+        preserveFlowDiagnostics: false,
+        remoteAuthAttempt: result,
+      };
+    case "cancelled":
+      return {
+        message: "/vc:auth cancelled.",
+        preserveFlowDiagnostics: false,
+        remoteAuthAttempt: result,
+      };
+    case "failed":
+      return {
+        message: result.failure.message,
+        preserveFlowDiagnostics: true,
+        remoteAuthAttempt: result,
+      };
+  }
+}
+
+function localOnlyResult(command: TuiSetupCommand): TuiSetupCommandResult {
+  return {
+    message: `/${command} is available only while eve dev is running the local server.`,
+    preserveFlowDiagnostics: true,
+  };
 }
 
 function pendingChannelsResult(message: string): TuiSetupCommandResult {

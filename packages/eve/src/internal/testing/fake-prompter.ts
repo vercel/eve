@@ -4,6 +4,8 @@ import type {
   MultiSelectOptions,
   Prompter,
   PrompterValue,
+  SearchSelectOptions,
+  SearchSelectResult,
   SingleSelectOptions,
 } from "#setup/prompter.js";
 
@@ -21,6 +23,9 @@ export interface FakePrompterConfig {
   multiple?: (
     opts: MultiSelectOptions<PrompterValue>,
   ) => PrompterValue[] | Promise<PrompterValue[]>;
+  search?: <T extends PrompterValue>(
+    opts: SearchSelectOptions<T>,
+  ) => SearchSelectResult<T> | Promise<SearchSelectResult<T>>;
 }
 
 export interface FakePrompter {
@@ -52,7 +57,21 @@ export function createFakePrompter(config: FakePrompterConfig = {}): FakePrompte
     return (config.single ? await config.single(opts) : fail(opts.message)) as T;
   }
 
+  const search = config.search;
+  const searchSelect =
+    search === undefined
+      ? {}
+      : {
+          async searchSelect<T extends PrompterValue>(
+            opts: SearchSelectOptions<T>,
+          ): Promise<SearchSelectResult<T>> {
+            selectMessages.push(opts.message);
+            return search(opts);
+          },
+        };
+
   const prompter: Prompter = {
+    ...searchSelect,
     text: async (opts) => (config.text ? config.text(opts) : fail(opts.message)),
     password: async (opts) => (config.password ? config.password(opts) : fail(opts.message)),
     select,
