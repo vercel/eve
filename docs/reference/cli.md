@@ -35,7 +35,7 @@ The optional `target` decides the mode:
 - An existing directory, including `.` for the current one (`eve init .`), adds an agent to that project. The project needs a `package.json`, the `agent/` files must not exist yet, and the missing `eve`, `ai`, and `zod` dependencies are added without touching anything else.
 - Omitting the target scaffolds or updates the current directory, the same as `eve init .`.
 
-Either mode installs dependencies, initializes Git, and runs `eve dev` through the project's package manager.
+Either mode installs dependencies, initializes Git, and runs `eve dev` through the detected project package manager. Fresh projects inherit a parent workspace manager when one is present; otherwise they use the manager that launched `eve init`.
 
 | Flag                   | Type | Default | Description                                                                                                                            |
 | ---------------------- | ---- | ------- | -------------------------------------------------------------------------------------------------------------------------------------- |

@@ -126,11 +126,17 @@ async function addToExistingProject(
 }
 
 /**
- * The manager a fresh scaffold will be owned by: the one whose package runner
- * launched the CLI, or pnpm when the binary ran directly and no preference
- * is visible.
+ * The manager a fresh scaffold will be owned by: an existing ancestor project
+ * manager first, then the package runner that launched the CLI, then pnpm.
  */
-function resolveScaffoldPackageManager(dependencies: InitCommandDependencies): PackageManagerKind {
+async function resolveScaffoldPackageManager(
+  projectPath: string,
+  dependencies: InitCommandDependencies,
+): Promise<PackageManagerKind> {
+  const detected = await dependencies.detectPackageManager(projectPath);
+  if (detected.source !== "default") {
+    return detected.kind;
+  }
   return dependencies.detectInvokingPackageManager() ?? "pnpm";
 }
 
@@ -235,17 +241,20 @@ export async function runInitCommand(
       : undefined
     : await resolveTargetDirectory(parentDirectory, rawTarget);
 
-  // A fresh project is owned by the manager that launched the CLI (`npx`,
-  // `pnpm dlx`, `yarn dlx`), defaulting to pnpm for a direct binary run; an
-  // existing project keeps whatever manager it already uses.
+  // A fresh project inside a workspace inherits that workspace's manager before
+  // considering the launcher (`npx`, `pnpm dlx`, `yarn dlx`); an existing
+  // project keeps whatever manager it already uses.
   let packageManager: PackageManagerKind;
   let projectPath: string;
   let freshScaffold: boolean;
   if (existingDirectory === undefined) {
-    packageManager = resolveScaffoldPackageManager(dependencies);
     const projectName = currentDirectoryTarget
       ? CURRENT_DIRECTORY_PROJECT_NAME
       : parseProjectName(rawTarget);
+    const parentPath = resolve(parentDirectory);
+    const plannedProjectPath =
+      projectName === CURRENT_DIRECTORY_PROJECT_NAME ? parentPath : join(parentPath, projectName);
+    packageManager = await resolveScaffoldPackageManager(plannedProjectPath, dependencies);
     projectPath = await scaffoldProject(
       parentDirectory,
       projectName,

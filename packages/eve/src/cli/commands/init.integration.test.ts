@@ -223,6 +223,76 @@ describe("runInitCommand", () => {
     },
   );
 
+  it("scaffolds a fresh named project with the ancestor packageManager before npx", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-init-bun-workspace-"));
+    const appsDirectory = join(workspaceRoot, "apps");
+    await mkdir(appsDirectory, { recursive: true });
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      `${JSON.stringify({ private: true, packageManager: "bun@1.2.0" }, null, 2)}\n`,
+      "utf8",
+    );
+    const output = logger();
+    const deps = dependencies();
+    deps.detectInvokingPackageManager.mockReturnValue("npm");
+
+    await runInitCommand(output, appsDirectory, "amelie", {}, deps);
+
+    const projectPath = join(appsDirectory, "amelie");
+    expect(await readFile(join(projectPath, "agent/agent.ts"), "utf8")).toContain(
+      DEFAULT_AGENT_MODEL_ID,
+    );
+    await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
+    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+      "bun",
+      projectPath,
+      expect.anything(),
+    );
+    expect(deps.spawnPackageManager).toHaveBeenCalledWith("bun", projectPath, [
+      "x",
+      "eve",
+      "dev",
+      "--input",
+      "/model",
+    ]);
+  });
+
+  it.each([
+    ["npm", "package-lock.json", "bun", ["exec", "--", "eve", "dev", "--input", "/model"]],
+    ["yarn", "yarn.lock", "npm", ["eve", "dev", "--input", "/model"]],
+    ["bun", "bun.lock", "npm", ["x", "eve", "dev", "--input", "/model"]],
+    ["pnpm", "pnpm-lock.yaml", "npm", ["exec", "eve", "dev", "--input", "/model"]],
+  ] as const)(
+    "scaffolds a fresh named project with the ancestor %s lockfile before the launcher",
+    async (kind, lockfile, invokingManager, devArguments) => {
+      const workspaceRoot = await mkdtemp(join(tmpdir(), `eve-init-${kind}-workspace-`));
+      const appsDirectory = join(workspaceRoot, "apps");
+      await mkdir(appsDirectory, { recursive: true });
+      await writeFile(
+        join(workspaceRoot, "package.json"),
+        `${JSON.stringify({ private: true }, null, 2)}\n`,
+        "utf8",
+      );
+      await writeFile(join(workspaceRoot, lockfile), "", "utf8");
+      const output = logger();
+      const deps = dependencies();
+      deps.detectInvokingPackageManager.mockReturnValue(invokingManager);
+
+      await runInitCommand(output, appsDirectory, "my-agent", {}, deps);
+
+      const projectPath = join(appsDirectory, "my-agent");
+      expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+        kind,
+        projectPath,
+        expect.anything(),
+      );
+      expect(deps.spawnPackageManager).toHaveBeenCalledWith(kind, projectPath, [...devArguments]);
+      await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(
+        kind === "pnpm",
+      );
+    },
+  );
+
   it("adds Web Chat to an npm-owned fresh scaffold without pnpm configuration", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-agent-web-npm-"));
     const output = logger();
@@ -459,6 +529,36 @@ describe("runInitCommand", () => {
       expect(deps.spawnPackageManager).toHaveBeenCalledWith(kind, projectRoot, [...devArguments]);
     },
   );
+
+  it("adds an agent to an existing project with the ancestor package manager", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-init-existing-workspace-"));
+    const appsDirectory = join(workspaceRoot, "apps");
+    const projectRoot = join(appsDirectory, "host-app");
+    await mkdir(projectRoot, { recursive: true });
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      `${JSON.stringify({ private: true, packageManager: "bun@1.2.0" }, null, 2)}\n`,
+      "utf8",
+    );
+    await writeFile(join(projectRoot, "package.json"), '{ "name": "host-app" }\n', "utf8");
+    const output = logger();
+    const deps = dependencies();
+    deps.detectInvokingPackageManager.mockReturnValue("npm");
+
+    await runInitCommand(output, appsDirectory, "host-app", {}, deps);
+
+    expect(await readFile(join(projectRoot, "agent/agent.ts"), "utf8")).toContain(
+      DEFAULT_AGENT_MODEL_ID,
+    );
+    await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
+    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+      "bun",
+      projectRoot,
+      expect.anything(),
+    );
+    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+    expect(deps.spawnPackageManager).toHaveBeenCalledWith("bun", projectRoot, ["x", "eve", "dev"]);
+  });
 
   it("reports agent file conflicts before writing anything", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-conflict-"));
