@@ -138,7 +138,7 @@ CLI commands:
 
 ## Deploying
 
-eve is built for Vercel. The runtime is Nitro + Vercel Workflows. Read [`./docs/guides/deployment.md`](./docs/guides/deployment.md) for the deployment path, environment variables, and Vercel-specific configuration.
+eve is built to be durable. The runtime is Nitro + Workflows. Read [`./docs/guides/deployment.md`](./docs/guides/deployment.md) for the deployment path, environment variables, and configuration.
 
 ## Read Next
 

@@ -75,6 +75,8 @@ export interface ChannelEvents<TCtx = void> {
   readonly "action.result"?: ChannelEventHandler<"action.result", TCtx>;
   readonly "message.completed"?: ChannelEventHandler<"message.completed", TCtx>;
   readonly "message.appended"?: ChannelEventHandler<"message.appended", TCtx>;
+  readonly "reasoning.appended"?: ChannelEventHandler<"reasoning.appended", TCtx>;
+  readonly "reasoning.completed"?: ChannelEventHandler<"reasoning.completed", TCtx>;
   readonly "input.requested"?: ChannelEventHandler<"input.requested", TCtx>;
   readonly "turn.failed"?: ChannelEventHandler<"turn.failed", TCtx>;
   readonly "turn.completed"?: ChannelEventHandler<"turn.completed", TCtx>;
@@ -234,6 +236,8 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
     "action.result",
     "message.completed",
     "message.appended",
+    "reasoning.appended",
+    "reasoning.completed",
     "input.requested",
     "turn.failed",
     "turn.completed",

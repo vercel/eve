@@ -20,7 +20,13 @@ export default defineAgent({
 The root `agent.ts` can be omitted when no runtime config is needed. In that case, eve defaults
 to `anthropic/claude-sonnet-4.6`. When `agent.ts` is present, `model` is required.
 
-`model` accepts a gateway model id string, which routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a provider-authored `LanguageModel`:
+`model` accepts a gateway model id string, which routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a provider-authored `LanguageModel`.
+
+Provider-specific AI SDK packages are regular project dependencies. A fresh `eve init` app includes the core `ai` package, but it does not install every provider package. Install the provider package you import, then set that provider's API key:
+
+```bash
+npm install @ai-sdk/anthropic
+```
 
 ```ts title="agent/agent.ts"
 import { anthropic } from "@ai-sdk/anthropic";

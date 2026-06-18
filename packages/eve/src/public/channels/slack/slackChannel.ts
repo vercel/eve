@@ -171,6 +171,13 @@ export interface SlackChannelState {
    */
   pendingToolCallMessage?: string | null;
   /**
+   * Last reasoning-derived typing indicator sent by the default
+   * `reasoning.appended` handler. Used to refresh Slack's status during
+   * long reasoning streams without sending one API call per delta.
+   */
+  lastReasoningTypingAtMs?: number | null;
+  lastReasoningTypingStatus?: string | null;
+  /**
    * Connection name to Slack message ts. Each entry is the public
    * link-free fallback status post created by the default
    * `authorization.required` handler when the challenge could not be
@@ -318,6 +325,8 @@ export interface SlackChannelEvents {
   readonly "action.result"?: SlackEventHandler<"action.result">;
   readonly "message.completed"?: SlackEventHandler<"message.completed">;
   readonly "message.appended"?: SlackEventHandler<"message.appended">;
+  readonly "reasoning.appended"?: SlackEventHandler<"reasoning.appended">;
+  readonly "reasoning.completed"?: SlackEventHandler<"reasoning.completed">;
   readonly "input.requested"?: SlackEventHandler<"input.requested">;
   readonly "turn.failed"?: SlackEventHandler<"turn.failed">;
   readonly "turn.completed"?: SlackEventHandler<"turn.completed">;
@@ -495,6 +504,8 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       teamId: null as string | null,
       triggeringUserId: null,
       pendingToolCallMessage: null,
+      lastReasoningTypingAtMs: null,
+      lastReasoningTypingStatus: null,
       pendingAuthMessageTs: {},
     },
     fetchFile: slackFetchFile,

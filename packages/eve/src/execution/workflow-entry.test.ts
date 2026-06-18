@@ -625,6 +625,45 @@ describe("workflowEntry", () => {
     expect(rekeyedDispose).toHaveBeenCalledTimes(1);
   });
 
+  it("defers the first park hook until an empty continuation token is anchored", async () => {
+    const baseSessionState = createBaseSessionState({ continuationToken: "" });
+    const anchoredSessionState: DurableSessionState = {
+      ...baseSessionState,
+      continuationToken: "slack:C01:1800000000.123456",
+    };
+
+    vi.mocked(createSessionStep).mockResolvedValue(
+      createSessionStepResultForMock(baseSessionState),
+    );
+
+    const anchoredReturn = createIteratorReturn();
+    const anchoredDispose = vi.fn();
+    installHookMocks({
+      parkHooks: [
+        {
+          dispose: anchoredDispose,
+          return: anchoredReturn,
+          token: "slack:C01:1800000000.123456",
+          values: [],
+        },
+      ],
+      turnCompletions: [turnResult({ action: "park", sessionState: anchoredSessionState })],
+    });
+
+    const result = await workflowEntry({
+      input: { message: "hello" },
+      serializedContext: createSerializedContext({
+        "eve.channel": { kind: "slack", state: {} },
+        "eve.continuationToken": "",
+      }),
+    });
+
+    expect(result).toEqual({ output: "" });
+    expect(nonTurnHookTokens()).toEqual(["slack:C01:1800000000.123456"]);
+    expect(anchoredReturn).toHaveBeenCalledTimes(1);
+    expect(anchoredDispose).toHaveBeenCalledTimes(1);
+  });
+
   it("recreates the park hook when a later turn re-keys the session", async () => {
     const baseSessionState = createBaseSessionState({ continuationToken: "slack:C01:" });
     const rekeyedSessionState: DurableSessionState = {

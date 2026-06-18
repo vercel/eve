@@ -52,7 +52,7 @@ The `auth` option decides who can call these routes. The built-in helpers cover 
 - `localDev()` accepts requests during local development.
 - `vercelOidc()` lets the local CLI reach a deployed agent, and lets other internal deployments from your team call it.
 
-Neither admits browser users or external clients in production. For a public app, wire the channel to your own auth (Clerk, Auth.js, or your own OIDC/JWT verification).
+Neither admits browser users or external clients in production. For a public app, wire the channel to your own auth (Clerk, Auth.js, your own OIDC/JWT verification, an API-key verifier, or any custom `AuthFn`). Vercel OIDC is optional; use it only when Vercel-issued deployment tokens are part of your trust model.
 
 `eve init` scaffolds an `agent/channels/eve.ts` with a production placeholder so you replace it before going live. The generated channel allows Vercel OIDC and localhost, and includes `placeholderAuth()`, which returns a setup-focused 401 in production until you swap it for real auth. Delete the file and eve falls back to `[localDev(), vercelOidc()]`, which still does not admit browser users in production.
 

@@ -78,7 +78,7 @@ export default slackChannel({
 
 ### Delivery
 
-The default handlers reply in-thread and show progress. Typing indicators post automatically: `Thinking…` on inbound, `Working…` on `turn.started`, tool status on `actions.requested`. Override `onAppMention` or the `events` handlers to customize.
+The default handlers reply in-thread and show progress. Typing indicators post automatically: `Thinking…` on inbound, `Working…` on `turn.started`, a truncated reasoning snippet on `reasoning.appended`, and tool status on `actions.requested`. Reasoning snippets are visible in Slack status while the model is thinking; override `events["reasoning.appended"]` if you prefer generic wording. Override `onAppMention` or the `events` handlers to customize.
 
 When a session starts without a `threadTs` (say, from a schedule or `receive(slack, ...)`), it anchors on the first agent post, and later posts and mentions resume that same session. Pass `initialMessage` with a `Card` to land a structured anchor first instead. `threadTs` and `initialMessage` are mutually exclusive.
 
