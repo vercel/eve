@@ -225,6 +225,27 @@ export default twilioChannel({
 \`\`\``,
     configure: `In the Twilio console, point your messaging service or phone number webhook at eve's route (\`/eve/v1/twilio\`). Provide the account SID and auth token via environment variables. See the [Twilio channel docs](/docs/channels/twilio) for SMS vs. WhatsApp specifics.`,
   },
+  blooio: {
+    logo: "blooio",
+    docsHref: "/docs/channels/blooio",
+    keywords: ["imessage", "rcs", "sms", "messaging", "phone", "apple"],
+    install: `Install the framework and the Blooio channel:
+
+\`\`\`bash
+npm install eve@latest
+\`\`\``,
+    quickStart: `Create \`agent/channels/blooio.ts\`:
+
+\`\`\`ts
+// agent/channels/blooio.ts
+import { blooioChannel } from "eve/channels/blooio";
+
+export default blooioChannel();
+\`\`\`
+
+The channel reads \`BLOOIO_API_KEY\` and \`BLOOIO_WEBHOOK_SECRET\` from the environment by default.`,
+    configure: `Create a Blooio API key and a webhook that points at the route eve serves (\`/eve/v1/blooio\`). Provide the API key and webhook signing secret through \`BLOOIO_API_KEY\` and \`BLOOIO_WEBHOOK_SECRET\`. Inbound \`message.received\` events are verified with HMAC-SHA256 and dispatched to your agent; replies, tapback reactions, typing indicators, and read receipts go back through the Blooio v2 API. See the [Blooio channel docs](/docs/channels/blooio) for group chats and send options.`,
+  },
   github: {
     logo: "github",
     docsHref: "/docs/channels/github",

@@ -221,6 +221,11 @@
       "import": "./dist/src/public/channels/github/index.js",
       "default": "./dist/src/public/channels/github/index.js"
     },
+    "./channels/blooio": {
+      "types": "./dist/src/public/channels/blooio/index.d.ts",
+      "import": "./dist/src/public/channels/blooio/index.js",
+      "default": "./dist/src/public/channels/blooio/index.js"
+    },
     "./channels/discord": {
       "types": "./dist/src/public/channels/discord/index.d.ts",
       "import": "./dist/src/public/channels/discord/index.js",

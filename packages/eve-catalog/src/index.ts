@@ -123,6 +123,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "blooio",
+    name: "Blooio",
+    kind: "channel",
+    tagline: "Send and receive iMessage, RCS, and SMS through Blooio.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "github",
     name: "GitHub",
     kind: "channel",
