@@ -531,6 +531,41 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("leaves blank space above and below the working spinner", async () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderAgentHeader({
+      name: "Weather Agent",
+      serverUrl: "http://localhost:3000",
+      info: agentInfoWithModel("gpt-5"),
+    });
+    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const rendering = renderer.renderStream(
+      {
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(controller) {
+            streamController = controller;
+          },
+        }),
+      },
+      { submittedPrompt: "hello", continueSession: true },
+    );
+
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("Working…");
+    });
+    const lines = screen.snapshot().split("\n");
+    const workingRow = lines.findIndex((line) => line.includes("Working…"));
+
+    expect(workingRow).toBeGreaterThan(0);
+    expect(lines[workingRow - 1]).toBe("");
+    expect(lines[workingRow + 1]).toBe("");
+    expect(lines[workingRow + 2]).toContain("gpt-5");
+
+    streamController?.close();
+    await rendering;
+    renderer.shutdown();
+  });
+
   it("seeds the editable buffer with an initial draft without auto-submitting", async () => {
     const { screen, input, renderer } = makeRenderer();
 

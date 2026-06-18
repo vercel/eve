@@ -2375,6 +2375,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       ? `${icon} ${status}  ${c.dim(this.#theme.glyph.dot)}  ${meta}`
       : `${icon} ${status}`;
     rows.push(clip(line, width));
+    if (this.#working) rows.push("");
     this.#pushStatusLine(rows, width);
     return rows;
   }
