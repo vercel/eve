@@ -188,53 +188,73 @@ for (const root of ROOTS) {
 }
 
 // 3. Internal links resolve. Every relative (./ ../) or site-absolute (/docs/)
-//    markdown link in a doc page must point at a real doc page or folder.
-//    fumadocs renders broken links as dead clicks; CI should catch them.
+//    markdown link in a doc page must point at the real rendered URL of a doc
+//    page or folder. Resolution is done in URL-space (not filesystem-space) so
+//    pages with a `url:` frontmatter override are validated against the URL
+//    they actually serve at, not the path they live at on disk.
+function renderedUrlFor(relPath, fm) {
+  if (fm && typeof fm.url === "string" && fm.url.length > 0) {
+    const u = fm.url.startsWith("/") ? fm.url : `/${fm.url}`;
+    return `/docs${u}`.replace(/\/$/, "") || "/docs";
+  }
+  const slug = relPath.replace(/\.mdx?$/, "").replace(/\/index$/, "");
+  return slug === "" ? "/docs" : `/docs/${slug}`;
+}
+
 function checkLinks(rootDir) {
   const files = walkMarkdown(rootDir);
-  const slugs = new Set();
-  const dirs = new Set();
+  const fileUrls = new Map();
+  const validUrls = new Set();
   for (const abs of files) {
     const rel = relative(rootDir, abs).split("\\").join("/");
-    slugs.add(rel.replace(/\.mdx?$/, ""));
-    let d = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
-    while (d) {
-      dirs.add(d);
-      d = d.includes("/") ? d.slice(0, d.lastIndexOf("/")) : "";
+    if (isExcluded(rel)) continue;
+    const fm = parseFrontmatter(readFileSync(abs, "utf8")) || {};
+    const url = renderedUrlFor(rel, fm);
+    fileUrls.set(abs, url);
+    validUrls.add(url);
+  }
+  // Folder URLs (sidebar groups) are valid link targets too.
+  const dirUrls = new Set();
+  for (const u of validUrls) {
+    let d = u;
+    while (d.length > "/docs".length) {
+      const idx = d.lastIndexOf("/");
+      if (idx <= 0) break;
+      d = d.slice(0, idx);
+      if (d.startsWith("/docs")) dirUrls.add(d);
     }
   }
+
   const linkRe = /\]\((\s*[^)]+?)\s*\)/g;
   for (const abs of files) {
     const rel = relative(rootDir, abs).split("\\").join("/");
     if (isExcluded(rel)) continue;
-    const dirOfFile = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
+    const baseUrl = fileUrls.get(abs);
+    if (!baseUrl) continue;
     const source = readFileSync(abs, "utf8");
     let m;
     while ((m = linkRe.exec(source)) !== null) {
       let target = m[1].trim();
       if (!target) continue;
-      // Only validate doc-internal links.
       const isRel = target.startsWith("./") || target.startsWith("../");
       const isSite = target.startsWith("/docs/") || target === "/docs";
-      if (!isRel && !isSite) continue; // external, mailto, #anchor, bare /eve/* runtime route, etc.
+      if (!isRel && !isSite) continue;
       target = target.split("#")[0].split("?")[0];
-      if (!target) continue; // pure in-page anchor
-      let resolvedSlug;
+      if (!target) continue;
+      let resolved;
       if (isSite) {
-        resolvedSlug = target.replace(/^\/docs\/?/, "");
+        resolved = target;
       } else {
-        const base = dirOfFile ? `${rootDir}/${dirOfFile}` : rootDir;
-        resolvedSlug = relative(rootDir, resolve(base, target)).split("\\").join("/");
+        resolved = new URL(target, `http://x${baseUrl}`).pathname;
       }
-      resolvedSlug = resolvedSlug.replace(/\/$/, "").replace(/\.mdx?$/, "");
-      if (resolvedSlug === "" || resolvedSlug === ".") continue; // docs root / index
-      if (slugs.has(resolvedSlug)) continue;
-      if (slugs.has(`${resolvedSlug}/index`)) continue;
-      if (dirs.has(resolvedSlug)) continue; // folder link (sidebar group)
+      resolved = resolved.replace(/\/$/, "") || "/docs";
+      if (resolved === "/docs") continue;
+      if (validUrls.has(resolved)) continue;
+      if (dirUrls.has(resolved)) continue;
       failures.push({
         root: "docs",
         file: rel,
-        issue: `broken internal link → \`${m[1].trim()}\` (resolves to \`${resolvedSlug}\`, no such page)`,
+        issue: `broken internal link → \`${m[1].trim()}\` (resolves to \`${resolved}\`, no such page)`,
       });
     }
   }
