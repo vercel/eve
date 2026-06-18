@@ -174,20 +174,30 @@ async function runDriverLoop(input: {
   const nextTurnCompletionToken = (): string =>
     `${input.sessionState.sessionId}:turn-completion:${String(turnDispatchIndex++)}`;
 
-  // Park hook registered BEFORE the first turn so it already exists
-  // when `session.waiting` reaches the client. Without this, fast
-  // clients (scripted smoke tests, programmatic SDKs) can POST
-  // `inputResponses` before `createHook` runs after the turn, causing
-  // "target session was not found via continuation token". The first
-  // turn may re-key via `setContinuationToken(...)` (e.g. Slack
-  // auto-anchor), so we rekey after the turn completes.
-  let parkToken = input.sessionState.continuationToken;
-  let hook: Hook<HookPayload> = createHook<HookPayload>({ token: parkToken });
-  let iterator: AsyncIterator<HookPayload> = hook[Symbol.asyncIterator]();
+  // Register before the first turn when a placeholder token exists.
+  // Tokenless channels must anchor during that turn before hook registration.
+  let parkToken = "";
+  let hook: Hook<HookPayload> | undefined;
+  let iterator: AsyncIterator<HookPayload> | undefined;
   let pendingNext: Promise<IteratorResult<HookPayload>> | null = null;
   const bufferedDeliveries: DeliverHookPayload[] = [];
 
+  const createParkHook = (nextToken: string): void => {
+    parkToken = nextToken;
+    hook = createHook<HookPayload>({ token: parkToken });
+    iterator = hook[Symbol.asyncIterator]();
+    pendingNext = null;
+  };
+
+  if (input.sessionState.continuationToken) {
+    createParkHook(input.sessionState.continuationToken);
+  }
+
   const getNextPromise = (): Promise<IteratorResult<HookPayload>> => {
+    if (iterator === undefined) {
+      throw new Error("Cannot wait for deliveries before a continuation token is available.");
+    }
+
     pendingNext ??= iterator.next();
     return pendingNext;
   };
@@ -202,14 +212,22 @@ async function runDriverLoop(input: {
    * with their senders — in-flight deliveries to the old token after
    * this returns are silently dropped.
    */
-  const rekeyHook = async (nextToken: string): Promise<void> => {
-    if (nextToken === parkToken || !nextToken) return;
-    await closeHookIterator(iterator);
-    await disposeHook(hook);
-    parkToken = nextToken;
-    hook = createHook<HookPayload>({ token: parkToken });
-    iterator = hook[Symbol.asyncIterator]();
+  const closeParkHook = async (): Promise<void> => {
+    if (iterator !== undefined) {
+      await closeHookIterator(iterator);
+    }
+    if (hook !== undefined) {
+      await disposeHook(hook);
+    }
+    hook = undefined;
+    iterator = undefined;
     pendingNext = null;
+  };
+
+  const rekeyHook = async (nextToken: string): Promise<void> => {
+    if (!nextToken || (hook !== undefined && nextToken === parkToken)) return;
+    await closeParkHook();
+    createParkHook(nextToken);
   };
 
   let action: NextDriverAction = await dispatchAndAwaitTurn({
@@ -225,8 +243,7 @@ async function runDriverLoop(input: {
   if (action.kind === "done") {
     await closeHookIterator(authIterator);
     await disposeHook(authHook);
-    await closeHookIterator(iterator);
-    await disposeHook(hook);
+    await closeParkHook();
     return await finalizeDone({
       action,
       driverWritable: input.driverWritable,
@@ -234,6 +251,9 @@ async function runDriverLoop(input: {
   }
 
   if (!action.sessionState.continuationToken) {
+    await closeHookIterator(authIterator);
+    await disposeHook(authHook);
+    await closeParkHook();
     throw new Error(
       "Cannot park: no continuation token available. The channel must " +
         "post the first message during the initial turn (anchoring the " +
@@ -373,8 +393,7 @@ async function runDriverLoop(input: {
       }
     }
   } finally {
-    await closeHookIterator(iterator);
-    await disposeHook(hook);
+    await closeParkHook();
     await closeHookIterator(authIterator);
     await disposeHook(authHook);
   }
