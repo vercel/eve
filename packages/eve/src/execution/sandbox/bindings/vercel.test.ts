@@ -4,6 +4,12 @@ import { SandboxTemplateNotProvisionedError } from "#public/definitions/sandbox-
 import { vercel } from "#public/sandbox/backends/vercel.js";
 import { createVercelSandbox } from "#execution/sandbox/bindings/vercel.js";
 
+vi.mock("#compiled/@vercel/oidc/index.js", () => ({
+  getVercelOidcToken: vi.fn(async () => {
+    throw new Error("No Vercel OIDC credential in this test.");
+  }),
+}));
+
 function createMockCommandResult() {
   return {
     exitCode: 0,
