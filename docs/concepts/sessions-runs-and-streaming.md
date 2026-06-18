@@ -42,7 +42,7 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `step.started`            | A model step began.                                                                                                 |
 | `actions.requested`       | The model requested tool calls.                                                                                     |
 | `action.result`           | A tool call returned.                                                                                               |
-| `input.requested`         | The run paused for human input ([HITL](../tools/human-in-the-loop) approval or `ask_question`); carries `requests`. |
+| `input.requested`         | The run paused for human input ([HITL](../human-in-the-loop) approval or `ask_question`); carries `requests`. |
 | `subagent.called`         | A subagent was delegated; carries `childSessionId` to attach to.                                                    |
 | `subagent.completed`      | A delegated subagent finished.                                                                                      |
 | `reasoning.appended`      | A reasoning delta (incremental, with cumulative text so far).                                                       |
