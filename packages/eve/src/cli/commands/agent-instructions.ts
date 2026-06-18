@@ -4,15 +4,13 @@ function readTemplate(fileName: string): string {
   return readFileSync(new URL(fileName, import.meta.url), "utf8").trim();
 }
 
-export function initAgentInstructions(options: { initCommand: string }): string {
-  return readTemplate("./init-agent-instructions.md").replace(
-    "{{initCommand}}",
-    () => options.initCommand,
-  );
+/** The launching-agent setup guide, read verbatim from its template. */
+export function initAgentInstructions(): string {
+  return readTemplate("./init-agent-instructions.md");
 }
 
 export function initAgentDevHandoff(options: { projectPath: string; devCommand: string }): string {
   return readTemplate("./init-agent-handoff.md")
     .replaceAll("{{projectPath}}", () => options.projectPath)
-    .replace("{{devCommand}}", () => options.devCommand);
+    .replaceAll("{{devCommand}}", () => options.devCommand);
 }

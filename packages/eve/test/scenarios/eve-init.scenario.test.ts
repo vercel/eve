@@ -301,7 +301,7 @@ describe("eve init smoke", () => {
     ]);
   });
 
-  it("scaffolds the current empty directory for a coding agent that omits the target", async () => {
+  it("hands a coding agent the setup guide when it omits the target", async () => {
     const scratch = await createScratchDirectory("eve-init-agent-bare-");
     const fakePnpmRoot = await createScratchDirectory("eve-init-agent-bare-pnpm-");
     const fakePnpm = await createFakePnpmEnvironment(fakePnpmRoot);
@@ -309,23 +309,29 @@ describe("eve init smoke", () => {
     const result = await runEveBin(scratch, ["init"], { ...fakePnpm.env, AI_AGENT: "claude" });
 
     expect(result.exitCode, result.stderr).toBe(0);
-    const canonicalProjectDir = await realpath(scratch);
-    expect(await readFile(join(scratch, "agent/agent.ts"), "utf8")).toContain(
-      DEFAULT_AGENT_MODEL_ID,
-    );
-    expect(await fakePnpm.readCalls()).toEqual([
-      {
-        args: [
-          "--dir",
-          canonicalProjectDir,
-          "install",
-          "--no-frozen-lockfile",
-          "--config.minimum-release-age=0",
-        ],
-        cwd: canonicalProjectDir,
-      },
-    ]);
-    expect(result.stdout).toContain("Do not start `eve dev`");
+    // A bare `eve init` from an agent prints the setup guide and scaffolds
+    // nothing — no agent files written. (No install runs, so the fake pnpm is
+    // never invoked and writes no call log.)
+    expect(result.stdout).toContain("Set up an eve agent");
+    expect(result.stdout).toContain("npx eve@latest init <name>");
+    await expect(pathExists(join(scratch, "agent/agent.ts"))).resolves.toBe(false);
+  });
+
+  it("prints the setup guide but still fails when a coding agent passes a bad flag", async () => {
+    const scratch = await createScratchDirectory("eve-init-agent-fumble-");
+    const fakePnpmRoot = await createScratchDirectory("eve-init-agent-fumble-pnpm-");
+    const fakePnpm = await createFakePnpmEnvironment(fakePnpmRoot);
+
+    const result = await runEveBin(scratch, ["init", "--unknown-flag"], {
+      ...fakePnpm.env,
+      AI_AGENT: "claude",
+    });
+
+    // The guide is still printed, but a malformed invocation must preserve its
+    // parse failure — exiting 0 would lie to any script or agent checking it.
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stdout).toContain("Set up an eve agent");
+    await expect(pathExists(join(scratch, "agent/agent.ts"))).resolves.toBe(false);
   });
 
   it("scaffolds the current empty directory when the target is omitted", async () => {
@@ -376,9 +382,9 @@ describe("eve init smoke", () => {
     );
     await expect(pathExists(join(projectDir, ".git"))).resolves.toBe(true);
     // Install runs through the real binary, but the dev server is handed off as
-    // text rather than spawned: the only install call is the install itself,
-    // and the handoff's "Do not start" line is the anchor that the TUI never
-    // launched. The handoff's command text is the unit test's job.
+    // text rather than spawned: the only package-manager call is the install
+    // itself. The handoff supplies a headless command the coding agent can run
+    // later in a controllable background process.
     expect(await fakePnpm.readCalls()).toEqual([
       {
         args: [
@@ -391,7 +397,7 @@ describe("eve init smoke", () => {
         cwd: canonicalProjectDir,
       },
     ]);
-    expect(result.stdout).toContain("Do not start `eve dev`");
+    expect(result.stdout).toContain("eve dev --no-ui");
   });
 
   it("rejects path-like names without writing outside the current directory", async () => {
