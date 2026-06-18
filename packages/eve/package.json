@@ -231,6 +231,11 @@
       "import": "./dist/src/public/channels/twilio/index.js",
       "default": "./dist/src/public/channels/twilio/index.js"
     },
+    "./channels/agentphone": {
+      "types": "./dist/src/public/channels/agentphone/index.d.ts",
+      "import": "./dist/src/public/channels/agentphone/index.js",
+      "default": "./dist/src/public/channels/agentphone/index.js"
+    },
     "./channels/telegram": {
       "types": "./dist/src/public/channels/telegram/index.d.ts",
       "import": "./dist/src/public/channels/telegram/index.js",

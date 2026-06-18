@@ -123,6 +123,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, gallery: true },
   },
   {
+    slug: "agentphone",
+    name: "AgentPhone",
+    kind: "channel",
+    tagline: "Reach users over SMS, iMessage, and voice calls through AgentPhone.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "github",
     name: "GitHub",
     kind: "channel",
