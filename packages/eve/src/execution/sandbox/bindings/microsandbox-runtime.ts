@@ -3,6 +3,7 @@ import { access } from "node:fs/promises";
 import { posix } from "node:path";
 
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
+import { createMicrosandboxWithProgress } from "#execution/sandbox/bindings/microsandbox-create.js";
 import {
   applyMicrosandboxNetwork,
   createMicrosandboxNetworkPlan,
@@ -292,6 +293,7 @@ export async function createPreparedMicrosandbox(input: {
   const initialNetworkPolicy = input.setupBaseRuntime ? "allow-all" : input.networkPolicy;
   const sandbox = await createMicrosandbox({
     fromSnapshot: input.fromSnapshot,
+    log: input.log,
     module: input.module,
     name: input.name,
     networkPolicy: initialNetworkPolicy,
@@ -590,6 +592,7 @@ export async function doesPathExist(path: string): Promise<boolean> {
 
 async function createMicrosandbox(input: {
   readonly fromSnapshot?: string;
+  readonly log?: (message: string) => void;
   readonly module: MicrosandboxModule;
   readonly name: string;
   readonly networkPolicy?: SandboxNetworkPolicy;
@@ -618,7 +621,16 @@ async function createMicrosandbox(input: {
     builder = builder.user(input.user);
   }
 
-  return await applyMicrosandboxNetwork(builder, input.networkPolicy).create();
+  const source =
+    input.fromSnapshot === undefined
+      ? `image "${input.options.image}"`
+      : `snapshot "${input.fromSnapshot}"`;
+  return await createMicrosandboxWithProgress({
+    builder: applyMicrosandboxNetwork(builder, input.networkPolicy),
+    errorType: input.module.MicrosandboxError,
+    log: input.log,
+    source,
+  });
 }
 
 async function removeSandboxIfExists(
