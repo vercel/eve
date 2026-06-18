@@ -2,6 +2,11 @@ import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 
 type PrewarmAppSandboxesInput = Parameters<typeof prewarmAppSandboxes>[0];
 
+const VERCEL_BUILD_PREWARM_SKIPPED_WARNING =
+  "[eve] WARNING: Skipped Vercel sandbox template prewarm because VERCEL_DEPLOYMENT_ID is missing. " +
+  "The generated .vercel/output may reference sandbox templates that were not provisioned. " +
+  'Do not deploy it with "vercel deploy --prebuilt"; use "vercel deploy" so Vercel builds from source.';
+
 /**
  * Detects whether the current build is running inside Vercel with a
  * stable deployment identifier. Build-time sandbox prewarm runs only
@@ -30,6 +35,9 @@ export function shouldPrewarmVercelBuild(): boolean {
  */
 export async function runVercelBuildPrewarm(input: PrewarmAppSandboxesInput): Promise<boolean> {
   if (!shouldPrewarmVercelBuild()) {
+    if (process.env.VERCEL?.trim() && !process.env.VERCEL_DEPLOYMENT_ID?.trim()) {
+      console.warn(VERCEL_BUILD_PREWARM_SKIPPED_WARNING);
+    }
     return false;
   }
   await prewarmAppSandboxes(input);
