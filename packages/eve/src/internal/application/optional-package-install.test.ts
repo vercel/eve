@@ -3,7 +3,11 @@ import { existsSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { installPackageIntoProject } from "#internal/application/optional-package-install.js";
+import {
+  EVE_DEV_ENV_FLAG,
+  installPackageIntoProject,
+  loadOptionalEnginePackage,
+} from "#internal/application/optional-package-install.js";
 
 vi.mock("node:child_process", async (importOriginal) => ({
   ...(await importOriginal<typeof import("node:child_process")>()),
@@ -13,6 +17,16 @@ vi.mock("node:child_process", async (importOriginal) => ({
 vi.mock("node:fs", async (importOriginal) => ({
   ...(await importOriginal<typeof import("node:fs")>()),
   existsSync: vi.fn(() => false),
+}));
+
+vi.mock("node:fs/promises", () => ({
+  mkdir: vi.fn(async () => {}),
+  readFile: vi.fn(async () => "{}"),
+  rm: vi.fn(async () => {}),
+  stat: vi.fn(async () => {
+    throw Object.assign(new Error("not found"), { code: "ENOENT" });
+  }),
+  writeFile: vi.fn(async () => {}),
 }));
 
 const mockedExistsSync = vi.mocked(existsSync);
@@ -37,6 +51,7 @@ function mockProcessPlatform(platform: NodeJS.Platform): () => void {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
   mockedExistsSync.mockReturnValue(false);
   mockedSpawn.mockImplementation(() => {
     const child = createMockChildProcess();
@@ -44,6 +59,96 @@ beforeEach(() => {
     return child;
   });
 });
+
+describe("loadOptionalEnginePackage", () => {
+  it("retries loading the package after auto-install finishes", async () => {
+    const appRoot = "/repo/retry-app";
+    vi.stubEnv(EVE_DEV_ENV_FLAG, "1");
+    let installed = false;
+    mockedSpawn.mockImplementationOnce(() => {
+      const child = createMockChildProcess();
+      queueMicrotask(() => {
+        installed = true;
+        child.emit("close", 0);
+      });
+      return child;
+    });
+    const loadedModule = { ok: true };
+    const importModule = vi.fn(async () => {
+      throw new Error("Cannot find module 'microsandbox'");
+    });
+    const importInstalledModule = vi.fn(async () => {
+      if (!installed) throw new Error("Cannot find module 'microsandbox'");
+      return loadedModule;
+    });
+
+    await expect(
+      loadOptionalEnginePackage({
+        appRoot,
+        autoInstall: true,
+        importInstalledModule,
+        importModule,
+        missingMessage: "missing microsandbox",
+        packageName: "microsandbox",
+      }),
+    ).resolves.toBe(loadedModule);
+
+    expect(mockedSpawn).toHaveBeenCalledTimes(1);
+    expect(importModule).toHaveBeenCalledTimes(1);
+    expect(importInstalledModule).toHaveBeenCalledTimes(2);
+  });
+
+  it("coalesces concurrent auto-installs for the same project package", async () => {
+    const appRoot = "/repo/concurrent-app";
+    vi.stubEnv(EVE_DEV_ENV_FLAG, "1");
+    let installed = false;
+    let installChild: ReturnType<typeof createMockChildProcess> | undefined;
+    mockedSpawn.mockImplementationOnce(() => {
+      installChild = createMockChildProcess();
+      return installChild;
+    });
+    const loadedModule = { ok: true };
+    const importModule = vi.fn(async () => {
+      throw new Error("Cannot find module 'microsandbox'");
+    });
+    const importInstalledModule = vi.fn(async () => {
+      if (!installed) throw new Error("Cannot find module 'microsandbox'");
+      return loadedModule;
+    });
+
+    const first = loadOptionalEnginePackage({
+      appRoot,
+      autoInstall: true,
+      importInstalledModule,
+      importModule,
+      missingMessage: "missing microsandbox",
+      packageName: "microsandbox",
+    });
+    await flushMicrotasks();
+    const second = loadOptionalEnginePackage({
+      appRoot,
+      autoInstall: true,
+      importInstalledModule,
+      importModule,
+      missingMessage: "missing microsandbox",
+      packageName: "microsandbox",
+    });
+    await flushMicrotasks();
+
+    expect(mockedSpawn).toHaveBeenCalledTimes(1);
+    installed = true;
+    installChild?.emit("close", 0);
+
+    await expect(Promise.all([first, second])).resolves.toEqual([loadedModule, loadedModule]);
+    expect(mockedSpawn).toHaveBeenCalledTimes(1);
+  });
+});
+
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 5; i += 1) {
+    await Promise.resolve();
+  }
+}
 
 describe("installPackageIntoProject", () => {
   it("uses the project's package manager", async () => {
