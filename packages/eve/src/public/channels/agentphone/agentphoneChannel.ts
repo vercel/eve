@@ -297,7 +297,7 @@ export function agentphoneChannel(config: AgentPhoneChannelConfig): AgentPhoneCh
           });
           if (voiceResult === null) return new Response("forbidden", { status: 403 });
 
-          waitUntil(dispatchVoice({ config, message: voice, onVoice, send }));
+          waitUntil(dispatchVoice({ config, message: voice, send }));
           return jsonResponse(voiceResult ?? {});
         }
 
@@ -522,31 +522,9 @@ async function acceptVoiceWebhook(input: {
 async function dispatchVoice(input: {
   readonly config: AgentPhoneChannelConfig;
   readonly message: AgentPhoneVoiceMessage;
-  readonly onVoice: NonNullable<AgentPhoneChannelConfig["onVoice"]>;
   readonly send: SendFn<AgentPhoneChannelState>;
 }): Promise<void> {
   const { message } = input;
-  const agentphone: AgentPhoneContext = {
-    agentphone: buildAgentPhoneHandle({
-      callId: message.callId,
-      config: input.config,
-      from: message.from,
-      to: message.to,
-    }),
-  };
-
-  let result: AgentPhoneInboundResult;
-  try {
-    const voiceResult = await input.onVoice(agentphone, message);
-    if (voiceResult === null || voiceResult === undefined) return;
-    result = {
-      auth: defaultAgentPhoneAuthFromVoice(message),
-    };
-  } catch (error) {
-    log.error("voice dispatch failed", { error });
-    return;
-  }
-  if (result === null || result === undefined) return;
 
   const contextBlock = formatAgentPhoneContextBlock({
     callId: message.callId,
@@ -562,7 +540,7 @@ async function dispatchVoice(input: {
         context: [contextBlock],
       },
       {
-        auth: result.auth,
+        auth: defaultAgentPhoneAuthFromVoice(message),
         continuationToken: agentphoneContinuationToken(message.from, message.to),
         state: {
           from: message.from,
