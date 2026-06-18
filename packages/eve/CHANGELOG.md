@@ -1,5 +1,11 @@
 # eve
 
+## 0.11.6
+
+### Patch Changes
+
+- 23cb00f: Slack channels now refresh assistant thread typing status during streamed reasoning, using a truncated reasoning snippet so long reasoning steps keep visible progress before tool calls or final replies.
+
 ## 0.11.5
 
 ### Patch Changes
