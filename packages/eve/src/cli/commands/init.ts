@@ -277,6 +277,9 @@ export async function runInitCommand(
       // The scaffold pins versions younger than typical release-age cooldown
       // windows; gating them would fail every fresh bootstrap.
       bypassMinimumReleaseAge: true,
+      // A freshly scaffolded app is standalone even when created under an
+      // ancestor workspace; npm in particular can crash on Bun-owned trees.
+      ignoreWorkspace: freshScaffold && packageManager === "npm",
       onOutput: (line) => installLog.push(line.text),
     });
   } finally {

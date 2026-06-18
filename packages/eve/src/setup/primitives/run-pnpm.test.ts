@@ -146,11 +146,23 @@ describe("runPackageManagerInstall", () => {
       expect.objectContaining({ cwd: "/tmp/app" }),
     );
   });
+
+  test("can isolate npm installs from ancestor workspaces", async () => {
+    await expect(
+      runPackageManagerInstall("npm", "/tmp/app", { ignoreWorkspace: true }),
+    ).resolves.toBe(true);
+
+    expect(mockedSpawn).toHaveBeenCalledWith(
+      "npm",
+      ["install", "--workspaces=false"],
+      expect.objectContaining({ cwd: "/tmp/app" }),
+    );
+  });
 });
 
 describe("eveDevArguments", () => {
   test.each([
-    ["npm", ["exec", "--", "eve", "dev"]],
+    ["npm", ["exec", "--workspaces=false", "--", "eve", "dev"]],
     ["pnpm", ["exec", "eve", "dev"]],
     ["yarn", ["eve", "dev"]],
     ["bun", ["x", "eve", "dev"]],

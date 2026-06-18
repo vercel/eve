@@ -194,7 +194,7 @@ describe("runInitCommand", () => {
   );
 
   it.each([
-    ["npm", ["exec", "--", "eve", "dev", "--input", "/model"]],
+    ["npm", ["exec", "--workspaces=false", "--", "eve", "dev", "--input", "/model"]],
     ["yarn", ["eve", "dev", "--input", "/model"]],
     ["bun", ["x", "eve", "dev", "--input", "/model"]],
   ] as const)(
@@ -217,7 +217,9 @@ describe("runInitCommand", () => {
       expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
         kind,
         projectPath,
-        expect.anything(),
+        expect.objectContaining({
+          ignoreWorkspace: kind === "npm",
+        }),
       );
       expect(deps.spawnPackageManager).toHaveBeenCalledWith(kind, projectPath, [...devArguments]);
     },
@@ -237,10 +239,11 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "npm",
       projectPath,
-      expect.anything(),
+      expect.objectContaining({ ignoreWorkspace: true }),
     );
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("npm", projectPath, [
       "exec",
+      "--workspaces=false",
       "--",
       "eve",
       "dev",
@@ -426,7 +429,7 @@ describe("runInitCommand", () => {
   });
 
   it.each([
-    ["npm", "package-lock.json", ["exec", "--", "eve", "dev"]],
+    ["npm", "package-lock.json", ["exec", "--workspaces=false", "--", "eve", "dev"]],
     ["yarn", "yarn.lock", ["eve", "dev"]],
     ["bun", "bun.lock", ["x", "eve", "dev"]],
   ] as const)(
@@ -454,7 +457,9 @@ describe("runInitCommand", () => {
       expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
         kind,
         projectRoot,
-        expect.anything(),
+        expect.objectContaining({
+          ignoreWorkspace: false,
+        }),
       );
       expect(deps.spawnPackageManager).toHaveBeenCalledWith(kind, projectRoot, [...devArguments]);
     },
@@ -549,7 +554,7 @@ describe("runInitCommand", () => {
     await runInitCommand(output, parentDirectory, "host-app", {}, deps);
 
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
-    expect(output.messages.join("\n")).toContain("npm exec -- eve dev");
+    expect(output.messages.join("\n")).toContain("npm exec --workspaces=false -- eve dev");
   });
 
   it("stops before Git and dev when dependency installation fails, replaying its output", async () => {

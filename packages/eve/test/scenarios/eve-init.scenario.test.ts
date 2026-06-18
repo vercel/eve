@@ -253,11 +253,11 @@ describe("eve init smoke", () => {
     await expect(pathExists(join(projectDir, "package-lock.json"))).resolves.toBe(true);
     expect(await fakeNpm.readCalls()).toEqual([
       {
-        args: ["install", "--min-release-age=0"],
+        args: ["install", "--workspaces=false", "--min-release-age=0"],
         cwd: canonicalProjectDir,
       },
       {
-        args: ["exec", "--", "eve", "dev", "--input", "/model"],
+        args: ["exec", "--workspaces=false", "--", "eve", "dev", "--input", "/model"],
         cwd: canonicalProjectDir,
       },
     ]);

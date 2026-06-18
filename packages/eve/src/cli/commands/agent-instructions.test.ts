@@ -23,7 +23,7 @@ describe("initAgentDevHandoff", () => {
   it("points at the bundled docs, applies the purpose, and hands the dev command to the user", () => {
     const handoff = initAgentDevHandoff({
       projectPath: "/tmp/triage-bot",
-      devCommand: "npm exec -- eve dev",
+      devCommand: "npm exec --workspaces=false -- eve dev",
     });
 
     expect(handoff).toContain("/tmp/triage-bot/node_modules/eve/docs/");
@@ -31,6 +31,6 @@ describe("initAgentDevHandoff", () => {
     expect(handoff).toContain("purpose you collected");
     expect(handoff).toContain("Do not start `eve dev` because it is interactive");
     expect(handoff).toContain("cd /tmp/triage-bot");
-    expect(handoff).toContain("npm exec -- eve dev");
+    expect(handoff).toContain("npm exec --workspaces=false -- eve dev");
   });
 });
