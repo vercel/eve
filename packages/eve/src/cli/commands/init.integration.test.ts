@@ -19,7 +19,12 @@ import {
 import { pathExists } from "#setup/path-exists.js";
 
 import type { GitInitResult } from "./init-git.js";
-import { runInitCommand, type InitCliLogger, type InitCommandDependencies } from "./init.js";
+import {
+  EVE_INIT_PACKAGE_SPEC_ENV,
+  runInitCommand,
+  type InitCliLogger,
+  type InitCommandDependencies,
+} from "./init.js";
 
 const BASE_VERSIONS = {
   aiPackageVersion: "7.0.0",
@@ -64,8 +69,13 @@ function dependencies(
   tryInitializeGit: ReturnType<typeof vi.fn<InitCommandDependencies["tryInitializeGit"]>>;
 } {
   return {
-    addAgentToProject: (options: AddAgentToProjectOptions) =>
-      addAgentToProject({ ...BASE_VERSIONS, ...options }),
+    addAgentToProject: (options: AddAgentToProjectOptions) => {
+      const merged = { ...BASE_VERSIONS, ...options };
+      if (options.evePackage === undefined) {
+        merged.evePackage = BASE_VERSIONS.evePackage;
+      }
+      return addAgentToProject(merged);
+    },
     // Stubbed to "no visible manager" so assertions do not depend on which
     // manager launched the test runner itself.
     detectInvokingPackageManager: vi.fn(() => undefined),
@@ -73,8 +83,13 @@ function dependencies(
     // launched by a coding agent, and these tests assert the human path.
     isCodingAgentLaunch: vi.fn(async () => false),
     detectPackageManager,
-    scaffoldBaseProject: (options: ScaffoldBaseProjectOptions) =>
-      scaffoldBaseProject({ ...BASE_VERSIONS, ...options }),
+    scaffoldBaseProject: (options: ScaffoldBaseProjectOptions) => {
+      const merged = { ...BASE_VERSIONS, ...options };
+      if (options.evePackage === undefined) {
+        merged.evePackage = BASE_VERSIONS.evePackage;
+      }
+      return scaffoldBaseProject(merged);
+    },
     ensureChannel: (options: EnsureChannelOptions) =>
       ensureChannel({
         ...options,
@@ -104,6 +119,7 @@ async function createHostProject(
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe("runInitCommand", () => {
@@ -157,6 +173,35 @@ describe("runInitCommand", () => {
     expect(output.messages[1]).toContain("Installing dependencies...");
     expect(output.messages[2]).toContain("Installed dependencies");
     expect(output.messages[3]).toContain("$ eve dev --input /model");
+  });
+
+  it("uses an explicit init package spec for fresh project scaffolds", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-package-spec-"));
+    const output = logger();
+    const deps = dependencies();
+    vi.stubEnv(EVE_INIT_PACKAGE_SPEC_ENV, "file:/tmp/eve-0.11.5.tgz");
+
+    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+
+    const packageJson = JSON.parse(
+      await readFile(join(parentDirectory, "my-agent", "package.json"), "utf8"),
+    ) as { dependencies: Record<string, string> };
+    expect(packageJson.dependencies.eve).toBe("file:/tmp/eve-0.11.5.tgz");
+  });
+
+  it("uses an explicit init package spec when adding to an existing project", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-existing-package-spec-"));
+    const projectRoot = await createHostProject(parentDirectory);
+    const output = logger();
+    const deps = dependencies();
+    vi.stubEnv(EVE_INIT_PACKAGE_SPEC_ENV, "file:/tmp/eve-0.11.5.tgz");
+
+    await runInitCommand(output, parentDirectory, "host-app", {}, deps);
+
+    const packageJson = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8")) as {
+      dependencies: Record<string, string>;
+    };
+    expect(packageJson.dependencies.eve).toBe("file:/tmp/eve-0.11.5.tgz");
   });
 
   it.each([undefined, ".", "./"] as const)(
