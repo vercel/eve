@@ -136,21 +136,22 @@ export async function compactMessages(
       temperature: 0,
     });
 
-    // The recent window may trail with an assistant message (e.g.
-    // deferred-input continuations where no user message was appended).
-    // Providers that don't support assistant prefill reject the request.
-    // Append a synthetic user message so the model resumes from a user turn.
-    const trailingAssistantGuard: ModelMessage[] =
-      recent.length > 0 && recent.at(-1)?.role === "assistant"
-        ? [{ role: "user", content: "Continue." }]
-        : [];
-
     const compacted: ModelMessage[] = [
       { content: "Summary of our conversation so far:", role: "user" },
       { content: result.text, role: "assistant" },
       ...recent,
-      ...trailingAssistantGuard,
     ];
+
+    // The compacted prompt may end on an assistant message — either because the
+    // recent window trails with one (deferred-input continuations) or because
+    // `recent` is empty and the summary block itself is the final message (a
+    // single oversized turn, or `keep` reaching 0). Providers that don't support
+    // assistant prefill (e.g. Anthropic) reject a prompt that doesn't end on a
+    // user turn, so append a synthetic user message whenever the assembled tail
+    // is still an assistant message.
+    if (compacted.at(-1)?.role === "assistant") {
+      compacted.push({ role: "user", content: "Continue." });
+    }
 
     if (estimateTokens(compacted) <= config.threshold || keep === 0) {
       return compacted;

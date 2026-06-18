@@ -251,6 +251,37 @@ describe("compactMessages", () => {
     expect(result[4]).toEqual({ content: "Continue.", role: "user" });
   });
 
+  it("ends on a user turn when no recent messages are kept", async () => {
+    const { generateText } = await import("ai");
+
+    vi.mocked(generateText).mockResolvedValue({
+      text: "Summary of prior context",
+    } as Awaited<ReturnType<typeof generateText>>);
+
+    const messages: ModelMessage[] = [
+      { content: "old message 1", role: "user" },
+      { content: "old message 2", role: "assistant" },
+    ];
+
+    const model = {} as Parameters<typeof compactMessages>[1];
+    // recentWindowSize 0 forces an empty recent window, so the summary's
+    // assistant block would be the final message without the trailing guard.
+    const result = await compactMessages(messages, model, {
+      ...config,
+      recentWindowSize: 0,
+    });
+
+    expect(result.at(-1)).toEqual({ content: "Continue.", role: "user" });
+    expect(result[0]).toEqual({
+      content: "Summary of our conversation so far:",
+      role: "user",
+    });
+    expect(result[1]).toEqual({
+      content: "Summary of prior context",
+      role: "assistant",
+    });
+  });
+
   it("forwards provider options to the compaction model call", async () => {
     const { generateText } = await import("ai");
 
@@ -339,6 +370,10 @@ describe("compactMessages", () => {
       {
         content: "Summary of the large SQL result",
         role: "assistant",
+      },
+      {
+        content: "Continue.",
+        role: "user",
       },
     ]);
     expect(vi.mocked(generateText)).toHaveBeenCalledTimes(1);
