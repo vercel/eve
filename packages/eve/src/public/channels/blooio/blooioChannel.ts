@@ -1,3 +1,5 @@
+import type { UserContent } from "ai";
+
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelSessionOps } from "#public/definitions/defineChannel.js";
@@ -26,6 +28,7 @@ import { defaultEvents, defaultOnMessage } from "#public/channels/blooio/default
 import {
   formatBlooioContextBlock,
   parseBlooioInboundMessage,
+  resolveAttachmentMediaType,
   type BlooioInboundMessage,
 } from "#public/channels/blooio/inbound.js";
 import { verifyBlooioRequest } from "#public/channels/blooio/verify.js";
@@ -357,12 +360,10 @@ async function dispatch(input: {
   }
   if (result === null || result === undefined) return;
 
-  const text = message.text || (message.attachments.length > 0 ? "[attachment]" : "");
-
   try {
     await input.send(
       {
-        message: text,
+        message: buildInboundMessageContent(message),
         context: [formatBlooioContextBlock(message)],
       },
       {
@@ -380,6 +381,34 @@ async function dispatch(input: {
   } catch (error) {
     log.error("blooio message delivery failed", { error });
   }
+}
+
+/**
+ * Builds the delivery content for an inbound message. When the message
+ * carries attachments, returns a multimodal `UserContent` array (text part
+ * plus one file part per attachment) so the model can see the media.
+ * Blooio serves inbound media from a public bucket, so the file-part URLs
+ * pass straight through to the model provider. Text-only messages return
+ * a plain string.
+ */
+function buildInboundMessageContent(message: BlooioInboundMessage): string | UserContent {
+  const files = message.attachments.filter(
+    (attachment): attachment is typeof attachment & { url: string } =>
+      typeof attachment.url === "string" && attachment.url.length > 0,
+  );
+  if (files.length === 0) return message.text;
+
+  const parts: Exclude<UserContent, string> = [];
+  if (message.text) parts.push({ type: "text", text: message.text });
+  for (const attachment of files) {
+    parts.push({
+      type: "file",
+      data: new URL(attachment.url),
+      mediaType: resolveAttachmentMediaType(attachment),
+      ...(attachment.name ? { filename: attachment.name } : {}),
+    });
+  }
+  return parts;
 }
 
 function buildBlooioHandle(input: {

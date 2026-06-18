@@ -8,9 +8,13 @@
 
 /** One inbound attachment as delivered by a Blooio webhook. */
 export interface BlooioInboundAttachment {
+  /** Public URL of the file (Blooio serves inbound media from a public bucket). */
   readonly url?: string;
+  /** Display file name (`file_name` in the webhook payload). */
   readonly name?: string;
+  /** MIME type (`mime_type` in the webhook payload). */
   readonly mimeType?: string;
+  readonly size?: number;
   readonly [key: string]: unknown;
 }
 
@@ -115,13 +119,62 @@ function readReplyTo(value: unknown): BlooioReplyTo | undefined {
 
 function readAttachments(value: unknown): BlooioInboundAttachment[] {
   if (!Array.isArray(value)) return [];
-  return value.map((entry) =>
-    typeof entry === "string"
-      ? { url: entry }
-      : isRecord(entry)
-        ? (entry as BlooioInboundAttachment)
-        : {},
-  );
+  return value.map((entry) => {
+    if (typeof entry === "string") return { url: entry };
+    if (!isRecord(entry)) return {};
+    return {
+      ...entry,
+      url: readString(entry.url),
+      name: readString(entry.file_name) ?? readString(entry.name),
+      mimeType: readString(entry.mime_type) ?? readString(entry.mimeType),
+      size: readNumber(entry.size),
+    };
+  });
+}
+
+const EXTENSION_MEDIA_TYPES: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  webp: "image/webp",
+  heic: "image/heic",
+  heif: "image/heif",
+  bmp: "image/bmp",
+  tiff: "image/tiff",
+  svg: "image/svg+xml",
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  webm: "video/webm",
+  avi: "video/x-msvideo",
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  ogg: "audio/ogg",
+  aac: "audio/aac",
+  m4a: "audio/mp4",
+  caf: "audio/x-caf",
+  pdf: "application/pdf",
+  txt: "text/plain",
+  csv: "text/csv",
+  vcf: "text/vcard",
+  json: "application/json",
+  zip: "application/zip",
+};
+
+/**
+ * Best-effort MIME type for an attachment: prefers the explicit
+ * `mimeType`, then infers from the URL extension, then falls back to
+ * `application/octet-stream`.
+ */
+export function resolveAttachmentMediaType(attachment: BlooioInboundAttachment): string {
+  if (attachment.mimeType) return attachment.mimeType;
+  const url = attachment.url;
+  if (url) {
+    const path = url.split(/[?#]/, 1)[0] ?? url;
+    const ext = path.split(".").pop()?.toLowerCase();
+    if (ext && EXTENSION_MEDIA_TYPES[ext]) return EXTENSION_MEDIA_TYPES[ext];
+  }
+  return "application/octet-stream";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
