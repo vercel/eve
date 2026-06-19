@@ -79,7 +79,7 @@ export type ModelProviderStatus =
  * disk — so it never surfaces as an outcome.
  */
 export interface ModelProviderOutcome {
-  credential?: "VERCEL_OIDC_TOKEN" | "AI_GATEWAY_API_KEY";
+  credential?: string;
   status: ModelProviderStatus;
 }
 
@@ -321,8 +321,15 @@ export async function runModelFlow(input: {
       nextSelection = "provider";
       continue;
     }
-    // External-provider setup only shows instructions, so keep the menu open.
+    // External-provider setup without a saved key only shows instructions, so
+    // keep the menu open. When it saves a provider key, return that outcome
+    // directly: gateway detection intentionally does not know about arbitrary
+    // provider env vars.
     if ("outcome" in result) {
+      if (result.credential !== undefined) {
+        providerOutcome = { credential: result.credential, status: { kind: "unset" } };
+        break;
+      }
       nextSelection = "done";
       continue;
     }

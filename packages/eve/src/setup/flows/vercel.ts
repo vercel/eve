@@ -15,13 +15,16 @@ import { runLinkFlow, type LinkFlowResult } from "./link.js";
 const AI_GATEWAY_ENV_KEY = "AI_GATEWAY_API_KEY";
 const ENV_FILE_NAME = ".env.local";
 type GatewayConnection = "project" | "own-key";
+type ExternalProvider = "anthropic" | "openai" | "other";
 
 export const PROVIDER_QUESTION = "Which model provider do you want to use?";
 export const CONNECTION_QUESTION = "How do you want to connect to AI Gateway?";
+export const EXTERNAL_PROVIDER_QUESTION = "Which provider key do you want to save?";
+export const EXTERNAL_PROVIDER_ENV_QUESTION = "Which environment variable should eve save?";
 
 export const EXTERNAL_PROVIDER_INSTRUCTIONS_TITLE = "Using another model provider";
 export const EXTERNAL_PROVIDER_INSTRUCTIONS: readonly string[] = [
-  `Set your provider's API key in ${ENV_FILE_NAME} — e.g. ANTHROPIC_API_KEY or OPENAI_API_KEY.`,
+  `Save your provider's API key in ${ENV_FILE_NAME} — e.g. ANTHROPIC_API_KEY or OPENAI_API_KEY.`,
   'In agent/agent.ts, set `model` to a provider-authored model — e.g. `anthropic("claude-opus-4.8")` from `@ai-sdk/anthropic`.',
   "See https://beta.eve.dev/docs/agent-config for details.",
   "A running `eve dev` reloads env files automatically — no restart needed.",
@@ -39,8 +42,10 @@ export type VercelFlowResult =
   | LinkFlowResult
   | {
       kind: "done";
-      /** The user runs a non-gateway provider; nothing was linked or written. */
+      /** The user runs a non-gateway provider; no Vercel project was linked. */
       outcome: "external-provider";
+      /** Provider credential saved to .env.local, when the user pasted one. */
+      credential?: string;
     };
 
 function projectConnectionOption(authStatus: VercelAuthStatus): SelectOption<GatewayConnection> {
@@ -79,6 +84,24 @@ function projectConnectionOption(authStatus: VercelAuthStatus): SelectOption<Gat
       return exhaustive;
     }
   }
+}
+
+function externalProviderEnvKey(provider: ExternalProvider): string | undefined {
+  switch (provider) {
+    case "anthropic":
+      return "ANTHROPIC_API_KEY";
+    case "openai":
+      return "OPENAI_API_KEY";
+    case "other":
+      return undefined;
+  }
+}
+
+function normalizeEnvKey(input: string): string {
+  return input
+    .trim()
+    .toUpperCase()
+    .replaceAll(/[^A-Z0-9_]/gu, "_");
 }
 
 /**
@@ -146,18 +169,50 @@ export async function runVercelFlow(input: {
   }
 
   if (provider === "other") {
+    const externalProvider = await prompter.select<ExternalProvider>({
+      message: EXTERNAL_PROVIDER_QUESTION,
+      options: [
+        { value: "anthropic", label: "Anthropic", hint: "ANTHROPIC_API_KEY" },
+        { value: "openai", label: "OpenAI", hint: "OPENAI_API_KEY" },
+        { value: "other", label: "Something else", hint: "custom env var" },
+      ],
+      hintLayout: "stacked",
+    });
+    let envKey = externalProviderEnvKey(externalProvider);
+    if (envKey === undefined) {
+      envKey = normalizeEnvKey(
+        await prompter.text({
+          message: EXTERNAL_PROVIDER_ENV_QUESTION,
+          placeholder: "PROVIDER_API_KEY",
+          validate: (value) =>
+            normalizeEnvKey(value).length === 0
+              ? "Environment variable cannot be empty."
+              : undefined,
+        }),
+      );
+    }
+
+    const key = await prompter.password({
+      message: `Enter your ${envKey}`,
+      validate: (value) => (value.trim().length === 0 ? "API key cannot be empty." : undefined),
+    });
+    await deps.appendEnv(join(appRoot, ENV_FILE_NAME), { [envKey]: key.trim() }, { force: true });
+    signal?.throwIfAborted();
+    prompter.log.success(`Saved ${envKey} to ${ENV_FILE_NAME}.`);
+
+    const lines = [
+      `Saved ${envKey} to ${ENV_FILE_NAME}.`,
+      ...EXTERNAL_PROVIDER_INSTRUCTIONS.slice(1),
+    ];
     if (prompter.acknowledge) {
       await prompter.acknowledge({
         message: EXTERNAL_PROVIDER_INSTRUCTIONS_TITLE,
-        lines: EXTERNAL_PROVIDER_INSTRUCTIONS,
+        lines,
       });
     } else {
-      prompter.note(
-        EXTERNAL_PROVIDER_INSTRUCTIONS.join("\n"),
-        EXTERNAL_PROVIDER_INSTRUCTIONS_TITLE,
-      );
+      prompter.note(lines.join("\n"), EXTERNAL_PROVIDER_INSTRUCTIONS_TITLE);
     }
-    return { kind: "done", outcome: "external-provider" };
+    return { kind: "done", outcome: "external-provider", credential: envKey };
   }
 
   if (connection === "own-key") {

@@ -7,6 +7,8 @@ import type { VercelAuthStatus } from "#setup/vercel-project.js";
 
 import {
   CONNECTION_QUESTION,
+  EXTERNAL_PROVIDER_ENV_QUESTION,
+  EXTERNAL_PROVIDER_QUESTION,
   EXTERNAL_PROVIDER_INSTRUCTIONS,
   EXTERNAL_PROVIDER_INSTRUCTIONS_TITLE,
   PROVIDER_QUESTION,
@@ -159,31 +161,114 @@ describe("runVercelFlow", () => {
     expect(deps.appendEnv).toHaveBeenCalledOnce();
   });
 
-  it("shows provider instructions and ends with the external-provider outcome", async () => {
-    const fake = createFakePrompter({ single: answers("other") });
+  it("writes an Anthropic key to .env.local before showing provider instructions", async () => {
+    const fake = createFakePrompter({
+      single: (opts) => {
+        if (opts.message === PROVIDER_QUESTION) return "other";
+        if (opts.message === EXTERNAL_PROVIDER_QUESTION) return "anthropic";
+        throw new Error(`Unexpected select: ${opts.message}`);
+      },
+      password: () => "  sk-ant-test  ",
+    });
     const deps = createDeps();
 
     const result = await runVercelFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps });
 
-    expect(result).toEqual({ kind: "done", outcome: "external-provider" });
+    expect(result).toEqual({
+      kind: "done",
+      outcome: "external-provider",
+      credential: "ANTHROPIC_API_KEY",
+    });
+    expect(deps.appendEnv).toHaveBeenCalledExactlyOnceWith(
+      `${APP_ROOT}/.env.local`,
+      { ANTHROPIC_API_KEY: "sk-ant-test" },
+      { force: true },
+    );
     expect(fake.prompter.acknowledge).toHaveBeenCalledExactlyOnceWith({
       message: EXTERNAL_PROVIDER_INSTRUCTIONS_TITLE,
-      lines: EXTERNAL_PROVIDER_INSTRUCTIONS,
+      lines: ["Saved ANTHROPIC_API_KEY to .env.local.", ...EXTERNAL_PROVIDER_INSTRUCTIONS.slice(1)],
     });
     expect(deps.runLinkFlow).not.toHaveBeenCalled();
-    expect(deps.appendEnv).not.toHaveBeenCalled();
+    expect(deps.validateGatewayApiKey).not.toHaveBeenCalled();
+  });
+
+  it("writes an OpenAI key to .env.local for OpenAI-compatible models", async () => {
+    const fake = createFakePrompter({
+      single: (opts) => {
+        if (opts.message === PROVIDER_QUESTION) return "other";
+        if (opts.message === EXTERNAL_PROVIDER_QUESTION) return "openai";
+        throw new Error(`Unexpected select: ${opts.message}`);
+      },
+      password: () => "sk-openai-test",
+    });
+    const deps = createDeps();
+
+    const result = await runVercelFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps });
+
+    expect(result).toEqual({
+      kind: "done",
+      outcome: "external-provider",
+      credential: "OPENAI_API_KEY",
+    });
+    expect(deps.appendEnv).toHaveBeenCalledExactlyOnceWith(
+      `${APP_ROOT}/.env.local`,
+      { OPENAI_API_KEY: "sk-openai-test" },
+      { force: true },
+    );
+  });
+
+  it("normalizes and writes a custom external provider env var", async () => {
+    const fake = createFakePrompter({
+      single: (opts) => {
+        if (opts.message === PROVIDER_QUESTION) return "other";
+        if (opts.message === EXTERNAL_PROVIDER_QUESTION) return "other";
+        throw new Error(`Unexpected select: ${opts.message}`);
+      },
+      text: (opts) => {
+        expect(opts.message).toBe(EXTERNAL_PROVIDER_ENV_QUESTION);
+        return "acme-token";
+      },
+      password: () => "sk-acme-test",
+    });
+    const deps = createDeps();
+
+    const result = await runVercelFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps });
+
+    expect(result).toEqual({
+      kind: "done",
+      outcome: "external-provider",
+      credential: "ACME_TOKEN",
+    });
+    expect(deps.appendEnv).toHaveBeenCalledExactlyOnceWith(
+      `${APP_ROOT}/.env.local`,
+      { ACME_TOKEN: "sk-acme-test" },
+      { force: true },
+    );
   });
 
   it("falls back to note when the prompter lacks acknowledge", async () => {
-    const fake = createFakePrompter({ single: answers("other") });
+    const fake = createFakePrompter({
+      single: (opts) => {
+        if (opts.message === PROVIDER_QUESTION) return "other";
+        if (opts.message === EXTERNAL_PROVIDER_QUESTION) return "anthropic";
+        throw new Error(`Unexpected select: ${opts.message}`);
+      },
+      password: () => "sk-ant-test",
+    });
     delete fake.prompter.acknowledge;
     const deps = createDeps();
 
     const result = await runVercelFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps });
 
-    expect(result).toEqual({ kind: "done", outcome: "external-provider" });
+    expect(result).toEqual({
+      kind: "done",
+      outcome: "external-provider",
+      credential: "ANTHROPIC_API_KEY",
+    });
     expect(fake.prompter.note).toHaveBeenCalledWith(
-      EXTERNAL_PROVIDER_INSTRUCTIONS.join("\n"),
+      ["Saved ANTHROPIC_API_KEY to .env.local.", ...EXTERNAL_PROVIDER_INSTRUCTIONS.slice(1)].join(
+        "\n",
+      ),
       EXTERNAL_PROVIDER_INSTRUCTIONS_TITLE,
     );
   });

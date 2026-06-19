@@ -412,6 +412,13 @@ function pendingChannelsResult(message: string): TuiSetupCommandResult {
  */
 function providerOutcomeMessage(outcome: ModelProviderOutcome): string {
   const { credential, status } = outcome;
+  const externalCredential =
+    credential !== undefined &&
+    credential !== "AI_GATEWAY_API_KEY" &&
+    credential !== "VERCEL_OIDC_TOKEN";
+  if (externalCredential) {
+    return `Saved ${credential} to .env.local. Update agent.ts to use the matching AI SDK provider model.`;
+  }
   if (status.kind === "gateway-project") {
     return credential === undefined
       ? "Project linked. No model credential found; set AI_GATEWAY_API_KEY in .env.local."

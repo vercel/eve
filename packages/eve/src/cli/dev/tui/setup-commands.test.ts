@@ -148,6 +148,24 @@ describe("runTuiSetupCommand", () => {
     });
   });
 
+  it("reports a saved external provider key without calling it AI Gateway", async () => {
+    const flows = fakeFlows({
+      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
+        kind: "done",
+        providerOutcome: {
+          credential: "ANTHROPIC_API_KEY",
+          status: { kind: "unset" },
+        },
+      })),
+    });
+    await expect(run({ command: "model", flows })).resolves.toEqual({
+      message:
+        "Saved ANTHROPIC_API_KEY to .env.local. Update agent.ts to use the matching AI SDK provider model.",
+      preserveFlowDiagnostics: false,
+      vercelEffect: { kind: "refresh-identity" },
+    });
+  });
+
   it("reports a cancelled model pick", async () => {
     const flows = fakeFlows({
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({ kind: "cancelled" })),

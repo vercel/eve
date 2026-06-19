@@ -332,6 +332,31 @@ describe("runModelFlow", () => {
     expect(menuPaints[1]?.notices).toEqual([]);
   });
 
+  it("returns to the prompt when the external-provider branch saves a credential", async () => {
+    const { prompter, menuPaints } = scriptedPrompter({ menu: ["provider"] });
+    const deps = flowDeps({
+      runVercelFlow: vi.fn(
+        async () =>
+          ({
+            kind: "done",
+            outcome: "external-provider",
+            credential: "ANTHROPIC_API_KEY",
+          }) as const,
+      ),
+    });
+
+    await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
+      kind: "done",
+      providerOutcome: {
+        credential: "ANTHROPIC_API_KEY",
+        status: { kind: "unset" },
+      },
+    });
+
+    expect(deps.detectProviderStatus).toHaveBeenCalledTimes(1);
+    expect(menuPaints).toHaveLength(1);
+  });
+
   it("returns to the menu after a cancelled sub-flow and folds an empty exit", async () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["provider", "esc"] });
     const deps = flowDeps({
