@@ -57,7 +57,3 @@ minimumReleaseAgeExclude:
   - turbo
   - typescript
   - vercel
-  # Temporary third-party transitives required by latest Nitro before they age through
-  # the workspace release-age policy.
-  - env-runner
-  - ocache
