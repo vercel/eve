@@ -20,6 +20,13 @@ See the [README](./README.md) for the full overview and
 - `docs` — published documentation content
 - `e2e/` — fixture-owned `eve eval` end-to-end tests
 
+## Git workflow
+
+Commits must be cryptographically signed with a GitHub-verified key and include
+the DCO `Signed-off-by` trailer. Use `git commit -s` for every commit, and if a
+commit is missing the trailer, amend it with `git commit --amend -s --no-edit`
+before pushing.
+
 ## Commands
 
 ```sh
