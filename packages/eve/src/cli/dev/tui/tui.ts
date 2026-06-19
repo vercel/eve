@@ -60,14 +60,14 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     client,
     serverUrl,
     promptCommandHandler: createPromptCommandHandler(
-      target.kind === "local" ? { appRoot: target.appRoot } : {},
+      target.kind === "local" ? { appRoot: target.workspaceRoot } : {},
     ),
     formatTransportError: (error) =>
       isVercelAuthChallenge(error)
         ? formatVercelAuthChallengeMessage({ serverUrl })
         : toErrorMessage(error),
   };
-  if (target.kind === "local") options.appRoot = target.appRoot;
+  if (target.kind === "local") options.appRoot = target.workspaceRoot;
   if (initialInput !== undefined) options.initialInput = initialInput;
   if (onBootProgress !== undefined) options.onBootProgress = onBootProgress;
 

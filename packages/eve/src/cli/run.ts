@@ -540,7 +540,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
         const tuiInput: RunDevelopmentTuiInput = {
           target:
             remoteServerUrl === undefined
-              ? { kind: "local", serverUrl, appRoot }
+              ? { kind: "local", serverUrl, workspaceRoot: appRoot }
               : { kind: "remote", serverUrl, workspaceRoot: appRoot },
           initialInput: options.input,
           onBootProgress: report,

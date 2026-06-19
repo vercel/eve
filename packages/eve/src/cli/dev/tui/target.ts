@@ -1,16 +1,18 @@
-/** Local or remote server backing one development TUI session. */
-export type DevelopmentTuiTarget = LocalDevelopmentTarget | RemoteDevelopmentTarget;
+interface DevelopmentTargetBase {
+  readonly serverUrl: string;
+  /** Local workspace root; locates `.vercel/project.json` and app files. */
+  readonly workspaceRoot: string;
+}
 
 /** A development TUI session backed by the local `eve dev` server. */
-export interface LocalDevelopmentTarget {
+export interface LocalDevelopmentTarget extends DevelopmentTargetBase {
   readonly kind: "local";
-  readonly serverUrl: string;
-  readonly appRoot: string;
 }
 
 /** A development TUI session connected to an existing remote server. */
-export interface RemoteDevelopmentTarget {
+export interface RemoteDevelopmentTarget extends DevelopmentTargetBase {
   readonly kind: "remote";
-  readonly serverUrl: string;
-  readonly workspaceRoot: string;
 }
+
+/** Local or remote server backing one development TUI session. */
+export type DevelopmentTuiTarget = LocalDevelopmentTarget | RemoteDevelopmentTarget;
