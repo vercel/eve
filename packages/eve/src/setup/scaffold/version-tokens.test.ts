@@ -25,6 +25,17 @@ describe("resolveVersionToken", () => {
     expect(manifest).toContain(`"@vercel/connect": "${resolved}"`);
   });
 
+  it("resolves a named catalog token from the dev tree's workspace manifest", () => {
+    const resolved = resolveVersionToken(
+      "nextTypescriptPackageVersion",
+      "__NEXT_TYPESCRIPT_VERSION__",
+    );
+
+    const manifest = readFileSync(fileURLToPath(WORKSPACE_MANIFEST_URL), "utf8");
+    expect(resolved).not.toMatch(/^__/);
+    expect(manifest).toContain(`typescript6:\n    typescript: "${resolved}"`);
+  });
+
   it("resolves the eve version token from eve's own package.json", () => {
     const resolved = resolveVersionToken("evePackage.version", "__EVE_PACKAGE_VERSION__");
 

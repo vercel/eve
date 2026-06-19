@@ -7,24 +7,47 @@ const monorepoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const workspaceYamlPath = join(monorepoRoot, "pnpm-workspace.yaml");
 const packageJson = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
 
-async function resolveCatalogVersion(packageName) {
+async function resolveCatalogVersion(packageName, catalogName) {
   const contents = await readFile(workspaceYamlPath, "utf8");
   const lines = contents.split(/\r?\n/);
   let inCatalog = false;
+  let inNamedCatalog = false;
   for (const line of lines) {
-    if (/^catalog:\s*$/.test(line)) {
+    if (catalogName === undefined) {
+      if (/^catalog:\s*$/.test(line)) {
+        inCatalog = true;
+        continue;
+      }
+      if (inCatalog) {
+        if (/^\S/.test(line)) break;
+        const match = line.match(/^\s+(?:"([^"]+)"|([\w@/.-]+)):\s*"([^"]+)"/);
+        if (!match) continue;
+        const name = match[1] ?? match[2];
+        if (name === packageName) return match[3];
+      }
+      continue;
+    }
+
+    if (/^catalogs:\s*$/.test(line)) {
       inCatalog = true;
       continue;
     }
     if (inCatalog) {
       if (/^\S/.test(line)) break;
-      const match = line.match(/^\s+(?:"([^"]+)"|([\w@/.-]+)):\s*"([^"]+)"/);
+      const namedCatalog = line.match(/^\s{2}(?:"([^"]+)"|([\w@/.-]+)):\s*$/);
+      if (namedCatalog) {
+        inNamedCatalog = (namedCatalog[1] ?? namedCatalog[2]) === catalogName;
+        continue;
+      }
+      if (!inNamedCatalog) continue;
+      const match = line.match(/^\s{4}(?:"([^"]+)"|([\w@/.-]+)):\s*"([^"]+)"/);
       if (!match) continue;
       const name = match[1] ?? match[2];
       if (name === packageName) return match[3];
     }
   }
-  throw new Error(`Could not find "${packageName}" in catalog at ${workspaceYamlPath}`);
+  const catalogReference = catalogName === undefined ? "catalog" : `catalogs.${catalogName}`;
+  throw new Error(`Could not find "${packageName}" in ${catalogReference} at ${workspaceYamlPath}`);
 }
 
 // These tokens are authored in source so scaffold templates can pin the same
@@ -50,6 +73,7 @@ const replacements = {
   __STREAMDOWN_VERSION__: await resolveCatalogVersion("streamdown"),
   __ZOD_VERSION__: await resolveCatalogVersion("zod"),
   __TYPESCRIPT_VERSION__: await resolveCatalogVersion("typescript"),
+  __NEXT_TYPESCRIPT_VERSION__: await resolveCatalogVersion("typescript", "typescript6"),
   __TYPES_REACT_VERSION__: await resolveCatalogVersion("@types/react"),
   __TYPES_REACT_DOM_VERSION__: await resolveCatalogVersion("@types/react-dom"),
 };

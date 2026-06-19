@@ -31,7 +31,7 @@ const TEST_WEB_PACKAGE_VERSIONS = {
   reactDomPackageVersion: "19.2.6",
   streamdownPackageVersion: "2.5.0",
   zodPackageVersion: "4.4.3",
-  typescriptPackageVersion: "7.0.1-rc",
+  nextTypescriptPackageVersion: "6.0.3",
   typesReactPackageVersion: "19.2.15",
   typesReactDomPackageVersion: "19.2.3",
 } satisfies WebPackageVersions;
@@ -162,6 +162,10 @@ describe("ensureChannel", () => {
     await expect(readFile(join(projectRoot, "agent/channels/eve.ts"), "utf8")).resolves.toBe(
       "existing channel\n",
     );
+    const patchedPackageJson = JSON.parse(
+      await readFile(join(projectRoot, "package.json"), "utf8"),
+    ) as { devDependencies: Record<string, string> };
+    expect(patchedPackageJson.devDependencies.typescript).toBe("6.0.3");
     await expect(readFile(join(projectRoot, "app/page.tsx"), "utf8")).resolves.toContain(
       "AgentChat",
     );

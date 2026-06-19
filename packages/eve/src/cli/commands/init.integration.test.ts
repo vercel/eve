@@ -36,6 +36,7 @@ const BASE_VERSIONS = {
 
 const WEB_VERSIONS = {
   ...BASE_VERSIONS,
+  nextTypescriptPackageVersion: "6.0.3",
   nextPackageVersion: "16.0.0",
   reactDomPackageVersion: "19.0.0",
   reactPackageVersion: "19.0.0",

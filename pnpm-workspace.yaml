@@ -41,6 +41,10 @@ catalog:
   vitest: "4.1.7"
   zod: "4.4.3"
 
+catalogs:
+  typescript6:
+    typescript: "6.0.3"
+
 minimumReleaseAge: 2880 # 2 days
 
 minimumReleaseAgeExclude:

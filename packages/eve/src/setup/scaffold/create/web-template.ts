@@ -115,5 +115,6 @@ export const WEB_APP_TEMPLATE_PACKAGE_JSON = {
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    typescript: "catalog:typescript6",
   },
 } as const;
