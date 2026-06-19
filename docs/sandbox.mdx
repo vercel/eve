@@ -52,6 +52,7 @@ The handle does more than `run` and `writeTextFile`. In every method, relative p
 | `readBinaryFile` / `writeBinaryFile`     | read/write raw bytes (images, archives, anything non-text)                                      |
 | `readFile` / `writeFile`                 | stream a file in/out as bytes                                                                   |
 | `removePath({ path, force, recursive })` | delete one file or directory; `force` ignores missing paths, `recursive` removes non-empty dirs |
+| `getPortUrl(port)`                       | resolve a port declared in the backend options                                                  |
 | `resolvePath(path)`                      | anchor a relative path to its absolute `/workspace/...` form                                    |
 | `setNetworkPolicy(policy)`               | change egress policy mid-turn (backend-dependent; see [Network policy](#network-policy))        |
 
@@ -69,6 +70,30 @@ A `SandboxProcess` exposes `stdout`/`stderr` byte streams, `wait()` (resolves wi
 `sandbox.id` is a stable per-session identifier that persists across reconnects to the same logical session. Use it as the cache key for per-session state that must outlive individual step executions.
 
 The option types (`SandboxSpawnOptions`, `SandboxReadBinaryFileOptions`, `SandboxWriteBinaryFileOptions`, and so on) are named exports from `eve/sandbox`, alongside `SandboxProcess`.
+
+### Exposing ports
+
+To run a server, declare the port when configuring the backend, bind the process to `0.0.0.0` inside the sandbox, then ask the session for its URL:
+
+```ts title="agent/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+import { docker } from "eve/sandbox/docker";
+
+export default defineSandbox({
+  backend: docker({
+    ports: [{ sandboxPort: 3000, hostPort: 43000 }],
+  }),
+});
+```
+
+```ts
+const server = await sandbox.spawn({
+  command: "python -m http.server 3000 --bind 0.0.0.0",
+});
+const url = await sandbox.getPortUrl(3000); // http://127.0.0.1:43000
+```
+
+Docker and microsandbox use `{ sandboxPort, hostPort }` mappings and expose only the loopback host address. Vercel Sandbox uses its existing `ports: number[]` option and returns the hosted URL for that declared port. `justbash()` rejects `getPortUrl()` because it cannot run listening processes. Docker and microsandbox port mappings cannot be combined with `"deny-all"` networking.
 
 ## Seeding `/workspace`
 
@@ -147,7 +172,7 @@ export default defineSandbox({
 
 ### Docker
 
-`docker()` drives the Docker CLI directly. The default base image is `ghcr.io/vercel/eve:latest`, eve's published sandbox runtime image. eve creates `/workspace` and verifies Bash during framework setup, before authored bootstrap code runs. Configure it through `docker({ image, env, pullPolicy, networkPolicy })`, and install authored runtime tools in sandbox bootstrap or provide them through a custom image. Templates are committed as local Docker images and reused across sessions when the sandbox source, seed files, `revalidationKey`, and Docker backend options still match. Sessions run as long-lived containers whose filesystems persist `/workspace` changes across turns for the same durable session. `eve dev` prunes stale template images in the background.
+`docker()` drives the Docker CLI directly. The default base image is `ghcr.io/vercel/eve:latest`, eve's published sandbox runtime image. eve creates `/workspace` and verifies Bash during framework setup, before authored bootstrap code runs. Configure it through `docker({ image, env, pullPolicy, networkPolicy, ports })`, and install authored runtime tools in sandbox bootstrap or provide them through a custom image. Templates are committed as local Docker images and reused across sessions when the sandbox source, seed files, `revalidationKey`, and Docker backend options still match. Sessions run as long-lived containers whose filesystems persist `/workspace` changes across turns for the same durable session. `eve dev` prunes stale template images in the background.
 
 ### microsandbox
 

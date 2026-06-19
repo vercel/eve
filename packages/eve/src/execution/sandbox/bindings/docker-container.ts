@@ -40,6 +40,14 @@ export async function startDockerContainer(input: {
   for (const [key, value] of Object.entries(input.options.env)) {
     args.push("-e", `${key}=${value}`);
   }
+  if (input.role === "session") {
+    for (const mapping of input.options.ports) {
+      args.push(
+        "--publish",
+        `127.0.0.1:${String(mapping.hostPort)}:${String(mapping.sandboxPort)}/tcp`,
+      );
+    }
+  }
   if (input.initialNetworkPolicy === "deny-all") {
     args.push("--network", "none");
   }

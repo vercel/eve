@@ -78,6 +78,19 @@ describe("just-bash sandbox file API", () => {
     expect(content).toBe("hello world");
   });
 
+  it("explains that just-bash cannot expose listening ports", async () => {
+    const appRoot = await createTemporaryCacheDirectory("port-url");
+    const handle = await createPrewarmedLocalHandle({
+      appRoot,
+      sessionKey: "session-port",
+      templateKey: "tpl-port",
+    });
+
+    await expect(handle.session.getPortUrl(3000)).rejects.toThrow(
+      "just-bash cannot run listening processes",
+    );
+  });
+
   it("passes env vars to a command run via the public session", async () => {
     const cacheDirectory = await createTemporaryCacheDirectory("run-env");
     const handle = await createPrewarmedLocalHandle({

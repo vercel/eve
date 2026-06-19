@@ -23,6 +23,9 @@ function createFakeAccess(files: Record<string, string | null>): SandboxAccess {
 
     async get() {
       return {
+        async getPortUrl() {
+          return "http://127.0.0.1:3000";
+        },
         id: "test-read-file-sandbox",
         async readFile() {
           return null;

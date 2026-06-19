@@ -800,6 +800,9 @@ function createRecordingDispatch(
     if (input.bootstrap !== undefined) {
       await input.bootstrap({
         use: async () => ({
+          async getPortUrl() {
+            return "http://127.0.0.1:3000";
+          },
           id: "test-prewarm-session",
           async readFile() {
             return null;

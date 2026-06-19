@@ -28,6 +28,7 @@ function createTestPrimitives(
   overrides: Partial<InternalSandboxSession> = {},
 ): InternalSandboxSession {
   return {
+    getPortUrl: overrides.getPortUrl,
     id: overrides.id ?? "test-session-id",
     readFile: overrides.readFile ?? vi.fn(async () => null),
     removePath: overrides.removePath ?? vi.fn(async () => {}),
@@ -106,6 +107,34 @@ describe("buildSandboxSession", () => {
       path: "/workspace/skills/tenant",
       recursive: true,
     });
+  });
+
+  // ---------------------------------------------------------------------------
+  // getPortUrl
+  // ---------------------------------------------------------------------------
+
+  it("delegates valid ports to the backend primitive", async () => {
+    const getPortUrl = vi.fn((port: number) => `https://port-${String(port)}.example.com`);
+    const session = buildSandboxSession(createTestPrimitives({ getPortUrl }));
+
+    await expect(session.getPortUrl(3000)).resolves.toBe("https://port-3000.example.com");
+    expect(getPortUrl).toHaveBeenCalledWith(3000);
+  });
+
+  it.each([0, 65_536, 1.5, Number.NaN])("rejects invalid port %s", async (port) => {
+    const session = buildSandboxSession(createTestPrimitives({ getPortUrl: vi.fn() }));
+
+    await expect(session.getPortUrl(port)).rejects.toThrow(
+      "port must be an integer between 1 and 65535",
+    );
+  });
+
+  it("rejects port access when the backend does not support listening processes", async () => {
+    const session = buildSandboxSession(createTestPrimitives());
+
+    await expect(session.getPortUrl(3000)).rejects.toThrow(
+      "Port URLs are not supported by this sandbox backend",
+    );
   });
 
   // ---------------------------------------------------------------------------

@@ -45,6 +45,9 @@ describe("defineBashTool", () => {
 
       async get() {
         return {
+          async getPortUrl() {
+            return "http://127.0.0.1:3000";
+          },
           id: "test-bash-sandbox",
           async readFile() {
             return null;
@@ -137,6 +140,9 @@ describe("defineBashTool", () => {
 
       async get() {
         return {
+          async getPortUrl() {
+            return "http://127.0.0.1:3000";
+          },
           id: "test-bash-sandbox-large",
           async readFile() {
             return null;

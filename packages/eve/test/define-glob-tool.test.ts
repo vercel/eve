@@ -20,6 +20,9 @@ function createFakeAccess(
       const callHandler = handler;
       if (callHandler === null) return null;
       return {
+        async getPortUrl() {
+          return "http://127.0.0.1:3000";
+        },
         id: `test-glob-sandbox-${crypto.randomUUID()}`,
         async readFile() {
           return null;

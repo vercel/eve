@@ -44,6 +44,8 @@ export interface MockSandboxInput {
    * fall through to {@link MockSandboxInput.run}.
    */
   readonly commands?: Readonly<Record<string, SandboxCommandResult>>;
+  /** Published port URLs returned by `session.getPortUrl()`. */
+  readonly portUrls?: Readonly<Record<number, string>>;
   /**
    * Fallback command handler. Invoked when the request does not match a
    * {@link MockSandboxInput.commands} entry. Defaults to a no-op exit code 0
@@ -175,6 +177,13 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
   }
 
   const session: SandboxSession = {
+    async getPortUrl(port: number): Promise<string> {
+      const url = input.portUrls?.[port];
+      if (url === undefined) {
+        throw new Error(`Sandbox port ${String(port)} is not published.`);
+      }
+      return url;
+    },
     id: sandboxId,
     resolvePath(path: string): string {
       return resolveWorkspacePath(path);

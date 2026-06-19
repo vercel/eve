@@ -12,6 +12,7 @@ describe("resolveDockerSandboxOptions", () => {
       env: {},
       image: DEFAULT_DOCKER_SANDBOX_IMAGE,
       networkPolicy: "allow-all",
+      ports: [],
       pullPolicy: "if-not-present",
     });
   });
@@ -21,15 +22,26 @@ describe("resolveDockerSandboxOptions", () => {
       resolveDockerSandboxOptions({
         env: { FOO: "bar" },
         image: "ubuntu:26.04",
-        networkPolicy: "deny-all",
+        networkPolicy: "allow-all",
+        ports: [{ hostPort: 43_000, sandboxPort: 3000 }],
         pullPolicy: "never",
       }),
     ).toEqual({
       env: { FOO: "bar" },
       image: "ubuntu:26.04",
-      networkPolicy: "deny-all",
+      networkPolicy: "allow-all",
+      ports: [{ hostPort: 43_000, sandboxPort: 3000 }],
       pullPolicy: "never",
     });
+  });
+
+  it("rejects published ports with deny-all networking", () => {
+    expect(() =>
+      resolveDockerSandboxOptions({
+        networkPolicy: "deny-all",
+        ports: [{ hostPort: 43_000, sandboxPort: 3000 }],
+      }),
+    ).toThrow('Docker sandbox ports require networkPolicy: "allow-all"');
   });
 
   it("hashes template-affecting options stably", () => {
@@ -57,5 +69,15 @@ describe("resolveDockerSandboxOptions", () => {
 
     expect(first).toBe(second);
     expect(changed).not.toBe(first);
+    expect(
+      createDockerSandboxOptionsHash(
+        resolveDockerSandboxOptions({
+          env: { A: "1", B: "2" },
+          image: "ubuntu:26.04",
+          networkPolicy: "allow-all",
+          ports: [{ hostPort: 43_000, sandboxPort: 3000 }],
+        }),
+      ),
+    ).not.toBe(first);
   });
 });

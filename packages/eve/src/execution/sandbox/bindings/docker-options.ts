@@ -5,6 +5,8 @@ import type {
   DockerSandboxNetworkPolicy,
   DockerSandboxPullPolicy,
 } from "#public/sandbox/docker-sandbox.js";
+import { normalizeSandboxPortMappings } from "#execution/sandbox/port-mappings.js";
+import type { SandboxPortMapping } from "#shared/sandbox-session.js";
 
 /**
  * Default base image for the Docker backend: eve's published sandbox
@@ -20,6 +22,7 @@ export interface ResolvedDockerSandboxOptions {
   readonly env: Readonly<Record<string, string>>;
   readonly image: string;
   readonly networkPolicy: DockerSandboxNetworkPolicy;
+  readonly ports: ReadonlyArray<SandboxPortMapping>;
   readonly pullPolicy: DockerSandboxPullPolicy;
 }
 
@@ -29,10 +32,16 @@ export interface ResolvedDockerSandboxOptions {
 export function resolveDockerSandboxOptions(
   options: DockerSandboxCreateOptions = {},
 ): ResolvedDockerSandboxOptions {
+  const networkPolicy = options.networkPolicy ?? "allow-all";
+  const ports = normalizeSandboxPortMappings(options.ports);
+  if (networkPolicy === "deny-all" && ports.length > 0) {
+    throw new Error('Docker sandbox ports require networkPolicy: "allow-all".');
+  }
   return {
     env: options.env ?? {},
     image: options.image ?? DEFAULT_DOCKER_SANDBOX_IMAGE,
-    networkPolicy: options.networkPolicy ?? "allow-all",
+    networkPolicy,
+    ports,
     pullPolicy: options.pullPolicy ?? "if-not-present",
   };
 }
@@ -49,6 +58,7 @@ function dockerOptionsForHash(options: ResolvedDockerSandboxOptions): Record<str
     env: sortStringRecord(options.env),
     image: options.image,
     networkPolicy: options.networkPolicy,
+    ports: options.ports,
     pullPolicy: options.pullPolicy,
   };
 }

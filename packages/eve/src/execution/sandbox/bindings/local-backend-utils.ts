@@ -23,10 +23,12 @@ export interface FileBackedSandbox {
 }
 
 export function createFileBackedInternalSandboxSession(input: {
+  readonly getPortUrl?: (port: number) => Promise<string> | string;
   readonly id: string;
   readonly sandbox: FileBackedSandbox;
 }): InternalSandboxSession {
   return {
+    getPortUrl: input.getPortUrl,
     id: input.id,
     resolvePath: resolveWorkspacePath,
     async spawn(options: SandboxSpawnOptions) {

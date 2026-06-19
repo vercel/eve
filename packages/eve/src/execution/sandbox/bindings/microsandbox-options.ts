@@ -1,5 +1,7 @@
 import type { MicrosandboxCreateOptions } from "#public/sandbox/microsandbox-sandbox.js";
+import { normalizeSandboxPortMappings } from "#execution/sandbox/port-mappings.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
+import type { SandboxPortMapping } from "#shared/sandbox-session.js";
 
 export const MICROSANDBOX_DEFAULT_IMAGE = "ghcr.io/vercel/eve:latest";
 export const MICROSANDBOX_DEFAULT_CPUS = 1;
@@ -18,6 +20,7 @@ export interface ResolvedMicrosandboxOptions {
   readonly image: string;
   readonly memoryMiB: number;
   readonly networkPolicy?: SandboxNetworkPolicy;
+  readonly ports: ReadonlyArray<SandboxPortMapping>;
   readonly pullPolicy: "always" | "if-missing" | "never";
   readonly setup: {
     readonly autoInstall: boolean;
@@ -31,12 +34,18 @@ export interface ResolvedMicrosandboxOptions {
 export function resolveMicrosandboxOptions(
   options: MicrosandboxCreateOptions | undefined,
 ): ResolvedMicrosandboxOptions {
+  const networkPolicy = options?.networkPolicy;
+  const ports = normalizeSandboxPortMappings(options?.ports);
+  if (networkPolicy === "deny-all" && ports.length > 0) {
+    throw new Error('Microsandbox ports require a network policy other than "deny-all".');
+  }
   return {
     cpus: options?.cpus ?? MICROSANDBOX_DEFAULT_CPUS,
     env: options?.env ?? {},
     image: options?.image ?? MICROSANDBOX_DEFAULT_IMAGE,
     memoryMiB: options?.memoryMiB ?? MICROSANDBOX_DEFAULT_MEMORY_MIB,
-    networkPolicy: options?.networkPolicy,
+    networkPolicy,
+    ports,
     pullPolicy: options?.pullPolicy ?? MICROSANDBOX_DEFAULT_PULL_POLICY,
     setup: {
       autoInstall: options?.setup?.autoInstall ?? true,
@@ -58,6 +67,7 @@ export function microsandboxOptionsForHash(
     env: options.env,
     image: options.image,
     memoryMiB: options.memoryMiB,
+    ports: options.ports,
     pullPolicy: options.pullPolicy,
   };
 }

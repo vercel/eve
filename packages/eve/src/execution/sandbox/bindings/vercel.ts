@@ -122,7 +122,7 @@ export function createVercelSandbox(
         await applyInitialVercelNetworkPolicy(session.sandbox, createOptions.networkPolicy);
       }
 
-      return createHandle(session.sandbox, createInput.sessionKey);
+      return createHandle(session.sandbox, createInput.sessionKey, createOptions.ports);
     },
     async prewarm(
       prewarmInput: SandboxBackendPrewarmInput<VercelSandboxBootstrapUseOptions>,
@@ -305,7 +305,7 @@ async function ensureTemplate(input: EnsureTemplateInput): Promise<EnsureTemplat
   await applyInitialVercelNetworkPolicy(sandbox, input.createOptions.networkPolicy);
 
   const templateSession = buildSandboxSession(
-    createVercelInternalSandboxSession(sandbox, input.templateKey),
+    createVercelInternalSandboxSession(sandbox, input.templateKey, input.createOptions.ports),
     createVercelNetworkPolicySetter(sandbox),
   );
 
@@ -424,10 +424,11 @@ function withBaseSetupNetworkPolicy(
 function createHandle(
   sandbox: SdkSandbox,
   sessionKey: string,
+  ports: ReadonlyArray<number> | undefined,
 ): SandboxBackendHandle<VercelSandboxSessionUseOptions> {
   return {
     session: buildSandboxSession(
-      createVercelInternalSandboxSession(sandbox, sessionKey),
+      createVercelInternalSandboxSession(sandbox, sessionKey, ports),
       createVercelNetworkPolicySetter(sandbox),
     ),
     useSessionFn: async (options?: VercelSandboxSessionUseOptions) => {
@@ -435,7 +436,7 @@ function createHandle(
         await sandbox.update(options);
       }
       return buildSandboxSession(
-        createVercelInternalSandboxSession(sandbox, sessionKey),
+        createVercelInternalSandboxSession(sandbox, sessionKey, ports),
         createVercelNetworkPolicySetter(sandbox),
       );
     },

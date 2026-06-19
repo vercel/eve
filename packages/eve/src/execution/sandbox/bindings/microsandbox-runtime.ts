@@ -3,12 +3,15 @@ import { access } from "node:fs/promises";
 import { posix } from "node:path";
 
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
-import { createMicrosandboxWithProgress } from "#execution/sandbox/bindings/microsandbox-create.js";
+import { getLoopbackPortUrl } from "#execution/sandbox/port-mappings.js";
 import {
-  applyMicrosandboxNetwork,
   createMicrosandboxNetworkPlan,
   createTransformBrokerEnvironment,
 } from "#execution/sandbox/bindings/microsandbox-network.js";
+import {
+  createMicrosandbox,
+  type MicrosandboxModule,
+} from "#execution/sandbox/bindings/microsandbox-create-runtime.js";
 import {
   MICROSANDBOX_USER,
   type ResolvedMicrosandboxOptions,
@@ -27,7 +30,6 @@ import {
   isEveDevEnvironment,
   loadOptionalEnginePackage,
 } from "#internal/application/optional-package-install.js";
-import { withDevelopmentSandboxTags } from "#execution/sandbox/development-run.js";
 import type { SandboxBackendTags } from "#public/definitions/sandbox-backend.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
@@ -38,7 +40,7 @@ import type {
 } from "#shared/sandbox-session.js";
 import type { Sandbox as MicrosandboxSandbox } from "microsandbox";
 
-export type MicrosandboxModule = typeof import("microsandbox");
+export type { MicrosandboxModule } from "#execution/sandbox/bindings/microsandbox-create-runtime.js";
 
 const MICROSANDBOX_PACKAGE_NAME = "microsandbox";
 const MICROSANDBOX_CONNECT_TIMEOUT_MS = 10_000;
@@ -48,6 +50,7 @@ export class MicrosandboxVm {
   readonly #input: {
     readonly module: MicrosandboxModule;
     readonly options: ResolvedMicrosandboxOptions;
+    readonly ports: ResolvedMicrosandboxOptions["ports"];
     readonly sessionKey: string;
     readonly tags?: SandboxBackendTags;
   };
@@ -62,6 +65,7 @@ export class MicrosandboxVm {
     input: {
       readonly module: MicrosandboxModule;
       readonly options: ResolvedMicrosandboxOptions;
+      readonly ports: ResolvedMicrosandboxOptions["ports"];
       readonly sessionKey: string;
       readonly tags?: SandboxBackendTags;
     },
@@ -83,6 +87,10 @@ export class MicrosandboxVm {
 
   get id(): string {
     return this.#input.sessionKey;
+  }
+
+  getPortUrl(port: number): string {
+    return getLoopbackPortUrl(this.#input.ports, port);
   }
 
   async captureState(optionsHash: string): Promise<MicrosandboxSessionMetadata> {
@@ -157,6 +165,9 @@ export class MicrosandboxVm {
   }
 
   async setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void> {
+    if (policy === "deny-all" && this.#input.ports.length > 0) {
+      throw new Error('Microsandbox ports require a network policy other than "deny-all".');
+    }
     const previousStateSnapshotName = this.#stateSnapshotName;
     const stateSnapshotName = createProviderName(
       "eve-sbx-state",
@@ -177,6 +188,7 @@ export class MicrosandboxVm {
       name: nextSandboxName,
       networkPolicy: policy,
       options: this.#input.options,
+      ports: this.#input.ports,
       tags: this.#input.tags,
       user: MICROSANDBOX_USER,
       workdir: WORKSPACE_ROOT,
@@ -286,11 +298,13 @@ export async function createPreparedMicrosandbox(input: {
   readonly name: string;
   readonly networkPolicy?: SandboxNetworkPolicy;
   readonly options: ResolvedMicrosandboxOptions;
+  readonly publishPorts?: boolean;
   readonly sessionKey: string;
   readonly setupBaseRuntime: boolean;
   readonly tags?: SandboxBackendTags;
 }): Promise<MicrosandboxVm> {
   const initialNetworkPolicy = input.setupBaseRuntime ? "allow-all" : input.networkPolicy;
+  const ports = input.publishPorts === false ? [] : input.options.ports;
   const sandbox = await createMicrosandbox({
     fromSnapshot: input.fromSnapshot,
     log: input.log,
@@ -298,6 +312,7 @@ export async function createPreparedMicrosandbox(input: {
     name: input.name,
     networkPolicy: initialNetworkPolicy,
     options: input.options,
+    ports,
     tags: input.tags,
     user: input.setupBaseRuntime ? undefined : MICROSANDBOX_USER,
     workdir: input.setupBaseRuntime ? "/" : WORKSPACE_ROOT,
@@ -307,6 +322,7 @@ export async function createPreparedMicrosandbox(input: {
     {
       module: input.module,
       options: input.options,
+      ports,
       sessionKey: input.sessionKey,
       tags: input.tags,
     },
@@ -366,6 +382,7 @@ export async function connectMicrosandbox(input: {
     {
       module: input.module,
       options: input.options,
+      ports: input.options.ports,
       sessionKey: input.sessionKey,
       tags: input.tags,
     },
@@ -400,6 +417,7 @@ async function restoreMicrosandboxSessionSnapshot(input: {
     name: sandboxName,
     networkPolicy: input.metadata.networkPolicy,
     options: input.options,
+    ports: input.metadata.networkPolicy === "deny-all" ? [] : input.options.ports,
     tags: input.tags,
     user: MICROSANDBOX_USER,
     workdir: WORKSPACE_ROOT,
@@ -410,6 +428,7 @@ async function restoreMicrosandboxSessionSnapshot(input: {
     {
       module: input.module,
       options: input.options,
+      ports: input.options.ports,
       sessionKey: input.sessionKey,
       tags: input.tags,
     },
@@ -590,49 +609,6 @@ export async function doesPathExist(path: string): Promise<boolean> {
   }
 }
 
-async function createMicrosandbox(input: {
-  readonly fromSnapshot?: string;
-  readonly log?: (message: string) => void;
-  readonly module: MicrosandboxModule;
-  readonly name: string;
-  readonly networkPolicy?: SandboxNetworkPolicy;
-  readonly options: ResolvedMicrosandboxOptions;
-  readonly tags?: SandboxBackendTags;
-  readonly user?: string;
-  readonly workdir: string;
-}): Promise<MicrosandboxSandbox> {
-  let builder = input.module.Sandbox.builder(input.name)
-    .cpus(input.options.cpus)
-    .detached(true)
-    .envs(input.options.env)
-    .labels(resolveMicrosandboxLabels(input.tags))
-    .memory(input.options.memoryMiB)
-    .pullPolicy(input.options.pullPolicy)
-    .replace()
-    .workdir(input.workdir);
-
-  if (input.fromSnapshot !== undefined) {
-    builder = builder.fromSnapshot(input.fromSnapshot);
-  } else {
-    builder = builder.image(input.options.image);
-  }
-
-  if (input.user !== undefined) {
-    builder = builder.user(input.user);
-  }
-
-  const source =
-    input.fromSnapshot === undefined
-      ? `image "${input.options.image}"`
-      : `snapshot "${input.fromSnapshot}"`;
-  return await createMicrosandboxWithProgress({
-    builder: applyMicrosandboxNetwork(builder, input.networkPolicy),
-    errorType: input.module.MicrosandboxError,
-    log: input.log,
-    source,
-  });
-}
-
 async function removeSandboxIfExists(
   module: MicrosandboxModule,
   sandboxName: string,
@@ -681,11 +657,4 @@ function isMicrosandboxSnapshotSourceRunningError(error: unknown): boolean {
     return false;
   }
   return /snapshot source sandbox .*not stopped|SnapshotSandboxRunning/i.test(error.message);
-}
-
-function resolveMicrosandboxLabels(tags: SandboxBackendTags | undefined): Record<string, string> {
-  return {
-    "eve.backend": "microsandbox",
-    ...withDevelopmentSandboxTags(tags),
-  };
 }

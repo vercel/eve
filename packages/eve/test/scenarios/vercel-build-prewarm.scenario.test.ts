@@ -230,6 +230,9 @@ function createRecordingDispatch(events: ReturnType<typeof createPrewarmEvents>)
     if (input.bootstrap !== undefined) {
       await input.bootstrap({
         use: async () => ({
+          async getPortUrl() {
+            return "http://127.0.0.1:3000";
+          },
           id: input.templateKey,
           async readFile() {
             return null;
@@ -276,6 +279,9 @@ function createFailingBootstrapDispatch() {
     if (input.bootstrap !== undefined) {
       await input.bootstrap({
         use: async () => ({
+          async getPortUrl() {
+            return "http://127.0.0.1:3000";
+          },
           id: input.templateKey,
           async readFile() {
             return null;

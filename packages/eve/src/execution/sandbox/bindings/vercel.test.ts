@@ -40,6 +40,7 @@ function createMockSandbox(input: {
   return {
     currentSnapshotId: input.snapshotId ?? "",
     delete: vi.fn().mockResolvedValue(undefined),
+    domain: vi.fn((port: number) => `https://port-${String(port)}.sandbox.example.com`),
     fs: {
       rm: vi.fn().mockResolvedValue(undefined),
       unlink: vi.fn().mockResolvedValue(undefined),
@@ -411,6 +412,43 @@ describe("createVercelSandbox", () => {
       signal: undefined,
     });
     expect(sessionSandbox.runCommand).not.toHaveBeenCalled();
+  });
+
+  it("resolves declared port URLs through the Vercel Sandbox SDK", async () => {
+    const templateSandbox = createMockSandbox({ name: "template" });
+    const sessionSandbox = createMockSandbox({ name: "session" });
+    const sandboxModule = {
+      Sandbox: {
+        create: vi
+          .fn()
+          .mockResolvedValueOnce(templateSandbox)
+          .mockResolvedValueOnce(sessionSandbox),
+        get: vi.fn().mockResolvedValue(null),
+      },
+    };
+    const backend = createTestVercelSandbox({
+      createOptions: { ports: [3000] } as never,
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+
+    await backend.prewarm({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      seedFiles: [],
+      templateKey: "template-key",
+    });
+    const handle = await backend.create({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      sessionKey: "session-key",
+      templateKey: "template-key",
+    });
+
+    await expect(handle.session.getPortUrl(3000)).resolves.toBe(
+      "https://port-3000.sandbox.example.com",
+    );
+    expect(sessionSandbox.domain).toHaveBeenCalledWith(3000);
+    await expect(handle.session.getPortUrl(3001)).rejects.toThrow(
+      "Sandbox port 3001 is not published",
+    );
   });
 
   it("applies a 30-minute default timeout to Sandbox.create", async () => {

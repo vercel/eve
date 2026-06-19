@@ -111,8 +111,21 @@ export function buildSandboxSession(
         recursive: options.recursive,
       });
     },
+    async getPortUrl(port: number) {
+      validatePort(port);
+      if (primitives.getPortUrl === undefined) {
+        throw new Error("Port URLs are not supported by this sandbox backend.");
+      }
+      return await primitives.getPortUrl(port);
+    },
     setNetworkPolicy,
   };
+}
+
+function validatePort(port: number): void {
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error("port must be an integer between 1 and 65535.");
+  }
 }
 
 /**

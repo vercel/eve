@@ -17,9 +17,16 @@ import type {
 export function createVercelInternalSandboxSession(
   sandbox: SdkSandbox,
   id: string,
+  ports: ReadonlyArray<number> | undefined,
 ): InternalSandboxSession {
   return {
     id,
+    getPortUrl(port: number) {
+      if (ports?.includes(port) !== true) {
+        throw new Error(`Sandbox port ${String(port)} is not published.`);
+      }
+      return sandbox.domain(port);
+    },
     resolvePath: resolveVercelSandboxPath,
     async spawn(options: SandboxSpawnOptions): Promise<SandboxProcess> {
       const command = await sandbox.runCommand({

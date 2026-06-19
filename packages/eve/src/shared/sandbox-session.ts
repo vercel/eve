@@ -76,6 +76,12 @@ export interface SandboxRemovePathOptions {
   readonly recursive?: boolean;
 }
 
+/** One loopback TCP port published by a local sandbox backend. */
+export interface SandboxPortMapping {
+  readonly hostPort: number;
+  readonly sandboxPort: number;
+}
+
 /**
  * Public eve-owned sandbox session exposed to authored lifecycle hooks.
  *
@@ -83,8 +89,8 @@ export interface SandboxRemovePathOptions {
  * `readTextFile`, `writeFile`, `writeBinaryFile`, `writeTextFile`) are
  * pulled directly from the AI SDK {@link AiSdkSandbox} type, so authored
  * code that targets either surface uses identical signatures. `id` and
- * `resolvePath` are eve-specific extensions that the runtime relies on
- * for caching and `/workspace` path anchoring.
+ * `resolvePath`, `removePath`, and `getPortUrl` are eve-specific extensions
+ * for lifecycle, path management, and port access.
  *
  * Relative paths resolve from `/workspace`, the live working directory
  * for every backend. Absolute paths pass through unchanged.
@@ -141,6 +147,13 @@ export interface SandboxSession extends Pick<
    * Relative paths resolve from `/workspace`; absolute paths pass through.
    */
   removePath(options: SandboxRemovePathOptions): Promise<void>;
+  /**
+   * Returns the URL for a port declared in the selected backend's create
+   * options. Vercel URLs are public; Docker and microsandbox URLs use the
+   * configured loopback host port. Throws when the port is not published or
+   * the backend cannot run listening processes.
+   */
+  getPortUrl(port: number): Promise<string>;
 }
 
 /**
@@ -165,6 +178,8 @@ export interface InternalSandboxSession extends Pick<
    * Stable identifier surfaced on the public {@link SandboxSession}.
    */
   readonly id: string;
+  /** Resolves a published sandbox port when the backend supports it. */
+  getPortUrl?(port: number): Promise<string> | string;
   /** Removes an already-resolved path from the backend filesystem. */
   removePath(options: SandboxRemovePathOptions): Promise<void>;
   /** Translates a user-facing path to the backend's native path. */

@@ -263,8 +263,18 @@ export function createDockerSandboxBackend(
       }
 
       const session = buildSandboxSession(
-        createDockerInternalSession({ cli, containerName, id: createInput.sessionKey }),
-        (policy) => setDockerNetworkPolicy(cli, containerName, policy),
+        createDockerInternalSession({
+          cli,
+          containerName,
+          id: createInput.sessionKey,
+          ports: options.ports,
+        }),
+        async (policy) => {
+          if (policy === "deny-all" && options.ports.length > 0) {
+            throw new Error('Docker sandbox ports require networkPolicy: "allow-all".');
+          }
+          await setDockerNetworkPolicy(cli, containerName, policy);
+        },
       );
 
       return {

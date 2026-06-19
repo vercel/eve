@@ -249,12 +249,23 @@ export async function justBashSetNetworkPolicyUnsupported(): Promise<never> {
   );
 }
 
+export async function justBashGetPortUrlUnsupported(): Promise<never> {
+  throw new Error(
+    "getPortUrl() is not supported on the just-bash sandbox backend because just-bash " +
+      "cannot run listening processes. Use docker(), microsandbox(), or vercel().",
+  );
+}
+
 export function createJustBashHandle(
   sandbox: BashSandbox,
   backendName: string,
 ): SandboxBackendHandle {
   const session = buildSandboxSession(
-    createFileBackedInternalSandboxSession({ id: sandbox.sessionKey, sandbox }),
+    createFileBackedInternalSandboxSession({
+      getPortUrl: justBashGetPortUrlUnsupported,
+      id: sandbox.sessionKey,
+      sandbox,
+    }),
     justBashSetNetworkPolicyUnsupported,
   );
   return {

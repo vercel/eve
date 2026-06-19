@@ -8,6 +8,7 @@ export {
   type SandboxBootstrapUseFn,
   type SandboxCommandResult,
   type SandboxDefinition,
+  type SandboxPortMapping,
   type SandboxProcess,
   type SandboxReadBinaryFileOptions,
   type SandboxReadFileOptions,

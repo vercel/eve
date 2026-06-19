@@ -106,6 +106,7 @@ export async function prewarmMicrosandboxTemplate(input: {
     name: temporarySandboxName,
     networkPolicy: input.options.networkPolicy,
     options: input.options,
+    publishPorts: false,
     sessionKey: input.prewarmInput.templateKey,
     setupBaseRuntime: true,
     tags: undefined,
@@ -316,7 +317,11 @@ function createHandle(
 }
 
 function createMicrosandboxInternalSession(sandbox: MicrosandboxVm): InternalSandboxSession {
-  return createFileBackedInternalSandboxSession({ id: sandbox.id, sandbox });
+  return createFileBackedInternalSandboxSession({
+    getPortUrl: (port) => sandbox.getPortUrl(port),
+    id: sandbox.id,
+    sandbox,
+  });
 }
 
 function createActiveMicrosandboxSessionKey(sessionRootPath: string, optionsHash: string): string {

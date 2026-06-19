@@ -89,6 +89,7 @@ describe("createLoggingSandboxSession", () => {
 
 function createTestSession(runResult = { exitCode: 0, stderr: "", stdout: "" }): SandboxSession {
   return {
+    getPortUrl: vi.fn(async () => "http://127.0.0.1:3000"),
     id: "test-session",
     resolvePath: (path) => (path.startsWith("/") ? path : `/workspace/${path}`),
     run: vi.fn(async () => runResult),

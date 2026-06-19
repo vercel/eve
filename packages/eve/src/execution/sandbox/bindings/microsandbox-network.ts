@@ -72,8 +72,9 @@ export interface MicrosandboxNetworkPlan {
 export function applyMicrosandboxNetwork(
   builder: MicrosandboxSandboxBuilder,
   networkPolicy: SandboxNetworkPolicy | undefined,
+  publishedPorts: ReadonlyArray<number> = [],
 ): MicrosandboxSandboxBuilder {
-  const networkPlan = createMicrosandboxNetworkPlan(networkPolicy);
+  const networkPlan = createMicrosandboxNetworkPlan(networkPolicy, publishedPorts);
   if (networkPlan.disabled) {
     return builder.disableNetwork();
   }
@@ -143,6 +144,7 @@ export function serializeMicrosandboxNetworkPolicyJson(policy: MicrosandboxNetwo
 
 export function createMicrosandboxNetworkPlan(
   policy: SandboxNetworkPolicy | undefined,
+  publishedPorts: ReadonlyArray<number> = [],
 ): MicrosandboxNetworkPlan {
   if (policy === undefined || policy === "allow-all") {
     return {
@@ -150,7 +152,7 @@ export function createMicrosandboxNetworkPlan(
       policy: {
         defaultEgress: "allow",
         defaultIngress: "deny",
-        rules: [],
+        rules: createPublishedPortRules(publishedPorts),
       },
       transformHeaderRules: [],
     };
@@ -228,6 +230,8 @@ export function createMicrosandboxNetworkPlan(
     }
   }
 
+  rules.push(...createPublishedPortRules(publishedPorts));
+
   return {
     disabled: false,
     policy: {
@@ -237,6 +241,16 @@ export function createMicrosandboxNetworkPlan(
     },
     transformHeaderRules,
   };
+}
+
+function createPublishedPortRules(ports: ReadonlyArray<number>): MicrosandboxRule[] {
+  return ports.map((port) => ({
+    action: "allow",
+    destination: { kind: "any" },
+    direction: "ingress",
+    ports: [{ end: port, start: port }],
+    protocols: ["tcp"],
+  }));
 }
 
 export function createTransformBrokerEnvironment(

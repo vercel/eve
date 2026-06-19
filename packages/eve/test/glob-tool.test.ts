@@ -38,6 +38,9 @@ function createFakeAccess(
 
     async get() {
       return {
+        async getPortUrl() {
+          return "http://127.0.0.1:3000";
+        },
         // Use a fresh id per fake session so the ripgrep-probe cache
         // (keyed by `session.id`) does not leak across tests.
         id: `test-glob-sandbox-${crypto.randomUUID()}`,

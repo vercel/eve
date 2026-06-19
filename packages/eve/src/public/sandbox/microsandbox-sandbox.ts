@@ -1,4 +1,5 @@
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
+import type { SandboxPortMapping } from "#shared/sandbox-session.js";
 
 /**
  * Options accepted by `microsandbox(opts)`.
@@ -40,6 +41,8 @@ export interface MicrosandboxCreateOptions {
   };
   /** Initial network policy applied to sandboxes after framework setup. */
   readonly networkPolicy?: SandboxNetworkPolicy;
+  /** TCP ports published on loopback for live session VMs. */
+  readonly ports?: ReadonlyArray<SandboxPortMapping>;
 }
 
 /**

@@ -3,6 +3,7 @@ import { dirname as posixDirname } from "node:path/posix";
 
 import type { DockerCli } from "#execution/sandbox/bindings/docker-cli.js";
 import { expectDockerSuccess } from "#execution/sandbox/bindings/docker-utils.js";
+import { getLoopbackPortUrl } from "#execution/sandbox/port-mappings.js";
 import { resolveWorkspacePath } from "#execution/sandbox/bindings/local-backend-utils.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import { bufferToStream, streamToBuffer } from "#execution/sandbox/stream-utils.js";
@@ -11,6 +12,7 @@ import type {
   InternalSandboxSession,
   SandboxReadFileOptions,
   SandboxRemovePathOptions,
+  SandboxPortMapping,
   SandboxSpawnOptions,
   SandboxWriteFileOptions,
 } from "#shared/sandbox-session.js";
@@ -52,6 +54,7 @@ export function createDockerInternalSession(input: {
   readonly cli: DockerCli;
   readonly containerName: string;
   readonly id: string;
+  readonly ports?: ReadonlyArray<SandboxPortMapping>;
 }): InternalSandboxSession {
   const { cli, containerName } = input;
 
@@ -73,6 +76,9 @@ export function createDockerInternalSession(input: {
 
   return {
     id: input.id,
+    getPortUrl(port: number) {
+      return getLoopbackPortUrl(input.ports ?? [], port);
+    },
     resolvePath: resolveWorkspacePath,
     async spawn(options: SandboxSpawnOptions) {
       const args = ["exec", "-w", resolveWorkspacePath(options.workingDirectory ?? WORKSPACE_ROOT)];

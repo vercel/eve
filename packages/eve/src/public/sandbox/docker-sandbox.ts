@@ -1,3 +1,5 @@
+import type { SandboxPortMapping } from "#shared/sandbox-session.js";
+
 /**
  * Image pull behavior for the Docker sandbox backend.
  *
@@ -44,4 +46,6 @@ export interface DockerSandboxCreateOptions {
    * `"allow-all"`.
    */
   readonly networkPolicy?: DockerSandboxNetworkPolicy;
+  /** TCP ports published on loopback for live session containers. */
+  readonly ports?: ReadonlyArray<SandboxPortMapping>;
 }

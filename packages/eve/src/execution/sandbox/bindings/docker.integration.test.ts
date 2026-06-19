@@ -288,6 +288,11 @@ describe("createDockerSandboxBackend create", () => {
 
   it("creates a session container from the template image with labels and tags", async () => {
     const appRoot = await createScratchDirectory("eve-docker-sandbox-");
+    const options = { ports: [{ hostPort: 43_000, sandboxPort: 3000 }] } as const;
+    const templateImage = dockerTemplateImageReference({
+      optionsHash: createDockerSandboxOptionsHash(resolveDockerSandboxOptions(options)),
+      templateKey: TEMPLATE_KEY,
+    });
     const previousRunId = process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV];
     process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV] = "dev-run-test";
     const { calls, cli } = createFakeDockerCli((args) => {
@@ -298,7 +303,10 @@ describe("createDockerSandboxBackend create", () => {
     });
 
     try {
-      const handle = await createEngine({ cli }).create({
+      const handle = await createEngine({
+        cli,
+        options,
+      }).create({
         runtimeContext: { appRoot },
         sessionKey: SESSION_KEY,
         tags: { agent: "weather" },
@@ -310,7 +318,14 @@ describe("createDockerSandboxBackend create", () => {
       expect(run?.args).toContain("eve.sandbox.role=session");
       expect(run?.args).toContain("eve.sandbox.tag.agent=weather");
       expect(run?.args).toContain("eve.sandbox.tag.devRunId=dev-run-test");
-      expect(run?.args.at(-3)).toBe(TEMPLATE_IMAGE);
+      expect(run?.args).toContain("--publish");
+      expect(run?.args).toContain("127.0.0.1:43000:3000/tcp");
+      expect(run?.args.at(-3)).toBe(templateImage);
+
+      await expect(handle.session.getPortUrl(3000)).resolves.toBe("http://127.0.0.1:43000");
+      await expect(handle.session.getPortUrl(3001)).rejects.toThrow(
+        "Sandbox port 3001 is not published",
+      );
 
       // No base setup against template-backed sessions — the template
       // image already carries it.

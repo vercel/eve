@@ -7,6 +7,7 @@ import {
 } from "#execution/sandbox/bindings/microsandbox-network.js";
 import {
   MICROSANDBOX_DEFAULT_IMAGE,
+  microsandboxOptionsForHash,
   resolveMicrosandboxOptions,
 } from "#execution/sandbox/bindings/microsandbox-options.js";
 
@@ -33,6 +34,26 @@ describe.skipIf(onWindows)("createMicrosandboxSandboxBackend", () => {
   it("defaults to eve's published sandbox runtime image", () => {
     expect(MICROSANDBOX_DEFAULT_IMAGE).toBe("ghcr.io/vercel/eve:latest");
     expect(resolveMicrosandboxOptions(undefined).image).toBe(MICROSANDBOX_DEFAULT_IMAGE);
+    expect(resolveMicrosandboxOptions(undefined).ports).toEqual([]);
+  });
+
+  it("normalizes ports and includes them in template compatibility", () => {
+    const base = resolveMicrosandboxOptions(undefined);
+    const withPort = resolveMicrosandboxOptions({
+      ports: [{ hostPort: 43_000, sandboxPort: 3000 }],
+    });
+
+    expect(withPort.ports).toEqual([{ hostPort: 43_000, sandboxPort: 3000 }]);
+    expect(microsandboxOptionsForHash(withPort)).not.toEqual(microsandboxOptionsForHash(base));
+  });
+
+  it("rejects published ports with deny-all networking", () => {
+    expect(() =>
+      resolveMicrosandboxOptions({
+        networkPolicy: "deny-all",
+        ports: [{ hostPort: 43_000, sandboxPort: 3000 }],
+      }),
+    ).toThrow('Microsandbox ports require a network policy other than "deny-all"');
   });
 
   it("excludes setup behavior from the template compatibility hash", () => {
@@ -79,6 +100,31 @@ describe.skipIf(onWindows)("createMicrosandboxNetworkPlan", () => {
         rules: [],
       },
       transformHeaderRules: [],
+    });
+  });
+
+  it("allows ingress only to published sandbox TCP ports", () => {
+    const plan = createMicrosandboxNetworkPlan("allow-all", [3000, 8080]);
+
+    expect(plan.policy).toEqual({
+      defaultEgress: "allow",
+      defaultIngress: "deny",
+      rules: [
+        {
+          action: "allow",
+          destination: { kind: "any" },
+          direction: "ingress",
+          ports: [{ end: 3000, start: 3000 }],
+          protocols: ["tcp"],
+        },
+        {
+          action: "allow",
+          destination: { kind: "any" },
+          direction: "ingress",
+          ports: [{ end: 8080, start: 8080 }],
+          protocols: ["tcp"],
+        },
+      ],
     });
   });
 

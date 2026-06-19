@@ -6,6 +6,7 @@ import type {
 
 export type {
   SandboxCommandResult,
+  SandboxPortMapping,
   SandboxProcess,
   SandboxReadBinaryFileOptions,
   SandboxReadFileOptions,

@@ -41,6 +41,7 @@ describe("executeBashOnSandbox", () => {
 
 function createTestSandboxSession(result: SandboxCommandResult): SandboxSession {
   return {
+    getPortUrl: async () => "http://127.0.0.1:3000",
     id: "test-sandbox",
     readBinaryFile: async () => null,
     readFile: async () => null,

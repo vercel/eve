@@ -193,6 +193,25 @@ describe.skipIf(process.platform === "win32")("connectMicrosandbox", () => {
 });
 
 describe.skipIf(process.platform === "win32")("MicrosandboxVm", () => {
+  it("resolves configured sandbox ports to loopback host ports", () => {
+    const vm = new MicrosandboxVm(
+      {
+        module: {} as never,
+        options: resolveMicrosandboxOptions({
+          ports: [{ hostPort: 43_000, sandboxPort: 3000 }],
+        }),
+        ports: [{ hostPort: 43_000, sandboxPort: 3000 }],
+        sessionKey: "session-key",
+      },
+      {} as never,
+      "sandbox-name",
+      undefined,
+    );
+
+    expect(vm.getPortUrl(3000)).toBe("http://127.0.0.1:43000");
+    expect(() => vm.getPortUrl(3001)).toThrow("Sandbox port 3001 is not published");
+  });
+
   it("finishes streamed commands when the exec handle emits an exit event", async () => {
     const sandbox = {
       async execStreamWith() {
@@ -206,6 +225,7 @@ describe.skipIf(process.platform === "win32")("MicrosandboxVm", () => {
       {
         module: {} as never,
         options: resolveMicrosandboxOptions({ image: MICROSANDBOX_DEFAULT_IMAGE }),
+        ports: [],
         sessionKey: "session-key",
       },
       sandbox as never,
@@ -236,6 +256,7 @@ describe.skipIf(process.platform === "win32")("MicrosandboxVm", () => {
       {
         module: {} as never,
         options: resolveMicrosandboxOptions({ image: MICROSANDBOX_DEFAULT_IMAGE }),
+        ports: [],
         sessionKey: "session-key",
       },
       sandbox as never,
@@ -255,6 +276,27 @@ describe.skipIf(process.platform === "win32")("MicrosandboxVm", () => {
 });
 
 describe.skipIf(process.platform === "win32")("createPreparedMicrosandbox", () => {
+  it("binds configured ports to loopback", async () => {
+    const module = createCreationModule({
+      create: async () => createMockMicrosandbox(),
+      progress: [],
+    });
+
+    await createPreparedMicrosandbox({
+      module: module as never,
+      name: "session-vm",
+      options: resolveMicrosandboxOptions({
+        ports: [{ hostPort: 43_000, sandboxPort: 3000 }],
+      }),
+      sessionKey: "session-key",
+      setupBaseRuntime: false,
+    });
+
+    expect(module.portBindings).toEqual([
+      { host: "127.0.0.1", hostPort: 43_000, sandboxPort: 3000 },
+    ]);
+  });
+
   it("reports the current creation phase while the VM is still starting", async () => {
     vi.useFakeTimers();
     const sandbox = createMockMicrosandbox();
@@ -377,6 +419,7 @@ function createCreationModule(input: {
   readonly create: () => Promise<ReturnType<typeof createMockMicrosandbox>>;
   readonly progress: readonly Record<string, unknown>[];
 }) {
+  const portBindings: Array<{ host: string; hostPort: number; sandboxPort: number }> = [];
   const builder = {
     cpus: returnBuilder,
     async create() {
@@ -396,6 +439,14 @@ function createCreationModule(input: {
     image: returnBuilder,
     labels: returnBuilder,
     memory: returnBuilder,
+    network(configure: (network: unknown) => unknown) {
+      configure(createMockNetworkBuilder());
+      return builder;
+    },
+    portBind(host: string, hostPort: number, sandboxPort: number) {
+      portBindings.push({ host, hostPort, sandboxPort });
+      return builder;
+    },
     pullPolicy: returnBuilder,
     replace: returnBuilder,
     user: returnBuilder,
@@ -407,6 +458,7 @@ function createCreationModule(input: {
   }
 
   return {
+    portBindings,
     Sandbox: {
       builder() {
         return builder;
@@ -535,6 +587,9 @@ function createMockSandboxBuilder(create: (fromSnapshot: string) => unknown) {
       return builder;
     },
     memory() {
+      return builder;
+    },
+    portBind() {
       return builder;
     },
     network(configure: (network: unknown) => unknown) {
