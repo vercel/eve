@@ -50,7 +50,7 @@ export default defineTool({
 | `defineEvalConfig`                                     | `eve/evals`                                   | `evals/evals.config.ts`              | [Evals](../evals/overview)                             |
 | `useEveAgent`                                          | `eve/react`, `eve/vue`, `eve/svelte`          | frontend                             | [Frontend](../guides/frontend/overview)                |
 
-A few non-`define*` helpers round out the set: `disableTool` and `ExperimentalWorkflow` from `eve/tools` (see [Default harness](../concepts/default-harness)), the route verbs `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`WS` from `eve/channels`, the approval predicates `always`/`once`/`never` from `eve/tools/approval`, and the channel auth helpers `localDev`/`vercelOidc`/`placeholderAuth` from `eve/channels/auth`. To wrap a built-in tool, import its default value from `eve/tools/defaults` (`bash`, `readFile`, `writeFile`, `glob`, `grep`, `webFetch`, `webSearch`, `todo`, `loadSkill`).
+A few non-`define*` helpers round out the set: `disableTool` and `ExperimentalWorkflow` from `eve/tools` (see [Default harness](../concepts/default-harness)), the route verbs `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`WS` from `eve/channels`, the approval predicates `always`/`once`/`never` from `eve/tools/approval`, and the channel auth helpers `localDev`/`vercelOidc`/`placeholderAuth` from `eve/channels/auth`. To wrap a built-in tool, import its default value from `eve/tools/defaults` (`bash`, `readFile`, `writeFile`, `glob`, `grep`, `webFetch`, `webSearch`, `todo`, `loadSkill`). `AgentWorkflowDefinition` and `AgentWorkflowWorldDefinition` are exported from `eve` for the `defineAgent({ experimental: { workflow } })` config shape.
 
 ## Runtime context (`ctx`)
 
@@ -68,7 +68,7 @@ A few non-`define*` helpers round out the set: `disableTool` and `ExperimentalWo
 
 | Import                                                      | Holds                                                                |
 | ----------------------------------------------------------- | -------------------------------------------------------------------- |
-| `eve`                                                       | `defineAgent`, `defineRemoteAgent`                                   |
+| `eve`                                                       | `defineAgent`, `defineRemoteAgent`, agent config types               |
 | `eve/tools`                                                 | `defineTool`, `defineDynamic`, `disableTool`, `ExperimentalWorkflow` |
 | `eve/tools/defaults`                                        | the built-in tools as plain values                                   |
 | `eve/tools/approval`                                        | `always`, `once`, `never`                                            |

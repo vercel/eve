@@ -21,7 +21,22 @@ Nitro is the HTTP host layer. It gives eve a build artifact that can serve the h
 
 On Vercel, eve emits Vercel Build Output, the Workflow SDK runs on Vercel Workflow, and `defaultBackend()` selects Vercel Sandbox. Outside Vercel, `eve start` serves the standard Nitro Node output, the Workflow SDK uses its local world by default, and `defaultBackend()` selects a local sandbox backend in availability order. That local workflow world persists run state on disk and has no direct coupling to Vercel; Vercel-only behavior such as latest-deployment routing and dashboard run attributes is additive.
 
-Eve does not expose Workflow world selection as a public app API today. Future releases will let advanced deployments provide a different Workflow world, the SDK abstraction for workflow state, queues, auth, and streaming; see [Workflow Worlds](https://workflow-sdk.dev/worlds) for the underlying concept.
+Advanced self-hosted deployments can select a different installed Workflow world package in the root `agent.ts`:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  experimental: {
+    workflow: {
+      world: "@acme/eve-workflow-world",
+    },
+  },
+});
+```
+
+The world package should read credentials and host-specific options from runtime environment variables. It should export a default factory or `createWorld()` function. See [Workflow Worlds](https://workflow-sdk.dev/worlds) for the underlying SDK abstraction.
 
 ## 2. Environment variables and secrets
 
@@ -125,7 +140,7 @@ Eve writes the standard Nitro output under `.output/` instead of Vercel Build Ou
 
 Self-deployed agents should make the Vercel-specific choices explicit:
 
-- Let the Workflow SDK use its default local world, which stores workflow state under `.workflow-data`, or configure your host so that directory is on persistent storage.
+- Let the Workflow SDK use its default local world, which stores workflow state under `.workflow-data`, configure your host so that directory is on persistent storage, or select another world with `experimental.workflow.world` in the root `agent.ts`.
 - Install the AI SDK package for your provider, then use a direct provider model object and `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` when you want no Gateway dependency.
 - Use `AI_GATEWAY_API_KEY` if you still want Gateway routing from a non-Vercel host.
 - Replace `vercelOidc()` with auth that your host can verify.
