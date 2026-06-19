@@ -45,8 +45,8 @@ void (async () => {
     promptCommandHandler: createPromptCommandHandler({
       target: {
         kind: "remote",
+        serverUrl: UNREACHABLE_HOST,
         workspaceRoot: process.cwd(),
-        host: "127.0.0.1:49214",
       },
       flows: {
         runLoginFlow: async () => ({ kind: "already" }),
@@ -132,7 +132,7 @@ async function runLocalChannelsCancellation(): Promise<void> {
     appRoot,
     availablePromptCommands: promptCommandsFor("local"),
     promptCommandHandler: createPromptCommandHandler({
-      target: { kind: "local", appRoot },
+      target: { kind: "local", serverUrl: UNREACHABLE_HOST, appRoot },
     }),
   });
   const runPromise = runner.run();

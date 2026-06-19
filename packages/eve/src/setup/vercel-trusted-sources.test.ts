@@ -1,6 +1,7 @@
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
 import type { VercelCaptureResult } from "#setup/primitives/index.js";
-import type { PrompterValue, SingleSelectOptions } from "#setup/prompter.js";
+import type { Prompter, PrompterValue, SingleSelectOptions } from "#setup/prompter.js";
 import { describe, expect, it } from "vitest";
 import { vi } from "vitest";
 
@@ -24,6 +25,18 @@ const self = {
   customEnvironmentSlugs: [] as const,
 };
 
+const PREVIEW_TARGET = await resolveTestVercelTarget({
+  host: "inbound.example.com",
+  projectId: "prj_target",
+  projectName: "inbound",
+});
+const PRODUCTION_TARGET = await resolveTestVercelTarget({
+  host: "inbound.example.com",
+  projectId: "prj_target",
+  projectName: "inbound",
+  environment: "production",
+});
+
 function captureSequence(...results: VercelCaptureResult[]) {
   return vi.fn<VercelTrustedSourceDeps["captureVercel"]>(async () => {
     const result = results.shift();
@@ -36,18 +49,51 @@ function success(value: unknown): VercelCaptureResult {
   return { ok: true, stdout: JSON.stringify(value) };
 }
 
-function failure(message: string, stdout = ""): VercelCaptureResult {
-  return { ok: false, failure: { code: 1, stdout, stderr: "", message } };
+function projectResponse(
+  id: string,
+  name: string,
+  customEnvironmentSlugs: readonly string[] = [],
+  trustedSources: unknown = null,
+) {
+  return {
+    id,
+    name,
+    customEnvironments: customEnvironmentSlugs.map((slug) => ({ slug })),
+    trustedSources,
+  };
+}
+
+function failure(message: string): VercelCaptureResult {
+  return { ok: false, failure: { code: 1, message, stderr: "", stdout: "" } };
 }
 
 function accessDeps(
   captureVercel: VercelTrustedSourceDeps["captureVercel"],
-  projectId = "prj_target",
 ): Partial<VercelTrustedSourceDeps> {
-  return {
-    captureVercel,
-    readProjectLink: async () => ({ orgId: "team_a", projectId }),
-  };
+  return { captureVercel };
+}
+
+async function prepareAndApply(input: {
+  readonly captureVercel: VercelTrustedSourceDeps["captureVercel"];
+  readonly prompter: Prompter;
+  readonly sourceProject?: { readonly projectId: string; readonly scope: string };
+  readonly target?: typeof PRODUCTION_TARGET;
+}) {
+  const preparation = await prepareVercelTrustedSourceAccess({
+    workspaceRoot: "/repo",
+    sourceProject: input.sourceProject ?? { projectId: "prj_target", scope: "team_a" },
+    target: input.target ?? PRODUCTION_TARGET,
+    prompter: input.prompter,
+    deps: accessDeps(input.captureVercel),
+  });
+  if (preparation.kind !== "approved") {
+    throw new Error(`Expected approved access, received ${preparation.kind}.`);
+  }
+  return await applyVercelTrustedSourceAccess({
+    workspaceRoot: "/repo",
+    grant: preparation.grant,
+    deps: accessDeps(input.captureVercel),
+  });
 }
 
 describe("planTrustedSourceAccess", () => {
@@ -147,46 +193,53 @@ describe("planTrustedSourceAccess", () => {
 });
 
 describe("prepareVercelTrustedSourceAccess", () => {
+  it("returns the PATCH failure without claiming the policy changed", async () => {
+    const captureVercel = captureSequence(
+      success(projectResponse("prj_target", "inbound")),
+      failure("Vercel rejected the policy update."),
+    );
+
+    await expect(
+      applyVercelTrustedSourceAccess({
+        workspaceRoot: "/repo",
+        grant: {
+          scope: "team_a",
+          sourceProjectId: "prj_target",
+          sourceEnvironment: "development",
+          targetProjectId: "prj_target",
+          targetProjectName: "inbound",
+          targetEnvironment: "production",
+        },
+        deps: accessDeps(captureVercel),
+      }),
+    ).resolves.toEqual({
+      kind: "failed",
+      message: "Could not update Trusted Sources for inbound: Vercel rejected the policy update.",
+    });
+  });
+
   it("re-reads the target policy immediately before patching", async () => {
     const captureVercel = captureSequence(
-      success({ projectId: "prj_target", name: "inbound", target: "production" }),
-      success({
-        id: "prj_target",
-        name: "inbound",
-        customEnvironments: [],
-        trustedSources: null,
-      }),
-      success({
-        id: "prj_target",
-        name: "inbound",
-        customEnvironments: [],
-        trustedSources: {
+      success(projectResponse("prj_target", "inbound")),
+      success(
+        projectResponse("prj_target", "inbound", [], {
           projects: { prj_other: { label: "concurrent rule" } },
-        },
-      }),
+        }),
+      ),
       success({ id: "prj_target" }),
     );
     const { prompter } = createFakePrompter({ single: () => "continue" });
 
-    const preparation = await prepareVercelTrustedSourceAccess({
-      workspaceRoot: "/repo",
-      host: "inbound.example.com",
-      prompter,
-      deps: accessDeps(captureVercel),
-    });
-    expect(preparation.kind).toBe("approved");
-    if (preparation.kind !== "approved") return;
     await expect(
-      applyVercelTrustedSourceAccess({
-        workspaceRoot: "/repo",
-        grant: preparation.grant,
-        deps: accessDeps(captureVercel),
+      prepareAndApply({
+        captureVercel,
+        prompter,
       }),
     ).resolves.toMatchObject({ kind: "updated", targetProjectId: "prj_target" });
 
-    expect(captureVercel).toHaveBeenCalledTimes(4);
+    expect(captureVercel).toHaveBeenCalledTimes(3);
     expect(captureVercel).toHaveBeenNthCalledWith(
-      4,
+      3,
       expect.any(Array),
       expect.objectContaining({
         stdin: expect.stringContaining('"prj_other":{"label":"concurrent rule"}'),
@@ -196,23 +249,8 @@ describe("prepareVercelTrustedSourceAccess", () => {
 
   it("warns before granting the resolved development-to-production pair", async () => {
     const captureVercel = captureSequence(
-      success({
-        projectId: "prj_target",
-        name: "inbound",
-        target: "production",
-      }),
-      success({
-        id: "prj_target",
-        name: "inbound",
-        customEnvironments: [],
-        trustedSources: null,
-      }),
-      success({
-        id: "prj_target",
-        name: "inbound",
-        customEnvironments: [],
-        trustedSources: null,
-      }),
+      success(projectResponse("prj_target", "inbound")),
+      success(projectResponse("prj_target", "inbound")),
       success({ id: "prj_target" }),
     );
     let prompt: SingleSelectOptions<PrompterValue> | undefined;
@@ -223,21 +261,10 @@ describe("prepareVercelTrustedSourceAccess", () => {
       },
     });
 
-    const preparation = await prepareVercelTrustedSourceAccess({
-      workspaceRoot: "/repo",
-      host: "inbound.example.com",
-      prompter,
-      deps: accessDeps(captureVercel),
+    await expect(prepareAndApply({ captureVercel, prompter })).resolves.toMatchObject({
+      kind: "updated",
+      targetProjectId: "prj_target",
     });
-    expect(preparation.kind).toBe("approved");
-    if (preparation.kind !== "approved") return;
-    await expect(
-      applyVercelTrustedSourceAccess({
-        workspaceRoot: "/repo",
-        grant: preparation.grant,
-        deps: accessDeps(captureVercel),
-      }),
-    ).resolves.toMatchObject({ kind: "updated", targetProjectId: "prj_target" });
 
     expect(prompt?.message).toBe(
       "Allow Development from inbound to access Production deployments of inbound?",
@@ -249,12 +276,7 @@ describe("prepareVercelTrustedSourceAccess", () => {
       },
     ]);
     expect(captureVercel).toHaveBeenNthCalledWith(
-      1,
-      ["api", "/v13/deployments/inbound.example.com", "--scope", "team_a", "--raw"],
-      expect.objectContaining({ cwd: "/repo" }),
-    );
-    expect(captureVercel).toHaveBeenNthCalledWith(
-      4,
+      3,
       [
         "api",
         "/v9/projects/prj_target",
@@ -287,78 +309,43 @@ describe("prepareVercelTrustedSourceAccess", () => {
   });
 
   it("does not prompt or mutate for same-project development-to-preview", async () => {
-    const captureVercel = captureSequence(
-      success({ projectId: "prj_target", name: "inbound", target: null }),
-      success({
-        id: "prj_target",
-        name: "inbound",
-        customEnvironments: [],
-        trustedSources: null,
-      }),
-    );
+    const captureVercel = captureSequence(success(projectResponse("prj_target", "inbound")));
     const { prompter } = createFakePrompter();
 
     await expect(
       prepareVercelTrustedSourceAccess({
         workspaceRoot: "/repo",
-        host: "inbound.example.com",
+        sourceProject: { projectId: "prj_target", scope: "team_a" },
+        target: PREVIEW_TARGET,
         prompter,
         deps: accessDeps(captureVercel),
       }),
     ).resolves.toEqual({ kind: "unchanged" });
 
-    expect(captureVercel).toHaveBeenCalledTimes(2);
+    expect(captureVercel).toHaveBeenCalledTimes(1);
   });
 
   it("preserves matching-environment defaults when adding another same-team project", async () => {
     const captureVercel = captureSequence(
-      success({ projectId: "prj_target", name: "api", target: null }),
-      success({
-        id: "prj_target",
-        name: "api",
-        customEnvironments: [{ slug: "staging" }],
-        trustedSources: null,
-      }),
-      success({
-        id: "prj_source",
-        name: "web",
-        customEnvironments: [{ slug: "staging" }, { slug: "qa" }],
-        trustedSources: null,
-      }),
-      success({
-        id: "prj_target",
-        name: "api",
-        customEnvironments: [{ slug: "staging" }],
-        trustedSources: null,
-      }),
-      success({
-        id: "prj_source",
-        name: "web",
-        customEnvironments: [{ slug: "staging" }, { slug: "qa" }],
-        trustedSources: null,
-      }),
+      success(projectResponse("prj_target", "api", ["staging"])),
+      success(projectResponse("prj_source", "web", ["staging", "qa"])),
+      success(projectResponse("prj_target", "api", ["staging"])),
+      success(projectResponse("prj_source", "web", ["staging", "qa"])),
       success({ id: "prj_target" }),
     );
     const { prompter } = createFakePrompter({ single: () => "continue" });
 
-    const preparation = await prepareVercelTrustedSourceAccess({
-      workspaceRoot: "/repo",
-      host: "api.example.com",
-      prompter,
-      deps: accessDeps(captureVercel, "prj_source"),
-    });
-    expect(preparation.kind).toBe("approved");
-    if (preparation.kind !== "approved") return;
     await expect(
-      applyVercelTrustedSourceAccess({
-        workspaceRoot: "/repo",
-        grant: preparation.grant,
-        deps: accessDeps(captureVercel, "prj_source"),
+      prepareAndApply({
+        captureVercel,
+        prompter,
+        sourceProject: { projectId: "prj_source", scope: "team_a" },
+        target: PREVIEW_TARGET,
       }),
     ).resolves.toMatchObject({ kind: "updated", targetProjectId: "prj_target" });
 
     expect(captureVercel).toHaveBeenNthCalledWith(
-      6,
+      5,
       expect.any(Array),
       expect.objectContaining({
         stdin: JSON.stringify({
@@ -380,63 +367,19 @@ describe("prepareVercelTrustedSourceAccess", () => {
   });
 
   it("leaves policy unchanged when the user declines the access grant", async () => {
-    const captureVercel = captureSequence(
-      success({ projectId: "prj_target", name: "inbound", target: "production" }),
-      success({
-        id: "prj_target",
-        name: "inbound",
-        customEnvironments: [],
-        trustedSources: null,
-      }),
-    );
+    const captureVercel = captureSequence(success(projectResponse("prj_target", "inbound")));
     const { prompter } = createFakePrompter({ single: () => "cancel" });
 
     await expect(
       prepareVercelTrustedSourceAccess({
         workspaceRoot: "/repo",
-        host: "inbound.example.com",
+        sourceProject: { projectId: "prj_target", scope: "team_a" },
+        target: PRODUCTION_TARGET,
         prompter,
         deps: accessDeps(captureVercel),
       }),
     ).resolves.toEqual({ kind: "cancelled" });
 
-    expect(captureVercel).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not block non-Vercel remotes when the host cannot be resolved", async () => {
-    const captureVercel = captureSequence(
-      failure(
-        "Deployment not found.",
-        JSON.stringify({ error: { code: "not_found", message: "Deployment not found." } }),
-      ),
-    );
-    const { prompter } = createFakePrompter();
-
-    await expect(
-      prepareVercelTrustedSourceAccess({
-        workspaceRoot: "/repo",
-        host: "custom.example.com",
-        prompter,
-        deps: accessDeps(captureVercel),
-      }),
-    ).resolves.toEqual({ kind: "not-applicable" });
-  });
-
-  it("does not collapse an operational deployment lookup failure into not-applicable", async () => {
-    const captureVercel = captureSequence(failure("Vercel deployment lookup timed out."));
-    const { prompter } = createFakePrompter();
-
-    await expect(
-      prepareVercelTrustedSourceAccess({
-        workspaceRoot: "/repo",
-        host: "inbound.example.com",
-        prompter,
-        deps: accessDeps(captureVercel),
-      }),
-    ).resolves.toEqual({
-      kind: "failed",
-      message:
-        "Could not resolve the Vercel deployment for inbound.example.com: Vercel deployment lookup timed out.",
-    });
+    expect(captureVercel).toHaveBeenCalledTimes(1);
   });
 });

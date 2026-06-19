@@ -52,7 +52,6 @@ import {
   type RemoteConnectionController,
   type RemoteConnectionControllerOptions,
   type RemoteConnectionSnapshot,
-  type RemoteTarget,
 } from "./remote-connection.js";
 import type { DevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
 import {
@@ -67,6 +66,7 @@ import {
   type SetupIssue,
 } from "./setup-issues.js";
 import type { SetupFlowRenderer } from "./setup-flow.js";
+import type { RemoteDevelopmentTarget } from "./target.js";
 import type {
   AssistantResponseStatsMode,
   LogDisplayMode,
@@ -351,7 +351,7 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   availablePromptCommands?: readonly PromptCommandSpec[];
   /** Remote target and mutable OIDC token source, when connected through `--url`. */
   remote?: {
-    readonly target: RemoteTarget;
+    readonly target: RemoteDevelopmentTarget;
     readonly credentials: DevelopmentCredentialGate;
     readonly resolveOidcToken?: () => Promise<string>;
     readonly resolveDeployment?: NonNullable<

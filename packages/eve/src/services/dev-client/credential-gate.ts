@@ -7,7 +7,7 @@ import {
 
 export interface DevelopmentCredentialGrant {
   readonly target: VerifiedVercelTarget;
-  readonly token: string;
+  readonly resolveToken: () => Promise<string>;
 }
 
 export type DevelopmentCredentialGateSnapshot =
@@ -18,8 +18,11 @@ export type DevelopmentCredentialGateSnapshot =
 export interface DevelopmentCredentialGate {
   /** The origin this gate is permanently bound to. */
   readonly serverOrigin: string;
-  /** Installs or refreshes authority after Vercel verified the exact origin. */
-  authorize(grant: DevelopmentCredentialGrant): void;
+  /**
+   * Installs authority after Vercel verifies the exact origin.
+   * Returns a rollback that restores the prior grant if this grant is still current.
+   */
+  authorize(grant: DevelopmentCredentialGrant): () => void;
   /** Returns a token-free view of the current authority. */
   current(): DevelopmentCredentialGateSnapshot;
   /** Resolves headers for one request without exposing stored credential material. */
@@ -31,7 +34,7 @@ type DevelopmentCredentialGateState =
   | {
       readonly kind: "vercel";
       readonly target: VerifiedVercelTarget;
-      readonly token: string;
+      readonly resolveToken: () => Promise<string>;
     };
 
 /** Creates an anonymous credential gate bound to one client origin. */
@@ -39,13 +42,22 @@ export function createDevelopmentCredentialGate(serverUrl: string): DevelopmentC
   const serverOrigin = new URL(serverUrl).origin;
   let state: DevelopmentCredentialGateState = { kind: "anonymous" };
 
-  const authorize = (grant: DevelopmentCredentialGrant): void => {
+  const authorize = (grant: DevelopmentCredentialGrant): (() => void) => {
     if (grant.target.origin !== serverOrigin) {
       throw new Error(
         `Verified Vercel origin ${grant.target.origin} does not match client origin ${serverOrigin}.`,
       );
     }
-    state = { kind: "vercel", target: grant.target, token: grant.token.trim() };
+    const previous = state;
+    const next = {
+      kind: "vercel",
+      target: grant.target,
+      resolveToken: grant.resolveToken,
+    } as const;
+    state = next;
+    return () => {
+      if (state === next) state = previous;
+    };
   };
 
   const current = (): DevelopmentCredentialGateSnapshot => {
@@ -58,14 +70,16 @@ export function createDevelopmentCredentialGate(serverUrl: string): DevelopmentC
   };
 
   const resolveHeaders = async (): Promise<Readonly<Record<string, string>>> => {
-    if (state.kind === "anonymous") return {};
+    const authorized = state;
+    if (authorized.kind === "anonymous") return {};
 
     const headers: Record<string, string> = {};
     const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
     if (bypassSecret) headers[VERCEL_PROTECTION_BYPASS_HEADER] = bypassSecret;
-    if (state.token.length > 0) {
-      headers.authorization = `Bearer ${state.token}`;
-      headers[VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER] = state.token;
+    const token = (await authorized.resolveToken()).trim();
+    if (token.length > 0) {
+      headers.authorization = `Bearer ${token}`;
+      headers[VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER] = token;
     }
     return headers;
   };

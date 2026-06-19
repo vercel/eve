@@ -15,23 +15,10 @@ import { toErrorMessage } from "#shared/errors.js";
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
 import { promptCommandsFor } from "./prompt-commands.js";
 import { EveTUIRunner, type EveTUIRunnerOptions } from "./runner.js";
-import type { TuiSetupCommandTarget } from "./setup-commands.js";
+import { remoteHost, type DevelopmentTuiTarget, type RemoteDevelopmentTarget } from "./target.js";
 import type { TuiDisplayOptions } from "./types.js";
 
-/**
- * Options for running the `eve dev` terminal UI against a server URL.
- */
-export type DevelopmentTuiTarget =
-  | {
-      readonly kind: "local";
-      readonly serverUrl: string;
-      readonly appRoot: string;
-    }
-  | {
-      readonly kind: "remote";
-      readonly serverUrl: string;
-      readonly workspaceRoot: string;
-    };
+export type { DevelopmentTuiTarget } from "./target.js";
 
 export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
   /** The local server or remote URL used by this TUI session. */
@@ -44,21 +31,33 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
   readonly initialInput?: string;
 }
 
-function prepareRemoteTarget(target: Extract<DevelopmentTuiTarget, { kind: "remote" }>) {
-  const host = new URL(target.serverUrl).host;
+function prepareRemoteTarget(target: RemoteDevelopmentTarget) {
+  const host = remoteHost(target);
   const credentials = createDevelopmentCredentialGate(target.serverUrl);
-  const remote = {
-    target: {
-      serverUrl: target.serverUrl,
-      host,
-      workspaceRoot: target.workspaceRoot,
-    },
+  return {
+    target,
     credentials,
     resolveOidcToken: resolveDevelopmentOidcToken,
     resolveDeployment: (signal: AbortSignal) =>
       resolveVercelDeployment({ workspaceRoot: target.workspaceRoot, host, signal }),
   } satisfies NonNullable<EveTUIRunnerOptions["remote"]>;
-  return { kind: "remote" as const, serverUrl: target.serverUrl, remote };
+}
+
+type PreparedDevelopmentTuiTarget =
+  | {
+      readonly kind: "local";
+      readonly target: Extract<DevelopmentTuiTarget, { kind: "local" }>;
+    }
+  | {
+      readonly kind: "remote";
+      readonly target: RemoteDevelopmentTarget;
+      readonly remote: NonNullable<EveTUIRunnerOptions["remote"]>;
+    };
+
+function prepareDevelopmentTarget(target: DevelopmentTuiTarget): PreparedDevelopmentTuiTarget {
+  return target.kind === "local"
+    ? { kind: "local", target }
+    : { kind: "remote", target, remote: prepareRemoteTarget(target) };
 }
 
 /**
@@ -72,41 +71,34 @@ function prepareRemoteTarget(target: Extract<DevelopmentTuiTarget, { kind: "remo
  */
 export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<void> {
   const { target, initialInput, ...display } = input;
-  const preparedTarget = target.kind === "remote" ? prepareRemoteTarget(target) : target;
-  const { serverUrl } = preparedTarget;
+  const prepared = prepareDevelopmentTarget(target);
+  const { serverUrl } = target;
 
   const client = new Client(
-    preparedTarget.kind === "local"
+    prepared.kind === "local"
       ? resolveDevelopmentClientOptions(serverUrl)
       : resolveRemoteDevelopmentClientOptions({
           serverUrl,
-          credentials: preparedTarget.remote.credentials,
+          credentials: prepared.remote.credentials,
         }),
   );
-  const commandTarget: TuiSetupCommandTarget =
-    preparedTarget.kind === "local"
-      ? { kind: "local", appRoot: preparedTarget.appRoot }
-      : {
-          kind: "remote",
-          ...preparedTarget.remote.target,
-        };
 
   const options: EveTUIRunnerOptions = {
     ...display,
     session: client.session(),
     client,
     serverUrl,
-    promptCommandHandler: createPromptCommandHandler({ target: commandTarget }),
-    availablePromptCommands: promptCommandsFor(preparedTarget.kind),
+    promptCommandHandler: createPromptCommandHandler({ target }),
+    availablePromptCommands: promptCommandsFor(target.kind),
     formatTransportError: (error) =>
       isVercelAuthChallenge(error)
         ? formatVercelAuthChallengeMessage({ serverUrl })
         : toErrorMessage(error),
   };
-  if (preparedTarget.kind === "local") {
-    options.appRoot = preparedTarget.appRoot;
+  if (prepared.kind === "local") {
+    options.appRoot = prepared.target.appRoot;
   } else {
-    options.remote = preparedTarget.remote;
+    options.remote = prepared.remote;
   }
   if (initialInput !== undefined) options.initialInput = initialInput;
 

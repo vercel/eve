@@ -2,6 +2,7 @@ import { clipVisible, visibleLength } from "./terminal-text.js";
 import type { Theme } from "./theme.js";
 import type { LogDisplayMode } from "./log-display-mode.js";
 import type { RemoteConnectionSnapshot } from "./remote-connection.js";
+import { remoteHost } from "./target.js";
 import type { VercelStatusSnapshot } from "./vercel-status.js";
 import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 
@@ -88,7 +89,7 @@ function formatRemoteStatus(
   const c = theme.colors;
   const label =
     snapshot.deployment === undefined
-      ? snapshot.target.host
+      ? remoteHost(snapshot.target)
       : `${snapshot.deployment.projectName} (${snapshot.deployment.environment})`;
   const arrow = theme.unicode ? "↗" : "->";
   const badge = formatRemoteBadge(` ${arrow} ${label} `, snapshot.connection.state, theme);

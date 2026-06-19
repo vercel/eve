@@ -1,14 +1,8 @@
 import { captureVercel } from "#setup/primitives/index.js";
-import { readProjectLink } from "#setup/project-resolution.js";
 import { z } from "zod";
 
 import type { Prompter } from "./prompter.js";
-import {
-  resolveVercelDeployment,
-  type ResolvedVercelDeployment,
-  type VercelDeploymentResolutionFailure,
-  type VerifiedVercelTarget,
-} from "./vercel-deployment.js";
+import type { VerifiedVercelTarget } from "./vercel-deployment.js";
 import { parseVercelJsonAs } from "./vercel-project-api.js";
 import {
   planTrustedSourceAccess,
@@ -18,7 +12,7 @@ import {
 } from "./vercel-trusted-sources-policy.js";
 
 export type VercelTrustedSourcePreparation =
-  | { readonly kind: "unchanged" | "not-applicable" }
+  | { readonly kind: "unchanged" }
   | { readonly kind: "approved"; readonly grant: VercelTrustedSourceGrant }
   | { readonly kind: "cancelled" }
   | { readonly kind: "failed"; readonly message: string };
@@ -48,7 +42,6 @@ export interface VercelTrustedSourceGrant {
 
 export interface VercelTrustedSourceDeps {
   readonly captureVercel: typeof captureVercel;
-  readonly readProjectLink: typeof readProjectLink;
 }
 
 const ProjectSchema = z.object({
@@ -58,7 +51,7 @@ const ProjectSchema = z.object({
   trustedSources: VercelTrustedSourcesSchema.nullable().optional(),
 });
 
-const defaultDeps: VercelTrustedSourceDeps = { captureVercel, readProjectLink };
+const defaultDeps: VercelTrustedSourceDeps = { captureVercel };
 
 function environmentLabel(environment: string): string {
   switch (environment) {
@@ -71,10 +64,6 @@ function environmentLabel(environment: string): string {
     default:
       return environment;
   }
-}
-
-function deploymentFailureMessage(failure: VercelDeploymentResolutionFailure): string {
-  return failure.cause === "vercel" ? failure.failure.message : failure.message;
 }
 
 function projectEndpoint(
@@ -179,72 +168,18 @@ async function planEndpointAccess(input: {
   };
 }
 
-/** Resolves and confirms a required Trusted Sources grant without mutating it. */
+/** Confirms a Trusted Sources grant for one resolved source and verified target. */
 export async function prepareVercelTrustedSourceAccess(input: {
   readonly workspaceRoot: string;
-  readonly host: string;
-  readonly sourceProject?: VercelTrustedSourceProject;
-  readonly target?: VerifiedVercelTarget;
+  readonly sourceProject: VercelTrustedSourceProject;
+  readonly target: VerifiedVercelTarget;
   readonly prompter: Prompter;
   readonly signal?: AbortSignal;
   readonly deps?: Partial<VercelTrustedSourceDeps>;
 }): Promise<VercelTrustedSourcePreparation> {
   const deps: VercelTrustedSourceDeps = { ...defaultDeps, ...input.deps };
-  const linkedProject =
-    input.sourceProject === undefined ? await deps.readProjectLink(input.workspaceRoot) : undefined;
-  const sourceProject =
-    input.sourceProject ??
-    (linkedProject === undefined
-      ? undefined
-      : { projectId: linkedProject.projectId, scope: linkedProject.orgId });
-  if (sourceProject === undefined) {
-    return {
-      kind: "failed",
-      message: "The directory is not linked to a valid Vercel project.",
-    };
-  }
-
-  let deployment: ResolvedVercelDeployment;
-  if (input.target !== undefined) {
-    const origin = new URL(`https://${input.host}`).origin;
-    if (input.target.origin !== origin) {
-      return {
-        kind: "failed",
-        message: `Verified Vercel origin ${input.target.origin} does not match ${origin}.`,
-      };
-    }
-    deployment = input.target.deployment;
-  } else {
-    const deploymentResolution = await resolveVercelDeployment({
-      workspaceRoot: input.workspaceRoot,
-      host: input.host,
-      ownerId: sourceProject.scope,
-      signal: input.signal,
-      deps: {
-        captureVercel: deps.captureVercel,
-        readProjectLink: deps.readProjectLink,
-      },
-    });
-    switch (deploymentResolution.kind) {
-      case "resolved":
-        deployment = deploymentResolution.target.deployment;
-        break;
-      case "not-found":
-        return { kind: "not-applicable" };
-      case "cancelled":
-        return { kind: "cancelled" };
-      case "unscoped":
-        return {
-          kind: "failed",
-          message: `Could not resolve the Vercel deployment for ${input.host}: no Vercel account scope was available.`,
-        };
-      case "failed":
-        return {
-          kind: "failed",
-          message: `Could not resolve the Vercel deployment for ${input.host}: ${deploymentFailureMessage(deploymentResolution.failure)}`,
-        };
-    }
-  }
+  const { sourceProject } = input;
+  const deployment = input.target.deployment;
 
   // `vercel env pull` mints a Development token, regardless of the target.
   const planned = await planEndpointAccess({

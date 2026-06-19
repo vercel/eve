@@ -12,8 +12,8 @@ const ascii = createTheme({ color: false, unicode: false });
 const identity = { projectName: "my-agent", teamName: "acme" };
 const connected = { kind: "gateway", connected: true, credential: "oidc" } as const;
 const remoteTarget = {
+  kind: "remote",
   serverUrl: "https://vpoke.playground-vercel.tools",
-  host: "vpoke.playground-vercel.tools",
   workspaceRoot: "/tmp/weather-agent",
 } as const;
 

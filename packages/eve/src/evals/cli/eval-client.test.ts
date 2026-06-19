@@ -51,11 +51,15 @@ describe("resolveEvalClientOptions", () => {
     expect(options.auth).toBeUndefined();
   });
 
-  it("authorizes ambient OIDC only after Vercel verifies the exact remote origin", async () => {
+  it("resolves ambient OIDC per request after Vercel verifies the exact remote origin", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValue(Response.json({ ok: true, status: "ready", workflowId: "wf" }));
-    const resolveDevelopmentOidcToken = vi.fn(async () => "verified-token");
+      .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }))
+      .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }));
+    const resolveDevelopmentOidcToken = vi
+      .fn<() => Promise<string>>()
+      .mockResolvedValueOnce(" first-token ")
+      .mockResolvedValueOnce("second-token");
     const client = await createEvalClient(
       { kind: "remote", url: "https://example.vercel.app" },
       {
@@ -70,12 +74,19 @@ describe("resolveEvalClientOptions", () => {
       },
     );
 
+    expect(resolveDevelopmentOidcToken).not.toHaveBeenCalled();
+    await client.health();
     await client.health();
 
-    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
-    expect(headers.get("authorization")).toBe("Bearer verified-token");
-    expect(headers.get("x-vercel-trusted-oidc-idp-token")).toBe("verified-token");
+    const firstHeaders = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    const secondHeaders = new Headers(fetchMock.mock.calls[1]?.[1]?.headers);
+    expect(firstHeaders.get("authorization")).toBe("Bearer first-token");
+    expect(firstHeaders.get("x-vercel-trusted-oidc-idp-token")).toBe("first-token");
+    expect(secondHeaders.get("authorization")).toBe("Bearer second-token");
+    expect(secondHeaders.get("x-vercel-trusted-oidc-idp-token")).toBe("second-token");
+    expect(resolveDevelopmentOidcToken).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0]?.[1]?.redirect).toBe("manual");
+    expect(fetchMock.mock.calls[1]?.[1]?.redirect).toBe("manual");
   });
 
   it("does not resolve or emit ambient OIDC for an unverified remote origin", async () => {

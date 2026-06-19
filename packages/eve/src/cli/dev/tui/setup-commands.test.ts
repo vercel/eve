@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
-import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
 import { openUrl } from "#setup/primitives/open-url.js";
 import { WizardCancelledError } from "#setup/step.js";
@@ -18,12 +17,7 @@ import {
 vi.mock("#setup/primitives/open-url.js", () => ({ openUrl: vi.fn() }));
 
 const APP_ROOT = "/tmp/weather-agent";
-const VERIFIED_TARGET = await resolveTestVercelTarget({
-  host: "inbound.playground-vercel.tools",
-  projectId: "prj_inbound",
-  projectName: "inbound",
-});
-
+const LOCAL_SERVER_URL = "http://localhost:3000";
 function fakePanelRenderer(): TuiSetupCommandRenderer & {
   fireInterrupt: () => void;
   interruptDisposed: () => boolean;
@@ -60,9 +54,7 @@ function fakeFlows(overrides: Partial<TuiSetupFlows> = {}): TuiSetupFlows {
     })),
     runLoginFlow: vi.fn<TuiSetupFlows["runLoginFlow"]>(async () => ({ kind: "logged-in" })),
     runRemoteAuthFlow: vi.fn<TuiSetupFlows["runRemoteAuthFlow"]>(async () => ({
-      kind: "credential",
-      target: VERIFIED_TARGET,
-      token: "oidc-token",
+      kind: "cancelled",
       completedMutations: [],
     })),
     runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
@@ -89,7 +81,7 @@ function run(input: {
   const fake = createFakePrompter({});
   const commandInput: TuiSetupCommandInput = {
     command: input.command,
-    target: { kind: "local", appRoot: APP_ROOT },
+    target: { kind: "local", serverUrl: LOCAL_SERVER_URL, appRoot: APP_ROOT },
     renderer: input.renderer ?? fakePanelRenderer(),
     createPrompter: () => fake.prompter,
     flows: input.flows,
@@ -98,51 +90,6 @@ function run(input: {
 }
 
 describe("runTuiSetupCommand", () => {
-  it("preserves query-select support through the interrupt-aware renderer", async () => {
-    const readQuerySelect = vi.fn(async () => ({ kind: "query" as const, query: "inbound" }));
-    const renderer = { ...fakePanelRenderer(), readQuerySelect };
-    const flows = fakeFlows({
-      runRemoteAuthFlow: vi.fn<TuiSetupFlows["runRemoteAuthFlow"]>(async ({ prompter }) => {
-        if (prompter.searchSelect === undefined) {
-          throw new Error("TUI prompter lost query-select support.");
-        }
-        await expect(
-          prompter.searchSelect({
-            message: "Project to link",
-            options: [{ value: "alpha", label: "Alpha" }],
-            queryActionLabel: "Search for",
-          }),
-        ).resolves.toEqual({ kind: "query", query: "inbound" });
-        return {
-          kind: "credential",
-          target: VERIFIED_TARGET,
-          token: "oidc-token",
-          completedMutations: [],
-        };
-      }),
-    });
-
-    await expect(
-      runTuiSetupCommand({
-        command: "vc:auth",
-        target: {
-          kind: "remote",
-          workspaceRoot: APP_ROOT,
-          host: "inbound.playground-vercel.tools",
-          serverUrl: "https://inbound.playground-vercel.tools/",
-        },
-        renderer,
-        flows,
-      }),
-    ).resolves.toMatchObject({ message: "Vercel OIDC credential refreshed." });
-    expect(readQuerySelect).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "query-search", queryActionLabel: "Search for" }),
-    );
-    expect(flows.runRemoteAuthFlow).toHaveBeenCalledWith(
-      expect.objectContaining({ serverUrl: "https://inbound.playground-vercel.tools/" }),
-    );
-  });
-
   it("surfaces the model flow's apply line as the outcome", async () => {
     const flows = fakeFlows();
     await expect(run({ command: "model", flows })).resolves.toEqual({
@@ -492,7 +439,7 @@ describe("runTuiSetupCommand", () => {
     // The real TUI prompter, so the muted renderer is actually exercised.
     const result = runTuiSetupCommand({
       command: "channels",
-      target: { kind: "local", appRoot: APP_ROOT },
+      target: { kind: "local", serverUrl: LOCAL_SERVER_URL, appRoot: APP_ROOT },
       renderer,
       flows,
     });

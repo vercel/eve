@@ -1,99 +1,172 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import pc from "picocolors";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
 import { StepBackError } from "#setup/step.js";
 
+import type { PrompterValue, SingleSelectOptions } from "../prompter.js";
 import { runRemoteAuthFlow, type RemoteAuthFlowDeps } from "./remote-auth.js";
 
 const WORKSPACE_ROOT = "/app/weather-agent";
 const HOST = "vpoke.playground-vercel.tools";
 const SERVER_URL = `https://${HOST}/`;
+const CURRENT_PROJECT = {
+  projectId: "prj_current",
+  orgId: "team_acme",
+  projectName: "weather-agent",
+};
+const SELECTED_PROJECT = {
+  id: "prj_remote",
+  name: "remote-agent",
+  accountId: "team_acme",
+};
 const VERIFIED_TARGET = await resolveTestVercelTarget({
   host: HOST,
   projectId: "prj_remote",
   projectName: "remote-agent",
 });
+const TRUSTED_SOURCE_GRANT = {
+  scope: "acme",
+  sourceProjectId: "prj_remote",
+  sourceEnvironment: "development",
+  targetProjectId: "prj_target",
+  targetProjectName: "inbound",
+  targetEnvironment: "production",
+} as const;
 
-afterEach(() => vi.restoreAllMocks());
+type LoginResult = Awaited<ReturnType<RemoteAuthFlowDeps["runLoginFlow"]>>;
+type DeploymentResult = Awaited<ReturnType<RemoteAuthFlowDeps["resolveVercelDeployment"]>>;
+type PreparationResult = Awaited<
+  ReturnType<RemoteAuthFlowDeps["prepareVercelTrustedSourceAccess"]>
+>;
+type ApplicationResult = Awaited<ReturnType<RemoteAuthFlowDeps["applyVercelTrustedSourceAccess"]>>;
+type SelectedProject = Awaited<ReturnType<RemoteAuthFlowDeps["resolveProjectByNameOrId"]>>;
 
-function deps(overrides: Partial<RemoteAuthFlowDeps> = {}): RemoteAuthFlowDeps {
-  return {
-    runLoginFlow: vi.fn<RemoteAuthFlowDeps["runLoginFlow"]>(async () => ({ kind: "already" })),
-    detectProjectIdentity: vi.fn(async () => ({
-      projectName: "weather-agent",
-      teamName: "Acme",
-    })),
-    pickTeam: vi.fn(async () => "acme"),
-    pickProject: vi.fn(async () => ({ exists: true, project: "remote-agent" })),
-    resolveProjectByNameOrId: vi.fn(async () => ({
-      id: "prj_remote",
-      name: "remote-agent",
-      accountId: "team_acme",
-    })),
-    linkProject: vi.fn(async () => true),
-    resolveVercelDeployment: vi.fn<RemoteAuthFlowDeps["resolveVercelDeployment"]>(async () => ({
-      kind: "resolved",
-      target: VERIFIED_TARGET,
-    })),
-    runVercelEnvPull: vi.fn(async () => true),
-    readPulledOidcToken: vi.fn(async () => "fresh-token"),
-    prepareVercelTrustedSourceAccess: vi.fn<RemoteAuthFlowDeps["prepareVercelTrustedSourceAccess"]>(
-      async () => ({ kind: "unchanged" }),
-    ),
-    applyVercelTrustedSourceAccess: vi.fn<RemoteAuthFlowDeps["applyVercelTrustedSourceAccess"]>(
-      async () => ({ kind: "unchanged" }),
-    ),
-    ...overrides,
-  };
+interface HarnessOptions {
+  readonly projectAction?: "current" | "change" | "cancel";
+  readonly confirmation?: "continue" | "cancel";
+  readonly identity?: "current" | "none";
+  readonly login?: LoginResult;
+  readonly deployment?: DeploymentResult;
+  readonly preparation?: PreparationResult;
+  readonly application?: ApplicationResult;
+  readonly envPull?: boolean;
+  readonly linkError?: Error;
+  readonly token?:
+    | { readonly kind: "present"; readonly value: string }
+    | { readonly kind: "missing" };
+  readonly selectedProject?: SelectedProject;
+  readonly projectBackOnce?: boolean;
+  readonly teamBack?: boolean;
+  readonly configureTrustedSources?: boolean;
 }
 
-describe("runRemoteAuthFlow", () => {
-  it("shows the project-change warning on its option and returns the pulled token", async () => {
-    const bold = vi.spyOn(pc, "bold").mockImplementation((value) => `<bold>${value}</bold>`);
-    let notices: unknown;
-    let projectOptions: unknown;
-    const { prompter } = createFakePrompter({
-      single: (options) => {
-        notices = options.notices;
-        projectOptions = options.options;
-        return "current";
+function createHarness(options: HarnessOptions = {}) {
+  const operations: string[] = [];
+  const prompts: SingleSelectOptions<PrompterValue>[] = [];
+  let projectAttempts = 0;
+  let token =
+    options.token?.kind === "missing" ? undefined : (options.token?.value ?? "fresh-token");
+  const { prompter } = createFakePrompter({
+    single: (prompt) => {
+      prompts.push(prompt);
+      return prompt.message === `Authenticate ${HOST}`
+        ? (options.projectAction ?? "current")
+        : (options.confirmation ?? "continue");
+    },
+  });
+  const deps: RemoteAuthFlowDeps = {
+    runLoginFlow: vi.fn<RemoteAuthFlowDeps["runLoginFlow"]>(async () => {
+      operations.push("login");
+      return options.login ?? { kind: "already" };
+    }),
+    detectProjectIdentity: vi.fn(async () => {
+      operations.push("identity");
+      return options.identity === "none"
+        ? undefined
+        : { projectName: "weather-agent", teamName: "Acme" };
+    }),
+    readProjectLink: vi.fn(async () => {
+      operations.push("read-link");
+      return CURRENT_PROJECT;
+    }),
+    pickTeam: vi.fn(async () => {
+      operations.push("team");
+      if (options.teamBack === true) throw new StepBackError();
+      return "acme";
+    }),
+    pickProject: vi.fn(async () => {
+      operations.push("project");
+      projectAttempts += 1;
+      if (options.projectBackOnce === true && projectAttempts === 1) throw new StepBackError();
+      return { exists: true, project: "remote-agent" };
+    }),
+    resolveProjectByNameOrId: vi.fn(async () => {
+      operations.push("resolve-project");
+      return options.selectedProject === undefined ? SELECTED_PROJECT : options.selectedProject;
+    }),
+    linkResolvedVercelProject: vi.fn(async ({ project }) => {
+      operations.push("link");
+      if (options.linkError !== undefined) throw options.linkError;
+      return { project };
+    }),
+    resolveVercelDeployment: vi.fn<RemoteAuthFlowDeps["resolveVercelDeployment"]>(async () => {
+      operations.push("deployment");
+      return options.deployment ?? { kind: "resolved", target: VERIFIED_TARGET };
+    }),
+    runVercelEnvPull: vi.fn(async () => {
+      operations.push("pull");
+      return options.envPull ?? true;
+    }),
+    readPulledOidcToken: vi.fn(async () => {
+      operations.push("read-token");
+      return token;
+    }),
+    prepareVercelTrustedSourceAccess: vi.fn<RemoteAuthFlowDeps["prepareVercelTrustedSourceAccess"]>(
+      async () => {
+        operations.push("prepare-ts");
+        return options.preparation ?? { kind: "unchanged" };
       },
-    });
-    const calls: string[] = [];
-    const flowDeps = deps({
-      prepareVercelTrustedSourceAccess: vi.fn(async () => {
-        calls.push("prepare");
-        return { kind: "unchanged" as const };
-      }),
-      runVercelEnvPull: vi.fn(async () => {
-        calls.push("pull");
-        return true;
-      }),
-      readPulledOidcToken: vi.fn(async () => {
-        calls.push("read");
-        return "fresh-token";
-      }),
-    });
+    ),
+    applyVercelTrustedSourceAccess: vi.fn<RemoteAuthFlowDeps["applyVercelTrustedSourceAccess"]>(
+      async () => {
+        operations.push("apply-ts");
+        return options.application ?? { kind: "unchanged" };
+      },
+    ),
+  };
 
-    await expect(
+  return {
+    deps,
+    operations,
+    prompts,
+    prompter,
+    setToken(value: string | undefined) {
+      token = value;
+    },
+    run: (signal?: AbortSignal) =>
       runRemoteAuthFlow({
         workspaceRoot: WORKSPACE_ROOT,
         serverUrl: SERVER_URL,
-        configureTrustedSources: true,
+        configureTrustedSources: options.configureTrustedSources,
         prompter,
-        deps: flowDeps,
+        signal,
+        deps,
       }),
-    ).resolves.toMatchObject({
-      kind: "credential",
-      target: VERIFIED_TARGET,
-      token: "fresh-token",
-    });
+  };
+}
 
-    expect(bold).toHaveBeenCalledWith("weather-agent");
-    expect(notices).toBeUndefined();
-    expect(projectOptions).toEqual([
+afterEach(() => vi.restoreAllMocks());
+
+describe("runRemoteAuthFlow", () => {
+  it("shows the current project and warns that changing it updates local files", async () => {
+    vi.spyOn(pc, "bold").mockImplementation((value) => `<bold>${value}</bold>`);
+    const harness = createHarness({ configureTrustedSources: true });
+
+    await expect(harness.run()).resolves.toMatchObject({ kind: "prepared" });
+
+    expect(harness.prompts[0]?.options).toEqual([
       {
         value: "current",
         label: "Use current project",
@@ -102,524 +175,213 @@ describe("runRemoteAuthFlow", () => {
       {
         value: "change",
         label: "Select another Vercel project",
-        notice: {
-          tone: "warning",
-          lines: ["Updates .env.local and .vercel/project.json"],
-        },
+        notice: { tone: "warning", lines: ["Updates .env.local and .vercel/project.json"] },
       },
       { value: "cancel", label: "Cancel" },
     ]);
-    expect(flowDeps.linkProject).not.toHaveBeenCalled();
-    expect(flowDeps.runVercelEnvPull).toHaveBeenCalledWith(
-      WORKSPACE_ROOT,
-      expect.any(Function),
-      undefined,
-    );
-    expect(flowDeps.prepareVercelTrustedSourceAccess).toHaveBeenCalledWith({
+    expect(harness.deps.resolveVercelDeployment).toHaveBeenCalledWith({
       workspaceRoot: WORKSPACE_ROOT,
       host: HOST,
-      target: VERIFIED_TARGET,
-      prompter,
       signal: undefined,
+      ownerId: "team_acme",
     });
-    expect(calls).toEqual(["prepare", "pull", "read"]);
-  });
-
-  it("does not mutate project state when Vercel cannot verify the target", async () => {
-    const { prompter } = createFakePrompter({ single: () => "current" });
-    const flowDeps = deps({
-      resolveVercelDeployment: vi.fn<RemoteAuthFlowDeps["resolveVercelDeployment"]>(async () => ({
-        kind: "not-found",
-      })),
-    });
-
-    await expect(
-      runRemoteAuthFlow({
-        workspaceRoot: WORKSPACE_ROOT,
-        serverUrl: SERVER_URL,
-        configureTrustedSources: true,
-        prompter,
-        deps: flowDeps,
-      }),
-    ).resolves.toEqual({
-      kind: "failed",
-      failure: {
-        cause: "deployment-unverified",
-        message: `Vercel did not resolve ${HOST} as a deployment in the selected account.`,
-      },
-      completedMutations: [],
-    });
-    expect(flowDeps.linkProject).not.toHaveBeenCalled();
-    expect(flowDeps.prepareVercelTrustedSourceAccess).not.toHaveBeenCalled();
-    expect(flowDeps.runVercelEnvPull).not.toHaveBeenCalled();
-  });
-
-  it("shows teams and projects before confirming a project change", async () => {
-    const bold = vi.spyOn(pc, "bold").mockImplementation((value) => `<bold>${value}</bold>`);
-    const prompts: unknown[] = [];
-    let linkAction: unknown;
-    const { prompter } = createFakePrompter({
-      single: (options) => {
-        prompts.push(options);
-        if (options.message === `Authenticate ${HOST}`) return "change";
-        if (options.message.startsWith("This directory is currently linked to")) {
-          linkAction = options.options.find((option) => option.value === "continue");
-          return "continue";
-        }
-        throw new Error(`Unexpected prompt: ${options.message}`);
-      },
-    });
-    const calls: string[] = [];
-    const flowDeps = deps({
-      linkProject: vi.fn(async () => {
-        calls.push("link");
-        return true;
-      }),
-      prepareVercelTrustedSourceAccess: vi.fn(async () => {
-        calls.push("prepare");
-        return { kind: "unchanged" as const };
-      }),
-    });
-
-    await expect(
-      runRemoteAuthFlow({
-        workspaceRoot: WORKSPACE_ROOT,
-        serverUrl: SERVER_URL,
-        configureTrustedSources: true,
-        prompter,
-        deps: flowDeps,
-      }),
-    ).resolves.toMatchObject({ kind: "credential", token: "fresh-token" });
-
-    expect(flowDeps.pickTeam).toHaveBeenCalledWith(prompter, WORKSPACE_ROOT, undefined, {
-      message: `Which team does ${pc.blue(SERVER_URL)} belong to?`,
-      promptWhenSingle: true,
-      signal: undefined,
-    });
-    expect(flowDeps.pickProject).toHaveBeenCalledWith(prompter, WORKSPACE_ROOT, "acme", {
-      allowCreateWhenEmpty: false,
-      message: `Which project is ${pc.blue(SERVER_URL)} part of?`,
-      signal: undefined,
-    });
-    expect(flowDeps.linkProject).toHaveBeenCalledWith(
-      prompter,
-      WORKSPACE_ROOT,
-      { kind: "existing", project: "remote-agent", team: "acme" },
-      expect.any(Function),
-      { signal: undefined },
-    );
-    expect(prompts).toEqual([
-      expect.objectContaining({ message: `Authenticate ${HOST}` }),
+    expect(harness.deps.prepareVercelTrustedSourceAccess).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: "This directory is currently linked to weather-agent in <bold>Acme</bold>.",
-        messageTone: "warning",
+        sourceProject: { projectId: "prj_current", scope: "team_acme" },
+        target: VERIFIED_TARGET,
       }),
+    );
+    expect(harness.deps.linkResolvedVercelProject).not.toHaveBeenCalled();
+  });
+
+  it("resolves a selected project once and links that exact identity after target verification", async () => {
+    vi.spyOn(pc, "bold").mockImplementation((value) => `<bold>${value}</bold>`);
+    const harness = createHarness({ projectAction: "change" });
+
+    await expect(harness.run()).resolves.toMatchObject({ kind: "prepared" });
+
+    expect(harness.deps.resolveProjectByNameOrId).toHaveBeenCalledTimes(1);
+    expect(harness.deps.linkResolvedVercelProject).toHaveBeenCalledWith({
+      prompter: harness.prompter,
+      projectRoot: WORKSPACE_ROOT,
+      project: SELECTED_PROJECT,
+      signal: undefined,
+    });
+    expect(harness.operations).toEqual([
+      "login",
+      "identity",
+      "team",
+      "project",
+      "resolve-project",
+      "deployment",
+      "link",
+      "pull",
+      "read-token",
     ]);
-    expect(linkAction).toEqual({
-      value: "continue",
-      label: "Link to project '<bold>remote-agent</bold>'",
-      hint: "Links this directory and pulls an OIDC token for remote authentication.",
+    expect(harness.prompts[1]).toMatchObject({
+      message: "This directory is currently linked to weather-agent in <bold>Acme</bold>.",
+      messageTone: "warning",
     });
-    expect(bold).toHaveBeenCalledWith("Acme");
-    expect(calls.slice(0, 2)).toEqual(["prepare", "link"]);
   });
 
-  it("does not change the project when Trusted Sources consent is cancelled", async () => {
-    const { prompter } = createFakePrompter({
-      single: (options) => {
-        if (options.message === `Authenticate ${HOST}`) return "change";
-        if (options.message === "This directory is currently linked to weather-agent in Acme.") {
-          return "continue";
-        }
-        throw new Error(`Unexpected prompt: ${options.message}`);
+  it("returns from the project picker to the team picker", async () => {
+    const harness = createHarness({ identity: "none", projectBackOnce: true });
+
+    await expect(harness.run()).resolves.toMatchObject({ kind: "prepared" });
+
+    expect(harness.deps.pickTeam).toHaveBeenCalledTimes(2);
+    expect(harness.deps.pickProject).toHaveBeenCalledTimes(2);
+  });
+
+  it("gets Trusted Sources consent before linking, then applies it before env pull", async () => {
+    const harness = createHarness({
+      projectAction: "change",
+      configureTrustedSources: true,
+      preparation: { kind: "approved", grant: TRUSTED_SOURCE_GRANT },
+      application: {
+        kind: "updated",
+        targetProjectId: "prj_target",
+        targetProjectName: "inbound",
       },
     });
-    const flowDeps = deps({
-      prepareVercelTrustedSourceAccess: vi.fn(async () => ({ kind: "cancelled" as const })),
-    });
 
-    await expect(
-      runRemoteAuthFlow({
-        workspaceRoot: WORKSPACE_ROOT,
-        serverUrl: SERVER_URL,
-        configureTrustedSources: true,
-        prompter,
-        deps: flowDeps,
-      }),
-    ).resolves.toEqual({ kind: "cancelled", completedMutations: [] });
+    await expect(harness.run()).resolves.toMatchObject({ kind: "prepared" });
 
-    expect(flowDeps.linkProject).not.toHaveBeenCalled();
-    expect(flowDeps.runVercelEnvPull).not.toHaveBeenCalled();
+    expect(
+      harness.operations.filter(
+        (operation) =>
+          operation.endsWith("ts") ||
+          operation === "deployment" ||
+          operation === "link" ||
+          operation === "pull",
+      ),
+    ).toEqual(["deployment", "prepare-ts", "link", "apply-ts", "pull"]);
   });
 
-  it("applies an approved Trusted Sources grant after linking and before env pull", async () => {
-    const calls: string[] = [];
-    const grant = {
-      scope: "acme",
-      sourceProjectId: "prj_remote",
-      sourceEnvironment: "development",
-      targetProjectId: "prj_target",
-      targetProjectName: "inbound",
-      targetEnvironment: "production",
-    } as const;
-    const { prompter } = createFakePrompter({
-      single: (options) => (options.message === `Authenticate ${HOST}` ? "change" : "continue"),
-    });
-    const flowDeps = deps({
-      prepareVercelTrustedSourceAccess: vi.fn(async () => {
-        calls.push("prepare");
-        return { kind: "approved" as const, grant };
-      }),
-      linkProject: vi.fn(async () => {
-        calls.push("link");
-        return true;
-      }),
-      applyVercelTrustedSourceAccess: vi.fn(async () => {
-        calls.push("apply");
-        return {
-          kind: "updated" as const,
-          targetProjectId: "prj_target",
-          targetProjectName: "inbound",
-        };
-      }),
-      runVercelEnvPull: vi.fn(async () => {
-        calls.push("pull");
-        return true;
-      }),
-    });
+  it("records a completed login when the next decision is cancelled", async () => {
+    const harness = createHarness({ login: { kind: "logged-in" }, projectAction: "cancel" });
 
-    await expect(
-      runRemoteAuthFlow({
-        workspaceRoot: WORKSPACE_ROOT,
-        serverUrl: SERVER_URL,
-        configureTrustedSources: true,
-        prompter,
-        deps: flowDeps,
-      }),
-    ).resolves.toMatchObject({ kind: "credential", token: "fresh-token" });
-
-    expect(calls).toEqual(["prepare", "link", "apply", "pull"]);
-    expect(flowDeps.prepareVercelTrustedSourceAccess).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sourceProject: { projectId: "prj_remote", scope: "team_acme" },
-      }),
-    );
-  });
-
-  it("steps back from the project picker to the team picker when the user presses Esc", async () => {
-    // Esc on the project picker surfaces as StepBackError; selectProject should
-    // re-ask the team picker rather than abort the whole flow.
-    const { prompter } = createFakePrompter({ single: () => "continue" });
-    let projectAttempts = 0;
-    const flowDeps = deps({
-      detectProjectIdentity: vi.fn(async () => undefined),
-      pickProject: vi.fn(async () => {
-        projectAttempts += 1;
-        if (projectAttempts === 1) throw new StepBackError();
-        return { exists: true, project: "remote-agent" };
-      }),
-    });
-
-    await expect(
-      runRemoteAuthFlow({
-        workspaceRoot: WORKSPACE_ROOT,
-        serverUrl: SERVER_URL,
-        prompter,
-        deps: flowDeps,
-      }),
-    ).resolves.toMatchObject({ kind: "credential", token: "fresh-token" });
-
-    expect(flowDeps.pickTeam).toHaveBeenCalledTimes(2);
-    expect(flowDeps.pickProject).toHaveBeenCalledTimes(2);
-  });
-
-  it("preserves cancellation when a pre-apply project lookup is aborted", async () => {
-    const abort = new AbortController();
-    const { prompter } = createFakePrompter({ single: () => "change" });
-    const flowDeps = deps({
-      pickTeam: vi.fn(async () => {
-        abort.abort();
-        throw new Error("Vercel project lookup was aborted.");
-      }),
-    });
-
-    await expect(
-      runRemoteAuthFlow({
-        workspaceRoot: WORKSPACE_ROOT,
-        serverUrl: SERVER_URL,
-        prompter,
-        signal: abort.signal,
-        deps: flowDeps,
-      }),
-    ).resolves.toEqual({ kind: "cancelled", completedMutations: [] });
-    expect(flowDeps.linkProject).not.toHaveBeenCalled();
-    expect(flowDeps.runVercelEnvPull).not.toHaveBeenCalled();
-  });
-
-  it("cancels the flow when Esc backs out of the first (team) picker", async () => {
-    const { prompter } = createFakePrompter({ single: () => "continue" });
-    const flowDeps = deps({
-      detectProjectIdentity: vi.fn(async () => undefined),
-      pickTeam: vi.fn(async () => {
-        throw new StepBackError();
-      }),
-    });
-
-    await expect(
-      runRemoteAuthFlow({
-        workspaceRoot: WORKSPACE_ROOT,
-        serverUrl: SERVER_URL,
-        prompter,
-        deps: flowDeps,
-      }),
-    ).resolves.toEqual({ kind: "cancelled", completedMutations: [] });
-    expect(flowDeps.pickProject).not.toHaveBeenCalled();
-  });
-
-  it("names the selected project and explains an initial link with a normal hint", async () => {
-    const blueServerUrl = `\x1b[34m${SERVER_URL}\x1b[39m`;
-    const blue = vi.spyOn(pc, "blue").mockImplementation((value) => `\x1b[34m${value}\x1b[39m`);
-    let confirmationMessage: string | undefined;
-    let confirmationNotices: unknown;
-    let linkAction: unknown;
-    const { prompter } = createFakePrompter({
-      single: (options) => {
-        confirmationMessage = options.message;
-        confirmationNotices = options.notices;
-        linkAction = options.options.find((option) => option.value === "continue");
-        return "continue";
-      },
-    });
-    const flowDeps = deps({ detectProjectIdentity: vi.fn(async () => undefined) });
-
-    await expect(
-      runRemoteAuthFlow({
-        workspaceRoot: WORKSPACE_ROOT,
-        serverUrl: SERVER_URL,
-        prompter,
-        deps: flowDeps,
-      }),
-    ).resolves.toMatchObject({ kind: "credential", token: "fresh-token" });
-
-    expect(confirmationMessage).toBe("This directory is not currently linked.");
-    expect(confirmationNotices).toBeUndefined();
-    expect(linkAction).toEqual({
-      value: "continue",
-      label: `Link to project '${pc.bold("remote-agent")}'`,
-      hint: "Links this directory and pulls an OIDC token for remote authentication.",
-    });
-    expect(blue).toHaveBeenCalledWith(SERVER_URL);
-    expect(flowDeps.pickTeam).toHaveBeenCalledWith(prompter, WORKSPACE_ROOT, undefined, {
-      message: `Which team does ${blueServerUrl} belong to?`,
-      promptWhenSingle: true,
-      signal: undefined,
-    });
-    expect(flowDeps.pickProject).toHaveBeenCalledWith(prompter, WORKSPACE_ROOT, "acme", {
-      allowCreateWhenEmpty: false,
-      message: `Which project is ${blueServerUrl} part of?`,
-      signal: undefined,
-    });
-  });
-
-  it("does not inspect or change Trusted Sources for a non-Vercel challenge", async () => {
-    const { prompter } = createFakePrompter({ single: () => "current" });
-    const flowDeps = deps();
-
-    await expect(
-      runRemoteAuthFlow({
-        workspaceRoot: WORKSPACE_ROOT,
-        serverUrl: SERVER_URL,
-        prompter,
-        deps: flowDeps,
-      }),
-    ).resolves.toMatchObject({ kind: "credential", token: "fresh-token" });
-
-    expect(flowDeps.prepareVercelTrustedSourceAccess).not.toHaveBeenCalled();
-  });
-
-  it("runs Vercel login inline when the CLI account is logged out", async () => {
-    const runLoginFlow = vi.fn<RemoteAuthFlowDeps["runLoginFlow"]>(async () => ({
-      kind: "logged-in",
-    }));
-    const { prompter } = createFakePrompter({ single: () => "current" });
-
-    await runRemoteAuthFlow({
-      workspaceRoot: WORKSPACE_ROOT,
-      serverUrl: SERVER_URL,
-      prompter,
-      deps: deps({ runLoginFlow }),
-    });
-
-    expect(runLoginFlow).toHaveBeenCalledWith({
-      appRoot: WORKSPACE_ROOT,
-      prompter,
-      signal: undefined,
-    });
-  });
-
-  it("reports a completed login when a later decision is cancelled", async () => {
-    const { prompter } = createFakePrompter({ single: () => "cancel" });
-
-    await expect(
-      runRemoteAuthFlow({
-        workspaceRoot: WORKSPACE_ROOT,
-        serverUrl: SERVER_URL,
-        prompter,
-        deps: deps({
-          runLoginFlow: vi.fn<RemoteAuthFlowDeps["runLoginFlow"]>(async () => ({
-            kind: "logged-in",
-          })),
-        }),
-      }),
-    ).resolves.toEqual({
+    await expect(harness.run()).resolves.toEqual({
       kind: "cancelled",
       completedMutations: [{ kind: "vercel-login" }],
     });
   });
 
-  it("reports a completed login when project resolution later fails", async () => {
-    const { prompter } = createFakePrompter({ single: () => "change" });
-
-    await expect(
-      runRemoteAuthFlow({
-        workspaceRoot: WORKSPACE_ROOT,
-        serverUrl: SERVER_URL,
-        prompter,
-        deps: deps({
-          runLoginFlow: vi.fn<RemoteAuthFlowDeps["runLoginFlow"]>(async () => ({
-            kind: "logged-in",
-          })),
-          resolveProjectByNameOrId: vi.fn(async () => null),
-        }),
-      }),
-    ).resolves.toMatchObject({
-      kind: "failed",
-      completedMutations: [{ kind: "vercel-login" }],
-    });
-  });
-
-  it("does not pull credentials when the user cancels", async () => {
-    const { prompter } = createFakePrompter({ single: () => "cancel" });
-    const flowDeps = deps();
-
-    await expect(
-      runRemoteAuthFlow({
-        workspaceRoot: WORKSPACE_ROOT,
-        serverUrl: SERVER_URL,
+  it.each([
+    { name: "project choice", options: { projectAction: "cancel" } },
+    {
+      name: "Trusted Sources consent",
+      options: {
         configureTrustedSources: true,
-        prompter,
-        deps: flowDeps,
-      }),
-    ).resolves.toEqual({ kind: "cancelled", completedMutations: [] });
-    expect(flowDeps.runVercelEnvPull).not.toHaveBeenCalled();
-  });
-
-  it("keeps missing CLI, env-pull failure, and missing OIDC token distinct", async () => {
-    const { prompter } = createFakePrompter({ single: () => "current" });
-
-    await expect(
-      runRemoteAuthFlow({
-        workspaceRoot: WORKSPACE_ROOT,
-        serverUrl: SERVER_URL,
-        configureTrustedSources: true,
-        prompter,
-        deps: deps({
-          runLoginFlow: vi.fn<RemoteAuthFlowDeps["runLoginFlow"]>(async () => ({
-            kind: "cli-missing",
-          })),
-        }),
-      }),
-    ).resolves.toMatchObject({
-      kind: "failed",
-      failure: { cause: "cli-missing" },
-    });
-
-    await expect(
-      runRemoteAuthFlow({
-        workspaceRoot: WORKSPACE_ROOT,
-        serverUrl: SERVER_URL,
-        prompter,
-        deps: deps({ runVercelEnvPull: vi.fn(async () => false) }),
-      }),
-    ).resolves.toMatchObject({
-      kind: "failed",
-      failure: { cause: "env-pull-failed" },
-    });
-
-    await expect(
-      runRemoteAuthFlow({
-        workspaceRoot: WORKSPACE_ROOT,
-        serverUrl: SERVER_URL,
-        prompter,
-        deps: deps({ readPulledOidcToken: vi.fn(async () => undefined) }),
-      }),
-    ).resolves.toMatchObject({
-      kind: "failed",
-      failure: { cause: "oidc-token-missing" },
-    });
-  });
-
-  it("reports mutations that completed before a later failure", async () => {
-    const { prompter } = createFakePrompter({
-      single: (options) => {
-        if (options.message === `Authenticate ${HOST}`) return "change";
-        return "continue";
+        preparation: { kind: "cancelled" },
       },
+    },
+    { name: "first team picker", options: { identity: "none", teamBack: true } },
+  ] satisfies readonly { name: string; options: HarnessOptions }[])(
+    "cancels at $name before changing project state",
+    async ({ options }) => {
+      const harness = createHarness(options);
+
+      await expect(harness.run()).resolves.toEqual({ kind: "cancelled", completedMutations: [] });
+      expect(harness.operations).not.toContain("link");
+      expect(harness.operations).not.toContain("apply-ts");
+      expect(harness.operations).not.toContain("pull");
+    },
+  );
+
+  it.each([
+    {
+      name: "Vercel CLI",
+      options: { login: { kind: "cli-missing" } },
+      cause: "cli-missing",
+    },
+    {
+      name: "deployment",
+      options: { deployment: { kind: "not-found" } },
+      cause: "deployment-unverified",
+    },
+    {
+      name: "selected project",
+      options: { projectAction: "change", selectedProject: null },
+      cause: "project-link-failed",
+    },
+    {
+      name: "project link",
+      options: { projectAction: "change", linkError: new Error("link rejected") },
+      cause: "project-link-failed",
+    },
+    { name: "environment pull", options: { envPull: false }, cause: "env-pull-failed" },
+    {
+      name: "OIDC token",
+      options: { token: { kind: "missing" } },
+      cause: "oidc-token-missing",
+    },
+    {
+      name: "Trusted Sources",
+      options: {
+        configureTrustedSources: true,
+        preparation: { kind: "failed", message: "Vercel rejected the policy update." },
+      },
+      cause: "trusted-sources-update-failed",
+    },
+    {
+      name: "Trusted Sources apply",
+      options: {
+        configureTrustedSources: true,
+        preparation: { kind: "approved", grant: TRUSTED_SOURCE_GRANT },
+        application: { kind: "failed", message: "Vercel rejected the policy update." },
+      },
+      cause: "trusted-sources-update-failed",
+    },
+  ] satisfies readonly { name: string; options: HarnessOptions; cause: string }[])(
+    "keeps the $name failure distinct",
+    async ({ options, cause }) => {
+      const harness = createHarness(options);
+
+      await expect(harness.run()).resolves.toMatchObject({ kind: "failed", failure: { cause } });
+      if (cause === "deployment-unverified") {
+        expect(harness.operations).not.toContain("link");
+        expect(harness.operations).not.toContain("pull");
+      }
+    },
+  );
+
+  it("cancels an abort that arrives before the first mutation", async () => {
+    const abort = new AbortController();
+    const harness = createHarness();
+    vi.mocked(harness.deps.resolveVercelDeployment).mockImplementationOnce(async () => {
+      abort.abort();
+      return { kind: "resolved", target: VERIFIED_TARGET };
     });
 
-    await expect(
-      runRemoteAuthFlow({
-        workspaceRoot: WORKSPACE_ROOT,
-        serverUrl: SERVER_URL,
-        prompter,
-        deps: deps({ runVercelEnvPull: vi.fn(async () => false) }),
-      }),
-    ).resolves.toMatchObject({
+    await expect(harness.run(abort.signal)).resolves.toEqual({
+      kind: "cancelled",
+      completedMutations: [],
+    });
+    expect(harness.operations).not.toContain("pull");
+  });
+
+  it("reports a linked project when env pull fails afterward", async () => {
+    const harness = createHarness({ projectAction: "change", envPull: false });
+
+    await expect(harness.run()).resolves.toMatchObject({
       kind: "failed",
       failure: { cause: "env-pull-failed" },
       completedMutations: [{ kind: "project-linked", project: "remote-agent", team: "acme" }],
     });
   });
 
-  it("cancels or fails when the required Trusted Sources update does not complete", async () => {
-    const { prompter } = createFakePrompter({ single: () => "current" });
+  it("skips Trusted Sources for an Eve-only challenge and returns a live token resolver", async () => {
+    const harness = createHarness();
 
-    await expect(
-      runRemoteAuthFlow({
-        workspaceRoot: WORKSPACE_ROOT,
-        serverUrl: SERVER_URL,
-        configureTrustedSources: true,
-        prompter,
-        deps: deps({
-          prepareVercelTrustedSourceAccess: vi.fn<
-            RemoteAuthFlowDeps["prepareVercelTrustedSourceAccess"]
-          >(async () => ({ kind: "cancelled" })),
-        }),
-      }),
-    ).resolves.toEqual({ kind: "cancelled", completedMutations: [] });
+    const result = await harness.run();
+    expect(result).toMatchObject({ kind: "prepared" });
+    expect(harness.deps.prepareVercelTrustedSourceAccess).not.toHaveBeenCalled();
+    expect(harness.deps.applyVercelTrustedSourceAccess).not.toHaveBeenCalled();
+    if (result.kind !== "prepared") throw new Error("Expected a prepared result");
 
-    await expect(
-      runRemoteAuthFlow({
-        workspaceRoot: WORKSPACE_ROOT,
-        serverUrl: SERVER_URL,
-        configureTrustedSources: true,
-        prompter,
-        deps: deps({
-          prepareVercelTrustedSourceAccess: vi.fn<
-            RemoteAuthFlowDeps["prepareVercelTrustedSourceAccess"]
-          >(async () => ({
-            kind: "failed",
-            message: "Vercel rejected the policy update.",
-          })),
-        }),
-      }),
-    ).resolves.toEqual({
-      kind: "failed",
-      failure: {
-        cause: "trusted-sources-update-failed",
-        message: "Vercel rejected the policy update.",
-      },
-      completedMutations: [],
-    });
+    harness.setToken("rotated-token");
+    await expect(result.resolveToken()).resolves.toBe("rotated-token");
+    expect(harness.deps.readPulledOidcToken).toHaveBeenCalledTimes(2);
   });
 });

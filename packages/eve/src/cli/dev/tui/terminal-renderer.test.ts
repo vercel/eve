@@ -2114,8 +2114,8 @@ describe("TerminalRenderer status line", () => {
     renderer.renderNotice("anchor");
     renderer.setRemoteConnectionStatus({
       target: {
+        kind: "remote",
         serverUrl: "https://vpoke.playground-vercel.tools",
-        host: "vpoke.playground-vercel.tools",
         workspaceRoot: "/tmp/weather-agent",
       },
       connection: {

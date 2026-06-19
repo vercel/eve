@@ -5,7 +5,11 @@ import { parseEnv } from "node:util";
 import pc from "picocolors";
 
 import { createPromptCommandOutput } from "#setup/cli/index.js";
-import { detectProjectIdentity, type ProjectIdentity } from "#setup/project-resolution.js";
+import {
+  detectProjectIdentity,
+  readProjectLink,
+  type ProjectIdentity,
+} from "#setup/project-resolution.js";
 import { runVercelEnvPull } from "#setup/run-vercel-link.js";
 import {
   resolveVercelDeployment,
@@ -20,11 +24,12 @@ import {
 } from "#setup/vercel-trusted-sources.js";
 import { StepBackError, WizardCancelledError } from "#setup/step.js";
 import {
-  linkProject,
+  linkResolvedVercelProject,
   pickProject,
   pickTeam,
   resolveProjectByNameOrId,
   type PickTeamOptions,
+  type VercelProjectReference,
 } from "#setup/vercel-project.js";
 import { toErrorMessage } from "#shared/errors.js";
 
@@ -64,11 +69,11 @@ export type RemoteAuthCompletedMutation =
     }
   | { readonly kind: "environment-pulled"; readonly path: ".env.local" };
 
-export type RemoteAuthFlowResult =
+export type RemoteAuthPreparation =
   | {
-      readonly kind: "credential";
+      readonly kind: "prepared";
       readonly target: VerifiedVercelTarget;
-      readonly token: string;
+      readonly resolveToken: () => Promise<string>;
       readonly completedMutations: readonly RemoteAuthCompletedMutation[];
     }
   | {
@@ -84,10 +89,11 @@ export type RemoteAuthFlowResult =
 export interface RemoteAuthFlowDeps {
   readonly runLoginFlow: typeof runLoginFlow;
   readonly detectProjectIdentity: typeof detectProjectIdentity;
+  readonly readProjectLink: typeof readProjectLink;
   readonly pickTeam: typeof pickTeam;
   readonly pickProject: typeof pickProject;
   readonly resolveProjectByNameOrId: typeof resolveProjectByNameOrId;
-  readonly linkProject: typeof linkProject;
+  readonly linkResolvedVercelProject: typeof linkResolvedVercelProject;
   readonly resolveVercelDeployment: typeof resolveVercelDeployment;
   readonly runVercelEnvPull: typeof runVercelEnvPull;
   readonly readPulledOidcToken: (workspaceRoot: string) => Promise<string | undefined>;
@@ -98,10 +104,11 @@ export interface RemoteAuthFlowDeps {
 const defaultDeps: RemoteAuthFlowDeps = {
   runLoginFlow,
   detectProjectIdentity,
+  readProjectLink,
   pickTeam,
   pickProject,
   resolveProjectByNameOrId,
-  linkProject,
+  linkResolvedVercelProject,
   resolveVercelDeployment,
   runVercelEnvPull,
   readPulledOidcToken,
@@ -142,7 +149,7 @@ function failed(
   cause: RemoteAuthFlowFailureCause,
   message: string,
   completedMutations: readonly RemoteAuthCompletedMutation[] = [],
-): Extract<RemoteAuthFlowResult, { kind: "failed" }> {
+): Extract<RemoteAuthPreparation, { kind: "failed" }> {
   return {
     kind: "failed",
     failure: {
@@ -155,11 +162,11 @@ function failed(
 
 function cancelled(
   completedMutations: readonly RemoteAuthCompletedMutation[] = [],
-): Extract<RemoteAuthFlowResult, { kind: "cancelled" }> {
+): Extract<RemoteAuthPreparation, { kind: "cancelled" }> {
   return { kind: "cancelled", completedMutations: [...completedMutations] };
 }
 
-function loginFailure(result: LoginFlowResult): RemoteAuthFlowResult | undefined {
+function loginFailure(result: LoginFlowResult): RemoteAuthPreparation | undefined {
   switch (result.kind) {
     case "already":
     case "logged-in":
@@ -304,7 +311,8 @@ export async function readPulledOidcToken(workspaceRoot: string): Promise<string
 
 /**
  * Authenticates a remote through a new or existing Vercel project. Updates
- * Trusted Sources when needed, refreshes `.env.local`, and returns the token.
+ * Trusted Sources when needed, refreshes `.env.local`, and prepares a live
+ * token resolver for the verified target.
  */
 export async function runRemoteAuthFlow(input: {
   readonly workspaceRoot: string;
@@ -313,7 +321,7 @@ export async function runRemoteAuthFlow(input: {
   readonly prompter: Prompter;
   readonly signal?: AbortSignal;
   readonly deps?: Partial<RemoteAuthFlowDeps>;
-}): Promise<RemoteAuthFlowResult> {
+}): Promise<RemoteAuthPreparation> {
   const { workspaceRoot, serverUrl, prompter, signal } = input;
   const host = new URL(serverUrl).host;
   const deps: RemoteAuthFlowDeps = { ...defaultDeps, ...input.deps };
@@ -340,7 +348,12 @@ export async function runRemoteAuthFlow(input: {
       shouldLink = action === "change";
     }
 
-    let projectToLink: ResolvedVercelProjectSpec | undefined;
+    let projectToLink:
+      | {
+          readonly spec: ResolvedVercelProjectSpec;
+          readonly project: VercelProjectReference;
+        }
+      | undefined;
     let sourceProject: VercelTrustedSourceProject | undefined;
     if (shouldLink) {
       try {
@@ -361,7 +374,7 @@ export async function runRemoteAuthFlow(input: {
         if (!(await confirmProjectChange(prompter, identity, project))) {
           return cancelled(completedMutations);
         }
-        projectToLink = project;
+        projectToLink = { spec: project, project: resolved };
         sourceProject = { projectId: resolved.id, scope: resolved.accountId };
       } catch (error) {
         if (error instanceof WizardCancelledError) return cancelled(completedMutations);
@@ -373,7 +386,12 @@ export async function runRemoteAuthFlow(input: {
         );
       }
     }
-
+    if (!shouldLink) {
+      const link = await deps.readProjectLink(workspaceRoot);
+      if (link !== undefined) {
+        sourceProject = { projectId: link.projectId, scope: link.orgId };
+      }
+    }
     const deploymentInput: Parameters<RemoteAuthFlowDeps["resolveVercelDeployment"]>[0] =
       sourceProject === undefined
         ? { workspaceRoot, host, signal }
@@ -408,22 +426,20 @@ export async function runRemoteAuthFlow(input: {
 
     let trustedSourcesGrant: VercelTrustedSourceGrant | undefined;
     if (input.configureTrustedSources === true) {
-      const trustedSourcesInput: {
-        workspaceRoot: string;
-        host: string;
-        sourceProject?: VercelTrustedSourceProject;
-        target: VerifiedVercelTarget;
-        prompter: Prompter;
-        signal?: AbortSignal;
-      } = {
+      if (sourceProject === undefined) {
+        return failed(
+          "trusted-sources-update-failed",
+          "The directory is not linked to a valid Vercel project.",
+          completedMutations,
+        );
+      }
+      const trustedSources = await deps.prepareVercelTrustedSourceAccess({
         workspaceRoot,
-        host,
+        sourceProject,
         target,
         prompter,
         signal,
-      };
-      if (sourceProject !== undefined) trustedSourcesInput.sourceProject = sourceProject;
-      const trustedSources = await deps.prepareVercelTrustedSourceAccess(trustedSourcesInput);
+      });
       signal?.throwIfAborted();
       if (trustedSources.kind === "cancelled") return cancelled(completedMutations);
       if (trustedSources.kind === "failed") {
@@ -432,17 +448,16 @@ export async function runRemoteAuthFlow(input: {
       if (trustedSources.kind === "approved") trustedSourcesGrant = trustedSources.grant;
     }
 
+    signal?.throwIfAborted();
     applying = true;
     if (projectToLink !== undefined) {
-      let linked: boolean;
       try {
-        linked = await deps.linkProject(
+        await deps.linkResolvedVercelProject({
           prompter,
-          workspaceRoot,
-          projectToLink,
-          createPromptCommandOutput(prompter.log),
-          { signal },
-        );
+          projectRoot: workspaceRoot,
+          project: projectToLink.project,
+          signal,
+        });
       } catch (error) {
         return failed(
           "project-link-failed",
@@ -450,17 +465,10 @@ export async function runRemoteAuthFlow(input: {
           completedMutations,
         );
       }
-      if (!linked) {
-        return failed(
-          "project-link-failed",
-          `Vercel did not link ${projectToLink.project} in ${projectToLink.team}. Retry /vc:auth.`,
-          completedMutations,
-        );
-      }
       completedMutations.push({
         kind: "project-linked",
-        project: projectToLink.project,
-        team: projectToLink.team,
+        project: projectToLink.spec.project,
+        team: projectToLink.spec.team,
       });
     }
 
@@ -481,7 +489,6 @@ export async function runRemoteAuthFlow(input: {
         });
       }
     }
-
     let pulled: boolean;
     try {
       pulled = await deps.runVercelEnvPull(
@@ -505,16 +512,18 @@ export async function runRemoteAuthFlow(input: {
     }
     completedMutations.push({ kind: "environment-pulled", path: ".env.local" });
 
-    const token = await deps.readPulledOidcToken(workspaceRoot);
+    const resolveToken = async (): Promise<string> =>
+      (await deps.readPulledOidcToken(workspaceRoot)) ?? "";
+    const token = await resolveToken();
     signal?.throwIfAborted();
-    if (token === undefined) {
+    if (token.length === 0) {
       return failed(
         "oidc-token-missing",
         "The selected project did not provide VERCEL_OIDC_TOKEN in .env.local.",
         completedMutations,
       );
     }
-    return { kind: "credential", target, token, completedMutations: [...completedMutations] };
+    return { kind: "prepared", target, resolveToken, completedMutations: [...completedMutations] };
   } catch (error) {
     if (!applying && (error instanceof WizardCancelledError || signal?.aborted === true)) {
       return cancelled(completedMutations);

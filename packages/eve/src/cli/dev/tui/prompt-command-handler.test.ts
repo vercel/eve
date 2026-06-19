@@ -7,6 +7,16 @@ import type { AgentTUIRenderer, PromptCommandHandlerContext } from "./runner.js"
 import type { SetupFlowRenderer } from "./setup-flow.js";
 
 const APP_ROOT = "/tmp/weather-agent";
+const LOCAL_TARGET = {
+  kind: "local",
+  serverUrl: "http://localhost:3000",
+  appRoot: APP_ROOT,
+} as const;
+const REMOTE_TARGET = {
+  kind: "remote",
+  serverUrl: "https://example.com/",
+  workspaceRoot: APP_ROOT,
+} as const;
 
 function context(renderer: Partial<AgentTUIRenderer> = {}): PromptCommandHandlerContext {
   return {
@@ -46,7 +56,7 @@ describe("createPromptCommandHandler", () => {
         ({ kind: "changed", to: slug }) as const,
     );
     const handler = createPromptCommandHandler({
-      target: { kind: "local", appRoot: APP_ROOT },
+      target: LOCAL_TARGET,
       applyModel,
       modelChangeRefusal: async () => null,
     });
@@ -71,7 +81,7 @@ describe("createPromptCommandHandler", () => {
         ({ kind: "changed", to: slug }) as const,
     );
     const handler = createPromptCommandHandler({
-      target: { kind: "local", appRoot: APP_ROOT },
+      target: LOCAL_TARGET,
       applyModel,
       modelChangeRefusal: async () => "Model is pinned to the external provider `anthropic`.",
     });
@@ -88,7 +98,7 @@ describe("createPromptCommandHandler", () => {
     const applyModel = vi.fn(async () => ({ kind: "rejected", message: "unused" }) as const);
     const readInputQuestion = vi.fn(async () => ({ optionId: "openai/gpt-5" }));
     const handler = createPromptCommandHandler({
-      target: { kind: "local", appRoot: APP_ROOT },
+      target: LOCAL_TARGET,
       applyModel,
     });
 
@@ -106,12 +116,7 @@ describe("createPromptCommandHandler", () => {
 
   it("reports that model changes need the local dev server", async () => {
     const handler = createPromptCommandHandler({
-      target: {
-        kind: "remote",
-        workspaceRoot: APP_ROOT,
-        host: "example.com",
-        serverUrl: "https://example.com/",
-      },
+      target: REMOTE_TARGET,
     });
 
     await expect(
@@ -125,11 +130,7 @@ describe("createPromptCommandHandler", () => {
     const setupFlow = setupFlowRenderer();
     const remoteConnection: RemoteConnectionController = {
       current: () => ({
-        target: {
-          serverUrl: "https://example.com",
-          host: "example.com",
-          workspaceRoot: APP_ROOT,
-        },
+        target: REMOTE_TARGET,
         connection: {
           state: "auth-required",
           challenge: { kind: "eve-oidc" },
@@ -147,12 +148,7 @@ describe("createPromptCommandHandler", () => {
       dispose() {},
     };
     const handler = createPromptCommandHandler({
-      target: {
-        kind: "remote",
-        workspaceRoot: APP_ROOT,
-        host: "example.com",
-        serverUrl: "https://example.com/",
-      },
+      target: REMOTE_TARGET,
     });
 
     await expect(
@@ -167,6 +163,10 @@ describe("createPromptCommandHandler", () => {
       message:
         "/vc:auth cancelled after logging in to Vercel. No project, Trusted Sources, or environment changes were made.",
     });
+    expect(setupFlow.begin).toHaveBeenCalledWith("Authenticate via Vercel OIDC", [
+      "Connecting to this remote agent requires a Vercel OIDC token from a linked project.",
+    ]);
+    expect(setupFlow.end).toHaveBeenCalledWith({ preserveDiagnostics: true });
   });
 
   it("reports mutations that completed before /vc:auth was interrupted", async () => {
@@ -176,31 +176,30 @@ describe("createPromptCommandHandler", () => {
     } satisfies SetupFlowRenderer;
     const remoteConnection: RemoteConnectionController = {
       current: () => ({
-        target: {
-          serverUrl: "https://example.com",
-          host: "example.com",
-          workspaceRoot: APP_ROOT,
-        },
+        target: REMOTE_TARGET,
         connection: { state: "auth-required", challenge: { kind: "eve-oidc" } },
       }),
       check: async () => ({
         state: "auth-required",
         challenge: { kind: "eve-oidc" },
       }),
-      authenticate: async () => ({
-        kind: "cancelled",
-        completedMutations: [{ kind: "environment-pulled", path: ".env.local" }],
-      }),
+      authenticate: async (_trigger, _attempt, signal) =>
+        await new Promise((resolve) => {
+          signal?.addEventListener(
+            "abort",
+            () =>
+              resolve({
+                kind: "cancelled" as const,
+                completedMutations: [{ kind: "environment-pulled", path: ".env.local" }],
+              }),
+            { once: true },
+          );
+        }),
       reportFailure: () => ({ state: "checking" }),
       dispose() {},
     };
     const handler = createPromptCommandHandler({
-      target: {
-        kind: "remote",
-        workspaceRoot: APP_ROOT,
-        host: "example.com",
-        serverUrl: "https://example.com/",
-      },
+      target: REMOTE_TARGET,
     });
 
     await expect(
@@ -221,7 +220,7 @@ describe("createPromptCommandHandler", () => {
     try {
       const setupFlow = setupFlowRenderer();
       const handler = createPromptCommandHandler({
-        target: { kind: "local", appRoot: APP_ROOT },
+        target: LOCAL_TARGET,
       });
 
       await expect(

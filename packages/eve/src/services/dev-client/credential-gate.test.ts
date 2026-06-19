@@ -42,7 +42,7 @@ describe("createDevelopmentCredentialGate", () => {
     await expect(gate.resolveHeaders()).resolves.toEqual({});
 
     const target = await verifiedTarget("verified.example.com");
-    gate.authorize({ target, token: " oidc-token " });
+    gate.authorize({ target, resolveToken: async () => " oidc-token " });
 
     expect(gate.current()).toEqual({ kind: "vercel", target });
     await expect(gate.resolveHeaders()).resolves.toEqual({
@@ -56,11 +56,11 @@ describe("createDevelopmentCredentialGate", () => {
     const gate = createDevelopmentCredentialGate("https://verified.example.com");
     const target = await verifiedTarget("verified.example.com");
     const otherTarget = await verifiedTarget("other.example.com");
-    gate.authorize({ target, token: "first-token" });
+    gate.authorize({ target, resolveToken: async () => "first-token" });
 
-    expect(() => gate.authorize({ target: otherTarget, token: "other-token" })).toThrow(
-      "does not match",
-    );
+    expect(() =>
+      gate.authorize({ target: otherTarget, resolveToken: async () => "other-token" }),
+    ).toThrow("does not match");
     await expect(gate.resolveHeaders()).resolves.toMatchObject({
       authorization: "Bearer first-token",
     });
@@ -73,11 +73,31 @@ describe("createDevelopmentCredentialGate", () => {
 
     gate.authorize({
       target: await verifiedTarget("verified.example.com"),
-      token: "",
+      resolveToken: async () => "",
     });
 
     await expect(gate.resolveHeaders()).resolves.toEqual({
       "x-vercel-protection-bypass": "verified-bypass",
     });
+  });
+
+  it("resolves the current token for every request", async () => {
+    const gate = createDevelopmentCredentialGate("https://verified.example.com");
+    const resolveToken = vi
+      .fn<() => Promise<string>>()
+      .mockResolvedValueOnce(" first-token ")
+      .mockResolvedValueOnce("second-token");
+    gate.authorize({
+      target: await verifiedTarget("verified.example.com"),
+      resolveToken,
+    });
+
+    await expect(gate.resolveHeaders()).resolves.toMatchObject({
+      authorization: "Bearer first-token",
+    });
+    await expect(gate.resolveHeaders()).resolves.toMatchObject({
+      authorization: "Bearer second-token",
+    });
+    expect(resolveToken).toHaveBeenCalledTimes(2);
   });
 });

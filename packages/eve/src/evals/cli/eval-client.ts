@@ -67,9 +67,8 @@ export async function createEvalClient(
   if (resolution.kind !== "resolved") return new Client(base);
 
   const resolveToken = options.deps?.resolveDevelopmentOidcToken ?? resolveDevelopmentOidcToken;
-  const token = (await resolveToken()).trim();
   const credentials = createDevelopmentCredentialGate(target.url);
-  credentials.authorize({ target: resolution.target, token });
+  credentials.authorize({ target: resolution.target, resolveToken });
   return new Client(
     resolveRemoteDevelopmentClientOptions({
       serverUrl: target.url,

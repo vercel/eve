@@ -9,18 +9,14 @@ import {
   appendRemoteAuthMutationSummary,
   type RemoteAuthCompletedMutation,
   type RemoteAuthFlowFailure,
-  type RemoteAuthFlowResult,
+  type RemoteAuthPreparation,
 } from "#setup/flows/remote-auth.js";
 import type { VercelDeploymentResolution, VerifiedVercelTarget } from "#setup/vercel-deployment.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { DeploymentIdentity } from "#shared/deployment-identity.js";
 import { isObject } from "#shared/guards.js";
 
-export interface RemoteTarget {
-  readonly serverUrl: string;
-  readonly host: string;
-  readonly workspaceRoot: string;
-}
+import { remoteHost, type RemoteDevelopmentTarget } from "./target.js";
 
 export type RemoteAuthChallenge =
   | { readonly kind: "eve-oidc" }
@@ -65,15 +61,13 @@ export type RemoteConnectionState =
     };
 
 export interface RemoteConnectionSnapshot {
-  readonly target: RemoteTarget;
+  readonly target: RemoteDevelopmentTarget;
   readonly connection: RemoteConnectionState;
   /** Last deployment identity resolved from Vercel for this target. */
   readonly deployment?: DeploymentIdentity;
 }
 
-export type RemoteAuthAttempt = RemoteAuthFlowResult;
-
-export type RemoteAuthenticationOutcome =
+export type RemoteAuthCompletion =
   | { readonly kind: "authenticated"; readonly info: AgentInfoResult }
   | {
       readonly kind: "cancelled";
@@ -95,9 +89,9 @@ export interface RemoteConnectionController {
   check(): Promise<RemoteConnectionState>;
   authenticate(
     trigger: "startup" | "command",
-    attempt: (signal: AbortSignal) => Promise<RemoteAuthAttempt>,
+    prepare: (signal: AbortSignal) => Promise<RemoteAuthPreparation>,
     signal?: AbortSignal,
-  ): Promise<RemoteAuthenticationOutcome>;
+  ): Promise<RemoteAuthCompletion>;
   reportFailure(error: unknown): RemoteConnectionState;
   dispose(): void;
 }
@@ -105,7 +99,7 @@ export interface RemoteConnectionController {
 export interface RemoteConnectionControllerOptions {
   readonly client: Client;
   readonly credentials: DevelopmentCredentialGate;
-  readonly target: RemoteTarget;
+  readonly target: RemoteDevelopmentTarget;
   /** Resolves an ambient token only after Vercel proves the exact target origin. */
   readonly resolveOidcToken?: () => Promise<string>;
   readonly resolveDeployment?: (signal: AbortSignal) => Promise<VercelDeploymentResolution>;
@@ -293,9 +287,10 @@ export function createRemoteConnectionController(
       const resolved = await resolveDeployment(signal);
       if (!isCurrent(generation) || signal.aborted || resolved.kind !== "resolved") return;
       publishTarget(resolved.target);
-      const token = (await options.resolveOidcToken?.())?.trim() ?? "";
-      if (!isCurrent(generation) || signal.aborted) return;
-      options.credentials.authorize({ target: resolved.target, token });
+      options.credentials.authorize({
+        target: resolved.target,
+        resolveToken: options.resolveOidcToken ?? (async () => ""),
+      });
     } catch {
       // Deployment metadata and ambient credentials are optional. The anonymous
       // probe below remains the authoritative connection result.
@@ -330,19 +325,19 @@ export function createRemoteConnectionController(
 
     async authenticate(
       trigger: "startup" | "command",
-      runAttempt: (signal: AbortSignal) => Promise<RemoteAuthAttempt>,
+      prepare: (signal: AbortSignal) => Promise<RemoteAuthPreparation>,
       signal?: AbortSignal,
-    ): Promise<RemoteAuthenticationOutcome> {
+    ): Promise<RemoteAuthCompletion> {
       const operation = beginOperation(signal);
       const previous = connection;
       const challenge = challengeFor(connection);
       update({ state: "authenticating", challenge, trigger });
 
-      let attempt: RemoteAuthAttempt;
+      let preparation: RemoteAuthPreparation;
       try {
-        attempt = await runAttempt(operation.signal);
+        preparation = await prepare(operation.signal);
       } catch (error) {
-        attempt = {
+        preparation = {
           kind: "failed",
           failure: {
             cause: "unexpected",
@@ -355,76 +350,83 @@ export function createRemoteConnectionController(
       if (!isCurrent(operation.generation)) {
         return {
           kind: "cancelled",
-          completedMutations: attempt.completedMutations,
+          completedMutations: preparation.completedMutations,
         };
       }
 
-      if (attempt.kind === "cancelled") {
+      if (preparation.kind === "cancelled") {
         update(previous);
         return {
           kind: "cancelled",
-          completedMutations: attempt.completedMutations,
+          completedMutations: preparation.completedMutations,
         };
       }
-      if (attempt.kind === "failed") {
-        update({ state: "auth-failed", challenge, failure: attempt.failure });
+      if (preparation.kind === "failed") {
+        update({ state: "auth-failed", challenge, failure: preparation.failure });
         return {
           kind: "failed",
-          failure: attempt.failure,
-          completedMutations: attempt.completedMutations,
+          failure: preparation.failure,
+          completedMutations: preparation.completedMutations,
         };
       }
       if (operation.signal.aborted) {
         update(previous);
         return {
           kind: "cancelled",
-          completedMutations: attempt.completedMutations,
+          completedMutations: preparation.completedMutations,
         };
       }
 
+      let restoreCredentials: () => void;
       try {
-        options.credentials.authorize({ target: attempt.target, token: attempt.token });
+        restoreCredentials = options.credentials.authorize({
+          target: preparation.target,
+          resolveToken: preparation.resolveToken,
+        });
       } catch (error) {
         const failure: RemoteAuthFailure = {
           cause: "unexpected",
           message: appendRemoteAuthMutationSummary(
             toErrorMessage(error),
-            attempt.completedMutations,
+            preparation.completedMutations,
           ),
         };
         update({ state: "auth-failed", challenge, failure });
         return {
           kind: "failed",
           failure,
-          completedMutations: attempt.completedMutations,
+          completedMutations: preparation.completedMutations,
         };
       }
-      publishTarget(attempt.target);
       const verified = await runProbe("authentication-verification", operation.signal);
       if (!isCurrent(operation.generation)) {
-        return { kind: "cancelled", completedMutations: attempt.completedMutations };
+        restoreCredentials();
+        return { kind: "cancelled", completedMutations: preparation.completedMutations };
       }
       if (operation.signal.aborted) {
+        restoreCredentials();
         update(previous);
-        return { kind: "cancelled", completedMutations: attempt.completedMutations };
+        return { kind: "cancelled", completedMutations: preparation.completedMutations };
       }
       if (verified.state === "ready") {
+        publishTarget(preparation.target);
         update(verified);
         return { kind: "authenticated", info: verified.info };
       }
+      restoreCredentials();
       if (verified.state === "auth-required") {
         const failure: RemoteAuthFailure = {
           cause: "token-rejected",
           message: appendRemoteAuthMutationSummary(
-            `The selected Vercel project did not authorize ${options.target.host}.`,
-            attempt.completedMutations,
+            `The selected Vercel project did not authorize ${remoteHost(options.target)}.`,
+            preparation.completedMutations,
           ),
         };
         update({ state: "auth-failed", challenge: verified.challenge, failure });
         return {
           kind: "failed",
           failure,
-          completedMutations: attempt.completedMutations,
+          completedMutations: preparation.completedMutations,
         };
       }
       if (verified.state === "unavailable") {
@@ -432,14 +434,14 @@ export function createRemoteConnectionController(
           ...verified.failure,
           message: appendRemoteAuthMutationSummary(
             verified.failure.message,
-            attempt.completedMutations,
+            preparation.completedMutations,
           ),
         };
         update({ state: "unavailable", failure });
         return {
           kind: "unavailable",
           failure,
-          completedMutations: attempt.completedMutations,
+          completedMutations: preparation.completedMutations,
         };
       }
 
