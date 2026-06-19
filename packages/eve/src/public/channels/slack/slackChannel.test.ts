@@ -255,10 +255,12 @@ async function firePost(
 describe("slackChannel() default event handlers", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   beforeEach(() => {
-    fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true, ts: "1700000001.000001" }), {
-        headers: { "content-type": "application/json" },
-      }),
+    fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ ok: true, ts: "1700000001.000001" }), {
+          headers: { "content-type": "application/json" },
+        }),
+      ),
     );
     vi.stubGlobal("fetch", fetchMock);
   });
@@ -479,7 +481,9 @@ describe("slackChannel() default event handlers", () => {
     expect(ctx.state.lastReasoningTypingStatus).toBe(body.status);
   });
 
-  it("reasoning.appended does not replace the fallback with streamed opening words", async () => {
+  it("reasoning.appended immediately publishes progressive extensions of four characters", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-18T12:00:00Z"));
     const adapter = withState(
       getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
       THREAD_STATE,
@@ -495,45 +499,16 @@ describe("slackChannel() default event handlers", () => {
       });
 
     await callEvent(adapter, reasoningEvent("I", "I"), ctx);
-    await callEvent(adapter, reasoningEvent(" need", "I need"), ctx);
-    expect(fetchMock).not.toHaveBeenCalled();
+    await callEvent(adapter, reasoningEvent(" ca", "I ca"), ctx);
+    await callEvent(adapter, reasoningEvent("n", "I can"), ctx);
 
-    await callEvent(
-      adapter,
-      reasoningEvent(" to inspect the implementation", "I need to inspect the implementation"),
-      ctx,
+    const statuses = fetchMock.mock.calls.map(
+      ([, init]) => parseSlackRequestBody(init as RequestInit).status,
     );
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const body = parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit);
-    expect(body.status).toBe("I need to inspect the implementation");
+    expect(statuses).toEqual(["I", "I can"]);
   });
 
-  it("reasoning.appended accepts a completed short line", async () => {
-    const adapter = withState(
-      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
-      THREAD_STATE,
-    );
-    const ctx = buildAdapterContext(adapter, stubAccessor());
-
-    await callEvent(
-      adapter,
-      makeEvent("reasoning.appended", {
-        reasoningDelta: "Check logs.",
-        reasoningSoFar: "Check logs.",
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "t1",
-      }),
-      ctx,
-    );
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const body = parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit);
-    expect(body.status).toBe("Check logs.");
-  });
-
-  it("reasoning.appended throttles repeated status refreshes", async () => {
+  it("reasoning.appended requires a matching prefix and four new characters", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-18T12:00:00Z"));
     const adapter = withState(
@@ -550,20 +525,18 @@ describe("slackChannel() default event handlers", () => {
         turnId: "t1",
       });
 
-    await callEvent(adapter, reasoningEvent("Need to inspect the repo."), ctx);
+    await callEvent(adapter, reasoningEvent("Need"), ctx);
     vi.setSystemTime(new Date("2026-06-18T12:00:01Z"));
-    await callEvent(adapter, reasoningEvent("Need to inspect the repo. Then test."), ctx);
+    await callEvent(adapter, reasoningEvent("Need to"), ctx);
+    await callEvent(adapter, reasoningEvent("Check something else"), ctx);
     vi.setSystemTime(new Date("2026-06-18T12:00:05Z"));
-    await callEvent(adapter, reasoningEvent("Need to inspect the repo. Then test again."), ctx);
+    await callEvent(adapter, reasoningEvent("Need to"), ctx);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const statuses = fetchMock.mock.calls.map(
       ([, init]) => parseSlackRequestBody(init as RequestInit).status,
     );
-    expect(statuses).toEqual([
-      "Need to inspect the repo.",
-      "Need to inspect the repo. Then test again.",
-    ]);
+    expect(statuses).toEqual(["Need", "Need to"]);
   });
 
   it("turn.started resets reasoning status throttling", async () => {

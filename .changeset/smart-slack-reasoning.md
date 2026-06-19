@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Slack reasoning typing indicators now keep the generic working status until streamed reasoning contains a meaningful snippet, preventing partial opening words from remaining visible during short reasoning steps.
+Slack reasoning typing indicators now update progressively when the cumulative status grows by at least four characters, preventing opening fragments from remaining stale without issuing one Slack request per token.
