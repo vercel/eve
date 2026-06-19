@@ -67,7 +67,7 @@ describe("createTuiPrompter", () => {
     const prompter = createTuiPrompter(renderer);
 
     await expect(
-      prompter.searchSelect?.({
+      prompter.searchSelect({
         message: "Project to link",
         options: [{ value: "alpha", label: "alpha" }],
         queryActionLabel: "Search for",
@@ -194,7 +194,7 @@ describe("createTuiPrompter", () => {
 
     await expect(prompter.text({ message: "Name" })).rejects.toBeInstanceOf(StepBackError);
     await expect(
-      prompter.searchSelect?.({
+      prompter.searchSelect({
         message: "Project",
         options: [{ value: "a", label: "A" }],
         queryActionLabel: "Search for",

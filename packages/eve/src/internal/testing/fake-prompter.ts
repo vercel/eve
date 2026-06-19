@@ -57,24 +57,18 @@ export function createFakePrompter(config: FakePrompterConfig = {}): FakePrompte
     return (config.single ? await config.single(opts) : fail(opts.message)) as T;
   }
 
-  const search = config.search;
-  const searchSelect =
-    search === undefined
-      ? {}
-      : {
-          async searchSelect<T extends PrompterValue>(
-            opts: SearchSelectOptions<T>,
-          ): Promise<SearchSelectResult<T>> {
-            selectMessages.push(opts.message);
-            return search(opts);
-          },
-        };
-
   const prompter: Prompter = {
-    ...searchSelect,
     text: async (opts) => (config.text ? config.text(opts) : fail(opts.message)),
     password: async (opts) => (config.password ? config.password(opts) : fail(opts.message)),
     select,
+    async searchSelect<T extends PrompterValue>(
+      opts: SearchSelectOptions<T>,
+    ): Promise<SearchSelectResult<T>> {
+      selectMessages.push(opts.message);
+      if (config.search !== undefined) return config.search(opts);
+      const value = config.single ? await config.single(opts) : fail(opts.message);
+      return { kind: "selected", value: value as T };
+    },
     acknowledge: vi.fn(async () => {}),
     note: vi.fn(),
     intro: vi.fn(),

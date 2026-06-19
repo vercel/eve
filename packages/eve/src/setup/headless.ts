@@ -50,6 +50,7 @@ export function createHeadlessPrompter(sink: HeadlessLogSink): Prompter {
     text: async (opts) => fail(opts.message),
     password: async (opts) => fail(opts.message),
     select,
+    searchSelect: async (opts) => fail(opts.message),
     note: (message) => sink(message),
     intro: (title, subtitle) => sink(subtitle ? `${title}: ${subtitle}` : title),
     outro: (message) => sink(message),

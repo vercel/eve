@@ -202,7 +202,7 @@ export interface Prompter {
   select<T extends PrompterValue>(opts: SingleSelectOptions<T>): Promise<T>;
   select<T extends PrompterValue>(opts: MultiSelectOptions<T>): Promise<T[]>;
   /** Returns the query when the user selects the external lookup row. */
-  searchSelect?<T extends PrompterValue>(
+  searchSelect<T extends PrompterValue>(
     opts: SearchSelectOptions<T>,
   ): Promise<SearchSelectResult<T>>;
   /**
