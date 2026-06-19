@@ -19,7 +19,10 @@ import {
 const SNAPSHOT_SKIP_NAMES = new Set([
   ".eve",
   ".git",
+  ".next",
+  ".nuxt",
   ".output",
+  ".svelte-kit",
   ".turbo",
   ".vercel",
   ".workflow-data",

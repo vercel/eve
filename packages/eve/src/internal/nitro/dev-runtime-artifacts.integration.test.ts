@@ -384,4 +384,40 @@ describe("development runtime artifact snapshots", () => {
 
     expect(moduleNamespace.result).toBe("snapshotted:external");
   });
+
+  it("skips framework build cache directories (.next, .nuxt, .svelte-kit) in runtime snapshots", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-skips-");
+    const agentRoot = join(appRoot, "agent");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+    const manifestPath = join(compileDirectoryPath, "compiled-agent-manifest.json");
+
+    await mkdir(agentRoot, { recursive: true });
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(join(appRoot, "package.json"), '{"type":"module"}\n');
+    await writeFile(manifestPath, `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`);
+
+    // Create directories that should be skipped
+    await mkdir(join(appRoot, ".next"), { recursive: true });
+    await writeFile(join(appRoot, ".next", "lock"), "lock file");
+    await mkdir(join(appRoot, ".nuxt"), { recursive: true });
+    await writeFile(join(appRoot, ".nuxt", "tsconfig.json"), "{}");
+    await mkdir(join(appRoot, ".svelte-kit"), { recursive: true });
+    await writeFile(join(appRoot, ".svelte-kit", "tsconfig.json"), "{}");
+
+    // Also write a normal source file to ensure snapshot staging works
+    await writeFile(join(agentRoot, "agent.ts"), "export const answer = 42;\n");
+
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+
+    // Verify skipped directories are not in snapshot source
+    expect(existsSync(join(snapshot.snapshotSourceRoot, ".next"))).toBe(false);
+    expect(existsSync(join(snapshot.snapshotSourceRoot, ".nuxt"))).toBe(false);
+    expect(existsSync(join(snapshot.snapshotSourceRoot, ".svelte-kit"))).toBe(false);
+
+    // Verify normal files are present
+    expect(existsSync(join(snapshot.snapshotSourceRoot, "agent", "agent.ts"))).toBe(true);
+  });
 });

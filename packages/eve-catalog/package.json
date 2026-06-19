@@ -18,7 +18,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "clean": "rm -rf dist",
+    "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\"",
     "build": "pnpm run clean && tsgo -p tsconfig.build.json",
     "build:types": "tsgo -p tsconfig.build.json --emitDeclarationOnly",
     "test": "pnpm run test:unit",
