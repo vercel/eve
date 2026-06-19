@@ -31,7 +31,7 @@ const TEST_WEB_PACKAGE_VERSIONS = {
   reactDomPackageVersion: "19.2.6",
   streamdownPackageVersion: "2.5.0",
   zodPackageVersion: "4.4.3",
-  tsgoPackageVersion: "7.0.0-dev",
+  typescriptPackageVersion: "7.0.1-rc",
   typesReactPackageVersion: "19.2.15",
   typesReactDomPackageVersion: "19.2.3",
 } satisfies WebPackageVersions;
@@ -155,7 +155,7 @@ describe("ensureChannel", () => {
       expect.objectContaining({
         path: join(projectRoot, "package.json"),
         dependencies: expect.arrayContaining(["eve", "next", "react", "react-dom"]),
-        devDependencies: expect.arrayContaining(["@typescript/native-preview", "@types/react"]),
+        devDependencies: expect.arrayContaining(["typescript", "@types/react"]),
         scripts: expect.arrayContaining(["build", "dev", "start", "typecheck"]),
       }),
     ]);
@@ -570,7 +570,7 @@ describe("scaffoldBaseProject", () => {
       aiPackageVersion: "7.0.0",
       connectPackageVersion: "0.2.2",
       zodPackageVersion: "4.4.3",
-      tsgoPackageVersion: "7.0.0-dev",
+      typescriptPackageVersion: "7.0.1-rc",
     });
 
     const agentSource = await readFile(join(projectRoot, "agent/agent.ts"), "utf8");
@@ -622,7 +622,7 @@ describe("scaffoldBaseProject", () => {
         evePackage: TEST_EVE_PACKAGE,
         aiPackageVersion: "7.0.0",
         zodPackageVersion: "4.4.3",
-        tsgoPackageVersion: "7.0.0-dev",
+        typescriptPackageVersion: "7.0.1-rc",
       });
 
       await expect(readFile(join(projectRoot, "package.json"), "utf8")).resolves.toContain(
@@ -642,7 +642,7 @@ describe("scaffoldBaseProject", () => {
       evePackage: TEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
       zodPackageVersion: "4.4.3",
-      tsgoPackageVersion: "7.0.0-dev",
+      typescriptPackageVersion: "7.0.1-rc",
     });
 
     const agentSource = await readFile(join(projectRoot, "agent/agent.ts"), "utf8");
@@ -665,7 +665,7 @@ describe("scaffoldBaseProject", () => {
       evePackage: TEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
       zodPackageVersion: "4.4.3",
-      tsgoPackageVersion: "7.0.0-dev",
+      typescriptPackageVersion: "7.0.1-rc",
     });
 
     const agentSource = await readFile(join(projectRoot, "agent/agent.ts"), "utf8");
@@ -683,7 +683,7 @@ describe("scaffoldBaseProject", () => {
       evePackage: { version: "0.25.0", nodeEngine: ">=24.5.0" },
       aiPackageVersion: "7.0.0",
       zodPackageVersion: "4.4.3",
-      tsgoPackageVersion: "7.0.0-dev",
+      typescriptPackageVersion: "7.0.1-rc",
     });
 
     const packageJson = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8")) as {
@@ -703,7 +703,7 @@ describe("scaffoldBaseProject", () => {
       evePackage: LATEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
       zodPackageVersion: "4.4.3",
-      tsgoPackageVersion: "7.0.0-dev",
+      typescriptPackageVersion: "7.0.1-rc",
     });
 
     await expect(readFile(join(projectRoot, "package.json"), "utf8")).resolves.toContain(
@@ -720,7 +720,7 @@ describe("scaffoldBaseProject", () => {
       evePackage: TEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
       zodPackageVersion: "4.4.3",
-      tsgoPackageVersion: "7.0.0-dev",
+      typescriptPackageVersion: "7.0.1-rc",
     });
 
     const channelPath = join(projectRoot, "agent/channels/eve.ts");
@@ -744,7 +744,7 @@ describe("scaffoldBaseProject", () => {
         evePackage: TEST_EVE_PACKAGE,
         aiPackageVersion: "7.0.0",
         zodPackageVersion: "4.4.3",
-        tsgoPackageVersion: "7.0.0-dev",
+        typescriptPackageVersion: "7.0.1-rc",
       }),
     ).rejects.toThrow(/Use an empty directory/);
 
@@ -759,7 +759,7 @@ describe("scaffoldBaseProject", () => {
       evePackage: TEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
       zodPackageVersion: "4.4.3",
-      tsgoPackageVersion: "7.0.0-dev",
+      typescriptPackageVersion: "7.0.1-rc",
     });
 
     expect(projectRoot).toBe(targetDirectory);

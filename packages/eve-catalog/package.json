@@ -19,11 +19,11 @@
   },
   "scripts": {
     "clean": "rm -rf dist",
-    "build": "pnpm run clean && tsgo -p tsconfig.build.json",
-    "build:types": "tsgo -p tsconfig.build.json --emitDeclarationOnly",
+    "build": "pnpm run clean && tsc -p tsconfig.build.json",
+    "build:types": "tsc -p tsconfig.build.json --emitDeclarationOnly",
     "test": "pnpm run test:unit",
     "test:unit": "vitest run --config vitest.config.ts",
-    "typecheck": "tsgo -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
     "vitest": "catalog:"

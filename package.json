@@ -35,7 +35,6 @@
   "devDependencies": {
     "@changesets/cli": "2.31.0",
     "@types/node": "catalog:",
-    "@typescript/native-preview": "catalog:",
     "ai": "catalog:",
     "gray-matter": "4.0.3",
     "oxfmt": "0.52.0",
@@ -43,6 +42,7 @@
     "simple-git-hooks": "2.13.1",
     "syncpack": "15.3.1",
     "turbo": "2.9.16",
+    "typescript": "catalog:",
     "vercel": "54.12.2",
     "vitest": "catalog:"
   },

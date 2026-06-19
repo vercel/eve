@@ -7,7 +7,7 @@
     "build": "eve build",
     "dev": "eve dev",
     "start": "eve start",
-    "typecheck": "eve build && tsgo"
+    "typecheck": "eve build && tsc"
   },
   "dependencies": {
     "@opentelemetry/core": "2.6.1",
@@ -18,6 +18,6 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@typescript/native-preview": "catalog:"
+    "typescript": "catalog:"
   }
 }

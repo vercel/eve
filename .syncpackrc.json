@@ -33,7 +33,7 @@
       "dependencies": [
         "@ai-sdk/**",
         "@types/node",
-        "@typescript/native-preview",
+        "typescript",
         "ai",
         "next",
         "@types/react",

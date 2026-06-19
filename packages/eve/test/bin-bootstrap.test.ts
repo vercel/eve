@@ -10,7 +10,7 @@ const bootstrapOptions = {
     "/workspace/packages/eve/scripts/copy-docs.mjs",
     "/workspace/packages/eve/scripts/stamp-version-tokens.mjs",
   ],
-  tsgoCliPath: "/workspace/node_modules/@typescript/native-preview/bin/tsgo.js",
+  tscCliPath: "/workspace/node_modules/typescript/bin/tsc",
 };
 const workspaceBuildInputPaths = new Set([
   ...bootstrapOptions.postBuildScriptPaths,
@@ -136,7 +136,7 @@ describe("eve CLI bootstrap", () => {
     expect(runCommand).toHaveBeenNthCalledWith(
       1,
       process.execPath,
-      [bootstrapOptions.tsgoCliPath, "-p", "tsconfig.json"],
+      [bootstrapOptions.tscCliPath, "-p", "tsconfig.json"],
       {
         cwd: bootstrapOptions.packageRoot,
       },
@@ -190,7 +190,7 @@ describe("eve CLI bootstrap", () => {
     expect(runCommand).toHaveBeenNthCalledWith(
       1,
       process.execPath,
-      [bootstrapOptions.tsgoCliPath, "-p", "tsconfig.json"],
+      [bootstrapOptions.tscCliPath, "-p", "tsconfig.json"],
       {
         cwd: bootstrapOptions.packageRoot,
       },

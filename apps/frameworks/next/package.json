@@ -9,7 +9,7 @@
     "build:eve": "eve build",
     "build:next": "next build",
     "lint": "eslint",
-    "typecheck": "tsgo"
+    "typecheck": "tsc"
   },
   "dependencies": {
     "@auth/core": "0.41.2",
