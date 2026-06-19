@@ -21,6 +21,7 @@ import type {
 
 const log = createLogger("slack.defaults");
 const REASONING_TYPING_REFRESH_INTERVAL_MS = 5_000;
+const REASONING_TYPING_MIN_PROGRESS_CHARS = 4;
 
 /**
  * Workspace-scoped projection of the Slack actor that produced
@@ -123,14 +124,20 @@ export const defaultEvents: SlackChannelInternalEvents = {
     const line = firstNonEmptyLine(event.reasoningSoFar);
     if (line === undefined) return;
 
+    const status = truncateTypingStatus(line);
+    const lastStatus = channel.state.lastReasoningTypingStatus;
+    const isProgressiveExtension =
+      lastStatus !== null &&
+      lastStatus !== undefined &&
+      status.startsWith(lastStatus) &&
+      status.length >= lastStatus.length + REASONING_TYPING_MIN_PROGRESS_CHARS;
     const now = Date.now();
     const lastAt = channel.state.lastReasoningTypingAtMs;
-    if (lastAt !== null && lastAt !== undefined) {
+    if (!isProgressiveExtension && lastAt !== null && lastAt !== undefined) {
       const elapsed = now - lastAt;
       if (elapsed >= 0 && elapsed < REASONING_TYPING_REFRESH_INTERVAL_MS) return;
     }
 
-    const status = truncateTypingStatus(line);
     await channel.thread.startTyping(status);
     channel.state.lastReasoningTypingAtMs = now;
     channel.state.lastReasoningTypingStatus = status;

@@ -172,8 +172,8 @@ export interface SlackChannelState {
   pendingToolCallMessage?: string | null;
   /**
    * Last reasoning-derived typing indicator sent by the default
-   * `reasoning.appended` handler. Used to refresh Slack's status during
-   * long reasoning streams without sending one API call per delta.
+   * `reasoning.appended` handler. Used to surface substantial progressive
+   * extensions immediately while throttling smaller streamed deltas.
    */
   lastReasoningTypingAtMs?: number | null;
   lastReasoningTypingStatus?: string | null;
