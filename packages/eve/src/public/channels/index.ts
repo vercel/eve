@@ -32,6 +32,10 @@ export {
   createWebSocketUpgradeServer,
   type WebSocketUpgradeServerBridge,
 } from "#channel/websocket-upgrade-server.js";
+export {
+  validateWebSocketOrigin,
+  type ValidateWebSocketOriginOptions,
+} from "#channel/websocket-origin.js";
 
 import { getChannelInstrumentationKind } from "#channel/compiled-channel.js";
 import type { Channel } from "#public/definitions/defineChannel.js";

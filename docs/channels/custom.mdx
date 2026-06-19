@@ -78,6 +78,33 @@ export default defineChannel({
 
 `WS()` handlers receive the same helpers as HTTP route handlers: `send`, `getSession`, `receive`, `params`, `waitUntil`, and `requestIp`. The returned hooks are eve-owned structural types compatible with Nitro/H3 websocket routing, including `upgrade`, `open`, `message`, `close`, and `error`.
 
+### Validating the Origin
+
+The production server binds `0.0.0.0` and accepts a WebSocket handshake on any matched `WS()` route. Because a browser cannot suppress or forge the `Origin` header, validating it in the `upgrade` hook is the standard defense against cross-site WebSocket hijacking and DNS rebinding: a malicious page in a victim's browser otherwise completes a same-credentials handshake to your agent and drives it. eve does not enforce this for you — your channel decides which origins may connect.
+
+`validateWebSocketOrigin()` enforces an allowlist from inside the `upgrade` hook. It returns a `403` `Response` to reject a missing or non-allowlisted `Origin` and `undefined` to let an allowed handshake through, matching the hook's `Response | void` contract:
+
+```ts
+import { defineChannel, WS, validateWebSocketOrigin } from "eve/channels";
+
+export default defineChannel({
+  routes: [
+    WS("/voice/ws", async (_req, { send }) => ({
+      upgrade(request) {
+        return validateWebSocketOrigin(request, {
+          allowedOrigins: ["https://app.example.com"],
+        });
+      },
+      async message(_peer, message) {
+        await send(message.text(), { auth: null, continuationToken: "voice-demo" });
+      },
+    })),
+  ],
+});
+```
+
+Allowlist entries are compared by normalized origin, so port, trailing slash, and case differences don't matter. A missing `Origin` header is rejected by default; pass `allowNoOrigin: true` when the route also serves non-browser clients (which never send one). An origin check bounds the browser threat only — a non-browser client can send any value — so keep authenticating the session as well.
+
 ### Node upgrade server escape hatch
 
 Prefer the `WS()` lifecycle hooks above when you own the websocket behavior. eve also exposes `createWebSocketUpgradeServer()` for the narrower case where a third-party SDK or framework expects to bind directly to a Node `http.Server` with `server.on("upgrade", ...)`.
