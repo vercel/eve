@@ -4,7 +4,7 @@ import { captureVercel, type VercelCaptureFailure } from "#setup/primitives/inde
 import pc from "picocolors";
 import { z } from "zod";
 
-import { writeProjectLink, type ProjectResolution } from "./project-resolution.js";
+import { readProjectLink, writeProjectLink, type ProjectResolution } from "./project-resolution.js";
 import type { Prompter } from "./prompter.js";
 import type { ResolvedVercelProjectSpec } from "./state.js";
 import {
@@ -34,7 +34,11 @@ const VercelProjectReferenceSchema = z.object({
   accountId: z.string().min(1),
 });
 
-type VercelProjectReference = z.infer<typeof VercelProjectReferenceSchema>;
+export type VercelProjectReference = z.infer<typeof VercelProjectReferenceSchema>;
+
+export interface VercelProjectLinkReceipt {
+  readonly project: VercelProjectReference;
+}
 
 export interface PickProjectOptions extends VercelProjectOperationOptions {
   /** Whether an empty project list may fall back to entering a name to create. */
@@ -499,19 +503,46 @@ export async function linkProject(
     }
     project = existing;
   }
-  await withNetworkSpinner(
+  await linkResolvedVercelProject({
     prompter,
-    `Linking this directory to Vercel project "${project.name}"...`,
+    projectRoot,
+    project,
+    signal: options.signal,
+  });
+  return true;
+}
+
+/** Links one parsed project identity without resolving it through Vercel again. */
+export async function linkResolvedVercelProject(input: {
+  readonly prompter: Prompter;
+  readonly projectRoot: string;
+  readonly project: VercelProjectReference;
+  readonly signal?: AbortSignal;
+}): Promise<VercelProjectLinkReceipt> {
+  await withNetworkSpinner(
+    input.prompter,
+    `Linking this directory to Vercel project "${input.project.name}"...`,
     () =>
       writeProjectLink({
-        projectRoot,
+        projectRoot: input.projectRoot,
         link: {
-          projectId: project.id,
-          orgId: project.accountId,
-          projectName: project.name,
+          projectId: input.project.id,
+          orgId: input.project.accountId,
+          projectName: input.project.name,
         },
-        signal: options.signal,
+        signal: input.signal,
       }),
   );
-  return true;
+
+  const link = await readProjectLink(input.projectRoot);
+  if (
+    link === undefined ||
+    link.projectId !== input.project.id ||
+    link.orgId !== input.project.accountId
+  ) {
+    throw new Error(
+      `Linked project identity did not match Vercel project "${input.project.name}".`,
+    );
+  }
+  return { project: input.project };
 }

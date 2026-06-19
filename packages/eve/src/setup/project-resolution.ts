@@ -47,19 +47,15 @@ No, you should not share the ".vercel" folder with anyone.
 Upon creation, it will be automatically added to your ".gitignore" file.
 `;
 
-async function ensureVercelIgnored(
-  projectRoot: string,
-  signal: AbortSignal | undefined,
-): Promise<void> {
+async function ensureVercelIgnored(projectRoot: string): Promise<void> {
   try {
     const path = join(projectRoot, ".gitignore");
     const current = await readFile(path, "utf8").catch(() => "");
     const newline = current.includes("\r\n") ? "\r\n" : "\n";
     if (current.split(/\r?\n/u).includes(".vercel")) return;
     const separator = current.length === 0 || current.endsWith(newline) ? "" : newline;
-    await writeFile(path, `${current}${separator}.vercel${newline}`, { encoding: "utf8", signal });
-  } catch (error) {
-    if (signal?.aborted) throw error;
+    await writeFile(path, `${current}${separator}.vercel${newline}`, "utf8");
+  } catch {
     // Match `vercel link`: the project link remains valid when updating the
     // auxiliary ignore file is not possible.
   }
@@ -76,11 +72,12 @@ export async function writeProjectLink(input: WriteProjectLinkInput): Promise<vo
     `${JSON.stringify(input.link, null, 2)}\n`,
     { encoding: "utf8", signal: input.signal },
   );
-  await writeFile(join(vercelDirectory, "README.txt"), VERCEL_DIRECTORY_README, {
-    encoding: "utf8",
-    signal: input.signal,
-  });
-  await ensureVercelIgnored(input.projectRoot, input.signal);
+  try {
+    await writeFile(join(vercelDirectory, "README.txt"), VERCEL_DIRECTORY_README, "utf8");
+  } catch {
+    // project.json is the link contract; README failure does not undo it.
+  }
+  await ensureVercelIgnored(input.projectRoot);
 }
 
 /** Reads the linked Vercel project and team ids from `.vercel/project.json`. */

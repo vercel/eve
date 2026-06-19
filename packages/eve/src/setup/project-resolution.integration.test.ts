@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -30,6 +30,19 @@ describe("writeProjectLink", () => {
       await expect(readFile(join(projectRoot, ".gitignore"), "utf8")).resolves.toBe(
         "node_modules\n.vercel\n",
       );
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the project link when the auxiliary README cannot be written", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "eve-project-link-"));
+    const link = { projectId: "prj_demo", orgId: "team_demo", projectName: "demo-agent" };
+    try {
+      await mkdir(join(projectRoot, ".vercel", "README.txt"), { recursive: true });
+
+      await expect(writeProjectLink({ projectRoot, link })).resolves.toBeUndefined();
+      await expect(readProjectLink(projectRoot)).resolves.toEqual(link);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

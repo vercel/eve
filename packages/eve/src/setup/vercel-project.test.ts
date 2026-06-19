@@ -10,6 +10,7 @@ import {
   assertNewProjectNameAvailable,
   getVercelAuthStatus,
   linkProject,
+  linkResolvedVercelProject,
   listProjects,
   listTeams,
   pickNewProjectName,
@@ -29,11 +30,18 @@ vi.mock("#setup/primitives/index.js", async (importOriginal) => {
   };
 });
 
-const mockedWriteProjectLink = vi.hoisted(() => vi.fn());
+const { mockedReadProjectLink, mockedWriteProjectLink } = vi.hoisted(() => ({
+  mockedReadProjectLink: vi.fn(),
+  mockedWriteProjectLink: vi.fn(),
+}));
 
 vi.mock("./project-resolution.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("./project-resolution.js")>();
-  return { ...original, writeProjectLink: mockedWriteProjectLink };
+  return {
+    ...original,
+    readProjectLink: mockedReadProjectLink,
+    writeProjectLink: mockedWriteProjectLink,
+  };
 });
 
 const mockedCaptureVercel = vi.mocked(captureVercel);
@@ -67,6 +75,7 @@ beforeEach(() => {
   mockedRunVercel.mockResolvedValue(true);
   mockedWriteProjectLink.mockReset();
   mockedWriteProjectLink.mockResolvedValue(undefined);
+  mockedReadProjectLink.mockReset();
 });
 
 describe("listTeams", () => {
@@ -671,6 +680,54 @@ describe("assertNewProjectNameAvailable", () => {
 });
 
 describe("linkProject", () => {
+  it("links an already-resolved project without another Vercel API lookup", async () => {
+    const project = { id: "prj_selected", name: "remote-agent", accountId: "team_account" };
+    mockedReadProjectLink.mockResolvedValue({
+      projectId: project.id,
+      orgId: project.accountId,
+      projectName: project.name,
+    });
+    const { prompter } = createFakePrompter();
+
+    await expect(
+      linkResolvedVercelProject({
+        prompter,
+        projectRoot: "/tmp/eve-agent",
+        project,
+      }),
+    ).resolves.toEqual({ project });
+
+    expect(mockedCaptureVercel).not.toHaveBeenCalled();
+    expect(mockedWriteProjectLink).toHaveBeenCalledWith({
+      projectRoot: "/tmp/eve-agent",
+      link: {
+        projectId: project.id,
+        orgId: project.accountId,
+        projectName: project.name,
+      },
+      signal: undefined,
+    });
+    expect(mockedReadProjectLink).toHaveBeenCalledWith("/tmp/eve-agent");
+  });
+
+  it("rejects a link receipt whose ids do not match the resolved project", async () => {
+    const project = { id: "prj_selected", name: "remote-agent", accountId: "team_account" };
+    mockedReadProjectLink.mockResolvedValue({
+      projectId: "prj_other",
+      orgId: project.accountId,
+    });
+    const { prompter } = createFakePrompter();
+
+    await expect(
+      linkResolvedVercelProject({
+        prompter,
+        projectRoot: "/tmp/eve-agent",
+        project,
+      }),
+    ).rejects.toThrow('Linked project identity did not match Vercel project "remote-agent".');
+    expect(mockedCaptureVercel).not.toHaveBeenCalled();
+  });
+
   it("fails a new-project plan when that project name already exists", async () => {
     mockedCaptureVercel.mockResolvedValue(
       captured(JSON.stringify({ id: "prj_existing", name: "my-agent", accountId: "team_account" })),
@@ -718,6 +775,11 @@ describe("linkProject", () => {
         captured(JSON.stringify({ id: "prj_new", name: "my-agent", accountId: "team_account" })),
       );
     const { prompter } = createFakePrompter();
+    mockedReadProjectLink.mockResolvedValue({
+      projectId: "prj_new",
+      orgId: "team_account",
+      projectName: "my-agent",
+    });
 
     await expect(
       linkProject(
