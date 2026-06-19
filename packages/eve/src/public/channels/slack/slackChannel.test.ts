@@ -479,6 +479,60 @@ describe("slackChannel() default event handlers", () => {
     expect(ctx.state.lastReasoningTypingStatus).toBe(body.status);
   });
 
+  it("reasoning.appended does not replace the fallback with streamed opening words", async () => {
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+    const reasoningEvent = (reasoningDelta: string, reasoningSoFar: string) =>
+      makeEvent("reasoning.appended", {
+        reasoningDelta,
+        reasoningSoFar,
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      });
+
+    await callEvent(adapter, reasoningEvent("I", "I"), ctx);
+    await callEvent(adapter, reasoningEvent(" need", "I need"), ctx);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await callEvent(
+      adapter,
+      reasoningEvent(" to inspect the implementation", "I need to inspect the implementation"),
+      ctx,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit);
+    expect(body.status).toBe("I need to inspect the implementation");
+  });
+
+  it("reasoning.appended accepts a completed short line", async () => {
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("reasoning.appended", {
+        reasoningDelta: "Check logs.",
+        reasoningSoFar: "Check logs.",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit);
+    expect(body.status).toBe("Check logs.");
+  });
+
   it("reasoning.appended throttles repeated status refreshes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-18T12:00:00Z"));

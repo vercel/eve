@@ -21,6 +21,7 @@ import type {
 
 const log = createLogger("slack.defaults");
 const REASONING_TYPING_REFRESH_INTERVAL_MS = 5_000;
+const REASONING_TYPING_MIN_FRAGMENT_LENGTH = 32;
 
 /**
  * Workspace-scoped projection of the Slack actor that produced
@@ -87,6 +88,32 @@ function firstNonEmptyLine(text: string): string | undefined {
 }
 
 /**
+ * Returns the first reasoning line once it contains enough context for a
+ * useful status. Providers may stream initial deltas as single words, so a
+ * short line waits for punctuation or a newline while `Working...` remains
+ * visible. Longer fragments are useful even before the sentence completes.
+ */
+function firstMeaningfulReasoningLine(text: string): string | undefined {
+  const lines = text.split(/\r?\n/u);
+  for (const [index, line] of lines.entries()) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) continue;
+
+    const isCompleteLine = index < lines.length - 1;
+    const hasTerminalPunctuation = /[.!?…]["')\]}]*$/u.test(trimmed);
+    if (
+      isCompleteLine ||
+      hasTerminalPunctuation ||
+      trimmed.length >= REASONING_TYPING_MIN_FRAGMENT_LENGTH
+    ) {
+      return trimmed;
+    }
+    return undefined;
+  }
+  return undefined;
+}
+
+/**
  * Default `input.requested` handler — renders each pending HITL
  * request as Slack `block_actions`. Buttons by default; radio for
  * ≤6-option select requests; static_select for >6-option select
@@ -120,7 +147,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
   },
 
   async "reasoning.appended"(event, channel, _ctx) {
-    const line = firstNonEmptyLine(event.reasoningSoFar);
+    const line = firstMeaningfulReasoningLine(event.reasoningSoFar);
     if (line === undefined) return;
 
     const now = Date.now();
