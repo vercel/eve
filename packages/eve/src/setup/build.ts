@@ -146,7 +146,7 @@ async function renderGeneratedModule(): Promise<string> {
   const sourceFiles = await discoverSourceFiles();
   const entries = await Promise.all(
     sourceFiles.map(async (relativePath) => {
-      const source = await readFile(join(SOURCE_ROOT, relativePath), "utf8");
+      const source = (await readFile(join(SOURCE_ROOT, relativePath), "utf8")).replaceAll("\r\n", "\n");
       return renderFileEntry(relativePath, applyDeclaredTransforms(relativePath, source));
     }),
   );
