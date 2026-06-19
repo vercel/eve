@@ -26,7 +26,7 @@ const DEFAULT_REACT_PACKAGE_VERSION = "__REACT_VERSION__";
 const DEFAULT_REACT_DOM_PACKAGE_VERSION = "__REACT_DOM_VERSION__";
 const DEFAULT_STREAMDOWN_PACKAGE_VERSION = "__STREAMDOWN_VERSION__";
 const DEFAULT_ZOD_PACKAGE_VERSION = "__ZOD_VERSION__";
-const DEFAULT_NEXT_TYPESCRIPT_PACKAGE_VERSION = "__NEXT_TYPESCRIPT_VERSION__";
+const NEXT_TYPESCRIPT_PACKAGE_VERSION = "6.0.3";
 const DEFAULT_TYPES_REACT_PACKAGE_VERSION = "__TYPES_REACT_VERSION__";
 const DEFAULT_TYPES_REACT_DOM_PACKAGE_VERSION = "__TYPES_REACT_DOM_VERSION__";
 const CONNECT_PACKAGE_NAME = "@vercel/connect";
@@ -211,8 +211,6 @@ function resolveWebPackageVersions(
     reactDomPackageVersion: input?.reactDomPackageVersion ?? DEFAULT_REACT_DOM_PACKAGE_VERSION,
     streamdownPackageVersion: input?.streamdownPackageVersion ?? DEFAULT_STREAMDOWN_PACKAGE_VERSION,
     zodPackageVersion: input?.zodPackageVersion ?? DEFAULT_ZOD_PACKAGE_VERSION,
-    nextTypescriptPackageVersion:
-      input?.nextTypescriptPackageVersion ?? DEFAULT_NEXT_TYPESCRIPT_PACKAGE_VERSION,
     typesReactPackageVersion:
       input?.typesReactPackageVersion ?? DEFAULT_TYPES_REACT_PACKAGE_VERSION,
     typesReactDomPackageVersion:
@@ -261,10 +259,7 @@ async function patchWebPackageJson(
       "typesReactDomPackageVersion",
       options.typesReactDomPackageVersion,
     ),
-    typescript: resolveVersionToken(
-      "nextTypescriptPackageVersion",
-      options.nextTypescriptPackageVersion,
-    ),
+    typescript: NEXT_TYPESCRIPT_PACKAGE_VERSION,
   } satisfies Record<string, string>;
   const scripts = WEB_APP_TEMPLATE_PACKAGE_JSON.scripts;
 
@@ -432,8 +427,6 @@ export interface WebPackageVersions {
   reactDomPackageVersion?: string;
   streamdownPackageVersion?: string;
   zodPackageVersion?: string;
-  /** TypeScript version for the Next build, which requires the JavaScript compiler API. */
-  nextTypescriptPackageVersion?: string;
   typesReactPackageVersion?: string;
   typesReactDomPackageVersion?: string;
 }

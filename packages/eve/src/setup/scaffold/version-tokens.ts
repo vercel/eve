@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 type TokenSource =
   | { kind: "eve-version" }
   | { kind: "eve-node-engine" }
-  | { kind: "catalog"; packageName: string; catalogName?: string };
+  | { kind: "catalog"; packageName: string };
 
 function versionToken(name: string): string {
   return `__${name}_VERSION__`;
@@ -39,11 +39,6 @@ const TOKEN_SOURCES: Readonly<Record<string, TokenSource>> = {
   [versionToken("STREAMDOWN")]: { kind: "catalog", packageName: "streamdown" },
   [versionToken("ZOD")]: { kind: "catalog", packageName: "zod" },
   [versionToken("TYPESCRIPT")]: { kind: "catalog", packageName: "typescript" },
-  [versionToken("NEXT_TYPESCRIPT")]: {
-    kind: "catalog",
-    catalogName: "typescript6",
-    packageName: "typescript",
-  },
   [versionToken("TYPES_REACT")]: { kind: "catalog", packageName: "@types/react" },
   [versionToken("TYPES_REACT_DOM")]: { kind: "catalog", packageName: "@types/react-dom" },
 };
@@ -88,41 +83,17 @@ function findWorkspaceManifest(packageRoot: string): string | undefined {
 // Line-oriented mirror of resolveCatalogVersion in
 // scripts/stamp-version-tokens.mjs, which cannot be imported: it is a build
 // script that must run before dist exists.
-function readCatalogVersion(
-  manifestPath: string,
-  packageName: string,
-  catalogName?: string,
-): string | undefined {
+function readCatalogVersion(manifestPath: string, packageName: string): string | undefined {
   const lines = readFileSync(manifestPath, "utf8").split(/\r?\n/);
   let inCatalog = false;
-  let inNamedCatalog = false;
   for (const line of lines) {
-    if (catalogName === undefined) {
-      if (/^catalog:\s*$/.test(line)) {
-        inCatalog = true;
-        continue;
-      }
-      if (!inCatalog) continue;
-      if (/^\S/.test(line)) break;
-      const match = line.match(/^\s+(?:"([^"]+)"|([\w@/.-]+)):\s*"([^"]+)"/);
-      if (!match) continue;
-      if ((match[1] ?? match[2]) === packageName) return match[3];
-      continue;
-    }
-
-    if (/^catalogs:\s*$/.test(line)) {
+    if (/^catalog:\s*$/.test(line)) {
       inCatalog = true;
       continue;
     }
     if (!inCatalog) continue;
     if (/^\S/.test(line)) break;
-    const namedCatalog = line.match(/^\s{2}(?:"([^"]+)"|([\w@/.-]+)):\s*$/);
-    if (namedCatalog) {
-      inNamedCatalog = (namedCatalog[1] ?? namedCatalog[2]) === catalogName;
-      continue;
-    }
-    if (!inNamedCatalog) continue;
-    const match = line.match(/^\s{4}(?:"([^"]+)"|([\w@/.-]+)):\s*"([^"]+)"/);
+    const match = line.match(/^\s+(?:"([^"]+)"|([\w@/.-]+)):\s*"([^"]+)"/);
     if (!match) continue;
     if ((match[1] ?? match[2]) === packageName) return match[3];
   }
@@ -152,7 +123,7 @@ function resolveTokenFromDevTree(token: string): string | undefined {
     }
     const manifestPath = findWorkspaceManifest(packageRoot);
     if (manifestPath === undefined) return undefined;
-    return readCatalogVersion(manifestPath, source.packageName, source.catalogName);
+    return readCatalogVersion(manifestPath, source.packageName);
   } catch {
     // Any filesystem or parse failure falls through to the unstamped throw;
     // the fallback must never turn a loud failure into a corrupt scaffold.

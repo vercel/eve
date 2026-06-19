@@ -31,7 +31,6 @@ const TEST_WEB_PACKAGE_VERSIONS = {
   reactDomPackageVersion: "19.2.6",
   streamdownPackageVersion: "2.5.0",
   zodPackageVersion: "4.4.3",
-  nextTypescriptPackageVersion: "6.0.3",
   typesReactPackageVersion: "19.2.15",
   typesReactDomPackageVersion: "19.2.3",
 } satisfies WebPackageVersions;

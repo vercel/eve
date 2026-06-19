@@ -30,6 +30,6 @@
     "eslint": "10.4.0",
     "eslint-config-next": "16.2.6",
     "tailwindcss": "4.3.0",
-    "typescript": "catalog:typescript6"
+    "typescript": "6.0.3"
   }
 }
