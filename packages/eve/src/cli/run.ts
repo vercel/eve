@@ -538,10 +538,12 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
         const title = resolveTuiTitle({ name: options.name, remoteServerUrl, appRoot });
         if (title !== undefined) display.name = title;
         const tuiInput: RunDevelopmentTuiInput = {
-          appRoot: remoteServerUrl === undefined ? appRoot : undefined,
+          target:
+            remoteServerUrl === undefined
+              ? { kind: "local", serverUrl, appRoot }
+              : { kind: "remote", serverUrl, workspaceRoot: appRoot },
           initialInput: options.input,
           onBootProgress: report,
-          serverUrl,
           ...display,
         };
         await runDevelopmentTui(tuiInput);

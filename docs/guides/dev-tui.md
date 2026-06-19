@@ -119,7 +119,7 @@ Pass a URL and the TUI talks to a running deployment instead of starting a local
 eve dev https://<your-app>
 ```
 
-The bare URL is shorthand for `--url`. `--host`, `--port`, and `--no-ui` are ignored against a remote target. If the deployment sits behind Vercel preview protection, set `VERCEL_AUTOMATION_BYPASS_SECRET` locally first. See [Deployment](./deployment) for the smoke-test flow.
+The bare URL is shorthand for `--url`; `--host`, `--port`, and `--no-ui` cannot be combined with a remote target. When the current directory is linked to the target Vercel project, eve verifies the exact deployment origin before attaching a freshly resolved project-scoped OIDC token or `VERCEL_AUTOMATION_BYPASS_SECRET`. Unverified URLs remain anonymous, and credential-bearing requests do not follow redirects. See [Deployment](./deployment) for the smoke-test flow.
 
 ## What to read next
 

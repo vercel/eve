@@ -30,6 +30,9 @@ export type ClientAuth =
   | { readonly basic: { readonly username: string; readonly password: TokenValue } }
   | { readonly bearer: TokenValue };
 
+/** Redirect modes supported by the configured fetch implementation. */
+export type ClientRedirectPolicy = NonNullable<RequestInit["redirect"]>;
+
 /**
  * Configuration for creating a new {@link Client}.
  */
@@ -51,6 +54,16 @@ export interface ClientOptions {
    * that need to be refreshed alongside the bearer credential).
    */
   readonly headers?: HeadersValue;
+
+  /**
+   * Redirect policy enforced for every request made by this client, including
+   * session creation and event streams. When set, it takes precedence over a
+   * per-request `RequestInit.redirect` value passed to {@link Client.fetch}.
+   *
+   * Credential-bearing clients should use `"manual"` or `"error"` so custom
+   * authorization headers cannot be forwarded to a different origin.
+   */
+  readonly redirect?: ClientRedirectPolicy;
 
   /**
    * Maximum number of stream reconnection attempts per message turn.

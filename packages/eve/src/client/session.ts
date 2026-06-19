@@ -11,7 +11,13 @@ import { openStreamBody, openStreamIterable } from "#client/open-stream.js";
 import { normalizeOutputSchemaForRequest } from "#client/output-schema.js";
 import { advanceSession } from "#client/session-utils.js";
 import { createClientUrl } from "#client/url.js";
-import type { SendTurnInput, SendTurnPayload, SessionState, StreamOptions } from "#client/types.js";
+import type {
+  ClientRedirectPolicy,
+  SendTurnInput,
+  SendTurnPayload,
+  SessionState,
+  StreamOptions,
+} from "#client/types.js";
 
 const DELIVER_RETRY_ATTEMPTS = 10;
 const DELIVER_RETRY_DELAY_MS = 200;
@@ -24,6 +30,7 @@ interface SessionContext {
   readonly host: string;
   readonly maxReconnectAttempts: number;
   readonly preserveCompletedSessions: boolean;
+  readonly redirect?: ClientRedirectPolicy;
   resolveHeaders(perRequest?: Readonly<Record<string, string>>): Promise<Headers>;
 }
 
@@ -121,6 +128,7 @@ export class ClientSession {
       body: JSON.stringify(body),
       headers,
       mustDeliver: (input.inputResponses?.length ?? 0) > 0,
+      redirect: this.#context.redirect,
       signal: input.signal,
       url,
     });
@@ -221,6 +229,7 @@ export class ClientSession {
     return await openStreamBody({
       host: this.#context.host,
       resolveHeaders: () => this.#context.resolveHeaders(headers),
+      redirect: this.#context.redirect,
       sessionId,
       signal,
       startIndex,
@@ -240,6 +249,7 @@ export class ClientSession {
         host: this.#context.host,
         maxReconnectAttempts: this.#context.maxReconnectAttempts,
         resolveHeaders: () => this.#context.resolveHeaders(),
+        redirect: this.#context.redirect,
         sessionId,
         signal: options?.signal,
         startIndex: streamIndex,
@@ -263,6 +273,7 @@ async function postTurnWithRetry(input: {
   readonly body: string;
   readonly headers: Headers;
   readonly mustDeliver: boolean;
+  readonly redirect?: ClientRedirectPolicy;
   readonly signal?: AbortSignal;
   readonly url: string;
 }): Promise<Response> {
@@ -275,6 +286,7 @@ async function postTurnWithRetry(input: {
       body: input.body,
       headers: input.headers,
       method: "POST",
+      redirect: input.redirect,
       signal: input.signal ?? null,
     });
 

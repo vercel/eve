@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { z } from "zod";
 
 import { captureVercel } from "./primitives/run-vercel.js";
 
@@ -14,9 +15,26 @@ export interface DeploymentInfo {
   productionUrl?: string;
 }
 
-interface VercelProjectJson {
-  projectId?: unknown;
-  orgId?: unknown;
+const VercelProjectReferenceSchema = z.object({
+  projectId: z.string().min(1),
+  orgId: z.string().min(1),
+  projectName: z.string().min(1).optional(),
+});
+
+/** Project and owner identifiers from a valid on-disk Vercel link. */
+export type VercelProjectReference = z.infer<typeof VercelProjectReferenceSchema>;
+
+/** Reads a validated Vercel project reference from `.vercel/project.json`. */
+export async function readProjectLink(
+  projectPath: string,
+): Promise<VercelProjectReference | undefined> {
+  try {
+    const raw = await readFile(join(projectPath, ".vercel", "project.json"), "utf8");
+    const parsed = VercelProjectReferenceSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 interface VercelApiProject {
@@ -68,32 +86,20 @@ export async function detectDeployment(
   options: ProjectDetectionOptions = {},
 ): Promise<DeploymentInfo> {
   options.signal?.throwIfAborted();
-  let projectJsonRaw: string;
-  try {
-    projectJsonRaw = await readFile(join(projectPath, ".vercel", "project.json"), "utf8");
-  } catch {
-    return { state: "unlinked" };
-  }
+  const link = await readProjectLink(projectPath);
+  if (link === undefined) return { state: "unlinked" };
 
-  let projectJson: VercelProjectJson;
-  try {
-    projectJson = JSON.parse(projectJsonRaw) as VercelProjectJson;
-  } catch {
-    return { state: "unlinked" };
-  }
-
-  const projectId = typeof projectJson.projectId === "string" ? projectJson.projectId : undefined;
-  const orgId = typeof projectJson.orgId === "string" ? projectJson.orgId : undefined;
-  if (!projectId || !orgId) {
-    return { state: "unlinked" };
-  }
-
-  const productionUrl = await fetchProductionAlias(projectId, orgId, projectPath, options);
+  const productionUrl = await fetchProductionAlias(
+    link.projectId,
+    link.orgId,
+    projectPath,
+    options,
+  );
   options.signal?.throwIfAborted();
   return {
     state: productionUrl ? "deployed" : "linked",
-    projectId,
-    orgId,
+    projectId: link.projectId,
+    orgId: link.orgId,
     productionUrl,
   };
 }
@@ -148,30 +154,20 @@ export async function detectProjectIdentity(
   options: ProjectDetectionOptions = {},
 ): Promise<ProjectIdentity | undefined> {
   options.signal?.throwIfAborted();
-  let projectJsonRaw: string;
-  try {
-    projectJsonRaw = await readFile(join(projectPath, ".vercel", "project.json"), "utf8");
-  } catch {
-    return undefined;
-  }
-  let projectJson: VercelProjectJson;
-  try {
-    projectJson = JSON.parse(projectJsonRaw) as VercelProjectJson;
-  } catch {
-    return undefined;
-  }
-  const projectId = typeof projectJson.projectId === "string" ? projectJson.projectId : undefined;
-  const orgId = typeof projectJson.orgId === "string" ? projectJson.orgId : undefined;
-  if (!projectId || !orgId) return undefined;
+  const link = await readProjectLink(projectPath);
+  if (link === undefined) return undefined;
 
   // Independent lookups; fetched concurrently because this read gates the
   // first paint of every surface that names the link (/model, the dashboard).
   const [projectName, teamName] = await Promise.all([
-    fetchVercelName(`/v9/projects/${projectId}?teamId=${orgId}`, orgId, projectPath, options).then(
-      (name) => name ?? projectId,
-    ),
-    orgId.startsWith("team_")
-      ? fetchVercelName(`/v2/teams/${orgId}`, orgId, projectPath, options)
+    fetchVercelName(
+      `/v9/projects/${link.projectId}?teamId=${link.orgId}`,
+      link.orgId,
+      projectPath,
+      options,
+    ).then((name) => name ?? link.projectId),
+    link.orgId.startsWith("team_")
+      ? fetchVercelName(`/v2/teams/${link.orgId}`, link.orgId, projectPath, options)
       : Promise.resolve(undefined),
   ]);
   options.signal?.throwIfAborted();
