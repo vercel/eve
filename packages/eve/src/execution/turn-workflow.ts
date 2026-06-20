@@ -34,6 +34,9 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
   "use workflow";
 
   const input = migrateTurnWorkflowInput(rawInput);
+  const cancelledBeforeStep =
+    input.stepInput.input?.kind === "runtime-action-result" &&
+    input.stepInput.input.cancelled === true;
   const cancellation =
     input.cancelToken === undefined
       ? undefined
@@ -41,8 +44,11 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
           metadata: { sessionId: input.stepInput.sessionState.sessionId },
           token: input.cancelToken,
         });
-  const controller = cancellation === undefined ? undefined : new AbortController();
-  const cancellationPromise = cancellation?.then(() => ({ kind: "cancelled" as const }));
+  const controller =
+    cancellation === undefined && !cancelledBeforeStep ? undefined : new AbortController();
+  const cancellationPromise = cancelledBeforeStep
+    ? Promise.resolve({ kind: "cancelled" as const })
+    : cancellation?.then(() => ({ kind: "cancelled" as const }));
   let currentStepInput: TurnStepInput =
     controller === undefined
       ? input.stepInput

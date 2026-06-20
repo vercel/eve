@@ -37,7 +37,11 @@ export async function runRuntimeActionCancellationScope<
   readonly dispatch: () => Promise<TDispatch>;
   readonly sessionId: string;
   readonly wait: (dispatchResult: TDispatch) => Promise<TResult>;
-}): Promise<{ readonly dispatchResult: TDispatch; readonly result: TResult }> {
+}): Promise<{
+  readonly cancelled: boolean;
+  readonly dispatchResult: TDispatch;
+  readonly result: TResult;
+}> {
   const cancellation =
     input.cancelToken === undefined
       ? undefined
@@ -58,16 +62,16 @@ export async function runRuntimeActionCancellationScope<
 
     const waitOperation = input.wait(dispatchResult);
     if (dispatchOutcome.kind === "cancelled") {
-      return { dispatchResult, result: await waitOperation };
+      return { cancelled: true, dispatchResult, result: await waitOperation };
     }
 
     const waitOutcome = await raceCancellation(waitOperation, cancelled);
     if (waitOutcome.kind === "cancelled") {
       await input.cancel(dispatchResult.cancellationTargets);
-      return { dispatchResult, result: await waitOperation };
+      return { cancelled: true, dispatchResult, result: await waitOperation };
     }
 
-    return { dispatchResult, result: waitOutcome.value };
+    return { cancelled: false, dispatchResult, result: waitOutcome.value };
   } finally {
     cancellation?.dispose();
   }

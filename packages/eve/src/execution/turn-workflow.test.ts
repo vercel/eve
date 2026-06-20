@@ -81,6 +81,52 @@ describe("turnWorkflow", () => {
     );
   });
 
+  // Runtime-action cancellation settles child workflows before the parent can
+  // resume. The resumed turn must start cancelled instead of asking the model
+  // to interpret the children's cancellation errors as ordinary tool results.
+  it("starts the resumed turn cancelled after delegated work settles", async () => {
+    const sessionState = createSessionState();
+    let stepSignal: AbortSignal | undefined;
+    vi.mocked(turnStep).mockImplementationOnce(
+      async (input) =>
+        await new Promise((resolve) => {
+          stepSignal = input.abortSignal;
+          input.abortSignal?.addEventListener(
+            "abort",
+            () =>
+              resolve({
+                action: "park",
+                hasPendingAuthorization: false,
+                hasPendingInputBatch: false,
+                serializedContext: { state: "cancelled" },
+                sessionState,
+              }),
+            { once: true },
+          );
+        }),
+    );
+
+    const { input } = createInput({ sessionState });
+    const cancelledInput: TurnWorkflowInput = {
+      ...input,
+      stepInput: {
+        ...input.stepInput,
+        input: { cancelled: true, kind: "runtime-action-result", results: [] },
+      },
+    };
+    await turnWorkflow(cancelledInput);
+
+    expect(stepSignal?.aborted).toBe(true);
+    expect(createHook).not.toHaveBeenCalled();
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "turn-token",
+      expect.objectContaining({
+        action: expect.objectContaining({ kind: "park" }),
+        kind: "turn-result",
+      }),
+    );
+  });
+
   it("notifies the driver when a turn completes", async () => {
     const sessionState = createSessionState();
     vi.mocked(turnStep).mockResolvedValueOnce({

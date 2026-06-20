@@ -121,6 +121,8 @@ export interface DeliverHookPayload {
  * Runtime-action results resumed back into a parked parent workflow.
  */
 export interface RuntimeActionResultHookPayload {
+  /** Stops the resumed logical turn after consuming these child results. */
+  readonly cancelled?: boolean;
   readonly kind: "runtime-action-result";
   readonly results: readonly RuntimeActionResult[];
 }

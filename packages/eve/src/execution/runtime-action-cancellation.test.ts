@@ -40,6 +40,7 @@ describe("runRuntimeActionCancellationScope", () => {
     dispatch.resolve({ cancellationTargets: [TARGET] });
 
     await expect(running).resolves.toEqual({
+      cancelled: true,
       dispatchResult: { cancellationTargets: [TARGET] },
       result: "complete",
     });

@@ -286,7 +286,7 @@ async function runDriverLoop(input: {
               ? dispatchCodeModeRuntimeActionsStep
               : dispatchRuntimeActionsStep;
 
-          const { result: runtimeResults } = await runRuntimeActionCancellationScope({
+          const { cancelled, result: runtimeResults } = await runRuntimeActionCancellationScope({
             cancel: (targets) =>
               cancelRuntimeActionsStep({
                 serializedContext: runtimeAction.serializedContext,
@@ -321,11 +321,15 @@ async function runDriverLoop(input: {
             return { output: "" };
           }
 
+          const cancelTokenOptions =
+            activeCancelToken === undefined ? {} : { cancelToken: activeCancelToken };
+          const cancellationResultOptions = cancelled ? { cancelled: true } : {};
           action = await dispatchAndAwaitTurn({
-            cancelToken: activeCancelToken,
+            ...cancelTokenOptions,
             capabilities: input.capabilities,
             completionToken: nextTurnCompletionToken(),
             delivery: {
+              ...cancellationResultOptions,
               kind: "runtime-action-result",
               results: runtimeResults.results,
             },
