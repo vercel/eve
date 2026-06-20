@@ -96,7 +96,7 @@ await agent.send({
 });
 ```
 
-Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and `status` moves from `ready` to `submitted` to `streaming` and back. Call `stop()` to abort the active request, and `reset()` to clear local state so the next send starts a fresh durable session.
+Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and `status` moves from `ready` to `submitted` to `streaming` and back. Call `stop()` to cancel the active server turn while preserving the session, and `reset()` to clear local state so the next send starts a fresh durable session.
 
 ## Human-in-the-loop prompts
 

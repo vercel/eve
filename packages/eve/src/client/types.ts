@@ -117,7 +117,8 @@ export interface SendTurnPayload<TOutput = unknown> {
   readonly outputSchema?: StandardJSONSchemaV1<unknown, TOutput> | JsonObject;
 
   /**
-   * Abort signal for cancelling the request.
+   * Abort signal for detaching the local request or stream. Use
+   * `MessageResponse.cancel()` to cancel server-side turn work.
    */
   readonly signal?: AbortSignal;
 

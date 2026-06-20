@@ -51,7 +51,7 @@ export interface UseEveAgentReturn<TData> {
   readonly session: SessionState;
   /** Lifecycle phase: `"ready"` (idle), `"submitted"` (request sent, awaiting first event), `"streaming"` (events arriving), or `"error"`. */
   readonly status: UseEveAgentStatus;
-  /** Abort the in-flight request. */
+  /** Cancel the active server turn while preserving its session. */
   readonly stop: () => void;
 }
 

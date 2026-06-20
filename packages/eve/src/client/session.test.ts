@@ -26,6 +26,7 @@ function createSession(
 function createAcceptedResponse() {
   return Response.json(
     {
+      cancelToken: "cancel_1",
       continuationToken: "eve:test",
       ok: true,
       sessionId: "session_1",
@@ -49,6 +50,26 @@ function createStreamResponse(events: readonly unknown[]) {
 }
 
 describe("ClientSession", () => {
+  // Repeated stop actions must share one server request so rapid clicks cannot
+  // race multiple cancellations for the same turn.
+  it("cancels the active server turn without aborting the session", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(createAcceptedResponse())
+      .mockResolvedValueOnce(Response.json({ cancelled: true }, { status: 202 }));
+    const session = createSession();
+
+    const response = await session.send("hello");
+    await expect(response.cancel()).resolves.toBe(true);
+    await expect(response.cancel()).resolves.toBe(true);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [url, init] = fetchMock.mock.calls[1]!;
+    expect(new URL(String(url)).pathname).toBe("/eve/v1/session/session_1/cancel");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({ cancelToken: "cancel_1" });
+  });
+
   it("serializes clientContext when sending a create-session message", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createAcceptedResponse());
     const session = createSession();

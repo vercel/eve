@@ -103,7 +103,7 @@ The find-and-answer flow is identical across frameworks. The [React hook referen
 
 ## Stop, reset, and resume
 
-`stop()` aborts the in-flight stream. `reset()` wipes state and starts a fresh session. To resume across reloads, hand `initialSession` the state you saved earlier and use `onSessionChange` to persist the cursor as it advances:
+`stop()` cancels the active server turn and keeps the session available for follow-ups. `reset()` wipes state and starts a fresh session. To resume across reloads, hand `initialSession` the state you saved earlier and use `onSessionChange` to persist the cursor as it advances:
 
 ```ts
 const agent = useEveAgent({

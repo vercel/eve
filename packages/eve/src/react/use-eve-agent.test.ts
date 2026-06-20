@@ -17,13 +17,16 @@ import {
 import type { SessionState } from "#client/types.js";
 
 function createStartedMessageResponse(sessionId: string, continuationToken: string): Response {
-  return new Response(JSON.stringify({ continuationToken, ok: true, sessionId }), {
-    headers: {
-      "content-type": "application/json",
-      [EVE_SESSION_ID_HEADER]: sessionId,
+  return new Response(
+    JSON.stringify({ cancelToken: `cancel:${sessionId}`, continuationToken, ok: true, sessionId }),
+    {
+      headers: {
+        "content-type": "application/json",
+        [EVE_SESSION_ID_HEADER]: sessionId,
+      },
+      status: 202,
     },
-    status: 202,
-  });
+  );
 }
 
 function createEagerStreamResponse(events: readonly HandleMessageStreamEvent[]): Response {
@@ -220,6 +223,46 @@ describe("useEveAgent", () => {
         userMessage: "Hello",
       }),
     );
+  });
+
+  // Stop can arrive before the POST returns its cancel token, so the client
+  // must replay that intent as soon as the server handle becomes available.
+  it("remembers a stop requested while the turn POST is pending", async () => {
+    const startResponse = createDeferred<Response>();
+    const streamResponse = createEagerStreamResponse([createSessionWaitingEvent()]);
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
+      const url = new URL(String(request), "https://eve.test");
+      if (url.pathname.endsWith("/cancel")) {
+        return Response.json({ cancelled: true, ok: true }, { status: 202 });
+      }
+      if (url.pathname.endsWith("/stream")) return streamResponse;
+      return await startResponse.promise;
+    });
+    let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
+
+    function TestComponent() {
+      helpers = useEveAgent();
+      return null;
+    }
+
+    await act(async () => {
+      create(createElement(TestComponent));
+    });
+
+    let sendPromise: Promise<void> | undefined;
+    await act(async () => {
+      sendPromise = helpers?.send({ message: "Stop after dispatch" });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      helpers?.stop();
+      startResponse.resolve(createStartedMessageResponse("session_1", "http:session_1"));
+      await sendPromise;
+    });
+
+    expect(
+      fetchMock.mock.calls.some(([request]) =>
+        new URL(String(request), "https://eve.test").pathname.endsWith("/cancel"),
+      ),
+    ).toBe(true);
   });
 
   it("prepares fresh clientContext before sending without projecting it optimistically", async () => {

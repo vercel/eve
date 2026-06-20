@@ -5,6 +5,7 @@ import type { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 
 import { EVE_HEALTH_ROUTE_PATH } from "../../src/protocol/routes.js";
+import { Client } from "../../src/client/client.js";
 import { WEATHER_AGENT_DESCRIPTOR } from "../../src/internal/testing/scenario-apps/weather-agent.js";
 import {
   type ScenarioAppDescriptor,
@@ -26,6 +27,10 @@ const DEV_SERVER_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
       ([path]) => !path.startsWith("agent/channels/"),
     ),
   ),
+};
+const CANCELLATION_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
+  ...DEV_SERVER_AGENT_DESCRIPTOR,
+  name: "cancellation-agent",
 };
 
 interface RunningEveDev {
@@ -233,6 +238,40 @@ async function startEveDev(appRoot: string): Promise<RunningEveDev> {
 }
 
 describe("eve dev server", () => {
+  it(
+    "cancels one child turn and continues the parent session",
+    async () => {
+      const app = await scenarioApp(CANCELLATION_AGENT_DESCRIPTOR);
+      const server = await startEveDev(app.appRoot);
+
+      try {
+        const session = new Client({ host: server.url }).session();
+        const response = await session.send("[wait-for-cancel]");
+        const resultPromise = response.result();
+
+        await expect(response.cancel()).resolves.toBe(true);
+        const cancelled = await resultPromise;
+
+        expect(cancelled.status).toBe("waiting");
+        expect(cancelled.events.find((event) => event.type === "step.failed")?.data).toMatchObject({
+          code: "TURN_CANCELLED",
+          message: "Turn cancelled by the client.",
+        });
+        expect(cancelled.events.at(-1)?.type).toBe("session.waiting");
+
+        const followUp = await (
+          await session.send("Reply with the exact string `still-alive` and nothing else.")
+        ).result();
+        expect(followUp.sessionId).toBe(cancelled.sessionId);
+        expect(followUp.message).toBe("still-alive");
+        expect(followUp.status).toBe("waiting");
+      } finally {
+        await server.stop();
+      }
+    },
+    DEV_SERVER_SCENARIO_TIMEOUT_MS,
+  );
+
   it(
     "boots the packaged development server and completes a streamed turn",
     async () => {

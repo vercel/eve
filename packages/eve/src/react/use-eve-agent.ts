@@ -36,11 +36,11 @@ export type UseEveAgentSnapshot<TData> = EveAgentStoreSnapshot<TData>;
  * Snapshot plus commands returned by `useEveAgent`.
  */
 export interface UseEveAgentHelpers<TData> extends UseEveAgentSnapshot<TData> {
-  /** Resets the session: aborts any in-flight turn, recreates the owned session, and clears events and projected data. */
+  /** Resets the session: cancels any active turn, recreates the owned session, and clears events and projected data. */
   readonly reset: () => void;
   /** Sends a turn (message, HITL responses, and/or client context). Rejects if a turn is already in flight. */
   readonly send: <TOutput = unknown>(input: SendTurnPayload<TOutput>) => Promise<void>;
-  /** Aborts the in-flight turn's stream, if any. */
+  /** Cancels the active server turn while preserving its session. */
   readonly stop: () => void;
 }
 

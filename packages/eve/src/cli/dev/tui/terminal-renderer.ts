@@ -312,6 +312,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #keyFlushTimer?: ReturnType<typeof setTimeout>;
   #onResize?: () => void;
   #resolveStreamInterrupt?: () => void;
+  #cancelActiveStream?: () => void | Promise<void>;
+  #forceAbortActiveStream?: () => void;
   #painting = false;
   #paintAgain = false;
 
@@ -587,6 +589,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#resolveStreamInterrupt = resolve;
     });
     this.#consumeKey = (key) => this.#handleStreamingKey(key);
+    this.#cancelActiveStream = result.abort;
+    this.#forceAbortActiveStream = result.forceAbort;
     this.#attachInput();
     const turnState: RenderTurnState = {
       text: new Map(),
@@ -597,14 +601,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     try {
       for await (const event of takeUntil(iterateTUIStream(result.events), streamInterrupted)) {
-        if (this.#interrupted) break;
+        if (this.#interrupted) continue;
         this.#applyStreamEvent(event, displayModes, turnState);
       }
     } catch (error) {
       this.#addErrorBlock("Error", toErrorMessage(error));
     } finally {
       this.#resolveStreamInterrupt = undefined;
-      if (this.#interrupted) result.abort?.();
+      this.#cancelActiveStream = undefined;
+      this.#forceAbortActiveStream = undefined;
       this.#detachInput();
       this.#stopTicker();
       this.#working = false;
@@ -1763,8 +1768,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
         if (!this.#interrupted) {
           this.#interrupted = true;
           this.#status = "Interrupted";
-          this.#resolveStreamInterrupt?.();
+          void this.#cancelActiveStream?.();
           this.#paint();
+        } else {
+          this.#forceAbortActiveStream?.();
+          this.#resolveStreamInterrupt?.();
         }
         break;
       default:

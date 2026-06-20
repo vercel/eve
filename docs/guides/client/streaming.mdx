@@ -115,9 +115,26 @@ for await (const event of session.stream({ startIndex: 0 })) {
 
 `stream()` throws if the session has no `sessionId`, because there's no stream to attach to before the first send.
 
+## Cancel a turn
+
+Call `response.cancel()` to stop the current server-side turn while keeping its durable parent session alive. Keep consuming the response through its `session.waiting` boundary so the client can advance the stream cursor:
+
+```ts
+const response = await session.send("Run a long analysis.");
+
+setTimeout(() => {
+  void response.cancel();
+}, 10_000);
+
+const result = await response.result();
+console.log(result.status); // "waiting"
+```
+
+Cancellation is cooperative. eve passes a durable `AbortSignal` into the turn's model and compaction calls, then emits `step.failed` and `turn.failed` with `code: "TURN_CANCELLED"` before parking the session.
+
 ## Abort a request
 
-Pass an `AbortSignal` to cancel the POST or stream. Arm the timeout before awaiting `send()` so it covers the POST as well as the stream:
+Pass an `AbortSignal` to detach the local POST or stream without cancelling server work. Arm the timeout before awaiting `send()` so it covers the POST as well as the stream:
 
 ```ts
 const controller = new AbortController();
@@ -135,7 +152,7 @@ for await (const event of response) {
 clearTimeout(timeout);
 ```
 
-Once a response is aborted, create a new send for the next turn. Don't reuse the same `MessageResponse`.
+Once a response is aborted, create a new send for the next turn. Don't reuse the same `MessageResponse`. Prefer `response.cancel()` when the server should stop the turn too.
 
 ## What to read next
 

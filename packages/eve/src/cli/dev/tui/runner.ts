@@ -81,7 +81,8 @@ const idleRuntimeArtifactPollMs = 500;
 
 export type AgentTUIStreamResult = {
   events: AsyncIterable<AgentTUIStreamEvent> | ReadableStream<AgentTUIStreamEvent>;
-  abort?: () => void;
+  abort?: () => void | Promise<void>;
+  forceAbort?: () => void;
   turnState?: AgentTUITurnState;
 };
 
@@ -871,7 +872,14 @@ export class EveTUIRunner {
     const turnState = createTurnState();
 
     return {
-      abort: () => abortController.abort(),
+      abort: async () => {
+        try {
+          if (await response.cancel()) return;
+        } catch {
+          // Fall back to detaching locally when server cancellation fails.
+        }
+        abortController.abort();
+      },
       events: eveEventsToTUIStream({
         events: response,
         pendingInputRequests: this.#pendingInputRequests,
@@ -890,6 +898,7 @@ export class EveTUIRunner {
             : (event) =>
                 isGatewayAuthFailure(event) ? formatGatewayAuthFailureNotice(event) : undefined,
       }),
+      forceAbort: () => abortController.abort(),
       turnState,
     };
   }

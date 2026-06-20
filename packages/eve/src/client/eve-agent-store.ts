@@ -2,6 +2,7 @@ import { Client } from "#client/client.js";
 import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import { ActiveTurnControl } from "#client/active-turn-control.js";
 import { toError } from "#shared/errors.js";
 import type { ClientAuth, HeadersValue, SendTurnPayload, SessionState } from "#client/types.js";
 import type { UserContent } from "ai";
@@ -90,7 +91,7 @@ interface PendingMessageSubmission {
  * Drives one turn at a time: `send` rejects if a turn is already submitted or
  * streaming. Read the latest projection via the `snapshot` getter, observe
  * changes with `subscribe`, register lifecycle hooks with `setCallbacks`,
- * abort the in-flight turn with `stop`, and discard all state with `reset`.
+ * cancel the active server turn with `stop`, and discard all state with `reset`.
  */
 export class EveAgentStore<TData> {
   readonly #createSession: (() => ClientSession) | undefined;
@@ -98,7 +99,7 @@ export class EveAgentStore<TData> {
   readonly #reducer: EveAgentReducer<TData>;
   readonly #subscribers = new Set<() => void>();
 
-  #abortController: AbortController | undefined;
+  #activeTurn: ActiveTurnControl | undefined;
   #callbacks: EveAgentStoreCallbacks<TData> = {};
   #data: TData;
   #error: Error | undefined;
@@ -151,8 +152,8 @@ export class EveAgentStore<TData> {
     }
 
     const operationId = this.#startOperation();
-    const abortController = new AbortController();
-    this.#abortController = abortController;
+    const activeTurn = new ActiveTurnControl();
+    this.#activeTurn = activeTurn;
     this.#error = undefined;
     this.#status = "submitted";
     this.#publish();
@@ -164,14 +165,20 @@ export class EveAgentStore<TData> {
         return;
       }
 
+      if (!activeTurn.beginDispatch()) {
+        this.#status = "ready";
+        return;
+      }
+
       this.#projectOptimisticMessage(preparedInput);
       this.#projectInputResponses(preparedInput);
       this.#publish();
 
       const response = await this.#session.send({
         ...preparedInput,
-        signal: createAbortSignal(preparedInput.signal, abortController.signal),
+        signal: createAbortSignal(preparedInput.signal, activeTurn.signal),
       });
+      activeTurn.attachCancellation(() => response.cancel());
 
       let sawEvent = false;
       for await (const event of response) {
@@ -212,7 +219,9 @@ export class EveAgentStore<TData> {
       }
     } finally {
       if (this.#isCurrentOperation(operationId)) {
-        this.#abortController = undefined;
+        if (this.#activeTurn === activeTurn) {
+          this.#activeTurn = undefined;
+        }
         this.#callbacks.onSessionChange?.(this.#session.state);
         this.#publish();
         this.#callbacks.onFinish?.(this.#snapshot);
@@ -221,13 +230,13 @@ export class EveAgentStore<TData> {
   }
 
   stop(): void {
-    this.#abortController?.abort();
+    this.#activeTurn?.stop();
   }
 
   reset(): void {
     this.#invalidateOperation();
     this.stop();
-    this.#abortController = undefined;
+    this.#activeTurn = undefined;
     this.#session = this.#createSession?.() ?? this.#session;
     this.#events = [];
     this.#pendingMessageSubmission = undefined;

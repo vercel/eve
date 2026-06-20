@@ -13,7 +13,7 @@ import {
   type HandleMessageStreamEvent,
 } from "#protocol/message.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
-import type { SessionState } from "#client/types.js";
+import type { SendTurnPayload, SessionState } from "#client/types.js";
 
 function createStartedMessageResponse(sessionId: string, continuationToken: string): Response {
   return new Response(JSON.stringify({ continuationToken, ok: true, sessionId }), {
@@ -195,6 +195,35 @@ describe("EveAgentStore (Vue composable backing store)", () => {
         streamIndex: 3,
       },
     ]);
+  });
+
+  // Async preparation is still pre-dispatch: stopping here must leave no
+  // optimistic message or submitted state behind when preparation resolves.
+  it("returns to ready when stopped while prepareSend is pending", async () => {
+    const preparedInput = createDeferred<SendTurnPayload>();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new Error("fetch should not run"));
+    const store = new EveAgentStore({
+      reducer: defaultMessageReducer(),
+    });
+    store.setCallbacks({
+      prepareSend() {
+        return preparedInput.promise;
+      },
+    });
+
+    const sendPromise = store.send({ message: "Stop before dispatch" });
+    await Promise.resolve();
+    expect(store.snapshot.status).toBe("submitted");
+
+    store.stop();
+    preparedInput.resolve({ message: "Stop before dispatch" });
+    await sendPromise;
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.data.messages).toEqual([]);
   });
 
   it("surfaces transport errors", async () => {

@@ -2,6 +2,7 @@ import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 import {
   EVE_CREATE_SESSION_ROUTE_PATH,
+  createEveCancelTurnRoutePath,
   createEveContinueSessionRoutePath,
 } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
@@ -63,9 +64,10 @@ export class ClientSession {
     const payload = normalizeSendTurnInput(input);
     const state = this.#state;
     const postResult = await this.#postTurn(payload, state);
-    const { continuationToken, sessionId } = postResult;
+    const { cancelToken, continuationToken, sessionId } = postResult;
 
     return new MessageResponse<TOutput>({
+      cancel: () => this.#cancelTurn(sessionId, cancelToken, payload.headers),
       continuationToken,
       createStream: () => this.#createEventStream(sessionId, continuationToken, state, payload),
       sessionId,
@@ -99,7 +101,7 @@ export class ClientSession {
   async #postTurn(
     input: SendTurnPayload,
     session: SessionState,
-  ): Promise<{ continuationToken?: string; sessionId: string }> {
+  ): Promise<{ cancelToken?: string; continuationToken?: string; sessionId: string }> {
     const routePath = session.sessionId
       ? createEveContinueSessionRoutePath(session.sessionId)
       : EVE_CREATE_SESSION_ROUTE_PATH;
@@ -138,8 +140,30 @@ export class ClientSession {
 
     const continuationToken =
       typeof payload.continuationToken === "string" ? payload.continuationToken : undefined;
+    const cancelToken = typeof payload.cancelToken === "string" ? payload.cancelToken : undefined;
 
-    return { continuationToken, sessionId };
+    return { cancelToken, continuationToken, sessionId };
+  }
+
+  async #cancelTurn(
+    sessionId: string,
+    cancelToken: string | undefined,
+    perRequestHeaders?: Readonly<Record<string, string>>,
+  ): Promise<boolean> {
+    if (!cancelToken) return false;
+
+    const url = createClientUrl(this.#context.host, createEveCancelTurnRoutePath(sessionId));
+    const headers = await this.#context.resolveHeaders(perRequestHeaders);
+    headers.set("content-type", "application/json");
+
+    const response = await fetch(url, {
+      body: JSON.stringify({ cancelToken }),
+      headers,
+      method: "POST",
+    });
+    if (response.ok) return true;
+    if (response.status === 409) return false;
+    throw new ClientError(response.status, await response.text());
   }
 
   // ---------------------------------------------------------------------------
