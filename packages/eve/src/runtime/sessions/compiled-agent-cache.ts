@@ -1,5 +1,3 @@
-import { pathToFileURL } from "node:url";
-
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
@@ -7,13 +5,12 @@ import type { RuntimeAdapterRegistry } from "#runtime/channels/registry.js";
 import { createRuntimeAdapterRegistry } from "#runtime/channels/registry.js";
 import {
   getRuntimeCompiledArtifactsCacheKey,
-  type RuntimeDiskCompiledArtifactsSource,
   type RuntimeCompiledArtifactsSource,
 } from "#runtime/compiled-artifacts-source.js";
 import { getResolvedRuntimeAgentNode, type ResolvedAgentGraphBundle } from "#runtime/graph.js";
 import type { RuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
-import { loadCompiledModuleMap } from "#runtime/loaders/module-map.js";
+import { loadRuntimeCompiledModuleMap } from "#runtime/loaders/module-map.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import type { RuntimeToolRegistry } from "#runtime/tools/registry.js";
@@ -63,37 +60,6 @@ async function loadFullBundle(
     toolRegistry: rootNode.toolRegistry,
     turnAgent: rootNode.turnAgent,
   };
-}
-
-async function loadRuntimeCompiledModuleMap(
-  compiledArtifactsSource: RuntimeCompiledArtifactsSource,
-): Promise<CompiledModuleMap> {
-  if (
-    compiledArtifactsSource.kind === "disk" &&
-    compiledArtifactsSource.moduleMapLoaderPath !== undefined
-  ) {
-    return await loadAuthoredSourceCompiledModuleMap(compiledArtifactsSource);
-  }
-
-  return await loadCompiledModuleMap({ compiledArtifactsSource });
-}
-
-async function loadAuthoredSourceCompiledModuleMap(
-  compiledArtifactsSource: RuntimeDiskCompiledArtifactsSource,
-): Promise<CompiledModuleMap> {
-  if (compiledArtifactsSource.moduleMapLoaderPath === undefined) {
-    throw new Error(
-      'Authored-source module map loading requires "moduleMapLoaderPath" in the compiled artifacts source.',
-    );
-  }
-
-  const loader = (await import(
-    pathToFileURL(compiledArtifactsSource.moduleMapLoaderPath).href
-  )) as typeof import("#internal/authored-module-map-loader.js");
-
-  return await loader.loadCompiledModuleMapFromAuthoredSource({
-    compiledArtifactsSource,
-  });
 }
 
 async function getOrLoadFullBundle(

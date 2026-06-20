@@ -8,7 +8,7 @@ import {
 } from "#internal/authored-module.js";
 import type { ModuleDefinitionExport } from "#public/definitions/source.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { loadCompiledModuleMap } from "#runtime/loaders/module-map.js";
+import { loadRuntimeCompiledModuleMap } from "#runtime/loaders/module-map.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { resolveBootstrapRuntimeModel } from "#runtime/agent/bootstrap-model.js";
 import {
@@ -60,9 +60,7 @@ async function loadSourceBackedRuntimeModelReference(
     );
   }
 
-  const moduleMap = await loadCompiledModuleMap({
-    compiledArtifactsSource: input.compiledArtifactsSource,
-  });
+  const moduleMap = await loadRuntimeCompiledModuleMap(input.compiledArtifactsSource);
   const moduleNamespace =
     moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules[reference.source.sourceId];
 

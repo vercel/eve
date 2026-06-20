@@ -1,3 +1,5 @@
+import { pathToFileURL } from "node:url";
+
 import { type CompiledModuleMap, compiledModuleMapSchema } from "#compiler/module-map.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { formatValidationError } from "#runtime/validation.js";
@@ -69,6 +71,38 @@ export async function loadCompiledModuleMap(
     "Compiled module map is unavailable without an app root or bundled compiled artifacts.",
     BUNDLED_MODULE_MAP_SOURCE,
   );
+}
+
+/**
+ * Loads the compiled module map the way the runtime does. When the source is a
+ * disk build that ships an authored-source module-map loader (dev and build
+ * flows), authored modules are hydrated through it so tsconfig path aliases and
+ * NodeNext `.js` import specifiers resolve to their `.ts` sources. Otherwise it
+ * falls back to the bundled/compiled module map.
+ *
+ * Every runtime consumer that re-reads authored config (the compiled-agent
+ * cache and source-backed model resolution) must go through this single entry
+ * point so they resolve modules identically; importing the compiled
+ * `module-map.mjs` directly skips the authored-source loader and fails to
+ * resolve `.js` specifiers between authored source files in dev.
+ */
+export async function loadRuntimeCompiledModuleMap(
+  compiledArtifactsSource: RuntimeCompiledArtifactsSource,
+): Promise<CompiledModuleMap> {
+  if (
+    compiledArtifactsSource.kind === "disk" &&
+    compiledArtifactsSource.moduleMapLoaderPath !== undefined
+  ) {
+    const loader = (await import(
+      pathToFileURL(compiledArtifactsSource.moduleMapLoaderPath).href
+    )) as typeof import("#internal/authored-module-map-loader.js");
+
+    return await loader.loadCompiledModuleMapFromAuthoredSource({
+      compiledArtifactsSource,
+    });
+  }
+
+  return await loadCompiledModuleMap({ compiledArtifactsSource });
 }
 
 function parseCompiledModuleMap(value: unknown, moduleMapPath: string): CompiledModuleMap {
