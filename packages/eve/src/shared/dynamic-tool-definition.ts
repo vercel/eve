@@ -157,11 +157,6 @@ export const DYNAMIC_SENTINEL_KIND = "eve:dynamic" as const;
 export interface DynamicSentinel {
   readonly kind: typeof DYNAMIC_SENTINEL_KIND;
   readonly events: DynamicEvents;
-  /**
-   * Whether map entries are namespaced under the file slug (`slug__key`).
-   * Defaults to `true`. Set `false` to expose each entry under its bare key.
-   * Has no effect for dynamic instructions (they carry no model-visible name).
-   */
   readonly namespace?: boolean;
 }
 

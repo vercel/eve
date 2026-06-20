@@ -168,7 +168,6 @@ export type CompiledToolDefinition = InternalToolDefinition & ModuleSourceRef;
 export interface CompiledDynamicToolDefinition extends ModuleSourceRef {
   readonly slug: string;
   readonly eventNames: readonly string[];
-  /** Namespace map entries under the slug (`slug__key`). Defaults to true. */
   readonly namespace: boolean;
 }
 
@@ -180,7 +179,6 @@ export interface CompiledDynamicToolDefinition extends ModuleSourceRef {
 export interface CompiledDynamicSkillDefinition extends ModuleSourceRef {
   readonly slug: string;
   readonly eventNames: readonly string[];
-  /** Namespace map entries under the slug (`slug__key`). Defaults to true. */
   readonly namespace: boolean;
 }
 

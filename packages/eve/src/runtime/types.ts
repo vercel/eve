@@ -327,7 +327,6 @@ interface ResolvedAgentMetadata {
 export interface ResolvedDynamicToolResolver extends Readonly<ModuleSourceRef> {
   readonly slug: string;
   readonly eventNames: readonly string[];
-  /** Namespace map entries under the slug (`slug__key`). */
   readonly namespace: boolean;
   readonly events: Readonly<
     Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
@@ -342,7 +341,6 @@ export interface ResolvedDynamicToolResolver extends Readonly<ModuleSourceRef> {
 export interface ResolvedDynamicSkillResolver extends Readonly<ModuleSourceRef> {
   readonly slug: string;
   readonly eventNames: readonly string[];
-  /** Namespace map entries under the slug (`slug__key`). */
   readonly namespace: boolean;
   readonly events: Readonly<
     Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
