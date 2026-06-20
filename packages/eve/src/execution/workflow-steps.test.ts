@@ -240,6 +240,8 @@ describe("dispatchTurnStep", () => {
 });
 
 describe("dispatchRuntimeActionsStep", () => {
+  // Cancellation fan-out depends on recording the same token sent to the child
+  // together with the child session and node that own it.
   it("starts subagent child drivers on the latest deployment", async () => {
     vi.stubEnv("VERCEL_ENV", "production");
     const compiledArtifactsSource = {} as never;
@@ -299,16 +301,29 @@ describe("dispatchRuntimeActionsStep", () => {
     });
 
     const result = await dispatchRuntimeActionsStep({
+      cancelToken: "parent_cancel_1",
       parentWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState,
     });
 
-    expect(result).toEqual({ results: [], sessionState: expect.any(Object) });
+    expect(result).toEqual({
+      cancellationTargets: [
+        {
+          cancelToken: expect.stringMatching(/^eve:cancel:/),
+          kind: "local",
+          nodeId: "subagents/delegate",
+          sessionId: "child-run",
+        },
+      ],
+      results: [],
+      sessionState: expect.any(Object),
+    });
     expect(startMock).toHaveBeenCalledWith(
       workflowEntryReference,
       [
         expect.objectContaining({
+          cancelToken: result.cancellationTargets[0]?.cancelToken,
           input: {
             message: expect.stringContaining("investigate latest routing"),
           },
@@ -388,6 +403,7 @@ describe("dispatchRuntimeActionsStep", () => {
         sessionState,
       }),
     ).resolves.toEqual({
+      cancellationTargets: [],
       results: [
         {
           callId: "call-1",

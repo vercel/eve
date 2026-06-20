@@ -22,13 +22,16 @@ import { hydrateDurableSession } from "#execution/session.js";
 import { deserializeContext } from "#context/serialize.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
+import type { RuntimeActionCancellationTarget } from "#execution/runtime-action-cancellation.js";
 
 export async function dispatchCodeModeRuntimeActionsStep(input: {
   readonly callbackBaseUrl?: string;
+  readonly cancelToken?: string;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<{
+  readonly cancellationTargets: readonly RuntimeActionCancellationTarget[];
   readonly results: readonly RuntimeSubagentResultActionResult[];
   readonly sessionState: DurableSessionState;
 }> {
@@ -38,7 +41,7 @@ export async function dispatchCodeModeRuntimeActionsStep(input: {
   const codeModeAction = getPendingCodeModeInterrupt(durableSession.state);
 
   if (codeModeAction === undefined) {
-    return { results: [], sessionState: input.sessionState };
+    return { cancellationTargets: [], results: [], sessionState: input.sessionState };
   }
 
   const action = buildRuntimeActionFromInterrupt(codeModeAction.interrupt);
@@ -64,6 +67,7 @@ export async function dispatchCodeModeRuntimeActionsStep(input: {
 
   return dispatchRuntimeActionsStep({
     callbackBaseUrl: input.callbackBaseUrl,
+    cancelToken: input.cancelToken,
     parentWritable: input.parentWritable,
     serializedContext: input.serializedContext,
     sessionState: batchState,

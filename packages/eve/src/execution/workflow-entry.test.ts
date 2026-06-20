@@ -48,6 +48,7 @@ vi.mock("./dispatch-runtime-actions-step.js", () => ({
   dispatchRuntimeActionsStep: vi
     .fn()
     .mockImplementation(async ({ sessionState }: { sessionState: DurableSessionState }) => ({
+      cancellationTargets: [],
       results: [],
       sessionState,
     })),
@@ -219,6 +220,7 @@ describe("workflowEntry", () => {
     const parentWritable = vi.mocked(dispatchTurnStep).mock.calls[0]?.[0].parentWritable;
     expect(dispatchRuntimeActionsStep).toHaveBeenCalledWith({
       callbackBaseUrl: "https://eve.example.com",
+      cancelToken: undefined,
       parentWritable,
       serializedContext: expect.objectContaining({
         "eve.sessionId": "wrun_test_123",
@@ -263,6 +265,7 @@ describe("workflowEntry", () => {
       createSessionStepResultForMock(baseSessionState),
     );
     vi.mocked(dispatchRuntimeActionsStep).mockResolvedValueOnce({
+      cancellationTargets: [],
       results: [failedResult],
       sessionState: pendingSessionState,
     });

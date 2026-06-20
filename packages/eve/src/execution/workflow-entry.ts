@@ -32,6 +32,8 @@ import { createSessionStep } from "#execution/create-session-step.js";
 import { dispatchCodeModeRuntimeActionsStep } from "#execution/dispatch-code-mode-runtime-actions-step.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { dispatchAndAwaitTurn } from "#execution/dispatch-turn.js";
+import { cancelRuntimeActionsStep } from "#execution/cancel-runtime-actions-step.js";
+import { runRuntimeActionCancellationScope } from "#execution/runtime-action-cancellation.js";
 import {
   emitTerminalSessionFailureStep,
   routeProxiedDeliverStep,
@@ -278,28 +280,41 @@ async function runDriverLoop(input: {
 
         case "dispatch-code-mode-runtime-actions":
         case "dispatch-runtime-actions": {
+          const runtimeAction = action;
           const dispatchStep =
-            action.kind === "dispatch-code-mode-runtime-actions"
+            runtimeAction.kind === "dispatch-code-mode-runtime-actions"
               ? dispatchCodeModeRuntimeActionsStep
               : dispatchRuntimeActionsStep;
 
-          const dispatchResult = await dispatchStep({
-            callbackBaseUrl: resolveVercelProductionCallbackBaseUrl() ?? getWorkflowMetadata().url,
-            parentWritable: input.driverWritable,
-            serializedContext: action.serializedContext,
-            sessionState: action.sessionState,
-          });
-
-          const runtimeResults = await waitForPendingRuntimeActionResults({
-            bufferedDeliveries,
-            consumeNext,
-            getNextPromise,
-            initialResults: dispatchResult.results,
-            parentWritable: input.driverWritable,
-            pendingActionKeys: action.pendingActionKeys,
-            rekeyHook,
-            serializedContext: action.serializedContext,
-            sessionState: dispatchResult.sessionState,
+          const { result: runtimeResults } = await runRuntimeActionCancellationScope({
+            cancel: (targets) =>
+              cancelRuntimeActionsStep({
+                serializedContext: runtimeAction.serializedContext,
+                targets,
+              }),
+            cancelToken: activeCancelToken,
+            dispatch: () =>
+              dispatchStep({
+                callbackBaseUrl:
+                  resolveVercelProductionCallbackBaseUrl() ?? getWorkflowMetadata().url,
+                cancelToken: activeCancelToken,
+                parentWritable: input.driverWritable,
+                serializedContext: runtimeAction.serializedContext,
+                sessionState: runtimeAction.sessionState,
+              }),
+            sessionId: input.sessionState.sessionId,
+            wait: (result) =>
+              waitForPendingRuntimeActionResults({
+                bufferedDeliveries,
+                consumeNext,
+                getNextPromise,
+                initialResults: result.results,
+                parentWritable: input.driverWritable,
+                pendingActionKeys: runtimeAction.pendingActionKeys,
+                rekeyHook,
+                serializedContext: runtimeAction.serializedContext,
+                sessionState: result.sessionState,
+              }),
           });
 
           if (runtimeResults === null) {

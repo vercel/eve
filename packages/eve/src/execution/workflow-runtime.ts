@@ -20,6 +20,8 @@ import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { buildRunContext } from "#execution/runtime-context.js";
 import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
+import { createRuntimeActionCancellationHookToken } from "#execution/runtime-action-cancellation.js";
+
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
 const CANCEL_HOOK_REGISTRATION_ATTEMPTS = 80;
@@ -84,23 +86,26 @@ export function createWorkflowRuntime(config: {
   return {
     async cancelTurn(sessionId: string, cancelToken: string): Promise<boolean> {
       applyEveWorkflowQueueNamespace();
+      const hookTokens = [cancelToken, createRuntimeActionCancellationHookToken(cancelToken)];
       for (let attempt = 0; attempt < CANCEL_HOOK_REGISTRATION_ATTEMPTS; attempt += 1) {
-        try {
-          const hook = normalizeWorkflowHook(await getHookByToken(cancelToken));
-          if (!isTurnCancellationHookForSession(hook, sessionId)) return false;
-          await resumeHook(cancelToken, { kind: "cancel-turn" });
-          return true;
-        } catch (error) {
-          if (!HookNotFoundError.is(error)) {
-            logError(log, "failed to cancel active turn", error, {
-              cancelToken,
-              sessionId,
-            });
-            throw error;
+        for (const hookToken of hookTokens) {
+          try {
+            const hook = normalizeWorkflowHook(await getHookByToken(hookToken));
+            if (!isTurnCancellationHookForSession(hook, sessionId)) return false;
+            await resumeHook(hookToken, { kind: "cancel-turn" });
+            return true;
+          } catch (error) {
+            if (!HookNotFoundError.is(error)) {
+              logError(log, "failed to cancel active turn", error, {
+                cancelToken,
+                sessionId,
+              });
+              throw error;
+            }
           }
-          if (attempt < CANCEL_HOOK_REGISTRATION_ATTEMPTS - 1) {
-            await new Promise((resolve) => setTimeout(resolve, CANCEL_HOOK_REGISTRATION_RETRY_MS));
-          }
+        }
+        if (attempt < CANCEL_HOOK_REGISTRATION_ATTEMPTS - 1) {
+          await new Promise((resolve) => setTimeout(resolve, CANCEL_HOOK_REGISTRATION_RETRY_MS));
         }
       }
       return false;

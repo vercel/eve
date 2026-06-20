@@ -45,6 +45,7 @@ export function buildSubagentRunInput(input: {
    */
   readonly capabilities?: SessionCapabilities;
   readonly channelMetadata?: ChannelInstrumentationProjection;
+  readonly cancelToken?: string;
   readonly initiatorAuth: SessionAuthContext | null;
   readonly session: HarnessSession;
 }): SubagentRunInputBuild {
@@ -78,6 +79,7 @@ export function buildSubagentRunInput(input: {
     },
     auth,
     capabilities,
+    cancelToken: input.cancelToken,
     channelMetadata,
     continuationToken: childContinuationToken,
     initiatorAuth,

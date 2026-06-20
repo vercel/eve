@@ -7,12 +7,17 @@ import type { RuntimeRemoteAgentCallActionRequest } from "#runtime/actions/types
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 
+export interface RemoteAgentSessionStart {
+  readonly cancelToken?: string;
+  readonly sessionId: string;
+}
+
 export async function startRemoteAgentSession(input: {
   readonly action: RuntimeRemoteAgentCallActionRequest;
   readonly callbackBaseUrl: string | undefined;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
   readonly session: HarnessSession;
-}): Promise<string> {
+}): Promise<RemoteAgentSessionStart> {
   const callbackToken = input.session.continuationToken;
   if (!callbackToken) {
     throw new Error("Cannot dispatch remote agent without a parent continuation token.");
@@ -51,18 +56,28 @@ export async function startRemoteAgentSession(input: {
     );
   }
 
-  const sessionIdFromHeader = response.headers.get(EVE_SESSION_ID_HEADER);
-  if (sessionIdFromHeader !== null && sessionIdFromHeader.length > 0) {
-    return sessionIdFromHeader;
-  }
+  const sessionIdFromHeader = response.headers.get(EVE_SESSION_ID_HEADER) ?? undefined;
 
   try {
-    const body = (await response.json()) as { readonly sessionId?: unknown };
-    if (typeof body.sessionId === "string" && body.sessionId.length > 0) {
-      return body.sessionId;
+    const body = (await response.json()) as {
+      readonly cancelToken?: unknown;
+      readonly sessionId?: unknown;
+    };
+    const sessionId =
+      sessionIdFromHeader ??
+      (typeof body.sessionId === "string" && body.sessionId.length > 0
+        ? body.sessionId
+        : undefined);
+    if (sessionId !== undefined) {
+      return {
+        cancelToken: typeof body.cancelToken === "string" ? body.cancelToken : undefined,
+        sessionId,
+      };
     }
   } catch {
-    // Fall through to the generic error below.
+    if (sessionIdFromHeader !== undefined) {
+      return { sessionId: sessionIdFromHeader };
+    }
   }
 
   throw new Error(
@@ -87,7 +102,7 @@ function createRemoteAgentSessionUrl(remote: ResolvedRuntimeRemoteAgentNode): st
   return new URL(remote.path, `${trimTrailingSlash(remote.url)}/`).toString();
 }
 
-async function resolveRemoteAgentRequestHeaders(
+export async function resolveRemoteAgentRequestHeaders(
   remote: ResolvedRuntimeRemoteAgentNode,
 ): Promise<Record<string, string>> {
   const headers: Record<string, string> = {};

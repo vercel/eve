@@ -10,16 +10,21 @@ describe("startRemoteAgentSession", () => {
     vi.unstubAllEnvs();
   });
 
+  // The parent needs both identifiers from session creation so it can route
+  // results by session and later cancel that exact remote turn.
   it("posts the formatted subagent message and callback metadata", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true, sessionId: "remote-session" }), {
-        headers: { "x-eve-session-id": "remote-session-header" },
-        status: 202,
-      }),
+      new Response(
+        JSON.stringify({ cancelToken: "remote-cancel", ok: true, sessionId: "remote-session" }),
+        {
+          headers: { "x-eve-session-id": "remote-session-header" },
+          status: 202,
+        },
+      ),
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const childSessionId = await startRemoteAgentSession({
+    const childSession = await startRemoteAgentSession({
       action: createAction(),
       callbackBaseUrl: "https://caller.example.com",
       remote: createRemoteAgent(),
@@ -40,7 +45,10 @@ describe("startRemoteAgentSession", () => {
       },
     });
 
-    expect(childSessionId).toBe("remote-session-header");
+    expect(childSession).toEqual({
+      cancelToken: "remote-cancel",
+      sessionId: "remote-session-header",
+    });
     expect(fetchMock).toHaveBeenCalledWith("https://remote.example.com/eve/v1/session", {
       body: expect.any(String),
       headers: {

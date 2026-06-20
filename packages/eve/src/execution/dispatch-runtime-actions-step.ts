@@ -44,15 +44,18 @@ import { buildSubagentRunInput } from "#execution/subagent-tool.js";
 import { createWorkflowRuntime, workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
+import type { RuntimeActionCancellationTarget } from "#execution/runtime-action-cancellation.js";
 
 const log = createLogger("execution.dispatch-runtime-actions");
 
 export async function dispatchRuntimeActionsStep(input: {
   readonly callbackBaseUrl?: string;
+  readonly cancelToken?: string;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<{
+  readonly cancellationTargets: readonly RuntimeActionCancellationTarget[];
   readonly results: readonly RuntimeSubagentResultActionResult[];
   readonly sessionState: DurableSessionState;
 }> {
@@ -62,7 +65,7 @@ export async function dispatchRuntimeActionsStep(input: {
   const batch = getPendingRuntimeActionBatch(durableSession.state);
 
   if (batch === undefined || batch.actions.length === 0) {
-    return { results: [], sessionState: input.sessionState };
+    return { cancellationTargets: [], results: [], sessionState: input.sessionState };
   }
 
   const ctx = await deserializeContext(input.serializedContext);
@@ -84,6 +87,7 @@ export async function dispatchRuntimeActionsStep(input: {
   const adapterCtx = buildAdapterContext(adapter, ctx);
 
   let nextSession = session;
+  const cancellationTargets: RuntimeActionCancellationTarget[] = [];
   const results: RuntimeSubagentResultActionResult[] = [];
 
   try {
@@ -95,6 +99,8 @@ export async function dispatchRuntimeActionsStep(input: {
 
       switch (action.kind) {
         case "subagent-call": {
+          const cancelToken =
+            input.cancelToken === undefined ? undefined : `eve:cancel:${crypto.randomUUID()}`;
           const childRuntime = createWorkflowRuntime({
             compiledArtifactsSource: bundle.compiledArtifactsSource,
             nodeId: action.nodeId,
@@ -104,6 +110,7 @@ export async function dispatchRuntimeActionsStep(input: {
             auth,
             batchEvent: batch.event,
             capabilities,
+            cancelToken,
             channelMetadata,
             initiatorAuth,
             session,
@@ -116,6 +123,14 @@ export async function dispatchRuntimeActionsStep(input: {
             session: nextSession,
           });
           childSessionId = handle.sessionId;
+          if (cancelToken !== undefined) {
+            cancellationTargets.push({
+              cancelToken,
+              kind: "local",
+              nodeId: action.nodeId,
+              sessionId: childSessionId,
+            });
+          }
           name = action.name;
           toolName = action.subagentName;
           break;
@@ -128,12 +143,21 @@ export async function dispatchRuntimeActionsStep(input: {
               remoteAgentName: action.remoteAgentName,
               registry: bundle.subagentRegistry.subagentsByNodeId,
             });
-            childSessionId = await startRemoteAgentSession({
+            const remoteSession = await startRemoteAgentSession({
               action,
               callbackBaseUrl: input.callbackBaseUrl,
               remote: resolvedRemote,
               session,
             });
+            childSessionId = remoteSession.sessionId;
+            if (remoteSession.cancelToken !== undefined) {
+              cancellationTargets.push({
+                cancelToken: remoteSession.cancelToken,
+                kind: "remote",
+                nodeId: action.nodeId,
+                sessionId: childSessionId,
+              });
+            }
           } catch (error) {
             logError(log, "remote agent start failed", error, {
               remoteAgentName: action.remoteAgentName,
@@ -178,7 +202,7 @@ export async function dispatchRuntimeActionsStep(input: {
       ? input.sessionState
       : createDurableSessionState({ session: nextSession });
 
-  return { results, sessionState: nextState };
+  return { cancellationTargets, results, sessionState: nextState };
 }
 
 function createRemoteAgentStartFailureResult(input: {
