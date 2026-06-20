@@ -1,5 +1,17 @@
 # eve
 
+## 0.11.10
+
+### Patch Changes
+
+- c707ca3: Keep `eve init` and local `eve dev` progress on one terminal row. Init now includes elapsed completion times and preserves useful package-manager diagnostics on failure. With `EVE_LOG_LEVEL=debug`, both commands use plain phase logs instead of animation.
+- 2197c14: Dynamic skill resolvers that return a map now name every entry `<slug>__<key>` even when the map holds a single entry, matching dynamic tools and the documented contract. Previously a one-entry map was advertised and materialized under the bare resolver slug, so `load_skill` failed to find it and adding a second skill silently renamed the first. `load_skill` failures now also list the available skill names so the model can correct a wrong id.
+
+  Adds a `t.loadedSkill(skill, opts?)` eval assertion — sugar for `t.calledTool("load_skill", { input: { skill }, ... })`.
+
+- d22fd04: In the dev TUI, Ctrl+C now clears a non-empty chat or freeform `ask_question` prompt instead of quitting. On an empty prompt it still quits, and during a running turn it still interrupts.
+- d22fd04: The dev TUI prompt now takes multi-line input in both chat and freeform `ask_question` fields. Pasting multi-line text inserts it intact instead of submitting at the first line, `Shift+Enter` inserts a newline, a tall prompt scrolls within the terminal height, and editing moves by whole graphemes so wide and emoji characters aren't split.
+
 ## 0.11.9
 
 ### Patch Changes
