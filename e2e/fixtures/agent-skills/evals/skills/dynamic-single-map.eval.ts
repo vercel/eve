@@ -19,8 +19,7 @@ export default defineEval({
 
     t.didNotFail();
     t.completed();
-    t.calledTool("load_skill", {
-      input: { skill: "dynamic-single-map__solo" },
+    t.loadedSkill("dynamic-single-map__solo", {
       output: new RegExp(DYNAMIC_SINGLE_MAP_TOKEN, "u"),
     });
     t.messageIncludes(DYNAMIC_SINGLE_MAP_TOKEN);

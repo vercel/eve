@@ -18,8 +18,7 @@ export default defineEval({
 
     t.didNotFail();
     t.completed();
-    t.calledTool("load_skill", {
-      input: { skill: "dynamic-multi__alpha" },
+    t.loadedSkill("dynamic-multi__alpha", {
       output: new RegExp(DYNAMIC_MULTI_ALPHA_TOKEN, "u"),
     });
     t.messageIncludes(DYNAMIC_MULTI_ALPHA_TOKEN);
