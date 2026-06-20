@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { resolveDevUiMode, resolveTuiDisplayOptions, resolveTuiTitle, runCli } from "#cli/run.js";
+import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
+import type { DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 
 async function withInteractiveTerminal<T>(fn: () => Promise<T>): Promise<T> {
   const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
@@ -98,6 +100,44 @@ describe("eve dev --logs", () => {
         serverUrl: "https://example.com/",
       }),
     );
+  });
+});
+
+describe("eve dev boot progress", () => {
+  it("passes one reporter through local startup and clears the row on failure", async () => {
+    const writes: string[] = [];
+    const close = vi.fn(async () => {});
+    let hostReporter: DevelopmentServerOptions["onBootProgress"] = undefined;
+    let tuiReporter: RunDevelopmentTuiInput["onBootProgress"] = undefined;
+    const startHost = vi.fn(async (_appRoot: string, options?: DevelopmentServerOptions) => {
+      hostReporter = options?.onBootProgress;
+      hostReporter?.({ phase: "compiling agent", type: "phase-started" });
+      hostReporter?.({ elapsedMs: 1, phase: "compiling agent", type: "phase-finished" });
+      return { close, url: "http://127.0.0.1:2000" };
+    });
+    const runDevelopmentTui = vi.fn(async (input: RunDevelopmentTuiInput) => {
+      tuiReporter = input.onBootProgress;
+      throw new Error("TUI startup failed");
+    });
+    const stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      writes.push(String(chunk));
+      return true;
+    });
+
+    try {
+      await expect(
+        withInteractiveTerminal(() =>
+          runCli(["dev"], { error: () => {}, log: () => {} }, { runDevelopmentTui, startHost }),
+        ),
+      ).rejects.toThrow("TUI startup failed");
+    } finally {
+      stdoutWrite.mockRestore();
+    }
+
+    expect(hostReporter).toBeTypeOf("function");
+    expect(tuiReporter).toBe(hostReporter);
+    expect(writes.at(-1)).toBe("\r\u001B[K");
+    expect(close).toHaveBeenCalledOnce();
   });
 });
 

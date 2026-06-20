@@ -18,6 +18,8 @@ export interface PackageManagerInstallOptions {
   readonly bypassMinimumReleaseAge?: boolean;
   /** Resolves the project standalone even when an ancestor workspace exists. */
   readonly ignoreWorkspace?: boolean;
+  /** Requests verbose package-manager output for a live progress display. */
+  readonly progressDetails?: boolean;
 }
 
 /**

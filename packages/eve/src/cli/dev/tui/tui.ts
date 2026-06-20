@@ -5,6 +5,7 @@ import {
   isVercelAuthChallenge,
 } from "#services/dev-client/vercel-auth-error.js";
 import { toErrorMessage } from "#shared/errors.js";
+import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
 import { EveTUIRunner, type EveTUIRunnerOptions } from "./runner.js";
@@ -31,6 +32,8 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
    * Applies to the first prompt only.
    */
   readonly initialInput?: string;
+  /** Reports local CLI boot phases. Omitted for remote and programmatic TUI runs. */
+  readonly onBootProgress?: DevBootProgressReporter;
 }
 
 /**
@@ -43,7 +46,7 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
  * the inline error region rather than crashing the command.
  */
 export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<void> {
-  const { serverUrl, appRoot, initialInput, ...display } = input;
+  const { serverUrl, appRoot, initialInput, onBootProgress, ...display } = input;
 
   const client = new Client(resolveDevelopmentClientOptions(serverUrl));
 
@@ -60,6 +63,7 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
   };
   if (appRoot !== undefined) options.appRoot = appRoot;
   if (initialInput !== undefined) options.initialInput = initialInput;
+  if (onBootProgress !== undefined) options.onBootProgress = onBootProgress;
 
   await new EveTUIRunner(options).run();
 }
