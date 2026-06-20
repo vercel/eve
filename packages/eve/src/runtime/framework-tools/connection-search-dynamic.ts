@@ -508,6 +508,7 @@ export function createConnectionSearchResolver(): ResolvedDynamicToolResolver {
   return {
     slug: "connection",
     eventNames: Object.keys(events),
+    namespace: true,
     events: events as ResolvedDynamicToolResolver["events"],
     sourceId: "eve:connection-search-dynamic",
     sourceKind: "module",

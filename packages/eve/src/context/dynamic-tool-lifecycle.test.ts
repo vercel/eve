@@ -29,6 +29,7 @@ import type { HandleMessageStreamEvent } from "#protocol/message.js";
 function qualifyDynamicToolNames(
   slug: string,
   isSingle: boolean,
+  namespace: boolean,
   entries: Readonly<Record<string, DynamicToolEntry>>,
 ): Map<string, DynamicToolEntry> {
   const keys = Object.keys(entries);
@@ -37,14 +38,14 @@ function qualifyDynamicToolNames(
   if (keys.length === 0) return result;
 
   // single entry: one tool, named after the file slug.
-  // map of entries: always slug__key.
+  // map of entries: slug__key, or the bare key when namespace is false.
   if (isSingle) {
     result.set(slug, entries[keys[0]!]!);
     return result;
   }
 
   for (const key of keys) {
-    result.set(`${slug}__${key}`, entries[key]!);
+    result.set(namespace ? `${slug}__${key}` : key, entries[key]!);
   }
   return result;
 }
@@ -57,29 +58,37 @@ const stubEntry = defineTool({
 
 describe("dynamic tool naming", () => {
   it("uses file slug for a single entry", () => {
-    const names = qualifyDynamicToolNames("analytics", true, {
+    const names = qualifyDynamicToolNames("analytics", true, true, {
       run: stubEntry,
     });
     expect([...names.keys()]).toEqual(["analytics"]);
   });
 
   it("uses slug__key for a map entry", () => {
-    const names = qualifyDynamicToolNames("search", false, {
+    const names = qualifyDynamicToolNames("search", false, true, {
       run: stubEntry,
     });
     expect([...names.keys()]).toEqual(["search__run"]);
   });
 
   it("uses slug__key for multiple map entries", () => {
-    const names = qualifyDynamicToolNames("tenant", false, {
+    const names = qualifyDynamicToolNames("tenant", false, true, {
       export: stubEntry,
       query: stubEntry,
     });
     expect([...names.keys()]).toEqual(["tenant__export", "tenant__query"]);
   });
 
+  it("uses bare keys for a map when namespace is false", () => {
+    const names = qualifyDynamicToolNames("tenant", false, false, {
+      export: stubEntry,
+      query: stubEntry,
+    });
+    expect([...names.keys()]).toEqual(["export", "query"]);
+  });
+
   it("handles empty entries — no tools produced", () => {
-    const names = qualifyDynamicToolNames("empty", false, {});
+    const names = qualifyDynamicToolNames("empty", false, true, {});
     expect([...names.keys()]).toEqual([]);
   });
 });
@@ -423,6 +432,7 @@ function createResolver(
   slug: string,
   eventNames: readonly string[],
   handler: (event: unknown, ctx: unknown) => unknown | Promise<unknown>,
+  namespace = true,
 ): ResolvedDynamicToolResolver {
   const events: Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>> = {};
   for (const name of eventNames) {
@@ -431,6 +441,7 @@ function createResolver(
   return {
     slug,
     eventNames,
+    namespace,
     events,
     sourceId: `test:${slug}`,
     sourceKind: "module",
@@ -495,6 +506,26 @@ describe("dispatchDynamicToolEvent", () => {
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(1);
     expect(tools[0]!.name).toBe("weather__forecast");
+  });
+
+  it("uses bare keys for a map when namespace is false", async () => {
+    const ctx = createCtx();
+    const resolver = createResolver(
+      "weather",
+      ["session.started"],
+      () => ({ forecast: createReplayableTool() }),
+      false,
+    );
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+
+    expect(ctx.get(SessionDynamicToolMetadataKey)![0]!.name).toBe("forecast");
+    expect(buildDynamicTools(ctx)[0]!.name).toBe("forecast");
   });
 
   it("skips resolvers that do not match the event type", async () => {

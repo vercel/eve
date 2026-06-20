@@ -47,6 +47,12 @@ Write `execute` as an inline function expression, arrow, or method shorthand pla
 
 A single return produces one tool named after the file slug, identical to a static tool. A map always uses `slug__key`, even when it holds a single entry, so adding a second entry later never renames the first.
 
+Pass `defineDynamic({ namespace: false, events })` to name each map entry by its bare key (`export`, `query`) instead of `slug__key`. The single-return form is unaffected (still the file slug).
+
+### Conflicts
+
+A dynamic tool or skill whose name matches an authored one **overrides** it. This is what makes `namespace: false` useful — a per-caller resolver can replace a built-in by name. Two dynamic resolvers that emit the same name is a genuine ambiguity and throws.
+
 ### Events
 
 | Event             | Resolver runs          | Tools available for             |
@@ -116,7 +122,7 @@ export default defineDynamic({
 
 The caller's team gets its own playbook advertised as a loadable skill; everyone else gets nothing.
 
-Skills follow the same naming rule as tools: a single `defineSkill(...)` is named after the file slug, while a map return names each entry `slug__key` — even when the map holds one entry, so adding a second skill later never renames the first.
+Skills follow the same naming rule as tools: a single `defineSkill(...)` is named after the file slug, while a map return names each entry `slug__key` — even when the map holds one entry, so adding a second skill later never renames the first. `namespace: false` and the conflict rule above apply equally: a map skill resolver can expose bare keys, and a dynamic skill overrides a same-named authored one.
 
 ## Dynamic instructions
 

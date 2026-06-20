@@ -34,6 +34,7 @@ type NormalizedToolEntry =
   | {
       readonly kind: "dynamic-tool";
       readonly eventNames: readonly DynamicToolEventName[];
+      readonly namespace: boolean;
     };
 
 /**
@@ -48,6 +49,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     return {
       kind: "dynamic-tool",
       eventNames: Object.keys(value.events) as DynamicToolEventName[],
+      namespace: value.namespace ?? true,
     };
   }
   if (isDisabledToolSentinel(value)) {

@@ -79,6 +79,7 @@ export async function compileSkillSource(
         eventNames: Object.keys(exportValue.events) as DynamicToolEventName[],
         exportName: source.exportName,
         logicalPath: source.logicalPath,
+        namespace: exportValue.namespace ?? true,
         slug,
         sourceId: source.sourceId,
         sourceKind: "module",

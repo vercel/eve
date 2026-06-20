@@ -61,6 +61,7 @@ function convertOptionalOutputSchema(schema: unknown): FlexibleSchema | undefine
 function qualifyDynamicToolNames(
   slug: string,
   isSingle: boolean,
+  namespace: boolean,
   entries: Readonly<Record<string, DynamicToolEntry>>,
 ): Array<{ name: string; entryKey: string; entry: DynamicToolEntry }> {
   const keys = Object.keys(entries);
@@ -68,13 +69,15 @@ function qualifyDynamicToolNames(
 
   if (keys.length === 0) return result;
 
+  // A single returned defineTool is named after the slug regardless of
+  // `namespace`; only the map branch honors it.
   if (isSingle) {
     result.push({ name: slug, entryKey: keys[0]!, entry: entries[keys[0]!]! });
     return result;
   }
 
   for (const key of keys) {
-    result.push({ name: `${slug}__${key}`, entryKey: key, entry: entries[key]! });
+    result.push({ name: namespace ? `${slug}__${key}` : key, entryKey: key, entry: entries[key]! });
   }
   return result;
 }
@@ -239,7 +242,7 @@ async function resolveToolsFromEvent(
     if (outcome.value === null) continue;
 
     const { resolver, entries, isSingle } = outcome.value;
-    const named = qualifyDynamicToolNames(resolver.slug, isSingle, entries);
+    const named = qualifyDynamicToolNames(resolver.slug, isSingle, resolver.namespace, entries);
     for (const { name, entryKey, entry } of named) {
       liveTools.push(toHarnessToolDefinition(name, entry));
 

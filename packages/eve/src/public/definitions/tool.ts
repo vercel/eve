@@ -264,13 +264,26 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
  *   },
  * });
  * ```
+ *
+ * A map return names each entry `slug__key`. Pass `namespace: false` to expose
+ * each entry under its bare key instead (tools and skills only; instructions
+ * carry no model-visible name). A dynamic tool/skill whose name collides with an
+ * authored one overrides it; two dynamic resolvers emitting the same name is an
+ * error.
  */
-export function defineDynamic(definition: { readonly events: DynamicEvents }): DynamicSentinel {
+export function defineDynamic(definition: {
+  readonly events: DynamicEvents;
+  readonly namespace?: boolean;
+}): DynamicSentinel {
   const sentinel: DynamicSentinel = {
     kind: DYNAMIC_SENTINEL_KIND,
     events: definition.events,
+    namespace: definition.namespace,
   };
-  stampDefinitionKey(sentinel, `dynamic:${Object.keys(definition.events).join(",")}`);
+  stampDefinitionKey(
+    sentinel,
+    `dynamic:${definition.namespace === false ? "flat:" : ""}${Object.keys(definition.events).join(",")}`,
+  );
   return sentinel;
 }
 

@@ -13,7 +13,7 @@ import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-contex
 import type { ResolvedDynamicSkillResolver } from "#runtime/types.js";
 import type { SkillPackageDefinition } from "#shared/skill-definition.js";
 
-function createMockBundle(): CompiledBundle {
+function createMockBundle(authoredSkillNames: readonly string[] = []): CompiledBundle {
   return {
     adapterRegistry: undefined as never,
     compiledArtifactsSource: undefined as never,
@@ -23,7 +23,7 @@ function createMockBundle(): CompiledBundle {
     nodeId: undefined,
     resolvedAgent: {
       config: { name: "test-agent" },
-      skills: [],
+      skills: authoredSkillNames.map((name) => ({ name })),
     } as never,
     subagentRegistry: undefined as never,
     toolRegistry: undefined as never,
@@ -31,12 +31,12 @@ function createMockBundle(): CompiledBundle {
   };
 }
 
-function createCtx() {
+function createCtx(authoredSkillNames: readonly string[] = []) {
   const ctx = new ContextContainer();
   const sandbox = mockSandbox();
   ctx.set(SessionIdKey, "test-session");
   ctx.set(SandboxKey, sandbox.access);
-  ctx.set(BundleKey, createMockBundle());
+  ctx.set(BundleKey, createMockBundle(authoredSkillNames));
   return { ctx, sandbox };
 }
 
@@ -47,6 +47,7 @@ function createResolver(
     | Record<string, SkillPackageDefinition>
     | null
     | Promise<SkillPackageDefinition | Record<string, SkillPackageDefinition> | null>,
+  namespace = true,
 ): ResolvedDynamicSkillResolver {
   return {
     eventNames: ["session.started"],
@@ -55,6 +56,7 @@ function createResolver(
     },
     exportName: "default",
     logicalPath: `skills/${slug}.ts`,
+    namespace,
     slug,
     sourceId: `skills/${slug}.ts`,
     sourceKind: "module",
@@ -152,6 +154,52 @@ describe("dispatchDynamicSkillEvent", () => {
       "custom__talk-like-a-dog: Talk like a dog",
     );
     expect(sandbox.writes.some((w) => w.path.includes("/skills/custom__talk-like-a-dog/"))).toBe(
+      true,
+    );
+  });
+
+  it("uses bare keys for a map when namespace is false", async () => {
+    const { ctx, sandbox } = createCtx();
+    const resolver = createResolver(
+      "custom",
+      () => ({ "talk-like-a-dog": makeSkill("Talk like a dog", "Woof.") }),
+      false,
+    );
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(ctx.get(DynamicSkillManifestKey)).toEqual({
+      custom: [{ description: "Talk like a dog", name: "talk-like-a-dog" }],
+    });
+    expect(ctx.get(PendingSkillAnnouncementKey)).toContain("talk-like-a-dog: Talk like a dog");
+    expect(sandbox.writes.some((w) => w.path.includes("/skills/talk-like-a-dog/"))).toBe(true);
+  });
+
+  it("lets a dynamic skill override a same-named authored skill instead of throwing", async () => {
+    const { ctx, sandbox } = createCtx(["talk-like-a-dog"]);
+    const resolver = createResolver(
+      "custom",
+      () => ({ "talk-like-a-dog": makeSkill("Dynamic override", "Woof.") }),
+      false,
+    );
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    // No throw; the dynamic skill is written to the authored skill's path.
+    expect(ctx.get(DynamicSkillManifestKey)).toEqual({
+      custom: [{ description: "Dynamic override", name: "talk-like-a-dog" }],
+    });
+    expect(sandbox.writes.some((w) => w.path.includes("/skills/talk-like-a-dog/SKILL.md"))).toBe(
       true,
     );
   });
