@@ -116,6 +116,8 @@ export default defineDynamic({
 
 The caller's team gets its own playbook advertised as a loadable skill; everyone else gets nothing.
 
+Skills follow the same naming rule as tools: a single `defineSkill(...)` is named after the file slug, while a map return names each entry `slug__key` — even when the map holds one entry, so adding a second skill later never renames the first.
+
 ## Dynamic instructions
 
 A dynamic instructions file resolves the per-session system prompt the same way, returning `defineInstructions(...)` built from the principal, tenant, or external data:

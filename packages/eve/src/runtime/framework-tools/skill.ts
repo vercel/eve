@@ -1,6 +1,7 @@
 import { loadContext } from "#context/container.js";
-import { SandboxKey } from "#context/keys.js";
+import { DynamicSkillManifestKey, SandboxKey } from "#context/keys.js";
 import { loadSkillFromSandbox } from "#runtime/skills/sandbox-access.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import type { JsonObject } from "#shared/json.js";
 
@@ -29,7 +30,21 @@ async function executeLoadSkillTool(args: LoadSkillInput): Promise<unknown> {
   }
 
   const { skill } = args;
-  return await loadSkillFromSandbox(sandbox, skill);
+  return await loadSkillFromSandbox(sandbox, skill, availableSkillNames(ctx));
+}
+
+/**
+ * The skill names the model was shown in the "Available skills" section:
+ * authored skills plus every entry the dynamic skill manifest last produced.
+ * Best-effort — a missing bundle or manifest yields fewer names rather than
+ * masking the underlying "skill not found" error.
+ */
+function availableSkillNames(ctx: ReturnType<typeof loadContext>): string[] {
+  const authored = ctx.get(BundleKey)?.resolvedAgent.skills.map((s) => s.name) ?? [];
+  const dynamic = Object.values(ctx.get(DynamicSkillManifestKey) ?? {})
+    .flat()
+    .map((s) => s.name);
+  return [...new Set([...authored, ...dynamic])].sort();
 }
 
 // ---------------------------------------------------------------------------

@@ -40,7 +40,10 @@ function qualifyDynamicSkillNames(
 
   if (keys.length === 0) return result;
 
-  if (isSingle || keys.length === 1) {
+  // Only a directly-returned single `defineSkill` collapses to the bare slug. A
+  // map is always `slug__key`, even with one entry, so adding a second entry
+  // never renames the first. Mirrors `qualifyDynamicToolNames`.
+  if (isSingle) {
     result.push({ name: slug, entryKey: keys[0]!, entry: entries[keys[0]!]! });
     return result;
   }

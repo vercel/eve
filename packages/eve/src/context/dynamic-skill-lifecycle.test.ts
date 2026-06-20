@@ -132,6 +132,47 @@ describe("dispatchDynamicSkillEvent", () => {
     expect(announcement).toContain("support: Support policy");
   });
 
+  it("qualifies a single-entry map as slug__key (never collapses to the bare slug)", async () => {
+    const { ctx, sandbox } = createCtx();
+    const resolver = createResolver("custom", () => ({
+      "talk-like-a-dog": makeSkill("Talk like a dog", "Woof."),
+    }));
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(ctx.get(DynamicSkillManifestKey)).toEqual({
+      custom: [{ description: "Talk like a dog", name: "custom__talk-like-a-dog" }],
+    });
+    expect(ctx.get(PendingSkillAnnouncementKey)).toContain(
+      "custom__talk-like-a-dog: Talk like a dog",
+    );
+    expect(sandbox.writes.some((w) => w.path.includes("/skills/custom__talk-like-a-dog/"))).toBe(
+      true,
+    );
+  });
+
+  it("collapses a directly-returned single defineSkill to the bare slug", async () => {
+    const { ctx, sandbox } = createCtx();
+    const resolver = createResolver("tenant", () => makeSkill("Tenant policy"));
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(ctx.get(DynamicSkillManifestKey)).toEqual({
+      tenant: [{ description: "Tenant policy", name: "tenant" }],
+    });
+    expect(sandbox.writes.some((w) => w.path.includes("/skills/tenant/"))).toBe(true);
+  });
+
   it("rejects duplicate names produced by dynamic skill resolvers before writing", async () => {
     const { ctx, sandbox } = createCtx();
     const single = createResolver("foo__bar", () => makeSkill("Single"));
