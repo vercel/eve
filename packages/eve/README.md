@@ -75,7 +75,7 @@ Runtime accessors live on the subpath that owns the concern:
 - `getSkill(identifier)` — handle for a named skill visible to the current agent (`eve/skills`)
 - `getContext(key)`, `requireContext(key)`, `hasContext(key)`, `setContext(key)`, `ensureContext(key, factory)` — unified context helpers (`eve/context`)
 
-The complete API reference, including types and lower-level runtime primitives, is in [`./docs/reference/typescript-api.md`](./docs/reference/typescript-api.md).
+The complete API reference, including types and lower-level runtime primitives, is in the [TypeScript API documentation](https://eve.dev/docs/reference/typescript-api).
 
 ## Tiny Example
 
@@ -138,22 +138,22 @@ CLI commands:
 
 ## Deploying
 
-eve is built to be durable. The runtime is Nitro + Workflows. Read [`./docs/guides/deployment.md`](./docs/guides/deployment.md) for the deployment path, environment variables, and configuration.
+eve is built to be durable. The runtime is Nitro + Workflows. Read the [deployment guide](https://eve.dev/docs/guides/deployment) for the deployment path, environment variables, and configuration.
 
 ## Read Next
 
 These files ship inside the installed package at `node_modules/eve/docs/`:
 
-- [Full docs index](./docs/README.md) — recommended entry point
-- [Getting Started](./docs/getting-started.mdx) — install, scaffold, and run locally
-- [Project Layout](./docs/reference/project-layout.md) — every authored directory in depth
-- [`agent.ts`](./docs/agent-config.md) — agent config reference
-- [TypeScript API](./docs/reference/typescript-api.md) — complete `define*` and runtime helper reference
-- [Vercel Deployment](./docs/guides/deployment.md) — deploy to production
+- [Full docs index](https://eve.dev/docs) — recommended entry point
+- [Getting Started](https://eve.dev/docs/getting-started) — install, scaffold, and run locally
+- [Project Layout](https://eve.dev/docs/reference/project-layout) — every authored directory in depth
+- [`agent.ts`](https://eve.dev/docs/agent-config) — agent config reference
+- [TypeScript API](https://eve.dev/docs/reference/typescript-api) — complete `define*` and runtime helper reference
+- [Vercel Deployment](https://eve.dev/docs/guides/deployment) — deploy to production
 
-By authoring concern: [Tools](./docs/tools.mdx) · [Channels](./docs/channels/overview.mdx) · [Hooks](./docs/guides/hooks.md) · [Skills](./docs/skills.mdx) · [Sandbox](./docs/sandbox.mdx) · [Connections](./docs/connections.mdx) · [Subagents](./docs/subagents.mdx) · [Schedules](./docs/schedules.mdx) · [Evals](./docs/evals/overview.mdx)
+By authoring concern: [Tools](https://eve.dev/docs/tools) · [Channels](https://eve.dev/docs/channels/overview) · [Hooks](https://eve.dev/docs/guides/hooks) · [Skills](https://eve.dev/docs/skills) · [Sandbox](https://eve.dev/docs/sandbox) · [Connections](https://eve.dev/docs/connections) · [Subagents](https://eve.dev/docs/subagents) · [Schedules](https://eve.dev/docs/schedules) · [Evals](https://eve.dev/docs/evals/overview)
 
-By runtime concern: [Sessions and Streaming](./docs/concepts/sessions-runs-and-streaming.md) · [Session Context](./docs/guides/session-context.md) · [Context Control](./docs/concepts/context-control.md) · [Auth and Route Protection](./docs/guides/auth-and-route-protection.md) · [CLI, Build, and Debugging](./docs/reference/cli.md) · [Instrumentation](./docs/guides/instrumentation.md)
+By runtime concern: [Sessions and Streaming](https://eve.dev/docs/concepts/sessions-runs-and-streaming) · [Session Context](https://eve.dev/docs/guides/session-context) · [Context Control](https://eve.dev/docs/concepts/context-control) · [Auth and Route Protection](https://eve.dev/docs/guides/auth-and-route-protection) · [CLI, Build, and Debugging](https://eve.dev/docs/reference/cli) · [Instrumentation](https://eve.dev/docs/guides/instrumentation)
 
 ## Architecture (Internals)
 
