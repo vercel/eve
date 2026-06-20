@@ -1,7 +1,6 @@
 import { loadContext } from "#context/container.js";
 import { DynamicSkillManifestKey, SandboxKey } from "#context/keys.js";
 import { loadSkillFromSandbox } from "#runtime/skills/sandbox-access.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import type { JsonObject } from "#shared/json.js";
 
@@ -34,17 +33,22 @@ async function executeLoadSkillTool(args: LoadSkillInput): Promise<unknown> {
 }
 
 /**
- * The skill names the model was shown in the "Available skills" section:
- * authored skills plus every entry the dynamic skill manifest last produced.
- * Best-effort — a missing bundle or manifest yields fewer names rather than
- * masking the underlying "skill not found" error.
+ * The runtime-contributed (dynamic) skill names the model was shown, used to
+ * help it correct a wrong id — e.g. calling `talk-like-a-dog` when the loadable
+ * id is `custom__talk-like-a-dog`. Dynamic skills are the ones whose names are
+ * qualified at runtime (`slug__key`); authored skills already appear verbatim in
+ * the static "Available skills" prompt section, so they are not repeated here.
+ *
+ * Reads only `#context/keys.js`: a framework tool must not import heavy session
+ * modules (e.g. for the bundle), which would create an import cycle through the
+ * framework-tools barrel. Best-effort — an absent manifest yields no hint rather
+ * than masking the underlying "skill not found" error.
  */
 function availableSkillNames(ctx: ReturnType<typeof loadContext>): string[] {
-  const authored = ctx.get(BundleKey)?.resolvedAgent.skills.map((s) => s.name) ?? [];
   const dynamic = Object.values(ctx.get(DynamicSkillManifestKey) ?? {})
     .flat()
     .map((s) => s.name);
-  return [...new Set([...authored, ...dynamic])].sort();
+  return [...new Set(dynamic)].sort();
 }
 
 // ---------------------------------------------------------------------------
