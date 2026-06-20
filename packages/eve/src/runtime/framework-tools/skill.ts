@@ -32,18 +32,9 @@ async function executeLoadSkillTool(args: LoadSkillInput): Promise<unknown> {
   return await loadSkillFromSandbox(sandbox, skill, availableSkillNames(ctx));
 }
 
-/**
- * The runtime-contributed (dynamic) skill names the model was shown, used to
- * help it correct a wrong id — e.g. calling `talk-like-a-dog` when the loadable
- * id is `custom__talk-like-a-dog`. Dynamic skills are the ones whose names are
- * qualified at runtime (`slug__key`); authored skills already appear verbatim in
- * the static "Available skills" prompt section, so they are not repeated here.
- *
- * Reads only `#context/keys.js`: a framework tool must not import heavy session
- * modules (e.g. for the bundle), which would create an import cycle through the
- * framework-tools barrel. Best-effort — an absent manifest yields no hint rather
- * than masking the underlying "skill not found" error.
- */
+// Dynamic skill names for load_skill's not-found hint. Dynamic-only on purpose:
+// importing the bundle (for authored skills) would cycle through the
+// framework-tools barrel.
 function availableSkillNames(ctx: ReturnType<typeof loadContext>): string[] {
   const dynamic = Object.values(ctx.get(DynamicSkillManifestKey) ?? {})
     .flat()
