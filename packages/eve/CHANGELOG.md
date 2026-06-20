@@ -1,5 +1,12 @@
 # eve
 
+## 0.11.8
+
+### Patch Changes
+
+- 4622d94: Point the npm README, runtime landing page, and setup guidance at the canonical eve documentation domain.
+- bfc7191: Use the official TypeScript 7 `tsc` compiler for eve builds, base generated projects, and fixture typechecks. Next.js projects and generated Web Chat apps pin `typescript@6.0.3`, which still provides the JavaScript compiler API Next.js requires.
+
 ## 0.11.7
 
 ### Patch Changes
