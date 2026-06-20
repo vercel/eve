@@ -22,6 +22,10 @@ import {
 } from "#setup/primitives/index.js";
 import { addAgentToProject } from "#setup/scaffold/create/add-to-project.js";
 import { ensureChannel, scaffoldBaseProject } from "#setup/scaffold/index.js";
+import {
+  DEFAULT_EVE_PACKAGE_CONTRACT,
+  type EvePackageContract,
+} from "#setup/scaffold/create/project.js";
 
 import { initAgentDevHandoff } from "./agent-instructions.js";
 import { tryInitializeGit } from "./init-git.js";
@@ -62,6 +66,7 @@ const defaultDependencies: InitCommandDependencies = {
 
 const CURRENT_DIRECTORY_PROJECT_NAME = ".";
 const ALLOWED_CREATE_IN_PLACE_ENTRIES = new Set([".DS_Store", ".git", ".gitkeep", ".hg"]);
+export const EVE_INIT_PACKAGE_SPEC_ENV = "EVE_INIT_PACKAGE_SPEC";
 
 /** Resolves `target` to an existing directory, or undefined for name mode. */
 async function resolveTargetDirectory(
@@ -105,6 +110,7 @@ async function addToExistingProject(
   targetPath: string,
   options: InitCommandOptions,
   dependencies: InitCommandDependencies,
+  evePackage: EvePackageContract | undefined,
 ): Promise<{ packageManager: PackageManagerKind; nodeEngineOverride?: NodeEngineOverride }> {
   if (options.channelWebNextjs === true) {
     throw new Error(
@@ -118,6 +124,7 @@ async function addToExistingProject(
     projectRoot: targetPath,
     model: DEFAULT_AGENT_MODEL_ID,
     packageManager: manager.kind,
+    evePackage,
   });
   return {
     packageManager: manager.kind,
@@ -126,11 +133,17 @@ async function addToExistingProject(
 }
 
 /**
- * The manager a fresh scaffold will be owned by: the one whose package runner
- * launched the CLI, or pnpm when the binary ran directly and no preference
- * is visible.
+ * The manager a fresh scaffold will be owned by: an existing ancestor project
+ * manager first, then the package runner that launched the CLI, then pnpm.
  */
-function resolveScaffoldPackageManager(dependencies: InitCommandDependencies): PackageManagerKind {
+async function resolveScaffoldPackageManager(
+  projectPath: string,
+  dependencies: InitCommandDependencies,
+): Promise<PackageManagerKind> {
+  const detected = await dependencies.detectPackageManager(projectPath);
+  if (detected.source !== "default") {
+    return detected.kind;
+  }
   return dependencies.detectInvokingPackageManager() ?? "pnpm";
 }
 
@@ -140,6 +153,7 @@ async function scaffoldProject(
   packageManager: PackageManagerKind,
   options: InitCommandOptions,
   dependencies: InitCommandDependencies,
+  evePackage: EvePackageContract | undefined,
 ): Promise<string> {
   const parentPath = resolve(parentDirectory);
   const createInPlace = projectName === CURRENT_DIRECTORY_PROJECT_NAME;
@@ -153,12 +167,14 @@ async function scaffoldProject(
   const stagingDirectory = await mkdtemp(join(parentPath, ".eve-init-"));
   try {
     const stagedProjectName = createInPlace ? basename(projectPath) : projectName;
-    const stagedProjectPath = await dependencies.scaffoldBaseProject({
+    const scaffoldOptions = {
       projectName: stagedProjectName,
       model: DEFAULT_AGENT_MODEL_ID,
-      packageManager,
+      evePackage,
       targetDirectory: stagingDirectory,
-    });
+      packageManager,
+    };
+    const stagedProjectPath = await dependencies.scaffoldBaseProject(scaffoldOptions);
 
     if (options.channelWebNextjs === true) {
       await dependencies.ensureChannel({
@@ -228,6 +244,7 @@ export async function runInitCommand(
 ): Promise<void> {
   const agentLaunched = await dependencies.isCodingAgentLaunch();
   const rawTarget = target ?? CURRENT_DIRECTORY_PROJECT_NAME;
+  const evePackage = resolveInitEvePackageOverride();
   const currentDirectoryTarget = isCurrentDirectoryTarget(rawTarget);
   const existingDirectory = currentDirectoryTarget
     ? (await pathExists(join(resolve(parentDirectory), "package.json")))
@@ -235,28 +252,37 @@ export async function runInitCommand(
       : undefined
     : await resolveTargetDirectory(parentDirectory, rawTarget);
 
-  // A fresh project is owned by the manager that launched the CLI (`npx`,
-  // `pnpm dlx`, `yarn dlx`), defaulting to pnpm for a direct binary run; an
-  // existing project keeps whatever manager it already uses.
+  // A fresh project inside a workspace inherits that workspace's manager before
+  // considering the launcher (`npx`, `pnpm dlx`, `yarn dlx`); an existing
+  // project keeps whatever manager it already uses.
   let packageManager: PackageManagerKind;
   let projectPath: string;
   let freshScaffold: boolean;
   if (existingDirectory === undefined) {
-    packageManager = resolveScaffoldPackageManager(dependencies);
     const projectName = currentDirectoryTarget
       ? CURRENT_DIRECTORY_PROJECT_NAME
       : parseProjectName(rawTarget);
+    const parentPath = resolve(parentDirectory);
+    const plannedProjectPath =
+      projectName === CURRENT_DIRECTORY_PROJECT_NAME ? parentPath : join(parentPath, projectName);
+    packageManager = await resolveScaffoldPackageManager(plannedProjectPath, dependencies);
     projectPath = await scaffoldProject(
       parentDirectory,
       projectName,
       packageManager,
       options,
       dependencies,
+      evePackage,
     );
     freshScaffold = true;
     logger.log(`${pc.green("✓")} Created an ${EVE_WORDMARK} agent in ${pc.bold(projectPath)}`);
   } else {
-    const addition = await addToExistingProject(existingDirectory, options, dependencies);
+    const addition = await addToExistingProject(
+      existingDirectory,
+      options,
+      dependencies,
+      evePackage,
+    );
     packageManager = addition.packageManager;
     projectPath = existingDirectory;
     freshScaffold = false;
@@ -319,4 +345,16 @@ export async function runInitCommand(
   if (!(await dependencies.spawnPackageManager(packageManager, projectPath, devArguments))) {
     throw new Error(`Development server exited unsuccessfully in "${projectPath}".`);
   }
+}
+
+function resolveInitEvePackageOverride(): EvePackageContract | undefined {
+  const spec = process.env[EVE_INIT_PACKAGE_SPEC_ENV]?.trim();
+  if (spec === undefined || spec.length === 0) {
+    return undefined;
+  }
+
+  return {
+    nodeEngine: DEFAULT_EVE_PACKAGE_CONTRACT.nodeEngine,
+    version: spec,
+  };
 }

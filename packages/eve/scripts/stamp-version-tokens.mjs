@@ -49,7 +49,7 @@ const replacements = {
   __REACT_DOM_VERSION__: await resolveCatalogVersion("react-dom"),
   __STREAMDOWN_VERSION__: await resolveCatalogVersion("streamdown"),
   __ZOD_VERSION__: await resolveCatalogVersion("zod"),
-  __TSGO_VERSION__: await resolveCatalogVersion("@typescript/native-preview"),
+  __TYPESCRIPT_VERSION__: await resolveCatalogVersion("typescript"),
   __TYPES_REACT_VERSION__: await resolveCatalogVersion("@types/react"),
   __TYPES_REACT_DOM_VERSION__: await resolveCatalogVersion("@types/react-dom"),
 };

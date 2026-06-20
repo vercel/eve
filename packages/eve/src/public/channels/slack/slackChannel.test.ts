@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
@@ -255,12 +255,17 @@ async function firePost(
 describe("slackChannel() default event handlers", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   beforeEach(() => {
-    fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true, ts: "1700000001.000001" }), {
-        headers: { "content-type": "application/json" },
-      }),
+    fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ ok: true, ts: "1700000001.000001" }), {
+          headers: { "content-type": "application/json" },
+        }),
+      ),
     );
     vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("message.completed posts the agent message via Slack API", async () => {
@@ -439,6 +444,144 @@ describe("slackChannel() default event handlers", () => {
       status: "Working...",
       loading_messages: ["Working..."],
     });
+  });
+
+  it("reasoning.appended calls assistant.threads.setStatus with a truncated snippet", async () => {
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+    const longReasoning =
+      "Need to inspect the implementation and verify the Slack typing status behavior before editing.";
+
+    await callEvent(
+      adapter,
+      makeEvent("reasoning.appended", {
+        reasoningDelta: longReasoning,
+        reasoningSoFar: `${longReasoning}\nThen continue.`,
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe("https://slack.com/api/assistant.threads.setStatus");
+    const body = parseSlackRequestBody(init as RequestInit);
+    expect(body).toMatchObject({
+      channel_id: "C01",
+      thread_ts: "1700000000.000001",
+    });
+    expect((body.status as string).length).toBeLessThanOrEqual(50);
+    expect((body.status as string).endsWith("...")).toBe(true);
+    expect(body.loading_messages).toEqual([body.status]);
+    expect(ctx.state.lastReasoningTypingStatus).toBe(body.status);
+  });
+
+  it("reasoning.appended immediately publishes progressive extensions of four characters", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-18T12:00:00Z"));
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+    const reasoningEvent = (reasoningDelta: string, reasoningSoFar: string) =>
+      makeEvent("reasoning.appended", {
+        reasoningDelta,
+        reasoningSoFar,
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      });
+
+    await callEvent(adapter, reasoningEvent("I", "I"), ctx);
+    await callEvent(adapter, reasoningEvent(" ca", "I ca"), ctx);
+    await callEvent(adapter, reasoningEvent("n", "I can"), ctx);
+
+    const statuses = fetchMock.mock.calls.map(
+      ([, init]) => parseSlackRequestBody(init as RequestInit).status,
+    );
+    expect(statuses).toEqual(["I", "I can"]);
+  });
+
+  it("reasoning.appended requires a matching prefix and four new characters", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-18T12:00:00Z"));
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+    const reasoningEvent = (reasoningSoFar: string) =>
+      makeEvent("reasoning.appended", {
+        reasoningDelta: reasoningSoFar,
+        reasoningSoFar,
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      });
+
+    await callEvent(adapter, reasoningEvent("Need"), ctx);
+    vi.setSystemTime(new Date("2026-06-18T12:00:01Z"));
+    await callEvent(adapter, reasoningEvent("Need to"), ctx);
+    await callEvent(adapter, reasoningEvent("Check something else"), ctx);
+    vi.setSystemTime(new Date("2026-06-18T12:00:05Z"));
+    await callEvent(adapter, reasoningEvent("Need to"), ctx);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const statuses = fetchMock.mock.calls.map(
+      ([, init]) => parseSlackRequestBody(init as RequestInit).status,
+    );
+    expect(statuses).toEqual(["Need", "Need to"]);
+  });
+
+  it("turn.started resets reasoning status throttling", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-18T12:00:00Z"));
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("reasoning.appended", {
+        reasoningDelta: "Need to inspect the repo.",
+        reasoningSoFar: "Need to inspect the repo.",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+    vi.setSystemTime(new Date("2026-06-18T12:00:01Z"));
+    await callEvent(
+      adapter,
+      makeEvent("turn.started", { sequence: 0, stepIndex: 0, turnId: "t2" }),
+      ctx,
+    );
+    await callEvent(
+      adapter,
+      makeEvent("reasoning.appended", {
+        reasoningDelta: "Fresh turn reasoning.",
+        reasoningSoFar: "Fresh turn reasoning.",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "t2",
+      }),
+      ctx,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const statuses = fetchMock.mock.calls.map(
+      ([, init]) => parseSlackRequestBody(init as RequestInit).status,
+    );
+    expect(statuses).toEqual(["Need to inspect the repo.", "Working...", "Fresh turn reasoning."]);
   });
 
   it("session.failed posts a terminal markdown message with error hint and id", async () => {

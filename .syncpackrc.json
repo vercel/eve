@@ -28,12 +28,19 @@
       "isIgnored": true
     },
     {
+      "label": "Next.js projects pin TypeScript 6 for its compiler API",
+      "dependencies": ["typescript"],
+      "packages": ["eve-docs", "framework-next", "web-chat-next-template"],
+      "dependencyTypes": ["dev"],
+      "pinVersion": "6.0.3"
+    },
+    {
       "label": "Shared third-party deps must use the catalog: protocol",
       "policy": "catalog",
       "dependencies": [
         "@ai-sdk/**",
         "@types/node",
-        "@typescript/native-preview",
+        "typescript",
         "ai",
         "next",
         "@types/react",

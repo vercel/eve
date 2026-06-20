@@ -6,7 +6,7 @@
     "build": "pnpm --filter eve build && vite build",
     "dev": "vite dev",
     "preview": "vite preview",
-    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+    "typecheck": "svelte-kit sync && tsc --noEmit --project ./tsconfig.json"
   },
   "dependencies": {
     "@sveltejs/adapter-vercel": "^6.3.0",
@@ -18,7 +18,6 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@types/node": "catalog:",
-    "svelte-check": "^4.0.0"
+    "@types/node": "catalog:"
   }
 }

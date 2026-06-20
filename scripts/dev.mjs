@@ -17,7 +17,7 @@ let isShuttingDown = false;
 let pendingChildren = commands.length;
 let processExitCode = 0;
 
-// Each command fans out into a tree (pnpm → shell → tsgo/eve), so a signal to
+// Each command fans out into a tree (pnpm → shell → tsc/eve), so a signal to
 // the direct child alone orphans the watchers underneath it. Killing the
 // child's process group reaches the whole tree.
 function killProcessGroup(childProcess, signal) {

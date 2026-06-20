@@ -1,5 +1,33 @@
 # eve
 
+## 0.11.7
+
+### Patch Changes
+
+- 11a9a3e: Report image-pull and VM-boot progress during microsandbox creation, and include phase and provider-specific recovery guidance when prewarm fails.
+- 7b8df64: Serialize optional sandbox engine auto-installs and reload newly installed engines through their package entrypoint file instead of retrying the cached bare specifier. This prevents first-run `eve dev` sessions from racing microsandbox installation or surfacing Node's stale same-process module-not-found result after Bun installs `microsandbox`.
+
+  `eve init` also supports `EVE_INIT_PACKAGE_SPEC` so local tarball/source validation can make the generated project install the same eve build under test instead of resolving the published semver range from the registry.
+
+- 159d4af: Slack reasoning typing indicators now update progressively when the cumulative status grows by at least four characters, preventing opening fragments from remaining stale without issuing one Slack request per token.
+
+## 0.11.6
+
+### Patch Changes
+
+- 23cb00f: Slack channels now refresh assistant thread typing status during streamed reasoning, using a truncated reasoning snippet so long reasoning steps keep visible progress before tool calls or final replies.
+
+## 0.11.5
+
+### Patch Changes
+
+- 4761011: Avoid creating workflow park hooks with an empty continuation token. Sessions that start without a token now wait until the first turn anchors one before registering the park hook.
+- 93ff280: The `eve dev` header now shows the beta-terms link inline (`eve is currently in preview: <url>`), clickable via the terminal's own URL matcher. The verbose preview notice is dropped from the boot banner and from `eve init` output.
+- 432503d: Clarify the duplicate `eve dev` process error with a copyable package-manager command for connecting to the existing local server instead of stopping it.
+- c0c5cbf: Upgrades the workflow dependency to 5.0.0-beta.19
+- 602e9e0: Detect parent workspace package managers when running `eve init <name>` so fresh agents created inside monorepos install with the workspace manager instead of always following the launcher.
+- 0bd7aca: Warn when a Vercel build skips sandbox template prewarming because `VERCEL_DEPLOYMENT_ID` is missing, and direct users away from deploying that output with `vercel deploy --prebuilt`.
+
 ## 0.11.4
 
 ### Patch Changes

@@ -8,7 +8,7 @@ import { never } from "eve/tools/approval";
  * `tool-approval.ts` / `tool-denial.ts`.
  *
  * Wrapping the framework's `defineBashTool()` in `defineTool({...})`
- * gives the inferred default a named return type so tsgo does not
+ * gives the inferred default a named return type so tsc does not
  * trip the TS2883 "inferred type cannot be named" portability
  * check.
  */

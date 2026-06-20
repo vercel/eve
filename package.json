@@ -35,15 +35,15 @@
   "devDependencies": {
     "@changesets/cli": "2.31.0",
     "@types/node": "catalog:",
-    "@typescript/native-preview": "catalog:",
     "ai": "catalog:",
     "gray-matter": "4.0.3",
-    "oxfmt": "0.52.0",
-    "oxlint": "1.67.0",
+    "oxfmt": "0.55.0",
+    "oxlint": "1.70.0",
     "simple-git-hooks": "2.13.1",
-    "syncpack": "15.3.1",
-    "turbo": "2.9.16",
-    "vercel": "54.12.2",
+    "syncpack": "15.3.2",
+    "turbo": "2.9.18",
+    "typescript": "catalog:",
+    "vercel": "54.14.2",
     "vitest": "catalog:"
   },
   "simple-git-hooks": {
@@ -52,5 +52,5 @@
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@11.5.2"
+  "packageManager": "pnpm@11.7.0"
 }

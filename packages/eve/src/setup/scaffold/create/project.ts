@@ -16,7 +16,7 @@ const ALLOWED_CREATE_IN_PLACE_ENTRIES = new Set([".DS_Store", ".git", ".gitkeep"
 export const DEFAULT_AI_PACKAGE_VERSION = "__AI_SDK_VERSION__";
 export const DEFAULT_CONNECT_PACKAGE_VERSION = "__VERCEL_CONNECT_VERSION__";
 export const DEFAULT_ZOD_PACKAGE_VERSION = "__ZOD_VERSION__";
-const DEFAULT_TSGO_PACKAGE_VERSION = "__TSGO_VERSION__";
+const DEFAULT_TYPESCRIPT_PACKAGE_VERSION = "__TYPESCRIPT_VERSION__";
 
 /**
  * The eve package metadata that generated projects consume together. Keeping
@@ -53,7 +53,7 @@ interface TemplateContext {
   aiPackageVersion: string;
   connectPackageVersion: string;
   zodPackageVersion: string;
-  tsgoPackageVersion: string;
+  typescriptPackageVersion: string;
   nodeTypesVersion: string;
   nodeEngine: string;
 }
@@ -107,7 +107,7 @@ function renderTemplate(content: string, ctx: TemplateContext): string {
     .replaceAll("__EVE_INIT_AI_SDK_VERSION__", ctx.aiPackageVersion)
     .replaceAll("__EVE_INIT_CONNECT_VERSION__", ctx.connectPackageVersion)
     .replaceAll("__EVE_INIT_ZOD_VERSION__", ctx.zodPackageVersion)
-    .replaceAll("__EVE_INIT_TSGO_VERSION__", ctx.tsgoPackageVersion)
+    .replaceAll("__EVE_INIT_TYPESCRIPT_VERSION__", ctx.typescriptPackageVersion)
     .replaceAll("__EVE_INIT_TYPES_NODE_VERSION__", ctx.nodeTypesVersion)
     .replaceAll("__EVE_INIT_NODE_ENGINE__", ctx.nodeEngine);
 }
@@ -165,7 +165,7 @@ function packageJsonTemplate(): string {
     "build": "eve build",
     "dev": "eve dev",
     "start": "eve start",
-    "typecheck": "tsgo"
+    "typecheck": "tsc"
   },
   "dependencies": {
     "@vercel/connect": "__EVE_INIT_CONNECT_VERSION__",
@@ -175,7 +175,7 @@ function packageJsonTemplate(): string {
   },
   "devDependencies": {
     "@types/node": "__EVE_INIT_TYPES_NODE_VERSION__",
-    "@typescript/native-preview": "__EVE_INIT_TSGO_VERSION__"
+    "typescript": "__EVE_INIT_TYPESCRIPT_VERSION__"
   },
   "overrides": {
     "ai": "__EVE_INIT_AI_SDK_VERSION__"
@@ -290,7 +290,7 @@ export interface ScaffoldBaseProjectOptions {
   aiPackageVersion?: string;
   connectPackageVersion?: string;
   zodPackageVersion?: string;
-  tsgoPackageVersion?: string;
+  typescriptPackageVersion?: string;
   /**
    * Scaffold an inline provider `byok` block in `agent.ts` that reads the
    * provider key from `process.env` instead of relying on the managed Vercel
@@ -333,9 +333,9 @@ export async function scaffoldBaseProject(options: ScaffoldBaseProjectOptions): 
       "zodPackageVersion",
       options.zodPackageVersion ?? DEFAULT_ZOD_PACKAGE_VERSION,
     ),
-    tsgoPackageVersion: resolveVersionToken(
-      "tsgoPackageVersion",
-      options.tsgoPackageVersion ?? DEFAULT_TSGO_PACKAGE_VERSION,
+    typescriptPackageVersion: resolveVersionToken(
+      "typescriptPackageVersion",
+      options.typescriptPackageVersion ?? DEFAULT_TYPESCRIPT_PACKAGE_VERSION,
     ),
     nodeTypesVersion: nodeEngine,
     nodeEngine,

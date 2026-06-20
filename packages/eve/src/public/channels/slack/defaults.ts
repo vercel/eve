@@ -20,6 +20,8 @@ import type {
 } from "#public/channels/slack/slackChannel.js";
 
 const log = createLogger("slack.defaults");
+const REASONING_TYPING_REFRESH_INTERVAL_MS = 5_000;
+const REASONING_TYPING_MIN_PROGRESS_CHARS = 4;
 
 /**
  * Workspace-scoped projection of the Slack actor that produced
@@ -113,7 +115,32 @@ export function defaultInputRequestedHandler(): NonNullable<SlackChannelEvents["
 export const defaultEvents: SlackChannelInternalEvents = {
   async "turn.started"(_event, channel, _ctx) {
     channel.state.pendingToolCallMessage = null;
+    channel.state.lastReasoningTypingAtMs = null;
+    channel.state.lastReasoningTypingStatus = null;
     await channel.thread.startTyping("Working...");
+  },
+
+  async "reasoning.appended"(event, channel, _ctx) {
+    const line = firstNonEmptyLine(event.reasoningSoFar);
+    if (line === undefined) return;
+
+    const status = truncateTypingStatus(line);
+    const lastStatus = channel.state.lastReasoningTypingStatus;
+    const isProgressiveExtension =
+      lastStatus !== null &&
+      lastStatus !== undefined &&
+      status.startsWith(lastStatus) &&
+      status.length >= lastStatus.length + REASONING_TYPING_MIN_PROGRESS_CHARS;
+    const now = Date.now();
+    const lastAt = channel.state.lastReasoningTypingAtMs;
+    if (!isProgressiveExtension && lastAt !== null && lastAt !== undefined) {
+      const elapsed = now - lastAt;
+      if (elapsed >= 0 && elapsed < REASONING_TYPING_REFRESH_INTERVAL_MS) return;
+    }
+
+    await channel.thread.startTyping(status);
+    channel.state.lastReasoningTypingAtMs = now;
+    channel.state.lastReasoningTypingStatus = status;
   },
 
   async "actions.requested"(event, channel, _ctx) {

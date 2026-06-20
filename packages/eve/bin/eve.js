@@ -29,7 +29,7 @@ function createBootstrapOptions(overrides = {}) {
       resolve(packageRoot, "scripts", "copy-docs.mjs"),
       resolve(packageRoot, "scripts", "stamp-version-tokens.mjs"),
     ],
-    tsgoCliPath: overrides.tsgoCliPath,
+    tscCliPath: overrides.tscCliPath,
   };
 }
 
@@ -198,17 +198,17 @@ async function assertSupportedNodeVersion(
   );
 }
 
-function resolveTsgoCliPath({ tsgoCliPath }) {
-  if (tsgoCliPath) {
-    return tsgoCliPath;
+function resolveTscCliPath({ tscCliPath }) {
+  if (tscCliPath) {
+    return tscCliPath;
   }
 
-  // The `@typescript/native-preview` package only exports `./package.json`
-  // in its `exports` map, so `require.resolve("@typescript/native-preview/bin/tsgo.js")`
+  // The `typescript` package only exports `./package.json` in its `exports`
+  // map, so `require.resolve("typescript/bin/tsc")`
   // fails with ERR_PACKAGE_PATH_NOT_EXPORTED. Resolve the package.json
   // (which is exported) and join to the binary path manually.
-  const packageJsonPath = require.resolve("@typescript/native-preview/package.json");
-  return resolve(dirname(packageJsonPath), "bin", "tsgo.js");
+  const packageJsonPath = require.resolve("typescript/package.json");
+  return resolve(dirname(packageJsonPath), "bin", "tsc");
 }
 
 async function runCommand(command, args, options) {
@@ -276,7 +276,7 @@ export async function ensureBuiltCli(overrides = {}, dependencies = {}) {
 
   await executeCommand(
     process.execPath,
-    [resolveTsgoCliPath({ tsgoCliPath: options.tsgoCliPath }), "-p", "tsconfig.json"],
+    [resolveTscCliPath({ tscCliPath: options.tscCliPath }), "-p", "tsconfig.json"],
     {
       cwd: options.packageRoot,
     },
