@@ -191,9 +191,29 @@ async function settleAsyncWork(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
+  await Promise.resolve();
 }
 
 describe("EveTUIRunner agent header", () => {
+  it("reports the paint boundary before rendering the startup header", async () => {
+    const order: string[] = [];
+    const client = stubClient();
+    vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
+    const runner = new EveTUIRunner({
+      session: stubSession(),
+      client,
+      renderer: fakeRenderer({
+        renderAgentHeader: () => order.push("render"),
+      }),
+      serverUrl: "http://localhost:3000",
+      onBootProgress: (event) => order.push(event.type),
+    });
+
+    await runner.run();
+
+    expect(order).toEqual(["phase-started", "phase-finished", "before-first-paint", "render"]);
+  });
+
   it("fetches agent info and renders the startup header", async () => {
     const headers: AgentTUIAgentHeader[] = [];
     const renderer = fakeRenderer({

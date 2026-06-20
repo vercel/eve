@@ -258,6 +258,11 @@ function resolveThreshold(): number {
   return LEVEL_SEVERITY.info;
 }
 
+/** Returns whether the current threshold emits `level`. */
+export function isLogLevelEnabled(level: LogLevel): boolean {
+  return LEVEL_SEVERITY[level] >= resolveThreshold();
+}
+
 function write(level: LogLevel, namespace: string, message: string, fields?: LogFields): void {
   if (LEVEL_SEVERITY[level] < resolveThreshold()) {
     return;

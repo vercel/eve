@@ -194,7 +194,7 @@ describe("eve init smoke", () => {
       },
     ]);
     expect(result.stdout).toContain("Created an eve agent in ");
-    expect(result.stdout).toContain("Installing dependencies...");
+    expect(result.stdout).toContain("Preparing project...");
     expect(result.stdout).toContain("Installed dependencies");
     expect(result.stdout).not.toContain("Progress: resolved");
     await expect(pathExists(join(projectDir, ".git"))).resolves.toBe(true);

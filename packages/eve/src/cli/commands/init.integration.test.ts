@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { MockScreen } from "#cli/dev/tui/test/mock-terminal.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { detectPackageManager } from "#setup/package-manager.js";
 import {
@@ -62,6 +63,7 @@ function dependencies(
     typeof vi.fn<InitCommandDependencies["detectInvokingPackageManager"]>
   >;
   isCodingAgentLaunch: ReturnType<typeof vi.fn<InitCommandDependencies["isCodingAgentLaunch"]>>;
+  now: ReturnType<typeof vi.fn<InitCommandDependencies["now"]>>;
   runPackageManagerInstall: ReturnType<
     typeof vi.fn<InitCommandDependencies["runPackageManagerInstall"]>
   >;
@@ -82,6 +84,7 @@ function dependencies(
     // Stubbed to "human launch" for the same reason: the runner is often
     // launched by a coding agent, and these tests assert the human path.
     isCodingAgentLaunch: vi.fn(async () => false),
+    now: vi.fn(() => 0),
     detectPackageManager,
     scaffoldBaseProject: (options: ScaffoldBaseProjectOptions) => {
       const merged = { ...BASE_VERSIONS, ...options };
@@ -97,7 +100,7 @@ function dependencies(
       }),
     runPackageManagerInstall: vi.fn(async () => true),
     spawnPackageManager: vi.fn(async () => true),
-    tryInitializeGit: vi.fn(() => gitResult),
+    tryInitializeGit: vi.fn(async () => gitResult),
   };
 }
 
@@ -127,6 +130,11 @@ describe("runInitCommand", () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-base-"));
     const output = logger();
     const deps = dependencies();
+    deps.now
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(467)
+      .mockReturnValueOnce(467)
+      .mockReturnValueOnce(13_667);
 
     await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
 
@@ -167,11 +175,13 @@ describe("runInitCommand", () => {
     // decides at import time whether the strings carry escape codes. The boot
     // banner is the CLI program's pre-action hook, not the command's output.
     expect(output.messages).toHaveLength(4);
-    expect(output.messages[0]).toContain("✓");
-    expect(output.messages[0]).toContain("Created an eve agent in ");
-    expect(output.messages[0]).toContain(projectPath);
-    expect(output.messages[1]).toContain("Installing dependencies...");
+    expect(output.messages[0]).toContain("Preparing project...");
+    expect(output.messages[1]).toContain("✓");
+    expect(output.messages[1]).toContain("Created an eve agent in ");
+    expect(output.messages[1]).toContain(projectPath);
+    expect(output.messages[1]).toContain("in 467ms");
     expect(output.messages[2]).toContain("Installed dependencies");
+    expect(output.messages[2]).toContain("in 13.2s");
     expect(output.messages[3]).toContain("$ eve dev --input /model");
   });
 
@@ -233,8 +243,8 @@ describe("runInitCommand", () => {
         "--input",
         "/model",
       ]);
-      expect(output.messages[0]).toContain("Created an eve agent in ");
-      expect(output.messages[0]).toContain(projectPath);
+      expect(output.messages[1]).toContain("Created an eve agent in ");
+      expect(output.messages[1]).toContain(projectPath);
     },
   );
 
@@ -702,6 +712,7 @@ describe("runInitCommand", () => {
     const output = logger();
     const deps = dependencies();
     deps.runPackageManagerInstall.mockImplementation(async (_kind, _projectPath, options) => {
+      options?.onOutput?.({ stream: "stdout", text: "Packages: +12" });
       options?.onOutput?.({ stream: "stderr", text: "ERR_PNPM_FETCH_404 not found" });
       return false;
     });
@@ -711,8 +722,190 @@ describe("runInitCommand", () => {
     );
 
     await expect(pathExists(join(parentDirectory, "my-agent"))).resolves.toBe(true);
-    expect(output.errors.join("\n")).toContain("ERR_PNPM_FETCH_404 not found");
+    expect(output.errors).toEqual(["Packages: +12", "ERR_PNPM_FETCH_404 not found"]);
     expect(deps.tryInitializeGit).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+  });
+
+  it("replays only the actionable npm error, dropping silly/verbose/http/timing noise", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-npm-noise-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.runPackageManagerInstall.mockImplementation(async (_kind, _projectPath, options) => {
+      options?.onOutput?.({ stream: "stderr", text: "npm silly logfile start cleaning logs" });
+      options?.onOutput?.({ stream: "stderr", text: "npm verbose cli /usr/local/bin/node" });
+      options?.onOutput?.({
+        stream: "stderr",
+        text: "npm http fetch GET 200 https://registry.npmjs.org/eve 41ms",
+      });
+      options?.onOutput?.({ stream: "stderr", text: "npm timing idealTree Completed in 42ms" });
+      options?.onOutput?.({ stream: "stderr", text: "npm error code ERESOLVE" });
+      options?.onOutput?.({
+        stream: "stderr",
+        text: "npm error ERESOLVE unable to resolve dependency tree",
+      });
+      return false;
+    });
+
+    await expect(runInitCommand(output, parentDirectory, "my-agent", {}, deps)).rejects.toThrow(
+      "Failed to install dependencies",
+    );
+
+    expect(output.errors).toEqual([
+      "npm error code ERESOLVE",
+      "npm error ERESOLVE unable to resolve dependency tree",
+    ]);
+    expect(output.errors.join("\n")).not.toMatch(/npm (?:silly|verbose|http|timing)/u);
+  });
+
+  it("replays only the final npm detail lines when filtering leaves no error", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-npm-fallback-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.runPackageManagerInstall.mockImplementation(async (_kind, _projectPath, options) => {
+      for (let index = 0; index < 25; index += 1) {
+        options?.onOutput?.({ stream: "stderr", text: `npm silly step ${index}` });
+      }
+      options?.onOutput?.({ stream: "stderr", text: "" });
+      return false;
+    });
+
+    await expect(runInitCommand(output, parentDirectory, "my-agent", {}, deps)).rejects.toThrow(
+      "Failed to install dependencies",
+    );
+
+    expect(output.errors).toHaveLength(20);
+    expect(output.errors.at(0)).toBe("npm silly step 5");
+    expect(output.errors.at(-1)).toBe("npm silly step 24");
+  });
+
+  it("streams init phases and package-manager output as debug logs", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-debug-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.runPackageManagerInstall.mockImplementation(async (_kind, _projectPath, options) => {
+      options?.onOutput?.({ stream: "stdout", text: "Progress: resolved 62, reused 62, done" });
+      return true;
+    });
+
+    const previous = process.env.EVE_LOG_LEVEL;
+    process.env.EVE_LOG_LEVEL = "debug";
+    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+      const debugLines = consoleLog.mock.calls.map((call) => String(call[0]));
+      expect(debugLines).toContain("[eve:init] creating agent");
+      expect(
+        debugLines.some((line) => line.startsWith("[eve:init] installing dependencies with")),
+      ).toBe(true);
+      expect(debugLines).toContain("[eve:init] Progress: resolved 62, reused 62, done");
+      expect(debugLines).toContain("[eve:init] initializing git repository");
+      expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({ progressDetails: false }),
+      );
+    } finally {
+      consoleLog.mockRestore();
+      if (previous === undefined) {
+        delete process.env.EVE_LOG_LEVEL;
+      } else {
+        process.env.EVE_LOG_LEVEL = previous;
+      }
+    }
+  });
+
+  it("reports a failed install as failed under debug", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-debug-failure-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.runPackageManagerInstall.mockResolvedValue(false);
+
+    const previous = process.env.EVE_LOG_LEVEL;
+    process.env.EVE_LOG_LEVEL = "debug";
+    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(runInitCommand(output, parentDirectory, "my-agent", {}, deps)).rejects.toThrow(
+        "Failed to install dependencies",
+      );
+      const debugLines = consoleLog.mock.calls.map((call) => String(call[0]));
+      expect(debugLines.some((line) => line.includes("dependency installation failed"))).toBe(true);
+      expect(debugLines.some((line) => line.includes("dependencies installed"))).toBe(false);
+    } finally {
+      consoleLog.mockRestore();
+      if (previous === undefined) {
+        delete process.env.EVE_LOG_LEVEL;
+      } else {
+        process.env.EVE_LOG_LEVEL = previous;
+      }
+    }
+  });
+
+  it("keeps interactive progress on one physical row", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-progress-"));
+    const output = logger();
+    const deps = dependencies();
+    const screen = new MockScreen({ columns: 80, rows: 10 });
+    const snapshots: string[] = [];
+    const isTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+    const columnsDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "columns");
+
+    Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
+    Object.defineProperty(process.stdout, "columns", { configurable: true, value: screen.columns });
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
+      screen.write(chunk);
+      snapshots.push(screen.snapshot());
+      return true;
+    });
+    deps.isCodingAgentLaunch.mockResolvedValue(true);
+    deps.detectInvokingPackageManager.mockReturnValue("npm");
+    deps.runPackageManagerInstall.mockImplementation(async (_kind, _projectPath, options) => {
+      options?.onOutput?.({ stream: "stderr", text: "npm silly config load:file:/tmp/.npmrc" });
+      options?.onOutput?.({
+        stream: "stderr",
+        text: "npm silly fetch manifest @vercel/connect@0.2.2",
+      });
+      options?.onOutput?.({ stream: "stderr", text: "npm silly fetch manifest zod@4.4.3" });
+      options?.onOutput?.({
+        stream: "stderr",
+        text: "npm http fetch GET https://registry.npmjs.org/@vercel%2fconnect attempt 1 failed with ENOTFOUND",
+      });
+      options?.onOutput?.({ stream: "stdout", text: `Downloading ${"package".repeat(20)}` });
+      return true;
+    });
+
+    try {
+      await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+    } finally {
+      if (isTtyDescriptor === undefined) {
+        Reflect.deleteProperty(process.stdout, "isTTY");
+      } else {
+        Object.defineProperty(process.stdout, "isTTY", isTtyDescriptor);
+      }
+      if (columnsDescriptor === undefined) {
+        Reflect.deleteProperty(process.stdout, "columns");
+      } else {
+        Object.defineProperty(process.stdout, "columns", columnsDescriptor);
+      }
+    }
+
+    const rendered = snapshots.join("\n");
+    expect(rendered).toContain("Preparing project");
+    expect(rendered).toContain("Creating agent");
+    expect(rendered).toContain("Installing dependencies");
+    expect(rendered).toContain("npm install");
+    expect(rendered).toContain("Resolving @vercel/connect@0.2.2");
+    expect(rendered).toContain("npm registry · attempt 1 failed: ENOTFOUND");
+    expect(rendered).not.toContain("config load:file");
+    expect(rendered).toContain("Initializing Git repository");
+    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+      "npm",
+      join(parentDirectory, "my-agent"),
+      expect.objectContaining({ progressDetails: true }),
+    );
+    for (const snapshot of snapshots.filter(Boolean)) {
+      expect(snapshot.split("\n")).toHaveLength(1);
+      expect([...snapshot].length).toBeLessThan(screen.columns);
+    }
   });
 });

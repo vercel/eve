@@ -26,6 +26,7 @@ import {
   type DevelopmentRuntimeArtifactSessionRefresher,
 } from "#services/dev-client.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 
 import {
   type FailureStreamEvent,
@@ -337,6 +338,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   detectProjectIdentity?: typeof detectProjectIdentity;
   /** Test seam for the off-critical-path boot login probe; defaults to the real one. */
   getVercelAuthStatus?: typeof getVercelAuthStatus;
+  /** Reports phases from this runner's initial local-dev connection. */
+  onBootProgress?: DevBootProgressReporter;
 };
 
 /** The attention-line issue for a Vercel auth state, or undefined when nothing's wrong. */
@@ -366,6 +369,7 @@ export class EveTUIRunner {
   readonly #promptCommandHandler?: PromptCommandHandler;
   readonly #bootDetections: readonly BootDetection[];
   readonly #getVercelAuthStatus: typeof getVercelAuthStatus;
+  #onBootProgress?: DevBootProgressReporter;
   /** Set when the run loop unwinds, so a late boot login probe cannot paint into a torn-down terminal. */
   #disposed = false;
   /** Aborts the off-critical-path boot auth probe when the run loop unwinds. */
@@ -467,6 +471,7 @@ export class EveTUIRunner {
     }
     this.#bootDetections = options.bootDetections ?? BOOT_DETECTIONS;
     this.#getVercelAuthStatus = options.getVercelAuthStatus ?? getVercelAuthStatus;
+    if (options.onBootProgress !== undefined) this.#onBootProgress = options.onBootProgress;
     if (options.serverUrl !== undefined) {
       this.#serverUrl = options.serverUrl;
       this.#runtimeArtifacts = createDevelopmentRuntimeArtifactSessionRefresher({
@@ -483,13 +488,18 @@ export class EveTUIRunner {
   async #renderAgentHeader(): Promise<void> {
     const serverUrl = this.#serverUrl;
     if (serverUrl === undefined) {
+      this.#reportBeforeFirstPaint();
       await this.#renderSetupIssues(undefined);
       return;
     }
 
     let info: AgentInfoResult | undefined;
     try {
-      info = await this.#client?.info();
+      info = await devBootPhase(
+        "connecting to agent",
+        () => (this.#client ? this.#client.info() : Promise.resolve(undefined)),
+        this.#onBootProgress,
+      );
     } catch {
       info = undefined;
     }
@@ -501,8 +511,15 @@ export class EveTUIRunner {
     };
     if (info !== undefined) header.info = info;
     if (this.#appRoot !== undefined) header.tip = this.#headerTip;
+    this.#reportBeforeFirstPaint();
     this.#renderer.renderAgentHeader?.(header);
     await this.#renderSetupIssues(info);
+  }
+
+  #reportBeforeFirstPaint(): void {
+    const report = this.#onBootProgress;
+    this.#onBootProgress = undefined;
+    report?.({ type: "before-first-paint" });
   }
 
   async run() {

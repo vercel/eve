@@ -1,13 +1,22 @@
 import { basename } from "node:path";
 
 import { Command, CommanderError, InvalidArgumentError } from "#compiled/commander/index.js";
+import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { eveCliBanner } from "#cli/banner.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
+import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import { LOG_DISPLAY_MODES, parseLogDisplayMode } from "#cli/dev/tui/log-display-mode.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
+import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
+import { createLogger } from "#internal/logging.js";
+import type {
+  DevelopmentServerHandle,
+  DevelopmentServerOptions,
+  ProductionServerHandle,
+} from "#internal/nitro/host/types.js";
 import type {
   AssistantResponseStatsMode,
   LogDisplayMode,
@@ -41,17 +50,6 @@ interface ProductionCliOptions {
   port?: number;
 }
 
-interface DevelopmentServerHandle {
-  readonly url: string;
-  close(): Promise<void>;
-}
-
-interface ProductionServerHandle {
-  readonly url: string;
-  close(): Promise<void>;
-  wait(): Promise<void>;
-}
-
 interface CliRuntimeDependencies {
   buildHost(appRoot: string): Promise<string>;
   printApplicationInfo(
@@ -59,21 +57,13 @@ interface CliRuntimeDependencies {
     appRoot: string,
     options?: { json?: boolean },
   ): Promise<void>;
-  runDevelopmentTui(
-    input: { serverUrl: string; appRoot?: string; initialInput?: string } & TuiDisplayOptions,
-  ): Promise<void>;
+  runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<void>;
   runEvalCommand(
     evalIds: readonly string[],
     options: EvalCliOptions,
     logger: CliLogger,
   ): Promise<void>;
-  startHost(
-    appRoot: string,
-    options?: {
-      host?: string;
-      port?: number;
-    },
-  ): Promise<DevelopmentServerHandle>;
+  startHost(appRoot: string, options?: DevelopmentServerOptions): Promise<DevelopmentServerHandle>;
   startProductionHost(
     appRoot: string,
     options?: {
@@ -84,6 +74,31 @@ interface CliRuntimeDependencies {
 }
 
 type CliRuntimeOverrides = Partial<CliRuntimeDependencies>;
+
+const devBootLog = createLogger("dev.boot");
+
+function createDevBootProgressReporter(
+  row: ReturnType<typeof startCliLiveRow> | undefined,
+): DevBootProgressReporter {
+  return (event) => {
+    switch (event.type) {
+      case "phase-started":
+        row?.update("Building your agent", event.phase);
+        devBootLog.debug(event.phase);
+        return;
+      case "phase-finished":
+        devBootLog.debug(`${event.phase} finished`, { ms: event.elapsedMs });
+        return;
+      case "before-first-paint":
+        row?.stop();
+        return;
+      default: {
+        const exhaustive: never = event;
+        return exhaustive;
+      }
+    }
+  };
+}
 
 interface EvalCliOptions {
   json?: boolean;
@@ -513,23 +528,22 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
 
       loadDevelopmentEnvironmentFiles(appRoot);
 
-      const runInteractiveUi = async (serverUrl: string): Promise<void> => {
-        logger.log("");
-
-        const runDevelopmentTui = runtime.runDevelopmentTui ?? (await loadRunDevelopmentTui());
+      const runInteractiveUi = async (serverUrl: string, report?: DevBootProgressReporter) => {
+        const runDevelopmentTui = await devBootPhase(
+          "loading interactive UI",
+          async () => runtime.runDevelopmentTui ?? (await loadRunDevelopmentTui()),
+          report,
+        );
         const display = resolveTuiDisplayOptions(options);
         const title = resolveTuiTitle({ name: options.name, remoteServerUrl, appRoot });
         if (title !== undefined) display.name = title;
-        const tuiInput: Parameters<CliRuntimeDependencies["runDevelopmentTui"]>[0] = {
+        const tuiInput: RunDevelopmentTuiInput = {
+          appRoot: remoteServerUrl === undefined ? appRoot : undefined,
+          initialInput: options.input,
+          onBootProgress: report,
           serverUrl,
           ...display,
         };
-        if (remoteServerUrl === undefined) {
-          tuiInput.appRoot = appRoot;
-        }
-        if (options.input !== undefined) {
-          tuiInput.initialInput = options.input;
-        }
         await runDevelopmentTui(tuiInput);
       };
 
@@ -553,19 +567,21 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
           return;
         }
 
+        logger.log("");
         await runInteractiveUi(remoteServerUrl);
         return;
       }
 
-      const startHost = runtime.startHost ?? (await loadStartHost());
-      const server = await startHost(appRoot, {
-        host: options.host,
-        port: options.port,
-      });
-      let closed = false;
+      // Print spacing before the live row; a later write would strand the row.
+      if (mode === "tui") logger.log("");
+      const buildProgress = mode === "tui" ? startCliLiveRow(logger) : undefined;
+      const onBootProgress = createDevBootProgressReporter(buildProgress);
+      buildProgress?.update("Building your agent");
 
+      let closed = false;
+      let server: DevelopmentServerHandle | undefined;
       const closeServer = async () => {
-        if (closed) {
+        if (closed || server === undefined) {
           return;
         }
 
@@ -574,6 +590,13 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       };
 
       try {
+        const startHost = runtime.startHost ?? (await loadStartHost());
+        server = await startHost(appRoot, {
+          host: options.host,
+          onBootProgress,
+          port: options.port,
+        });
+
         // The terminal UI's header already shows the server URL, and startup
         // no longer clears the screen, so the line would linger as noise.
         // Headless consumers (scripts, scenario tests) still parse it.
@@ -606,8 +629,9 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
           });
         }
 
-        await runInteractiveUi(server.url);
+        await runInteractiveUi(server.url, onBootProgress);
       } finally {
+        buildProgress?.stop();
         await closeServer();
       }
     });
