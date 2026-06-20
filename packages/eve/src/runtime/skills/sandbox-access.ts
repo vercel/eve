@@ -31,12 +31,8 @@ export function assertSafeSkillId(id: string): asserts id is string {
  * Returns the SKILL.md body with any YAML frontmatter stripped, so the
  * model receives plain markdown as the tool result. Throws when the id
  * is unsafe or the file does not exist; the AI SDK forwards the error
- * to the model as a tool-error result.
- *
- * When the skill is missing, `availableNames` (the names the model was
- * shown in the "Available skills" section) is appended to the error so the
- * model can correct a wrong id on its next turn — e.g. calling
- * `talk-like-a-dog` when the loadable id is `custom__talk-like-a-dog`.
+ * to the model as a tool-error result. `availableNames`, when given, is
+ * listed in the not-found error so the model can correct a wrong id.
  */
 export async function loadSkillFromSandbox(
   access: SandboxAccess,
