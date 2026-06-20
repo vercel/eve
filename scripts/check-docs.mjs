@@ -188,27 +188,36 @@ for (const root of ROOTS) {
 }
 
 // 3. Internal links resolve. Every relative (./ ../) or site-absolute (/docs/)
-//    markdown link in a doc page must point at a real doc page or folder.
+//    markdown link in a doc page must point at a rendered doc URL or folder.
 //    fumadocs renders broken links as dead clicks; CI should catch them.
+function renderedUrl(relPath, source) {
+  const slug = relPath.replace(/\.mdx?$/, "").replace(/(^|\/)index$/, "");
+  const override = parseFrontmatter(source)?.url;
+  const route = override || `/${slug}`;
+  return `/docs${route}`.replace(/\/$/, "");
+}
+
 function checkLinks(rootDir) {
   const files = walkMarkdown(rootDir);
-  const slugs = new Set();
-  const dirs = new Set();
+  const renderedUrls = new Set();
+  const renderedDirs = new Set();
   for (const abs of files) {
     const rel = relative(rootDir, abs).split("\\").join("/");
-    slugs.add(rel.replace(/\.mdx?$/, ""));
-    let d = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
-    while (d) {
-      dirs.add(d);
-      d = d.includes("/") ? d.slice(0, d.lastIndexOf("/")) : "";
+    if (isExcluded(rel)) continue;
+    const source = readFileSync(abs, "utf8");
+    renderedUrls.add(renderedUrl(rel, source));
+    let dir = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
+    while (dir) {
+      renderedDirs.add(`/docs/${dir}`);
+      dir = dir.includes("/") ? dir.slice(0, dir.lastIndexOf("/")) : "";
     }
   }
   const linkRe = /\]\((\s*[^)]+?)\s*\)/g;
   for (const abs of files) {
     const rel = relative(rootDir, abs).split("\\").join("/");
     if (isExcluded(rel)) continue;
-    const dirOfFile = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
     const source = readFileSync(abs, "utf8");
+    const sourceUrl = renderedUrl(rel, source);
     let m;
     while ((m = linkRe.exec(source)) !== null) {
       let target = m[1].trim();
@@ -219,22 +228,16 @@ function checkLinks(rootDir) {
       if (!isRel && !isSite) continue; // external, mailto, #anchor, bare /eve/* runtime route, etc.
       target = target.split("#")[0].split("?")[0];
       if (!target) continue; // pure in-page anchor
-      let resolvedSlug;
-      if (isSite) {
-        resolvedSlug = target.replace(/^\/docs\/?/, "");
-      } else {
-        const base = dirOfFile ? `${rootDir}/${dirOfFile}` : rootDir;
-        resolvedSlug = relative(rootDir, resolve(base, target)).split("\\").join("/");
-      }
-      resolvedSlug = resolvedSlug.replace(/\/$/, "").replace(/\.mdx?$/, "");
-      if (resolvedSlug === "" || resolvedSlug === ".") continue; // docs root / index
-      if (slugs.has(resolvedSlug)) continue;
-      if (slugs.has(`${resolvedSlug}/index`)) continue;
-      if (dirs.has(resolvedSlug)) continue; // folder link (sidebar group)
+      const resolvedUrl = new URL(target, `https://eve.dev${sourceUrl}`).pathname
+        .replace(/\/$/, "")
+        .replace(/\.mdx?$/, "");
+      if (resolvedUrl === "/docs") continue; // docs root / index
+      if (renderedUrls.has(resolvedUrl)) continue;
+      if (renderedDirs.has(resolvedUrl)) continue; // folder link (sidebar group)
       failures.push({
         root: "docs",
         file: rel,
-        issue: `broken internal link → \`${m[1].trim()}\` (resolves to \`${resolvedSlug}\`, no such page)`,
+        issue: `broken internal link → \`${m[1].trim()}\` (resolves to \`${resolvedUrl}\`, no such page)`,
       });
     }
   }

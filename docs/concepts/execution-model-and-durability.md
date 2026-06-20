@@ -19,7 +19,22 @@ The Workflow SDK is not inherently tied to Vercel. In local development and in a
 
 Nitro hosts the HTTP routes and workflow entrypoints. It does not supply the workflow state store or the sandbox runtime. Those are separate adapters: Workflow uses the active world implementation, and Sandbox uses the backend from `agent/sandbox` or `defaultBackend()`.
 
-Today, eve owns Workflow world selection. In the future, eve will expose a supported way to provide a different Workflow world, so advanced self-hosted deployments can swap the state, queue, auth, and streaming backend behind the same agent runtime. The underlying [Workflow Worlds](https://workflow-sdk.dev/worlds) abstraction is what makes that possible, but it is not an eve application API yet.
+For advanced self-hosted deployments, the root `agent.ts` can select the installed Workflow world package to use with `experimental.workflow.world`:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  experimental: {
+    workflow: {
+      world: "@workflow/world-postgres",
+    },
+  },
+});
+```
+
+The world package backs workflow state, queues, hooks, and streams. Keep secrets and deployment-specific options in runtime environment variables read by that package, not in `agent.ts`. See [agent.ts](../agent-config#workflow-world) and [Workflow Worlds](https://workflow-sdk.dev/worlds).
 
 ## Resuming after a crash
 
