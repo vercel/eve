@@ -88,8 +88,10 @@ describe("reduceSelect", () => {
     ]);
   });
 
-  it("ignores backspace on an empty filter", () => {
+  it("backspaces one grapheme and ignores an empty filter", () => {
     expect(reduceSelect(initial, { type: "backspace" }, context())).toBe(initial);
+    const state = { filter: "😀", cursor: 0, selected: new Set<string>() };
+    expect(reduceSelect(state, { type: "backspace" }, context()).filter).toBe("");
   });
 
   it("wraps the cursor across the visible list", () => {

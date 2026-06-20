@@ -111,15 +111,15 @@ function editSetupSelect(input: SetupSelectInputState): SetupSelectInputResult {
       return isSearchableSelect(input)
         ? updatedSelect(input, { type: "backspace" })
         : { kind: "ignore" };
-    case "character": {
-      if (isMultiSelect(input) && input.key.value === " ") {
+    case "text": {
+      if (input.key.framing === "unframed" && isMultiSelect(input) && input.key.value === " ") {
         return updatedSelect(input, { type: "toggle" });
       }
       if (!isSearchableSelect(input)) return { kind: "ignore" };
 
       let select = input.select;
       const context = { options: input.options, submitRow: isMultiSelect(input) };
-      for (const char of input.key.value) {
+      for (const char of input.key.value.replaceAll("\n", " ")) {
         if (char >= " " && char !== "\u007f") {
           select = reduceSelect(select, { type: "char", char }, context);
         }

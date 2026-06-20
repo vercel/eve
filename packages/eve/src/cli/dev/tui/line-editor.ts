@@ -1,23 +1,34 @@
 /**
  * A tiny, dependency-free line-editing model for the prompt input.
  *
- * The renderer owns the terminal; this module owns the *text* — a single
- * logical line plus a caret position — and exposes pure transforms for the
- * common readline-style edits (insert, delete, word/line kill, cursor moves)
- * and a {@link visibleLine} helper that windows a long line around the caret
- * so it stays on screen. Keeping it pure makes the editing rules trivial to
- * unit test without a TTY.
+ * The renderer owns the terminal; this module owns the *text* — buffer plus
+ * caret position, where the buffer may carry embedded newlines — and exposes
+ * pure transforms for the common readline-style edits (insert, delete,
+ * word/line kill, cursor moves), a {@link visibleLine} helper that windows a
+ * long line around the caret, and {@link layoutPromptInput} which splits a
+ * multi-line buffer into logical rows. Keeping it pure makes the editing rules
+ * trivial to unit test without a TTY.
  */
 
 import type { TerminalKey } from "./stream-format.js";
+import {
+  graphemeBoundaryAtOrAfter,
+  graphemes,
+  nextGraphemeBoundary,
+  previousGraphemeBoundary,
+} from "#shared/text-boundaries.js";
+import { inputTextWidth, offsetAtVisibleColumn } from "./terminal-text.js";
 
-/** One logical input line: its text and the caret's index within it. */
+/**
+ * Editor text and a caret at a grapheme boundary, represented as a UTF-16
+ * offset so it can be passed directly to `String.slice`.
+ */
 export interface LineState {
   readonly text: string;
   readonly cursor: number;
 }
 
-/** The empty line with the caret at column 0. */
+/** The empty editor buffer with the caret at offset 0. */
 export const EMPTY_LINE: LineState = { text: "", cursor: 0 };
 
 /** Builds a line from `text` with the caret placed at the end. */
@@ -29,74 +40,125 @@ export function lineOf(text: string): LineState {
 export function insert(state: LineState, value: string): LineState {
   if (value.length === 0) return state;
   const text = state.text.slice(0, state.cursor) + value + state.text.slice(state.cursor);
-  return { text, cursor: state.cursor + value.length };
+  const cursor = graphemeBoundaryAtOrAfter(text, state.cursor + value.length);
+  return { text, cursor };
 }
 
-/** Deletes the character before the caret (Backspace). */
+/** Deletes the grapheme before the caret (Backspace). */
 export function backspace(state: LineState): LineState {
   if (state.cursor === 0) return state;
-  const text = state.text.slice(0, state.cursor - 1) + state.text.slice(state.cursor);
-  return { text, cursor: state.cursor - 1 };
+  const cursor = previousGraphemeBoundary(state.text, state.cursor);
+  const text = state.text.slice(0, cursor) + state.text.slice(state.cursor);
+  return { text, cursor: graphemeBoundaryAtOrAfter(text, cursor) };
 }
 
-/** Deletes the character at the caret (Delete / Ctrl+D mid-line). */
+/** Deletes the grapheme at the caret (Delete / Ctrl+D mid-line). */
 export function deleteForward(state: LineState): LineState {
   if (state.cursor >= state.text.length) return state;
-  const text = state.text.slice(0, state.cursor) + state.text.slice(state.cursor + 1);
-  return { text, cursor: state.cursor };
+  const end = nextGraphemeBoundary(state.text, state.cursor);
+  const text = state.text.slice(0, state.cursor) + state.text.slice(end);
+  return { text, cursor: graphemeBoundaryAtOrAfter(text, state.cursor) };
 }
 
-/** Moves the caret one column left. */
+/** Moves the caret one grapheme left. */
 export function moveLeft(state: LineState): LineState {
-  return state.cursor === 0 ? state : { text: state.text, cursor: state.cursor - 1 };
+  return state.cursor === 0
+    ? state
+    : { text: state.text, cursor: previousGraphemeBoundary(state.text, state.cursor) };
 }
 
-/** Moves the caret one column right. */
+/** Moves the caret one grapheme right. */
 export function moveRight(state: LineState): LineState {
-  return state.cursor >= state.text.length ? state : { text: state.text, cursor: state.cursor + 1 };
+  return state.cursor >= state.text.length
+    ? state
+    : { text: state.text, cursor: nextGraphemeBoundary(state.text, state.cursor) };
 }
 
 /** Moves the caret to the start of the line (Home / Ctrl+A). */
 export function moveHome(state: LineState): LineState {
-  return state.cursor === 0 ? state : { text: state.text, cursor: 0 };
+  const cursor = logicalLineStart(state.text, state.cursor);
+  return state.cursor === cursor ? state : { text: state.text, cursor };
 }
 
 /** Moves the caret to the end of the line (End / Ctrl+E). */
 export function moveEnd(state: LineState): LineState {
-  return state.cursor === state.text.length
-    ? state
-    : { text: state.text, cursor: state.text.length };
+  const cursor = logicalLineEnd(state.text, state.cursor);
+  return state.cursor === cursor ? state : { text: state.text, cursor };
 }
 
 /** Deletes from the caret to the end of the line (Ctrl+K). */
 export function killToEnd(state: LineState): LineState {
-  if (state.cursor >= state.text.length) return state;
-  return { text: state.text.slice(0, state.cursor), cursor: state.cursor };
+  const lineEnd = logicalLineEnd(state.text, state.cursor);
+  if (state.cursor >= lineEnd) return state;
+  return {
+    text: state.text.slice(0, state.cursor) + state.text.slice(lineEnd),
+    cursor: state.cursor,
+  };
 }
 
 /** Deletes from the start of the line to the caret (Ctrl+U). */
 export function killToStart(state: LineState): LineState {
-  if (state.cursor === 0) return state;
-  return { text: state.text.slice(state.cursor), cursor: 0 };
+  const lineStart = logicalLineStart(state.text, state.cursor);
+  if (state.cursor <= lineStart) return state;
+  return {
+    text: state.text.slice(0, lineStart) + state.text.slice(state.cursor),
+    cursor: lineStart,
+  };
 }
 
 /** Deletes the whitespace-delimited word before the caret (Ctrl+W). */
 export function deleteWord(state: LineState): LineState {
   if (state.cursor === 0) return state;
+  // Bound to the current logical line, like killToEnd/killToStart: Ctrl+W stops
+  // at the line start instead of reaching up and merging the line above.
+  const lineStart = logicalLineStart(state.text, state.cursor);
   let start = state.cursor;
-  while (start > 0 && isWhitespace(state.text[start - 1])) start -= 1;
-  while (start > 0 && !isWhitespace(state.text[start - 1])) start -= 1;
-  return { text: state.text.slice(0, start) + state.text.slice(state.cursor), cursor: start };
+  while (start > lineStart) {
+    const previous = previousGraphemeBoundary(state.text, start);
+    if (!isWhitespace(state.text.slice(previous, start))) break;
+    start = previous;
+  }
+  while (start > lineStart) {
+    const previous = previousGraphemeBoundary(state.text, start);
+    if (isWhitespace(state.text.slice(previous, start))) break;
+    start = previous;
+  }
+  const text = state.text.slice(0, start) + state.text.slice(state.cursor);
+  return { text, cursor: graphemeBoundaryAtOrAfter(text, start) };
+}
+
+function logicalLineStart(text: string, cursor: number): number {
+  if (cursor === 0) return 0;
+  return text.lastIndexOf("\n", cursor - 1) + 1;
+}
+
+function logicalLineEnd(text: string, cursor: number): number {
+  const newline = text.indexOf("\n", cursor);
+  return newline === -1 ? text.length : newline;
+}
+
+/** Options for {@link applyLineEditorKey}. */
+interface LineEditorOptions {
+  /** Single-line inputs flatten pasted newlines and ignore Shift+Enter. */
+  readonly multiline?: boolean;
 }
 
 /**
- * Applies a key owned by the single-line editor. Returns `undefined` when the
- * key belongs to the surrounding controller (submit, cancel, history, menus).
+ * Applies a key owned by the line editor. Returns `undefined` when the key
+ * belongs to the surrounding controller (submit, cancel, history, menus), which
+ * on a single-line input includes Shift+Enter.
  */
-export function applyLineEditorKey(state: LineState, key: TerminalKey): LineState | undefined {
+export function applyLineEditorKey(
+  state: LineState,
+  key: TerminalKey,
+  options?: LineEditorOptions,
+): LineState | undefined {
+  const multiline = options?.multiline ?? false;
   switch (key.type) {
-    case "character":
-      return insert(state, key.value);
+    case "text":
+      return insert(state, multiline ? key.value : key.value.replaceAll("\n", " "));
+    case "newline":
+      return multiline ? insert(state, "\n") : undefined;
     case "backspace":
       return backspace(state);
     case "delete":
@@ -122,46 +184,123 @@ export function applyLineEditorKey(state: LineState, key: TerminalKey): LineStat
   }
 }
 
-function isWhitespace(char: string | undefined): boolean {
-  return char !== undefined && /\s/u.test(char);
+function isWhitespace(text: string): boolean {
+  return /^\s+$/u.test(text);
 }
 
 /**
  * The portion of `state.text` to draw within `budget` columns, split at the
- * caret so the renderer can place its caret glyph between `before` and
- * `after`. When the line is wider than `budget` it is windowed around the
- * caret, marking truncated ends with `…` so the caret is always visible.
+ * caret so the renderer can highlight `under` without slicing a grapheme.
+ * When the line is wider than `budget` it is windowed around the caret,
+ * marking truncated ends with `…` so the caret is always visible.
  */
-export interface VisibleLine {
+interface VisibleLine {
   readonly before: string;
+  readonly under: string;
   readonly after: string;
 }
 
 export function visibleLine(state: LineState, budget: number, ellipsis = "…"): VisibleLine {
   const width = Math.max(1, budget);
   const { text, cursor } = state;
+  const segments = graphemes(text);
+  const caretIndex = segments.findIndex((segment) => segment.start === cursor);
+  const underIndex = caretIndex === -1 ? segments.length : caretIndex;
+  const under = segments[underIndex]?.text ?? "";
 
-  if (text.length <= width) {
-    return { before: text.slice(0, cursor), after: text.slice(cursor) };
+  if (inputTextWidth(text) <= width) {
+    return {
+      before: text.slice(0, cursor),
+      under,
+      after: text.slice(cursor + under.length),
+    };
   }
 
-  // Window the line so the caret stays on screen, keeping a little context
-  // ahead of the caret when scrolling right.
-  let start = cursor < width ? 0 : cursor - width + 1;
-  start = Math.min(start, text.length - width);
-  start = Math.max(0, start);
-  const end = start + width;
+  let start = underIndex;
+  let end = underIndex + (under.length > 0 ? 1 : 0);
+  const windowWidth = (candidateStart: number, candidateEnd: number): number => {
+    const startOffset = segments[candidateStart]?.start ?? text.length;
+    const endOffset = segments[candidateEnd]?.start ?? text.length;
+    return (
+      inputTextWidth(text.slice(startOffset, endOffset)) +
+      (candidateStart > 0 ? inputTextWidth(ellipsis) : 0) +
+      (candidateEnd < segments.length ? inputTextWidth(ellipsis) : 0)
+    );
+  };
 
-  let visible = text.slice(start, end);
-  const rel = cursor - start;
-  if (start > 0 && rel > 0) {
-    visible = ellipsis + visible.slice(ellipsis.length);
-  }
-  if (end < text.length && rel < visible.length) {
-    visible = visible.slice(0, visible.length - ellipsis.length) + ellipsis;
+  let preferBefore = true;
+  while (true) {
+    const beforeFits = start > 0 && windowWidth(start - 1, end) <= width;
+    const afterFits = end < segments.length && windowWidth(start, end + 1) <= width;
+    if (!beforeFits && !afterFits) break;
+    if ((preferBefore && beforeFits) || !afterFits) start -= 1;
+    else end += 1;
+    preferBefore = !preferBefore;
   }
 
-  return { before: visible.slice(0, rel), after: visible.slice(rel) };
+  const startOffset = segments[start]?.start ?? text.length;
+  const endOffset = segments[end]?.start ?? text.length;
+  return {
+    before: `${start > 0 ? ellipsis : ""}${text.slice(startOffset, cursor)}`,
+    under,
+    after: `${text.slice(cursor + under.length, endOffset)}${end < segments.length ? ellipsis : ""}`,
+  };
+}
+
+/** One logical prompt row and the UTF-16 offset where it starts in the buffer. */
+interface PromptLogicalRow {
+  readonly text: string;
+  readonly start: number;
+}
+
+/**
+ * A multi-line prompt split into logical rows. `caretRow` indexes {@link rows};
+ * `caretOffset` is a UTF-16 offset within that row.
+ */
+interface PromptLayout {
+  readonly rows: PromptLogicalRow[];
+  readonly caretRow: number;
+  readonly caretOffset: number;
+}
+
+/**
+ * Splits a prompt buffer on newlines and locates the caret. This function does
+ * not measure terminal columns or wrap rows; the renderer windows each logical
+ * row to the available width.
+ */
+export function layoutPromptInput(state: LineState): PromptLayout {
+  const rows: PromptLogicalRow[] = [];
+  let caretRow = 0;
+  let caretOffset = 0;
+
+  let start = 0;
+  for (const text of state.text.split("\n")) {
+    // The caret sits on this line when it falls within [start, start + length];
+    // the next line begins one past the "\n", so the ranges never overlap.
+    if (state.cursor >= start && state.cursor <= start + text.length) {
+      caretRow = rows.length;
+      caretOffset = state.cursor - start;
+    }
+    rows.push({ text, start });
+    start += text.length + 1; // + 1 for the "\n" that split removed
+  }
+
+  return { rows, caretRow, caretOffset };
+}
+
+/** Moves to the adjacent logical line while preserving the terminal column where possible. */
+export function movePromptLine(state: LineState, direction: "up" | "down"): LineState | undefined {
+  const layout = layoutPromptInput(state);
+  const targetRow = direction === "up" ? layout.caretRow - 1 : layout.caretRow + 1;
+  if (targetRow < 0 || targetRow >= layout.rows.length) return undefined;
+
+  const current = layout.rows[layout.caretRow]!;
+  const target = layout.rows[targetRow]!;
+  const column = inputTextWidth(current.text.slice(0, layout.caretOffset));
+  return {
+    text: state.text,
+    cursor: target.start + offsetAtVisibleColumn(target.text, column),
+  };
 }
 
 /**

@@ -657,16 +657,17 @@ describe("renderTextQuestion", () => {
     expect(rows[1]).toBe("  New project name");
   });
 
-  it("masks the typed value", () => {
+  it("masks one bullet per grapheme", () => {
     const text = renderTextQuestion(
-      { message: "API key", editor: lineOf("secret"), mask: true },
+      { message: "API key", editor: lineOf("e\u0301👨‍👩‍👧‍👦"), mask: true },
       theme,
       60,
       false,
     ).join("\n");
 
-    expect(text).toContain("••••••");
-    expect(text).not.toContain("secret");
+    expect(text).toContain("••");
+    expect(text).not.toContain("•••");
+    expect(text).not.toContain("👨");
   });
 });
 

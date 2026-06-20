@@ -234,6 +234,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(abort).toHaveBeenCalledTimes(1);
     expect(screen.snapshot()).toContain("Interrupted");
     expect(input.rawModes).toEqual([true]);
+    expect(screen.rawOutput()).toContain("\x1b[?2004h");
 
     // Control returns to the prompt rather than exiting; the next prompt works.
     const nextPrompt = renderer.readPrompt();
@@ -243,6 +244,149 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     renderer.shutdown();
     expect(input.rawModes).toEqual([true, false]);
+    expect(screen.rawOutput()).toContain("\x1b[?2004l");
+  });
+
+  it("reassembles and renders a byte-split multi-line paste", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const text = "first 😀\nsecond 界";
+
+    const prompt = renderer.readPrompt();
+    for (const byte of Buffer.from(`\x1b[200~${text}\x1b[201~`)) {
+      input.emit("data", Buffer.of(byte));
+    }
+
+    const lines = screen.snapshot().split("\n");
+    const firstRow = lines.findIndex((line) => line.includes("first 😀"));
+    const secondRow = lines.findIndex((line) => line.includes("second 界"));
+    expect(firstRow).toBeGreaterThanOrEqual(0);
+    expect(secondRow).toBe(firstRow + 1);
+    expect(screen.snapshot()).not.toContain("⏎");
+
+    input.enter();
+    expect(await prompt).toBe(text);
+    renderer.shutdown();
+  });
+
+  it("clears a non-empty prompt on Ctrl+C, and quits only when already empty", async () => {
+    const { input, renderer } = makeRenderer();
+
+    const prompt = renderer.readPrompt();
+    input.type("draft message");
+    input.ctrlC(); // first Ctrl+C clears the buffer instead of quitting
+    input.type("real message");
+    input.enter();
+
+    // The cleared draft is gone (otherwise this would be "draft messagereal message").
+    expect(await prompt).toBe("real message");
+
+    // A Ctrl+C on the now-empty prompt quits.
+    const second = renderer.readPrompt();
+    input.ctrlC();
+    await expect(second).rejects.toThrow();
+
+    renderer.shutdown();
+  });
+
+  it("windows a line longer than the terminal around the caret", async () => {
+    const { screen, input, renderer } = makeRenderer(20); // narrow terminal
+
+    const prompt = renderer.readPrompt();
+    input.type("abcdefghijklmnopqrstuvwxyz"); // 26 chars into ~18 columns of room
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("xyz"); // the caret end stays visible
+    expect(snapshot).toContain("…"); // the truncated head is marked
+    expect(snapshot).not.toContain("abcde"); // the head scrolled off
+
+    input.enter();
+    expect(await prompt).toBe("abcdefghijklmnopqrstuvwxyz"); // full text still submits
+    renderer.shutdown();
+  });
+
+  it("draws the caret over the character under it without inserting a cell", async () => {
+    const { screen, input, renderer } = makeRenderer();
+
+    const prompt = renderer.readPrompt();
+    input.type("hello");
+    input.left();
+    input.left(); // caret between "hel" and "lo"
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("hello"); // text stays contiguous, not split by a caret
+    expect(snapshot).not.toContain("▏"); // no inserted bar-caret cell
+    // The block caret is reverse-video (SGR 7) over the grapheme under the
+    // cursor; snapshot() strips SGR, so assert it on the raw output.
+    expect(screen.rawOutput()).toContain("\x1b[7m");
+
+    input.enter();
+    await prompt;
+    renderer.shutdown();
+  });
+
+  it("recovers from an unterminated bracketed paste instead of wedging input", async () => {
+    vi.useFakeTimers();
+    try {
+      const { input, renderer } = makeRenderer();
+      const prompt = renderer.readPrompt();
+      input.send("\x1b[200~first\nsecond"); // paste start, closing marker never arrives
+      vi.advanceTimersByTime(1_100); // past the incomplete-paste flush
+      input.type("X"); // input still works rather than being wedged
+      input.enter();
+      expect(await prompt).toBe("first\nsecondX");
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("inserts a newline on Shift+Enter and submits the whole multi-line buffer", async () => {
+    const { input, renderer } = makeRenderer();
+
+    const prompt = renderer.readPrompt();
+    input.type("line one");
+    input.send("\x1b[27;2;13~"); // Shift+Enter (xterm modifyOtherKeys)
+    input.type("line two");
+    input.enter();
+
+    expect(await prompt).toBe("line one\nline two");
+    renderer.shutdown();
+  });
+
+  it("moves the caret into the line above on ↑, then edits it", async () => {
+    const { input, renderer } = makeRenderer();
+
+    const prompt = renderer.readPrompt();
+    input.send("\x1b[200~ab\ncd\x1b[201~"); // caret lands after "cd"
+    input.up(); // to the end of "ab"
+    input.type("X");
+    input.enter();
+
+    expect(await prompt).toBe("abX\ncd");
+    renderer.shutdown();
+  });
+
+  it("bounds a tall prompt and moves its viewport with the caret", async () => {
+    const { screen, input, renderer } = makeRenderer(40, 8);
+    const lines = Array.from({ length: 20 }, (_, index) => `line ${index + 1}`);
+
+    const prompt = renderer.readPrompt();
+    input.send(`\x1b[200~${lines.join("\n")}\x1b[201~`);
+
+    expect(screen.snapshot().split("\n").length).toBeLessThanOrEqual(8);
+    expect(screen.snapshot()).toContain("line 20");
+    expect(screen.snapshot()).toContain("…");
+
+    for (let index = 0; index < 15; index += 1) input.up();
+
+    expect(screen.snapshot()).toContain("line 5");
+    expect(screen.snapshot()).not.toContain("line 20");
+
+    input.type("X");
+    input.enter();
+    lines[4] += "X";
+    expect(await prompt).toBe(lines.join("\n"));
+    renderer.shutdown();
   });
 
   it("renders reused stream block ids across separate prompt turns", async () => {
@@ -570,6 +714,65 @@ describe("TerminalRenderer (inline scrollback)", () => {
     input.type("no");
     input.enter();
     await answer;
+    renderer.shutdown();
+  });
+
+  it("preserves bracketed multi-line paste in freeform question input", async () => {
+    const { input, renderer } = makeRenderer();
+
+    const answer = renderer.readInputQuestion({
+      requestId: "q1",
+      prompt: "What city are you in?",
+      display: "text",
+      options: [],
+      allowFreeform: true,
+    });
+    input.send("\x1b[200~New\nYork\x1b[201~");
+    input.enter();
+
+    await expect(answer).resolves.toEqual({ text: "New\nYork" });
+    renderer.shutdown();
+  });
+
+  it("edits freeform question input across lines", async () => {
+    const { input, renderer } = makeRenderer();
+
+    const answer = renderer.readInputQuestion({
+      requestId: "q1",
+      prompt: "What should I know?",
+      display: "text",
+    });
+    input.type("first");
+    input.send("\x1b[27;2;13~");
+    input.type("second");
+    input.up();
+    input.type("!");
+    input.enter();
+
+    await expect(answer).resolves.toEqual({ text: "first!\nsecond" });
+    renderer.shutdown();
+  });
+
+  it("clears non-empty freeform question input on Ctrl+C before interrupting", async () => {
+    const { input, renderer } = makeRenderer();
+    const question = {
+      requestId: "q1",
+      prompt: "What city are you in?",
+      display: "text",
+      options: [],
+      allowFreeform: true,
+    } satisfies Parameters<typeof renderer.readInputQuestion>[0];
+
+    const answer = renderer.readInputQuestion(question);
+    input.type("New York");
+    input.ctrlC();
+    input.type("Boston");
+    input.enter();
+    await expect(answer).resolves.toEqual({ text: "Boston" });
+
+    const interrupted = renderer.readInputQuestion({ ...question, requestId: "q2" });
+    input.ctrlC();
+    await expect(interrupted).rejects.toThrow();
     renderer.shutdown();
   });
 
@@ -1148,6 +1351,44 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("delete_files");
     expect(snapshot).toContain("→ denied");
+  });
+
+  it("does not treat bracketed-paste text as a tool approval action", async () => {
+    const { input, renderer } = makeRenderer();
+    const approval = renderer.readToolApproval({
+      approvalId: "a1",
+      toolCallId: "c1",
+      toolName: "delete_files",
+      input: { path: "/" },
+    });
+
+    input.send("\x1b[200~y\x1b[201~");
+    input.type("n");
+
+    await expect(approval).resolves.toEqual({ approved: false, reason: "Denied by user." });
+    renderer.shutdown();
+  });
+
+  it("does not treat an unterminated bracketed paste as a tool approval action", async () => {
+    vi.useFakeTimers();
+    try {
+      const { input, renderer } = makeRenderer();
+      const approval = renderer.readToolApproval({
+        approvalId: "a1",
+        toolCallId: "c1",
+        toolName: "delete_files",
+        input: { path: "/" },
+      });
+
+      input.send("\x1b[200~y");
+      vi.advanceTimersByTime(1_100);
+      input.type("n");
+
+      await expect(approval).resolves.toEqual({ approved: false, reason: "Denied by user." });
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("commits a dim recovery notice to scrollback", () => {

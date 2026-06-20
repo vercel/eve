@@ -1,3 +1,5 @@
+import { StringDecoder } from "node:string_decoder";
+
 import type {
   AgentTUIInputOption,
   AgentTUIInputQuestion,
@@ -59,7 +61,6 @@ import {
   type DevRebuildLogUpdate,
 } from "#internal/nitro/host/dev-watcher-log.js";
 import { toErrorMessage } from "#shared/errors.js";
-
 import {
   type Block,
   type BlockKind,
@@ -74,7 +75,9 @@ import {
   PromptHistory,
   applyLineEditorKey,
   deleteForward,
+  layoutPromptInput,
   lineOf,
+  movePromptLine,
   visibleLine,
   type LineState,
 } from "./line-editor.js";
@@ -82,14 +85,17 @@ import { LiveRegion } from "./live-region.js";
 import { buildStatusLine } from "./status-line.js";
 import { nextLogDisplayMode } from "./log-display-mode.js";
 import { createTheme, detectUnicode, type Theme } from "./theme.js";
-import { sliceVisible, stripAnsi, stripTerminalControls, visibleLength } from "./terminal-text.js";
+import { clipVisible, renderInputText, stripAnsi, stripTerminalControls } from "./terminal-text.js";
 import type { VercelStatusSnapshot } from "./vercel-status.js";
 import { summarizeToolArgs, summarizeToolResult } from "./tool-format.js";
 import { reduceSetupSelectInput, setupSelectionIntent } from "./setup-selection-input.js";
 import {
   formatAssistantResponseStats,
   formatTokenFlow,
+  isIncompletePaste,
   nextKey,
+  sanitizePastedText,
+  stripPasteStart,
   stripPromptControlCharacters,
   takeUntil,
   type TerminalKey,
@@ -217,6 +223,10 @@ const tickMs = 90;
 // How long to wait on a lone `ESC` before treating it as the Escape key, so a
 // split arrow sequence (`ESC` then `[A`) has time to reassemble first.
 const escFlushMs = 30;
+// How long to wait, with no further input, before abandoning a bracketed paste
+// whose closing marker never arrived. Generous because the timer resets on every
+// read, so an in-flight paste keeps it alive; it only fires once input goes quiet.
+const incompletePasteFlushMs = 1_000;
 // How long the transient Ctrl+L log-mode hint stays in the status line after
 // the last cycle before it clears itself.
 const logLevelHintMs = 5_000;
@@ -307,8 +317,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #logLevelHintActive = false;
   /** Active per-mode key consumer (prompt, approval, question, streaming). */
   #consumeKey?: (key: TerminalKey) => void;
-  /** Bytes held back while an escape sequence is still arriving. */
+  /** Decoded input held while an escape sequence is still arriving. */
   #keyBuffer = "";
+  #inputDecoder = new StringDecoder("utf8");
   #keyFlushTimer?: ReturnType<typeof setTimeout>;
   #onResize?: () => void;
   #resolveStreamInterrupt?: () => void;
@@ -453,7 +464,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
       };
 
       this.#consumeKey = (key) => {
-        const edited = applyLineEditorKey(editor, key);
+        // Chat keeps pasted newlines and honors Shift+Enter. Setup-panel inputs
+        // stay single-line; freeform questions opt in separately below.
+        const edited = applyLineEditorKey(editor, key, { multiline: true });
         if (edited !== undefined) {
           apply(edited);
           return;
@@ -461,22 +474,28 @@ export class TerminalRenderer implements AgentTUIRenderer {
         switch (key.type) {
           case "up": {
             const open = suggestions();
-            if (open === undefined) {
-              recall(this.#promptHistory.previous(editor.text));
-            } else {
+            if (open !== undefined) {
               this.#typeahead = moveTypeaheadSelection(open, -1);
               this.#paint();
+              break;
             }
+            // Within a multi-line buffer, ↑ walks to the row above; only at the
+            // top row does it hand off to prompt history.
+            const moved = movePromptLine(editor, "up");
+            if (moved !== undefined) apply(moved);
+            else recall(this.#promptHistory.previous(editor.text));
             break;
           }
           case "down": {
             const open = suggestions();
-            if (open === undefined) {
-              recall(this.#promptHistory.next());
-            } else {
+            if (open !== undefined) {
               this.#typeahead = moveTypeaheadSelection(open, 1);
               this.#paint();
+              break;
             }
+            const moved = movePromptLine(editor, "down");
+            if (moved !== undefined) apply(moved);
+            else recall(this.#promptHistory.next());
             break;
           }
           case "tab": {
@@ -540,7 +559,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
             this.#paint();
             break;
           case "ctrl-c":
-            interrupt();
+            // A first Ctrl+C clears a non-empty prompt; on an already-empty
+            // prompt it quits.
+            if (editor.text.length === 0) {
+              interrupt();
+            } else {
+              apply(EMPTY_LINE);
+            }
             break;
           default:
             break;
@@ -632,7 +657,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
     return await new Promise((resolve, reject) => {
       this.#consumeKey = (key) => {
         switch (key.type) {
-          case "character": {
+          case "text": {
+            // This prevents ordinary bracketed paste from confirming by
+            // accident; terminal framing is not an authentication signal.
+            if (key.framing !== "unframed") break;
             const value = key.value.toLowerCase();
             if (value === "y") {
               this.#status = STATUS.processing;
@@ -683,7 +711,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     let mode: "select" | "text" = hasOptions ? "select" : "text";
     let cursorIndex = 0;
-    let text = "";
+    let editor = EMPTY_LINE;
 
     const isOnFreeformRow = () => hasFreeformRow && cursorIndex === optionList.length;
 
@@ -705,7 +733,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#inputActive = false;
       } else {
         this.#inputActive = true;
-        this.#syncInput(lineOf(text));
+        this.#syncInput(editor);
         this.#status = "";
       }
       this.#paint();
@@ -742,6 +770,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     return await new Promise<AgentTUIInputQuestionResponse | undefined>((resolve, reject) => {
       this.#consumeKey = (key) => {
         if (key.type === "ctrl-c") {
+          if (mode === "text" && editor.text.length > 0) {
+            editor = EMPTY_LINE;
+            this.#showCaret();
+            repaintStatus();
+            return;
+          }
           this.#interrupted = true;
           this.#stopCaretBlink();
           this.#stop();
@@ -773,7 +807,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
             case "enter": {
               if (isOnFreeformRow()) {
                 mode = "text";
-                text = "";
+                editor = EMPTY_LINE;
                 this.#startCaretBlink();
                 repaintStatus();
                 break;
@@ -788,39 +822,47 @@ export class TerminalRenderer implements AgentTUIRenderer {
           return;
         }
 
+        const edited = applyLineEditorKey(editor, key, { multiline: true });
+        if (edited !== undefined) {
+          editor = edited;
+          this.#showCaret();
+          repaintStatus();
+          return;
+        }
+
         switch (key.type) {
-          case "character":
-            text += key.value;
-            this.#showCaret();
-            repaintStatus();
+          case "up":
+          case "down": {
+            const moved = movePromptLine(editor, key.type);
+            if (moved !== undefined) {
+              editor = moved;
+              this.#showCaret();
+              repaintStatus();
+            }
             break;
-          case "backspace":
-            text = text.slice(0, -1);
-            this.#showCaret();
-            repaintStatus();
-            break;
+          }
           case "enter": {
-            const resolvedText = resolveQuestionText(text, question);
+            const resolvedText = resolveQuestionText(editor.text, question);
             if (resolvedText === undefined) break;
             resolve(finalize(resolvedText));
             break;
           }
           case "escape":
             if (hasOptions) {
-              if (text.length > 0) {
-                text = "";
+              if (editor.text.length > 0) {
+                editor = EMPTY_LINE;
                 this.#showCaret();
                 repaintStatus();
                 break;
               }
               mode = "select";
-              text = "";
+              editor = EMPTY_LINE;
               this.#inputActive = false;
               this.#stopCaretBlink();
               repaintStatus();
               break;
             }
-            text = "";
+            editor = EMPTY_LINE;
             this.#showCaret();
             repaintStatus();
             break;
@@ -1658,6 +1700,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (this.#input.isTTY) {
       this.#input.setRawMode?.(true);
       this.#input.resume();
+      // Enable bracketed paste (DEC private mode 2004) so the terminal wraps
+      // pasted text in \x1b[200~ … \x1b[201~; the decoder then inserts a
+      // multi-line paste intact instead of each newline submitting the prompt.
+      // Routed through the live region's original `write` so the foreign-output
+      // capture installed just above can't swallow the control sequence.
+      this.#live.emitBracketedPaste(true);
     }
 
     this.#onResize = () => this.#paint();
@@ -1691,6 +1739,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#live.newline();
 
     if (this.#input.isTTY) {
+      // Disable bracketed paste, restoring the terminal to how we found it.
+      this.#live.emitBracketedPaste(false);
       this.#input.setRawMode?.(false);
       this.#input.pause();
     }
@@ -1714,6 +1764,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#input.off("data", this.#feedRaw);
     this.#clearKeyFlush();
     this.#keyBuffer = "";
+    this.#inputDecoder = new StringDecoder("utf8");
     this.#consumeKey = undefined;
   }
 
@@ -1724,9 +1775,25 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   readonly #feedRaw = (chunk: Buffer) => {
     this.#clearKeyFlush();
-    this.#keyBuffer += chunk.toString("utf8");
+    this.#keyBuffer += this.#inputDecoder.write(chunk);
     this.#drainKeys();
+    this.#armKeyFlush();
+  };
 
+  /**
+   * Arms a one-shot timer for an escape sequence that {@link nextKey} can't yet
+   * resolve, so the decoder never blocks all further input waiting on bytes that
+   * will not come. Re-armed on every read, so a sequence still in flight stays
+   * alive; it only fires once input goes quiet.
+   */
+  #armKeyFlush() {
+    // A lone trailing ESC may begin an arrow/function key; hold it briefly, then
+    // surface it as a bare Escape. This is the standard ESC-timeout heuristic: a
+    // lone ESC and the leading byte of a longer sequence are indistinguishable,
+    // so a paste whose `\x1b[200~` leader is split off by >escFlushMs (only under
+    // network/PTY fragmentation, never an atomically-delivered local paste) can
+    // be misread as Escape + literal text. Lengthening the timeout trades Escape
+    // latency for a smaller window; not worth it for a non-adversarial edge.
     if (this.#keyBuffer === "\x1b") {
       this.#keyFlushTimer = setTimeout(() => {
         if (this.#keyBuffer !== "\x1b") return;
@@ -1734,8 +1801,24 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#consumeKey?.({ type: "escape" });
       }, escFlushMs);
       this.#keyFlushTimer.unref?.();
+      return;
     }
-  };
+    // A bracketed paste whose closing marker never arrives would otherwise wedge
+    // input forever. Recover its sanitized payload without losing the paste
+    // framing that downstream consumers use to apply paste-safe behavior.
+    if (isIncompletePaste(this.#keyBuffer)) {
+      const stuck = this.#keyBuffer;
+      this.#keyFlushTimer = setTimeout(() => {
+        if (this.#keyBuffer !== stuck) return;
+        const value = sanitizePastedText(stripPasteStart(stuck));
+        this.#keyBuffer = "";
+        if (value.length > 0) {
+          this.#consumeKey?.({ type: "text", value, framing: "bracketed-paste" });
+        }
+      }, incompletePasteFlushMs);
+      this.#keyFlushTimer.unref?.();
+    }
+  }
 
   #drainKeys() {
     while (this.#keyBuffer.length > 0) {
@@ -2345,23 +2428,29 @@ export class TerminalRenderer implements AgentTUIRenderer {
       ) {
         rows.push(...renderCommandSuggestions(this.#typeahead, this.#theme, width));
       }
-      // Reserve three columns: prompt glyph, its trailing space, and the caret.
-      const budget = Math.max(4, width - 3);
-      const { before, after } = visibleLine(
-        { text: this.#inputText, cursor: this.#inputCursor },
-        budget,
-        this.#theme.glyph.ellipsis,
-      );
       // A fully typed known command paints blue, confirming it will dispatch
       // as a command instead of being sent to the agent as a message.
       const isCommand = isPromptControlCommand(this.#inputText);
-      const style = (segment: string): string =>
-        isCommand && segment.length > 0 ? c.blue(segment) : segment;
-      const caret = this.#caretVisible ? c.cyan(this.#theme.glyph.caret) : " ";
       const ghost = inlineHint ? c.dim(` ${inlineHint}`) : "";
-      const body = `${style(before)}${caret}${style(after)}${ghost}`;
-      rows.push(...promptInputRows(body, width, this.#theme, true));
-      this.#pushStatusLine(rows, width);
+      const statusRows: string[] = [];
+      this.#pushStatusLine(statusRows, width);
+      // Keep one transcript row above the footer and one separator below the
+      // prompt. Everything already in `rows` has higher-level footer ownership
+      // (attention or typeahead), so the prompt receives only what remains.
+      const maxPromptRows = Math.max(1, this.#height() - 1 - rows.length - 1 - statusRows.length);
+      rows.push(
+        ...promptInputRows({
+          text: this.#inputText,
+          cursor: this.#inputCursor,
+          width,
+          theme: this.#theme,
+          caretVisible: this.#caretVisible,
+          isCommand,
+          ghost,
+          maxRows: maxPromptRows,
+        }),
+      );
+      rows.push(...statusRows);
       return rows;
     }
 
@@ -2695,19 +2784,83 @@ async function* iterateTUIStream(
 }
 
 function clip(line: string, width: number): string {
-  return visibleLength(line) > width ? sliceVisible(line, width) : line;
+  return clipVisible(line, width);
+}
+
+interface PromptInputRowsInput {
+  readonly text: string;
+  readonly cursor: number;
+  readonly width: number;
+  readonly theme: Theme;
+  readonly caretVisible: boolean;
+  /** A fully typed known command paints blue, confirming it will dispatch as a command. */
+  readonly isCommand: boolean;
+  readonly ghost: string;
+  readonly maxRows: number;
 }
 
 /**
- * Renders the original prompt glyph and horizontal position, followed by a
- * blank row that keeps the persistent status visually separate. During a
- * turn the same row stays visible but dimmed beneath live activity.
+ * Renders the prompt buffer as terminal rows, followed by a blank row that keeps
+ * the persistent status visually separate. The buffer can carry newlines from
+ * paste or Shift+Enter, so it renders one row per logical line and windows tall
+ * input to `maxRows`, marking any hidden rows with an ellipsis.
  */
-function promptInputRows(content: string, width: number, theme: Theme, active: boolean): string[] {
+function promptInputRows({
+  text,
+  cursor,
+  width,
+  theme,
+  caretVisible,
+  isCommand,
+  ghost,
+  maxRows,
+}: PromptInputRowsInput): string[] {
   const c = theme.colors;
-  const prompt = active ? c.cyan(theme.glyph.prompt) : c.dim(theme.glyph.prompt);
-  const body = active ? content : c.dim(content);
-  return [clip(`${prompt} ${body}`, width), ""];
+  const style = (segment: string): string => {
+    const rendered = renderInputText(segment);
+    return isCommand && rendered.length > 0 ? c.blue(rendered) : rendered;
+  };
+
+  const layout = layoutPromptInput({ text, cursor });
+  const visibleCount = Math.min(Math.max(1, maxRows), layout.rows.length);
+  const top = Math.max(
+    0,
+    Math.min(layout.caretRow - visibleCount + 1, layout.rows.length - visibleCount),
+  );
+  const promptGlyph = c.cyan(theme.glyph.prompt);
+  const ellipsis = c.dim(theme.glyph.ellipsis);
+  // Reserve the gutter and the block caret's trailing cell at end-of-line.
+  const budget = Math.max(1, width - 3);
+  const out: string[] = [];
+  for (let r = top; r < top + visibleCount; r += 1) {
+    const row = layout.rows[r]!;
+    let gutter = r === 0 ? promptGlyph : " ";
+    if (r === top && top > 0) gutter = ellipsis;
+    else if (r === top + visibleCount - 1 && top + visibleCount < layout.rows.length) {
+      gutter = ellipsis;
+    }
+
+    let body: string;
+    if (r === layout.caretRow) {
+      // Window the active row so the caret remains visible on long lines.
+      const { before, under, after } = visibleLine(
+        { text: row.text, cursor: layout.caretOffset },
+        budget,
+        theme.glyph.ellipsis,
+      );
+      // Inverse video keeps the underlying text in place; EOL uses a space.
+      const caretText = under || " ";
+      const caretCell = caretVisible ? c.inverse(renderInputText(caretText)) : style(caretText);
+      body = `${style(before)}${caretCell}${style(after)}`;
+      // The argument hint trails the caret only on a single-line command draft.
+      if (ghost.length > 0 && layout.rows.length === 1) body += ghost;
+    } else {
+      body = style(row.text);
+    }
+    out.push(clip(`${gutter} ${body}`, width));
+  }
+  out.push("");
+  return out;
 }
 
 /** Kind + title of the previously rendered block, for gap / run decisions. */

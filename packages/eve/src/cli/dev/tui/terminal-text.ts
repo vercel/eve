@@ -1,7 +1,12 @@
+import { graphemes } from "#shared/text-boundaries.js";
+
 const ansiEscape = String.fromCharCode(27);
 
 export const ansiPattern = new RegExp(`${ansiEscape}\\[[0-?]*[ -/]*[@-~]`, "g");
 export const ansiPrefixPattern = new RegExp(`^${ansiEscape}\\[[0-?]*[ -/]*[@-~]`);
+const emojiPresentationPattern = /\p{Emoji_Presentation}/u;
+const extendedPictographicPattern = /\p{Extended_Pictographic}/u;
+const keycapPattern = /^[#*0-9]\u{fe0f}?\u{20e3}$/u;
 
 export function stripAnsi(input: string): string {
   return stripTerminalControls(input.replaceAll(ansiPattern, ""));
@@ -33,27 +38,7 @@ export function stripTerminalControls(input: string): string {
 
 export function visibleLength(input: string): number {
   let width = 0;
-  let index = 0;
-
-  while (index < input.length) {
-    const ansiMatch = input.slice(index).match(ansiPrefixPattern);
-
-    if (ansiMatch) {
-      index += ansiMatch[0].length;
-      continue;
-    }
-
-    const codePoint = input.codePointAt(index);
-
-    if (codePoint == null) {
-      break;
-    }
-
-    const character = String.fromCodePoint(codePoint);
-    width += codePointWidth(codePoint);
-    index += character.length;
-  }
-
+  for (const unit of terminalTextUnits(input)) width += unit.width;
   return width;
 }
 
@@ -64,47 +49,101 @@ export function sliceVisible(input: string, width: number): string {
 
   let output = "";
   let visible = 0;
+  const units = terminalTextUnits(input);
   let index = 0;
+  while (index < units.length && visible < width) {
+    const unit = units[index]!;
+    if (unit.width > 0 && visible + unit.width > width) break;
+    output += unit.text;
+    visible += unit.width;
+    index += 1;
+  }
 
-  while (index < input.length && visible < width) {
-    const ansiMatch = input.slice(index).match(ansiPrefixPattern);
+  while (units[index]?.ansi === true) {
+    output += units[index]!.text;
+    index += 1;
+  }
 
-    if (ansiMatch) {
-      output += ansiMatch[0];
+  return output;
+}
+
+/** Clips text styled only at grapheme boundaries, resetting any truncated style. */
+export function clipVisible(input: string, width: number): string {
+  if (visibleLength(input) <= width) return input;
+  const sliced = sliceVisible(input, width);
+  return sliced.includes(ansiEscape) ? `${sliced}${ansiEscape}[0m` : sliced;
+}
+
+/** Terminal-cell width of editor text, measured one grapheme cluster at a time. */
+export function inputTextWidth(input: string): number {
+  let width = 0;
+  for (const grapheme of graphemes(input)) {
+    width += terminalGraphemeWidth(grapheme.text);
+  }
+  return width;
+}
+
+/** Expands editor tabs to the same fixed four cells used by {@link inputTextWidth}. */
+export function renderInputText(input: string): string {
+  return input.replaceAll("\t", "    ");
+}
+
+/**
+ * Returns the UTF-16 offset at or immediately before a terminal column.
+ * Graphemes stay intact even when the requested column falls inside a wide one.
+ */
+export function offsetAtVisibleColumn(input: string, column: number): number {
+  if (column <= 0) return 0;
+
+  let visible = 0;
+  for (const grapheme of graphemes(input)) {
+    const next = visible + terminalGraphemeWidth(grapheme.text);
+    if (next > column) return grapheme.start;
+    if (next === column) return grapheme.end;
+    visible = next;
+  }
+  return input.length;
+}
+
+function terminalGraphemeWidth(grapheme: string): number {
+  let width = 0;
+  for (const character of grapheme) {
+    const codePoint = character.codePointAt(0);
+    if (codePoint !== undefined) width = Math.max(width, codePointWidth(codePoint));
+  }
+  const emojiPresentation =
+    emojiPresentationPattern.test(grapheme) ||
+    keycapPattern.test(grapheme) ||
+    (grapheme.includes("\u{fe0f}") && extendedPictographicPattern.test(grapheme));
+  return emojiPresentation ? Math.max(2, width) : width;
+}
+
+interface TerminalTextUnit {
+  readonly text: string;
+  readonly width: number;
+  readonly ansi: boolean;
+}
+
+function terminalTextUnits(input: string): TerminalTextUnit[] {
+  const units: TerminalTextUnit[] = [];
+  let index = 0;
+  while (index < input.length) {
+    const remaining = input.slice(index);
+    const ansiMatch = remaining.match(ansiPrefixPattern);
+    if (ansiMatch !== null) {
+      units.push({ text: ansiMatch[0], width: 0, ansi: true });
       index += ansiMatch[0].length;
       continue;
     }
 
-    const codePoint = input.codePointAt(index);
-
-    if (codePoint == null) {
-      break;
+    const nextAnsi = remaining.search(ansiPattern);
+    const plain = remaining.slice(0, nextAnsi === -1 ? remaining.length : nextAnsi);
+    for (const grapheme of graphemes(plain)) {
+      units.push({ text: grapheme.text, width: terminalGraphemeWidth(grapheme.text), ansi: false });
     }
-
-    const character = String.fromCodePoint(codePoint);
-    const characterWidth = codePointWidth(codePoint);
-
-    if (characterWidth > 0 && visible + characterWidth > width) {
-      break;
-    }
-
-    output += character;
-    index += character.length;
-    visible += characterWidth;
+    index += plain.length;
   }
-
-  while (index < input.length) {
-    const ansiMatch = input.slice(index).match(ansiPrefixPattern);
-
-    if (!ansiMatch) {
-      break;
-    }
-
-    output += ansiMatch[0];
-    index += ansiMatch[0].length;
-  }
-
-  return output;
+  return units;
 }
 
 /**
@@ -130,7 +169,7 @@ export function wrapVisibleLine(line: string, width: number): string[] {
     remaining = remaining.slice(breakAt).trimStart();
   }
 
-  lines.push(remaining);
+  if (remaining.length > 0 || lines.length === 0) lines.push(remaining);
   return lines;
 }
 
@@ -142,7 +181,17 @@ function findVisibleBreakPoint(input: string, width: number): number {
     return lastSpace;
   }
 
-  return sliceVisible(input, width).length;
+  const hardSlice = sliceVisible(input, width);
+  if (visibleLength(hardSlice) > 0) return hardSlice.length;
+
+  let offset = 0;
+  let foundVisibleUnit = false;
+  for (const unit of terminalTextUnits(input)) {
+    if (foundVisibleUnit && unit.width > 0) return offset;
+    offset += unit.text.length;
+    if (unit.width > 0) foundVisibleUnit = true;
+  }
+  return offset;
 }
 
 export function codePointWidth(codePoint: number): number {

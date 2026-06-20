@@ -58,17 +58,20 @@ The provider row demands attention (a bold yellow "Configure provider" with "Req
 
 ## Keyboard shortcuts
 
-The prompt input behaves like a shell line editor.
+Chat and freeform `ask_question` inputs behave like a shell line editor.
 
 | Key                                            | Action                                                                                                            |
 | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `Enter`                                        | Send the message.                                                                                                 |
-| `Ctrl+C`                                       | Interrupt a running turn, or quit at the prompt.                                                                  |
-| `↑` / `↓`                                      | Cycle through the messages you have sent this session.                                                            |
-| `←` / `→`, `Home` / `End`, `Ctrl+A` / `Ctrl+E` | Move the caret.                                                                                                   |
-| `Ctrl+U` / `Ctrl+K` / `Ctrl+W`                 | Kill the whole line, the rest of the line, or the previous word.                                                  |
+| `Enter`                                        | Submit the message or question response.                                                                          |
+| `Shift+Enter`                                  | Insert a newline without sending (needs a terminal that reports modified keys).                                   |
+| `Ctrl+C`                                       | Interrupt a running turn. At the chat or freeform-question prompt, clear non-empty input; when empty, quit.       |
+| `↑` / `↓`                                      | Move between input lines; at a chat-buffer edge, navigate messages you have sent this session.                    |
+| `←` / `→`, `Home` / `End`, `Ctrl+A` / `Ctrl+E` | Move the caret; Home/End stay within the current line.                                                            |
+| `Ctrl+U` / `Ctrl+K` / `Ctrl+W`                 | Delete to the start of the line, to its end, or through the previous word.                                        |
 | `Ctrl+L`                                       | Cycle the log display mode (`none → all → stderr → sandbox → none`) and briefly show the mode in the status line. |
 | `Ctrl+R`                                       | Redraw the screen.                                                                                                |
+
+In terminals that support bracketed paste, pasting multi-line text into chat or a freeform question inserts it intact and renders one row per line rather than submitting at the first line. `Shift+Enter` adds a line by hand. The input grows down to the available terminal height, then scrolls to keep the caret visible; `Enter` submits the whole response.
 
 If a turn fails terminally (the server session dies or the connection drops), the TUI starts a fresh session and notes it inline so you can keep going. Server-side context resets with the old session.
 
@@ -77,7 +80,7 @@ If a turn fails terminally (the server session dies or the connection drops), th
 When the agent needs something from you, the TUI asks inline.
 
 - Tool approvals are a `y` or `n`.
-- Option questions let you pick with `↑` / `↓` and `Enter`, or you can type a freeform answer.
+- Option questions let you pick with `↑` / `↓` and `Enter`, or you can compose a multi-line freeform answer.
 - If a tool needs an authorized [connection](../connections), the URL shows up right in the transcript, and the turn picks back up once you finish the flow.
 
 ## Control what logs show
