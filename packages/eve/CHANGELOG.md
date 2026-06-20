@@ -1,5 +1,11 @@
 # eve
 
+## 0.11.9
+
+### Patch Changes
+
+- 4bfbaa0: Add root agent `experimental.workflow.world` configuration for selecting an installed Workflow world package. Eve now loads and registers the configured world at runtime and documents how self-hosted deployments can provide a custom Workflow world.
+
 ## 0.11.8
 
 ### Patch Changes
