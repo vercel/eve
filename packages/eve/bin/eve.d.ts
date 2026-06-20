@@ -15,9 +15,9 @@ export interface BootstrapOptions {
   postBuildScriptPaths?: readonly string[];
 
   /**
-   * Absolute path to the tsgo CLI entrypoint used for bootstrap builds.
+   * Absolute path to the tsc CLI entrypoint used for bootstrap builds.
    */
-  tsgoCliPath?: string;
+  tscCliPath?: string;
 }
 
 export interface BootstrapCommandOptions {

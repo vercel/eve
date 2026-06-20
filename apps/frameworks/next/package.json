@@ -9,7 +9,7 @@
     "build:eve": "eve build",
     "build:next": "next build",
     "lint": "eslint",
-    "typecheck": "tsgo"
+    "typecheck": "tsc"
   },
   "dependencies": {
     "@auth/core": "0.41.2",
@@ -30,6 +30,6 @@
     "eslint": "10.4.0",
     "eslint-config-next": "16.2.6",
     "tailwindcss": "4.3.0",
-    "typescript": "catalog:"
+    "typescript": "6.0.3"
   }
 }

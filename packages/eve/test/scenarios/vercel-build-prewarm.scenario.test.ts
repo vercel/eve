@@ -80,6 +80,21 @@ describe("Vercel build-time sandbox prewarm", () => {
     expect(shouldPrewarmVercelBuild()).toBe(true);
   });
 
+  it("warns when a Vercel build cannot prewarm sandbox templates", async () => {
+    vi.stubEnv("VERCEL", "1");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await expect(
+      runVercelBuildPrewarm({
+        appRoot: "/unused",
+      }),
+    ).resolves.toBe(false);
+
+    expect(warn).toHaveBeenCalledWith(
+      '[eve] WARNING: Skipped Vercel sandbox template prewarm because VERCEL_DEPLOYMENT_ID is missing. The generated .vercel/output may reference sandbox templates that were not provisioned. Do not deploy it with "vercel deploy --prebuilt"; use "vercel deploy" so Vercel builds from source.',
+    );
+  });
+
   it("prewarms sandbox templates with per-agent skill seed files", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_test_build_prewarm");

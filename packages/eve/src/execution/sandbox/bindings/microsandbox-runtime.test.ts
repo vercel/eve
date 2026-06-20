@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { MicrosandboxSessionMetadata } from "#execution/sandbox/bindings/microsandbox-metadata.js";
 import {
   connectMicrosandbox,
+  createPreparedMicrosandbox,
   MicrosandboxVm,
 } from "#execution/sandbox/bindings/microsandbox-runtime.js";
 import {
@@ -253,9 +254,164 @@ describe.skipIf(process.platform === "win32")("MicrosandboxVm", () => {
   });
 });
 
+describe.skipIf(process.platform === "win32")("createPreparedMicrosandbox", () => {
+  it("reports the current creation phase while the VM is still starting", async () => {
+    vi.useFakeTimers();
+    const sandbox = createMockMicrosandbox();
+    const created = Promise.withResolvers<typeof sandbox>();
+    const log = vi.fn();
+    const module = createCreationModule({
+      create: () => created.promise,
+      progress: [
+        { kind: "resolving", reference: MICROSANDBOX_DEFAULT_IMAGE },
+        {
+          kind: "complete",
+          layerCount: 12,
+          reference: MICROSANDBOX_DEFAULT_IMAGE,
+        },
+      ],
+    });
+
+    try {
+      const pending = createPreparedMicrosandbox({
+        log,
+        module: module as never,
+        name: "template-vm",
+        networkPolicy: "deny-all",
+        options: resolveMicrosandboxOptions(undefined),
+        sessionKey: "template-key",
+        setupBaseRuntime: false,
+      });
+
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(log).toHaveBeenCalledWith("image ready; booting microsandbox VM (10s elapsed)");
+
+      created.resolve(sandbox);
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("adds image and provider context when VM creation rejects", async () => {
+    class TestMicrosandboxError extends Error {
+      readonly code = "imageNotFound";
+    }
+
+    const cause = new TestMicrosandboxError("manifest was not found");
+    const module = {
+      ...createCreationModule({
+        create: async () => {
+          throw cause;
+        },
+        progress: [],
+      }),
+      MicrosandboxError: TestMicrosandboxError,
+    };
+
+    const creation = createPreparedMicrosandbox({
+      module: module as never,
+      name: "template-vm",
+      networkPolicy: "deny-all",
+      options: resolveMicrosandboxOptions(undefined),
+      sessionKey: "template-key",
+      setupBaseRuntime: false,
+    });
+
+    await expect(creation).rejects.toMatchObject({
+      cause,
+      message: expect.stringContaining(
+        `Failed to create microsandbox VM from image "${MICROSANDBOX_DEFAULT_IMAGE}" ` +
+          "while resolving the image [imageNotFound]: manifest was not found. " +
+          "Check that the image exists and that the registry credentials can pull it.",
+      ),
+    });
+  });
+
+  it("reports interleaved layer work as one stable phase", async () => {
+    const log = vi.fn();
+    const module = createCreationModule({
+      create: async () => createMockMicrosandbox(),
+      progress: [
+        { kind: "resolving", reference: MICROSANDBOX_DEFAULT_IMAGE },
+        { kind: "layerDownloadProgress" },
+        { kind: "layerMaterializeStarted" },
+        { kind: "layerDownloadProgress" },
+        { kind: "layerMaterializeComplete" },
+        { kind: "stitchWritingVmdk" },
+        {
+          kind: "complete",
+          layerCount: 2,
+          reference: MICROSANDBOX_DEFAULT_IMAGE,
+        },
+      ],
+    });
+
+    await createPreparedMicrosandbox({
+      log,
+      module: module as never,
+      name: "template-vm",
+      networkPolicy: "deny-all",
+      options: resolveMicrosandboxOptions(undefined),
+      sessionKey: "template-key",
+      setupBaseRuntime: false,
+    });
+
+    expect(log.mock.calls.map(([message]) => message)).toEqual([
+      "resolving the image",
+      "downloading and materializing image layers",
+      "assembling the image filesystem",
+      "image ready; booting microsandbox VM",
+    ]);
+  });
+});
+
 function createMockMicrosandbox() {
   return {
     async stop() {},
+  };
+}
+
+function createCreationModule(input: {
+  readonly create: () => Promise<ReturnType<typeof createMockMicrosandbox>>;
+  readonly progress: readonly Record<string, unknown>[];
+}) {
+  const builder = {
+    cpus: returnBuilder,
+    async create() {
+      return await input.create();
+    },
+    async createWithPullProgress() {
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield* input.progress;
+        },
+        awaitSandbox: input.create,
+      };
+    },
+    detached: returnBuilder,
+    disableNetwork: returnBuilder,
+    envs: returnBuilder,
+    image: returnBuilder,
+    labels: returnBuilder,
+    memory: returnBuilder,
+    pullPolicy: returnBuilder,
+    replace: returnBuilder,
+    user: returnBuilder,
+    workdir: returnBuilder,
+  };
+
+  function returnBuilder() {
+    return builder;
+  }
+
+  return {
+    Sandbox: {
+      builder() {
+        return builder;
+      },
+    },
   };
 }
 
@@ -322,6 +478,7 @@ function createMockMicrosandboxModule(
 
   const snapshots = new Set(options.snapshots ?? []);
   const module = {
+    MicrosandboxError: class extends Error {},
     Sandbox: {
       async get() {
         return oldHandle;
@@ -398,6 +555,14 @@ function createMockSandboxBuilder(create: (fromSnapshot: string) => unknown) {
     },
     async create() {
       return create(fromSnapshot);
+    },
+    async createWithPullProgress() {
+      return {
+        async *[Symbol.asyncIterator]() {},
+        async awaitSandbox() {
+          return create(fromSnapshot);
+        },
+      };
     },
   };
   return builder;

@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { pathExists } from "./path-exists.js";
 
@@ -67,11 +67,12 @@ export function detectInvokingPackageManager(): PackageManagerKind | undefined {
   return packageManagerFromUserAgent(process.env.npm_config_user_agent);
 }
 
-/** Reads the detection facts for {@link resolvePackageManager} from `projectRoot`. */
-export async function detectPackageManager(projectRoot: string): Promise<DetectedPackageManager> {
+async function detectPackageManagerInDirectory(
+  directory: string,
+): Promise<DetectedPackageManager | undefined> {
   let packageManagerField: string | undefined;
   try {
-    const parsed: unknown = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"));
+    const parsed: unknown = JSON.parse(await readFile(join(directory, "package.json"), "utf8"));
     if (
       typeof parsed === "object" &&
       parsed !== null &&
@@ -86,10 +87,33 @@ export async function detectPackageManager(projectRoot: string): Promise<Detecte
 
   const lockfiles: string[] = [];
   for (const [lockfile] of LOCKFILE_MANAGERS) {
-    if (await pathExists(join(projectRoot, lockfile))) {
+    if (await pathExists(join(directory, lockfile))) {
       lockfiles.push(lockfile);
     }
   }
 
-  return resolvePackageManager({ packageManagerField, lockfiles });
+  const resolved = resolvePackageManager({ packageManagerField, lockfiles });
+  return resolved.source === "default" ? undefined : resolved;
+}
+
+async function detectAncestorPackageManager(
+  projectRoot: string,
+): Promise<DetectedPackageManager | undefined> {
+  let directory = dirname(resolve(projectRoot));
+  while (true) {
+    const detected = await detectPackageManagerInDirectory(directory);
+    if (detected !== undefined) return detected;
+
+    const parent = dirname(directory);
+    if (parent === directory) return undefined;
+    directory = parent;
+  }
+}
+
+/** Reads package-manager facts from `projectRoot`, then walks ancestors. */
+export async function detectPackageManager(projectRoot: string): Promise<DetectedPackageManager> {
+  return (
+    (await detectPackageManagerInDirectory(resolve(projectRoot))) ??
+    (await detectAncestorPackageManager(projectRoot)) ?? { kind: "pnpm", source: "default" }
+  );
 }

@@ -29,7 +29,6 @@ catalog:
   "@types/node": "25.9.1"
   "@types/react": "19.2.15"
   "@types/react-dom": "19.2.3"
-  "@typescript/native-preview": "7.0.0-dev.20260523.1"
   "@vercel/connect": "0.2.2"
   "@vercel/sandbox": "2.2.1"
   ai: "7.0.0-beta.178"
@@ -38,7 +37,7 @@ catalog:
   react: "19.2.6"
   react-dom: "19.2.6"
   streamdown: "2.5.0"
-  typescript: "6.0.3"
+  typescript: "7.0.1-rc"
   vitest: "4.1.7"
   zod: "4.4.3"
 
@@ -46,6 +45,7 @@ minimumReleaseAge: 2880 # 2 days
 
 minimumReleaseAgeExclude:
   - "@ai-sdk/*"
+  - "@typescript/typescript-*"
   - "@turbo/*"
   - "@workflow/*"
   - "@vercel/*"
@@ -55,8 +55,5 @@ minimumReleaseAgeExclude:
   - eve
   - nitro
   - turbo
+  - typescript
   - vercel
-  # Temporary third-party transitives required by latest Nitro before they age through
-  # the workspace release-age policy.
-  - env-runner
-  - ocache

@@ -87,6 +87,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup pnpm
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
@@ -149,7 +150,9 @@ jobs:
         id: baseline_build
         continue-on-error: true
         working-directory: ${{ steps.baseline.outputs.root }}
-        run: VERCEL=1 pnpm --filter "${{ steps.baseline_weather_app.outputs.filter }}" build
+        run: VERCEL=1 pnpm --filter "${STEPS_BASELINE_WEATHER_APP_OUTPUTS_FILTER}" build
+        env:
+          STEPS_BASELINE_WEATHER_APP_OUTPUTS_FILTER: ${{ steps.baseline_weather_app.outputs.filter }}
 
       - name: Note skipped main baseline
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' && steps.baseline_build.outcome != 'success' }}
@@ -160,10 +163,11 @@ jobs:
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' && steps.baseline_build.outcome == 'success' }}
         env:
           BASELINE_REPORT_JSON: ${{ runner.temp }}/weather-agent-bundle-report-main.json
+          STEPS_BASELINE_WEATHER_APP_OUTPUTS_PATH: ${{ steps.baseline_weather_app.outputs.path }}
         working-directory: ${{ steps.baseline.outputs.root }}
         run: |
           node ./scripts/nitro-bundle-report.mjs \
-            --app "${{ steps.baseline_weather_app.outputs.path }}" \
+            --app "${STEPS_BASELINE_WEATHER_APP_OUTPUTS_PATH}" \
             --app-label apps/fixtures/weather-agent \
             --package packages/eve \
             --package-label packages/eve \

@@ -94,6 +94,8 @@ During hosted builds, eve prewarms reusable Vercel sandbox templates so the firs
 - Prewarming only covers template construction. `onSession()` still runs at runtime, once per session.
 - **If build-time prewarm fails, the build fails.**
 
+If `VERCEL` is set but `VERCEL_DEPLOYMENT_ID` is missing, eve warns that it skipped prewarming. Do not deploy that build with `vercel deploy --prebuilt`; its output may reference sandbox templates that were never provisioned. Run `vercel deploy` instead so Vercel builds the source in its hosted build environment.
+
 ## 6. Auth
 
 Swap any scaffolded `placeholderAuth()` for your real policy before the first production browser request hits the app. Both the framework default and the placeholder reject production browser traffic, so an unconfigured app fails closed rather than serving open routes. The production policy can be a shipped helper (`httpBasic()`, `jwtHmac()`, `jwtEcdsa()`, `oidc()`, `vercelOidc()`) or a custom `AuthFn` that validates your own sessions, API keys, or identity provider. See [Auth and route protection](./auth-and-route-protection) for the ordered auth walk and the fail-closed guarantee.
