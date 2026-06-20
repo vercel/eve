@@ -215,6 +215,7 @@ describe("startDevelopmentServer", () => {
     Object.assign(mocks.nitro.options.devServer, {
       hostname: "127.0.0.1",
       port: undefined,
+      runner: undefined,
     });
     Object.assign(mocks.listenerServer, {
       url: "http://localhost:2000/",
@@ -262,6 +263,16 @@ describe("startDevelopmentServer", () => {
     expect(process.env.WORKFLOW_LOCAL_BASE_URL).toBeUndefined();
     expect(process.env.PORT).toBeUndefined();
     expect(process.env.EVE_DEVELOPMENT_SANDBOX_RUN_ID).toBeUndefined();
+  });
+
+  it("uses Nitro's self runner when runtime debugging is enabled", async () => {
+    const { startDevelopmentServer } = await import("./start-development-server.js");
+
+    const server = await startDevelopmentServer("/tmp/eve-test", { runtimeDebugging: true });
+
+    expect(mocks.nitro.options.devServer).toMatchObject({ runner: "self" });
+
+    await server.close();
   });
 
   it("uses eve's default port when no port is requested", async () => {

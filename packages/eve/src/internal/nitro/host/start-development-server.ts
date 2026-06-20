@@ -467,6 +467,7 @@ export async function startDevelopmentServer(
   options: {
     host?: string;
     port?: number;
+    runtimeDebugging?: boolean;
   } = {},
 ): Promise<DevelopmentServerHandle> {
   // Marks this process tree as an `eve dev` session so runtime features
@@ -499,6 +500,13 @@ export async function startDevelopmentServer(
     });
     pruneLocalSandboxTemplatesInBackground(preparedHost.appRoot);
     nitro = await createApplicationNitro(preparedHost, true);
+    if (options.runtimeDebugging === true) {
+      // Nitro's default dev runner handles requests in a worker. The Node
+      // inspector opened by `eve dev --inspect*` attaches to this parent
+      // process, so debug sessions must execute runtime code in-process for
+      // authored tool breakpoints to pause reliably.
+      nitro.options.devServer.runner = "self";
+    }
     devServer = createDevServer(nitro);
     guardDevelopmentServerWebSocketUpgrades(nitro, devServer);
     const hostname =

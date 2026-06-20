@@ -1,11 +1,13 @@
 import { existsSync } from "node:fs";
 import { lstat, mkdir, readdir, readFile, symlink, utimes, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { loadAuthoredModuleNamespace } from "#internal/authored-module-loader.js";
+import { rewriteDevSnapshotSourceMap } from "#internal/authored-module-source-map.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import {
   activateDevelopmentRuntimeArtifactsSnapshot,
@@ -16,6 +18,11 @@ import {
   resolveDevelopmentRuntimeArtifactsPointerPath,
   stageDevelopmentRuntimeArtifactsSnapshot,
 } from "#internal/nitro/dev-runtime-artifacts.js";
+import {
+  DEV_RUNTIME_SNAPSHOT_METADATA_FILE_NAME,
+  DEV_RUNTIME_SNAPSHOT_METADATA_KIND,
+  DEV_RUNTIME_SNAPSHOT_METADATA_VERSION,
+} from "#internal/nitro/dev-runtime-snapshot-metadata.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 
 const createScratchDirectory = useTemporaryDirectories();
@@ -85,6 +92,7 @@ describe("development runtime artifact snapshots", () => {
         runtimeAppRoot: join(activeSnapshotRoot, "source", "app"),
         snapshotRoot: activeSnapshotRoot,
         snapshotSourceRoot: join(activeSnapshotRoot, "source"),
+        sourceRoot: appRoot,
       },
     });
 
@@ -178,6 +186,19 @@ describe("development runtime artifact snapshots", () => {
       runtimeAppRoot: snapshot.runtimeAppRoot,
       snapshotRoot: snapshot.snapshotRoot,
       version: 2,
+    });
+    await expect(
+      readFile(join(snapshot.snapshotRoot, DEV_RUNTIME_SNAPSHOT_METADATA_FILE_NAME), "utf8").then(
+        (source) => JSON.parse(source) as Record<string, unknown>,
+      ),
+    ).resolves.toMatchObject({
+      appRoot,
+      kind: DEV_RUNTIME_SNAPSHOT_METADATA_KIND,
+      runtimeAppRoot: snapshot.runtimeAppRoot,
+      snapshotRoot: snapshot.snapshotRoot,
+      snapshotSourceRoot: snapshot.snapshotSourceRoot,
+      sourceRoot: appRoot,
+      version: DEV_RUNTIME_SNAPSHOT_METADATA_VERSION,
     });
     expect(
       resolveNitroCompiledArtifactsSource({
@@ -384,4 +405,123 @@ describe("development runtime artifact snapshots", () => {
 
     expect(moduleNamespace.result).toBe("snapshotted:external");
   });
+
+  it("leaves inline source maps unchanged outside dev runtime snapshots", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-sourcemap-normal-");
+    const sourceMap = createInlineSourceMap({
+      sources: [join(appRoot, "agent", "tool.ts")],
+      sourcesContent: ["export const answer = 42;\n"],
+    });
+    const code = `export const answer = 42;\n${sourceMap}\n`;
+
+    expect(
+      rewriteDevSnapshotSourceMap({
+        code,
+        modulePath: join(appRoot, "agent", "tool.ts"),
+      }),
+    ).toBe(code);
+  });
+
+  it("rewrites dev snapshot inline source maps back to live source paths", async () => {
+    const sourceRoot = await createScratchDirectory("eve-dev-runtime-sourcemap-");
+    const appRoot = join(sourceRoot, "apps", "weather");
+    const snapshotRoot = join(appRoot, ".eve", "dev-runtime", "snapshots", "revision-a");
+    const snapshotSourceRoot = join(snapshotRoot, "source");
+    const runtimeAppRoot = join(snapshotSourceRoot, "apps", "weather");
+    const modulePath = join(runtimeAppRoot, "agent", "tools", "get_weather.ts");
+
+    await mkdir(dirname(modulePath), { recursive: true });
+    await mkdir(join(snapshotSourceRoot, "packages", "shared", "src"), { recursive: true });
+    await writeFile(modulePath, "export const weather = 72;\n");
+    await writeFile(
+      join(runtimeAppRoot, "agent", "tools", "helper.ts"),
+      "export const helper = true;\n",
+    );
+    await mkdir(join(runtimeAppRoot, "agent", "tools", "agent", "tools"), { recursive: true });
+    await writeFile(
+      join(runtimeAppRoot, "agent", "tools", "agent", "tools", "helper.ts"),
+      "export const doubled = true;\n",
+    );
+    await writeFile(
+      join(snapshotSourceRoot, "packages", "shared", "src", "message.ts"),
+      "export const message = 'hi';\n",
+    );
+    await writeFile(
+      join(snapshotRoot, DEV_RUNTIME_SNAPSHOT_METADATA_FILE_NAME),
+      `${JSON.stringify(
+        {
+          appRoot,
+          kind: DEV_RUNTIME_SNAPSHOT_METADATA_KIND,
+          runtimeAppRoot,
+          snapshotRoot,
+          snapshotSourceRoot,
+          sourceRoot,
+          version: DEV_RUNTIME_SNAPSHOT_METADATA_VERSION,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await mkdir(join(appRoot, ".eve", "dev-runtime"), { recursive: true });
+    await writeFile(
+      join(appRoot, ".eve", "dev-runtime", "current.json"),
+      `${JSON.stringify({ sourceRoot: "/must/not/be/used" })}\n`,
+    );
+
+    const sourceMap = createInlineSourceMap({
+      sources: [modulePath, "agent/tools/helper.ts", "packages/shared/src/message.ts", "node:fs"],
+      sourcesContent: [
+        "export const weather = 72;\n",
+        "export const helper = true;\n",
+        "export const message = 'hi';\n",
+        null,
+      ],
+    });
+    const code = `export const weather = 72;\n${sourceMap}\n`;
+
+    const rewritten = rewriteDevSnapshotSourceMap({ code, modulePath });
+    const rewrittenSourceMap = readInlineSourceMap(rewritten);
+
+    expect(rewrittenSourceMap.sources).toEqual([
+      pathToFileURL(join(sourceRoot, "apps", "weather", "agent", "tools", "get_weather.ts")).href,
+      pathToFileURL(join(sourceRoot, "apps", "weather", "agent", "tools", "helper.ts")).href,
+      pathToFileURL(join(sourceRoot, "packages", "shared", "src", "message.ts")).href,
+      "node:fs",
+    ]);
+    expect(rewrittenSourceMap.sourcesContent).toEqual([
+      "export const weather = 72;\n",
+      "export const helper = true;\n",
+      "export const message = 'hi';\n",
+      null,
+    ]);
+  });
 });
+
+function createInlineSourceMap(input: {
+  readonly sources: readonly string[];
+  readonly sourcesContent: readonly (string | null)[];
+}): string {
+  const sourceMap = {
+    mappings: "",
+    sources: input.sources,
+    sourcesContent: input.sourcesContent,
+    version: 3,
+  };
+  const encoded = Buffer.from(JSON.stringify(sourceMap), "utf8").toString("base64");
+  return `//# sourceMappingURL=data:application/json;base64,${encoded}`;
+}
+
+function readInlineSourceMap(code: string): {
+  readonly sources: readonly string[];
+  readonly sourcesContent: readonly (string | null)[];
+} {
+  const match = /sourceMappingURL=data:application\/json;base64,([A-Za-z0-9+/=]+)/u.exec(code);
+  if (match === null) {
+    throw new Error("Missing inline source map.");
+  }
+
+  return JSON.parse(Buffer.from(match[1]!, "base64").toString("utf8")) as {
+    readonly sources: readonly string[];
+    readonly sourcesContent: readonly (string | null)[];
+  };
+}

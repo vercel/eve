@@ -24,6 +24,7 @@ import { configureNitroRoutes } from "#internal/nitro/host/configure-nitro-route
 import { applyEveCronHandlerRoute } from "#internal/nitro/host/cron-handler-route.js";
 import { createNitroBundlerConfig } from "#internal/nitro/host/nitro-bundler-config.js";
 import { captureDevLiveVirtualModules } from "#internal/nitro/host/dev-live-virtual-modules.js";
+import { addDevelopmentSourceMapNormalizePlugin } from "#internal/nitro/host/dev-source-map-normalize-plugin.js";
 import {
   createOptionalEngineDependencyPlugin,
   OPTIONAL_ENGINE_PACKAGES_BY_BACKEND_NAME,
@@ -742,6 +743,10 @@ export async function createApplicationNitro(
   addNitroRoutingImportSpecifierPlugin(nitro);
   if (dev) {
     captureDevLiveVirtualModules(nitro);
+    // The final Nitro dev map mixes virtual route ids, immutable snapshot
+    // files, and generated `.eve` artifacts. Normalize those source URLs so
+    // DevTools shows live authored files and Eve-owned virtual namespaces.
+    addDevelopmentSourceMapNormalizePlugin(nitro);
   }
 
   // Resolve bare `workflow/*` specifiers during Nitro's Rollup bundling so

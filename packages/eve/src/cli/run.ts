@@ -1,39 +1,34 @@
-import { basename } from "node:path";
-
 import { Command, CommanderError, InvalidArgumentError } from "#compiled/commander/index.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { eveCliBanner } from "#cli/banner.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
-import { LOG_DISPLAY_MODES, parseLogDisplayMode } from "#cli/dev/tui/log-display-mode.js";
+import {
+  openDevInspector,
+  resolveDevInspectorRequest,
+  type DevInspectorHandle,
+  type DevInspectorRequest,
+} from "#cli/dev/inspector.js";
+import {
+  parseContextSizeOption,
+  parseDisplayMode,
+  parseLogsMode,
+  parseStatsMode,
+  resolveDevUiMode,
+  resolveRemoteDevelopmentServerUrl,
+  resolveTuiDisplayOptions,
+  resolveTuiTitle,
+  type DevelopmentCliOptions,
+} from "#cli/dev/options.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
-import type {
-  AssistantResponseStatsMode,
-  LogDisplayMode,
-  TerminalPartDisplayMode,
-  TuiDisplayOptions,
-} from "#cli/dev/tui/types.js";
+import type { TuiDisplayOptions } from "#cli/dev/tui/types.js";
+
+export { resolveDevUiMode, resolveTuiDisplayOptions, resolveTuiTitle } from "#cli/dev/options.js";
 
 interface CliLogger {
   error(message: string): void;
   log(message: string): void;
-}
-
-interface DevelopmentCliOptions {
-  assistantResponseStats?: AssistantResponseStatsMode;
-  connectionAuth?: TerminalPartDisplayMode;
-  contextSize?: number;
-  host?: string;
-  input?: string;
-  logs?: LogDisplayMode;
-  name?: string;
-  port?: number;
-  reasoning?: TerminalPartDisplayMode;
-  subagents?: TerminalPartDisplayMode;
-  tools?: TerminalPartDisplayMode;
-  ui?: boolean;
-  url?: string;
 }
 
 interface ProductionCliOptions {
@@ -54,6 +49,7 @@ interface ProductionServerHandle {
 
 interface CliRuntimeDependencies {
   buildHost(appRoot: string): Promise<string>;
+  openDevInspector(request: DevInspectorRequest): Promise<DevInspectorHandle>;
   printApplicationInfo(
     logger: CliLogger,
     appRoot: string,
@@ -72,6 +68,7 @@ interface CliRuntimeDependencies {
     options?: {
       host?: string;
       port?: number;
+      runtimeDebugging?: boolean;
     },
   ): Promise<DevelopmentServerHandle>;
   startProductionHost(
@@ -177,136 +174,6 @@ function parsePortOption(value: string): number {
   return port;
 }
 
-const DISPLAY_MODES = new Set(["full", "collapsed", "auto-collapsed", "hidden"]);
-const STATS_MODES = new Set(["tokens", "tokensPerSecond"]);
-
-function parseDisplayMode(value: string): TerminalPartDisplayMode {
-  if (!DISPLAY_MODES.has(value)) {
-    throw new InvalidArgumentError(
-      `Expected one of ${[...DISPLAY_MODES].join(", ")}, received "${value}".`,
-    );
-  }
-
-  return value as TerminalPartDisplayMode;
-}
-
-function parseStatsMode(value: string): AssistantResponseStatsMode {
-  if (!STATS_MODES.has(value)) {
-    throw new InvalidArgumentError(
-      `Expected one of ${[...STATS_MODES].join(", ")}, received "${value}".`,
-    );
-  }
-
-  return value as AssistantResponseStatsMode;
-}
-
-function parseLogsMode(value: string): LogDisplayMode {
-  const mode = parseLogDisplayMode(value);
-  if (mode === undefined) {
-    throw new InvalidArgumentError(
-      `Expected one of ${LOG_DISPLAY_MODES.join(", ")}, received "${value}".`,
-    );
-  }
-
-  return mode;
-}
-
-function parseContextSizeOption(value: string): number {
-  const size = Number(value);
-
-  if (!Number.isFinite(size) || size <= 0) {
-    throw new InvalidArgumentError(`Expected a positive number, received "${value}".`);
-  }
-
-  return size;
-}
-
-/**
- * The interactive UI `eve dev` runs against a server.
- *
- * - `tui` — the default terminal UI.
- * - `headless` — no UI: just keep the server running (`--no-ui`, or a
- *   non-interactive terminal).
- *
- * Exported for unit coverage of the flag-routing contract.
- */
-export type DevUiMode = "tui" | "headless";
-
-/**
- * Resolves which UI `eve dev` should run from the parsed flags and whether
- * the terminal is interactive. `--no-ui` and non-TTY terminals force
- * `headless`; otherwise the terminal UI runs.
- */
-export function resolveDevUiMode(input: {
-  options: Pick<DevelopmentCliOptions, "ui">;
-  interactive: boolean;
-}): DevUiMode {
-  if (input.options.ui === false || !input.interactive) {
-    return "headless";
-  }
-
-  return "tui";
-}
-
-/**
- * Resolves the terminal UI's header title: an explicit `--name`, else the
- * remote server's host (for `--url`), else the humanized app-folder name
- * (e.g. `apps/fixtures/weather-agent` → "Weather Agent"). Returns `undefined` when
- * nothing meaningful can be derived, so the runner falls back to its own
- * default.
- */
-export function resolveTuiTitle(input: {
-  name: string | undefined;
-  remoteServerUrl: string | undefined;
-  appRoot: string;
-}): string | undefined {
-  if (input.name !== undefined && input.name.length > 0) {
-    return input.name;
-  }
-
-  if (input.remoteServerUrl !== undefined) {
-    try {
-      return new URL(input.remoteServerUrl).host;
-    } catch {
-      return undefined;
-    }
-  }
-
-  const humanized = humanizeProjectName(basename(input.appRoot));
-  return humanized.length > 0 ? humanized : undefined;
-}
-
-function humanizeProjectName(name: string): string {
-  return name
-    .replace(/[-_.]+/gu, " ")
-    .trim()
-    .split(/\s+/u)
-    .filter((word) => word.length > 0)
-    .map((word) => word[0]!.toUpperCase() + word.slice(1))
-    .join(" ");
-}
-
-/**
- * Builds the terminal-UI display options for `eve dev`. Tools default to
- * `auto-collapsed`, reasoning to `full`, and stderr logs are visible so
- * long-running local sandbox work can report progress.
- */
-export function resolveTuiDisplayOptions(options: DevelopmentCliOptions): TuiDisplayOptions {
-  const display: TuiDisplayOptions = {
-    logs: options.logs ?? "stderr",
-    reasoning: options.reasoning ?? "full",
-    tools: options.tools ?? "auto-collapsed",
-  };
-
-  if (options.subagents !== undefined) display.subagents = options.subagents;
-  if (options.connectionAuth !== undefined) display.connectionAuth = options.connectionAuth;
-  if (options.assistantResponseStats !== undefined) {
-    display.assistantResponseStats = options.assistantResponseStats;
-  }
-  if (options.contextSize !== undefined) display.contextSize = options.contextSize;
-  return display;
-}
-
 function hasInteractiveTerminal(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
@@ -324,26 +191,6 @@ function rewriteDevelopmentUrlShorthand(argv: readonly string[]): string[] {
   }
 
   return ["dev", "--url", shorthandUrl];
-}
-
-function resolveRemoteDevelopmentServerUrl(options: DevelopmentCliOptions): string | undefined {
-  if (!options.url) {
-    return undefined;
-  }
-
-  if (options.host !== undefined) {
-    throw new InvalidArgumentError("The --host option cannot be used with --url.");
-  }
-
-  if (options.port !== undefined) {
-    throw new InvalidArgumentError("The --port option cannot be used with --url.");
-  }
-
-  if (options.ui === false) {
-    throw new InvalidArgumentError("The --no-ui option cannot be used with --url.");
-  }
-
-  return options.url;
 }
 
 function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Command {
@@ -461,6 +308,9 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .option("--port <port>", "Port to listen on (defaults to $PORT, then 2000)", parsePortOption)
     .option("-u, --url <url>", "Connect to an existing server URL", parseDevelopmentServerUrl)
     .option("--no-ui", "Start the server without an interactive UI")
+    .option("--inspect [target]", "Open the Node inspector for local runtime debugging")
+    .option("--inspect-brk [target]", "Open the Node inspector and pause before startup")
+    .option("--inspect-wait [target]", "Open the Node inspector and wait for attach before startup")
     .option("--name <name>", "Title shown in the terminal UI (defaults to the app folder name)")
     .option("--input <text>", "Pre-fill the prompt input after launching the UI")
     .option(
@@ -512,6 +362,8 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
 
       loadDevelopmentEnvironmentFiles(appRoot);
+      const inspectorRequest = resolveDevInspectorRequest(options);
+      let inspectorHandle: DevInspectorHandle | undefined;
 
       const runInteractiveUi = async (serverUrl: string): Promise<void> => {
         logger.log("");
@@ -557,14 +409,26 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
         return;
       }
 
-      const startHost = runtime.startHost ?? (await loadStartHost());
-      const server = await startHost(appRoot, {
-        host: options.host,
-        port: options.port,
-      });
+      if (inspectorRequest !== undefined) {
+        const inspect = runtime.openDevInspector ?? openDevInspector;
+        inspectorHandle = await inspect(inspectorRequest);
+        if (inspectorHandle.mode === "inspect-wait" || inspectorHandle.mode === "inspect-brk") {
+          inspectorHandle.waitForDebugger();
+        }
+        if (inspectorHandle.mode === "inspect-brk") {
+          // oxlint-disable-next-line no-debugger
+          debugger;
+        }
+      }
+
+      let server: DevelopmentServerHandle | undefined;
       let closed = false;
 
       const closeServer = async () => {
+        if (server === undefined) {
+          return;
+        }
+
         if (closed) {
           return;
         }
@@ -574,6 +438,13 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       };
 
       try {
+        const startHost = runtime.startHost ?? (await loadStartHost());
+        server = await startHost(appRoot, {
+          host: options.host,
+          port: options.port,
+          runtimeDebugging: inspectorRequest !== undefined,
+        });
+
         // The terminal UI's header already shows the server URL, and startup
         // no longer clears the screen, so the line would linger as noise.
         // Headless consumers (scripts, scenario tests) still parse it.
@@ -609,6 +480,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
         await runInteractiveUi(server.url);
       } finally {
         await closeServer();
+        inspectorHandle?.close();
       }
     });
 

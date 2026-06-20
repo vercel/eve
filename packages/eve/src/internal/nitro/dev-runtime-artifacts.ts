@@ -6,6 +6,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { copyDevelopmentSourceSnapshot } from "#internal/nitro/dev-runtime-source-snapshot-copy.js";
 import { createDevelopmentSourceSnapshotPlan } from "#internal/nitro/dev-runtime-source-snapshot.js";
+import { writeDevelopmentRuntimeSnapshotMetadata } from "#internal/nitro/dev-runtime-snapshot-metadata.js";
 
 const DEV_RUNTIME_ARTIFACTS_DIRECTORY = "dev-runtime";
 const DEV_RUNTIME_ARTIFACTS_POINTER_VERSION = 2;
@@ -34,6 +35,7 @@ export interface DevelopmentRuntimeArtifactsSnapshot {
   readonly runtimeAppRoot: string;
   readonly snapshotRoot: string;
   readonly snapshotSourceRoot: string;
+  readonly sourceRoot: string;
 }
 
 /**
@@ -105,6 +107,15 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
       ),
       runtimeAppRoot: sourceSnapshotPlan.runtimeAppRoot,
     });
+    // The runtime uses frozen snapshot files, but source maps need this
+    // provenance to point DevTools back at live authored workspace files.
+    await writeDevelopmentRuntimeSnapshotMetadata({
+      appRoot: sourceSnapshotPlan.appRoot,
+      runtimeAppRoot: sourceSnapshotPlan.runtimeAppRoot,
+      snapshotRoot,
+      snapshotSourceRoot: sourceSnapshotPlan.snapshotSourceRoot,
+      sourceRoot: sourceSnapshotPlan.sourceRoot,
+    });
   } catch (error) {
     await rm(snapshotRoot, { force: true, recursive: true }).catch(() => {});
     throw error;
@@ -114,6 +125,7 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
     runtimeAppRoot: sourceSnapshotPlan.runtimeAppRoot,
     snapshotRoot,
     snapshotSourceRoot: sourceSnapshotPlan.snapshotSourceRoot,
+    sourceRoot: sourceSnapshotPlan.sourceRoot,
   };
 }
 

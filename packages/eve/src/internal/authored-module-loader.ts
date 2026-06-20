@@ -8,11 +8,15 @@ import { createAuthoredModuleBundleError } from "#internal/authored-module-bundl
 import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-package-tsconfig-paths.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
 import {
+  externalizeInlineSourceMap,
+  prependNodeEsmCompatBannerToInlineSourceMap,
+  rewriteDevSnapshotSourceMap,
+} from "#internal/authored-module-source-map.js";
+import {
   buildWithNitroRolldown,
   getSingleRolldownChunk,
 } from "#internal/bundler/nitro-rolldown.js";
 import { SERVER_EXTERNAL_PACKAGES } from "#internal/nitro/host/server-external-packages.js";
-import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 
 const AUTHORED_BUNDLED_MODULE_EXTENSION = /\.[cm]?[jt]sx?$/;
 const AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH = join(
@@ -32,7 +36,6 @@ const RESOLVE_EXTENSIONS = [
   ".cjs",
   ".json",
 ] as const;
-
 const CHANNEL_MODULE_CACHE_KEY = "__eveChannelModuleCache__";
 const CACHED_CHANNEL_PREFIX = "eve-cached-channel:";
 
@@ -200,7 +203,6 @@ async function loadBundledAuthoredModule(
       appPackageRoot: packageRoot,
       extensions: RESOLVE_EXTENSIONS,
     }),
-    createNodeEsmCompatBannerPlugin({ includeRequire: true }),
     createPackageBoundaryPlugin(packageRoot, externalDependencies),
     channelIdentityPlugin,
   ].filter((plugin) => plugin !== null);
@@ -228,19 +230,43 @@ async function loadBundledAuthoredModule(
     throw createAuthoredModuleBundleError(modulePath, error);
   }
 
+  // The banner is added after bundling so it can skip bindings that the
+  // finished chunk already declares, but that means this pass owns keeping the
+  // source-map line offsets aligned with the authored code.
+  const banneredCode = prependNodeEsmCompatBannerToInlineSourceMap({
+    code: outputFile.code,
+    includeRequire: true,
+  });
+  const bundleCode = rewriteDevSnapshotSourceMap({
+    code: banneredCode,
+    modulePath,
+    packageRoot,
+  });
   const bundleHash = createHash("sha1")
     .update(modulePath)
     .update("\0")
     .update(externalDependencies.join("\0"))
     .update("\0")
-    .update(outputFile.code)
+    .update("external-source-map-v1")
+    .update("\0")
+    .update(bundleCode)
     .digest("hex");
   const bundleDirectoryPath = join(packageRoot, AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH);
   const bundlePath = join(bundleDirectoryPath, `${bundleHash}.mjs`);
+  const sourceMapPath = `${bundlePath}.map`;
+  const externalizedBundle = externalizeInlineSourceMap({
+    code: bundleCode,
+    sourceMapFileName: `${bundleHash}.mjs.map`,
+  });
 
   if (!existsSync(bundlePath)) {
     mkdirSync(bundleDirectoryPath, { recursive: true });
-    writeFileSync(bundlePath, outputFile.code);
+    writeFileSync(bundlePath, externalizedBundle.code);
+  }
+
+  if (externalizedBundle.sourceMap !== undefined && !existsSync(sourceMapPath)) {
+    mkdirSync(bundleDirectoryPath, { recursive: true });
+    writeFileSync(sourceMapPath, `${JSON.stringify(externalizedBundle.sourceMap)}\n`);
   }
 
   return await import(`${createFileImportSpecifier(bundlePath)}?v=${bundleHash}`);
