@@ -18,7 +18,7 @@ describe("buildHomePageResponse", () => {
   it("links out to the public docs site", async () => {
     const body = await buildResponseForRequest("https://my-agent.example.com/").text();
 
-    expect(body).toContain("https://beta.eve.dev/docs");
+    expect(body).toContain("https://eve.dev/docs");
   });
 
   it("echoes the deployment origin into the `eve dev` hint", async () => {

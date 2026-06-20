@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Fix the documentation links in the npm package README so they point to the published eve documentation.
+Point the npm README, runtime landing page, and setup guidance at the canonical eve documentation domain.
