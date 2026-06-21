@@ -6,6 +6,7 @@ import { describe, expect, test } from "vitest";
 import {
   deriveSlackConnectorSlug,
   ensureChannel,
+  hasVercelHostFramework,
   isNextJsProject,
   listAuthoredChannels,
   normalizeSlackConnectorSlug,
@@ -548,6 +549,43 @@ describe("isNextJsProject", () => {
     );
 
     await expect(isNextJsProject(projectRoot)).resolves.toBe(false);
+  });
+});
+
+describe("hasVercelHostFramework", () => {
+  test("reads as no host app when package.json is missing", async () => {
+    const projectRoot = await createTempDir();
+
+    await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(false);
+  });
+
+  test.each([
+    ["Next.js", { next: "16.2.6" }],
+    ["Nuxt", { nuxt: "4.3.3" }],
+    ["Nuxt 3", { nuxt3: "3.19.7" }],
+    ["Nuxt edge", { "nuxt-edge": "3.0.0-rc.13" }],
+    ["Nuxt nightly", { "nuxt-nightly": "3.0.0-27575307.749db41" }],
+    ["SvelteKit", { "@sveltejs/kit": "2.60.0" }],
+  ])("recognizes %s as the root Vercel framework", async (_label, dependencies) => {
+    const projectRoot = await createTempDir();
+    await writeFile(
+      join(projectRoot, "package.json"),
+      JSON.stringify({ name: "demo", devDependencies: dependencies }),
+      "utf8",
+    );
+
+    await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(true);
+  });
+
+  test("ignores standalone eve projects", async () => {
+    const projectRoot = await createTempDir();
+    await writeFile(
+      join(projectRoot, "package.json"),
+      JSON.stringify({ name: "demo", dependencies: { eve: "0.25.0" } }),
+      "utf8",
+    );
+
+    await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(false);
   });
 });
 
