@@ -86,6 +86,44 @@ const TEST_CONFIG = {
 };
 
 describe("eve eval environment loading", () => {
+  it("matches scoped package names against the runtime agent id", async () => {
+    const fixtureRoot = await createEnvironmentFixture();
+    const previousCwd = process.cwd();
+    const logger = {
+      error: vi.fn(),
+      log: vi.fn(),
+    };
+    const exit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
+    const evaluation = makeEvaluation("demo-eval");
+
+    await writeFile(join(fixtureRoot, "package.json"), '{ "name": "@acme/agent" }\n');
+    process.chdir(fixtureRoot);
+    mockedEvalDependencies.discoverAndImportEvals.mockResolvedValue([evaluation]);
+    mockedEvalDependencies.discoverEvalConfig.mockResolvedValue(TEST_CONFIG);
+    mockedEvalDependencies.resolveEvalTargetHandle.mockResolvedValue({
+      attachSession: vi.fn(),
+      capabilities: { devRoutes: false },
+      dispatchSchedule: vi.fn(),
+      fetch: vi.fn(),
+      kind: "remote",
+      url: "https://example.com",
+    });
+    mockedEvalDependencies.executeEval.mockResolvedValue(makeEvalResult(evaluation.id));
+
+    try {
+      await runCli(["eval", "--url", "https://example.com"], logger);
+    } finally {
+      process.chdir(previousCwd);
+    }
+
+    expect(mockedEvalDependencies.resolveEvalTargetHandle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedAgentName: "agent",
+      }),
+    );
+    expect(exit).toHaveBeenCalledWith(0);
+  });
+
   it("loads local env files before resolving a remote target", async () => {
     const fixtureRoot = await createEnvironmentFixture();
     const resolvedFixtureRoot = await realpath(fixtureRoot);

@@ -229,10 +229,15 @@ async function readExpectedAgentName(appRoot: string): Promise<string> {
     const packageJson = JSON.parse(await readFile(join(appRoot, "package.json"), "utf8")) as {
       readonly name?: unknown;
     };
-    return typeof packageJson.name === "string" && packageJson.name.length > 0
-      ? packageJson.name
-      : basename(appRoot);
-  } catch {
-    return basename(appRoot);
-  }
+    if (typeof packageJson.name === "string" && packageJson.name.length > 0) {
+      return unscopedPackageName(packageJson.name);
+    }
+  } catch {}
+
+  return basename(appRoot);
+}
+
+function unscopedPackageName(packageName: string): string {
+  const slashIndex = packageName.lastIndexOf("/");
+  return slashIndex === -1 ? packageName : packageName.slice(slashIndex + 1);
 }
