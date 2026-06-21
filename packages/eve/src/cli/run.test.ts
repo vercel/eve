@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { resolveDevUiMode, resolveTuiDisplayOptions, resolveTuiTitle, runCli } from "#cli/run.js";
+import { resolveDevUiMode, resolveTuiDisplayOptions, runCli } from "#cli/run.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import type { DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 
@@ -207,37 +207,5 @@ describe("resolveTuiDisplayOptions", () => {
     expect(resolved).not.toHaveProperty("subagents");
     expect(resolved).not.toHaveProperty("contextSize");
     expect(resolved.logs).toBe("stderr");
-  });
-});
-
-describe("resolveTuiTitle", () => {
-  it("humanizes the app folder name for a local server", () => {
-    expect(
-      resolveTuiTitle({
-        name: undefined,
-        remoteServerUrl: undefined,
-        appRoot: "/x/apps/fixtures/weather-agent",
-      }),
-    ).toBe("Weather Agent");
-  });
-
-  it("uses the remote host when connecting to a URL", () => {
-    expect(
-      resolveTuiTitle({
-        name: undefined,
-        remoteServerUrl: "https://example.com:8080",
-        appRoot: "/x",
-      }),
-    ).toBe("example.com:8080");
-  });
-
-  it("prefers an explicit --name over both", () => {
-    expect(
-      resolveTuiTitle({
-        name: "Custom",
-        remoteServerUrl: "https://example.com",
-        appRoot: "/x/weather-agent",
-      }),
-    ).toBe("Custom");
   });
 });
