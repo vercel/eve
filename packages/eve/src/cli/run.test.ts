@@ -86,6 +86,14 @@ describe("eve dev --input", () => {
   });
 });
 
+describe("eve dev --url protocol", () => {
+  it("rejects an http:// remote URL up front instead of crashing during connect", async () => {
+    await expect(
+      runCli(["dev", "--url", "http://my-app.vercel.app"], { error: () => {}, log: () => {} }),
+    ).rejects.toThrow(/https/);
+  });
+});
+
 describe("eve dev --logs", () => {
   it("accepts sandbox as the initial TUI log mode", async () => {
     const runDevelopmentTui = vi.fn(async () => {});

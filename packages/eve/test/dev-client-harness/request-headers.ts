@@ -1,7 +1,7 @@
 import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { isLocalDevelopmentServerUrl } from "#services/dev-client/local-host.js";
 import {
-  isLocalDevelopmentServerUrl,
   VERCEL_PROTECTION_BYPASS_HEADER,
   VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER,
 } from "#services/dev-client/request-headers.js";

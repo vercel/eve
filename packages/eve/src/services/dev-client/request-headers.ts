@@ -1,34 +1,10 @@
 import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
 import { z } from "zod";
 
-/** Hostnames served by the local development runtime. */
-const LOCAL_HOSTNAMES: ReadonlySet<string> = new Set([
-  "localhost",
-  "127.0.0.1",
-  "0.0.0.0",
-  "::1",
-  "[::1]",
-]);
 const VercelOidcClaimsSchema = z.object({
   owner_id: z.string().min(1),
   project_id: z.string().min(1),
 });
-
-function isLocalEveServerUrl(url: URL): boolean {
-  return LOCAL_HOSTNAMES.has(url.hostname);
-}
-
-/**
- * Returns whether `serverUrl` targets a recognized local development host.
- * Invalid URLs are treated as remote.
- */
-export function isLocalDevelopmentServerUrl(serverUrl: string): boolean {
-  try {
-    return isLocalEveServerUrl(new URL(serverUrl));
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Resolves the locally available Vercel OIDC token. This function does not

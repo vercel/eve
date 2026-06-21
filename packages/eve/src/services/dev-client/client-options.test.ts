@@ -5,7 +5,7 @@ import {
   resolveRemoteDevelopmentClientOptions,
 } from "./client-options.js";
 import { createDevelopmentCredentialGate } from "./credential-gate.js";
-import { isLocalDevelopmentServerUrl } from "./request-headers.js";
+import { isLocalDevelopmentServerUrl } from "./local-host.js";
 
 describe("resolveDevelopmentClientOptions", () => {
   it("targets the given host without inferring credentials from locality", () => {
