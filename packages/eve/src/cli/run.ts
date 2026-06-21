@@ -617,7 +617,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       "[evalIds...]",
       "Eval ids (or directory prefixes) to run (all discovered evals when omitted)",
     )
-    .option("--url <url>", "Remote agent URL (skip local host startup)")
+    .option("--url <url>", "Remote agent URL (skip local host startup)", parseDevelopmentServerUrl)
     .option("--tag <tag...>", "Run only evals carrying a tag")
     .option("--strict", "Fail the exit code when any score falls below its threshold")
     .option("--list", "Print discovered evals without running them")
