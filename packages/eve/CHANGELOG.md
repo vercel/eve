@@ -1,5 +1,15 @@
 # eve
 
+## 0.12.0
+
+### Minor Changes
+
+- 7df41e1: Dynamic map resolvers no longer auto-prefix entries with the file slug — the map key is the tool/skill name verbatim (a single `defineTool`/`defineSkill` is still named after the file slug). Namespace keys yourself (e.g. `team__playbook`) when a bare name might collide. A dynamic tool/skill overrides a same-named authored one; two dynamic resolvers emitting the same name now throw, recommending manual namespacing. Connection tools are renamed accordingly: the search tool is `connection_search` and discovered tools are `<connection>__<tool>` (e.g. `linear__list_issues`).
+
+### Patch Changes
+
+- 10e9237: Fix code-defined models under `eve dev`, including NodeNext `.js` imports that target authored `.ts` files. Runtime model resolution now reuses the active agent bundle's module map and node scope, so child agents resolve their own models without rebuilding authored modules on each step.
+
 ## 0.11.10
 
 ### Patch Changes
