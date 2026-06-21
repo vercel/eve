@@ -2,7 +2,7 @@ import { basename } from "node:path";
 
 interface DevelopmentTargetBase {
   readonly serverUrl: string;
-  /** Local workspace root; locates `.vercel/project.json` and app files. */
+  /** Local workspace root for app files and the fallback Vercel project link. */
   readonly workspaceRoot: string;
 }
 

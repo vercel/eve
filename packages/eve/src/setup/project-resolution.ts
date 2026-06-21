@@ -20,9 +20,25 @@ const VercelProjectReferenceSchema = z.object({
   orgId: z.string().min(1),
   projectName: z.string().min(1).optional(),
 });
+const VercelProjectEnvironmentSchema = z.object({
+  VERCEL_ORG_ID: VercelProjectReferenceSchema.shape.orgId,
+  VERCEL_PROJECT_ID: VercelProjectReferenceSchema.shape.projectId,
+});
 
-/** Project and owner identifiers from a valid on-disk Vercel link. */
+/** Validated Vercel owner and project identifiers. */
 export type VercelProjectReference = z.infer<typeof VercelProjectReferenceSchema>;
+
+/** Parses the complete Vercel owner and project environment pair. */
+export function projectReferenceFromEnvironment(
+  environment: Readonly<Record<string, string | undefined>>,
+): VercelProjectReference | undefined {
+  const parsed = VercelProjectEnvironmentSchema.safeParse(environment);
+  if (!parsed.success) return undefined;
+  return {
+    orgId: parsed.data.VERCEL_ORG_ID,
+    projectId: parsed.data.VERCEL_PROJECT_ID,
+  };
+}
 
 /** Reads a validated Vercel project reference from `.vercel/project.json`. */
 export async function readProjectLink(

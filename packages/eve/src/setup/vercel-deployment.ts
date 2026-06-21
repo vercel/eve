@@ -1,5 +1,9 @@
 import { captureVercel, type VercelCaptureFailure } from "#setup/primitives/index.js";
-import { readProjectLink, type VercelProjectReference } from "#setup/project-resolution.js";
+import {
+  projectReferenceFromEnvironment,
+  readProjectLink,
+  type VercelProjectReference,
+} from "#setup/project-resolution.js";
 import { z } from "zod";
 
 const VercelDeploymentSchema = z.object({
@@ -92,7 +96,10 @@ export async function resolveVercelDeployment(input: {
   readonly deps?: Partial<VercelDeploymentResolutionDeps>;
 }): Promise<VercelDeploymentResolution> {
   const deps = { ...defaultDeps, ...input.deps };
-  const source = input.source ?? (await deps.readProjectLink(input.workspaceRoot));
+  const source =
+    input.source ??
+    projectReferenceFromEnvironment(process.env) ??
+    (await deps.readProjectLink(input.workspaceRoot));
   if (source === undefined) return { kind: "unscoped" };
 
   const result = await deps.captureVercel(

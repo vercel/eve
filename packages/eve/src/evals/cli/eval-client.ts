@@ -33,7 +33,7 @@ export function resolveEvalClientOptions(
 }
 
 export interface CreateEvalClientOptions {
-  /** Local Vercel project state used to verify a remote deployment origin. */
+  /** Working directory for Vercel lookup and the fallback on-disk project link. */
   readonly workspaceRoot?: string;
   /** Test seams for the two authority-resolution boundaries. */
   readonly deps?: Partial<VerifiedRemoteDevelopmentClientDeps>;

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { VercelCaptureResult } from "#setup/primitives/index.js";
 
@@ -7,7 +7,47 @@ import {
   type VercelDeploymentResolutionDeps,
 } from "./vercel-deployment.js";
 
+beforeEach(() => {
+  vi.stubEnv("VERCEL_ORG_ID", "");
+  vi.stubEnv("VERCEL_PROJECT_ID", "");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("resolveVercelDeployment", () => {
+  it("uses a complete Vercel project environment before the on-disk link", async () => {
+    vi.stubEnv("VERCEL_ORG_ID", "team_env");
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_env");
+    const readProjectLink = vi.fn<VercelDeploymentResolutionDeps["readProjectLink"]>(async () => ({
+      orgId: "team_link",
+      projectId: "prj_link",
+    }));
+    const captureVercel = vi.fn<VercelDeploymentResolutionDeps["captureVercel"]>(async () => ({
+      ok: true,
+      stdout: JSON.stringify({
+        projectId: "prj_env",
+        name: "inbound",
+        target: "preview",
+      }),
+    }));
+
+    await expect(
+      resolveVercelDeployment({
+        workspaceRoot: "/repo",
+        host: "inbound.example.com",
+        deps: { captureVercel, readProjectLink },
+      }),
+    ).resolves.toMatchObject({
+      kind: "resolved",
+      target: {
+        deployment: { ownerId: "team_env", projectId: "prj_env" },
+      },
+    });
+    expect(readProjectLink).not.toHaveBeenCalled();
+  });
+
   it("resolves a standard deployment whose custom environment is null", async () => {
     const response: VercelCaptureResult = {
       ok: true,

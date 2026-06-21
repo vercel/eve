@@ -30,7 +30,7 @@ Sessions attached this way are full `EveEvalSession`s: you can keep driving them
 
 ## Authentication
 
-Local targets send no auth: `eve eval` owns the dev server it boots. For a remote `--url`, eve first asks Vercel to resolve that exact HTTPS origin under the account linked in `.vercel/project.json`. Ambient Vercel credentials are sent only when that lookup succeeds; an arbitrary URL remains anonymous.
+Local targets send no auth: `eve eval` owns the dev server it boots. For a remote `--url`, eve gets the expected Vercel owner and project from `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` when both are set. Otherwise it reads `.vercel/project.json`. Eve then asks Vercel to resolve the exact HTTPS origin and sends ambient credentials only when the project IDs match. An arbitrary URL remains anonymous.
 
 After verification, eve sends the available Vercel credentials:
 
