@@ -10,6 +10,7 @@ export const Logo = () => (
 export const github = {
   owner: "vercel",
   repo: "eve",
+  editPath: "docs/{path}",
 };
 
 export const nav = [
