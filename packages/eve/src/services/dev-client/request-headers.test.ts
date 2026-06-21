@@ -23,26 +23,64 @@ describe("resolveDevelopmentOidcToken", () => {
     const expected = token({ owner_id: target.ownerId, project_id: target.projectId });
     vi.mocked(getVercelOidcToken).mockResolvedValue(expected);
 
-    await expect(resolveDevelopmentOidcToken(target)).resolves.toBe(expected);
+    await expect(resolveDevelopmentOidcToken(target)).resolves.toEqual({
+      kind: "resolved",
+      token: expected,
+    });
     expect(getVercelOidcToken).toHaveBeenCalledWith({
       team: target.ownerId,
       project: target.projectId,
     });
   });
 
-  it.each([
-    ["mismatched claims", token({ owner_id: "team_other", project_id: "prj_other" })],
-    ["missing claims", token({ subject: "user" })],
-    ["malformed token", "not-a-jwt"],
-  ])("rejects %s", async (_name, invalid) => {
-    vi.mocked(getVercelOidcToken).mockResolvedValue(invalid);
+  it("reports a token minted for a different project", async () => {
+    vi.mocked(getVercelOidcToken).mockResolvedValue(
+      token({ owner_id: target.ownerId, project_id: "prj_other" }),
+    );
 
-    await expect(resolveDevelopmentOidcToken(target)).resolves.toBe("");
+    await expect(resolveDevelopmentOidcToken(target)).resolves.toEqual({
+      kind: "target-mismatch",
+      mismatchedClaims: ["project_id"],
+    });
   });
 
-  it("fails closed when token resolution throws", async () => {
+  it("reports claims that do not match the Vercel OIDC schema", async () => {
+    vi.mocked(getVercelOidcToken).mockResolvedValue(token({ subject: "user" }));
+
+    await expect(resolveDevelopmentOidcToken(target)).resolves.toMatchObject({
+      kind: "invalid-claims",
+      invalidClaims: expect.arrayContaining([
+        expect.stringContaining("owner_id"),
+        expect.stringContaining("project_id"),
+      ]),
+    });
+  });
+
+  it("reports a token without a JWT payload", async () => {
+    vi.mocked(getVercelOidcToken).mockResolvedValue("not-a-jwt");
+
+    await expect(resolveDevelopmentOidcToken(target)).resolves.toEqual({
+      kind: "malformed-token",
+      reason: "missing-payload",
+    });
+  });
+
+  it("reports a JWT payload that is not valid JSON", async () => {
+    const payload = Buffer.from("not json").toString("base64url");
+    vi.mocked(getVercelOidcToken).mockResolvedValue(`header.${payload}.signature`);
+
+    await expect(resolveDevelopmentOidcToken(target)).resolves.toEqual({
+      kind: "malformed-token",
+      reason: "invalid-json-payload",
+    });
+  });
+
+  it("reports why token resolution failed", async () => {
     vi.mocked(getVercelOidcToken).mockRejectedValue(new Error("refresh failed"));
 
-    await expect(resolveDevelopmentOidcToken(target)).resolves.toBe("");
+    await expect(resolveDevelopmentOidcToken(target)).resolves.toEqual({
+      kind: "resolution-failed",
+      message: "refresh failed",
+    });
   });
 });

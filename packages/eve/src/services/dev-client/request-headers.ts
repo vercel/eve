@@ -1,4 +1,5 @@
 import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
+import { toErrorMessage } from "#shared/errors.js";
 import { z } from "zod";
 
 const VercelOidcClaimsSchema = z.object({
@@ -6,48 +7,89 @@ const VercelOidcClaimsSchema = z.object({
   project_id: z.string().min(1),
 });
 
+/** Vercel owner and project expected to have minted an OIDC token. */
+export interface DevelopmentOidcTarget {
+  readonly ownerId: string;
+  readonly projectId: string;
+}
+
+type VercelOidcClaimName = keyof z.infer<typeof VercelOidcClaimsSchema>;
+type InvalidVercelOidcClaim = VercelOidcClaimName | "claims";
+
+/** Why eve could not use a locally resolved Vercel OIDC token. */
+export type DevelopmentOidcTokenFailure =
+  | { readonly kind: "resolution-failed"; readonly message: string }
+  | {
+      readonly kind: "malformed-token";
+      readonly reason: "missing-payload" | "invalid-json-payload";
+    }
+  | {
+      readonly kind: "invalid-claims";
+      readonly invalidClaims: readonly InvalidVercelOidcClaim[];
+    }
+  | {
+      readonly kind: "target-mismatch";
+      readonly mismatchedClaims: readonly VercelOidcClaimName[];
+    };
+
+/** Result of resolving and checking a Vercel OIDC token for one target. */
+export type DevelopmentOidcTokenResolution =
+  | { readonly kind: "resolved"; readonly token: string }
+  | DevelopmentOidcTokenFailure;
+
 /**
  * Resolves the locally available Vercel OIDC token. This function does not
  * authorize a destination; callers must first verify the exact deployment
  * origin and install the result in a `DevelopmentCredentialGate`.
  *
  * Asks `@vercel/oidc` for a token scoped to the verified owner and project,
- * validates the returned claims, and returns an empty string when verification
- * fails. Refresh and repair are owned by the explicit remote-auth flow.
+ * then distinguishes token-resolution, token-shape, claim-schema, and target
+ * failures so the caller can report the cause without sending the token.
  */
-export async function resolveDevelopmentOidcToken(input: {
-  readonly ownerId: string;
-  readonly projectId: string;
-}): Promise<string> {
+export async function resolveDevelopmentOidcToken(
+  input: DevelopmentOidcTarget,
+): Promise<DevelopmentOidcTokenResolution> {
   try {
     const token = (
       await getVercelOidcToken({ team: input.ownerId, project: input.projectId })
     ).trim();
-    return tokenMatchesProject(token, input) ? token : "";
-  } catch {
-    return "";
+    return validateDevelopmentOidcToken(token, input);
+  } catch (error) {
+    return { kind: "resolution-failed", message: toErrorMessage(error) };
   }
 }
 
-function tokenMatchesProject(
+function validateDevelopmentOidcToken(
   token: string,
-  input: { readonly ownerId: string; readonly projectId: string },
-): boolean {
+  input: DevelopmentOidcTarget,
+): Exclude<DevelopmentOidcTokenResolution, { readonly kind: "resolution-failed" }> {
   const payload = token.split(".")[1];
-  if (payload === undefined) return false;
+  if (!payload) return { kind: "malformed-token", reason: "missing-payload" };
 
+  let decoded: unknown;
   try {
-    const claims = VercelOidcClaimsSchema.safeParse(
-      JSON.parse(Buffer.from(payload, "base64url").toString("utf8")),
-    );
-    return (
-      claims.success &&
-      claims.data.owner_id === input.ownerId &&
-      claims.data.project_id === input.projectId
-    );
+    decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
   } catch {
-    return false;
+    return { kind: "malformed-token", reason: "invalid-json-payload" };
   }
+
+  const claims = VercelOidcClaimsSchema.safeParse(decoded);
+  if (!claims.success) {
+    return {
+      kind: "invalid-claims",
+      invalidClaims: claims.error.issues.map((issue) => {
+        const claim = issue.path[0];
+        return claim === "owner_id" || claim === "project_id" ? claim : "claims";
+      }),
+    };
+  }
+
+  const mismatchedClaims: VercelOidcClaimName[] = [];
+  if (claims.data.owner_id !== input.ownerId) mismatchedClaims.push("owner_id");
+  if (claims.data.project_id !== input.projectId) mismatchedClaims.push("project_id");
+  if (mismatchedClaims.length > 0) return { kind: "target-mismatch", mismatchedClaims };
+
+  return { kind: "resolved", token };
 }
 
 /**

@@ -1,13 +1,15 @@
 import type { VerifiedVercelTarget } from "#setup/vercel-deployment.js";
 
 import {
+  type DevelopmentOidcTokenFailure,
+  type DevelopmentOidcTokenResolution,
   VERCEL_PROTECTION_BYPASS_HEADER,
   VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER,
 } from "./request-headers.js";
 
 export interface DevelopmentCredentialGrant {
   readonly target: VerifiedVercelTarget;
-  readonly resolveToken: () => Promise<string>;
+  readonly resolveToken: () => Promise<DevelopmentOidcTokenResolution>;
 }
 
 /** Per-client authority for resolving and emitting remote Vercel credentials. */
@@ -24,11 +26,17 @@ type DevelopmentCredentialGateState =
   | { readonly kind: "anonymous" }
   | {
       readonly kind: "vercel";
-      readonly resolveToken: () => Promise<string>;
+      readonly resolveToken: () => Promise<DevelopmentOidcTokenResolution>;
     };
 
 /** Creates an anonymous credential gate bound to one client origin. */
-export function createDevelopmentCredentialGate(serverUrl: string): DevelopmentCredentialGate {
+export function createDevelopmentCredentialGate(
+  serverUrl: string,
+  options: {
+    /** Reports failed token checks without exposing credential material. */
+    readonly onTokenFailure?: (failure: DevelopmentOidcTokenFailure | undefined) => void;
+  } = {},
+): DevelopmentCredentialGate {
   const serverOrigin = new URL(serverUrl).origin;
   let state: DevelopmentCredentialGateState = { kind: "anonymous" };
 
@@ -51,7 +59,14 @@ export function createDevelopmentCredentialGate(serverUrl: string): DevelopmentC
     const headers: Record<string, string> = {};
     const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
     if (bypassSecret) headers[VERCEL_PROTECTION_BYPASS_HEADER] = bypassSecret;
-    const token = (await authorized.resolveToken()).trim();
+    const resolution = await authorized.resolveToken();
+    if (resolution.kind !== "resolved") {
+      options.onTokenFailure?.(resolution);
+      return headers;
+    }
+
+    options.onTokenFailure?.(undefined);
+    const token = resolution.token.trim();
     if (token.length > 0) {
       headers.authorization = `Bearer ${token}`;
       headers[VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER] = token;

@@ -14,7 +14,7 @@ export function isLocalEveServerUrl(url: URL): boolean {
 
 /**
  * Returns whether `serverUrl` targets a recognized local development host.
- * Invalid URLs are treated as remote.
+ * Invalid URLs count as remote.
  */
 export function isLocalDevelopmentServerUrl(serverUrl: string): boolean {
   try {

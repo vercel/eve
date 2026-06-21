@@ -11,7 +11,10 @@ const target = await resolveTestVercelTarget({
 
 describe("resolveVerifiedRemoteDevelopmentClientOptions", () => {
   it("resolves scoped credentials per request after exact deployment verification", async () => {
-    const resolveDevelopmentOidcToken = vi.fn(async () => " fresh-token ");
+    const resolveDevelopmentOidcToken = vi.fn(async () => ({
+      kind: "resolved" as const,
+      token: " fresh-token ",
+    }));
     const options = await resolveVerifiedRemoteDevelopmentClientOptions({
       serverUrl: "https://example.vercel.app/path",
       workspaceRoot: "/workspace",
@@ -34,8 +37,33 @@ describe("resolveVerifiedRemoteDevelopmentClientOptions", () => {
     });
   });
 
+  it("reports a token failure while preserving anonymous fallback", async () => {
+    const failure = {
+      kind: "target-mismatch",
+      mismatchedClaims: ["owner_id", "project_id"],
+    } as const;
+    const onOidcTokenFailure = vi.fn();
+    const options = await resolveVerifiedRemoteDevelopmentClientOptions({
+      serverUrl: "https://example.vercel.app/path",
+      workspaceRoot: "/workspace",
+      onOidcTokenFailure,
+      deps: {
+        resolveVercelDeployment: async () => ({ kind: "resolved", target }),
+        resolveDevelopmentOidcToken: async () => failure,
+      },
+    });
+
+    expect(typeof options.headers).toBe("function");
+    if (typeof options.headers !== "function") throw new Error("Expected dynamic headers.");
+    await expect(options.headers()).resolves.toEqual({});
+    expect(onOidcTokenFailure).toHaveBeenCalledWith(failure);
+  });
+
   it("keeps an unverified remote anonymous", async () => {
-    const resolveDevelopmentOidcToken = vi.fn(async () => "ambient-token");
+    const resolveDevelopmentOidcToken = vi.fn(async () => ({
+      kind: "resolved" as const,
+      token: "ambient-token",
+    }));
     const options = await resolveVerifiedRemoteDevelopmentClientOptions({
       serverUrl: "https://arbitrary.example.com",
       workspaceRoot: "/workspace",

@@ -1,5 +1,6 @@
 import { Client } from "#client/index.js";
 import { resolveDevelopmentClientOptions } from "#services/dev-client/client-options.js";
+import type { DevelopmentOidcTokenFailure } from "#services/dev-client/request-headers.js";
 import { resolveVerifiedRemoteDevelopmentClientOptions } from "#setup/verified-remote-client.js";
 import {
   formatVercelAuthChallengeMessage,
@@ -28,7 +29,10 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
   readonly onBootProgress?: DevBootProgressReporter;
 }
 
-async function resolveClientOptions(target: DevelopmentTuiTarget) {
+async function resolveClientOptions(
+  target: DevelopmentTuiTarget,
+  onOidcTokenFailure: (failure: DevelopmentOidcTokenFailure | undefined) => void,
+) {
   if (target.kind === "local") {
     return resolveDevelopmentClientOptions(target.serverUrl);
   }
@@ -36,6 +40,7 @@ async function resolveClientOptions(target: DevelopmentTuiTarget) {
   return await resolveVerifiedRemoteDevelopmentClientOptions({
     serverUrl: target.serverUrl,
     workspaceRoot: target.workspaceRoot,
+    onOidcTokenFailure,
   });
 }
 
@@ -52,7 +57,12 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
   const { target, initialInput, onBootProgress, ...display } = input;
   const { serverUrl } = target;
 
-  const client = new Client(await resolveClientOptions(target));
+  let oidcTokenFailure: DevelopmentOidcTokenFailure | undefined;
+  const client = new Client(
+    await resolveClientOptions(target, (failure) => {
+      oidcTokenFailure = failure;
+    }),
+  );
 
   const options: EveTUIRunnerOptions = {
     ...display,
@@ -64,7 +74,7 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     ),
     formatTransportError: (error) =>
       isVercelAuthChallenge(error)
-        ? formatVercelAuthChallengeMessage({ serverUrl })
+        ? formatVercelAuthChallengeMessage({ serverUrl, oidcTokenFailure })
         : toErrorMessage(error),
   };
   if (target.kind === "local") options.appRoot = target.workspaceRoot;

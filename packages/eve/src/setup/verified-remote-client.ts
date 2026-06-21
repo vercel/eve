@@ -1,7 +1,10 @@
 import type { ClientOptions } from "#client/index.js";
 import { resolveRemoteDevelopmentClientOptions } from "#services/dev-client/client-options.js";
 import { createDevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
-import { resolveDevelopmentOidcToken } from "#services/dev-client/request-headers.js";
+import {
+  type DevelopmentOidcTokenFailure,
+  resolveDevelopmentOidcToken,
+} from "#services/dev-client/request-headers.js";
 
 import { resolveVercelDeployment } from "./vercel-deployment.js";
 
@@ -23,10 +26,14 @@ const defaultDeps: VerifiedRemoteDevelopmentClientDeps = {
 export async function resolveVerifiedRemoteDevelopmentClientOptions(input: {
   readonly serverUrl: string;
   readonly workspaceRoot: string;
+  /** Receives local OIDC failures without changing anonymous or bypass fallback. */
+  readonly onOidcTokenFailure?: (failure: DevelopmentOidcTokenFailure | undefined) => void;
   readonly deps?: Partial<VerifiedRemoteDevelopmentClientDeps>;
 }): Promise<ClientOptions> {
   const deps = { ...defaultDeps, ...input.deps };
-  const credentials = createDevelopmentCredentialGate(input.serverUrl);
+  const credentials = createDevelopmentCredentialGate(input.serverUrl, {
+    onTokenFailure: input.onOidcTokenFailure,
+  });
   const resolution = await deps.resolveVercelDeployment({
     workspaceRoot: input.workspaceRoot,
     host: new URL(input.serverUrl).host,

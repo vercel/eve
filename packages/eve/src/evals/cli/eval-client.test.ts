@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
+import type { DevelopmentOidcTokenResolution } from "#services/dev-client/request-headers.js";
 
 import { createEvalClient, resolveEvalClientOptions } from "./eval-client.js";
 
@@ -58,9 +59,14 @@ describe("resolveEvalClientOptions", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }))
       .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }));
     const resolveDevelopmentOidcToken = vi
-      .fn<(input: { readonly ownerId: string; readonly projectId: string }) => Promise<string>>()
-      .mockResolvedValueOnce(" first-token ")
-      .mockResolvedValueOnce("second-token");
+      .fn<
+        (input: {
+          readonly ownerId: string;
+          readonly projectId: string;
+        }) => Promise<DevelopmentOidcTokenResolution>
+      >()
+      .mockResolvedValueOnce({ kind: "resolved", token: " first-token " })
+      .mockResolvedValueOnce({ kind: "resolved", token: "second-token" });
     const client = await createEvalClient(
       { kind: "remote", url: "https://example.vercel.app" },
       {
@@ -102,7 +108,10 @@ describe("resolveEvalClientOptions", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(Response.json({ ok: true, status: "ready", workflowId: "wf" }));
-    const resolveDevelopmentOidcToken = vi.fn(async () => "ambient-token");
+    const resolveDevelopmentOidcToken = vi.fn(async () => ({
+      kind: "resolved" as const,
+      token: "ambient-token",
+    }));
     const client = await createEvalClient(
       { kind: "remote", url: "https://arbitrary.example.com" },
       {
