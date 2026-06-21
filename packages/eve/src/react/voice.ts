@@ -21,6 +21,9 @@ const ECHO_SUPPRESSION_MS = 900;
 // Bounds the deduplication set so a long-lived session does not grow it without
 // limit; finalized transcription item ids are only revisited within a few turns.
 const MAX_TRACKED_INPUT_ITEMS = 256;
+// Bounds the rendered voice transcript so a long-lived session does not grow the
+// messages array without limit; mirrors MAX_TRACKED_INPUT_ITEMS.
+const MAX_VOICE_MESSAGES = 256;
 
 type StoppableMediaStream = {
   getTracks(): readonly { stop(): void }[];
@@ -32,6 +35,14 @@ export interface UseEveVoiceOptions {
   readonly sessionConfig?: EveVoiceConfig;
   readonly setupUrl?: string;
   readonly voiceSessionId?: string;
+  /**
+   * Gateway-owned control mode (A-lite). When true, AI Gateway drives durable
+   * turns over its server-side control socket, so the browser only streams
+   * audio: the hook does not run client-side `/eve/v1/session` turns, call
+   * `onTranscript`, or speak replies (Gateway injects TTS). Use this when the
+   * channel is configured with `control`.
+   */
+  readonly controlMode?: boolean;
   /**
    * Spoken when a turn fails before producing any assistant text. Off by
    * default: a failed turn surfaces through `onError`/`status` instead of
@@ -74,6 +85,65 @@ export type EveVoiceActivity =
   | "error";
 
 export type EveVoiceStatus = "disconnected" | "connecting" | "connected" | "error";
+
+/**
+ * One rendered turn in the live voice transcript. Works in both modes: in
+ * Gateway-control mode it is built from the realtime transcript events the
+ * browser receives (user `input-transcription-completed`, assistant
+ * `audio-transcript-delta`); in client-driven mode it mirrors the durable turn
+ * the hook runs. Lets apps render the conversation without reaching into raw
+ * provider event shapes.
+ */
+export interface EveVoiceMessage {
+  readonly id: string;
+  readonly role: "user" | "assistant";
+  readonly text: string;
+}
+
+// Keeps the most recent messages; new entries are appended, so the oldest are
+// evicted from the front and a streaming (newest) assistant message is never
+// dropped mid-stream.
+function capVoiceMessages(messages: readonly EveVoiceMessage[]): readonly EveVoiceMessage[] {
+  return messages.length > MAX_VOICE_MESSAGES
+    ? messages.slice(messages.length - MAX_VOICE_MESSAGES)
+    : messages;
+}
+
+function upsertUserVoiceMessage(
+  messages: readonly EveVoiceMessage[],
+  id: string,
+  text: string,
+): readonly EveVoiceMessage[] {
+  if (text.length === 0 || messages.some((message) => message.id === id)) return messages;
+  return capVoiceMessages([...messages, { id, role: "user", text }]);
+}
+
+function appendAssistantVoiceDelta(
+  messages: readonly EveVoiceMessage[],
+  id: string,
+  delta: string,
+): readonly EveVoiceMessage[] {
+  const index = messages.findIndex((message) => message.id === id);
+  const existing = index === -1 ? undefined : messages[index];
+  if (existing === undefined) {
+    return capVoiceMessages([...messages, { id, role: "assistant", text: delta }]);
+  }
+  const next = messages.slice();
+  next[index] = { id, role: "assistant", text: existing.text + delta };
+  return next;
+}
+
+function setAssistantVoiceText(
+  messages: readonly EveVoiceMessage[],
+  id: string,
+  text: string,
+): readonly EveVoiceMessage[] {
+  const index = messages.findIndex((message) => message.id === id);
+  if (index === -1) return capVoiceMessages([...messages, { id, role: "assistant", text }]);
+  const next = messages.slice();
+  next[index] = { id, role: "assistant", text };
+  return next;
+}
 
 export interface EveVoiceConfig {
   readonly instructions?: string;
@@ -229,6 +299,10 @@ export interface UseEveVoiceResult {
   readonly isPlaying: boolean;
   readonly isUserSpeaking: boolean;
   readonly lastReply: string | undefined;
+  /** Live voice transcript for both sides; render this instead of raw events. */
+  readonly messages: readonly EveVoiceMessage[];
+  /** True between a finalized user transcript and the assistant's first words. */
+  readonly isThinking: boolean;
   readonly sessionId: string | undefined;
   readonly speak: (text: string) => void;
   readonly status: EveVoiceStatus;
@@ -250,6 +324,8 @@ export function useEveVoice(options: UseEveVoiceOptions = {}): UseEveVoiceResult
   const [error, setError] = useState<Error | undefined>(undefined);
   const [isUserSpeaking, setIsUserSpeaking] = useState(false);
   const [lastReply, setLastReply] = useState<string | undefined>(undefined);
+  const [messages, setMessages] = useState<readonly EveVoiceMessage[]>([]);
+  const [isThinking, setIsThinking] = useState(false);
   const [sessionId, setSessionId] = useState<string | undefined>(session.state.sessionId);
   const [streamIndex, setStreamIndex] = useState(session.state.streamIndex);
   const ignoreInputUntilRef = useRef(0);
@@ -324,14 +400,18 @@ export function useEveVoice(options: UseEveVoiceOptions = {}): UseEveVoiceResult
 
   const runEveTurn = useCallback(
     async (message: string, itemId: string) => {
+      setMessages((prev) => upsertUserVoiceMessage(prev, `user:${itemId}`, message.trim()));
+      setIsThinking(true);
       if (options.onTranscript !== undefined) {
         const reply = await options.onTranscript({
           itemId,
           transcript: message,
           voiceSessionId,
         });
+        setIsThinking(false);
         if (typeof reply === "string" && reply.trim().length > 0) {
           setLastReply(reply);
+          setMessages((prev) => setAssistantVoiceText(prev, `assistant:${itemId}`, reply.trim()));
           speakEveReply(reply);
         }
         return;
@@ -362,7 +442,10 @@ export function useEveVoice(options: UseEveVoiceOptions = {}): UseEveVoiceResult
         setStreamIndex(session.state.streamIndex);
 
         if (replyText !== undefined && replyText.trim().length > 0) {
+          const finalReply = replyText.trim();
           setLastReply(replyText);
+          setMessages((prev) => setAssistantVoiceText(prev, `assistant:${itemId}`, finalReply));
+          setIsThinking(false);
           options.onReply?.({
             message,
             sessionId: response.sessionId,
@@ -376,8 +459,10 @@ export function useEveVoice(options: UseEveVoiceOptions = {}): UseEveVoiceResult
 
         // A terminal failure that produced no assistant text would be dead
         // air, so optionally speak the configured fallback.
+        setIsThinking(false);
         if (failed) speakFallbackReply();
       } catch (cause) {
+        setIsThinking(false);
         // Only fall back when this turn produced no usable reply, so a late
         // transport error cannot overwrite or double-speak a real answer.
         if (!spokeReply && (replyText === undefined || replyText.trim().length === 0)) {
@@ -425,6 +510,7 @@ export function useEveVoice(options: UseEveVoiceOptions = {}): UseEveVoiceResult
         case "error":
           responseInFlightRef.current = false;
           ignoreInputUntilRef.current = Date.now() + ECHO_SUPPRESSION_MS;
+          setIsThinking(false);
           break;
         case "speech-started":
           setIsUserSpeaking(true);
@@ -433,8 +519,45 @@ export function useEveVoice(options: UseEveVoiceOptions = {}): UseEveVoiceResult
         case "audio-committed":
           setIsUserSpeaking(false);
           break;
+        case "audio-transcript-delta":
+          // Gateway-control mode: the assistant's spoken words stream back as
+          // transcript deltas; accumulate them into the live feed.
+          if (options.controlMode) {
+            setIsThinking(false);
+            setMessages((prev) =>
+              appendAssistantVoiceDelta(prev, `assistant:${event.responseId}`, event.delta),
+            );
+          }
+          break;
+        case "audio-transcript-done":
+          if (options.controlMode) {
+            setIsThinking(false);
+            const finalText = event.transcript?.trim();
+            if (finalText !== undefined && finalText.length > 0) {
+              setMessages((prev) =>
+                setAssistantVoiceText(prev, `assistant:${event.responseId}`, finalText),
+              );
+            }
+          }
+          break;
         case "input-transcription-completed":
           setIsUserSpeaking(false);
+          // In Gateway-control mode the server drives turns over its control
+          // socket; the browser only streams audio and never runs client turns.
+          // It still surfaces the finalized transcript, which we render and use
+          // to flip into the Thinking… state until the assistant speaks.
+          if (options.controlMode) {
+            {
+              const transcript = event.transcript.trim();
+              if (transcript.length > 0) {
+                setMessages((prev) =>
+                  upsertUserVoiceMessage(prev, `user:${event.itemId}`, transcript),
+                );
+                setIsThinking(true);
+              }
+            }
+            break;
+          }
           if (processedInputItemsRef.current.has(event.itemId)) {
             break;
           }
@@ -455,7 +578,7 @@ export function useEveVoice(options: UseEveVoiceOptions = {}): UseEveVoiceResult
       }
       options.onEvent?.(event as EveVoiceEvent);
     },
-    [enqueueEveTurn, options.onEvent],
+    [enqueueEveTurn, options.controlMode, options.onEvent],
   );
 
   const sendEventRef = useRef<((event: Experimental_RealtimeClientEvent) => void) | undefined>(
@@ -535,8 +658,10 @@ export function useEveVoice(options: UseEveVoiceOptions = {}): UseEveVoiceResult
     error,
     isCapturing: realtime.isCapturing,
     isPlaying: realtime.isPlaying,
+    isThinking,
     isUserSpeaking,
     lastReply,
+    messages,
     sessionId,
     speak: speakEveReply,
     start,

@@ -312,10 +312,10 @@ npm install eve@latest @ai-sdk/react
 
 \`\`\`ts
 // agent/channels/speech.ts
-import { realtimeSpeechChannel } from "eve/channels/vercel/speech";
+import { vercelSpeechChannel } from "eve/channels/vercel/speech";
 import { localDev, vercelOidc } from "eve/channels/auth";
 
-export default realtimeSpeechChannel({
+export default vercelSpeechChannel({
   auth: [localDev(), vercelOidc()],
 });
 \`\`\`

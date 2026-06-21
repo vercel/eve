@@ -4,6 +4,13 @@ packages:
   - e2e/fixtures/*
   - packages/*
 
+# Temporary override: a locally-built @ai-sdk/gateway that adds Eve realtime
+# voice `control` mint support (threads `control` through getToken into the
+# client-secret mint body). Vendored as a tarball so this branch is
+# self-contained; drop it once the change lands upstream in @ai-sdk/gateway.
+overrides:
+  "@ai-sdk/gateway": "file:vendor/ai-sdk-gateway-4.0.0-beta.110.tgz"
+
 allowBuilds:
   "@mongodb-js/zstd": true
   "@nestjs/core": true

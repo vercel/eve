@@ -33,9 +33,12 @@ export {
   type WebSocketUpgradeServerBridge,
 } from "#channel/websocket-upgrade-server.js";
 export {
-  realtimeSpeechChannel,
-  type RealtimeSpeechChannelInput,
-  type RealtimeSpeechSetupResponse,
+  vercelSpeechChannel,
+  type VercelRealtimeClientSecret,
+  type VercelRealtimeControlConfig,
+  type VercelSpeechChannelInput,
+  type VercelSpeechControlInput,
+  type VercelSpeechSetupResponse,
 } from "#public/channels/vercel/speech.js";
 
 import { getChannelInstrumentationKind } from "#channel/compiled-channel.js";

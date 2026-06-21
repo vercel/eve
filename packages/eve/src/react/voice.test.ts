@@ -342,6 +342,61 @@ describe("useEveVoice", () => {
     expect(postCalls(fetch)).toHaveLength(1);
   });
 
+  it("does not run client turns in gateway-control mode", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const { useEveVoice } = await import("#react/voice.js");
+
+    function TestComponent() {
+      useEveVoice({ voiceSessionId: "voice-1", controlMode: true });
+      return null;
+    }
+
+    act(() => {
+      create(createElement(TestComponent));
+    });
+
+    // Gateway drives turns over its control socket; the browser only streams
+    // audio, so a finalized transcript must not start a client-side turn.
+    realtimeOptions[0].onEvent({
+      itemId: "item-1",
+      raw: {},
+      transcript: "hello",
+      type: "input-transcription-completed",
+    });
+
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("caps the live voice transcript and keeps the most recent messages", async () => {
+    const { useEveVoice } = await import("#react/voice.js");
+
+    let latest: ReturnType<typeof useEveVoice> | undefined;
+    function TestComponent() {
+      latest = useEveVoice({ voiceSessionId: "voice-1", controlMode: true });
+      return null;
+    }
+
+    act(() => {
+      create(createElement(TestComponent));
+    });
+
+    act(() => {
+      for (let i = 0; i < 300; i++) {
+        realtimeOptions[0].onEvent({
+          raw: {},
+          responseId: `response-${i}`,
+          transcript: `reply ${i}`,
+          type: "audio-transcript-done",
+        });
+      }
+    });
+
+    expect(latest?.messages).toHaveLength(256);
+    expect(latest?.messages.at(-1)?.text).toBe("reply 299");
+    expect(latest?.messages[0]?.text).toBe("reply 44");
+  });
+
   it("ignores empty transcription completions", async () => {
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);

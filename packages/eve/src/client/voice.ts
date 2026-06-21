@@ -1,6 +1,7 @@
 export const EVE_VOICE_SETUP_ROUTE_PATH = "/eve/v1/realtime-speech/setup";
 
 export interface EveVoiceSetupResult {
+  readonly control?: boolean;
   readonly expiresAt?: number;
   readonly token: string;
   readonly url: string;
@@ -75,10 +76,18 @@ export async function setupVoice(
       ? data.voiceSessionId
       : voiceSessionId;
 
-  const result: EveVoiceSetupResult = {
+  const result: {
+    control?: boolean;
+    expiresAt?: number;
+    token: string;
+    url: string;
+    voiceSessionId: string;
+  } = {
     token: data.token,
     url: data.url,
     voiceSessionId: resolvedVoiceSessionId,
   };
-  return typeof data.expiresAt === "number" ? { ...result, expiresAt: data.expiresAt } : result;
+  if (typeof data.control === "boolean") result.control = data.control;
+  if (typeof data.expiresAt === "number") result.expiresAt = data.expiresAt;
+  return result;
 }

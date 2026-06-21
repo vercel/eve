@@ -1,7 +1,7 @@
 "use client";
 
 import { useEveAgent } from "eve/react";
-import { useEveVoice } from "eve/react/voice";
+import { useEveVoice, type EveVoiceMessage } from "eve/react/voice";
 import { type FormEvent, type JSX, useEffect, useMemo, useRef, useState } from "react";
 
 import { traceReducer, type TraceProjection } from "./trace-reducer";
@@ -67,10 +67,38 @@ function ConversationSection(props: {
   );
 }
 
+// In Gateway-control mode the durable turn runs server-side (its own `voice:`
+// continuation), so the typed-chat feed (`agent.data.turns`) never sees it. The
+// hook surfaces the live transcript (user finalized speech + the agent's
+// streamed spoken words) as `voice.messages`; this feed renders it, with a
+// Thinking… row in the gap while Eve runs the turn.
+function VoiceConversationSection(props: {
+  readonly messages: readonly EveVoiceMessage[];
+  readonly thinking: boolean;
+}) {
+  return (
+    <ul className="chat-feed">
+      {props.messages.map((message) => (
+        <li className={`chat-row role-${message.role}`} key={message.id}>
+          <div className="chat-bubble-stack">
+            <div className="chat-bubble">{message.text}</div>
+          </div>
+        </li>
+      ))}
+      {props.thinking ? (
+        <li className="chat-row role-assistant pending">
+          <div className="chat-bubble">Thinking…</div>
+        </li>
+      ) : null}
+    </ul>
+  );
+}
+
 export function App() {
   const [composerInput, setComposerInput] = useState("");
   const [composerError, setComposerError] = useState<string | undefined>(undefined);
   const [voiceCaption, setVoiceCaption] = useState<string | undefined>(undefined);
+  const controlMode = process.env.NEXT_PUBLIC_EVE_VOICE_CONTROL === "1";
   const conversationStageRef = useRef<HTMLElement | null>(null);
   const agentRef = useRef<ReturnType<typeof useEveAgent<TraceProjection>> | undefined>(undefined);
   const pendingVoiceMessagesRef = useRef<string[]>([]);
@@ -109,8 +137,15 @@ export function App() {
   });
   agentRef.current = agent;
   const voice = useEveVoice({
+    // Opt into Gateway-owned control mode (A-lite): the Gateway drives turns
+    // over its server-side control socket, so the browser only streams audio
+    // and `onTranscript` below is not used. Defaults off (client-driven path).
+    controlMode,
     onEvent(event) {
-      if (event.type === "input-transcription-completed") {
+      // The live transcript now comes from `voice.messages` / `voice.isThinking`
+      // (rendered by VoiceConversationSection). Only the client-driven path
+      // keeps the lightweight caption.
+      if (!controlMode && event.type === "input-transcription-completed") {
         setVoiceCaption(`Heard: ${event.transcript}`);
       }
     },
@@ -131,12 +166,16 @@ export function App() {
   const turns = agent.data.turns;
   const isComposeInProgress = agent.status === "submitted" || agent.status === "streaming";
   const hasComposerText = composerInput.trim().length > 0;
-  const hasConversation = turns.length > 0 || isComposeInProgress;
+  const hasVoiceConversation = controlMode && (voice.messages.length > 0 || voice.isThinking);
+  const hasConversation = turns.length > 0 || isComposeInProgress || hasVoiceConversation;
   const conversationActivityKey = [
     agent.session.sessionId ?? "new-thread",
     String(agent.session.streamIndex),
     String(agent.events.length),
     agent.status,
+    String(voice.messages.length),
+    String(voice.messages.at(-1)?.text.length ?? 0),
+    String(voice.isThinking),
   ].join(":");
 
   useEffect(() => {
@@ -243,10 +282,14 @@ export function App() {
         <section className="conversation-stage" ref={conversationStageRef}>
           {hasConversation ? (
             <div className="conversation-scroll">
-              <ConversationSection
-                isSending={agent.status === "submitted" || agent.status === "streaming"}
-                turns={turns}
-              />
+              {controlMode ? (
+                <VoiceConversationSection messages={voice.messages} thinking={voice.isThinking} />
+              ) : (
+                <ConversationSection
+                  isSending={agent.status === "submitted" || agent.status === "streaming"}
+                  turns={turns}
+                />
+              )}
             </div>
           ) : (
             <div className="empty-state">
