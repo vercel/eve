@@ -6,6 +6,7 @@ import { AuthKey, InitiatorAuthKey, SessionIdKey, SessionKey } from "#context/ke
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
+import { resolveRuntimeModelReference } from "#runtime/agent/resolve-model.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
@@ -254,10 +255,14 @@ describe("createExecutionNodeStep", () => {
         toolRegistry,
       },
     );
+    const modelResolutionScope = {
+      moduleMap: { nodes: {} },
+      nodeId: undefined,
+    };
     const step = createExecutionNodeStep({
-      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       createRuntime: () => createNoopRuntime(),
       mode: "task",
+      modelResolutionScope,
       node: rootNode,
     });
 
@@ -273,6 +278,10 @@ describe("createExecutionNodeStep", () => {
     );
 
     expect(result.next).toEqual({ done: true, output: "tool-output" });
+    expect(resolveRuntimeModelReference).toHaveBeenCalledWith(
+      rootNode.turnAgent.model,
+      modelResolutionScope,
+    );
   });
 
   it("records visible subagent tools as pending runtime actions", async () => {
@@ -297,9 +306,12 @@ describe("createExecutionNodeStep", () => {
       }),
     );
     const step = createExecutionNodeStep({
-      compiledArtifactsSource: testCompiledArtifactsSource,
       createRuntime,
       mode: "task",
+      modelResolutionScope: {
+        moduleMap: { nodes: {} },
+        nodeId: undefined,
+      },
       node: rootNode,
     });
 
