@@ -448,6 +448,8 @@ describe("linkProject", () => {
         "POST",
         "--raw-field",
         "name=my-agent",
+        "--raw-field",
+        "framework=eve",
         "--raw",
       ],
       { cwd: "/tmp/eve-agent", onOutput: expect.any(Function) },

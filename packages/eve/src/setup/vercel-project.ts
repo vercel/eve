@@ -32,6 +32,8 @@ const VercelProjectReferenceSchema = z.object({
 
 type VercelProjectReference = z.infer<typeof VercelProjectReferenceSchema>;
 
+const EVE_FRAMEWORK_PRESET = "eve";
+
 const VercelApiErrorSchema = z.object({
   error: z
     .object({
@@ -238,6 +240,8 @@ async function createProject(
       "POST",
       "--raw-field",
       `name=${projectName}`,
+      "--raw-field",
+      `framework=${EVE_FRAMEWORK_PRESET}`,
       "--raw",
     ],
     { cwd: projectRoot, onOutput, signal: options.signal },
