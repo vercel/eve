@@ -1,9 +1,12 @@
 import { vi } from "vitest";
 
 import type {
+  EditableSelectOptions,
+  EditableSelectResult,
   MultiSelectOptions,
   Prompter,
   PrompterValue,
+  SelectEditable,
   SingleSelectOptions,
 } from "#setup/prompter.js";
 
@@ -12,15 +15,16 @@ import type {
  * and returns the answer; an omitted handler makes that prompt type fail, which
  * is the right default for tests that assert a given prompt never runs. `single`
  * answers a single-select (`select`) and `multiple` answers a checklist
- * (`select({ multiple: true })`).
+ * (`select({ multiple: true })`); `editable` answers the TUI-only editable row.
  */
 export interface FakePrompterConfig {
   text?: (opts: Parameters<Prompter["text"]>[0]) => string;
-  password?: (opts: { message: string }) => string;
+  password?: (opts: Parameters<Prompter["password"]>[0]) => string;
   single?: (opts: SingleSelectOptions<PrompterValue>) => PrompterValue | Promise<PrompterValue>;
   multiple?: (
     opts: MultiSelectOptions<PrompterValue>,
   ) => PrompterValue[] | Promise<PrompterValue[]>;
+  editable?: SelectEditable;
 }
 
 export interface FakePrompter {
@@ -52,6 +56,13 @@ export function createFakePrompter(config: FakePrompterConfig = {}): FakePrompte
     return (config.single ? await config.single(opts) : fail(opts.message)) as T;
   }
 
+  async function selectEditable<T extends PrompterValue, Payload>(
+    opts: EditableSelectOptions<T, Payload>,
+  ): Promise<EditableSelectResult<T, Payload>> {
+    selectMessages.push(opts.message);
+    return config.editable ? config.editable(opts) : fail(opts.message);
+  }
+
   const prompter: Prompter = {
     text: async (opts) => (config.text ? config.text(opts) : fail(opts.message)),
     password: async (opts) => (config.password ? config.password(opts) : fail(opts.message)),
@@ -69,6 +80,7 @@ export function createFakePrompter(config: FakePrompterConfig = {}): FakePrompte
       commandOutput: vi.fn(),
     },
   };
+  if (config.editable !== undefined) prompter.selectEditable = selectEditable;
 
   return { prompter, selectMessages };
 }

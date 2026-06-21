@@ -2,12 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { initialSelectState } from "#setup/cli/select-state.js";
 import { lineOf } from "./line-editor.js";
-import {
-  renderAcknowledgeQuestion,
-  renderFlowPanel,
-  renderSelectQuestion,
-  renderTextQuestion,
-} from "./setup-panel.js";
+import { renderFlowPanel, renderSelectQuestion, type SetupPanelOption } from "./setup-panel.js";
 import { stripAnsi } from "./terminal-text.js";
 import { createTheme } from "./theme.js";
 
@@ -52,7 +47,7 @@ describe("renderFlowPanel", () => {
     }));
     const text = renderFlowPanel(
       {
-        title: "/channels",
+        title: "/deploy",
         lines,
         content: { kind: "idle", indicator: { glyph: "⠏", color: "yellow" } },
       },
@@ -72,7 +67,10 @@ describe("renderFlowPanel", () => {
         lines: [],
         content: {
           kind: "status",
-          status: { text: "Loading teams…", indicator: { glyph: "⠼", color: "yellow" } },
+          status: {
+            text: "Loading teams…",
+            indicator: { glyph: "⠼", color: "yellow" },
+          },
         },
       },
       theme,
@@ -124,12 +122,84 @@ describe("renderFlowPanel", () => {
     expect(text).toContain("▪ Creating a Slackbot through Vercel Connect…");
     expect(text).toContain("◦ Try again");
     expect(text).toContain("◦ Cancel");
-    // The spinner leads; the actions follow.
+    // The pulse leads; the actions follow.
     expect(text.indexOf("Creating a Slackbot")).toBeLessThan(text.indexOf("Try again"));
   });
 });
 
 describe("renderSelectQuestion", () => {
+  it("aligns stacked hints with their option labels", () => {
+    const options: SetupPanelOption[] = [
+      {
+        value: "model",
+        label: "Change model",
+        hint: "anthropic/claude-sonnet-4.6",
+      },
+      {
+        value: "provider",
+        label: "Configure model access",
+        hint: "Not configured",
+      },
+      { value: "done", label: "Done", description: "Return to the prompt" },
+    ];
+    const rows = renderSelectQuestion(
+      {
+        kind: "stacked",
+        message: "Configure the agent model",
+        options,
+        select: initialSelectState({ options, defaultValue: "done" }),
+      },
+      theme,
+      80,
+    );
+
+    expect(rows).toContain("   ◦ Change model");
+    expect(rows).toContain("     anthropic/claude-sonnet-4.6");
+    expect(rows).toContain("   ◦ Configure model access");
+    expect(rows).toContain("     Not configured");
+  });
+
+  it("shows a stacked menu's selected-row description beneath that option", () => {
+    const options: SetupPanelOption[] = [
+      { value: "model", label: "Change model", description: "The model your agent uses" },
+      {
+        value: "provider",
+        label: "Configure model access",
+        description: "How your agent reaches the model provider",
+      },
+    ];
+    const rows = renderSelectQuestion(
+      {
+        kind: "stacked",
+        message: "",
+        options,
+        select: initialSelectState({ options, defaultValue: "provider" }),
+      },
+      theme,
+      80,
+    );
+
+    expect(rows.indexOf("     How your agent reaches the model provider")).toBe(
+      rows.findIndex((row) => row.includes("▶ Configure model access")) + 1,
+    );
+    expect(rows.join("\n")).not.toContain("The model your agent uses");
+
+    const modelRows = renderSelectQuestion(
+      {
+        kind: "stacked",
+        message: "",
+        options,
+        select: initialSelectState({ options, defaultValue: "model" }),
+      },
+      theme,
+      80,
+    );
+    expect(modelRows.indexOf("     The model your agent uses")).toBe(
+      modelRows.findIndex((row) => row.includes("▶ Change model")) + 1,
+    );
+    expect(modelRows.join("\n")).not.toContain("How your agent reaches the model provider");
+  });
+
   it("paints an unnumbered single-select with one state-glyph column", () => {
     const rows = renderSelectQuestion(
       {
@@ -383,66 +453,215 @@ describe("renderSelectQuestion", () => {
     expect(continuation).toBeDefined();
   });
 
-  it("renders the hovered editable row as a live field with the caret after the name", () => {
+  it("renders the hovered editable row as a live field with the block cursor after the name", () => {
     const options = [
       { value: "new", label: "Create a new project", hint: "Named 'weather-agent'" },
       { value: "link", label: "Link an existing project" },
     ];
     const baseEdit = {
       optionValue: "new",
-      defaultValue: "weather-agent",
+      footerHint: "type to rename",
       formatHint: (value: string) => `Named '${value}'`,
       caretVisible: true,
     };
 
-    // Hovering the editable row: the seeded default reads back with the caret
-    // parked after it, never wedged before the name, and the footer says so.
+    // Hovering the editable row: the seeded default reads back with the block
+    // parked after it, never before the name, and the footer says so.
     const hover = renderSelectQuestion(
       {
         kind: "editable",
+        layout: "task-list",
         message: "Vercel project",
         options,
         select: initialSelectState({ options }),
-        edit: { ...baseEdit, editor: lineOf("weather-agent") },
+        edit: {
+          ...baseEdit,
+          phase: { kind: "editing", editor: lineOf("weather-agent") },
+        },
       },
       theme,
       80,
     );
-    expect(hover.join("\n")).toContain("Named 'weather-agent▏'");
-    expect(hover.join("\n")).not.toContain("'▏weather-agent'");
+    expect(hover.join("\n")).toContain("Named 'weather-agent '");
+    expect(hover.join("\n")).not.toContain(theme.glyph.caret);
     expect(hover.at(-1)).toContain("type to rename");
 
-    // Caret off (blink) collapses to nothing — no stray space before the quote.
+    // Blink-off retains the same cell so the surrounding row does not shift.
     const hoverOff = renderSelectQuestion(
       {
         kind: "editable",
+        layout: "task-list",
         message: "Vercel project",
         options,
         select: initialSelectState({ options }),
-        edit: { ...baseEdit, caretVisible: false, editor: lineOf("weather-agent") },
+        edit: {
+          ...baseEdit,
+          phase: { kind: "editing", editor: lineOf("weather-agent") },
+          caretVisible: false,
+        },
       },
       theme,
       80,
     );
-    expect(hoverOff.join("\n")).toContain("Named 'weather-agent'");
-    expect(hoverOff.join("\n")).not.toContain("Named 'weather-agent '");
+    expect(hoverOff.join("\n")).toContain("Named 'weather-agent '");
 
-    // A backspaced field renders the shortened name with the caret at its end.
+    // A backspaced field renders the shortened name with the block at its end.
     const edited = renderSelectQuestion(
       {
         kind: "editable",
+        layout: "task-list",
         message: "Vercel project",
         options,
         select: initialSelectState({ options }),
-        edit: { ...baseEdit, editor: lineOf("weather-fixtur") },
+        edit: {
+          ...baseEdit,
+          phase: { kind: "editing", editor: lineOf("weather-fixtur") },
+        },
       },
       theme,
       80,
     );
-    expect(edited.join("\n")).toContain("Named 'weather-fixtur▏'");
+    expect(edited.join("\n")).toContain("Named 'weather-fixtur '");
   });
 
-  it("hides the rename caret and hint when the cursor is off the editable row", () => {
+  it("renders a dynamic hint when the editable option has no static hint", () => {
+    const options = [
+      { value: "new", label: "Create a new project" },
+      { value: "link", label: "Link an existing project" },
+    ];
+
+    const rows = renderSelectQuestion(
+      {
+        kind: "editable",
+        layout: "task-list",
+        message: "Vercel project",
+        options,
+        select: initialSelectState({ options }),
+        edit: {
+          optionValue: "new",
+          formatHint: (value: string) => `Named '${value}'`,
+          caretVisible: true,
+          phase: { kind: "editing", editor: lineOf("weather-agent") },
+        },
+      },
+      theme,
+      80,
+    );
+
+    expect(rows.join("\n")).toContain("Named 'weather-agent '");
+  });
+
+  it("renders an inline validation failure after the masked value", () => {
+    const options = [
+      {
+        value: "own-key",
+        label: "AI Gateway via AI_GATEWAY_API_KEY",
+        hint: ">  type your key",
+      },
+    ];
+    const rows = renderSelectQuestion(
+      {
+        kind: "editable",
+        layout: "stacked",
+        message: "Which model provider do you want to use?",
+        options,
+        select: initialSelectState({ options }),
+        edit: {
+          optionValue: "own-key",
+          mask: true,
+          inlineInvalidLabel: "Invalid key",
+          formatHint: (value: string) => `>  ${value}`,
+          caretVisible: false,
+          phase: {
+            kind: "invalid",
+            editor: lineOf("bad-key-123"),
+            message: "The AI Gateway rejected this key.",
+          },
+        },
+      },
+      colorTheme,
+      80,
+    );
+    const row = rows.find((line) => line.includes("Invalid key"));
+
+    expect(row).toBeDefined();
+    expect(stripAnsi(row ?? "")).toBe("     >  •••••••••••    ⨯ Invalid key");
+    expect(row).toContain(
+      colorTheme.colors.red(`${colorTheme.glyph.error} ${colorTheme.colors.bold("Invalid key")}`),
+    );
+  });
+
+  it("keeps a long masked key's inline failure visible within a narrow panel", () => {
+    const options = [
+      {
+        value: "own-key",
+        label: "AI Gateway via AI_GATEWAY_API_KEY",
+        hint: ">  type your key",
+      },
+    ];
+    const width = 44;
+    const rows = renderSelectQuestion(
+      {
+        kind: "editable",
+        layout: "stacked",
+        message: "Provider",
+        options,
+        select: initialSelectState({ options }),
+        edit: {
+          optionValue: "own-key",
+          mask: true,
+          inlineInvalidLabel: "Invalid key",
+          formatHint: (value: string) => `>  ${value}`,
+          caretVisible: false,
+          phase: {
+            kind: "invalid",
+            editor: lineOf(`sk-${"x".repeat(80)}`),
+            message: "The AI Gateway rejected this key.",
+          },
+        },
+      },
+      colorTheme,
+      width,
+    );
+    const row = rows.find((line) => line.includes("Invalid key"));
+    const plain = stripAnsi(row ?? "");
+
+    expect(plain).toContain("…");
+    expect(plain).toContain("    ⨯ Invalid key");
+    expect(plain.length).toBeLessThanOrEqual(width);
+    expect(row).toContain(
+      colorTheme.colors.red(`${colorTheme.glyph.error} ${colorTheme.colors.bold("Invalid key")}`),
+    );
+  });
+
+  it("renders the full validation message when the editable row has no inline label", () => {
+    const options = [{ value: "new", label: "Create a new project", hint: "Named weather-agent" }];
+    const rows = renderSelectQuestion(
+      {
+        kind: "editable",
+        layout: "task-list",
+        message: "Vercel project",
+        options,
+        select: initialSelectState({ options }),
+        edit: {
+          optionValue: "new",
+          formatHint: (value: string) => `Named ${value}`,
+          caretVisible: true,
+          phase: {
+            kind: "invalid",
+            editor: lineOf(""),
+            message: "Project name cannot be empty.",
+          },
+        },
+      },
+      theme,
+      80,
+    );
+
+    expect(rows).toContain("  Project name cannot be empty.");
+  });
+
+  it("hides the rename cursor and hint when the cursor is off the editable row", () => {
     const options = [
       { value: "new", label: "Create a new project", hint: "Named 'weather-agent'" },
       { value: "link", label: "Link an existing project" },
@@ -450,22 +669,23 @@ describe("renderSelectQuestion", () => {
     const rows = renderSelectQuestion(
       {
         kind: "editable",
+        layout: "task-list",
         message: "Vercel project",
         options,
         // Cursor parked on the second (non-editable) row.
         select: { ...initialSelectState({ options }), cursor: 1 },
         edit: {
           optionValue: "new",
-          defaultValue: "weather-agent",
+          footerHint: "type to rename",
           formatHint: (value: string) => `Named '${value}'`,
-          caretVisible: true,
-          editor: lineOf(""),
+          caretVisible: false,
+          phase: { kind: "inactive" },
         },
       },
       theme,
       80,
     );
-    // The editable row shows its plain static hint — no caret injected.
+    // The editable row shows its plain static hint — no cursor cell injected.
     expect(rows.join("\n")).toContain("Named 'weather-agent'");
     expect(rows.join("\n")).not.toContain("weather-agent▏");
     expect(rows.at(-1)).not.toContain("type to rename");
@@ -533,7 +753,8 @@ describe("renderSelectQuestion", () => {
 
   it("keeps a stacked hint dim across an embedded bold span", () => {
     const colored = createTheme({ color: true, unicode: true });
-    const options = [
+    const options: SetupPanelOption[] = [
+      { value: "model", label: "Change model" },
       {
         value: "provider",
         label: "Change provider",
@@ -556,12 +777,48 @@ describe("renderSelectQuestion", () => {
     expect(text).toContain("\x1b[1mmy-agent\x1b[22m\x1b[2m)");
   });
 
-  it("keeps a warning row yellow under the cursor highlight", () => {
-    const options = [
+  it("uses the terminal foreground for a selected yellow hint and dims it otherwise", () => {
+    const hint = colorTheme.colors.yellow("Not configured");
+    const options: SetupPanelOption[] = [
+      { value: "model", label: "Change model" },
       {
         value: "provider",
         label: "Configure model access",
-        accent: "warning" as const,
+        hint,
+      },
+    ];
+    const selectedRows = renderSelectQuestion(
+      {
+        kind: "stacked",
+        message: "",
+        options,
+        select: initialSelectState({ options, defaultValue: "provider" }),
+      },
+      colorTheme,
+      80,
+    );
+    const unselectedRows = renderSelectQuestion(
+      {
+        kind: "stacked",
+        message: "",
+        options,
+        select: initialSelectState({ options, defaultValue: "model" }),
+      },
+      colorTheme,
+      80,
+    );
+
+    expect(selectedRows).toContain("     Not configured");
+    expect(selectedRows).not.toContain(`     ${hint}`);
+    expect(unselectedRows).toContain(`     ${colorTheme.colors.dim(hint)}`);
+  });
+
+  it("keeps a warning row yellow under the cursor highlight", () => {
+    const options: SetupPanelOption[] = [
+      {
+        value: "provider",
+        label: "Configure model access",
+        accent: "warning",
       },
     ];
     const rows = renderSelectQuestion(
@@ -578,6 +835,50 @@ describe("renderSelectQuestion", () => {
     expect(rows).toContain(
       `  ${colorTheme.colors.inverse(colorTheme.colors.yellow(" ▶ Configure model access "))}`,
     );
+  });
+
+  it("uses the terminal foreground for the selected stacked hint", () => {
+    const options = [
+      { value: "project", label: "AI Gateway via Project", hint: "Selected hint" },
+      { value: "external", label: "Other providers", hint: "Unselected hint" },
+    ];
+    const rows = renderSelectQuestion(
+      {
+        kind: "stacked",
+        message: "Which model provider do you want to use?",
+        options,
+        select: initialSelectState({ options }),
+      },
+      colorTheme,
+      80,
+    );
+
+    expect(rows).toContain("     Selected hint");
+    expect(rows).toContain(`     ${colorTheme.colors.dim("Unselected hint")}`);
+  });
+
+  it("renders each line of a stacked hint beneath its option", () => {
+    const options = [
+      {
+        value: "project",
+        label: "AI Gateway via Project",
+        hint: "Authenticates with AI Gateway automatically\nin a new or existing project. No keys to manage.",
+      },
+    ];
+    const rows = renderSelectQuestion(
+      {
+        kind: "stacked",
+        message: "Which model provider do you want to use?",
+        options,
+        select: initialSelectState({ options }),
+      },
+      theme,
+      80,
+    );
+
+    expect(rows).toContain("     Authenticates with AI Gateway automatically");
+    expect(rows).toContain("     in a new or existing project. No keys to manage.");
+    expect(rows.every((row) => !row.includes("\n"))).toBe(true);
   });
 
   it("renders checkboxes and the Submit row for a multi-select", () => {
@@ -688,115 +989,5 @@ describe("renderSelectQuestion", () => {
     expect(context).toContain("\x1b[2m· Waiting for you to complete setup in the browser\x1b[22m");
     expect(context).not.toContain("▷");
     expect(retry).toContain(colorTheme.colors.inverse(colorTheme.colors.blue(" ▶ Try again ")));
-  });
-});
-
-describe("renderTextQuestion", () => {
-  it("paints the message, input line, and hints", () => {
-    const rows = renderTextQuestion(
-      { message: "Project name", editor: lineOf("my-agent"), mask: false },
-      theme,
-      60,
-      true,
-    );
-    const text = rows.join("\n");
-
-    expect(rows[0]).toBe("  Project name");
-    // The input line sits directly under the message — no blank row between.
-    expect(rows[1]).toContain("my-agent");
-    expect(text).toContain("enter to submit · esc to cancel");
-  });
-
-  it("draws the blinking cursor as a block over the grapheme under it", () => {
-    const rows = renderTextQuestion(
-      {
-        message: "Project name",
-        editor: { text: "hello", cursor: 3 },
-        mask: false,
-      },
-      colorTheme,
-      60,
-      true,
-    );
-    const input = rows[1] ?? "";
-
-    expect(stripAnsi(input)).toBe("  hello");
-    expect(input).toContain(colorTheme.colors.inverse("l"));
-    expect(input).not.toContain(colorTheme.glyph.caret);
-  });
-
-  it("draws the block over the first placeholder grapheme", () => {
-    const rows = renderTextQuestion(
-      {
-        message: "API key",
-        editor: lineOf(""),
-        mask: true,
-        placeholder: "type your key",
-      },
-      colorTheme,
-      60,
-      true,
-    );
-    const input = rows[1] ?? "";
-
-    expect(stripAnsi(input)).toBe("  type your key");
-    expect(input).toContain(colorTheme.colors.inverse("t"));
-  });
-
-  it("paints notices above the message, gone with the question", () => {
-    const rows = renderTextQuestion(
-      {
-        message: "New project name",
-        editor: lineOf(""),
-        mask: false,
-        notices: [{ tone: "warning", text: "Project named 'x' already exists in 'team'" }],
-      },
-      theme,
-      60,
-      true,
-    );
-
-    expect(rows[0]).toBe("⚠ Project named 'x' already exists in 'team'");
-    expect(rows[1]).toBe("  New project name");
-  });
-
-  it("masks one bullet per grapheme", () => {
-    const text = renderTextQuestion(
-      { message: "API key", editor: lineOf("e\u0301👨‍👩‍👧‍👦"), mask: true },
-      theme,
-      60,
-      false,
-    ).join("\n");
-
-    expect(text).toContain("••");
-    expect(text).not.toContain("•••");
-    expect(text).not.toContain("👨");
-  });
-});
-
-describe("renderAcknowledgeQuestion", () => {
-  it("paints the heading, dim body lines, and an enter-only footer", () => {
-    const rows = renderAcknowledgeQuestion(
-      {
-        message: "Using another model provider",
-        lines: ["Set your provider's API key in .env.local.", "Point your agent at it."],
-      },
-      theme,
-      60,
-    );
-    const text = rows.join("\n");
-
-    expect(rows[0]).toBe("  Using another model provider");
-    expect(text).toContain("Set your provider's API key in .env.local.");
-    expect(text).toContain("Point your agent at it.");
-    expect(text).toContain("enter to continue");
-    expect(text).not.toContain("esc");
-  });
-
-  it("omits the body gap when there are no lines", () => {
-    const rows = renderAcknowledgeQuestion({ message: "All set", lines: [] }, theme, 60);
-
-    expect(rows[0]).toBe("  All set");
-    expect(rows.filter((row) => row.trim().length > 0)).toHaveLength(2);
   });
 });

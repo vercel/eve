@@ -1,18 +1,4 @@
-/**
- * Pure rendering for the bordered setup flow panel — the input-region variant
- * a setup command runs inside for its whole duration (the Claude Code
- * `/model`-panel grammar): a full-width rule, the command as a blue title,
- * the flow's recent progress lines, and the active question (numbered option
- * rows or a text field) or the ephemeral status spinner. Behavior state comes
- * from the shared select reducer (`#setup/cli/select-state.js`); this module
- * only paints rows, so the renderer hosts lifecycle and keys while tests
- * assert on strings.
- *
- * Column grammar: the panel adds a one-space left margin to every row under
- * the rule, while each section contributes two more spaces. Titles, spinners,
- * notices, filter prompts, and option-state glyphs therefore all begin at
- * column 3.
- */
+/** Pure rendering for the bordered setup panel; lifecycle and input live in the renderer. */
 
 import type { ChannelSetupAction, PromptOption } from "#setup/cli/index.js";
 import {
@@ -29,10 +15,14 @@ import {
 } from "#setup/cli/select-state.js";
 import type { SelectNotice } from "#setup/prompter.js";
 
+import { renderEditableOption, type SetupEditableRow } from "./editable-select.js";
 import { maskLine, visibleLine, type LineState } from "./line-editor.js";
+import { selectFooterHints } from "./setup-select-footer.js";
 import type { Theme } from "./theme.js";
 import {
   clipVisible,
+  dimWithEmphasis,
+  foregroundWithEmphasis,
   renderInputText,
   renderInputWithBlockCursor,
   visibleLength,
@@ -61,19 +51,6 @@ interface SetupSelectPanelBase extends SetupQuestionPanelBase {
   loadingFrame?: string;
 }
 
-interface SetupEditableRow {
-  /**
-   * The row whose hint is a live rename field. Hovering it (cursor on the row)
-   * makes it editable directly — typing and backspace edit the name in place —
-   * so the editor's text and a blinking caret render only on that row.
-   */
-  optionValue: string;
-  editor: LineState;
-  defaultValue: string;
-  formatHint: (value: string) => string;
-  caretVisible: boolean;
-}
-
 /**
  * Select presentation variants. The discriminant owns the interaction grammar
  * so feature combinations are deliberate rather than resolved by conditional
@@ -86,7 +63,11 @@ type SetupOptionSelectPanelState =
   | (SetupSelectPanelBase & { kind: "searchable-multi"; placeholder?: string })
   | (SetupSelectPanelBase & { kind: "stacked" })
   | (SetupSelectPanelBase & { kind: "task-list" })
-  | (SetupSelectPanelBase & { kind: "editable"; edit: SetupEditableRow });
+  | (SetupSelectPanelBase & {
+      kind: "editable";
+      layout: "stacked" | "task-list";
+      edit: SetupEditableRow;
+    });
 
 interface SetupActionsPanelState {
   kind: "actions";
@@ -136,7 +117,7 @@ export type FlowPanelContent =
   | {
       kind: "question";
       rows: readonly string[];
-      /** The install wait keeps its indicator above the concurrent actions. */
+      /** The install wait keeps its spinner above the concurrent actions. */
       status?: { text: string; indicator: FlowPanelIndicator };
     }
   | {
@@ -165,18 +146,6 @@ const FLOW_PANEL_LINE_CAP = 6;
 function questionFooter(hints: readonly string[], theme: Theme): string[] {
   const c = theme.colors;
   return ["", `  ${c.dim(c.italic(hints.join(` ${theme.glyph.dot} `)))}`];
-}
-
-const BOLD_OR_DIM_CLOSE = "\x1b[22m";
-const DIM_OPEN = "\x1b[2m";
-
-/**
- * Dims a line that may carry embedded bold spans (e.g. a flow bolding a
- * project name inside a hint): SGR 22 closes bold AND dim together, so dim is
- * re-opened after each close or the line's tail would render full-bright.
- */
-function dimWithEmphasis(text: string, theme: Theme): string {
-  return theme.colors.dim(text.replaceAll(BOLD_OR_DIM_CLOSE, `${BOLD_OR_DIM_CLOSE}${DIM_OPEN}`));
 }
 
 function toneGlyph(tone: FlowPanelLine["tone"], theme: Theme): string {
@@ -346,7 +315,7 @@ function selectPresentation(state: SetupOptionSelectPanelState): SelectPresentat
       return {
         selection: "single",
         filter: undefined,
-        layout: "task-list",
+        layout: state.layout,
         edit: state.edit,
       };
   }
@@ -393,27 +362,17 @@ function selectViewSize(input: {
   return SEARCH_VIEW_SIZE;
 }
 
-function noticeBody(notice: SelectNotice, layout: SelectLayout, theme: Theme): string {
+function coloredNoticeBody(notice: SelectNotice, theme: Theme): string {
   if (notice.tone === "info") return theme.colors.dim(notice.text);
-  if (notice.tone === "success" && layout === "task-list") {
-    return theme.colors.bold(notice.text);
-  }
+  if (notice.tone === "error") return theme.colors.red(notice.text);
   return notice.text;
 }
 
-function editableOption(
-  option: SetupPanelOption,
-  isCursor: boolean,
-  edit: SetupEditableRow | undefined,
-  theme: Theme,
-): SetupPanelOption {
-  if (!isCursor || edit?.optionValue !== option.value) return option;
-
-  const value = edit.editor.text || edit.defaultValue;
-  const caretAt = edit.editor.text.length === 0 ? value.length : edit.editor.cursor;
-  const caret = edit.caretVisible ? theme.colors.cyan(theme.glyph.caret) : "";
-  const editableValue = `${value.slice(0, caretAt)}${caret}${value.slice(caretAt)}`;
-  return { ...option, hint: edit.formatHint(editableValue) };
+function noticeBody(notice: SelectNotice, layout: SelectLayout, theme: Theme): string {
+  if (notice.tone === "success" && layout === "task-list") {
+    return theme.colors.bold(notice.text);
+  }
+  return coloredNoticeBody(notice, theme);
 }
 
 function optionWithoutStackedHint(
@@ -453,10 +412,21 @@ function appendSelectOptionRows(input: {
   end: number;
   cursor: number;
   visibleLabelWidth: number;
+  width: number;
   theme: Theme;
 }): void {
-  const { rows, state, presentation, visible, start, end, cursor, visibleLabelWidth, theme } =
-    input;
+  const {
+    rows,
+    state,
+    presentation,
+    visible,
+    start,
+    end,
+    cursor,
+    visibleLabelWidth,
+    width,
+    theme,
+  } = input;
   const c = theme.colors;
 
   for (let index = start; index < end; index += 1) {
@@ -466,7 +436,17 @@ function appendSelectOptionRows(input: {
       rows.push("");
     }
 
-    const rendered = editableOption(option, isCursor, presentation.edit, theme);
+    const editableHintWidth =
+      presentation.layout === "stacked"
+        ? Math.max(1, width - 6)
+        : Math.max(1, width - Math.max(visibleLabelWidth, option.label.length) - 9);
+    const rendered = renderEditableOption(
+      option,
+      isCursor,
+      presentation.edit,
+      theme,
+      editableHintWidth,
+    );
     const { option: rowOption, stackedHint } = optionWithoutStackedHint(
       rendered,
       presentation.layout,
@@ -477,18 +457,34 @@ function appendSelectOptionRows(input: {
         isCursor,
         isChecked: presentation.selection === "multiple" && state.select.selected.has(option.value),
         placeholder: optionUsesPlaceholder(presentation, index, visible.length),
-        hintPadding: visibleLabelWidth - option.label.length,
+        hintPadding: Math.max(0, visibleLabelWidth - rowOption.label.length),
         theme,
       })}`,
     );
 
     if (stackedHint !== undefined) {
-      rows.push(`  ${renderOptionRowContinuation(dimWithEmphasis(stackedHint, theme))}`);
+      const isActiveEditableRow =
+        isCursor &&
+        presentation.edit?.optionValue === option.value &&
+        presentation.edit.phase.kind !== "inactive";
+      for (const line of stackedHint.split("\n")) {
+        const renderedHint = !isCursor
+          ? dimWithEmphasis(line, theme.colors.dim)
+          : isActiveEditableRow
+            ? line
+            : foregroundWithEmphasis(line);
+        rows.push(`  ${renderOptionRowContinuation(renderedHint)}`);
+      }
     }
     // Disabled descriptions explain why an inert row cannot be selected, so
     // keep them visible even though the cursor skips that row.
     if (option.description !== undefined && (option.disabled === true || isCursor)) {
-      rows.push(`    ${c.dim(option.description)}`);
+      const description = c.dim(option.description);
+      rows.push(
+        presentation.layout === "stacked"
+          ? `  ${renderOptionRowContinuation(description)}`
+          : `    ${description}`,
+      );
     }
     if (presentation.layout === "stacked" && index < end - 1) rows.push("");
   }
@@ -525,23 +521,6 @@ function appendSelectNotices(
       rows.push(index === 0 ? `  ${glyph} ${body}` : `  ${hangingIndent}${body}`);
     }
   }
-}
-
-function selectFooterHints(
-  presentation: SelectPresentation,
-  visible: readonly SetupPanelOption[],
-  cursor: number,
-): string[] {
-  const hints: string[] = [];
-  if (presentation.edit !== undefined && visible[cursor]?.value === presentation.edit.optionValue) {
-    hints.push("type to rename");
-  }
-  if (presentation.filter !== undefined) hints.push("type to filter");
-  hints.push("↑/↓ move");
-  hints.push(presentation.selection === "multiple" ? "space to toggle" : "enter to select");
-  if (presentation.selection === "multiple") hints.push("enter on Submit to confirm");
-  hints.push("esc to cancel");
-  return hints;
 }
 
 function renderActionQuestion(
@@ -589,9 +568,8 @@ export function renderSelectQuestion(
   const submitIndex = presentation.selection === "multiple" ? submitRowIndex(visible) : -1;
   const cursor = state.select.cursor;
 
-  // An empty message (e.g. a panel-titled menu) contributes no header rows;
-  // the panel's own spacing does the separating.
   const rows = selectMessageRows(state.message, presentation.layout, theme);
+
   if (presentation.filter !== undefined) {
     rows.push(
       `  ${searchFilter(
@@ -639,6 +617,7 @@ export function renderSelectQuestion(
     end,
     cursor,
     visibleLabelWidth,
+    width,
     theme,
   });
   appendSubmitRow(rows, cursor, submitIndex, theme);
@@ -649,11 +628,28 @@ export function renderSelectQuestion(
 
   appendSelectNotices(rows, state.notices, presentation.layout, theme, width);
 
-  if (state.error !== undefined) {
-    rows.push("", `  ${c.red(state.error)}`);
+  const error =
+    state.error ??
+    (state.kind === "editable" &&
+    state.edit.phase.kind === "invalid" &&
+    state.edit.inlineInvalidLabel === undefined
+      ? state.edit.phase.message
+      : undefined);
+  if (error !== undefined) {
+    rows.push("", `  ${c.red(error)}`);
   }
 
-  rows.push(...questionFooter(selectFooterHints(presentation, visible, cursor), theme));
+  rows.push(
+    ...questionFooter(
+      selectFooterHints({
+        edit: presentation.edit,
+        selectedValue: visible[cursor]?.value,
+        filter: presentation.filter !== undefined,
+        multiple: presentation.selection === "multiple",
+      }),
+      theme,
+    ),
+  );
   return rows.map((row) => clip(row, width));
 }
 
@@ -667,8 +663,14 @@ export function renderTextQuestion(
   const c = theme.colors;
   const rows: string[] = [];
   for (const notice of state.notices ?? []) {
-    const body = notice.tone === "info" ? c.dim(notice.text) : notice.text;
-    rows.push(`${toneGlyph(notice.tone, theme)} ${body}`);
+    const glyph = toneGlyph(notice.tone, theme);
+    const hangingIndent = " ".repeat(visibleLength(glyph) + 1);
+    const textWidth = Math.max(1, width - visibleLength(glyph) - 2);
+    const wrapped = wrapVisibleLine(notice.text, textWidth);
+    for (const [index, line] of wrapped.entries()) {
+      const body = coloredNoticeBody({ ...notice, text: line }, theme);
+      rows.push(index === 0 ? `${glyph} ${body}` : `${hangingIndent}${body}`);
+    }
   }
   rows.push(...state.message.split("\n").map((line) => `  ${c.bold(line)}`));
 

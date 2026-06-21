@@ -39,7 +39,7 @@ export type LinkFlowResult =
 
 /**
  * THE LINK FLOW, shared by `eve link` and the dev TUI `/model` menu's provider row (its
- * "Connect via a project" branch): the same
+ * "AI Gateway via Project" branch): the same
  * team/project pickers onboarding uses, then the actual `vercel link`, then a
  * `vercel env pull` so the AI Gateway credential lands in `.env.local`.
  *
@@ -60,7 +60,7 @@ export async function runLinkFlow(input: {
   signal?: AbortSignal;
   /**
    * Whether the caller may only link an existing project (`eve link`, the
-   * default) or may also create one (the `/model` "Connect via a project"
+   * default) or may also create one (the `/model` "AI Gateway via Project"
    * branch, where a fresh agent has no project yet).
    */
   projectSelection?: "create-or-link" | "existing-only";
@@ -130,7 +130,7 @@ export async function runLinkFlow(input: {
       // skip the pickers that choosing "Link to another project" exists to reach.
       adoptExistingLink: false,
       // `eve link` links an existing project (the default); the `/model`
-      // "Connect via a project" branch passes "create-or-link" so a fresh
+      // "AI Gateway via Project" branch passes "create-or-link" so a fresh
       // agent can create its first project here instead of dead-ending on an
       // empty project list.
       projectSelection,

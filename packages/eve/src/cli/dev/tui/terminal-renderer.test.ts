@@ -375,12 +375,12 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const prompt = renderer.readPrompt();
     input.type("hello");
     input.left();
-    input.left(); // caret between "hel" and "lo"
+    input.left(); // cursor between "hel" and "lo"
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("hello"); // text stays contiguous, not split by a caret
-    expect(snapshot).not.toContain("▏"); // no inserted bar-caret cell
-    // The block caret is reverse-video (SGR 7) over the grapheme under the
+    expect(snapshot).toContain("hello"); // text stays contiguous, not split by a cursor glyph
+    expect(snapshot).not.toContain("▏"); // no inserted bar-cursor cell
+    // The block cursor is reverse-video (SGR 7) over the grapheme under the
     // cursor; snapshot() strips SGR, so assert it on the raw output.
     expect(screen.rawOutput()).toContain("\x1b[7m");
 
@@ -688,7 +688,11 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.renderCommandResult("/model cancelled.");
     renderer.shutdown();
 
-    expect(screen.snapshot()).toContain("\u23bf  /model cancelled.");
+    const resultRow = screen
+      .snapshot()
+      .split("\n")
+      .find((line) => line.includes("/model cancelled."));
+    expect(resultRow).toBe("   \u23bf  /model cancelled.");
   });
 
   it("shows a bare prompt with no placeholder and accepts typing", async () => {
@@ -1731,6 +1735,7 @@ describe("TerminalRenderer setup panel", () => {
 
     const answer = renderer.setupFlow.readEditableSelect?.({
       message: "Vercel project",
+      layout: "task-list",
       options: [
         { value: "new", label: "Create a new project", hint: "Named 'weather-agent'" },
         { value: "link", label: "Link an existing project" },
@@ -1739,7 +1744,9 @@ describe("TerminalRenderer setup panel", () => {
       editable: {
         value: "new",
         defaultValue: "weather-agent",
+        footerHint: "type to rename",
         formatHint: (value) => `Named '${value}'`,
+        validate: () => ({ kind: "accepted", payload: undefined }),
       },
     });
     expect(answer).toBeDefined();
@@ -1756,18 +1763,20 @@ describe("TerminalRenderer setup panel", () => {
     expect(screen.snapshot()).toContain("Named 'weather-age!");
     input.enter();
     await expect(answer).resolves.toEqual({
-      kind: "edited",
+      kind: "submitted",
       value: "new",
       text: "weather-age!",
+      payload: undefined,
     });
     renderer.shutdown();
   });
 
-  it("returns an untouched editable row as a plain selection", async () => {
+  it("returns an untouched editable row as an accepted submission", async () => {
     const { input, renderer } = makeRenderer();
 
     const answer = renderer.setupFlow.readEditableSelect?.({
       message: "Vercel project",
+      layout: "task-list",
       options: [
         { value: "new", label: "Create a new project", hint: "Named 'weather-agent'" },
         { value: "link", label: "Link an existing project" },
@@ -1776,14 +1785,229 @@ describe("TerminalRenderer setup panel", () => {
       editable: {
         value: "new",
         defaultValue: "weather-agent",
+        footerHint: "type to rename",
         formatHint: (value) => `Named '${value}'`,
+        validate: () => ({ kind: "accepted", payload: undefined }),
       },
     });
     expect(answer).toBeDefined();
 
-    // Enter without editing resolves to the default name, not a rename.
+    // Enter without editing still returns the validator evidence for the default.
     input.enter();
-    await expect(answer).resolves.toEqual({ kind: "selected", value: "new" });
+    await expect(answer).resolves.toEqual({
+      kind: "submitted",
+      value: "new",
+      text: "weather-agent",
+      payload: undefined,
+    });
+    renderer.shutdown();
+  });
+
+  it("validates a masked key without replacing the provider frame", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    type Validation =
+      | { kind: "accepted"; payload: undefined }
+      | { kind: "rejected"; message: string };
+    let resolveValidation: ((result: Validation) => void) | undefined;
+    const validate = vi.fn(() => {
+      expect(screen.snapshot()).toContain("Validating…");
+      return new Promise<Validation>((resolve) => {
+        resolveValidation = resolve;
+      });
+    });
+    const finishValidation = (error: string | undefined) => {
+      const resolve = resolveValidation;
+      if (resolve === undefined) throw new Error("No key validation is pending.");
+      resolveValidation = undefined;
+      resolve(
+        error === undefined
+          ? { kind: "accepted", payload: undefined }
+          : { kind: "rejected", message: error },
+      );
+    };
+
+    const answer = renderer.setupFlow.readEditableSelect({
+      message: "Which model provider do you want to use?",
+      layout: "stacked",
+      options: [
+        {
+          value: "project",
+          label: "AI Gateway via Project",
+          hint: "Authenticates with AI Gateway automatically\nin a new or existing project. No keys to manage.",
+        },
+        {
+          value: "own-key",
+          label: "AI Gateway via AI_GATEWAY_API_KEY",
+          hint: "> type your key",
+        },
+        {
+          value: "external",
+          label: "Other providers",
+          hint: "Connect directly to a model provider\nvia OPENAI_API_KEY or ANTHROPIC_API_KEY.",
+        },
+      ],
+      initialValue: "own-key",
+      editable: {
+        value: "own-key",
+        defaultValue: "",
+        placeholder: "type your key",
+        mask: true,
+        footerHint: "type your key",
+        inlineInvalidLabel: "Invalid key",
+        formatHint: (value) => `>  ${value}`,
+        validate,
+      },
+    });
+
+    expect(screen.snapshot()).toContain("Authenticates with AI Gateway automatically\n");
+    expect(screen.snapshot()).toContain("No keys to manage");
+    expect(screen.snapshot()).toContain(">  type your key");
+    expect(screen.snapshot()).not.toContain("▏");
+    expect(screen.snapshot()).toContain("via OPENAI_API_KEY or ANTHROPIC_API_KEY.");
+    expect(screen.snapshot()).toContain("type your key · ↑/↓ move");
+
+    input.type("bad-key-123");
+    input.enter();
+    expect(screen.snapshot()).toContain("Which model provider do you want to use?");
+    expect(screen.snapshot()).toContain("•••••••••••");
+    expect(screen.snapshot()).toContain("Validating…");
+
+    finishValidation("The AI Gateway rejected this key. Check the key and try again.");
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain(">  •••••••••••    ⨯ Invalid key");
+    });
+    expect(screen.snapshot()).not.toContain("The AI Gateway rejected this key.");
+    expect(screen.snapshot().match(/Invalid key/g)).toHaveLength(1);
+
+    input.enter();
+    expect(screen.snapshot()).toContain("Validating… •••••••••••");
+    expect(screen.snapshot()).not.toContain("Invalid key");
+    finishValidation("The replacement rejection.");
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain(">  •••••••••••    ⨯ Invalid key");
+    });
+
+    input.type("x");
+    expect(screen.snapshot()).toContain(">  •••••••••••• ");
+    expect(screen.snapshot()).not.toContain("▏");
+    expect(screen.snapshot()).not.toContain("Invalid key");
+
+    input.enter();
+    finishValidation(undefined);
+    await expect(answer).resolves.toEqual({
+      kind: "submitted",
+      value: "own-key",
+      text: "bad-key-123x",
+      payload: undefined,
+    });
+    expect(validate).toHaveBeenCalledTimes(3);
+    renderer.shutdown();
+  });
+
+  it.each([
+    { name: "Escape", sequence: "\x1b", waitForEscape: true },
+    { name: "Ctrl-C", sequence: "\u0003", waitForEscape: false },
+  ])(
+    "clears a masked key before $name cancels its editable row",
+    async ({ sequence, waitForEscape }) => {
+      const { screen, input, renderer } = makeRenderer();
+      const answer = renderer.setupFlow.readEditableSelect({
+        message: "Provider",
+        layout: "stacked",
+        options: [{ value: "own-key", label: "AI Gateway via AI_GATEWAY_API_KEY" }],
+        initialValue: "own-key",
+        editable: {
+          value: "own-key",
+          defaultValue: "",
+          placeholder: "type your key",
+          mask: true,
+          cancelBehavior: "clear-first",
+          formatHint: (value) => `>  ${value}`,
+          validate: () => ({ kind: "accepted", payload: undefined }),
+        },
+      });
+      let settled = false;
+      void answer.finally(() => {
+        settled = true;
+      });
+
+      input.type("sk-secret");
+      expect(screen.snapshot()).toContain("esc to clear");
+      input.send(sequence);
+      if (waitForEscape) await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(settled).toBe(false);
+      expect(screen.snapshot()).not.toContain("•••••••••");
+      expect(screen.snapshot()).toContain("type your key");
+      expect(screen.snapshot()).toContain("esc to cancel");
+
+      input.send(sequence);
+      if (waitForEscape) await new Promise((resolve) => setTimeout(resolve, 50));
+      await expect(answer).resolves.toBeUndefined();
+      renderer.shutdown();
+    },
+  );
+
+  it("aborts pending editable validation when the question is cancelled", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    let validationSignal: AbortSignal | undefined;
+    let finishValidation: (() => void) | undefined;
+    const answer = renderer.setupFlow.readEditableSelect({
+      message: "Provider",
+      layout: "stacked",
+      options: [{ value: "own-key", label: "AI Gateway key" }],
+      initialValue: "own-key",
+      editable: {
+        value: "own-key",
+        defaultValue: "",
+        formatHint: (value) => value,
+        validate: (_value, signal) => {
+          validationSignal = signal;
+          return new Promise<{ kind: "accepted"; payload: undefined }>((resolve) => {
+            finishValidation = () => resolve({ kind: "accepted", payload: undefined });
+          });
+        },
+      },
+    });
+
+    input.type("sk-test");
+    input.enter();
+    input.send("\x1b");
+
+    await expect(answer).resolves.toBeUndefined();
+    expect(validationSignal?.aborted).toBe(true);
+    const cancelledScreen = screen.snapshot();
+    finishValidation?.();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(screen.snapshot()).toBe(cancelledScreen);
+    renderer.shutdown();
+  });
+
+  it("closes the editable question when validation throws synchronously", async () => {
+    const { input, renderer } = makeRenderer();
+    let validationSignal: AbortSignal | undefined;
+    const answer = renderer.setupFlow.readEditableSelect({
+      message: "Provider",
+      layout: "stacked",
+      options: [{ value: "own-key", label: "AI Gateway key" }],
+      initialValue: "own-key",
+      editable: {
+        value: "own-key",
+        defaultValue: "",
+        formatHint: (value) => value,
+        validate: (_value, signal) => {
+          validationSignal = signal;
+          throw new Error("Validation crashed.");
+        },
+      },
+    });
+
+    input.type("sk-test");
+    input.enter();
+
+    await expect(answer).rejects.toThrow("Validation crashed.");
+    expect(validationSignal?.aborted).toBe(true);
     renderer.shutdown();
   });
 

@@ -12,6 +12,20 @@ export function stripAnsi(input: string): string {
   return stripTerminalControls(input.replaceAll(ansiPattern, ""));
 }
 
+const boldOrDimClose = "\x1b[22m";
+const dimOpen = "\x1b[2m";
+const ansiForegroundColor = new RegExp(`${ansiEscape}\\[(?:3[0-9]|9[0-7])m`, "g");
+
+/** Dims ANSI text while retaining emphasis after SGR 22 closes a bold span. */
+export function dimWithEmphasis(text: string, dim: (value: string) => string): string {
+  return dim(text.replaceAll(boldOrDimClose, `${boldOrDimClose}${dimOpen}`));
+}
+
+/** Restores the terminal foreground while retaining embedded bold spans. */
+export function foregroundWithEmphasis(text: string): string {
+  return text.replaceAll(dimOpen, "").replace(ansiForegroundColor, "");
+}
+
 export function stripTerminalControls(input: string): string {
   let output = "";
   let index = 0;

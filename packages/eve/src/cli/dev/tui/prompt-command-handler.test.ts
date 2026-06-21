@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
 import type { AgentTUIRenderer, PromptCommandHandlerContext } from "./runner.js";
-import type { SetupFlowRenderer } from "./setup-flow.js";
+import { createFakeSetupFlowRenderer } from "./test/fake-setup-flow-renderer.js";
 
 const APP_ROOT = "/tmp/weather-agent";
 
@@ -15,25 +15,6 @@ function context(renderer: Partial<AgentTUIRenderer> = {}): PromptCommandHandler
     },
     title: "Weather Agent",
   };
-}
-
-function setupFlowRenderer() {
-  return {
-    begin: vi.fn(),
-    end: vi.fn(),
-    readSelect: vi.fn(async () => undefined),
-    readEditableSelect: vi.fn(async () => undefined),
-    readText: vi.fn(async () => undefined),
-    readAcknowledge: vi.fn(async () => {}),
-    readChoice: vi.fn(() => ({ choice: Promise.resolve(undefined), close: vi.fn() })),
-    setStatus: vi.fn(),
-    renderLine: vi.fn(),
-    renderOutput: vi.fn(),
-    waitForInterrupt: () => ({
-      promise: new Promise<void>(() => {}),
-      dispose: vi.fn(),
-    }),
-  } satisfies SetupFlowRenderer;
 }
 
 describe("createPromptCommandHandler", () => {
@@ -122,7 +103,9 @@ describe("createPromptCommandHandler", () => {
     }));
 
     try {
-      const setupFlow = setupFlowRenderer();
+      const begin = vi.fn();
+      const end = vi.fn();
+      const setupFlow = createFakeSetupFlowRenderer({ begin, end });
       const handler = createPromptCommandHandler({ appRoot: APP_ROOT });
 
       await expect(
@@ -137,8 +120,8 @@ describe("createPromptCommandHandler", () => {
       expect(runTuiSetupCommand).toHaveBeenCalledWith(
         expect.objectContaining({ initialModelStep: "provider" }),
       );
-      expect(setupFlow.begin).toHaveBeenCalledWith("Configure the agent model", "pulse");
-      expect(setupFlow.end).toHaveBeenCalledWith({ preserveDiagnostics: false });
+      expect(begin).toHaveBeenCalledWith("Configure the agent model", "pulse");
+      expect(end).toHaveBeenCalledWith({ preserveDiagnostics: false });
     } finally {
       vi.doUnmock("./setup-commands.js");
       vi.resetModules();
@@ -151,7 +134,8 @@ describe("createPromptCommandHandler", () => {
     });
 
     try {
-      const setupFlow = setupFlowRenderer();
+      const begin = vi.fn();
+      const setupFlow = createFakeSetupFlowRenderer({ begin });
       const handler = createPromptCommandHandler({ appRoot: APP_ROOT });
 
       await expect(
@@ -159,7 +143,7 @@ describe("createPromptCommandHandler", () => {
       ).resolves.toEqual({
         message: expect.stringMatching(/^\/model failed: /),
       });
-      expect(setupFlow.begin).not.toHaveBeenCalled();
+      expect(begin).not.toHaveBeenCalled();
     } finally {
       vi.doUnmock("./setup-commands.js");
       vi.resetModules();

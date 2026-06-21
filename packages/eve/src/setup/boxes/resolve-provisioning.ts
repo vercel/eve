@@ -303,16 +303,19 @@ export function resolveProvisioning(
       ];
       const editableChoice =
         options.projectSelection !== "existing-only" && options.prompter.selectEditable
-          ? await options.prompter.selectEditable<"new" | "link">({
+          ? await options.prompter.selectEditable<"new" | "link", undefined>({
               message: "Vercel project",
               options: projectOptions,
               initialValue: "new",
               editable: {
                 value: "new",
                 defaultValue: agentName,
+                footerHint: "type to rename",
                 formatHint: (value) => `Named ${value}`,
                 validate: (value) =>
-                  value.trim().length === 0 ? "Project name cannot be empty." : undefined,
+                  value.trim().length === 0
+                    ? { kind: "rejected", message: "Project name cannot be empty." }
+                    : { kind: "accepted", payload: undefined },
               },
             })
           : undefined;
@@ -338,7 +341,8 @@ export function resolveProvisioning(
               }),
             )));
       if (choice === "new") {
-        const requestedName = editableChoice?.kind === "edited" ? editableChoice.text : agentName;
+        const requestedName =
+          editableChoice?.kind === "submitted" ? editableChoice.text : agentName;
         const project = await deps.pickNewProjectName(prompter, parent(), team, requestedName, {
           signal,
         });

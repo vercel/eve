@@ -11,7 +11,11 @@ import { createSelectOptionCodec } from "#setup/cli/select-option-codec.js";
 import { searchActionQuery } from "#setup/cli/select-state.js";
 import { WizardCancelledError } from "#setup/step.js";
 
-import type { SetupFlowPrompterRenderer, SetupSelectRequest } from "./setup-flow.js";
+import type {
+  SetupEditableSelectRequest,
+  SetupFlowPrompterRenderer,
+  SetupSelectRequest,
+} from "./setup-flow.js";
 
 /**
  * The renderer slice the TUI-native prompter drives: the bordered setup
@@ -123,6 +127,36 @@ export function createTuiPrompter(renderer: TuiPrompterRenderer): Prompter {
     return value;
   }
 
+  async function selectEditable<T extends PrompterValue, Payload>(
+    opts: EditableSelectOptions<T, Payload>,
+  ): Promise<EditableSelectResult<T, Payload>> {
+    const codec = createSelectOptionCodec(opts.options);
+    const editable: SetupEditableSelectRequest<Payload>["editable"] = {
+      ...opts.editable,
+      value: codec.encode(opts.editable.value),
+    };
+    const request: Omit<SetupEditableSelectRequest<Payload>, "editable"> = {
+      message: opts.message,
+      options: codec.options,
+      layout: opts.hintLayout === "stacked" ? "stacked" : "task-list",
+    };
+    if (opts.initialValue !== undefined) {
+      request.initialValue = codec.encode(opts.initialValue);
+    }
+    if (opts.notices !== undefined) request.notices = opts.notices;
+
+    const result = guardCancel(
+      await renderer.readEditableSelect({
+        ...request,
+        editable,
+      }),
+    );
+    const value = codec.decode(result.value);
+    return result.kind === "submitted"
+      ? { kind: "submitted", value, text: result.text, payload: result.payload }
+      : { kind: "selected", value };
+  }
+
   function line(tone: "info" | "success" | "warning" | "error") {
     return (text: string): void => renderer.renderLine(text, tone);
   }
@@ -149,30 +183,7 @@ export function createTuiPrompter(renderer: TuiPrompterRenderer): Prompter {
     },
 
     select,
-    async selectEditable<T extends PrompterValue>(
-      opts: EditableSelectOptions<T>,
-    ): Promise<EditableSelectResult<T>> {
-      const codec = createSelectOptionCodec(opts.options);
-      const editable: Parameters<TuiPrompterRenderer["readEditableSelect"]>[0]["editable"] = {
-        value: codec.encode(opts.editable.value),
-        defaultValue: opts.editable.defaultValue,
-        formatHint: opts.editable.formatHint,
-      };
-      if (opts.editable.validate !== undefined) editable.validate = opts.editable.validate;
-      const request: Parameters<TuiPrompterRenderer["readEditableSelect"]>[0] = {
-        message: opts.message,
-        options: codec.options,
-        editable,
-      };
-      if (opts.initialValue !== undefined) {
-        request.initialValue = codec.encode(opts.initialValue);
-      }
-      const result = guardCancel(await renderer.readEditableSelect(request));
-      const value = codec.decode(result.value);
-      return result.kind === "edited"
-        ? { kind: "edited", value, text: result.text }
-        : { kind: "selected", value };
-    },
+    selectEditable,
 
     async acknowledge(opts) {
       await renderer.readAcknowledge({ message: opts.message, lines: opts.lines ?? [] });

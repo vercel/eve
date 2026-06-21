@@ -16,7 +16,7 @@ On startup the TUI prints a brand line with your agent's name, plus a rotating t
  Use /channels to add more ways to reach your agent.
 ```
 
-If agent discovery reported problems, an error and warning count renders between the two lines. Instructions, tools, skills, and subagents are one `eve info` away, and `/help` lists every command. The TUI also runs a startup check. When the runtime confirms that no model provider is configured, it opens the `/model` provider questions before the first prompt. When the available evidence cannot confirm that state, missing setup remains visible as an attention line, with each command's outcome hanging under it on a `⎿` connector.
+If agent discovery reported problems, an error and warning count renders between the two lines. Instructions, tools, skills, and subagents are one `eve info` away, and `/help` lists every command. The TUI also runs a startup check. When the runtime confirms that no model provider is configured, it opens the `/model` provider picker before the first prompt. Unknown or linked-but-incomplete credential states remain visible as an attention line, with each command's outcome hanging under it on a `⎿` connector.
 
 ## Reading the transcript
 
@@ -32,25 +32,25 @@ Errors render compactly with docs links highlighted. A code bug escaping your ag
 
 Each command echoes as an invocation line, asks through a bordered panel that takes the input area's place (one question at a time, separate from the chat transcript), and finishes with a one-line `⎿` result. Loading states stay on the ephemeral status line instead of piling into the transcript; model and channel setup use the same green square pulse as the build phase. Setup menus render the selected option with a filled arrow and an inverse label padded by one space on each side. Text prompts use a blinking block cursor over the character at the caret. The selected label is blue normally and yellow for warning rows.
 
-| Command     | Does                                                                                                                              |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `/model`    | Opens a configure menu that loops until Done (or Esc). See [Configure the model and provider](#configure-the-model-and-provider). |
-| `/channels` | Shows the agent's channel list and adds the one you pick. See [Add a channel](#add-a-channel).                                    |
-| `/deploy`   | Ships the agent to Vercel production, linking the directory first when it is unlinked.                                            |
-| `/loglevel` | Switches which logs the transcript shows. See [Control what logs show](#control-what-logs-show).                                  |
-| `/new`      | Starts a fresh session.                                                                                                           |
-| `/exit`     | Quits the TUI.                                                                                                                    |
-| `/help`     | Lists every command.                                                                                                              |
+| Command     | Does                                                                                                                                                                            |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/model`    | Opens model and provider configuration. A completed change returns to the prompt; Done or Esc exits. See [Configure the model and provider](#configure-the-model-and-provider). |
+| `/channels` | Shows the agent's channel list and adds the one you pick. See [Add a channel](#add-a-channel).                                                                                  |
+| `/deploy`   | Ships the agent to Vercel production, linking the directory first when it is unlinked.                                                                                          |
+| `/loglevel` | Switches which logs the transcript shows. See [Control what logs show](#control-what-logs-show).                                                                                |
+| `/new`      | Starts a fresh session.                                                                                                                                                         |
+| `/exit`     | Quits the TUI.                                                                                                                                                                  |
+| `/help`     | Lists every command.                                                                                                                                                            |
 
 `/model`, `/channels`, and `/deploy` manage the project and are available only when `eve dev` runs the server locally, not when connected to a remote server with `--url`.
 
 ### Configure the model and provider
 
-Bare `/model` opens the configure menu. When no provider is configured, it opens the provider questions directly; Esc returns to the configure menu. "Change model" runs the same searchable model picker setup uses (the Vercel AI Gateway catalog, pre-selected on the model the runtime is serving). A model change is written into your agent's authored source, and the command reports success only after eve confirms the new id. `/model <provider/model-id>` applies one directly, skipping the menu.
+Bare `/model` opens the configure menu. When no provider is configured, it opens the provider picker directly and Esc returns to the configure menu. "Change model" runs the same searchable model picker setup uses (the Vercel AI Gateway catalog, pre-selected on the model the runtime is serving). A model change is written into your agent's authored source, and the command reports success only after eve confirms the new id. A completed model or provider change closes the menu and returns its result to the transcript; Done or Esc closes it without a change. `/model <provider/model-id>` applies one directly, skipping the menu.
 
-The provider row opens the provider questions: which model provider to use, and how to connect. Picking something other than Vercel AI Gateway shows wiring instructions for your own provider and stops there, leaving any existing setup untouched. For Vercel AI Gateway, you either paste your own `AI_GATEWAY_API_KEY` (saved straight to `.env.local`) or connect via a project. Connecting via a project asks for a Vercel team, opens that team's recent projects, and lets you search all projects for older matches. Vercel links the selected project, eve verifies its project ID, then pulls its environment into `.env.local`. The dev TUI reloads env files, re-reads the runtime's model endpoint, and clears the setup warning automatically; no restart is needed.
+The provider row opens one menu: AI Gateway via a project, AI Gateway via `AI_GATEWAY_API_KEY`, or **Other providers**. The key option becomes a masked input when highlighted. Enter validates it without replacing the menu. A rejected key shows a red `⨯ Invalid key` beside the masked value; retrying or editing clears that result. With a non-empty key, the first Esc or Ctrl-C clears the input and the second cancels the menu. An accepted key is saved to `.env.local`. The project option asks for a Vercel team, opens that team's recent projects, and lets you search all projects for older matches. Vercel links the selected project, eve verifies its project ID, then pulls its environment into `.env.local`. The **Other providers** option shows direct-provider wiring instructions and leaves the existing setup untouched. The dev server reloads env files and refreshes the status bar automatically, with no restart needed.
 
-The provider row demands attention (a bold yellow "Configure provider" with "Required to enable the agent") until a link or gateway credential is detected, then names the connection afterward (for example "AI Gateway (Linked to my-project in my-team)"). Each action's latest outcome stays visible beneath the menu (for example "✓ Model changed to openai/gpt-5.5"). When a turn fails because AI Gateway authentication is missing or stale, the error points you at `/model` directly.
+The provider row demands attention (a bold yellow "Configure model access" with a yellow "Not configured" hint that dims when unselected and uses the terminal foreground when selected) until a link or gateway credential is detected, then names the connection afterward (for example "AI Gateway (Linked to my-project in my-team)"). Setup menus mark the cursor row with a padded, filled-arrow inverse label that inherits the row's accent: blue normally and yellow for warning rows. In stacked menus, the selected row's description appears directly beneath that option. The completed command's outcome stays in the transcript after the panel closes. When a turn fails because AI Gateway authentication is missing or stale, the error points you at `/model` directly.
 
 ### Add a channel
 

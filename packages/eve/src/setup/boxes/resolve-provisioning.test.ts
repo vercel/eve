@@ -6,13 +6,7 @@ import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 
 import { headlessAsker, interactiveAsker } from "../ask.js";
 import type { ProjectResolution } from "../project-resolution.js";
-import type {
-  EditableSelectOptions,
-  EditableSelectResult,
-  Prompter,
-  PrompterValue,
-  SingleSelectOptions,
-} from "../prompter.js";
+import type { Prompter, PrompterValue, SingleSelectOptions } from "../prompter.js";
 import {
   createDefaultSetupState,
   type ConnectionPlan,
@@ -254,14 +248,20 @@ describe("resolveProvisioning box", () => {
 
   it("checks an inline-edited project name instead of the directory default", async () => {
     const deps = fakeDeps();
-    const prompter = createPrompter({ selectValues: ["vercel"] });
-    prompter.selectEditable = async <T extends PrompterValue>(
-      opts: EditableSelectOptions<T>,
-    ): Promise<EditableSelectResult<T>> => ({
-      kind: "edited",
-      value: opts.editable.value,
-      text: "custom-project",
-    });
+    const prompter = createFakePrompter({
+      single: () => "vercel",
+      editable: async (opts) => {
+        const text = "custom-project";
+        const outcome = await opts.editable.validate(text, new AbortController().signal);
+        if (outcome.kind === "rejected") throw new Error(outcome.message);
+        return {
+          kind: "submitted",
+          value: opts.editable.value,
+          text,
+          payload: outcome.payload,
+        };
+      },
+    }).prompter;
     const box = makeBox({
       prompter,
       targetDirectory: "/tmp/parent",

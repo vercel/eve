@@ -36,11 +36,11 @@ import {
   type FlowPanelContent,
   type FlowPanelIndicator,
   type FlowPanelLine,
-  type SetupPanelOption,
   type SetupSelectPanelState,
 } from "./setup-panel.js";
 import type {
   SetupEditableSelectResult,
+  SetupEditableSelectRequest,
   SetupFlowIndicator,
   SetupFlowRenderer,
   SetupSelectRequest,
@@ -73,6 +73,12 @@ import {
   renderBlockLines,
 } from "./blocks.js";
 import { formatDevRebuildStatus, summarizeChangedFiles } from "./dev-rebuild-status.js";
+import {
+  initialEditableSelectState,
+  transitionEditableSelect,
+  type EditableSelectContext,
+  type EditableSelectEvent,
+} from "./editable-select.js";
 import { buildAgentHeader } from "./agent-header.js";
 import {
   EMPTY_LINE,
@@ -387,7 +393,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     begin: (title, indicator) => this.#beginSetupFlow(title, indicator),
     end: (options) => this.#endSetupFlow(options?.preserveDiagnostics ?? true),
     readSelect: (options) => this.#readSetupSelect(options),
-    readEditableSelect: (options) => this.#readSetupEditableSelect(options),
+    readEditableSelect: <Payload>(options: SetupEditableSelectRequest<Payload>) =>
+      this.#readSetupEditableSelect(options),
     readText: (options) => this.#readSetupText(options),
     readAcknowledge: (options) => this.#readSetupAcknowledge(options),
     readChoice: (options) => this.#readSetupChoice(options),
@@ -1387,107 +1394,121 @@ export class TerminalRenderer implements AgentTUIRenderer {
     return { choice: question.promise, close: () => question.settle(undefined) };
   }
 
-  async #readSetupEditableSelect(opts: {
-    message: string;
-    options: readonly SetupPanelOption[];
-    initialValue?: string;
-    editable: {
-      value: string;
-      defaultValue: string;
-      formatHint: (value: string) => string;
-      validate?: (value: string) => string | undefined;
-    };
-  }): Promise<SetupEditableSelectResult | undefined> {
+  async #readSetupEditableSelect<Payload>(
+    opts: SetupEditableSelectRequest<Payload>,
+  ): Promise<SetupEditableSelectResult<Payload> | undefined> {
     const flow = this.#beginSetupQuestion();
+    const {
+      value: editableValue,
+      defaultValue,
+      cancelBehavior = "cancel",
+      validate,
+      ...editablePresentation
+    } = opts.editable;
 
-    const initial: Parameters<typeof initialSelectState>[0] = { options: opts.options };
-    if (opts.initialValue !== undefined) initial.defaultValue = opts.initialValue;
-    let select = initialSelectState(initial);
-    let editor = lineOf("");
-    let error: string | undefined;
+    const context: EditableSelectContext = {
+      options: opts.options,
+      editableValue,
+      defaultValue,
+      cancelBehavior,
+    };
+    let interaction = initialEditableSelectState(context, opts.initialValue);
+    let validation: AbortController | undefined;
 
     flow.question = (width) => {
       const state: SetupSelectPanelState = {
         kind: "editable",
+        layout: opts.layout,
         message: opts.message,
         options: opts.options,
-        select,
+        select: interaction.select,
         edit: {
-          optionValue: opts.editable.value,
-          editor,
-          defaultValue: opts.editable.defaultValue,
-          formatHint: opts.editable.formatHint,
+          ...editablePresentation,
+          optionValue: editableValue,
+          cancelBehavior,
+          phase: interaction.phase,
           caretVisible: this.#caretVisible,
         },
       };
-      if (error !== undefined) state.error = error;
+      if (opts.notices !== undefined) state.notices = opts.notices;
       return renderSelectQuestion(state, this.#theme, width);
     };
-    // Hovering the editable row makes it a live field: seed the editor with the
-    // default (caret blinking at the end) so typing and backspace edit it in
-    // place — no → to enter or ← to leave. Moving off the row clears the field
-    // and stops the blink; returning re-seeds the default.
-    const onEditableRow = () =>
-      selectValueAtCursor([...opts.options], select.cursor) === opts.editable.value;
-    const syncEditableRow = () => {
-      if (onEditableRow()) {
-        if (editor.text.length === 0) editor = lineOf(opts.editable.defaultValue);
+
+    const syncCaret = () => {
+      if (interaction.phase.kind === "editing" || interaction.phase.kind === "invalid") {
         this.#startCaretBlink();
       } else {
-        editor = lineOf("");
         this.#stopCaretBlink();
       }
     };
-    syncEditableRow();
+    syncCaret();
     this.#paint();
 
-    const question = this.#captureSetupQuestion<SetupEditableSelectResult | undefined>(
-      (key, settle) => {
-        const applyEditor = (next: LineState) => {
-          editor = next;
-          error = undefined;
-          this.#showCaret();
-          this.#paint();
-        };
-        const applySelect = (event: Parameters<typeof reduceSelect>[1]) => {
-          select = reduceSelect(select, event, { options: opts.options });
-          error = undefined;
-          syncEditableRow();
-          this.#paint();
-        };
-        const submit = () => {
-          const value = selectValueAtCursor([...opts.options], select.cursor);
-          if (value === undefined) return;
-          if (value !== opts.editable.value) {
-            settle({ kind: "selected", value });
-            return;
+    const question = this.#captureSetupQuestion<SetupEditableSelectResult<Payload> | undefined>(
+      (key, settle, reject) => {
+        const dispatch = (event: EditableSelectEvent<Payload>) => {
+          const transition = transitionEditableSelect(interaction, event, context);
+          switch (transition.kind) {
+            case "ignore":
+              return;
+            case "clear":
+              validation?.abort();
+              validation = undefined;
+              interaction = transition.state;
+              syncCaret();
+              this.#paint();
+              return;
+            case "cancel":
+              settle(undefined);
+              return;
+            case "render":
+              interaction = transition.state;
+              syncCaret();
+              this.#paint();
+              return;
+            case "validate": {
+              interaction = transition.state;
+              syncCaret();
+              this.#paint();
+              const controller = new AbortController();
+              validation = controller;
+              let result: ReturnType<typeof validate>;
+              try {
+                result = validate(transition.text, controller.signal);
+              } catch (error) {
+                reject(error);
+                return;
+              }
+              void Promise.resolve(result).then(
+                (outcome) => {
+                  if (validation !== controller || controller.signal.aborted) return;
+                  validation = undefined;
+                  dispatch({ type: "validated", outcome });
+                },
+                (error: unknown) => {
+                  if (validation !== controller || controller.signal.aborted) return;
+                  validation = undefined;
+                  reject(error);
+                },
+              );
+              return;
+            }
+            case "settle":
+              settle(transition.result);
+              return;
           }
-          // An untouched field resolves as a plain selection (the default name);
-          // any edit resolves as the renamed text.
-          const text = (editor.text || opts.editable.defaultValue).trim();
-          const invalid = opts.editable.validate?.(text);
-          if (invalid !== undefined) {
-            error = invalid;
-            this.#paint();
-            return;
-          }
-          settle(
-            text === opts.editable.defaultValue
-              ? { kind: "selected", value }
-              : { kind: "edited", value, text },
-          );
         };
 
         const intent = setupSelectionIntent(key);
         switch (intent?.kind) {
           case "cancel":
-            settle(undefined);
+            dispatch({ type: "cancel" });
             return;
           case "move":
-            applySelect({ type: intent.direction });
+            dispatch({ type: "move", direction: intent.direction });
             return;
           case "submit":
-            submit();
+            dispatch({ type: "submit" });
             return;
           case "repaint":
             this.#paint();
@@ -1496,13 +1517,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
             break;
         }
 
-        // Text keys edit the hovered row's name in place; on a non-editable row
-        // there is nothing to type into, so they are ignored.
-        if (!onEditableRow()) return;
-        const edited = applyLineEditorKey(editor, key);
-        if (edited !== undefined) applyEditor(edited);
+        if (interaction.phase.kind !== "editing" && interaction.phase.kind !== "invalid") return;
+        const edited = applyLineEditorKey(interaction.phase.editor, key);
+        if (edited !== undefined) {
+          this.#showCaret();
+          dispatch({ type: "edit", editor: edited });
+        }
       },
-      () => this.#stopCaretBlink(),
+      () => {
+        validation?.abort();
+        validation = undefined;
+        this.#stopCaretBlink();
+      },
     );
     return await question.promise;
   }
@@ -1652,13 +1678,19 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * only the repeated input attachment and panel teardown lifecycle.
    */
   #captureSetupQuestion<T>(
-    consume: (key: TerminalKey, settle: (value: T) => void) => void,
+    consume: (
+      key: TerminalKey,
+      settle: (value: T) => void,
+      reject: (error: unknown) => void,
+    ) => void,
     beforeClose?: () => void,
   ): { promise: Promise<T>; settle(value: T): void } {
     let settled = false;
     let resolve!: (value: T) => void;
-    const promise = new Promise<T>((resolvePromise) => {
+    let rejectPromise!: (error: unknown) => void;
+    const promise = new Promise<T>((resolvePromise, reject) => {
       resolve = resolvePromise;
+      rejectPromise = reject;
     });
     const settle = (value: T): void => {
       if (settled) return;
@@ -1667,7 +1699,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#closeSetupQuestion();
       resolve(value);
     };
-    this.#consumeKey = (key) => consume(key, settle);
+    const reject = (error: unknown): void => {
+      if (settled) return;
+      settled = true;
+      beforeClose?.();
+      this.#closeSetupQuestion();
+      rejectPromise(error);
+    };
+    this.#consumeKey = (key) => consume(key, settle, reject);
     this.#attachInput();
     return { promise, settle };
   }

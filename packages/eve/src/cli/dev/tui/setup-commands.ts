@@ -6,7 +6,11 @@ import {
   type InstallVercelCliResult,
 } from "#setup/flows/install-vercel-cli.js";
 import { runLoginFlow, type LoginFlowResult } from "#setup/flows/login.js";
-import { runModelFlow, type ModelProviderOutcome } from "#setup/flows/model.js";
+import {
+  formatApplyModelOutcome,
+  runModelFlow,
+  type ModelProviderOutcome,
+} from "#setup/flows/model.js";
 import { openUrl } from "#setup/primitives/open-url.js";
 import type { Prompter } from "#setup/prompter.js";
 import { slackMessageDeepLink } from "#setup/slack-connect.js";
@@ -177,27 +181,21 @@ async function executeSetupCommand(
           modelInput.initialStep = input.initialModelStep;
         }
         const result = await flows.runModelFlow(modelInput);
-        if (result.kind === "cancelled") {
-          return { message: "/model cancelled.", preserveFlowDiagnostics: false };
+        switch (result.kind) {
+          case "cancelled":
+            return { message: "/model cancelled.", preserveFlowDiagnostics: false };
+          case "model-result":
+            return {
+              message: formatApplyModelOutcome(result.outcome),
+              preserveFlowDiagnostics: false,
+            };
+          case "provider-changed":
+            return {
+              message: providerOutcomeMessage(result.outcome),
+              preserveFlowDiagnostics: false,
+              effect: { kind: "model-access-changed" },
+            };
         }
-        // One line per completed menu action: the apply line (it already
-        // distinguishes success from a rejected slug), then the provider
-        // outcome when that sub-flow also ran.
-        const lines: string[] = [];
-        if (result.modelMessage !== undefined) lines.push(result.modelMessage);
-        if (result.providerOutcome !== undefined) {
-          lines.push(providerOutcomeMessage(result.providerOutcome));
-        }
-        const outcome: TuiSetupCommandResult = {
-          message: lines.join("\n"),
-          preserveFlowDiagnostics: false,
-        };
-        // Provider setup can change both the local env and Vercel identity.
-        // The runner refreshes the complete model-access view after the flow.
-        if (result.providerOutcome !== undefined) {
-          outcome.effect = { kind: "model-access-changed" };
-        }
-        return outcome;
       }
       case "channels": {
         const result = await flows.runChannelsFlow({ appRoot, prompter, signal });

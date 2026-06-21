@@ -1,15 +1,20 @@
 import type { ChannelSetupChoice, ChannelSetupChoiceOptions } from "#setup/cli/index.js";
 import type { SearchActionOption } from "#setup/cli/select-state.js";
-import type { SelectNotice } from "#setup/prompter.js";
+import type { EditableSelectOptions, EditableSelectResult, SelectNotice } from "#setup/prompter.js";
 
 import type { SetupPanelOption } from "./setup-panel.js";
 
-export type SetupEditableSelectResult =
-  | { kind: "selected"; value: string }
-  | { kind: "edited"; value: string; text: string };
+export type SetupEditableSelectResult<Payload> = EditableSelectResult<string, Payload>;
 
 /** Animation shown while a setup flow is between questions. */
 export type SetupFlowIndicator = "spinner" | "pulse";
+
+export type SetupEditableSelectRequest<Payload> = Pick<
+  EditableSelectOptions<string, Payload>,
+  "message" | "options" | "initialValue" | "notices" | "editable"
+> & {
+  layout: "stacked" | "task-list";
+};
 
 interface SetupSelectRequestBase {
   message: string;
@@ -61,17 +66,9 @@ export interface SetupFlowRenderer {
   begin(title: string, indicator?: SetupFlowIndicator): void;
   end(options?: { preserveDiagnostics?: boolean }): void;
   readSelect(options: SetupSelectRequest): Promise<readonly string[] | undefined>;
-  readEditableSelect(options: {
-    message: string;
-    options: readonly SetupPanelOption[];
-    initialValue?: string;
-    editable: {
-      value: string;
-      defaultValue: string;
-      formatHint: (value: string) => string;
-      validate?: (value: string) => string | undefined;
-    };
-  }): Promise<SetupEditableSelectResult | undefined>;
+  readEditableSelect<Payload>(
+    options: SetupEditableSelectRequest<Payload>,
+  ): Promise<SetupEditableSelectResult<Payload> | undefined>;
   readText(options: {
     message: string;
     placeholder?: string;

@@ -54,8 +54,8 @@ function fakeFlows(overrides: Partial<TuiSetupFlows> = {}): TuiSetupFlows {
     })),
     runLoginFlow: vi.fn<TuiSetupFlows["runLoginFlow"]>(async () => ({ kind: "logged-in" })),
     runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
-      kind: "done",
-      modelMessage: "Model changed to openai/gpt-5.5. Live on your next prompt.",
+      kind: "model-result",
+      outcome: { kind: "changed", to: "openai/gpt-5.5" },
     })),
     runChannelsFlow: vi.fn<TuiSetupFlows["runChannelsFlow"]>(async () => ({
       kind: "done",
@@ -123,31 +123,11 @@ describe("runTuiSetupCommand", () => {
     );
   });
 
-  it("stacks the model and provider outcome lines when both menu actions ran", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
-        kind: "done",
-        modelMessage: "Model changed to openai/gpt-5.5. Live on your next prompt.",
-        providerOutcome: {
-          credential: "AI_GATEWAY_API_KEY",
-          status: { kind: "gateway-project", projectName: "my-agent" },
-        },
-      })),
-    });
-    await expect(run({ command: "model", flows })).resolves.toEqual({
-      message:
-        "Model changed to openai/gpt-5.5. Live on your next prompt.\n" +
-        "Project linked. Connected to AI Gateway via AI_GATEWAY_API_KEY.",
-      preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed" },
-    });
-  });
-
   it("reports a provider-only model session with the provider outcome", async () => {
     const flows = fakeFlows({
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
-        kind: "done",
-        providerOutcome: {
+        kind: "provider-changed",
+        outcome: {
           credential: "VERCEL_OIDC_TOKEN",
           status: { kind: "gateway-project", projectName: "my-agent", teamName: "my-team" },
         },
@@ -163,8 +143,8 @@ describe("runTuiSetupCommand", () => {
   it("does not claim a link for a pasted key — the outcome names the env file", async () => {
     const flows = fakeFlows({
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
-        kind: "done",
-        providerOutcome: {
+        kind: "provider-changed",
+        outcome: {
           credential: "AI_GATEWAY_API_KEY",
           status: { kind: "gateway-key", envKey: "AI_GATEWAY_API_KEY", envFile: ".env.local" },
         },
@@ -450,8 +430,8 @@ describe("runTuiSetupCommand", () => {
               "abort",
               () =>
                 resolve({
-                  kind: "done",
-                  providerOutcome: {
+                  kind: "provider-changed",
+                  outcome: {
                     credential: "AI_GATEWAY_API_KEY",
                     status: {
                       kind: "gateway-key",
