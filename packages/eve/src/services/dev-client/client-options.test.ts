@@ -32,7 +32,7 @@ describe("resolveDevelopmentClientOptions", () => {
     }
   });
 
-  it("binds an authorized credential gate to a client", () => {
+  it("binds an authorized credential gate to a non-redirecting client", () => {
     const credentials = createDevelopmentCredentialGate("https://verified.example.com");
 
     expect(
@@ -43,6 +43,7 @@ describe("resolveDevelopmentClientOptions", () => {
     ).toEqual({
       headers: credentials.resolveHeaders,
       host: "https://verified.example.com",
+      redirect: "manual",
     });
   });
 });

@@ -39,6 +39,7 @@ describe("resolveEvalClientOptions", () => {
       url: "https://example.vercel.app",
     });
     expect(options.auth).toEqual({ bearer: "static-token" });
+    expect(options.redirect).toBe("manual");
     expect(options.headers).toBeUndefined();
   });
 
@@ -93,6 +94,8 @@ describe("resolveEvalClientOptions", () => {
       ownerId: "team_test",
       projectId: "prj_example",
     });
+    expect(fetchMock.mock.calls[0]?.[1]?.redirect).toBe("manual");
+    expect(fetchMock.mock.calls[1]?.[1]?.redirect).toBe("manual");
   });
 
   it("does not resolve or emit ambient OIDC for an unverified remote origin", async () => {
