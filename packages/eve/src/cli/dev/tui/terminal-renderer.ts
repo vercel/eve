@@ -2382,10 +2382,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // so their panels stay status-free as before.
       if (flow.question !== undefined) {
         const rows = flow.question(width);
-        content = { kind: "question", rows };
-        if (flow.status !== undefined) {
-          content = { kind: "question", rows, status: { text: flow.status, frame } };
-        }
+        content = {
+          kind: "question",
+          rows,
+          // A question can park on a still-streaming subprocess (e.g. /login
+          // waiting on the browser while `vercel login` prints its device URL);
+          // keep that output beside the actions instead of dropping it.
+          ...(flow.status !== undefined ? { status: { text: flow.status, frame } } : {}),
+          ...(flow.outputBuffer.length > 0 ? { preview: flow.outputBuffer } : {}),
+        };
       } else if (flow.status !== undefined) {
         content = { kind: "status", status: { text: flow.status, frame } };
         if (flow.preview !== undefined) {
