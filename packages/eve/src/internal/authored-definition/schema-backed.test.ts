@@ -173,26 +173,6 @@ describe("normalizeToolDefinition", () => {
     expect(entry.kind).toBe("dynamic-tool");
     if (entry.kind !== "dynamic-tool") throw new Error("expected dynamic-tool");
     expect(entry.eventNames).toEqual(["session.started"]);
-    expect(entry.namespace).toBe(true);
-  });
-
-  it("carries namespace: false from the sentinel", () => {
-    const dynamicTools = defineDynamic({
-      namespace: false,
-      events: {
-        "session.started": async () => ({
-          echo: defineTool({
-            description: "Echo tool",
-            inputSchema: { type: "object" as const },
-            execute: (input: Record<string, unknown>) => input,
-          }),
-        }),
-      },
-    });
-
-    const entry = normalizeToolDefinition(dynamicTools, FAILURE_MESSAGE);
-    if (entry.kind !== "dynamic-tool") throw new Error("expected dynamic-tool");
-    expect(entry.namespace).toBe(false);
   });
 
   it("returns a dynamic-tool entry for a defineDynamic({ events }) export with a single entry", () => {

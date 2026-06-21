@@ -61,7 +61,6 @@ function convertOptionalOutputSchema(schema: unknown): FlexibleSchema | undefine
 function qualifyDynamicToolNames(
   slug: string,
   isSingle: boolean,
-  namespace: boolean,
   entries: Readonly<Record<string, DynamicToolEntry>>,
 ): Array<{ name: string; entryKey: string; entry: DynamicToolEntry }> {
   const keys = Object.keys(entries);
@@ -69,15 +68,15 @@ function qualifyDynamicToolNames(
 
   if (keys.length === 0) return result;
 
-  // A single returned defineTool is named after the slug regardless of
-  // `namespace`; only the map branch honors it.
+  // A single returned defineTool is named after the file slug; a map names each
+  // entry by its bare key (authors namespace keys themselves if needed).
   if (isSingle) {
     result.push({ name: slug, entryKey: keys[0]!, entry: entries[keys[0]!]! });
     return result;
   }
 
   for (const key of keys) {
-    result.push({ name: namespace ? `${slug}__${key}` : key, entryKey: key, entry: entries[key]! });
+    result.push({ name: key, entryKey: key, entry: entries[key]! });
   }
   return result;
 }
@@ -231,6 +230,10 @@ async function resolveToolsFromEvent(
 
   const metadata: DurableDynamicToolMetadata[] = [];
   const liveTools: HarnessToolDefinition[] = [];
+  // Tracks which resolver claimed each name so two dynamic resolvers can't
+  // silently shadow each other (a dynamic tool overriding an authored one is
+  // allowed and handled at merge time).
+  const dynamicToolOwners = new Map<string, string>();
 
   for (const outcome of outcomes) {
     if (outcome.status === "rejected") {
@@ -242,8 +245,16 @@ async function resolveToolsFromEvent(
     if (outcome.value === null) continue;
 
     const { resolver, entries, isSingle } = outcome.value;
-    const named = qualifyDynamicToolNames(resolver.slug, isSingle, resolver.namespace, entries);
+    const named = qualifyDynamicToolNames(resolver.slug, isSingle, entries);
     for (const { name, entryKey, entry } of named) {
+      const previousOwner = dynamicToolOwners.get(name);
+      if (previousOwner !== undefined && previousOwner !== resolver.slug) {
+        throw new Error(
+          `Dynamic tool "${name}" from resolver "${resolver.slug}" collides with dynamic resolver "${previousOwner}". Namespace the map key manually, e.g. "${resolver.slug}__${name}".`,
+        );
+      }
+      dynamicToolOwners.set(name, resolver.slug);
+
       liveTools.push(toHarnessToolDefinition(name, entry));
 
       const stepFn =

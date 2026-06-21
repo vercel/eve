@@ -32,7 +32,6 @@ const log = createLogger("dynamic-skills");
 function qualifyDynamicSkillNames(
   slug: string,
   isSingle: boolean,
-  namespace: boolean,
   entries: Readonly<Record<string, SkillPackageDefinition>>,
 ): Array<{ name: string; entryKey: string; entry: SkillPackageDefinition }> {
   const keys = Object.keys(entries);
@@ -40,15 +39,15 @@ function qualifyDynamicSkillNames(
 
   if (keys.length === 0) return result;
 
-  // A single returned defineSkill is named after the slug regardless of
-  // `namespace`. A single-entry map still qualifies; only isSingle collapses.
+  // A single returned defineSkill is named after the file slug; a map names
+  // each entry by its bare key (authors namespace keys themselves if needed).
   if (isSingle) {
     result.push({ name: slug, entryKey: keys[0]!, entry: entries[keys[0]!]! });
     return result;
   }
 
   for (const key of keys) {
-    result.push({ name: namespace ? `${slug}__${key}` : key, entryKey: key, entry: entries[key]! });
+    result.push({ name: key, entryKey: key, entry: entries[key]! });
   }
   return result;
 }
@@ -142,7 +141,7 @@ export async function dispatchDynamicSkillEvent(input: {
         isSingle = false;
       }
 
-      const named = qualifyDynamicSkillNames(resolver.slug, isSingle, resolver.namespace, entries);
+      const named = qualifyDynamicSkillNames(resolver.slug, isSingle, entries);
       return { resolver, named } satisfies DynamicSkillResolution;
     }),
   );
@@ -187,7 +186,7 @@ export async function dispatchDynamicSkillEvent(input: {
       const previousOwner = dynamicSkillOwners.get(name);
       if (previousOwner !== undefined) {
         throw new Error(
-          `Dynamic skill "${name}" from resolver "${resolverSlug}" conflicts with dynamic resolver "${previousOwner}".`,
+          `Dynamic skill "${name}" from resolver "${resolverSlug}" collides with dynamic resolver "${previousOwner}". Namespace the map key manually, e.g. "${resolverSlug}__${name}".`,
         );
       }
       dynamicSkillOwners.set(name, resolverSlug);

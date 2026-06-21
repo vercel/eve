@@ -568,7 +568,7 @@ describe("createToolLoopHarness", () => {
         description: "Get TfL line status.",
         execute: vi.fn().mockResolvedValue({ ok: true }),
         inputSchema: jsonSchema({ type: "object" }),
-        name: "connection__tfl__getLineStatus",
+        name: "tfl__getLineStatus",
         needsApproval,
       },
     ]);
@@ -581,13 +581,13 @@ describe("createToolLoopHarness", () => {
       | { tools: Record<string, { needsApproval?: (toolInput: unknown) => Promise<boolean> }> }
       | undefined;
     expect(agentCall).toBeDefined();
-    const dynamicTool = agentCall!.tools.connection__tfl__getLineStatus!;
+    const dynamicTool = agentCall!.tools.tfl__getLineStatus!;
 
     await expect(dynamicTool.needsApproval?.({ line: "victoria" })).resolves.toBe(true);
     expect(needsApproval).toHaveBeenCalledExactlyOnceWith({
       approvedTools: new Set(),
       toolInput: { line: "victoria" },
-      toolName: "connection__tfl__getLineStatus",
+      toolName: "tfl__getLineStatus",
     });
   });
 

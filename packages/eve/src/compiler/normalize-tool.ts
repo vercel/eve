@@ -65,7 +65,6 @@ export async function compileToolEntry(
         eventNames: [...entry.eventNames],
         exportName: source.exportName,
         logicalPath: source.logicalPath,
-        namespace: entry.namespace,
         slug: toolName,
         sourceId: source.sourceId,
         sourceKind: "module",

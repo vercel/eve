@@ -157,7 +157,6 @@ export const DYNAMIC_SENTINEL_KIND = "eve:dynamic" as const;
 export interface DynamicSentinel {
   readonly kind: typeof DYNAMIC_SENTINEL_KIND;
   readonly events: DynamicEvents;
-  readonly namespace?: boolean;
 }
 
 export function isDynamicSentinel(value: unknown): value is DynamicSentinel {

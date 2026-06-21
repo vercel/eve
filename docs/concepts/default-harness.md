@@ -43,7 +43,7 @@ Notes:
 
 - **`agent`** runs a copy of the current agent on a focused task. It inherits the same tools, connections, and instructions, but starts with fresh conversation history and fresh [state](../guides/state). The child shares the parent's sandbox filesystem, so anything it writes is visible to the parent. See [Subagents](../subagents).
 - **`load_skill`** only pulls instructions into context. It adds no new execution surface, because behavior still comes from the tools the agent already has.
-- **`connection_search`** is the model-facing `connection__search` tool. A search surfaces a connection's tools by their qualified name (e.g. `connection__linear__list_issues`), and the model can then call them directly. It's registered only when the agent has connections.
+- **`connection_search`** surfaces a connection's tools by their qualified name (e.g. `linear__list_issues`), which the model can then call directly. It's registered only when the agent has connections.
 - **`web_search`** has no local executor; the provider runs it. To supply your own implementation, override it with `defineTool()`.
 
 Review these built-in tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.

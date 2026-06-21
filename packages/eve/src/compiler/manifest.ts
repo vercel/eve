@@ -168,7 +168,6 @@ export type CompiledToolDefinition = InternalToolDefinition & ModuleSourceRef;
 export interface CompiledDynamicToolDefinition extends ModuleSourceRef {
   readonly slug: string;
   readonly eventNames: readonly string[];
-  readonly namespace: boolean;
 }
 
 /**
@@ -179,7 +178,6 @@ export interface CompiledDynamicToolDefinition extends ModuleSourceRef {
 export interface CompiledDynamicSkillDefinition extends ModuleSourceRef {
   readonly slug: string;
   readonly eventNames: readonly string[];
-  readonly namespace: boolean;
 }
 
 /**
@@ -509,7 +507,6 @@ const compiledDynamicToolDefinitionSchema: z.ZodType<CompiledDynamicToolDefiniti
     eventNames: z.array(z.string()).readonly(),
     exportName: z.string().optional(),
     logicalPath: z.string(),
-    namespace: z.boolean(),
     slug: z.string(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
@@ -521,7 +518,6 @@ const compiledDynamicSkillDefinitionSchema: z.ZodType<CompiledDynamicSkillDefini
     eventNames: z.array(z.string()).readonly(),
     exportName: z.string().optional(),
     logicalPath: z.string(),
-    namespace: z.boolean(),
     slug: z.string(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
