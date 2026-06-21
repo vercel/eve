@@ -21,7 +21,6 @@ describe("resolveVerifiedRemoteDevelopmentClientOptions", () => {
       },
     });
 
-    expect(options.redirect).toBe("manual");
     expect(typeof options.headers).toBe("function");
     if (typeof options.headers !== "function") throw new Error("Expected dynamic headers.");
     const headers = new Headers(await options.headers());

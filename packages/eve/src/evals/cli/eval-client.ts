@@ -31,7 +31,7 @@ export function resolveEvalClientOptions(
   };
   const explicitToken = process.env.EVE_EVAL_AUTH_TOKEN?.trim();
   if (explicitToken) {
-    return { ...options, auth: { bearer: explicitToken }, redirect: "manual" };
+    return { ...options, auth: { bearer: explicitToken } };
   }
 
   return options;

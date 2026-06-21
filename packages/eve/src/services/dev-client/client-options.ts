@@ -11,7 +11,7 @@ export function resolveDevelopmentClientOptions(serverUrl: string): ClientOption
   return { host: serverUrl };
 }
 
-/** Builds non-redirecting client options backed by one verified credential gate. */
+/** Builds client options backed by one verified credential gate. */
 export function resolveRemoteDevelopmentClientOptions(input: {
   readonly credentials: DevelopmentCredentialGate;
   readonly serverUrl: string;
@@ -25,6 +25,5 @@ export function resolveRemoteDevelopmentClientOptions(input: {
   return {
     headers: input.credentials.resolveHeaders,
     host: input.serverUrl,
-    redirect: "manual",
   };
 }
