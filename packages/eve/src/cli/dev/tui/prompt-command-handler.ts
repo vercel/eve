@@ -84,11 +84,14 @@ export function createPromptCommandHandler(
           appRoot,
           renderer: flow,
         };
+        if (context.initialModelStep !== undefined) {
+          commandInput.initialModelStep = context.initialModelStep;
+        }
         if (options.flows !== undefined) commandInput.flows = options.flows;
         const result = await runTuiSetupCommand(commandInput);
         preserveFlowDiagnostics = result.preserveFlowDiagnostics;
         const outcome: PromptCommandOutcome = { message: result.message };
-        if (result.vercelEffect !== undefined) outcome.vercelEffect = result.vercelEffect;
+        if (result.effect !== undefined) outcome.effect = result.effect;
         return outcome;
       } finally {
         flow.end({ preserveDiagnostics: preserveFlowDiagnostics });

@@ -81,8 +81,10 @@ export interface ThemeGlyphs {
   connection: string;
   /** `→` — separates a tool call from its summarized result. */
   arrow: string;
-  /** `▷` — selected-option marker in question lists. */
+  /** `▷` — cursor marker for an inert option. */
   pointer: string;
+  /** `▶` — cursor marker for an actionable option. */
+  selectedPointer: string;
   /** `◦` — available, unselected option marker. */
   option: string;
   /** `❯` — the input prompt mark. */
@@ -116,6 +118,7 @@ const UNICODE_GLYPHS: ThemeGlyphs = {
   connection: "●",
   arrow: "→",
   pointer: "▷",
+  selectedPointer: "▶",
   option: "◦",
   prompt: "❯",
   elbow: "⎿",
@@ -140,6 +143,7 @@ const ASCII_GLYPHS: ThemeGlyphs = {
   connection: "*",
   arrow: "->",
   pointer: ">",
+  selectedPointer: ">",
   option: ".",
   prompt: ">",
   elbow: "`-",

@@ -7,15 +7,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { theme } from "./lib/theme.ts";
 
 /**
- * End-to-end proof that the *packed* eve artifact can run `/model` after a
- * consumer-shaped install.
+ * End-to-end proof that the *packed* eve artifact can auto-open `/model` after
+ * a consumer-shaped install.
  *
  * Every other smoke test resolves eve's modules inside the workspace, where
  * devDependencies are installed — so a runtime import of an undeclared
  * dependency still resolves and the bug ships. This test packs the built
  * package (`pnpm pack`), installs the tarball into an empty project with npm
  * (which installs only declared dependencies, exactly like a user install),
- * and drives the installed TUI through the `/model` configure menu.
+ * and drives the installed TUI through automatic provider setup.
  *
  * Regression: eve 0.6.x–0.7.0 imported `oxc-parser` from the `/model` flow
  * while declaring it only as a devDependency. In a scaffolded project the
@@ -106,22 +106,33 @@ void (async () => {
       name: "Packed install model command",
       appRoot: consumerRoot,
       promptCommandHandler: createPromptCommandHandler({ appRoot: consumerRoot }),
+      bootDetections: [
+        {
+          id: "test-unconfigured-provider",
+          detect: () => [
+            {
+              kind: "model-provider-unconfigured",
+              label: "model provider not linked",
+              command: "/model",
+            },
+          ],
+        },
+      ],
     });
     const runPromise = runner.run();
 
     try {
-      await screen.waitForText("❯", 5_000);
-      input.type("/model");
-      input.enter();
-      // The configure menu paints only after the installed `/model` flow's
-      // module graph loaded — the exact surface the oxc-parser regression
-      // crashed. A "/model failed:" outcome line would keep this wait timing
-      // out until the snapshot below reports it.
+      // The provider picker paints before the first prompt only when boot
+      // detection launched the installed `/model` flow and its module graph
+      // loaded — the exact surface the oxc-parser regression crashed.
       await screen.waitForText("Configure the agent model", 15_000);
-      console.log(theme.muted("[tui-packed-install] /model opened the configure menu"));
+      await screen.waitForText("Which model provider do you want to use?", 15_000);
+      console.log(theme.muted("[tui-packed-install] /model auto-opened provider setup"));
 
       input.send("\x1b");
-      await waitForAnyScreenText(screen, ["/model cancelled.", "/model interrupted."], 5_000);
+      await screen.waitForText("Change model", 5_000);
+      input.send("\x1b");
+      await screen.waitForText("/model cancelled.", 5_000);
       await screen.waitForText("❯", 5_000);
 
       input.type("/exit");
@@ -177,26 +188,4 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, message: string):
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
-}
-
-async function waitForAnyScreenText(
-  screen: { snapshot(): string },
-  texts: readonly string[],
-  ms: number,
-): Promise<void> {
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < ms) {
-    const snapshot = screen.snapshot();
-    if (texts.some((text) => snapshot.includes(text))) {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-
-  throw new Error(
-    [`Timed out waiting for one of: ${texts.join(", ")}`, `Screen:\n${screen.snapshot()}`].join(
-      "\n\n",
-    ),
-  );
 }

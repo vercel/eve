@@ -302,7 +302,12 @@ async function runInitSteps(input: {
       );
       project = { kind: "created", packageManager, projectPath };
     } else {
-      const addition = await addToExistingProject(existingDirectory, options, dependencies, evePackage);
+      const addition = await addToExistingProject(
+        existingDirectory,
+        options,
+        dependencies,
+        evePackage,
+      );
       project =
         addition.nodeEngineOverride === undefined
           ? {
@@ -394,7 +399,6 @@ export async function runInitCommand(
   dependencies: InitCommandDependencies = defaultDependencies,
 ): Promise<void> {
   const result = await runInitSteps({ dependencies, logger, options, parentDirectory, target });
-  const freshScaffold = result.kind === "created";
 
   if (result.kind === "created") {
     logger.log(
@@ -429,10 +433,8 @@ export async function runInitCommand(
   // Strictly the eve binary, never the project's dev script, which in an
   // existing app may start unrelated processes. Exec-style runs do not echo
   // the command the way run-scripts do, so the handoff line is printed here.
-  const devArguments = freshScaffold
-    ? [...eveDevArguments(result.packageManager), "--input", "/model"]
-    : eveDevArguments(result.packageManager);
-  logger.log(pc.dim(freshScaffold ? "$ eve dev --input /model" : "$ eve dev"));
+  const devArguments = eveDevArguments(result.packageManager);
+  logger.log(pc.dim("$ eve dev"));
   if (
     !(await dependencies.spawnPackageManager(
       result.packageManager,

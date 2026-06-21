@@ -15,7 +15,12 @@
  */
 
 import type { ChannelSetupAction, PromptOption } from "#setup/cli/index.js";
-import { renderOptionRow, resolveOptionRowState } from "#setup/cli/option-row.js";
+import {
+  renderOptionRow,
+  renderOptionRowContinuation,
+  renderCursorRow,
+  resolveOptionRowState,
+} from "#setup/cli/option-row.js";
 import { filterOptions, submitRowIndex, type SelectState } from "#setup/cli/select-state.js";
 import type { SelectNotice } from "#setup/prompter.js";
 import { graphemes } from "#shared/text-boundaries.js";
@@ -239,6 +244,7 @@ function optionRow(input: {
     colors: theme.colors,
     glyphs: {
       pointer: theme.glyph.pointer,
+      selectedPointer: theme.glyph.selectedPointer,
       success: theme.glyph.success,
       placeholder: theme.glyph.option,
       dot: theme.glyph.dot,
@@ -437,7 +443,7 @@ function appendSelectOptionRows(input: {
     );
 
     if (stackedHint !== undefined) {
-      rows.push(`${" ".repeat(4)}${dimWithEmphasis(stackedHint, theme)}`);
+      rows.push(`  ${renderOptionRowContinuation(dimWithEmphasis(stackedHint, theme))}`);
     }
     // Disabled descriptions explain why an inert row cannot be selected, so
     // keep them visible even though the cursor skips that row.
@@ -451,9 +457,10 @@ function appendSelectOptionRows(input: {
 function appendSubmitRow(rows: string[], cursor: number, submitIndex: number, theme: Theme): void {
   if (submitIndex < 0) return;
   const onSubmit = cursor === submitIndex;
-  const pointer = onSubmit ? theme.colors.cyan(theme.glyph.pointer) : " ";
-  const label = onSubmit ? theme.colors.cyan(theme.colors.bold("Submit")) : "Submit";
-  rows.push("", `  ${pointer} ${label}`);
+  const content = onSubmit
+    ? `${theme.glyph.selectedPointer} ${theme.colors.bold("Submit")}`
+    : "  Submit";
+  rows.push("", `  ${renderCursorRow(content, onSubmit, theme.colors)}`);
 }
 
 function appendSelectNotices(
@@ -545,7 +552,6 @@ export function renderSelectQuestion(
   // An empty message (e.g. a panel-titled menu) contributes no header rows;
   // the panel's own spacing does the separating.
   const rows = selectMessageRows(state.message, presentation.layout, theme);
-
   if (presentation.filter !== undefined) {
     rows.push(`  ${searchFilter(state.select.filter, presentation.filter.placeholder, theme)}`);
   }

@@ -6,6 +6,7 @@ import { initialQuitGuardState, quitHintNote, reduceQuitGuard } from "./quit-gua
 const identity = (text: string) => text;
 
 const colors: PromptColors = {
+  blue: identity,
   bold: identity,
   cyan: identity,
   dim: identity,
