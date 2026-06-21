@@ -763,6 +763,53 @@ describe("loadAuthoredModuleNamespace", () => {
     });
   });
 
+  it("loads authored code imports with dotted basenames", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/helpers/Reflect.getPrototypeOf.js": [
+          '"use strict";',
+          "",
+          "module.exports = Object.getPrototypeOf;",
+          "",
+        ].join("\n"),
+        "agent/helpers/mock-registry.schemas.ts": [
+          'export const schemaName = "mock-registry";',
+          "",
+        ].join("\n"),
+        "agent/helpers/usesCommonjsDottedImport.js": [
+          '"use strict";',
+          "",
+          'const getPrototypeOf = require("./Reflect.getPrototypeOf");',
+          "",
+          "exports.getPrototypeName = function getPrototypeName(value) {",
+          "  return getPrototypeOf(value).constructor.name;",
+          "};",
+          "",
+        ].join("\n"),
+        "agent/tools/use_dotted_code_imports.ts": [
+          'import { schemaName } from "../helpers/mock-registry.schemas";',
+          'import { getPrototypeName } from "../helpers/usesCommonjsDottedImport.js";',
+          "",
+          "export const result = {",
+          "  prototypeName: getPrototypeName({}),",
+          "  schemaName,",
+          "};",
+          "",
+        ].join("\n"),
+      },
+      name: "dotted-code-imports",
+    });
+
+    const moduleNamespace = await loadAuthoredModuleNamespace(
+      join(app.appRoot, "agent", "tools", "use_dotted_code_imports.ts"),
+    );
+
+    expect(moduleNamespace.result).toEqual({
+      prototypeName: "Object",
+      schemaName: "mock-registry",
+    });
+  });
+
   it("recovers in the same process once a missing package is installed", async () => {
     // Regression: bundling used to emit unresolvable package imports as
     // bare externals, so the loader handed Node an import that could not
