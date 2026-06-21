@@ -658,8 +658,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           disabledProviderTools: opts.disabledProviderTools,
           tools: dynamicTools,
         });
+        // Dynamic tools override a same-named authored tool.
         for (const [name, toolDefinition] of Object.entries(dynamicToolSet)) {
-          flatTools[name] ??= toolDefinition;
+          flatTools[name] = toolDefinition;
         }
       }
 
