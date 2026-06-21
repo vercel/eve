@@ -56,12 +56,10 @@ export interface ClientOptions {
   readonly headers?: HeadersValue;
 
   /**
-   * Redirect policy enforced for every request made by this client, including
-   * session creation and event streams. When set, it takes precedence over a
-   * per-request `RequestInit.redirect` value passed to {@link Client.fetch}.
-   *
-   * Credential-bearing clients should use `"manual"` or `"error"` so custom
-   * authorization headers cannot be forwarded to a different origin.
+   * Redirect policy for every request, including streams. Overrides a
+   * per-request `RequestInit.redirect`. Credential-bearing clients should use
+   * `"manual"` or `"error"` so custom auth headers can't follow a cross-origin
+   * redirect.
    */
   readonly redirect?: ClientRedirectPolicy;
 

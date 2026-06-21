@@ -9,14 +9,9 @@ import {
 import type { EveEvalTargetHandle } from "#evals/types.js";
 
 /**
- * Resolves the {@link ClientOptions} for an eval target.
- *
- * Local targets need no auth. Remote targets remain anonymous unless the user
- * supplied `EVE_EVAL_AUTH_TOKEN`; ambient Vercel credentials require the
- * authoritative resolution performed by {@link createEvalClient}.
- *
- * `EVE_EVAL_AUTH_TOKEN` overrides the bearer with a static token for
- * targets whose auth is not OIDC-based.
+ * Synchronous {@link ClientOptions} for an eval target: local needs no auth,
+ * remote stays anonymous unless `EVE_EVAL_AUTH_TOKEN` sets a static bearer.
+ * Ambient Vercel credentials need the async {@link createEvalClient}.
  */
 export function resolveEvalClientOptions(
   target: Pick<EveEvalTargetHandle, "kind" | "url">,

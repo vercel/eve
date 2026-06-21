@@ -8,7 +8,7 @@ import {
 
 import { resolveVercelDeployment } from "./vercel-deployment.js";
 
-/** Injectable authority boundaries used while verifying one remote client target. */
+/** Dependencies for verifying one remote client (injectable for tests). */
 export interface VerifiedRemoteDevelopmentClientDeps {
   readonly resolveVercelDeployment: typeof resolveVercelDeployment;
   readonly resolveDevelopmentOidcToken: typeof resolveDevelopmentOidcToken;
@@ -17,11 +17,7 @@ export interface VerifiedRemoteDevelopmentClientDeps {
 /** A verified remote client's options plus a reader for its latest OIDC failure. */
 export interface VerifiedRemoteDevelopmentClient {
   readonly options: ClientOptions;
-  /**
-   * The OIDC token failure from the most recent request, or `undefined` while
-   * healthy. Read it when a request fails to explain why credentials were not
-   * attached.
-   */
+  /** OIDC failure from the most recent request, or `undefined` while healthy. */
   readonly lastOidcTokenFailure: () => DevelopmentOidcTokenFailure | undefined;
 }
 

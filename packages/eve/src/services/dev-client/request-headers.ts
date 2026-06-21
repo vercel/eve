@@ -38,13 +38,9 @@ export type DevelopmentOidcTokenResolution =
   | DevelopmentOidcTokenFailure;
 
 /**
- * Resolves the locally available Vercel OIDC token. This function does not
- * authorize a destination; callers must first verify the exact deployment
- * origin and install the result in a `DevelopmentCredentialGate`.
- *
- * Asks `@vercel/oidc` for a token scoped to the verified owner and project,
- * then distinguishes token-resolution, token-shape, claim-schema, and target
- * failures so the caller can report the cause without sending the token.
+ * Resolves and claim-checks the local Vercel OIDC token for a verified target.
+ * It does not authorize a destination; callers must verify the exact origin
+ * first and install the result in a `DevelopmentCredentialGate`.
  */
 export async function resolveDevelopmentOidcToken(
   input: DevelopmentOidcTarget,

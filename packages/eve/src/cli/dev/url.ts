@@ -10,10 +10,9 @@ function assertDevelopmentServerProtocol(url: URL, value: string): void {
 }
 
 /**
- * Rejects insecure remote targets. A remote Vercel deployment is always served
- * over https, and the verified-remote client only emits ambient credentials to
- * a matching https origin. An `http://` remote would fail that origin check.
- * Loopback hosts may keep using `http://` for local development servers.
+ * Reject http for remote hosts. The verified-remote client only sends
+ * credentials to an https origin, so an http remote would never authenticate.
+ * Loopback stays http for local dev.
  */
 function assertSecureRemoteProtocol(url: URL, value: string): void {
   if (url.protocol === "http:" && !isLocalEveServerUrl(url)) {

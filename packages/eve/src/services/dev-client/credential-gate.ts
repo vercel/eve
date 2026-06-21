@@ -18,14 +18,9 @@ export interface DevelopmentCredentialGate {
   readonly serverOrigin: string;
   /** Installs authority after Vercel verifies the exact origin. */
   authorize(grant: DevelopmentCredentialGrant): void;
-  /** Resolves headers for one request without exposing stored credential material. */
+  /** Resolves headers for one request. */
   resolveHeaders(): Promise<Readonly<Record<string, string>>>;
-  /**
-   * The token failure from the most recent {@link resolveHeaders} call, or
-   * `undefined` when that call resolved a token (or none has run yet). Lets a
-   * caller explain a later auth rejection without the gate pushing the failure
-   * back through its construction path.
-   */
+  /** Token failure from the most recent {@link resolveHeaders}, or `undefined` if it resolved one. */
   lastTokenFailure(): DevelopmentOidcTokenFailure | undefined;
 }
 
