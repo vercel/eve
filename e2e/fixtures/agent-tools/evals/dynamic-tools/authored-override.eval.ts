@@ -1,9 +1,9 @@
 import { defineEval } from "eve/evals";
 
-// A `namespace: false` dynamic resolver (override-provider.ts) emits a tool
-// named `override-target`, the same name as an authored tool. The dynamic tool
-// must win: calling `override-target` returns the dynamic result, never the
-// authored `source: "authored"`.
+// A dynamic resolver (override-provider.ts) emits a tool named `override-target`,
+// the same name as an authored tool. The dynamic tool must win: calling
+// `override-target` returns the dynamic result, never the authored
+// `source: "authored"`.
 const OVERRIDE_TOKEN = "dynamic-override-ok-K2P7";
 
 export default defineEval({
