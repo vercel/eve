@@ -57,10 +57,7 @@ describe("createDevelopmentCredentialGate", () => {
 
   it("permits an automation bypass only after origin verification", async () => {
     vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "verified-bypass");
-    const onTokenFailure = vi.fn();
-    const gate = createDevelopmentCredentialGate("https://verified.example.com", {
-      onTokenFailure,
-    });
+    const gate = createDevelopmentCredentialGate("https://verified.example.com");
     await expect(gate.resolveHeaders()).resolves.toEqual({});
     const failure = { kind: "invalid-claims", invalidClaims: ["project_id"] } as const;
 
@@ -72,7 +69,7 @@ describe("createDevelopmentCredentialGate", () => {
     await expect(gate.resolveHeaders()).resolves.toEqual({
       "x-vercel-protection-bypass": "verified-bypass",
     });
-    expect(onTokenFailure).toHaveBeenCalledWith(failure);
+    expect(gate.lastTokenFailure()).toEqual(failure);
   });
 
   it("resolves the current token for every request", async () => {
@@ -97,10 +94,7 @@ describe("createDevelopmentCredentialGate", () => {
 
   it("clears a reported failure after a later token refresh succeeds", async () => {
     const failure = { kind: "resolution-failed", message: "refresh failed" } as const;
-    const onTokenFailure = vi.fn();
-    const gate = createDevelopmentCredentialGate("https://verified.example.com", {
-      onTokenFailure,
-    });
+    const gate = createDevelopmentCredentialGate("https://verified.example.com");
     const resolveToken = vi
       .fn<() => Promise<DevelopmentOidcTokenResolution>>()
       .mockResolvedValueOnce(failure)
@@ -111,10 +105,10 @@ describe("createDevelopmentCredentialGate", () => {
     });
 
     await expect(gate.resolveHeaders()).resolves.toEqual({});
+    expect(gate.lastTokenFailure()).toEqual(failure);
     await expect(gate.resolveHeaders()).resolves.toMatchObject({
       authorization: "Bearer fresh-token",
     });
-    expect(onTokenFailure).toHaveBeenNthCalledWith(1, failure);
-    expect(onTokenFailure).toHaveBeenNthCalledWith(2, undefined);
+    expect(gate.lastTokenFailure()).toBeUndefined();
   });
 });

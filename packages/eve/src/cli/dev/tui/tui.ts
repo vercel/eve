@@ -1,7 +1,9 @@
 import { Client } from "#client/index.js";
 import { resolveDevelopmentClientOptions } from "#services/dev-client/client-options.js";
-import type { DevelopmentOidcTokenFailure } from "#services/dev-client/request-headers.js";
-import { resolveVerifiedRemoteDevelopmentClientOptions } from "#setup/verified-remote-client.js";
+import {
+  resolveVerifiedRemoteDevelopmentClient,
+  type VerifiedRemoteDevelopmentClient,
+} from "#setup/verified-remote-client.js";
 import {
   formatVercelAuthChallengeMessage,
   isVercelAuthChallenge,
@@ -31,16 +33,17 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
 
 async function resolveClientOptions(
   target: DevelopmentTuiTarget,
-  onOidcTokenFailure: (failure: DevelopmentOidcTokenFailure | undefined) => void,
-) {
+): Promise<VerifiedRemoteDevelopmentClient> {
   if (target.kind === "local") {
-    return resolveDevelopmentClientOptions(target.serverUrl);
+    return {
+      options: resolveDevelopmentClientOptions(target.serverUrl),
+      lastOidcTokenFailure: () => undefined,
+    };
   }
 
-  return await resolveVerifiedRemoteDevelopmentClientOptions({
+  return await resolveVerifiedRemoteDevelopmentClient({
     serverUrl: target.serverUrl,
     workspaceRoot: target.workspaceRoot,
-    onOidcTokenFailure,
   });
 }
 
@@ -57,12 +60,8 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
   const { target, initialInput, onBootProgress, ...display } = input;
   const { serverUrl } = target;
 
-  let oidcTokenFailure: DevelopmentOidcTokenFailure | undefined;
-  const client = new Client(
-    await resolveClientOptions(target, (failure) => {
-      oidcTokenFailure = failure;
-    }),
-  );
+  const { options: clientOptions, lastOidcTokenFailure } = await resolveClientOptions(target);
+  const client = new Client(clientOptions);
 
   const options: EveTUIRunnerOptions = {
     ...display,
@@ -74,7 +73,7 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     ),
     formatTransportError: (error) =>
       isVercelAuthChallenge(error)
-        ? formatVercelAuthChallengeMessage({ serverUrl, oidcTokenFailure })
+        ? formatVercelAuthChallengeMessage({ serverUrl, oidcTokenFailure: lastOidcTokenFailure() })
         : toErrorMessage(error),
   };
   if (target.kind === "local") options.appRoot = target.workspaceRoot;

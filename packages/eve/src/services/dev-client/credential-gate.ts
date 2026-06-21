@@ -20,6 +20,13 @@ export interface DevelopmentCredentialGate {
   authorize(grant: DevelopmentCredentialGrant): void;
   /** Resolves headers for one request without exposing stored credential material. */
   resolveHeaders(): Promise<Readonly<Record<string, string>>>;
+  /**
+   * The token failure from the most recent {@link resolveHeaders} call, or
+   * `undefined` when that call resolved a token (or none has run yet). Lets a
+   * caller explain a later auth rejection without the gate pushing the failure
+   * back through its construction path.
+   */
+  lastTokenFailure(): DevelopmentOidcTokenFailure | undefined;
 }
 
 type DevelopmentCredentialGateState =
@@ -30,15 +37,10 @@ type DevelopmentCredentialGateState =
     };
 
 /** Creates an anonymous credential gate bound to one client origin. */
-export function createDevelopmentCredentialGate(
-  serverUrl: string,
-  options: {
-    /** Reports failed token checks without exposing credential material. */
-    readonly onTokenFailure?: (failure: DevelopmentOidcTokenFailure | undefined) => void;
-  } = {},
-): DevelopmentCredentialGate {
+export function createDevelopmentCredentialGate(serverUrl: string): DevelopmentCredentialGate {
   const serverOrigin = new URL(serverUrl).origin;
   let state: DevelopmentCredentialGateState = { kind: "anonymous" };
+  let tokenFailure: DevelopmentOidcTokenFailure | undefined;
 
   const authorize = (grant: DevelopmentCredentialGrant): void => {
     if (grant.target.origin !== serverOrigin) {
@@ -59,13 +61,11 @@ export function createDevelopmentCredentialGate(
     const headers: Record<string, string> = {};
     const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
     if (bypassSecret) headers[VERCEL_PROTECTION_BYPASS_HEADER] = bypassSecret;
-    const resolution = await authorized.resolveToken();
-    if (resolution.kind !== "resolved") {
-      options.onTokenFailure?.(resolution);
-      return headers;
-    }
 
-    options.onTokenFailure?.(undefined);
+    const resolution = await authorized.resolveToken();
+    tokenFailure = resolution.kind === "resolved" ? undefined : resolution;
+    if (resolution.kind !== "resolved") return headers;
+
     const token = resolution.token.trim();
     if (token.length > 0) {
       headers.authorization = `Bearer ${token}`;
@@ -74,5 +74,5 @@ export function createDevelopmentCredentialGate(
     return headers;
   };
 
-  return { authorize, resolveHeaders, serverOrigin };
+  return { authorize, resolveHeaders, serverOrigin, lastTokenFailure: () => tokenFailure };
 }

@@ -14,26 +14,33 @@ export interface VerifiedRemoteDevelopmentClientDeps {
   readonly resolveDevelopmentOidcToken: typeof resolveDevelopmentOidcToken;
 }
 
+/** A verified remote client's options plus a reader for its latest OIDC failure. */
+export interface VerifiedRemoteDevelopmentClient {
+  readonly options: ClientOptions;
+  /**
+   * The OIDC token failure from the most recent request, or `undefined` while
+   * healthy. Read it when a request fails to explain why credentials were not
+   * attached.
+   */
+  readonly lastOidcTokenFailure: () => DevelopmentOidcTokenFailure | undefined;
+}
+
 const defaultDeps: VerifiedRemoteDevelopmentClientDeps = {
   resolveVercelDeployment,
   resolveDevelopmentOidcToken,
 };
 
 /**
- * Resolves client options that emit ambient Vercel credentials only after
- * exact origin proof.
+ * Resolves a remote client that emits ambient Vercel credentials only after
+ * exact origin proof, plus a reader for the latest OIDC token failure.
  */
-export async function resolveVerifiedRemoteDevelopmentClientOptions(input: {
+export async function resolveVerifiedRemoteDevelopmentClient(input: {
   readonly serverUrl: string;
   readonly workspaceRoot: string;
-  /** Receives local OIDC failures without changing anonymous or bypass fallback. */
-  readonly onOidcTokenFailure?: (failure: DevelopmentOidcTokenFailure | undefined) => void;
   readonly deps?: Partial<VerifiedRemoteDevelopmentClientDeps>;
-}): Promise<ClientOptions> {
+}): Promise<VerifiedRemoteDevelopmentClient> {
   const deps = { ...defaultDeps, ...input.deps };
-  const credentials = createDevelopmentCredentialGate(input.serverUrl, {
-    onTokenFailure: input.onOidcTokenFailure,
-  });
+  const credentials = createDevelopmentCredentialGate(input.serverUrl);
   const resolution = await deps.resolveVercelDeployment({
     workspaceRoot: input.workspaceRoot,
     host: new URL(input.serverUrl).host,
@@ -47,8 +54,8 @@ export async function resolveVerifiedRemoteDevelopmentClientOptions(input: {
     });
   }
 
-  return resolveRemoteDevelopmentClientOptions({
-    serverUrl: input.serverUrl,
-    credentials,
-  });
+  return {
+    options: resolveRemoteDevelopmentClientOptions({ serverUrl: input.serverUrl, credentials }),
+    lastOidcTokenFailure: credentials.lastTokenFailure,
+  };
 }

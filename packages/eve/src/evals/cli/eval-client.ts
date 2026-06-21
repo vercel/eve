@@ -2,7 +2,7 @@ import { Client } from "#client/client.js";
 import type { ClientOptions } from "#client/types.js";
 import { resolveDevelopmentClientOptions } from "#services/dev-client/client-options.js";
 import {
-  resolveVerifiedRemoteDevelopmentClientOptions,
+  resolveVerifiedRemoteDevelopmentClient,
   type VerifiedRemoteDevelopmentClientDeps,
 } from "#setup/verified-remote-client.js";
 
@@ -54,7 +54,7 @@ export async function createEvalClient(
     return new Client(base);
   }
 
-  const verified = await resolveVerifiedRemoteDevelopmentClientOptions({
+  const { options: verified } = await resolveVerifiedRemoteDevelopmentClient({
     serverUrl: target.url,
     workspaceRoot: options.workspaceRoot,
     deps: options.deps,
