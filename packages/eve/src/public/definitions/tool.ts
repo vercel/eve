@@ -264,6 +264,12 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
  *   },
  * });
  * ```
+ *
+ * A single return is named after the file slug. A map names each entry by its
+ * bare key — there is no automatic slug prefix, so namespace keys yourself
+ * (e.g. `team__playbook`) when a bare name might collide. A dynamic tool/skill
+ * whose name matches an authored one overrides it; two dynamic resolvers
+ * emitting the same name is an error.
  */
 export function defineDynamic(definition: { readonly events: DynamicEvents }): DynamicSentinel {
   const sentinel: DynamicSentinel = {

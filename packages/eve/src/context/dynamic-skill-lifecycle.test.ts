@@ -13,7 +13,7 @@ import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-contex
 import type { ResolvedDynamicSkillResolver } from "#runtime/types.js";
 import type { SkillPackageDefinition } from "#shared/skill-definition.js";
 
-function createMockBundle(): CompiledBundle {
+function createMockBundle(authoredSkillNames: readonly string[] = []): CompiledBundle {
   return {
     adapterRegistry: undefined as never,
     compiledArtifactsSource: undefined as never,
@@ -23,7 +23,7 @@ function createMockBundle(): CompiledBundle {
     nodeId: undefined,
     resolvedAgent: {
       config: { name: "test-agent" },
-      skills: [],
+      skills: authoredSkillNames.map((name) => ({ name })),
     } as never,
     subagentRegistry: undefined as never,
     toolRegistry: undefined as never,
@@ -31,12 +31,12 @@ function createMockBundle(): CompiledBundle {
   };
 }
 
-function createCtx() {
+function createCtx(authoredSkillNames: readonly string[] = []) {
   const ctx = new ContextContainer();
   const sandbox = mockSandbox();
   ctx.set(SessionIdKey, "test-session");
   ctx.set(SandboxKey, sandbox.access);
-  ctx.set(BundleKey, createMockBundle());
+  ctx.set(BundleKey, createMockBundle(authoredSkillNames));
   return { ctx, sandbox };
 }
 
@@ -132,7 +132,7 @@ describe("dispatchDynamicSkillEvent", () => {
     expect(announcement).toContain("support: Support policy");
   });
 
-  it("qualifies a single-entry map as slug__key (never collapses to the bare slug)", async () => {
+  it("names map entries by their bare key", async () => {
     const { ctx, sandbox } = createCtx();
     const resolver = createResolver("custom", () => ({
       "talk-like-a-dog": makeSkill("Talk like a dog", "Woof."),
@@ -146,12 +146,30 @@ describe("dispatchDynamicSkillEvent", () => {
     });
 
     expect(ctx.get(DynamicSkillManifestKey)).toEqual({
-      custom: [{ description: "Talk like a dog", name: "custom__talk-like-a-dog" }],
+      custom: [{ description: "Talk like a dog", name: "talk-like-a-dog" }],
     });
-    expect(ctx.get(PendingSkillAnnouncementKey)).toContain(
-      "custom__talk-like-a-dog: Talk like a dog",
-    );
-    expect(sandbox.writes.some((w) => w.path.includes("/skills/custom__talk-like-a-dog/"))).toBe(
+    expect(ctx.get(PendingSkillAnnouncementKey)).toContain("talk-like-a-dog: Talk like a dog");
+    expect(sandbox.writes.some((w) => w.path.includes("/skills/talk-like-a-dog/"))).toBe(true);
+  });
+
+  it("lets a dynamic skill override a same-named authored skill instead of throwing", async () => {
+    const { ctx, sandbox } = createCtx(["talk-like-a-dog"]);
+    const resolver = createResolver("custom", () => ({
+      "talk-like-a-dog": makeSkill("Dynamic override", "Woof."),
+    }));
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    // No throw; the dynamic skill is written to the authored skill's path.
+    expect(ctx.get(DynamicSkillManifestKey)).toEqual({
+      custom: [{ description: "Dynamic override", name: "talk-like-a-dog" }],
+    });
+    expect(sandbox.writes.some((w) => w.path.includes("/skills/talk-like-a-dog/SKILL.md"))).toBe(
       true,
     );
   });
@@ -173,22 +191,19 @@ describe("dispatchDynamicSkillEvent", () => {
     expect(sandbox.writes.some((w) => w.path.includes("/skills/tenant/"))).toBe(true);
   });
 
-  it("rejects duplicate names produced by dynamic skill resolvers before writing", async () => {
+  it("throws and recommends manual namespacing when two resolvers emit the same name", async () => {
     const { ctx, sandbox } = createCtx();
-    const single = createResolver("foo__bar", () => makeSkill("Single"));
-    const mapped = createResolver("foo", () => ({
-      bar: makeSkill("Mapped"),
-      baz: makeSkill("Other mapped"),
-    }));
+    const alpha = createResolver("alpha", () => ({ shared: makeSkill("From alpha") }));
+    const beta = createResolver("beta", () => ({ shared: makeSkill("From beta") }));
 
     await expect(
       dispatchDynamicSkillEvent({
         ctx,
         event: makeEvent(),
         messages: [],
-        resolvers: [single, mapped],
+        resolvers: [alpha, beta],
       }),
-    ).rejects.toThrow('Dynamic skill "foo__bar"');
+    ).rejects.toThrow(/Dynamic skill "shared".*Namespace the map key manually/u);
 
     expect(sandbox.writes).toEqual([]);
     expect(ctx.get(DynamicSkillManifestKey)).toBeUndefined();

@@ -274,7 +274,7 @@ async function executeConnectionSearch(
             description: tool.description,
             inputSchema: tool.inputSchema,
             outputSchema: tool.outputSchema,
-            qualifiedName: `connection__${qualifiedConnectionToolName(conn.connectionName, tool.name)}`,
+            qualifiedName: qualifiedConnectionToolName(conn.connectionName, tool.name),
             tool: tool.name,
           },
           score,
@@ -331,7 +331,7 @@ export function extractDiscoveredTools(
       output?: unknown;
     }>;
     for (const part of parts) {
-      if (part.type !== "tool-result" || part.toolName !== "connection__search") continue;
+      if (part.type !== "tool-result" || part.toolName !== "connection_search") continue;
       const output = part.output;
       if (output === undefined || output === null) continue;
       const items = (
@@ -381,11 +381,11 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const tools: Record<string, DynamicToolEntry<any, any>> = {};
 
-      tools["search"] = {
+      tools["connection_search"] = {
         description:
           "Search for tools across your connections. " +
           "Discovered tools become directly callable by their qualified name " +
-          "(e.g. `connection__linear__list_issues`) in your next response. " +
+          "(e.g. `linear__list_issues`) in your next response. " +
           `Available connections: ${connectionNames.join(", ")}.`,
         inputSchema: {
           type: "object" as const,

@@ -15,12 +15,12 @@ describe("extractDiscoveredTools", () => {
           {
             type: "tool-result",
             toolCallId: "call-1",
-            toolName: "connection__search",
+            toolName: "connection_search",
             output: [
               {
                 connection: "linear",
                 tool: "list_issues",
-                qualifiedName: "connection__linear__list_issues",
+                qualifiedName: "linear__list_issues",
                 description: "List issues",
                 inputSchema: { type: "object" },
                 outputSchema: { type: "object" },
@@ -33,7 +33,7 @@ describe("extractDiscoveredTools", () => {
 
     const result = extractDiscoveredTools(messages);
     expect(result).toHaveLength(1);
-    expect(result[0]!.qualifiedName).toBe("connection__linear__list_issues");
+    expect(result[0]!.qualifiedName).toBe("linear__list_issues");
     expect(result[0]!.connection).toBe("linear");
     expect(result[0]!.tool).toBe("list_issues");
     expect(result[0]!.outputSchema).toEqual({ type: "object" });
@@ -47,14 +47,14 @@ describe("extractDiscoveredTools", () => {
           {
             type: "tool-result",
             toolCallId: "call-1",
-            toolName: "connection__search",
+            toolName: "connection_search",
             output: {
               type: "json",
               value: [
                 {
                   connection: "linear",
                   tool: "list_issues",
-                  qualifiedName: "connection__linear__list_issues",
+                  qualifiedName: "linear__list_issues",
                   description: "List issues",
                   inputSchema: { type: "object" },
                 },
@@ -67,7 +67,7 @@ describe("extractDiscoveredTools", () => {
 
     const result = extractDiscoveredTools(messages);
     expect(result).toHaveLength(1);
-    expect(result[0]!.qualifiedName).toBe("connection__linear__list_issues");
+    expect(result[0]!.qualifiedName).toBe("linear__list_issues");
   });
 
   it("returns empty for no tool results", () => {
@@ -83,12 +83,12 @@ describe("extractDiscoveredTools", () => {
           {
             type: "tool-result",
             toolCallId: "call-1",
-            toolName: "connection__search",
+            toolName: "connection_search",
             output: [
               {
                 connection: "linear",
                 tool: "list_issues",
-                qualifiedName: "connection__linear__list_issues",
+                qualifiedName: "linear__list_issues",
                 description: "Old description",
               },
             ],
@@ -101,12 +101,12 @@ describe("extractDiscoveredTools", () => {
           {
             type: "tool-result",
             toolCallId: "call-2",
-            toolName: "connection__search",
+            toolName: "connection_search",
             output: [
               {
                 connection: "linear",
                 tool: "list_issues",
-                qualifiedName: "connection__linear__list_issues",
+                qualifiedName: "linear__list_issues",
                 description: "New description",
               },
             ],
@@ -128,7 +128,7 @@ describe("extractDiscoveredTools", () => {
           {
             type: "tool-result",
             toolCallId: "call-1",
-            toolName: "connection__search",
+            toolName: "connection_search",
             output: [
               {
                 connection: "linear",
@@ -137,7 +137,7 @@ describe("extractDiscoveredTools", () => {
               {
                 connection: "linear",
                 tool: "list_issues",
-                qualifiedName: "connection__linear__list_issues",
+                qualifiedName: "linear__list_issues",
                 description: "Valid",
               },
             ],

@@ -5,7 +5,7 @@ description: "Expose external MCP and OpenAPI servers to the model, with connect
 
 A connection wires an agent into an external server you don't author, either an MCP server (Linear, GitHub, a warehouse) or any HTTP API with an OpenAPI document. eve handles the parts you'd otherwise hand-roll, discovering the remote tools, surfacing them to the model, and brokering auth.
 
-Connections live under `agent/connections/`. The runtime name comes from the filename, so `agent/connections/linear.ts` registers as `"linear"`. The model never sees a connection's URL or credentials. It discovers tools through the built-in `connection__search` and calls them by their qualified name, `connection__<connection>__<tool>` (e.g. `connection__linear__list_issues`).
+Connections live under `agent/connections/`. The runtime name comes from the filename, so `agent/connections/linear.ts` registers as `"linear"`. The model never sees a connection's URL or credentials. It discovers tools through the built-in `connection_search` and calls them by their qualified name, `<connection>__<tool>` (e.g. `linear__list_issues`).
 
 ## MCP connections
 
@@ -23,7 +23,7 @@ export default defineMcpClientConnection({
 });
 ```
 
-The `url` must speak Streamable HTTP or SSE. Write the `description` for the model, not for yourself. It shows up in `connection__search`, and the model uses it to decide which connection to query.
+The `url` must speak Streamable HTTP or SSE. Write the `description` for the model, not for yourself. It shows up in `connection_search`, and the model uses it to decide which connection to query.
 
 ### Static-token auth
 
@@ -60,7 +60,7 @@ export default defineMcpClientConnection({
 
 ### Tool filters
 
-To narrow which remote tools the model sees, set exactly one of `tools.allow` or `tools.block`. Filtered-out tools do not appear in `connection__search`:
+To narrow which remote tools the model sees, set exactly one of `tools.allow` or `tools.block`. Filtered-out tools do not appear in `connection_search`:
 
 ```ts
 export default defineMcpClientConnection({
@@ -104,7 +104,7 @@ export default defineOpenAPIConnection({
 });
 ```
 
-Each operation becomes `connection__<connection>__<operationId>` (e.g. `connection__petstore__getInventory`). When an operation has no `operationId`, eve derives a deterministic `<method>_<sanitized-path>` name instead.
+Each operation becomes `<connection>__<operationId>` (e.g. `petstore__getInventory`). When an operation has no `operationId`, eve derives a deterministic `<method>_<sanitized-path>` name instead.
 
 `auth`, `headers`, and `approval` work exactly as they do for MCP. There are two fields specific to OpenAPI:
 
