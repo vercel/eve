@@ -1,5 +1,11 @@
 # eve
 
+## 0.12.2
+
+### Patch Changes
+
+- 8f7d97b: Keep Vercel Sandbox option types synchronized with the installed SDK by vendoring its upstream declaration files instead of maintaining a hand-written copy. Vercel-backed file reads now convert provider Node streams to Eve's public Web stream contract.
+
 ## 0.12.1
 
 ### Patch Changes
