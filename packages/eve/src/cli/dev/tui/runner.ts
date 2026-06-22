@@ -20,6 +20,7 @@ import {
   ClientSession,
   isCurrentTurnBoundaryEvent,
 } from "#client/index.js";
+import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { subscribeDevelopmentSandboxPrewarmLogs } from "#execution/sandbox/development-prewarm.js";
 import {
   createDevelopmentRuntimeArtifactSessionRefresher,
@@ -49,6 +50,7 @@ import {
 import {
   BOOT_DETECTIONS,
   CLI_MISSING_SETUP_ISSUE,
+  automaticSetupCommand,
   detectSetupIssues,
   formatSetupIssuesLine,
   LOGIN_SETUP_ISSUE,
@@ -278,14 +280,16 @@ export type AgentTUIRenderer = {
 export interface PromptCommandHandlerContext {
   readonly renderer: AgentTUIRenderer;
   readonly title: string;
+  /** Provider entry authorized by confirmed boot-time model-access evidence. */
+  readonly initialModelStep?: "provider";
 }
 
 /** What one handled slash command leaves behind for the runner to apply. */
 export interface PromptCommandOutcome {
   /** Outcome line rendered under the echoed command; absent renders nothing. */
   message?: string;
-  /** Vercel status-line effect the runner applies to its tracker. */
-  vercelEffect?: VercelStatusEffect;
+  /** Post-command work; model access also re-probes the Vercel identity. */
+  effect?: VercelStatusEffect | { kind: "model-access-changed" };
 }
 
 export interface PromptCommandHandler {
@@ -503,7 +507,15 @@ export class EveTUIRunner {
     } catch {
       info = undefined;
     }
+    this.#reportBeforeFirstPaint();
+    this.#replaceAgentInfo(info);
+    await this.#renderSetupIssues(info);
+  }
+
+  #replaceAgentInfo(info: AgentInfoResult | undefined): void {
     this.#agentInfo = info;
+    const serverUrl = this.#serverUrl;
+    if (serverUrl === undefined) return;
 
     const header: AgentTUIAgentHeader = {
       name: this.#name,
@@ -511,9 +523,7 @@ export class EveTUIRunner {
     };
     if (info !== undefined) header.info = info;
     if (this.#appRoot !== undefined) header.tip = this.#headerTip;
-    this.#reportBeforeFirstPaint();
     this.#renderer.renderAgentHeader?.(header);
-    await this.#renderSetupIssues(info);
   }
 
   #reportBeforeFirstPaint(): void {
@@ -541,6 +551,7 @@ export class EveTUIRunner {
   async #run() {
     const title = this.#name;
     let prompt: string | undefined;
+    let automaticSetup: ReturnType<typeof automaticSetupCommand> = undefined;
     let pendingInputResponses: readonly InputResponse[] | undefined;
     let hasRunTurn = false;
     let streamWithoutPrompt = false;
@@ -553,6 +564,11 @@ export class EveTUIRunner {
     // Fire-and-forget: the link identity is network-bound to resolve, and the
     // first prompt must not wait on it. The segment appears when it lands.
     this.#vercelStatus?.refreshIdentity();
+
+    if (this.#promptCommandHandler !== undefined && this.#renderer.setupFlow !== undefined) {
+      automaticSetup = automaticSetupCommand(this.#bootIssues);
+      prompt = automaticSetup?.prompt;
+    }
 
     while (true) {
       if (!streamWithoutPrompt) {
@@ -625,21 +641,27 @@ export class EveTUIRunner {
 
         if (command?.type === "extension") {
           try {
+            const initialModelStep =
+              command.name === "model" ? automaticSetup?.initialModelStep : undefined;
+            const context: PromptCommandHandlerContext =
+              initialModelStep === undefined
+                ? { renderer: this.#renderer, title }
+                : { renderer: this.#renderer, title, initialModelStep };
+            automaticSetup = undefined;
             const outcome =
               this.#promptCommandHandler === undefined
                 ? { message: `/${command.name} is not available in this session.` }
-                : await this.#promptCommandHandler.handle(command, {
-                    renderer: this.#renderer,
-                    title,
-                  });
+                : await this.#promptCommandHandler.handle(command, context);
             if (outcome?.message !== undefined) this.#renderCommandOutcome(outcome.message);
-            if (outcome?.vercelEffect !== undefined) {
-              this.#vercelStatus?.applyEffect(outcome.vercelEffect);
-              // A command changed Vercel state (e.g. /login). Stop a still-pending
-              // boot probe from painting a now-stale hint, and re-evaluate the
-              // attention line so a fixed issue clears instead of lingering.
+            const effect = outcome?.effect;
+            if (effect?.kind === "model-access-changed") {
+              this.#vercelStatus?.applyEffect({ kind: "refresh-identity" });
               this.#authHintStale = true;
-              void this.#refreshSetupAttention();
+              await this.#refreshModelAccess();
+            } else if (effect !== undefined) {
+              this.#vercelStatus?.applyEffect(effect);
+              this.#authHintStale = true;
+              void this.#refreshSetupAttention(this.#agentInfo);
             }
           } catch (error) {
             if (isInterruptedError(error)) return;
@@ -913,13 +935,13 @@ export class EveTUIRunner {
 
   async #renderSetupIssues(info: AgentInfoResult | undefined): Promise<void> {
     if (this.#appRoot === undefined) return;
-    if (this.#renderer.renderSetupWarning === undefined) return;
     const context: BootDetectionContext = {
       appRoot: this.#appRoot,
       env: process.env,
     };
     if (info !== undefined) context.info = info;
     this.#bootIssues = await detectSetupIssues(context, this.#bootDetections);
+    if (this.#renderer.renderSetupWarning === undefined) return;
     this.#paintSetupAttention();
     // Login state is a `vercel whoami` round-trip — too costly for the
     // cheap-and-local boot detections above — so it rides its own probe off
@@ -953,17 +975,17 @@ export class EveTUIRunner {
   }
 
   /**
-   * Re-evaluates the attention line after a setup command changed Vercel state,
+   * Re-evaluates the attention line after a setup command changed local state,
    * so a fixed issue clears (e.g. the `not logged in · /login` line disappears
    * once `/login` succeeds) instead of lingering stale. Authoritative: unlike
    * the boot probe it re-reads detections and auth and is not stale-guarded.
    */
-  async #refreshSetupAttention(): Promise<void> {
+  async #refreshSetupAttention(info: AgentInfoResult | undefined): Promise<void> {
     const appRoot = this.#appRoot;
     if (appRoot === undefined) return;
     if (this.#renderer.renderSetupWarning === undefined) return;
     const context: BootDetectionContext = { appRoot, env: process.env };
-    if (this.#agentInfo !== undefined) context.info = this.#agentInfo;
+    if (info !== undefined) context.info = info;
     try {
       this.#bootIssues = await detectSetupIssues(context, this.#bootDetections);
       const status = await this.#getVercelAuthStatus(appRoot, {
@@ -1032,28 +1054,33 @@ export class EveTUIRunner {
     }
   }
 
+  /**
+   * Setup commands can write env files before the dev watcher reloads them.
+   * Reload first, then replace the cached `/info` response that owns the status
+   * bar's endpoint state. The slower Vercel auth probe stays off the prompt path.
+   */
+  async #refreshModelAccess(): Promise<void> {
+    const appRoot = this.#appRoot;
+    if (appRoot === undefined) return;
+
+    loadDevelopmentEnvironmentFiles(appRoot);
+    const refreshedInfo = await this.#readAgentInfo();
+    this.#replaceAgentInfo(refreshedInfo);
+    void this.#refreshSetupAttention(refreshedInfo);
+  }
+
+  async #readAgentInfo(): Promise<AgentInfoResult | undefined> {
+    try {
+      return await this.#client?.info();
+    } catch {
+      return undefined;
+    }
+  }
+
   async #handleRuntimeArtifactsChanged(): Promise<void> {
     const previousInfo = this.#agentInfo;
-    let nextInfo: AgentInfoResult | undefined;
-
-    try {
-      nextInfo = await this.#client?.info();
-    } catch {
-      nextInfo = undefined;
-    }
-
-    if (nextInfo !== undefined) {
-      this.#agentInfo = nextInfo;
-      if (this.#serverUrl !== undefined) {
-        const header: AgentTUIAgentHeader = {
-          info: nextInfo,
-          name: this.#name,
-          serverUrl: this.#serverUrl,
-        };
-        if (this.#appRoot !== undefined) header.tip = this.#headerTip;
-        this.#renderer.renderAgentHeader?.(header);
-      }
-    }
+    const nextInfo = await this.#readAgentInfo();
+    if (nextInfo !== undefined) this.#replaceAgentInfo(nextInfo);
 
     if (!this.#renderer.renderAgentHeader || nextInfo === undefined) {
       this.#renderer.renderNotice?.(formatAgentUpdateNotice(previousInfo, nextInfo));

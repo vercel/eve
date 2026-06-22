@@ -18,6 +18,8 @@ import {
   type PromptCommandOutcome,
 } from "./runner.js";
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
+import type { BootDetection, SetupIssue } from "./setup-issues.js";
+import { createFakeSetupFlowRenderer } from "./test/fake-setup-flow-renderer.js";
 import type { VercelStatusSnapshot } from "./vercel-status.js";
 
 /**
@@ -1234,9 +1236,9 @@ describe("EveTUIRunner Vercel status line", () => {
     const outcomes: Record<string, PromptCommandOutcome> = {
       channels: {
         message: "Channels added: slack — run /deploy to ship them.",
-        vercelEffect: { kind: "channels-added" },
+        effect: { kind: "channels-added" },
       },
-      deploy: { message: "Deployed.", vercelEffect: { kind: "deployed" } },
+      deploy: { message: "Deployed.", effect: { kind: "deployed" } },
     };
 
     const runner = new EveTUIRunner({
@@ -1255,6 +1257,46 @@ describe("EveTUIRunner Vercel status line", () => {
       { identity, pendingDeploy: false },
     ]);
     expect(detectIdentity).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes agent info only after a model-access change", async () => {
+    const client = stubClient();
+    const info = vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
+    const prompts: Array<string | undefined> = ["/channels", "/model", undefined];
+    const infoCallsAtPrompt: number[] = [];
+    const renderer = fakeRenderer({
+      readPrompt: vi.fn(async () => {
+        infoCallsAtPrompt.push(info.mock.calls.length);
+        return prompts.shift();
+      }),
+    });
+    const channelsOutcome: PromptCommandOutcome = {
+      message: "Channels added.",
+      effect: { kind: "channels-added" },
+    };
+    const modelOutcome: PromptCommandOutcome = {
+      message: "Connected to AI Gateway.",
+      effect: { kind: "model-access-changed" },
+    };
+
+    const runner = new EveTUIRunner({
+      session: stubSession(),
+      client,
+      renderer,
+      serverUrl: "http://localhost:3000",
+      name: "Weather Agent",
+      appRoot: "/tmp/weather-agent",
+      bootDetections: [],
+      detectProjectIdentity: vi.fn(async () => undefined),
+      promptCommandHandler: {
+        handle: async (command) => (command.name === "model" ? modelOutcome : channelsOutcome),
+      },
+    });
+
+    await runner.run();
+
+    expect(infoCallsAtPrompt).toEqual([1, 1, 2]);
+    expect(info).toHaveBeenCalledTimes(2);
   });
 
   it("never pushes Vercel status for a remote --url session", async () => {
@@ -1332,10 +1374,18 @@ describe("EveTUIRunner gateway-auth failure rendering", () => {
 });
 
 describe("EveTUIRunner boot setup detection", () => {
-  function bootRunner(input: {
-    appRoot?: string;
-    issues: Array<{ label: string; command: string }>;
-  }) {
+  const disconnectedGatewayInfo: AgentInfoResult = {
+    ...AGENT_INFO,
+    agent: {
+      ...AGENT_INFO.agent,
+      model: {
+        ...AGENT_INFO.agent.model,
+        endpoint: { kind: "gateway", connected: false },
+      },
+    },
+  };
+
+  function bootRunner(input: { appRoot?: string; issues: SetupIssue[] }) {
     const warnings: string[] = [];
     const session = sessionYielding([]);
     const renderer: AgentTUIRenderer = {
@@ -1353,19 +1403,186 @@ describe("EveTUIRunner boot setup detection", () => {
     return { runner: new EveTUIRunner(options), warnings };
   }
 
+  function providerSetupRefreshRunner(input: {
+    refreshInfo: () => Promise<AgentInfoResult>;
+    renderer?: Partial<AgentTUIRenderer>;
+    bootDetections?: BootDetection[];
+  }) {
+    const client = stubClient();
+    vi.spyOn(client, "info")
+      .mockResolvedValueOnce(disconnectedGatewayInfo)
+      .mockImplementationOnce(input.refreshInfo);
+    const renderer = fakeRenderer({
+      renderSetupWarning: vi.fn(),
+      setupFlow: createFakeSetupFlowRenderer(),
+      ...input.renderer,
+    });
+    const runner = new EveTUIRunner({
+      session: stubSession(),
+      client,
+      renderer,
+      serverUrl: "http://localhost:3000",
+      name: "Weather Agent",
+      appRoot: "/tmp/weather-agent",
+      bootDetections: input.bootDetections ?? [
+        {
+          id: "test",
+          detect: () => [
+            {
+              kind: "model-provider-unconfigured",
+              label: "model provider not linked",
+              command: "/model",
+            },
+          ],
+        },
+      ],
+      detectProjectIdentity: vi.fn(async () => undefined),
+      getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
+      promptCommandHandler: {
+        handle: async () => ({
+          message: "Connected to AI Gateway via AI_GATEWAY_API_KEY in .env.local.",
+          effect: { kind: "model-access-changed" },
+        }),
+      },
+    });
+
+    return { client, runner };
+  }
+
   it("surfaces detected issues as the attention line at boot", async () => {
     const { runner, warnings } = bootRunner({
       appRoot: "/tmp/weather-agent",
-      issues: [{ label: "AI Gateway credentials", command: "/model" }],
+      issues: [{ kind: "attention", label: "AI Gateway credentials", command: "/model" }],
     });
     await runner.run();
 
     expect(warnings).toEqual(["1 setup issue: AI Gateway credentials · /model"]);
   });
 
+  it("opens /model before the first prompt when the provider is unset", async () => {
+    const order: string[] = [];
+    const handle = vi.fn(async () => {
+      order.push("model");
+      return { message: "/model cancelled." };
+    });
+    const renderer = fakeRenderer({
+      readPrompt: vi.fn(async (options?: AgentTUISessionOptions) => {
+        order.push("prompt");
+        expect(options?.initialDraft).toBe("draft me");
+        return undefined;
+      }),
+      setupFlow: createFakeSetupFlowRenderer(),
+    });
+    const runner = new EveTUIRunner({
+      session: sessionYielding([]),
+      renderer,
+      name: "Weather Agent",
+      appRoot: "/tmp/weather-agent",
+      initialInput: "draft me",
+      bootDetections: [
+        {
+          id: "test",
+          detect: () => [
+            {
+              kind: "model-provider-unconfigured",
+              label: "model provider not linked",
+              command: "/model",
+            },
+          ],
+        },
+      ],
+      promptCommandHandler: { handle },
+    });
+
+    await runner.run();
+
+    expect(order).toEqual(["model", "prompt"]);
+    expect(handle).toHaveBeenCalledWith(
+      { type: "extension", name: "model", argument: "" },
+      { renderer, title: "Weather Agent", initialModelStep: "provider" },
+    );
+  });
+
+  it("refreshes the gateway endpoint after automatic provider setup", async () => {
+    const connectedInfo: AgentInfoResult = {
+      ...AGENT_INFO,
+      agent: {
+        ...AGENT_INFO.agent,
+        model: {
+          ...AGENT_INFO.agent.model,
+          endpoint: { kind: "gateway", connected: true, credential: "api-key" },
+        },
+      },
+    };
+    const clearSetupWarning = vi.fn();
+    const headers: AgentTUIAgentHeader[] = [];
+    const detect = vi.fn(({ info }: { info?: AgentInfoResult }) =>
+      info?.agent.model.endpoint?.kind === "gateway" && !info.agent.model.endpoint.connected
+        ? [
+            {
+              kind: "model-provider-unconfigured" as const,
+              label: "model provider not linked",
+              command: "/model" as const,
+            },
+          ]
+        : [],
+    );
+    const { client, runner } = providerSetupRefreshRunner({
+      refreshInfo: async () => connectedInfo,
+      bootDetections: [{ id: "test", detect }],
+      renderer: {
+        clearSetupWarning,
+        renderAgentHeader: (header) => headers.push(header),
+      },
+    });
+
+    await runner.run();
+    await vi.waitFor(() => expect(clearSetupWarning).toHaveBeenCalled());
+
+    expect(client.info).toHaveBeenCalledTimes(2);
+    expect(detect.mock.calls.at(-1)?.[0].info).toBe(connectedInfo);
+    expect(headers.map((header) => header.info?.agent.model.endpoint)).toEqual([
+      { kind: "gateway", connected: false },
+      { kind: "gateway", connected: true, credential: "api-key" },
+    ]);
+  });
+
+  it("drops stale disconnected evidence when the post-setup info refresh fails", async () => {
+    const clearSetupWarning = vi.fn();
+    const headers: AgentTUIAgentHeader[] = [];
+    const detect = vi.fn(({ info }: { info?: AgentInfoResult }) =>
+      info?.agent.model.endpoint?.kind === "gateway" && !info.agent.model.endpoint.connected
+        ? [
+            {
+              kind: "model-provider-unconfigured" as const,
+              label: "model provider not linked",
+              command: "/model" as const,
+            },
+          ]
+        : [],
+    );
+    const { client, runner } = providerSetupRefreshRunner({
+      refreshInfo: async () => {
+        throw new Error("info unavailable");
+      },
+      bootDetections: [{ id: "test", detect }],
+      renderer: {
+        clearSetupWarning,
+        renderAgentHeader: (header) => headers.push(header),
+      },
+    });
+
+    await runner.run();
+    await vi.waitFor(() => expect(clearSetupWarning).toHaveBeenCalled());
+
+    expect(client.info).toHaveBeenCalledTimes(2);
+    expect(detect.mock.calls.at(-1)?.[0].info).toBeUndefined();
+    expect(headers.at(-1)?.info).toBeUndefined();
+  });
+
   it("stays quiet without a local setup context, even with issues", async () => {
     const { runner, warnings } = bootRunner({
-      issues: [{ label: "AI Gateway credentials", command: "/model" }],
+      issues: [{ kind: "attention", label: "AI Gateway credentials", command: "/model" }],
     });
     await runner.run();
 

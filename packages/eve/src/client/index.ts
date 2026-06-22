@@ -43,6 +43,7 @@ export type {
   AgentInfoTools,
   ClientAuth,
   ClientOptions,
+  ClientRedirectPolicy,
   HeadersValue,
   HealthResult,
   MessageResult,

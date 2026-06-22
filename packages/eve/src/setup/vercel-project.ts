@@ -1,6 +1,7 @@
 import { createPromptCommandOutput, whimsyFor } from "#setup/cli/index.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
 import { captureVercel, runVercel, type VercelCaptureFailure } from "#setup/primitives/index.js";
+import { hasVercelHostFramework } from "#setup/scaffold/index.js";
 import pc from "picocolors";
 import { z } from "zod";
 
@@ -230,22 +231,29 @@ async function createProject(
   onOutput: ReturnType<typeof createPromptCommandOutput>,
   options: VercelProjectOperationOptions,
 ): Promise<VercelProjectReference> {
-  const result = await captureVercel(
-    [
-      "api",
-      "/v10/projects",
-      "--scope",
-      team,
-      "--method",
-      "POST",
-      "--raw-field",
-      `name=${projectName}`,
-      "--raw-field",
-      `framework=${EVE_FRAMEWORK_PRESET}`,
-      "--raw",
-    ],
-    { cwd: projectRoot, onOutput, signal: options.signal },
-  );
+  const createProjectArgs = [
+    "api",
+    "/v10/projects",
+    "--scope",
+    team,
+    "--method",
+    "POST",
+    "--raw-field",
+    `name=${projectName}`,
+  ];
+  // Host framework integrations (Next.js, Nuxt, SvelteKit) own the top-level
+  // Vercel build. Leaving the preset unset lets Vercel detect that framework
+  // while vercel.json/build-output config owns the internal Eve service.
+  if (!(await hasVercelHostFramework(projectRoot))) {
+    createProjectArgs.push("--raw-field", `framework=${EVE_FRAMEWORK_PRESET}`);
+  }
+  createProjectArgs.push("--raw");
+
+  const result = await captureVercel(createProjectArgs, {
+    cwd: projectRoot,
+    onOutput,
+    signal: options.signal,
+  });
   if (result.ok) {
     return parseProjectReference(result.stdout, `created project ${projectName}`);
   }

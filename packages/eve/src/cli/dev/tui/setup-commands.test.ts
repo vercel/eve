@@ -72,6 +72,7 @@ function run(input: {
   command: "vc" | "login" | "model" | "channels" | "deploy";
   flows: TuiSetupFlows;
   renderer?: TuiSetupCommandRenderer;
+  initialModelStep?: "provider";
 }) {
   const fake = createFakePrompter({});
   const commandInput: TuiSetupCommandInput = {
@@ -81,6 +82,9 @@ function run(input: {
     createPrompter: () => fake.prompter,
     flows: input.flows,
   };
+  if (input.initialModelStep !== undefined) {
+    commandInput.initialModelStep = input.initialModelStep;
+  }
   return runTuiSetupCommand(commandInput);
 }
 
@@ -92,6 +96,16 @@ describe("runTuiSetupCommand", () => {
       preserveFlowDiagnostics: false,
     });
     expect(flows.runModelFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
+  });
+
+  it("forwards an automatic provider entry to the model flow", async () => {
+    const flows = fakeFlows();
+
+    await run({ command: "model", flows, initialModelStep: "provider" });
+
+    expect(flows.runModelFlow).toHaveBeenCalledWith(
+      expect.objectContaining({ appRoot: APP_ROOT, initialStep: "provider" }),
+    );
   });
 
   it("stacks the model and provider outcome lines when both menu actions ran", async () => {
@@ -110,7 +124,7 @@ describe("runTuiSetupCommand", () => {
         "Model changed to openai/gpt-5.5. Live on your next prompt.\n" +
         "Project linked. Connected to AI Gateway via AI_GATEWAY_API_KEY.",
       preserveFlowDiagnostics: false,
-      vercelEffect: { kind: "refresh-identity" },
+      effect: { kind: "model-access-changed" },
     });
   });
 
@@ -127,7 +141,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "model", flows })).resolves.toEqual({
       message: "Project linked. Connected to AI Gateway via VERCEL_OIDC_TOKEN.",
       preserveFlowDiagnostics: false,
-      vercelEffect: { kind: "refresh-identity" },
+      effect: { kind: "model-access-changed" },
     });
   });
 
@@ -144,7 +158,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "model", flows })).resolves.toEqual({
       message: "Connected to AI Gateway via AI_GATEWAY_API_KEY in .env.local.",
       preserveFlowDiagnostics: false,
-      vercelEffect: { kind: "refresh-identity" },
+      effect: { kind: "model-access-changed" },
     });
   });
 
@@ -171,7 +185,7 @@ describe("runTuiSetupCommand", () => {
     expect(notice).toEqual({
       message: "Channels added: slack — run /deploy to ship them.",
       preserveFlowDiagnostics: true,
-      vercelEffect: { kind: "channels-added" },
+      effect: { kind: "channels-added" },
     });
     expect(flows.runChannelsFlow).toHaveBeenCalledWith(
       expect.objectContaining({ appRoot: APP_ROOT }),
@@ -198,7 +212,7 @@ describe("runTuiSetupCommand", () => {
       message:
         "Deployed: https://my-agent.vercel.app\n" + `Chat with your agent in Slack: ${expectedUrl}`,
       preserveFlowDiagnostics: true,
-      vercelEffect: { kind: "deployed" },
+      effect: { kind: "deployed" },
     });
     expect(flows.runDeployFlow).toHaveBeenCalledWith(
       expect.objectContaining({ interactive: true }),
@@ -219,7 +233,7 @@ describe("runTuiSetupCommand", () => {
     expect(notice).toEqual({
       message: "Deployed: https://my-agent.vercel.app\nMessage your agent in Slack to see it live.",
       preserveFlowDiagnostics: true,
-      vercelEffect: { kind: "deployed" },
+      effect: { kind: "deployed" },
     });
   });
 
@@ -236,7 +250,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "channels", flows })).resolves.toEqual({
       message: "Channels added, but /deploy was cancelled. Run /deploy to ship them.",
       preserveFlowDiagnostics: true,
-      vercelEffect: { kind: "channels-added" },
+      effect: { kind: "channels-added" },
     });
   });
 
@@ -254,7 +268,7 @@ describe("runTuiSetupCommand", () => {
       message:
         "Channels added, but this directory is not linked to Vercel. Run /model, then /deploy.",
       preserveFlowDiagnostics: true,
-      vercelEffect: { kind: "channels-added" },
+      effect: { kind: "channels-added" },
     });
   });
 
@@ -273,7 +287,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "channels", flows })).resolves.toEqual({
       message: "Channels added, but /deploy failed: build failed",
       preserveFlowDiagnostics: true,
-      vercelEffect: { kind: "channels-added" },
+      effect: { kind: "channels-added" },
     });
   });
 
@@ -299,7 +313,7 @@ describe("runTuiSetupCommand", () => {
       message:
         "Channel files changed, but /channels failed: Slack connector UID update is required before deployment.",
       preserveFlowDiagnostics: true,
-      vercelEffect: { kind: "channels-added" },
+      effect: { kind: "channels-added" },
     });
   });
 
@@ -308,7 +322,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "deploy", flows })).resolves.toEqual({
       message: "Deployed: https://my-agent.vercel.app",
       preserveFlowDiagnostics: true,
-      vercelEffect: { kind: "deployed" },
+      effect: { kind: "deployed" },
     });
     expect(flows.runDeployFlow).toHaveBeenCalledWith(
       expect.objectContaining({ interactive: true }),
@@ -407,7 +421,43 @@ describe("runTuiSetupCommand", () => {
     await expect(result).resolves.toEqual({
       message: "/channels interrupted.",
       preserveFlowDiagnostics: true,
-      vercelEffect: { kind: "channels-added" },
+      effect: { kind: "channels-added" },
+    });
+  });
+
+  it("preserves model access refreshes when provider setup is interrupted", async () => {
+    const renderer = fakePanelRenderer();
+    const flows = fakeFlows({
+      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(
+        ({ signal }) =>
+          new Promise((resolve) => {
+            signal?.addEventListener(
+              "abort",
+              () =>
+                resolve({
+                  kind: "done",
+                  providerOutcome: {
+                    credential: "AI_GATEWAY_API_KEY",
+                    status: {
+                      kind: "gateway-key",
+                      envKey: "AI_GATEWAY_API_KEY",
+                      envFile: ".env.local",
+                    },
+                  },
+                }),
+              { once: true },
+            );
+          }),
+      ),
+    });
+
+    const result = run({ command: "model", flows, renderer });
+    renderer.fireInterrupt();
+
+    await expect(result).resolves.toEqual({
+      message: "/model interrupted.",
+      preserveFlowDiagnostics: true,
+      effect: { kind: "model-access-changed" },
     });
   });
 
@@ -455,7 +505,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "login", flows })).resolves.toEqual({
       message: "Logged in to Vercel.",
       preserveFlowDiagnostics: false,
-      vercelEffect: { kind: "refresh-identity" },
+      effect: { kind: "refresh-identity" },
     });
   });
 
@@ -562,7 +612,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "vc", flows })).resolves.toEqual({
       message: "Installed the Vercel CLI. Run /login next.",
       preserveFlowDiagnostics: false,
-      vercelEffect: { kind: "refresh-identity" },
+      effect: { kind: "refresh-identity" },
     });
   });
 
@@ -614,7 +664,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "channels", flows })).resolves.toEqual({
       message: "Channels added. You're not logged in to Vercel — run /login, then retry /deploy.",
       preserveFlowDiagnostics: true,
-      vercelEffect: { kind: "channels-added" },
+      effect: { kind: "channels-added" },
     });
   });
 });

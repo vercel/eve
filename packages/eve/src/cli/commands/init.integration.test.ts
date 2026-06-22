@@ -168,8 +168,6 @@ describe("runInitCommand", () => {
       "exec",
       "eve",
       "dev",
-      "--input",
-      "/model",
     ]);
     // Substring assertions keep the expectations color-agnostic; picocolors
     // decides at import time whether the strings carry escape codes. The boot
@@ -182,7 +180,7 @@ describe("runInitCommand", () => {
     expect(output.messages[1]).toContain("in 467ms");
     expect(output.messages[2]).toContain("Installed dependencies");
     expect(output.messages[2]).toContain("in 13.2s");
-    expect(output.messages[3]).toContain("$ eve dev --input /model");
+    expect(output.messages[3]).toContain("$ eve dev");
   });
 
   it("uses an explicit init package spec for fresh project scaffolds", async () => {
@@ -240,8 +238,6 @@ describe("runInitCommand", () => {
         "exec",
         "eve",
         "dev",
-        "--input",
-        "/model",
       ]);
       expect(output.messages[1]).toContain("Created an eve agent in ");
       expect(output.messages[1]).toContain(projectPath);
@@ -249,9 +245,9 @@ describe("runInitCommand", () => {
   );
 
   it.each([
-    ["npm", ["exec", "--", "eve", "dev", "--input", "/model"]],
-    ["yarn", ["eve", "dev", "--input", "/model"]],
-    ["bun", ["x", "eve", "dev", "--input", "/model"]],
+    ["npm", ["exec", "--", "eve", "dev"]],
+    ["yarn", ["eve", "dev"]],
+    ["bun", ["x", "eve", "dev"]],
   ] as const)(
     "scaffolds a fresh project owned by the invoking manager %s without pnpm policy",
     async (kind, devArguments) => {
@@ -303,20 +299,14 @@ describe("runInitCommand", () => {
       projectPath,
       expect.anything(),
     );
-    expect(deps.spawnPackageManager).toHaveBeenCalledWith("bun", projectPath, [
-      "x",
-      "eve",
-      "dev",
-      "--input",
-      "/model",
-    ]);
+    expect(deps.spawnPackageManager).toHaveBeenCalledWith("bun", projectPath, ["x", "eve", "dev"]);
   });
 
   it.each([
-    ["npm", "package-lock.json", "bun", ["exec", "--", "eve", "dev", "--input", "/model"]],
-    ["yarn", "yarn.lock", "npm", ["eve", "dev", "--input", "/model"]],
-    ["bun", "bun.lock", "npm", ["x", "eve", "dev", "--input", "/model"]],
-    ["pnpm", "pnpm-lock.yaml", "npm", ["exec", "eve", "dev", "--input", "/model"]],
+    ["npm", "package-lock.json", "bun", ["exec", "--", "eve", "dev"]],
+    ["yarn", "yarn.lock", "npm", ["eve", "dev"]],
+    ["bun", "bun.lock", "npm", ["x", "eve", "dev"]],
+    ["pnpm", "pnpm-lock.yaml", "npm", ["exec", "eve", "dev"]],
   ] as const)(
     "scaffolds a fresh named project with the ancestor %s lockfile before the launcher",
     async (kind, lockfile, invokingManager, devArguments) => {
@@ -369,8 +359,6 @@ describe("runInitCommand", () => {
       "--",
       "eve",
       "dev",
-      "--input",
-      "/model",
     ]);
   });
 
@@ -385,7 +373,7 @@ describe("runInitCommand", () => {
     expect(deps.spawnPackageManager).toHaveBeenCalledWith(
       "pnpm",
       join(parentDirectory, "my-agent"),
-      ["exec", "eve", "dev", "--input", "/model"],
+      ["exec", "eve", "dev"],
     );
   });
 
@@ -416,8 +404,6 @@ describe("runInitCommand", () => {
       "exec",
       "eve",
       "dev",
-      "--input",
-      "/model",
     ]);
   });
 

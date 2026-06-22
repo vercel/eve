@@ -50,6 +50,7 @@ import {
   selectValueAtCursor,
   type SelectState,
 } from "#setup/cli/select-state.js";
+import { renderCursorRow } from "#setup/cli/option-row.js";
 import type {
   AssistantResponseStatsMode,
   LogDisplayMode,
@@ -2829,8 +2830,8 @@ function promptInputRows({
   );
   const promptGlyph = c.cyan(theme.glyph.prompt);
   const ellipsis = c.dim(theme.glyph.ellipsis);
-  // Reserve the gutter and the block caret's trailing cell at end-of-line.
-  const budget = Math.max(1, width - 3);
+  // Reserve the leading pad, gutter, and block caret's trailing cell at end-of-line.
+  const budget = Math.max(1, width - 4);
   const out: string[] = [];
   for (let r = top; r < top + visibleCount; r += 1) {
     const row = layout.rows[r]!;
@@ -2857,7 +2858,7 @@ function promptInputRows({
     } else {
       body = style(row.text);
     }
-    out.push(clip(`${gutter} ${body}`, width));
+    out.push(clip(` ${gutter} ${body}`, width));
   }
   out.push("");
   return out;
@@ -3068,17 +3069,20 @@ function formatQuestionContent(
       const labelText = stripTerminalControls(option.label);
       const descriptionText =
         option.description === undefined ? "" : stripTerminalControls(option.description);
-      const description = descriptionText.length > 0 ? `  ${c.dim(`— ${descriptionText}`)}` : "";
       const selected = highlight === index;
-      const marker = selected ? `${c.cyan(theme.glyph.pointer)} ` : "  ";
-      const label = selected ? c.cyan(labelText) : labelText;
-      lines.push(`${marker}${label}${description}`);
+      const description =
+        descriptionText.length > 0
+          ? `${selected ? " " : "  "}${c.dim(`— ${descriptionText}`)}`
+          : "";
+      const content = selected ? `${theme.glyph.selectedPointer} ${labelText}` : `  ${labelText}`;
+      const selection = renderCursorRow(content, selected, c);
+      lines.push(`${selection}${description}`);
     }
     if (question.allowFreeform === true) {
       const selected = highlight === options.length;
-      const marker = selected ? `${c.cyan(theme.glyph.pointer)} ` : "  ";
       const label = "Type your own answer";
-      lines.push(`${marker}${selected ? c.cyan(label) : c.dim(label)}`);
+      const content = selected ? `${theme.glyph.selectedPointer} ${label}` : `  ${c.dim(label)}`;
+      lines.push(renderCursorRow(content, selected, c));
     }
   } else {
     lines.push(c.dim("  (type your answer)"));

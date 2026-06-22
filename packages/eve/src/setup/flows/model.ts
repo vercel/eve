@@ -226,6 +226,8 @@ export async function detectModelProviderStatus(
 export async function runModelFlow(input: {
   appRoot: string;
   prompter: Prompter;
+  /** Opens provider setup before the root menu when runtime evidence requires it. */
+  initialStep?: "provider";
   signal?: AbortSignal;
   deps?: Partial<ModelFlowDeps>;
 }): Promise<ModelFlowResult> {
@@ -277,20 +279,29 @@ export async function runModelFlow(input: {
         : routing?.kind === "external"
           ? "done"
           : "provider";
+  // A gateway model with no provider cannot run. Skip the menu's extra Enter
+  // and open provider setup as soon as that state is confirmed.
+  let openProviderFirst =
+    routing?.kind !== "external" && (input.initialStep === "provider" || provider.kind === "unset");
 
   while (true) {
     let pick: ModelMenuRow;
-    try {
-      pick = await prompter.select<ModelMenuRow>({
-        message: MODEL_MENU_MESSAGE,
-        options: modelMenuRows(current, provider, routing, editable),
-        hintLayout: "stacked",
-        initialValue: nextSelection,
-        notices: externalNotice === undefined ? [] : [externalNotice],
-      });
-    } catch (error) {
-      if (!(error instanceof WizardCancelledError)) throw error;
-      break;
+    if (openProviderFirst) {
+      openProviderFirst = false;
+      pick = "provider";
+    } else {
+      try {
+        pick = await prompter.select<ModelMenuRow>({
+          message: MODEL_MENU_MESSAGE,
+          options: modelMenuRows(current, provider, routing, editable),
+          hintLayout: "stacked",
+          initialValue: nextSelection,
+          notices: externalNotice === undefined ? [] : [externalNotice],
+        });
+      } catch (error) {
+        if (!(error instanceof WizardCancelledError)) throw error;
+        break;
+      }
     }
 
     if (pick === "done") break;

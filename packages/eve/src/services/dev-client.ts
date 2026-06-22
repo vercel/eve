@@ -1,7 +1,7 @@
 import type { UserContent } from "ai";
 import type { ClientSession } from "#client/session.js";
 import type { InputResponse } from "#runtime/input/types.js";
-import { isLocalDevelopmentServerUrl } from "#services/dev-client/request-headers.js";
+import { isLocalDevelopmentServerUrl } from "#services/dev-client/local-host.js";
 import {
   readDevelopmentRuntimeArtifactsRevision,
   rebuildDevelopmentRuntimeArtifacts,

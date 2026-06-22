@@ -16,7 +16,7 @@ On startup the TUI prints a brand line with your agent's name, plus a rotating t
  Use /channels to add more ways to reach your agent.
 ```
 
-If agent discovery reported problems, an error and warning count renders between the two lines. Instructions, tools, skills, and subagents are one `eve info` away, and `/help` lists every command. The TUI also runs a startup check. A missing model-provider setup surfaces as an attention line (`⚠ 1 setup issue: model provider not linked · /model`) so the fix is visible before the first message fails, with each command's outcome hanging under it on a `⎿` connector.
+If agent discovery reported problems, an error and warning count renders between the two lines. Instructions, tools, skills, and subagents are one `eve info` away, and `/help` lists every command. The TUI also runs a startup check. When the runtime confirms that no model provider is configured, it opens the `/model` provider questions before the first prompt. When the available evidence cannot confirm that state, missing setup remains visible as an attention line, with each command's outcome hanging under it on a `⎿` connector.
 
 ## Reading the transcript
 
@@ -30,7 +30,7 @@ Errors render compactly with docs links highlighted. A code bug escaping your ag
 
 ## Slash commands
 
-Each command echoes as an invocation line, asks through a bordered panel that takes the input area's place (one question at a time, separate from the chat transcript), and finishes with a one-line `⎿` result. Loading states stay on the ephemeral status line instead of piling into the transcript.
+Each command echoes as an invocation line, asks through a bordered panel that takes the input area's place (one question at a time, separate from the chat transcript), and finishes with a one-line `⎿` result. Loading states stay on the ephemeral status line instead of piling into the transcript. Setup menus render the selected option with a filled arrow and an inverse label padded by one space on each side. The label is blue normally and yellow for warning rows.
 
 | Command     | Does                                                                                                                              |
 | ----------- | --------------------------------------------------------------------------------------------------------------------------------- |
@@ -46,9 +46,9 @@ Each command echoes as an invocation line, asks through a bordered panel that ta
 
 ### Configure the model and provider
 
-Bare `/model` opens the configure menu. "Change model" runs the same searchable model picker setup uses (the Vercel AI Gateway catalog, pre-selected on the model the runtime is serving). A model change is written into your agent's authored source, and the command reports success only after eve confirms the new id. `/model <provider/model-id>` applies one directly, skipping the menu.
+Bare `/model` opens the configure menu. When no provider is configured, it opens the provider questions directly; Esc returns to the configure menu. "Change model" runs the same searchable model picker setup uses (the Vercel AI Gateway catalog, pre-selected on the model the runtime is serving). A model change is written into your agent's authored source, and the command reports success only after eve confirms the new id. `/model <provider/model-id>` applies one directly, skipping the menu.
 
-The provider row opens the provider questions: which model provider to use, and how to connect. Picking something other than Vercel AI Gateway shows wiring instructions for your own provider and stops there, leaving any existing setup untouched. For Vercel AI Gateway, you either paste your own `AI_GATEWAY_API_KEY` (saved straight to `.env.local`) or connect via a project. Connecting via a project asks for a Vercel team, opens that team's existing-project list (picking again re-links), then pulls the project's environment so an AI Gateway credential lands in `.env.local`. The dev server reloads env files automatically, with no restart needed.
+The provider row opens the provider questions: which model provider to use, and how to connect. Picking something other than Vercel AI Gateway shows wiring instructions for your own provider and stops there, leaving any existing setup untouched. For Vercel AI Gateway, you either paste your own `AI_GATEWAY_API_KEY` (saved straight to `.env.local`) or connect via a project. Connecting via a project asks for a Vercel team, opens that team's existing-project list (picking again re-links), then pulls the project's environment so an AI Gateway credential lands in `.env.local`. The dev TUI reloads env files, re-reads the runtime's model endpoint, and clears the setup warning automatically; no restart is needed.
 
 The provider row demands attention (a bold yellow "Configure provider" with "Required to enable the agent") until a link or gateway credential is detected, then names the connection afterward (for example "AI Gateway (Linked to my-project in my-team)"). Each action's latest outcome stays visible beneath the menu (for example "✓ Model changed to openai/gpt-5.5"). When a turn fails because AI Gateway authentication is missing or stale, the error points you at `/model` directly.
 
@@ -119,7 +119,7 @@ Pass a URL and the TUI talks to a running deployment instead of starting a local
 eve dev https://<your-app>
 ```
 
-The bare URL is shorthand for `--url`. `--host`, `--port`, and `--no-ui` are ignored against a remote target. If the deployment sits behind Vercel preview protection, set `VERCEL_AUTOMATION_BYPASS_SECRET` locally first. See [Deployment](./deployment) for the smoke-test flow.
+The bare URL is shorthand for `--url`; `--host`, `--port`, and `--no-ui` cannot be combined with a remote target. Eve gets the expected Vercel owner and project from `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` when both are set, or from the current directory's Vercel link otherwise. It verifies the exact deployment origin before attaching a freshly resolved project-scoped OIDC token or `VERCEL_AUTOMATION_BYPASS_SECRET`. Unverified URLs remain anonymous, and credential-bearing requests do not follow redirects. See [Deployment](./deployment) for the smoke-test flow.
 
 ## What to read next
 

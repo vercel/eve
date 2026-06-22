@@ -734,6 +734,42 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("renders the selected question option as a padded inverse-blue label", async () => {
+    const { screen, input, renderer } = makeRenderer();
+
+    const answer = renderer.readInputQuestion({
+      requestId: "q1",
+      prompt: "Choose access",
+      display: "select",
+      options: [
+        { id: "gateway", label: "AI Gateway", description: "Managed access" },
+        { id: "external", label: "Other providers", description: "Direct access" },
+      ],
+    });
+
+    const selected = screen
+      .snapshot()
+      .split("\n")
+      .find((line) => line.includes("AI Gateway"));
+    expect(selected).toContain(" ▶ AI Gateway ");
+    expect(screen.rawOutput()).toContain("\x1b[7m");
+    expect(screen.rawOutput()).toContain("\x1b[34m");
+
+    const selectedDescriptionColumn = selected?.indexOf("— Managed access");
+    expect(selectedDescriptionColumn).toBeGreaterThanOrEqual(0);
+    input.down();
+    const unselected = screen
+      .snapshot()
+      .split("\n")
+      .find((line) => line.includes("AI Gateway"));
+    expect(unselected?.indexOf("— Managed access")).toBe(selectedDescriptionColumn);
+    input.up();
+
+    input.enter();
+    await expect(answer).resolves.toEqual({ optionId: "gateway" });
+    renderer.shutdown();
+  });
+
   it("edits freeform question input across lines", async () => {
     const { input, renderer } = makeRenderer();
 
@@ -2037,6 +2073,8 @@ describe("TerminalRenderer command typeahead", () => {
     expect(snapshot).toContain("/help");
     expect(snapshot).toContain("Show available commands");
     expect(snapshot).toContain("Configure the agent's model and provider");
+    const promptLine = snapshot.split("\n").find((line) => line.includes("❯ /"));
+    expect(promptLine?.startsWith(" ❯ /")).toBe(true);
 
     input.enter();
     // The highlighted default — /help leads the registry — is what a bare

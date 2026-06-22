@@ -1,5 +1,3 @@
-import { basename } from "node:path";
-
 import { Command, CommanderError, InvalidArgumentError } from "#compiled/commander/index.js";
 import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
@@ -8,6 +6,7 @@ import { eveCliBanner } from "#cli/banner.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import { LOG_DISPLAY_MODES, parseLogDisplayMode } from "#cli/dev/tui/log-display-mode.js";
+import { resolveTuiTitle, type DevelopmentTuiTarget } from "#cli/dev/tui/target.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
@@ -264,44 +263,6 @@ export function resolveDevUiMode(input: {
 }
 
 /**
- * Resolves the terminal UI's header title: an explicit `--name`, else the
- * remote server's host (for `--url`), else the humanized app-folder name
- * (e.g. `apps/fixtures/weather-agent` → "Weather Agent"). Returns `undefined` when
- * nothing meaningful can be derived, so the runner falls back to its own
- * default.
- */
-export function resolveTuiTitle(input: {
-  name: string | undefined;
-  remoteServerUrl: string | undefined;
-  appRoot: string;
-}): string | undefined {
-  if (input.name !== undefined && input.name.length > 0) {
-    return input.name;
-  }
-
-  if (input.remoteServerUrl !== undefined) {
-    try {
-      return new URL(input.remoteServerUrl).host;
-    } catch {
-      return undefined;
-    }
-  }
-
-  const humanized = humanizeProjectName(basename(input.appRoot));
-  return humanized.length > 0 ? humanized : undefined;
-}
-
-function humanizeProjectName(name: string): string {
-  return name
-    .replace(/[-_.]+/gu, " ")
-    .trim()
-    .split(/\s+/u)
-    .filter((word) => word.length > 0)
-    .map((word) => word[0]!.toUpperCase() + word.slice(1))
-    .join(" ");
-}
-
-/**
  * Builds the terminal-UI display options for `eve dev`. Tools default to
  * `auto-collapsed`, reasoning to `full`, and stderr logs are visible so
  * long-running local sandbox work can report progress.
@@ -535,13 +496,16 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
           report,
         );
         const display = resolveTuiDisplayOptions(options);
-        const title = resolveTuiTitle({ name: options.name, remoteServerUrl, appRoot });
+        const target: DevelopmentTuiTarget =
+          remoteServerUrl === undefined
+            ? { kind: "local", serverUrl, workspaceRoot: appRoot }
+            : { kind: "remote", serverUrl, workspaceRoot: appRoot };
+        const title = resolveTuiTitle({ name: options.name, target });
         if (title !== undefined) display.name = title;
         const tuiInput: RunDevelopmentTuiInput = {
-          appRoot: remoteServerUrl === undefined ? appRoot : undefined,
+          target,
           initialInput: options.input,
           onBootProgress: report,
-          serverUrl,
           ...display,
         };
         await runDevelopmentTui(tuiInput);
@@ -653,7 +617,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       "[evalIds...]",
       "Eval ids (or directory prefixes) to run (all discovered evals when omitted)",
     )
-    .option("--url <url>", "Remote agent URL (skip local host startup)")
+    .option("--url <url>", "Remote agent URL (skip local host startup)", parseDevelopmentServerUrl)
     .option("--tag <tag...>", "Run only evals carrying a tag")
     .option("--strict", "Fail the exit code when any score falls below its threshold")
     .option("--list", "Print discovered evals without running them")

@@ -12,6 +12,7 @@ export {
   SLACK_CHANNEL_DEFAULT_ROUTE,
   deriveSlackConnectorSlug,
   ensureChannel,
+  hasVercelHostFramework,
   isNextJsProject,
   listAuthoredChannels,
   normalizeSlackConnectorSlug,

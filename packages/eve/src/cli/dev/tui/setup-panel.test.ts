@@ -118,7 +118,7 @@ describe("renderSelectQuestion", () => {
     expect(text).not.toContain("▔".repeat(10));
     // The lone hint sits one space past its own label — the longer hint-less
     // "Link an existing project" no longer pads the column open.
-    expect(text).toContain("  ▷ Create a new project · fastest");
+    expect(text).toContain("   ▶ Create a new project · fastest");
     expect(text).toContain("    Link an existing project");
     expect(text).not.toContain("1.");
     expect(text).toContain("esc to cancel");
@@ -137,7 +137,7 @@ describe("renderSelectQuestion", () => {
       60,
     );
 
-    expect(rows).toContain("  . Link an existing project");
+    expect(rows).toContain("   . Link an existing project");
     expect(rows.join("\n")).not.toContain("◦");
   });
 
@@ -154,8 +154,20 @@ describe("renderSelectQuestion", () => {
       60,
     ).join("\n");
 
-    expect(text).toContain("  ▷ Link to another project");
+    expect(text).toContain("   ▶ Link to another project ");
     expect(text).not.toContain("1.");
+
+    const colored = renderSelectQuestion(
+      {
+        kind: "single",
+        message: "Already linked to weather-agent in Acme",
+        options: lone,
+        select: initialSelectState({ options: lone }),
+      },
+      colorTheme,
+      60,
+    ).join("\n");
+    expect(colored).toContain("\x1b[7m\x1b[34m ▶ Link to another project \x1b[39m\x1b[27m");
   });
 
   it("renders completed task rows as focusable but not highlighted actions", () => {
@@ -191,15 +203,17 @@ describe("renderSelectQuestion", () => {
     );
 
     // The focused completed row reads as inert: a dim pointer, not a check.
-    expect(rows).toContain("  ▷ Terminal UI · Already installed");
-    expect(rows).not.toContain("  ✓ Terminal UI");
+    expect(rows).toContain("   ▷ Terminal UI · Already installed");
+    expect(rows).not.toContain("   ✓ Terminal UI");
     // An unfocused completed row keeps its check.
-    expect(rows).toContain("  ✓ Web Chat");
-    expect(rows).toContain("  ◦ Slack       · Creates slackbot and deploys to Vercel");
-    expect(rows).toContain("    Done");
+    expect(rows).toContain("   ✓ Web Chat");
+    expect(rows).toContain("   ◦ Slack       · Creates slackbot and deploys to Vercel");
+    expect(rows).toContain("     Done");
     expect(rows).toContain("  ⚠ Overwrote /tmp/weather-agent");
     expect(rows).toContain("  ✓ Scaffolded channel: web");
-    expect(rows.indexOf("    Done")).toBeLessThan(rows.indexOf("  ⚠ Overwrote /tmp/weather-agent"));
+    expect(rows.indexOf("     Done")).toBeLessThan(
+      rows.indexOf("  ⚠ Overwrote /tmp/weather-agent"),
+    );
     expect(rows.at(-1)).toContain("↑/↓ move · enter to select · esc to cancel");
 
     const coloredRow = renderSelectQuestion(
@@ -231,7 +245,7 @@ describe("renderSelectQuestion", () => {
       theme,
       60,
     ).join("\n");
-    expect(multi).toContain("  ▷ Create a new project");
+    expect(multi).toContain("   ▶ Create a new project ");
     expect(multi).not.toContain("1.");
 
     const searchable = renderSelectQuestion(
@@ -448,11 +462,11 @@ describe("renderSelectQuestion", () => {
     expect(rows).toEqual([
       "  Configure the agent's model",
       "",
-      "  ▷ Change model",
-      "    anthropic/claude-sonnet-4.6",
+      "   ▶ Change model ",
+      "     anthropic/claude-sonnet-4.6",
       "",
-      "  ◦ Change provider",
-      "    AI Gateway (Linked to my-agent)",
+      "   ◦ Change provider",
+      "     AI Gateway (Linked to my-agent)",
       "",
       "  ✓ Model changed to openai/gpt-5.5",
       "",
@@ -513,6 +527,30 @@ describe("renderSelectQuestion", () => {
     expect(text).toContain("\x1b[1mmy-agent\x1b[22m\x1b[2m)");
   });
 
+  it("keeps a warning row yellow under the cursor highlight", () => {
+    const options = [
+      {
+        value: "provider",
+        label: "Configure model access",
+        accent: "warning" as const,
+      },
+    ];
+    const rows = renderSelectQuestion(
+      {
+        kind: "stacked",
+        message: "",
+        options,
+        select: initialSelectState({ options }),
+      },
+      colorTheme,
+      80,
+    );
+
+    expect(rows).toContain(
+      `  ${colorTheme.colors.inverse(colorTheme.colors.yellow(" ▶ Configure model access "))}`,
+    );
+  });
+
   it("renders checkboxes and the Submit row for a multi-select", () => {
     const select = initialSelectState({
       options: OPTIONS,
@@ -530,7 +568,7 @@ describe("renderSelectQuestion", () => {
       60,
     ).join("\n");
 
-    expect(text).toContain("▷ Create a new project");
+    expect(text).toContain("▶ Create a new project");
     expect(text).toContain("✓ Link an existing project");
     expect(text).toContain("Submit");
     expect(text).toContain("space to toggle");
@@ -620,7 +658,7 @@ describe("renderSelectQuestion", () => {
 
     expect(context).toContain("\x1b[2m· Waiting for you to complete setup in the browser\x1b[22m");
     expect(context).not.toContain("▷");
-    expect(retry).toContain("\x1b[36m▷\x1b[39m");
+    expect(retry).toContain(colorTheme.colors.inverse(colorTheme.colors.blue(" ▶ Try again ")));
   });
 });
 
