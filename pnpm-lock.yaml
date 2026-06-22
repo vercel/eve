@@ -805,6 +805,9 @@ importers:
       '@vercel/sandbox':
         specifier: 'catalog:'
         version: 2.2.1
+      '@vercel/sdk':
+        specifier: 1.28.1
+        version: 1.28.1
       '@workflow/core':
         specifier: 5.0.0-beta.19
         version: 5.0.0-beta.19(@opentelemetry/api@1.9.1)(ws@8.21.0)
@@ -6814,6 +6817,9 @@ packages:
 
   '@vercel/sandbox@2.2.1':
     resolution: {integrity: sha512-IqFYVEsPilXb28VbpTtrP5UkMgVAyQlp77zcLJUgCUo1yEbjJiClGS6sEqGjkAukhbLGS+T2vG3ZOgzSzUTyZg==}
+
+  '@vercel/sdk@1.28.1':
+    resolution: {integrity: sha512-QYAX0QStBQak4c9PXunGVERL68cp8r1JcVuQd+SwXGThuZkEHRMpSStnvrO1Ny2nWg9wOeRnS0GEp+md42IVfg==}
 
   '@vercel/speed-insights@2.0.0':
     resolution: {integrity: sha512-jwkNcrTeafWxjmWq4AHBaptSqZiJkYU5adLC9QBSqeim0GcqDMgN5Ievh8OG1rJ6W3A4l1oiP7qr9CWxGuzu3w==}
@@ -18922,6 +18928,10 @@ snapshots:
     transitivePeerDependencies:
       - bare-abort-controller
       - react-native-b4a
+
+  '@vercel/sdk@1.28.1':
+    dependencies:
+      zod: 4.4.3
 
   '@vercel/speed-insights@2.0.0(1bf1af76e23df0ef2782fcce60ed20a8)':
     optionalDependencies:

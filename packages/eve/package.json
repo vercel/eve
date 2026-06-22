@@ -306,6 +306,7 @@
     "@vercel/eve-catalog": "workspace:*",
     "@vercel/oidc": "3.5.0",
     "@vercel/sandbox": "catalog:",
+    "@vercel/sdk": "1.28.1",
     "@workflow/core": "5.0.0-beta.19",
     "@workflow/errors": "5.0.0-beta.8",
     "@workflow/world": "5.0.0-beta.10",
