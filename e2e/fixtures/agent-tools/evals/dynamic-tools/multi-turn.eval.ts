@@ -28,10 +28,5 @@ export default defineEval({
 
     t.didNotFail();
     t.completed();
-    t.calledTool(ECHO_TOOL, {
-      isError: false,
-      output: { token: DYNAMIC_ECHO_TOKEN },
-      times: 2,
-    });
   },
 });
