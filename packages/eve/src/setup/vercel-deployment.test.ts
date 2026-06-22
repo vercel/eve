@@ -94,13 +94,8 @@ describe("resolveVercelDeployment", () => {
   it("distinguishes not-found, operational, and invalid-response failures", async () => {
     const captures: VercelCaptureResult[] = [
       {
-        ok: false,
-        failure: {
-          code: 1,
-          stdout: JSON.stringify({ error: { code: "not_found", message: "missing" } }),
-          stderr: "",
-          message: "vercel api exited with code 1.",
-        },
+        ok: true,
+        stdout: JSON.stringify({ error: { code: "not_found", message: "missing" } }),
       },
       {
         ok: false,

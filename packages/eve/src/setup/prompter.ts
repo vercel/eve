@@ -115,11 +115,25 @@ export interface SelectCommonOptions<T extends PrompterValue> {
   notices?: readonly SelectNotice[];
 }
 
+/** A selectable action appended after local matches for a non-empty query. */
+export interface SearchAction<T extends PrompterValue> {
+  label(query: string): string;
+  value(query: string): T;
+  /**
+   * Loads replacement rows without closing a repainting picker. Plain CLI
+   * prompts still return {@link value}; the TUI keeps the search input open
+   * and shows the wait beside it.
+   */
+  load?(query: string): Promise<readonly SelectOption<T>[]>;
+}
+
 /** Single-select form: navigate, then enter picks the highlighted option. */
 export interface SingleSelectOptions<T extends PrompterValue> extends SelectCommonOptions<T> {
   multiple?: false;
   /** Pre-position the cursor on the option whose value matches. */
   initialValue?: T;
+  /** Appended after local matches for each non-empty query. Requires `search: true`. */
+  searchAction?: SearchAction<T>;
 }
 
 /** Multi-select form: space or enter toggles rows; enter on the trailing Submit row confirms the marked set. */
@@ -435,6 +449,7 @@ export function createPrompter(): Prompter {
           options: opts.options,
           multiple: opts.multiple === true,
           search: opts.search ?? false,
+          searchAction: opts.multiple === true ? undefined : opts.searchAction,
           required: opts.required ?? false,
           placeholder: opts.placeholder,
           defaultValue: opts.multiple === true ? undefined : opts.initialValue,

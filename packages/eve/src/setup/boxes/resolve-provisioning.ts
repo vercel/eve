@@ -29,6 +29,7 @@ import {
   pickProject,
   pickTeam,
   requireAuth,
+  resolveProjectByNameOrId,
   resolveTeam,
   validateTeam,
 } from "../vercel-project.js";
@@ -46,6 +47,7 @@ export interface ResolveProvisioningDeps {
   pickProject: typeof pickProject;
   pickNewProjectName: typeof pickNewProjectName;
   assertNewProjectNameAvailable: typeof assertNewProjectNameAvailable;
+  resolveProjectByNameOrId: typeof resolveProjectByNameOrId;
 }
 
 export interface ResolveProvisioningOptions {
@@ -154,6 +156,7 @@ export function resolveProvisioning(
     pickProject,
     pickNewProjectName,
     assertNewProjectNameAvailable,
+    resolveProjectByNameOrId,
   };
   const parent = (): string => resolve(options.targetDirectory ?? process.cwd());
 
@@ -212,10 +215,18 @@ export function resolveProvisioning(
       aiGatewayArgs.apiKey !== undefined
         ? { kind: "byok", apiGatewayKey: aiGatewayArgs.apiKey }
         : { kind: "inherit" };
-    const vercelProject: ResolvedVercelProject =
-      projectArgs.project !== undefined
-        ? { kind: "existing", project: projectArgs.project, team }
-        : { kind: "new", project: agentName, team };
+    let vercelProject: ResolvedVercelProject;
+    if (projectArgs.project === undefined) {
+      vercelProject = { kind: "new", project: agentName, team };
+    } else {
+      const project = await deps.resolveProjectByNameOrId(parent(), team, projectArgs.project, {
+        signal,
+      });
+      if (project === null) {
+        throw new Error(`Vercel project "${projectArgs.project}" was not found in ${team}.`);
+      }
+      vercelProject = { kind: "existing", project, team };
+    }
     if (vercelProject.kind === "new") {
       await deps.assertNewProjectNameAvailable(parent(), team, vercelProject.project, { signal });
     }
@@ -342,11 +353,7 @@ export function resolveProvisioning(
         signal,
       });
       return {
-        vercelProject: {
-          kind: pickedProject.exists ? "existing" : "new",
-          project: pickedProject.project,
-          team,
-        },
+        vercelProject: pickedProject,
         aiGateway: { kind: "inherit" },
         modelWiring: "gateway",
       };

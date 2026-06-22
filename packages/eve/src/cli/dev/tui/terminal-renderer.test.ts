@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { AgentInfoResult } from "#client/index.js";
+import { searchActionValue } from "#setup/cli/select-state.js";
 import {
   AUTHORED_ARTIFACTS_UPDATED_LOG_LINE,
   STRUCTURAL_RELOAD_LOG_LINE,
@@ -2132,6 +2133,77 @@ describe("TerminalRenderer setup select typing", () => {
     input.type("3");
     input.enter();
     await expect(answer).resolves.toEqual(["a"]);
+    renderer.setupFlow.end();
+    renderer.shutdown();
+  });
+
+  it("appends a search action after matching options", async () => {
+    const { screen, input, renderer } = makeRenderer();
+
+    renderer.setupFlow.begin("/model");
+    const answer = renderer.setupFlow.readSelect({
+      kind: "search",
+      message: "Project to link",
+      options: [{ value: "prj_veto", label: "veto" }],
+      searchAction: { label: (query) => `Search for '${query}'` },
+    });
+
+    input.type("v");
+    expect(screen.snapshot()).toContain("veto");
+    expect(screen.snapshot()).toContain("Search for 'v'");
+    input.down();
+    input.enter();
+    await expect(answer).resolves.toEqual([searchActionValue("v")]);
+
+    renderer.setupFlow.end();
+    renderer.shutdown();
+  });
+
+  it("keeps the searchable panel open while a search action loads results", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    let resolveSearch!: (options: readonly { value: string; label: string }[]) => void;
+    const search = vi.fn(
+      () =>
+        new Promise<readonly { value: string; label: string }[]>((resolve) => {
+          resolveSearch = resolve;
+        }),
+    );
+
+    renderer.setupFlow.begin("/model");
+    const answer = renderer.setupFlow.readSelect({
+      kind: "search",
+      message: "Project to link",
+      options: [{ value: "prj_recent", label: "recent-agent" }],
+      searchAction: { label: (query) => `Search for '${query}'`, load: search },
+    });
+
+    input.type("older-agent");
+    input.enter();
+
+    expect(search).toHaveBeenCalledWith("older-agent");
+    expect(screen.snapshot()).toMatch(/older-agent▏ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
+    expect(screen.snapshot()).toContain("Project to link");
+
+    resolveSearch([
+      { value: "prj_recent", label: "recent-agent" },
+      { value: "prj_older", label: "older-agent" },
+    ]);
+    await vi.waitFor(() => expect(screen.snapshot()).toContain("Search for 'older-agent'"));
+    for (const _ of "older-agent") input.backspace();
+    expect(screen.snapshot()).toContain("recent-agent");
+    expect(screen.snapshot()).toContain("older-agent");
+
+    input.type("older-agent");
+    await vi.waitFor(() => expect(screen.snapshot()).toContain("older-agent▏"));
+    input.send("\x1b");
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("recent-agent");
+      expect(screen.snapshot()).toContain("older-agent");
+    });
+    input.down();
+    input.enter();
+    await expect(answer).resolves.toEqual(["prj_older"]);
+
     renderer.setupFlow.end();
     renderer.shutdown();
   });

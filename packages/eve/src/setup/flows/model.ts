@@ -17,7 +17,10 @@ import {
   type SelectModelDeps,
   type SelectModelOptions,
 } from "../boxes/select-model.js";
-import { detectProjectIdentity, type ProjectDetectionOptions } from "../project-resolution.js";
+import {
+  detectProjectIdentity,
+  type VercelProjectOperationOptions,
+} from "../project-resolution.js";
 import type { ModelRouting } from "#shared/agent-definition.js";
 import type { Prompter, SelectNotice, SelectOption } from "../prompter.js";
 import { runInteractive } from "../runner.js";
@@ -189,7 +192,7 @@ function modelMenuRows(
  */
 export async function detectModelProviderStatus(
   appRoot: string,
-  options: ProjectDetectionOptions = {},
+  options: VercelProjectOperationOptions = {},
 ): Promise<ModelProviderStatus> {
   const [identity, gatewayKeyFile, oidcFile] = await Promise.all([
     detectProjectIdentity(appRoot, options),

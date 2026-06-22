@@ -1,4 +1,5 @@
 import type { ChannelSetupChoice, ChannelSetupChoiceOptions } from "#setup/cli/index.js";
+import type { SearchActionOption } from "#setup/cli/select-state.js";
 import type { SelectNotice } from "#setup/prompter.js";
 
 import type { SetupPanelOption } from "./setup-panel.js";
@@ -21,10 +22,15 @@ interface SetupSingleSelectRequest extends SetupSelectRequestBase {
   initialValue?: string;
 }
 
+interface SetupSearchAction extends SearchActionOption {
+  load?(query: string): Promise<readonly SetupPanelOption[]>;
+}
+
 interface SetupSearchSelectRequest extends SetupSelectRequestBase {
   kind: "search";
   initialValue?: string;
   placeholder?: string;
+  searchAction?: SetupSearchAction;
 }
 
 interface SetupMultiSelectRequest extends SetupSelectRequestBase {

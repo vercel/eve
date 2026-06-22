@@ -49,6 +49,7 @@ import type { SelectNotice } from "#setup/prompter.js";
 import {
   initialSelectState,
   reduceSelect,
+  searchActionQuery,
   selectValueAtCursor,
   type SelectState,
 } from "#setup/cli/select-state.js";
@@ -1185,15 +1186,19 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * Asks one select question inside the flow panel. Behavior comes from the
    * shared select reducer (filter, cursor, toggle, locked rows, the
    * multi-select Submit row). Resolves the chosen value keys, or `undefined`
-   * when the user cancels with Esc or Ctrl-C (cancel folds into the flow,
-   * never the TUI). One question at a time; it vanishes on resolve.
+   * when the user cancels with Ctrl-C or Esc from an unfiltered list. Esc
+   * clears an active search first. One question at a time; it vanishes on
+   * resolve.
    */
   async #readSetupSelect(opts: SetupSelectRequest): Promise<readonly string[] | undefined> {
     const flow = this.#beginSetupQuestion();
     const multiple = isMultiSelectRequest(opts);
+    const searchAction = opts.kind === "search" ? opts.searchAction : undefined;
+    let selectOptions: readonly SetupPanelOption[] = opts.options;
 
     const initial: Parameters<typeof initialSelectState>[0] = {
-      options: opts.options,
+      options: selectOptions,
+      searchAction,
       submitRow: multiple,
     };
     if ("initialValue" in opts && opts.initialValue !== undefined) {
@@ -1204,6 +1209,52 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
     let select: SelectState = initialSelectState(initial);
     let error: string | undefined;
+    let loading = false;
+    let searchVersion = 0;
+
+    const isCurrentSearch = (version: number): boolean => version === searchVersion;
+    const clearSearch = (): void => {
+      searchVersion += 1;
+      loading = false;
+      select = reduceSelect(
+        select,
+        { type: "clear" },
+        {
+          options: selectOptions,
+          searchAction,
+          submitRow: multiple,
+        },
+      );
+      this.#paint();
+    };
+    const loadSearch = async (
+      query: string,
+      load: (query: string) => Promise<readonly SetupPanelOption[]>,
+    ): Promise<void> => {
+      loading = true;
+      error = undefined;
+      const version = ++searchVersion;
+      this.#paint();
+
+      try {
+        const options = await load(query);
+        if (!isCurrentSearch(version)) return;
+
+        const filter = select.filter;
+        selectOptions = options;
+        select = {
+          ...initialSelectState({ options, searchAction, submitRow: multiple }),
+          filter,
+        };
+      } catch (reason) {
+        if (isCurrentSearch(version)) error = toErrorMessage(reason);
+      } finally {
+        if (isCurrentSearch(version)) {
+          loading = false;
+          this.#paint();
+        }
+      }
+    };
 
     let notices = opts.notices;
     if (opts.kind === "task-list") {
@@ -1220,22 +1271,34 @@ export class TerminalRenderer implements AgentTUIRenderer {
       flow.hideLinesWhileQuestion = true;
     }
     const panelState = (): SetupOptionPanelState => {
-      const state: SetupOptionPanelState = { ...opts, select };
+      const state: SetupOptionPanelState = { ...opts, options: selectOptions, select };
       if (notices !== undefined && notices.length > 0) state.notices = notices;
       if (error !== undefined) state.error = error;
+      if (loading) state.loadingFrame = this.#spinnerFrame();
       return state;
     };
     flow.question = (width) => renderSelectQuestion(panelState(), this.#theme, width);
     this.#paint();
 
     const question = this.#captureSetupQuestion<readonly string[] | undefined>((key, settle) => {
-      const base = { key, options: opts.options, select };
+      const close = (value: readonly string[] | undefined): void => {
+        searchVersion += 1;
+        settle(value);
+      };
+      if (loading) {
+        if (key.type === "ctrl-c") close(undefined);
+        else if (key.type === "escape") clearSearch();
+        else if (key.type === "ctrl-r") this.#paint();
+        return;
+      }
+
+      const base = { key, options: selectOptions, searchAction, select };
       const result = multiple
         ? reduceSetupSelectInput({ ...base, kind: opts.kind, required: opts.required })
         : reduceSetupSelectInput({ ...base, kind: opts.kind });
       switch (result.kind) {
         case "cancel":
-          settle(undefined);
+          close(undefined);
           return;
         case "repaint":
           this.#paint();
@@ -1245,9 +1308,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
           error = undefined;
           this.#paint();
           return;
-        case "submit":
-          settle(result.values);
+        case "submit": {
+          const query = searchActionQuery(result.values[0] ?? "");
+          const load = searchAction?.load;
+          if (query === undefined || load === undefined) {
+            close(result.values);
+            return;
+          }
+
+          void loadSearch(query, load);
           return;
+        }
         case "error":
           error = result.message;
           this.#paint();

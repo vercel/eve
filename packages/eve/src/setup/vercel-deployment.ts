@@ -6,6 +6,8 @@ import {
 } from "#setup/project-resolution.js";
 import { z } from "zod";
 
+import { isNotFoundApiFailure, normalizeVercelApiResult } from "./vercel-api-failure.js";
+
 const VercelDeploymentSchema = z.object({
   projectId: z.string().min(1),
   name: z.string().min(1),
@@ -14,12 +16,6 @@ const VercelDeploymentSchema = z.object({
     .object({ slug: z.string().min(1) })
     .nullable()
     .optional(),
-});
-const VercelApiErrorSchema = z.object({
-  error: z.object({
-    code: z.union([z.string(), z.number()]).optional(),
-    message: z.string().optional(),
-  }),
 });
 
 const verifiedVercelTargetBrand: unique symbol = Symbol("VerifiedVercelTarget");
@@ -66,20 +62,6 @@ export interface VercelDeploymentResolutionDeps {
 const defaultDeps: VercelDeploymentResolutionDeps = { captureVercel, readProjectLink };
 const DEPLOYMENT_LOOKUP_TIMEOUT_MS = 10_000;
 
-function isNotFoundApiFailure(failure: VercelCaptureFailure): boolean {
-  if (failure.code === 404) return true;
-
-  try {
-    const parsed = VercelApiErrorSchema.safeParse(JSON.parse(failure.stdout));
-    if (!parsed.success) return false;
-    const code = String(parsed.data.error.code ?? "").toLowerCase();
-    const message = parsed.data.error.message?.toLowerCase() ?? "";
-    return code === "404" || code === "not_found" || message.includes("not found");
-  } catch {
-    return false;
-  }
-}
-
 function environmentForDeployment(deployment: z.infer<typeof VercelDeploymentSchema>): string {
   if (deployment.customEnvironment !== null && deployment.customEnvironment !== undefined) {
     return deployment.customEnvironment.slug;
@@ -102,14 +84,22 @@ export async function resolveVercelDeployment(input: {
     (await deps.readProjectLink(input.workspaceRoot));
   if (source === undefined) return { kind: "unscoped" };
 
-  const result = await deps.captureVercel(
-    ["api", `/v13/deployments/${encodeURIComponent(input.host)}`, "--scope", source.orgId, "--raw"],
-    {
-      cwd: input.workspaceRoot,
-      nonInteractive: true,
-      signal: input.signal,
-      timeoutMs: DEPLOYMENT_LOOKUP_TIMEOUT_MS,
-    },
+  const result = normalizeVercelApiResult(
+    await deps.captureVercel(
+      [
+        "api",
+        `/v13/deployments/${encodeURIComponent(input.host)}`,
+        "--scope",
+        source.orgId,
+        "--raw",
+      ],
+      {
+        cwd: input.workspaceRoot,
+        nonInteractive: true,
+        signal: input.signal,
+        timeoutMs: DEPLOYMENT_LOOKUP_TIMEOUT_MS,
+      },
+    ),
   );
   if (!result.ok) {
     if (input.signal?.aborted === true || result.failure.errno === "ABORT_ERR") {

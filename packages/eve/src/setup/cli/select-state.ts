@@ -12,10 +12,30 @@ export interface SelectState {
   selected: Set<string>;
 }
 
+/** A virtual row appended to local matches for a non-empty type-ahead query. */
+export interface SearchActionOption {
+  label(query: string): string;
+}
+
+const SEARCH_ACTION_PREFIX = "\0search-action:";
+
+/** Encodes the query behind a virtual search action for picker transport. */
+export function searchActionValue(query: string): string {
+  return `${SEARCH_ACTION_PREFIX}${query}`;
+}
+
+/** Reads a query from a virtual search action value. */
+export function searchActionQuery(value: string): string | undefined {
+  return value.startsWith(SEARCH_ACTION_PREFIX)
+    ? value.slice(SEARCH_ACTION_PREFIX.length)
+    : undefined;
+}
+
 /** Keyboard intents the select reducer understands. */
 export type SelectEvent =
   | { type: "char"; char: string }
   | { type: "backspace" }
+  | { type: "clear" }
   | { type: "up" }
   | { type: "down" }
   | { type: "toggle" };
@@ -24,6 +44,8 @@ export type SelectEvent =
 export interface SelectContext {
   /** Selectable entries, including any disabled ones (the cursor skips them). */
   options: readonly PromptOption<string>[];
+  /** Optional virtual row appended to local matches for a non-empty query. */
+  searchAction?: SearchActionOption;
   /**
    * Appends a virtual Submit row after the visible options. The cursor can
    * land on it (index `visible.length`, see {@link submitRowIndex}) but it
@@ -47,16 +69,20 @@ export function submitRowIndex(visible: readonly PromptOption<string>[]): number
 export function filterOptions(
   options: readonly PromptOption<string>[],
   filter: string,
+  searchAction?: SearchActionOption,
 ): PromptOption<string>[] {
-  const query = filter.trim().toLowerCase();
+  const query = filter.trim();
   if (query === "") return [...options];
-  return options.filter(
+  const normalizedQuery = query.toLowerCase();
+  const matches = options.filter(
     (option) =>
-      option.label.toLowerCase().includes(query) ||
-      option.value.toLowerCase().includes(query) ||
-      (option.hint?.toLowerCase().includes(query) ?? false) ||
-      (option.focusHint?.toLowerCase().includes(query) ?? false),
+      option.label.toLowerCase().includes(normalizedQuery) ||
+      option.value.toLowerCase().includes(normalizedQuery) ||
+      (option.hint?.toLowerCase().includes(normalizedQuery) ?? false) ||
+      (option.focusHint?.toLowerCase().includes(normalizedQuery) ?? false),
   );
+  if (searchAction === undefined) return matches;
+  return [...matches, { value: searchActionValue(query), label: searchAction.label(query) }];
 }
 
 /** A row the cursor can land on: neither disabled nor locked. */
@@ -121,7 +147,10 @@ export function reduceSelect(
       return {
         ...state,
         filter,
-        cursor: firstFocusableIndex(filterOptions(context.options, filter), submitRow),
+        cursor: firstFocusableIndex(
+          filterOptions(context.options, filter, context.searchAction),
+          submitRow,
+        ),
       };
     }
     case "backspace": {
@@ -133,18 +162,35 @@ export function reduceSelect(
       return {
         ...state,
         filter,
-        cursor: firstFocusableIndex(filterOptions(context.options, filter), submitRow),
+        cursor: firstFocusableIndex(
+          filterOptions(context.options, filter, context.searchAction),
+          submitRow,
+        ),
+      };
+    }
+    case "clear": {
+      if (state.filter.length === 0) return state;
+      const filter = "";
+      return {
+        ...state,
+        filter,
+        cursor: firstFocusableIndex(
+          filterOptions(context.options, filter, context.searchAction),
+          submitRow,
+        ),
       };
     }
     case "up":
     case "down": {
-      const visible = filterOptions(context.options, state.filter);
+      const visible = filterOptions(context.options, state.filter, context.searchAction);
       const delta = event.type === "up" ? -1 : 1;
       const cursor = stepCursor(visible, state.cursor, delta, submitRow);
       return cursor === state.cursor ? state : { ...state, cursor };
     }
     case "toggle": {
-      const option = filterOptions(context.options, state.filter)[state.cursor];
+      const option = filterOptions(context.options, state.filter, context.searchAction)[
+        state.cursor
+      ];
       if (option === undefined || !isActionable(option)) return state;
       const selected = new Set(state.selected);
       if (selected.has(option.value)) selected.delete(option.value);
@@ -166,10 +212,11 @@ export function initialSelectState(input: {
   filter?: string;
   defaultValue?: string;
   initialValues?: readonly string[];
+  searchAction?: SearchActionOption;
   submitRow?: boolean;
 }): SelectState {
   const filter = input.filter ?? "";
-  const visible = filterOptions(input.options, filter);
+  const visible = filterOptions(input.options, filter, input.searchAction);
   let cursor = firstFocusableIndex(visible, input.submitRow === true);
   if (input.defaultValue !== undefined) {
     const index = visible.findIndex(

@@ -21,7 +21,12 @@ import {
   renderCursorRow,
   resolveOptionRowState,
 } from "#setup/cli/option-row.js";
-import { filterOptions, submitRowIndex, type SelectState } from "#setup/cli/select-state.js";
+import {
+  filterOptions,
+  submitRowIndex,
+  type SearchActionOption,
+  type SelectState,
+} from "#setup/cli/select-state.js";
 import type { SelectNotice } from "#setup/prompter.js";
 
 import { maskLine, visibleLine, type LineState } from "./line-editor.js";
@@ -50,7 +55,10 @@ interface SetupQuestionPanelBase {
 
 interface SetupSelectPanelBase extends SetupQuestionPanelBase {
   options: readonly SetupPanelOption[];
+  searchAction?: SearchActionOption;
   select: SelectState;
+  /** Live frame rendered beside a searchable input while it loads replacement rows. */
+  loadingFrame?: string;
 }
 
 interface SetupEditableRow {
@@ -355,10 +363,19 @@ function selectMessageRows(message: string, layout: SelectLayout, theme: Theme):
   return rows;
 }
 
-function searchFilter(filter: string, placeholder: string | undefined, theme: Theme): string {
-  if (filter.length > 0) return filter + theme.colors.dim(theme.glyph.caret);
-  if (placeholder !== undefined) return theme.colors.dim(`> ${placeholder}`);
-  return theme.colors.dim(theme.glyph.caret);
+function searchFilter(
+  filter: string,
+  placeholder: string | undefined,
+  loadingFrame: string | undefined,
+  theme: Theme,
+): string {
+  const input =
+    filter.length > 0
+      ? filter + theme.colors.dim(theme.glyph.caret)
+      : placeholder !== undefined
+        ? theme.colors.dim(`> ${placeholder}`)
+        : theme.colors.dim(theme.glyph.caret);
+  return loadingFrame === undefined ? input : `${input} ${theme.colors.yellow(loadingFrame)}`;
 }
 
 function selectViewSize(input: {
@@ -565,7 +582,7 @@ export function renderSelectQuestion(
   const c = theme.colors;
   const presentation = selectPresentation(state);
   const visible = presentation.filter
-    ? filterOptions(state.options, state.select.filter)
+    ? filterOptions(state.options, state.select.filter, state.searchAction)
     : state.options;
   const submitIndex = presentation.selection === "multiple" ? submitRowIndex(visible) : -1;
   const cursor = state.select.cursor;
@@ -574,7 +591,14 @@ export function renderSelectQuestion(
   // the panel's own spacing does the separating.
   const rows = selectMessageRows(state.message, presentation.layout, theme);
   if (presentation.filter !== undefined) {
-    rows.push(`  ${searchFilter(state.select.filter, presentation.filter.placeholder, theme)}`);
+    rows.push(
+      `  ${searchFilter(
+        state.select.filter,
+        presentation.filter.placeholder,
+        state.loadingFrame,
+        theme,
+      )}`,
+    );
   }
 
   let featuredLead = 0;

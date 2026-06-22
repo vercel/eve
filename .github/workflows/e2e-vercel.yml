@@ -86,7 +86,10 @@ jobs:
             team_args=(--team "$VERCEL_ORG_ID")
           fi
 
-          pnpm exec vc link --yes --project "$VERCEL_PROJECT_ID" "${team_args[@]}" "${token_args[@]}"
+          # Force the CLI to materialize .vercel/project.json. The job-level
+          # IDs otherwise make it treat the fixture as already linked.
+          env -u VERCEL_ORG_ID -u VERCEL_PROJECT_ID \
+            pnpm exec vc link --yes --project "$VERCEL_PROJECT_ID" "${team_args[@]}" "${token_args[@]}"
           pnpm exec vc env pull --yes --environment=preview "${token_args[@]}"
           # Sandbox templates key on VERCEL_PROJECT_ID (present at build and
           # runtime). Do not add VERCEL_TEAM_ID: it does not exist at runtime,
