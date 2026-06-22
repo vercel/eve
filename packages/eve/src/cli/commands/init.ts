@@ -469,6 +469,14 @@ export async function runInitCommand(
         command: handoff,
         cwd: result.projectPath,
         prompt: initAgentReplPrompt({ devCommand: agentDevCommand }),
+        // A `.cmd`/`.bat` shim can't take the multi-line prompt on its command
+        // line, so print it for the user to paste once the REPL opens.
+        onPromptUnseeded: (prompt) => {
+          logger.log(
+            pc.yellow(`Could not seed ${handoff} automatically. Paste this prompt into it:`),
+          );
+          logger.log(prompt);
+        },
       }))
     ) {
       throw new Error(`Coding-agent REPL exited unsuccessfully in "${result.projectPath}".`);

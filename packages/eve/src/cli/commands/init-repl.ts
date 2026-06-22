@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { constants } from "node:fs";
 import { access, stat } from "node:fs/promises";
-import { delimiter, join } from "node:path";
+import { delimiter, extname, join } from "node:path";
 
 import { createPrompter, type Prompter, type SelectOption } from "#setup/prompter.js";
 
@@ -11,14 +11,15 @@ import { hasInteractiveTerminal } from "./preconditions.js";
 // seeded with an initial prompt. Most take a bare positional argument; Gemini
 // treats a positional as a one-shot query and needs `-i`, and opencode treats a
 // positional as a project path and needs `--prompt`.
+const positional = (prompt: string) => [prompt];
 const CODING_AGENT_REPLS = [
-  { command: "claude", label: "Claude Code", promptArgs: (prompt: string) => [prompt] },
-  { command: "codex", label: "Codex", promptArgs: (prompt: string) => [prompt] },
-  { command: "cursor-agent", label: "Cursor", promptArgs: (prompt: string) => [prompt] },
-  { command: "droid", label: "Droid", promptArgs: (prompt: string) => [prompt] },
+  { command: "claude", label: "Claude Code", promptArgs: positional },
+  { command: "codex", label: "Codex", promptArgs: positional },
+  { command: "cursor-agent", label: "Cursor", promptArgs: positional },
+  { command: "droid", label: "Droid", promptArgs: positional },
   { command: "gemini", label: "Gemini CLI", promptArgs: (prompt: string) => ["-i", prompt] },
   { command: "opencode", label: "opencode", promptArgs: (prompt: string) => ["--prompt", prompt] },
-  { command: "pi", label: "Pi", promptArgs: (prompt: string) => [prompt] },
+  { command: "pi", label: "Pi", promptArgs: positional },
 ] as const;
 
 // Node exposes no PATH/PATHEXT-aware executable resolver, so availability is
@@ -65,18 +66,24 @@ async function isExecutable(filePath: string): Promise<boolean> {
   }
 }
 
-/** True when the named REPL resolves to an executable on the current `PATH`. */
-export async function isCodingAgentReplAvailable(command: CodingAgentRepl): Promise<boolean> {
+/** The full path of the named REPL's executable on `PATH`, or null if absent. */
+export async function resolveCodingAgentRepl(command: CodingAgentRepl): Promise<string | null> {
   const path = process.env.PATH;
-  if (path === undefined || path.length === 0) return false;
+  if (path === undefined || path.length === 0) return null;
 
   for (const directory of path.split(delimiter)) {
     if (directory.length === 0) continue;
     for (const executableName of executableNames(command)) {
-      if (await isExecutable(join(directory, executableName))) return true;
+      const candidate = join(directory, executableName);
+      if (await isExecutable(candidate)) return candidate;
     }
   }
-  return false;
+  return null;
+}
+
+/** True when the named REPL resolves to an executable on the current `PATH`. */
+export async function isCodingAgentReplAvailable(command: CodingAgentRepl): Promise<boolean> {
+  return (await resolveCodingAgentRepl(command)) !== null;
 }
 
 function handoffOptions(
@@ -97,9 +104,9 @@ function handoffOptions(
 }
 
 /**
- * Offers the locally installed coding-agent REPLs immediately before the
- * existing `eve dev` handoff. Non-interactive sessions and systems without
- * either executable keep the prior direct-to-dev behavior.
+ * Offers any locally installed coding-agent REPLs immediately before the
+ * existing `eve dev` handoff. Non-interactive sessions, and systems with none
+ * of them on `PATH`, keep the prior direct-to-dev behavior.
  */
 export async function selectInitHandoff(
   input: {
@@ -130,16 +137,65 @@ function codingAgentRepl(command: CodingAgentRepl): CodingAgentReplDefinition {
   return definition;
 }
 
+// Only PE executables (.exe/.com) can be launched without a shell on Windows;
+// .cmd/.bat shims must go through cmd.exe. Everything on POSIX runs directly.
+function isDirectlySpawnable(resolvedPath: string, platform: NodeJS.Platform): boolean {
+  if (platform !== "win32") return true;
+  const extension = extname(resolvedPath).toLowerCase();
+  return extension === ".exe" || extension === ".com";
+}
+
+interface ReplSpawnPlan {
+  file: string;
+  args: readonly string[];
+  shell: boolean;
+  /** False means the prompt is not in argv and the caller must surface it. */
+  seeded: boolean;
+}
+
+/**
+ * Decides how to launch a REPL from its resolved executable path. A directly
+ * spawnable executable runs without a shell, so the multi-line prompt passes
+ * through argv verbatim. A `.cmd`/`.bat` shim (or an unresolved command) can
+ * only run via cmd.exe, which cannot carry the prompt's newlines or
+ * metacharacters in an argument, so it launches the bare REPL and reports the
+ * prompt as unseeded.
+ */
+export function replSpawnPlan(
+  command: CodingAgentRepl,
+  resolvedPath: string | null,
+  prompt: string,
+  platform: NodeJS.Platform = process.platform,
+): ReplSpawnPlan {
+  if (resolvedPath !== null && isDirectlySpawnable(resolvedPath, platform)) {
+    return {
+      file: resolvedPath,
+      args: codingAgentRepl(command).promptArgs(prompt),
+      shell: false,
+      seeded: true,
+    };
+  }
+  return { file: command, args: [], shell: platform === "win32", seeded: false };
+}
+
 /** Starts the selected coding-agent REPL in the newly initialized project. */
-export function spawnCodingAgentRepl(input: {
+export async function spawnCodingAgentRepl(input: {
   command: CodingAgentRepl;
   cwd: string;
   prompt: string;
+  /** Surfaces the prompt when it could not be seeded into the REPL's argv. */
+  onPromptUnseeded?: (prompt: string) => void;
+  resolvePath?: (command: CodingAgentRepl) => Promise<string | null>;
 }): Promise<boolean> {
+  const resolvePath = input.resolvePath ?? resolveCodingAgentRepl;
+  const plan = replSpawnPlan(input.command, await resolvePath(input.command), input.prompt);
+  if (!plan.seeded) {
+    input.onPromptUnseeded?.(input.prompt);
+  }
   return new Promise((resolve) => {
-    const child = spawn(input.command, codingAgentRepl(input.command).promptArgs(input.prompt), {
+    const child = spawn(plan.file, plan.args, {
       cwd: input.cwd,
-      shell: process.platform === "win32",
+      shell: plan.shell,
       stdio: "inherit",
     });
     let settled = false;

@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { isCodingAgentReplAvailable } from "./init-repl.js";
+import { isCodingAgentReplAvailable, resolveCodingAgentRepl } from "./init-repl.js";
 
 let temporaryDirectory: string | undefined;
 
@@ -28,5 +28,9 @@ describe("isCodingAgentReplAvailable", () => {
 
     await expect(isCodingAgentReplAvailable("claude")).resolves.toBe(true);
     await expect(isCodingAgentReplAvailable("codex")).resolves.toBe(false);
+
+    // The resolver returns the full path so the spawn can run shell-free.
+    await expect(resolveCodingAgentRepl("claude")).resolves.toBe(executablePath);
+    await expect(resolveCodingAgentRepl("codex")).resolves.toBeNull();
   });
 });
