@@ -1,11 +1,11 @@
-import type * as VercelSdk from "#compiled/@vercel/sandbox/index.js";
+import type * as Vercel from "#compiled/@vercel/sandbox/index.js";
 
-export type VercelSdkCommand = VercelSdk.Command;
+export type VercelCommand = Vercel.Command;
 
-export type VercelSdkCreateOptions = NonNullable<Parameters<typeof VercelSdk.Sandbox.create>[0]>;
+export type VercelCreateOptions = NonNullable<Parameters<typeof Vercel.Sandbox.create>[0]>;
 
-export type VercelSdkGetOptions = Parameters<typeof VercelSdk.Sandbox.get>[0];
+export type VercelGetOptions = Parameters<typeof Vercel.Sandbox.get>[0];
 
-export type VercelSdkModule = typeof VercelSdk;
+export type VercelModule = typeof Vercel;
 
-export type VercelSdkSandbox = VercelSdk.Sandbox;
+export type VercelSandbox = Vercel.Sandbox;

@@ -1,11 +1,11 @@
 import type { SandboxProcess } from "#shared/sandbox-session.js";
-import type { VercelSdkCommand } from "#execution/sandbox/bindings/vercel-sdk-types.js";
+import type { VercelCommand } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 
 /**
  * Wraps a Vercel `Command` (returned from `runCommand({ detached: true })`)
  * in the AI SDK `Experimental_SandboxProcess` shape.
  */
-export function adaptVercelCommandToSandboxProcess(command: VercelSdkCommand): SandboxProcess {
+export function adaptVercelCommandToSandboxProcess(command: VercelCommand): SandboxProcess {
   const encoder = new TextEncoder();
   let stdoutController: ReadableStreamDefaultController<Uint8Array> | undefined;
   let stderrController: ReadableStreamDefaultController<Uint8Array> | undefined;

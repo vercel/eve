@@ -1,8 +1,8 @@
-import type * as VercelSdk from "#compiled/@vercel/sandbox/index.js";
+import type * as Vercel from "#compiled/@vercel/sandbox/index.js";
 
-type VercelSdkCreateOptions = NonNullable<Parameters<typeof VercelSdk.Sandbox.create>[0]>;
+type VercelCreateOptions = NonNullable<Parameters<typeof Vercel.Sandbox.create>[0]>;
 
-type VercelSdkUpdateOptions = Parameters<VercelSdk.Sandbox["update"]>[0];
+type VercelUpdateOptions = Parameters<Vercel.Sandbox["update"]>[0];
 
 type VercelSandboxInternalCreateOptions = {
   readonly [key: `__${string}`]: unknown;
@@ -38,7 +38,7 @@ type VercelSandboxAuthorCreateOptions<T> = T extends unknown
  * snapshot, force a template rebuild (e.g. by changing the sandbox
  * definition so its template key changes).
  */
-export type VercelSandboxCreateOptions = VercelSandboxAuthorCreateOptions<VercelSdkCreateOptions>;
+export type VercelSandboxCreateOptions = VercelSandboxAuthorCreateOptions<VercelCreateOptions>;
 
 /**
  * Options accepted by the Vercel backend's `bootstrap({ use })` hook.
@@ -52,11 +52,11 @@ export type VercelSandboxCreateOptions = VercelSandboxAuthorCreateOptions<Vercel
  * {@link VercelSandboxSessionUseOptions}; both are exposed as separate
  * named aliases so future divergence is non-breaking.
  */
-export type VercelSandboxBootstrapUseOptions = VercelSdkUpdateOptions;
+export type VercelSandboxBootstrapUseOptions = VercelUpdateOptions;
 
 /**
  * Options accepted by the Vercel backend's `onSession({ use })` hook.
  * Tracks the Vercel SDK's `Sandbox.update(...)` parameter; passed values are
  * applied to the live session via the SDK's `update`.
  */
-export type VercelSandboxSessionUseOptions = VercelSdkUpdateOptions;
+export type VercelSandboxSessionUseOptions = VercelUpdateOptions;
