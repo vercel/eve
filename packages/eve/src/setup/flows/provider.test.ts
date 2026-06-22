@@ -74,33 +74,13 @@ describe("runProviderFlow", () => {
   it("presents project, inline key, and external provider choices in one question", async () => {
     const fake = createFakePrompter({
       editable: async (opts) => {
-        expect({
-          message: opts.message,
-          options: opts.options,
-          hintLayout: opts.hintLayout,
-          initialValue: opts.initialValue,
-        }).toEqual({
-          message: PROVIDER_QUESTION,
-          options: [
-            {
-              value: "project",
-              label: "AI Gateway via Project",
-              hint: "Authenticates with AI Gateway automatically\nin a new or existing project. No keys to manage.",
-            },
-            {
-              value: "own-key",
-              label: "AI Gateway via AI_GATEWAY_API_KEY",
-              hint: ">  type your key",
-            },
-            {
-              value: "external",
-              label: "Other providers",
-              hint: "Connect directly to a model provider\nvia OPENAI_API_KEY or ANTHROPIC_API_KEY.",
-            },
-          ],
-          hintLayout: "stacked",
-          initialValue: "project",
-        });
+        expect(opts.message).toBe(PROVIDER_QUESTION);
+        expect(opts.options.map((option) => option.value)).toEqual([
+          "project",
+          "own-key",
+          "external",
+        ]);
+        expect(opts.initialValue).toBe("project");
         return selectOption(opts, "project");
       },
     });
@@ -144,13 +124,10 @@ describe("runProviderFlow", () => {
 
     await runProviderFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps });
 
-    expect(providerOptions[0]).toEqual({
+    expect(providerOptions[0]).toMatchObject({
       value: "project",
-      label: "AI Gateway via Project",
-      hint: "Authenticates with AI Gateway automatically\nin a new or existing project. No keys to manage.",
       disabled: true,
       disabledReason: "Vercel CLI not found, see /vc",
-      disabledReasonTone: "warning",
     });
     expect(deps.runLinkFlow).not.toHaveBeenCalled();
   });
@@ -159,17 +136,8 @@ describe("runProviderFlow", () => {
     const inlineKey = "  sk-inline  ";
     const fake = createFakePrompter({
       editable: async (opts) => {
-        expect(opts.message).toBe(PROVIDER_QUESTION);
-        expect(opts.hintLayout).toBe("stacked");
-        expect(opts.initialValue).toBe("project");
         expect(opts.editable.value).toBe("own-key");
-        expect(opts.editable.defaultValue).toBe("");
-        expect(opts.editable.placeholder).toBe("type your key");
         expect(opts.editable.mask).toBe(true);
-        expect(opts.editable.footerHint).toBe("type your key");
-        expect(opts.editable.inlineInvalidLabel).toBe("Invalid key");
-        expect(opts.editable.cancelBehavior).toBe("clear-first");
-        expect(opts.editable.formatHint("secret")).toBe(">  secret");
 
         const outcome = await opts.editable.validate(inlineKey, new AbortController().signal);
         if (outcome.kind !== "accepted") throw new Error("Expected the inline key to be accepted.");

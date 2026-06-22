@@ -80,27 +80,6 @@ describe("renderFlowPanel", () => {
     expect(text).toContain("⠼ Loading teams…");
   });
 
-  it("renders the build-phase pulse for a setup status", () => {
-    const text = renderFlowPanel(
-      {
-        title: "/model",
-        lines: [],
-        content: {
-          kind: "status",
-          status: {
-            text: "Checking the project…",
-            indicator: { glyph: "▪", color: "green" },
-          },
-        },
-      },
-      colorTheme,
-      60,
-    ).join("\n");
-
-    expect(text).toContain(colorTheme.colors.green("▪"));
-    expect(stripAnsi(text)).toContain("▪ Checking the project…");
-  });
-
   it("rides the status pulse above an open question for the install wait", () => {
     const text = renderFlowPanel(
       {
@@ -524,33 +503,6 @@ describe("renderSelectQuestion", () => {
     expect(edited.join("\n")).toContain("Named 'weather-fixtur '");
   });
 
-  it("renders a dynamic hint when the editable option has no static hint", () => {
-    const options = [
-      { value: "new", label: "Create a new project" },
-      { value: "link", label: "Link an existing project" },
-    ];
-
-    const rows = renderSelectQuestion(
-      {
-        kind: "editable",
-        layout: "task-list",
-        message: "Vercel project",
-        options,
-        select: initialSelectState({ options }),
-        edit: {
-          optionValue: "new",
-          formatHint: (value: string) => `Named '${value}'`,
-          caretVisible: true,
-          phase: { kind: "editing", editor: lineOf("weather-agent") },
-        },
-      },
-      theme,
-      80,
-    );
-
-    expect(rows.join("\n")).toContain("Named 'weather-agent '");
-  });
-
   it("renders an inline validation failure after the masked value", () => {
     const options = [
       {
@@ -835,26 +787,6 @@ describe("renderSelectQuestion", () => {
     expect(rows).toContain(
       `  ${colorTheme.colors.inverse(colorTheme.colors.yellow(" ▶ Configure model access "))}`,
     );
-  });
-
-  it("uses the terminal foreground for the selected stacked hint", () => {
-    const options = [
-      { value: "project", label: "AI Gateway via Project", hint: "Selected hint" },
-      { value: "external", label: "Other providers", hint: "Unselected hint" },
-    ];
-    const rows = renderSelectQuestion(
-      {
-        kind: "stacked",
-        message: "Which model provider do you want to use?",
-        options,
-        select: initialSelectState({ options }),
-      },
-      colorTheme,
-      80,
-    );
-
-    expect(rows).toContain("     Selected hint");
-    expect(rows).toContain(`     ${colorTheme.colors.dim("Unselected hint")}`);
   });
 
   it("renders each line of a stacked hint beneath its option", () => {

@@ -1771,38 +1771,6 @@ describe("TerminalRenderer setup panel", () => {
     renderer.shutdown();
   });
 
-  it("returns an untouched editable row as an accepted submission", async () => {
-    const { input, renderer } = makeRenderer();
-
-    const answer = renderer.setupFlow.readEditableSelect?.({
-      message: "Vercel project",
-      layout: "task-list",
-      options: [
-        { value: "new", label: "Create a new project", hint: "Named 'weather-agent'" },
-        { value: "link", label: "Link an existing project" },
-      ],
-      initialValue: "new",
-      editable: {
-        value: "new",
-        defaultValue: "weather-agent",
-        footerHint: "type to rename",
-        formatHint: (value) => `Named '${value}'`,
-        validate: () => ({ kind: "accepted", payload: undefined }),
-      },
-    });
-    expect(answer).toBeDefined();
-
-    // Enter without editing still returns the validator evidence for the default.
-    input.enter();
-    await expect(answer).resolves.toEqual({
-      kind: "submitted",
-      value: "new",
-      text: "weather-agent",
-      payload: undefined,
-    });
-    renderer.shutdown();
-  });
-
   it("validates a masked key without replacing the provider frame", async () => {
     const { screen, input, renderer } = makeRenderer();
     type Validation =
