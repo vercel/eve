@@ -43,14 +43,15 @@ export function projectReferenceFromEnvironment(
 /** Rejects Vercel's unsupported legacy link directory before link mutation. */
 export async function assertNoLegacyProjectLinkDirectory(projectRoot: string): Promise<void> {
   try {
-    if ((await stat(join(projectRoot, ".now"))).isDirectory()) {
-      throw new Error(
-        "Legacy Vercel link directory `.now` is not supported. Remove `.now` before linking this project.",
-      );
-    }
+    if (!(await stat(join(projectRoot, ".now"))).isDirectory()) return;
   } catch (error) {
-    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return;
+    throw error;
   }
+
+  throw new Error(
+    "Legacy Vercel link directory `.now` is not supported. Remove `.now` before linking this project.",
+  );
 }
 
 /** Reads a validated project reference from Vercel's link metadata directory. */
