@@ -42,7 +42,10 @@ const mockedCaptureVercel = vi.mocked(captureVercel);
 const mockedRunVercel = vi.mocked(runVercel);
 
 /** Wraps stdout as a successful capture result for the mocked `captureVercel`. */
-const captured = (stdout: string): VercelCaptureResult => ({ ok: true, stdout });
+const captured = (value: unknown): VercelCaptureResult => ({
+  ok: true,
+  stdout: typeof value === "string" ? value : JSON.stringify(value),
+});
 
 const failedCapture = (stdout: string, stderr = ""): VercelCaptureResult => ({
   ok: false,
@@ -191,6 +194,128 @@ describe("pickProject", () => {
     // Randomized copy: the team name must still anchor the step.
     expect(spinner.mock.calls[0]?.[0]).toContain("team-a");
     expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("searches the full team scope after a CLI picker search", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(
+        captured({
+          projects: [
+            { id: "prj_old", name: "older" },
+            { id: "prj_new", name: "newer" },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(captured({ projects: [{ id: "prj_found", name: "found" }] }));
+    const single = vi
+      .fn()
+      .mockImplementationOnce((options) => {
+        expect(options.search).toBe(true);
+        expect(options.placeholder).toBe("type to filter projects");
+        expect(options.options.map((option: { label: string }) => option.label)).toEqual([
+          "older",
+          "newer",
+        ]);
+        return "\0search-project:found";
+      })
+      .mockImplementationOnce((options) => {
+        expect(options.search).toBe(true);
+        expect(options.options.map((option: { label: string }) => option.label)).toEqual([
+          "older",
+          "newer",
+          "found",
+        ]);
+        return "prj_found";
+      });
+    const { prompter } = createFakePrompter({ single });
+
+    await expect(pickProject(prompter, "/repo", "team-a")).resolves.toEqual({
+      kind: "existing",
+      project: { projectId: "prj_found", projectName: "found" },
+      team: "team-a",
+    });
+    expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
+      2,
+      ["project", "ls", "--format", "json", "--scope", "team-a", "--filter", "found"],
+      { cwd: "/repo", signal: undefined, timeoutMs: 15_000 },
+    );
+  });
+
+  it("loads full-team results into a repainting picker", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(captured({ projects: [{ id: "prj_recent", name: "recent" }] }))
+      .mockResolvedValueOnce(captured({ projects: [{ id: "prj_found", name: "found" }] }));
+    const single = vi.fn(async (options) => {
+      const loaded = await options.searchAction.load("found");
+      expect(loaded.map((option: { label: string }) => option.label)).toEqual(["recent", "found"]);
+      return "prj_found";
+    });
+    const { prompter } = createFakePrompter({ single });
+
+    await expect(pickProject(prompter, "/repo", "team-a")).resolves.toEqual({
+      kind: "existing",
+      project: { projectId: "prj_found", projectName: "found" },
+      team: "team-a",
+    });
+  });
+
+  it("refreshes a recent project when a full-team search returns it", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(captured({ projects: [{ id: "prj_recent", name: "recent" }] }))
+      .mockResolvedValueOnce(
+        captured({
+          projects: [
+            { id: "prj_recent", name: "recent-updated" },
+            { id: "prj_found", name: "found" },
+          ],
+        }),
+      );
+    const single = vi
+      .fn()
+      .mockImplementationOnce(() => "\0search-project:found")
+      .mockImplementationOnce((options) => {
+        expect(options.options.map((option: { label: string }) => option.label)).toEqual([
+          "recent-updated",
+          "found",
+        ]);
+        expect(options.initialValue).toBe("prj_recent");
+        return "prj_found";
+      });
+    const { prompter } = createFakePrompter({ single });
+
+    await expect(pickProject(prompter, "/repo", "team-a")).resolves.toEqual({
+      kind: "existing",
+      project: { projectId: "prj_found", projectName: "found" },
+      team: "team-a",
+    });
+  });
+
+  it("reports an empty full-team search and reopens the picker", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(captured({ projects: [{ id: "prj_recent", name: "recent" }] }))
+      .mockResolvedValueOnce(captured({ projects: [] }));
+    const single = vi
+      .fn()
+      .mockImplementationOnce((options) => {
+        expect(options.search).toBe(true);
+        return "\0search-project:missing";
+      })
+      .mockImplementationOnce((options) => {
+        expect(options.options.map((option: { label: string }) => option.label)).toEqual([
+          "recent",
+        ]);
+        expect(options.search).toBe(true);
+        expect(options.initialValue).toBe("prj_recent");
+        return "prj_recent";
+      });
+    const { prompter } = createFakePrompter({ single });
+
+    await expect(pickProject(prompter, "/repo", "team-a")).resolves.toEqual({
+      kind: "existing",
+      project: { projectId: "prj_recent", projectName: "recent" },
+      team: "team-a",
+    });
+    expect(prompter.note).toHaveBeenCalledWith('No projects matched "missing" in team-a.');
   });
 });
 

@@ -22,7 +22,7 @@ const VercelProjectListEntrySchema = z.object({
   id: z.string(),
 });
 
-type VercelProjectListEntry = z.infer<typeof VercelProjectListEntrySchema>;
+export type VercelProjectListEntry = z.infer<typeof VercelProjectListEntrySchema>;
 
 const VercelPaginationSchema = z.object({
   next: z.number().int().nonnegative().nullable().optional(),

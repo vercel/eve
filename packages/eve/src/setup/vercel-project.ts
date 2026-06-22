@@ -24,9 +24,9 @@ import {
   parseVercelJson,
   requireVercelTeamAccess,
   searchProjects,
+  type VercelProjectListEntry,
   type VercelProjectOperationOptions,
 } from "./vercel-project-api.js";
-import { pickExistingVercelProject } from "./vercel-project-picker.js";
 
 const VercelProjectReferenceSchema = z.object({
   id: z.string().min(1),
@@ -372,6 +372,15 @@ export async function pickTeam(
   });
 }
 
+const SEARCH_PROJECT_PREFIX = "\0search-project:";
+
+function appendProjects(
+  existing: readonly VercelProjectListEntry[],
+  found: readonly VercelProjectListEntry[],
+): VercelProjectListEntry[] {
+  return [...new Map([...existing, ...found].map((project) => [project.id, project])).values()];
+}
+
 /** Picks an existing project under a team, or a name to create when none exist. */
 export async function pickProject(
   prompter: Prompter,
@@ -379,7 +388,7 @@ export async function pickProject(
   team: string,
   options: PickProjectOptions = {},
 ): Promise<ResolvedVercelProjectSpec> {
-  const projects = await withSpinner(prompter, whimsyFor("projects", team), () =>
+  let projects = await withSpinner(prompter, whimsyFor("projects", team), () =>
     listRecentProjects(projectRoot, team, options),
   );
   if (projects.length === 0) {
@@ -395,17 +404,46 @@ export async function pickProject(
     });
     return { kind: "new", project, team };
   }
-  const project = await pickExistingVercelProject({
-    prompter,
-    team,
-    projects,
-    search: (query) => searchProjects(projectRoot, team, query, { signal: options.signal }),
-  });
-  return {
-    kind: "existing",
-    project: { projectId: project.id, projectName: project.name },
-    team,
-  };
+
+  while (true) {
+    const selected = await prompter.select({
+      message: "Project to link",
+      search: true,
+      placeholder: "type to filter projects",
+      searchAction: {
+        label: (query) => `Search for '${query}'`,
+        value: (query) => `${SEARCH_PROJECT_PREFIX}${query}`,
+        load: async (query) => {
+          const found = await searchProjects(projectRoot, team, query, { signal: options.signal });
+          projects = appendProjects(projects, found);
+          return projects.map((project) => ({ value: project.id, label: project.name }));
+        },
+      },
+      options: projects.map((project) => ({ value: project.id, label: project.name })),
+      initialValue: projects[0]?.id,
+    });
+    const query = selected.startsWith(SEARCH_PROJECT_PREFIX)
+      ? selected.slice(SEARCH_PROJECT_PREFIX.length)
+      : undefined;
+    if (query === undefined) {
+      const project = projects.find((candidate) => candidate.id === selected);
+      if (project === undefined) throw new Error("Selected Vercel project is not available.");
+      return {
+        kind: "existing",
+        project: { projectId: project.id, projectName: project.name },
+        team,
+      };
+    }
+
+    const found = await withSpinner(prompter, `Searching ${team} for "${query}"...`, () =>
+      searchProjects(projectRoot, team, query, { signal: options.signal }),
+    );
+    if (found.length === 0) {
+      prompter.note(`No projects matched "${query}" in ${team}.`);
+      continue;
+    }
+    projects = appendProjects(projects, found);
+  }
 }
 
 /** Returns a project name for a new Vercel project, prompting when the default exists. */
