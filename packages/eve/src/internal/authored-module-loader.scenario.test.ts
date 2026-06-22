@@ -12,6 +12,111 @@ import { useScenarioApp } from "#internal/testing/scenario-app.js";
 describe("loadAuthoredModuleNamespace", () => {
   const scenarioApp = useScenarioApp();
 
+  it("resolves extensionless relative imports with dotted TypeScript basenames", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/tools/use_schema.ts": [
+          'import { schemaValue } from "./mock-registry.schemas";',
+          "",
+          "export const result = schemaValue;",
+          "",
+        ].join("\n"),
+        "agent/tools/mock-registry.schemas.ts": [
+          'export const schemaValue = "local-dotted-basename";',
+          "",
+        ].join("\n"),
+      },
+      name: "local-dotted-basename-import",
+    });
+
+    const moduleNamespace = await loadAuthoredModuleNamespace(
+      join(app.appRoot, "agent", "tools", "use_schema.ts"),
+    );
+
+    expect(moduleNamespace.result).toBe("local-dotted-basename");
+  });
+
+  it("resolves extensionless CommonJS requires with dotted JavaScript basenames", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/channels/api/contact-sales/webhook.ts": [
+          'import { readDottedValue } from "@repo/enrichment/dotted";',
+          "",
+          "export const result = readDottedValue();",
+          "",
+        ].join("\n"),
+      },
+      name: "dependency-dotted-basename-require",
+    });
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-dependency-dotted-basename-"));
+
+    try {
+      const packageRoot = join(workspaceRoot, "packages", "enrichment");
+      const packageNodeModules = join(packageRoot, "node_modules", "fixture-dotted-cjs-dep");
+      await mkdir(join(packageRoot, "src"), { recursive: true });
+      await mkdir(packageNodeModules, { recursive: true });
+      await writeFile(
+        join(packageRoot, "package.json"),
+        JSON.stringify(
+          {
+            exports: {
+              "./dotted": "./src/dotted.ts",
+            },
+            name: "@repo/enrichment",
+            type: "module",
+          },
+          null,
+          2,
+        ),
+      );
+      await writeFile(
+        join(packageRoot, "src", "dotted.ts"),
+        [
+          'import dottedDependency from "fixture-dotted-cjs-dep";',
+          "",
+          "export function readDottedValue() {",
+          "  return dottedDependency.value;",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      await writeFile(
+        join(packageNodeModules, "package.json"),
+        JSON.stringify(
+          {
+            main: "index.cjs",
+            name: "fixture-dotted-cjs-dep",
+          },
+          null,
+          2,
+        ),
+      );
+      await writeFile(
+        join(packageNodeModules, "index.cjs"),
+        'module.exports = require("./Reflect.getPrototypeOf");\n',
+      );
+      await writeFile(
+        join(packageNodeModules, "Reflect.getPrototypeOf.js"),
+        'module.exports = { value: "cjs-dotted-basename" };\n',
+      );
+
+      await mkdir(join(app.appRoot, "node_modules", "@repo"), { recursive: true });
+      await symlink(
+        packageRoot,
+        join(app.appRoot, "node_modules", "@repo", "enrichment"),
+        "junction",
+      );
+
+      const moduleNamespace = await loadAuthoredModuleNamespace(
+        join(app.appRoot, "agent", "channels", "api", "contact-sales", "webhook.ts"),
+      );
+
+      expect(moduleNamespace.result).toBe("cjs-dotted-basename");
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
   it("bundles symlinked workspace packages that export TypeScript source", async () => {
     const app = await scenarioApp({
       files: {
