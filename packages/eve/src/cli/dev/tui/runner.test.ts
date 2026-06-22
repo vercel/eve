@@ -2,11 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   Client,
+  ClientError,
   MessageResponse,
   type AgentInfoResult,
   type ClientSession,
   type HandleMessageStreamEvent,
 } from "#client/index.js";
+import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
+import { createDevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
 
 import {
   EveTUIRunner,
@@ -18,9 +21,19 @@ import {
   type PromptCommandOutcome,
 } from "./runner.js";
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
+import { promptCommandsFor } from "./prompt-commands.js";
+import type { RemoteAuthFlow } from "./remote-auth.js";
+import type { RemoteAuthCompletedMutation } from "./remote-auth-result.js";
 import type { BootDetection, SetupIssue } from "./setup-issues.js";
+import type { SetupFlowRenderer } from "./setup-flow.js";
 import { createFakeSetupFlowRenderer } from "./test/fake-setup-flow-renderer.js";
 import type { VercelStatusSnapshot } from "./vercel-status.js";
+
+const REMOTE_VERIFIED_TARGET = await resolveTestVercelTarget({
+  host: "vpoke.playground-vercel.tools",
+  projectId: "prj_inbound",
+  projectName: "inbound",
+});
 
 /**
  * Real `Client` whose network-touching methods are replaced by vi spies.
@@ -176,6 +189,26 @@ function fakeRenderer(overrides: Partial<AgentTUIRenderer> = {}): AgentTUIRender
     renderStream: vi.fn(async () => {}),
     readPrompt: vi.fn(async () => undefined),
     ...overrides,
+  };
+}
+
+function idleSetupFlow(): SetupFlowRenderer {
+  return {
+    begin: vi.fn(),
+    end: vi.fn(),
+    readSelect: vi.fn(async () => undefined),
+    readEditableSelect: vi.fn(async () => undefined),
+    readProviderPicker: vi.fn(async () => undefined),
+    readText: vi.fn(async () => undefined),
+    readAcknowledge: vi.fn(async () => {}),
+    readChoice: vi.fn(() => ({ choice: Promise.resolve(undefined), close: vi.fn() })),
+    setStatus: vi.fn(),
+    renderLine: vi.fn(),
+    renderOutput: vi.fn(),
+    waitForInterrupt: () => ({
+      promise: new Promise<void>(() => {}),
+      dispose: vi.fn(),
+    }),
   };
 }
 
@@ -1088,7 +1121,14 @@ describe("EveTUIRunner setup commands", () => {
       session,
       renderer,
       name: "Weather Agent",
-      promptCommandHandler: createPromptCommandHandler({}),
+      availablePromptCommands: promptCommandsFor("remote"),
+      promptCommandHandler: createPromptCommandHandler({
+        target: {
+          kind: "remote",
+          workspaceRoot: "/tmp/weather-agent",
+          serverUrl: "https://example.com/",
+        },
+      }),
     });
     await runner.run();
 
@@ -1106,13 +1146,207 @@ describe("EveTUIRunner setup commands", () => {
       renderer,
       name: "Weather Agent",
       appRoot: "/tmp/weather-agent",
-      promptCommandHandler: createPromptCommandHandler({ appRoot: "/tmp/weather-agent" }),
+      promptCommandHandler: createPromptCommandHandler({
+        target: {
+          kind: "local",
+          serverUrl: "http://localhost:3000",
+          workspaceRoot: "/tmp/weather-agent",
+        },
+      }),
     });
     await runner.run();
 
     expect(notices).toHaveLength(1);
     expect(notices[0]).toContain("not supported by this renderer");
     expect(session.send).not.toHaveBeenCalled();
+  });
+});
+
+describe("EveTUIRunner remote authentication", () => {
+  const target = {
+    kind: "remote",
+    serverUrl: "https://vpoke.playground-vercel.tools",
+    workspaceRoot: "/tmp/weather-agent",
+  } as const;
+
+  function remoteOptions() {
+    return {
+      target,
+      credentials: createDevelopmentCredentialGate(target.serverUrl),
+      resolveDeployment: async () => ({ kind: "unscoped" }) as const,
+      resolveOidcToken: async () => ({
+        kind: "resolution-failed" as const,
+        message: "No ambient token in this test.",
+      }),
+    };
+  }
+
+  function unauthorized(): ClientError {
+    return new ClientError(
+      401,
+      '{"ok":false,"code":"unauthorized","error":"Authorization is required for this route."}',
+    );
+  }
+
+  function successfulAuth(
+    completedMutations: readonly RemoteAuthCompletedMutation[] = [],
+  ): RemoteAuthFlow {
+    return vi.fn<RemoteAuthFlow>(async () => ({
+      kind: "prepared",
+      target: REMOTE_VERIFIED_TARGET,
+      resolveToken: async () => "fresh-token",
+      completedMutations,
+    }));
+  }
+
+  async function runRemoteAuth(input: {
+    client: Client;
+    flow: RemoteAuthFlow;
+    renderer?: Partial<AgentTUIRenderer>;
+  }): Promise<void> {
+    await new EveTUIRunner({
+      session: input.client.session(),
+      client: input.client,
+      renderer: fakeRenderer({ setupFlow: idleSetupFlow(), ...input.renderer }),
+      serverUrl: target.serverUrl,
+      availablePromptCommands: promptCommandsFor("remote"),
+      promptCommandHandler: createPromptCommandHandler({
+        target,
+        remoteAuthFlow: input.flow,
+      }),
+      remote: remoteOptions(),
+    }).run();
+  }
+
+  it("runs /vc:auth once at startup after the exact remote auth challenge", async () => {
+    const client = stubClient();
+    vi.spyOn(client, "info")
+      .mockRejectedValueOnce(unauthorized())
+      .mockResolvedValueOnce(AGENT_INFO);
+    const commandInvocations: Array<{ text: string; status: "failed" | undefined }> = [];
+    const flow = successfulAuth();
+
+    await runRemoteAuth({
+      client,
+      flow,
+      renderer: {
+        renderCommandInvocation: (text, status) => commandInvocations.push({ text, status }),
+      },
+    });
+
+    expect(flow).toHaveBeenCalledOnce();
+    expect(commandInvocations).toEqual([{ text: "/vc:auth", status: undefined }]);
+  });
+
+  it("requests Trusted Sources repair for an environment mismatch", async () => {
+    const client = stubClient();
+    const mismatch = new ClientError(
+      403,
+      "The caller environment is not permitted.\n\n" +
+        "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH\n\niad1::request-id",
+    );
+    vi.spyOn(client, "info").mockRejectedValueOnce(mismatch).mockResolvedValueOnce(AGENT_INFO);
+    const flow = successfulAuth();
+
+    await runRemoteAuth({ client, flow });
+
+    expect(flow).toHaveBeenCalledWith(expect.objectContaining({ configureTrustedSources: true }));
+  });
+
+  it("renders a failed automatic /vc:auth as one command result without the request id", async () => {
+    const client = stubClient();
+    vi.spyOn(client, "info")
+      .mockRejectedValueOnce(unauthorized())
+      .mockRejectedValueOnce(
+        new ClientError(
+          403,
+          "Your trusted sources OIDC token's environment is not permitted to access this deployment\n\n" +
+            "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH\n\niad1::zgc5p-1781730251155-85842c28901b",
+        ),
+      );
+    const commandInvocations: Array<{ text: string; status: "failed" | undefined }> = [];
+    const commandResults: string[] = [];
+    const flow = successfulAuth([
+      { kind: "trusted-sources-updated", targetProjectName: "remote-agent" },
+    ]);
+
+    await runRemoteAuth({
+      client,
+      flow,
+      renderer: {
+        renderCommandInvocation: (text, status) => commandInvocations.push({ text, status }),
+        renderCommandResult: (message) => commandResults.push(message),
+      },
+    });
+
+    expect(commandInvocations).toEqual([{ text: "/vc:auth", status: "failed" }]);
+    expect(commandResults).toEqual([
+      "Authentication was refreshed, but vpoke.playground-vercel.tools is unavailable: " +
+        "Your trusted sources OIDC token's environment is not permitted to access this deployment.\n\n" +
+        "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH Completed before the failure: updated Trusted Sources for remote-agent.",
+    ]);
+  });
+
+  it("does not start authentication for an ordinary remote HTTP failure", async () => {
+    const client = stubClient();
+    vi.spyOn(client, "info").mockRejectedValue(new ClientError(503, "Unavailable"));
+    const flow = successfulAuth();
+
+    await runRemoteAuth({ client, flow });
+
+    expect(flow).not.toHaveBeenCalled();
+  });
+
+  it("demotes a ready remote after turn dispatch fails", async () => {
+    const client = stubClient();
+    vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
+    const session = client.session();
+    vi.spyOn(session, "send").mockRejectedValue(new Error("socket down"));
+    const statuses: string[] = [];
+    const readPrompt = vi.fn().mockResolvedValueOnce("hello").mockResolvedValueOnce(undefined);
+
+    await new EveTUIRunner({
+      session,
+      client,
+      renderer: fakeRenderer({
+        readPrompt,
+        setRemoteConnectionStatus: (snapshot) => statuses.push(snapshot.connection.state),
+      }),
+      serverUrl: target.serverUrl,
+      remote: remoteOptions(),
+    }).run();
+
+    expect(statuses.at(-1)).toBe("unavailable");
+  });
+
+  it("keeps a ready remote connected after an agent session failure", async () => {
+    const client = stubClient();
+    vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
+    const session = sessionYielding([
+      {
+        type: "session.failed",
+        data: { code: "HookConflictError", message: "HookConflictError: token in use" },
+      },
+    ]);
+    const statuses: string[] = [];
+    const readPrompt = vi.fn().mockResolvedValueOnce("hello").mockResolvedValueOnce(undefined);
+
+    await new EveTUIRunner({
+      session,
+      client,
+      renderer: fakeRenderer({
+        readPrompt,
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events as AsyncIterable<unknown>) void event;
+        }),
+        setRemoteConnectionStatus: (snapshot) => statuses.push(snapshot.connection.state),
+      }),
+      serverUrl: target.serverUrl,
+      remote: remoteOptions(),
+    }).run();
+
+    expect(statuses.at(-1)).toBe("ready");
+    expect(statuses).not.toContain("unavailable");
   });
 });
 
@@ -1690,7 +1924,13 @@ describe("EveTUIRunner command outcome rendering", () => {
       session,
       renderer,
       name: "Weather Agent",
-      promptCommandHandler: createPromptCommandHandler({}),
+      promptCommandHandler: createPromptCommandHandler({
+        target: {
+          kind: "remote",
+          workspaceRoot: "/tmp/weather-agent",
+          serverUrl: "https://example.com/",
+        },
+      }),
     });
     await runner.run();
 

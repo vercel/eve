@@ -14,6 +14,7 @@ export type RemoteAuthChallenge =
   | { readonly kind: "vercel-deployment-protection" };
 
 interface RemoteRequestFailure {
+  readonly code?: string;
   readonly message: string;
 }
 

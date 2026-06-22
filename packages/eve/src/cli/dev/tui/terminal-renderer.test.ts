@@ -9,6 +9,7 @@ import {
 } from "#internal/nitro/host/dev-watcher-log.js";
 
 import type { AgentTUIStreamEvent, AgentTUIStreamResult } from "./runner.js";
+import { promptCommandsFor } from "./prompt-commands.js";
 import { TerminalRenderer } from "./terminal-renderer.js";
 import { MockScreen, MockUserInput } from "./test/mock-terminal.js";
 
@@ -689,6 +690,22 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     expect(screen.snapshot()).toContain("\u23bf  /model cancelled.");
+  });
+
+  it("marks a failed automatic command and keeps its multiline outcome in one result block", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandInvocation("/vc:auth", "failed");
+    renderer.renderCommandResult(
+      "Authentication was refreshed, but example.vercel.app is unavailable: Access denied.\n\n" +
+        "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH",
+    );
+    renderer.shutdown();
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("▌ ⨯ /vc:auth");
+    expect(snapshot).toContain("⎿  Authentication was refreshed");
+    expect(snapshot).toContain("TRUSTED_SOURCES_ENVIRONMENT_MISMATCH");
+    expect(snapshot).not.toContain("· Authentication was refreshed");
   });
 
   it("shows a bare prompt with no placeholder and accepts typing", async () => {
@@ -2548,6 +2565,48 @@ describe("TerminalRenderer command typeahead", () => {
     await answer;
     renderer.shutdown();
   });
+
+  it("uses the target-specific command list for typeahead", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      availablePromptCommands: promptCommandsFor("remote"),
+    });
+
+    const prompt = renderer.readPrompt();
+    input.type("/");
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("Authenticate this remote via Vercel OIDC");
+    expect(snapshot).not.toContain("Configure the agent's model and provider");
+    input.enter();
+    await prompt;
+    renderer.shutdown();
+  });
+
+  it("echoes a known unavailable command as a command, not chat", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      availablePromptCommands: promptCommandsFor("remote"),
+    });
+
+    const prompt = renderer.readPrompt();
+    input.type("/model");
+    input.enter();
+
+    await expect(prompt).resolves.toBe("/model");
+    renderer.shutdown();
+    expect(screen.snapshot()).toContain("▌ /model");
+    expect(screen.snapshot()).not.toContain("❯ /model");
+  });
 });
 
 describe("TerminalRenderer status line", () => {
@@ -2629,6 +2688,49 @@ describe("TerminalRenderer status line", () => {
 
     renderer.setupFlow.end({ preserveDiagnostics: false });
     expect(screen.snapshot()).toContain("AI Gateway (my-agent)");
+    renderer.shutdown();
+  });
+
+  it("lays out the remote authentication panel and inset status line", async () => {
+    const { screen, input, renderer } = makeRenderer(100, 40);
+    renderer.renderNotice("anchor");
+    renderer.setRemoteConnectionStatus({
+      target: {
+        kind: "remote",
+        serverUrl: "https://vpoke.playground-vercel.tools",
+        workspaceRoot: "/tmp/weather-agent",
+      },
+      connection: {
+        state: "authenticating",
+        challenge: { kind: "eve-oidc" },
+      },
+    });
+
+    renderer.setupFlow.begin("Authenticate via Vercel OIDC");
+    const answer = renderer.setupFlow.readSelect({
+      kind: "search",
+      message: "Select your team",
+      placeholder: "type to search teams",
+      options: [
+        { value: "vercel", label: "Vercel" },
+        { value: "labs", label: "Vercel Labs" },
+      ],
+    });
+
+    const lines = screen.snapshot().split("\n");
+    const title = lines.indexOf("   Authenticate via Vercel OIDC");
+    expect(lines.slice(title, title + 3)).toEqual([
+      "   Authenticate via Vercel OIDC",
+      "",
+      "   Select your team",
+    ]);
+    const status = lines.indexOf("   ↗ vpoke.playground-vercel.tools  · Authenticating via OIDC…");
+    expect(status).toBeGreaterThan(title);
+    expect(lines[status - 1]).toBe("");
+
+    input.send("\x1b");
+    await expect(answer).resolves.toBeUndefined();
+    renderer.setupFlow.end({ preserveDiagnostics: false });
     renderer.shutdown();
   });
 

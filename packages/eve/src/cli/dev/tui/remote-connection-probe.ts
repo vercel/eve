@@ -1,5 +1,9 @@
 import { ClientError, type Client } from "#client/index.js";
-import { isVercelAuthChallenge } from "#services/dev-client/vercel-auth-error.js";
+import {
+  formatVercelTrustedSourcesFailure,
+  isVercelAuthChallenge,
+  vercelTrustedSourcesErrorCode,
+} from "#services/dev-client/vercel-auth-error.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { isObject } from "#shared/guards.js";
 
@@ -9,6 +13,8 @@ export type RemoteProbeResult = Extract<
   RemoteConnectionState,
   { state: "ready" | "auth-required" | "unavailable" }
 >;
+
+export type RemoteProbePhase = "connection-check" | "authentication-verification";
 
 function isEveOidcChallenge(error: unknown): boolean {
   if (!(error instanceof ClientError) || error.status !== 401) return false;
@@ -26,7 +32,7 @@ function isEveOidcChallenge(error: unknown): boolean {
   }
 }
 
-export function classifyRemoteError(error: unknown): RemoteProbeResult {
+export function classifyRemoteError(error: unknown, phase: RemoteProbePhase): RemoteProbeResult {
   if (isVercelAuthChallenge(error)) {
     return {
       state: "auth-required",
@@ -40,7 +46,22 @@ export function classifyRemoteError(error: unknown): RemoteProbeResult {
     };
   }
   if (error instanceof ClientError) {
-    return { state: "unavailable", failure: { message: error.message } };
+    const code = vercelTrustedSourcesErrorCode(error.message);
+    if (
+      phase === "connection-check" &&
+      error.status === 403 &&
+      code === "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH"
+    ) {
+      return {
+        state: "auth-required",
+        challenge: { kind: "vercel-deployment-protection" },
+      };
+    }
+    const failure = { message: formatVercelTrustedSourcesFailure(error.message) };
+    return {
+      state: "unavailable",
+      failure: code === undefined ? failure : { ...failure, code },
+    };
   }
   return {
     state: "unavailable",
@@ -50,10 +71,11 @@ export function classifyRemoteError(error: unknown): RemoteProbeResult {
 
 export async function probeRemoteInfo(input: {
   readonly client: Client;
+  readonly phase: RemoteProbePhase;
 }): Promise<RemoteProbeResult> {
   try {
     return { state: "ready", info: await input.client.info() };
   } catch (error) {
-    return classifyRemoteError(error);
+    return classifyRemoteError(error, input.phase);
   }
 }

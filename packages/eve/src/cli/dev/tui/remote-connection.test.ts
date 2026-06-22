@@ -83,6 +83,11 @@ const VERCEL_SSO_CHALLENGE = `
 <a href="https://vercel.com/sso-api?url=https%3A%2F%2Fvpoke.playground-vercel.tools">
   Vercel Authentication
 </a>`;
+const TRUSTED_SOURCES_MISMATCH = [
+  "The caller environment is not permitted.",
+  "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH",
+].join("\n\n");
+
 function eveUnauthorized(error = "Authorization is required for this route."): ClientError {
   return new ClientError(401, JSON.stringify({ code: "unauthorized", error, ok: false }));
 }
@@ -155,6 +160,22 @@ describe("createRemoteConnectionController", () => {
       expected: {
         state: "auth-required",
         challenge: { kind: "vercel-deployment-protection" },
+      },
+    },
+    {
+      name: "a 403 Trusted Sources environment mismatch",
+      error: new ClientError(403, TRUSTED_SOURCES_MISMATCH),
+      expected: {
+        state: "auth-required",
+        challenge: { kind: "vercel-deployment-protection" },
+      },
+    },
+    {
+      name: "the same Trusted Sources code on a non-403 response",
+      error: new ClientError(500, TRUSTED_SOURCES_MISMATCH),
+      expected: {
+        state: "unavailable",
+        failure: { code: "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH" },
       },
     },
     {
@@ -252,7 +273,7 @@ describe("createRemoteConnectionController", () => {
       kind: "prepared",
       target: VERIFIED_TARGET,
       resolveToken: async () => "rejected-token",
-      completedMutations: [{ kind: "vercel-login" }],
+      completedMutations: [{ kind: "trusted-sources-updated", targetProjectName: "remote-agent" }],
     }));
     const harness = createHarness({ info });
 
@@ -261,7 +282,7 @@ describe("createRemoteConnectionController", () => {
       kind: "failed",
       message:
         "The selected Vercel project did not authorize vpoke.playground-vercel.tools. " +
-        "Completed before the failure: logged in to Vercel.",
+        "Completed before the failure: updated Trusted Sources for remote-agent.",
     });
     expect(attempt).toHaveBeenCalledOnce();
     expect(info).toHaveBeenCalledTimes(2);

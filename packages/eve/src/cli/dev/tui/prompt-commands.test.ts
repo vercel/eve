@@ -4,6 +4,7 @@ import {
   formatPromptCommandHelp,
   isPromptControlCommand,
   parsePromptCommand,
+  promptCommandsFor,
   PROMPT_COMMANDS,
 } from "./prompt-commands.js";
 
@@ -44,6 +45,11 @@ describe("parsePromptCommand", () => {
       name: "login",
       argument: "",
     });
+    expect(parsePromptCommand("/vc:auth")).toEqual({
+      type: "extension",
+      name: "vc:auth",
+      argument: "",
+    });
     expect(parsePromptCommand("/channels")).toEqual({
       type: "extension",
       name: "channels",
@@ -77,11 +83,50 @@ describe("parsePromptCommand", () => {
   it("rejects near-misses and ordinary prompts", () => {
     expect(parsePromptCommand("/models")).toBeNull();
     expect(parsePromptCommand("/vercel")).toBeNull();
+    expect(parsePromptCommand("/vc:install")).toBeNull();
     expect(parsePromptCommand("/channels extra")).toBeNull();
     expect(parsePromptCommand("tell me about /channels")).toBeNull();
     expect(parsePromptCommand("/")).toBeNull();
     expect(parsePromptCommand("")).toBeNull();
     expect(parsePromptCommand("hello")).toBeNull();
+  });
+});
+
+describe("promptCommandsFor", () => {
+  it("exposes project commands only for local sessions", () => {
+    const names = promptCommandsFor("local").map((command) => command.name);
+    expect(names).toContain("model");
+    expect(names).toContain("channels");
+    expect(names).toContain("deploy");
+    expect(names).toContain("vc");
+    expect(names).toContain("login");
+    expect(names).not.toContain("vc:auth");
+  });
+
+  it("exposes remote OIDC auth only for remote sessions", () => {
+    const names = promptCommandsFor("remote").map((command) => command.name);
+    expect(names).not.toContain("vc");
+    expect(names).not.toContain("login");
+    expect(names).toContain("vc:auth");
+    expect(names).not.toContain("model");
+    expect(names).not.toContain("channels");
+    expect(names).not.toContain("deploy");
+  });
+
+  it("filters discovery without weakening global recognition", () => {
+    const remote = promptCommandsFor("remote");
+    expect(parsePromptCommand("/vc:auth")).toEqual({
+      type: "extension",
+      name: "vc:auth",
+      argument: "",
+    });
+    expect(parsePromptCommand("/model")).toEqual({
+      type: "extension",
+      name: "model",
+      argument: "",
+    });
+    expect(formatPromptCommandHelp(remote)).toContain("/vc:auth");
+    expect(formatPromptCommandHelp(remote)).not.toContain("/model");
   });
 });
 

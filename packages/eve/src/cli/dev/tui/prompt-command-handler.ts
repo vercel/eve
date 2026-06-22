@@ -6,19 +6,23 @@ import type {
   PromptCommandHandlerContext,
   PromptCommandOutcome,
 } from "./runner.js";
-import type { PromptCommand } from "./prompt-commands.js";
+import { isPromptCommandAvailableFor, type PromptCommand } from "./prompt-commands.js";
+import type { RemoteAuthFlow } from "./remote-auth.js";
 import type { TuiSetupCommandInput, TuiSetupFlows } from "./setup-commands.js";
+import type { DevelopmentTuiTarget } from "./target.js";
 
 type ExtensionCommand = Extract<PromptCommand, { type: "extension" }>;
 
 export interface PromptCommandHandlerOptions {
-  readonly appRoot?: string;
+  readonly target: DevelopmentTuiTarget;
   /** Test seam; defaults to the model flow's shared source-change apply. */
   readonly applyModel?: (input: { appRoot: string; slug: string }) => Promise<ApplyModelOutcome>;
   /** Test seam; defaults to the model flow's external-provider refusal check. */
   readonly modelChangeRefusal?: (appRoot: string) => Promise<string | null>;
   /** Test seam; forwarded to runTuiSetupCommand's injectable flows. */
   readonly flows?: Partial<TuiSetupFlows>;
+  /** Test seam for remote authentication. */
+  readonly remoteAuthFlow?: RemoteAuthFlow;
 }
 
 export function createPromptCommandHandler(
@@ -29,8 +33,12 @@ export function createPromptCommandHandler(
       command: ExtensionCommand,
       context: PromptCommandHandlerContext,
     ): Promise<PromptCommandOutcome> {
-      const appRoot = options.appRoot;
-      if (appRoot === undefined) {
+      const { target } = options;
+      // Local-only commands invoked on a remote target are rejected here; the
+      // allowlist is derived from each command's `targets` so dispatch can't
+      // drift from discovery. (vc:auth's remote-only direction is enforced in
+      // its own branch below.)
+      if (target.kind === "remote" && !isPromptCommandAvailableFor(command.name, "remote")) {
         return {
           message: `/${command.name} needs eve dev running the local server (it is not available with --url).`,
         };
@@ -39,6 +47,13 @@ export function createPromptCommandHandler(
       // `/model <slug>` applies directly; only the bare command opens the
       // configure menu flow below.
       if (command.name === "model" && command.argument.length > 0) {
+        if (target.kind !== "local") {
+          return {
+            message:
+              "/model needs eve dev running the local server (it is not available with --url).",
+          };
+        }
+        const appRoot = target.workspaceRoot;
         // Package-loading failures are command outcomes at this CLI boundary.
         try {
           const {
@@ -69,6 +84,27 @@ export function createPromptCommandHandler(
         return { message: `/${command.name} is not supported by this renderer.` };
       }
 
+      if (command.name === "vc:auth") {
+        if (target.kind !== "remote" || context.remoteConnection === undefined) {
+          return { message: "/vc:auth is not available in this session." };
+        }
+        let runRemoteAuthCommand: (typeof import("./remote-auth-command.js"))["runRemoteAuthCommand"];
+        try {
+          ({ runRemoteAuthCommand } = await import("./remote-auth-command.js"));
+        } catch (error) {
+          return { message: `/vc:auth failed: ${toErrorMessage(error)}` };
+        }
+        const message = await runRemoteAuthCommand({
+          connection: context.remoteConnection,
+          flow: options.remoteAuthFlow,
+          renderer: flow,
+        });
+        return { message };
+      }
+      if (target.kind !== "local") {
+        return { message: `/${command.name} is not available in this session.` };
+      }
+
       let setupCommands: typeof import("./setup-commands.js");
       try {
         setupCommands = await import("./setup-commands.js");
@@ -82,7 +118,7 @@ export function createPromptCommandHandler(
       try {
         const commandInput: TuiSetupCommandInput = {
           command: command.name,
-          appRoot,
+          appRoot: target.workspaceRoot,
           renderer: flow,
         };
         if (context.initialModelStep !== undefined) {

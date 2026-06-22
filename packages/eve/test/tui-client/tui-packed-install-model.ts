@@ -45,7 +45,9 @@ interface PackedTuiHarness {
     send(sequence: string): void;
     ctrlC(): void;
   };
-  createPromptCommandHandler: (options: { appRoot?: string }) => unknown;
+  createPromptCommandHandler: (options: {
+    target: { kind: "local"; serverUrl: string; workspaceRoot: string };
+  }) => unknown;
 }
 
 void (async () => {
@@ -105,7 +107,13 @@ void (async () => {
       userInput: input,
       name: "Packed install model command",
       appRoot: consumerRoot,
-      promptCommandHandler: createPromptCommandHandler({ appRoot: consumerRoot }),
+      promptCommandHandler: createPromptCommandHandler({
+        target: {
+          kind: "local",
+          serverUrl: "http://127.0.0.1:0",
+          workspaceRoot: consumerRoot,
+        },
+      }),
       bootDetections: [
         {
           id: "test-unconfigured-provider",

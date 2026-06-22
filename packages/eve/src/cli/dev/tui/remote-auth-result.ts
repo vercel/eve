@@ -1,6 +1,11 @@
 import type { VerifiedVercelTarget } from "#setup/vercel-deployment.js";
 
-export type RemoteAuthCompletedMutation = { readonly kind: "vercel-login" };
+export type RemoteAuthCompletedMutation =
+  | { readonly kind: "vercel-login" }
+  | {
+      readonly kind: "trusted-sources-updated";
+      readonly targetProjectName: string;
+    };
 
 export type RemoteAuthPreparation =
   | {
@@ -27,6 +32,8 @@ export function describeRemoteAuthCompletedMutations(
     switch (mutation.kind) {
       case "vercel-login":
         return "logged in to Vercel";
+      case "trusted-sources-updated":
+        return `updated Trusted Sources for ${mutation.targetProjectName}`;
     }
   });
 }
@@ -40,4 +47,19 @@ export function appendRemoteAuthMutationSummary(
   return completed.length === 0
     ? message
     : `${message} Completed before the failure: ${completed.join(", ")}.`;
+}
+
+/** Formats a Vercel Deployment Protection challenge for the remote TUI. */
+export function formatRemoteAuthChallengeMessage(serverUrl: string): string {
+  return [
+    `Vercel Deployment Protection blocked the request to ${serverUrl}.`,
+    "",
+    "To access the deployment from `eve dev`, do one of:",
+    "  • Run `/vc:auth` to select a Vercel project and refresh its OIDC token.",
+    "  • Set VERCEL_AUTOMATION_BYPASS_SECRET to a Protection Bypass for",
+    "    Automation token (Project Settings → Deployment Protection).",
+    "  • Disable Deployment Protection on the target deployment.",
+    "",
+    "Docs: https://vercel.com/docs/deployment-protection",
+  ].join("\n");
 }
