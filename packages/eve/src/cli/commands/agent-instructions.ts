@@ -1,26 +1,48 @@
 import { readFileSync } from "node:fs";
 
-function readTemplate(fileName: string): string {
-  return readFileSync(new URL(fileName, import.meta.url), "utf8").trim();
-}
+// The two coding-agent prompts are one onboarding flow in two phases, composed
+// from the section files in `agent-prompt/`. The setup guide runs before
+// anything is scaffolded (a bare `eve init`); the handoff runs once a project
+// exists (after `eve init <name>`, or when seeding a REPL). They share the
+// `collect-intent`, `vercel-connect`, and `build-and-verify` sections verbatim,
+// so guidance authored once reaches both. `{{devCommand}}` is rendered per
+// caller; `{{workingDirectory}}` is post-scaffold only and lives in the handoff
+// intro. The shared sections use paths relative to the project directory so the
+// setup guide, which has no working directory yet, can reuse them unchanged.
+// Exported so `agent-instructions.test.ts` can assert these lists name exactly
+// the files in `agent-prompt/`, which is what keeps them from drifting.
+/** Ordered `agent-prompt/` sections composed into the pre-scaffold setup guide. */
+export const SETUP_SECTIONS = [
+  "intro-setup.md",
+  "collect-intent.md",
+  "vercel-connect.md",
+  "scaffold.md",
+  "build-and-verify.md",
+] as const;
 
-// The two coding-agent prompts are one onboarding flow in two phases.
-// `init-agent-instructions.md` runs before anything is scaffolded, on a bare
-// `eve init`. `init-agent-handoff.md` runs once a project exists, after
-// `eve init <name>` or when seeding a REPL. Both share the same headings
-// (## Collect intent, ## Build it out, then verify) and the `{{devCommand}}`
-// placeholder, and both render through this one path so it stays identical.
-// `{{workingDirectory}}` only exists after scaffolding, so it is optional.
-function renderAgentPrompt(
-  templateFile: string,
+/** Ordered `agent-prompt/` sections composed into the post-scaffold handoff. */
+export const HANDOFF_SECTIONS = [
+  "intro-handoff.md",
+  "collect-intent.md",
+  "vercel-connect.md",
+  "build-and-verify.md",
+] as const;
+
+function compose(
+  sections: readonly string[],
   options: { devCommand: string; workingDirectory?: string },
 ): string {
-  let prompt = readTemplate(templateFile).replaceAll("{{devCommand}}", () => options.devCommand);
+  const prompt = sections
+    .map((section) =>
+      readFileSync(new URL(`./agent-prompt/${section}`, import.meta.url), "utf8").trim(),
+    )
+    .join("\n\n")
+    .replaceAll("{{devCommand}}", () => options.devCommand);
   const { workingDirectory } = options;
-  if (workingDirectory !== undefined) {
-    prompt = prompt.replaceAll("{{workingDirectory}}", () => workingDirectory);
+  if (workingDirectory === undefined) {
+    return prompt;
   }
-  return prompt;
+  return prompt.replaceAll("{{workingDirectory}}", () => workingDirectory);
 }
 
 /**
@@ -29,12 +51,12 @@ function renderAgentPrompt(
  * `npx eve dev` rather than a launcher-specific command.
  */
 export function initAgentInstructions(): string {
-  return renderAgentPrompt("./init-agent-instructions.md", { devCommand: "npx eve dev" });
+  return compose(SETUP_SECTIONS, { devCommand: "npx eve dev" });
 }
 
 /** The post-scaffold handoff printed after a coding agent runs `eve init <name>`. */
 export function initAgentDevHandoff(options: { projectPath: string; devCommand: string }): string {
-  return renderAgentPrompt("./init-agent-handoff.md", {
+  return compose(HANDOFF_SECTIONS, {
     devCommand: options.devCommand,
     workingDirectory: options.projectPath,
   });
@@ -42,7 +64,7 @@ export function initAgentDevHandoff(options: { projectPath: string; devCommand: 
 
 /** The initial prompt for a coding-agent REPL opened inside the scaffolded project. */
 export function initAgentReplPrompt(options: { devCommand: string }): string {
-  return renderAgentPrompt("./init-agent-handoff.md", {
+  return compose(HANDOFF_SECTIONS, {
     devCommand: options.devCommand,
     workingDirectory: ".",
   });

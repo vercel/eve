@@ -1,9 +1,13 @@
+import { readdirSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import {
+  HANDOFF_SECTIONS,
   initAgentDevHandoff,
   initAgentInstructions,
   initAgentReplPrompt,
+  SETUP_SECTIONS,
 } from "./agent-instructions.js";
 
 describe("initAgentInstructions", () => {
@@ -43,23 +47,32 @@ describe("initAgentInstructions", () => {
 });
 
 describe("initAgentDevHandoff", () => {
-  it("guides the user and distinguishes the agent REPL from headless verification", () => {
+  it("composes the shared sections and keeps verification headless", () => {
     const handoff = initAgentDevHandoff({
       projectPath: "/tmp/triage-bot",
       devCommand: "npm exec -- eve dev",
     });
 
-    expect(handoff).toContain("/tmp/triage-bot/node_modules/eve/docs/");
-    expect(handoff).toContain("/tmp/triage-bot/agent/instructions.md");
+    // The intro names the scaffolded project; the shared sections then reference
+    // paths relative to it rather than interpolating the working directory.
+    expect(handoff).toContain("The project at `/tmp/triage-bot` is already scaffolded");
+    expect(handoff).toContain("node_modules/eve/docs/");
+    expect(handoff).toContain("agent/instructions.md");
+    expect(handoff).not.toContain("/tmp/triage-bot/");
+
+    // Shared guidance the leaner handoff used to omit now reaches it.
     expect(handoff).toContain("What should the agent do?");
     expect(handoff).toContain("Vercel Connect");
+    expect(handoff).toContain("@vercel/connect/eve");
+    expect(handoff).toContain("defineTool");
+
+    // The REPL-versus-headless distinction survives the merge.
     expect(handoff).toContain("HMR development server");
     expect(handoff).toContain("does not start or control this coding-agent session");
     expect(handoff).toMatch(/controllable\s+background process/);
-    expect(handoff).toContain("cd /tmp/triage-bot");
     expect(handoff).toContain("npm exec -- eve dev --no-ui");
-    expect(handoff).toContain("Give the user the interactive command");
-    expect(handoff).not.toContain("{{devCommand}}");
+    expect(handoff).toMatch(/give them the interactive\s+command/);
+    expect(handoff).not.toContain("{{");
   });
 });
 
@@ -71,5 +84,19 @@ describe("initAgentReplPrompt", () => {
     expect(prompt).toContain("What should the agent do?");
     expect(prompt).toContain("pnpm exec eve dev --no-ui");
     expect(prompt).not.toContain("{{");
+  });
+});
+
+describe("agent-prompt sections", () => {
+  // Ties the composed section lists to the files on disk: renaming, removing, or
+  // adding a section file fails here unless every prompt that should use it is
+  // updated, so the lists cannot silently drift away from `agent-prompt/`.
+  it("references exactly the section files present in agent-prompt/", () => {
+    const onDisk = readdirSync(new URL("./agent-prompt/", import.meta.url))
+      .filter((name) => name.endsWith(".md"))
+      .sort();
+    const referenced = [...new Set([...SETUP_SECTIONS, ...HANDOFF_SECTIONS])].sort();
+
+    expect(referenced).toEqual(onDisk);
   });
 });
