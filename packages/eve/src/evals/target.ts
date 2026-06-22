@@ -25,7 +25,10 @@ export async function resolveEvalTargetHandle(input: {
   const info = await input.client.info();
   assertAgentInfoShape(info, input.url);
 
-  if (input.expectedAgentName !== undefined && info.agent.name !== input.expectedAgentName) {
+  if (
+    input.expectedAgentName !== undefined &&
+    !matchesExpectedAgentName(input.expectedAgentName, info.agent.name)
+  ) {
     throw new Error(
       `Expected eval target ${JSON.stringify(input.expectedAgentName)} at ${input.url}, but ${JSON.stringify(info.agent.name)} is responding there.`,
     );
@@ -141,6 +144,19 @@ function capabilitiesFromInfo(info: AgentInfoResult): EveEvalTargetCapabilities 
   return {
     devRoutes: info.capabilities?.devRoutes ?? info.mode === "development",
   };
+}
+
+function matchesExpectedAgentName(expected: string, actual: string): boolean {
+  return actual === expected || actual === stripNpmScope(expected);
+}
+
+function stripNpmScope(name: string): string {
+  if (!name.startsWith("@")) return name;
+
+  const slashIndex = name.indexOf("/");
+  if (slashIndex === -1 || slashIndex === name.length - 1) return name;
+
+  return name.slice(slashIndex + 1);
 }
 
 async function waitForTargetHealth(client: Client, url: string): Promise<void> {
