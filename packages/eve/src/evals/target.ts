@@ -4,6 +4,7 @@ import { Client } from "#client/client.js";
 import type { AgentInfoResult } from "#client/types.js";
 import { createEveDevDispatchSchedulePath } from "#protocol/routes.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { stripNpmPackageScope } from "#shared/package-name.js";
 import { EvalSessionManager } from "#evals/session.js";
 import type {
   EveEvalScheduleDispatchResult,
@@ -147,16 +148,7 @@ function capabilitiesFromInfo(info: AgentInfoResult): EveEvalTargetCapabilities 
 }
 
 function matchesExpectedAgentName(expected: string, actual: string): boolean {
-  return actual === expected || actual === stripNpmScope(expected);
-}
-
-function stripNpmScope(name: string): string {
-  if (!name.startsWith("@")) return name;
-
-  const slashIndex = name.indexOf("/");
-  if (slashIndex === -1 || slashIndex === name.length - 1) return name;
-
-  return name.slice(slashIndex + 1);
+  return actual === expected || actual === stripNpmPackageScope(expected);
 }
 
 async function waitForTargetHealth(client: Client, url: string): Promise<void> {
