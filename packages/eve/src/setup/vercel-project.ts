@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { ProjectResolution } from "./project-resolution.js";
 import type { Prompter } from "./prompter.js";
 import type { ResolvedVercelProjectSpec } from "./state.js";
+import { withSpinner } from "./with-spinner.js";
 
 const JsonObjectSchema = z.record(z.string(), z.unknown());
 
@@ -55,24 +56,6 @@ export interface PickProjectOptions extends VercelProjectOperationOptions {
 
 export function unresolvedProject(): ProjectResolution {
   return { kind: "unresolved" };
-}
-
-/**
- * Runs a network reach behind a section-like spinner so the user sees the CLI
- * is working, not hung. The spinner clears whether the work resolves or throws,
- * and degrades to nothing when the prompter has no spinner (headless/test).
- */
-export async function withNetworkSpinner<T>(
-  prompter: Prompter,
-  message: string,
-  task: () => Promise<T>,
-): Promise<T> {
-  const spinner = prompter.log.spinner?.(message);
-  try {
-    return await task();
-  } finally {
-    spinner?.stop();
-  }
 }
 
 /** Resolves the linked project id from a resolution, if any. */
@@ -362,6 +345,24 @@ export function requireVercelAuth(failure: VercelCaptureFailure): never {
  */
 export type VercelAuthStatus = "authenticated" | "logged-out" | "cli-missing" | "unavailable";
 
+/** Returns the user-facing reason Vercel-backed setup is unavailable. */
+export function vercelAuthBlockerReason(authStatus: VercelAuthStatus): string | undefined {
+  switch (authStatus) {
+    case "authenticated":
+      return undefined;
+    case "cli-missing":
+      return "Vercel CLI not found, see /vc";
+    case "logged-out":
+      return "Log in to Vercel first, see /login";
+    case "unavailable":
+      return "Couldn't reach Vercel, check your connection";
+    default: {
+      const exhaustive: never = authStatus;
+      return exhaustive;
+    }
+  }
+}
+
 export async function getVercelAuthStatus(
   projectRoot: string,
   options: VercelProjectOperationOptions = {},
@@ -411,7 +412,7 @@ export async function requireAuth(
     await check();
     return;
   }
-  await withNetworkSpinner(prompter, whimsyFor("auth"), check);
+  await withSpinner(prompter, whimsyFor("auth"), check);
 }
 
 /**
@@ -495,7 +496,7 @@ export async function pickTeam(
     await validateTeam(prompter, projectRoot, presetTeam, options);
     return resolveTeam(projectRoot, presetTeam, options);
   }
-  const teams = await withNetworkSpinner(prompter, whimsyFor("teams"), () =>
+  const teams = await withSpinner(prompter, whimsyFor("teams"), () =>
     listTeams(projectRoot, options),
   );
   if (teams.length <= 1) {
@@ -532,7 +533,7 @@ export async function pickProject(
   team: string,
   options: PickProjectOptions = {},
 ): Promise<ArgsPickedProject> {
-  const projects = await withNetworkSpinner(prompter, whimsyFor("projects", team), () =>
+  const projects = await withSpinner(prompter, whimsyFor("projects", team), () =>
     listProjects(projectRoot, team, options),
   );
   if (projects.length === 0) {
@@ -565,7 +566,7 @@ export async function pickNewProjectName(
   defaultProjectName: string,
   options: VercelProjectOperationOptions = {},
 ): Promise<string> {
-  let existing = await withNetworkSpinner(prompter, whimsyFor("project-name", team), () =>
+  let existing = await withSpinner(prompter, whimsyFor("project-name", team), () =>
     resolveProjectByNameOrId(projectRoot, team, defaultProjectName.trim(), options),
   );
   let projectName = defaultProjectName.trim();
@@ -614,7 +615,7 @@ export async function linkProject(
   const scope = ["--scope", spec.team];
   let project: VercelProjectReference;
   if (spec.kind === "new") {
-    project = await withNetworkSpinner(
+    project = await withSpinner(
       prompter,
       `Creating Vercel project "${spec.project}" in ${spec.team}...`,
       async () => {
@@ -629,7 +630,7 @@ export async function linkProject(
     }
     project = existing;
   }
-  return withNetworkSpinner(
+  return withSpinner(
     prompter,
     `Linking this directory to Vercel project "${project.name}"...`,
     () =>
