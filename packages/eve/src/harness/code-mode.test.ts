@@ -287,7 +287,7 @@ describe("applySandboxToolSet", () => {
         description: "Requires approval.",
         execute: async () => "ok",
         inputSchema: jsonSchema({ type: "object" }),
-        name: "connection__tfl__getLineStatus",
+        name: "tfl__getLineStatus",
         needsApproval,
       },
     ]);
@@ -295,7 +295,7 @@ describe("applySandboxToolSet", () => {
     const hostTools = await contextStorage.run(ctx, () =>
       buildSandboxHostTools({ tools: new Map() }),
     );
-    const guardedTool = hostTools.connection__tfl__getLineStatus as {
+    const guardedTool = hostTools.tfl__getLineStatus as {
       needsApproval?: (input: unknown) => Promise<boolean> | boolean;
     };
 

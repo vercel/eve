@@ -1,8 +1,8 @@
 import type { HandleMessageStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
-const SEARCH_TOOL = "connection__search";
-const TFL_APPROVAL_JOURNEY_MODES_TOOL = "connection__tfl-approval__Journey_Meta";
+const SEARCH_TOOL = "connection_search";
+const TFL_APPROVAL_JOURNEY_MODES_TOOL = "tfl-approval__Journey_Meta";
 
 export default defineEval({
   description:
@@ -11,8 +11,8 @@ export default defineEval({
   async test(t) {
     const parked = await t.send(
       [
-        "Use the `connection__search` tool with connection `tfl-approval` to find the TfL journey modes operation.",
-        "Then call `connection__tfl-approval__Journey_Meta` exactly once with an empty object.",
+        "Use the `connection_search` tool with connection `tfl-approval` to find the TfL journey modes operation.",
+        "Then call `tfl-approval__Journey_Meta` exactly once with an empty object.",
         "Wait for approval if requested.",
         "After the tool runs, reply with the exact words `bus` and `tube` if both mode names are present in the tool result.",
       ].join("\n"),

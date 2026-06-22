@@ -1,8 +1,8 @@
 import type { EveEvalTurn } from "eve/evals";
 import { defineEval } from "eve/evals";
 
-const SEARCH_TOOL = "connection__search";
-const TFL_JOURNEY_MODES_TOOL = "connection__tfl__Journey_Meta";
+const SEARCH_TOOL = "connection_search";
+const TFL_JOURNEY_MODES_TOOL = "tfl__Journey_Meta";
 
 export default defineEval({
   description:
@@ -11,8 +11,8 @@ export default defineEval({
   async test(t) {
     const turn = await t.send(
       [
-        "Use the `connection__search` tool to find the TfL journey modes operation in the `tfl` connection.",
-        "Then call `connection__tfl__Journey_Meta` exactly once with an empty object.",
+        "Use the `connection_search` tool to find the TfL journey modes operation in the `tfl` connection.",
+        "Then call `tfl__Journey_Meta` exactly once with an empty object.",
         "Reply with the exact words `bus` and `tube` if both mode names are present in the tool result.",
       ].join("\n"),
     );

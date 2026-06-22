@@ -7,22 +7,22 @@ export default defineEval({
     "Dynamic tools smoke: helper-built and inline tools from one resolver survive replay.",
   async test(t) {
     const first = await t.send(
-      "Call the `dynamic-nested__nested_query` tool and tell me exactly what it returned.",
+      "Call the `nested_query` tool and tell me exactly what it returned.",
     );
     first.expectOk();
 
     const second = await t.send(
-      "Now call the `dynamic-nested__nested_status` tool and tell me exactly what it returned.",
+      "Now call the `nested_status` tool and tell me exactly what it returned.",
     );
     second.expectOk();
 
     t.didNotFail();
     t.completed();
-    t.calledTool("dynamic-nested__nested_query", {
+    t.calledTool("nested_query", {
       isError: false,
       output: { action: "query", endpoint: "/v2/query", source: "helper" },
     });
-    t.calledTool("dynamic-nested__nested_status", {
+    t.calledTool("nested_status", {
       isError: false,
       output: { tier: "premium", source: "inline" },
     });

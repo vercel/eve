@@ -2,11 +2,11 @@ import type { EveEvalTurn } from "eve/evals";
 
 /**
  * Shared constants and helpers for the dynamic tool (`defineDynamic`) smoke
- * evals. Each case names the full registered tool name (`<file>__<key>`) in
- * its prompt so the model calls it.
+ * evals. A map resolver names each entry by its bare key, so each case names
+ * that key in its prompt so the model calls it.
  */
 export const DYNAMIC_ECHO_TOKEN = "dynamic-echo-ok-X7R2";
-export const ECHO_TOOL = "dynamic-echo__echo_dynamic";
+export const ECHO_TOOL = "echo_dynamic";
 
 /**
  * Finds the named tool call inside one turn and returns its object output.

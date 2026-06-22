@@ -322,10 +322,13 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
 
       const step = createExecutionNodeStep({
         capabilities,
-        compiledArtifactsSource: bundle.compiledArtifactsSource,
         createRuntime: createWorkflowRuntime,
         handleEvent,
         mode,
+        modelResolutionScope: {
+          moduleMap: bundle.moduleMap,
+          nodeId: bundle.nodeId,
+        },
         node: bundle.graph.root,
       });
       return step(refreshedSession, stepInput);
