@@ -201,12 +201,13 @@ describe("development runtime artifact snapshots", () => {
     expect(existsSync(staleSnapshotRoot)).toBe(false);
   });
 
-  it("preserves stale snapshots referenced by durable workflow data", async () => {
+  it("preserves snapshots referenced by active durable workflow data", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-artifacts-prune-durable-");
     const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
     const activeSnapshotRoot = join(snapshotsRoot, "active");
     const posixParkedTurnSnapshotRoot = join(snapshotsRoot, "parked-turn-posix");
     const windowsParkedTurnSnapshotRoot = join(snapshotsRoot, "parked-turn-windows");
+    const completedTurnSnapshotRoot = join(snapshotsRoot, "completed-turn");
     const staleSnapshotRoot = join(snapshotsRoot, "stale");
     const oldSnapshotTime = new Date(1_000);
     const now = 1_000_000;
@@ -215,6 +216,7 @@ describe("development runtime artifact snapshots", () => {
       activeSnapshotRoot,
       posixParkedTurnSnapshotRoot,
       windowsParkedTurnSnapshotRoot,
+      completedTurnSnapshotRoot,
       staleSnapshotRoot,
     ]) {
       await mkdir(snapshotRoot, { recursive: true });
@@ -235,6 +237,7 @@ describe("development runtime artifact snapshots", () => {
       join(appRoot, ".workflow-data", "default", "runs", "parked-turn.json"),
       `${JSON.stringify(
         {
+          status: "running",
           input: {
             serializedContext: {
               "eve.bundle": {
@@ -255,6 +258,7 @@ describe("development runtime artifact snapshots", () => {
       join(appRoot, ".workflow-data", "default", "runs", "parked-turn-windows.json"),
       `${JSON.stringify(
         {
+          status: "running",
           input: {
             serializedContext: {
               "eve.bundle": {
@@ -275,6 +279,27 @@ describe("development runtime artifact snapshots", () => {
       )}\n`,
     );
 
+    await writeFile(
+      join(appRoot, ".workflow-data", "default", "runs", "completed-turn.json"),
+      `${JSON.stringify(
+        {
+          status: "completed",
+          input: {
+            serializedContext: {
+              "eve.bundle": {
+                source: {
+                  appRoot: join(completedTurnSnapshotRoot, "source", "app").replaceAll("\\", "/"),
+                  kind: "disk",
+                },
+              },
+            },
+          },
+          workflowId: "workflow//eve//turnWorkflow",
+        },
+        null,
+        2,
+      )}\n`,
+    );
     await pruneDevelopmentRuntimeArtifactsSnapshots({
       appRoot,
       now,
@@ -285,6 +310,7 @@ describe("development runtime artifact snapshots", () => {
     await expect(readdir(snapshotsRoot)).resolves.toEqual(
       expect.arrayContaining(["active", "parked-turn-posix", "parked-turn-windows"]),
     );
+    expect(existsSync(completedTurnSnapshotRoot)).toBe(false);
     expect(existsSync(staleSnapshotRoot)).toBe(false);
   });
 

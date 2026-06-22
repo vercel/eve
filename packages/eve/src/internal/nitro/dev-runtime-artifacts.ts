@@ -12,6 +12,7 @@ const DEV_RUNTIME_ARTIFACTS_POINTER_VERSION = 2;
 const DEV_RUNTIME_SNAPSHOT_RECENT_WINDOW_MS = 15 * 60 * 1000;
 const DEV_RUNTIME_SNAPSHOT_RETAIN_COUNT = 5;
 const DEV_RUNTIME_WORKFLOW_DATA_MAX_SCAN_BYTES = 1024 * 1024;
+const TERMINAL_WORKFLOW_RUN_STATUSES = new Set(["completed", "failed", "cancelled", "canceled"]);
 
 interface DevelopmentRuntimeArtifactsPointerV1 {
   readonly appRoot: string;
@@ -353,6 +354,10 @@ async function collectSnapshotPathsFromDirectory(input: {
       }
 
       const source = await readFile(path, "utf8");
+      if (!shouldScanWorkflowDataSource(source)) {
+        return;
+      }
+
       for (const snapshotPath of collectSnapshotPathsFromText(source, input.snapshotsDirectory)) {
         input.snapshotPaths.add(snapshotPath);
       }
@@ -378,6 +383,29 @@ function collectSnapshotPathsFromText(
   }
 
   return [...snapshotPaths];
+}
+
+function shouldScanWorkflowDataSource(source: string): boolean {
+  const value = parseJsonObject(source);
+  if (value === undefined) {
+    return true;
+  }
+
+  const status = value.status;
+  return typeof status !== "string" || !TERMINAL_WORKFLOW_RUN_STATUSES.has(status);
+}
+
+function parseJsonObject(source: string): Record<string, unknown> | undefined {
+  try {
+    const value = JSON.parse(source) as unknown;
+    return isObjectRecord(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function escapeRegExp(value: string): string {
