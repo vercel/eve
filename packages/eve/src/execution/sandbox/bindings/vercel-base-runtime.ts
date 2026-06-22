@@ -1,12 +1,13 @@
-import type { Sandbox as SdkSandbox } from "#compiled/@vercel/sandbox/index.js";
-
 import { buildDockerBaseSetupScript } from "#execution/sandbox/bindings/docker-base-setup.js";
-import type { VercelSdkCreateOptions } from "#execution/sandbox/bindings/vercel-sdk-types.js";
+import type {
+  VercelSdkCreateOptions,
+  VercelSdkSandbox,
+} from "#execution/sandbox/bindings/vercel-sdk-types.js";
 
 /**
  * Prepares a fresh Vercel sandbox for use by the framework.
  */
-export async function ensureVercelSandboxBaseRuntime(sandbox: SdkSandbox): Promise<void> {
+export async function ensureVercelSandboxBaseRuntime(sandbox: VercelSdkSandbox): Promise<void> {
   await runSandboxBootstrapStep(sandbox, {
     failureMessage: "Failed to initialize Vercel sandbox base runtime.",
     script: buildDockerBaseSetupScript(),
@@ -14,7 +15,7 @@ export async function ensureVercelSandboxBaseRuntime(sandbox: SdkSandbox): Promi
 }
 
 export async function applyInitialVercelNetworkPolicy(
-  sandbox: SdkSandbox,
+  sandbox: VercelSdkSandbox,
   networkPolicy: VercelSdkCreateOptions["networkPolicy"],
 ): Promise<void> {
   if (networkPolicy !== undefined) {
@@ -23,7 +24,7 @@ export async function applyInitialVercelNetworkPolicy(
 }
 
 async function runSandboxBootstrapStep(
-  sandbox: SdkSandbox,
+  sandbox: VercelSdkSandbox,
   input: { readonly failureMessage: string; readonly script: string },
 ): Promise<void> {
   const result = await runBootstrapCommand(sandbox, input.script);
@@ -40,7 +41,10 @@ async function runSandboxBootstrapStep(
   throw new Error(`${input.failureMessage}${output ? `\n${output}` : ""}`);
 }
 
-async function runBootstrapCommand(sandbox: SdkSandbox, script: string): Promise<string | null> {
+async function runBootstrapCommand(
+  sandbox: VercelSdkSandbox,
+  script: string,
+): Promise<string | null> {
   return await readBootstrapFailure(
     await sandbox.runCommand({
       args: ["-lc", script],
@@ -50,7 +54,7 @@ async function runBootstrapCommand(sandbox: SdkSandbox, script: string): Promise
 }
 
 async function runBootstrapCommandWithSudo(
-  sandbox: SdkSandbox,
+  sandbox: VercelSdkSandbox,
   script: string,
 ): Promise<string | null> {
   return await readBootstrapFailure(
@@ -62,7 +66,7 @@ async function runBootstrapCommandWithSudo(
 }
 
 async function readBootstrapFailure(
-  result: Awaited<ReturnType<SdkSandbox["runCommand"]>>,
+  result: Awaited<ReturnType<VercelSdkSandbox["runCommand"]>>,
 ): Promise<string | null> {
   if (result.exitCode === 0) {
     return null;

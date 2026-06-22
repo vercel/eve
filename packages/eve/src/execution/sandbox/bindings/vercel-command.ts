@@ -1,6 +1,5 @@
-import type { Command as VercelSdkCommand } from "#compiled/@vercel/sandbox/index.js";
-
 import type { SandboxProcess } from "#shared/sandbox-session.js";
+import type { VercelSdkCommand } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 
 /**
  * Wraps a Vercel `Command` (returned from `runCommand({ detached: true })`)

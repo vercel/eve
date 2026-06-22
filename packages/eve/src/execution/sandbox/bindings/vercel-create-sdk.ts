@@ -1,8 +1,8 @@
-import type * as VercelSandboxSdk from "#compiled/@vercel/sandbox/index.js";
-import type { Sandbox as SdkSandbox } from "#compiled/@vercel/sandbox/index.js";
-import type { VercelSdkCreateOptions } from "#execution/sandbox/bindings/vercel-sdk-types.js";
-
-export type VercelSandboxModule = typeof VercelSandboxSdk;
+import type {
+  VercelSdkCreateOptions,
+  VercelSdkModule,
+  VercelSdkSandbox,
+} from "#execution/sandbox/bindings/vercel-sdk-types.js";
 
 export type VercelSandboxCreateParams = VercelSdkCreateOptions & {
   readonly name: string;
@@ -17,13 +17,13 @@ type VercelSandboxInternalCreateOptions = {
 
 export type CreateVercelSandbox = (input: {
   readonly createOptions: VercelSandboxCreateParams;
-  readonly sandboxModule: VercelSandboxModule;
-}) => Promise<SdkSandbox>;
+  readonly sandboxModule: VercelSdkModule;
+}) => Promise<VercelSdkSandbox>;
 
 export async function createVercelEveImageSandbox(input: {
   readonly createOptions: VercelSandboxCreateParams;
-  readonly sandboxModule: VercelSandboxModule;
-}): Promise<SdkSandbox> {
+  readonly sandboxModule: VercelSdkModule;
+}): Promise<VercelSdkSandbox> {
   const createOptions: VercelSandboxCreateParams = {
     ...input.createOptions,
     __image: VERCEL_EVE_SANDBOX_IMAGE,

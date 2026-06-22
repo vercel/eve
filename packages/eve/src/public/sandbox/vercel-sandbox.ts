@@ -1,6 +1,8 @@
-import type { Sandbox as SdkSandbox } from "#compiled/@vercel/sandbox/index.js";
+import type * as VercelSdk from "#compiled/@vercel/sandbox/index.js";
 
-type VercelSdkUpdateOptions = Parameters<SdkSandbox["update"]>[0];
+type VercelSdkCreateOptions = NonNullable<Parameters<typeof VercelSdk.Sandbox.create>[0]>;
+
+type VercelSdkUpdateOptions = Parameters<VercelSdk.Sandbox["update"]>[0];
 
 type VercelSandboxInternalCreateOptions = {
   readonly [key: `__${string}`]: unknown;
@@ -36,9 +38,7 @@ type VercelSandboxAuthorCreateOptions<T> = T extends unknown
  * snapshot, force a template rebuild (e.g. by changing the sandbox
  * definition so its template key changes).
  */
-export type VercelSandboxCreateOptions = VercelSandboxAuthorCreateOptions<
-  NonNullable<Parameters<typeof SdkSandbox.create>[0]>
->;
+export type VercelSandboxCreateOptions = VercelSandboxAuthorCreateOptions<VercelSdkCreateOptions>;
 
 /**
  * Options accepted by the Vercel backend's `bootstrap({ use })` hook.
