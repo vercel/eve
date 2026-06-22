@@ -577,6 +577,37 @@ describe("hasVercelHostFramework", () => {
     await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(true);
   });
 
+  test("recognizes a host framework resolved from an ancestor node_modules", async () => {
+    const workspaceRoot = await createTempDir();
+    const projectRoot = join(workspaceRoot, "apps", "agent");
+    await mkdir(projectRoot, { recursive: true });
+    await writeFile(join(projectRoot, "package.json"), JSON.stringify({ name: "agent" }), "utf8");
+    await mkdir(join(workspaceRoot, "node_modules", "next"), { recursive: true });
+    await writeFile(
+      join(workspaceRoot, "node_modules", "next", "package.json"),
+      JSON.stringify({ name: "next", version: "16.2.6" }),
+      "utf8",
+    );
+
+    await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(true);
+  });
+
+  test("does not scan unrelated sibling package manifests", async () => {
+    const workspaceRoot = await createTempDir();
+    const projectRoot = join(workspaceRoot, "apps", "agent");
+    const siblingRoot = join(workspaceRoot, "apps", "web");
+    await mkdir(projectRoot, { recursive: true });
+    await mkdir(siblingRoot, { recursive: true });
+    await writeFile(join(projectRoot, "package.json"), JSON.stringify({ name: "agent" }), "utf8");
+    await writeFile(
+      join(siblingRoot, "package.json"),
+      JSON.stringify({ name: "web", dependencies: { next: "16.2.6" } }),
+      "utf8",
+    );
+
+    await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(false);
+  });
+
   test("ignores standalone eve projects", async () => {
     const projectRoot = await createTempDir();
     await writeFile(
