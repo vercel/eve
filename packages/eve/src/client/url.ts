@@ -10,8 +10,17 @@ export function createClientUrl(
   routePath: string,
   searchParams?: Readonly<Record<string, string>>,
 ): string {
-  const normalizedRoute = routePath.startsWith("/") ? routePath : `/${routePath}`;
-  const search = formatSearch(searchParams);
+  const queryIndex = routePath.indexOf("?");
+  const pathPart = queryIndex === -1 ? routePath : routePath.slice(0, queryIndex);
+  const embeddedSearch = queryIndex === -1 ? "" : routePath.slice(queryIndex);
+  const normalizedRoute = pathPart.startsWith("/") ? pathPart : `/${pathPart}`;
+  // Explicit searchParams win; otherwise preserve a query string already on the
+  // route path (e.g. the realtime-speech setup URL's `?voiceSessionId=`), which
+  // the URL pathname setter would otherwise percent-encode for absolute hosts.
+  const search =
+    searchParams && Object.keys(searchParams).length > 0
+      ? formatSearch(searchParams)
+      : embeddedSearch;
 
   if (isAbsoluteUrl(host)) {
     const url = new URL(host);
