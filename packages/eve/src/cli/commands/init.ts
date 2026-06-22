@@ -26,13 +26,19 @@ import {
 import type { ProcessOutputLine } from "#setup/primitives/process-output.js";
 import { addAgentToProject } from "#setup/scaffold/create/add-to-project.js";
 import { ensureChannel, scaffoldBaseProject } from "#setup/scaffold/index.js";
+import { WizardCancelledError } from "#setup/step.js";
 import {
   DEFAULT_EVE_PACKAGE_CONTRACT,
   type EvePackageContract,
 } from "#setup/scaffold/create/project.js";
 
-import { initAgentDevHandoff } from "./agent-instructions.js";
+import {
+  initAgentDevHandoff,
+  initAgentInstructions,
+  initAgentReplPrompt,
+} from "./agent-instructions.js";
 import { tryInitializeGit, type GitInitResult } from "./init-git.js";
+import { selectInitHandoff, spawnCodingAgentRepl, type InitHandoff } from "./init-repl.js";
 
 export interface InitCliLogger {
   error(message: string): void;
@@ -53,6 +59,8 @@ export interface InitCommandDependencies {
   now: () => number;
   runPackageManagerInstall: typeof runPackageManagerInstall;
   scaffoldBaseProject: typeof scaffoldBaseProject;
+  selectInitHandoff: typeof selectInitHandoff;
+  spawnCodingAgentRepl: typeof spawnCodingAgentRepl;
   spawnPackageManager: typeof spawnPackageManager;
   tryInitializeGit: typeof tryInitializeGit;
 }
@@ -66,6 +74,8 @@ const defaultDependencies: InitCommandDependencies = {
   now: () => performance.now(),
   runPackageManagerInstall,
   scaffoldBaseProject,
+  selectInitHandoff,
+  spawnCodingAgentRepl,
   spawnPackageManager,
   tryInitializeGit,
 };
@@ -390,6 +400,9 @@ async function runInitSteps(input: {
  *
  * Runs launched by a coding agent get the dev command printed instead of
  * spawned after scaffolding, since the dev TUI would wedge the launching agent.
+ * A coding agent that omits the target entirely gets the setup guide printed and
+ * nothing scaffolded, since a bare `eve init` means it has not yet chosen what to
+ * build.
  */
 export async function runInitCommand(
   logger: InitCliLogger,
@@ -398,6 +411,15 @@ export async function runInitCommand(
   options: InitCommandOptions,
   dependencies: InitCommandDependencies = defaultDependencies,
 ): Promise<void> {
+  // A coding agent that runs `eve init` with no target has not decided what to
+  // build yet. Hand it the setup guide (collect intent, then re-run with an
+  // explicit target) rather than silently scaffolding the current directory. A
+  // human, or an explicit `.`/`<name>`, still scaffolds.
+  if (target === undefined && (await dependencies.isCodingAgentLaunch())) {
+    logger.log(initAgentInstructions());
+    return;
+  }
+
   const result = await runInitSteps({ dependencies, logger, options, parentDirectory, target });
 
   if (result.kind === "created") {
@@ -420,13 +442,45 @@ export async function runInitCommand(
     logger.error(pc.yellow(`Git initialization failed: ${result.gitResult.reason}`));
   }
 
+  const agentDevCommand = [result.packageManager, ...eveDevArguments(result.packageManager)].join(
+    " ",
+  );
+  const agentHandoff = initAgentDevHandoff({
+    projectPath: result.projectPath,
+    devCommand: agentDevCommand,
+  });
+
   if (result.agentLaunched) {
-    logger.log(
-      initAgentDevHandoff({
-        projectPath: result.projectPath,
-        devCommand: [result.packageManager, ...eveDevArguments(result.packageManager)].join(" "),
-      }),
-    );
+    logger.log(agentHandoff);
+    return;
+  }
+
+  let handoff: InitHandoff;
+  try {
+    handoff = await dependencies.selectInitHandoff({ agentName: basename(result.projectPath) });
+  } catch (error) {
+    if (error instanceof WizardCancelledError) return;
+    throw error;
+  }
+  if (handoff !== "eve-dev") {
+    logger.log(pc.dim(`$ ${handoff}`));
+    if (
+      !(await dependencies.spawnCodingAgentRepl({
+        command: handoff,
+        cwd: result.projectPath,
+        prompt: initAgentReplPrompt({ devCommand: agentDevCommand }),
+        // A `.cmd`/`.bat` shim can't take the multi-line prompt on its command
+        // line, so print it for the user to paste once the REPL opens.
+        onPromptUnseeded: (prompt) => {
+          logger.log(
+            pc.yellow(`Could not seed ${handoff} automatically. Paste this prompt into it:`),
+          );
+          logger.log(prompt);
+        },
+      }))
+    ) {
+      throw new Error(`Coding-agent REPL exited unsuccessfully in "${result.projectPath}".`);
+    }
     return;
   }
 

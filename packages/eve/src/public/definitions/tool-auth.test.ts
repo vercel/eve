@@ -72,6 +72,30 @@ describe("defineTool auth normalization", () => {
     expect(tool.auth).toMatchObject({ vercelConnect: { connector: "okta" } });
   });
 
+  it("retains the provider cache eviction hook", () => {
+    const evict = async () => {};
+    const tool = defineTool({
+      description: "Connect-backed tool.",
+      inputSchema: { type: "object" },
+      auth: {
+        evict,
+        principalType: "user",
+        async getToken(): Promise<TokenResult> {
+          return { token: "live" };
+        },
+        async startAuthorization() {
+          return { challenge: { url: "https://idp.example/auth" }, resume: {} };
+        },
+        async completeAuthorization(): Promise<TokenResult> {
+          return { token: "live" };
+        },
+      },
+      execute: () => null,
+    });
+
+    expect(tool.auth?.evict).toBe(evict);
+  });
+
   it("retains the authored displayName", () => {
     const tool = defineTool({
       description: "Branded tool.",

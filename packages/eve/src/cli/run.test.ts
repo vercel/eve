@@ -42,6 +42,36 @@ describe("CLI command registration", () => {
   });
 });
 
+describe("eve init for a coding agent that fumbles the invocation", () => {
+  // Detection must precede the commander failure: a bad/unknown arg trips
+  // parsing before the init action runs, so runCli itself falls back to the guide.
+  it("prints the setup guide but still fails on the malformed invocation", async () => {
+    const output: string[] = [];
+
+    // The guide is additive: the parse failure must still propagate (nonzero
+    // exit), so runCli rejects even though the agent gets actionable next steps.
+    await expect(
+      runCli(
+        ["init", "--unknown-flag"],
+        { error: (message) => output.push(message), log: (message) => output.push(message) },
+        { isCodingAgentLaunch: async () => true },
+      ),
+    ).rejects.toThrow();
+
+    expect(output.join("\n")).toContain("Set up an eve agent");
+  });
+
+  it("still surfaces the usage error for a human", async () => {
+    await expect(
+      runCli(
+        ["init", "--unknown-flag"],
+        { error: () => {}, log: () => {} },
+        { isCodingAgentLaunch: async () => false },
+      ),
+    ).rejects.toThrow();
+  });
+});
+
 describe("eve dev --input", () => {
   it("forwards the initial draft to the interactive TUI", async () => {
     const runDevelopmentTui = vi.fn(async () => {});

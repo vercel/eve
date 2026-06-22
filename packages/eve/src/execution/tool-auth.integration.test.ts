@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createAuthorizedToolExecute } from "#execution/tool-auth.js";
+import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
 import { loadContext } from "#context/container.js";
 import { AuthKey, SessionIdKey } from "#context/keys.js";
@@ -21,7 +21,7 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
 
 /**
  * Integration coverage for tool-hosted authorization: the
- * {@link createAuthorizedToolExecute} wrapper drives token resolution,
+ * {@link createToolExecuteWithAuth} wrapper drives token resolution,
  * the per-step cache, the park-on-`Required` flow, callback completion
  * on resume, and the loop guard — all scoped by the tool's name.
  */
@@ -57,14 +57,21 @@ function authTool(input: {
   readonly auth: AuthorizationDefinition;
   readonly execute: (toolInput: unknown, ctx: ToolContext) => unknown;
 }): ResolvedToolDefinition {
+  return authoredTool(input);
+}
+
+function authoredTool(input: {
+  readonly name: string;
+  readonly auth?: AuthorizationDefinition;
+  readonly execute: (toolInput: unknown, ctx: ToolContext) => unknown;
+}): ResolvedToolDefinition {
   const logicalPath = `tools/${input.name}.ts`;
-  return {
-    auth: input.auth,
+  const base: ResolvedToolDefinition = {
     description: `${input.name} auth tool.`,
-    execute: createAuthorizedToolExecute({
-      auth: input.auth,
+    execute: createToolExecuteWithAuth({
       execute: input.execute as (toolInput: unknown, ctx: unknown) => unknown,
       scope: input.name,
+      topLevelAuth: input.auth,
     }),
     inputSchema: null,
     logicalPath,
@@ -72,6 +79,7 @@ function authTool(input: {
     sourceId: logicalPath,
     sourceKind: "module",
   };
+  return input.auth === undefined ? base : { ...base, auth: input.auth };
 }
 
 describe("tool-hosted authorization", () => {
@@ -100,6 +108,140 @@ describe("tool-hosted authorization", () => {
     // Both reads return the same cached token; getToken ran once.
     expect(result).toEqual({ first: "tok-1", second: "tok-1" });
     expect(calls).toBe(1);
+  });
+
+  it("resolves and caches an inline provider on a plain tool", async () => {
+    let calls = 0;
+    const inlineAuth: AuthorizationDefinition = {
+      principalType: "app",
+      async getToken(): Promise<TokenResult> {
+        calls += 1;
+        return { token: `inline-${calls}` };
+      },
+    };
+    const tool = authoredTool({
+      name: "sync_ticket",
+      async execute(_input, ctx) {
+        const first = await ctx.getToken(inlineAuth);
+        const second = await ctx.getToken(inlineAuth);
+        return { first: first.token, second: second.token };
+      },
+    });
+    const runtime = createTestRuntime({ tools: [tool] });
+
+    const result = await runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {}));
+
+    expect(result).toEqual({ first: "inline-1", second: "inline-1" });
+    expect(calls).toBe(1);
+  });
+
+  it("keeps explicit auth keys separate for anonymous inline providers", async () => {
+    const githubAuth: AuthorizationDefinition = {
+      principalType: "app",
+      async getToken(): Promise<TokenResult> {
+        return { token: "github-token" };
+      },
+    };
+    const linearAuth: AuthorizationDefinition = {
+      principalType: "app",
+      async getToken(): Promise<TokenResult> {
+        return { token: "linear-token" };
+      },
+    };
+    const tool = authoredTool({
+      name: "sync_ticket",
+      async execute(_input, ctx) {
+        const github = await ctx.getToken(githubAuth, { authKey: "github" });
+        const linear = await ctx.getToken(linearAuth, { authKey: "linear" });
+        return { github: github.token, linear: linear.token };
+      },
+    });
+    const runtime = createTestRuntime({ tools: [tool] });
+
+    const result = await runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {}));
+
+    expect(result).toEqual({ github: "github-token", linear: "linear-token" });
+  });
+
+  it("rejects multiple anonymous inline providers without explicit auth keys", async () => {
+    const githubAuth: AuthorizationDefinition = {
+      principalType: "app",
+      async getToken(): Promise<TokenResult> {
+        return { token: "github-token" };
+      },
+    };
+    const linearAuth: AuthorizationDefinition = {
+      principalType: "app",
+      async getToken(): Promise<TokenResult> {
+        return { token: "linear-token" };
+      },
+    };
+    const tool = authoredTool({
+      name: "sync_ticket",
+      async execute(_input, ctx) {
+        await ctx.getToken(githubAuth);
+        await ctx.getToken(linearAuth);
+      },
+    });
+    const runtime = createTestRuntime({ tools: [tool] });
+
+    await expect(
+      runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {})),
+    ).rejects.toThrow(/explicit auth keys/);
+  });
+
+  it("keeps no-arg ctx.getToken() guarded on tools without top-level auth", async () => {
+    const tool = authoredTool({
+      name: "plain_tool",
+      async execute(_input, ctx) {
+        return await ctx.getToken();
+      },
+    });
+    const runtime = createTestRuntime({ tools: [tool] });
+
+    await expect(
+      runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {})),
+    ).rejects.toThrow(/does not declare an "auth" strategy/);
+  });
+
+  it("parks the turn with a challenge for an inline provider", async () => {
+    const inlineAuth: AuthorizationDefinition = {
+      principalType: "user",
+      vercelConnect: { connector: "oauth/linear" },
+      async getToken(): Promise<TokenResult> {
+        throw requiredError();
+      },
+      async startAuthorization() {
+        return { challenge: { url: "https://idp.example/auth" }, resume: { nonce: "n1" } };
+      },
+      async completeAuthorization(): Promise<TokenResult> {
+        return { token: "after-signin" };
+      },
+    };
+    const tool = authoredTool({
+      name: "sync_ticket",
+      async execute(_input, ctx) {
+        return await ctx.getToken(inlineAuth, { displayName: "Linear" });
+      },
+    });
+    const runtime = createTestRuntime({ tools: [tool] });
+
+    const result = await runtime.runAsSession(
+      { sessionId: "session_inline_auth_park" },
+      async () => {
+        seedUserPrincipal();
+        loadContext().set(CallbackBaseUrlKey, "https://app.example");
+        return runtime.executeTool(tool, {});
+      },
+    );
+
+    expect(isAuthorizationSignal(result)).toBe(true);
+    if (!isAuthorizationSignal(result)) throw new Error("expected signal");
+    expect(result.challenges).toHaveLength(1);
+    expect(result.challenges[0]).toMatchObject({
+      name: "sync_ticket__oauth_linear",
+      challenge: { displayName: "Linear", url: "https://idp.example/auth" },
+    });
   });
 
   it("parks the turn with a challenge when getToken throws Required", async () => {
@@ -293,6 +435,93 @@ describe("tool-hosted authorization", () => {
     expect(result).toEqual({ token: "minted" });
   });
 
+  it("completes an inline provider callback on resume and serves the minted token", async () => {
+    let completeCalls = 0;
+    const inlineAuth: AuthorizationDefinition = {
+      principalType: "user",
+      vercelConnect: { connector: "oauth/linear" },
+      async getToken(): Promise<TokenResult> {
+        throw requiredError();
+      },
+      async startAuthorization() {
+        return { challenge: { url: "https://idp.example/auth" }, resume: {} };
+      },
+      async completeAuthorization(): Promise<TokenResult> {
+        completeCalls += 1;
+        return { token: "inline-minted" };
+      },
+    };
+    const tool = authoredTool({
+      name: "sync_ticket",
+      async execute(_input, ctx) {
+        return await ctx.getToken(inlineAuth);
+      },
+    });
+    const runtime = createTestRuntime({ tools: [tool] });
+
+    const result = await runtime.runAsSession({ sessionId: "session_inline_resume" }, async () => {
+      seedUserPrincipal();
+      loadContext().set(CallbackBaseUrlKey, "https://app.example");
+      loadContext().set(PendingAuthorizationResultKey, [
+        {
+          name: "sync_ticket__oauth_linear",
+          hookUrl: "https://app.example/callback",
+          callback: {
+            params: { code: "abc" },
+            method: "GET",
+          },
+        },
+      ]);
+      return runtime.executeTool(tool, {});
+    });
+
+    expect(completeCalls).toBe(1);
+    expect(result).toEqual({ token: "inline-minted" });
+  });
+
+  it("maps inline ctx.requireAuth(auth) to eviction and a fresh challenge", async () => {
+    const evicted: ConnectionPrincipal[] = [];
+    const inlineAuth: AuthorizationDefinition = {
+      principalType: "user",
+      vercelConnect: { connector: "oauth/github" },
+      async getToken(): Promise<TokenResult> {
+        return { token: "stale" };
+      },
+      evict({ principal }) {
+        evicted.push(principal);
+      },
+      async startAuthorization() {
+        return { challenge: { url: "https://idp.example/auth" }, resume: {} };
+      },
+      async completeAuthorization(): Promise<TokenResult> {
+        return { token: "fresh" };
+      },
+    };
+    const tool = authoredTool({
+      name: "sync_ticket",
+      async execute(_input, ctx) {
+        await ctx.getToken(inlineAuth);
+        ctx.requireAuth(inlineAuth);
+      },
+    });
+    const runtime = createTestRuntime({ tools: [tool] });
+
+    const result = await runtime.runAsSession({ sessionId: "session_inline_require" }, async () => {
+      seedUserPrincipal();
+      loadContext().set(CallbackBaseUrlKey, "https://app.example");
+      return runtime.executeTool(tool, {});
+    });
+
+    expect(evicted).toHaveLength(1);
+    expect(evicted[0]).toMatchObject({ type: "user" });
+    expect(isAuthorizationSignal(result)).toBe(true);
+    if (!isAuthorizationSignal(result)) throw new Error("expected signal");
+    expect(result.challenges[0]).toMatchObject({
+      name: "sync_ticket__oauth_github",
+      challenge: { url: "https://idp.example/auth" },
+    });
+  });
+
   it("fails terminally when the token is rejected immediately after sign-in", async () => {
     const auth: AuthorizationDefinition = {
       principalType: "user",
@@ -325,6 +554,53 @@ describe("tool-hosted authorization", () => {
         loadContext().set(PendingAuthorizationResultKey, [
           {
             name: "list_groups",
+            hookUrl: "https://app.example/callback",
+            callback: {
+              params: { code: "abc" },
+              method: "GET",
+            },
+          },
+        ]);
+        return runtime.executeTool(tool, {});
+      })
+      .then(
+        () => null,
+        (err: unknown) => err,
+      );
+
+    expect(isConnectionAuthorizationFailedError(error)).toBe(true);
+  });
+
+  it("fails terminally when an inline provider token is rejected immediately after sign-in", async () => {
+    const inlineAuth: AuthorizationDefinition = {
+      principalType: "user",
+      vercelConnect: { connector: "oauth/github" },
+      async getToken(): Promise<TokenResult> {
+        return { token: "rejected" };
+      },
+      async startAuthorization() {
+        return { challenge: { url: "https://idp.example/auth" }, resume: {} };
+      },
+      async completeAuthorization(): Promise<TokenResult> {
+        return { token: "rejected" };
+      },
+    };
+    const tool = authoredTool({
+      name: "sync_ticket",
+      async execute(_input, ctx) {
+        await ctx.getToken(inlineAuth);
+        ctx.requireAuth(inlineAuth);
+      },
+    });
+    const runtime = createTestRuntime({ tools: [tool] });
+
+    const error = await runtime
+      .runAsSession({ sessionId: "session_inline_loop_guard" }, async () => {
+        seedUserPrincipal();
+        loadContext().set(CallbackBaseUrlKey, "https://app.example");
+        loadContext().set(PendingAuthorizationResultKey, [
+          {
+            name: "sync_ticket__oauth_github",
             hookUrl: "https://app.example/callback",
             callback: {
               params: { code: "abc" },

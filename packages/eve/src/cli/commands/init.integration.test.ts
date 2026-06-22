@@ -18,8 +18,10 @@ import {
   type ScaffoldBaseProjectOptions,
 } from "#setup/scaffold/index.js";
 import { pathExists } from "#setup/path-exists.js";
+import { WizardCancelledError } from "#setup/step.js";
 
 import type { GitInitResult } from "./init-git.js";
+import { initAgentReplPrompt } from "./agent-instructions.js";
 import {
   EVE_INIT_PACKAGE_SPEC_ENV,
   runInitCommand,
@@ -67,6 +69,8 @@ function dependencies(
   runPackageManagerInstall: ReturnType<
     typeof vi.fn<InitCommandDependencies["runPackageManagerInstall"]>
   >;
+  selectInitHandoff: ReturnType<typeof vi.fn<InitCommandDependencies["selectInitHandoff"]>>;
+  spawnCodingAgentRepl: ReturnType<typeof vi.fn<InitCommandDependencies["spawnCodingAgentRepl"]>>;
   spawnPackageManager: ReturnType<typeof vi.fn<InitCommandDependencies["spawnPackageManager"]>>;
   tryInitializeGit: ReturnType<typeof vi.fn<InitCommandDependencies["tryInitializeGit"]>>;
 } {
@@ -99,6 +103,8 @@ function dependencies(
         webPackageVersions: { ...WEB_VERSIONS, ...options.webPackageVersions },
       }),
     runPackageManagerInstall: vi.fn(async () => true),
+    selectInitHandoff: vi.fn(async () => "eve-dev"),
+    spawnCodingAgentRepl: vi.fn(async () => true),
     spawnPackageManager: vi.fn(async () => true),
     tryInitializeGit: vi.fn(async () => gitResult),
   };
@@ -181,6 +187,53 @@ describe("runInitCommand", () => {
     expect(output.messages[2]).toContain("Installed dependencies");
     expect(output.messages[2]).toContain("in 13.2s");
     expect(output.messages[3]).toContain("$ eve dev");
+  });
+
+  it("opens the selected coding-agent REPL instead of starting eve dev", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-repl-handoff-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.selectInitHandoff.mockResolvedValue("codex");
+
+    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+
+    const projectPath = join(parentDirectory, "my-agent");
+    expect(deps.spawnCodingAgentRepl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: "codex",
+        cwd: projectPath,
+        prompt: expect.stringContaining("pnpm exec eve dev --no-ui"),
+      }),
+    );
+    const prompt = deps.spawnCodingAgentRepl.mock.calls[0]?.[0].prompt;
+    expect(prompt).toBe(
+      initAgentReplPrompt({
+        devCommand: "pnpm exec eve dev",
+      }),
+    );
+    expect(prompt).toContain("What should the agent do?");
+    expect(prompt).toContain("HMR development server");
+    expect(prompt).not.toContain(projectPath);
+    expect(prompt).not.toContain("{{");
+    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+    expect(output.messages.at(-1)).toContain("$ codex");
+  });
+
+  it("keeps a completed init successful when its optional handoff is cancelled", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-repl-cancelled-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.selectInitHandoff.mockRejectedValue(new WizardCancelledError());
+
+    await expect(
+      runInitCommand(output, parentDirectory, "my-agent", {}, deps),
+    ).resolves.toBeUndefined();
+
+    const projectPath = join(parentDirectory, "my-agent");
+    await expect(pathExists(join(projectPath, "agent/agent.ts"))).resolves.toBe(true);
+    expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
+    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+    expect(output.errors).toEqual([]);
   });
 
   it("uses an explicit init package spec for fresh project scaffolds", async () => {
@@ -609,9 +662,11 @@ describe("runInitCommand", () => {
     const output = logger();
     const deps = dependencies();
 
-    await expect(runInitCommand(output, parentDirectory, "host-app", {}, deps)).rejects.toThrow(
-      "agent/instructions.md",
-    );
+    await expect(
+      runInitCommand(output, parentDirectory, "host-app", {}, deps),
+    ).rejects.toMatchObject({
+      message: `Cannot add an eve agent to "${projectRoot}" because it already has: agent/instructions.md.`,
+    });
 
     await expect(pathExists(join(projectRoot, "agent/agent.ts"))).resolves.toBe(false);
     expect(await readFile(join(projectRoot, "agent/instructions.md"), "utf8")).toBe("existing\n");
@@ -632,26 +687,23 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
   });
 
-  it("scaffolds the current directory for a coding agent that omits the target", async () => {
+  it("hands a coding agent the setup guide when it omits the target", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-agent-bare-"));
     const output = logger();
     const deps = dependencies();
     deps.isCodingAgentLaunch.mockResolvedValue(true);
-    deps.detectInvokingPackageManager.mockReturnValue("pnpm");
 
     await runInitCommand(output, parentDirectory, undefined, {}, deps);
 
-    expect(await readFile(join(parentDirectory, "agent/agent.ts"), "utf8")).toContain(
-      DEFAULT_AGENT_MODEL_ID,
-    );
-    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
-      "pnpm",
-      parentDirectory,
-      expect.anything(),
-    );
-    expect(deps.tryInitializeGit).toHaveBeenCalledWith(parentDirectory);
+    // A bare `eve init` from an agent means it has not chosen what to build, so
+    // we print the guide and touch nothing — no scaffold, install, Git, or dev.
+    await expect(pathExists(join(parentDirectory, "agent"))).resolves.toBe(false);
+    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
+    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
-    expect(output.messages.join("\n")).toContain("Do not start `eve dev`");
+    const printed = output.messages.join("\n");
+    expect(printed).toContain("Set up an eve agent");
+    expect(printed).toContain("npx eve@latest init <name>");
   });
 
   it("scaffolds and initializes Git for a coding agent but does not spawn the dev server", async () => {
@@ -674,6 +726,8 @@ describe("runInitCommand", () => {
     expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
     // The dev server is handed off as text, never spawned — the dev TUI would
     // wedge the launching agent. The handoff's content is the unit test's job.
+    expect(deps.selectInitHandoff).not.toHaveBeenCalled();
+    expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
   });
 
