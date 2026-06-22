@@ -9,7 +9,7 @@ description: "Resolve tools, skills, and instructions at runtime with defineDyna
 
 Pass `defineDynamic` an `events` object whose handlers return either a single `defineTool(...)`, a `Record<string, defineTool(...)>`, or `null` for no tools. Wrap every entry in `defineTool()`. The wrapper stamps them so their `execute` functions survive workflow step boundaries.
 
-The example below builds one tool per warehouse table. A map return names tools `slug__key`, so the model sees `query__orders`, `query__users`, and so on.
+The example below builds one tool per warehouse table. A map return names each tool by its bare key, so the model sees `orders`, `users`, and so on.
 
 ```ts title="agent/tools/query.ts"
 import { defineDynamic, defineTool } from "eve/tools";
@@ -39,13 +39,16 @@ Write `execute` as an inline function expression, arrow, or method shorthand pla
 
 ### Naming
 
-| Return shape              | File                       | Tool name(s)                      |
-| ------------------------- | -------------------------- | --------------------------------- |
-| single `defineTool`       | `agent/tools/analytics.ts` | `analytics`                       |
-| map `{ export, query }`   | `agent/tools/tenant.ts`    | `tenant__export`, `tenant__query` |
-| map `{ run }` (one entry) | `agent/tools/search.ts`    | `search__run`                     |
+| Return shape            | File                       | Tool name(s)      |
+| ----------------------- | -------------------------- | ----------------- |
+| single `defineTool`     | `agent/tools/analytics.ts` | `analytics`       |
+| map `{ export, query }` | `agent/tools/tenant.ts`    | `export`, `query` |
 
-A single return produces one tool named after the file slug, identical to a static tool. A map always uses `slug__key`, even when it holds a single entry, so adding a second entry later never renames the first.
+A single return produces one tool named after the file slug, identical to a static tool. A map names each entry by its **bare key** — there is no automatic slug prefix. If a bare name might collide, namespace the key yourself by including the prefix in the key (e.g. return `{ "tenant__export": … }` to get `tenant__export`).
+
+### Conflicts
+
+A dynamic tool or skill whose name matches an **authored** one **overrides** it — a per-caller resolver can replace a built-in by name. Two **dynamic** resolvers emitting the same name is a genuine ambiguity and throws; namespace one of the keys manually to resolve it.
 
 ### Events
 
@@ -115,6 +118,8 @@ export default defineDynamic({
 ```
 
 The caller's team gets its own playbook advertised as a loadable skill; everyone else gets nothing.
+
+Skills follow the same naming rule as tools: a single `defineSkill(...)` is named after the file slug, while a map names each entry by its bare key (namespace the key yourself if it might collide). A dynamic skill overrides a same-named authored one; two dynamic resolvers emitting the same name throws.
 
 ## Dynamic instructions
 

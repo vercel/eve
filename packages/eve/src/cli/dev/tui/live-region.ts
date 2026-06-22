@@ -29,6 +29,8 @@ const CLEAR_SCROLLBACK = `${ESC}[3J`;
 const CURSOR_HOME = `${ESC}[H`;
 const SYNC_START = `${ESC}[?2026h`;
 const SYNC_END = `${ESC}[?2026l`;
+const BRACKETED_PASTE_ON = `${ESC}[?2004h`;
+const BRACKETED_PASTE_OFF = `${ESC}[?2004l`;
 
 export interface LiveRegionOutput {
   write(chunk: string): boolean;
@@ -57,6 +59,11 @@ export class LiveRegion {
 
   showCursor(): void {
     this.#write(SHOW_CURSOR);
+  }
+
+  /** Toggles bracketed paste through the original write, bypassing foreign-output capture. */
+  emitBracketedPaste(enabled: boolean): void {
+    this.#write(enabled ? BRACKETED_PASTE_ON : BRACKETED_PASTE_OFF);
   }
 
   /** Writes a newline through the bound (original) write. */

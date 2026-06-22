@@ -1,4 +1,5 @@
 import { interactiveAsker, withAnswers } from "../ask.js";
+import { AI_GATEWAY_API_KEY_ENV_VAR } from "../ai-gateway-api-key.js";
 import {
   applyAiGatewayCredential,
   type ApplyAiGatewayCredentialDeps,
@@ -14,6 +15,7 @@ import type { Prompter } from "../prompter.js";
 import { WizardCancelledError } from "../step.js";
 import { runInteractive, type AnySetupBox } from "../runner.js";
 import { snapshotSetupState, type SetupState } from "../state.js";
+import { withSpinner } from "../with-spinner.js";
 import pc from "picocolors";
 
 import { inProjectSetupState, prompterSink } from "./in-project.js";
@@ -31,7 +33,7 @@ export type LinkFlowResult =
   | {
       kind: "done";
       /** The model credential verified in an env file, when one landed. */
-      credential?: "VERCEL_OIDC_TOKEN" | "AI_GATEWAY_API_KEY";
+      credential?: "VERCEL_OIDC_TOKEN" | typeof AI_GATEWAY_API_KEY_ENV_VAR;
     }
   | { kind: "cancelled" };
 
@@ -71,20 +73,17 @@ export async function runLinkFlow(input: {
     ...input.deps,
   };
 
-  const spinner = prompter.log.spinner?.("Checking the current Vercel link...");
-  let identity: Awaited<ReturnType<typeof detectProjectIdentity>>;
-  try {
-    identity = await deps.detectProjectIdentity(appRoot, { signal });
+  const identity = await withSpinner(prompter, "Checking the current Vercel link...", async () => {
+    const detected = await deps.detectProjectIdentity(appRoot, { signal });
     signal?.throwIfAborted();
-  } finally {
-    spinner?.stop();
-  }
+    return detected;
+  });
   if (identity === undefined) {
     // A working model is NOT evidence of a link — credentials can come from
     // an env file or the shell. Naming the source heads off "but it clearly
     // works" confusion when the link detection correctly says unlinked.
     const [gatewayKey, oidc] = await Promise.all([
-      deps.findEnvFileWithKey(appRoot, "AI_GATEWAY_API_KEY"),
+      deps.findEnvFileWithKey(appRoot, AI_GATEWAY_API_KEY_ENV_VAR),
       deps.findEnvFileWithKey(appRoot, "VERCEL_OIDC_TOKEN"),
     ]);
     const credentialFile = gatewayKey ?? oidc;
@@ -154,7 +153,7 @@ export async function runLinkFlow(input: {
 
   const [oidcFile, gatewayKeyFile] = await Promise.all([
     deps.findEnvFileWithKey(appRoot, "VERCEL_OIDC_TOKEN"),
-    deps.findEnvFileWithKey(appRoot, "AI_GATEWAY_API_KEY"),
+    deps.findEnvFileWithKey(appRoot, AI_GATEWAY_API_KEY_ENV_VAR),
   ]);
   signal?.throwIfAborted();
   // Success stays silent here: the caller owns the closing line (`eve link`'s
@@ -168,6 +167,6 @@ export async function runLinkFlow(input: {
   }
   const done: LinkFlowResult = { kind: "done" };
   if (oidcFile !== undefined) done.credential = "VERCEL_OIDC_TOKEN";
-  else if (gatewayKeyFile !== undefined) done.credential = "AI_GATEWAY_API_KEY";
+  else if (gatewayKeyFile !== undefined) done.credential = AI_GATEWAY_API_KEY_ENV_VAR;
   return done;
 }

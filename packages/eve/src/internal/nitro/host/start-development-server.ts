@@ -24,7 +24,10 @@ import {
   EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV,
   getInitializedDevelopmentSandboxBackendNames,
 } from "#execution/sandbox/development-run.js";
-import type { DevelopmentServerHandle } from "#internal/nitro/host/types.js";
+import type {
+  DevelopmentServerHandle,
+  DevelopmentServerOptions,
+} from "#internal/nitro/host/types.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { pruneDevelopmentRuntimeArtifactsSnapshotsInBackground } from "#internal/nitro/dev-runtime-artifacts.js";
 import {
@@ -33,6 +36,7 @@ import {
 } from "#internal/nitro/host/ports.js";
 import { detectPackageManager, type PackageManagerKind } from "#setup/package-manager.js";
 import { eveDevArguments } from "#setup/primitives/index.js";
+import { devBootPhase } from "#internal/dev-boot-progress.js";
 
 const MAX_ALLOWED_DEVELOPMENT_SERVER_PORT = 65_535;
 const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
@@ -464,10 +468,7 @@ async function listenForDevelopmentServer(input: {
  */
 export async function startDevelopmentServer(
   rootDir: string,
-  options: {
-    host?: string;
-    port?: number;
-  } = {},
+  options: DevelopmentServerOptions = {},
 ): Promise<DevelopmentServerHandle> {
   // Marks this process tree as an `eve dev` session so runtime features
   // that must never run in production (for example auto-installing
@@ -484,7 +485,11 @@ export async function startDevelopmentServer(
   let removeDevelopmentProcessId: (() => Promise<void>) | undefined;
 
   try {
-    const preparedHost = await prepareApplicationHost(rootDir, { dev: true });
+    const preparedHost = await devBootPhase(
+      "compiling agent",
+      () => prepareApplicationHost(rootDir, { dev: true }),
+      options.onBootProgress,
+    );
     removeDevelopmentProcessId = await writeDevelopmentProcessId(preparedHost.appRoot);
     pruneDevelopmentRuntimeArtifactsSnapshotsInBackground(preparedHost.appRoot);
     const compiledArtifactsSource = resolveNitroCompiledArtifactsSource(
@@ -498,19 +503,30 @@ export async function startDevelopmentServer(
       compiledArtifactsSource,
     });
     pruneLocalSandboxTemplatesInBackground(preparedHost.appRoot);
-    nitro = await createApplicationNitro(preparedHost, true);
-    devServer = createDevServer(nitro);
-    guardDevelopmentServerWebSocketUpgrades(nitro, devServer);
+    const activeNitro = await devBootPhase(
+      "creating dev server",
+      () => createApplicationNitro(preparedHost, true),
+      options.onBootProgress,
+    );
+    nitro = activeNitro;
+    devServer = createDevServer(activeNitro);
+    const activeDevServer = devServer;
+    guardDevelopmentServerWebSocketUpgrades(activeNitro, devServer);
     const hostname =
-      options.host ?? nitro.options.devServer.hostname ?? DEFAULT_DEVELOPMENT_SERVER_HOST;
+      options.host ?? activeNitro.options.devServer.hostname ?? DEFAULT_DEVELOPMENT_SERVER_HOST;
     const requestedPort = options.port ?? readEnvironmentPort();
     const retryOnAddressInUse = requestedPort === undefined;
-    const server = await listenForDevelopmentServer({
-      devServer,
-      host: hostname,
-      port: requestedPort,
-      retryOnAddressInUse,
-    });
+    const server = await devBootPhase(
+      "binding port",
+      () =>
+        listenForDevelopmentServer({
+          devServer: activeDevServer,
+          host: hostname,
+          port: requestedPort,
+          retryOnAddressInUse,
+        }),
+      options.onBootProgress,
+    );
 
     if (!server.url) {
       throw new Error("Nitro dev server did not expose a URL.");
@@ -519,15 +535,24 @@ export async function startDevelopmentServer(
     const serverUrl = normalizeDevelopmentServerClientUrl(server.url);
     await writeDevelopmentServerMetadata(preparedHost.appRoot, serverUrl);
     restoreWorkflowLocalQueueEnvironment = installWorkflowLocalQueueEnvironment(serverUrl);
-    await prepare(nitro);
-    await buildNitro(nitro);
+    await devBootPhase(
+      "building dev bundle",
+      async () => {
+        await prepare(activeNitro);
+        await buildNitro(activeNitro);
+      },
+      options.onBootProgress,
+    );
 
-    const { startAuthoredSourceWatcher } =
-      await import("#internal/nitro/host/dev-authored-source-watcher.js");
-    authoredSourceWatcher = await startAuthoredSourceWatcher({
-      nitro,
-      preparedHost,
-    });
+    authoredSourceWatcher = await devBootPhase(
+      "starting file watcher",
+      async () => {
+        const { startAuthoredSourceWatcher } =
+          await import("#internal/nitro/host/dev-authored-source-watcher.js");
+        return startAuthoredSourceWatcher({ nitro: activeNitro, preparedHost });
+      },
+      options.onBootProgress,
+    );
     const restoreWorkflowLocalQueueEnvironmentOnClose = restoreWorkflowLocalQueueEnvironment;
     if (restoreWorkflowLocalQueueEnvironmentOnClose === undefined) {
       throw new Error("Workflow local queue environment was not initialized.");
@@ -535,7 +560,7 @@ export async function startDevelopmentServer(
 
     const authoredSourceWatcherOnClose = authoredSourceWatcher;
     const devServerOnClose = devServer;
-    const nitroOnClose = nitro;
+    const nitroOnClose = activeNitro;
     return {
       async close() {
         try {

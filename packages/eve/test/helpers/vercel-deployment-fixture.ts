@@ -7,7 +7,7 @@ import { ensureScenarioEveTarballPath } from "#internal/testing/scenario-app.js"
 import { runPnpmCommand } from "#internal/testing/run-pnpm-command.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import { EVE_HEALTH_ROUTE_PATH } from "#protocol/routes.js";
-import { createDevelopmentRequestHeadersAsync } from "#services/dev-client/request-headers.js";
+import { createDevelopmentRequestHeadersAsync } from "../dev-client-harness/request-headers.js";
 import { resolveDevelopmentServerRouteUrl } from "../dev-client-harness/url.js";
 
 const VERCEL_CLI_PACKAGE = "vercel@latest";

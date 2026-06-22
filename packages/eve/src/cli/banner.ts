@@ -13,5 +13,5 @@ export const EVE_BETA_TERMS_URL = "https://vercel.com/docs/release-phases/public
  */
 export function eveCliBanner(): string {
   const { version } = resolveInstalledPackageInfo();
-  return `${pc.bgBlack(pc.white(` ${EVE_WORDMARK} `))} ${pc.dim(`v${version}`)}`;
+  return `${pc.bgBlack(pc.white(`☰${EVE_WORDMARK} `))} ${pc.dim(`v${version}`)}`;
 }

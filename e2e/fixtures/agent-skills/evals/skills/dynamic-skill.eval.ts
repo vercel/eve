@@ -18,8 +18,7 @@ export default defineEval({
 
     t.didNotFail();
     t.completed();
-    t.calledTool("load_skill", {
-      input: { skill: "dynamic-tenant-policy" },
+    t.loadedSkill("dynamic-tenant-policy", {
       output: new RegExp(DYNAMIC_SKILL_TOKEN, "u"),
     });
     t.messageIncludes(DYNAMIC_SKILL_TOKEN);

@@ -1,4 +1,5 @@
 import type { PromptOption } from "./prompt-ui.js";
+import { previousGraphemeBoundary } from "#shared/text-boundaries.js";
 
 /**
  * Snapshot of the select interaction, advanced by {@link reduceSelect}. `cursor`
@@ -125,7 +126,10 @@ export function reduceSelect(
     }
     case "backspace": {
       if (state.filter.length === 0) return state;
-      const filter = state.filter.slice(0, -1);
+      const filter = state.filter.slice(
+        0,
+        previousGraphemeBoundary(state.filter, state.filter.length),
+      );
       return {
         ...state,
         filter,

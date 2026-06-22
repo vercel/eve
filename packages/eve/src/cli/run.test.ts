@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { resolveDevUiMode, resolveTuiDisplayOptions, resolveTuiTitle, runCli } from "#cli/run.js";
+import { resolveDevUiMode, resolveTuiDisplayOptions, runCli } from "#cli/run.js";
+import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
+import type { DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 
 async function withInteractiveTerminal<T>(fn: () => Promise<T>): Promise<T> {
   const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
@@ -55,7 +57,11 @@ describe("eve dev --input", () => {
     expect(runDevelopmentTui).toHaveBeenCalledWith(
       expect.objectContaining({
         initialInput: "/model",
-        serverUrl: "https://example.com/",
+        target: {
+          kind: "remote",
+          serverUrl: "https://example.com/",
+          workspaceRoot: process.cwd(),
+        },
       }),
     );
   });
@@ -80,6 +86,22 @@ describe("eve dev --input", () => {
   });
 });
 
+describe("eve dev --url protocol", () => {
+  it("rejects an http:// remote URL up front instead of crashing during connect", async () => {
+    await expect(
+      runCli(["dev", "--url", "http://my-app.vercel.app"], { error: () => {}, log: () => {} }),
+    ).rejects.toThrow(/https/);
+  });
+});
+
+describe("eve eval --url protocol", () => {
+  it("rejects an http:// remote URL up front", async () => {
+    await expect(
+      runCli(["eval", "--url", "http://my-app.vercel.app"], { error: () => {}, log: () => {} }),
+    ).rejects.toThrow(/https/);
+  });
+});
+
 describe("eve dev --logs", () => {
   it("accepts sandbox as the initial TUI log mode", async () => {
     const runDevelopmentTui = vi.fn(async () => {});
@@ -95,9 +117,51 @@ describe("eve dev --logs", () => {
     expect(runDevelopmentTui).toHaveBeenCalledWith(
       expect.objectContaining({
         logs: "sandbox",
-        serverUrl: "https://example.com/",
+        target: {
+          kind: "remote",
+          serverUrl: "https://example.com/",
+          workspaceRoot: process.cwd(),
+        },
       }),
     );
+  });
+});
+
+describe("eve dev boot progress", () => {
+  it("passes one reporter through local startup and clears the row on failure", async () => {
+    const writes: string[] = [];
+    const close = vi.fn(async () => {});
+    let hostReporter: DevelopmentServerOptions["onBootProgress"] = undefined;
+    let tuiReporter: RunDevelopmentTuiInput["onBootProgress"] = undefined;
+    const startHost = vi.fn(async (_appRoot: string, options?: DevelopmentServerOptions) => {
+      hostReporter = options?.onBootProgress;
+      hostReporter?.({ phase: "compiling agent", type: "phase-started" });
+      hostReporter?.({ elapsedMs: 1, phase: "compiling agent", type: "phase-finished" });
+      return { close, url: "http://127.0.0.1:2000" };
+    });
+    const runDevelopmentTui = vi.fn(async (input: RunDevelopmentTuiInput) => {
+      tuiReporter = input.onBootProgress;
+      throw new Error("TUI startup failed");
+    });
+    const stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      writes.push(String(chunk));
+      return true;
+    });
+
+    try {
+      await expect(
+        withInteractiveTerminal(() =>
+          runCli(["dev"], { error: () => {}, log: () => {} }, { runDevelopmentTui, startHost }),
+        ),
+      ).rejects.toThrow("TUI startup failed");
+    } finally {
+      stdoutWrite.mockRestore();
+    }
+
+    expect(hostReporter).toBeTypeOf("function");
+    expect(tuiReporter).toBe(hostReporter);
+    expect(writes.at(-1)).toBe("\r\u001B[K");
+    expect(close).toHaveBeenCalledOnce();
   });
 });
 
@@ -151,37 +215,5 @@ describe("resolveTuiDisplayOptions", () => {
     expect(resolved).not.toHaveProperty("subagents");
     expect(resolved).not.toHaveProperty("contextSize");
     expect(resolved.logs).toBe("stderr");
-  });
-});
-
-describe("resolveTuiTitle", () => {
-  it("humanizes the app folder name for a local server", () => {
-    expect(
-      resolveTuiTitle({
-        name: undefined,
-        remoteServerUrl: undefined,
-        appRoot: "/x/apps/fixtures/weather-agent",
-      }),
-    ).toBe("Weather Agent");
-  });
-
-  it("uses the remote host when connecting to a URL", () => {
-    expect(
-      resolveTuiTitle({
-        name: undefined,
-        remoteServerUrl: "https://example.com:8080",
-        appRoot: "/x",
-      }),
-    ).toBe("example.com:8080");
-  });
-
-  it("prefers an explicit --name over both", () => {
-    expect(
-      resolveTuiTitle({
-        name: "Custom",
-        remoteServerUrl: "https://example.com",
-        appRoot: "/x/weather-agent",
-      }),
-    ).toBe("Custom");
   });
 });

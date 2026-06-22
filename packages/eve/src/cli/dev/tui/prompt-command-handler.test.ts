@@ -108,6 +108,41 @@ describe("createPromptCommandHandler", () => {
     });
   });
 
+  it("forwards automatic provider entry and model-access changes", async () => {
+    const runTuiSetupCommand = vi.fn(async () => ({
+      message: "Connected to AI Gateway via AI_GATEWAY_API_KEY in .env.local.",
+      preserveFlowDiagnostics: false,
+      effect: { kind: "model-access-changed" } as const,
+    }));
+    vi.doMock("./setup-commands.js", () => ({
+      SETUP_FLOW_TITLES: { model: "Configure the agent model" },
+      runTuiSetupCommand,
+    }));
+
+    try {
+      const setupFlow = setupFlowRenderer();
+      const handler = createPromptCommandHandler({ appRoot: APP_ROOT });
+
+      await expect(
+        handler.handle(
+          { type: "extension", name: "model", argument: "" },
+          { ...context({ setupFlow }), initialModelStep: "provider" },
+        ),
+      ).resolves.toEqual({
+        message: "Connected to AI Gateway via AI_GATEWAY_API_KEY in .env.local.",
+        effect: { kind: "model-access-changed" },
+      });
+      expect(runTuiSetupCommand).toHaveBeenCalledWith(
+        expect.objectContaining({ initialModelStep: "provider" }),
+      );
+      expect(setupFlow.begin).toHaveBeenCalledWith("Configure the agent model");
+      expect(setupFlow.end).toHaveBeenCalledWith({ preserveDiagnostics: false });
+    } finally {
+      vi.doUnmock("./setup-commands.js");
+      vi.resetModules();
+    }
+  });
+
   it("folds setup-module load failures at the command adapter boundary", async () => {
     vi.doMock("./setup-commands.js", () => {
       throw new Error("Cannot find package 'oxc-parser'");

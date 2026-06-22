@@ -7,6 +7,7 @@ import type {
   AgentInfoResult,
   ClientAuth,
   ClientOptions,
+  ClientRedirectPolicy,
   HeadersValue,
   HealthResult,
   SessionState,
@@ -26,6 +27,7 @@ export class Client {
   readonly #host: string;
   readonly #maxReconnectAttempts: number;
   readonly #preserveCompletedSessions: boolean;
+  readonly #redirect: ClientRedirectPolicy | undefined;
 
   constructor(options: ClientOptions) {
     this.#host = options.host;
@@ -33,6 +35,7 @@ export class Client {
     this.#headers = options.headers;
     this.#maxReconnectAttempts = options.maxReconnectAttempts ?? 3;
     this.#preserveCompletedSessions = options.preserveCompletedSessions ?? false;
+    this.#redirect = options.redirect;
   }
 
   /**
@@ -43,7 +46,7 @@ export class Client {
   async health(): Promise<HealthResult> {
     const url = createClientUrl(this.#host, EVE_HEALTH_ROUTE_PATH);
     const headers = await this.#resolveHeaders();
-    const response = await fetch(url, { headers });
+    const response = await fetch(url, withRedirectPolicy({ headers }, this.#redirect));
 
     if (!response.ok) {
       const body = await response.text();
@@ -65,7 +68,7 @@ export class Client {
   async info(): Promise<AgentInfoResult> {
     const url = createClientUrl(this.#host, EVE_INFO_ROUTE_PATH);
     const headers = await this.#resolveHeaders();
-    const response = await fetch(url, { headers });
+    const response = await fetch(url, withRedirectPolicy({ headers }, this.#redirect));
 
     if (!response.ok) {
       const body = await response.text();
@@ -85,7 +88,7 @@ export class Client {
   async fetch(path: string, init: RequestInit = {}): Promise<Response> {
     const url = createClientUrl(this.#host, path);
     const headers = await this.#resolveHeaders(headersInitToRecord(init.headers));
-    return await fetch(url, { ...init, headers });
+    return await fetch(url, withRedirectPolicy({ ...init, headers }, this.#redirect));
   }
 
   /**
@@ -112,6 +115,7 @@ export class Client {
         host: this.#host,
         maxReconnectAttempts: this.#maxReconnectAttempts,
         preserveCompletedSessions: this.#preserveCompletedSessions,
+        redirect: this.#redirect,
         resolveHeaders: (perRequest) => this.#resolveHeaders(perRequest),
       },
       resolved,
@@ -192,6 +196,13 @@ function headersInitToRecord(
 ): Readonly<Record<string, string>> {
   if (headers === undefined) return {};
   return Object.fromEntries(new Headers(headers).entries());
+}
+
+function withRedirectPolicy(
+  init: RequestInit,
+  redirect: ClientRedirectPolicy | undefined,
+): RequestInit {
+  return redirect === undefined ? init : { ...init, redirect };
 }
 
 /**

@@ -5,7 +5,7 @@ import type { H3Event } from "nitro";
  * so the deployment output is a fully static, build-time-baked HTML
  * response that performs no runtime resolution.
  */
-const EVE_DOCS_URL = "https://beta.eve.dev/docs";
+const EVE_DOCS_URL = "https://eve.dev/docs";
 
 const DEPLOYMENT_URL_PLACEHOLDER = "{{DEPLOYMENT_URL}}";
 

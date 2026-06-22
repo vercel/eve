@@ -37,14 +37,14 @@ function qualifyDynamicToolNames(
   if (keys.length === 0) return result;
 
   // single entry: one tool, named after the file slug.
-  // map of entries: always slug__key.
+  // map of entries: each named by its bare key.
   if (isSingle) {
     result.set(slug, entries[keys[0]!]!);
     return result;
   }
 
   for (const key of keys) {
-    result.set(`${slug}__${key}`, entries[key]!);
+    result.set(key, entries[key]!);
   }
   return result;
 }
@@ -63,19 +63,19 @@ describe("dynamic tool naming", () => {
     expect([...names.keys()]).toEqual(["analytics"]);
   });
 
-  it("uses slug__key for a map entry", () => {
+  it("uses the bare key for a map entry", () => {
     const names = qualifyDynamicToolNames("search", false, {
       run: stubEntry,
     });
-    expect([...names.keys()]).toEqual(["search__run"]);
+    expect([...names.keys()]).toEqual(["run"]);
   });
 
-  it("uses slug__key for multiple map entries", () => {
+  it("uses bare keys for multiple map entries", () => {
     const names = qualifyDynamicToolNames("tenant", false, {
       export: stubEntry,
       query: stubEntry,
     });
-    expect([...names.keys()]).toEqual(["tenant__export", "tenant__query"]);
+    expect([...names.keys()]).toEqual(["export", "query"]);
   });
 
   it("handles empty entries — no tools produced", () => {
@@ -490,11 +490,11 @@ describe("dispatchDynamicToolEvent", () => {
 
     const metadata = ctx.get(SessionDynamicToolMetadataKey);
     expect(metadata).toHaveLength(1);
-    expect(metadata![0]!.name).toBe("weather__forecast");
+    expect(metadata![0]!.name).toBe("forecast");
 
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(1);
-    expect(tools[0]!.name).toBe("weather__forecast");
+    expect(tools[0]!.name).toBe("forecast");
   });
 
   it("skips resolvers that do not match the event type", async () => {
@@ -557,7 +557,7 @@ describe("dispatchDynamicToolEvent", () => {
       event: makeEvent("session.started"),
     });
     expect(buildDynamicTools(ctx)).toHaveLength(1);
-    expect(buildDynamicTools(ctx)[0]!.name).toBe("alpha__a_tool");
+    expect(buildDynamicTools(ctx)[0]!.name).toBe("a_tool");
 
     await dispatchDynamicToolEvent({
       ctx,
@@ -567,7 +567,26 @@ describe("dispatchDynamicToolEvent", () => {
     });
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(2);
-    expect(tools.map((t) => t.name).sort()).toEqual(["alpha__a_tool", "beta__b_tool"]);
+    expect(tools.map((t) => t.name).sort()).toEqual(["a_tool", "b_tool"]);
+  });
+
+  it("throws and recommends manual namespacing when two resolvers emit the same name", async () => {
+    const ctx = createCtx();
+    const alpha = createResolver("alpha", ["session.started"], () => ({
+      shared: createReplayableTool(),
+    }));
+    const beta = createResolver("beta", ["session.started"], () => ({
+      shared: createReplayableTool(),
+    }));
+
+    await expect(
+      dispatchDynamicToolEvent({
+        ctx,
+        resolvers: [alpha, beta],
+        messages: [],
+        event: makeEvent("session.started"),
+      }),
+    ).rejects.toThrow(/Dynamic tool "shared".*Namespace the map key manually/u);
   });
 
   it("does not clobber session metadata when a different event resolves tools", async () => {
@@ -651,7 +670,7 @@ describe("dispatchDynamicToolEvent", () => {
 
       const tools = buildDynamicTools(ctx);
       expect(tools).toHaveLength(1);
-      expect(tools[0]!.name).toBe("tenant__query");
+      expect(tools[0]!.name).toBe("query");
     } finally {
       registry.delete(stepId);
     }
@@ -689,7 +708,7 @@ describe("dispatchDynamicToolEvent", () => {
 
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(1);
-    expect(tools[0]!.name).toBe("good__working");
+    expect(tools[0]!.name).toBe("working");
   });
 
   it("uses file slug when handler returns a single entry", async () => {
@@ -746,14 +765,14 @@ describe("framework dynamic tools (no bundler transform)", () => {
 
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(1);
-    expect(tools[0]!.name).toBe("fwk__search");
+    expect(tools[0]!.name).toBe("search");
 
     // Simulate step boundary — virtual context cleared, durable survives
     ctx.clearVirtualContext();
 
     const replayedTools = buildDynamicTools(ctx);
     expect(replayedTools).toHaveLength(1);
-    expect(replayedTools[0]!.name).toBe("fwk__search");
+    expect(replayedTools[0]!.name).toBe("search");
 
     // Execute the replayed tool — the original closure is invoked
     await replayedTools[0]!.execute!({ query: "test" });
@@ -782,7 +801,7 @@ describe("framework dynamic tools (no bundler transform)", () => {
 
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(1);
-    expect(tools[0]!.name).toBe("helper__assist");
+    expect(tools[0]!.name).toBe("assist");
 
     await tools[0]!.execute!({ action: "help" });
     expect(executeFn).toHaveBeenCalledWith({ action: "help" });
@@ -811,7 +830,7 @@ describe("framework dynamic tools (no bundler transform)", () => {
 
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(2);
-    expect(tools.map((t) => t.name).sort()).toEqual(["authored__query", "fwk__search"]);
+    expect(tools.map((t) => t.name).sort()).toEqual(["query", "search"]);
   });
 
   it("single-entry framework tool uses slug as name", async () => {
@@ -854,13 +873,13 @@ describe("framework dynamic tools (no bundler transform)", () => {
 
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(1);
-    expect(tools[0]!.name).toBe("connection__risky");
+    expect(tools[0]!.name).toBe("risky");
     expect(tools[0]!.needsApproval).toBe(approvalFn);
     expect(
       tools[0]!.needsApproval!({
         approvedTools: new Set(),
         toolInput: undefined,
-        toolName: "connection__risky",
+        toolName: "risky",
       }),
     ).toBe(true);
   });

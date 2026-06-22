@@ -189,12 +189,12 @@ describe("eve init smoke", () => {
         cwd: canonicalProjectDir,
       },
       {
-        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev", "--input", "/model"],
+        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev"],
         cwd: canonicalProjectDir,
       },
     ]);
     expect(result.stdout).toContain("Created an eve agent in ");
-    expect(result.stdout).toContain("Installing dependencies...");
+    expect(result.stdout).toContain("Preparing project...");
     expect(result.stdout).toContain("Installed dependencies");
     expect(result.stdout).not.toContain("Progress: resolved");
     await expect(pathExists(join(projectDir, ".git"))).resolves.toBe(true);
@@ -232,7 +232,7 @@ describe("eve init smoke", () => {
       "--no-frozen-lockfile",
       "--config.minimum-release-age=0",
     ]);
-    expect(devCall?.args.slice(-5)).toEqual(["exec", "eve", "dev", "--input", "/model"]);
+    expect(devCall?.args.slice(-3)).toEqual(["exec", "eve", "dev"]);
   });
 
   it("adds Web Chat through npm without writing pnpm configuration", async () => {
@@ -257,7 +257,7 @@ describe("eve init smoke", () => {
         cwd: canonicalProjectDir,
       },
       {
-        args: ["exec", "--", "eve", "dev", "--input", "/model"],
+        args: ["exec", "--", "eve", "dev"],
         cwd: canonicalProjectDir,
       },
     ]);
@@ -353,7 +353,7 @@ describe("eve init smoke", () => {
         cwd: canonicalProjectDir,
       },
       {
-        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev", "--input", "/model"],
+        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev"],
         cwd: canonicalProjectDir,
       },
     ]);

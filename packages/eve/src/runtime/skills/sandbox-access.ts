@@ -31,16 +31,23 @@ export function assertSafeSkillId(id: string): asserts id is string {
  * Returns the SKILL.md body with any YAML frontmatter stripped, so the
  * model receives plain markdown as the tool result. Throws when the id
  * is unsafe or the file does not exist; the AI SDK forwards the error
- * to the model as a tool-error result.
+ * to the model as a tool-error result. `availableNames`, when given, is
+ * listed in the not-found error so the model can correct a wrong id.
  */
-export async function loadSkillFromSandbox(access: SandboxAccess, id: string): Promise<string> {
+export async function loadSkillFromSandbox(
+  access: SandboxAccess,
+  id: string,
+  availableNames: readonly string[] = [],
+): Promise<string> {
   assertSafeSkillId(id);
   const sandbox = await requireSandboxSession(access);
   const path = skillFilePath(id, "SKILL.md");
   const instructions = await sandbox.readTextFile({ path });
 
   if (instructions === null) {
-    throw new Error(`No skill named "${id}" at ${path}.`);
+    const hint =
+      availableNames.length > 0 ? ` Available skills: ${availableNames.join(", ")}.` : "";
+    throw new Error(`No skill named "${id}" at ${path}.${hint}`);
   }
 
   return instructions.replace(FRONTMATTER_PATTERN, "");

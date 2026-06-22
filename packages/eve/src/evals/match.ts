@@ -34,6 +34,13 @@ export interface EveEvalToolCallMatchOptions {
 }
 
 /**
+ * Constraints applied to a `load_skill` call by `t.loadedSkill`. Identical to
+ * {@link EveEvalToolCallMatchOptions} without `input`, which the helper fixes to
+ * the loaded skill id.
+ */
+export type EveEvalSkillLoadMatchOptions = Omit<EveEvalToolCallMatchOptions, "input">;
+
+/**
  * Constraints applied to subagent calls by `t.calledSubagent`.
  */
 export interface EveEvalSubagentCallMatchOptions {

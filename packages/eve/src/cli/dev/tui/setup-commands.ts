@@ -44,6 +44,8 @@ export interface TuiSetupCommandInput {
   appRoot: string;
   /** The renderer surface the TUI-native prompter drives. */
   renderer: TuiSetupCommandRenderer;
+  /** Initial model-flow step authorized by the runner's boot evidence. */
+  initialModelStep?: "provider";
   /** Test seam; defaults to the real TUI-native prompter over `renderer`. */
   createPrompter?: (renderer: TuiPrompterRenderer) => Prompter;
   /** Test seam; defaults to the real setup flows. */
@@ -63,8 +65,8 @@ export interface TuiSetupCommandResult {
   message: string;
   /** Keep warning/error lines after the bordered panel closes. */
   preserveFlowDiagnostics: boolean;
-  /** Status-line effect of this command, when it changed link/deploy state. */
-  vercelEffect?: VercelStatusEffect;
+  /** Status refresh required after the command settles. */
+  effect?: VercelStatusEffect | { kind: "model-access-changed" };
 }
 
 /**
@@ -129,12 +131,11 @@ export async function runTuiSetupCommand(
     interrupted = true;
     controller.abort(new WizardCancelledError());
     const settled = await execution;
-    const result: TuiSetupCommandResult = {
+    return {
+      ...settled,
       message: `/${command} interrupted.`,
       preserveFlowDiagnostics: true,
     };
-    if (settled.vercelEffect !== undefined) result.vercelEffect = settled.vercelEffect;
-    return result;
   } finally {
     interrupt.dispose();
     // A flow that threw or was abandoned mid-wait must not leave the footer spinning.
@@ -169,7 +170,15 @@ async function executeSetupCommand(
         return loginResultMessage(await flows.runLoginFlow({ appRoot, prompter, signal }));
       }
       case "model": {
-        const result = await flows.runModelFlow({ appRoot, prompter, signal });
+        const modelInput: Parameters<TuiSetupFlows["runModelFlow"]>[0] = {
+          appRoot,
+          prompter,
+          signal,
+        };
+        if (input.initialModelStep !== undefined) {
+          modelInput.initialStep = input.initialModelStep;
+        }
+        const result = await flows.runModelFlow(modelInput);
         if (result.kind === "cancelled") {
           return { message: "/model cancelled.", preserveFlowDiagnostics: false };
         }
@@ -185,10 +194,10 @@ async function executeSetupCommand(
           message: lines.join("\n"),
           preserveFlowDiagnostics: false,
         };
-        // Provider setup can relink the project. Re-probe once after the flow
-        // instead of threading link-specific state through every result layer.
+        // Provider setup can change both the local env and Vercel identity.
+        // The runner refreshes the complete model-access view after the flow.
         if (result.providerOutcome !== undefined) {
-          outcome.vercelEffect = { kind: "refresh-identity" };
+          outcome.effect = { kind: "model-access-changed" };
         }
         return outcome;
       }
@@ -214,7 +223,7 @@ async function executeSetupCommand(
             return {
               message: `Channels added: ${result.addedChannels.join(", ")} — run /deploy to ship them.`,
               preserveFlowDiagnostics: true,
-              vercelEffect: { kind: "channels-added" },
+              effect: { kind: "channels-added" },
             };
         }
       }
@@ -233,7 +242,7 @@ async function executeSetupCommand(
           message:
             result.productionUrl === undefined ? "Deployed." : `Deployed: ${result.productionUrl}`,
           preserveFlowDiagnostics: true,
-          vercelEffect: { kind: "deployed" },
+          effect: { kind: "deployed" },
         };
       }
     }
@@ -334,7 +343,7 @@ async function runDeployAndChat(
   return {
     message: `${live}\n${chatLine}`,
     preserveFlowDiagnostics: true,
-    vercelEffect: { kind: "deployed" },
+    effect: { kind: "deployed" },
   };
 }
 
@@ -356,7 +365,7 @@ function installVercelCliResultMessage(result: InstallVercelCliResult): TuiSetup
         message: "Installed the Vercel CLI. Run /login next.",
         preserveFlowDiagnostics: false,
         // The CLI now resolves, so the status line's identity probe can run.
-        vercelEffect: { kind: "refresh-identity" },
+        effect: { kind: "refresh-identity" },
       };
   }
 }
@@ -384,7 +393,7 @@ function loginResultMessage(result: LoginFlowResult): TuiSetupCommandResult {
         preserveFlowDiagnostics: false,
         // A now-valid `whoami` lets a previously-linked directory resolve its
         // project identity for the status line.
-        vercelEffect: { kind: "refresh-identity" },
+        effect: { kind: "refresh-identity" },
       };
     case "unavailable":
       return {
@@ -398,7 +407,7 @@ function pendingChannelsResult(message: string): TuiSetupCommandResult {
   return {
     message,
     preserveFlowDiagnostics: true,
-    vercelEffect: { kind: "channels-added" },
+    effect: { kind: "channels-added" },
   };
 }
 

@@ -5,9 +5,11 @@ import {
   subagentCallMatches,
   testRegExp,
   toolCallMatches,
+  type EveEvalSkillLoadMatchOptions,
   type EveEvalSubagentCallMatchOptions,
   type EveEvalToolCallMatchOptions,
 } from "#evals/match.js";
+import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import type { AssertionOutcome, RunAssertion } from "#evals/assertions/collector.js";
 
 const PASS: AssertionOutcome = { score: 1 };
@@ -122,6 +124,19 @@ export function calledTool(name: string, options: EveEvalToolCallMatchOptions = 
       return fail(`${expectation}; ${observed}`);
     },
   };
+}
+
+/**
+ * Sugar over {@link calledTool} for the framework `load_skill` tool: asserts a
+ * skill with id `skill` was loaded. `output`/`isError`/`times` constrain the
+ * matching call exactly as for `calledTool`.
+ */
+export function loadedSkill(
+  skill: string,
+  options: EveEvalSkillLoadMatchOptions = {},
+): RunAssertion {
+  const base = calledTool(LOAD_SKILL_TOOL_NAME, { ...options, input: { skill } });
+  return { ...base, name: `loadedSkill(${skill})` };
 }
 
 /**

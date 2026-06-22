@@ -15,22 +15,22 @@
  */
 
 import type { ChannelSetupAction, PromptOption } from "#setup/cli/index.js";
-import { renderOptionRow, resolveOptionRowState } from "#setup/cli/option-row.js";
+import {
+  renderOptionRow,
+  renderOptionRowContinuation,
+  renderCursorRow,
+  resolveOptionRowState,
+} from "#setup/cli/option-row.js";
 import { filterOptions, submitRowIndex, type SelectState } from "#setup/cli/select-state.js";
 import type { SelectNotice } from "#setup/prompter.js";
+import { graphemes } from "#shared/text-boundaries.js";
 
 import { visibleLine, type LineState } from "./line-editor.js";
 import type { Theme } from "./theme.js";
-import { sliceVisible, visibleLength, wrapVisibleLine } from "./terminal-text.js";
+import { clipVisible, renderInputText, visibleLength, wrapVisibleLine } from "./terminal-text.js";
 
 function clip(line: string, width: number): string {
-  if (visibleLength(line) <= width) {
-    return line;
-  }
-  const sliced = sliceVisible(line, width);
-  // Truncation can cut a color span before its close; reset so the open
-  // style cannot bleed into every row painted below.
-  return sliced.includes("\x1b[") ? `${sliced}\x1b[0m` : sliced;
+  return clipVisible(line, width);
 }
 
 /** One row of a setup select panel; the shared prompt-option shape. */
@@ -244,6 +244,7 @@ function optionRow(input: {
     colors: theme.colors,
     glyphs: {
       pointer: theme.glyph.pointer,
+      selectedPointer: theme.glyph.selectedPointer,
       success: theme.glyph.success,
       placeholder: theme.glyph.option,
       dot: theme.glyph.dot,
@@ -442,7 +443,7 @@ function appendSelectOptionRows(input: {
     );
 
     if (stackedHint !== undefined) {
-      rows.push(`${" ".repeat(4)}${dimWithEmphasis(stackedHint, theme)}`);
+      rows.push(`  ${renderOptionRowContinuation(dimWithEmphasis(stackedHint, theme))}`);
     }
     // Disabled descriptions explain why an inert row cannot be selected, so
     // keep them visible even though the cursor skips that row.
@@ -456,9 +457,10 @@ function appendSelectOptionRows(input: {
 function appendSubmitRow(rows: string[], cursor: number, submitIndex: number, theme: Theme): void {
   if (submitIndex < 0) return;
   const onSubmit = cursor === submitIndex;
-  const pointer = onSubmit ? theme.colors.cyan(theme.glyph.pointer) : " ";
-  const label = onSubmit ? theme.colors.cyan(theme.colors.bold("Submit")) : "Submit";
-  rows.push("", `  ${pointer} ${label}`);
+  const content = onSubmit
+    ? `${theme.glyph.selectedPointer} ${theme.colors.bold("Submit")}`
+    : "  Submit";
+  rows.push("", `  ${renderCursorRow(content, onSubmit, theme.colors)}`);
 }
 
 function appendSelectNotices(
@@ -550,7 +552,6 @@ export function renderSelectQuestion(
   // An empty message (e.g. a panel-titled menu) contributes no header rows;
   // the panel's own spacing does the separating.
   const rows = selectMessageRows(state.message, presentation.layout, theme);
-
   if (presentation.filter !== undefined) {
     rows.push(`  ${searchFilter(state.select.filter, presentation.filter.placeholder, theme)}`);
   }
@@ -626,14 +627,17 @@ export function renderTextQuestion(
 
   const budget = Math.max(4, width - 4);
   const display = state.mask
-    ? { text: "•".repeat(state.editor.text.length), cursor: state.editor.cursor }
+    ? {
+        text: "•".repeat(graphemes(state.editor.text).length),
+        cursor: graphemes(state.editor.text.slice(0, state.editor.cursor)).length,
+      }
     : { text: state.editor.text, cursor: state.editor.cursor };
-  const { before, after } = visibleLine(display, budget, theme.glyph.ellipsis);
+  const { before, under, after } = visibleLine(display, budget, theme.glyph.ellipsis);
   const caret = caretVisible ? c.cyan(theme.glyph.caret) : " ";
   const body =
     state.editor.text.length === 0 && state.placeholder !== undefined
       ? `${caret}${c.dim(state.placeholder)}`
-      : `${before}${caret}${after}`;
+      : `${renderInputText(before)}${caret}${renderInputText(under)}${renderInputText(after)}`;
   rows.push(`  ${body}`);
 
   if (state.error !== undefined) {

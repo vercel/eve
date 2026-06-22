@@ -2,7 +2,12 @@ import type { Writable } from "node:stream";
 
 import { wrapTextWithPrefix } from "@clack/core";
 
-import { renderOptionRow, resolveOptionRowState, UNICODE_ROW_GLYPHS } from "./option-row.js";
+import {
+  renderCursorRow,
+  renderOptionRow,
+  resolveOptionRowState,
+  UNICODE_ROW_GLYPHS,
+} from "./option-row.js";
 
 /** Terminal lifecycle state accepted by the shared prompt renderer. */
 export type PromptState = "initial" | "active" | "submit" | "cancel" | "error";
@@ -12,6 +17,7 @@ export type PromptValue = string | number | boolean;
 
 /** Coloring operations used by prompt rendering without coupling to a color library. */
 export interface PromptColors {
+  blue(text: string): string;
   bold(text: string): string;
   cyan(text: string): string;
   dim(text: string): string;
@@ -28,17 +34,16 @@ export interface PromptColors {
 export interface PromptOption<T extends PromptValue> {
   value: T;
   label: string;
-  /** Short inline annotation shown in parentheses while the option is highlighted. */
+  /** Supporting copy; stacked prompts render newline-separated text on separate rows. */
   hint?: string;
   /** Short inline annotation shown dimmed only while the cursor is on this row. */
   focusHint?: string;
   /**
-   * Longer, display-only explanation shown dimmed on the line below the option
-   * while it is highlighted during navigation. It is navigation-only: once a
-   * choice is submitted only the label remains.
+   * Longer, display-only explanation for the highlighted option. Its prompt
+   * chooses the placement; it is hidden once a choice is submitted.
    */
   description?: string;
-  /** Cursor-pointer/active-label accent; "warning" turns them yellow for an attention row. */
+  /** Row accent; "warning" stays yellow both at rest and under the cursor. */
   accent?: "warning";
   disabled?: boolean;
   disabledReason?: string;
@@ -353,7 +358,7 @@ function descriptionLine<T extends PromptValue>(
 /**
  * Renders the virtual Submit row that closes every multi-select list. It has
  * no checkbox — its bold label sits in the checkbox column, trails a green
- * check, and brightens under the cursor; enter confirms the checklist only
+ * check, and uses the shared cursor highlight; enter confirms the checklist only
  * from here. The label reads "Skip" while an optional checklist has nothing
  * picked (the caller computes that), so an empty confirm is honest about what
  * it does. Callers put a blank rail line above it to set it apart from the
@@ -364,9 +369,12 @@ export function renderSubmitRow(
   colors: PromptColors,
   label: string = "Submit",
 ): string {
-  const arrow = isCursor ? colors.cyan(UNICODE_ROW_GLYPHS.pointer) : " ";
   const bold = colors.bold(label);
-  return `${arrow} ${isCursor ? bold : colors.dim(bold)} ${colors.green(UNICODE_ROW_GLYPHS.success)}`;
+  const content = isCursor
+    ? `${UNICODE_ROW_GLYPHS.selectedPointer} ${bold}`
+    : `  ${colors.dim(bold)}`;
+  const suffixSeparator = isCursor ? "" : " ";
+  return `${renderCursorRow(content, isCursor, colors)}${suffixSeparator}${colors.green(UNICODE_ROW_GLYPHS.success)}`;
 }
 
 function renderMultiselectRows<T extends PromptValue>(input: {
