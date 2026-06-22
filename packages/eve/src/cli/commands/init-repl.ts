@@ -86,19 +86,22 @@ export async function isCodingAgentReplAvailable(command: CodingAgentRepl): Prom
   return (await resolveCodingAgentRepl(command)) !== null;
 }
 
+// `focusHint` (not `hint`) so the menu reads like the dev TUI lists: only the
+// highlighted row shows its hint, rather than every row at once.
 function handoffOptions(
   availableRepls: readonly CodingAgentReplDefinition[],
+  agentName: string,
 ): SelectOption<InitHandoff>[] {
   return [
     {
       value: "eve-dev",
       label: "Start eve dev",
-      hint: "run your agent locally",
+      focusHint: `talk to '${agentName}' in your terminal`,
     },
     ...availableRepls.map((repl) => ({
       value: repl.command,
       label: `Open ${repl.label}`,
-      hint: "open its interactive REPL in this project",
+      focusHint: `build '${agentName}' using ${repl.label}`,
     })),
   ];
 }
@@ -108,11 +111,10 @@ function handoffOptions(
  * existing `eve dev` handoff. Non-interactive sessions, and systems with none
  * of them on `PATH`, keep the prior direct-to-dev behavior.
  */
-export async function selectInitHandoff(
-  input: {
-    deps?: Partial<InitReplDependencies>;
-  } = {},
-): Promise<InitHandoff> {
+export async function selectInitHandoff(input: {
+  agentName: string;
+  deps?: Partial<InitReplDependencies>;
+}): Promise<InitHandoff> {
   const dependencies: InitReplDependencies = { ...defaultDependencies, ...input.deps };
   if (!dependencies.hasInteractiveTerminal()) return "eve-dev";
 
@@ -124,7 +126,7 @@ export async function selectInitHandoff(
 
   return dependencies.createPrompter().select<InitHandoff>({
     message: "How would you like to continue?",
-    options: handoffOptions(availableRepls),
+    options: handoffOptions(availableRepls, input.agentName),
     initialValue: "eve-dev",
   });
 }

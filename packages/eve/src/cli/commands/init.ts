@@ -457,7 +457,7 @@ export async function runInitCommand(
 
   let handoff: InitHandoff;
   try {
-    handoff = await dependencies.selectInitHandoff();
+    handoff = await dependencies.selectInitHandoff({ agentName: basename(result.projectPath) });
   } catch (error) {
     if (error instanceof WizardCancelledError) return;
     throw error;

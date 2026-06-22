@@ -48,7 +48,7 @@ describe("selectInitHandoff", () => {
   it("keeps non-interactive sessions on the direct eve dev path", async () => {
     const deps = dependencies({ interactive: false, available: ["claude"] });
 
-    await expect(selectInitHandoff({ deps })).resolves.toBe("eve-dev");
+    await expect(selectInitHandoff({ deps, agentName: "weather-bot" })).resolves.toBe("eve-dev");
     expect(deps.isCodingAgentReplAvailable).not.toHaveBeenCalled();
     expect(deps.createPrompter).not.toHaveBeenCalled();
   });
@@ -56,7 +56,7 @@ describe("selectInitHandoff", () => {
   it("keeps the direct eve dev path when no supported REPL is installed", async () => {
     const deps = dependencies();
 
-    await expect(selectInitHandoff({ deps })).resolves.toBe("eve-dev");
+    await expect(selectInitHandoff({ deps, agentName: "weather-bot" })).resolves.toBe("eve-dev");
     expect(
       vi.mocked(deps.isCodingAgentReplAvailable).mock.calls.map(([command]) => command),
     ).toEqual(["claude", "codex", "cursor-agent", "droid", "gemini", "opencode", "pi"]);
@@ -78,7 +78,7 @@ describe("selectInitHandoff", () => {
       isCodingAgentReplAvailable,
     };
 
-    const handoff = selectInitHandoff({ deps });
+    const handoff = selectInitHandoff({ deps, agentName: "weather-bot" });
     const checksStartedBeforeAnyFinished = isCodingAgentReplAvailable.mock.calls.length;
     releaseAvailabilityChecks!();
 
@@ -93,11 +93,17 @@ describe("selectInitHandoff", () => {
         expect(options.message).toBe("How would you like to continue?");
         expect(options.initialValue).toBe("eve-dev");
         expect(options.options.map((option) => option.value)).toEqual(["eve-dev", "codex"]);
+        expect(options.options.map((option) => option.focusHint)).toEqual([
+          "talk to 'weather-bot' in your terminal",
+          "build 'weather-bot' using Codex",
+        ]);
+        // Hints are focus-only, like the dev TUI lists, so no always-on hint is set.
+        expect(options.options.every((option) => option.hint === undefined)).toBe(true);
         return "codex";
       },
     });
 
-    await expect(selectInitHandoff({ deps })).resolves.toBe("codex");
+    await expect(selectInitHandoff({ deps, agentName: "weather-bot" })).resolves.toBe("codex");
   });
 });
 
