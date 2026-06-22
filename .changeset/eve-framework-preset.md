@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Set the Vercel framework preset when creating new Eve projects.
+Set the Eve Vercel framework preset when creating standalone Eve projects.

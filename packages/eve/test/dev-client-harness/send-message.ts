@@ -8,7 +8,7 @@ import {
 import {
   createDevelopmentRequestHeadersAsync,
   type DevelopmentRequestHeaders,
-} from "#services/dev-client/request-headers.js";
+} from "./request-headers.js";
 import { openDevelopmentMessageStream } from "./live-stream.js";
 import {
   createDevelopmentMessageRequest,
