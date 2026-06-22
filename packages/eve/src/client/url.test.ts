@@ -24,4 +24,19 @@ describe("createClientUrl", () => {
       "/api/eve/v1/session/123/stream?startIndex=4",
     );
   });
+
+  it("preserves a query string embedded in the route path for absolute hosts", () => {
+    expect(
+      createClientUrl(
+        "https://agent.example.com",
+        "/eve/v1/realtime-speech/setup?voiceSessionId=v1",
+      ),
+    ).toBe("https://agent.example.com/eve/v1/realtime-speech/setup?voiceSessionId=v1");
+  });
+
+  it("preserves a query string embedded in the route path for same-origin prefixes", () => {
+    expect(createClientUrl("", "/eve/v1/realtime-speech/setup?voiceSessionId=v1")).toBe(
+      "/eve/v1/realtime-speech/setup?voiceSessionId=v1",
+    );
+  });
 });

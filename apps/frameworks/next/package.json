@@ -12,6 +12,8 @@
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@ai-sdk/gateway": "catalog:",
+    "@ai-sdk/react": "catalog:",
     "@auth/core": "0.41.2",
     "@vercel/connect": "catalog:",
     "@vercel/oidc": "3.4.1",

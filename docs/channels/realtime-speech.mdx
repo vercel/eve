@@ -1,0 +1,152 @@
+---
+title: "Realtime Speech (Vercel AI Gateway)"
+description: "Add a browser microphone backed by Vercel AI Gateway realtime audio; finalized utterances run as normal durable Eve turns."
+---
+
+Realtime Speech adds a microphone surface for agents without turning Eve into a long-running audio runtime.
+
+This channel is specific to **Vercel AI Gateway** realtime audio and is exported from `eve/channels/vercel/speech`. It is not a provider-agnostic speech API. The shipped topology is:
+
+- **Audio:** browser ↔ AI Gateway realtime WebSocket (Eve is never in the audio path).
+- **Turns:** browser/app ↔ Eve `/eve/v1/session` (+ `/stream`) as ordinary durable turns.
+
+Eve serves a setup route that authenticates the caller and mints a short-lived Gateway client secret for the browser audio socket; each finalized utterance then becomes one normal durable agent turn through the existing session API.
+
+`useEveVoice` is audio-first by default: it requests audio output from the realtime model and uses transcription events for visible text. Override `sessionConfig.outputModalities` only if you intentionally want a text-only or provider-specific realtime mode.
+
+## Install
+
+The server channel ships with Eve. The React microphone helper uses the AI SDK realtime hook, so install the optional peer in apps that render voice UI:
+
+```bash
+npm install eve@latest @ai-sdk/react
+```
+
+## Enable the channel
+
+Create `agent/channels/speech.ts`:
+
+```ts
+import { vercelSpeechChannel } from "eve/channels/vercel/speech";
+import { localDev, vercelOidc } from "eve/channels/auth";
+
+export default vercelSpeechChannel({
+  auth: [localDev(), vercelOidc()],
+});
+```
+
+Provide `AI_GATEWAY_API_KEY` in the server environment. The setup route uses it to mint a single-use `vcst_` realtime client secret, so the browser never receives a long-lived Gateway credential.
+
+## Add a microphone
+
+Use the React hook to render a microphone control that fits your UI:
+
+```tsx
+"use client";
+
+import { useEveVoice } from "eve/react/voice";
+
+export function ComposerActions() {
+  const voice = useEveVoice();
+  const active = voice.status === "connected" || voice.status === "connecting";
+
+  return (
+    <button onClick={() => (active ? voice.stop() : void voice.start())}>
+      {active ? "Stop" : "Talk"}
+    </button>
+  );
+}
+```
+
+The React helper is intentionally limited to React because it wraps the AI SDK realtime React hook. For non-React clients, mint the realtime audio token with `setupVoice` and run turns through a normal durable session:
+
+```ts
+import { Client, setupVoice } from "eve/client";
+
+const client = new Client({ host: "https://my-agent.example.com" });
+
+// Mint the short-lived AI Gateway realtime token to open the audio socket.
+const { token, url, voiceSessionId } = await setupVoice(client);
+
+// Finalized transcripts are ordinary durable turns.
+const session = client.session();
+const reply = await session.send("What's the weather?").result();
+console.log(reply.message);
+```
+
+## How it works
+
+- `POST /eve/v1/realtime-speech/setup` authenticates the request and returns a Gateway realtime token, an empty realtime tool list, and `voiceSessionId`.
+- The browser opens the AI Gateway realtime WebSocket directly with the short-lived token.
+- The client listens for finalized realtime transcription events and sends each transcript to Eve as a normal durable turn through `POST /eve/v1/session` (and `POST /eve/v1/session/:sessionId` for follow-ups), which return immediately.
+- The client consumes the session event stream (`GET /eve/v1/session/:sessionId/stream`) and, on a non-tool-call `message.completed`, sends that text back to the realtime session for audio playback.
+- The durable continuation token returned by the session route keeps the same Eve conversation across utterances, advancing the stream cursor each turn.
+
+No Eve HTTP request blocks for a full model turn: the setup POST and each session turn POST return right away, and replies arrive over the event stream. The speech transport can stay open for many utterances. Eve still sees discrete durable turns and parks between them, so history, tools, compaction, auth, and instrumentation behave the same as other channels.
+
+Eve is the durable source of truth for the conversation: transcripts enter Eve as user turns, and spoken replies are readback of Eve output. Realtime provider suppression is still client/provider mediated, so do not treat the realtime model as a security boundary for policy decisions.
+
+## Options
+
+```ts
+export default vercelSpeechChannel({
+  auth: [localDev(), vercelOidc()],
+  model: "openai/gpt-realtime-2",
+  expiresAfterSeconds: 300,
+});
+```
+
+`useEveVoice` defaults to the `/eve/v1/realtime-speech/setup` route and same-origin `/eve/v1/session` routes. Override `setupUrl` only if you changed the channel `basePath`, and pass `host`, `auth`, `headers`, `client`, or `session` to run turns against a custom origin or a session you already manage (for example one shared with `useEveAgent`).
+
+The default client session config uses `outputModalities: ["audio"]`, `inputAudioTranscription: {}`, and `outputAudioTranscription: {}`. This keeps the speech UX compatible with realtime providers that reject mixed `audio` + `text` output modalities while still letting the UI observe transcripts.
+
+`sessionConfig` is merged over the defaults, so passing `instructions` replaces the built-in speech-adapter prompt that drives reply playback (it tells the model to speak only the text after the `EVE_SPEAK:` marker). If you override `instructions`, keep that marker behavior or Eve's replies will not be spoken.
+
+## Gateway-owned control mode (A-lite, experimental)
+
+In the default mode above the client (or app) owns turn timing. The experimental **Gateway-owned control mode** instead lets AI Gateway drive turns: per live session it dials an Eve `WS()` control route with a signed, short-lived control token; Eve verifies it, owns turn coordination (settle-debounce, backchannel/duplicate suppression, barge-in), runs durable turns, and streams reply text back as semantic `response.delta` / `response.done` packets that Gateway injects into the provider's TTS. Audio still never flows through Eve, and the browser is frame-filtered by Gateway so only Eve can trigger speech.
+
+This requires the matching AI Gateway control feature to be enabled for your team. Enable it on the channel:
+
+```ts
+export default vercelSpeechChannel({
+  auth: [localDev(), vercelOidc()],
+  control: true,
+});
+```
+
+and put the browser hook in control mode so it only streams audio (no client-driven turns):
+
+```tsx
+const voice = useEveVoice({ controlMode: true });
+```
+
+`control: true` makes `/setup` mint a token carrying an Eve control URL + signed control token, and serves the `{basePath}/ws` route Gateway dials. Put the browser hook in `controlMode` only when the channel is also configured with `control`; otherwise the browser and Gateway will disagree about who owns Eve turns.
+
+Configuration:
+
+- **`EVE_REALTIME_CONTROL_URL`** — full `wss://` (or `ws://localhost`) control URL. For local dev, expose Eve via a tunnel (ngrok/cloudflared) or a preview deployment and point this at `wss://<host>/eve/v1/realtime-speech/ws`. Otherwise Eve derives it from the deployment host (`VERCEL_BRANCH_URL` / `VERCEL_URL`).
+- **`EVE_REALTIME_CONTROL_SECRET`** — HMAC secret for control tokens. Required by default. For local/preview experiments only, set `EVE_REALTIME_CONTROL_ALLOW_GATEWAY_KEY_FALLBACK=1` or pass `allowGatewayKeyFallback: true` to derive it from `AI_GATEWAY_API_KEY`.
+- **`VERCEL_AUTOMATION_BYPASS_SECRET`** (or `VERCEL_DPBP`) — when set, appended to Vercel deployment control URLs as `x-vercel-protection-bypass` so Gateway can dial a protection-enabled preview. Temporary, for protected-preview testing.
+
+Control mode keeps a voice-session continuation token and stream cursor keyed by the authenticated principal plus `voiceSessionId`. The channel uses an in-memory store by default, which helps same-instance reconnects but is not durable across serverless cold starts. For production recovery, pass a durable store:
+
+```ts
+export default vercelSpeechChannel({
+  auth: [localDev(), vercelOidc()],
+  control: {
+    stateStore: {
+      async get(key) {
+        return await loadVoiceState(key);
+      },
+      async set(key, state) {
+        await saveVoiceState(key, state);
+      },
+    },
+  },
+});
+```
+
+If you want recovery across page reloads, persist and reuse the same `voiceSessionId` in `useEveVoice({ voiceSessionId, controlMode: true })` or `setupVoice(..., { voiceSessionId })`.
+
+Eve degrades gracefully: it uses final transcripts (partials are optional), only promises barge-in when Gateway sends interruption signals, and still runs durable turns even if the provider cannot speak. The default durable-session path remains available and is the recommended fallback.

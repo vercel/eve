@@ -4,6 +4,13 @@ packages:
   - e2e/fixtures/*
   - packages/*
 
+# Temporary override: a locally-built @ai-sdk/gateway that adds realtime voice
+# `control` mint support plus the shared speech-engine control protocol + codec
+# + GatewaySpeechEngineSession helper. Vendored as a tarball so this branch is
+# self-contained; drop it once the change lands upstream in @ai-sdk/gateway.
+overrides:
+  "@ai-sdk/gateway": "file:vendor/ai-sdk-gateway-4.0.0-beta.110-speech-engine.tgz"
+
 allowBuilds:
   "@mongodb-js/zstd": true
   "@nestjs/core": true
@@ -19,6 +26,7 @@ allowBuilds:
 
 catalog:
   "@ai-sdk/anthropic": "4.0.0-beta.67"
+  "@ai-sdk/gateway": "4.0.0-beta.110"
   "@ai-sdk/google": "4.0.0-beta.82"
   "@ai-sdk/mcp": "2.0.0-beta.66"
   "@ai-sdk/openai": "4.0.0-beta.74"

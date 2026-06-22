@@ -125,8 +125,9 @@ const EXCLUDED_DIRECTORIES = new Set([join("internal", "testing")]);
  * Packages externalized at bundle time so rolldown never inlines them
  * into eve's dist tree. Three categories:
  *
- *   - Peer dependencies (`ai`, `next`, `react`, `@opentelemetry/api`,
- *     `braintrust`) — consumers provide the install.
+ *   - Peer dependencies (`ai`, `next`, `react`, `@ai-sdk/gateway`,
+ *     `@ai-sdk/react`, `@opentelemetry/api`, `braintrust`) — consumers
+ *     provide the install.
  *   - Runtime dependencies (`nitro`) — resolved at
  *     runtime against the eve installation.
  *   - Optional peer dependency (`just-bash`) — the opt-in local sandbox
@@ -138,6 +139,8 @@ const EXCLUDED_DIRECTORIES = new Set([join("internal", "testing")]);
  * the package `imports` map.
  */
 const EXTERNAL_PACKAGES = new Set([
+  "@ai-sdk/gateway",
+  "@ai-sdk/react",
   "@nuxt/kit",
   "@opentelemetry/api",
   "@sveltejs/kit",

@@ -3,6 +3,7 @@
   "pages": [
     "overview",
     "eve",
+    "realtime-speech",
     "slack",
     "discord",
     "teams",

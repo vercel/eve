@@ -144,6 +144,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: true, gallery: true },
   },
   {
+    slug: "realtime-speech",
+    name: "Realtime Speech",
+    kind: "channel",
+    tagline: "Add a microphone button backed by AI Gateway realtime audio and durable Eve turns.",
+    surfaces: { scaffoldable: false, gallery: true },
+  },
+  {
     slug: "linear",
     name: "Linear",
     kind: "connection",

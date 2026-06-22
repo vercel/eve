@@ -24,6 +24,9 @@ catalogs:
     '@ai-sdk/provider':
       specifier: 4.0.0-beta.19
       version: 4.0.0-beta.19
+    '@ai-sdk/react':
+      specifier: 4.0.0-beta.182
+      version: 4.0.0-beta.182
     '@types/node':
       specifier: 25.9.1
       version: 25.9.1
@@ -66,6 +69,9 @@ catalogs:
     zod:
       specifier: 4.4.3
       version: 4.4.3
+
+overrides:
+  '@ai-sdk/gateway': file:vendor/ai-sdk-gateway-4.0.0-beta.110-speech-engine.tgz
 
 importers:
 
@@ -289,6 +295,12 @@ importers:
 
   apps/frameworks/next:
     dependencies:
+      '@ai-sdk/gateway':
+        specifier: file:../../../vendor/ai-sdk-gateway-4.0.0-beta.110-speech-engine.tgz
+        version: file:vendor/ai-sdk-gateway-4.0.0-beta.110-speech-engine.tgz(zod@4.4.3)
+      '@ai-sdk/react':
+        specifier: 'catalog:'
+        version: 4.0.0-beta.182(react@19.2.6)(zod@4.4.3)
       '@auth/core':
         specifier: 0.41.2
         version: 0.41.2
@@ -735,6 +747,9 @@ importers:
 
   packages/eve:
     dependencies:
+      '@ai-sdk/gateway':
+        specifier: file:../../vendor/ai-sdk-gateway-4.0.0-beta.110-speech-engine.tgz
+        version: file:vendor/ai-sdk-gateway-4.0.0-beta.110-speech-engine.tgz(zod@4.4.3)
       '@opentelemetry/api':
         specifier: ^1.0.0
         version: 1.9.1
@@ -766,6 +781,9 @@ importers:
       '@ai-sdk/provider':
         specifier: 'catalog:'
         version: 4.0.0-beta.19
+      '@ai-sdk/react':
+        specifier: 'catalog:'
+        version: 4.0.0-beta.182(react@19.2.6)(zod@4.4.3)
       '@chat-adapter/slack':
         specifier: 4.29.0
         version: 4.29.0(ai@7.0.0-beta.178(zod@4.4.3))(zod@4.4.3)
@@ -904,14 +922,9 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/gateway@3.0.120':
-    resolution: {integrity: sha512-MYKAeD2q7/sa1ZdqtL2tw0Me0B8Tok6Q/fhkJDhJl39dG8u+VBlWO9yk9lcdm784bM418o1EKObo4aOxs6+18Q==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
-
-  '@ai-sdk/gateway@4.0.0-beta.109':
-    resolution: {integrity: sha512-W/1kLlPb6Bgbhwep3CA3R6do0HD7SXV5gyuz2XBLY1YABqgxYkw+IhEcjOYlmn9v+Tifjqy5yJqmWdSHMJhyPQ==}
+  '@ai-sdk/gateway@file:vendor/ai-sdk-gateway-4.0.0-beta.110-speech-engine.tgz':
+    resolution: {integrity: sha512-Twty+hibORBK2YBEnmV1MEkI1ukSXn0Alb4pLIweV/JDFhj6oF1AaLdrWwwbRwaJANwybLd9Y7AiibHQhvO5UA==, tarball: file:vendor/ai-sdk-gateway-4.0.0-beta.110-speech-engine.tgz}
+    version: 4.0.0-beta.110
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -961,6 +974,12 @@ packages:
   '@ai-sdk/react@3.0.193':
     resolution: {integrity: sha512-El0jUZ/B7mvBHAD5rfSDqOAhWxutVTq7BCNhfGuwfDPT9SO0TMHybh2bMkieJQI7YOfl+qNBoWrRAOHHaFb99Q==}
     engines: {node: '>=18'}
+    peerDependencies:
+      react: ^18 || ~19.0.1 || ~19.1.2 || ^19.2.1
+
+  '@ai-sdk/react@4.0.0-beta.182':
+    resolution: {integrity: sha512-o9YwQ1QELhsuXcdg2ZfJ1GyHrtsXBSjMtlxdGnOW36Jkqiv0DT1yARI2PQKX0Ge0vsCNGIbPoJzNrkDzRTcG+g==}
+    engines: {node: '>=22'}
     peerDependencies:
       react: ^18 || ~19.0.1 || ~19.1.2 || ^19.2.1
 
@@ -11724,6 +11743,7 @@ packages:
 
   stream-to-promise@2.2.0:
     resolution: {integrity: sha512-HAGUASw8NT0k8JvIVutB2Y/9iBk7gpgEyAudXwNJmZERdMITGdajOa4VJfD/kNiA3TppQpTP4J+CtcHwdzKBAw==}
+    deprecated: Deprecated. Use node:stream/promises and node:stream/consumers instead.
 
   streamdown@2.5.0:
     resolution: {integrity: sha512-/tTnURfIOxZK/pqJAxsfCvETG/XCJHoWnk3jq9xLcuz6CSpnjjuxSRBTTL4PKGhxiZQf0lqPxGhImdpwcZ2XwA==}
@@ -12962,14 +12982,7 @@ snapshots:
       '@ai-sdk/provider-utils': 5.0.0-beta.49(zod@4.4.3)
       zod: 4.4.3
 
-  '@ai-sdk/gateway@3.0.120(zod@4.4.3)':
-    dependencies:
-      '@ai-sdk/provider': 3.0.10
-      '@ai-sdk/provider-utils': 4.0.27(zod@4.4.3)
-      '@vercel/oidc': 3.2.0
-      zod: 4.4.3
-
-  '@ai-sdk/gateway@4.0.0-beta.109(zod@4.4.3)':
+  '@ai-sdk/gateway@file:vendor/ai-sdk-gateway-4.0.0-beta.110-speech-engine.tgz(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 4.0.0-beta.19
       '@ai-sdk/provider-utils': 5.0.0-beta.49(zod@4.4.3)
@@ -13030,6 +13043,18 @@ snapshots:
     dependencies:
       '@ai-sdk/provider-utils': 4.0.27(zod@4.4.3)
       ai: 6.0.191(zod@4.4.3)
+      react: 19.2.6
+      swr: 2.4.1(react@19.2.6)
+      throttleit: 2.1.0
+    transitivePeerDependencies:
+      - zod
+
+  '@ai-sdk/react@4.0.0-beta.182(react@19.2.6)(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/mcp': 2.0.0-beta.66(zod@4.4.3)
+      '@ai-sdk/provider': 4.0.0-beta.19
+      '@ai-sdk/provider-utils': 5.0.0-beta.49(zod@4.4.3)
+      ai: 7.0.0-beta.178(zod@4.4.3)
       react: 19.2.6
       swr: 2.4.1(react@19.2.6)
       throttleit: 2.1.0
@@ -19235,7 +19260,7 @@ snapshots:
 
   ai@6.0.191(zod@4.4.3):
     dependencies:
-      '@ai-sdk/gateway': 3.0.120(zod@4.4.3)
+      '@ai-sdk/gateway': file:vendor/ai-sdk-gateway-4.0.0-beta.110-speech-engine.tgz(zod@4.4.3)
       '@ai-sdk/provider': 3.0.10
       '@ai-sdk/provider-utils': 4.0.27(zod@4.4.3)
       '@opentelemetry/api': 1.9.1
@@ -19243,7 +19268,7 @@ snapshots:
 
   ai@7.0.0-beta.178(zod@4.4.3):
     dependencies:
-      '@ai-sdk/gateway': 4.0.0-beta.109(zod@4.4.3)
+      '@ai-sdk/gateway': file:vendor/ai-sdk-gateway-4.0.0-beta.110-speech-engine.tgz(zod@4.4.3)
       '@ai-sdk/provider': 4.0.0-beta.19
       '@ai-sdk/provider-utils': 5.0.0-beta.49(zod@4.4.3)
       zod: 4.4.3

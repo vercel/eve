@@ -66,10 +66,20 @@
       "import": "./dist/src/client/index.js",
       "default": "./dist/src/client/index.js"
     },
+    "./client/voice": {
+      "types": "./dist/src/client/voice.d.ts",
+      "import": "./dist/src/client/voice.js",
+      "default": "./dist/src/client/voice.js"
+    },
     "./react": {
       "types": "./dist/src/react/index.d.ts",
       "import": "./dist/src/react/index.js",
       "default": "./dist/src/react/index.js"
+    },
+    "./react/voice": {
+      "types": "./dist/src/react/voice.d.ts",
+      "import": "./dist/src/react/voice.js",
+      "default": "./dist/src/react/voice.js"
     },
     "./vue": {
       "types": "./dist/src/vue/index.d.ts",
@@ -206,6 +216,11 @@
       "import": "./dist/src/public/channels/eve.js",
       "default": "./dist/src/public/channels/eve.js"
     },
+    "./channels/vercel/speech": {
+      "types": "./dist/src/public/channels/vercel/speech.d.ts",
+      "import": "./dist/src/public/channels/vercel/speech.js",
+      "default": "./dist/src/public/channels/vercel/speech.js"
+    },
     "./channels/auth": {
       "types": "./dist/src/public/channels/auth.d.ts",
       "import": "./dist/src/public/channels/auth.js",
@@ -288,11 +303,13 @@
   },
   "devDependencies": {
     "@ai-sdk/anthropic": "catalog:",
+    "@ai-sdk/gateway": "catalog:",
     "@ai-sdk/google": "catalog:",
     "@ai-sdk/mcp": "catalog:",
     "@ai-sdk/openai": "catalog:",
     "@ai-sdk/otel": "catalog:",
     "@ai-sdk/provider": "catalog:",
+    "@ai-sdk/react": "catalog:",
     "@chat-adapter/slack": "4.29.0",
     "@chat-adapter/state-memory": "4.29.0",
     "@clack/core": "1.3.1",
@@ -336,6 +353,8 @@
     "zod-validation-error": "5.0.0"
   },
   "peerDependencies": {
+    "@ai-sdk/gateway": "catalog:",
+    "@ai-sdk/react": "catalog:",
     "@opentelemetry/api": "^1.0.0",
     "@sveltejs/kit": "^2.0.0",
     "ai": "catalog:",
@@ -350,6 +369,12 @@
     "vue": "^3.5.0"
   },
   "peerDependenciesMeta": {
+    "@ai-sdk/gateway": {
+      "optional": true
+    },
+    "@ai-sdk/react": {
+      "optional": true
+    },
     "@opentelemetry/api": {
       "optional": true
     },

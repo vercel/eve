@@ -21,6 +21,25 @@ export const webLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const voiceLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M12 3.75a3 3 0 0 0-3 3v4.5a3 3 0 1 0 6 0v-4.5a3 3 0 0 0-3-3Z"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.8"
+    />
+    <path
+      d="M5.75 10.75a6.25 6.25 0 0 0 12.5 0M12 17v3.25M8.75 20.25h6.5"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.8"
+    />
+  </svg>
+);
+
 export const githubLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
@@ -136,6 +155,7 @@ export const honeycombLogo = (props: LogoProps) => (
 export const logos = {
   eve: eveLogo,
   web: webLogo,
+  voice: voiceLogo,
   github: githubLogo,
   slack: slackLogo,
   discord: discordLogo,
