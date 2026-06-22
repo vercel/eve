@@ -1,8 +1,8 @@
 # Set up an eve agent
 
-eve is a filesystem-first framework for durable backend AI agents: the agent is a
-directory of files — instructions, tools, connections, channels — that eve
-compiles and runs. Work through this with the user.
+eve is a filesystem-first framework for durable backend AI agents. The agent is a
+directory of files that eve compiles and runs: its instructions, tools,
+connections, and channels. Work through this with the user.
 
 Ask the questions one at a time, use the coding harness's prompt tools when
 available, and do not guess.
@@ -17,17 +17,17 @@ available, and do not guess.
    On top of that:
    - **Web Chat** (a Next.js app): add it at init with `--channel-web-nextjs`.
    - **Slack** and other platforms: add after deploy with `eve channels add slack`.
-     Credentials run through **Vercel Connect** — it provisions the bot token and
-     verifies inbound webhooks, so there is no `SLACK_BOT_TOKEN` or signing secret
-     to manage.
-4. Which external systems does it need programmatic read/write access to — Slack,
-   Salesforce, Linear, GitHub, your own API? Each becomes a connection under
+     Credentials run through **Vercel Connect**, which provisions the bot token
+     and verifies inbound webhooks, so there is no `SLACK_BOT_TOKEN` or signing
+     secret to manage.
+4. Which external systems does it need programmatic read/write access to, such as
+   Slack, Salesforce, Linear, GitHub, or your own API? Each becomes a connection under
    `agent/connections/`. When a system needs every end-user to sign in, wire its
    auth through **Vercel Connect** (`connect()` from `@vercel/connect/eve`), which
    handles consent, encrypted token storage, and refresh.
 
 Reach for Vercel Connect for both channels and connections rather than
-hand-managing tokens — it is the path to a working setup out of the box. See
+hand-managing tokens. It is the path to a working setup out of the box. See
 https://vercel.com/docs/connect.
 
 ## Scaffold
@@ -50,14 +50,14 @@ scripts alone. If init cannot be used, install by hand with
 
 Once eve is installed, the full docs are bundled at `node_modules/eve/docs/` and
 match the installed version exactly. Read `README.md` there first, then the guide
-for what you're adding — `connections`, `channels/slack`, and
-`guides/auth-and-route-protection` (the Vercel Connect flow). Then:
+for what you're adding, such as `connections`, `channels/slack`, or
+`guides/auth-and-route-protection` for the Vercel Connect flow. Then:
 
 - Put the purpose in `agent/instructions.md` (the always-on system prompt).
 - Add a first typed tool under `agent/tools/` with `defineTool` from `eve/tools`
   and a Zod `inputSchema`.
 - Start eve without the terminal UI in a controllable background process:
-  `npx eve dev --no-ui`. Wait for the server URL, exercise the HTTP API with
+  `{{devCommand}} --no-ui`. Wait for the server URL, exercise the HTTP API with
   `POST /eve/v1/session`, stream `GET /eve/v1/session/:id/stream`, then send a
   follow-up with the returned `continuationToken`. Stop the dev process after
   verification.

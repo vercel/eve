@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { initAgentDevHandoff, initAgentInstructions } from "./agent-instructions.js";
+import {
+  initAgentDevHandoff,
+  initAgentInstructions,
+  initAgentReplPrompt,
+} from "./agent-instructions.js";
 
 describe("initAgentInstructions", () => {
   // This is the single home for the launching-agent instruction contract; the
@@ -14,12 +18,15 @@ describe("initAgentInstructions", () => {
     expect(instructions).toContain("Web Chat");
     expect(instructions).toContain("--channel-web-nextjs");
     // `npx` runs without a prior install and is package-manager agnostic, so the
-    // guide hardcodes it rather than rendering a launcher-specific command.
+    // pre-scaffold guide renders the universal `npx eve dev` through the shared
+    // prompt renderer rather than a launcher-specific command.
     expect(instructions).toContain("npx eve@latest init <name>");
     expect(instructions).toContain("node_modules/eve/docs/");
     expect(instructions).toContain("npx eve dev --no-ui");
     expect(instructions).not.toContain("npm run dev");
     expect(instructions).not.toContain("starts the dev server");
+    // The shared renderer resolves every placeholder, even in the pre-scaffold guide.
+    expect(instructions).not.toContain("{{");
   });
 
   it("routes both channels and connections through Vercel Connect", () => {
@@ -36,7 +43,7 @@ describe("initAgentInstructions", () => {
 });
 
 describe("initAgentDevHandoff", () => {
-  it("points at the bundled docs and gives the agent a headless verification command", () => {
+  it("guides the user and distinguishes the agent REPL from headless verification", () => {
     const handoff = initAgentDevHandoff({
       projectPath: "/tmp/triage-bot",
       devCommand: "npm exec -- eve dev",
@@ -44,11 +51,25 @@ describe("initAgentDevHandoff", () => {
 
     expect(handoff).toContain("/tmp/triage-bot/node_modules/eve/docs/");
     expect(handoff).toContain("/tmp/triage-bot/agent/instructions.md");
-    expect(handoff).toContain("purpose you collected");
+    expect(handoff).toContain("What should the agent do?");
+    expect(handoff).toContain("Vercel Connect");
+    expect(handoff).toContain("HMR development server");
+    expect(handoff).toContain("does not start or control this coding-agent session");
     expect(handoff).toMatch(/controllable\s+background process/);
     expect(handoff).toContain("cd /tmp/triage-bot");
     expect(handoff).toContain("npm exec -- eve dev --no-ui");
     expect(handoff).toContain("Give the user the interactive command");
     expect(handoff).not.toContain("{{devCommand}}");
+  });
+});
+
+describe("initAgentReplPrompt", () => {
+  it("uses the shared guidance without interpolating the project path into the launch argument", () => {
+    const prompt = initAgentReplPrompt({ devCommand: "pnpm exec eve dev" });
+
+    expect(prompt).toContain("The project at `.` is already scaffolded.");
+    expect(prompt).toContain("What should the agent do?");
+    expect(prompt).toContain("pnpm exec eve dev --no-ui");
+    expect(prompt).not.toContain("{{");
   });
 });

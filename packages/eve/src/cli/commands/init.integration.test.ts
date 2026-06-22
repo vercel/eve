@@ -18,8 +18,10 @@ import {
   type ScaffoldBaseProjectOptions,
 } from "#setup/scaffold/index.js";
 import { pathExists } from "#setup/path-exists.js";
+import { WizardCancelledError } from "#setup/step.js";
 
 import type { GitInitResult } from "./init-git.js";
+import { initAgentReplPrompt } from "./agent-instructions.js";
 import {
   EVE_INIT_PACKAGE_SPEC_ENV,
   runInitCommand,
@@ -67,6 +69,8 @@ function dependencies(
   runPackageManagerInstall: ReturnType<
     typeof vi.fn<InitCommandDependencies["runPackageManagerInstall"]>
   >;
+  selectInitHandoff: ReturnType<typeof vi.fn<InitCommandDependencies["selectInitHandoff"]>>;
+  spawnCodingAgentRepl: ReturnType<typeof vi.fn<InitCommandDependencies["spawnCodingAgentRepl"]>>;
   spawnPackageManager: ReturnType<typeof vi.fn<InitCommandDependencies["spawnPackageManager"]>>;
   tryInitializeGit: ReturnType<typeof vi.fn<InitCommandDependencies["tryInitializeGit"]>>;
 } {
@@ -99,6 +103,8 @@ function dependencies(
         webPackageVersions: { ...WEB_VERSIONS, ...options.webPackageVersions },
       }),
     runPackageManagerInstall: vi.fn(async () => true),
+    selectInitHandoff: vi.fn(async () => "eve-dev"),
+    spawnCodingAgentRepl: vi.fn(async () => true),
     spawnPackageManager: vi.fn(async () => true),
     tryInitializeGit: vi.fn(async () => gitResult),
   };
@@ -181,6 +187,53 @@ describe("runInitCommand", () => {
     expect(output.messages[2]).toContain("Installed dependencies");
     expect(output.messages[2]).toContain("in 13.2s");
     expect(output.messages[3]).toContain("$ eve dev");
+  });
+
+  it("opens the selected coding-agent REPL instead of starting eve dev", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-repl-handoff-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.selectInitHandoff.mockResolvedValue("codex");
+
+    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+
+    const projectPath = join(parentDirectory, "my-agent");
+    expect(deps.spawnCodingAgentRepl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: "codex",
+        cwd: projectPath,
+        prompt: expect.stringContaining("pnpm exec eve dev --no-ui"),
+      }),
+    );
+    const prompt = deps.spawnCodingAgentRepl.mock.calls[0]?.[0].prompt;
+    expect(prompt).toBe(
+      initAgentReplPrompt({
+        devCommand: "pnpm exec eve dev",
+      }),
+    );
+    expect(prompt).toContain("What should the agent do?");
+    expect(prompt).toContain("HMR development server");
+    expect(prompt).not.toContain(projectPath);
+    expect(prompt).not.toContain("{{");
+    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+    expect(output.messages.at(-1)).toContain("$ codex");
+  });
+
+  it("keeps a completed init successful when its optional handoff is cancelled", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-repl-cancelled-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.selectInitHandoff.mockRejectedValue(new WizardCancelledError());
+
+    await expect(
+      runInitCommand(output, parentDirectory, "my-agent", {}, deps),
+    ).resolves.toBeUndefined();
+
+    const projectPath = join(parentDirectory, "my-agent");
+    await expect(pathExists(join(projectPath, "agent/agent.ts"))).resolves.toBe(true);
+    expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
+    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+    expect(output.errors).toEqual([]);
   });
 
   it("uses an explicit init package spec for fresh project scaffolds", async () => {
@@ -673,6 +726,8 @@ describe("runInitCommand", () => {
     expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
     // The dev server is handed off as text, never spawned — the dev TUI would
     // wedge the launching agent. The handoff's content is the unit test's job.
+    expect(deps.selectInitHandoff).not.toHaveBeenCalled();
+    expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
   });
 

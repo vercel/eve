@@ -26,13 +26,19 @@ import {
 import type { ProcessOutputLine } from "#setup/primitives/process-output.js";
 import { addAgentToProject } from "#setup/scaffold/create/add-to-project.js";
 import { ensureChannel, scaffoldBaseProject } from "#setup/scaffold/index.js";
+import { WizardCancelledError } from "#setup/step.js";
 import {
   DEFAULT_EVE_PACKAGE_CONTRACT,
   type EvePackageContract,
 } from "#setup/scaffold/create/project.js";
 
-import { initAgentDevHandoff, initAgentInstructions } from "./agent-instructions.js";
+import {
+  initAgentDevHandoff,
+  initAgentInstructions,
+  initAgentReplPrompt,
+} from "./agent-instructions.js";
 import { tryInitializeGit, type GitInitResult } from "./init-git.js";
+import { selectInitHandoff, spawnCodingAgentRepl, type InitHandoff } from "./init-repl.js";
 
 export interface InitCliLogger {
   error(message: string): void;
@@ -53,6 +59,8 @@ export interface InitCommandDependencies {
   now: () => number;
   runPackageManagerInstall: typeof runPackageManagerInstall;
   scaffoldBaseProject: typeof scaffoldBaseProject;
+  selectInitHandoff: typeof selectInitHandoff;
+  spawnCodingAgentRepl: typeof spawnCodingAgentRepl;
   spawnPackageManager: typeof spawnPackageManager;
   tryInitializeGit: typeof tryInitializeGit;
 }
@@ -66,6 +74,8 @@ const defaultDependencies: InitCommandDependencies = {
   now: () => performance.now(),
   runPackageManagerInstall,
   scaffoldBaseProject,
+  selectInitHandoff,
+  spawnCodingAgentRepl,
   spawnPackageManager,
   tryInitializeGit,
 };
@@ -432,13 +442,37 @@ export async function runInitCommand(
     logger.error(pc.yellow(`Git initialization failed: ${result.gitResult.reason}`));
   }
 
+  const agentDevCommand = [result.packageManager, ...eveDevArguments(result.packageManager)].join(
+    " ",
+  );
+  const agentHandoff = initAgentDevHandoff({
+    projectPath: result.projectPath,
+    devCommand: agentDevCommand,
+  });
+
   if (result.agentLaunched) {
-    logger.log(
-      initAgentDevHandoff({
-        projectPath: result.projectPath,
-        devCommand: [result.packageManager, ...eveDevArguments(result.packageManager)].join(" "),
-      }),
-    );
+    logger.log(agentHandoff);
+    return;
+  }
+
+  let handoff: InitHandoff;
+  try {
+    handoff = await dependencies.selectInitHandoff();
+  } catch (error) {
+    if (error instanceof WizardCancelledError) return;
+    throw error;
+  }
+  if (handoff !== "eve-dev") {
+    logger.log(pc.dim(`$ ${handoff}`));
+    if (
+      !(await dependencies.spawnCodingAgentRepl({
+        command: handoff,
+        cwd: result.projectPath,
+        prompt: initAgentReplPrompt({ devCommand: agentDevCommand }),
+      }))
+    ) {
+      throw new Error(`Coding-agent REPL exited unsuccessfully in "${result.projectPath}".`);
+    }
     return;
   }
 

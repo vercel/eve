@@ -38,9 +38,14 @@ The command:
 
 - Creates a child directory using the current workspace or launcher package manager, and uses eve's default model
 - Installs dependencies and initializes Git
-- Starts the development server and opens the interactive [terminal UI](./guides/dev-tui)
+- When a supported coding-agent REPL (Claude Code, Codex, Cursor, Droid, Gemini CLI, opencode, or Pi) is on `PATH`, asks whether to open an available REPL or start the development server; otherwise starts the server and opens the interactive [terminal UI](./guides/dev-tui)
 
 Type a message and watch the model loop run. Pass `--channel-web-nextjs` to add the Web Chat application. Every app ships the built-in HTTP channel (`agent/channels/eve.ts`) regardless.
+
+When you choose one of those REPLs, eve starts it with a project-specific
+prompt that guides the setup. The prompt distinguishes `eve dev`, which starts
+eve's HMR server and the agent's terminal REPL, from `eve dev --no-ui`, which is
+the controllable background mode for verification.
 
 `eve init` holds the terminal, so stop it with Ctrl+C to get your shell back before editing the generated agent. The command does not create a Vercel project or deploy.
 
