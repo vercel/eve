@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -11,6 +11,48 @@ import { useScenarioApp } from "#internal/testing/scenario-app.js";
 
 describe("loadAuthoredModuleNamespace", () => {
   const scenarioApp = useScenarioApp();
+
+  it("preserves cached channel identity for relative channel imports", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/channels/support.ts": [
+          'export default { marker: "source-channel-instance" };',
+          "",
+        ].join("\n"),
+        "agent/tools/use_support_channel.ts": [
+          'import supportChannel from "../channels/support";',
+          "",
+          "export const result = supportChannel.marker;",
+          "",
+        ].join("\n"),
+      },
+      name: "cached-relative-channel-import",
+    });
+    const cache = new Map<string, unknown>();
+    const cacheKey = "__eveChannelModuleCache__";
+    const globals = globalThis as Record<string, unknown>;
+    const previousCache = globals[cacheKey];
+
+    try {
+      const supportChannelPath = await realpath(
+        join(app.appRoot, "agent", "channels", "support.ts"),
+      );
+      cache.set(supportChannelPath, { marker: "cached-channel-instance" });
+      globals[cacheKey] = cache;
+
+      const moduleNamespace = await loadAuthoredModuleNamespace(
+        join(app.appRoot, "agent", "tools", "use_support_channel.ts"),
+      );
+
+      expect(moduleNamespace.result).toBe("cached-channel-instance");
+    } finally {
+      if (previousCache === undefined) {
+        delete globals[cacheKey];
+      } else {
+        globals[cacheKey] = previousCache;
+      }
+    }
+  });
 
   it("resolves extensionless relative imports with dotted TypeScript basenames", async () => {
     const app = await scenarioApp({
@@ -34,6 +76,29 @@ describe("loadAuthoredModuleNamespace", () => {
     );
 
     expect(moduleNamespace.result).toBe("local-dotted-basename");
+  });
+
+  it("resolves extensionless relative directory imports to index modules", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/tools/use_helpers.ts": [
+          'import { helperValue } from "./helpers";',
+          "",
+          "export const result = helperValue;",
+          "",
+        ].join("\n"),
+        "agent/tools/helpers/index.ts": ['export const helperValue = "directory-index";', ""].join(
+          "\n",
+        ),
+      },
+      name: "directory-index-import",
+    });
+
+    const moduleNamespace = await loadAuthoredModuleNamespace(
+      join(app.appRoot, "agent", "tools", "use_helpers.ts"),
+    );
+
+    expect(moduleNamespace.result).toBe("directory-index");
   });
 
   it("resolves extensionless CommonJS requires with dotted JavaScript basenames", async () => {
@@ -832,15 +897,18 @@ describe("loadAuthoredModuleNamespace", () => {
     const app = await scenarioApp({
       files: {
         "agent/assets/logo.bin": "logo-bytes",
+        "agent/assets/logo.png": "png-bytes",
         "agent/assets/message.txt": "asset text",
         "agent/tools/use_assets.ts": [
           'import logoUrl from "../assets/logo.bin";',
+          'import imageUrl from "../assets/logo.png";',
           'import rawText from "../assets/message.txt?raw";',
           "",
           "export default {",
           '  description: "Use asset imports.",',
           "  async execute() {",
           "    return {",
+          "      imageUrl,",
           "      logoUrl,",
           "      rawText,",
           "    };",
@@ -857,12 +925,14 @@ describe("loadAuthoredModuleNamespace", () => {
     );
     const tool = moduleNamespace.default as {
       execute(): Promise<{
+        imageUrl: string;
         logoUrl: string;
         rawText: string;
       }>;
     };
 
     await expect(tool.execute()).resolves.toEqual({
+      imageUrl: "data:image/png;base64,cG5nLWJ5dGVz",
       logoUrl: "data:application/octet-stream;base64,bG9nby1ieXRlcw==",
       rawText: "asset text",
     });
