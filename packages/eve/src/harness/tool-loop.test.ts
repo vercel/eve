@@ -5418,6 +5418,234 @@ describe("createToolLoopHarness", () => {
       });
     }
 
+    it("preserves the gateway-cached prompt prefix across tool steps and user turns", async () => {
+      type CapturedModelCall = {
+        instructions: unknown;
+        messages: Array<{ content: unknown; role: string }>;
+        providerOptions: unknown;
+        tools: Array<{
+          description: unknown;
+          inputSchema: unknown;
+          name: string;
+          providerOptions: unknown;
+        }>;
+      };
+      type PromptAgentSettings = MockAgentSettings & {
+        instructions?: unknown;
+        tools?: Record<
+          string,
+          { description?: unknown; inputSchema?: unknown; providerOptions?: unknown }
+        >;
+      };
+
+      async function captureModelCall(index: number): Promise<CapturedModelCall> {
+        const settings = vi.mocked(ToolLoopAgent).mock.calls[index]?.[0] as
+          | PromptAgentSettings
+          | undefined;
+        const instance = vi.mocked(ToolLoopAgent).mock.results[index]?.value as
+          | { generate: ReturnType<typeof vi.fn> }
+          | undefined;
+        const call = instance?.generate.mock.calls[0]?.[0] as
+          | { messages: CapturedModelCall["messages"] }
+          | undefined;
+        if (settings === undefined || call === undefined) {
+          throw new Error(`Missing captured model call ${String(index)}.`);
+        }
+
+        const prepareStep = getPrepareStep<
+          CapturedModelCall["messages"],
+          { messages?: CapturedModelCall["messages"]; providerOptions?: unknown }
+        >(settings.prepareStep);
+        const prepared = await prepareStep({
+          context: undefined,
+          messages: call.messages,
+          model: {},
+          stepNumber: 0,
+          steps: [],
+        });
+
+        return {
+          instructions: structuredClone(settings.instructions),
+          messages: structuredClone(prepared.messages ?? call.messages),
+          providerOptions: structuredClone(prepared.providerOptions),
+          tools: Object.entries(settings.tools ?? {}).map(([name, tool]) => ({
+            description: structuredClone(tool.description),
+            inputSchema: structuredClone(tool.inputSchema),
+            name,
+            providerOptions: structuredClone(tool.providerOptions),
+          })),
+        };
+      }
+
+      const toolCallMessage = {
+        content: [
+          {
+            input: { a: 1, b: 2 },
+            toolCallId: "call-1",
+            toolName: "add",
+            type: "tool-call",
+          },
+        ],
+        role: "assistant",
+      } as const;
+      const toolResultMessage = {
+        content: [
+          {
+            output: "3",
+            toolCallId: "call-1",
+            toolName: "add",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      } as const;
+      const firstAnswerMessage = { content: "The answer is 3.", role: "assistant" } as const;
+      const modelResults = [
+        {
+          finishReason: "tool-calls",
+          response: { messages: [toolCallMessage, toolResultMessage] },
+          text: "",
+          toolCalls: [
+            {
+              input: { a: 1, b: 2 },
+              toolCallId: "call-1",
+              toolName: "add",
+              type: "tool-call",
+            },
+          ],
+          toolResults: [
+            {
+              input: { a: 1, b: 2 },
+              output: "3",
+              toolCallId: "call-1",
+              toolName: "add",
+              type: "tool-result",
+            },
+          ],
+        },
+        {
+          finishReason: "stop",
+          response: { messages: [firstAnswerMessage] },
+          text: firstAnswerMessage.content,
+          toolCalls: [],
+          toolResults: [],
+        },
+        {
+          finishReason: "stop",
+          response: { messages: [{ content: "Confirmed.", role: "assistant" }] },
+          text: "Confirmed.",
+          toolCalls: [],
+          toolResults: [],
+        },
+      ] satisfies Record<string, unknown>[];
+
+      const tools = new Map([
+        [
+          "add",
+          {
+            description: "Adds numbers",
+            execute: vi.fn().mockResolvedValue("3"),
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "add",
+          },
+        ],
+        [
+          "lookup",
+          {
+            description: "Looks up a saved result",
+            execute: vi.fn().mockResolvedValue("saved"),
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "lookup",
+          },
+        ],
+      ]);
+      const config = createTestConfig("conversation", undefined, {
+        codeMode: false,
+        resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
+        tools,
+      });
+      const session = createTestSession({
+        agent: {
+          modelReference: { id: "anthropic/claude-sonnet-4-5" },
+          system: "You are a test assistant.",
+          tools: [
+            { description: "Adds numbers", inputSchema: { type: "object" }, name: "add" },
+            {
+              description: "Looks up a saved result",
+              inputSchema: { type: "object" },
+              name: "lookup",
+            },
+          ],
+        },
+      });
+      const runStep = createToolLoopHarness(config);
+
+      setupMockAgent(modelResults[0]!);
+      const firstStep = await runStep(session, { message: "Add 1 and 2." });
+      expect(firstStep.next).toBe(runStep);
+
+      setupMockAgent(modelResults[1]!);
+      const secondStep = await runStep(firstStep.session);
+      expect(secondStep.next).toBeNull();
+
+      setupMockAgent(modelResults[2]!);
+      const nextTurn = await runStep(secondStep.session, { message: "Can you confirm?" });
+      expect(nextTurn.next).toBeNull();
+      const modelCalls = await Promise.all([0, 1, 2].map(captureModelCall));
+      expect(modelCalls).toHaveLength(3);
+
+      const firstPrompt = modelCalls[0]!;
+      const secondPrompt = modelCalls[1]!;
+      const nextTurnPrompt = modelCalls[2]!;
+
+      expect(secondPrompt.messages.slice(0, firstPrompt.messages.length)).toEqual(
+        firstPrompt.messages,
+      );
+      expect(nextTurnPrompt.messages.slice(0, secondPrompt.messages.length)).toEqual(
+        secondPrompt.messages,
+      );
+      expect(modelCalls.map((call) => call.instructions)).toEqual([
+        "You are a test assistant.",
+        "You are a test assistant.",
+        "You are a test assistant.",
+      ]);
+      expect(firstPrompt.tools).toEqual([
+        {
+          description: "Adds numbers",
+          inputSchema: { type: "object" },
+          name: "add",
+          providerOptions: undefined,
+        },
+        {
+          description: "Looks up a saved result",
+          inputSchema: { type: "object" },
+          name: "lookup",
+          providerOptions: undefined,
+        },
+      ]);
+      expect(modelCalls.map((call) => call.tools)).toEqual([
+        firstPrompt.tools,
+        firstPrompt.tools,
+        firstPrompt.tools,
+      ]);
+      expect(modelCalls.map((call) => call.providerOptions)).toEqual([
+        { gateway: { caching: "auto" } },
+        { gateway: { caching: "auto" } },
+        { gateway: { caching: "auto" } },
+      ]);
+      expect(modelCalls.map((call) => call.messages)).toEqual([
+        [{ content: "Add 1 and 2.", role: "user" }],
+        [{ content: "Add 1 and 2.", role: "user" }, toolCallMessage, toolResultMessage],
+        [
+          { content: "Add 1 and 2.", role: "user" },
+          toolCallMessage,
+          toolResultMessage,
+          firstAnswerMessage,
+          { content: "Can you confirm?", role: "user" },
+        ],
+      ]);
+    });
+
     it("gateway-auto path: merges gateway.caching='auto' into providerOptions for string model ids", async () => {
       setupStopResult();
       const config: ToolLoopHarnessConfig = {
