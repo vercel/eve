@@ -11,6 +11,7 @@ const DEV_RUNTIME_ARTIFACTS_DIRECTORY = "dev-runtime";
 const DEV_RUNTIME_ARTIFACTS_POINTER_VERSION = 2;
 const DEV_RUNTIME_SNAPSHOT_RECENT_WINDOW_MS = 15 * 60 * 1000;
 const DEV_RUNTIME_SNAPSHOT_RETAIN_COUNT = 5;
+const DEV_RUNTIME_WORKFLOW_DATA_MAX_SCAN_BYTES = 1024 * 1024;
 
 interface DevelopmentRuntimeArtifactsPointerV1 {
   readonly appRoot: string;
@@ -180,7 +181,10 @@ export async function pruneDevelopmentRuntimeArtifactsSnapshots(input: {
   const pointer = readDevelopmentRuntimeArtifactsPointer(
     resolveDevelopmentRuntimeArtifactsPointerPath(input.appRoot),
   );
-  const protectedPaths = collectProtectedSnapshotPaths(pointer);
+  const protectedPaths = [
+    ...collectProtectedSnapshotPaths(pointer),
+    ...(await collectWorkflowDataSnapshotPaths({ appRoot: input.appRoot, snapshotsDirectory })),
+  ];
   const now = input.now ?? Date.now();
   const recentWindowMs = input.recentWindowMs ?? DEV_RUNTIME_SNAPSHOT_RECENT_WINDOW_MS;
   const retainCount = input.retainCount ?? DEV_RUNTIME_SNAPSHOT_RETAIN_COUNT;
@@ -290,6 +294,94 @@ function collectProtectedSnapshotPaths(
   }
 
   return [pointer.runtimeAppRoot, pointer.snapshotRoot];
+}
+
+async function collectWorkflowDataSnapshotPaths(input: {
+  readonly appRoot: string;
+  readonly snapshotsDirectory: string;
+}): Promise<readonly string[]> {
+  const workflowDataDirectory = join(input.appRoot, ".workflow-data");
+  const snapshotPaths = new Set<string>();
+
+  await collectSnapshotPathsFromDirectory({
+    directory: workflowDataDirectory,
+    snapshotPaths,
+    snapshotsDirectory: input.snapshotsDirectory,
+  });
+
+  return [...snapshotPaths];
+}
+
+async function collectSnapshotPathsFromDirectory(input: {
+  readonly directory: string;
+  readonly snapshotPaths: Set<string>;
+  readonly snapshotsDirectory: string;
+}): Promise<void> {
+  let entries: Dirent<string>[];
+
+  try {
+    entries = await readdir(input.directory, { withFileTypes: true });
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return;
+    }
+
+    throw error;
+  }
+
+  await Promise.all(
+    entries.map(async (entry) => {
+      const path = join(input.directory, entry.name);
+
+      if (entry.isDirectory()) {
+        await collectSnapshotPathsFromDirectory({
+          directory: path,
+          snapshotPaths: input.snapshotPaths,
+          snapshotsDirectory: input.snapshotsDirectory,
+        });
+        return;
+      }
+
+      if (!entry.isFile()) {
+        return;
+      }
+
+      const fileStats = await stat(path);
+      // Local workflow run payloads are small; keep this best-effort scan cheap.
+      if (fileStats.size > DEV_RUNTIME_WORKFLOW_DATA_MAX_SCAN_BYTES) {
+        return;
+      }
+
+      const source = await readFile(path, "utf8");
+      for (const snapshotPath of collectSnapshotPathsFromText(source, input.snapshotsDirectory)) {
+        input.snapshotPaths.add(snapshotPath);
+      }
+    }),
+  );
+}
+
+function collectSnapshotPathsFromText(
+  source: string,
+  snapshotsDirectory: string,
+): readonly string[] {
+  const snapshotPaths = new Set<string>();
+  const normalizedSnapshotsDirectory = snapshotsDirectory.replaceAll("\\", "/");
+  const pattern = new RegExp(`${escapeRegExp(normalizedSnapshotsDirectory)}/([^/"'\\s]+)`, "gu");
+  const normalizedSource = source.replaceAll("\\\\", "/").replaceAll("\\", "/");
+
+  for (const match of normalizedSource.matchAll(pattern)) {
+    const snapshotName = match[1];
+
+    if (snapshotName !== undefined && snapshotName.length > 0) {
+      snapshotPaths.add(join(snapshotsDirectory, snapshotName));
+    }
+  }
+
+  return [...snapshotPaths];
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 function pathsOverlap(left: string, right: string): boolean {
