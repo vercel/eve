@@ -60,6 +60,11 @@ export type ToolAuthDefinition =
  */
 export type ToolContext = SessionContext & {
   /**
+   * Signals that the active turn was cancelled. Long-running tools should
+   * pass this signal to cancellable APIs such as `fetch` and sandbox commands.
+   */
+  readonly abortSignal?: AbortSignal;
+  /**
    * Resolves the bearer token for this tool's declared `auth`,
    * consulting the per-step token cache before invoking the authored
    * `getToken`. For interactive strategies a cache miss throws

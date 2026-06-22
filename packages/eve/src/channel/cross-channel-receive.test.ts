@@ -10,6 +10,7 @@ import type { Runtime } from "#channel/types.js";
 
 function makeRuntime(): Runtime {
   return {
+    cancelTurn: vi.fn().mockResolvedValue(false),
     deliver: vi.fn(),
     getEventStream: vi.fn(),
     run: vi.fn(),
@@ -18,6 +19,9 @@ function makeRuntime(): Runtime {
 
 function makeSession(): Session {
   return {
+    async cancelTurn() {
+      return false;
+    },
     id: "sess_1",
     continuationToken: "tok",
     async getEventStream() {

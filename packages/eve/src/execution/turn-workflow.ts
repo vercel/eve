@@ -1,4 +1,5 @@
 import type { NextDriverAction } from "#execution/next-driver-action.js";
+import { createHook } from "#compiled/@workflow/core/index.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import {
   migrateTurnWorkflowInput,
@@ -33,11 +34,37 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
   "use workflow";
 
   const input = migrateTurnWorkflowInput(rawInput);
-  let currentStepInput: TurnStepInput = input.stepInput;
+  const cancellation =
+    input.cancelToken === undefined
+      ? undefined
+      : createHook<{ readonly kind: "cancel-turn" }>({
+          metadata: { sessionId: input.stepInput.sessionState.sessionId },
+          token: input.cancelToken,
+        });
+  const controller = cancellation === undefined ? undefined : new AbortController();
+  const cancellationPromise = cancellation?.then(() => ({ kind: "cancelled" as const }));
+  let currentStepInput: TurnStepInput =
+    controller === undefined
+      ? input.stepInput
+      : { ...input.stepInput, abortSignal: controller.signal };
 
   try {
     while (true) {
-      const result = await turnStep(currentStepInput);
+      const stepPromise = turnStep(currentStepInput);
+      const outcome =
+        cancellationPromise === undefined || controller === undefined
+          ? { kind: "completed" as const, result: await stepPromise }
+          : await Promise.race([
+              stepPromise.then((result) => ({ kind: "completed" as const, result })),
+              cancellationPromise,
+            ]);
+      let result;
+      if (outcome.kind === "completed") {
+        result = outcome.result;
+      } else {
+        controller?.abort();
+        result = await stepPromise;
+      }
 
       if (result.action === "done") {
         await notifyDriverStep({
@@ -106,7 +133,12 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
         return;
       }
 
+      const abortOptions =
+        currentStepInput.abortSignal === undefined
+          ? {}
+          : { abortSignal: currentStepInput.abortSignal };
       currentStepInput = {
+        ...abortOptions,
         input: undefined,
         parentWritable: currentStepInput.parentWritable,
         serializedContext: result.serializedContext,
@@ -122,6 +154,8 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
       },
     });
     throw error;
+  } finally {
+    cancellation?.dispose();
   }
 }
 

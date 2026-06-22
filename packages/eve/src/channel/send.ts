@@ -21,10 +21,12 @@ export function createSendFn<TState = undefined>(
   ): Promise<Session> => {
     const auth = (options as { auth: SessionAuthContext | null }).auth;
     const callback = (options as { callback?: SendOptions<TState>["callback"] }).callback;
+    const cancelToken = (options as { cancelToken?: string }).cancelToken;
     const mode = (options as { mode?: SendOptions<TState>["mode"] }).mode ?? "conversation";
     const state = (options as { state?: TState }).state;
     const rawToken = (options as { continuationToken: string }).continuationToken;
     const continuationToken = `${channelName}:${rawToken}`;
+    const cancelOptions = cancelToken === undefined ? {} : { cancelToken };
 
     const {
       message: rawMessage,
@@ -37,6 +39,7 @@ export function createSendFn<TState = undefined>(
     try {
       const { sessionId } = await runtime.deliver({
         auth,
+        ...cancelOptions,
         continuationToken,
         payload: { inputResponses, message, context, outputSchema },
       });
@@ -65,6 +68,7 @@ export function createSendFn<TState = undefined>(
     const handle = await runtime.run({
       adapter: sessionAdapter,
       auth,
+      ...cancelOptions,
       capabilities: mode === "conversation" ? { requestInput: true } : undefined,
       channelName,
       callback,

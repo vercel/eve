@@ -31,6 +31,7 @@ import {
   startScopedAuthorization,
   type ScopedAuthorization,
 } from "#runtime/connections/scoped-authorization.js";
+import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 
 /**
  * Wraps one authored tool's `execute` with the tool-hosted
@@ -56,7 +57,7 @@ export function createAuthorizedToolExecute(input: {
   readonly scope: string;
   readonly auth: AuthorizationDefinition;
   readonly execute: (toolInput: unknown, ctx: unknown) => unknown;
-}): (toolInput: unknown) => Promise<unknown> {
+}): (toolInput: unknown, options?: ToolExecuteOptions) => Promise<unknown> {
   const { scope, auth, execute } = input;
   const scoped: ScopedAuthorization = {
     authorization: auth,
@@ -64,11 +65,14 @@ export function createAuthorizedToolExecute(input: {
     scope,
   };
 
-  return async (toolInput: unknown): Promise<unknown> => {
+  return async (toolInput: unknown, options?: ToolExecuteOptions): Promise<unknown> => {
     const justAuthorized = await completeScopedAuthorization(scoped);
 
     try {
-      return await execute(toolInput, buildToolContext(scoped));
+      return await execute(
+        toolInput,
+        buildToolContext({ abortSignal: options?.abortSignal, scoped }),
+      );
     } catch (err) {
       if (!isConnectionAuthorizationRequiredError(err)) throw err;
 
@@ -122,15 +126,19 @@ export function createAuthorizedToolExecute(input: {
  * declare `auth`. The token accessors are present (the type promises
  * them) but throw, since there is no strategy to resolve a token from.
  */
-export function buildUnauthorizedToolContext(scope: string): ToolContext {
+export function buildUnauthorizedToolContext(input: {
+  readonly abortSignal?: AbortSignal;
+  readonly scope: string;
+}): ToolContext {
   const base = buildCallbackContext();
   return {
     ...base,
+    abortSignal: input.abortSignal,
     getToken(): Promise<TokenResult> {
-      throw noAuthError(scope);
+      throw noAuthError(input.scope);
     },
     requireAuth(): never {
-      throw noAuthError(scope);
+      throw noAuthError(input.scope);
     },
   };
 }
@@ -140,15 +148,19 @@ export function buildUnauthorizedToolContext(scope: string): ToolContext {
  * `execute`: the base session context plus token accessors bound to the
  * tool's scope.
  */
-function buildToolContext(scoped: ScopedAuthorization): ToolContext {
+function buildToolContext(input: {
+  readonly abortSignal?: AbortSignal;
+  readonly scoped: ScopedAuthorization;
+}): ToolContext {
   const base = buildCallbackContext();
   return {
     ...base,
+    abortSignal: input.abortSignal,
     getToken(): Promise<TokenResult> {
-      return resolveScopedToken(scoped);
+      return resolveScopedToken(input.scoped);
     },
     requireAuth(): never {
-      throw new ConnectionAuthorizationRequiredError(scoped.scope);
+      throw new ConnectionAuthorizationRequiredError(input.scoped.scope);
     },
   };
 }

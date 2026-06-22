@@ -497,6 +497,38 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     session = pending.session;
     let messages: ModelMessage[] = pending.messages;
 
+    const finishCancelledTurn = async (): Promise<StepResult | undefined> => {
+      if (config.abortSignal?.aborted !== true) return undefined;
+      if (!emit) {
+        config.abortSignal.throwIfAborted();
+        throw new Error("Turn cancelled.");
+      }
+
+      const failure = {
+        code: "TURN_CANCELLED",
+        message: "Turn cancelled by the client.",
+      };
+      if (config.mode === "task") {
+        await emitFailedStep(emit, emissionState, {
+          ...failure,
+          sessionId: session.sessionId,
+        });
+        return {
+          next: { done: true, isError: true, output: failure.message },
+          session,
+        };
+      }
+
+      emissionState = await emitRecoverableFailedTurn(emit, emissionState, failure);
+      return {
+        next: null,
+        session: setHarnessEmissionState(session, emissionState),
+      };
+    };
+
+    const alreadyCancelled = await finishCancelledTurn();
+    if (alreadyCancelled !== undefined) return alreadyCancelled;
+
     if (stepInput.input?.context !== undefined) {
       for (const entry of stepInput.input.context) {
         messages.push({ content: entry, role: "user" });
@@ -525,17 +557,24 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // `messages` (which the harness uses to rebuild session history).
     const attributionHeaders = buildGatewayAttributionHeaders(model, config.runtimeIdentity);
 
-    ({ messages, session } = await maybeCompact({
-      emit,
-      emissionState,
-      headers: attributionHeaders,
-      messages,
-      model,
-      onCompaction: config.onCompaction,
-      resolveModel: config.resolveModel,
-      session,
-      telemetry: enrichTelemetry(telemetryConfig, agentName) ?? undefined,
-    }));
+    try {
+      ({ messages, session } = await maybeCompact({
+        abortSignal: config.abortSignal,
+        emit,
+        emissionState,
+        headers: attributionHeaders,
+        messages,
+        model,
+        onCompaction: config.onCompaction,
+        resolveModel: config.resolveModel,
+        session,
+        telemetry: enrichTelemetry(telemetryConfig, agentName) ?? undefined,
+      }));
+    } catch (error) {
+      const cancelled = await finishCancelledTurn();
+      if (cancelled !== undefined) return cancelled;
+      throw error;
+    }
 
     const approvedTools = getApprovedTools(session);
 
@@ -738,7 +777,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       const executeModelCall = async (): Promise<HarnessStepResult> => {
         if (emit) {
-          const streamResult = await agent.stream({ messages: callMessages });
+          const streamResult = await agent.stream({
+            abortSignal: config.abortSignal,
+            messages: callMessages,
+          });
           const {
             handledInlineToolResultCallIds,
             inlineAuthorizationResults,
@@ -796,7 +838,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           }
           return stepResult;
         }
-        await agent.generate({ messages: callMessages });
+        await agent.generate({ abortSignal: config.abortSignal, messages: callMessages });
         const stepResult = await hooks.stepResult;
         if (isEmptyModelResponse(stepResult)) {
           throw new EmptyModelResponseError();
@@ -810,6 +852,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           sessionId: session.sessionId,
           turnId: emissionState.turnId,
         },
+        config.abortSignal,
       );
     };
 
@@ -847,6 +890,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         suppressStepStartedEmission: true,
       });
     } catch (error) {
+      const cancelled = await finishCancelledTurn();
+      if (cancelled !== undefined) return cancelled;
+
       // Stage order: drop a gateway-rejected provider tool first, then
       // reissue an empty response; see runModelCallRecoveryPipeline for
       // the skip/act semantics.
@@ -2089,6 +2135,7 @@ function createNextCompactionConfig(
  * harness uses to rebuild `session.history` after the step.
  */
 async function maybeCompact(input: {
+  readonly abortSignal?: AbortSignal;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly headers?: Record<string, string>;
@@ -2133,6 +2180,7 @@ async function maybeCompact(input: {
     compaction.providerOptions,
     input.telemetry,
     input.headers,
+    input.abortSignal,
   );
 
   if (input.onCompaction) {
@@ -2181,11 +2229,16 @@ function resolveApprovalKeyFromTools(
 async function runModelCallWithRetries<T>(
   fn: () => Promise<T>,
   diag: { readonly sessionId: string; readonly turnId: string },
+  abortSignal?: AbortSignal,
 ): Promise<T> {
   for (let attempt = 1; ; attempt++) {
+    abortSignal?.throwIfAborted();
     try {
       return await fn();
     } catch (error) {
+      if (abortSignal?.aborted === true) {
+        throw error;
+      }
       if (attempt === MODEL_CALL_MAX_ATTEMPTS || classifyModelCallError(error) !== "retry") {
         throw error;
       }
@@ -2198,9 +2251,29 @@ async function runModelCallWithRetries<T>(
         turnId: diag.turnId,
         error,
       });
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await sleepWithAbortSignal(delayMs, abortSignal);
     }
   }
+}
+
+async function sleepWithAbortSignal(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal === undefined) {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+    return;
+  }
+
+  signal.throwIfAborted();
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(signal.reason);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function findAuthorizationSignalFromToolResults(

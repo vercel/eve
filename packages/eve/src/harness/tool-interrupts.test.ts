@@ -94,7 +94,9 @@ describe("wrapToolExecute", () => {
     const signal = signalWithVerifier();
     const wrapped = wrapToolExecute({ ...baseDef, execute: async () => signal })!;
     const ctx = new ContextContainer();
-    const output = await contextStorage.run(ctx, () => wrapped({}, { toolCallId: "call_1" }));
+    const output = await contextStorage.run(ctx, () =>
+      wrapped({}, { messages: [], toolCallId: "call_1" }),
+    );
 
     expect(isAuthorizationPendingModelOutput(output)).toBe(true);
     expect(output).toEqual(modelFacingAuthorizationOutput(signal));
@@ -107,7 +109,8 @@ describe("wrapToolExecute", () => {
     const signal = signalWithVerifier();
     const wrapped = wrapToolExecute({ ...baseDef, execute: async () => signal })!;
     const ctx = new ContextContainer();
-    const options = markCodeModeToolExecutionOptions({ toolCallId: "call_2" }) as {
+    const options = markCodeModeToolExecutionOptions({ messages: [], toolCallId: "call_2" }) as {
+      messages: [];
       toolCallId: string;
     };
     const output = await contextStorage.run(ctx, () => wrapped({}, options));
@@ -119,7 +122,9 @@ describe("wrapToolExecute", () => {
   it("passes non-interrupt outputs through unchanged", async () => {
     const wrapped = wrapToolExecute({ ...baseDef, execute: async () => ({ ok: true }) })!;
     const ctx = new ContextContainer();
-    const output = await contextStorage.run(ctx, () => wrapped({}, { toolCallId: "call_3" }));
+    const output = await contextStorage.run(ctx, () =>
+      wrapped({}, { messages: [], toolCallId: "call_3" }),
+    );
 
     expect(output).toEqual({ ok: true });
     expect(readToolInterrupt(ctx, "call_3")).toBeUndefined();

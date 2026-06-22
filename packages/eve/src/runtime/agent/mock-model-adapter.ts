@@ -35,6 +35,7 @@ import { FINAL_OUTPUT_TOOL_NAME } from "#runtime/framework-tools/final-output.js
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 
 const MOCK_RUNTIME_MODEL_PROVIDER = "eve-runtime-mock";
+const MOCK_CANCELLATION_PROMPT = "[wait-for-cancel]";
 const LOAD_SKILL_TOOL_CALL_ID = "call_load_skill";
 type BootstrapGenerateOptions = Parameters<MockLanguageModelV3["doGenerate"]>[0];
 
@@ -79,13 +80,27 @@ export function createMockAuthoredRuntimeModel(reference: RuntimeModelReference)
     modelId: reference.id,
     provider: MOCK_RUNTIME_MODEL_PROVIDER,
     doGenerate: async (options) => createMockModelResult(options, reference.id),
-    doStream: async (options) =>
-      createBootstrapStreamResult(createMockModelResult(options, reference.id)),
+    doStream: async (options) => {
+      if (getLastUserPromptText(options.prompt)?.includes(MOCK_CANCELLATION_PROMPT) === true) {
+        return await waitForMockModelCancellation(options.abortSignal);
+      }
+      return createBootstrapStreamResult(createMockModelResult(options, reference.id));
+    },
   });
 
   authoredRuntimeModelMocks.set(reference.id, model);
 
   return model;
+}
+
+async function waitForMockModelCancellation(signal: AbortSignal | undefined): Promise<never> {
+  if (signal === undefined) {
+    throw new Error("The cancellable mock model requires an AbortSignal.");
+  }
+  signal.throwIfAborted();
+  return await new Promise((_, reject) => {
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
 }
 
 function createMockModelResult(

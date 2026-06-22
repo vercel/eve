@@ -18,20 +18,21 @@ export default eveChannel({
 
 ## Routes
 
-The channel exposes routes that create sessions, send follow-ups, and stream events:
+The channel exposes routes that create sessions, send follow-ups, cancel active turns, and stream events:
 
 - `GET /eve/v1/health`
 - `POST /eve/v1/session` (start a session)
 - `POST /eve/v1/session/:sessionId` (send a follow-up)
+- `POST /eve/v1/session/:sessionId/cancel` (cancel the active turn)
 - `GET /eve/v1/session/:sessionId/stream` (stream events, NDJSON)
 
-Start a session with a minimal body. The response returns `sessionId` and the `continuationToken` you reuse for follow-ups:
+Start a session with a minimal body. The response returns `sessionId`, the `continuationToken` you reuse for follow-ups, and a one-turn `cancelToken`:
 
 ```bash
 curl -X POST https://<deployment>/eve/v1/session \
   -H "Content-Type: application/json" \
   -d '{"message":"What is the weather in Paris?"}'
-# {"continuationToken":"eve:7f3c...","ok":true,"sessionId":"ses_01h..."}
+# {"cancelToken":"eve:cancel:9a2d...","continuationToken":"eve:7f3c...","ok":true,"sessionId":"ses_01h..."}
 ```
 
 Stream that session's events as newline-delimited JSON (`application/x-ndjson; charset=utf-8`), one event object per line:
@@ -41,6 +42,14 @@ curl -N https://<deployment>/eve/v1/session/ses_01h.../stream
 # {"type":"turn.started",...}
 # {"type":"text.delta","delta":"It is "}
 # {"type":"message.completed",...}
+```
+
+Cancel only that active turn by posting its `cancelToken`. The child turn stops cooperatively and emits a recoverable failure boundary ending in `session.waiting`; the parent session remains available for follow-ups:
+
+```bash
+curl -X POST https://<deployment>/eve/v1/session/ses_01h.../cancel \
+  -H "Content-Type: application/json" \
+  -d '{"cancelToken":"eve:cancel:9a2d..."}'
 ```
 
 See [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming) for the full request and stream flow, including the complete event set.

@@ -180,6 +180,8 @@ export type HandleEventFn = (
  * Dependencies injected into the tool-loop harness at construction time.
  */
 export interface ToolLoopHarnessConfig {
+  /** Signal used to cancel model work for the active durable turn. */
+  readonly abortSignal?: AbortSignal;
   /**
    * Session-level capabilities. The harness reads
    * {@link SessionCapabilities.requestInput} when assembling the

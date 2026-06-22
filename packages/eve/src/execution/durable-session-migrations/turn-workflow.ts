@@ -20,6 +20,7 @@ import { turnWorkflowInputV0ToV1 } from "./turn-workflow-v0-to-v1.js";
 export const TURN_WORKFLOW_INPUT_VERSION = 1;
 
 export interface TurnStepInput {
+  readonly abortSignal?: AbortSignal;
   readonly input: HookPayload | undefined;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
@@ -28,6 +29,7 @@ export interface TurnStepInput {
 
 export interface TurnWorkflowInput {
   readonly version: typeof TURN_WORKFLOW_INPUT_VERSION;
+  readonly cancelToken?: string;
   readonly capabilities: SessionCapabilities | undefined;
   readonly completionToken: string;
   readonly mode: RunMode;
@@ -35,6 +37,7 @@ export interface TurnWorkflowInput {
 }
 
 export interface TurnWorkflowDispatchInput {
+  readonly cancelToken?: string;
   readonly capabilities: SessionCapabilities | undefined;
   readonly completionToken: string;
   readonly delivery: HookPayload;
@@ -47,8 +50,10 @@ export interface TurnWorkflowDispatchInput {
 const turnWorkflowInputMigrations: readonly VersionMigration[] = [turnWorkflowInputV0ToV1];
 
 export function createTurnWorkflowInput(input: TurnWorkflowDispatchInput): TurnWorkflowInput {
+  const cancelOptions = input.cancelToken === undefined ? {} : { cancelToken: input.cancelToken };
   return {
     capabilities: input.capabilities,
+    ...cancelOptions,
     completionToken: input.completionToken,
     mode: input.mode,
     stepInput: {

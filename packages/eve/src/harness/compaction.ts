@@ -112,6 +112,7 @@ export async function compactMessages(
   providerOptions?: Parameters<typeof generateText>[0]["providerOptions"],
   telemetry?: TelemetryOptions,
   headers?: Record<string, string>,
+  abortSignal?: AbortSignal,
 ): Promise<ModelMessage[]> {
   let keep = selectRecentWindowSize(messages, config);
 
@@ -127,6 +128,7 @@ export async function compactMessages(
     }));
 
     const result = await generateText({
+      abortSignal,
       headers,
       model,
       prompt: formatCompactionPrompt(prunedOlder),

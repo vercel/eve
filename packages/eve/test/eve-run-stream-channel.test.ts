@@ -166,6 +166,9 @@ function createEvents(
 
 function createMockGetSession(events: ReadableStream<HandleMessageStreamEvent>) {
   return vi.fn<GetSessionFn>().mockReturnValue({
+    async cancelTurn() {
+      return false;
+    },
     id: "session_xyz",
     continuationToken: "",
     async getEventStream() {

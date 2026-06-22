@@ -2014,6 +2014,60 @@ describe("createToolLoopHarness", () => {
     expect((stepFailed!.data as { details?: { errorId?: string } }).details?.errorId).toBeDefined();
   });
 
+  // Cancellation must park at a recoverable boundary so the next message can
+  // continue the same durable conversation.
+  it("emits a recoverable cancellation boundary for an aborted turn", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, { abortSignal: controller.signal }),
+    );
+
+    const result = await runStep(createTestSession(), { message: "Hi" });
+
+    expect(result.next).toBeNull();
+    expect(events.map((event) => event.type)).toEqual([
+      "session.started",
+      "turn.started",
+      "message.received",
+      "step.failed",
+      "turn.failed",
+      "session.waiting",
+    ]);
+    expect(events.find((event) => event.type === "step.failed")?.data).toMatchObject({
+      code: "TURN_CANCELLED",
+      message: "Turn cancelled by the client.",
+    });
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
+  });
+
+  // Reaching the model call is what stops provider generation and billing,
+  // rather than merely hiding the response on the client.
+  it("passes the durable turn signal to the AI SDK model call", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "done", role: "assistant" }] },
+      text: "done",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const controller = new AbortController();
+    const { emit } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, { abortSignal: controller.signal }),
+    );
+
+    await runStep(createTestSession(), { message: "Hi" });
+
+    const instance = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
+      stream: ReturnType<typeof vi.fn>;
+    };
+    expect(instance.stream).toHaveBeenCalledWith(
+      expect.objectContaining({ abortSignal: controller.signal }),
+    );
+  });
+
   it("parks the session on an ambiguous GatewayInternalServerError 400 model-call error", async () => {
     setupMockAgentError(
       createGatewayModelCallError({

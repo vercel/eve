@@ -117,8 +117,8 @@ export interface EveChannel extends Channel {}
 
 /**
  * Builds the default eve HTTP channel: a {@link defineChannel} instance serving the
- * built-in `/eve/v1` routes (POST creates a session, POST delivers a follow-up, GET
- * streams a session's NDJSON event feed). Every route runs {@link EveChannelInput.auth}
+ * built-in `/eve/v1` routes (POST creates a session, delivers a follow-up, or cancels
+ * an active turn; GET streams a session's NDJSON event feed). Every route runs {@link EveChannelInput.auth}
  * via {@link routeAuth} before dispatching. Default-export the result as your
  * `agent/channels/eve.ts` channel; reach for {@link defineChannel} directly only for a custom transport.
  */
@@ -159,17 +159,20 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (!messageResult.dispatch) return droppedMessageResponse();
 
         const token = `eve:${crypto.randomUUID()}`;
+        const cancelToken = `eve:cancel:${crypto.randomUUID()}`;
         const context = mergeContext(body.context, messageResult.context);
 
         const session = await send(createSendPayload(body, context), {
           auth: messageResult.auth,
           callback: body.callback,
+          cancelToken,
           continuationToken: token,
           mode: body.mode,
         });
 
         return Response.json(
           {
+            cancelToken,
             continuationToken: session.continuationToken,
             ok: true,
             sessionId: session.id,
@@ -233,6 +236,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           dispatchAuth = messageResult.auth;
         }
 
+        const cancelToken = `eve:cancel:${crypto.randomUUID()}`;
         const session = await send(
           {
             inputResponses: body.inputResponses,
@@ -242,12 +246,14 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           },
           {
             auth: dispatchAuth,
+            cancelToken,
             continuationToken: body.continuationToken,
           },
         );
 
         return Response.json(
           {
+            cancelToken,
             ok: true,
             sessionId: session.id,
           },
@@ -258,6 +264,47 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             },
             status: 200,
           },
+        );
+      }),
+
+      POST("/eve/v1/session/:sessionId/cancel", async (req, { getSession, params }) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+
+        const sessionId = params.sessionId;
+        if (!sessionId) {
+          return Response.json({ error: "Missing session id.", ok: false }, { status: 400 });
+        }
+
+        let payload: unknown;
+        try {
+          payload = await req.json();
+        } catch {
+          return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
+        }
+
+        const cancelToken =
+          payload !== null &&
+          typeof payload === "object" &&
+          "cancelToken" in payload &&
+          typeof payload.cancelToken === "string"
+            ? payload.cancelToken.trim()
+            : "";
+        if (!cancelToken) {
+          return Response.json({ error: "Missing cancel token.", ok: false }, { status: 400 });
+        }
+
+        const cancelled = await getSession(sessionId).cancelTurn(cancelToken);
+        if (!cancelled) {
+          return Response.json(
+            { cancelled: false, error: "Active turn not found.", ok: false },
+            { status: 409 },
+          );
+        }
+
+        return Response.json(
+          { cancelled: true, ok: true },
+          { headers: { "cache-control": "no-store" }, status: 202 },
         );
       }),
 

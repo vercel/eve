@@ -64,6 +64,7 @@ export type SendFn<TState = undefined> = (
 type BaseSendOptions = {
   auth: SessionAuthContext | null;
   callback?: SessionCallback;
+  cancelToken?: string;
   continuationToken: string;
   mode?: RunMode;
 };

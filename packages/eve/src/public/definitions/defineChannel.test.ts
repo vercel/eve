@@ -511,6 +511,9 @@ describe("defineChannel", () => {
         void threadTs;
 
         return {
+          async cancelTurn() {
+            return false;
+          },
           id: channelId,
           continuationToken: channelId,
           async getEventStream() {

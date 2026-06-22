@@ -79,6 +79,9 @@ interface CapturedRun {
 
 function createCapturingRuntime(captured: CapturedRun[]): Runtime {
   return {
+    async cancelTurn() {
+      return false;
+    },
     async run(input) {
       captured.push({
         adapter: input.adapter,

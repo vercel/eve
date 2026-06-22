@@ -48,6 +48,15 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+interface MockAgentCallOptions {
+  readonly abortSignal?: AbortSignal;
+  readonly messages: unknown[];
+}
+
+interface MockExecutableTool {
+  execute(input: unknown, options: { readonly abortSignal?: AbortSignal }): Promise<unknown>;
+}
+
 function setupMockAgentForToolExecution(toolName: string, args: unknown): void {
   vi.mocked(ToolLoopAgent).mockImplementation(function (
     this: Record<string, unknown>,
@@ -60,7 +69,7 @@ function setupMockAgentForToolExecution(toolName: string, args: unknown): void {
       | ((...args: unknown[]) => Promise<unknown>)
       | undefined;
 
-    this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
+    this.generate = vi.fn().mockImplementation(async (options: MockAgentCallOptions) => {
       if (prepareStep) {
         await prepareStep({
           messages: options.messages,
@@ -71,18 +80,14 @@ function setupMockAgentForToolExecution(toolName: string, args: unknown): void {
         });
       }
 
-      const tools = (
-        settings as {
-          readonly tools: Record<string, { execute: (input: unknown) => Promise<unknown> }>;
-        }
-      ).tools;
+      const tools = (settings as { readonly tools: Record<string, MockExecutableTool> }).tools;
       const tool = tools[toolName];
 
       if (tool === undefined) {
         throw new Error(`Missing test tool "${toolName}".`);
       }
 
-      const output = await tool.execute(args);
+      const output = await tool.execute(args, { abortSignal: options.abortSignal });
 
       const result = {
         finishReason: "stop",
@@ -218,6 +223,7 @@ function createTestNode(
 
 function createNoopRuntime(): Runtime {
   return {
+    cancelTurn: vi.fn().mockResolvedValue(false),
     deliver: vi.fn(),
     run: vi.fn().mockRejectedValue(new Error("runtime.run should not be called in this test")),
     getEventStream: vi
@@ -282,6 +288,60 @@ describe("createExecutionNodeStep", () => {
       rootNode.turnAgent.model,
       modelResolutionScope,
     );
+  });
+
+  // Authored tools can outlive the model call, so they need the same signal or
+  // client cancellation would leave tool work running.
+  it("passes the active turn signal to authored tool contexts", async () => {
+    setupMockAgentForToolExecution("regular-tool", {});
+    const controller = new AbortController();
+    let receivedContext: unknown;
+    const toolRegistry = await createRuntimeToolRegistry({
+      tools: [
+        {
+          description: "A cancellable tool.",
+          execute: async (_input, ctx) => {
+            receivedContext = ctx;
+            return "tool-output";
+          },
+          inputSchema: { type: "object" },
+          logicalPath: "tools/regular-tool.ts",
+          name: "regular-tool",
+          sourceId: "tools/regular-tool.ts",
+          sourceKind: "module",
+        },
+      ],
+    });
+    const rootNode = createTestNode(createTestTurnAgent({ tools: toolRegistry.preparedTools }), {
+      toolRegistry,
+    });
+    const step = createExecutionNodeStep({
+      abortSignal: controller.signal,
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      createRuntime: () => createNoopRuntime(),
+      mode: "task",
+      node: rootNode,
+    });
+
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: "sess-root",
+      turn: { id: "turn-1", sequence: 0 },
+    });
+
+    await contextStorage.run(ctx, async () =>
+      step(
+        createSession({
+          continuationToken: "test-root",
+          sessionId: "sess-root",
+          turnAgent: rootNode.turnAgent,
+        }),
+        { message: "Run the tool." },
+      ),
+    );
+
+    expect(receivedContext).toMatchObject({ abortSignal: controller.signal });
   });
 
   it("records visible subagent tools as pending runtime actions", async () => {

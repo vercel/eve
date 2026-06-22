@@ -58,6 +58,9 @@ function createEveCreateHandler(input: EveChannelInput) {
   if (!createRoute) throw new Error("No create POST route found");
 
   const mockSend = vi.fn<SendFn>().mockResolvedValue({
+    async cancelTurn() {
+      return false;
+    },
     id: "test-session-id",
     continuationToken: "eve:test",
     async getEventStream() {
@@ -93,6 +96,9 @@ function createEveContinueHandler(input: EveChannelInput) {
   if (!continueRoute) throw new Error("No continue POST route found");
 
   const mockSession: ChannelSession = {
+    async cancelTurn() {
+      return false;
+    },
     id: "test-session-id",
     continuationToken: "eve:test",
     async getEventStream() {
@@ -115,6 +121,39 @@ function createEveContinueHandler(input: EveChannelInput) {
         requestIp: "127.0.0.1",
       };
       return (continueRoute as any).handler(req, args);
+    },
+  };
+}
+
+function createEveCancelHandler(input: EveChannelInput) {
+  const channel = eveChannel(input);
+  const cancelRoute = channel.routes.find(
+    (route) => route.method === "POST" && route.path === "/eve/v1/session/:sessionId/cancel",
+  );
+  if (!cancelRoute) throw new Error("No cancel POST route found");
+
+  const cancelTurn = vi.fn().mockResolvedValue(true);
+  const mockSession: ChannelSession = {
+    cancelTurn,
+    continuationToken: "",
+    async getEventStream() {
+      return new ReadableStream();
+    },
+    id: "test-session-id",
+  };
+
+  return {
+    cancelTurn,
+    async fetch(req: Request) {
+      const args: RouteHandlerArgs = {
+        getSession: vi.fn().mockReturnValue(mockSession),
+        params: { sessionId: "test-session-id" },
+        receive: vi.fn() as any,
+        requestIp: "127.0.0.1",
+        send: vi.fn() as any,
+        waitUntil: () => undefined,
+      };
+      return (cancelRoute as any).handler(req, args);
     },
   };
 }
@@ -160,6 +199,26 @@ function contextAccessorFor(ctx: ContextContainer): ContextAccessor {
     ensure: (key, create) => ctx.ensure(key as any, create),
   };
 }
+
+describe("eveChannel cancel route", () => {
+  // The public endpoint must cancel the addressed turn without terminating
+  // the durable session that owns it.
+  it("cancels only the active turn for the requested session", async () => {
+    const handler = createEveCancelHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      new Request("https://example.com/eve/v1/session/test-session-id/cancel", {
+        body: JSON.stringify({ cancelToken: "cancel_1" }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({ cancelled: true, ok: true });
+    expect(handler.cancelTurn).toHaveBeenCalledWith("cancel_1");
+  });
+});
 
 describe("eveChannel — events", () => {
   it("passes configured event handlers through with session context", async () => {
@@ -371,6 +430,8 @@ describe("eveChannel — onMessage", () => {
 });
 
 describe("eveChannel — create session (text)", () => {
+  // The create response is where the client learns how to address this turn,
+  // so it must return the exact token passed into the runtime.
   it("accepts a plain-string message and opens a new session", async () => {
     const handler = createEveCreateHandler({ auth: none() });
 
@@ -379,6 +440,10 @@ describe("eveChannel — create session (text)", () => {
     expect(response.status).toBe(202);
     expect(handler.send).toHaveBeenCalledTimes(1);
     expect(handler.send.mock.calls[0]?.[0]).toBe("hi");
+    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    const body = (await response.json()) as { cancelToken: string };
+    expect(options.cancelToken).toMatch(/^eve:cancel:/);
+    expect(body.cancelToken).toBe(options.cancelToken);
   });
 
   it("accepts task mode for callback-driven session creation", async () => {
@@ -896,6 +961,8 @@ describe("eveChannel — uploadPolicy enforcement", () => {
 });
 
 describe("eveChannel — continue session HITL (inputResponses)", () => {
+  // Every continuation turn needs a fresh cancellation handle, including
+  // turns that carry HITL responses alongside a message.
   it("forwards inputResponses alongside a message", async () => {
     const handler = createEveContinueHandler({ auth: none() });
 
@@ -912,6 +979,10 @@ describe("eveChannel — continue session HITL (inputResponses)", () => {
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
     expect(payload.message).toBe("yes please");
     expect(payload.inputResponses).toEqual([{ requestId: "req-1", optionId: "approve" }]);
+    const options = handler.send.mock.calls[0]?.[1] as SendOptions;
+    const body = (await response.json()) as { cancelToken: string };
+    expect(options.cancelToken).toMatch(/^eve:cancel:/);
+    expect(body.cancelToken).toBe(options.cancelToken);
   });
 
   it("converts clientContext on continue-session requests", async () => {

@@ -20,9 +20,10 @@ import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { buildRunContext } from "#execution/runtime-context.js";
 import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
-
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
+const CANCEL_HOOK_REGISTRATION_ATTEMPTS = 80;
+const CANCEL_HOOK_REGISTRATION_RETRY_MS = 25;
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 export const LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE =
   "deploymentId 'latest' requires a World that implements resolveLatestDeploymentId()";
@@ -47,6 +48,7 @@ const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
 const log = createLogger("execution.workflow-runtime");
 
 interface WorkflowHookRecord {
+  readonly metadata?: unknown;
   readonly runId: string;
 }
 
@@ -80,6 +82,30 @@ export function createWorkflowRuntime(config: {
   readonly nodeId?: string;
 }): Runtime {
   return {
+    async cancelTurn(sessionId: string, cancelToken: string): Promise<boolean> {
+      applyEveWorkflowQueueNamespace();
+      for (let attempt = 0; attempt < CANCEL_HOOK_REGISTRATION_ATTEMPTS; attempt += 1) {
+        try {
+          const hook = normalizeWorkflowHook(await getHookByToken(cancelToken));
+          if (!isTurnCancellationHookForSession(hook, sessionId)) return false;
+          await resumeHook(cancelToken, { kind: "cancel-turn" });
+          return true;
+        } catch (error) {
+          if (!HookNotFoundError.is(error)) {
+            logError(log, "failed to cancel active turn", error, {
+              cancelToken,
+              sessionId,
+            });
+            throw error;
+          }
+          if (attempt < CANCEL_HOOK_REGISTRATION_ATTEMPTS - 1) {
+            await new Promise((resolve) => setTimeout(resolve, CANCEL_HOOK_REGISTRATION_RETRY_MS));
+          }
+        }
+      }
+      return false;
+    },
+
     async run(input: RunInput): Promise<RunHandle> {
       const bundle = await getCompiledRuntimeAgentBundle({
         compiledArtifactsSource: config.compiledArtifactsSource,
@@ -87,11 +113,14 @@ export function createWorkflowRuntime(config: {
       });
       const ctx = buildRunContext({ bundle, run: input });
       const serializedContext = serializeContext(ctx);
+      const cancelOptions =
+        input.cancelToken === undefined ? {} : { cancelToken: input.cancelToken };
 
       let run: Awaited<ReturnType<typeof startWorkflowPreferLatest>>;
       try {
         run = await startWorkflowPreferLatest(workflowEntryReference, [
           {
+            ...cancelOptions,
             input: input.input,
             serializedContext,
           },
@@ -120,8 +149,11 @@ export function createWorkflowRuntime(config: {
 
     async deliver(input: DeliverInput): Promise<{ sessionId: string }> {
       applyEveWorkflowQueueNamespace();
+      const cancelOptions =
+        input.cancelToken === undefined ? {} : { cancelToken: input.cancelToken };
       const hookPayload: HookPayload = {
         auth: input.auth,
+        ...cancelOptions,
         kind: "deliver",
         payloads: [input.payload],
       };
@@ -204,8 +236,18 @@ function normalizeWorkflowHook(value: unknown): WorkflowHookRecord {
   }
 
   return {
+    metadata: (value as { metadata?: unknown }).metadata,
     runId,
   };
+}
+
+function isTurnCancellationHookForSession(hook: WorkflowHookRecord, sessionId: string): boolean {
+  return (
+    hook.metadata !== null &&
+    typeof hook.metadata === "object" &&
+    "sessionId" in hook.metadata &&
+    hook.metadata.sessionId === sessionId
+  );
 }
 
 function parseNdjsonStream(

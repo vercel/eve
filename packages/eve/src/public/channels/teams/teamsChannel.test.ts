@@ -26,6 +26,7 @@ async function firePost(
   }
 
   const send = vi.fn(async (_input: unknown, _options: unknown) => ({
+    cancelTurn: async () => false,
     continuationToken: "TOKEN",
     getEventStream: async () => new ReadableStream(),
     id: "SESSION",
@@ -148,6 +149,7 @@ describe("teamsChannel", () => {
       credentials: { tokenProvider: () => "token" },
     });
     const send = vi.fn(async (_input: unknown, _options: unknown) => ({
+      cancelTurn: async () => false,
       continuationToken: "TOKEN",
       getEventStream: async () => new ReadableStream(),
       id: "SESSION",

@@ -16,6 +16,8 @@ import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#
 export interface Session {
   readonly id: string;
   readonly continuationToken: string;
+  /** Cancels the active turn while preserving this session. */
+  cancelTurn(cancelToken: string): Promise<boolean>;
   getEventStream(options?: {
     startIndex?: number;
   }): Promise<ReadableStream<HandleMessageStreamEvent>>;
@@ -39,6 +41,9 @@ export function createSession(id: string, continuationToken: string, runtime: Ru
   return {
     id,
     continuationToken,
+    async cancelTurn(cancelToken: string) {
+      return await runtime.cancelTurn(id, cancelToken);
+    },
     async getEventStream(options?: { startIndex?: number }) {
       return runtime.getEventStream(id, options);
     },

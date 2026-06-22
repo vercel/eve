@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createHook } from "#compiled/@workflow/core/index.js";
 
 import type { HookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
@@ -10,6 +11,10 @@ import {
 import { turnStep } from "#execution/workflow-steps.js";
 
 const resumeHookMock = vi.fn();
+
+vi.mock("#compiled/@workflow/core/index.js", () => ({
+  createHook: vi.fn(),
+}));
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
@@ -23,6 +28,59 @@ describe("turnWorkflow", () => {
   afterEach(() => {
     vi.clearAllMocks();
     resumeHookMock.mockReset();
+  });
+
+  // The hook is the durable bridge from the cancel route to a running step;
+  // this proves that bridge also settles the step and closes its hook.
+  it("aborts the active turn step when the cancellation hook resumes", async () => {
+    const sessionState = createSessionState();
+    let resolveCancellation!: (payload: { readonly kind: "cancel-turn" }) => void;
+    const cancellation = new Promise<{ readonly kind: "cancel-turn" }>((resolve) => {
+      resolveCancellation = resolve;
+    });
+    const dispose = vi.fn();
+    vi.mocked(createHook).mockReturnValue(
+      Object.assign(cancellation, { dispose, token: "cancel_1" }) as never,
+    );
+    let stepSignal: AbortSignal | undefined;
+    vi.mocked(turnStep).mockImplementationOnce(
+      async (input) =>
+        await new Promise((resolve) => {
+          stepSignal = input.abortSignal;
+          input.abortSignal?.addEventListener(
+            "abort",
+            () =>
+              resolve({
+                action: "park",
+                hasPendingAuthorization: false,
+                hasPendingInputBatch: false,
+                serializedContext: { state: "cancelled" },
+                sessionState,
+              }),
+            { once: true },
+          );
+        }),
+    );
+
+    const { input } = createInput({ cancelToken: "cancel_1", sessionState });
+    const running = turnWorkflow(input);
+    await vi.waitFor(() => expect(stepSignal).toBeInstanceOf(AbortSignal));
+    resolveCancellation({ kind: "cancel-turn" });
+    await running;
+
+    expect(stepSignal?.aborted).toBe(true);
+    expect(createHook).toHaveBeenCalledWith({
+      metadata: { sessionId: "wrun_test_123" },
+      token: "cancel_1",
+    });
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "turn-token",
+      expect.objectContaining({
+        action: expect.objectContaining({ kind: "park" }),
+        kind: "turn-result",
+      }),
+    );
   });
 
   it("notifies the driver when a turn completes", async () => {

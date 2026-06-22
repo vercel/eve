@@ -112,6 +112,7 @@ export interface DeliverPayload {
  */
 export interface DeliverHookPayload {
   readonly auth?: SessionAuthContext | null;
+  readonly cancelToken?: string;
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
 }
@@ -241,6 +242,8 @@ export interface RunInput {
    * callback when the session completes or fails.
    */
   readonly callback?: SessionCallback;
+  /** Opaque token that authorizes cancellation of this active turn. */
+  readonly cancelToken?: string;
   /**
    * Session continuation token for delivery and hook creation. Channels can
    * re-key the session during the first turn via
@@ -273,6 +276,8 @@ export interface DeliverInput {
    * this field before calling the adapter's hooks.
    */
   readonly auth?: SessionAuthContext | null;
+  /** Opaque token that authorizes cancellation of this active turn. */
+  readonly cancelToken?: string;
   readonly continuationToken: string;
   readonly payload: DeliverPayload;
 }
@@ -307,6 +312,12 @@ export interface RunHandle {
  * Runtime interface consumed by routes and the subagent tool wrapper.
  */
 export interface Runtime {
+  /**
+   * Requests cooperative cancellation of one active turn without terminating
+   * its parent session.
+   */
+  cancelTurn(sessionId: string, cancelToken: string): Promise<boolean>;
+
   /**
    * Starts a new run from a flat platform-shape input.
    *

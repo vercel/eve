@@ -180,6 +180,7 @@ function toUserContentArray(value: string | UserContent): UserContentArray {
  */
 interface DeliverLike {
   readonly auth?: SessionAuthContext | null;
+  readonly cancelToken?: string;
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
 }
@@ -201,14 +202,18 @@ export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): 
   }
 
   let auth = first.auth;
+  let cancelToken = first.cancelToken;
   const payloads = [...first.payloads];
 
   for (const item of rest) {
     if (item.auth !== undefined) {
       auth = item.auth;
     }
+    if (item.cancelToken !== undefined) {
+      cancelToken = item.cancelToken;
+    }
     payloads.push(...item.payloads);
   }
 
-  return { ...first, auth, payloads };
+  return { ...first, auth, cancelToken, payloads };
 }

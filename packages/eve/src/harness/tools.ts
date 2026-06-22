@@ -17,6 +17,7 @@ import {
 } from "#harness/authorization.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { isCodeModeToolExecutionOptions } from "#runtime/framework-tools/code-mode-connection-auth.js";
+import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 
 /**
  * Builds an AI SDK `ToolSet` from unified harness tool definitions.
@@ -133,11 +134,11 @@ export function buildToolSetFromDefinitions(input: {
  */
 export function wrapToolExecute(
   definition: HarnessToolDefinition,
-): ((input: any, options: { readonly toolCallId: string }) => Promise<any>) | undefined {
+): ((input: any, options: ToolExecuteOptions) => Promise<any>) | undefined {
   const execute = definition.execute;
   if (execute === undefined) return undefined;
   return async (input, options) => {
-    const output = await execute(input);
+    const output = await execute(input, options);
     if (!isAuthorizationSignal(output)) return output;
     if (isCodeModeToolExecutionOptions(options)) return output;
     stashToolInterrupt(loadContext(), options.toolCallId, output);

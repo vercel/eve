@@ -24,7 +24,7 @@ curl -X POST http://127.0.0.1:3000/eve/v1/session \
   -d '{"message":"Summarize the latest forecast."}'
 ```
 
-eve responds right away. The JSON body carries a `sessionId` and a `continuationToken`, and the `x-eve-session-id` header names the durable session to stream.
+eve responds right away. The JSON body carries a `sessionId`, a `continuationToken`, and a one-turn `cancelToken`. The `x-eve-session-id` header names the durable session to stream.
 
 ## Stream a session
 
@@ -83,6 +83,18 @@ curl -X POST http://127.0.0.1:3000/eve/v1/session/<sessionId> \
 ```
 
 The follow-up reuses the same durable session: same history, same state.
+
+## Cancel the active turn
+
+Post the active turn's `cancelToken` to stop its child workflow without terminating the parent session:
+
+```bash
+curl -X POST http://127.0.0.1:3000/eve/v1/session/<sessionId>/cancel \
+  -H 'content-type: application/json' \
+  -d '{"cancelToken":"<cancelToken>"}'
+```
+
+The turn receives a durable `AbortSignal` and stops cooperatively. Its stream ends with `step.failed` and `turn.failed` using `code: "TURN_CANCELLED"`, followed by `session.waiting`. You can then send another follow-up with the same continuation token.
 
 For deterministic ordering, send one follow-up at a time and wait for the next `session.waiting` event before sending another message to the same session. See [message delivery and queueing](./execution-model-and-durability#message-delivery-and-queueing) for the current runtime contract.
 
