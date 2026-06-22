@@ -31,14 +31,14 @@ export const resources: Resource[] = [
   },
   {
     kind: "Template",
-    title: "Eve Chat Template",
+    title: "eve Chat Template",
     description:
-      "A persisted Next.js chat template for Eve, built with shadcn/ui, Tailwind CSS, Streamdown, Better Auth, Drizzle, Neon, and Upstash Redis.",
+      "A persisted Next.js chat template for eve, built with shadcn/ui, Tailwind CSS, Streamdown, Better Auth, Drizzle, Neon, and Upstash Redis.",
     href: "https://vercel.com/templates/eve/eve-chat-template",
   },
   {
     kind: "Template",
-    title: "Eve Slack Agent",
+    title: "eve Slack Agent",
     description:
       "A Slack agent template with webhook handling, Vercel Connect, a starter agent, and an example tool ready to deploy on Vercel.",
     href: "https://vercel.com/templates/eve/eve-slack-agent",
@@ -52,9 +52,9 @@ export const resources: Resource[] = [
   },
   {
     kind: "Reference",
-    title: "Eve Knowledge Base",
+    title: "eve Knowledge Base",
     description:
-      "Vercel's Eve hub with getting-started guides, build guides, templates, docs, integrations, and community links.",
+      "Vercel's eve hub with getting-started guides, build guides, templates, docs, integrations, and community links.",
     href: "https://vercel.com/kb/eve",
   },
 ];

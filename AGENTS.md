@@ -11,6 +11,9 @@ channels, subagents, and schedules are all files — and eve compiles and runs i
 See the [README](./README.md) for the full overview and
 [`docs/`](./docs) for user-facing documentation.
 
+Always style the framework name as `eve`, lowercase, in user-facing copy,
+docs, prompts, comments, and headings.
+
 ## Repository layout
 
 - `packages/eve` — the framework and `eve` CLI (the main package)

@@ -1,5 +1,16 @@
 # eve
 
+## 0.13.0
+
+### Minor Changes
+
+- 306e14e: Remove the top-level `auth` field from `defineTool()` and require tool auth providers to be passed inline to `ctx.getToken(provider)` or `ctx.requireAuth(provider)`.
+- f00ca73: Search every Vercel project in the selected team and preserve the selected project ID through linking.
+
+### Patch Changes
+
+- 36b67fc: Make `eve init` respect ancestor package-manager workspaces when scaffolding nested packages. The scaffold now updates workspace-owned package policy at the npm, pnpm, Yarn, or Bun workspace root instead of writing nested root-only config into the generated package.
+
 ## 0.12.3
 
 ### Patch Changes
