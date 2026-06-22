@@ -529,7 +529,7 @@ describe("isNextJsProject", () => {
     await expect(isNextJsProject(projectRoot)).resolves.toBe(false);
   });
 
-  test("finds a next dependency in any dependency field", async () => {
+  test("finds a next dependency in the Vercel framework dependency fields", async () => {
     const projectRoot = await createTempDir();
     await writeFile(
       join(projectRoot, "package.json"),
@@ -577,7 +577,7 @@ describe("hasVercelHostFramework", () => {
     await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(true);
   });
 
-  test("recognizes a host framework resolved from an ancestor node_modules", async () => {
+  test("does not infer a host framework from ancestor node_modules alone", async () => {
     const workspaceRoot = await createTempDir();
     const projectRoot = join(workspaceRoot, "apps", "agent");
     await mkdir(projectRoot, { recursive: true });
@@ -589,7 +589,22 @@ describe("hasVercelHostFramework", () => {
       "utf8",
     );
 
-    await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(true);
+    await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(false);
+  });
+
+  test("ignores dependency fields Vercel framework detection does not inspect", async () => {
+    const projectRoot = await createTempDir();
+    await writeFile(
+      join(projectRoot, "package.json"),
+      JSON.stringify({
+        name: "demo",
+        optionalDependencies: { next: "16.2.6" },
+        peerDependencies: { nuxt: "4.3.3" },
+      }),
+      "utf8",
+    );
+
+    await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(false);
   });
 
   test("does not scan unrelated sibling package manifests", async () => {

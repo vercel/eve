@@ -1,7 +1,5 @@
-import { realpathSync } from "node:fs";
 import { readFile, readdir, writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor, type NodeEngineOverride } from "../../node-engine.js";
@@ -41,12 +39,7 @@ const VERCEL_HOST_FRAMEWORK_PACKAGE_NAMES = [
   "nuxt-edge",
   "nuxt-nightly",
 ] as const;
-const PACKAGE_DEPENDENCY_FIELDS = [
-  "dependencies",
-  "devDependencies",
-  "peerDependencies",
-  "optionalDependencies",
-] as const;
+const PACKAGE_DEPENDENCY_FIELDS = ["dependencies", "devDependencies"] as const;
 const USER_AUTHORED_CHANNEL_DIR = "agent/channels";
 const WEB_CHANNEL_PATH = "agent/channels/eve.ts";
 const WEB_NEXT_CONFIG_PATH = "next.config.ts";
@@ -186,59 +179,13 @@ async function hasAnyPackageDependency(
   const parsed: unknown = JSON.parse(await readFile(packageJsonPath, "utf8"));
   if (!isJsonObject(parsed)) return false;
 
-  return dependencyNames.some(
-    (dependencyName) =>
-      packageJsonHasDependency(parsed, dependencyName) ||
-      canResolvePackageDependency(packageJsonPath, dependencyName),
-  );
-}
-
-function canResolvePackageDependency(packageJsonPath: string, dependencyName: string): boolean {
-  const requireFromProject = createRequire(packageJsonPath);
-  let resolvedPath: string;
-  try {
-    resolvedPath = requireFromProject.resolve(`${dependencyName}/package.json`);
-  } catch {
-    return false;
-  }
-  return ancestorNodeModulesPaths(packageJsonPath).some((nodeModulesPath) =>
-    isPathInside(resolvedPath, nodeModulesPath),
-  );
-}
-
-function ancestorNodeModulesPaths(packageJsonPath: string): string[] {
-  const paths: string[] = [];
-  let directory = dirname(resolve(packageJsonPath));
-  while (true) {
-    paths.push(join(directory, "node_modules"));
-    const parent = dirname(directory);
-    if (parent === directory) break;
-    directory = parent;
-  }
-  return paths;
-}
-
-function isPathInside(path: string, directory: string): boolean {
-  const normalizedPath = canonicalPath(path);
-  const normalizedDirectory = canonicalPath(directory);
-  const pathFromDirectory = relative(normalizedDirectory, normalizedPath);
-  return (
-    pathFromDirectory === "" ||
-    (!pathFromDirectory.startsWith("..") && !isAbsolute(pathFromDirectory))
-  );
-}
-
-function canonicalPath(path: string): string {
-  try {
-    return realpathSync.native(path);
-  } catch {
-    return resolve(path);
-  }
+  return dependencyNames.some((dependencyName) => packageJsonHasDependency(parsed, dependencyName));
 }
 
 /**
  * Whether the project already carries a Next.js app: `package.json` declares a
- * `next` dependency in any dependency field. This is the exact predicate the
+ * `next` dependency in the same dependency fields Vercel framework detection
+ * checks. This is the exact predicate the
  * web scaffold skips on (`skipReason: "nextjs-project"`), so pickers can mark
  * Web Chat as already present precisely when scaffolding would be a no-op.
  * A missing `package.json` reads as "no app".
@@ -248,9 +195,9 @@ export async function isNextJsProject(projectRoot: string): Promise<boolean> {
 }
 
 /**
- * Whether the root app declares or can resolve a Vercel framework that should
- * own the top-level deployment while eve runs as a sibling service. These match
- * Eve's current framework integrations: Next.js, Nuxt, and SvelteKit.
+ * Whether the root app declares a Vercel framework that should own the
+ * top-level deployment while eve runs as a sibling service. These match Eve's
+ * current framework integrations: Next.js, Nuxt, and SvelteKit.
  */
 export async function hasVercelHostFramework(projectRoot: string): Promise<boolean> {
   return hasAnyPackageDependency(
