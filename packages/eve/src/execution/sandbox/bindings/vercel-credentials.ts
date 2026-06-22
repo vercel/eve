@@ -1,15 +1,13 @@
 import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
-import type { SandboxCreateOptions } from "#compiled/@vercel/sandbox/index.js";
+import type { VercelCreateOptions } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 
-export function getVercelSandboxFetch(
-  createOptions: SandboxCreateOptions,
-): typeof globalThis.fetch {
+export function getVercelSandboxFetch(createOptions: VercelCreateOptions): typeof globalThis.fetch {
   const fetchOverride = (createOptions as { readonly fetch?: typeof globalThis.fetch }).fetch;
   return fetchOverride ?? globalThis.fetch;
 }
 
 export async function getVercelSandboxCredentials(
-  createOptions: SandboxCreateOptions,
+  createOptions: VercelCreateOptions,
 ): Promise<VercelSandboxCredentials> {
   const teamId =
     readNonEmptyString(createOptions, "teamId") ??

@@ -1,4 +1,4 @@
-import type { NetworkPolicy } from "#compiled/@vercel/sandbox/index.js";
+import type * as Vercel from "#compiled/@vercel/sandbox/index.js";
 
 /**
  * Firewall network policy applied to a live sandbox session.
@@ -23,4 +23,4 @@ import type { NetworkPolicy } from "#compiled/@vercel/sandbox/index.js";
  * entirely (its network policy is fixed at sandbox creation and it runs
  * no binaries to govern).
  */
-export type SandboxNetworkPolicy = NetworkPolicy;
+export type SandboxNetworkPolicy = Vercel.NetworkPolicy;
