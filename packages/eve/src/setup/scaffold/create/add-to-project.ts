@@ -3,10 +3,14 @@ import { join } from "node:path";
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import type { NodeEngineOverride } from "../../node-engine.js";
-import { getPackageManagerStrategy } from "../../primitives/pm/index.js";
 import { pathExists, writeTextFile } from "../files.js";
 import { patchPackageJson, type PackageJsonPatch } from "../update/package-json.js";
 import { resolveVersionToken } from "../version-tokens.js";
+import {
+  applyPackageManagerWorkspaceConfiguration,
+  isPackageManagerWorkspaceMember,
+  patchWorkspaceRootPackageJson,
+} from "../workspace-root.js";
 import {
   agentTemplateFiles,
   DEFAULT_AI_PACKAGE_VERSION,
@@ -72,6 +76,7 @@ function hasDeclaredDependency(packageJson: unknown, dependencyName: string): bo
 export async function addAgentToProject(
   options: AddAgentToProjectOptions,
 ): Promise<AddAgentToProjectResult> {
+  const packageManager = options.packageManager ?? "pnpm";
   const packageJsonPath = join(options.projectRoot, "package.json");
   if (!(await pathExists(packageJsonPath))) {
     throw new Error(
@@ -134,21 +139,35 @@ export async function addAgentToProject(
       additions[name] = version;
     }
   }
-  const patch: PackageJsonPatch = {
-    nodeEngineRequirement: evePackage.nodeEngine,
-  };
+  const patch: PackageJsonPatch = {};
   if (Object.keys(additions).length > 0) {
     patch.dependencies = additions;
   }
+  const workspaceMember = isPackageManagerWorkspaceMember(packageManager, options.projectRoot);
+  if (!workspaceMember) {
+    patch.nodeEngineRequirement = evePackage.nodeEngine;
+  }
   const patchResult = await patchPackageJson(packageJsonPath, patch);
 
-  await getPackageManagerStrategy(options.packageManager ?? "pnpm").applyProjectConfiguration(
+  const workspacePatchResult = await patchWorkspaceRootPackageJson(
+    packageManager,
     options.projectRoot,
+    {
+      aiPackageVersion: aiVersion,
+      nodeEngineRequirement: evePackage.nodeEngine,
+    },
   );
+  const nodeEngineOverride =
+    workspacePatchResult.nodeEngineOverride ?? patchResult.nodeEngineOverride;
+
+  await applyPackageManagerWorkspaceConfiguration({
+    packageManager,
+    projectRoot: options.projectRoot,
+  });
 
   return {
     filesWritten,
     dependenciesAdded: Object.keys(additions).sort(),
-    nodeEngineOverride: patchResult.nodeEngineOverride,
+    nodeEngineOverride,
   };
 }

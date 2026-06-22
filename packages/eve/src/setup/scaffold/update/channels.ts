@@ -3,11 +3,16 @@ import { basename, join, resolve } from "node:path";
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor, type NodeEngineOverride } from "../../node-engine.js";
-import { getPackageManagerStrategy } from "../../primitives/pm/index.js";
 import { pathExists, writeTextFile } from "../files.js";
 import { resolveVersionToken } from "../version-tokens.js";
+import {
+  applyPackageManagerWorkspaceConfiguration,
+  isPackageManagerWorkspaceMember,
+  patchWorkspaceRootPackageJson,
+  type WorkspaceRootMutation,
+} from "../workspace-root.js";
 import { getSupportedModuleBaseName, matchesSupportedModuleBaseName } from "./module-files.js";
-import { patchPackageJson } from "./package-json.js";
+import { patchPackageJson, type PackageJsonPatch } from "./package-json.js";
 import {
   CURRENT_DIRECTORY_PROJECT_NAME,
   DEFAULT_EVE_PACKAGE_CONTRACT,
@@ -253,12 +258,16 @@ function formatEveDependencySpecifier(versionOrSpecifier: string): string {
 }
 
 async function patchWebPackageJson(
-  packageJsonPath: string,
+  projectRoot: string,
+  packageManager: PackageManagerKind,
+  workspaceProbeRoot: string,
   options: Required<WebPackageVersions>,
+  onWorkspaceRootMutation?: (mutation: WorkspaceRootMutation) => void | Promise<void>,
 ): Promise<{
   mutations: PackageJsonMutation[];
   nodeEngineOverride?: NodeEngineOverride;
 }> {
+  const packageJsonPath = join(projectRoot, "package.json");
   if (!(await pathExists(packageJsonPath))) return { mutations: [] };
 
   // Resolved here, not at the defaults site, so a project without a
@@ -291,12 +300,27 @@ async function patchWebPackageJson(
   } satisfies Record<string, string>;
   const scripts = WEB_APP_TEMPLATE_PACKAGE_JSON.scripts;
 
-  const patchResult = await patchPackageJson(packageJsonPath, {
+  const workspaceMember = isPackageManagerWorkspaceMember(packageManager, workspaceProbeRoot);
+  const packageJsonPatch: PackageJsonPatch = {
     dependencies,
     devDependencies,
     scripts,
-    nodeEngineRequirement: evePackage.nodeEngine,
-  });
+  };
+  if (!workspaceMember) {
+    packageJsonPatch.nodeEngineRequirement = evePackage.nodeEngine;
+  }
+  const patchResult = await patchPackageJson(packageJsonPath, packageJsonPatch);
+  const workspacePatchResult = await patchWorkspaceRootPackageJson(
+    packageManager,
+    workspaceProbeRoot,
+    {
+      aiPackageVersion: dependencies.ai,
+      nodeEngineRequirement: evePackage.nodeEngine,
+      onWorkspaceRootMutation,
+    },
+  );
+  const nodeEngineOverride =
+    workspacePatchResult.nodeEngineOverride ?? patchResult.nodeEngineOverride;
 
   return {
     mutations: [
@@ -307,7 +331,7 @@ async function patchWebPackageJson(
         scripts: Object.keys(scripts),
       },
     ],
-    nodeEngineOverride: patchResult.nodeEngineOverride,
+    nodeEngineOverride,
   };
 }
 
@@ -437,6 +461,12 @@ export interface EnsureChannelOptions {
   kind: ChannelKind;
   /** Manager that owns generated project configuration. Defaults to pnpm. */
   packageManager?: PackageManagerKind;
+  /**
+   * Final project path used to discover ancestor workspaces. This differs from
+   * `projectRoot` only when scaffolding writes into a temporary staging
+   * directory before moving the project into place.
+   */
+  workspaceProbeDirectory?: string;
   force?: boolean;
   /** Exact UID returned by Vercel Connect; takes precedence over the derived slug. */
   slackConnectorUid?: string;
@@ -445,6 +475,7 @@ export interface EnsureChannelOptions {
   webPackageVersions?: WebPackageVersions;
   /** When false, Web Chat leaves Vercel Services config unwritten for preview-only scaffolds. */
   configureVercelServices?: boolean;
+  onWorkspaceRootMutation?: (mutation: WorkspaceRootMutation) => void | Promise<void>;
 }
 
 export interface WebPackageVersions {
@@ -486,7 +517,15 @@ async function ensureWebChannel(
   }
 
   const webPackageVersions = resolveWebPackageVersions(options.webPackageVersions);
-  const packageJsonPatch = await patchWebPackageJson(packageJsonPath, webPackageVersions);
+  const packageManager = options.packageManager ?? "pnpm";
+  const workspaceProbeRoot = resolve(options.workspaceProbeDirectory ?? options.projectRoot);
+  const packageJsonPatch = await patchWebPackageJson(
+    options.projectRoot,
+    packageManager,
+    workspaceProbeRoot,
+    webPackageVersions,
+    options.onWorkspaceRootMutation,
+  );
   const filesWritten: string[] = [];
   const filesOverwritten: string[] = [];
   const competingNextConfigFiles: string[] = [];
@@ -504,9 +543,12 @@ async function ensureWebChannel(
     }
   }
 
-  const packageManagerConfiguration = await getPackageManagerStrategy(
-    options.packageManager ?? "pnpm",
-  ).applyProjectConfiguration(options.projectRoot);
+  const packageManagerConfiguration = await applyPackageManagerWorkspaceConfiguration({
+    packageManager,
+    projectRoot: options.projectRoot,
+    workspaceProbeRoot,
+    onWorkspaceRootMutation: options.onWorkspaceRootMutation,
+  });
   filesWritten.push(...packageManagerConfiguration.filesWritten);
   filesSkipped.push(...packageManagerConfiguration.filesSkipped);
 
@@ -528,12 +570,16 @@ async function ensureWebChannel(
   }
 
   competingNextConfigFiles.push(...(await findCompetingNextConfigFiles(options.projectRoot)));
+  const uniqueFilesWritten = [...new Set(filesWritten)];
+  const uniqueFilesSkipped = [...new Set(filesSkipped)].filter(
+    (filePath) => !uniqueFilesWritten.includes(filePath),
+  );
 
   const result: WebChannelWrittenResult = {
     kind: "web",
     action: webEntryAlreadyExists ? "overwritten" : "created",
-    filesWritten,
-    filesSkipped,
+    filesWritten: uniqueFilesWritten,
+    filesSkipped: uniqueFilesSkipped,
     packageJsonUpdated: packageJsonPatch.mutations,
   };
   if (filesOverwritten.length > 0) {

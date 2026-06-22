@@ -486,6 +486,52 @@ describe("ensureChannel", () => {
     expect(result.filesWritten).toContain(pnpmWorkspacePath);
   });
 
+  test("adds Web Chat pnpm policy and a missing package pattern at the ancestor workspace root", async () => {
+    const workspaceRoot = await createTempDir();
+    const projectRoot = join(workspaceRoot, "agents", "agent");
+    await mkdir(projectRoot, { recursive: true });
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      `${JSON.stringify({ private: true, engines: { node: "22.x" } }, null, 2)}\n`,
+      "utf8",
+    );
+    await writeFile(join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n", "utf8");
+    await writeFile(
+      join(projectRoot, "package.json"),
+      `${JSON.stringify({ name: "agent", type: "module" }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const result = await ensureChannel({
+      projectRoot,
+      kind: "web",
+      webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
+    });
+    if (result.kind !== "web" || result.action === "skipped") {
+      throw new Error(`Expected Web Chat to be created, got ${result.kind}:${result.action}`);
+    }
+
+    expect(result.filesWritten).toContain(join(workspaceRoot, "pnpm-workspace.yaml"));
+    expect(result.filesWritten).not.toContain(join(projectRoot, "pnpm-workspace.yaml"));
+    await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
+    await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
+      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\nminimumReleaseAgeExclude:\n  - eve\n",
+    );
+    const projectPackageJson = JSON.parse(
+      await readFile(join(projectRoot, "package.json"), "utf8"),
+    ) as { engines?: unknown; dependencies: Record<string, string> };
+    expect(projectPackageJson.dependencies.eve).toBe("^0.25.0");
+    expect(projectPackageJson.engines).toBeUndefined();
+    expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
+      engines: { node: "24.x" },
+    });
+    expect(result.nodeEngineOverride).toEqual({
+      kind: "overridden",
+      next: "24.x",
+      previous: "22.x",
+    });
+  });
+
   test("skips Web Chat when Next.js is already present", async () => {
     const projectRoot = await createTempDir();
     const pagePath = join(projectRoot, "app/page.tsx");
@@ -716,6 +762,208 @@ describe("scaffoldBaseProject", () => {
         '"eve": "^0.25.0"',
       );
       await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
+    },
+  );
+
+  test("scaffolds a pnpm workspace member without nested root-only package files", async () => {
+    const workspaceRoot = await createTempDir();
+    const targetDirectory = join(workspaceRoot, "apps");
+    await mkdir(targetDirectory, { recursive: true });
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      `${JSON.stringify({ private: true, engines: { node: "22.x" } }, null, 2)}\n`,
+      "utf8",
+    );
+    await writeFile(join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n", "utf8");
+
+    const projectRoot = await scaffoldBaseProject({
+      projectName: "demo-agent",
+      model: "openai/gpt-5-mini",
+      targetDirectory,
+      evePackage: TEST_EVE_PACKAGE,
+      aiPackageVersion: "7.0.0",
+      connectPackageVersion: "0.2.2",
+      zodPackageVersion: "4.4.3",
+      typescriptPackageVersion: "7.0.1-rc",
+    });
+
+    await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
+    await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
+      "packages:\n  - apps/*\n\nallowBuilds:\n  sharp: false\n\nminimumReleaseAgeExclude:\n  - eve\n",
+    );
+    const projectPackageJson = JSON.parse(
+      await readFile(join(projectRoot, "package.json"), "utf8"),
+    ) as {
+      dependencies: Record<string, string>;
+      engines?: unknown;
+      overrides?: unknown;
+      resolutions?: unknown;
+    };
+    expect(projectPackageJson.dependencies.eve).toBe("^0.25.0");
+    expect(projectPackageJson.engines).toBeUndefined();
+    expect(projectPackageJson.overrides).toBeUndefined();
+    expect(projectPackageJson.resolutions).toBeUndefined();
+    expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
+      engines: { node: "24.x" },
+    });
+  });
+
+  test("scaffolds under an unclaimed pnpm workspace directory by adding a package pattern", async () => {
+    const workspaceRoot = await createTempDir();
+    const targetDirectory = join(workspaceRoot, "agents");
+    await mkdir(targetDirectory, { recursive: true });
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      `${JSON.stringify({ private: true, engines: { node: "22.x" } }, null, 2)}\n`,
+      "utf8",
+    );
+    await writeFile(join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n", "utf8");
+
+    const projectRoot = await scaffoldBaseProject({
+      projectName: "demo-agent",
+      model: "openai/gpt-5-mini",
+      targetDirectory,
+      evePackage: TEST_EVE_PACKAGE,
+      aiPackageVersion: "7.0.0",
+      connectPackageVersion: "0.2.2",
+      zodPackageVersion: "4.4.3",
+      typescriptPackageVersion: "7.0.1-rc",
+    });
+
+    await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
+    await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
+      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\nminimumReleaseAgeExclude:\n  - eve\n",
+    );
+    const projectPackageJson = JSON.parse(
+      await readFile(join(projectRoot, "package.json"), "utf8"),
+    ) as {
+      engines?: unknown;
+      overrides?: unknown;
+      resolutions?: unknown;
+    };
+    expect(projectPackageJson.engines).toBeUndefined();
+    expect(projectPackageJson.overrides).toBeUndefined();
+    expect(projectPackageJson.resolutions).toBeUndefined();
+    expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
+      engines: { node: "24.x" },
+    });
+  });
+
+  test.each([
+    ["npm", "overrides"],
+    ["bun", "overrides"],
+    ["yarn", "resolutions"],
+  ] as const)(
+    "scaffolds a %s workspace member with root-only package fields at the workspace root",
+    async (packageManager, rootAiPinField) => {
+      const workspaceRoot = await createTempDir();
+      const targetDirectory = join(workspaceRoot, "apps");
+      await mkdir(targetDirectory, { recursive: true });
+      await writeFile(
+        join(workspaceRoot, "package.json"),
+        `${JSON.stringify(
+          {
+            private: true,
+            engines: { node: "22.x" },
+            workspaces: ["apps/*"],
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+
+      const projectRoot = await scaffoldBaseProject({
+        projectName: "demo-agent",
+        model: "openai/gpt-5-mini",
+        packageManager,
+        targetDirectory,
+        evePackage: TEST_EVE_PACKAGE,
+        aiPackageVersion: "7.0.0",
+        connectPackageVersion: "0.2.2",
+        zodPackageVersion: "4.4.3",
+        typescriptPackageVersion: "7.0.1-rc",
+      });
+
+      const projectPackageJson = JSON.parse(
+        await readFile(join(projectRoot, "package.json"), "utf8"),
+      ) as {
+        engines?: unknown;
+        overrides?: unknown;
+        resolutions?: unknown;
+      };
+      expect(projectPackageJson.engines).toBeUndefined();
+      expect(projectPackageJson.overrides).toBeUndefined();
+      expect(projectPackageJson.resolutions).toBeUndefined();
+      const rootPackageJson = JSON.parse(
+        await readFile(join(workspaceRoot, "package.json"), "utf8"),
+      ) as {
+        engines?: { node?: string };
+        overrides?: { ai?: string };
+        resolutions?: { ai?: string };
+      };
+      expect(rootPackageJson.engines?.node).toBe("24.x");
+      expect(rootPackageJson[rootAiPinField]?.ai).toBe("7.0.0");
+    },
+  );
+
+  test.each([
+    ["npm", "overrides"],
+    ["bun", "overrides"],
+    ["yarn", "resolutions"],
+  ] as const)(
+    "scaffolds under an unclaimed %s workspace directory by adding a package pattern",
+    async (packageManager, rootAiPinField) => {
+      const workspaceRoot = await createTempDir();
+      const targetDirectory = join(workspaceRoot, "agents");
+      await mkdir(targetDirectory, { recursive: true });
+      await writeFile(
+        join(workspaceRoot, "package.json"),
+        `${JSON.stringify(
+          {
+            private: true,
+            engines: { node: "22.x" },
+            workspaces: ["apps/*"],
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+
+      const projectRoot = await scaffoldBaseProject({
+        projectName: "demo-agent",
+        model: "openai/gpt-5-mini",
+        packageManager,
+        targetDirectory,
+        evePackage: TEST_EVE_PACKAGE,
+        aiPackageVersion: "7.0.0",
+        connectPackageVersion: "0.2.2",
+        zodPackageVersion: "4.4.3",
+        typescriptPackageVersion: "7.0.1-rc",
+      });
+
+      const projectPackageJson = JSON.parse(
+        await readFile(join(projectRoot, "package.json"), "utf8"),
+      ) as {
+        engines?: unknown;
+        overrides?: unknown;
+        resolutions?: unknown;
+      };
+      expect(projectPackageJson.engines).toBeUndefined();
+      expect(projectPackageJson.overrides).toBeUndefined();
+      expect(projectPackageJson.resolutions).toBeUndefined();
+      const rootPackageJson = JSON.parse(
+        await readFile(join(workspaceRoot, "package.json"), "utf8"),
+      ) as {
+        engines?: { node?: string };
+        overrides?: { ai?: string };
+        resolutions?: { ai?: string };
+        workspaces?: string[];
+      };
+      expect(rootPackageJson.workspaces).toEqual(["apps/*", "agents/*"]);
+      expect(rootPackageJson.engines?.node).toBe("24.x");
+      expect(rootPackageJson[rootAiPinField]?.ai).toBe("7.0.0");
     },
   );
 

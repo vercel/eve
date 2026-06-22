@@ -27,6 +27,7 @@ import type { ProcessOutputLine } from "#setup/primitives/process-output.js";
 import { addAgentToProject } from "#setup/scaffold/create/add-to-project.js";
 import { ensureChannel, scaffoldBaseProject } from "#setup/scaffold/index.js";
 import { WizardCancelledError } from "#setup/step.js";
+import type { WorkspaceRootMutation } from "#setup/scaffold/workspace-root.js";
 import {
   DEFAULT_EVE_PACKAGE_CONTRACT,
   type EvePackageContract,
@@ -120,6 +121,30 @@ async function moveDirectoryContents(sourceRoot: string, targetRoot: string): Pr
   }
 }
 
+function uniqueWorkspaceRootMutations(
+  mutations: readonly WorkspaceRootMutation[],
+): WorkspaceRootMutation[] {
+  const byKey = new Map<string, WorkspaceRootMutation>();
+  for (const mutation of mutations) {
+    const key = `${mutation.kind}:${mutation.path}`;
+    const existing = byKey.get(key);
+    byKey.set(key, {
+      ...mutation,
+      nodeEngineOverride: mutation.nodeEngineOverride ?? existing?.nodeEngineOverride,
+    });
+  }
+  return [...byKey.values()];
+}
+
+function formatWorkspaceRootMutationWarning(mutation: WorkspaceRootMutation): string {
+  const target = mutation.kind === "package-json" ? "package.json" : "configuration";
+  const suffix =
+    mutation.nodeEngineOverride === undefined
+      ? ""
+      : ` (${formatNodeEngineOverrideWarning(mutation.nodeEngineOverride)})`;
+  return `Updated workspace root ${target} at ${mutation.path}${suffix}`;
+}
+
 /**
  * Adds the agent to an existing project and returns the
  * detected manager, which drives the install and dev handoff.
@@ -172,7 +197,7 @@ async function scaffoldProject(
   options: InitCommandOptions,
   dependencies: InitCommandDependencies,
   evePackage: EvePackageContract | undefined,
-): Promise<string> {
+): Promise<{ projectPath: string; workspaceRootMutations: WorkspaceRootMutation[] }> {
   const parentPath = resolve(parentDirectory);
   const createInPlace = projectName === CURRENT_DIRECTORY_PROJECT_NAME;
   const projectPath = createInPlace ? parentPath : join(parentPath, projectName);
@@ -183,6 +208,7 @@ async function scaffoldProject(
   }
 
   const stagingDirectory = await mkdtemp(join(parentPath, ".eve-init-"));
+  const workspaceRootMutations: WorkspaceRootMutation[] = [];
   try {
     const stagedProjectName = createInPlace ? basename(projectPath) : projectName;
     const scaffoldOptions = {
@@ -190,7 +216,11 @@ async function scaffoldProject(
       model: DEFAULT_AGENT_MODEL_ID,
       evePackage,
       targetDirectory: stagingDirectory,
+      workspaceProbeDirectory: projectPath,
       packageManager,
+      onWorkspaceRootMutation: (mutation: WorkspaceRootMutation) => {
+        workspaceRootMutations.push(mutation);
+      },
     };
     const stagedProjectPath = await dependencies.scaffoldBaseProject(scaffoldOptions);
 
@@ -199,7 +229,11 @@ async function scaffoldProject(
         projectRoot: stagedProjectPath,
         kind: "web",
         packageManager,
+        workspaceProbeDirectory: projectPath,
         configureVercelServices: false,
+        onWorkspaceRootMutation: (mutation: WorkspaceRootMutation) => {
+          workspaceRootMutations.push(mutation);
+        },
       });
     }
 
@@ -208,7 +242,10 @@ async function scaffoldProject(
     } else {
       await rename(stagedProjectPath, projectPath);
     }
-    return projectPath;
+    return {
+      projectPath,
+      workspaceRootMutations: uniqueWorkspaceRootMutations(workspaceRootMutations),
+    };
   } finally {
     await rm(stagingDirectory, { recursive: true, force: true });
   }
@@ -225,6 +262,7 @@ type PreparedInitProject =
       kind: "created";
       packageManager: PackageManagerKind;
       projectPath: string;
+      workspaceRootMutations: WorkspaceRootMutation[];
     };
 
 type InitResult = {
@@ -241,6 +279,7 @@ type InitResult = {
   | {
       gitResult: GitInitResult;
       kind: "created";
+      workspaceRootMutations: WorkspaceRootMutation[];
     }
 );
 
@@ -302,7 +341,7 @@ async function runInitSteps(input: {
       const plannedProjectPath =
         projectName === CURRENT_DIRECTORY_PROJECT_NAME ? parentPath : join(parentPath, projectName);
       const packageManager = await resolveScaffoldPackageManager(plannedProjectPath, dependencies);
-      const projectPath = await scaffoldProject(
+      const scaffold = await scaffoldProject(
         parentDirectory,
         projectName,
         packageManager,
@@ -310,7 +349,12 @@ async function runInitSteps(input: {
         dependencies,
         evePackage,
       );
-      project = { kind: "created", packageManager, projectPath };
+      project = {
+        kind: "created",
+        packageManager,
+        projectPath: scaffold.projectPath,
+        workspaceRootMutations: scaffold.workspaceRootMutations,
+      };
     } else {
       const addition = await addToExistingProject(
         existingDirectory,
@@ -426,6 +470,9 @@ export async function runInitCommand(
     logger.log(
       `${pc.green("✓")} Created an ${EVE_WORDMARK} agent in ${pc.bold(result.projectPath)} ${pc.dim(`in ${formatElapsed(result.agentElapsedMs)}`)}`,
     );
+    for (const mutation of result.workspaceRootMutations) {
+      logger.log(pc.yellow(`⚠ ${formatWorkspaceRootMutationWarning(mutation)}`));
+    }
   } else {
     logger.log(
       `${pc.green("✓")} Added an ${EVE_WORDMARK} agent to ${pc.bold(result.projectPath)} ${pc.dim(`in ${formatElapsed(result.agentElapsedMs)}`)}`,
