@@ -80,4 +80,31 @@ describe("formatVercelAuthChallengeMessage", () => {
     expect(message).not.toContain("<");
     expect(message).not.toContain("doctype");
   });
+
+  it("includes invalid local OIDC claims in the repair context", () => {
+    const message = formatVercelAuthChallengeMessage({
+      serverUrl: "https://example.vercel.app",
+      oidcTokenFailure: {
+        kind: "invalid-claims",
+        invalidClaims: ["owner_id", "project_id"],
+      },
+    });
+
+    expect(message).toContain("invalid claims");
+    expect(message).toContain("owner_id");
+    expect(message).toContain("project_id");
+  });
+
+  it("identifies the claims that do not match the resolved target", () => {
+    const message = formatVercelAuthChallengeMessage({
+      serverUrl: "https://example.vercel.app",
+      oidcTokenFailure: {
+        kind: "target-mismatch",
+        mismatchedClaims: ["owner_id", "project_id"],
+      },
+    });
+
+    expect(message).toContain("owner_id");
+    expect(message).toContain("project_id");
+  });
 });

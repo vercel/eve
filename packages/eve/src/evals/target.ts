@@ -4,6 +4,7 @@ import { Client } from "#client/client.js";
 import type { AgentInfoResult } from "#client/types.js";
 import { createEveDevDispatchSchedulePath } from "#protocol/routes.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { stripNpmPackageScope } from "#shared/package-name.js";
 import { EvalSessionManager } from "#evals/session.js";
 import type {
   EveEvalScheduleDispatchResult,
@@ -25,7 +26,10 @@ export async function resolveEvalTargetHandle(input: {
   const info = await input.client.info();
   assertAgentInfoShape(info, input.url);
 
-  if (input.expectedAgentName !== undefined && info.agent.name !== input.expectedAgentName) {
+  if (
+    input.expectedAgentName !== undefined &&
+    !matchesExpectedAgentName(input.expectedAgentName, info.agent.name)
+  ) {
     throw new Error(
       `Expected eval target ${JSON.stringify(input.expectedAgentName)} at ${input.url}, but ${JSON.stringify(info.agent.name)} is responding there.`,
     );
@@ -141,6 +145,10 @@ function capabilitiesFromInfo(info: AgentInfoResult): EveEvalTargetCapabilities 
   return {
     devRoutes: info.capabilities?.devRoutes ?? info.mode === "development",
   };
+}
+
+function matchesExpectedAgentName(expected: string, actual: string): boolean {
+  return actual === expected || actual === stripNpmPackageScope(expected);
 }
 
 async function waitForTargetHealth(client: Client, url: string): Promise<void> {

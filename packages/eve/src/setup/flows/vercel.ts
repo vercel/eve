@@ -1,19 +1,19 @@
-import { join } from "node:path";
-
 import pc from "picocolors";
 
+import {
+  AI_GATEWAY_API_KEY_ENV_FILE,
+  AI_GATEWAY_API_KEY_ENV_VAR,
+  writeAiGatewayApiKey,
+} from "../ai-gateway-api-key.js";
 import { appendEnv } from "../append-env.js";
 import type { Prompter, SelectOption } from "../prompter.js";
 import { WizardCancelledError } from "../step.js";
 import { validateGatewayApiKey } from "../validate-gateway-key.js";
 import { getVercelAuthStatus, type VercelAuthStatus } from "../vercel-project.js";
+import { withSpinner } from "../with-spinner.js";
 
 import { runLinkFlow, type LinkFlowResult } from "./link.js";
 
-// Mirrors the private constants in boxes/apply-ai-gateway-credential.ts; the
-// key name is also user-facing copy here, so the literal is the contract.
-const AI_GATEWAY_ENV_KEY = "AI_GATEWAY_API_KEY";
-const ENV_FILE_NAME = ".env.local";
 type GatewayConnection = "project" | "own-key";
 
 export const PROVIDER_QUESTION = "Which model provider do you want to use?";
@@ -21,7 +21,7 @@ export const CONNECTION_QUESTION = "How do you want to connect to AI Gateway?";
 
 export const EXTERNAL_PROVIDER_INSTRUCTIONS_TITLE = "Using another model provider";
 export const EXTERNAL_PROVIDER_INSTRUCTIONS: readonly string[] = [
-  `Set your provider's API key in ${ENV_FILE_NAME} — e.g. ANTHROPIC_API_KEY or OPENAI_API_KEY.`,
+  `Set your provider's API key in ${AI_GATEWAY_API_KEY_ENV_FILE} — e.g. ANTHROPIC_API_KEY or OPENAI_API_KEY.`,
   'In agent/agent.ts, set `model` to a provider-authored model — e.g. `anthropic("claude-opus-4.8")` from `@ai-sdk/anthropic`.',
   "See https://eve.dev/docs/agent-config for details.",
   "A running `eve dev` reloads env files automatically — no restart needed.",
@@ -118,20 +118,21 @@ export async function runVercelFlow(input: {
       hintLayout: "stacked",
     });
     if (provider === "gateway") {
-      const spinner = prompter.log.spinner?.("Checking your Vercel login…");
-      let authStatus: VercelAuthStatus;
-      try {
-        authStatus = await deps.getVercelAuthStatus(appRoot, { signal });
+      const authStatus = await withSpinner(prompter, "Checking your Vercel login…", async () => {
+        const status = await deps.getVercelAuthStatus(appRoot, { signal });
         signal?.throwIfAborted();
-      } finally {
-        spinner?.stop();
-      }
+        return status;
+      });
 
       connection = await prompter.select<GatewayConnection>({
         message: CONNECTION_QUESTION,
         options: [
           projectConnectionOption(authStatus),
-          { value: "own-key", label: "Use my own key", hint: `paste an ${AI_GATEWAY_ENV_KEY}` },
+          {
+            value: "own-key",
+            label: "Use my own key",
+            hint: `paste an ${AI_GATEWAY_API_KEY_ENV_VAR}`,
+          },
         ],
         hintLayout: "stacked",
       });
@@ -167,7 +168,7 @@ export async function runVercelFlow(input: {
       let key: string;
       try {
         key = await prompter.password({
-          message: `Enter your ${AI_GATEWAY_ENV_KEY}`,
+          message: `Enter your ${AI_GATEWAY_API_KEY_ENV_VAR}`,
           validate: (value) => (value.trim().length === 0 ? "API key cannot be empty." : undefined),
         });
       } catch (error) {
@@ -179,13 +180,9 @@ export async function runVercelFlow(input: {
       signal?.throwIfAborted();
 
       const trimmed = key.trim();
-      const spinner = prompter.log.spinner?.("Validating…");
-      let validation: Awaited<ReturnType<typeof validateGatewayApiKey>>;
-      try {
-        validation = await deps.validateGatewayApiKey(trimmed, signal);
-      } finally {
-        spinner?.stop();
-      }
+      const validation = await withSpinner(prompter, "Validating…", () =>
+        deps.validateGatewayApiKey(trimmed, signal),
+      );
       signal?.throwIfAborted();
 
       if (validation.kind === "invalid") {
@@ -200,16 +197,14 @@ export async function runVercelFlow(input: {
         prompter.log.success(`${pc.green("✓")} ${pc.bold("Valid key")}`);
       }
 
-      await deps.appendEnv(
-        join(appRoot, ENV_FILE_NAME),
-        { [AI_GATEWAY_ENV_KEY]: trimmed },
-        {
-          force: true,
-        },
-      );
+      const location = await writeAiGatewayApiKey({
+        projectRoot: appRoot,
+        apiKey: trimmed,
+        appendEnv: deps.appendEnv,
+      });
       signal?.throwIfAborted();
-      prompter.log.success(`Saved ${AI_GATEWAY_ENV_KEY} to ${ENV_FILE_NAME}.`);
-      return { kind: "done", credential: AI_GATEWAY_ENV_KEY };
+      prompter.log.success(`Saved ${location.envKey} to ${location.envFile}.`);
+      return { kind: "done", credential: AI_GATEWAY_API_KEY_ENV_VAR };
     }
   } else {
     // A fresh agent often has no Vercel project yet, so this branch can create

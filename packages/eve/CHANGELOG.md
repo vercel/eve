@@ -1,5 +1,20 @@
 # eve
 
+## 0.12.2
+
+### Patch Changes
+
+- 8f7d97b: Keep Vercel Sandbox option types synchronized with the installed SDK by vendoring its upstream declaration files instead of maintaining a hand-written copy. Vercel-backed file reads now convert provider Node streams to Eve's public Web stream contract.
+
+## 0.12.1
+
+### Patch Changes
+
+- 3f3a86b: Improve conversation compaction for longer, more reliable sessions.
+- e296fb8: The dev TUI now opens `/model` when the runtime confirms no model provider is configured and refreshes model access after setup. Selected rows now use padded inverse labels with a filled arrow.
+- f68ecbe: Set the Eve Vercel framework preset when creating standalone Eve projects.
+- c084232: Verify remote Vercel deployment origins against the owner and project supplied by `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID`, or by a local project link, before sending ambient credentials. Remote dev and eval clients now refresh scoped OIDC tokens per request and refuse to forward credentials across redirects. Remote `eve dev` and `eve eval --url` targets now require `https://` (loopback hosts may still use `http://`).
+
 ## 0.12.0
 
 ### Minor Changes

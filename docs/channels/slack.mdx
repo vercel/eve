@@ -105,7 +105,7 @@ export default slackChannel({
 
 HITL renders as Slack buttons and selects. When the user responds, the parked session (paused awaiting input) resumes.
 
-Authorization prompts are private. A sign-in challenge (OAuth URL, device code) is a credential. Anyone who completes it binds their identity to the session's connection. The default `authorization.required` handler delivers the challenge ephemerally to the triggering user, device code included, and posts a public link-free status only when it has no user to target. The handler receives a private-delivery context with `postEphemeral`, `postDirectMessage` (needs the `im:write` scope), and `state`. There is, intentionally, no public `post` and no raw API access.
+Authorization prompts split public status from private credentials. A sign-in challenge (OAuth URL, device code) is a credential. Anyone who completes it binds their identity to the session's connection. The default `authorization.required` handler posts a public, link-free status in the thread, delivers the actual challenge ephemerally to the triggering user, device code included, and then updates that public status when `authorization.completed` fires. The handler receives a private-delivery context with `postEphemeral`, `postDirectMessage` (needs the `im:write` scope), and `state`. There is, intentionally, no public `post` and no raw API access.
 
 ```ts
 events: {

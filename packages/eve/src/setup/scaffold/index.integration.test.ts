@@ -6,6 +6,7 @@ import { describe, expect, test } from "vitest";
 import {
   deriveSlackConnectorSlug,
   ensureChannel,
+  hasVercelHostFramework,
   isNextJsProject,
   listAuthoredChannels,
   normalizeSlackConnectorSlug,
@@ -528,7 +529,7 @@ describe("isNextJsProject", () => {
     await expect(isNextJsProject(projectRoot)).resolves.toBe(false);
   });
 
-  test("finds a next dependency in any dependency field", async () => {
+  test("finds a next dependency in the Vercel framework dependency fields", async () => {
     const projectRoot = await createTempDir();
     await writeFile(
       join(projectRoot, "package.json"),
@@ -548,6 +549,89 @@ describe("isNextJsProject", () => {
     );
 
     await expect(isNextJsProject(projectRoot)).resolves.toBe(false);
+  });
+});
+
+describe("hasVercelHostFramework", () => {
+  test("reads as no host app when package.json is missing", async () => {
+    const projectRoot = await createTempDir();
+
+    await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(false);
+  });
+
+  test.each([
+    ["Next.js", { next: "16.2.6" }],
+    ["Nuxt", { nuxt: "4.3.3" }],
+    ["Nuxt 3", { nuxt3: "3.19.7" }],
+    ["Nuxt edge", { "nuxt-edge": "3.0.0-rc.13" }],
+    ["Nuxt nightly", { "nuxt-nightly": "3.0.0-27575307.749db41" }],
+    ["SvelteKit", { "@sveltejs/kit": "2.60.0" }],
+  ])("recognizes %s as the root Vercel framework", async (_label, dependencies) => {
+    const projectRoot = await createTempDir();
+    await writeFile(
+      join(projectRoot, "package.json"),
+      JSON.stringify({ name: "demo", devDependencies: dependencies }),
+      "utf8",
+    );
+
+    await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(true);
+  });
+
+  test("does not infer a host framework from ancestor node_modules alone", async () => {
+    const workspaceRoot = await createTempDir();
+    const projectRoot = join(workspaceRoot, "apps", "agent");
+    await mkdir(projectRoot, { recursive: true });
+    await writeFile(join(projectRoot, "package.json"), JSON.stringify({ name: "agent" }), "utf8");
+    await mkdir(join(workspaceRoot, "node_modules", "next"), { recursive: true });
+    await writeFile(
+      join(workspaceRoot, "node_modules", "next", "package.json"),
+      JSON.stringify({ name: "next", version: "16.2.6" }),
+      "utf8",
+    );
+
+    await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(false);
+  });
+
+  test("ignores dependency fields Vercel framework detection does not inspect", async () => {
+    const projectRoot = await createTempDir();
+    await writeFile(
+      join(projectRoot, "package.json"),
+      JSON.stringify({
+        name: "demo",
+        optionalDependencies: { next: "16.2.6" },
+        peerDependencies: { nuxt: "4.3.3" },
+      }),
+      "utf8",
+    );
+
+    await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(false);
+  });
+
+  test("does not scan unrelated sibling package manifests", async () => {
+    const workspaceRoot = await createTempDir();
+    const projectRoot = join(workspaceRoot, "apps", "agent");
+    const siblingRoot = join(workspaceRoot, "apps", "web");
+    await mkdir(projectRoot, { recursive: true });
+    await mkdir(siblingRoot, { recursive: true });
+    await writeFile(join(projectRoot, "package.json"), JSON.stringify({ name: "agent" }), "utf8");
+    await writeFile(
+      join(siblingRoot, "package.json"),
+      JSON.stringify({ name: "web", dependencies: { next: "16.2.6" } }),
+      "utf8",
+    );
+
+    await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(false);
+  });
+
+  test("ignores standalone eve projects", async () => {
+    const projectRoot = await createTempDir();
+    await writeFile(
+      join(projectRoot, "package.json"),
+      JSON.stringify({ name: "demo", dependencies: { eve: "0.25.0" } }),
+      "utf8",
+    );
+
+    await expect(hasVercelHostFramework(projectRoot)).resolves.toBe(false);
   });
 });
 

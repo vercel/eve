@@ -141,7 +141,6 @@ import {
   type HarnessStepResult,
   isInvalidToolCall,
 } from "#harness/step-hooks.js";
-import { pruneToolResults } from "#harness/tool-result-pruning.js";
 import { buildToolSetFromDefinitions, buildToolSetWithProviderTools } from "#harness/tools.js";
 import {
   CODE_MODE_TOOL_NAME,
@@ -1557,23 +1556,12 @@ async function handleStepResult(input: {
 
   // --- Continue or terminate ------------------------------------------------
 
-  const prunedHistory = pruneToolResults(promptMessages);
-  const historyWasPruned = prunedHistory !== promptMessages;
-
-  // When pruning rewrites messages that the model already counted, the
-  // exact input-token snapshot recorded by createNextCompactionConfig
-  // becomes stale. Clear it so the next step falls back to the
-  // estimation heuristic instead of overestimating and compacting early.
-  let compaction = baseSession.compaction;
-  if (historyWasPruned && compaction.lastKnownInputTokens !== undefined) {
-    compaction = {
-      recentWindowSize: compaction.recentWindowSize,
-      threshold: compaction.threshold,
-    };
-  }
-
-  const updatedHistory: ModelMessage[] = [...prunedHistory, ...responseMessages];
-  let nextSession: HarnessSession = { ...baseSession, compaction, history: updatedHistory };
+  // History grows by append only; nothing rewrites earlier messages mid-turn,
+  // so the prompt prefix stays stable and the provider's prompt cache keeps
+  // hitting across steps. Compaction is the sole mechanism that ever rewrites
+  // history, and it runs before the model call (see `maybeCompact`).
+  const updatedHistory: ModelMessage[] = [...promptMessages, ...responseMessages];
+  let nextSession: HarnessSession = { ...baseSession, history: updatedHistory };
 
   // A `final_output` call is terminal even when the model emits it alongside
   // executing tools: continuing the loop would leave the no-execute call as a
@@ -1601,7 +1589,7 @@ async function handleStepResult(input: {
     return finishTaskTurn({
       emissionState,
       emit,
-      prunedHistory,
+      history: promptMessages,
       result,
       schema: nextSession.outputSchema,
       session: nextSession,
@@ -1612,7 +1600,7 @@ async function handleStepResult(input: {
   return finishConversationTurn({
     emissionState,
     emit,
-    prunedHistory,
+    history: promptMessages,
     result,
     schema: nextSession.outputSchema,
     session: nextSession,
@@ -1640,12 +1628,12 @@ function extractFinalOutput(result: HarnessStepResult): JsonValue | undefined {
  */
 function persistStructuredAssistantTurn(
   session: HarnessSession,
-  prunedHistory: readonly ModelMessage[],
+  history: readonly ModelMessage[],
   structured: JsonValue,
 ): HarnessSession {
   return {
     ...session,
-    history: [...prunedHistory, { content: JSON.stringify(structured), role: "assistant" }],
+    history: [...history, { content: JSON.stringify(structured), role: "assistant" }],
     outputSchema: undefined,
   };
 }
@@ -1676,13 +1664,13 @@ async function emitStructuredResult(
 async function finishTaskTurn(input: {
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
-  readonly prunedHistory: readonly ModelMessage[];
+  readonly history: readonly ModelMessage[];
   readonly result: HarnessStepResult;
   readonly schema: JsonObject | undefined;
   readonly session: HarnessSession;
   readonly stepOutput: string | null;
 }): Promise<StepResult> {
-  const { emit, prunedHistory, result, schema, stepOutput } = input;
+  const { emit, history, result, schema, stepOutput } = input;
   let { emissionState, session } = input;
 
   if (schema === undefined) {
@@ -1707,7 +1695,7 @@ async function finishTaskTurn(input: {
     };
   }
 
-  session = persistStructuredAssistantTurn(session, prunedHistory, structured);
+  session = persistStructuredAssistantTurn(session, history, structured);
   if (emit) {
     emissionState = await emitStructuredResult(emit, emissionState, structured, "task");
     session = setHarnessEmissionState(session, emissionState);
@@ -1723,12 +1711,12 @@ async function finishTaskTurn(input: {
 async function finishConversationTurn(input: {
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
-  readonly prunedHistory: readonly ModelMessage[];
+  readonly history: readonly ModelMessage[];
   readonly result: HarnessStepResult;
   readonly schema: JsonObject | undefined;
   readonly session: HarnessSession;
 }): Promise<StepResult> {
-  const { emit, prunedHistory, result, schema } = input;
+  const { emit, history, result, schema } = input;
   let { emissionState, session } = input;
 
   if (schema === undefined) {
@@ -1752,7 +1740,7 @@ async function finishConversationTurn(input: {
     return { next: null, session };
   }
 
-  session = persistStructuredAssistantTurn(session, prunedHistory, structured);
+  session = persistStructuredAssistantTurn(session, history, structured);
   if (emit) {
     emissionState = await emitStructuredResult(emit, emissionState, structured, "conversation");
     session = setHarnessEmissionState(session, emissionState);

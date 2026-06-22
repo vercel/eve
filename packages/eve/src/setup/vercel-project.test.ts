@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createPromptCommandOutput, WHIMSY_POOLS } from "#setup/cli/index.js";
 import { captureVercel, runVercel, type VercelCaptureResult } from "#setup/primitives/index.js";
+import { hasVercelHostFramework } from "#setup/scaffold/index.js";
 
 import { HumanActionRequiredError } from "#setup/human-action.js";
 import type { Prompter, PrompterValue, SingleSelectOptions } from "./prompter.js";
@@ -17,6 +18,7 @@ import {
   pickTeam,
   requireAuth,
   validateTeam,
+  vercelAuthBlockerReason,
 } from "./vercel-project.js";
 
 vi.mock("#setup/primitives/index.js", async (importOriginal) => {
@@ -28,8 +30,17 @@ vi.mock("#setup/primitives/index.js", async (importOriginal) => {
   };
 });
 
+vi.mock("#setup/scaffold/index.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("#setup/scaffold/index.js")>();
+  return {
+    ...original,
+    hasVercelHostFramework: vi.fn(async () => false),
+  };
+});
+
 const mockedCaptureVercel = vi.mocked(captureVercel);
 const mockedRunVercel = vi.mocked(runVercel);
+const mockedHasVercelHostFramework = vi.mocked(hasVercelHostFramework);
 
 /** Wraps stdout as a successful capture result for the mocked `captureVercel`. */
 const captured = (stdout: string): VercelCaptureResult => ({ ok: true, stdout });
@@ -57,6 +68,8 @@ beforeEach(() => {
   mockedCaptureVercel.mockReset();
   mockedRunVercel.mockReset();
   mockedRunVercel.mockResolvedValue(true);
+  mockedHasVercelHostFramework.mockReset();
+  mockedHasVercelHostFramework.mockResolvedValue(false);
 });
 
 describe("listTeams", () => {
@@ -194,6 +207,22 @@ describe("listProjects", () => {
     const error = await listProjects("/tmp/eve-agent", "sso-team").catch((e: unknown) => e);
     expect(error).not.toBeInstanceOf(HumanActionRequiredError);
     expect(error).toMatchObject({ message: expect.stringContaining("Could not list Vercel") });
+  });
+});
+
+describe("vercelAuthBlockerReason", () => {
+  it("maps non-authenticated states to their setup blockers", () => {
+    expect([
+      vercelAuthBlockerReason("authenticated"),
+      vercelAuthBlockerReason("cli-missing"),
+      vercelAuthBlockerReason("logged-out"),
+      vercelAuthBlockerReason("unavailable"),
+    ]).toEqual([
+      undefined,
+      "Vercel CLI not found, see /vc",
+      "Log in to Vercel first, see /login",
+      "Couldn't reach Vercel, check your connection",
+    ]);
   });
 });
 
@@ -458,6 +487,43 @@ describe("linkProject", () => {
       1,
       ["link", "--project", "prj_new", "--scope", "team-a", "--yes"],
       { cwd: "/tmp/eve-agent", onOutput: expect.any(Function), nonInteractive: true },
+    );
+  });
+
+  it("leaves the framework preset unset for host framework projects", async () => {
+    mockedHasVercelHostFramework.mockResolvedValueOnce(true);
+    mockedCaptureVercel
+      .mockResolvedValueOnce(
+        failedCapture(
+          JSON.stringify({ error: { code: "not_found", message: "Project not found" } }),
+        ),
+      )
+      .mockResolvedValueOnce(captured(JSON.stringify({ id: "prj_new", name: "my-web-agent" })));
+    const { prompter } = createFakePrompter();
+
+    await expect(
+      linkProject(
+        prompter,
+        "/tmp/eve-web-agent",
+        { kind: "new", project: "my-web-agent", team: "team-a" },
+        createPromptCommandOutput(prompter.log),
+      ),
+    ).resolves.toBe(true);
+
+    expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
+      2,
+      [
+        "api",
+        "/v10/projects",
+        "--scope",
+        "team-a",
+        "--method",
+        "POST",
+        "--raw-field",
+        "name=my-web-agent",
+        "--raw",
+      ],
+      { cwd: "/tmp/eve-web-agent", onOutput: expect.any(Function) },
     );
   });
 });

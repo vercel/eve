@@ -19,7 +19,7 @@ import { theme } from "./lib/theme.ts";
  *   3. Type a prompt that asks the model to call `ask_question` with
  *      two options (red/blue).
  *   4. Wait for the question section to display the select indicator
- *      (`▷ <label>`), which proves the dedicated question UI is up.
+ *      (`▶ <label>`), which proves the dedicated question UI is up.
  *   5. Send Down arrow + Enter to pick the second option (blue).
  *   6. Wait for the answered marker in the body section.
  *   7. Wait for the post-answer assistant turn to render. The runner
@@ -63,7 +63,7 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   input.type(promptLines.join(" · "));
   input.enter();
 
-  await screen.waitForText("▷ Red", 60_000);
+  await screen.waitForText("▶ Red", 60_000);
   console.log(theme.muted("[tui-questions] select UI is live, highlight on Red"));
 
   // Bridges a server-side race where the park hook isn't yet
@@ -73,7 +73,7 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   await sleep(500);
 
   input.emit("data", Buffer.from("\x1B[B"));
-  await screen.waitForText("▷ Blue", 2_000);
+  await screen.waitForText("▶ Blue", 2_000);
   console.log(theme.muted("[tui-questions] highlight moved to Blue"));
 
   input.enter();

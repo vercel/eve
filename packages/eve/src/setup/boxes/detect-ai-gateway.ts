@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { AI_GATEWAY_API_KEY_ENV_FILE, AI_GATEWAY_API_KEY_ENV_VAR } from "../ai-gateway-api-key.js";
 import {
   requireProjectPath,
   type AiGatewayEnvFile,
@@ -9,8 +10,10 @@ import {
 } from "../state.js";
 import type { SetupBox } from "../step.js";
 
-const AI_GATEWAY_ENV_KEY = "AI_GATEWAY_API_KEY";
-const ENV_FILE_CANDIDATES = [".env.local", ".env"] as const satisfies readonly AiGatewayEnvFile[];
+const ENV_FILE_CANDIDATES = [
+  AI_GATEWAY_API_KEY_ENV_FILE,
+  ".env",
+] as const satisfies readonly AiGatewayEnvFile[];
 
 function readEnvValue(line: string, key: string): string | undefined {
   const trimmed = line.trim();
@@ -57,7 +60,7 @@ export async function findEnvFileWithKey(
 export async function detectAiGatewayResolution(
   projectRoot: string,
 ): Promise<ResolvedAiGatewayCredentials> {
-  const envFile = await findEnvFileWithKey(projectRoot, AI_GATEWAY_ENV_KEY);
+  const envFile = await findEnvFileWithKey(projectRoot, AI_GATEWAY_API_KEY_ENV_VAR);
   if (envFile !== undefined) {
     return { kind: "api-key", envFile };
   }
