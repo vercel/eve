@@ -23,11 +23,16 @@ import {
 } from "#setup/cli/option-row.js";
 import { filterOptions, submitRowIndex, type SelectState } from "#setup/cli/select-state.js";
 import type { SelectNotice } from "#setup/prompter.js";
-import { graphemes } from "#shared/text-boundaries.js";
 
-import { visibleLine, type LineState } from "./line-editor.js";
+import { maskLine, visibleLine, type LineState } from "./line-editor.js";
 import type { Theme } from "./theme.js";
-import { clipVisible, renderInputText, visibleLength, wrapVisibleLine } from "./terminal-text.js";
+import {
+  clipVisible,
+  renderInputText,
+  renderInputWithBlockCursor,
+  visibleLength,
+  wrapVisibleLine,
+} from "./terminal-text.js";
 
 function clip(line: string, width: number): string {
   return clipVisible(line, width);
@@ -113,21 +118,27 @@ export interface FlowPanelLine {
   evidence?: boolean;
 }
 
+/** One already-resolved animation frame and its active color. */
+export interface FlowPanelIndicator {
+  glyph: string;
+  color: "green" | "yellow";
+}
+
 export type FlowPanelContent =
   | {
       kind: "question";
       rows: readonly string[];
-      /** The install wait keeps its spinner above the concurrent actions. */
-      status?: { text: string; frame: string };
+      /** The install wait keeps its indicator above the concurrent actions. */
+      status?: { text: string; indicator: FlowPanelIndicator };
     }
   | {
       kind: "status";
-      status: { text: string; frame: string };
+      status: { text: string; indicator: FlowPanelIndicator };
       /** Latest child-process output shown transiently beneath the status. */
       preview?: string;
     }
-  | { kind: "preview"; text: string; frame: string }
-  | { kind: "idle"; frame: string };
+  | { kind: "preview"; text: string; indicator: FlowPanelIndicator }
+  | { kind: "idle"; indicator: FlowPanelIndicator };
 
 /** The whole bordered section: title, recent progress, and one explicit mode. */
 export interface FlowPanelState {
@@ -174,9 +185,15 @@ function toneGlyph(tone: FlowPanelLine["tone"], theme: Theme): string {
   }
 }
 
+function renderIndicator(indicator: FlowPanelIndicator, theme: Theme): string {
+  return indicator.color === "green"
+    ? theme.colors.green(indicator.glyph)
+    : theme.colors.yellow(indicator.glyph);
+}
+
 /**
  * Paints the bordered flow panel. Everything a running command produces lives
- * here — progress, questions, the status spinner — and the panel vanishes
+ * here — progress, questions, the status indicator — and the panel vanishes
  * wholesale when the command resolves; only the command echo and the elbow
  * outcome persist in the transcript.
  */
@@ -199,28 +216,32 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
 
   switch (state.content.kind) {
     case "question":
-      // The install wait's question rides beneath its live status spinner.
+      // The install wait's question rides beneath its live status indicator.
       if (state.content.status !== undefined) {
         rows.push(
-          `  ${c.yellow(state.content.status.frame)} ${c.dim(state.content.status.text)}`,
+          `  ${renderIndicator(state.content.status.indicator, theme)} ${c.dim(state.content.status.text)}`,
           "",
         );
       }
       rows.push(...state.content.rows);
       break;
     case "status":
-      rows.push(`  ${c.yellow(state.content.status.frame)} ${c.dim(state.content.status.text)}`);
+      rows.push(
+        `  ${renderIndicator(state.content.status.indicator, theme)} ${c.dim(state.content.status.text)}`,
+      );
       if (state.content.preview !== undefined) {
         rows.push(`    ${c.dim(state.content.preview)}`);
       }
       break;
     case "preview":
-      rows.push(`  ${c.yellow(state.content.frame)} ${c.dim(state.content.text)}`);
+      rows.push(
+        `  ${renderIndicator(state.content.indicator, theme)} ${c.dim(state.content.text)}`,
+      );
       break;
     case "idle":
       // A flow between phases must never look dead: boxes run subprocesses
       // without narrating every gap, so the panel keeps a live pulse.
-      rows.push(`  ${c.yellow(state.content.frame)} ${c.dim("Working…")}`);
+      rows.push(`  ${renderIndicator(state.content.indicator, theme)} ${c.dim("Working…")}`);
       break;
   }
 
@@ -610,7 +631,7 @@ export function renderSelectQuestion(
   return rows.map((row) => clip(row, width));
 }
 
-/** Paints a text question section: message, a caret-bearing input line, hints. */
+/** Paints a text question section: message, a block-cursor input line, hints. */
 export function renderTextQuestion(
   state: SetupTextPanelState,
   theme: Theme,
@@ -626,18 +647,15 @@ export function renderTextQuestion(
   rows.push(...state.message.split("\n").map((line) => `  ${c.bold(line)}`));
 
   const budget = Math.max(4, width - 4);
-  const display = state.mask
-    ? {
-        text: "•".repeat(graphemes(state.editor.text).length),
-        cursor: graphemes(state.editor.text.slice(0, state.editor.cursor)).length,
-      }
-    : { text: state.editor.text, cursor: state.editor.cursor };
-  const { before, under, after } = visibleLine(display, budget, theme.glyph.ellipsis);
-  const caret = caretVisible ? c.cyan(theme.glyph.caret) : " ";
-  const body =
-    state.editor.text.length === 0 && state.placeholder !== undefined
-      ? `${caret}${c.dim(state.placeholder)}`
-      : `${renderInputText(before)}${caret}${renderInputText(under)}${renderInputText(after)}`;
+  const display = state.mask ? maskLine(state.editor) : state.editor;
+  const placeholder = state.editor.text.length === 0 ? state.placeholder : undefined;
+  const cursorLine = placeholder === undefined ? display : { text: placeholder, cursor: 0 };
+  const body = renderInputWithBlockCursor({
+    ...visibleLine(cursorLine, budget, theme.glyph.ellipsis),
+    visible: caretVisible,
+    inverse: c.inverse,
+    render: placeholder === undefined ? renderInputText : (text) => c.dim(renderInputText(text)),
+  });
   rows.push(`  ${body}`);
 
   if (state.error !== undefined) {

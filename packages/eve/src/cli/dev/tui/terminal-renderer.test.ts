@@ -200,6 +200,70 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("uses the turn pulse while waiting for the first stream event", async () => {
+    vi.useFakeTimers();
+    try {
+      const { screen, renderer } = makeRenderer();
+      renderer.renderAgentHeader({
+        name: "Weather Agent",
+        serverUrl: "http://localhost:3000",
+        info: agentInfoWithModel("gpt-5"),
+      });
+      let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+      const rendering = renderer.renderStream(
+        {
+          events: new ReadableStream<AgentTUIStreamEvent>({
+            start(controller) {
+              streamController = controller;
+            },
+          }),
+        },
+        { submittedPrompt: "hello", continueSession: true },
+      );
+
+      await Promise.resolve();
+      let lines = screen.snapshot().split("\n");
+      let workingRow = lines.findIndex((line) => line === "  ⊙ Working…");
+      expect(workingRow).toBeGreaterThan(-1);
+      expect(lines[workingRow + 1]).toBe("");
+      expect(lines[workingRow + 2]).toContain("gpt-5");
+
+      vi.advanceTimersByTime(450);
+      expect(screen.snapshot()).not.toContain("⊙ Working…");
+      lines = screen.snapshot().split("\n");
+      workingRow = lines.findIndex((line) => line === "    Working…");
+      expect(workingRow).toBeGreaterThan(-1);
+      expect(lines[workingRow + 1]).toBe("");
+      expect(lines[workingRow + 2]).toContain("gpt-5");
+
+      streamController?.close();
+      await rendering;
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses an ASCII fallback for the turn pulse", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: false,
+    });
+    const prompt = renderer.readPrompt();
+
+    input.type("hello");
+    input.enter();
+
+    expect(await prompt).toBe("hello");
+    expect(screen.snapshot()).toContain("  o Working…");
+    expect(screen.snapshot()).not.toContain("⊙");
+    renderer.shutdown();
+  });
+
   it("interrupts a running response and returns to the prompt without exiting", async () => {
     const { screen, input, renderer } = makeRenderer();
     let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
@@ -304,7 +368,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("draws the caret over the character under it without inserting a cell", async () => {
+  it("draws the block cursor over the character under it without inserting a cell", async () => {
     const { screen, input, renderer } = makeRenderer();
 
     const prompt = renderer.readPrompt();
@@ -643,8 +707,52 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("does not paint a prompt while input is detached for a running turn", async () => {
+  it("starts the turn pulse as soon as the prompt is submitted", async () => {
+    vi.useFakeTimers();
+    try {
+      const { screen, input, renderer } = makeRenderer();
+      const prompt = renderer.readPrompt();
+
+      input.type("hello");
+      input.enter();
+
+      expect(await prompt).toBe("hello");
+      expect(screen.snapshot()).toContain("  ⊙ Working…");
+
+      vi.advanceTimersByTime(450);
+      expect(screen.snapshot()).not.toContain("⊙ Working…");
+      expect(screen.snapshot()).toContain("    Working…");
+
+      let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+      const rendering = renderer.renderStream(
+        {
+          events: new ReadableStream<AgentTUIStreamEvent>({
+            start(controller) {
+              streamController = controller;
+            },
+          }),
+        },
+        { continueSession: true },
+      );
+      await Promise.resolve();
+      expect(screen.snapshot()).not.toContain("⊙ Working…");
+      expect(screen.snapshot()).toContain("    Working…");
+
+      streamController?.close();
+      await rendering;
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("removes the turn indicator when reasoning starts", async () => {
     const { screen, renderer } = makeRenderer();
+    renderer.renderAgentHeader({
+      name: "Weather Agent",
+      serverUrl: "http://localhost:3000",
+      info: agentInfoWithModel("gpt-5"),
+    });
     let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
     const rendering = renderer.renderStream(
       {
@@ -663,11 +771,16 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
     const lines = screen.snapshot().split("\n");
     const thinkingRow = lines.findIndex((line) => line.includes("thinking"));
-    const workingRow = lines.findIndex((line) => line.includes("Responding…"));
+    const workingRow = lines.findIndex(
+      (line) => line.includes("Working…") || line.includes("Responding…"),
+    );
+    const modelRow = lines.findIndex((line) => line.includes("gpt-5"));
     const inputRow = lines.findIndex((line) => line.includes("❯"));
 
     expect(thinkingRow).toBeGreaterThan(-1);
-    expect(workingRow).toBeGreaterThan(thinkingRow);
+    expect(workingRow).toBe(-1);
+    expect(lines[thinkingRow + 1]).toBe("");
+    expect(modelRow).toBe(thinkingRow + 2);
     expect(inputRow).toBe(-1);
 
     streamController?.close();
@@ -714,6 +827,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     input.type("no");
     input.enter();
     await answer;
+    expect(screen.snapshot()).toContain("⊙ Working…");
     renderer.shutdown();
   });
 
@@ -1382,11 +1496,55 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
     input.type("n");
     expect(await approval).toEqual({ approved: false, reason: "Denied by user." });
+    expect(screen.snapshot()).toContain("⊙ Working…");
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("delete_files");
     expect(snapshot).toContain("→ denied");
+  });
+
+  it("stops the turn ticker while a later human-input request is open", async () => {
+    vi.useFakeTimers();
+    try {
+      const { screen, input, renderer } = makeRenderer();
+
+      const firstApproval = renderer.readToolApproval({
+        approvalId: "a1",
+        toolCallId: "c1",
+        toolName: "read_file",
+        input: { path: "README.md" },
+      });
+      input.type("y");
+      await firstApproval;
+
+      const question = renderer.readInputQuestion({
+        requestId: "q1",
+        prompt: "Continue?",
+        display: "select",
+        options: [{ id: "yes", label: "Yes" }],
+      });
+      const questionOutputLength = screen.rawOutput().length;
+      vi.advanceTimersByTime(300);
+      expect(screen.rawOutput()).toHaveLength(questionOutputLength);
+      input.enter();
+      await question;
+
+      const secondApproval = renderer.readToolApproval({
+        approvalId: "a2",
+        toolCallId: "c2",
+        toolName: "write_file",
+        input: { path: "README.md" },
+      });
+      const approvalOutputLength = screen.rawOutput().length;
+      vi.advanceTimersByTime(300);
+      expect(screen.rawOutput()).toHaveLength(approvalOutputLength);
+      input.type("n");
+      await secondApproval;
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not treat bracketed-paste text as a tool approval action", async () => {
@@ -1654,6 +1812,42 @@ describe("TerminalRenderer setup panel", () => {
 });
 
 describe("TerminalRenderer setup flow session", () => {
+  it("uses the build-phase pulse for pulse setup flows", () => {
+    vi.useFakeTimers();
+    try {
+      const { screen, renderer } = makeRenderer();
+
+      renderer.setupFlow.begin("Configure the agent model", "pulse");
+      renderer.setupFlow.setStatus("Checking the project…");
+      expect(screen.snapshot()).toContain("▪ Checking the project…");
+
+      vi.advanceTimersByTime(450);
+      expect(screen.snapshot()).not.toContain("▪ Checking the project…");
+      expect(screen.snapshot()).toContain("  Checking the project…");
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses an ASCII fallback for pulse setup flows", () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: false,
+    });
+
+    renderer.setupFlow.begin("Configure the agent model", "pulse");
+    renderer.setupFlow.setStatus("Checking the project...");
+
+    expect(screen.snapshot()).toContain("* Checking the project...");
+    expect(screen.snapshot()).not.toContain("▪");
+    renderer.shutdown();
+  });
+
   it("holds flow output inside the panel and clears it on end, flushing warnings", () => {
     const { screen, renderer } = makeRenderer();
 
@@ -2263,7 +2457,7 @@ describe("TerminalRenderer status line", () => {
     renderer.shutdown();
   });
 
-  it("shows the running token total on the status line, not the Ready row", async () => {
+  it("keeps the running token total after the turn indicator disappears", async () => {
     const { screen, renderer } = makeRenderer();
     await renderer.renderStream(
       streamOf([
@@ -2278,9 +2472,8 @@ describe("TerminalRenderer status line", () => {
     const lines = screen.snapshot().split("\n");
     const readyRow = lines.find((line) => line.includes("Ready"));
     const statusRow = lines.find((line) => line.includes("↑ 500 ↓ 300"));
-    expect(readyRow).toBeDefined();
+    expect(readyRow).toBeUndefined();
     expect(statusRow).toBeDefined();
-    expect(readyRow).not.toContain("↑ 500");
     renderer.shutdown();
   });
 

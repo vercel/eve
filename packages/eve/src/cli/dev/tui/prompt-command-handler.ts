@@ -75,8 +75,9 @@ export function createPromptCommandHandler(
       } catch (error) {
         return { message: `/${command.name} failed: ${toErrorMessage(error)}` };
       }
-      const { runTuiSetupCommand, SETUP_FLOW_TITLES } = setupCommands;
-      flow.begin(SETUP_FLOW_TITLES[command.name]);
+      const { runTuiSetupCommand, SETUP_FLOW_CONFIG } = setupCommands;
+      const flowConfig = SETUP_FLOW_CONFIG[command.name];
+      flow.begin(flowConfig.title, flowConfig.indicator);
       let preserveFlowDiagnostics = true;
       try {
         const commandInput: TuiSetupCommandInput = {

@@ -7,6 +7,9 @@ export type SetupEditableSelectResult =
   | { kind: "selected"; value: string }
   | { kind: "edited"; value: string; text: string };
 
+/** Animation shown while a setup flow is between questions. */
+export type SetupFlowIndicator = "spinner" | "pulse";
+
 interface SetupSelectRequestBase {
   message: string;
   options: readonly SetupPanelOption[];
@@ -49,7 +52,7 @@ export type SetupSelectRequest =
   | SetupSearchableMultiSelectRequest;
 
 export interface SetupFlowRenderer {
-  begin(title: string): void;
+  begin(title: string, indicator?: SetupFlowIndicator): void;
   end(options?: { preserveDiagnostics?: boolean }): void;
   readSelect(options: SetupSelectRequest): Promise<readonly string[] | undefined>;
   readEditableSelect(options: {
@@ -74,7 +77,7 @@ export interface SetupFlowRenderer {
   readAcknowledge(options: { message: string; lines: readonly string[] }): Promise<void>;
   /**
    * Presents an inert context row and a separate action menu beside the live
-   * flow spinner. Returns the choice plus a `close()` that dismisses the menu
+   * flow indicator. Returns the choice plus a `close()` that dismisses the menu
    * when a concurrent wait resolves first. Used by the Slack install wait for
    * "Try again" / "Cancel": the poll keeps running while the prompt is up, and
    * whichever settles first wins.
@@ -84,7 +87,7 @@ export interface SetupFlowRenderer {
   renderLine(text: string, tone: "info" | "success" | "warning" | "error"): void;
   renderOutput(text: string): void;
   /**
-   * Arms a key trap for the flow's working state — the status spinner between
+   * Arms a key trap for the flow's working state — the status indicator between
    * questions, where no prompt is consuming keys. Ctrl-C or Esc resolves the
    * promise so the command can abandon an in-flight flow (e.g. a parked
    * `vercel connect create` browser OAuth). Open questions own their keys; the

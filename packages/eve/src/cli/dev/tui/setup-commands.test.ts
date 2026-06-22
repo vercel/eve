@@ -7,6 +7,7 @@ import { WizardCancelledError } from "#setup/step.js";
 
 import {
   runTuiSetupCommand,
+  SETUP_FLOW_CONFIG,
   type TuiSetupCommandInput,
   type TuiSetupCommandRenderer,
   type TuiSetupFlows,
@@ -89,6 +90,20 @@ function run(input: {
 }
 
 describe("runTuiSetupCommand", () => {
+  it("uses the build pulse only for model and channel loading", () => {
+    expect(
+      Object.fromEntries(
+        Object.entries(SETUP_FLOW_CONFIG).map(([command, config]) => [command, config.indicator]),
+      ),
+    ).toEqual({
+      vc: "spinner",
+      login: "spinner",
+      model: "pulse",
+      channels: "pulse",
+      deploy: "spinner",
+    });
+  });
+
   it("surfaces the model flow's apply line as the outcome", async () => {
     const flows = fakeFlows();
     await expect(run({ command: "model", flows })).resolves.toEqual({

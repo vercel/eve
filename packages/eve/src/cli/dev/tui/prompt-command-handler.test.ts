@@ -115,7 +115,9 @@ describe("createPromptCommandHandler", () => {
       effect: { kind: "model-access-changed" } as const,
     }));
     vi.doMock("./setup-commands.js", () => ({
-      SETUP_FLOW_TITLES: { model: "Configure the agent model" },
+      SETUP_FLOW_CONFIG: {
+        model: { title: "Configure the agent model", indicator: "pulse" },
+      },
       runTuiSetupCommand,
     }));
 
@@ -135,7 +137,7 @@ describe("createPromptCommandHandler", () => {
       expect(runTuiSetupCommand).toHaveBeenCalledWith(
         expect.objectContaining({ initialModelStep: "provider" }),
       );
-      expect(setupFlow.begin).toHaveBeenCalledWith("Configure the agent model");
+      expect(setupFlow.begin).toHaveBeenCalledWith("Configure the agent model", "pulse");
       expect(setupFlow.end).toHaveBeenCalledWith({ preserveDiagnostics: false });
     } finally {
       vi.doUnmock("./setup-commands.js");
