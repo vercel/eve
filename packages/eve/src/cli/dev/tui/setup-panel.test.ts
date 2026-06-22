@@ -8,6 +8,7 @@ import {
   renderSelectQuestion,
   renderTextQuestion,
 } from "./setup-panel.js";
+import { stripAnsi } from "./terminal-text.js";
 import { createTheme } from "./theme.js";
 
 const theme = createTheme({ color: false, unicode: true });
@@ -50,7 +51,11 @@ describe("renderFlowPanel", () => {
       tone: "info" as const,
     }));
     const text = renderFlowPanel(
-      { title: "/channels", lines, content: { kind: "idle", frame: "⠏" } },
+      {
+        title: "/channels",
+        lines,
+        content: { kind: "idle", indicator: { glyph: "⠏", color: "yellow" } },
+      },
       theme,
       60,
     ).join("\n");
@@ -67,7 +72,7 @@ describe("renderFlowPanel", () => {
         lines: [],
         content: {
           kind: "status",
-          status: { text: "Loading teams…", frame: "⠼" },
+          status: { text: "Loading teams…", indicator: { glyph: "⠼", color: "yellow" } },
         },
       },
       theme,
@@ -77,14 +82,38 @@ describe("renderFlowPanel", () => {
     expect(text).toContain("⠼ Loading teams…");
   });
 
-  it("rides the status spinner above an open question for the install wait", () => {
+  it("renders the build-phase pulse for a setup status", () => {
+    const text = renderFlowPanel(
+      {
+        title: "/model",
+        lines: [],
+        content: {
+          kind: "status",
+          status: {
+            text: "Checking the project…",
+            indicator: { glyph: "▪", color: "green" },
+          },
+        },
+      },
+      colorTheme,
+      60,
+    ).join("\n");
+
+    expect(text).toContain(colorTheme.colors.green("▪"));
+    expect(stripAnsi(text)).toContain("▪ Checking the project…");
+  });
+
+  it("rides the status pulse above an open question for the install wait", () => {
     const text = renderFlowPanel(
       {
         title: "/channels",
         lines: [],
         content: {
           kind: "question",
-          status: { text: "Creating a Slackbot through Vercel Connect…", frame: "⠏" },
+          status: {
+            text: "Creating a Slackbot through Vercel Connect…",
+            indicator: { glyph: "▪", color: "green" },
+          },
           rows: ["  ◦ Try again", "  ◦ Cancel"],
         },
       },
@@ -92,7 +121,7 @@ describe("renderFlowPanel", () => {
       60,
     ).join("\n");
 
-    expect(text).toContain("⠏ Creating a Slackbot through Vercel Connect…");
+    expect(text).toContain("▪ Creating a Slackbot through Vercel Connect…");
     expect(text).toContain("◦ Try again");
     expect(text).toContain("◦ Cancel");
     // The spinner leads; the actions follow.
@@ -663,7 +692,7 @@ describe("renderSelectQuestion", () => {
 });
 
 describe("renderTextQuestion", () => {
-  it("paints the message, caret line, and hints", () => {
+  it("paints the message, input line, and hints", () => {
     const rows = renderTextQuestion(
       { message: "Project name", editor: lineOf("my-agent"), mask: false },
       theme,
@@ -676,6 +705,42 @@ describe("renderTextQuestion", () => {
     // The input line sits directly under the message — no blank row between.
     expect(rows[1]).toContain("my-agent");
     expect(text).toContain("enter to submit · esc to cancel");
+  });
+
+  it("draws the blinking cursor as a block over the grapheme under it", () => {
+    const rows = renderTextQuestion(
+      {
+        message: "Project name",
+        editor: { text: "hello", cursor: 3 },
+        mask: false,
+      },
+      colorTheme,
+      60,
+      true,
+    );
+    const input = rows[1] ?? "";
+
+    expect(stripAnsi(input)).toBe("  hello");
+    expect(input).toContain(colorTheme.colors.inverse("l"));
+    expect(input).not.toContain(colorTheme.glyph.caret);
+  });
+
+  it("draws the block over the first placeholder grapheme", () => {
+    const rows = renderTextQuestion(
+      {
+        message: "API key",
+        editor: lineOf(""),
+        mask: true,
+        placeholder: "type your key",
+      },
+      colorTheme,
+      60,
+      true,
+    );
+    const input = rows[1] ?? "";
+
+    expect(stripAnsi(input)).toBe("  type your key");
+    expect(input).toContain(colorTheme.colors.inverse("t"));
   });
 
   it("paints notices above the message, gone with the question", () => {

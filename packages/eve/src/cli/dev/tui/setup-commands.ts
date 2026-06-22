@@ -14,25 +14,23 @@ import { WizardCancelledError } from "#setup/step.js";
 
 import { createTuiPrompter, type TuiPrompterRenderer } from "./tui-prompter.js";
 import type { PromptCommandExtensionName } from "./prompt-commands.js";
-import type { SetupFlowRenderer } from "./setup-flow.js";
+import type { SetupFlowIndicator, SetupFlowRenderer } from "./setup-flow.js";
 import type { VercelStatusEffect } from "./vercel-status.js";
 
 export type TuiSetupCommand = PromptCommandExtensionName;
 
 /**
- * Human panel titles per command. The bordered panel never repeats the echoed
- * command verbatim (the transcript already shows it), but it always carries a
- * title: flows move past their opening question (project pickers, name
- * prompts), and without a constant header those later questions float
- * unanchored in the panel.
+ * Panel title and loading indicator per command. The bordered panel never
+ * repeats the echoed command verbatim, but it keeps a constant title as flows
+ * move past their opening question.
  */
-export const SETUP_FLOW_TITLES: Record<TuiSetupCommand, string> = {
-  vc: "Install the Vercel CLI",
-  login: "Log in to Vercel",
-  model: "Configure the agent model",
-  channels: "Agent channels",
-  deploy: "Deploy to Vercel",
-};
+export const SETUP_FLOW_CONFIG = {
+  vc: { title: "Install the Vercel CLI", indicator: "spinner" },
+  login: { title: "Log in to Vercel", indicator: "spinner" },
+  model: { title: "Configure the agent model", indicator: "pulse" },
+  channels: { title: "Agent channels", indicator: "pulse" },
+  deploy: { title: "Deploy to Vercel", indicator: "spinner" },
+} satisfies Record<TuiSetupCommand, { title: string; indicator: SetupFlowIndicator }>;
 
 /** The prompter surface plus the working-state interrupt trap a command races against. */
 export type TuiSetupCommandRenderer = TuiPrompterRenderer &
@@ -108,7 +106,7 @@ function muteableRenderer(
  * Runs one TUI setup command (/model, /channels, /deploy) over the
  * shared setup flows, asking through the TUI's own bordered panel. Never throws:
  * every outcome — done, cancelled, failed — folds into the returned command
- * result. Ctrl-C or Esc on the working spinner (no question open) aborts the
+ * result. Ctrl-C or Esc on the working indicator (no question open) aborts the
  * active flow, then keeps command ownership until its subprocesses and setup
  * stack have unwound.
  */

@@ -36,6 +36,14 @@ export function lineOf(text: string): LineState {
   return { text, cursor: text.length };
 }
 
+/** Masks each grapheme with one bullet while preserving the caret's grapheme position. */
+export function maskLine(state: LineState): LineState {
+  return {
+    text: "•".repeat(graphemes(state.text).length),
+    cursor: graphemes(state.text.slice(0, state.cursor)).length,
+  };
+}
+
 /** Inserts `value` at the caret and advances the caret past it. */
 export function insert(state: LineState, value: string): LineState {
   if (value.length === 0) return state;

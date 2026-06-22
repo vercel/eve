@@ -5,16 +5,16 @@
  * an OAuth-style authorization flow (e.g. signing in to Linear). The
  * challenge is a credential: anyone in a shared thread could complete a
  * posted sign-in link and bind their own identity to the session. The
- * default handler therefore delivers the challenge as an ephemeral
- * "Sign in with X" message visible only to the triggering user.
+ * default handler therefore posts a link-free public status while
+ * delivering the actual challenge as an ephemeral "Sign in with X"
+ * message visible only to the triggering user.
  *
- * Only when no user can be targeted (no triggering user id, no challenge
- * URL, or the ephemeral delivery fails) does the handler fall back to a
- * public status post, link-free by construction. The matching
- * `authorization.completed` handler edits that fallback post in place to
+ * When no user can be targeted (no triggering user id, no challenge
+ * URL, or the ephemeral delivery fails), the public status still leaves
+ * the shared thread with safe progress feedback. The matching
+ * `authorization.completed` handler edits that status post in place to
  * surface the outcome (`authorized` / `declined` / `failed` /
- * `timed-out`); on the normal ephemeral path there is nothing to edit
- * and the outcome surfaces through the resumed turn itself.
+ * `timed-out`).
  */
 
 import type { ConnectionAuthorizationOutcome } from "#protocol/message.js";
@@ -32,12 +32,11 @@ export function formatConnectionDisplayName(connectionName: string): string {
 }
 
 /**
- * Public fallback status text for an authorization challenge that could
- * not be delivered ephemerally. Deliberately link-free: it must stay safe
- * to post in a shared thread. When the channel cannot identify a
- * triggering user (rare — schedule-initiated sessions or events that lack
- * actor metadata) the text drops the "Connect with" call-to-action since
- * there's no one to act on it.
+ * Public status text for an authorization challenge. Deliberately
+ * link-free: it must stay safe to post in a shared thread. When the
+ * channel cannot identify a triggering user (rare — schedule-initiated
+ * sessions or events that lack actor metadata) the text drops the
+ * "Connect with" call-to-action since there's no one to act on it.
  */
 export function buildAuthRequiredPublicText(input: {
   readonly displayName: string;
@@ -50,10 +49,9 @@ export function buildAuthRequiredPublicText(input: {
 }
 
 /**
- * Final-state markdown for the public fallback status message. Edited in
- * place by `authorization.completed` so the thread sees resolution
- * without scrolling. Unused on the normal ephemeral path, which posts no
- * status message.
+ * Final-state markdown for the public status message. Edited in place by
+ * `authorization.completed` so the thread sees resolution without
+ * scrolling.
  */
 export function buildAuthCompletedText(input: {
   readonly displayName: string;

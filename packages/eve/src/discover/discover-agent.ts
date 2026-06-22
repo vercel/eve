@@ -27,6 +27,7 @@ import { createDiskProjectSource, type ProjectSource } from "#discover/project-s
 import { discoverSandboxSource } from "#discover/sandbox.js";
 import { discoverScheduleSources } from "#discover/schedules.js";
 import { discoverSkills } from "#discover/skills.js";
+import { stripNpmPackageScope } from "#shared/package-name.js";
 
 /**
  * Input for discovering the authored agent source graph from resolved roots.
@@ -219,8 +220,7 @@ async function tryReadPackageJsonName(
       return undefined;
     }
 
-    const slashIndex = name.lastIndexOf("/");
-    return slashIndex === -1 ? name : name.slice(slashIndex + 1);
+    return stripNpmPackageScope(name);
   } catch {
     return undefined;
   }
