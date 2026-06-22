@@ -17,8 +17,8 @@ function createMockCommandResult() {
 /*
  * A detached command, as returned by `runCommand({ detached: true })`,
  * is adapted into the `Experimental_SandboxProcess` shape — the adapter
- * drains `logs()`, then awaits `wait()`. This mock yields no log lines
- * and exits 0 so `spawn` and `run` resolve without real I/O.
+ * drains `logs()` alongside `wait()`. This mock yields no log lines and
+ * exits 0 so `spawn` and `run` resolve without real I/O.
  */
 function createMockDetachedCommand() {
   return {

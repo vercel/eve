@@ -1,12 +1,13 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-import type { IFileSystem, SandboxCommand as JustBashSandboxCommand } from "just-bash";
+import type { IFileSystem } from "just-bash";
 
 import {
   createFileBackedInternalSandboxSession,
   pathExists,
 } from "#execution/sandbox/bindings/local-backend-utils.js";
+import { adaptMultiplexedCommandToSandboxProcess } from "#execution/sandbox/multiplexed-command.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import { buildSandboxSession } from "#execution/sandbox/session.js";
 import { loadOptionalEnginePackage } from "#internal/application/optional-package-install.js";
@@ -151,7 +152,10 @@ export async function createBashSandbox(input: {
         env: options.env,
         signal: options.abortSignal,
       });
-      return adaptJustBashCommandToSandboxProcess(command);
+      return adaptMultiplexedCommandToSandboxProcess({
+        command,
+        getOutput: (log) => log.type,
+      });
     },
     async writeFiles(files) {
       for (const file of files) {
@@ -163,72 +167,6 @@ export async function createBashSandbox(input: {
         // just-bash filesystem accepts directly alongside strings.
         await filesystem.writeFile(file.path, file.content);
       }
-    },
-  };
-}
-
-/**
- * Wraps a `just-bash` detached command in the AI SDK
- * `Experimental_SandboxProcess` shape: two `ReadableStream<Uint8Array>`
- * for stdout/stderr (split from a single log iterator), a `wait()` that
- * resolves with the exit code, and an idempotent `kill()`.
- */
-function adaptJustBashCommandToSandboxProcess(command: JustBashSandboxCommand): SandboxProcess {
-  const encoder = new TextEncoder();
-  let stdoutController: ReadableStreamDefaultController<Uint8Array> | undefined;
-  let stderrController: ReadableStreamDefaultController<Uint8Array> | undefined;
-  let streamingDone = false;
-  let streamingError: unknown;
-
-  const stdout = new ReadableStream<Uint8Array>({
-    start(controller) {
-      stdoutController = controller;
-    },
-  });
-  const stderr = new ReadableStream<Uint8Array>({
-    start(controller) {
-      stderrController = controller;
-    },
-  });
-
-  void (async () => {
-    try {
-      for await (const message of command.logs()) {
-        const chunk = encoder.encode(message.data);
-        if (message.type === "stdout") {
-          stdoutController?.enqueue(chunk);
-        } else {
-          stderrController?.enqueue(chunk);
-        }
-      }
-    } catch (error) {
-      streamingError = error;
-      stdoutController?.error(error);
-      stderrController?.error(error);
-    } finally {
-      streamingDone = true;
-      if (streamingError === undefined) {
-        stdoutController?.close();
-        stderrController?.close();
-      }
-    }
-  })();
-
-  return {
-    stdout,
-    stderr,
-    async wait() {
-      const finished = await command.wait();
-      while (!streamingDone) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
-      if (streamingError !== undefined) {
-        throw streamingError;
-      }
-      return { exitCode: finished.exitCode };
-    },
-    async kill() {
-      await command.kill();
     },
   };
 }

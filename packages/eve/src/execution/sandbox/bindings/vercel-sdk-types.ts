@@ -1,7 +1,5 @@
 import type * as Vercel from "#compiled/@vercel/sandbox/index.js";
 
-export type VercelCommand = Vercel.Command;
-
 export type VercelCreateOptions = NonNullable<Parameters<typeof Vercel.Sandbox.create>[0]>;
 
 export type VercelGetOptions = Parameters<typeof Vercel.Sandbox.get>[0];

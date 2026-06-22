@@ -28,6 +28,7 @@ import type {
 } from "#public/sandbox/vercel-sandbox.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 import { createLoggingSandboxSession } from "#execution/sandbox/logging-session.js";
+import { adaptMultiplexedCommandToSandboxProcess } from "#execution/sandbox/multiplexed-command.js";
 import { buildSandboxSession } from "#execution/sandbox/session.js";
 import { streamToBuffer } from "#execution/sandbox/stream-utils.js";
 import {
@@ -42,7 +43,6 @@ import {
 import { getNamedVercelSandbox } from "#execution/sandbox/bindings/vercel-lookup.js";
 import { normalizeVercelReadStream } from "#execution/sandbox/bindings/vercel-read-stream.js";
 import type {
-  VercelCommand,
   VercelCreateOptions,
   VercelModule,
   VercelSandbox,
@@ -485,7 +485,10 @@ function createVercelInternalSandboxSession(
         env: options.env,
         signal: options.abortSignal,
       });
-      return adaptVercelCommandToSandboxProcess(command);
+      return adaptMultiplexedCommandToSandboxProcess({
+        command,
+        getOutput: (log) => log.stream,
+      });
     },
     async readFile(options: SandboxReadFileOptions) {
       return normalizeVercelReadStream(await sandbox.readFile({ path: options.path }));
@@ -500,72 +503,6 @@ function createVercelInternalSandboxSession(
         recursive: options.recursive,
         signal: options.abortSignal,
       });
-    },
-  };
-}
-
-/**
- * Wraps a Vercel `Command` (returned from `runCommand({ detached: true })`)
- * in the AI SDK `Experimental_SandboxProcess` shape. Splits the single
- * `logs()` iterator into two byte streams, exposes a `wait()` that
- * resolves with the exit code, and forwards `kill()` to the SDK.
- */
-function adaptVercelCommandToSandboxProcess(command: VercelCommand): SandboxProcess {
-  const encoder = new TextEncoder();
-  let stdoutController: ReadableStreamDefaultController<Uint8Array> | undefined;
-  let stderrController: ReadableStreamDefaultController<Uint8Array> | undefined;
-  let streamingDone = false;
-  let streamingError: unknown;
-
-  const stdout = new ReadableStream<Uint8Array>({
-    start(controller) {
-      stdoutController = controller;
-    },
-  });
-  const stderr = new ReadableStream<Uint8Array>({
-    start(controller) {
-      stderrController = controller;
-    },
-  });
-
-  void (async () => {
-    try {
-      for await (const message of command.logs()) {
-        const chunk = encoder.encode(message.data);
-        if (message.stream === "stdout") {
-          stdoutController?.enqueue(chunk);
-        } else {
-          stderrController?.enqueue(chunk);
-        }
-      }
-    } catch (error) {
-      streamingError = error;
-      stdoutController?.error(error);
-      stderrController?.error(error);
-    } finally {
-      streamingDone = true;
-      if (streamingError === undefined) {
-        stdoutController?.close();
-        stderrController?.close();
-      }
-    }
-  })();
-
-  return {
-    stdout,
-    stderr,
-    async wait() {
-      const finished = await command.wait();
-      while (!streamingDone) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
-      if (streamingError !== undefined) {
-        throw streamingError;
-      }
-      return { exitCode: finished.exitCode };
-    },
-    async kill() {
-      await command.kill();
     },
   };
 }
