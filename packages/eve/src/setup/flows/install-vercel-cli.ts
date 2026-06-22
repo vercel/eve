@@ -4,6 +4,7 @@ import { spawnPackageManager } from "#setup/primitives/index.js";
 import { getVercelAuthStatus } from "#setup/vercel-project.js";
 
 import type { Prompter } from "../prompter.js";
+import { withSpinner } from "../with-spinner.js";
 
 export type InstallVercelCliResult =
   /** The CLI is already resolvable; nothing to do. */
@@ -38,19 +39,6 @@ function globalInstallArguments(kind: PackageManagerKind): string[] {
     case "pnpm":
     case "bun":
       return ["add", "-g", "vercel@latest"];
-  }
-}
-
-async function withSpinner<T>(
-  prompter: Prompter,
-  message: string,
-  task: () => Promise<T>,
-): Promise<T> {
-  const spinner = prompter.log.spinner?.(message);
-  try {
-    return await task();
-  } finally {
-    spinner?.stop();
   }
 }
 

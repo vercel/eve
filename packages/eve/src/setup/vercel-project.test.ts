@@ -18,6 +18,7 @@ import {
   pickTeam,
   requireAuth,
   validateTeam,
+  vercelAuthBlockerReason,
 } from "./vercel-project.js";
 
 vi.mock("#setup/primitives/index.js", async (importOriginal) => {
@@ -206,6 +207,22 @@ describe("listProjects", () => {
     const error = await listProjects("/tmp/eve-agent", "sso-team").catch((e: unknown) => e);
     expect(error).not.toBeInstanceOf(HumanActionRequiredError);
     expect(error).toMatchObject({ message: expect.stringContaining("Could not list Vercel") });
+  });
+});
+
+describe("vercelAuthBlockerReason", () => {
+  it("maps non-authenticated states to their setup blockers", () => {
+    expect([
+      vercelAuthBlockerReason("authenticated"),
+      vercelAuthBlockerReason("cli-missing"),
+      vercelAuthBlockerReason("logged-out"),
+      vercelAuthBlockerReason("unavailable"),
+    ]).toEqual([
+      undefined,
+      "Vercel CLI not found, see /vc",
+      "Log in to Vercel first, see /login",
+      "Couldn't reach Vercel, check your connection",
+    ]);
   });
 });
 
