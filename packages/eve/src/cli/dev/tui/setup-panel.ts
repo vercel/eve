@@ -369,13 +369,15 @@ function searchFilter(
   loadingFrame: string | undefined,
   theme: Theme,
 ): string {
-  const input =
-    filter.length > 0
-      ? filter + theme.colors.dim(theme.glyph.caret)
-      : placeholder !== undefined
-        ? theme.colors.dim(`> ${placeholder}`)
-        : theme.colors.dim(theme.glyph.caret);
-  return loadingFrame === undefined ? input : `${input} ${theme.colors.yellow(loadingFrame)}`;
+  const caret = theme.colors.dim(theme.glyph.caret);
+  let input = caret;
+  if (filter.length > 0) {
+    input = filter + caret;
+  } else if (placeholder !== undefined) {
+    input = theme.colors.dim(`> ${placeholder}`);
+  }
+  if (loadingFrame === undefined) return input;
+  return `${input} ${theme.colors.yellow(loadingFrame)}`;
 }
 
 function selectViewSize(input: {
