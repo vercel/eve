@@ -8,6 +8,7 @@
 
 ### PR Checklist
 
+- [ ] I linked an issue with prior discussion confirming this change is wanted
 - [ ] I ran the relevant checks from `CONTRIBUTING.md`
 - [ ] I added tests and documentation where relevant
 - [ ] I added a changeset if this touches the published `eve` package
