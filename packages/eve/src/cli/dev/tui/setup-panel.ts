@@ -15,22 +15,27 @@
  */
 
 import type { ChannelSetupAction, PromptOption } from "#setup/cli/index.js";
-import { renderOptionRow, resolveOptionRowState } from "#setup/cli/option-row.js";
+import {
+  renderOptionRow,
+  renderOptionRowContinuation,
+  renderCursorRow,
+  resolveOptionRowState,
+} from "#setup/cli/option-row.js";
 import { filterOptions, submitRowIndex, type SelectState } from "#setup/cli/select-state.js";
 import type { SelectNotice } from "#setup/prompter.js";
 
-import { visibleLine, type LineState } from "./line-editor.js";
+import { maskLine, visibleLine, type LineState } from "./line-editor.js";
 import type { Theme } from "./theme.js";
-import { sliceVisible, visibleLength, wrapVisibleLine } from "./terminal-text.js";
+import {
+  clipVisible,
+  renderInputText,
+  renderInputWithBlockCursor,
+  visibleLength,
+  wrapVisibleLine,
+} from "./terminal-text.js";
 
 function clip(line: string, width: number): string {
-  if (visibleLength(line) <= width) {
-    return line;
-  }
-  const sliced = sliceVisible(line, width);
-  // Truncation can cut a color span before its close; reset so the open
-  // style cannot bleed into every row painted below.
-  return sliced.includes("\x1b[") ? `${sliced}\x1b[0m` : sliced;
+  return clipVisible(line, width);
 }
 
 /** One row of a setup select panel; the shared prompt-option shape. */
@@ -113,21 +118,27 @@ export interface FlowPanelLine {
   evidence?: boolean;
 }
 
+/** One already-resolved animation frame and its active color. */
+export interface FlowPanelIndicator {
+  glyph: string;
+  color: "green" | "yellow";
+}
+
 export type FlowPanelContent =
   | {
       kind: "question";
       rows: readonly string[];
-      /** The install wait keeps its spinner above the concurrent actions. */
-      status?: { text: string; frame: string };
+      /** The install wait keeps its indicator above the concurrent actions. */
+      status?: { text: string; indicator: FlowPanelIndicator };
     }
   | {
       kind: "status";
-      status: { text: string; frame: string };
+      status: { text: string; indicator: FlowPanelIndicator };
       /** Latest child-process output shown transiently beneath the status. */
       preview?: string;
     }
-  | { kind: "preview"; text: string; frame: string }
-  | { kind: "idle"; frame: string };
+  | { kind: "preview"; text: string; indicator: FlowPanelIndicator }
+  | { kind: "idle"; indicator: FlowPanelIndicator };
 
 /** The whole bordered section: title, recent progress, and one explicit mode. */
 export interface FlowPanelState {
@@ -174,9 +185,15 @@ function toneGlyph(tone: FlowPanelLine["tone"], theme: Theme): string {
   }
 }
 
+function renderIndicator(indicator: FlowPanelIndicator, theme: Theme): string {
+  return indicator.color === "green"
+    ? theme.colors.green(indicator.glyph)
+    : theme.colors.yellow(indicator.glyph);
+}
+
 /**
  * Paints the bordered flow panel. Everything a running command produces lives
- * here — progress, questions, the status spinner — and the panel vanishes
+ * here — progress, questions, the status indicator — and the panel vanishes
  * wholesale when the command resolves; only the command echo and the elbow
  * outcome persist in the transcript.
  */
@@ -199,28 +216,32 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
 
   switch (state.content.kind) {
     case "question":
-      // The install wait's question rides beneath its live status spinner.
+      // The install wait's question rides beneath its live status indicator.
       if (state.content.status !== undefined) {
         rows.push(
-          `  ${c.yellow(state.content.status.frame)} ${c.dim(state.content.status.text)}`,
+          `  ${renderIndicator(state.content.status.indicator, theme)} ${c.dim(state.content.status.text)}`,
           "",
         );
       }
       rows.push(...state.content.rows);
       break;
     case "status":
-      rows.push(`  ${c.yellow(state.content.status.frame)} ${c.dim(state.content.status.text)}`);
+      rows.push(
+        `  ${renderIndicator(state.content.status.indicator, theme)} ${c.dim(state.content.status.text)}`,
+      );
       if (state.content.preview !== undefined) {
         rows.push(`    ${c.dim(state.content.preview)}`);
       }
       break;
     case "preview":
-      rows.push(`  ${c.yellow(state.content.frame)} ${c.dim(state.content.text)}`);
+      rows.push(
+        `  ${renderIndicator(state.content.indicator, theme)} ${c.dim(state.content.text)}`,
+      );
       break;
     case "idle":
       // A flow between phases must never look dead: boxes run subprocesses
       // without narrating every gap, so the panel keeps a live pulse.
-      rows.push(`  ${c.yellow(state.content.frame)} ${c.dim("Working…")}`);
+      rows.push(`  ${renderIndicator(state.content.indicator, theme)} ${c.dim("Working…")}`);
       break;
   }
 
@@ -244,6 +265,7 @@ function optionRow(input: {
     colors: theme.colors,
     glyphs: {
       pointer: theme.glyph.pointer,
+      selectedPointer: theme.glyph.selectedPointer,
       success: theme.glyph.success,
       placeholder: theme.glyph.option,
       dot: theme.glyph.dot,
@@ -442,7 +464,7 @@ function appendSelectOptionRows(input: {
     );
 
     if (stackedHint !== undefined) {
-      rows.push(`${" ".repeat(4)}${dimWithEmphasis(stackedHint, theme)}`);
+      rows.push(`  ${renderOptionRowContinuation(dimWithEmphasis(stackedHint, theme))}`);
     }
     // Disabled descriptions explain why an inert row cannot be selected, so
     // keep them visible even though the cursor skips that row.
@@ -456,9 +478,10 @@ function appendSelectOptionRows(input: {
 function appendSubmitRow(rows: string[], cursor: number, submitIndex: number, theme: Theme): void {
   if (submitIndex < 0) return;
   const onSubmit = cursor === submitIndex;
-  const pointer = onSubmit ? theme.colors.cyan(theme.glyph.pointer) : " ";
-  const label = onSubmit ? theme.colors.cyan(theme.colors.bold("Submit")) : "Submit";
-  rows.push("", `  ${pointer} ${label}`);
+  const content = onSubmit
+    ? `${theme.glyph.selectedPointer} ${theme.colors.bold("Submit")}`
+    : "  Submit";
+  rows.push("", `  ${renderCursorRow(content, onSubmit, theme.colors)}`);
 }
 
 function appendSelectNotices(
@@ -550,7 +573,6 @@ export function renderSelectQuestion(
   // An empty message (e.g. a panel-titled menu) contributes no header rows;
   // the panel's own spacing does the separating.
   const rows = selectMessageRows(state.message, presentation.layout, theme);
-
   if (presentation.filter !== undefined) {
     rows.push(`  ${searchFilter(state.select.filter, presentation.filter.placeholder, theme)}`);
   }
@@ -609,7 +631,7 @@ export function renderSelectQuestion(
   return rows.map((row) => clip(row, width));
 }
 
-/** Paints a text question section: message, a caret-bearing input line, hints. */
+/** Paints a text question section: message, a block-cursor input line, hints. */
 export function renderTextQuestion(
   state: SetupTextPanelState,
   theme: Theme,
@@ -625,15 +647,15 @@ export function renderTextQuestion(
   rows.push(...state.message.split("\n").map((line) => `  ${c.bold(line)}`));
 
   const budget = Math.max(4, width - 4);
-  const display = state.mask
-    ? { text: "•".repeat(state.editor.text.length), cursor: state.editor.cursor }
-    : { text: state.editor.text, cursor: state.editor.cursor };
-  const { before, after } = visibleLine(display, budget, theme.glyph.ellipsis);
-  const caret = caretVisible ? c.cyan(theme.glyph.caret) : " ";
-  const body =
-    state.editor.text.length === 0 && state.placeholder !== undefined
-      ? `${caret}${c.dim(state.placeholder)}`
-      : `${before}${caret}${after}`;
+  const display = state.mask ? maskLine(state.editor) : state.editor;
+  const placeholder = state.editor.text.length === 0 ? state.placeholder : undefined;
+  const cursorLine = placeholder === undefined ? display : { text: placeholder, cursor: 0 };
+  const body = renderInputWithBlockCursor({
+    ...visibleLine(cursorLine, budget, theme.glyph.ellipsis),
+    visible: caretVisible,
+    inverse: c.inverse,
+    render: placeholder === undefined ? renderInputText : (text) => c.dim(renderInputText(text)),
+  });
   rows.push(`  ${body}`);
 
   if (state.error !== undefined) {

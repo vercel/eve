@@ -5,7 +5,7 @@ const DYNAMIC_MULTI_ALPHA_TOKEN = "dynamic-multi-alpha-Q8V3";
 /**
  * Skill smoke eval:
  * a `defineDynamic` multi-skill resolver (skills/dynamic-multi.ts) exposes
- * map entries under derived ids (`dynamic-multi__alpha`); the alpha body
+ * map entries under derived ids (`alpha`); the alpha body
  * must land in the load_skill result and the reply.
  */
 export default defineEval({
@@ -18,8 +18,7 @@ export default defineEval({
 
     t.didNotFail();
     t.completed();
-    t.calledTool("load_skill", {
-      input: { skill: "dynamic-multi__alpha" },
+    t.loadedSkill("alpha", {
       output: new RegExp(DYNAMIC_MULTI_ALPHA_TOKEN, "u"),
     });
     t.messageIncludes(DYNAMIC_MULTI_ALPHA_TOKEN);

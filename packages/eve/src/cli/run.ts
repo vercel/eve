@@ -1,13 +1,22 @@
-import { basename } from "node:path";
-
 import { Command, CommanderError, InvalidArgumentError } from "#compiled/commander/index.js";
+import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { isCodingAgentLaunch } from "#cli/agent-detection.js";
 import { eveCliBanner } from "#cli/banner.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
+import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import { LOG_DISPLAY_MODES, parseLogDisplayMode } from "#cli/dev/tui/log-display-mode.js";
+import { resolveTuiTitle, type DevelopmentTuiTarget } from "#cli/dev/tui/target.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
+import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
+import { createLogger } from "#internal/logging.js";
+import type {
+  DevelopmentServerHandle,
+  DevelopmentServerOptions,
+  ProductionServerHandle,
+} from "#internal/nitro/host/types.js";
 import type {
   AssistantResponseStatsMode,
   LogDisplayMode,
@@ -41,39 +50,21 @@ interface ProductionCliOptions {
   port?: number;
 }
 
-interface DevelopmentServerHandle {
-  readonly url: string;
-  close(): Promise<void>;
-}
-
-interface ProductionServerHandle {
-  readonly url: string;
-  close(): Promise<void>;
-  wait(): Promise<void>;
-}
-
 interface CliRuntimeDependencies {
+  isCodingAgentLaunch(): Promise<boolean>;
   buildHost(appRoot: string): Promise<string>;
   printApplicationInfo(
     logger: CliLogger,
     appRoot: string,
     options?: { json?: boolean },
   ): Promise<void>;
-  runDevelopmentTui(
-    input: { serverUrl: string; appRoot?: string; initialInput?: string } & TuiDisplayOptions,
-  ): Promise<void>;
+  runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<void>;
   runEvalCommand(
     evalIds: readonly string[],
     options: EvalCliOptions,
     logger: CliLogger,
   ): Promise<void>;
-  startHost(
-    appRoot: string,
-    options?: {
-      host?: string;
-      port?: number;
-    },
-  ): Promise<DevelopmentServerHandle>;
+  startHost(appRoot: string, options?: DevelopmentServerOptions): Promise<DevelopmentServerHandle>;
   startProductionHost(
     appRoot: string,
     options?: {
@@ -84,6 +75,31 @@ interface CliRuntimeDependencies {
 }
 
 type CliRuntimeOverrides = Partial<CliRuntimeDependencies>;
+
+const devBootLog = createLogger("dev.boot");
+
+function createDevBootProgressReporter(
+  row: ReturnType<typeof startCliLiveRow> | undefined,
+): DevBootProgressReporter {
+  return (event) => {
+    switch (event.type) {
+      case "phase-started":
+        row?.update("Building your agent", event.phase);
+        devBootLog.debug(event.phase);
+        return;
+      case "phase-finished":
+        devBootLog.debug(`${event.phase} finished`, { ms: event.elapsedMs });
+        return;
+      case "before-first-paint":
+        row?.stop();
+        return;
+      default: {
+        const exhaustive: never = event;
+        return exhaustive;
+      }
+    }
+  };
+}
 
 interface EvalCliOptions {
   json?: boolean;
@@ -246,44 +262,6 @@ export function resolveDevUiMode(input: {
   }
 
   return "tui";
-}
-
-/**
- * Resolves the terminal UI's header title: an explicit `--name`, else the
- * remote server's host (for `--url`), else the humanized app-folder name
- * (e.g. `apps/fixtures/weather-agent` → "Weather Agent"). Returns `undefined` when
- * nothing meaningful can be derived, so the runner falls back to its own
- * default.
- */
-export function resolveTuiTitle(input: {
-  name: string | undefined;
-  remoteServerUrl: string | undefined;
-  appRoot: string;
-}): string | undefined {
-  if (input.name !== undefined && input.name.length > 0) {
-    return input.name;
-  }
-
-  if (input.remoteServerUrl !== undefined) {
-    try {
-      return new URL(input.remoteServerUrl).host;
-    } catch {
-      return undefined;
-    }
-  }
-
-  const humanized = humanizeProjectName(basename(input.appRoot));
-  return humanized.length > 0 ? humanized : undefined;
-}
-
-function humanizeProjectName(name: string): string {
-  return name
-    .replace(/[-_.]+/gu, " ")
-    .trim()
-    .split(/\s+/u)
-    .filter((word) => word.length > 0)
-    .map((word) => word[0]!.toUpperCase() + word.slice(1))
-    .join(" ");
 }
 
 /**
@@ -513,23 +491,25 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
 
       loadDevelopmentEnvironmentFiles(appRoot);
 
-      const runInteractiveUi = async (serverUrl: string): Promise<void> => {
-        logger.log("");
-
-        const runDevelopmentTui = runtime.runDevelopmentTui ?? (await loadRunDevelopmentTui());
+      const runInteractiveUi = async (serverUrl: string, report?: DevBootProgressReporter) => {
+        const runDevelopmentTui = await devBootPhase(
+          "loading interactive UI",
+          async () => runtime.runDevelopmentTui ?? (await loadRunDevelopmentTui()),
+          report,
+        );
         const display = resolveTuiDisplayOptions(options);
-        const title = resolveTuiTitle({ name: options.name, remoteServerUrl, appRoot });
+        const target: DevelopmentTuiTarget =
+          remoteServerUrl === undefined
+            ? { kind: "local", serverUrl, workspaceRoot: appRoot }
+            : { kind: "remote", serverUrl, workspaceRoot: appRoot };
+        const title = resolveTuiTitle({ name: options.name, target });
         if (title !== undefined) display.name = title;
-        const tuiInput: Parameters<CliRuntimeDependencies["runDevelopmentTui"]>[0] = {
-          serverUrl,
+        const tuiInput: RunDevelopmentTuiInput = {
+          target,
+          initialInput: options.input,
+          onBootProgress: report,
           ...display,
         };
-        if (remoteServerUrl === undefined) {
-          tuiInput.appRoot = appRoot;
-        }
-        if (options.input !== undefined) {
-          tuiInput.initialInput = options.input;
-        }
         await runDevelopmentTui(tuiInput);
       };
 
@@ -553,19 +533,21 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
           return;
         }
 
+        logger.log("");
         await runInteractiveUi(remoteServerUrl);
         return;
       }
 
-      const startHost = runtime.startHost ?? (await loadStartHost());
-      const server = await startHost(appRoot, {
-        host: options.host,
-        port: options.port,
-      });
-      let closed = false;
+      // Print spacing before the live row; a later write would strand the row.
+      if (mode === "tui") logger.log("");
+      const buildProgress = mode === "tui" ? startCliLiveRow(logger) : undefined;
+      const onBootProgress = createDevBootProgressReporter(buildProgress);
+      buildProgress?.update("Building your agent");
 
+      let closed = false;
+      let server: DevelopmentServerHandle | undefined;
       const closeServer = async () => {
-        if (closed) {
+        if (closed || server === undefined) {
           return;
         }
 
@@ -574,6 +556,13 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       };
 
       try {
+        const startHost = runtime.startHost ?? (await loadStartHost());
+        server = await startHost(appRoot, {
+          host: options.host,
+          onBootProgress,
+          port: options.port,
+        });
+
         // The terminal UI's header already shows the server URL, and startup
         // no longer clears the screen, so the line would linger as noise.
         // Headless consumers (scripts, scenario tests) still parse it.
@@ -606,8 +595,9 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
           });
         }
 
-        await runInteractiveUi(server.url);
+        await runInteractiveUi(server.url, onBootProgress);
       } finally {
+        buildProgress?.stop();
         await closeServer();
       }
     });
@@ -629,7 +619,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       "[evalIds...]",
       "Eval ids (or directory prefixes) to run (all discovered evals when omitted)",
     )
-    .option("--url <url>", "Remote agent URL (skip local host startup)")
+    .option("--url <url>", "Remote agent URL (skip local host startup)", parseDevelopmentServerUrl)
     .option("--tag <tag...>", "Run only evals carrying a tag")
     .option("--strict", "Fail the exit code when any score falls below its threshold")
     .option("--list", "Print discovered evals without running them")
@@ -666,6 +656,19 @@ export async function runCli(
     if (error instanceof CommanderError) {
       if (error.exitCode === 0) {
         return;
+      }
+
+      // A coding agent that fumbles `eve init` (e.g. an unknown flag) trips
+      // commander before the init action runs, so the action's own agent
+      // detection never fires. Commander has already written its usage error to
+      // stderr; add the setup guide on stdout so the agent gets actionable next
+      // steps — but still fall through to throw, so the malformed invocation
+      // keeps its nonzero exit instead of silently succeeding.
+      const detectCodingAgentLaunch = runtime.isCodingAgentLaunch ?? isCodingAgentLaunch;
+      const agentLaunched = await detectCodingAgentLaunch();
+      if (input[0] === "init" && agentLaunched) {
+        const { initAgentInstructions } = await import("#cli/commands/agent-instructions.js");
+        logger.log(initAgentInstructions());
       }
 
       throw new Error(error.message);

@@ -7,7 +7,11 @@ import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { JsonObject } from "#shared/json.js";
 import type { AgentModelOptionsDefinition } from "#shared/agent-definition.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
-import type { EveEvalSubagentCallMatchOptions, EveEvalToolCallMatchOptions } from "#evals/match.js";
+import type {
+  EveEvalSkillLoadMatchOptions,
+  EveEvalSubagentCallMatchOptions,
+  EveEvalToolCallMatchOptions,
+} from "#evals/match.js";
 
 /**
  * One tool call extracted from the captured stream, pairing the
@@ -285,6 +289,8 @@ export interface EveEvalContext extends EveEvalSession {
   waiting(): AssertionHandle;
   messageIncludes(token: string | RegExp): AssertionHandle;
   calledTool(name: string, options?: EveEvalToolCallMatchOptions): AssertionHandle;
+  /** Sugar for `calledTool("load_skill", { input: { skill }, ... })`. */
+  loadedSkill(skill: string, options?: EveEvalSkillLoadMatchOptions): AssertionHandle;
   notCalledTool(name: string): AssertionHandle;
   toolOrder(names: readonly string[]): AssertionHandle;
   usedNoTools(): AssertionHandle;

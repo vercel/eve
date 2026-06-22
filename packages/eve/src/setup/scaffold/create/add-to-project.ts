@@ -93,7 +93,7 @@ export async function addAgentToProject(
   if (conflicts.length > 0) {
     throw new Error(
       `Cannot add an eve agent to "${options.projectRoot}" because it already has: ` +
-        `${conflicts.join(", ")}. Move them aside first.`,
+        `${conflicts.join(", ")}.`,
     );
   }
 

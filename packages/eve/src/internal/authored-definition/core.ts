@@ -1,4 +1,8 @@
-import type { AgentDefinition, AgentBuildDefinition } from "#public/definitions/agent.js";
+import type {
+  AgentDefinition,
+  AgentBuildDefinition,
+  AgentWorkflowDefinition,
+} from "#public/definitions/agent.js";
 import type { ScheduleDefinition, ScheduleRunHandler } from "#public/definitions/schedule.js";
 import type { SkillDefinition, SkillFileContent } from "#public/definitions/skill.js";
 import type { InstructionsDefinition } from "#public/definitions/instructions.js";
@@ -116,16 +120,47 @@ function normalizeAgentBuildDefinition(
   return normalizedDefinition;
 }
 
+function normalizeAgentWorkflowDefinition(
+  value: unknown,
+  message: string,
+): AgentWorkflowDefinition {
+  const record = expectObjectRecord(value, message);
+  expectOnlyKnownKeys(record, ["world"], message);
+  const normalizedDefinition: Mutable<AgentWorkflowDefinition> = {};
+
+  if (record.world !== undefined) {
+    normalizedDefinition.world = normalizeAgentWorkflowWorldDefinition(record.world, message);
+  }
+
+  return normalizedDefinition;
+}
+
+function normalizeAgentWorkflowWorldDefinition(
+  value: unknown,
+  message: string,
+): NonNullable<AgentWorkflowDefinition["world"]> {
+  const packageName = expectString(value, message);
+  if (packageName.trim() === "") {
+    throw new Error(`${message} "experimental.workflow.world" must be a non-empty package name.`);
+  }
+
+  return packageName;
+}
+
 function normalizeAgentExperimentalDefinition(
   value: unknown,
   message: string,
 ): NonNullable<NormalizedAgentDefinition["experimental"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["codeMode"], message);
+  expectOnlyKnownKeys(record, ["codeMode", "workflow"], message);
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["experimental"]>> = {};
 
   if (record.codeMode !== undefined) {
     normalizedDefinition.codeMode = expectBoolean(record.codeMode, message);
+  }
+
+  if (record.workflow !== undefined) {
+    normalizedDefinition.workflow = normalizeAgentWorkflowDefinition(record.workflow, message);
   }
 
   return normalizedDefinition;

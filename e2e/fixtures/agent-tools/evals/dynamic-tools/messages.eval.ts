@@ -8,10 +8,10 @@ export default defineEval({
   description: "Dynamic tools smoke: step.started resolver sees accumulated message history.",
   async test(t) {
     const first = await t.send(
-      "Use the `dynamic-messages__check_messages` tool with label 'turn1' and tell me the messageCount.",
+      "Use the `check_messages` tool with label 'turn1' and tell me the messageCount.",
     );
     first.expectOk();
-    const firstCount = requireToolOutput(first, "dynamic-messages__check_messages").messageCount;
+    const firstCount = requireToolOutput(first, "check_messages").messageCount;
     if (typeof firstCount !== "number" || firstCount < 1) {
       throw new Error(
         `Turn 1: expected messageCount >= 1, got ${JSON.stringify(firstCount)}. ` +
@@ -20,10 +20,10 @@ export default defineEval({
     }
 
     const second = await t.send(
-      "Use the `dynamic-messages__check_messages` tool again with label 'turn2' and tell me the messageCount.",
+      "Use the `check_messages` tool again with label 'turn2' and tell me the messageCount.",
     );
     second.expectOk();
-    const secondCount = requireToolOutput(second, "dynamic-messages__check_messages").messageCount;
+    const secondCount = requireToolOutput(second, "check_messages").messageCount;
     if (typeof secondCount !== "number" || secondCount <= firstCount) {
       throw new Error(
         `Turn 2: expected messageCount > ${firstCount}, got ${JSON.stringify(secondCount)}. ` +
@@ -37,6 +37,6 @@ export default defineEval({
     // (firstCount >= 1, secondCount > firstCount). The model may call the
     // tool more than once in a turn, so assert it was called without error
     // rather than pinning an exact count.
-    t.calledTool("dynamic-messages__check_messages", { isError: false });
+    t.calledTool("check_messages", { isError: false });
   },
 });

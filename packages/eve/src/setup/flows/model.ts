@@ -8,6 +8,7 @@ import { createStaticSourceChange } from "#source-change/static-source-change.js
 
 import pc from "picocolors";
 
+import { AI_GATEWAY_API_KEY_ENV_VAR } from "../ai-gateway-api-key.js";
 import { interactiveAsker } from "../ask.js";
 import { findEnvFileWithKey } from "../boxes/detect-ai-gateway.js";
 import {
@@ -22,6 +23,7 @@ import type { Prompter, SelectNotice, SelectOption } from "../prompter.js";
 import { runInteractive } from "../runner.js";
 import { snapshotSetupState } from "../state.js";
 import { WizardCancelledError } from "../step.js";
+import { withSpinner } from "../with-spinner.js";
 
 import { inProjectSetupState, prompterSink } from "./in-project.js";
 import { runVercelFlow } from "./vercel.js";
@@ -66,7 +68,7 @@ export type ModelProviderStatus =
   | { kind: "gateway-project"; projectName: string; teamName?: string }
   | {
       kind: "gateway-key";
-      envKey: "AI_GATEWAY_API_KEY" | "VERCEL_OIDC_TOKEN";
+      envKey: typeof AI_GATEWAY_API_KEY_ENV_VAR | "VERCEL_OIDC_TOKEN";
       envFile: string;
     };
 
@@ -79,7 +81,7 @@ export type ModelProviderStatus =
  * disk — so it never surfaces as an outcome.
  */
 export interface ModelProviderOutcome {
-  credential?: "VERCEL_OIDC_TOKEN" | "AI_GATEWAY_API_KEY";
+  credential?: "VERCEL_OIDC_TOKEN" | typeof AI_GATEWAY_API_KEY_ENV_VAR;
   status: ModelProviderStatus;
 }
 
@@ -191,7 +193,7 @@ export async function detectModelProviderStatus(
 ): Promise<ModelProviderStatus> {
   const [identity, gatewayKeyFile, oidcFile] = await Promise.all([
     detectProjectIdentity(appRoot, options),
-    findEnvFileWithKey(appRoot, "AI_GATEWAY_API_KEY"),
+    findEnvFileWithKey(appRoot, AI_GATEWAY_API_KEY_ENV_VAR),
     findEnvFileWithKey(appRoot, "VERCEL_OIDC_TOKEN"),
   ]);
   if (identity !== undefined) {
@@ -203,7 +205,7 @@ export async function detectModelProviderStatus(
     return status;
   }
   if (gatewayKeyFile !== undefined) {
-    return { kind: "gateway-key", envKey: "AI_GATEWAY_API_KEY", envFile: gatewayKeyFile };
+    return { kind: "gateway-key", envKey: AI_GATEWAY_API_KEY_ENV_VAR, envFile: gatewayKeyFile };
   }
   if (oidcFile !== undefined) {
     return { kind: "gateway-key", envKey: "VERCEL_OIDC_TOKEN", envFile: oidcFile };
@@ -226,6 +228,8 @@ export async function detectModelProviderStatus(
 export async function runModelFlow(input: {
   appRoot: string;
   prompter: Prompter;
+  /** Opens provider setup before the root menu when runtime evidence requires it. */
+  initialStep?: "provider";
   signal?: AbortSignal;
   deps?: Partial<ModelFlowDeps>;
 }): Promise<ModelFlowResult> {
@@ -238,22 +242,15 @@ export async function runModelFlow(input: {
     ...input.deps,
   };
 
-  async function checkProject<T>(task: () => Promise<T>): Promise<T> {
-    const spinner = prompter.log.spinner?.("Checking the project…");
-    try {
-      return await task();
-    } finally {
-      spinner?.stop();
-    }
-  }
-
   // The model read is local, the provider status is a `vercel` round-trip;
   // one ephemeral spinner covers both so the menu paints with no persisted
   // loading lines.
   const detectProvider = (): Promise<ModelProviderStatus> =>
     deps.detectProviderStatus(appRoot, { signal });
-  let [{ id: current, routing, editable }, provider] = await checkProject(() =>
-    Promise.all([deps.readCurrentModel(appRoot), detectProvider()]),
+  let [{ id: current, routing, editable }, provider] = await withSpinner(
+    prompter,
+    "Checking the project…",
+    () => Promise.all([deps.readCurrentModel(appRoot), detectProvider()]),
   );
   signal?.throwIfAborted();
 
@@ -277,20 +274,29 @@ export async function runModelFlow(input: {
         : routing?.kind === "external"
           ? "done"
           : "provider";
+  // A gateway model with no provider cannot run. Skip the menu's extra Enter
+  // and open provider setup as soon as that state is confirmed.
+  let openProviderFirst =
+    routing?.kind !== "external" && (input.initialStep === "provider" || provider.kind === "unset");
 
   while (true) {
     let pick: ModelMenuRow;
-    try {
-      pick = await prompter.select<ModelMenuRow>({
-        message: MODEL_MENU_MESSAGE,
-        options: modelMenuRows(current, provider, routing, editable),
-        hintLayout: "stacked",
-        initialValue: nextSelection,
-        notices: externalNotice === undefined ? [] : [externalNotice],
-      });
-    } catch (error) {
-      if (!(error instanceof WizardCancelledError)) throw error;
-      break;
+    if (openProviderFirst) {
+      openProviderFirst = false;
+      pick = "provider";
+    } else {
+      try {
+        pick = await prompter.select<ModelMenuRow>({
+          message: MODEL_MENU_MESSAGE,
+          options: modelMenuRows(current, provider, routing, editable),
+          hintLayout: "stacked",
+          initialValue: nextSelection,
+          notices: externalNotice === undefined ? [] : [externalNotice],
+        });
+      } catch (error) {
+        if (!(error instanceof WizardCancelledError)) throw error;
+        break;
+      }
     }
 
     if (pick === "done") break;
@@ -328,7 +334,7 @@ export async function runModelFlow(input: {
     }
     // Only a completed link/own-key sub-flow can move the link or
     // credentials, so this is the one place the status is re-read.
-    provider = await checkProject(detectProvider);
+    provider = await withSpinner(prompter, "Checking the project…", detectProvider);
     signal?.throwIfAborted();
     providerOutcome = { status: provider };
     if (result.credential !== undefined) providerOutcome.credential = result.credential;
@@ -363,14 +369,8 @@ async function pickModelFromCatalog(input: {
     deps: {
       // The box fetches inside its gather, so the catalog spinner has to ride
       // the fetch itself to bracket exactly the slow part.
-      fetchModels: async (requestSignal) => {
-        const spinner = prompter.log.spinner?.("Loading the model catalog...");
-        try {
-          return await baseFetch(requestSignal);
-        } finally {
-          spinner?.stop();
-        }
-      },
+      fetchModels: (requestSignal) =>
+        withSpinner(prompter, "Loading the model catalog...", () => baseFetch(requestSignal)),
     },
   };
   if (current !== null) options.defaultModel = current;

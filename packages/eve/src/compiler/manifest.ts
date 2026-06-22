@@ -39,7 +39,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 29;
+export const COMPILED_AGENT_MANIFEST_VERSION = 30;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -318,6 +318,14 @@ const compiledAgentBuildDefinitionSchema: z.ZodType<CompiledAgentBuildDefinition
   })
   .strict();
 
+const compiledAgentWorkflowWorldDefinitionSchema = z.string();
+
+const compiledAgentWorkflowDefinitionSchema = z
+  .object({
+    world: compiledAgentWorkflowWorldDefinitionSchema.optional(),
+  })
+  .strict();
+
 const compiledAgentCompactionDefinitionSchema: z.ZodType<CompiledAgentCompactionDefinition> = z
   .object({
     model: compiledRuntimeModelReferenceSchema.optional(),
@@ -330,7 +338,13 @@ const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
     build: compiledAgentBuildDefinitionSchema.optional(),
     compaction: compiledAgentCompactionDefinitionSchema.optional(),
     description: z.string().optional(),
-    experimental: z.object({ codeMode: z.boolean().optional() }).strict().optional(),
+    experimental: z
+      .object({
+        codeMode: z.boolean().optional(),
+        workflow: compiledAgentWorkflowDefinitionSchema.optional(),
+      })
+      .strict()
+      .optional(),
     model: compiledRuntimeModelReferenceSchema,
     name: z.string(),
     outputSchema: jsonObjectSchema.optional(),
@@ -665,7 +679,15 @@ export function createCompiledAgentNodeManifest(input: {
       experimental:
         input.config.experimental === undefined
           ? undefined
-          : { codeMode: input.config.experimental.codeMode },
+          : {
+              codeMode: input.config.experimental.codeMode,
+              workflow:
+                input.config.experimental.workflow === undefined
+                  ? undefined
+                  : {
+                      world: input.config.experimental.workflow.world,
+                    },
+            },
       model: cloneCompiledRuntimeModelReference(input.config.model),
       name: input.config.name,
       outputSchema: input.config.outputSchema,

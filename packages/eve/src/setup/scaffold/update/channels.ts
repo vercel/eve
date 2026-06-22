@@ -31,12 +31,15 @@ const DEFAULT_TYPES_REACT_PACKAGE_VERSION = "__TYPES_REACT_VERSION__";
 const DEFAULT_TYPES_REACT_DOM_PACKAGE_VERSION = "__TYPES_REACT_DOM_VERSION__";
 const CONNECT_PACKAGE_NAME = "@vercel/connect";
 const NEXT_PACKAGE_NAME = "next";
-const PACKAGE_DEPENDENCY_FIELDS = [
-  "dependencies",
-  "devDependencies",
-  "peerDependencies",
-  "optionalDependencies",
+const VERCEL_HOST_FRAMEWORK_PACKAGE_NAMES = [
+  "@sveltejs/kit",
+  NEXT_PACKAGE_NAME,
+  "nuxt",
+  "nuxt3",
+  "nuxt-edge",
+  "nuxt-nightly",
 ] as const;
+const PACKAGE_DEPENDENCY_FIELDS = ["dependencies", "devDependencies"] as const;
 const USER_AUTHORED_CHANNEL_DIR = "agent/channels";
 const WEB_CHANNEL_PATH = "agent/channels/eve.ts";
 const WEB_NEXT_CONFIG_PATH = "next.config.ts";
@@ -167,15 +170,40 @@ async function hasPackageDependency(
   return isJsonObject(parsed) && packageJsonHasDependency(parsed, dependencyName);
 }
 
+async function hasAnyPackageDependency(
+  packageJsonPath: string,
+  dependencyNames: readonly string[],
+): Promise<boolean> {
+  if (!(await pathExists(packageJsonPath))) return false;
+
+  const parsed: unknown = JSON.parse(await readFile(packageJsonPath, "utf8"));
+  if (!isJsonObject(parsed)) return false;
+
+  return dependencyNames.some((dependencyName) => packageJsonHasDependency(parsed, dependencyName));
+}
+
 /**
  * Whether the project already carries a Next.js app: `package.json` declares a
- * `next` dependency in any dependency field. This is the exact predicate the
+ * `next` dependency in the same dependency fields Vercel framework detection
+ * checks. This is the exact predicate the
  * web scaffold skips on (`skipReason: "nextjs-project"`), so pickers can mark
  * Web Chat as already present precisely when scaffolding would be a no-op.
  * A missing `package.json` reads as "no app".
  */
 export async function isNextJsProject(projectRoot: string): Promise<boolean> {
   return hasPackageDependency(join(projectRoot, "package.json"), NEXT_PACKAGE_NAME);
+}
+
+/**
+ * Whether the root app declares a Vercel framework that should own the
+ * top-level deployment while eve runs as a sibling service. These match Eve's
+ * current framework integrations: Next.js, Nuxt, and SvelteKit.
+ */
+export async function hasVercelHostFramework(projectRoot: string): Promise<boolean> {
+  return hasAnyPackageDependency(
+    join(projectRoot, "package.json"),
+    VERCEL_HOST_FRAMEWORK_PACKAGE_NAMES,
+  );
 }
 
 async function ensurePackageDependency(

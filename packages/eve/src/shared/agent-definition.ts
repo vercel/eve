@@ -109,6 +109,11 @@ export interface AgentExperimentalDefinition {
    * environment variable (`"1"` enables it) for backwards compatibility.
    */
   readonly codeMode?: boolean;
+  /**
+   * Durable Workflow runtime configuration. Root agents may use this to select
+   * the Workflow world backing sessions and runs.
+   */
+  readonly workflow?: AgentWorkflowDefinition;
 }
 
 /**
@@ -128,6 +133,26 @@ export interface AgentBuildDefinition {
    * `server/node_modules` in hosted output.
    */
   readonly externalDependencies?: string[];
+}
+
+/**
+ * Package name for a Workflow world module.
+ *
+ * The package must export either a default factory or a `createWorld` factory.
+ * The factory is called at runtime so credentials and deployment-specific
+ * options can come from environment variables instead of the compiled manifest.
+ */
+export type AgentWorkflowWorldDefinition = string;
+
+/**
+ * Advanced durable-runtime configuration for eve's Workflow SDK integration.
+ */
+export interface AgentWorkflowDefinition {
+  /**
+   * Workflow world module used for durable workflow storage, queueing, hooks,
+   * and streaming.
+   */
+  readonly world?: AgentWorkflowWorldDefinition;
 }
 
 /**

@@ -3,6 +3,7 @@ import { runVercel } from "#setup/primitives/run-vercel.js";
 import { getVercelAuthStatus, type VercelAuthStatus } from "#setup/vercel-project.js";
 
 import type { Prompter } from "../prompter.js";
+import { withSpinner } from "../with-spinner.js";
 
 export type LoginFlowResult =
   /** A `vercel whoami` already succeeds; nothing to do. */
@@ -50,19 +51,6 @@ const defaultDeps: LoginFlowDeps = {
       signal,
     }),
 };
-
-async function withSpinner<T>(
-  prompter: Prompter,
-  message: string,
-  task: () => Promise<T>,
-): Promise<T> {
-  const spinner = prompter.log.spinner?.(message);
-  try {
-    return await task();
-  } finally {
-    spinner?.stop();
-  }
-}
 
 /**
  * Runs `vercel login` while the dev TUI stays live, mirroring the Slack Connect

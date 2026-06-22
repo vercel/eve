@@ -147,12 +147,23 @@ function capturePackageManager(
         process.stderr.write(`\n${message}\n`);
       }
     }
+    function replayCapturedStdout(): void {
+      const captured = Buffer.concat(stdout);
+      if (captured.length === 0) return;
+      if (outputBuffer) {
+        outputBuffer.write("stdout", captured);
+        outputBuffer.flush();
+      } else {
+        process.stdout.write(captured);
+      }
+    }
 
     child.on("error", (error: NodeJS.ErrnoException) => {
       if (options.signal?.aborted === true || error.name === "AbortError") {
         return;
       } else {
         disarmAbort();
+        replayCapturedStdout();
         reportFailure(
           error.code === "ENOENT"
             ? `${kind} not found. Install it before running this step.`
@@ -164,6 +175,7 @@ function capturePackageManager(
     child.on("close", (code) => {
       disarmAbort();
       if (!settled && code !== 0 && options.signal?.aborted !== true) {
+        replayCapturedStdout();
         reportFailure(`${kind} ${args.join(" ")} exited with code ${code ?? "unknown"}.`);
       }
       settle(options.signal?.aborted === true ? false : code === 0);

@@ -67,8 +67,11 @@ const client = new Client({
   headers: async () => ({
     "x-vercel-protection-bypass": await getBypassToken(),
   }),
+  redirect: "manual",
 });
 ```
+
+Set `redirect` to `"manual"` or `"error"` on credential-bearing clients so fetch cannot forward custom authorization headers to another origin. The policy applies to inspection requests, custom fetches, session creation, and event streams.
 
 Per-request headers can be attached to an individual turn:
 

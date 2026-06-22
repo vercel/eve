@@ -44,7 +44,9 @@ function flowDeps(overrides: Partial<ModelFlowDeps> = {}): Partial<ModelFlowDeps
         ({ kind: "changed", to: slug }) as const,
     ),
     selectModel: { fetchModels: async () => CATALOG },
-    detectProviderStatus: vi.fn(async () => ({ kind: "unset" }) as const),
+    detectProviderStatus: vi.fn(
+      async () => ({ kind: "gateway-project", projectName: "my-agent" }) as const,
+    ),
     runVercelFlow: vi.fn(async () => ({ kind: "done" }) as const),
     ...overrides,
   };
@@ -94,7 +96,7 @@ function scriptedPrompter(input: { menu: (PrompterValue | "esc")[]; picker?: str
 }
 
 describe("runModelFlow", () => {
-  it("paints a stacked menu with the running model and a required provider row", async () => {
+  it("paints a stacked menu with the running model and configured provider", async () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps: flowDeps() })).resolves.toEqual({
@@ -107,17 +109,14 @@ describe("runModelFlow", () => {
           { value: "model", label: "Change model", hint: "anthropic/claude-sonnet-4.6" },
           {
             value: "provider",
-            label: pc.bold(pc.yellow("Configure provider")),
-            hint: "Required to enable the agent",
-            accent: "warning",
+            label: "Change provider",
+            hint: `AI Gateway (Linked to ${pc.bold("my-agent")})`,
           },
           { value: "done", label: "Done" },
         ],
         notices: [],
         hintLayout: "stacked",
-        // An unconfigured provider is what the agent needs first, so the menu
-        // opens on that row.
-        initialValue: "provider",
+        initialValue: "model",
       },
     ]);
   });
@@ -292,8 +291,8 @@ describe("runModelFlow", () => {
     expect(menuPaints).toHaveLength(1);
   });
 
-  it("returns to the prompt after provider setup", async () => {
-    const { prompter, menuPaints } = scriptedPrompter({ menu: ["provider"] });
+  it("opens provider setup directly when none is configured", async () => {
+    const { prompter, menuPaints } = scriptedPrompter({ menu: [] });
     const detectProviderStatus = vi
       .fn<ModelFlowDeps["detectProviderStatus"]>()
       .mockResolvedValueOnce({ kind: "unset" })
@@ -313,7 +312,33 @@ describe("runModelFlow", () => {
 
     expect(runVercelFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
     expect(detectProviderStatus).toHaveBeenCalledTimes(2);
-    expect(menuPaints).toHaveLength(1);
+    expect(menuPaints).toHaveLength(0);
+  });
+
+  it("honors confirmed provider entry when link metadata looks configured", async () => {
+    const { prompter, menuPaints } = scriptedPrompter({ menu: [] });
+    const runVercelFlow = vi.fn<ModelFlowDeps["runVercelFlow"]>(
+      async () => ({ kind: "done", credential: "VERCEL_OIDC_TOKEN" }) as const,
+    );
+    const deps = flowDeps({ runVercelFlow });
+
+    await expect(
+      runModelFlow({
+        appRoot: APP_ROOT,
+        prompter,
+        initialStep: "provider",
+        deps,
+      }),
+    ).resolves.toEqual({
+      kind: "done",
+      providerOutcome: {
+        credential: "VERCEL_OIDC_TOKEN",
+        status: { kind: "gateway-project", projectName: "my-agent" },
+      },
+    });
+
+    expect(runVercelFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
+    expect(menuPaints).toHaveLength(0);
   });
 
   it("treats the external-provider branch as informational — no notice, no outcome", async () => {

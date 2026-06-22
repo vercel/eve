@@ -1,54 +1,48 @@
-import { execSync } from "node:child_process";
-import { rmSync } from "node:fs";
+import { execFile, type ExecFileOptions } from "node:child_process";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 const GIT_TIMEOUT_MS = 5_000;
+const runFile = promisify(execFile);
 
 export type GitInitResult =
   | { kind: "initialized" }
   | { kind: "skipped" }
   | { kind: "failed"; reason: string };
 
-function isGitAvailable(): boolean {
+async function commandSucceeds(
+  command: string,
+  args: readonly string[],
+  cwd?: string,
+): Promise<boolean> {
   try {
-    execSync("git --version", { stdio: "ignore", timeout: GIT_TIMEOUT_MS });
+    const options: ExecFileOptions = { timeout: GIT_TIMEOUT_MS, windowsHide: true };
+    if (cwd !== undefined) options.cwd = cwd;
+    await runFile(command, [...args], options);
     return true;
   } catch {
     return false;
   }
 }
 
-function isInsideExistingRepository(cwd: string): boolean {
-  try {
-    execSync("git rev-parse --is-inside-work-tree", {
-      cwd,
-      stdio: "ignore",
-      timeout: GIT_TIMEOUT_MS,
-    });
-    return true;
-  } catch {
-    // Fall through to the Mercurial probe.
-  }
-
-  try {
-    execSync("hg --cwd . root", { cwd, stdio: "ignore", timeout: GIT_TIMEOUT_MS });
-    return true;
-  } catch {
-    return false;
-  }
+function isGitAvailable(): Promise<boolean> {
+  return commandSucceeds("git", ["--version"]);
 }
 
-function hasConfiguredDefaultBranch(cwd: string): boolean {
-  try {
-    execSync("git config init.defaultBranch", {
-      cwd,
-      stdio: "ignore",
-      timeout: GIT_TIMEOUT_MS,
-    });
-    return true;
-  } catch {
-    return false;
-  }
+async function isInsideExistingRepository(cwd: string): Promise<boolean> {
+  return (
+    (await commandSucceeds("git", ["rev-parse", "--is-inside-work-tree"], cwd)) ||
+    (await commandSucceeds("hg", ["--cwd", ".", "root"], cwd))
+  );
+}
+
+function hasConfiguredDefaultBranch(cwd: string): Promise<boolean> {
+  return commandSucceeds("git", ["config", "init.defaultBranch"], cwd);
+}
+
+async function runGit(cwd: string, args: readonly string[]): Promise<void> {
+  await runFile("git", [...args], { cwd, timeout: GIT_TIMEOUT_MS, windowsHide: true });
 }
 
 /**
@@ -57,38 +51,26 @@ function hasConfiguredDefaultBranch(cwd: string): boolean {
  * initialization is removed and returned as a `failed` result; presenting the
  * failure (without failing `eve init`) is the caller's job.
  */
-export function tryInitializeGit(projectPath: string): GitInitResult {
-  if (!isGitAvailable() || isInsideExistingRepository(projectPath)) {
+export async function tryInitializeGit(projectPath: string): Promise<GitInitResult> {
+  if (!(await isGitAvailable()) || (await isInsideExistingRepository(projectPath))) {
     return { kind: "skipped" };
   }
 
   let initialized = false;
   try {
-    execSync("git init", { cwd: projectPath, stdio: "ignore", timeout: GIT_TIMEOUT_MS });
+    await runGit(projectPath, ["init"]);
     initialized = true;
 
-    if (!hasConfiguredDefaultBranch(projectPath)) {
-      execSync("git checkout -b main", {
-        cwd: projectPath,
-        stdio: "ignore",
-        timeout: GIT_TIMEOUT_MS,
-      });
+    if (!(await hasConfiguredDefaultBranch(projectPath))) {
+      await runGit(projectPath, ["checkout", "-b", "main"]);
     }
 
-    execSync("git add -A", { cwd: projectPath, stdio: "ignore", timeout: GIT_TIMEOUT_MS });
-    execSync('git commit -m "Initial commit from eve"', {
-      cwd: projectPath,
-      stdio: "ignore",
-      timeout: GIT_TIMEOUT_MS,
-    });
+    await runGit(projectPath, ["add", "-A"]);
+    await runGit(projectPath, ["commit", "-m", "Initial commit from eve"]);
     return { kind: "initialized" };
   } catch (error) {
     if (initialized) {
-      try {
-        rmSync(join(projectPath, ".git"), { recursive: true, force: true });
-      } catch {
-        // Best-effort cleanup.
-      }
+      await rm(join(projectPath, ".git"), { recursive: true, force: true }).catch(() => {});
     }
 
     const reason = error instanceof Error ? error.message : String(error);

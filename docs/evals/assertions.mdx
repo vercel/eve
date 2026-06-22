@@ -17,6 +17,7 @@ Run-level assertions read the whole run, so they take no value. They are methods
 | `t.messageIncludes(token)`                          | Joined assistant text contains `token` (string or RegExp)                               |
 | `t.outputEquals(value)` / `t.outputMatches(schema)` | Deep equality or Standard Schema (e.g. Zod) validation of the agent's structured output |
 | `t.calledTool(name, opts?)`                         | A matching tool call happened (`input`, `output`, `isError`, `times` constraints)       |
+| `t.loadedSkill(skill, opts?)`                       | Sugar for `t.calledTool("load_skill", { input: { skill }, ...opts })`                   |
 | `t.notCalledTool(name)`                             | No call to `name`                                                                       |
 | `t.toolOrder([...names])`                           | Tool names appear in order (other calls may interleave)                                 |
 | `t.usedNoTools()`                                   | No tool calls at all                                                                    |

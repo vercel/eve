@@ -200,6 +200,70 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("uses the turn pulse while waiting for the first stream event", async () => {
+    vi.useFakeTimers();
+    try {
+      const { screen, renderer } = makeRenderer();
+      renderer.renderAgentHeader({
+        name: "Weather Agent",
+        serverUrl: "http://localhost:3000",
+        info: agentInfoWithModel("gpt-5"),
+      });
+      let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+      const rendering = renderer.renderStream(
+        {
+          events: new ReadableStream<AgentTUIStreamEvent>({
+            start(controller) {
+              streamController = controller;
+            },
+          }),
+        },
+        { submittedPrompt: "hello", continueSession: true },
+      );
+
+      await Promise.resolve();
+      let lines = screen.snapshot().split("\n");
+      let workingRow = lines.findIndex((line) => line === "  ⊙ Working…");
+      expect(workingRow).toBeGreaterThan(-1);
+      expect(lines[workingRow + 1]).toBe("");
+      expect(lines[workingRow + 2]).toContain("gpt-5");
+
+      vi.advanceTimersByTime(450);
+      expect(screen.snapshot()).not.toContain("⊙ Working…");
+      lines = screen.snapshot().split("\n");
+      workingRow = lines.findIndex((line) => line === "    Working…");
+      expect(workingRow).toBeGreaterThan(-1);
+      expect(lines[workingRow + 1]).toBe("");
+      expect(lines[workingRow + 2]).toContain("gpt-5");
+
+      streamController?.close();
+      await rendering;
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses an ASCII fallback for the turn pulse", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: false,
+    });
+    const prompt = renderer.readPrompt();
+
+    input.type("hello");
+    input.enter();
+
+    expect(await prompt).toBe("hello");
+    expect(screen.snapshot()).toContain("  o Working…");
+    expect(screen.snapshot()).not.toContain("⊙");
+    renderer.shutdown();
+  });
+
   it("interrupts a running response and returns to the prompt without exiting", async () => {
     const { screen, input, renderer } = makeRenderer();
     let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
@@ -234,6 +298,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(abort).toHaveBeenCalledTimes(1);
     expect(screen.snapshot()).toContain("Interrupted");
     expect(input.rawModes).toEqual([true]);
+    expect(screen.rawOutput()).toContain("\x1b[?2004h");
 
     // Control returns to the prompt rather than exiting; the next prompt works.
     const nextPrompt = renderer.readPrompt();
@@ -243,6 +308,149 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     renderer.shutdown();
     expect(input.rawModes).toEqual([true, false]);
+    expect(screen.rawOutput()).toContain("\x1b[?2004l");
+  });
+
+  it("reassembles and renders a byte-split multi-line paste", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const text = "first 😀\nsecond 界";
+
+    const prompt = renderer.readPrompt();
+    for (const byte of Buffer.from(`\x1b[200~${text}\x1b[201~`)) {
+      input.emit("data", Buffer.of(byte));
+    }
+
+    const lines = screen.snapshot().split("\n");
+    const firstRow = lines.findIndex((line) => line.includes("first 😀"));
+    const secondRow = lines.findIndex((line) => line.includes("second 界"));
+    expect(firstRow).toBeGreaterThanOrEqual(0);
+    expect(secondRow).toBe(firstRow + 1);
+    expect(screen.snapshot()).not.toContain("⏎");
+
+    input.enter();
+    expect(await prompt).toBe(text);
+    renderer.shutdown();
+  });
+
+  it("clears a non-empty prompt on Ctrl+C, and quits only when already empty", async () => {
+    const { input, renderer } = makeRenderer();
+
+    const prompt = renderer.readPrompt();
+    input.type("draft message");
+    input.ctrlC(); // first Ctrl+C clears the buffer instead of quitting
+    input.type("real message");
+    input.enter();
+
+    // The cleared draft is gone (otherwise this would be "draft messagereal message").
+    expect(await prompt).toBe("real message");
+
+    // A Ctrl+C on the now-empty prompt quits.
+    const second = renderer.readPrompt();
+    input.ctrlC();
+    await expect(second).rejects.toThrow();
+
+    renderer.shutdown();
+  });
+
+  it("windows a line longer than the terminal around the caret", async () => {
+    const { screen, input, renderer } = makeRenderer(20); // narrow terminal
+
+    const prompt = renderer.readPrompt();
+    input.type("abcdefghijklmnopqrstuvwxyz"); // 26 chars into ~18 columns of room
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("xyz"); // the caret end stays visible
+    expect(snapshot).toContain("…"); // the truncated head is marked
+    expect(snapshot).not.toContain("abcde"); // the head scrolled off
+
+    input.enter();
+    expect(await prompt).toBe("abcdefghijklmnopqrstuvwxyz"); // full text still submits
+    renderer.shutdown();
+  });
+
+  it("draws the block cursor over the character under it without inserting a cell", async () => {
+    const { screen, input, renderer } = makeRenderer();
+
+    const prompt = renderer.readPrompt();
+    input.type("hello");
+    input.left();
+    input.left(); // caret between "hel" and "lo"
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("hello"); // text stays contiguous, not split by a caret
+    expect(snapshot).not.toContain("▏"); // no inserted bar-caret cell
+    // The block caret is reverse-video (SGR 7) over the grapheme under the
+    // cursor; snapshot() strips SGR, so assert it on the raw output.
+    expect(screen.rawOutput()).toContain("\x1b[7m");
+
+    input.enter();
+    await prompt;
+    renderer.shutdown();
+  });
+
+  it("recovers from an unterminated bracketed paste instead of wedging input", async () => {
+    vi.useFakeTimers();
+    try {
+      const { input, renderer } = makeRenderer();
+      const prompt = renderer.readPrompt();
+      input.send("\x1b[200~first\nsecond"); // paste start, closing marker never arrives
+      vi.advanceTimersByTime(1_100); // past the incomplete-paste flush
+      input.type("X"); // input still works rather than being wedged
+      input.enter();
+      expect(await prompt).toBe("first\nsecondX");
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("inserts a newline on Shift+Enter and submits the whole multi-line buffer", async () => {
+    const { input, renderer } = makeRenderer();
+
+    const prompt = renderer.readPrompt();
+    input.type("line one");
+    input.send("\x1b[27;2;13~"); // Shift+Enter (xterm modifyOtherKeys)
+    input.type("line two");
+    input.enter();
+
+    expect(await prompt).toBe("line one\nline two");
+    renderer.shutdown();
+  });
+
+  it("moves the caret into the line above on ↑, then edits it", async () => {
+    const { input, renderer } = makeRenderer();
+
+    const prompt = renderer.readPrompt();
+    input.send("\x1b[200~ab\ncd\x1b[201~"); // caret lands after "cd"
+    input.up(); // to the end of "ab"
+    input.type("X");
+    input.enter();
+
+    expect(await prompt).toBe("abX\ncd");
+    renderer.shutdown();
+  });
+
+  it("bounds a tall prompt and moves its viewport with the caret", async () => {
+    const { screen, input, renderer } = makeRenderer(40, 8);
+    const lines = Array.from({ length: 20 }, (_, index) => `line ${index + 1}`);
+
+    const prompt = renderer.readPrompt();
+    input.send(`\x1b[200~${lines.join("\n")}\x1b[201~`);
+
+    expect(screen.snapshot().split("\n").length).toBeLessThanOrEqual(8);
+    expect(screen.snapshot()).toContain("line 20");
+    expect(screen.snapshot()).toContain("…");
+
+    for (let index = 0; index < 15; index += 1) input.up();
+
+    expect(screen.snapshot()).toContain("line 5");
+    expect(screen.snapshot()).not.toContain("line 20");
+
+    input.type("X");
+    input.enter();
+    lines[4] += "X";
+    expect(await prompt).toBe(lines.join("\n"));
+    renderer.shutdown();
   });
 
   it("renders reused stream block ids across separate prompt turns", async () => {
@@ -499,8 +707,52 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("does not paint a prompt while input is detached for a running turn", async () => {
+  it("starts the turn pulse as soon as the prompt is submitted", async () => {
+    vi.useFakeTimers();
+    try {
+      const { screen, input, renderer } = makeRenderer();
+      const prompt = renderer.readPrompt();
+
+      input.type("hello");
+      input.enter();
+
+      expect(await prompt).toBe("hello");
+      expect(screen.snapshot()).toContain("  ⊙ Working…");
+
+      vi.advanceTimersByTime(450);
+      expect(screen.snapshot()).not.toContain("⊙ Working…");
+      expect(screen.snapshot()).toContain("    Working…");
+
+      let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+      const rendering = renderer.renderStream(
+        {
+          events: new ReadableStream<AgentTUIStreamEvent>({
+            start(controller) {
+              streamController = controller;
+            },
+          }),
+        },
+        { continueSession: true },
+      );
+      await Promise.resolve();
+      expect(screen.snapshot()).not.toContain("⊙ Working…");
+      expect(screen.snapshot()).toContain("    Working…");
+
+      streamController?.close();
+      await rendering;
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("removes the turn indicator when reasoning starts", async () => {
     const { screen, renderer } = makeRenderer();
+    renderer.renderAgentHeader({
+      name: "Weather Agent",
+      serverUrl: "http://localhost:3000",
+      info: agentInfoWithModel("gpt-5"),
+    });
     let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
     const rendering = renderer.renderStream(
       {
@@ -519,11 +771,16 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
     const lines = screen.snapshot().split("\n");
     const thinkingRow = lines.findIndex((line) => line.includes("thinking"));
-    const workingRow = lines.findIndex((line) => line.includes("Responding…"));
+    const workingRow = lines.findIndex(
+      (line) => line.includes("Working…") || line.includes("Responding…"),
+    );
+    const modelRow = lines.findIndex((line) => line.includes("gpt-5"));
     const inputRow = lines.findIndex((line) => line.includes("❯"));
 
     expect(thinkingRow).toBeGreaterThan(-1);
-    expect(workingRow).toBeGreaterThan(thinkingRow);
+    expect(workingRow).toBe(-1);
+    expect(lines[thinkingRow + 1]).toBe("");
+    expect(modelRow).toBe(thinkingRow + 2);
     expect(inputRow).toBe(-1);
 
     streamController?.close();
@@ -570,6 +827,102 @@ describe("TerminalRenderer (inline scrollback)", () => {
     input.type("no");
     input.enter();
     await answer;
+    expect(screen.snapshot()).toContain("⊙ Working…");
+    renderer.shutdown();
+  });
+
+  it("preserves bracketed multi-line paste in freeform question input", async () => {
+    const { input, renderer } = makeRenderer();
+
+    const answer = renderer.readInputQuestion({
+      requestId: "q1",
+      prompt: "What city are you in?",
+      display: "text",
+      options: [],
+      allowFreeform: true,
+    });
+    input.send("\x1b[200~New\nYork\x1b[201~");
+    input.enter();
+
+    await expect(answer).resolves.toEqual({ text: "New\nYork" });
+    renderer.shutdown();
+  });
+
+  it("renders the selected question option as a padded inverse-blue label", async () => {
+    const { screen, input, renderer } = makeRenderer();
+
+    const answer = renderer.readInputQuestion({
+      requestId: "q1",
+      prompt: "Choose access",
+      display: "select",
+      options: [
+        { id: "gateway", label: "AI Gateway", description: "Managed access" },
+        { id: "external", label: "Other providers", description: "Direct access" },
+      ],
+    });
+
+    const selected = screen
+      .snapshot()
+      .split("\n")
+      .find((line) => line.includes("AI Gateway"));
+    expect(selected).toContain(" ▶ AI Gateway ");
+    expect(screen.rawOutput()).toContain("\x1b[7m");
+    expect(screen.rawOutput()).toContain("\x1b[34m");
+
+    const selectedDescriptionColumn = selected?.indexOf("— Managed access");
+    expect(selectedDescriptionColumn).toBeGreaterThanOrEqual(0);
+    input.down();
+    const unselected = screen
+      .snapshot()
+      .split("\n")
+      .find((line) => line.includes("AI Gateway"));
+    expect(unselected?.indexOf("— Managed access")).toBe(selectedDescriptionColumn);
+    input.up();
+
+    input.enter();
+    await expect(answer).resolves.toEqual({ optionId: "gateway" });
+    renderer.shutdown();
+  });
+
+  it("edits freeform question input across lines", async () => {
+    const { input, renderer } = makeRenderer();
+
+    const answer = renderer.readInputQuestion({
+      requestId: "q1",
+      prompt: "What should I know?",
+      display: "text",
+    });
+    input.type("first");
+    input.send("\x1b[27;2;13~");
+    input.type("second");
+    input.up();
+    input.type("!");
+    input.enter();
+
+    await expect(answer).resolves.toEqual({ text: "first!\nsecond" });
+    renderer.shutdown();
+  });
+
+  it("clears non-empty freeform question input on Ctrl+C before interrupting", async () => {
+    const { input, renderer } = makeRenderer();
+    const question = {
+      requestId: "q1",
+      prompt: "What city are you in?",
+      display: "text",
+      options: [],
+      allowFreeform: true,
+    } satisfies Parameters<typeof renderer.readInputQuestion>[0];
+
+    const answer = renderer.readInputQuestion(question);
+    input.type("New York");
+    input.ctrlC();
+    input.type("Boston");
+    input.enter();
+    await expect(answer).resolves.toEqual({ text: "Boston" });
+
+    const interrupted = renderer.readInputQuestion({ ...question, requestId: "q2" });
+    input.ctrlC();
+    await expect(interrupted).rejects.toThrow();
     renderer.shutdown();
   });
 
@@ -1143,11 +1496,93 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
     input.type("n");
     expect(await approval).toEqual({ approved: false, reason: "Denied by user." });
+    expect(screen.snapshot()).toContain("⊙ Working…");
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("delete_files");
     expect(snapshot).toContain("→ denied");
+  });
+
+  it("stops the turn ticker while a later human-input request is open", async () => {
+    vi.useFakeTimers();
+    try {
+      const { screen, input, renderer } = makeRenderer();
+
+      const firstApproval = renderer.readToolApproval({
+        approvalId: "a1",
+        toolCallId: "c1",
+        toolName: "read_file",
+        input: { path: "README.md" },
+      });
+      input.type("y");
+      await firstApproval;
+
+      const question = renderer.readInputQuestion({
+        requestId: "q1",
+        prompt: "Continue?",
+        display: "select",
+        options: [{ id: "yes", label: "Yes" }],
+      });
+      const questionOutputLength = screen.rawOutput().length;
+      vi.advanceTimersByTime(300);
+      expect(screen.rawOutput()).toHaveLength(questionOutputLength);
+      input.enter();
+      await question;
+
+      const secondApproval = renderer.readToolApproval({
+        approvalId: "a2",
+        toolCallId: "c2",
+        toolName: "write_file",
+        input: { path: "README.md" },
+      });
+      const approvalOutputLength = screen.rawOutput().length;
+      vi.advanceTimersByTime(300);
+      expect(screen.rawOutput()).toHaveLength(approvalOutputLength);
+      input.type("n");
+      await secondApproval;
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not treat bracketed-paste text as a tool approval action", async () => {
+    const { input, renderer } = makeRenderer();
+    const approval = renderer.readToolApproval({
+      approvalId: "a1",
+      toolCallId: "c1",
+      toolName: "delete_files",
+      input: { path: "/" },
+    });
+
+    input.send("\x1b[200~y\x1b[201~");
+    input.type("n");
+
+    await expect(approval).resolves.toEqual({ approved: false, reason: "Denied by user." });
+    renderer.shutdown();
+  });
+
+  it("does not treat an unterminated bracketed paste as a tool approval action", async () => {
+    vi.useFakeTimers();
+    try {
+      const { input, renderer } = makeRenderer();
+      const approval = renderer.readToolApproval({
+        approvalId: "a1",
+        toolCallId: "c1",
+        toolName: "delete_files",
+        input: { path: "/" },
+      });
+
+      input.send("\x1b[200~y");
+      vi.advanceTimersByTime(1_100);
+      input.type("n");
+
+      await expect(approval).resolves.toEqual({ approved: false, reason: "Denied by user." });
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("commits a dim recovery notice to scrollback", () => {
@@ -1377,6 +1812,42 @@ describe("TerminalRenderer setup panel", () => {
 });
 
 describe("TerminalRenderer setup flow session", () => {
+  it("uses the build-phase pulse for pulse setup flows", () => {
+    vi.useFakeTimers();
+    try {
+      const { screen, renderer } = makeRenderer();
+
+      renderer.setupFlow.begin("Configure the agent model", "pulse");
+      renderer.setupFlow.setStatus("Checking the project…");
+      expect(screen.snapshot()).toContain("▪ Checking the project…");
+
+      vi.advanceTimersByTime(450);
+      expect(screen.snapshot()).not.toContain("▪ Checking the project…");
+      expect(screen.snapshot()).toContain("  Checking the project…");
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses an ASCII fallback for pulse setup flows", () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: false,
+    });
+
+    renderer.setupFlow.begin("Configure the agent model", "pulse");
+    renderer.setupFlow.setStatus("Checking the project...");
+
+    expect(screen.snapshot()).toContain("* Checking the project...");
+    expect(screen.snapshot()).not.toContain("▪");
+    renderer.shutdown();
+  });
+
   it("holds flow output inside the panel and clears it on end, flushing warnings", () => {
     const { screen, renderer } = makeRenderer();
 
@@ -1796,6 +2267,8 @@ describe("TerminalRenderer command typeahead", () => {
     expect(snapshot).toContain("/help");
     expect(snapshot).toContain("Show available commands");
     expect(snapshot).toContain("Configure the agent's model and provider");
+    const promptLine = snapshot.split("\n").find((line) => line.includes("❯ /"));
+    expect(promptLine?.startsWith(" ❯ /")).toBe(true);
 
     input.enter();
     // The highlighted default — /help leads the registry — is what a bare
@@ -1984,7 +2457,7 @@ describe("TerminalRenderer status line", () => {
     renderer.shutdown();
   });
 
-  it("shows the running token total on the status line, not the Ready row", async () => {
+  it("keeps the running token total after the turn indicator disappears", async () => {
     const { screen, renderer } = makeRenderer();
     await renderer.renderStream(
       streamOf([
@@ -1999,9 +2472,8 @@ describe("TerminalRenderer status line", () => {
     const lines = screen.snapshot().split("\n");
     const readyRow = lines.find((line) => line.includes("Ready"));
     const statusRow = lines.find((line) => line.includes("↑ 500 ↓ 300"));
-    expect(readyRow).toBeDefined();
+    expect(readyRow).toBeUndefined();
     expect(statusRow).toBeDefined();
-    expect(readyRow).not.toContain("↑ 500");
     renderer.shutdown();
   });
 

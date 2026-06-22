@@ -3,8 +3,6 @@ import {
   EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH,
 } from "#protocol/routes.js";
 
-import { resolveDevelopmentClientHeaders } from "./request-headers.js";
-
 /**
  * Reads the dev server's runtime-artifacts revision — an opaque token that
  * changes whenever the authored-source watcher recompiles (HMR). Consumers
@@ -20,9 +18,7 @@ export async function readDevelopmentRuntimeArtifactsRevision(input: {
 }): Promise<string | undefined> {
   try {
     const url = new URL(EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH, input.serverUrl);
-    const response = await fetch(url, {
-      headers: await resolveDevelopmentClientHeaders({ serverUrl: input.serverUrl }),
-    });
+    const response = await fetch(url);
     return await parseDevelopmentRuntimeArtifactsRevision(response);
   } catch {
     return undefined;
@@ -34,10 +30,7 @@ export async function rebuildDevelopmentRuntimeArtifacts(input: {
 }): Promise<string | undefined> {
   try {
     const url = new URL(EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH, input.serverUrl);
-    const response = await fetch(url, {
-      headers: await resolveDevelopmentClientHeaders({ serverUrl: input.serverUrl }),
-      method: "POST",
-    });
+    const response = await fetch(url, { method: "POST" });
     return await parseDevelopmentRuntimeArtifactsRevision(response);
   } catch {
     return undefined;

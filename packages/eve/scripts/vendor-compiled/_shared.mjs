@@ -209,9 +209,10 @@ function relativeDeclarationSpecifier(fromOutputPath, targetFileName) {
 /**
  * Returns `Map<externalModuleName, Set<importedName>>` for every
  * `import { ... } from '<external>'`, `export { ... } from '<external>'`,
- * and `import * as <alias> from '<external>'` in a TypeScript declaration
- * source. Local relative paths and `#compiled/*` specifiers are skipped —
- * only bare module specifiers appear in the map.
+ * `import * as <alias> from '<external>'`, and side-effect
+ * `import '<external>'` in a TypeScript declaration source. Local relative
+ * paths and `#compiled/*` specifiers are skipped — only bare module
+ * specifiers appear in the map.
  *
  * `as`-renames are flattened to the original left-side name so the stub
  * exports the symbol the upstream actually references.
@@ -225,6 +226,7 @@ export function collectExternalDeclarationImports(source) {
   const namedPattern = /^(?:import|export)\s+(?:type\s+)?\{([^}]+)\}\s+from\s+['"]([^'"]+)['"];/gm;
   const namespacePattern =
     /^import\s+(?:type\s+)?\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+['"]([^'"]+)['"];/gm;
+  const sideEffectPattern = /^import\s+['"]([^'"]+)['"];/gm;
   const result = new Map();
 
   const isExternal = (moduleName) =>
@@ -281,19 +283,26 @@ export function collectExternalDeclarationImports(source) {
     }
   }
 
+  for (const match of source.matchAll(sideEffectPattern)) {
+    addName(match[1]);
+  }
+
   return result;
 }
 
 /**
- * Rewrites every `from '<moduleName>'` (and the `"`-quoted variant) in
- * a declaration source to `from '<replacement>'`. Used to redirect copied
- * `.d.ts` imports at locally-vendored stubs or `#compiled/*` re-vendoring.
+ * Rewrites every `from '<moduleName>'` and side-effect
+ * `import '<moduleName>'` (including their `"`-quoted variants) in a
+ * declaration source. Used to redirect copied `.d.ts` imports at
+ * locally-vendored stubs or `#compiled/*` re-vendoring.
  */
 export function rewriteImportSource(source, moduleName, replacement) {
   const escaped = moduleName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return source
     .replaceAll(new RegExp(`from '${escaped}'`, "g"), `from '${replacement}'`)
-    .replaceAll(new RegExp(`from "${escaped}"`, "g"), `from "${replacement}"`);
+    .replaceAll(new RegExp(`from "${escaped}"`, "g"), `from "${replacement}"`)
+    .replaceAll(new RegExp(`import '${escaped}'`, "g"), `import '${replacement}'`)
+    .replaceAll(new RegExp(`import "${escaped}"`, "g"), `import "${replacement}"`);
 }
 
 /**

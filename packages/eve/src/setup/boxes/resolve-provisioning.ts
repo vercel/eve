@@ -31,8 +31,8 @@ import {
   requireAuth,
   resolveTeam,
   validateTeam,
-  withNetworkSpinner,
 } from "../vercel-project.js";
+import { withSpinner } from "../with-spinner.js";
 
 /** Injected for tests; defaults to the real Vercel project and fs helpers. */
 export interface ResolveProvisioningDeps {
@@ -174,7 +174,7 @@ export function resolveProvisioning(
     if (state.projectPath.kind !== "resolved") return undefined;
     const path = state.projectPath.path;
     if (!(await deps.pathExists(join(path, ".vercel", "project.json")))) return undefined;
-    return withNetworkSpinner(options.prompter, whimsyFor("project-detect"), async () => {
+    return withSpinner(options.prompter, whimsyFor("project-detect"), async () => {
       const detected = await deps.detectProjectResolution(path, { signal });
       if (!isProjectResolved(detected)) return undefined;
       const authenticated = await deps.isVercelAuthenticated(path, { signal });

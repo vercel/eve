@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -68,7 +68,12 @@ describe("runCli dev URL support", () => {
 
     expect(startHost).not.toHaveBeenCalled();
     expect(runDevelopmentTui).toHaveBeenCalledWith(
-      expect.objectContaining({ serverUrl: "https://example.com/" }),
+      expect.objectContaining({
+        target: expect.objectContaining({
+          kind: "remote",
+          serverUrl: "https://example.com/",
+        }),
+      }),
     );
     expect(logger.log.mock.calls.map(([message]) => String(message)).join("\n")).toContain(
       "connecting to https://example.com/",
@@ -96,6 +101,7 @@ describe("runCli dev URL support", () => {
 
   it("loads local development env files before connecting", async () => {
     const appRoot = await createTemporaryRoot();
+    const canonicalAppRoot = await realpath(appRoot);
     const previousCwd = process.cwd();
     const logger = {
       error: vi.fn(),
@@ -120,7 +126,13 @@ describe("runCli dev URL support", () => {
 
     expect(process.env[DEV_URL_ENV_KEY]).toBe("from-env");
     expect(runDevelopmentTui).toHaveBeenCalledWith(
-      expect.objectContaining({ serverUrl: "https://example.com/" }),
+      expect.objectContaining({
+        target: {
+          kind: "remote",
+          serverUrl: "https://example.com/",
+          workspaceRoot: canonicalAppRoot,
+        },
+      }),
     );
   });
 });

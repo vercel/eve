@@ -34,33 +34,33 @@ curl http://127.0.0.1:3000/eve/v1/session/<sessionId>/stream
 
 The stream is newline-delimited JSON (NDJSON), one event per line:
 
-| Event                     | Meaning                                                                                                             |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `session.started`         | A durable session was created.                                                                                      |
-| `turn.started`            | A new turn began.                                                                                                   |
-| `message.received`        | An inbound user message was accepted.                                                                               |
-| `step.started`            | A model step began.                                                                                                 |
-| `actions.requested`       | The model requested tool calls.                                                                                     |
-| `action.result`           | A tool call returned.                                                                                               |
-| `input.requested`         | The run paused for human input ([HITL](../tools/human-in-the-loop) approval or `ask_question`); carries `requests`. |
-| `subagent.called`         | A subagent was delegated; carries `childSessionId` to attach to.                                                    |
-| `subagent.completed`      | A delegated subagent finished.                                                                                      |
-| `reasoning.appended`      | A reasoning delta (incremental, with cumulative text so far).                                                       |
-| `reasoning.completed`     | The finalized reasoning block.                                                                                      |
-| `message.appended`        | An assistant text delta (incremental, with cumulative text so far).                                                 |
-| `message.completed`       | A finalized assistant text block.                                                                                   |
-| `result.completed`        | The finalized structured result for a turn that requested an output schema; carries `result`.                       |
-| `compaction.requested`    | Context-window compaction began; carries `modelId`, `sessionId`, `turnId`, `usageInputTokens`.                      |
-| `compaction.completed`    | A compaction checkpoint was written to durable history.                                                             |
-| `authorization.required`  | A connection needs OAuth; carries `name`, `description`, and an `authorization` challenge.                          |
-| `authorization.completed` | A connection's authorization resolved; carries `outcome`.                                                           |
-| `step.completed`          | A model step finished; carries `finishReason` and usage.                                                            |
-| `step.failed`             | A model step failed; carries `{ code, message, details? }`.                                                         |
-| `turn.completed`          | The turn finished.                                                                                                  |
-| `turn.failed`             | The turn failed; carries `{ code, message, details? }`.                                                             |
-| `session.waiting`         | The session parked, waiting for the next input (a message, an answer).                                              |
-| `session.failed`          | The session failed.                                                                                                 |
-| `session.completed`       | The session reached a terminal end.                                                                                 |
+| Event                     | Meaning                                                                                                          |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `session.started`         | A durable session was created.                                                                                   |
+| `turn.started`            | A new turn began.                                                                                                |
+| `message.received`        | An inbound user message was accepted.                                                                            |
+| `step.started`            | A model step began.                                                                                              |
+| `actions.requested`       | The model requested tool calls.                                                                                  |
+| `action.result`           | A tool call returned.                                                                                            |
+| `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or `ask_question`); carries `requests`. |
+| `subagent.called`         | A subagent was delegated; carries `childSessionId` to attach to.                                                 |
+| `subagent.completed`      | A delegated subagent finished.                                                                                   |
+| `reasoning.appended`      | A reasoning delta (incremental, with cumulative text so far).                                                    |
+| `reasoning.completed`     | The finalized reasoning block.                                                                                   |
+| `message.appended`        | An assistant text delta (incremental, with cumulative text so far).                                              |
+| `message.completed`       | A finalized assistant text block.                                                                                |
+| `result.completed`        | The finalized structured result for a turn that requested an output schema; carries `result`.                    |
+| `compaction.requested`    | Context-window compaction began; carries `modelId`, `sessionId`, `turnId`, `usageInputTokens`.                   |
+| `compaction.completed`    | A compaction checkpoint was written to durable history.                                                          |
+| `authorization.required`  | A connection needs OAuth; carries `name`, `description`, and an `authorization` challenge.                       |
+| `authorization.completed` | A connection's authorization resolved; carries `outcome`.                                                        |
+| `step.completed`          | A model step finished; carries `finishReason` and usage.                                                         |
+| `step.failed`             | A model step failed; carries `{ code, message, details? }`.                                                      |
+| `turn.completed`          | The turn finished.                                                                                               |
+| `turn.failed`             | The turn failed; carries `{ code, message, details? }`.                                                          |
+| `session.waiting`         | The session parked, waiting for the next input (a message, an answer).                                           |
+| `session.failed`          | The session failed.                                                                                              |
+| `session.completed`       | The session reached a terminal end.                                                                              |
 
 `reasoning.appended` and `message.appended` stream deltas as they arrive, and each one carries both the new delta and the cumulative text for the current block. The finalized block shows up on `message.completed` and `reasoning.completed`, which is the compatibility path for clients that don't render incremental streaming.
 

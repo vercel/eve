@@ -8,6 +8,7 @@ import {
   renderSelectQuestion,
   renderTextQuestion,
 } from "./setup-panel.js";
+import { stripAnsi } from "./terminal-text.js";
 import { createTheme } from "./theme.js";
 
 const theme = createTheme({ color: false, unicode: true });
@@ -50,7 +51,11 @@ describe("renderFlowPanel", () => {
       tone: "info" as const,
     }));
     const text = renderFlowPanel(
-      { title: "/channels", lines, content: { kind: "idle", frame: "⠏" } },
+      {
+        title: "/channels",
+        lines,
+        content: { kind: "idle", indicator: { glyph: "⠏", color: "yellow" } },
+      },
       theme,
       60,
     ).join("\n");
@@ -67,7 +72,7 @@ describe("renderFlowPanel", () => {
         lines: [],
         content: {
           kind: "status",
-          status: { text: "Loading teams…", frame: "⠼" },
+          status: { text: "Loading teams…", indicator: { glyph: "⠼", color: "yellow" } },
         },
       },
       theme,
@@ -77,14 +82,38 @@ describe("renderFlowPanel", () => {
     expect(text).toContain("⠼ Loading teams…");
   });
 
-  it("rides the status spinner above an open question for the install wait", () => {
+  it("renders the build-phase pulse for a setup status", () => {
+    const text = renderFlowPanel(
+      {
+        title: "/model",
+        lines: [],
+        content: {
+          kind: "status",
+          status: {
+            text: "Checking the project…",
+            indicator: { glyph: "▪", color: "green" },
+          },
+        },
+      },
+      colorTheme,
+      60,
+    ).join("\n");
+
+    expect(text).toContain(colorTheme.colors.green("▪"));
+    expect(stripAnsi(text)).toContain("▪ Checking the project…");
+  });
+
+  it("rides the status pulse above an open question for the install wait", () => {
     const text = renderFlowPanel(
       {
         title: "/channels",
         lines: [],
         content: {
           kind: "question",
-          status: { text: "Creating a Slackbot through Vercel Connect…", frame: "⠏" },
+          status: {
+            text: "Creating a Slackbot through Vercel Connect…",
+            indicator: { glyph: "▪", color: "green" },
+          },
           rows: ["  ◦ Try again", "  ◦ Cancel"],
         },
       },
@@ -92,7 +121,7 @@ describe("renderFlowPanel", () => {
       60,
     ).join("\n");
 
-    expect(text).toContain("⠏ Creating a Slackbot through Vercel Connect…");
+    expect(text).toContain("▪ Creating a Slackbot through Vercel Connect…");
     expect(text).toContain("◦ Try again");
     expect(text).toContain("◦ Cancel");
     // The spinner leads; the actions follow.
@@ -118,7 +147,7 @@ describe("renderSelectQuestion", () => {
     expect(text).not.toContain("▔".repeat(10));
     // The lone hint sits one space past its own label — the longer hint-less
     // "Link an existing project" no longer pads the column open.
-    expect(text).toContain("  ▷ Create a new project · fastest");
+    expect(text).toContain("   ▶ Create a new project · fastest");
     expect(text).toContain("    Link an existing project");
     expect(text).not.toContain("1.");
     expect(text).toContain("esc to cancel");
@@ -137,7 +166,7 @@ describe("renderSelectQuestion", () => {
       60,
     );
 
-    expect(rows).toContain("  . Link an existing project");
+    expect(rows).toContain("   . Link an existing project");
     expect(rows.join("\n")).not.toContain("◦");
   });
 
@@ -154,8 +183,20 @@ describe("renderSelectQuestion", () => {
       60,
     ).join("\n");
 
-    expect(text).toContain("  ▷ Link to another project");
+    expect(text).toContain("   ▶ Link to another project ");
     expect(text).not.toContain("1.");
+
+    const colored = renderSelectQuestion(
+      {
+        kind: "single",
+        message: "Already linked to weather-agent in Acme",
+        options: lone,
+        select: initialSelectState({ options: lone }),
+      },
+      colorTheme,
+      60,
+    ).join("\n");
+    expect(colored).toContain("\x1b[7m\x1b[34m ▶ Link to another project \x1b[39m\x1b[27m");
   });
 
   it("renders completed task rows as focusable but not highlighted actions", () => {
@@ -191,15 +232,17 @@ describe("renderSelectQuestion", () => {
     );
 
     // The focused completed row reads as inert: a dim pointer, not a check.
-    expect(rows).toContain("  ▷ Terminal UI · Already installed");
-    expect(rows).not.toContain("  ✓ Terminal UI");
+    expect(rows).toContain("   ▷ Terminal UI · Already installed");
+    expect(rows).not.toContain("   ✓ Terminal UI");
     // An unfocused completed row keeps its check.
-    expect(rows).toContain("  ✓ Web Chat");
-    expect(rows).toContain("  ◦ Slack       · Creates slackbot and deploys to Vercel");
-    expect(rows).toContain("    Done");
+    expect(rows).toContain("   ✓ Web Chat");
+    expect(rows).toContain("   ◦ Slack       · Creates slackbot and deploys to Vercel");
+    expect(rows).toContain("     Done");
     expect(rows).toContain("  ⚠ Overwrote /tmp/weather-agent");
     expect(rows).toContain("  ✓ Scaffolded channel: web");
-    expect(rows.indexOf("    Done")).toBeLessThan(rows.indexOf("  ⚠ Overwrote /tmp/weather-agent"));
+    expect(rows.indexOf("     Done")).toBeLessThan(
+      rows.indexOf("  ⚠ Overwrote /tmp/weather-agent"),
+    );
     expect(rows.at(-1)).toContain("↑/↓ move · enter to select · esc to cancel");
 
     const coloredRow = renderSelectQuestion(
@@ -231,7 +274,7 @@ describe("renderSelectQuestion", () => {
       theme,
       60,
     ).join("\n");
-    expect(multi).toContain("  ▷ Create a new project");
+    expect(multi).toContain("   ▶ Create a new project ");
     expect(multi).not.toContain("1.");
 
     const searchable = renderSelectQuestion(
@@ -448,11 +491,11 @@ describe("renderSelectQuestion", () => {
     expect(rows).toEqual([
       "  Configure the agent's model",
       "",
-      "  ▷ Change model",
-      "    anthropic/claude-sonnet-4.6",
+      "   ▶ Change model ",
+      "     anthropic/claude-sonnet-4.6",
       "",
-      "  ◦ Change provider",
-      "    AI Gateway (Linked to my-agent)",
+      "   ◦ Change provider",
+      "     AI Gateway (Linked to my-agent)",
       "",
       "  ✓ Model changed to openai/gpt-5.5",
       "",
@@ -513,6 +556,30 @@ describe("renderSelectQuestion", () => {
     expect(text).toContain("\x1b[1mmy-agent\x1b[22m\x1b[2m)");
   });
 
+  it("keeps a warning row yellow under the cursor highlight", () => {
+    const options = [
+      {
+        value: "provider",
+        label: "Configure model access",
+        accent: "warning" as const,
+      },
+    ];
+    const rows = renderSelectQuestion(
+      {
+        kind: "stacked",
+        message: "",
+        options,
+        select: initialSelectState({ options }),
+      },
+      colorTheme,
+      80,
+    );
+
+    expect(rows).toContain(
+      `  ${colorTheme.colors.inverse(colorTheme.colors.yellow(" ▶ Configure model access "))}`,
+    );
+  });
+
   it("renders checkboxes and the Submit row for a multi-select", () => {
     const select = initialSelectState({
       options: OPTIONS,
@@ -530,7 +597,7 @@ describe("renderSelectQuestion", () => {
       60,
     ).join("\n");
 
-    expect(text).toContain("▷ Create a new project");
+    expect(text).toContain("▶ Create a new project");
     expect(text).toContain("✓ Link an existing project");
     expect(text).toContain("Submit");
     expect(text).toContain("space to toggle");
@@ -620,12 +687,12 @@ describe("renderSelectQuestion", () => {
 
     expect(context).toContain("\x1b[2m· Waiting for you to complete setup in the browser\x1b[22m");
     expect(context).not.toContain("▷");
-    expect(retry).toContain("\x1b[36m▷\x1b[39m");
+    expect(retry).toContain(colorTheme.colors.inverse(colorTheme.colors.blue(" ▶ Try again ")));
   });
 });
 
 describe("renderTextQuestion", () => {
-  it("paints the message, caret line, and hints", () => {
+  it("paints the message, input line, and hints", () => {
     const rows = renderTextQuestion(
       { message: "Project name", editor: lineOf("my-agent"), mask: false },
       theme,
@@ -638,6 +705,42 @@ describe("renderTextQuestion", () => {
     // The input line sits directly under the message — no blank row between.
     expect(rows[1]).toContain("my-agent");
     expect(text).toContain("enter to submit · esc to cancel");
+  });
+
+  it("draws the blinking cursor as a block over the grapheme under it", () => {
+    const rows = renderTextQuestion(
+      {
+        message: "Project name",
+        editor: { text: "hello", cursor: 3 },
+        mask: false,
+      },
+      colorTheme,
+      60,
+      true,
+    );
+    const input = rows[1] ?? "";
+
+    expect(stripAnsi(input)).toBe("  hello");
+    expect(input).toContain(colorTheme.colors.inverse("l"));
+    expect(input).not.toContain(colorTheme.glyph.caret);
+  });
+
+  it("draws the block over the first placeholder grapheme", () => {
+    const rows = renderTextQuestion(
+      {
+        message: "API key",
+        editor: lineOf(""),
+        mask: true,
+        placeholder: "type your key",
+      },
+      colorTheme,
+      60,
+      true,
+    );
+    const input = rows[1] ?? "";
+
+    expect(stripAnsi(input)).toBe("  type your key");
+    expect(input).toContain(colorTheme.colors.inverse("t"));
   });
 
   it("paints notices above the message, gone with the question", () => {
@@ -657,16 +760,17 @@ describe("renderTextQuestion", () => {
     expect(rows[1]).toBe("  New project name");
   });
 
-  it("masks the typed value", () => {
+  it("masks one bullet per grapheme", () => {
     const text = renderTextQuestion(
-      { message: "API key", editor: lineOf("secret"), mask: true },
+      { message: "API key", editor: lineOf("e\u0301👨‍👩‍👧‍👦"), mask: true },
       theme,
       60,
       false,
     ).join("\n");
 
-    expect(text).toContain("••••••");
-    expect(text).not.toContain("secret");
+    expect(text).toContain("••");
+    expect(text).not.toContain("•••");
+    expect(text).not.toContain("👨");
   });
 });
 

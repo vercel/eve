@@ -50,25 +50,27 @@ export default defineTool({
 | `defineEvalConfig`                                     | `eve/evals`                                   | `evals/evals.config.ts`              | [Evals](../evals/overview)                             |
 | `useEveAgent`                                          | `eve/react`, `eve/vue`, `eve/svelte`          | frontend                             | [Frontend](../guides/frontend/overview)                |
 
-A few non-`define*` helpers round out the set: `disableTool` and `ExperimentalWorkflow` from `eve/tools` (see [Default harness](../concepts/default-harness)), the route verbs `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`WS` from `eve/channels`, the approval predicates `always`/`once`/`never` from `eve/tools/approval`, and the channel auth helpers `localDev`/`vercelOidc`/`placeholderAuth` from `eve/channels/auth`. To wrap a built-in tool, import its default value from `eve/tools/defaults` (`bash`, `readFile`, `writeFile`, `glob`, `grep`, `webFetch`, `webSearch`, `todo`, `loadSkill`).
+A few non-`define*` helpers round out the set: `disableTool` and `ExperimentalWorkflow` from `eve/tools` (see [Default harness](../concepts/default-harness)), the route verbs `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`WS` from `eve/channels`, the approval predicates `always`/`once`/`never` from `eve/tools/approval`, and the channel auth helpers `localDev`/`vercelOidc`/`placeholderAuth` from `eve/channels/auth`. To wrap a built-in tool, import its default value from `eve/tools/defaults` (`bash`, `readFile`, `writeFile`, `glob`, `grep`, `webFetch`, `webSearch`, `todo`, `loadSkill`). `AgentWorkflowDefinition` and `AgentWorkflowWorldDefinition` are exported from `eve` for the `defineAgent({ experimental: { workflow } })` config shape.
 
 ## Runtime context (`ctx`)
 
 `ctx` is passed to your tool `execute`, hook handlers, and channel event handlers. It is live only while authored code is running, so reaching for it at module top level throws. See [Session context](../guides/session-context) for the full model.
 
-| Member                     | Use                                                                           |
-| -------------------------- | ----------------------------------------------------------------------------- |
-| `ctx.session`              | Current session, turn, auth, and optional parent lineage (read-only)          |
-| `ctx.getSandbox()`         | Live sandbox handle for the current agent                                     |
-| `ctx.getSkill(identifier)` | Handle for a named skill visible to the current agent                         |
-| `ctx.getToken()`           | Resolve the bearer token for a tool's declared `auth` (throws without `auth`) |
-| `ctx.requireAuth()`        | Force the tool's authorization flow before proceeding                         |
+| Member                      | Use                                                                          |
+| --------------------------- | ---------------------------------------------------------------------------- |
+| `ctx.session`               | Current session, turn, auth, and optional parent lineage (read-only)         |
+| `ctx.getSandbox()`          | Live sandbox handle for the current agent                                    |
+| `ctx.getSkill(identifier)`  | Handle for a named skill visible to the current agent                        |
+| `ctx.getToken(provider)`    | Resolve a bearer token for an inline auth provider such as `connect("...")`  |
+| `ctx.requireAuth(provider)` | Evict and re-authorize an inline provider, commonly after a downstream `401` |
+| `ctx.getToken()`            | Deprecated compatibility path for a tool's legacy top-level `auth`           |
+| `ctx.requireAuth()`         | Deprecated compatibility path for a tool's legacy top-level `auth`           |
 
 ## Imports at a glance
 
 | Import                                                      | Holds                                                                |
 | ----------------------------------------------------------- | -------------------------------------------------------------------- |
-| `eve`                                                       | `defineAgent`, `defineRemoteAgent`                                   |
+| `eve`                                                       | `defineAgent`, `defineRemoteAgent`, agent config types               |
 | `eve/tools`                                                 | `defineTool`, `defineDynamic`, `disableTool`, `ExperimentalWorkflow` |
 | `eve/tools/defaults`                                        | the built-in tools as plain values                                   |
 | `eve/tools/approval`                                        | `always`, `once`, `never`                                            |

@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url";
 
 import type { CompiledModuleMap } from "#compiler/module-map.js";
+import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import type { RuntimeAdapterRegistry } from "#runtime/channels/registry.js";
@@ -40,12 +41,35 @@ export interface CompiledRuntimeAgentBundle {
 
 const isCacheDisabled = process.env.EVE_DISABLE_AGENT_CACHE === "1";
 
+function isDevelopmentRuntimeSnapshotRoot(appRoot: string): boolean {
+  return appRoot.replaceAll("\\", "/").includes("/.eve/dev-runtime/snapshots/");
+}
+
+function normalizeCompiledArtifactsSource(
+  compiledArtifactsSource: RuntimeCompiledArtifactsSource,
+): RuntimeCompiledArtifactsSource {
+  if (
+    compiledArtifactsSource.kind !== "disk" ||
+    compiledArtifactsSource.moduleMapLoaderPath !== undefined ||
+    !isDevelopmentRuntimeSnapshotRoot(compiledArtifactsSource.appRoot)
+  ) {
+    return compiledArtifactsSource;
+  }
+
+  return {
+    ...compiledArtifactsSource,
+    moduleMapLoaderPath: resolvePackageSourceFilePath("src/internal/authored-module-map-loader.ts"),
+  };
+}
+
 async function loadFullBundle(
   compiledArtifactsSource: RuntimeCompiledArtifactsSource,
 ): Promise<CompiledRuntimeAgentBundle> {
+  const normalizedCompiledArtifactsSource =
+    normalizeCompiledArtifactsSource(compiledArtifactsSource);
   const [manifest, moduleMap] = await Promise.all([
-    loadCompiledManifest({ compiledArtifactsSource }),
-    loadRuntimeCompiledModuleMap(compiledArtifactsSource),
+    loadCompiledManifest({ compiledArtifactsSource: normalizedCompiledArtifactsSource }),
+    loadRuntimeCompiledModuleMap(normalizedCompiledArtifactsSource),
   ]);
   const graph = await resolveRuntimeAgentGraph({ manifest, moduleMap });
   const rootNode = graph.root;
@@ -54,7 +78,7 @@ async function loadFullBundle(
     adapterRegistry: createRuntimeAdapterRegistry({
       channels: collectResolvedChannels(graph),
     }),
-    compiledArtifactsSource,
+    compiledArtifactsSource: normalizedCompiledArtifactsSource,
     graph,
     hookRegistry: rootNode.hookRegistry,
     moduleMap,
@@ -99,13 +123,18 @@ async function loadAuthoredSourceCompiledModuleMap(
 async function getOrLoadFullBundle(
   compiledArtifactsSource: RuntimeCompiledArtifactsSource,
 ): Promise<CompiledRuntimeAgentBundle> {
+  const normalizedCompiledArtifactsSource =
+    normalizeCompiledArtifactsSource(compiledArtifactsSource);
+
   if (isCacheDisabled) {
-    return loadFullBundle(compiledArtifactsSource);
+    return loadFullBundle(normalizedCompiledArtifactsSource);
   }
 
   const session = getActiveRuntimeSession();
-  const sourceKey = getRuntimeCompiledArtifactsCacheKey(compiledArtifactsSource);
-  const cacheKey = await resolveRuntimeCompiledArtifactsVersionedCacheKey(compiledArtifactsSource);
+  const sourceKey = getRuntimeCompiledArtifactsCacheKey(normalizedCompiledArtifactsSource);
+  const cacheKey = await resolveRuntimeCompiledArtifactsVersionedCacheKey(
+    normalizedCompiledArtifactsSource,
+  );
   const previousKey = session.bundleCacheKeyBySourceKey.get(sourceKey);
 
   if (previousKey !== undefined && previousKey !== cacheKey) {
@@ -119,7 +148,7 @@ async function getOrLoadFullBundle(
     return cached;
   }
 
-  const bundlePromise = loadFullBundle(compiledArtifactsSource).catch((error) => {
+  const bundlePromise = loadFullBundle(normalizedCompiledArtifactsSource).catch((error) => {
     session.bundleCache.delete(cacheKey);
 
     if (session.bundleCacheKeyBySourceKey.get(sourceKey) === cacheKey) {

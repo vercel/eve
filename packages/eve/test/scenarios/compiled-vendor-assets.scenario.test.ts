@@ -1,5 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -7,6 +8,11 @@ import { describe, expect, it } from "vitest";
 const EVE_PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const COMPILED_VENDOR_ROOT = join(EVE_PACKAGE_ROOT, ".generated", "compiled");
 const VENDOR_WARNING_LOG_PATH = join(EVE_PACKAGE_ROOT, "scripts", "vendor-warning-log.mjs");
+const require = createRequire(import.meta.url);
+const VERCEL_SANDBOX_DIST_ROOT = join(
+  dirname(require.resolve("@vercel/sandbox/package.json")),
+  "dist",
+);
 
 type VendorWarningLog = {
   readonly createVendoredDependencyWarningFilter: () => {
@@ -150,5 +156,31 @@ describe("compiled vendor assets", () => {
     expect(workflowDts).toBe(`export * from "./workflow/index.js";\n`);
     expect(workflowIndexDts).toContain("from '#compiled/@workflow/errors/index.js'");
     expect(runtimeRunDts).toContain("from '../_workflow-serde.js'");
+  });
+
+  it("copies the complete @vercel/sandbox declaration tree from the installed package", async () => {
+    const [upstreamEntries, vendoredEntries] = await Promise.all([
+      readdir(VERCEL_SANDBOX_DIST_ROOT, { recursive: true }),
+      readdir(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox"), { recursive: true }),
+    ]);
+    const upstreamDeclarations = upstreamEntries.filter((entry) => entry.endsWith(".d.ts")).sort();
+    const generatedStubNames = new Set(["_async-retry.d.ts", "_workflow-serde.d.ts"]);
+    const vendoredDeclarations = vendoredEntries
+      .filter((entry) => entry.endsWith(".d.ts") && !generatedStubNames.has(entry))
+      .sort();
+
+    expect(vendoredDeclarations).toEqual(upstreamDeclarations);
+
+    const [upstreamIndex, vendoredIndex, vendoredSandbox, vendoredBaseClient] = await Promise.all([
+      readFile(join(VERCEL_SANDBOX_DIST_ROOT, "index.d.ts"), "utf8"),
+      readFile(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox/index.d.ts"), "utf8"),
+      readFile(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox/sandbox.d.ts"), "utf8"),
+      readFile(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox/api-client/base-client.d.ts"), "utf8"),
+    ]);
+
+    expect(vendoredIndex).toBe(upstreamIndex);
+    expect(vendoredSandbox).toContain('from "./_workflow-serde.js"');
+    expect(vendoredBaseClient).toContain('from "../_async-retry.js"');
+    expect(vendoredBaseClient).toContain('import "#compiled/zod/index.js"');
   });
 });
