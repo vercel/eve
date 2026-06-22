@@ -1,11 +1,12 @@
 /**
- * Tool-hosted authorization wiring for authored tools that declare
- * `auth` on {@link defineTool}.
+ * Tool-hosted authorization wiring for authored tools that resolve auth
+ * providers inline with {@link ToolContext.getToken} and
+ * {@link ToolContext.requireAuth}.
  *
  * Mirrors the connection authorization flow (see
  * `runtime/framework-tools/connection-search-dynamic.ts`) but scopes the
  * per-step token cache and framework-owned callback URL by the tool's
- * path-derived name instead of a connection name. All the shared
+ * path-derived name and provider key instead of a connection name. All the shared
  * machinery — principal resolution, cache reads/writes, the park/resume
  * webhook dance, and the loop guard — lives in
  * `runtime/connections/scoped-authorization.ts`; this module is the thin
@@ -35,62 +36,28 @@ import {
 } from "#runtime/connections/scoped-authorization.js";
 
 /**
- * Wraps one authored tool's `execute` with the tool-hosted
- * authorization flow.
+ * Wraps one authored tool's `execute` with a context that supports inline
+ * provider auth (`ctx.getToken(connect("..."))`).
  *
- * Each invocation:
- * 1. Completes an authorization whose OAuth callback arrived this turn,
- *    caching the freshly minted token (the loop-guard flag).
- * 2. Runs the authored `execute` with a {@link ToolContext} whose
- *    `getToken()` / `requireAuth()` are bound to this tool's scope.
- * 3. On a thrown `ConnectionAuthorizationRequiredError` — implicit from
- *    `getToken()` or explicit via `requireAuth()` — either fails
- *    terminally (token rejected immediately after sign-in) or evicts the
- *    rejected token from the per-step cache and starts the interactive
- *    flow, returning an `AuthorizationSignal` to park the turn. An
- *    interactive strategy never rethrows the raw `Required` into the
- *    model: if no callback URL can be minted it fails with a classified
- *    {@link ConnectionAuthorizationFailedError} instead. Only
- *    non-interactive strategies rethrow the original error, since they
- *    have no consent flow to park on.
- */
-export function createAuthorizedToolExecute(input: {
-  readonly scope: string;
-  readonly auth: AuthorizationDefinition;
-  readonly execute: (toolInput: unknown, ctx: unknown) => unknown;
-}): (toolInput: unknown) => Promise<unknown> {
-  return createToolExecuteWithAuth({
-    execute: input.execute,
-    scope: input.scope,
-    topLevelAuth: input.auth,
-  });
-}
-
-/**
- * Wraps one authored tool's `execute` with a context that supports both
- * top-level tool auth (`ctx.getToken()`) and inline provider auth
- * (`ctx.getToken(connect("..."))`).
+ * On a thrown provider-scoped authorization request — implicit from
+ * `ctx.getToken(provider)` or explicit via `ctx.requireAuth(provider)` — the
+ * wrapper either fails terminally (token rejected immediately after sign-in)
+ * or evicts the rejected token from the per-step cache and starts the
+ * interactive flow, returning an `AuthorizationSignal` to park the turn.
+ * Interactive strategies never rethrow the raw `Required` into the model: if
+ * no callback URL can be minted, they fail with a classified
+ * {@link ConnectionAuthorizationFailedError} instead. Non-interactive
+ * strategies rethrow the original error because they have no consent flow to
+ * park on.
  */
 export function createToolExecuteWithAuth(input: {
   readonly scope: string;
   readonly execute: (toolInput: unknown, ctx: unknown) => unknown;
-  readonly topLevelAuth?: AuthorizationDefinition;
 }): (toolInput: unknown) => Promise<unknown> {
-  const { scope, execute, topLevelAuth } = input;
-  const topLevelScoped: ScopedAuthorization | undefined =
-    topLevelAuth === undefined
-      ? undefined
-      : {
-          authorization: topLevelAuth,
-          connection: { url: "" },
-          scope,
-        };
+  const { scope, execute } = input;
 
   return async (toolInput: unknown): Promise<unknown> => {
     const justAuthorizedScopes = new Set<string>();
-    if (topLevelScoped !== undefined && (await completeScopedAuthorization(topLevelScoped))) {
-      justAuthorizedScopes.add(topLevelScoped.scope);
-    }
 
     try {
       return await execute(
@@ -99,7 +66,6 @@ export function createToolExecuteWithAuth(input: {
           inlineAuthState: {},
           justAuthorizedScopes,
           scope,
-          topLevelScoped,
         }),
       );
     } catch (err) {
@@ -107,50 +73,22 @@ export function createToolExecuteWithAuth(input: {
         return await handleAuthorizationRequests(err.requests);
       }
 
-      if (topLevelScoped !== undefined && isConnectionAuthorizationRequiredError(err)) {
-        return await handleAuthorizationRequests([
-          {
-            cause: err,
-            justAuthorized: justAuthorizedScopes.has(topLevelScoped.scope),
-            scoped: topLevelScoped,
-          },
-        ]);
-      }
-
       throw err;
     }
   };
 }
 
-/**
- * Builds the {@link ToolContext} for an authored tool without top-level
- * `auth`. No-arg token accessors throw, but provider-scoped accessors
- * still work.
- */
-export function buildUnauthorizedToolContext(scope: string): ToolContext {
-  return buildToolContext({
-    inlineAuthState: {},
-    justAuthorizedScopes: new Set<string>(),
-    scope,
-  });
-}
-
 function buildToolContext(input: {
   readonly scope: string;
-  readonly topLevelScoped?: ScopedAuthorization;
   readonly justAuthorizedScopes: Set<string>;
   readonly inlineAuthState: InlineAuthState;
 }): ToolContext {
-  const { scope, topLevelScoped, justAuthorizedScopes, inlineAuthState } = input;
+  const { scope, justAuthorizedScopes, inlineAuthState } = input;
   const base = buildCallbackContext();
   return {
     ...base,
     async getToken(provider?: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult> {
-      if (provider === undefined) {
-        if (topLevelScoped === undefined) throw noAuthError(scope);
-        return resolveScopedToken(topLevelScoped);
-      }
-
+      if (provider === undefined) throw missingProviderError("ctx.getToken");
       return await resolveInlineToken({
         inlineAuthState,
         justAuthorizedScopes,
@@ -160,11 +98,7 @@ function buildToolContext(input: {
       });
     },
     requireAuth(provider?: ToolAuthProvider, options?: ToolAuthOptions): never {
-      if (provider === undefined) {
-        if (topLevelScoped === undefined) throw noAuthError(scope);
-        throw new ConnectionAuthorizationRequiredError(topLevelScoped.scope);
-      }
-
+      if (provider === undefined) throw missingProviderError("ctx.requireAuth");
       const scoped = buildInlineScopedAuthorization({
         inlineAuthState,
         options,
@@ -371,9 +305,8 @@ function isToolAuthorizationRequiredError(err: unknown): err is ToolAuthorizatio
   return err instanceof Error && err.name === "ToolAuthorizationRequiredError";
 }
 
-function noAuthError(scope: string): Error {
+function missingProviderError(method: "ctx.getToken" | "ctx.requireAuth"): Error {
   return new Error(
-    `Tool "${scope}" called ctx.getToken()/ctx.requireAuth() without a provider but does not declare an "auth" strategy. ` +
-      `Add \`auth\` to the tool definition or pass a provider like \`ctx.getToken(connect("..."))\`.`,
+    `${method}: Pass an auth provider, for example ${method}(connect("github/myagent")).`,
   );
 }

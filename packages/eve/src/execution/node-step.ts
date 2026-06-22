@@ -210,7 +210,6 @@ function resolveHarnessToolDefinition(input: {
     approvalKey: def.approvalKey,
     description: def.description,
     execute: resolveAuthoredExecute({
-      auth: def.auth,
       isFrameworkTool,
       rawExecute,
       scope: def.name,
@@ -230,18 +229,16 @@ function resolveHarnessToolDefinition(input: {
  *   manage their own context and never receive an authored
  *   {@link ToolContext}.
  * - Authored tools are wrapped by {@link createToolExecuteWithAuth},
- *   which builds a token-aware context. Top-level `auth` drives the
- *   interactive consent flow scoped to the tool name; inline providers
- *   passed to `ctx.getToken(provider)` use their own derived scopes.
+ *   which builds a token-aware context. Providers passed to
+ *   `ctx.getToken(provider)` use tool-qualified auth scopes.
  * - Tools without `execute` (provider-managed) stay `undefined`.
  */
 function resolveAuthoredExecute(input: {
-  readonly auth: ResolvedToolDefinition["auth"];
   readonly isFrameworkTool: boolean;
   readonly rawExecute: ResolvedToolDefinition["execute"];
   readonly scope: string;
 }): HarnessToolDefinition["execute"] {
-  const { auth, isFrameworkTool, rawExecute, scope } = input;
+  const { isFrameworkTool, rawExecute, scope } = input;
   if (rawExecute === undefined) {
     return undefined;
   }
@@ -249,7 +246,7 @@ function resolveAuthoredExecute(input: {
     return rawExecute;
   }
   const authored = rawExecute as (toolInput: unknown, ctx: unknown) => unknown;
-  return createToolExecuteWithAuth({ execute: authored, scope, topLevelAuth: auth });
+  return createToolExecuteWithAuth({ execute: authored, scope });
 }
 
 function maybeJsonSchema(

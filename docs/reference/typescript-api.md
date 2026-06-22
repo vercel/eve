@@ -63,8 +63,6 @@ A few non-`define*` helpers round out the set: `disableTool` and `ExperimentalWo
 | `ctx.getSkill(identifier)`  | Handle for a named skill visible to the current agent                        |
 | `ctx.getToken(provider)`    | Resolve a bearer token for an inline auth provider such as `connect("...")`  |
 | `ctx.requireAuth(provider)` | Evict and re-authorize an inline provider, commonly after a downstream `401` |
-| `ctx.getToken()`            | Deprecated compatibility path for a tool's legacy top-level `auth`           |
-| `ctx.requireAuth()`         | Deprecated compatibility path for a tool's legacy top-level `auth`           |
 
 ## Imports at a glance
 

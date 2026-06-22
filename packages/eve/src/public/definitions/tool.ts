@@ -10,7 +10,6 @@ import type {
   NonInteractiveAuthorizationDefinition,
   TokenResult,
 } from "#runtime/connections/types.js";
-import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
 import {
   DYNAMIC_SENTINEL_KIND,
   TOOL_BRAND,
@@ -38,8 +37,9 @@ export interface NeedsApprovalContext<TInput = Record<string, unknown>> {
 export type { ToolModelOutput } from "#shared/tool-definition.js";
 
 /**
- * Authorization strategy declared on a {@link ToolDefinition} via the
- * `auth` field. Accepts the same shapes as a connection's `auth`:
+ * Authorization provider passed to {@link ToolContext.getToken} or
+ * {@link ToolContext.requireAuth}. Accepts the same shapes as a connection's
+ * `auth`:
  * - a `getToken`-only object (static API keys, pre-provisioned JWTs);
  *   `principalType` may be omitted and defaults to `"app"`.
  * - a full interactive OAuth definition (e.g. `connect("okta/myagent")` from
@@ -84,42 +84,14 @@ export interface ToolAuthOptions {
  *
  * Extends {@link SessionContext} with token accessors. Passing a provider
  * resolves that provider inline, which lets one tool use multiple credentials.
- * For backwards compatibility, calling the accessors without a provider uses
- * the tool's deprecated top-level `auth` field and throws when no `auth` exists.
  */
 export type ToolContext = SessionContext & {
-  /**
-   * Resolves the bearer token for this tool's declared `auth`,
-   * consulting the per-step token cache before invoking the authored
-   * `getToken`. For interactive strategies a cache miss throws
-   * `ConnectionAuthorizationRequiredError`; the runtime catches it,
-   * suspends the turn on a framework-owned callback URL, shows a
-   * "Sign in" affordance, and re-runs the tool after the OAuth
-   * callback completes.
-   *
-   * Throws when the tool does not declare an `auth` strategy.
-   *
-   * @deprecated Prefer `ctx.getToken(provider)` so auth dependencies live at
-   * the call site and compose when a tool needs multiple credentials.
-   */
-  getToken(): Promise<TokenResult>;
   /**
    * Resolves the bearer token for an inline provider. This accepts the same
    * auth shapes as a connection's `auth` field, including `connect("...")`
    * from `@vercel/connect/eve`.
    */
   getToken(provider: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult>;
-  /**
-   * Signals that the caller must complete this tool's authorization flow.
-   * Throws `ConnectionAuthorizationRequiredError`, which the runtime converts
-   * into a consent prompt (for interactive strategies) and re-runs the tool
-   * after sign-in. Use it after a downstream request rejects a token returned
-   * by the deprecated no-argument {@link getToken}.
-   *
-   * @deprecated Prefer `ctx.requireAuth(provider)` so auth dependencies live at
-   * the call site and compose when a tool needs multiple credentials.
-   */
-  requireAuth(): never;
   /**
    * Signals that the caller must complete authorization for an inline
    * provider before proceeding. Use this after a downstream `401` rejects a
@@ -140,16 +112,6 @@ export type ToolDefinition<TInput = unknown, TOutput = unknown> = PublicToolDefi
   TOutput
 > & {
   execute(input: TInput, ctx: ToolContext): Promise<TOutput> | TOutput;
-  /**
-   * Optional authorization strategy used by the deprecated no-argument
-   * {@link ToolContext.getToken} / {@link ToolContext.requireAuth} accessors.
-   *
-   * @deprecated Prefer passing a provider at the call site:
-   * `ctx.getToken(connect("..."))` or `ctx.requireAuth(connect("..."))`.
-   * Inline providers use the same auth shapes and compose when a tool needs
-   * multiple credentials.
-   */
-  auth?: ToolAuthDefinition;
   /**
    * Optional per-tool approval gate. The return value determines whether
    * user approval is required before executing this tool.
@@ -201,8 +163,6 @@ export function defineTool<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["toModelOutput"];
-  /** @deprecated Prefer inline providers via `ctx.getToken(provider)`. */
-  auth?: ToolAuthDefinition;
 }): ToolDefinition<
   StandardJSONSchemaV1.InferOutput<TInputSchema>,
   StandardJSONSchemaV1.InferOutput<TOutputSchema>
@@ -223,8 +183,6 @@ export function defineTool<
     unknown
   >["needsApproval"];
   toModelOutput?: ToolDefinition<unknown, TOutput>["toModelOutput"];
-  /** @deprecated Prefer inline providers via `ctx.getToken(provider)`. */
-  auth?: ToolAuthDefinition;
 }): ToolDefinition<StandardJSONSchemaV1.InferOutput<TSchema>, TOutput>;
 export function defineTool<
   TOutputSchema extends StandardJSONSchemaV1<unknown, unknown>,
@@ -243,8 +201,6 @@ export function defineTool<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["toModelOutput"];
-  /** @deprecated Prefer inline providers via `ctx.getToken(provider)`. */
-  auth?: ToolAuthDefinition;
 }): ToolDefinition<Record<string, unknown>, StandardJSONSchemaV1.InferOutput<TOutputSchema>>;
 export function defineTool<TOutput>(definition: {
   description: ToolDefinition<unknown, unknown>["description"];
@@ -253,8 +209,6 @@ export function defineTool<TOutput>(definition: {
   execute(input: Record<string, unknown>, ctx: ToolContext): Promise<TOutput> | TOutput;
   needsApproval?: ToolDefinition<Record<string, unknown>, unknown>["needsApproval"];
   toModelOutput?: ToolDefinition<unknown, TOutput>["toModelOutput"];
-  /** @deprecated Prefer inline providers via `ctx.getToken(provider)`. */
-  auth?: ToolAuthDefinition;
 }): ToolDefinition<Record<string, unknown>, TOutput>;
 export function defineTool<TInput = unknown, TOutput = unknown>(
   definition: ToolDefinition<TInput, TOutput>,
@@ -262,8 +216,11 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
 export function defineTool<TInput = unknown, TOutput = unknown>(
   definition: ToolDefinition<TInput, TOutput>,
 ): ToolDefinition<TInput, TOutput> {
-  if (definition.auth !== undefined) {
-    definition.auth = normalizeAuthorizationSpec(definition.auth, "defineTool:");
+  if ((definition as { readonly auth?: unknown }).auth !== undefined) {
+    throw new Error(
+      `defineTool: The "auth" field is no longer supported. ` +
+        `Pass auth providers inline to ctx.getToken(provider) or ctx.requireAuth(provider).`,
+    );
   }
   Object.assign(definition, { [TOOL_BRAND]: true });
   stampDefinitionKey(definition, `tool:${definition.description}`);

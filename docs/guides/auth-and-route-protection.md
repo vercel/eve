@@ -313,16 +313,14 @@ const githubAuth = connect({
 
 The tool's `ctx` exposes provider-scoped auth accessors:
 
-- `ctx.getToken(provider, options?)` resolves an inline provider such as `connect("github/myagent")`. It uses the same cache, callback, and sign-in machinery as connection auth, scoped to that provider instead of the tool's legacy top-level `auth`.
+- `ctx.getToken(provider, options?)` resolves an inline provider such as `connect("github/myagent")`. It uses the same cache, callback, and sign-in machinery as connection auth, scoped to that provider's tool-qualified auth key.
 - `ctx.requireAuth(provider, options?)` evicts the cached token for that inline provider and starts a fresh authorization challenge. Use it after a downstream `401` rejects a token returned by `ctx.getToken(provider)`.
 
 Throw `ConnectionAuthorizationRequiredError` from an inline provider's `getToken` to trigger the consent flow for that provider. If a downstream request later rejects an already-resolved token, call `ctx.requireAuth(provider)` to evict and re-authorize it.
 
 Vercel Connect providers usually supply their own display name in the authorization challenge. Set `displayName` in the inline options only when you need to override what users see, for example `ctx.getToken(customAuth, { displayName: "Salesforce" })`. It is presentation-only.
 
-Inline providers derive a stable tool-qualified auth key from Vercel Connect metadata when available. If you pass multiple custom providers that do not carry provider metadata, give each one an explicit auth key, for example `ctx.getToken(auth, { authKey: "github" })`. This `authKey` controls Eve's cache and callback keys; it is not an OAuth scope.
-
-Older tools may still declare a top-level `auth` field and call `ctx.getToken()` or `ctx.requireAuth()` without arguments. That compatibility path is deprecated; prefer inline providers for new tools.
+Inline providers derive a stable tool-qualified auth key from Vercel Connect metadata when available. If you pass multiple custom providers that do not carry provider metadata, give each one an explicit auth key, for example `ctx.getToken(auth, { authKey: "github" })`. This `authKey` controls eve's cache and callback keys; it is not an OAuth scope.
 
 ## What to read next
 

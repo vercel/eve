@@ -52,26 +52,16 @@ function seedUserPrincipal(): void {
   });
 }
 
-function authTool(input: {
-  readonly name: string;
-  readonly auth: AuthorizationDefinition;
-  readonly execute: (toolInput: unknown, ctx: ToolContext) => unknown;
-}): ResolvedToolDefinition {
-  return authoredTool(input);
-}
-
 function authoredTool(input: {
   readonly name: string;
-  readonly auth?: AuthorizationDefinition;
   readonly execute: (toolInput: unknown, ctx: ToolContext) => unknown;
 }): ResolvedToolDefinition {
   const logicalPath = `tools/${input.name}.ts`;
-  const base: ResolvedToolDefinition = {
+  return {
     description: `${input.name} auth tool.`,
     execute: createToolExecuteWithAuth({
       execute: input.execute as (toolInput: unknown, ctx: unknown) => unknown,
       scope: input.name,
-      topLevelAuth: input.auth,
     }),
     inputSchema: null,
     logicalPath,
@@ -79,11 +69,10 @@ function authoredTool(input: {
     sourceId: logicalPath,
     sourceKind: "module",
   };
-  return input.auth === undefined ? base : { ...base, auth: input.auth };
 }
 
 describe("tool-hosted authorization", () => {
-  it("resolves and caches the bearer through ctx.getToken()", async () => {
+  it("resolves and caches the bearer through ctx.getToken(provider)", async () => {
     let calls = 0;
     const auth: AuthorizationDefinition = {
       principalType: "app",
@@ -92,12 +81,11 @@ describe("tool-hosted authorization", () => {
         return { token: `tok-${calls}` };
       },
     };
-    const tool = authTool({
+    const tool = authoredTool({
       name: "list_groups",
-      auth,
       async execute(_input, ctx) {
-        const first = await ctx.getToken();
-        const second = await ctx.getToken();
+        const first = await ctx.getToken(auth);
+        const second = await ctx.getToken(auth);
         return { first: first.token, second: second.token };
       },
     });
@@ -190,18 +178,18 @@ describe("tool-hosted authorization", () => {
     ).rejects.toThrow(/explicit auth keys/);
   });
 
-  it("keeps no-arg ctx.getToken() guarded on tools without top-level auth", async () => {
+  it("rejects no-provider token access at runtime", async () => {
     const tool = authoredTool({
       name: "plain_tool",
       async execute(_input, ctx) {
-        return await ctx.getToken();
+        return await (ctx.getToken as () => Promise<TokenResult>)();
       },
     });
     const runtime = createTestRuntime({ tools: [tool] });
 
     await expect(
       runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {})),
-    ).rejects.toThrow(/does not declare an "auth" strategy/);
+    ).rejects.toThrow(/Pass an auth provider/);
   });
 
   it("parks the turn with a challenge for an inline provider", async () => {
@@ -257,11 +245,10 @@ describe("tool-hosted authorization", () => {
         return { token: "after-signin" };
       },
     };
-    const tool = authTool({
+    const tool = authoredTool({
       name: "list_groups",
-      auth,
       async execute(_input, ctx) {
-        return await ctx.getToken();
+        return await ctx.getToken(auth);
       },
     });
     const runtime = createTestRuntime({ tools: [tool] });
@@ -276,12 +263,12 @@ describe("tool-hosted authorization", () => {
     if (!isAuthorizationSignal(result)) throw new Error("expected signal");
     expect(result.challenges).toHaveLength(1);
     expect(result.challenges[0]).toMatchObject({
-      name: "list_groups",
+      name: "list_groups__inline_auth",
       challenge: { url: "https://idp.example/auth" },
     });
   });
 
-  it("stamps the definition-level displayName onto the challenge, winning over the strategy's", async () => {
+  it("stamps the provider displayName onto the challenge, winning over the strategy's", async () => {
     const auth: AuthorizationDefinition = {
       displayName: "Salesforce",
       principalType: "user",
@@ -297,11 +284,10 @@ describe("tool-hosted authorization", () => {
         return { token: "after-signin" };
       },
     };
-    const tool = authTool({
+    const tool = authoredTool({
       name: "sfdc_lookup",
-      auth,
       async execute(_input, ctx) {
-        return await ctx.getToken();
+        return await ctx.getToken(auth);
       },
     });
     const runtime = createTestRuntime({ tools: [tool] });
@@ -316,7 +302,7 @@ describe("tool-hosted authorization", () => {
     if (!isAuthorizationSignal(result)) throw new Error("expected signal");
     // Identity stays the path-derived scope; only the presentation name changes.
     expect(result.challenges[0]).toMatchObject({
-      name: "sfdc_lookup",
+      name: "sfdc_lookup__inline_auth",
       challenge: { displayName: "Salesforce", url: "https://idp.example/auth" },
     });
   });
@@ -334,11 +320,10 @@ describe("tool-hosted authorization", () => {
         return { token: "after-signin" };
       },
     };
-    const tool = authTool({
+    const tool = authoredTool({
       name: "sfdc_lookup",
-      auth,
       async execute(_input, ctx) {
-        return await ctx.getToken();
+        return await ctx.getToken(auth);
       },
     });
     const runtime = createTestRuntime({ tools: [tool] });
@@ -357,7 +342,7 @@ describe("tool-hosted authorization", () => {
     expect(result.challenges[0]?.challenge).toMatchObject({ displayName: "Salesforce" });
   });
 
-  it("parks the turn when the tool calls ctx.requireAuth()", async () => {
+  it("parks the turn when the tool calls ctx.requireAuth(provider)", async () => {
     const auth: AuthorizationDefinition = {
       principalType: "user",
       async getToken(): Promise<TokenResult> {
@@ -370,11 +355,10 @@ describe("tool-hosted authorization", () => {
         return { token: "after-signin" };
       },
     };
-    const tool = authTool({
+    const tool = authoredTool({
       name: "gated_tool",
-      auth,
       execute(_input, ctx) {
-        ctx.requireAuth();
+        ctx.requireAuth(auth);
       },
     });
     const runtime = createTestRuntime({ tools: [tool] });
@@ -406,11 +390,10 @@ describe("tool-hosted authorization", () => {
         return { token: "minted" };
       },
     };
-    const tool = authTool({
+    const tool = authoredTool({
       name: "list_groups",
-      auth,
       async execute(_input, ctx) {
-        return await ctx.getToken();
+        return await ctx.getToken(auth);
       },
     });
     const runtime = createTestRuntime({ tools: [tool] });
@@ -420,7 +403,7 @@ describe("tool-hosted authorization", () => {
       loadContext().set(CallbackBaseUrlKey, "https://app.example");
       loadContext().set(PendingAuthorizationResultKey, [
         {
-          name: "list_groups",
+          name: "list_groups__inline_auth",
           hookUrl: "https://app.example/callback",
           callback: {
             params: { code: "abc" },
@@ -535,14 +518,13 @@ describe("tool-hosted authorization", () => {
         return { token: "rejected" };
       },
     };
-    const tool = authTool({
+    const tool = authoredTool({
       name: "list_groups",
-      auth,
       async execute(_input, ctx) {
         // The token resolves, but the downstream service rejects it —
         // the tool re-signals Required the same turn it signed in.
-        await ctx.getToken();
-        throw requiredError();
+        await ctx.getToken(auth);
+        ctx.requireAuth(auth);
       },
     });
     const runtime = createTestRuntime({ tools: [tool] });
@@ -553,7 +535,7 @@ describe("tool-hosted authorization", () => {
         loadContext().set(CallbackBaseUrlKey, "https://app.example");
         loadContext().set(PendingAuthorizationResultKey, [
           {
-            name: "list_groups",
+            name: "list_groups__inline_auth",
             hookUrl: "https://app.example/callback",
             callback: {
               params: { code: "abc" },
@@ -684,11 +666,10 @@ describe("tool-hosted authorization", () => {
         return { token: "after-signin" };
       },
     };
-    const tool = authTool({
+    const tool = authoredTool({
       name: "list_groups",
-      auth,
       async execute(_input, ctx) {
-        return await ctx.getToken();
+        return await ctx.getToken(auth);
       },
     });
     const runtime = createTestRuntime({ tools: [tool] });
@@ -717,11 +698,10 @@ describe("tool-hosted authorization", () => {
         throw requiredError();
       },
     };
-    const tool = authTool({
+    const tool = authoredTool({
       name: "list_keys",
-      auth,
       async execute(_input, ctx) {
-        return await ctx.getToken();
+        return await ctx.getToken(auth);
       },
     });
     const runtime = createTestRuntime({ tools: [tool] });
