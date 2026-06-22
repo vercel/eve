@@ -201,6 +201,64 @@ describe("development runtime artifact snapshots", () => {
     expect(existsSync(staleSnapshotRoot)).toBe(false);
   });
 
+  it("preserves stale snapshots referenced by durable workflow data", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-artifacts-prune-durable-");
+    const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
+    const activeSnapshotRoot = join(snapshotsRoot, "active");
+    const parkedTurnSnapshotRoot = join(snapshotsRoot, "parked-turn");
+    const staleSnapshotRoot = join(snapshotsRoot, "stale");
+    const oldSnapshotTime = new Date(1_000);
+    const now = 1_000_000;
+
+    for (const snapshotRoot of [activeSnapshotRoot, parkedTurnSnapshotRoot, staleSnapshotRoot]) {
+      await mkdir(snapshotRoot, { recursive: true });
+      await writeFile(join(snapshotRoot, "marker.txt"), snapshotRoot);
+      await utimes(snapshotRoot, oldSnapshotTime, oldSnapshotTime);
+    }
+
+    await activateDevelopmentRuntimeArtifactsSnapshot({
+      appRoot,
+      snapshot: {
+        runtimeAppRoot: join(activeSnapshotRoot, "source", "app"),
+        snapshotRoot: activeSnapshotRoot,
+        snapshotSourceRoot: join(activeSnapshotRoot, "source"),
+      },
+    });
+    await mkdir(join(appRoot, ".workflow-data", "default", "runs"), { recursive: true });
+    await writeFile(
+      join(appRoot, ".workflow-data", "default", "runs", "parked-turn.json"),
+      `${JSON.stringify(
+        {
+          input: {
+            serializedContext: {
+              "eve.bundle": {
+                source: {
+                  appRoot: join(parkedTurnSnapshotRoot, "source", "app"),
+                  kind: "disk",
+                },
+              },
+            },
+          },
+          workflowId: "workflow//eve//turnWorkflow",
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    await pruneDevelopmentRuntimeArtifactsSnapshots({
+      appRoot,
+      now,
+      recentWindowMs: 0,
+      retainCount: 0,
+    });
+
+    await expect(readdir(snapshotsRoot)).resolves.toEqual(
+      expect.arrayContaining(["active", "parked-turn"]),
+    );
+    expect(existsSync(staleSnapshotRoot)).toBe(false);
+  });
+
   it("removes a partially staged snapshot when staging fails", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-artifacts-failed-stage-");
     const agentRoot = join(appRoot, "agent");
