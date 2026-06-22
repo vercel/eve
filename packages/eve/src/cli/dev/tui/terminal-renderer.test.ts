@@ -2283,3 +2283,33 @@ describe("TerminalRenderer status line", () => {
     renderer.shutdown();
   });
 });
+
+describe("TerminalRenderer setup-flow output during a choice panel", () => {
+  // Regression for the dev TUI `/login` flow: while the choice panel waits on
+  // the browser ("Complete the login in your browser"), `vercel login` streams
+  // its device-authorization URL on stderr through `renderOutput`. A remote
+  // user must be able to read that URL to finish the login by hand, so the open
+  // choice panel has to keep showing the subprocess preview alongside its
+  // actions — not suppress it the way it does a status line.
+  it("shows subprocess output (e.g. a login URL) while a choice panel is open", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.setupFlow.begin("Vercel");
+    const choice = renderer.setupFlow.readChoice({
+      status: "Logging in to Vercel…",
+      context: "Complete the login in your browser",
+      actions: [{ value: "cancel", label: "Cancel" }],
+    });
+    // `vercel login` prints the device URL, then a later line that would
+    // overwrite the single-line `preview` slot — so the URL only survives in the
+    // output buffer, and the panel must render that, not just the latest line.
+    renderer.setupFlow.renderOutput("Visit https://vercel.com/oauth/device?user_code=ZHHJ-VQJD");
+    renderer.setupFlow.renderOutput("Waiting for authentication...");
+
+    const snapshot = screen.snapshot();
+    choice.close();
+    renderer.shutdown();
+
+    expect(snapshot).toContain("Complete the login in your browser");
+    expect(snapshot).toContain("https://vercel.com/oauth/device?user_code=ZHHJ-VQJD");
+  });
+});

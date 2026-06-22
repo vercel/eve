@@ -114,6 +114,14 @@ export type FlowPanelContent =
       rows: readonly string[];
       /** The install wait keeps its spinner above the concurrent actions. */
       status?: { text: string; frame: string };
+      /**
+       * Recent child-process output shown above the actions. A question can wait
+       * on a still-streaming subprocess — `/login` parks on the browser OAuth
+       * while `vercel login` prints its device URL — and the user needs that
+       * output (the URL) to act, so it rides alongside the actions rather than
+       * being suppressed the way a single status line is.
+       */
+      preview?: readonly string[];
     }
   | {
       kind: "status";
@@ -137,6 +145,9 @@ const SEARCH_VIEW_SIZE = 8;
 
 /** The flow panel keeps only the freshest progress in view. */
 const FLOW_PANEL_LINE_CAP = 6;
+
+/** How many recent subprocess output lines ride above a parked question. */
+const QUESTION_PREVIEW_CAP = 6;
 
 function questionFooter(hints: readonly string[], theme: Theme): string[] {
   const c = theme.colors;
@@ -200,6 +211,14 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
           `  ${c.yellow(state.content.status.frame)} ${c.dim(state.content.status.text)}`,
           "",
         );
+      }
+      // Streaming subprocess output (e.g. the `vercel login` device URL) shown
+      // above the actions so a parked question stays actionable.
+      if (state.content.preview !== undefined && state.content.preview.length > 0) {
+        for (const line of state.content.preview.slice(-QUESTION_PREVIEW_CAP)) {
+          rows.push(`    ${c.dim(line)}`);
+        }
+        rows.push("");
       }
       rows.push(...state.content.rows);
       break;
