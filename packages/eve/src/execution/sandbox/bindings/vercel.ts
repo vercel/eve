@@ -1,3 +1,5 @@
+import { Readable } from "node:stream";
+
 import type {
   SandboxCreateOptions,
   Sandbox as SdkSandbox,
@@ -488,7 +490,7 @@ function createVercelInternalSandboxSession(
     },
     async readFile(options: SandboxReadFileOptions) {
       const stream = await sandbox.readFile({ path: options.path });
-      return stream ?? null;
+      return stream === null ? null : Readable.toWeb(stream);
     },
     async writeFile(options: SandboxWriteFileOptions) {
       const bytes = await streamToBuffer(options.content);

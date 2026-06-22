@@ -111,7 +111,7 @@ export declare class Sandbox {
   static create(options?: SandboxCreateOptions): Promise<Sandbox>;
   static get(options: SandboxGetOptions): Promise<Sandbox>;
   domain(port: number): string;
-  readFile(file: { path: string }): Promise<ReadableStream<Uint8Array> | null>;
+  readFile(file: { path: string }): Promise<NodeJS.ReadableStream | null>;
   readFileToBuffer(file: { path: string }): Promise<Buffer | null>;
   runCommand(input: SandboxRunCommandParams & { detached: true }): Promise<SandboxCommand>;
   runCommand(input: SandboxRunCommandParams): Promise<SandboxCommandFinished>;

@@ -1,5 +1,8 @@
+import { Readable } from "node:stream";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { streamToBuffer } from "#execution/sandbox/stream-utils.js";
 import { SandboxTemplateNotProvisionedError } from "#public/definitions/sandbox-backend.js";
 import { vercel } from "#public/sandbox/backends/vercel.js";
 import { createVercelSandbox } from "#execution/sandbox/bindings/vercel.js";
@@ -45,6 +48,7 @@ function createMockSandbox(input: {
       unlink: vi.fn().mockResolvedValue(undefined),
     },
     name: input.name,
+    readFile: vi.fn<() => Promise<NodeJS.ReadableStream | null>>().mockResolvedValue(null),
     runCommand: vi.fn().mockResolvedValue(createMockCommandResult()),
     snapshot: vi.fn().mockResolvedValue({ snapshotId: `${input.name}-snapshot` }),
     status: input.status ?? "running",
@@ -81,6 +85,45 @@ afterEach(() => {
 });
 
 describe("createVercelSandbox", () => {
+  it("adapts Vercel file reads to Eve's Web stream contract", async () => {
+    const templateSandbox = createMockSandbox({ name: "template" });
+    const sessionSandbox = createMockSandbox({ name: "session" });
+    const sandboxModule = {
+      Sandbox: {
+        create: vi
+          .fn()
+          .mockResolvedValueOnce(templateSandbox)
+          .mockResolvedValueOnce(sessionSandbox),
+        get: vi.fn().mockResolvedValue(null),
+      },
+    };
+    vi.mocked(sessionSandbox.readFile).mockResolvedValueOnce(
+      Readable.from([Buffer.from("vercel stream", "utf8")]),
+    );
+    const backend = createTestVercelSandbox({
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+
+    await backend.prewarm({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      seedFiles: [],
+      templateKey: "template-key",
+    });
+    const handle = await backend.create({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      sessionKey: "session-key",
+      templateKey: "template-key",
+    });
+    const stream = await handle.session.readFile({ path: "proof.bin" });
+
+    expect(stream).toBeInstanceOf(ReadableStream);
+    if (stream === null) {
+      throw new Error("Expected a file stream.");
+    }
+    await expect(streamToBuffer(stream)).resolves.toEqual(Buffer.from("vercel stream", "utf8"));
+    await expect(handle.session.readFile({ path: "missing.bin" })).resolves.toBeNull();
+  });
+
   it("creates fresh Vercel sandboxes through the SDK with the eve image", async () => {
     const templateSandbox = createMockSandbox({ name: "template-key" });
     const fetch = vi.fn();
