@@ -1,16 +1,14 @@
 import type * as VercelSandboxSdk from "#compiled/@vercel/sandbox/index.js";
-import type {
-  SandboxCreateOptions,
-  Sandbox as SdkSandbox,
-} from "#compiled/@vercel/sandbox/index.js";
+import type { Sandbox as SdkSandbox } from "#compiled/@vercel/sandbox/index.js";
+import type { VercelSdkCreateOptions } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 
 export type VercelSandboxModule = typeof VercelSandboxSdk;
 
-export type VercelSandboxCreateParams = SandboxCreateOptions & {
+export type VercelSandboxCreateParams = VercelSdkCreateOptions & {
   readonly name: string;
   readonly persistent: boolean;
-  readonly source?: SandboxCreateOptions["source"] | { snapshotId: string; type: "snapshot" };
-  readonly tags?: Record<string, string> | undefined;
+  readonly source?: VercelSdkCreateOptions["source"];
+  tags?: Record<string, string> | undefined;
 } & VercelSandboxInternalCreateOptions;
 
 type VercelSandboxInternalCreateOptions = {

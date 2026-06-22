@@ -1,17 +1,17 @@
-import type {
-  SandboxCreateOptions,
-  SandboxGetOptions,
-  Sandbox as SdkSandbox,
-} from "#compiled/@vercel/sandbox/index.js";
+import type { Sandbox as SdkSandbox } from "#compiled/@vercel/sandbox/index.js";
 
 import {
   getVercelSandboxCredentials,
   getVercelSandboxFetch,
 } from "#execution/sandbox/bindings/vercel-credentials.js";
 import type { VercelSandboxModule } from "#execution/sandbox/bindings/vercel-create-sdk.js";
+import type {
+  VercelSdkCreateOptions,
+  VercelSdkGetOptions,
+} from "#execution/sandbox/bindings/vercel-sdk-types.js";
 
 export async function getNamedVercelSandbox(input: {
-  readonly createOptions: SandboxCreateOptions;
+  readonly createOptions: VercelSdkCreateOptions;
   readonly sandboxModule: VercelSandboxModule;
   readonly sandboxName: string;
 }): Promise<SdkSandbox | null> {
@@ -32,9 +32,9 @@ export async function getNamedVercelSandbox(input: {
 }
 
 async function getVercelSandboxGetOptions(input: {
-  readonly createOptions: SandboxCreateOptions;
+  readonly createOptions: VercelSdkCreateOptions;
   readonly sandboxName: string;
-}): Promise<SandboxGetOptions> {
+}): Promise<VercelSdkGetOptions> {
   const baseOptions = {
     name: input.sandboxName,
     resume: false,
@@ -47,7 +47,7 @@ async function getVercelSandboxGetOptions(input: {
       ...credentials,
       fetch: getVercelSandboxFetch(input.createOptions),
       signal: input.createOptions.signal,
-    } as SandboxGetOptions;
+    } as VercelSdkGetOptions;
   } catch {
     return baseOptions;
   }

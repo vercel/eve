@@ -1,9 +1,7 @@
-import type {
-  SandboxCreateOptions,
-  Sandbox as SdkSandbox,
-} from "#compiled/@vercel/sandbox/index.js";
+import type { Sandbox as SdkSandbox } from "#compiled/@vercel/sandbox/index.js";
 
 import { buildDockerBaseSetupScript } from "#execution/sandbox/bindings/docker-base-setup.js";
+import type { VercelSdkCreateOptions } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 
 /**
  * Prepares a fresh Vercel sandbox for use by the framework.
@@ -17,7 +15,7 @@ export async function ensureVercelSandboxBaseRuntime(sandbox: SdkSandbox): Promi
 
 export async function applyInitialVercelNetworkPolicy(
   sandbox: SdkSandbox,
-  networkPolicy: SandboxCreateOptions["networkPolicy"],
+  networkPolicy: VercelSdkCreateOptions["networkPolicy"],
 ): Promise<void> {
   if (networkPolicy !== undefined) {
     await sandbox.update({ networkPolicy });
