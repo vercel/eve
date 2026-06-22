@@ -36,7 +36,7 @@ export default defineAgent({
 });
 ```
 
-The world package should read credentials and host-specific options from runtime environment variables. It should export a default factory or `createWorld()` function. See [Workflow Worlds](https://workflow-sdk.dev/worlds) for the underlying SDK abstraction.
+The world package should read credentials and host-specific options from runtime environment variables. It should export a default factory or `createWorld()` function and declare a dependency or peer dependency on `@workflow/world` compatible with the version used by eve. See [Workflow Worlds](https://workflow-sdk.dev/worlds) for the underlying SDK abstraction.
 
 ## 2. Environment variables and secrets
 

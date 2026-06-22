@@ -7,6 +7,7 @@ import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { stringifyEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
+import { validateWorkflowWorldPackage } from "#internal/workflow/world-package-validation.js";
 import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
 
 /**
@@ -45,8 +46,13 @@ export async function writeCompiledArtifactsFiles(input: {
   const bootstrapPath = join(input.outDir, "compiled-artifacts-bootstrap.mjs");
   const instrumentationPluginPath = join(input.outDir, "compiled-artifacts-instrumentation.mjs");
   const instrumentationPath = resolveInstrumentationModule(input.compileResult.manifest.agentRoot);
+  const workflowWorld = input.compileResult.manifest.config.experimental?.workflow?.world;
 
   await mkdir(input.outDir, { recursive: true });
+  validateWorkflowWorldPackage({
+    appRoot: input.compileResult.project.appRoot,
+    world: workflowWorld,
+  });
   await writeFile(
     bootstrapPath,
     await createCompiledArtifactsBootstrapSource({
