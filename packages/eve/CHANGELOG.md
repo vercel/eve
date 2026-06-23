@@ -1,5 +1,11 @@
 # eve
 
+## 0.13.3
+
+### Patch Changes
+
+- b33c611: use shared Chat SDK Block Kit primitives for Slack card rendering
+
 ## 0.13.2
 
 ### Patch Changes
