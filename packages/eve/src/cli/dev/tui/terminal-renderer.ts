@@ -1415,16 +1415,20 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     flow.question = (width) => {
       const state: SetupSelectPanelState = {
-        kind: "editable",
+        kind: "inline-edit",
+        layout: "task-list",
         message: opts.message,
         options: opts.options,
         select,
         edit: {
           optionValue: opts.editable.value,
-          editor,
-          defaultValue: opts.editable.defaultValue,
-          formatHint: opts.editable.formatHint,
           caretVisible: this.#caretVisible,
+          editor: {
+            kind: "rename",
+            editor,
+            defaultValue: opts.editable.defaultValue,
+            formatHint: opts.editable.formatHint,
+          },
         },
       };
       if (error !== undefined) state.error = error;
@@ -1516,11 +1520,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
     flow.question = (width) =>
       renderSelectQuestion(
         {
-          kind: "provider",
+          kind: "inline-edit",
+          layout: "stacked",
           message: opts.message,
           options: opts.options,
           select: interaction.select,
-          provider: { phase: interaction.phase, caretVisible: this.#caretVisible },
+          edit: {
+            optionValue: "own-key",
+            caretVisible: this.#caretVisible,
+            editor: { kind: "key", phase: interaction.phase },
+          },
         },
         this.#theme,
         width,

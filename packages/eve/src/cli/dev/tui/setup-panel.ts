@@ -62,28 +62,36 @@ interface SetupSelectPanelBase extends SetupQuestionPanelBase {
   loadingFrame?: string;
 }
 
-interface SetupEditableRow {
-  /**
-   * The row whose hint is a live rename field. Hovering it (cursor on the row)
-   * makes it editable directly — typing and backspace edit the name in place —
-   * so the editor's text and a blinking caret render only on that row.
-   */
+/**
+ * A menu row that turns into an inline editor while the cursor rests on it.
+ * `optionValue` names the row; the `editor` discriminant chooses the widget —
+ * an in-place rename field, or a masked provider-key field with its own
+ * validation phases. Hovering the row makes it editable directly (typing and
+ * backspace edit in place), so the editor's text and a blinking caret render
+ * only on that row. Layout and inline editing are orthogonal, so the editor
+ * travels as a payload rather than as its own panel `kind`.
+ */
+interface SetupInlineEditRow {
   optionValue: string;
-  editor: LineState;
-  defaultValue: string;
-  formatHint: (value: string) => string;
   caretVisible: boolean;
-}
-
-interface SetupProviderKeyRow {
-  phase: ProviderPickerPhase;
-  caretVisible: boolean;
+  editor:
+    | {
+        kind: "rename";
+        editor: LineState;
+        defaultValue: string;
+        formatHint: (value: string) => string;
+      }
+    | {
+        kind: "key";
+        phase: ProviderPickerPhase;
+      };
 }
 
 /**
  * Select presentation variants. The discriminant owns the interaction grammar
  * so feature combinations are deliberate rather than resolved by conditional
- * precedence inside the renderer.
+ * precedence inside the renderer. Inline editing is the exception: it composes
+ * with a layout instead of defining one, so `inline-edit` carries both.
  */
 type SetupOptionSelectPanelState =
   | (SetupSelectPanelBase & { kind: "single" })
@@ -93,12 +101,9 @@ type SetupOptionSelectPanelState =
   | (SetupSelectPanelBase & { kind: "stacked" })
   | (SetupSelectPanelBase & { kind: "task-list" })
   | (SetupSelectPanelBase & {
-      kind: "editable";
-      edit: SetupEditableRow;
-    })
-  | (SetupSelectPanelBase & {
-      kind: "provider";
-      provider: SetupProviderKeyRow;
+      kind: "inline-edit";
+      layout: "stacked" | "task-list";
+      edit: SetupInlineEditRow;
     });
 
 interface SetupActionsPanelState {
@@ -314,76 +319,35 @@ interface SelectPresentation {
   selection: "single" | "multiple";
   filter: { placeholder: string | undefined } | undefined;
   layout: SelectLayout;
-  edit: SetupEditableRow | undefined;
-  provider: SetupProviderKeyRow | undefined;
+  edit: SetupInlineEditRow | undefined;
 }
 
 function selectPresentation(state: SetupOptionSelectPanelState): SelectPresentation {
   switch (state.kind) {
     case "single":
-      return {
-        selection: "single",
-        filter: undefined,
-        layout: "plain",
-        edit: undefined,
-        provider: undefined,
-      };
+      return { selection: "single", filter: undefined, layout: "plain", edit: undefined };
     case "search":
       return {
         selection: "single",
         filter: { placeholder: state.placeholder },
         layout: "plain",
         edit: undefined,
-        provider: undefined,
       };
     case "multi":
-      return {
-        selection: "multiple",
-        filter: undefined,
-        layout: "plain",
-        edit: undefined,
-        provider: undefined,
-      };
+      return { selection: "multiple", filter: undefined, layout: "plain", edit: undefined };
     case "searchable-multi":
       return {
         selection: "multiple",
         filter: { placeholder: state.placeholder },
         layout: "plain",
         edit: undefined,
-        provider: undefined,
       };
     case "stacked":
-      return {
-        selection: "single",
-        filter: undefined,
-        layout: "stacked",
-        edit: undefined,
-        provider: undefined,
-      };
+      return { selection: "single", filter: undefined, layout: "stacked", edit: undefined };
     case "task-list":
-      return {
-        selection: "single",
-        filter: undefined,
-        layout: "task-list",
-        edit: undefined,
-        provider: undefined,
-      };
-    case "editable":
-      return {
-        selection: "single",
-        filter: undefined,
-        layout: "task-list",
-        edit: state.edit,
-        provider: undefined,
-      };
-    case "provider":
-      return {
-        selection: "single",
-        filter: undefined,
-        layout: "stacked",
-        edit: undefined,
-        provider: state.provider,
-      };
+      return { selection: "single", filter: undefined, layout: "task-list", edit: undefined };
+    case "inline-edit":
+      return { selection: "single", filter: undefined, layout: state.layout, edit: state.edit };
   }
 }
 
@@ -436,38 +400,29 @@ function noticeBody(notice: SelectNotice, layout: SelectLayout, theme: Theme): s
   return notice.text;
 }
 
-function editableOption(
+function renameHint(
   option: SetupPanelOption,
-  isCursor: boolean,
-  edit: SetupEditableRow | undefined,
+  caretVisible: boolean,
+  rename: Extract<SetupInlineEditRow["editor"], { kind: "rename" }>,
   theme: Theme,
 ): SetupPanelOption {
-  if (!isCursor || edit?.optionValue !== option.value) return option;
-
-  const value = edit.editor.text || edit.defaultValue;
-  const caretAt = edit.editor.text.length === 0 ? value.length : edit.editor.cursor;
-  const caret = edit.caretVisible ? theme.colors.cyan(theme.glyph.caret) : "";
+  const value = rename.editor.text || rename.defaultValue;
+  const caretAt = rename.editor.text.length === 0 ? value.length : rename.editor.cursor;
+  const caret = caretVisible ? theme.colors.cyan(theme.glyph.caret) : "";
   const editableValue = `${value.slice(0, caretAt)}${caret}${value.slice(caretAt)}`;
-  return { ...option, hint: edit.formatHint(editableValue) };
+  return { ...option, hint: rename.formatHint(editableValue) };
 }
 
-function providerKeyOption(
+function keyHint(
   option: SetupPanelOption,
-  isCursor: boolean,
-  provider: SetupProviderKeyRow | undefined,
+  caretVisible: boolean,
+  key: Extract<SetupInlineEditRow["editor"], { kind: "key" }>,
   theme: Theme,
   maxHintWidth: number,
 ): SetupPanelOption {
-  if (
-    !isCursor ||
-    option.value !== "own-key" ||
-    provider === undefined ||
-    provider.phase.kind === "inactive"
-  ) {
-    return option;
-  }
+  const phase = key.phase;
+  if (phase.kind === "inactive") return option;
 
-  const phase = provider.phase;
   const display = maskLine(phase.editor);
   const cursorEnabled = phase.kind !== "validating" && phase.kind !== "invalid";
   let prefix = "";
@@ -485,11 +440,32 @@ function providerKeyOption(
   const value = cursorEnabled
     ? renderInputWithBlockCursor({
         ...visible,
-        visible: provider.caretVisible,
+        visible: caretVisible,
         inverse: theme.colors.inverse,
       })
     : renderInputText(`${visible.before}${visible.under}${visible.after}`);
   return { ...option, hint: `>  ${prefix}${value}${suffix}` };
+}
+
+/**
+ * Applies the inline editor's live hint to its bound row when the cursor rests
+ * on it. Every other row — and every row when the cursor is elsewhere — renders
+ * unchanged. The bound row's `editor` discriminant selects the widget.
+ */
+function inlineEditOption(
+  option: SetupPanelOption,
+  isCursor: boolean,
+  edit: SetupInlineEditRow | undefined,
+  theme: Theme,
+  maxHintWidth: number,
+): SetupPanelOption {
+  if (!isCursor || edit === undefined || option.value !== edit.optionValue) return option;
+  switch (edit.editor.kind) {
+    case "rename":
+      return renameHint(option, edit.caretVisible, edit.editor, theme);
+    case "key":
+      return keyHint(option, edit.caretVisible, edit.editor, theme, maxHintWidth);
+  }
 }
 
 function optionWithoutStackedHint(
@@ -553,18 +529,11 @@ function appendSelectOptionRows(input: {
       rows.push("");
     }
 
-    const providerHintWidth =
+    const inlineHintWidth =
       presentation.layout === "stacked"
         ? Math.max(1, width - 6)
         : Math.max(1, width - Math.max(visibleLabelWidth, option.label.length) - 9);
-    const renamed = editableOption(option, isCursor, presentation.edit, theme);
-    const rendered = providerKeyOption(
-      renamed,
-      isCursor,
-      presentation.provider,
-      theme,
-      providerHintWidth,
-    );
+    const rendered = inlineEditOption(option, isCursor, presentation.edit, theme, inlineHintWidth);
     const { option: rowOption, stackedHint } = optionWithoutStackedHint(
       rendered,
       presentation.layout,
@@ -581,8 +550,13 @@ function appendSelectOptionRows(input: {
     );
 
     if (stackedHint !== undefined) {
+      const editRow = presentation.edit;
       const isActiveProviderKey =
-        isCursor && option.value === "own-key" && presentation.provider?.phase.kind !== "inactive";
+        isCursor &&
+        editRow !== undefined &&
+        editRow.optionValue === option.value &&
+        editRow.editor.kind === "key" &&
+        editRow.editor.phase.kind !== "inactive";
       for (const line of stackedHint.split("\n")) {
         const renderedHint = !isCursor
           ? dimWithEmphasis(line, theme)
@@ -646,18 +620,18 @@ function selectFooterHints(
 ): string[] {
   const hints: string[] = [];
   let cancelHint = "esc to cancel";
-  if (presentation.provider !== undefined && visible[cursor]?.value === "own-key") {
-    const phase = presentation.provider.phase;
-    if (phase.kind !== "inactive" && phase.editor.text.length > 0) {
-      cancelHint = "esc to clear";
+  const edit = presentation.edit;
+  if (edit !== undefined && visible[cursor]?.value === edit.optionValue) {
+    if (edit.editor.kind === "key") {
+      const phase = edit.editor.phase;
+      if (phase.kind !== "inactive" && phase.editor.text.length > 0) {
+        cancelHint = "esc to clear";
+      }
+      if (phase.kind === "validating") return [cancelHint];
+      hints.push("type your key");
+    } else {
+      hints.push("type to rename");
     }
-    if (phase.kind === "validating") return [cancelHint];
-    hints.push("type your key");
-  } else if (
-    presentation.edit !== undefined &&
-    visible[cursor]?.value === presentation.edit.optionValue
-  ) {
-    hints.push("type to rename");
   }
   if (presentation.filter !== undefined) hints.push("type to filter");
   hints.push("↑/↓ move");

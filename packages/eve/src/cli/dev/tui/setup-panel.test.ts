@@ -415,22 +415,25 @@ describe("renderSelectQuestion", () => {
       { value: "new", label: "Create a new project", hint: "Named 'weather-agent'" },
       { value: "link", label: "Link an existing project" },
     ];
-    const baseEdit = {
-      optionValue: "new",
-      defaultValue: "weather-agent",
-      formatHint: (value: string) => `Named '${value}'`,
-      caretVisible: true,
-    };
+    const renameEditor = (editor: ReturnType<typeof lineOf>) =>
+      ({
+        kind: "rename",
+        editor,
+        defaultValue: "weather-agent",
+        formatHint: (value: string) => `Named '${value}'`,
+      }) as const;
+    const baseEdit = { optionValue: "new", caretVisible: true };
 
     // Hovering the editable row: the seeded default reads back with the caret
     // parked after it, never wedged before the name, and the footer says so.
     const hover = renderSelectQuestion(
       {
-        kind: "editable",
+        kind: "inline-edit",
+        layout: "task-list",
         message: "Vercel project",
         options,
         select: initialSelectState({ options }),
-        edit: { ...baseEdit, editor: lineOf("weather-agent") },
+        edit: { ...baseEdit, editor: renameEditor(lineOf("weather-agent")) },
       },
       theme,
       80,
@@ -442,11 +445,12 @@ describe("renderSelectQuestion", () => {
     // Caret off (blink) collapses to nothing — no stray space before the quote.
     const hoverOff = renderSelectQuestion(
       {
-        kind: "editable",
+        kind: "inline-edit",
+        layout: "task-list",
         message: "Vercel project",
         options,
         select: initialSelectState({ options }),
-        edit: { ...baseEdit, caretVisible: false, editor: lineOf("weather-agent") },
+        edit: { ...baseEdit, caretVisible: false, editor: renameEditor(lineOf("weather-agent")) },
       },
       theme,
       80,
@@ -457,11 +461,12 @@ describe("renderSelectQuestion", () => {
     // A backspaced field renders the shortened name with the caret at its end.
     const edited = renderSelectQuestion(
       {
-        kind: "editable",
+        kind: "inline-edit",
+        layout: "task-list",
         message: "Vercel project",
         options,
         select: initialSelectState({ options }),
-        edit: { ...baseEdit, editor: lineOf("weather-fixtur") },
+        edit: { ...baseEdit, editor: renameEditor(lineOf("weather-fixtur")) },
       },
       theme,
       80,
@@ -480,16 +485,21 @@ describe("renderSelectQuestion", () => {
     const width = 44;
     const rows = renderSelectQuestion(
       {
-        kind: "provider",
+        kind: "inline-edit",
+        layout: "stacked",
         message: "Provider",
         options,
         select: initialSelectState({ options }),
-        provider: {
+        edit: {
+          optionValue: "own-key",
           caretVisible: false,
-          phase: {
-            kind: "invalid",
-            editor: lineOf(`sk-${"x".repeat(80)}`),
-            message: "The AI Gateway rejected this key.",
+          editor: {
+            kind: "key",
+            phase: {
+              kind: "invalid",
+              editor: lineOf(`sk-${"x".repeat(80)}`),
+              message: "The AI Gateway rejected this key.",
+            },
           },
         },
       },
@@ -514,17 +524,21 @@ describe("renderSelectQuestion", () => {
     ];
     const rows = renderSelectQuestion(
       {
-        kind: "editable",
+        kind: "inline-edit",
+        layout: "task-list",
         message: "Vercel project",
         options,
         // Cursor parked on the second (non-editable) row.
         select: { ...initialSelectState({ options }), cursor: 1 },
         edit: {
           optionValue: "new",
-          defaultValue: "weather-agent",
-          formatHint: (value: string) => `Named '${value}'`,
           caretVisible: true,
-          editor: lineOf(""),
+          editor: {
+            kind: "rename",
+            editor: lineOf(""),
+            defaultValue: "weather-agent",
+            formatHint: (value: string) => `Named '${value}'`,
+          },
         },
       },
       theme,
