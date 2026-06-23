@@ -91,6 +91,51 @@ jobs:
       - name: Run unit tests
         run: pnpm test:unit
 
+  client-resolved-hitl-construction:
+    # Gateway-free, merge-blocking proof of the client-resolved / HITL
+    # CONSTRUCTION contract (vercel/eve#203): a client-resolved tool may omit
+    # `execute`, the mixed `clientResolved + execute` shape is rejected at both
+    # compile and runtime, and the authored HITL fixture (the `ask_question`
+    # override + the approval-vs-client-resolved fixture) typechecks and builds
+    # against the authored surface. The gateway-backed `eve eval`
+    # (e2e-local / e2e-vercel) stays as the RUNTIME evidence — that the resumed
+    # history yields exactly one result and keeps approval-gated execution
+    # separate from client-resolved input. This job guarantees no executor-less
+    # path ships without a fixture compiled against it.
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build eve
+        run: pnpm --filter eve build
+
+      - name: Construction guards (omit-execute + mixed-shape rejection)
+        # Also covered by the full suite in test-unit; pinned here so this job is
+        # a self-contained statement of the construction contract.
+        run: >-
+          pnpm --filter eve exec vitest run --config vitest.unit.config.ts
+          src/public/definitions/define-client-tool.test.ts
+          src/internal/authored-definition/schema-backed.test.ts
+
+      - name: Build + typecheck the authored HITL fixture
+        run: pnpm --filter agent-tools-hitl run typecheck
+
   test-integration:
     name: test-integration (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
