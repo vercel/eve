@@ -1,12 +1,10 @@
 ---
 issue: https://github.com/vercel/eve/issues/216
+last_updated: "2026-06-23"
+status: proposed
 ---
 
 # Channel session reset and scoped cancellation
-
-Status: proposed
-
-Last updated: 2026-06-23
 
 ## Summary
 
