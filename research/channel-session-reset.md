@@ -20,10 +20,10 @@ Implement two distinct cancellation operations behind one explicit HTTP endpoint
 - **session cancellation** revokes the continuation, stops the active turn and delegated work, and
   terminates the parent `workflowEntry`.
 
-Telegram and Twilio should recognize `/new` and `/clear` by default. A bare reset command ends the
-old session without creating an empty replacement. A reset command followed by content ends the old
-session and dispatches that content as the first turn of a fresh session. Both forms are silent:
-there is no reset confirmation, and only replacement content can produce a normal agent response.
+Telegram and Twilio should recognize `/new` by default. A bare reset command ends the old session
+without creating an empty replacement. A reset command followed by content ends the old session and
+dispatches that content as the first turn of a fresh session. Both forms are silent: there is no
+reset confirmation, and only replacement content can produce a normal agent response.
 
 The implementation must expose the underlying behavior independently of slash-command parsing so
 that authors can reproduce it from a custom `defineChannel` route, a Slack `onAppMention` or
@@ -40,7 +40,7 @@ that authors can reproduce it from a custom `defineChannel` route, a Slack `onAp
   no clean-session boundary.
 - The pending turn-cancellation work in #118 adds
   `POST /eve/v1/session/:sessionId/cancel` with a one-turn `cancelToken`. That operation deliberately
-  leaves `workflowEntry` parked, so it cannot implement `/new` or `/clear`.
+  leaves `workflowEntry` parked, so it cannot implement `/new`.
 - The stacked work in #128 and #135 propagates turn cancellation through delegated local and remote
   runtime actions. Session cancellation must reuse that machinery rather than introduce a second,
   weaker descendant-cancellation path.
@@ -333,7 +333,7 @@ Add this option to Telegram and Twilio:
 resetCommands?: false | readonly string[];
 ```
 
-- Omitted: `['new', 'clear']`.
+- Omitted: `['new']`.
 - `false`: disable interception.
 - An array: replace the default names.
 
@@ -357,7 +357,6 @@ Side effects deliberately performed by an authored hook remain the author's resp
 
 ### Message semantics
 
-- `/new` and `/clear` are aliases with identical behavior.
 - A bare command cancels the current session and sends no reply.
 - A non-empty remainder becomes the replacement session's first message and receives the normal
   agent response.
@@ -400,7 +399,7 @@ clear unrelated threads in the same group.
 
 ### Unit tests
 
-- Parser: both defaults, case normalization, leading/trailing whitespace, boundary rejection,
+- Parser: default `/new`, case normalization, leading/trailing whitespace, boundary rejection,
   Telegram `@bot` matching/mismatch, custom lists, invalid configuration, disabled commands, and
   remainder extraction.
 - Content rewriting: text-only, caption, attachment-only replacement, text plus attachments, and
@@ -461,8 +460,7 @@ pnpm build
 
 - A Telegram private chat or Twilio phone pair can run `/new`, then send an ordinary message and
   receive a response with no prior conversation history or state.
-- Bare `/new` and `/clear` produce no message, no typing indicator from defaults, and no empty
-  workflow.
+- Bare `/new` produces no message, no typing indicator from defaults, and no empty workflow.
 - `/new explain this` produces exactly one normal response from a new session.
 - Session reset during active delegated work stops the entry, active turn, and all known local and
   remote descendants.
