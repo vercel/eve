@@ -8,441 +8,302 @@ status: proposed
 
 ## Summary
 
-Identity-based channels such as Telegram private chats and Twilio conversations reuse one
-channel-derived continuation token indefinitely. Every inbound message therefore resumes the same
-long-lived `workflowEntry`, and its history and state continue to grow. Users need a way to end
-that entry workflow and let the same channel identity start a clean session.
+Telegram private chats and Twilio conversations derive a stable continuation identity from the
+chat or phone-number pair. That is the right default for normal conversation continuity, but it
+means one durable session can accumulate history and state forever.
 
-Implement two distinct cancellation operations behind one explicit HTTP endpoint:
+eve should give users an explicit clean-session boundary. Telegram and Twilio will recognize
+`/new` by default. The command will terminate the current session and all work owned by it, release
+the channel identity, and let the next message start a new session with empty history and state.
 
-- **turn cancellation** stops the active turn and delegated work while keeping the parent session
-  resumable;
-- **session cancellation** revokes the continuation, stops the active turn and delegated work, and
-  terminates the parent `workflowEntry`.
+This feature also establishes a general cancellation architecture. Turn cancellation and session
+cancellation share one control plane, but have different terminal behavior:
 
-Telegram and Twilio should recognize `/new` by default. A bare reset command ends the old session
-without creating an empty replacement. A reset command followed by content ends the old session and
-dispatches that content as the first turn of a fresh session. Both forms are silent: there is no
-reset confirmation, and only replacement content can produce a normal agent response.
+- turn cancellation stops only the active turn tree and leaves its entry session resumable;
+- session cancellation stops the entire session tree and permanently terminates its entry session.
 
-The implementation must expose the underlying behavior independently of slash-command parsing so
-that authors can reproduce it from a custom `defineChannel` route, a Slack `onAppMention` or
-`onDirectMessage` handler, or a session event subscriber.
+The same behavior must be available through the eve HTTP channel, custom `defineChannel` routes,
+higher-level channel handlers such as Slack mentions, and in-session event subscribers. Slash
+command parsing is only one caller of the cancellation architecture.
 
-## Current architecture and failure mode
+## Product decisions
 
-- `send()` namespaces the channel's raw continuation token and first calls `Runtime.deliver()`. If
-  no live hook owns that token, it falls back to `Runtime.run()` and creates a new `workflowEntry`.
-- `workflowEntry` owns the continuation hook and durable session state. It dispatches each model
-  turn as a child `turnWorkflow`.
-- Telegram private chats derive a stable token from the chat. Twilio derives one from the phone
-  number pair. Reusing those tokens is correct for normal conversation continuity but gives users
-  no clean-session boundary.
-- The pending turn-cancellation work in #118 adds
-  `POST /eve/v1/session/:sessionId/cancel` with a one-turn `cancelToken`. That operation deliberately
-  leaves `workflowEntry` parked, so it cannot implement `/new`.
-- The stacked work in #128 and #135 propagates turn cancellation through delegated local and remote
-  runtime actions. Session cancellation must reuse that machinery rather than introduce a second,
-  weaker descendant-cancellation path.
-- Directly abandoning a client cursor is insufficient. The old workflow remains live, owns its
-  continuation hook, and can continue accumulating state or running delegated work.
-- Directly cancelling only the parent run is also insufficient unless the active child turn and
-  delegated descendants are explicitly stopped and the continuation hook cannot be recreated.
+- `/new` is the only reset command enabled by default.
+- The default applies to Telegram messages and Twilio text or literal voice-transcription input.
+- A bare `/new` silently cancels the current session and does not create an empty replacement.
+- `/new <message>` cancels the current session, then sends `<message>` as the first turn of a fresh
+  session.
+- Telegram attachments accompanying `/new` are content for the fresh session, even when there is no
+  trailing text.
+- Successful reset does not send a confirmation or render cancellation as an agent error.
+- Channel authors can disable reset commands or replace the default command list.
+- Slack does not enable a reset command by default. Authors can opt in from their mention or direct
+  message handler.
+- Existing workflow records and event streams remain available for inspection. Reset is not data
+  deletion.
+- External side effects that completed before cancellation cannot be rolled back.
 
-## Goals
+## Cancellation model
 
-1. A reset produces a genuinely new entry workflow, history, authored state, session id, and event
-   stream while retaining the channel's stable identity token.
-2. Session cancellation works while the entry is idle, running a turn, waiting for input or
-   authorization, or waiting for delegated local or remote work.
-3. The API makes turn-versus-session intent explicit at every ambiguous boundary.
-4. Channel authors can use the same behavior without depending on Telegram or Twilio internals.
-5. Authentication and channel allow-list decisions run before any reset can affect a session.
-6. Races cannot allow the cancelled entry to reclaim its continuation token or process buffered
-   input after the reset linearizes.
-7. Intentional cancellation is observable as cancellation, not reported as an ordinary agent
-   failure.
+### Scope
 
-## Non-goals
+Every cancellation request has an explicit scope. There is no inferred or default scope at public
+API boundaries.
 
-- Do not erase workflow records, prior event streams, logs, or telemetry. Reset severs future
-  continuation; it is not data deletion.
-- Do not attempt to undo external side effects that completed before cancellation was accepted.
-- Do not add default Slack reset commands. Slack threads already create natural conversation
-  boundaries; Slack authors can opt into the shared handler directive or parser.
-- Do not add compatibility behavior for the unmerged, unscoped #118 request body.
-- Do not make slash commands a runtime concern. Runtime APIs operate on sessions; channel code owns
-  parsing and transport behavior.
+**Turn scope**
 
-## API design
+- Targets one active turn within a session.
+- Stops model generation, tools, and delegated local or remote work owned by that turn.
+- Ends the turn with an intentional cancellation outcome.
+- Returns the parent session to its waiting state with history and authored state preserved.
+- A later message resumes the same entry session.
 
-### 1. Runtime boundary
+**Session scope**
 
-Keep separate runtime primitives because their capabilities and lifecycle guarantees differ:
+- Targets the entry session identified by its current continuation capability.
+- Immediately prevents the entry from accepting more input or starting more work.
+- Stops the active turn and every active descendant owned by the session.
+- Ends the entry with an intentional `session.cancelled` terminal outcome.
+- Releases the continuation identity so a later message using the same channel identity starts a new
+  entry session.
 
-```ts
-interface Runtime {
-  cancelTurn(sessionId: string, cancelToken: string): Promise<boolean>;
+The distinction is semantic, not just a difference in which workflow run receives an abort signal.
+A session reset is complete only when the old entry can no longer resume and its execution tree is
+being torn down as one unit.
 
-  cancelSession(input: {
-    continuationToken: string;
-    expectedSessionId?: string;
-  }): Promise<CancelSessionResult>;
-}
+### Ownership tree
 
-type CancelSessionResult = { status: "cancelled"; sessionId: string } | { status: "not-active" };
-```
+Cancellation follows execution ownership. An entry session owns its active turn; a turn owns every
+tool or delegated agent it starts; delegated agents own their descendants. Local and remote work use
+the same logical tree even when they run in different processes or deployments.
 
-`cancelTurn` preserves the semantics from #118: the token is scoped to one active turn, the parent
-entry remains alive, and the session returns to `session.waiting`.
+The runtime must know the parent-child relationship for every cancellable operation. When a node is
+cancelled, cancellation propagates to all active descendants. Work discovered while an ancestor is
+already cancelling is cancelled immediately rather than allowed to escape the tree.
 
-`cancelSession` accepts a fully namespaced continuation token. It resolves the token to the current
-entry run, optionally verifies `expectedSessionId`, and requests terminal cancellation of that entry
-and its active execution tree. A mismatched expected id returns `not-active`; it must never cancel a
-different session.
+### Cooperative and enforced cancellation
 
-The method resolves only after the entry has durably acknowledged cancellation, released its
-continuation hook, and initiated cancellation for all known descendants. This guarantee makes it
-safe for channel orchestration to reuse the same identity token immediately.
+The runtime first propagates a cooperative cancellation signal through model calls, authored tools,
+sandbox operations, and delegated-agent requests. Well-behaved work can then stop cleanly and report
+its cancellation outcome.
 
-### 2. Channel route boundary
+Cooperation cannot be the correctness boundary. The durable runtime remains responsible for
+terminating work that does not observe the signal and for ensuring a cancelled parent cannot resume
+after a descendant settles. No active branch may outlive the session indefinitely or append a late
+assistant message after reset.
 
-Extend `RouteHandlerArgs<TState>` with two channel-scoped operations:
+### Terminal state
 
-```ts
-interface RouteHandlerArgs<TState> {
-  // Existing operations omitted.
-  cancelSession(input: {
-    continuationToken: string;
-    expectedSessionId?: string;
-  }): Promise<CancelSessionResult>;
+Cancellation is intentional control flow, not failure:
 
-  restartSession(
-    input: string | UserContent | SendPayload,
-    options: SendOptions<TState>,
-  ): Promise<Session>;
-}
-```
+- turn scope produces a cancelled turn boundary followed by a waiting session;
+- session scope produces a terminal `session.cancelled` boundary and closes the old stream;
+- neither scope produces a generic user-facing error message;
+- callbacks, clients, hooks, and instrumentation can distinguish cancelled, completed, and failed
+  sessions.
 
-Both functions accept the channel-local raw continuation token, exactly like `send()`. The route
-dispatcher applies the current channel namespace before calling the runtime. This prevents custom
-channels from accidentally double-prefixing tokens or reaching another channel's session.
+## Architecture by layer
 
-`restartSession()` is the safe composition for reset-plus-message: it awaits `cancelSession()` and
-then starts a new run with the supplied input and options. It must not use a stale delivery path or
-dispatch replacement input before the old hook has been released. A missing active session is a
-successful precondition—the function simply starts the new one.
+### 1. Public cancellation contract
 
-For a reset with no replacement content, call `cancelSession()` only. Keeping this separate avoids
-creating empty entry workflows.
-
-### 3. Inbound handler boundary
-
-Introduce a shared inbound decision type and use it as the base for Telegram, Twilio, and Slack
-pre-dispatch result types:
-
-```ts
-type ChannelInboundDecision<TMessage = string | UserContent> =
-  | {
-      action?: "dispatch";
-      auth: SessionAuthContext | null;
-      context?: readonly string[];
-    }
-  | {
-      action: "reset-session";
-      auth: SessionAuthContext | null;
-      context?: readonly string[];
-      message?: TMessage;
-    }
-  | null;
-```
-
-Existing `{ auth, context? }` handlers continue to dispatch normally. Returning
-`{ action: "reset-session", auth }` cancels without dispatch. Supplying `message` performs a reset
-and uses that value as the new session's first message.
-
-This gives a custom Slack handler an explicit, transport-independent path:
-
-```ts
-onAppMention(ctx, message) {
-  const reset = matchSessionResetCommand(message.markdown);
-  if (reset === null) return { auth: deriveAuth(ctx, message) };
-
-  return {
-    action: "reset-session",
-    auth: deriveAuth(ctx, message),
-    message: reset.remainder || undefined,
-  };
-}
-```
-
-`defineChannel` authors who control their own routes use `cancelSession()` or `restartSession()`
-directly. The directive exists for higher-level channel factories whose handlers do not receive
-route operations.
-
-### 4. Session callback boundary
-
-Add an explicit authored control-flow operation to `SessionContext.session`:
-
-```ts
-ctx.session.cancel({ scope: "turn" | "session" }): never;
-```
-
-This form is intentionally synchronous and returns `never`. Calling it from a tool, hook, dynamic
-instruction callback, or channel event throws a framework-owned control signal. The runtime catches
-that signal at the execution boundary and performs the requested cancellation without treating it
-as an authored exception. It must not call back into the current workflow and await its own
-termination, which would deadlock.
-
-The explicit scope prevents an event subscriber from accidentally ending the whole conversation
-when it intended to stop only one turn. Terminal-event contexts must reject a second cancellation
-request as already terminal.
-
-### 5. eve HTTP cancellation route
-
-Expose one route on `eveChannel()`:
+The eve channel exposes one route:
 
 `POST /eve/v1/session/:sessionId/cancel`
 
-The body is a strict discriminated union:
+Its body is a strict scoped union:
 
-```ts
-type CancelRequest =
-  | { scope: "turn"; cancelToken: string }
-  | { scope: "session"; continuationToken: string };
+```json
+{ "scope": "turn", "cancelToken": "<active-turn capability>" }
 ```
 
-Rules:
+or:
 
-- `scope` is required. There is no default and no unscoped compatibility fallback.
-- Reject a missing token, an empty token, both token fields, the wrong token for the selected scope,
-  or unknown top-level fields with `400`.
-- Run `eveChannel` route authentication before parsing or inspecting capability tokens.
-- For turn scope, validate the cancellation hook metadata belongs to `:sessionId`.
-- For session scope, namespace the supplied eve-channel continuation token and verify its active hook
-  belongs to `:sessionId`.
-- A valid request returns `202` with:
-
-  ```json
-  { "cancelled": true, "ok": true, "scope": "session" }
-  ```
-
-- A missing, stale, terminal, or mismatched target returns the same non-disclosing response:
-
-  ```json
-  {
-    "cancelled": false,
-    "code": "CANCELLATION_TARGET_NOT_ACTIVE",
-    "ok": false,
-    "scope": "session"
-  }
-  ```
-
-  with status `409`.
-
-- Every response sets `cache-control: no-store`.
-
-Update #118 rather than adding a second session endpoint. Update #127 so
-`MessageResponse.cancel()` sends `{ scope: "turn", cancelToken }`.
-
-## Workflow cancellation model
-
-### Durable control path
-
-Session cancellation needs a control path that remains reachable while `workflowEntry` is blocked
-on an active child turn. Reusing the ordinary delivery iterator is insufficient because the driver
-does not consume that iterator at every active-turn wait point.
-
-For every entry run:
-
-1. Register a dedicated session-cancellation hook derived from the entry run id and tagged with that
-   session id.
-2. Keep an always-available internal cancellation token for each child turn, even when the channel
-   did not request or expose a public turn `cancelToken`.
-3. Race the session-cancellation signal at every driver wait boundary: active turn completion,
-   runtime-action results, authorization, input, and idle parking.
-4. On session cancellation, mark the driver as closing before any asynchronous cleanup. Once set,
-   this state forbids hook rekeying, new turns, new delegated actions, and processing buffered
-   deliveries.
-5. Dispose the park hook first so new input using the same channel identity can no longer enter the
-   old session.
-6. Cancel the active child turn through the same cooperative signal used by turn cancellation.
-7. Invoke the shared #128/#135 local and remote runtime-action cancellation path and await its
-   durable acknowledgements. Do not fork a second descendant traversal.
-8. Dispose authorization, completion, and control hooks; discard buffered deliveries and pending
-   input/authorization work.
-9. Record an intentional terminal cancellation outcome and terminate the entry run.
-
-The terminal projection should be `session.cancelled`, not `session.failed`. Add that status wherever
-session terminal state is represented: stream events, callback payloads, client reducers, event maps,
-and instrumentation. Built-in channels do nothing for `session.cancelled`, preserving silent reset
-behavior. If an active turn emits a cancellation boundary while the tree shuts down, default
-`turn.failed` handlers must recognize the cancellation code and avoid sending an error message.
-
-### Linearization and races
-
-The reset linearization point is durable disposal of the old continuation hook after the entry has
-entered closing state.
-
-- A delivery accepted before that point belongs to the old session and is discarded when reset
-  wins; it must not run after reset.
-- A delivery after that point cannot reach the old entry. Normal `send()` fallback starts a new
-  entry with the same channel-local token.
-- Two simultaneous resets are idempotent at the channel helper layer. One cancels the entry; the
-  other observes no active session and succeeds as a no-op.
-- The public HTTP route retains `409` for stale capabilities so API callers can detect that their
-  cancellation did not target a live operation.
-- A reset racing natural completion is successful if the hook was revoked by either path. It must
-  never turn a completed session into a failure or cancel a newer run that later acquired the same
-  channel token.
-- `restartSession()` must bind cancellation to the resolved old session id and re-check ownership so
-  a late cleanup cannot cancel the replacement run.
-
-## Slash-command behavior
-
-### Shared parser
-
-Export a pure `matchSessionResetCommand()` helper from `eve/channels`. It accepts text, a list of
-command names, and an optional Telegram bot username, and returns:
-
-```ts
-type SessionResetCommandMatch = {
-  command: string;
-  remainder: string;
-};
+```json
+{ "scope": "session", "continuationToken": "<current session capability>" }
 ```
 
-or `null`.
+The two capabilities have intentionally different lifetimes:
 
-Parser rules:
+- a cancel token authorizes cancellation of one active turn;
+- a continuation token authorizes control of the current entry session and is the capability needed
+  to reset it.
 
-- Match only at the beginning of trimmed text.
-- Match command names case-insensitively at a complete command boundary.
-- Accept `/new@botname` only when the suffix matches the configured Telegram bot username.
-- Strip the command and surrounding whitespace but preserve the remainder's content.
-- Do not treat prefixes such as `/newspaper` as `/new`.
-- Validate configured names once when the channel factory is created; reject empty names, leading
-  slashes, whitespace, mention suffixes, and duplicates after case normalization.
-- Unknown or disabled commands remain ordinary model input.
+The route authenticates the caller before inspecting either capability. It verifies that the
+capability belongs to the session id in the URL and rejects missing, stale, crossed, or mismatched
+capabilities without revealing another session's state.
 
-### Channel configuration
+The route returns `202` once cancellation has been durably accepted and the target can no longer
+accept new work. A caller can observe the final cancellation boundary on the session stream. Invalid
+request shapes return `400`; a capability that does not identify an active target returns a
+non-disclosing `409`.
 
-Add this option to Telegram and Twilio:
+### 2. Channel orchestration
+
+The channel layer owns conversation identity and therefore owns reset orchestration. It receives
+channel-local continuation tokens and delegates lifecycle changes to the runtime without exposing
+workflow SDK primitives.
+
+Custom `defineChannel` routes receive two high-level operations:
+
+- cancel the session addressed by a channel-local continuation token;
+- restart that session with replacement input.
+
+Restart is a single safe composition: close and cancel the old session, wait until its continuation
+identity is released, then start the replacement. Channel authors should not need to reproduce the
+ordering or namespace tokens themselves.
+
+Higher-level channel factories expose the same intent through an inbound `reset-session` decision.
+This lets a custom Slack `onAppMention` or `onDirectMessage` handler request reset without reaching
+into route or workflow internals. Supplying replacement content starts a fresh session; omitting it
+performs a bare reset.
+
+In-session callbacks and event subscribers receive an explicit cancellation operation with a
+required `turn` or `session` scope. The operation exits normal execution through framework control
+flow so authored code cannot accidentally continue after requesting cancellation.
+
+### 3. Runtime cancellation coordinator
+
+The runtime is the single authority for lifecycle transitions. It validates the target, records the
+cancellation request durably, and moves the target through `active` → `cancelling` → `cancelled`.
+
+For session scope, the coordinator performs these actions in order:
+
+1. Bind the request to the currently active entry session.
+2. Mark the entry as closing so it cannot accept deliveries, re-register its continuation, dispatch
+   another turn, or create another descendant.
+3. Release the continuation identity. This is the reset linearization point.
+4. Propagate cancellation through the active ownership tree, including remote descendants.
+5. Wait for each branch to acknowledge cancellation or be terminated by the runtime.
+6. Record `session.cancelled`, complete callbacks and instrumentation, and close the old event
+   stream.
+
+Turn scope uses the same descendant propagation but stops at the turn boundary. Once its tree has
+settled, the entry session returns to waiting instead of becoming terminal.
+
+### 4. Workflow execution
+
+Workflow code implements the lifecycle requested by the coordinator, but does not define public
+cancellation policy. It must expose durable points where the coordinator can close ingress, signal
+active execution, observe descendant completion, and record terminal state.
+
+The workflow implementation must preserve four invariants:
+
+- closing a session is monotonic and cannot be reversed;
+- a closing session cannot launch or resume user work;
+- descendant results cannot restart a cancelled ancestor;
+- continuation identity is released exactly once and cannot be reclaimed by the old entry.
+
+The implementation can evolve independently as long as those invariants and the public lifecycle
+contract remain true.
+
+## `/new` channel flow
+
+Telegram and Twilio intercept `/new` at the authenticated pre-dispatch boundary:
+
+1. Verify the provider webhook signature.
+2. Parse the provider event and reject bots, unsupported shapes, or disallowed senders.
+3. Run the authored inbound handler so custom gating and auth projection still apply. Returning
+   `null` drops the input and must not cancel anything.
+4. Match the configured reset command at a complete command boundary.
+5. For a bare reset, request session cancellation and stop.
+6. For replacement content, request restart and dispatch the stripped content only after the old
+   session has released the identity.
+
+The reset command itself is never appended to model history. Existing auth, channel context, upload
+policy, attachments, and adapter state seeding apply normally to replacement content.
+
+The parser is a small reusable channel utility. It matches case-insensitively, rejects prefixes such
+as `/newspaper`, and supports Telegram's `/new@botname` form only when the suffix targets the current
+bot.
+
+Telegram and Twilio expose:
 
 ```ts
 resetCommands?: false | readonly string[];
 ```
 
-- Omitted: `['new']`.
-- `false`: disable interception.
-- An array: replace the default names.
+- omitted: `['new']`;
+- `false`: disable interception;
+- array: replace the default list with explicitly configured names.
 
-Telegram applies commands to inbound message text and captions. Twilio applies them to SMS bodies
-and literal voice-transcription text. There is no fuzzy recognition of spoken “slash new.”
+Unknown or disabled commands remain ordinary model input.
 
-### Interception order
+## Concurrency and race behavior
 
-For Telegram and Twilio:
+The continuation release is the reset linearization point.
 
-1. Verify the platform webhook signature.
-2. Parse the platform event and reject bots, disallowed senders, or unsupported message shapes.
-3. Run the authored `onMessage`, `onText`, or `onVoiceTranscription` hook to obtain auth and honor
-   custom gating. A `null` result always wins and drops the request without cancellation.
-4. Honor an explicit `reset-session` decision from the authored hook.
-5. Otherwise match configured reset commands.
-6. Execute `cancelSession()` or `restartSession()` instead of normal `send()`.
+- Input accepted before that point belongs to the old session and is discarded as part of reset.
+- Input arriving after that point cannot enter the old session and may start or join the replacement.
+- Reset-plus-message waits for the old session's release before creating the replacement.
+- Duplicate channel resets are idempotent: the first closes the session and later requests observe
+  no active target.
+- A public API request using a stale capability receives `409` rather than cancelling a newer
+  session.
+- A reset racing natural completion succeeds if it closes the old continuation, but does not rewrite
+  a completed session as failed.
+- Late descendant results are recorded against the old tree and cannot append messages or state to
+  the replacement session.
+- Cancellation cleanup always remains bound to the old session id, so it cannot terminate a new
+  session that later reuses the channel identity.
 
-Default Telegram handling should avoid starting the typing indicator for a recognized bare reset.
-Side effects deliberately performed by an authored hook remain the author's responsibility.
+## Implementation plan
 
-### Message semantics
-
-- A bare command cancels the current session and sends no reply.
-- A non-empty remainder becomes the replacement session's first message and receives the normal
-  agent response.
-- Telegram attachments accompanying a reset are replacement content. Preserve them and replace only
-  the command-bearing text or caption. `/new` plus an attachment therefore starts a fresh session
-  containing that attachment rather than acting as a bare reset.
-- Preserve channel context blocks, auth, upload-policy enforcement, and initial adapter state for the
-  replacement message.
-- Do not emit a synthetic user message containing the reset command.
-- Do not post confirmation or cancellation-error text for successful resets.
-
-Telegram group and forum behavior continues to follow existing continuation-token granularity. A
-reset only affects the session addressed by the current chat/thread/conversation token; it does not
-clear unrelated threads in the same group.
-
-## Implementation sequence
-
-1. **Reconcile the cancellation stack.** Land or rebase #118, #127, #128, and #135. Change #118's
-   route contract to the required scoped body and #127's client call to `scope: "turn"` before
-   building session reset on top.
-2. **Add intentional terminal cancellation.** Extend protocol types, reducers, callbacks, event
-   maps, and instrumentation with `session.cancelled`; ensure default channel handlers remain silent.
-3. **Implement runtime session cancellation.** Add the dedicated entry control hook, internal
-   per-turn cancellation token, closing-state invariant, hook disposal, and shared recursive
-   descendant cancellation.
-4. **Expose channel primitives.** Add `cancelSession` and `restartSession` to route arguments with
-   channel-local token namespacing, plus `ctx.session.cancel({ scope })` for authored in-session code.
-5. **Expose inbound decisions and parsing.** Add `ChannelInboundDecision`, the reset directive, and
-   the pure command matcher. Adapt Slack, Telegram, and Twilio result aliases without exposing
-   transport-specific internals.
-6. **Integrate Telegram and Twilio defaults.** Add `resetCommands`, intercept at the authenticated
-   pre-dispatch boundary, preserve replacement content, and keep bare reset silent.
-7. **Finalize the eve route.** Dispatch the strict request union to the appropriate runtime
-   primitive and document capability ownership and response semantics.
-8. **Document and release.** Update eve, custom-channel, Telegram, Twilio, Slack customization,
-   sessions/streaming, auth, and client cancellation docs. Add a patch changeset; the prior unscoped
-   route is unmerged and receives no compatibility path.
+1. Define shared turn and session cancellation outcomes, stream events, callback states, and
+   capability validation rules.
+2. Add the runtime cancellation coordinator and ownership-tree propagation for active local and
+   remote work.
+3. Make workflow execution obey the closing-state invariants and surface intentional terminal
+   cancellation.
+4. Expose the scoped eve HTTP route and channel-level cancel/restart operations.
+5. Add the reusable inbound reset decision and command matcher for higher-level channel factories.
+6. Enable `/new` by default in Telegram and Twilio, preserving auth, attachments, context, and
+   silent behavior.
+7. Document cancellation scopes, custom-channel usage, event-subscriber usage, and stream outcomes.
+8. Add a patch changeset for the new public behavior.
 
 ## Test plan
 
-### Unit tests
+### Contract tests
 
-- Parser: default `/new`, case normalization, leading/trailing whitespace, boundary rejection,
-  Telegram `@bot` matching/mismatch, custom lists, invalid configuration, disabled commands, and
-  remainder extraction.
-- Content rewriting: text-only, caption, attachment-only replacement, text plus attachments, and
-  preservation of channel context.
-- Route body: valid turn/session variants; missing scope; missing, empty, extra, or crossed token
-  fields; invalid JSON; missing session id; auth-before-token processing; no-store headers.
-- Capability binding: turn token and continuation token cannot cancel another session id.
-- Channel helpers: raw token is namespaced exactly once; `restartSession` waits for cancellation;
-  not-active is safe; a mismatched expected id never starts destructive cleanup.
-- Inbound decisions: existing `{ auth }` behavior remains unchanged; reset with and without
-  replacement content; `null` gating wins.
-- Callback control flow: both scopes become runtime cancellation, not authored exceptions; code
-  after `ctx.session.cancel()` cannot execute.
+- Accept each valid HTTP scope and reject omitted, invalid, or crossed scopes and capabilities.
+- Authenticate before capability inspection and reject a capability bound to another session id.
+- Verify turn cancellation leaves the entry resumable and session cancellation makes it terminal.
+- Verify clients, callbacks, hooks, and instrumentation distinguish cancellation from failure.
 
-### Integration tests
+### Channel tests
 
-- Cancel an idle entry and verify its continuation hook disappears and the next send creates a new
-  session id with empty history/state.
-- Cancel during model generation, authored tool execution, authorization, input waiting, local
-  delegation, nested local delegation, remote delegation, and code-mode runtime actions.
-- Verify every active descendant reaches a cancellation terminal state and no parent resumes the
-  model with cancellation errors.
-- Verify turn scope still returns the original parent session to `session.waiting` and accepts a
-  follow-up with existing history.
-- Verify session scope closes the old stream with `session.cancelled`, does not emit
-  `session.failed`, and lets the same continuation token start a new entry.
-- Race cancellation against natural turn completion, hook registration, continuation rekeying,
-  concurrent delivery, duplicate reset, and immediate replacement delivery.
-- Exercise a custom `defineChannel` route using both helpers, a Slack mention handler returning the
-  reset directive, and an event subscriber calling `ctx.session.cancel({ scope: "session" })`.
+- Match `/new`, mixed case, whitespace, Telegram bot suffixes, and trailing replacement content.
+- Reject command prefixes, wrong Telegram bot suffixes, disabled commands, and unknown commands.
+- Run authored auth and gating before reset.
+- Preserve Telegram attachments and channel context in the replacement session.
+- Keep bare reset silent and avoid creating an empty session or default typing indicator.
+- Exercise a custom command list, a custom `defineChannel` route, a Slack inbound reset decision, and
+  an event subscriber requesting session cancellation.
 
-### Scenario and end-to-end tests
+### Runtime tests
 
-- Add deterministic dev-server scenarios proving reset during nested local and remote work and a
-  clean follow-up on the reused identity token.
-- Extend channel scenarios with signed Telegram and Twilio webhook requests for bare and inline
-  resets, including disabled/custom command configuration and auth rejection.
-- Run the `agent-channels` fixture eval if its model credentials are available; report explicitly if
-  they are not.
+- Cancel an idle entry, active model call, authored tool, sandbox operation, input wait,
+  authorization wait, local delegate, nested delegate, and remote delegate.
+- Verify every active descendant settles and no cancelled ancestor resumes the model.
+- Verify the old continuation cannot be reclaimed after reset.
+- Race reset with delivery, natural completion, descendant completion, duplicate reset, and immediate
+  replacement creation.
+- Verify completed external side effects remain recorded while unfinished work stops.
 
-### Required verification
+### End-to-end acceptance
 
-Run focused tests with their tier configs while iterating, then complete:
+- A Telegram private chat or Twilio phone pair can run `/new`, then send an ordinary message and
+  receive a response with no prior history or authored state.
+- `/new explain this` produces exactly one response from a fresh session.
+- `/new` plus a Telegram attachment starts a fresh session containing that attachment.
+- Session reset during nested local or remote work stops the complete old tree.
+- Turn cancellation preserves the original session and its context.
+- The eve channel exposes one cancellation route with an explicit required scope.
+- Intentional cancellation never appears to the user as an ordinary agent failure.
+
+## Required verification
+
+Run focused tests with the appropriate tier configuration while iterating, then complete:
 
 ```sh
 pnpm test:unit
@@ -456,18 +317,5 @@ pnpm docs:check
 pnpm build
 ```
 
-## Acceptance criteria
-
-- A Telegram private chat or Twilio phone pair can run `/new`, then send an ordinary message and
-  receive a response with no prior conversation history or state.
-- Bare `/new` produces no message, no typing indicator from defaults, and no empty workflow.
-- `/new explain this` produces exactly one normal response from a new session.
-- Session reset during active delegated work stops the entry, active turn, and all known local and
-  remote descendants.
-- Turn cancellation still preserves the entry and prior context.
-- The eve channel exposes only the single scoped cancellation endpoint, and an omitted scope is
-  rejected.
-- A capability cannot cancel a session other than the one in the URL.
-- Custom `defineChannel`, Slack inbound handlers, and session event subscribers can all trigger the
-  same session-reset semantics through documented public APIs.
-- Intentional cancellation never appears to users as a normal agent error.
+Run the relevant channel end-to-end eval when model credentials are available and report explicitly
+when they are not.
