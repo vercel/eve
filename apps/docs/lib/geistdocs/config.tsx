@@ -17,7 +17,6 @@ import {
   translations,
 } from "@/geistdocs";
 
-// geistdocs' default OSS products, minus eve (this site, shown as the logo).
 const navbarOssProducts: GeistdocsNavbarOssProduct[] = [
   { href: "https://ai-sdk.dev/", logo: <LogoAiSdk height={12} /> },
   { href: "https://flags-sdk.dev/", logo: <LogoFlagsSdk height={20} /> },
