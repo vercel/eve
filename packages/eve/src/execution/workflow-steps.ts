@@ -61,7 +61,6 @@ import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { turnWorkflow } from "#execution/turn-workflow.js";
 import { createWorkflowRuntime, startWorkflowPreferLatest } from "#execution/workflow-runtime.js";
-import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
 /**
  * Result of one durable harness step, consumed by the turn workflow.
@@ -315,7 +314,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         compactionOverrides: {
           thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
         },
-        refreshSystemPrompt: shouldRefreshSystemPromptFromTurnAgent(bundle.compiledArtifactsSource),
         session: lifecycleSession,
         turnAgent: bundle.turnAgent,
       });
@@ -390,15 +388,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     serializedContext: nextSerializedContext,
     sessionState: nextState,
   };
-}
-
-function shouldRefreshSystemPromptFromTurnAgent(
-  compiledArtifactsSource: RuntimeCompiledArtifactsSource,
-): boolean {
-  return (
-    compiledArtifactsSource.kind === "disk" &&
-    compiledArtifactsSource.moduleMapLoaderPath !== undefined
-  );
 }
 
 /**

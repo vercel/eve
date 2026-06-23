@@ -65,8 +65,9 @@ export interface DurableSessionState {
  * `agent.compactionModelReference`, and the `compaction` thresholds —
  * those are rebuilt every turn from `bundle.turnAgent` by
  * {@link import("#execution/session.js").hydrateDurableSession}.
- * `agent.system` is the session-start prompt snapshot, pinned at
- * `createSession`.
+ * `agent.system` is the last applied prompt snapshot. Before each model step,
+ * the execution layer replaces it from the current deployment's
+ * `bundle.turnAgent`.
  */
 export interface DurableSession {
   readonly sessionId: string;

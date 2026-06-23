@@ -1,5 +1,11 @@
 # eve
 
+## 0.13.1
+
+### Patch Changes
+
+- 9d8bd6e: Existing production sessions now refresh their system prompt from the latest deployment before each model step. Long-lived channel conversations retain their history and state while adopting updated agent instructions.
+
 ## 0.13.0
 
 ### Minor Changes

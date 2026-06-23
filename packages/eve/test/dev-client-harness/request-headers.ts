@@ -1,15 +1,11 @@
 import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
+import { VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER } from "#client/types.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { isLocalDevelopmentServerUrl } from "#services/dev-client/local-host.js";
-import {
-  VERCEL_PROTECTION_BYPASS_HEADER,
-  VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER,
-} from "#services/dev-client/request-headers.js";
+import { VERCEL_PROTECTION_BYPASS_HEADER } from "#services/dev-client/request-headers.js";
 
-export {
-  VERCEL_PROTECTION_BYPASS_HEADER,
-  VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER,
-} from "#services/dev-client/request-headers.js";
+export { VERCEL_PROTECTION_BYPASS_HEADER } from "#services/dev-client/request-headers.js";
+export { VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER } from "#client/types.js";
 
 const EVE_ROUTE_PREFIX_WITH_SEPARATOR = `${EVE_ROUTE_PREFIX}/`;
 export const VERCEL_OIDC_TOKEN_HEADER = "x-vercel-oidc-token";

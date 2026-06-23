@@ -32,6 +32,15 @@ console.log(health.status, health.workflowId);
 
 Non-2xx responses throw `ClientError`, which carries the HTTP `status` and response `body`.
 
+## Inspect an agent
+
+Use `info()` to inspect a development agent. The client parses and validates the complete response before returning it:
+
+```ts
+const info = await client.info();
+console.log(info.agent.name, info.agent.model.id);
+```
+
 ## Authentication
 
 Pass `auth` when the [eve channel](../../channels/eve) route requires credentials:
@@ -54,6 +63,21 @@ const client = new Client({
     basic: {
       username: "agent-client",
       password: async () => await getRotatingSecret(),
+    },
+  },
+});
+```
+
+For a Vercel OIDC-protected deployment, use `vercelOidc`. The client resolves the token once per request and sends it as both the bearer credential and Vercel's trusted-OIDC header:
+
+```ts
+import { getVercelOidcToken } from "@vercel/oidc";
+
+const client = new Client({
+  host: "https://agent.example.com",
+  auth: {
+    vercelOidc: {
+      token: async () => await getVercelOidcToken(),
     },
   },
 });

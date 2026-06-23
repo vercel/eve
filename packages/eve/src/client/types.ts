@@ -4,8 +4,27 @@ import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { JsonObject } from "#shared/json.js";
-import type { ModelRouting } from "#shared/agent-definition.js";
-import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
+
+export type {
+  AgentInfoChannelEntry,
+  AgentInfoChannels,
+  AgentInfoConnectionEntry,
+  AgentInfoDynamicResolverEntry,
+  AgentInfoEntry,
+  AgentInfoFrameworkChannelEntry,
+  AgentInfoFrameworkToolEntry,
+  AgentInfoHookEntry,
+  AgentInfoInstructions,
+  AgentInfoInstructionsEntry,
+  AgentInfoResult,
+  AgentInfoSandboxEntry,
+  AgentInfoScheduleEntry,
+  AgentInfoSkillEntry,
+  AgentInfoSource,
+  AgentInfoSubagentEntry,
+  AgentInfoToolEntry,
+  AgentInfoTools,
+} from "./agent-info-schema.js";
 
 /**
  * Static credential value or per-request credential resolver.
@@ -28,7 +47,18 @@ export type HeadersValue =
  */
 export type ClientAuth =
   | { readonly basic: { readonly username: string; readonly password: TokenValue } }
-  | { readonly bearer: TokenValue };
+  | { readonly bearer: TokenValue }
+  // The client-side mirror of the framework's server `vercelOidc()` channel
+  // auth: one token the client expands into both Vercel deployment-protection
+  // headers (Authorization and {@link VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER}).
+  | { readonly vercelOidc: { readonly token: TokenValue } };
+
+/**
+ * Vercel header that presents a trusted OIDC token as proof the caller is
+ * authorized for a protected deployment. The client emits it alongside
+ * `Authorization` for the {@link ClientAuth} `vercelOidc` variant.
+ */
+export const VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER = "x-vercel-trusted-oidc-idp-token";
 
 /** Redirect modes supported by the configured fetch implementation. */
 export type ClientRedirectPolicy = NonNullable<RequestInit["redirect"]>;
@@ -205,191 +235,6 @@ export interface HealthResult {
   readonly ok: true;
   readonly status: "ready";
   readonly workflowId: string;
-}
-
-/**
- * Source reference shared by entries in {@link AgentInfoResult}.
- */
-export interface AgentInfoSource {
-  readonly exportName?: string;
-  readonly logicalPath: string;
-  readonly sourceId?: string;
-  readonly sourceKind: string;
-}
-
-export interface AgentInfoEntry extends AgentInfoSource {
-  readonly name: string;
-}
-
-export interface AgentInfoToolEntry extends AgentInfoEntry {
-  readonly description: string;
-  readonly hasAuth: boolean;
-  readonly hasExecute: boolean;
-  readonly hasModelOutputProjection: boolean;
-  readonly hasOutputSchema: boolean;
-  readonly inputSchema: unknown;
-  readonly origin: "authored" | "framework";
-  readonly outputSchema: unknown;
-  readonly replacesFrameworkTool: boolean;
-  readonly requiresApproval: boolean;
-}
-
-export interface AgentInfoFrameworkToolEntry extends AgentInfoToolEntry {
-  readonly disabledByAuthor: boolean;
-  readonly replacedByAuthoredTool: boolean;
-  readonly status: "active" | "disabled" | "replaced";
-}
-
-export interface AgentInfoDynamicResolverEntry extends AgentInfoSource {
-  readonly eventNames: readonly string[];
-  readonly origin: "authored" | "framework";
-  readonly slug: string;
-}
-
-export interface AgentInfoTools {
-  readonly authored: readonly AgentInfoToolEntry[];
-  readonly available: readonly AgentInfoToolEntry[];
-  readonly disabledFramework: readonly string[];
-  readonly dynamic: readonly AgentInfoDynamicResolverEntry[];
-  readonly framework: readonly AgentInfoFrameworkToolEntry[];
-  readonly reserved: readonly string[];
-}
-
-export interface AgentInfoSkillEntry extends AgentInfoEntry {
-  readonly description: string;
-  readonly license?: string;
-  readonly markdown: string;
-  readonly metadata?: Readonly<Record<string, string>>;
-}
-
-export interface AgentInfoInstructionsEntry extends AgentInfoEntry {
-  readonly markdown: string;
-}
-
-export interface AgentInfoInstructions {
-  readonly dynamic: readonly AgentInfoDynamicResolverEntry[];
-  readonly static: AgentInfoInstructionsEntry | null;
-}
-
-export interface AgentInfoScheduleEntry extends AgentInfoEntry {
-  readonly cron: string;
-  readonly hasRun: boolean;
-  readonly markdown?: string;
-}
-
-export interface AgentInfoSubagentEntry extends AgentInfoEntry {
-  readonly description: string;
-  readonly entryPath: string;
-  readonly nodeId: string;
-  readonly rootPath: string;
-  readonly summary: {
-    readonly channels: number;
-    readonly connections: number;
-    readonly hooks: number;
-    readonly instructions: boolean;
-    readonly schedules: number;
-    readonly skills: number;
-    readonly tools: number;
-  };
-}
-
-export interface AgentInfoChannelEntry extends AgentInfoEntry {
-  readonly adapterKind?: string;
-  readonly method: string;
-  readonly origin: "authored" | "framework";
-  readonly urlPath: string;
-}
-
-export interface AgentInfoFrameworkChannelEntry extends AgentInfoChannelEntry {
-  readonly disabledByAuthor: boolean;
-  readonly replacedByAuthoredChannel: boolean;
-  readonly status: "active" | "disabled" | "replaced";
-}
-
-export interface AgentInfoChannels {
-  readonly authored: readonly AgentInfoChannelEntry[];
-  readonly available: readonly AgentInfoChannelEntry[];
-  readonly disabledFramework: readonly string[];
-  readonly framework: readonly AgentInfoFrameworkChannelEntry[];
-}
-
-export interface AgentInfoConnectionEntry extends AgentInfoSource {
-  readonly connectionName: string;
-  readonly description: string;
-  readonly hasApproval: boolean;
-  readonly hasAuthorization: boolean;
-  readonly hasHeaders: boolean;
-  readonly protocol: string;
-  readonly toolFilter?: unknown;
-  readonly url: string;
-}
-
-export interface AgentInfoHookEntry extends AgentInfoSource {
-  readonly eventNames: readonly string[];
-  readonly slug: string;
-}
-
-export interface AgentInfoSandboxEntry extends AgentInfoSource {
-  readonly backendKind?: string;
-  readonly description?: string;
-  readonly hasBootstrap: boolean;
-  readonly hasOnSession: boolean;
-  readonly revalidationKey?: string;
-  readonly sourceHash?: string;
-}
-
-export interface AgentInfoResult {
-  readonly agent: {
-    readonly agentRoot: string;
-    readonly appRoot: string;
-    readonly configSource?: AgentInfoSource;
-    readonly description?: string;
-    readonly model: {
-      readonly contextWindowTokens?: number;
-      readonly id: string;
-      readonly providerOptions?: unknown;
-      readonly source?: AgentInfoSource;
-      /** How the model is routed (gateway vs external), decided at compile time. */
-      readonly routing?: ModelRouting;
-      /** Composed routing + runtime credential readiness; absent only on legacy payloads. */
-      readonly endpoint?: ModelEndpointStatus;
-    };
-    readonly name: string;
-    readonly outputSchema?: unknown;
-  };
-  readonly capabilities: {
-    readonly devRoutes: boolean;
-  };
-  readonly channels: AgentInfoChannels;
-  readonly connections: readonly AgentInfoConnectionEntry[];
-  readonly diagnostics: {
-    readonly discoveryErrors: number;
-    readonly discoveryWarnings: number;
-  };
-  readonly hooks: readonly AgentInfoHookEntry[];
-  readonly instructions: AgentInfoInstructions;
-  readonly kind: "eve-agent-info";
-  readonly mode: "development" | "production";
-  readonly sandbox: AgentInfoSandboxEntry | null;
-  readonly schedules: readonly AgentInfoScheduleEntry[];
-  readonly skills: {
-    readonly dynamic: readonly AgentInfoDynamicResolverEntry[];
-    readonly static: readonly AgentInfoSkillEntry[];
-  };
-  readonly subagents: {
-    readonly local: readonly AgentInfoSubagentEntry[];
-    readonly total: number;
-  };
-  readonly tools: AgentInfoTools;
-  readonly version: 1;
-  readonly workflow: {
-    readonly enabled: boolean;
-    readonly toolName: string;
-  };
-  readonly workspace: {
-    readonly resourceRoot: unknown;
-    readonly rootEntries: readonly string[];
-  };
 }
 
 /**
