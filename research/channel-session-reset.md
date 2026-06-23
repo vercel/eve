@@ -94,23 +94,30 @@ created by custom channels as well as the built-in eve channel.
 The cancel token is minted per turn and bound to `(sessionId, turnId)`.
 
 ```text
- TypeScript client       eve channel       runtime control plane       session S1
-        |                     |                     |                       |
- send() |-------------------->| start/resume S1     |                       |
-        |                     |-------------------->| dispatch turn T7 ---->| T7
-        |<--------------------| S1, continuation C1 |                       |-- model
-        |                     | cancel token K7     |                       |-- tools
-        |                     |                     |                       `-- delegates
-        |                     |                     |                       |
- MessageResponse.cancel()    |                     |                       |
-        | POST /session/S1/cancel                   |                       |
-        | { scope: turn, cancelToken: K7 }           |                       |
-        |-------------------->|-------------------->| validate K7=(S1,T7)   |
-        |                     |                     | cancel T7 subtree ---->|
-        |<--------------------| 202 accepted        |<------ T7 settles ----|
-        |                     |                     | retire K7              |
-        |                     |                     | S1 -> waiting          |
-        |                     |                     | C1 remains active      |
+TURN START
+
+ClientSession.send()
+`-- POST message
+    `-- eve channel / runtime
+        |-- resume entry session S1 through continuation C1
+        |-- start turn T7
+        |-- bind cancel token K7 -> (S1, T7)
+        `-- return { sessionId: S1, continuationToken: C1, cancelToken: K7 }
+            `-- MessageResponse stores K7
+
+TURN CANCEL
+
+MessageResponse.cancel()
+`-- POST /eve/v1/session/S1/cancel
+    `-- { scope: "turn", cancelToken: K7 }
+        `-- eve channel / runtime
+            |-- authenticate the request
+            |-- resolve K7 -> (S1, T7)
+            |-- verify the URL session is S1
+            |-- durably accept cancellation and return 202
+            |-- cancel T7 and its descendants
+            |-- retire K7 when T7 settles
+            `-- keep C1 -> S1 and emit session.waiting
 ```
 
 When T7 completes, fails, or is cancelled, K7 becomes stale. The next turn receives a new token K8.
@@ -123,27 +130,32 @@ runtime releases the continuation before tearing down the tree; that release is 
 linearization point.
 
 ```text
- Client or /new       channel layer       runtime control plane        session S1
-      |                    |                       |                        |
-      | cancel (S1, C1)    |                       |                        |
-      |------------------->|---------------------->| validate C1 owns S1   |
-      |                    |                       | S1 -> closing          |
-      |                    |                       | release C1 from S1     |
-      |                    |                       | ==================     |
-      |                    |                       | reset linearizes       |
-      |                    |                       | cancel complete tree ->| S1
-      |<-------------------| 202 accepted          |                        `-- active turn
-      |                    |                       |                            `-- descendants
-      |                    |                       |<------ tree settles ----|
-      |                    |                       | S1 -> session.cancelled |
+SESSION CANCEL
 
- Stable channel identity uses continuation C1 again:
+ClientSession.cancel() or authenticated /new handler
+`-- request session cancellation for (S1, C1)
+    `-- channel / runtime
+        |-- verify C1 currently belongs to S1
+        |-- mark S1 as closing
+        |-- release C1 from S1  [reset linearization point]
+        |-- acknowledge accepted cancellation
+        |-- cancel the complete S1 tree
+        |   `-- active turn
+        |       |-- model and tools
+        |       `-- local and remote delegates
+        |-- wait for every branch to settle
+        `-- emit session.cancelled and close S1
 
-      before reset   C1 -> S1
-      after release  C1 -> no active session
-      next message   C1 -> new session S2 with empty history and state
+IDENTITY REUSE
 
- Cleanup remains bound to S1. An old request naming S1 cannot cancel S2 even though S2 reuses C1.
+Stable Telegram / Twilio identity R
+`-- channel continuation C1
+    |-- before reset: C1 -> S1
+    |-- after release: C1 -> no active session
+    `-- next message: C1 -> new session S2 with empty history and state
+
+Old cleanup remains bound to S1.
+`-- a stale request naming S1 cannot cancel S2, even though S2 reuses C1
 ```
 
 For bare `/new`, the flow ends after S1 is cancelled. For `/new <message>` or `/new` with an
