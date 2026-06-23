@@ -143,14 +143,16 @@ The channel layer owns conversation identity and therefore owns reset orchestrat
 channel-local continuation tokens and delegates lifecycle changes to the runtime without exposing
 workflow SDK primitives.
 
-Custom `defineChannel` routes receive two high-level operations:
+Custom `defineChannel` routes receive high-level operations for the complete cancellation contract:
 
-- cancel the session addressed by a channel-local continuation token;
+- cancel an active turn using its session-bound turn capability;
+- cancel the entry session addressed by a channel-local continuation token;
 - restart that session with replacement input.
 
-Restart is a single safe composition: close and cancel the old session, wait until its continuation
-identity is released, then start the replacement. Channel authors should not need to reproduce the
-ordering or namespace tokens themselves.
+The turn and session operations are distinct so scope cannot be selected accidentally. Restart is a
+single safe composition: close and cancel the old session, wait until its continuation identity is
+released, then start the replacement. Channel authors should not need to reproduce the ordering or
+namespace tokens themselves.
 
 Higher-level channel factories expose the same intent through an inbound `reset-session` decision.
 This lets a custom Slack `onAppMention` or `onDirectMessage` handler request reset without reaching
@@ -254,7 +256,8 @@ The continuation release is the reset linearization point.
    remote work.
 3. Make workflow execution obey the closing-state invariants and surface intentional terminal
    cancellation.
-4. Expose the scoped eve HTTP route and channel-level cancel/restart operations.
+4. Expose the scoped eve HTTP route and channel-level turn-cancel, session-cancel, and restart
+   operations.
 5. Add the reusable inbound reset decision and command matcher for higher-level channel factories.
 6. Enable `/new` by default in Telegram and Twilio, preserving auth, attachments, context, and
    silent behavior.
@@ -290,6 +293,33 @@ The continuation release is the reset linearization point.
   replacement creation.
 - Verify completed external side effects remain recorded while unfinished work stops.
 
+### Dedicated cancellation e2e fixture
+
+Add a new `e2e/fixtures/agent-cancellation` fixture. Do not fold these cases into an existing fixture:
+the fixture is the executable proof that a fully custom channel can implement the complete
+cancellation contract using only public `defineChannel` APIs.
+
+Its custom channel exposes deterministic test routes for starting a controlled cancellable turn,
+cancelling that turn, cancelling its entry session, sending a follow-up, and reusing the same
+channel-local continuation identity. The routes return the session identifiers and capabilities the
+evals need; they must not import runtime or workflow internals or proxy through the built-in eve
+cancellation route.
+
+The fixture contains at least two independent evals:
+
+- **Turn cancellation:** start a turn that remains active long enough to cancel, cancel it through
+  the custom channel, assert the turn tree reaches its cancellation boundary and the entry returns
+  to waiting, then send a follow-up and prove it resumes the same session with its prior context.
+- **Session cancellation:** start an equivalent active turn, cancel the entry through the custom
+  channel, assert the old stream reaches `session.cancelled` and all active work settles, then reuse
+  the same channel identity and prove the resulting session id, history, and authored state are
+  fresh.
+
+The fixture must be deterministic and self-contained, work against both local and deployed eval
+targets, and require no external service startup or credentials beyond the normal model provider.
+The evals should assert lifecycle events and session identity directly rather than relying only on a
+judge's interpretation of model text.
+
 ### End-to-end acceptance
 
 - A Telegram private chat or Twilio phone pair can run `/new`, then send an ordinary message and
@@ -318,4 +348,9 @@ pnpm build
 ```
 
 Run the relevant channel end-to-end eval when model credentials are available and report explicitly
-when they are not.
+when they are not. The new fixture is mandatory verification:
+
+```sh
+cd e2e/fixtures/agent-cancellation
+pnpm exec eve eval --strict
+```
