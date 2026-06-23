@@ -1381,6 +1381,7 @@ describe("EveTUIRunner boot setup detection", () => {
       ...AGENT_INFO.agent,
       model: {
         ...AGENT_INFO.agent.model,
+        routing: { kind: "gateway", target: "openai" },
         endpoint: { kind: "gateway", connected: false },
       },
     },
