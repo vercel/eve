@@ -27,6 +27,7 @@ describe("resolveVercelDeployment", () => {
     const captureVercel = vi.fn<VercelDeploymentResolutionDeps["captureVercel"]>(async () => ({
       ok: true,
       stdout: JSON.stringify({
+        ownerId: "team_env",
         projectId: "prj_env",
         name: "inbound",
         target: "preview",
@@ -52,6 +53,7 @@ describe("resolveVercelDeployment", () => {
     const response: VercelCaptureResult = {
       ok: true,
       stdout: JSON.stringify({
+        ownerId: "team_a",
         projectId: "prj_target",
         name: "inbound",
         target: null,
@@ -88,6 +90,38 @@ describe("resolveVercelDeployment", () => {
     expect(captureVercel).toHaveBeenCalledWith(
       ["api", "/v13/deployments/inbound.example.com", "--scope", "team_a", "--raw"],
       expect.objectContaining({ cwd: "/repo", nonInteractive: true, timeoutMs: 10_000 }),
+    );
+  });
+
+  it("derives the canonical owner id from the response, not the queried scope", async () => {
+    const captureVercel = vi.fn<VercelDeploymentResolutionDeps["captureVercel"]>(async () => ({
+      ok: true,
+      stdout: JSON.stringify({
+        ownerId: "team_acme",
+        projectId: "prj_target",
+        name: "inbound",
+        target: "preview",
+        customEnvironment: null,
+      }),
+    }));
+
+    const resolution = await resolveVercelDeployment({
+      workspaceRoot: "/repo",
+      host: "inbound.example.com",
+      // The project picker scopes with a team slug, but the OIDC `owner_id`
+      // claim is the canonical `team_*` id; the verified target must carry the
+      // id Vercel returned, not the slug we queried with.
+      source: { orgId: "acme", projectId: "prj_target" },
+      deps: { captureVercel },
+    });
+
+    expect(resolution).toMatchObject({
+      kind: "resolved",
+      target: { deployment: { ownerId: "team_acme", projectId: "prj_target" } },
+    });
+    expect(captureVercel).toHaveBeenCalledWith(
+      ["api", "/v13/deployments/inbound.example.com", "--scope", "acme", "--raw"],
+      expect.objectContaining({ cwd: "/repo" }),
     );
   });
 
@@ -152,6 +186,7 @@ describe("resolveVercelDeployment", () => {
           captureVercel: async () => ({
             ok: true,
             stdout: JSON.stringify({
+              ownerId: "team_a",
               projectId: "prj_other",
               name: "other",
               target: "preview",

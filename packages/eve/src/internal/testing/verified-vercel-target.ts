@@ -20,6 +20,7 @@ export async function resolveTestVercelTarget(input: {
       captureVercel: async () => ({
         ok: true,
         stdout: JSON.stringify({
+          ownerId: input.ownerId ?? "team_test",
           projectId: input.projectId ?? "prj_test",
           name: input.projectName ?? "test-project",
           target: environment,

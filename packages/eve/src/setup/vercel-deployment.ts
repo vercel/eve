@@ -9,6 +9,7 @@ import { z } from "zod";
 import { isNotFoundApiFailure, normalizeVercelApiResult } from "./vercel-api-failure.js";
 
 const VercelDeploymentSchema = z.object({
+  ownerId: z.string().min(1),
   projectId: z.string().min(1),
   name: z.string().min(1),
   target: z.string().nullable().optional(),
@@ -147,7 +148,12 @@ export async function resolveVercelDeployment(input: {
       origin,
       deployment: {
         provider: "vercel",
-        ownerId: source.orgId,
+        // `source.orgId` may be a team slug (the project picker hands back the
+        // slug it scoped with), but the OIDC `owner_id` claim and Trusted
+        // Sources both key on the canonical team/owner id. Vercel's own
+        // response carries that id, so the verified target derives it here
+        // rather than echoing whatever identifier we queried with.
+        ownerId: parsed.data.ownerId,
         projectId: parsed.data.projectId,
         projectName: parsed.data.name,
         environment: environmentForDeployment(parsed.data),

@@ -100,7 +100,10 @@ function createHarness(options: HarnessOptions = {}) {
       operations.push("team");
       return "acme";
     }),
-    pickProject: vi.fn<RemoteAuthFlowDeps["pickProject"]>(async () => {
+    // The real picker echoes back the team it was scoped with — a slug from
+    // `pickTeam`, not a `team_*` id. Mirror that so the suite exercises the
+    // slug flowing through as the deployment scope.
+    pickProject: vi.fn<RemoteAuthFlowDeps["pickProject"]>(async (_prompter, _root, team) => {
       operations.push("project");
       return {
         kind: "existing",
@@ -108,7 +111,7 @@ function createHarness(options: HarnessOptions = {}) {
           projectId: SELECTED_PROJECT.projectId,
           projectName: SELECTED_PROJECT.projectName,
         },
-        team: SELECTED_PROJECT.orgId,
+        team,
       };
     }),
     resolveVercelDeployment: vi.fn<RemoteAuthFlowDeps["resolveVercelDeployment"]>(async () => {
@@ -208,7 +211,9 @@ describe("runRemoteAuthFlow", () => {
       workspaceRoot: WORKSPACE_ROOT,
       host: HOST,
       signal: undefined,
-      source: { orgId: "team_acme", projectId: "prj_selected" },
+      // `pickTeam` yields a slug; it scopes the lookup verbatim, while the
+      // resolved target's canonical owner id is what mints the OIDC token.
+      source: { orgId: "acme", projectId: "prj_selected" },
     });
     expect(harness.operations).toEqual([
       "login",
