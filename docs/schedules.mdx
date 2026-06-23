@@ -77,11 +77,43 @@ export default defineSchedule({
 });
 ```
 
-- `receive(channel, { message, target, auth })`: starts a session on another channel. Same contract as a route handler's `args.receive`.
+- `receive(channel, { message, target, auth, outputSchema? })`: starts a session on another channel. Same contract as a route handler's `args.receive`; `outputSchema` accepts Standard Schema or raw JSON Schema for this turn.
 - `waitUntil(promise)`: extends the cron task's lifetime so the parked session and any in-flight fetches settle before the task ends. Wrap the `receive` call in it.
 - `appAuth`: the app principal (`{ authenticator: "app", principalId: "eve:app", principalType: "runtime" }`). Pass it as `receive(..., { auth: appAuth })` for work the agent does on its own behalf.
 
 A handler-form session runs on the same durable runtime engine as any other session, so it can park (durably suspend), for instance when the channel handoff is waiting for a Slack reply. Only markdown task mode is barred from waiting.
+
+### Structured handoffs
+
+Pass `outputSchema` when a scheduled handoff needs a structured result, including a retry of an earlier webhook delivery:
+
+```ts title="agent/schedules/retry-assessment.ts"
+import { defineSchedule } from "eve/schedules";
+import { z } from "zod";
+
+import github from "../channels/github.js";
+
+const assessmentSchema = z.object({
+  summary: z.string(),
+  priority: z.enum(["low", "medium", "high"]),
+});
+
+export default defineSchedule({
+  cron: "*/5 * * * *",
+  run({ receive, waitUntil, appAuth }) {
+    waitUntil(
+      receive(github, {
+        message: "Assess the claimed issue delivery.",
+        target: { owner: "vercel", repo: "eve", issueNumber: 214 },
+        auth: appAuth,
+        outputSchema: assessmentSchema,
+      }),
+    );
+  },
+});
+```
+
+This remains a durable conversation-mode session. The schema applies only to the delivered turn, and successful structured completion emits `result.completed` for an [agent hook](./guides/hooks) to consume.
 
 ## Trigger a schedule while iterating
 

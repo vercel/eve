@@ -42,16 +42,32 @@ Inbound hooks return `{ auth }` to dispatch, or `null` to ignore. Use `defaultGi
 
 ```ts
 import { defaultGitHubAuth, githubChannel } from "eve/channels/github";
+import { z } from "zod";
+
+const assessmentSchema = z.object({
+  summary: z.string(),
+  priority: z.enum(["low", "medium", "high"]),
+});
 
 export default githubChannel({
   botName: "my-agent",
   // Replaces the @mention gate. ctx.conversation.kind is "issue", "pull_request", or "review_thread".
   onComment: (ctx, comment) => ({ auth: defaultGitHubAuth(ctx) }),
   // Opt in; no default dispatch on these events.
-  onIssue: (ctx, issue) => (issue.action === "opened" ? { auth: defaultGitHubAuth(ctx) } : null),
-  onPullRequest: (ctx, pr) => (pr.action === "opened" ? { auth: defaultGitHubAuth(ctx) } : null),
+  onIssue: (ctx, issue) =>
+    issue.action === "opened"
+      ? { auth: defaultGitHubAuth(ctx), outputSchema: assessmentSchema }
+      : null,
+  onPullRequest: (ctx, pr) =>
+    pr.action === "opened"
+      ? { auth: defaultGitHubAuth(ctx), outputSchema: assessmentSchema }
+      : null,
 });
 ```
+
+Add `outputSchema` when a delivery needs a schema-validated result. It accepts a Standard Schema implementation such as Zod or a raw JSON Schema object and applies only to that turn. A successful structured turn emits the finalized value as `result.completed`; the durable session stays in conversation mode, and later turns do not inherit the schema.
+
+Consume `result.completed` in an [agent hook](../guides/hooks), where `ctx.session.auth.current` provides the trusted caller for validation and side effects. Keep those side effects idempotent and handle their failures inside the hook. `message.completed` is not the structured-result signal, and the GitHub channel does not need a separate result callback. See [Output Schema](../guides/client/output-schema) for the event lifecycle and failure behavior.
 
 ### Delivery
 
@@ -59,11 +75,22 @@ When a turn starts, the channel adds an `eyes` reaction to the triggering commen
 
 ### Human-in-the-loop (HITL)
 
-GitHub comments have no interactive button or card affordance. A human-in-the-loop (HITL) `input.requested` event is posted as a comment prompt, and the user's reply comment maps back to the pending input request. Declare an `events["input.requested"]` handler to customize the prompt.
+GitHub comments have no interactive button or card affordance. A human-in-the-loop (HITL) `input.requested` event is posted as a comment prompt, and the user's reply comment maps back to the pending input request. Declare an `events["input.requested"]` handler to customize the prompt. The reply is a new turn, so its inbound hook must return `outputSchema` again when that response turn also needs structured output.
 
 ### Proactive sessions
 
-Start a session without an inbound mention through `receive(github, { message, target, auth })` from a schedule `run` handler, or `args.receive(github, ...)` from another channel. The target requires `owner`, `repo`, and exactly one of `issueNumber` or `pullRequestNumber`.
+Start a session without an inbound mention through `receive(github, { message, target, auth, outputSchema })` from a schedule `run` handler, or `args.receive(github, ...)` from another channel. The target requires `owner`, `repo`, and exactly one of `issueNumber` or `pullRequestNumber`.
+
+```ts
+await receive(github, {
+  message: "Assess this issue.",
+  target: { owner: "vercel", repo: "eve", issueNumber: 214 },
+  auth: appAuth,
+  outputSchema: assessmentSchema,
+});
+```
+
+The `outputSchema` contract is identical to an inbound hook, so an initial webhook delivery and a scheduled retry can request the same structured result without changing session identity or mode.
 
 ### Attachments
 
