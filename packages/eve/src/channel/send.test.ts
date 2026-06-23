@@ -113,6 +113,27 @@ describe("createSendFn", () => {
     });
   });
 
+  it("adds channel request ids to deliver and run inputs when provided", async () => {
+    const deliverRuntime: Runtime = {
+      deliver: vi.fn().mockResolvedValue({ sessionId: "existing-session-id" }),
+      run: vi.fn().mockResolvedValue(createMockRunHandle()),
+      getEventStream: vi.fn().mockResolvedValue(new ReadableStream<HandleMessageStreamEvent>()),
+    };
+
+    const deliverSend = createSendFn(deliverRuntime, ADAPTER, "test", {
+      requestId: "req_send",
+    });
+    await deliverSend("hello", { auth: null, continuationToken: "token" });
+
+    expect(vi.mocked(deliverRuntime.deliver).mock.calls[0]?.[0].requestId).toBe("req_send");
+
+    const runRuntime = createRuntime(new RuntimeNoActiveSessionError("test:token"));
+    const runSend = createSendFn(runRuntime, ADAPTER, "test", { requestId: "req_send" });
+    await runSend("hello", { auth: null, continuationToken: "token" });
+
+    expect(vi.mocked(runRuntime.run).mock.calls[0]?.[0].requestId).toBe("req_send");
+  });
+
   it("forwards outputSchema through deliver and run payloads", async () => {
     const outputSchema = {
       properties: { title: { type: "string" } },

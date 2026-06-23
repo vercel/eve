@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHook } from "#compiled/@workflow/core/index.js";
 
 import type { HookPayload } from "#channel/types.js";
+import { ChannelRequestIdKey } from "#context/keys.js";
 import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
 import type { RuntimeSubagentResultActionResult } from "#runtime/actions/types.js";
 import { createSessionStep } from "#execution/create-session-step.js";
@@ -155,6 +156,62 @@ describe("workflowEntry", () => {
         sessionState,
       }),
     );
+  });
+
+  it("passes the run channel request id to the first turn", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      turnCompletions: [turnResult({ action: "done", output: "ok", sessionState })],
+    });
+
+    await workflowEntry({
+      input: { message: "hello there" },
+      serializedContext: createSerializedContext({
+        [ChannelRequestIdKey.name]: "req_initial",
+      }),
+    });
+
+    expect(vi.mocked(dispatchTurnStep).mock.calls[0]?.[0].delivery).toEqual({
+      requestId: "req_initial",
+      kind: "deliver",
+      payloads: [{ message: "hello there", context: undefined }],
+    });
+  });
+
+  it("passes the resumed channel request id to the next turn", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      parkHooks: [
+        {
+          token: "http:test",
+          values: [
+            {
+              requestId: "req_followup",
+              kind: "deliver",
+              payloads: [{ message: "follow up" }],
+            },
+          ],
+        },
+      ],
+      turnCompletions: [
+        turnResult({ action: "park", sessionState }),
+        turnResult({ action: "done", output: "ok", sessionState }),
+      ],
+    });
+
+    await workflowEntry({
+      input: { message: "hello there" },
+      serializedContext: createSerializedContext(),
+    });
+
+    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
+      auth: undefined,
+      requestId: "req_followup",
+      kind: "deliver",
+      payloads: [{ message: "follow up" }],
+    });
   });
 
   it("buffers follow-up user input until a pending subagent batch resolves", async () => {

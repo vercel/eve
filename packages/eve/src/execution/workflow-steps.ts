@@ -115,6 +115,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   await setEveAttributes(
     buildTurnAttributes({
       parentSessionId: input.sessionState.sessionId,
+      requestId: input.input?.kind === "deliver" ? input.input.requestId : undefined,
       rootSessionId: readRootSessionId(input.serializedContext) ?? input.sessionState.sessionId,
     }),
   );

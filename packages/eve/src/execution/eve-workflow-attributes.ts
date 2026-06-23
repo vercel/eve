@@ -22,8 +22,10 @@
  * - `$eve.subagent`     — active compiled graph node id (subagent rows only)
  * - `$eve.trigger`      — channel adapter kind (session/subagent rows)
  * - `$eve.title`        — truncated session title from the first user message
+ * - `$eve.channel_request_id` — inbound channel request id
  */
 
+import { ChannelRequestIdKey } from "#context/keys.js";
 import type { EveAttributeValue } from "#runtime/attributes/emit.js";
 import { isNonEmptyString } from "#shared/guards.js";
 
@@ -119,6 +121,18 @@ export function readRootSessionId(serializedContext: Record<string, unknown>): s
 }
 
 /**
+ * Reads the channel request id minted by an inbound channel route.
+ * Returns `undefined` when the active run was not started from an
+ * inbound route, such as a schedule.
+ */
+export function readChannelRequestId(
+  serializedContext: Record<string, unknown>,
+): string | undefined {
+  const channelRequestId = serializedContext[ChannelRequestIdKey.name];
+  return isNonEmptyString(channelRequestId) ? channelRequestId : undefined;
+}
+
+/**
  * Maximum visible length (in code points) of a derived `$eve.title`.
  *
  * Titles render as the first column of the dashboard's run table, so
@@ -194,6 +208,7 @@ export function buildSessionAttributes(input: {
   readonly serializedContext: Record<string, unknown>;
 }): Record<string, EveAttributeValue> {
   return {
+    "$eve.channel_request_id": readChannelRequestId(input.serializedContext),
     "$eve.type": "session",
     "$eve.trigger": readChannelKind(input.serializedContext),
     "$eve.title": deriveSessionTitle(input.inputMessage),
@@ -218,6 +233,7 @@ export function buildSubagentRootAttributes(input: {
   readonly serializedContext: Record<string, unknown>;
 }): Record<string, EveAttributeValue> {
   return {
+    "$eve.channel_request_id": readChannelRequestId(input.serializedContext),
     "$eve.type": "subagent",
     "$eve.parent": input.parentSessionId,
     "$eve.parent_call": input.parentCallId,
@@ -240,9 +256,11 @@ export function buildSubagentRootAttributes(input: {
  */
 export function buildTurnAttributes(input: {
   readonly parentSessionId: string;
+  readonly requestId?: string;
   readonly rootSessionId: string;
 }): Record<string, EveAttributeValue> {
   return {
+    "$eve.channel_request_id": input.requestId,
     "$eve.type": "turn",
     "$eve.parent": input.parentSessionId,
     "$eve.root": input.rootSessionId,

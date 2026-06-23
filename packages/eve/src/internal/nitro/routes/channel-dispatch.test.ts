@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { CHANNEL_SENTINEL, type CompiledChannel } from "#channel/compiled-channel.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
-import type { Runtime } from "#channel/types.js";
+import type { DeliverInput, RunInput, Runtime } from "#channel/types.js";
+import type { RouteContext } from "#public/definitions/channel.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import {
   dispatchChannelRequest,
@@ -34,10 +35,11 @@ function createDeferred<T>() {
 }
 
 function createEvent(input?: {
+  readonly headers?: Record<string, string>;
   readonly requestIp?: string;
   readonly waitUntil?: (task: Promise<unknown>) => void;
 }): H3Event {
-  const request = new Request("https://eve.test/slack");
+  const request = new Request("https://eve.test/slack", { headers: input?.headers });
   Object.assign(request, {
     ip: input?.requestIp ?? "127.0.0.1",
   });
@@ -170,6 +172,152 @@ describe("dispatchChannelRequest", () => {
     expect(input.message).toBe("handoff");
     expect(input.target).toEqual({ foo: "bar" });
     expect(typeof ctx.send).toBe("function");
+  });
+
+  it("tags route sends with Vercel's request id", async () => {
+    const runtimeForTest: Runtime = {
+      deliver: vi.fn().mockResolvedValue({ sessionId: "sess_route" }),
+      getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
+      run: vi.fn(),
+    };
+
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      channels: [
+        {
+          handler: async (_req, args) => {
+            await args.send("hello", {
+              auth: null,
+              continuationToken: "route-token",
+            });
+            return new Response("ok");
+          },
+          fetch: async () => new Response("ok"),
+          adapter: { kind: "channel:webhook" },
+          logicalPath: "agent/channels/webhook.ts",
+          method: "POST",
+          name: "webhook",
+          sourceId: "channel-webhook",
+          sourceKind: "module",
+          urlPath: "/webhook",
+        } satisfies ResolvedChannelDefinition,
+      ],
+      runtime: runtimeForTest,
+    });
+
+    const response = await dispatchChannelRequest(
+      createEvent({
+        headers: { "x-vercel-id": "iad1::abc123-1710000000000-deadbeef" },
+        waitUntil: vi.fn(),
+      }),
+      "POST /webhook",
+      {} as never,
+    );
+
+    expect(response.status).toBe(200);
+    expect(vi.mocked(runtimeForTest.deliver).mock.calls[0]?.[0].requestId).toBe(
+      "iad1::abc123-1710000000000-deadbeef",
+    );
+  });
+
+  it("does not invent a channel request id when Vercel did not send one", async () => {
+    const runtimeForTest: Runtime = {
+      deliver: vi.fn().mockResolvedValue({ sessionId: "sess_route" }),
+      getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
+      run: vi.fn(),
+    };
+
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      channels: [
+        {
+          handler: async (_req, args) => {
+            await args.send("hello", {
+              auth: null,
+              continuationToken: "route-token",
+            });
+            return new Response("ok");
+          },
+          fetch: async () => new Response("ok"),
+          adapter: { kind: "channel:webhook" },
+          logicalPath: "agent/channels/webhook.ts",
+          method: "POST",
+          name: "webhook",
+          sourceId: "channel-webhook",
+          sourceKind: "module",
+          urlPath: "/webhook",
+        } satisfies ResolvedChannelDefinition,
+      ],
+      runtime: runtimeForTest,
+    });
+
+    const response = await dispatchChannelRequest(
+      createEvent({ waitUntil: vi.fn() }),
+      "POST /webhook",
+      {} as never,
+    );
+
+    expect(response.status).toBe(200);
+    expect(vi.mocked(runtimeForTest.deliver).mock.calls[0]?.[0].requestId).toBeUndefined();
+  });
+
+  it("does not mutate route-owned run and deliver inputs", async () => {
+    const runtimeForTest: Runtime = {
+      deliver: vi.fn().mockResolvedValue({ sessionId: "sess_deliver" }),
+      getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
+      run: vi.fn().mockResolvedValue({
+        continuationToken: "route-token",
+        events: new ReadableStream(),
+        sessionId: "sess_run",
+      }),
+    };
+    const deliverInput = Object.freeze({
+      auth: null,
+      continuationToken: "route-token",
+      payload: { message: "follow up" },
+    } satisfies DeliverInput);
+    const runInput = Object.freeze({
+      adapter: { kind: "channel:test" },
+      auth: null,
+      input: { message: "start" },
+      mode: "conversation",
+    } satisfies RunInput);
+
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      channels: [
+        {
+          fetch: async (_request: Request, ctx: RouteContext) => {
+            await ctx.agent.deliver(deliverInput);
+            await ctx.agent.run(runInput);
+            return new Response("ok");
+          },
+          logicalPath: "agent/channels/internal.ts",
+          method: "POST",
+          name: "internal",
+          sourceId: "channel-internal",
+          sourceKind: "module",
+          urlPath: "/internal",
+        } satisfies ResolvedChannelDefinition,
+      ],
+      runtime: runtimeForTest,
+    });
+
+    const response = await dispatchChannelRequest(
+      createEvent({
+        headers: { "x-vercel-id": "iad1::abc123-1710000000000-deadbeef" },
+        waitUntil: vi.fn(),
+      }),
+      "POST /internal",
+      {} as never,
+    );
+
+    expect(response.status).toBe(200);
+    const deliveredInput = vi.mocked(runtimeForTest.deliver).mock.calls[0]?.[0];
+    const startedInput = vi.mocked(runtimeForTest.run).mock.calls[0]?.[0];
+    expect(deliveredInput).not.toBe(deliverInput);
+    expect(startedInput).not.toBe(runInput);
+    expect(deliveredInput?.requestId).toBe("iad1::abc123-1710000000000-deadbeef");
+    expect(startedInput?.requestId).toBe("iad1::abc123-1710000000000-deadbeef");
+    expect(deliverInput).not.toHaveProperty("requestId");
+    expect(runInput).not.toHaveProperty("requestId");
   });
 
   it("hands websocket route handlers the same route args", async () => {

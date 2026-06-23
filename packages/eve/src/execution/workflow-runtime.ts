@@ -120,10 +120,11 @@ export function createWorkflowRuntime(config: {
 
     async deliver(input: DeliverInput): Promise<{ sessionId: string }> {
       applyEveWorkflowQueueNamespace();
-      const hookPayload: HookPayload = {
+      const hookPayload: Extract<HookPayload, { kind: "deliver" }> = {
         auth: input.auth,
         kind: "deliver",
         payloads: [input.payload],
+        requestId: input.requestId,
       };
       try {
         const hook = normalizeWorkflowHook(await getHookByToken(input.continuationToken));

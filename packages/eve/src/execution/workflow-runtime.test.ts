@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
+import { ChannelRequestIdKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
@@ -91,6 +92,26 @@ describe("createWorkflowRuntime#deliver", () => {
       }),
     ).rejects.toBe(failure);
   });
+
+  it("resumes hooks with the channel request id", async () => {
+    getHookByTokenMock.mockResolvedValue({ runId: "driver-run" });
+
+    await expect(
+      buildRuntime().deliver({
+        auth: null,
+        continuationToken: "test:token",
+        payload: { message: "hello" },
+        requestId: "req_deliver",
+      }),
+    ).resolves.toEqual({ sessionId: "driver-run" });
+
+    expect(resumeHookMock).toHaveBeenCalledWith("test:token", {
+      auth: null,
+      requestId: "req_deliver",
+      kind: "deliver",
+      payloads: [{ message: "hello" }],
+    });
+  });
 });
 
 describe("createWorkflowRuntime#run", () => {
@@ -136,6 +157,34 @@ describe("createWorkflowRuntime#run", () => {
             "eve.bundle": { source: compiledArtifactsSource },
             "eve.channel": { kind: "http", state: {} },
             "eve.mode": "task",
+          }),
+        },
+      ],
+      { deploymentId: "latest" },
+    );
+  });
+
+  it("serializes the channel request id into workflow context", async () => {
+    vi.stubEnv("VERCEL_ENV", "production");
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: "driver-run" });
+
+    await buildRuntime(compiledArtifactsSource).run({
+      adapter,
+      auth: null,
+      input: { message: "hello" },
+      mode: "task",
+      requestId: "req_run",
+    });
+
+    expect(startMock).toHaveBeenCalledWith(
+      workflowEntryReference,
+      [
+        {
+          input: { message: "hello" },
+          serializedContext: expect.objectContaining({
+            [ChannelRequestIdKey.name]: "req_run",
           }),
         },
       ],
