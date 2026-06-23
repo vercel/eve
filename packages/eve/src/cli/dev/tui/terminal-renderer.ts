@@ -2773,9 +2773,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (this.#logLevelHintActive) input.logLevel = this.#logs;
     const model = this.#agentHeader?.info?.agent.model.id;
     if (model !== undefined) input.model = model;
-    // The runtime boundary owns endpoint readiness: the dev server computes it
-    // from its full process.env and returns it on /eve/v1/info, so the status
-    // bar (local or --url) reads one authority instead of re-deriving locally.
+    // The runner normalizes local credential evidence with `/info` before
+    // caching this header, so the status bar consumes that shared snapshot.
     const endpoint = this.#agentHeader?.info?.agent.model.endpoint;
     if (endpoint !== undefined) input.endpoint = endpoint;
     // Skip the token segment entirely until a turn moves a token — a `↑ 0 ↓ 0`

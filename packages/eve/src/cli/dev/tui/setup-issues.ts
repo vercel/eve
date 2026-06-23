@@ -41,22 +41,67 @@ export interface BootDetection {
 }
 
 type ModelProviderAccess = "configured" | "unconfigured" | "unknown";
+type LocalGatewayCredential = "api-key" | "oidc";
+
+function hasEnvValue(env: Record<string, string | undefined>, key: string): boolean {
+  const value = env[key];
+  return value !== undefined && value.trim().length > 0;
+}
+
+function localGatewayCredential(
+  env: Record<string, string | undefined>,
+): LocalGatewayCredential | undefined {
+  if (hasEnvValue(env, "AI_GATEWAY_API_KEY")) return "api-key";
+  if (hasEnvValue(env, "VERCEL_OIDC_TOKEN")) return "oidc";
+  return undefined;
+}
+
+/**
+ * Carries positive local credential evidence into the agent-info snapshot the
+ * TUI caches. The local TUI and dev server share `process.env`, so a loaded
+ * credential is usable even when an earlier `/info` response says disconnected.
+ */
+export function withLocalGatewayCredentialEvidence(
+  info: AgentInfoResult | undefined,
+  env: Record<string, string | undefined>,
+): AgentInfoResult | undefined {
+  const credential = localGatewayCredential(env);
+  if (info === undefined || credential === undefined) return info;
+
+  const model = info.agent.model;
+  const endpoint = model.endpoint;
+  if (endpoint?.kind === "external" || (endpoint?.kind === "gateway" && endpoint.connected)) {
+    return info;
+  }
+  if (endpoint?.kind !== "gateway" && model.routing?.kind !== "gateway") return info;
+
+  return {
+    ...info,
+    agent: {
+      ...info.agent,
+      model: {
+        ...model,
+        endpoint: { kind: "gateway", connected: true, credential },
+      },
+    },
+  };
+}
 
 /** Classifies only evidence the boot path can actually observe. */
 function modelProviderAccess(
   context: Pick<BootDetectionContext, "env" | "info">,
 ): ModelProviderAccess {
-  const endpoint = context.info?.agent.model.endpoint;
+  const info = withLocalGatewayCredentialEvidence(context.info, context.env);
+  const endpoint = info?.agent.model.endpoint;
   if (endpoint?.kind === "external") return "configured";
-  if (endpoint?.kind === "gateway") {
-    return endpoint.connected ? "configured" : "unconfigured";
-  }
+  if (endpoint?.kind === "gateway" && endpoint.connected) return "configured";
 
   // Older servers omit the composed endpoint status. Their routing and the
   // dev process's loaded env can prove configuration, but absence proves
   // nothing about credentials available only inside the running server.
-  if (context.info?.agent.model.routing?.kind === "external") return "configured";
-  if (context.env.AI_GATEWAY_API_KEY || context.env.VERCEL_OIDC_TOKEN) return "configured";
+  if (info?.agent.model.routing?.kind === "external") return "configured";
+  if (localGatewayCredential(context.env) !== undefined) return "configured";
+  if (endpoint?.kind === "gateway") return "unconfigured";
   return "unknown";
 }
 
@@ -66,10 +111,10 @@ function modelProviderAccess(
  * linking and credentials don't apply (and /model can't reconfigure it). For a
  * gateway model it reports only the most-root cause; an unlinked directory
  * implies missing OIDC, so listing both would double-count what /model's
- * provider step fixes in one pass. The composed runtime endpoint is
- * authoritative when available; legacy routing and local env can prove a
- * provider is configured, but their absence remains unknown and cannot launch
- * setup. A hint, not an error: the model call stays the source of truth.
+ * provider step fixes in one pass. The header and detection receive the same
+ * local-credential-normalized endpoint snapshot. Their absence remains
+ * unknown and cannot launch setup. A hint, not an error: the model call stays
+ * the source of truth.
  */
 const modelProvider: BootDetection = {
   id: "model-provider",

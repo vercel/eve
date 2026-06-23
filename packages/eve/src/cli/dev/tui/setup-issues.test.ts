@@ -87,6 +87,17 @@ describe("BOOT_DETECTIONS", () => {
     });
   });
 
+  it("treats a newly loaded gateway key as configured while runtime info catches up", async () => {
+    const info = infoWithRouting(
+      { kind: "gateway", target: "openai" },
+      { kind: "gateway", connected: false },
+    );
+
+    await expect(
+      detectSetupIssues(context({ env: { AI_GATEWAY_API_KEY: "key" }, info })),
+    ).resolves.toEqual([]);
+  });
+
   it("stays quiet when either gateway credential is present, linked or not", async () => {
     expect(await detectSetupIssues(context({ env: { AI_GATEWAY_API_KEY: "key" } }))).toEqual([]);
     expect(await detectSetupIssues(context({ env: { VERCEL_OIDC_TOKEN: "token" } }))).toEqual([]);

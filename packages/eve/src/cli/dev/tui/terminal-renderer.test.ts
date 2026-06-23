@@ -2563,13 +2563,24 @@ describe("TerminalRenderer status line", () => {
       serverUrl: "http://localhost:3000",
       info: agentInfoWithModel("anthropic/claude-sonnet-4-6", {
         kind: "gateway",
-        connected: true,
-        credential: "oidc",
+        connected: false,
       }),
     });
 
     const prompt = renderer.readPrompt();
     renderer.setVercelStatus(vercelStatus);
+
+    expect(screen.snapshot()).toContain("⚠ AI Gateway");
+
+    renderer.renderAgentHeader({
+      name: "Weather Agent",
+      serverUrl: "http://localhost:3000",
+      info: agentInfoWithModel("anthropic/claude-sonnet-4-6", {
+        kind: "gateway",
+        connected: true,
+        credential: "oidc",
+      }),
+    });
 
     const lines = screen.snapshot().split("\n");
     const promptRow = lines.findIndex((line) => line.includes("❯"));
@@ -2578,6 +2589,7 @@ describe("TerminalRenderer status line", () => {
     expect(statusRow).toContain("anthropic/claude-sonnet-4-6");
     // The linked project folds into the connected gateway label.
     expect(statusRow).toContain("AI Gateway (my-agent)");
+    expect(statusRow).not.toContain("⚠ AI Gateway");
     // No token segment before any turn reports usage (↑ 0 ↓ 0 is noise).
     expect(statusRow).not.toContain("↑ 0");
     expect(statusRow).not.toContain("/deploy pending");
