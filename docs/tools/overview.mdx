@@ -63,7 +63,7 @@ export default defineTool({
 });
 ```
 
-Approval is one half of eve's [human-in-the-loop](./human-in-the-loop) model — the page covers the `always/once/never` helpers, input-dependent predicates, and how a gated call pauses and resumes durably.
+Approval is one half of eve's [human-in-the-loop](./human-in-the-loop) model — the page covers the `always/once/never` helpers, input-dependent predicates, and how a gated call pauses and resumes durably. For the other half — a tool with **no** `execute` that parks for a typed user answer (`defineClientTool`, e.g. a custom picker) — see [client-resolved tools](./human-in-the-loop#custom-client-resolved-tools).
 
 ## Shape what the model sees with `toModelOutput`
 

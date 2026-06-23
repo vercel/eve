@@ -56,6 +56,27 @@ The built-in `ask_question` tool lets the model pause and ask the user, rather t
 
 `ask_question` is part of the [default harness](/docs/concepts/default-harness), so it is available without you defining anything. It produces the same `input.requested` pause as an approval, and resumes the same way.
 
+### Custom client-resolved tools
+
+`ask_question` is a _client-resolved_ tool: it has no `execute`, so eve never runs it — the model emits the call, the turn parks, and the user's answer becomes its single result. Author your own with `defineClientTool` when you want that exact pause-and-resume but with a **richer, typed input schema** — a "pick a template", "choose media", or multi-field form that a channel or your frontend renders as a dedicated widget:
+
+```ts title="agent/tools/ask_question.ts"
+import { defineClientTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineClientTool({
+  description: "Ask the user to pick a template.",
+  inputSchema: z.object({
+    prompt: z.string(),
+    ui: z.object({ kind: z.literal("template_picker") }).passthrough(),
+  }),
+});
+```
+
+Naming the file `ask_question.ts` overrides the built-in question tool with your wider schema while keeping the same parking behavior (parking is keyed on the `ask_question` name). The parked `input.requested` carries your full typed input, so the client renders the picker from it and resumes the turn with the user's structured choice.
+
+A `defineClientTool` tool must **not** declare an `execute` — that is the whole point, and passing one is rejected at compile and runtime. [`defineTool`](/docs/tools) is the opposite: it always requires an `execute` and runs on the server. The two shapes are mutually exclusive, so a parked call always resolves to exactly one result.
+
 ## How pause and resume works
 
 Approvals and questions share one protocol:
