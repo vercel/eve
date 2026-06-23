@@ -40,20 +40,17 @@ export interface BootDetection {
   detect(context: BootDetectionContext): SetupIssue[] | Promise<SetupIssue[]>;
 }
 
-type ModelProviderAccess = "configured" | "unconfigured" | "unknown";
-type LocalGatewayCredential = "api-key" | "oidc";
+type ModelProviderAccess =
+  | {
+      status: "configured";
+      localGatewayCredential: "api-key" | "oidc" | undefined;
+    }
+  | { status: "unconfigured" }
+  | { status: "unknown" };
 
 function hasEnvValue(env: Record<string, string | undefined>, key: string): boolean {
   const value = env[key];
   return value !== undefined && value.trim().length > 0;
-}
-
-function localGatewayCredential(
-  env: Record<string, string | undefined>,
-): LocalGatewayCredential | undefined {
-  if (hasEnvValue(env, "AI_GATEWAY_API_KEY")) return "api-key";
-  if (hasEnvValue(env, "VERCEL_OIDC_TOKEN")) return "oidc";
-  return undefined;
 }
 
 /**
@@ -65,8 +62,10 @@ export function withLocalGatewayCredentialEvidence(
   info: AgentInfoResult | undefined,
   env: Record<string, string | undefined>,
 ): AgentInfoResult | undefined {
-  const credential = localGatewayCredential(env);
-  if (info === undefined || credential === undefined) return info;
+  const access = modelProviderAccess({ env, info });
+  if (info === undefined || access.status !== "configured") return info;
+  const { localGatewayCredential: credential } = access;
+  if (credential === undefined) return info;
 
   const model = info.agent.model;
   const endpoint = model.endpoint;
@@ -91,18 +90,28 @@ export function withLocalGatewayCredentialEvidence(
 function modelProviderAccess(
   context: Pick<BootDetectionContext, "env" | "info">,
 ): ModelProviderAccess {
-  const info = withLocalGatewayCredentialEvidence(context.info, context.env);
-  const endpoint = info?.agent.model.endpoint;
-  if (endpoint?.kind === "external") return "configured";
-  if (endpoint?.kind === "gateway" && endpoint.connected) return "configured";
+  const endpoint = context.info?.agent.model.endpoint;
+  if (endpoint?.kind === "external") {
+    return { status: "configured", localGatewayCredential: undefined };
+  }
+  if (endpoint?.kind === "gateway" && endpoint.connected) {
+    return { status: "configured", localGatewayCredential: undefined };
+  }
 
   // Older servers omit the composed endpoint status. Their routing and the
   // dev process's loaded env can prove configuration, but absence proves
   // nothing about credentials available only inside the running server.
-  if (info?.agent.model.routing?.kind === "external") return "configured";
-  if (localGatewayCredential(context.env) !== undefined) return "configured";
-  if (endpoint?.kind === "gateway") return "unconfigured";
-  return "unknown";
+  if (context.info?.agent.model.routing?.kind === "external") {
+    return { status: "configured", localGatewayCredential: undefined };
+  }
+  if (hasEnvValue(context.env, "AI_GATEWAY_API_KEY")) {
+    return { status: "configured", localGatewayCredential: "api-key" };
+  }
+  if (hasEnvValue(context.env, "VERCEL_OIDC_TOKEN")) {
+    return { status: "configured", localGatewayCredential: "oidc" };
+  }
+  if (endpoint?.kind === "gateway") return { status: "unconfigured" };
+  return { status: "unknown" };
 }
 
 /**
@@ -121,11 +130,11 @@ const modelProvider: BootDetection = {
   async detect({ appRoot, env, info }) {
     const access = modelProviderAccess({ env, info });
 
-    if (access === "configured") {
+    if (access.status === "configured") {
       return [];
     }
     const linked = await pathExists(join(appRoot, ".vercel", "project.json"));
-    if (access === "unconfigured") {
+    if (access.status === "unconfigured") {
       return [
         {
           kind: "model-provider-unconfigured",
