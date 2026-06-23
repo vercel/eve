@@ -110,57 +110,31 @@ describe("listRecentProjects", () => {
 });
 
 describe("searchProjects", () => {
-  it("searches every matching page under the selected team", async () => {
-    mockedCaptureVercel
-      .mockResolvedValueOnce(
-        captured({
-          projects: [{ id: "prj_a", name: "agent" }],
-          pagination: { next: 7 },
-        }),
-      )
-      .mockResolvedValueOnce(
-        captured({
-          projects: [
-            { id: "prj_a", name: "agent" },
-            { id: "prj_b", name: "agent-api" },
-          ],
-          pagination: { next: null },
-        }),
-      );
-
-    await expect(searchProjects("/repo", "team-a", " agent ")).resolves.toEqual([
-      { id: "prj_a", name: "agent" },
-      { id: "prj_b", name: "agent-api" },
-    ]);
-    expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
-      1,
-      ["project", "ls", "--format", "json", "--scope", "team-a", "--filter", "agent"],
-      { cwd: "/repo", signal: undefined, timeoutMs: 15_000 },
+  it("returns one ranked matching page under the selected team", async () => {
+    mockedCaptureVercel.mockResolvedValue(
+      captured({
+        projects: [
+          { id: "prj_infix", name: "env" },
+          { id: "prj_prefix", name: "v-api" },
+          { id: "prj_exact", name: "v" },
+        ],
+        pagination: { next: 7 },
+      }),
     );
-    expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
-      2,
-      [
-        "project",
-        "ls",
-        "--format",
-        "json",
-        "--scope",
-        "team-a",
-        "--filter",
-        "agent",
-        "--next",
-        "7",
-      ],
+
+    await expect(searchProjects("/repo", "team-a", " V ")).resolves.toEqual([
+      { id: "prj_exact", name: "v" },
+      { id: "prj_prefix", name: "v-api" },
+      { id: "prj_infix", name: "env" },
+    ]);
+    expect(mockedCaptureVercel).toHaveBeenCalledOnce();
+    expect(mockedCaptureVercel).toHaveBeenCalledWith(
+      ["project", "ls", "--format", "json", "--scope", "team-a", "--filter", "V"],
       { cwd: "/repo", signal: undefined, timeoutMs: 15_000 },
     );
   });
 
-  it("rejects empty queries and repeated cursors", async () => {
+  it("rejects empty queries", async () => {
     await expect(searchProjects("/repo", "team-a", "  ")).rejects.toThrow("cannot be empty");
-
-    mockedCaptureVercel.mockResolvedValue(captured({ projects: [], pagination: { next: 7 } }));
-    await expect(searchProjects("/repo", "team-a", "agent")).rejects.toThrow(
-      "repeated pagination cursor",
-    );
   });
 });

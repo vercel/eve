@@ -374,11 +374,30 @@ export async function pickTeam(
 
 const SEARCH_PROJECT_PREFIX = "\0search-project:";
 
-function appendProjects(
+function prioritizeSearchResults(
   existing: readonly VercelProjectListEntry[],
   found: readonly VercelProjectListEntry[],
 ): VercelProjectListEntry[] {
-  return [...new Map([...existing, ...found].map((project) => [project.id, project])).values()];
+  const projects = new Map(found.map((project) => [project.id, project]));
+  for (const project of existing) {
+    if (!projects.has(project.id)) projects.set(project.id, project);
+  }
+  return [...projects.values()];
+}
+
+async function findProjectSearchResults(
+  projectRoot: string,
+  team: string,
+  query: string,
+  options: VercelProjectOperationOptions,
+): Promise<VercelProjectListEntry[]> {
+  const search = query.trim();
+  if (search.length === 0) throw new Error("Project search query cannot be empty.");
+
+  const exact = await resolveProjectByNameOrId(projectRoot, team, search, options);
+  if (exact !== null) return [{ id: exact.projectId, name: exact.projectName }];
+
+  return searchProjects(projectRoot, team, search, options);
 }
 
 /** Picks an existing project under a team, or a name to create when none exist. */
@@ -414,8 +433,10 @@ export async function pickProject(
         label: (query) => `Search for '${query}'`,
         value: (query) => `${SEARCH_PROJECT_PREFIX}${query}`,
         load: async (query) => {
-          const found = await searchProjects(projectRoot, team, query, { signal: options.signal });
-          projects = appendProjects(projects, found);
+          const found = await findProjectSearchResults(projectRoot, team, query, {
+            signal: options.signal,
+          });
+          projects = prioritizeSearchResults(projects, found);
           return projects.map((project) => ({ value: project.id, label: project.name }));
         },
       },
@@ -436,13 +457,13 @@ export async function pickProject(
     }
 
     const found = await withSpinner(prompter, `Searching ${team} for "${query}"...`, () =>
-      searchProjects(projectRoot, team, query, { signal: options.signal }),
+      findProjectSearchResults(projectRoot, team, query, { signal: options.signal }),
     );
     if (found.length === 0) {
       prompter.note(`No projects matched "${query}" in ${team}.`);
       continue;
     }
-    projects = appendProjects(projects, found);
+    projects = prioritizeSearchResults(projects, found);
   }
 }
 

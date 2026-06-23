@@ -154,7 +154,15 @@ export async function listRecentProjects(
   return (await fetchProjectPage(projectRoot, team, options)).items;
 }
 
-/** Searches every matching Vercel project page in one account scope. */
+function projectSearchRank(project: VercelProjectListEntry, query: string): number {
+  const name = project.name.toLowerCase();
+  const normalizedQuery = query.toLowerCase();
+  if (name === normalizedQuery) return 0;
+  if (name.startsWith(normalizedQuery)) return 1;
+  return 2;
+}
+
+/** Searches one matching Vercel project page, ranking exact and prefix matches first. */
 export async function searchProjects(
   projectRoot: string,
   team: string,
@@ -163,9 +171,8 @@ export async function searchProjects(
 ): Promise<VercelProjectListEntry[]> {
   const search = query.trim();
   if (search.length === 0) throw new Error("Project search query cannot be empty.");
-  return drainPages(
-    `project search in ${team}`,
-    (project) => project.id,
-    (next) => fetchProjectPage(projectRoot, team, { ...options, search, next }),
+  const projects = (await fetchProjectPage(projectRoot, team, { ...options, search })).items;
+  return [...projects].sort(
+    (left, right) => projectSearchRank(left, search) - projectSearchRank(right, search),
   );
 }
