@@ -1,8 +1,10 @@
 import { cardToSlackBlocks } from "#compiled/@chat-adapter/slack/blocks.js";
 import { cardChildToFallbackText, type CardChild, type CardElement } from "#compiled/chat/index.js";
 
+/** A Slack Block Kit block emitted by {@link cardToBlocks}. */
 export type BlockKitBlock = Record<string, unknown>;
 
+/** Converts a Chat SDK card into Slack Block Kit blocks. */
 export function cardToBlocks(card: CardElement): BlockKitBlock[] {
   return cardToSlackBlocks({
     ...card,
@@ -10,6 +12,7 @@ export function cardToBlocks(card: CardElement): BlockKitBlock[] {
   });
 }
 
+/** Creates the plain-text fallback used for notifications and accessibility. */
 export function cardToFallbackText(card: CardElement): string {
   const lines: string[] = [];
   if (card.title) lines.push(card.title);
