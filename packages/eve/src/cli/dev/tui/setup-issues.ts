@@ -57,11 +57,12 @@ function hasEnvValue(env: Record<string, string | undefined>, key: string): bool
 }
 
 /**
- * Carries positive local credential evidence into the agent-info snapshot the
- * TUI caches. The local TUI and dev server share `process.env`, so a loaded
- * credential is usable even when an earlier `/info` response says disconnected.
+ * Resolves the local TUI's current model-provider state into the agent-info
+ * snapshot it caches. The local TUI and dev server share `process.env`, so a
+ * loaded credential is usable even when an earlier `/info` response says
+ * disconnected.
  */
-export function withLocalGatewayCredentialEvidence(
+export function resolveModelProviderState(
   info: AgentInfoResult | undefined,
   env: Record<string, string | undefined>,
 ): AgentInfoResult | undefined {

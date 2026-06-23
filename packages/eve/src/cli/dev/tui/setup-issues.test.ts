@@ -8,8 +8,8 @@ import {
   formatSetupIssuesLine,
   LOGIN_SETUP_ISSUE,
   orderedSetupIssues,
+  resolveModelProviderState,
   type BootDetectionContext,
-  withLocalGatewayCredentialEvidence,
 } from "./setup-issues.js";
 
 function context(overrides: Partial<BootDetectionContext> = {}): BootDetectionContext {
@@ -111,7 +111,7 @@ describe("BOOT_DETECTIONS", () => {
       { kind: "external", provider: "anthropic" },
     );
 
-    expect(withLocalGatewayCredentialEvidence(info, { AI_GATEWAY_API_KEY: "key" })).toMatchObject({
+    expect(resolveModelProviderState(info, { AI_GATEWAY_API_KEY: "key" })).toMatchObject({
       agent: {
         model: {
           endpoint: { kind: "gateway", connected: true, credential: "api-key" },

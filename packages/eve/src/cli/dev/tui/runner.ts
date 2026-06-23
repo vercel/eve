@@ -55,7 +55,7 @@ import {
   formatSetupIssuesLine,
   LOGIN_SETUP_ISSUE,
   orderedSetupIssues,
-  withLocalGatewayCredentialEvidence,
+  resolveModelProviderState,
   type BootDetection,
   type BootDetectionContext,
   type SetupIssue,
@@ -515,7 +515,7 @@ export class EveTUIRunner {
 
   #replaceAgentInfo(info: AgentInfoResult | undefined): AgentInfoResult | undefined {
     const headerInfo =
-      this.#appRoot === undefined ? info : withLocalGatewayCredentialEvidence(info, process.env);
+      this.#appRoot === undefined ? info : resolveModelProviderState(info, process.env);
     this.#agentInfo = headerInfo;
     const serverUrl = this.#serverUrl;
     if (serverUrl === undefined) return headerInfo;
