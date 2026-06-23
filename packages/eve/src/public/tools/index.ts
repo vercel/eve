@@ -3,8 +3,10 @@
  */
 
 export {
+  type ClientToolDefinition,
   type DisabledToolSentinel,
   type EnableWorkflowToolSentinel,
+  defineClientTool,
   defineDynamic,
   defineTool,
   disableTool,

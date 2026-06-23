@@ -46,14 +46,22 @@ export async function resolveToolDefinition(
     registerDefinitionSource(sourceKey, sourceEntry);
     registerDefinitionSource(`tool:${resolvedRecord.description}`, sourceEntry);
 
-    const execute = expectFunction(
-      resolvedRecord.execute,
-      describe(definition, "to provide an execute function"),
-    ) as ResolvedToolDefinition["execute"];
+    /*
+     * Client-resolved tools (`defineClientTool`) carry no executor — eve never
+     * runs them; the call parks for input and resolves out-of-band. Every other
+     * authored tool must reattach a live `execute` from its module export.
+     */
+    const execute =
+      resolvedRecord.clientResolved === true
+        ? undefined
+        : (expectFunction(
+            resolvedRecord.execute,
+            describe(definition, "to provide an execute function"),
+          ) as ResolvedToolDefinition["execute"]);
 
     return {
       description: definition.description,
-      execute,
+      ...(execute !== undefined ? { execute } : {}),
       exportName: definition.exportName,
       inputSchema: definition.inputSchema,
       logicalPath: definition.logicalPath,

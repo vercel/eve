@@ -228,6 +228,82 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
 }
 
 /**
+ * Public client-resolved tool definition authored in `agent/tools/*.ts`.
+ *
+ * Unlike {@link ToolDefinition}, a client-resolved tool has **no `execute`**.
+ * eve never runs it; the model emits the call, the turn parks for input, and
+ * the result is supplied out-of-band (the human-in-the-loop input response, or
+ * the client tool channel). This is the same shape the built-in `ask_question`
+ * uses, exposed for authoring so apps can widen its input schema or build
+ * their own typed HITL pickers.
+ *
+ * The `clientResolved: true` marker is stamped by {@link defineClientTool} and
+ * is how the compiler/runtime know to skip the otherwise-required `execute`.
+ */
+export type ClientToolDefinition<TInput = unknown, TOutput = unknown> = PublicToolDefinition<
+  TInput,
+  TOutput
+> & {
+  readonly clientResolved: true;
+};
+
+/**
+ * Defines a client-resolved (human-in-the-loop) tool — a tool with **no
+ * executor**. eve surfaces it to the model, parks the turn when the model
+ * calls it, and resolves the call from the client/HITL channel (e.g. an
+ * `inputResponses` answer) rather than running server code. Its single
+ * `tool_result` is the user's response.
+ *
+ * Author it as the default export of a file in `agent/tools/`. Naming the file
+ * `ask_question.ts` overrides the built-in question tool with a wider, typed
+ * input schema while keeping native pause/resume:
+ *
+ * ```ts
+ * import { defineClientTool } from "eve/tools";
+ * import { z } from "zod";
+ *
+ * export default defineClientTool({
+ *   description: "Ask the user to pick a template.",
+ *   inputSchema: z.object({
+ *     prompt: z.string(),
+ *     ui: z.object({ kind: z.literal("template_picker") }).passthrough(),
+ *   }),
+ * });
+ * ```
+ *
+ * Unlike {@link defineTool}, no `execute` is permitted: passing one is a
+ * compile-time error, since a client-resolved call is never executed by eve.
+ */
+export function defineClientTool<
+  TInputSchema extends StandardJSONSchemaV1<unknown, unknown>,
+>(definition: {
+  description: ToolDefinition<unknown, unknown>["description"];
+  inputSchema: TInputSchema;
+  outputSchema?: JsonObject;
+}): ClientToolDefinition<StandardJSONSchemaV1.InferOutput<TInputSchema>, unknown>;
+export function defineClientTool(definition: {
+  description: ToolDefinition<unknown, unknown>["description"];
+  inputSchema: JsonObject;
+  outputSchema?: JsonObject;
+}): ClientToolDefinition<Record<string, unknown>, unknown>;
+export function defineClientTool(definition: {
+  description: ToolDefinition<unknown, unknown>["description"];
+  inputSchema: unknown;
+  outputSchema?: JsonObject;
+}): ClientToolDefinition {
+  if ((definition as { readonly execute?: unknown }).execute !== undefined) {
+    throw new Error(
+      `defineClientTool: client-resolved tools must not define "execute". ` +
+        `The call is resolved by the client/HITL channel, not the server. ` +
+        `Use defineTool for tools that execute.`,
+    );
+  }
+  Object.assign(definition, { [TOOL_BRAND]: true, clientResolved: true });
+  stampDefinitionKey(definition, `tool:${definition.description}`);
+  return definition as unknown as ClientToolDefinition;
+}
+
+/**
  * Defines a dynamic resolver evaluated at runtime from stream-event
  * handlers. It is shared across three slots, and the directory it is
  * authored in (not this function) decides what each handler must return

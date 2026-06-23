@@ -6,6 +6,7 @@ import {
   expectString,
 } from "#internal/authored-module.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
+import type { Optional } from "#shared/optional.js";
 import { normalizeJsonSchemaDefinition } from "#internal/json-schema.js";
 import { isDynamicSentinel, type DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
 
@@ -15,7 +16,9 @@ import { isDynamicSentinel, type DynamicToolEventName } from "#shared/dynamic-to
  * Identity is path-derived — the compiler stamps the filename slug onto
  * the compiled entry. This shape never carries an authored `name`.
  */
-type NormalizedAuthoredTool = Readonly<Omit<InternalToolDefinitionWithExecuteFn, "name">>;
+type NormalizedAuthoredTool = Readonly<
+  Omit<Optional<InternalToolDefinitionWithExecuteFn, "execute">, "name">
+>;
 type MutableNormalizedAuthoredTool = {
   -readonly [K in keyof NormalizedAuthoredTool]: NormalizedAuthoredTool[K];
 };
@@ -62,6 +65,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     record,
     [
       "auth",
+      "clientResolved",
       "description",
       "execute",
       "inputSchema",
@@ -77,11 +81,20 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     record.outputSchema === undefined
       ? undefined
       : normalizeJsonSchemaDefinition(record.outputSchema, "output");
+  /*
+   * Client-resolved tools (`defineClientTool`, e.g. an `ask_question` override)
+   * have no executor: the model emits the call, the turn parks for input, and
+   * the result is supplied out-of-band. They are the one authored shape allowed
+   * to omit `execute`; every other tool must provide one.
+   */
+  const clientResolved = record.clientResolved === true;
   const definition: MutableNormalizedAuthoredTool = {
     description: expectString(record.description, message),
-    execute: expectFunction(record.execute, message),
     inputSchema,
   };
+  if (!clientResolved) {
+    definition.execute = expectFunction(record.execute, message);
+  }
   if (outputSchema !== undefined) {
     definition.outputSchema = outputSchema;
   }

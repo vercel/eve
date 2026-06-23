@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "#compiled/zod/index.js";
 
 import {
+  defineClientTool,
   defineTool,
   defineDynamic,
   disableTool,
@@ -107,6 +108,31 @@ describe("normalizeToolDefinition", () => {
       required: ["summary"],
       type: "object",
     });
+  });
+
+  it("normalizes a client-resolved tool without an execute function", () => {
+    const tool = defineClientTool({
+      description: "Ask the user to pick a template.",
+      inputSchema: z.object({ prompt: z.string() }),
+    });
+
+    const entry = normalizeToolDefinition(tool, FAILURE_MESSAGE);
+
+    expect(entry.kind).toBe("tool");
+    if (entry.kind !== "tool") {
+      throw new Error("expected tool kind");
+    }
+    expect(entry.definition.execute).toBeUndefined();
+    expect(entry.definition.description).toBe("Ask the user to pick a template.");
+  });
+
+  it("still requires execute on tools that are not client-resolved", () => {
+    expect(() =>
+      normalizeToolDefinition(
+        { description: "Echo.", inputSchema: { type: "object" } },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
   });
 
   it("types approval context input from the tool input schema", () => {
