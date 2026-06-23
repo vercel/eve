@@ -1,6 +1,6 @@
 import { LogoEve } from "@vercel/geistdocs/assets/logos/logo-eve";
 
-export const Logo = () => <LogoEve height={16} />;
+export const Logo = () => <LogoEve height={15} />;
 
 export const github = {
   owner: "vercel",
