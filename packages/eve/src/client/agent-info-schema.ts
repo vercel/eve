@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "#compiled/zod/index.js";
 
 const source = z.object({
   exportName: z.string().optional(),
