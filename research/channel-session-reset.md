@@ -128,6 +128,10 @@ The two capabilities have intentionally different lifetimes:
 - a continuation token authorizes control of the current entry session and is the capability needed
   to reset it.
 
+Every create-session or follow-up response that starts a turn returns that turn's cancel token. The
+token rotates for each turn and is never reused as session authority. The continuation token remains
+the session capability returned and tracked by the existing continuation flow.
+
 The route authenticates the caller before inspecting either capability. It verifies that the
 capability belongs to the session id in the URL and rejects missing, stale, crossed, or mismatched
 capabilities without revealing another session's state.
@@ -137,7 +141,32 @@ accept new work. A caller can observe the final cancellation boundary on the ses
 request shapes return `400`; a capability that does not identify an active target returns a
 non-disclosing `409`.
 
-### 2. Channel orchestration
+### 2. TypeScript client and eval control
+
+The TypeScript client exposes first-class operations for both cancellation scopes. An active
+`MessageResponse` carries the capability needed to cancel that turn, while `ClientSession` can
+cancel its current entry session. Both operations call the scoped eve cancellation route and reuse
+the client's normal authentication, headers, redirects, and error handling.
+
+After session cancellation, the client must not retain a cursor that can accidentally resume the
+cancelled entry. The next send on that client session either starts fresh or requires an explicit
+new session handle, according to the existing client state model. A stale or already-terminal target
+is reported distinctly from a successfully accepted cancellation.
+
+Cancelling an HTTP request or event-stream reader with an `AbortSignal` remains a local transport
+operation. It does not imply server-side turn or session cancellation. Client docs and types must
+keep that distinction explicit.
+
+The eval driver also exposes first-class cancellation for an active turn and for its entry session.
+An eval must be able to start or attach to work, retain a cancellable handle while that work is
+active, issue cancellation, and continue observing events through the resulting boundary. Expected
+cancellation is an assertable eval outcome rather than an automatic eval failure.
+
+These eval controls use the TypeScript client and public channel contracts; they do not access
+runtime or workflow internals. They must work for sessions created by custom channels as well as the
+built-in eve channel.
+
+### 3. Channel orchestration
 
 The channel layer owns conversation identity and therefore owns reset orchestration. It receives
 channel-local continuation tokens and delegates lifecycle changes to the runtime without exposing
@@ -163,7 +192,7 @@ In-session callbacks and event subscribers receive an explicit cancellation oper
 required `turn` or `session` scope. The operation exits normal execution through framework control
 flow so authored code cannot accidentally continue after requesting cancellation.
 
-### 3. Runtime cancellation coordinator
+### 4. Runtime cancellation coordinator
 
 The runtime is the single authority for lifecycle transitions. It validates the target, records the
 cancellation request durably, and moves the target through `active` → `cancelling` → `cancelled`.
@@ -182,7 +211,7 @@ For session scope, the coordinator performs these actions in order:
 Turn scope uses the same descendant propagation but stops at the turn boundary. Once its tree has
 settled, the entry session returns to waiting instead of becoming terminal.
 
-### 4. Workflow execution
+### 5. Workflow execution
 
 Workflow code implements the lifecycle requested by the coordinator, but does not define public
 cancellation policy. It must expose durable points where the coordinator can close ingress, signal
@@ -258,11 +287,14 @@ The continuation release is the reset linearization point.
    cancellation.
 4. Expose the scoped eve HTTP route and channel-level turn-cancel, session-cancel, and restart
    operations.
-5. Add the reusable inbound reset decision and command matcher for higher-level channel factories.
-6. Enable `/new` by default in Telegram and Twilio, preserving auth, attachments, context, and
+5. Update the TypeScript client with first-class turn and session cancellation, then surface the
+   same lifecycle controls through the eval driver.
+6. Add the reusable inbound reset decision and command matcher for higher-level channel factories.
+7. Enable `/new` by default in Telegram and Twilio, preserving auth, attachments, context, and
    silent behavior.
-7. Document cancellation scopes, custom-channel usage, event-subscriber usage, and stream outcomes.
-8. Add a patch changeset for the new public behavior.
+8. Document cancellation scopes, TypeScript client usage, eval usage, custom-channel usage,
+   event-subscriber usage, and stream outcomes.
+9. Add a patch changeset for the new public behavior.
 
 ## Test plan
 
@@ -272,6 +304,11 @@ The continuation release is the reset linearization point.
 - Authenticate before capability inspection and reject a capability bound to another session id.
 - Verify turn cancellation leaves the entry resumable and session cancellation makes it terminal.
 - Verify clients, callbacks, hooks, and instrumentation distinguish cancellation from failure.
+- Verify the TypeScript client sends the correct scoped request, retains the active turn capability,
+  clears terminal session state correctly, and does not confuse local `AbortSignal` use with
+  server-side cancellation.
+- Verify eval cancellation can interrupt active work, capture the cancellation boundary, and treat
+  the expected outcome as an assertion target rather than a harness failure.
 
 ### Channel tests
 
@@ -305,7 +342,8 @@ channel-local continuation identity. The routes return the session identifiers a
 evals need; they must not import runtime or workflow internals or proxy through the built-in eve
 cancellation route.
 
-The fixture contains at least two independent evals:
+The fixture contains at least two independent evals. They use the new eval cancellation controls to
+drive the lifecycle while the custom channel exercises the public channel cancellation operations:
 
 - **Turn cancellation:** start a turn that remains active long enough to cancel, cancel it through
   the custom channel, assert the turn tree reaches its cancellation boundary and the entry returns
