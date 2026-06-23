@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { EditableSelectOptions } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 import { searchActionValue } from "#setup/cli/select-state.js";
 
@@ -21,43 +20,6 @@ function fakeRenderer(overrides: Partial<TuiPrompterRenderer> = {}): TuiPrompter
 }
 
 describe("createTuiPrompter", () => {
-  it("keeps unsupported select modes out of the editable contract", () => {
-    const supported = {
-      message: "Provider",
-      options: [{ value: "key", label: "API key" }],
-      editable: {
-        value: "key",
-        defaultValue: "",
-        formatHint: (value: string) => value,
-        validate: () => ({ kind: "accepted" as const, payload: undefined }),
-      },
-    } satisfies EditableSelectOptions<string, undefined>;
-    const withSearch: EditableSelectOptions<string, undefined> = {
-      ...supported,
-      // @ts-expect-error Editable selects have no search interaction.
-      search: true,
-    };
-    const withFilterPlaceholder: EditableSelectOptions<string, undefined> = {
-      ...supported,
-      // @ts-expect-error Editable selects have no filter placeholder.
-      placeholder: "Filter providers",
-    };
-    const withRequiredSelection: EditableSelectOptions<string, undefined> = {
-      ...supported,
-      // @ts-expect-error An editable single-select always has a selected row.
-      required: true,
-    };
-    const withSelectMode: EditableSelectOptions<string, undefined> = {
-      ...supported,
-      // @ts-expect-error Editable selects have one fixed interaction mode.
-      multiple: false,
-    };
-
-    expect([withSearch, withFilterPlaceholder, withRequiredSelection, withSelectMode]).toHaveLength(
-      4,
-    );
-  });
-
   it("round-trips non-string option values through the panel's string keys", async () => {
     const renderer = fakeRenderer({
       readSelect: vi.fn(async () => ["option-0"]),
@@ -153,63 +115,30 @@ describe("createTuiPrompter", () => {
     );
   });
 
-  it("round-trips editable presentation, non-string values, and validation evidence", async () => {
-    let capturedRequest: unknown;
-    const readEditableSelect: TuiPrompterRenderer["readEditableSelect"] = async (request) => {
-      capturedRequest = request;
-      const outcome = await request.editable.validate("sk-live", new AbortController().signal);
-      if (outcome.kind === "rejected") throw new Error(outcome.message);
-      return {
-        kind: "submitted",
-        value: "option-1",
-        text: "sk-live",
-        payload: outcome.payload,
-      };
-    };
+  it("round-trips an inline-edited select value", async () => {
     const renderer = fakeRenderer({
-      readEditableSelect,
+      readEditableSelect: vi.fn(async () => ({
+        kind: "edited" as const,
+        value: "option-0",
+        text: "custom-name",
+      })),
     });
     const prompter = createTuiPrompter(renderer);
 
     await expect(
       prompter.selectEditable?.({
-        message: "Provider",
-        hintLayout: "stacked",
-        notices: [{ tone: "error", text: "Rejected" }],
+        message: "Vercel project",
         options: [
-          { value: true, label: "Project" },
-          { value: false, label: "API key" },
+          { value: "new", label: "Create a new project" },
+          { value: "link", label: "Link an existing project" },
         ],
         editable: {
-          value: false,
-          defaultValue: "",
-          placeholder: "API key",
-          mask: true,
-          footerHint: "type a value",
-          inlineInvalidLabel: "Invalid value",
-          formatHint: (value) => value,
-          validate: () => ({ kind: "accepted", payload: { verdict: "valid" as const } }),
+          value: "new",
+          defaultValue: "weather-agent",
+          formatHint: (value) => `Named '${value}'`,
         },
       }),
-    ).resolves.toEqual({
-      kind: "submitted",
-      value: false,
-      text: "sk-live",
-      payload: { verdict: "valid" },
-    });
-    expect(capturedRequest).toEqual(
-      expect.objectContaining({
-        layout: "stacked",
-        notices: [{ tone: "error", text: "Rejected" }],
-        editable: expect.objectContaining({
-          value: "option-1",
-          placeholder: "API key",
-          mask: true,
-          footerHint: "type a value",
-          inlineInvalidLabel: "Invalid value",
-        }),
-      }),
-    );
+    ).resolves.toEqual({ kind: "edited", value: "new", text: "custom-name" });
   });
 
   it("throws WizardCancelledError when a panel is cancelled", async () => {
@@ -231,16 +160,8 @@ describe("createTuiPrompter", () => {
     });
     const prompter = createTuiPrompter(renderer);
 
-    await expect(
-      prompter.password({
-        message: "API key",
-      }),
-    ).resolves.toBe("secret");
-    expect(renderer.readText).toHaveBeenCalledWith(
-      expect.objectContaining({
-        mask: true,
-      }),
-    );
+    await expect(prompter.password({ message: "API key" })).resolves.toBe("secret");
+    expect(renderer.readText).toHaveBeenCalledWith(expect.objectContaining({ mask: true }));
   });
 
   it("maps the log surface onto flow lines and the ephemeral status", () => {

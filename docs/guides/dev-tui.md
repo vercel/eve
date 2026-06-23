@@ -32,15 +32,15 @@ Errors render compactly with docs links highlighted. A code bug escaping your ag
 
 Each command echoes as an invocation line, asks through a bordered panel that takes the input area's place (one question at a time, separate from the chat transcript), and finishes with a one-line `⎿` result. Loading states stay on the ephemeral status line instead of piling into the transcript; model and channel setup use the same green square pulse as the build phase. Setup menus render the selected option with a filled arrow and an inverse label padded by one space on each side. Text prompts use a blinking block cursor over the character at the caret. The selected label is blue normally and yellow for warning rows.
 
-| Command     | Does                                                                                                                                                                            |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/model`    | Opens model and provider configuration. A completed change returns to the prompt; Done or Esc exits. See [Configure the model and provider](#configure-the-model-and-provider). |
-| `/channels` | Shows the agent's channel list and adds the one you pick. See [Add a channel](#add-a-channel).                                                                                  |
-| `/deploy`   | Ships the agent to Vercel production, linking the directory first when it is unlinked.                                                                                          |
-| `/loglevel` | Switches which logs the transcript shows. See [Control what logs show](#control-what-logs-show).                                                                                |
-| `/new`      | Starts a fresh session.                                                                                                                                                         |
-| `/exit`     | Quits the TUI.                                                                                                                                                                  |
-| `/help`     | Lists every command.                                                                                                                                                            |
+| Command     | Does                                                                                                                              |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `/model`    | Opens a configure menu that loops until Done (or Esc). See [Configure the model and provider](#configure-the-model-and-provider). |
+| `/channels` | Shows the agent's channel list and adds the one you pick. See [Add a channel](#add-a-channel).                                    |
+| `/deploy`   | Ships the agent to Vercel production, linking the directory first when it is unlinked.                                            |
+| `/loglevel` | Switches which logs the transcript shows. See [Control what logs show](#control-what-logs-show).                                  |
+| `/new`      | Starts a fresh session.                                                                                                           |
+| `/exit`     | Quits the TUI.                                                                                                                    |
+| `/help`     | Lists every command.                                                                                                              |
 
 `/model`, `/channels`, and `/deploy` manage the project and are available only when `eve dev` runs the server locally, not when connected to a remote server with `--url`.
 

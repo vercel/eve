@@ -11,7 +11,7 @@ import type {
 } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 
-import { runModelFlow, type ModelFlowDeps } from "./model.js";
+import { MODEL_MENU_MESSAGE, runModelFlow, type ModelFlowDeps } from "./model.js";
 
 const APP_ROOT = "/app/my-agent";
 
@@ -54,7 +54,6 @@ function flowDeps(overrides: Partial<ModelFlowDeps> = {}): Partial<ModelFlowDeps
 
 /** One painted menu: its option rows plus the notice lines shown with them. */
 interface MenuPaint {
-  message: string;
   options: SelectOption<PrompterValue>[];
   notices: readonly SelectNotice[];
   hintLayout: string | undefined;
@@ -73,9 +72,8 @@ function scriptedPrompter(input: { menu: (PrompterValue | "esc")[]; picker?: str
   const pickerScript = [...(input.picker ?? [])];
   const fake = createFakePrompter({
     single: (opts: SingleSelectOptions<PrompterValue>) => {
-      if (opts.message === "") {
+      if (opts.message === MODEL_MENU_MESSAGE) {
         menuPaints.push({
-          message: opts.message,
           options: opts.options,
           notices: opts.notices ?? [],
           hintLayout: opts.hintLayout,
@@ -105,17 +103,28 @@ describe("runModelFlow", () => {
       kind: "cancelled",
     });
 
-    expect(menuPaints).toHaveLength(1);
-    expect(menuPaints[0]).toMatchObject({
-      hintLayout: "stacked",
-      // An editable model with a configured provider opens on the model row.
-      initialValue: "model",
-      options: [
-        { value: "model", hint: "anthropic/claude-sonnet-4.6" },
-        { value: "provider" },
-        { value: "done" },
-      ],
-    });
+    expect(menuPaints).toEqual([
+      {
+        options: [
+          {
+            value: "model",
+            label: "Change model",
+            hint: "anthropic/claude-sonnet-4.6",
+            description: "The model your agent uses",
+          },
+          {
+            value: "provider",
+            label: "Change provider",
+            hint: `AI Gateway (Linked to ${pc.bold("my-agent")})`,
+            description: "How your agent reaches the model provider",
+          },
+          { value: "done", label: "Done", description: "Return to the prompt" },
+        ],
+        notices: [],
+        hintLayout: "stacked",
+        initialValue: "model",
+      },
+    ]);
   });
 
   it("disables both rows for an external-provider model and never asks to configure a provider", async () => {
@@ -135,23 +144,33 @@ describe("runModelFlow", () => {
       kind: "cancelled",
     });
 
-    expect(menuPaints).toHaveLength(1);
-    expect(menuPaints[0]).toMatchObject({
-      // Both action rows are disabled, so the menu opens on Done.
-      initialValue: "done",
-      options: [
-        { value: "model", disabled: true },
-        { value: "provider", disabled: true },
-        { value: "done" },
-      ],
-      // One yellow notice explains why both rows are inert.
-      notices: [
-        {
-          tone: "warning",
-          text: "`agent.ts` specifies a model provider directly. In-TUI configuration is restricted to AI Gateway endpoints.",
-        },
-      ],
-    });
+    expect(menuPaints).toEqual([
+      {
+        options: [
+          {
+            value: "model",
+            label: "Change model",
+            disabled: true,
+            description: "Set via an SDK model call in agent.ts; edit the source to change it",
+          },
+          {
+            value: "provider",
+            label: "Change provider",
+            disabled: true,
+            description: "Disabled in external endpoint mode",
+          },
+          { value: "done", label: "Done", description: "Return to the prompt" },
+        ],
+        notices: [
+          {
+            tone: "warning",
+            text: "`agent.ts` specifies a model provider directly. In-TUI configuration is restricted to AI Gateway endpoints.",
+          },
+        ],
+        hintLayout: "stacked",
+        initialValue: "done",
+      },
+    ]);
   });
 
   it("disables only Change model for a gateway-routed SDK model call, keeping the provider row", async () => {
@@ -171,11 +190,20 @@ describe("runModelFlow", () => {
 
     await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
 
-    expect(menuPaints[0]?.options).toMatchObject([
-      { value: "model", disabled: true },
-      // The provider row stays enabled and names where the key lives.
-      { value: "provider", hint: "AI Gateway (AI_GATEWAY_API_KEY in .env.local)" },
-      { value: "done" },
+    expect(menuPaints[0]?.options).toEqual([
+      {
+        value: "model",
+        label: "Change model",
+        disabled: true,
+        description: "Set via an SDK model call in agent.ts; edit the source to change it",
+      },
+      {
+        value: "provider",
+        label: "Change provider",
+        hint: "AI Gateway (AI_GATEWAY_API_KEY in .env.local)",
+        description: "How your agent reaches the model provider",
+      },
+      { value: "done", label: "Done", description: "Return to the prompt" },
     ]);
     // Gateway routing gets no external-restriction notice.
     expect(menuPaints[0]?.notices).toEqual([]);
@@ -201,9 +229,12 @@ describe("runModelFlow", () => {
 
     await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
 
-    expect(menuPaints[0]?.options[1]?.hint).toBe(
-      `AI Gateway (Linked to ${pc.bold("my-agent")} in ${pc.bold("my-team")})`,
-    );
+    expect(menuPaints[0]?.options[1]).toEqual({
+      value: "provider",
+      label: "Change provider",
+      hint: `AI Gateway (Linked to ${pc.bold("my-agent")} in ${pc.bold("my-team")})`,
+      description: "How your agent reaches the model provider",
+    });
   });
 
   it("names the credential env file when a gateway key is set without a link", async () => {
@@ -221,7 +252,12 @@ describe("runModelFlow", () => {
 
     await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
 
-    expect(menuPaints[0]?.options[1]?.hint).toBe("AI Gateway (AI_GATEWAY_API_KEY in .env.local)");
+    expect(menuPaints[0]?.options[1]).toEqual({
+      value: "provider",
+      label: "Change provider",
+      hint: "AI Gateway (AI_GATEWAY_API_KEY in .env.local)",
+      description: "How your agent reaches the model provider",
+    });
   });
 
   it("applies the model and returns to the prompt", async () => {
@@ -232,11 +268,11 @@ describe("runModelFlow", () => {
     const deps = flowDeps();
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
-      kind: "model-result",
-      outcome: { kind: "changed", to: "openai/gpt-5.5" },
+      kind: "done",
+      modelMessage: `Model changed to ${pc.bold("openai/gpt-5.5")}. Live on your next prompt.`,
     });
 
-    expect(selectMessages).toEqual(["", "Which model should your agent use?"]);
+    expect(selectMessages).toEqual([MODEL_MENU_MESSAGE, "Which model should your agent use?"]);
     expect(menuPaints).toHaveLength(1);
     expect(deps.applyModel).toHaveBeenCalledWith({ appRoot: APP_ROOT, slug: "openai/gpt-5.5" });
     expect(deps.readCurrentModel).toHaveBeenCalledTimes(1);
@@ -254,8 +290,8 @@ describe("runModelFlow", () => {
     });
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
-      kind: "model-result",
-      outcome: { kind: "rejected", message: "Couldn't confirm the id." },
+      kind: "done",
+      modelMessage: "Couldn't confirm the id.",
     });
 
     expect(menuPaints).toHaveLength(1);
@@ -273,8 +309,8 @@ describe("runModelFlow", () => {
     const deps = flowDeps({ detectProviderStatus, runProviderFlow });
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
-      kind: "provider-changed",
-      outcome: {
+      kind: "done",
+      providerOutcome: {
         credential: "AI_GATEWAY_API_KEY",
         status: { kind: "gateway-project", projectName: "my-agent" },
       },
@@ -300,8 +336,8 @@ describe("runModelFlow", () => {
         deps,
       }),
     ).resolves.toEqual({
-      kind: "provider-changed",
-      outcome: {
+      kind: "done",
+      providerOutcome: {
         credential: "VERCEL_OIDC_TOKEN",
         status: { kind: "gateway-project", projectName: "my-agent" },
       },
@@ -337,8 +373,8 @@ describe("runModelFlow", () => {
         deps,
       }),
     ).resolves.toEqual({
-      kind: "provider-changed",
-      outcome: {
+      kind: "done",
+      providerOutcome: {
         credential: "AI_GATEWAY_API_KEY",
         status: {
           kind: "gateway-key",

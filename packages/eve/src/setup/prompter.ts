@@ -10,9 +10,7 @@ import {
   railFor,
   runSelectComponent,
   type ChannelSetupAwaitChoice,
-  type PromptOption,
   type PromptState,
-  type PromptValue,
 } from "#setup/cli/index.js";
 import { createRailLog, type RailSpinner } from "#setup/cli/index.js";
 import pc from "picocolors";
@@ -25,11 +23,57 @@ import {
 } from "./quit-guard.js";
 import { WizardCancelledError } from "./step.js";
 
-/** Scalar values supported by prompt options. */
-export type PrompterValue = PromptValue;
+/**
+ * Clack constrains option values to readonly primitives. Our scaffold flow
+ * only ever uses string-valued options (`ChannelKind`, `SetupMode`,
+ * `ProviderConnection`, model id), so the tightened bound matches usage.
+ */
+export type PrompterValue = string | number | boolean;
 
-/** The canonical prompt-option model shared by CLI and TUI renderers. */
-export type SelectOption<T extends PrompterValue> = PromptOption<T>;
+export interface SelectOption<T extends PrompterValue> {
+  value: T;
+  label: string;
+  hint?: string;
+  /** Short inline annotation shown dimmed only while the cursor is on this row. */
+  focusHint?: string;
+  /**
+   * Longer, display-only explanation shown dimmed alongside the option while it
+   * is highlighted during navigation. Hidden once a choice is submitted.
+   */
+  description?: string;
+  /** Cursor-pointer/active-label accent; "warning" turns them yellow for an attention row. */
+  accent?: "warning";
+  disabled?: boolean;
+  /** Parenthetical shown after a disabled option's label explaining why. */
+  disabledReason?: string;
+  /**
+   * "warning" renders the disabled reason in yellow with a dimmed (not struck)
+   * label: the row is unavailable here but actionable elsewhere (e.g. a channel
+   * that needs a Vercel account points at /model), unlike the default disabled
+   * styling, which marks a hard conflict.
+   */
+  disabledReasonTone?: "warning";
+  /**
+   * Completed work: renders with a check and remains cursor-addressable for
+   * contextual feedback, but cannot be selected or toggled.
+   */
+  completed?: boolean;
+  /**
+   * Marks a mandatory row that is always selected and cannot be toggled off; the
+   * cursor skips it and it renders a dimmed check. Mutually exclusive with
+   * `disabled`.
+   */
+  locked?: boolean;
+  /** Parenthetical shown after a locked option's label, e.g. "always available". */
+  lockedReason?: string;
+  /**
+   * A leading run of featured options forms a searchable picker's default
+   * viewport: with no filter typed, only they are in view, and scrolling or
+   * filtering reaches the rest of the list. Featured options must be sorted
+   * to the front. Meaningless without `search`.
+   */
+  featured?: boolean;
+}
 
 /**
  * An outcome line from an earlier lap of a looping menu, shown with the
@@ -99,58 +143,20 @@ export interface MultiSelectOptions<T extends PrompterValue> extends SelectCommo
   initialValues?: T[];
 }
 
-/** A validator either supplies accepted evidence or a user-facing rejection. */
-export type EditableValidation<Payload> =
-  | { kind: "accepted"; payload: Payload }
-  | { kind: "rejected"; message: string };
-
-/** Result of a select whose editable row validates its submitted text. */
-export type EditableSelectResult<T extends PrompterValue, Payload> =
+/** Result of a single-select whose one row can be edited inline. */
+export type EditableSelectResult<T extends PrompterValue> =
   | { kind: "selected"; value: T }
-  | { kind: "submitted"; value: T; text: string; payload: Payload };
+  | { kind: "edited"; value: T; text: string };
 
-/** What Esc or Ctrl-C does while the editable row owns a non-empty value. */
-export type EditableCancelBehavior = "cancel" | "clear-first";
-
-interface EditableRowOptions<T extends PrompterValue> {
-  value: T;
-  defaultValue: string;
-  /** Shown while the editable value is empty without becoming its value. */
-  placeholder?: string;
-  /** Replaces the visible value with bullets while preserving the real submitted text. */
-  mask?: boolean;
-  /** Footer instruction while this row is focused. Defaults to "type to edit". */
-  footerHint?: string;
-  /** Shows validation failure beside the value instead of as a prompt-level error. */
-  inlineInvalidLabel?: string;
-  /** Defaults to immediate cancellation. */
-  cancelBehavior?: EditableCancelBehavior;
-  formatHint: (value: string) => string;
-}
-
-type EditableSelectPromptOptions<T extends PrompterValue> = Pick<
-  SingleSelectOptions<T>,
-  "message" | "options" | "initialValue" | "hintLayout" | "notices"
->;
-
-/** Inline-edit behavior whose result carries validator-owned evidence. */
-export interface EditableSelectOptions<
-  T extends PrompterValue,
-  Payload,
-> extends EditableSelectPromptOptions<T> {
-  editable: EditableRowOptions<T> & {
-    /** Async validation keeps the row mounted; cancelling aborts its signal. */
-    validate: (
-      value: string,
-      signal: AbortSignal,
-    ) => EditableValidation<Payload> | Promise<EditableValidation<Payload>>;
+/** Inline-edit behavior for one row in an otherwise ordinary single-select. */
+export interface EditableSelectOptions<T extends PrompterValue> extends SingleSelectOptions<T> {
+  editable: {
+    value: T;
+    defaultValue: string;
+    formatHint: (value: string) => string;
+    validate?: (value: string) => string | undefined;
   };
 }
-
-/** A single-select whose editable row returns accepted validation evidence. */
-export type SelectEditable = <T extends PrompterValue, Payload>(
-  opts: EditableSelectOptions<T, Payload>,
-) => Promise<EditableSelectResult<T, Payload>>;
 
 /** Color intent for {@link Prompter.note}: red warning (default) or green success. */
 export type NoteTone = "warning" | "success";
@@ -196,7 +202,9 @@ export interface Prompter {
    * so non-repainting prompt implementations can keep the ordinary
    * select-then-text fallback.
    */
-  selectEditable?: SelectEditable;
+  selectEditable?<T extends PrompterValue>(
+    opts: EditableSelectOptions<T>,
+  ): Promise<EditableSelectResult<T>>;
 
   /**
    * Static instructions the user dismisses before the flow moves on. The TUI

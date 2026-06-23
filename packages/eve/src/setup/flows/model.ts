@@ -90,24 +90,19 @@ export interface ModelProviderOutcome {
 
 export type ModelFlowResult =
   | { kind: "cancelled" }
-  | { kind: "model-result"; outcome: ApplyModelOutcome }
-  | { kind: "provider-changed"; outcome: ModelProviderOutcome };
+  | {
+      kind: "done";
+      /** The last apply line, when the model was changed this session. */
+      modelMessage?: string;
+      /** The last provider sub-flow outcome, when one ran to completion. */
+      providerOutcome?: ModelProviderOutcome;
+    };
+
+// The bordered panel's title ("Configure the agent model") is the menu's header,
+// so the select itself carries no message — avoiding a redundant second title.
+export const MODEL_MENU_MESSAGE = "";
 
 type ModelMenuRow = "model" | "provider" | "done";
-
-function initialModelMenuSelection(
-  provider: ModelProviderStatus,
-  routing: ModelRouting | null,
-  editable: boolean,
-): ModelMenuRow {
-  if (routing?.kind === "external") {
-    if (editable) return "model";
-    return "done";
-  }
-  if (provider.kind === "unset") return "provider";
-  if (editable) return "model";
-  return "provider";
-}
 
 /**
  * The provider row's value line. `emphasis` bolds the project and team names
@@ -269,6 +264,8 @@ export async function runModelFlow(input: {
   );
   signal?.throwIfAborted();
 
+  let lastApply: ApplyModelOutcome | undefined;
+  let providerOutcome: ModelProviderOutcome | undefined;
   // Explains, once, why every row is inert for an external-provider model.
   const externalNotice: SelectNotice | undefined =
     routing?.kind === "external"
@@ -279,7 +276,14 @@ export async function runModelFlow(input: {
       : undefined;
 
   // Start at the first useful row. Cancellation keeps the current row.
-  let nextSelection = initialModelMenuSelection(provider, routing, editable);
+  let nextSelection: ModelMenuRow =
+    provider.kind === "unset" && routing?.kind !== "external"
+      ? "provider"
+      : editable
+        ? "model"
+        : routing?.kind === "external"
+          ? "done"
+          : "provider";
   // A gateway model with no provider cannot run. Skip the menu's extra Enter
   // and open provider setup as soon as that state is confirmed.
   let openProviderFirst =
@@ -293,7 +297,7 @@ export async function runModelFlow(input: {
     } else {
       try {
         pick = await prompter.select<ModelMenuRow>({
-          message: "",
+          message: MODEL_MENU_MESSAGE,
           options: modelMenuRows(current, provider, routing, editable),
           hintLayout: "stacked",
           initialValue: nextSelection,
@@ -320,9 +324,9 @@ export async function runModelFlow(input: {
         continue;
       }
       signal?.throwIfAborted();
-      const outcome = await deps.applyModel({ appRoot, slug });
+      lastApply = await deps.applyModel({ appRoot, slug });
       signal?.throwIfAborted();
-      return { kind: "model-result", outcome };
+      break;
     }
 
     const result = await deps.runProviderFlow({ appRoot, prompter, signal });
@@ -344,12 +348,18 @@ export async function runModelFlow(input: {
     // sub-flow commits, finish without the aborted interaction signal so the
     // TUI can refresh the state that is already on disk.
     provider = await withSpinner(prompter, "Checking the project…", () => detectProvider(false));
-    const outcome: ModelProviderOutcome = { status: provider };
-    if (result.credential !== undefined) outcome.credential = result.credential;
-    return { kind: "provider-changed", outcome };
+    providerOutcome = { status: provider };
+    if (result.credential !== undefined) providerOutcome.credential = result.credential;
+    break;
   }
 
-  return { kind: "cancelled" };
+  if (lastApply === undefined && providerOutcome === undefined) {
+    return { kind: "cancelled" };
+  }
+  const done: Extract<ModelFlowResult, { kind: "done" }> = { kind: "done" };
+  if (lastApply !== undefined) done.modelMessage = formatApplyModelOutcome(lastApply);
+  if (providerOutcome !== undefined) done.providerOutcome = providerOutcome;
+  return done;
 }
 
 /**

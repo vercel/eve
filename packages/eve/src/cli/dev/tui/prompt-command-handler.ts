@@ -90,8 +90,9 @@ export function createPromptCommandHandler(
         }
         if (options.flows !== undefined) commandInput.flows = options.flows;
         const result = await runTuiSetupCommand(commandInput);
-        const { preserveFlowDiagnostics: nextPreserveFlowDiagnostics, ...outcome } = result;
-        preserveFlowDiagnostics = nextPreserveFlowDiagnostics;
+        preserveFlowDiagnostics = result.preserveFlowDiagnostics;
+        const outcome: PromptCommandOutcome = { message: result.message };
+        if (result.effect !== undefined) outcome.effect = result.effect;
         return outcome;
       } finally {
         flow.end({ preserveDiagnostics: preserveFlowDiagnostics });

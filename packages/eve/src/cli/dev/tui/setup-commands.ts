@@ -6,11 +6,8 @@ import {
   type InstallVercelCliResult,
 } from "#setup/flows/install-vercel-cli.js";
 import { runLoginFlow, type LoginFlowResult } from "#setup/flows/login.js";
-import {
-  formatApplyModelOutcome,
-  runModelFlow,
-  type ModelProviderOutcome,
-} from "#setup/flows/model.js";
+import { runModelFlow, type ModelProviderOutcome } from "#setup/flows/model.js";
+import { runProviderFlow, type ProviderPicker } from "#setup/flows/provider.js";
 import { openUrl } from "#setup/primitives/open-url.js";
 import type { Prompter } from "#setup/prompter.js";
 import { slackMessageDeepLink } from "#setup/slack-connect.js";
@@ -38,7 +35,9 @@ export const SETUP_FLOW_CONFIG = {
 
 /** The prompter surface plus the working-state interrupt trap a command races against. */
 export type TuiSetupCommandRenderer = TuiPrompterRenderer &
-  Pick<SetupFlowRenderer, "waitForInterrupt">;
+  Pick<SetupFlowRenderer, "readProviderPicker" | "waitForInterrupt">;
+
+type MuteableSetupRenderer = TuiPrompterRenderer & Pick<SetupFlowRenderer, "readProviderPicker">;
 
 export interface TuiSetupCommandInput {
   command: TuiSetupCommand;
@@ -77,14 +76,16 @@ export interface TuiSetupCommandResult {
  * output drops while the flow unwinds.
  */
 function muteableRenderer(
-  renderer: TuiPrompterRenderer,
+  renderer: TuiSetupCommandRenderer,
   isMuted: () => boolean,
-): TuiPrompterRenderer {
+): MuteableSetupRenderer {
   return {
     readSelect: (options) =>
       isMuted() ? Promise.resolve(undefined) : renderer.readSelect(options),
     readEditableSelect: (options) =>
       isMuted() ? Promise.resolve(undefined) : renderer.readEditableSelect(options),
+    readProviderPicker: (options) =>
+      isMuted() ? Promise.resolve(undefined) : renderer.readProviderPicker(options),
     readText: (options) => (isMuted() ? Promise.resolve(undefined) : renderer.readText(options)),
     readAcknowledge: (options) =>
       isMuted() ? Promise.resolve() : renderer.readAcknowledge(options),
@@ -120,13 +121,12 @@ export async function runTuiSetupCommand(
   const { command } = input;
   let interrupted = false;
   const controller = new AbortController();
-  const prompter = (input.createPrompter ?? createTuiPrompter)(
-    muteableRenderer(input.renderer, () => interrupted),
-  );
+  const renderer = muteableRenderer(input.renderer, () => interrupted);
+  const prompter = (input.createPrompter ?? createTuiPrompter)(renderer);
 
   const interrupt = input.renderer.waitForInterrupt();
   const INTERRUPTED = Symbol("interrupted");
-  const execution = executeSetupCommand(input, prompter, controller.signal);
+  const execution = executeSetupCommand(input, prompter, renderer, controller.signal);
   try {
     const outcome = await Promise.race([execution, interrupt.promise.then(() => INTERRUPTED)]);
     if (outcome !== INTERRUPTED) return outcome as TuiSetupCommandResult;
@@ -149,6 +149,7 @@ export async function runTuiSetupCommand(
 async function executeSetupCommand(
   input: TuiSetupCommandInput,
   prompter: Prompter,
+  renderer: MuteableSetupRenderer,
   signal: AbortSignal,
 ): Promise<TuiSetupCommandResult> {
   const { command, appRoot } = input;
@@ -172,30 +173,41 @@ async function executeSetupCommand(
         return loginResultMessage(await flows.runLoginFlow({ appRoot, prompter, signal }));
       }
       case "model": {
+        const pickProvider: ProviderPicker = (request) => renderer.readProviderPicker(request);
         const modelInput: Parameters<TuiSetupFlows["runModelFlow"]>[0] = {
           appRoot,
           prompter,
           signal,
+          deps: {
+            runProviderFlow: (providerInput) =>
+              runProviderFlow({ ...providerInput, picker: pickProvider }),
+          },
         };
         if (input.initialModelStep !== undefined) {
           modelInput.initialStep = input.initialModelStep;
         }
         const result = await flows.runModelFlow(modelInput);
-        switch (result.kind) {
-          case "cancelled":
-            return { message: "/model cancelled.", preserveFlowDiagnostics: false };
-          case "model-result":
-            return {
-              message: formatApplyModelOutcome(result.outcome),
-              preserveFlowDiagnostics: false,
-            };
-          case "provider-changed":
-            return {
-              message: providerOutcomeMessage(result.outcome),
-              preserveFlowDiagnostics: false,
-              effect: { kind: "model-access-changed" },
-            };
+        if (result.kind === "cancelled") {
+          return { message: "/model cancelled.", preserveFlowDiagnostics: false };
         }
+        // One line per completed menu action: the apply line (it already
+        // distinguishes success from a rejected slug), then the provider
+        // outcome when that sub-flow also ran.
+        const lines: string[] = [];
+        if (result.modelMessage !== undefined) lines.push(result.modelMessage);
+        if (result.providerOutcome !== undefined) {
+          lines.push(providerOutcomeMessage(result.providerOutcome));
+        }
+        const outcome: TuiSetupCommandResult = {
+          message: lines.join("\n"),
+          preserveFlowDiagnostics: false,
+        };
+        // Provider setup can change both the local env and Vercel identity.
+        // The runner refreshes the complete model-access view after the flow.
+        if (result.providerOutcome !== undefined) {
+          outcome.effect = { kind: "model-access-changed" };
+        }
+        return outcome;
       }
       case "channels": {
         const result = await flows.runChannelsFlow({ appRoot, prompter, signal });

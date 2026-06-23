@@ -18,7 +18,7 @@ import { withSpinner } from "../with-spinner.js";
 
 import { runLinkFlow, type LinkFlowResult } from "./link.js";
 
-type ProviderConnection = "project" | "own-key" | "external";
+export type ProviderConnection = "project" | "own-key" | "external";
 
 export const PROVIDER_QUESTION = "Which model provider do you want to use?";
 
@@ -45,9 +45,30 @@ export type ProviderFlowResult =
       /** The user runs a non-gateway provider; nothing was linked or written. */
     };
 
-type AuthProbeResult =
-  | { kind: "resolved"; status: VercelAuthStatus }
-  | { kind: "rejected"; error: unknown };
+type AcceptedGatewayKeyValidation = Exclude<GatewayKeyValidation, { kind: "invalid" }>;
+
+/** A provider choice, including the accepted evidence for an inline key. */
+export type ProviderPickerChoice =
+  | { kind: "project" }
+  | { kind: "external" }
+  | {
+      kind: "inline-key";
+      key: string;
+      validation: AcceptedGatewayKeyValidation;
+    };
+
+/** Private Dev TUI request for the provider's one-screen chooser. */
+export interface ProviderPickerRequest {
+  message: string;
+  options: readonly SelectOption<ProviderConnection>[];
+  initialValue: ProviderConnection;
+  validateInlineKey(key: string, signal: AbortSignal): Promise<GatewayKeyValidation>;
+}
+
+/** Renderer-owned provider chooser; only the Dev TUI invokes this flow. */
+export type ProviderPicker = (
+  request: ProviderPickerRequest,
+) => Promise<ProviderPickerChoice | undefined>;
 
 function projectConnectionOption(
   authStatus: VercelAuthStatus | undefined,
@@ -81,62 +102,24 @@ function providerOptions(
   ];
 }
 
-type AcceptedGatewayValidation = Exclude<GatewayKeyValidation, { kind: "invalid" }>;
-
-type GatewayKeyChoice = {
-  kind: "inline-key";
-  key: string;
-  validation: AcceptedGatewayValidation;
-};
-
-type ProviderChoice = Exclude<ProviderConnection, "own-key"> | GatewayKeyChoice;
-
 async function selectProvider(input: {
-  selectEditable: NonNullable<Prompter["selectEditable"]>;
+  picker?: ProviderPicker;
   options: SelectOption<ProviderConnection>[];
   initialValue: ProviderConnection;
   validateInlineKey: (key: string, signal: AbortSignal) => Promise<GatewayKeyValidation>;
-}): Promise<ProviderChoice> {
-  const result = await input.selectEditable<ProviderConnection, AcceptedGatewayValidation>({
+}): Promise<ProviderPickerChoice> {
+  const request: ProviderPickerRequest = {
     message: PROVIDER_QUESTION,
     options: input.options,
-    hintLayout: "stacked",
     initialValue: input.initialValue,
-    editable: {
-      value: "own-key",
-      defaultValue: "",
-      placeholder: "type your key",
-      mask: true,
-      footerHint: "type your key",
-      inlineInvalidLabel: "Invalid key",
-      cancelBehavior: "clear-first",
-      formatHint: (value: string) => `>  ${value}`,
-      validate: async (value, signal) => {
-        if (value.trim().length === 0) {
-          return { kind: "rejected", message: "API key cannot be empty." };
-        }
-        const validation = await input.validateInlineKey(value.trim(), signal);
-        if (validation.kind === "invalid") {
-          return {
-            kind: "rejected",
-            message: `${validation.message} Check the key and try again, or Esc to cancel.`,
-          };
-        }
-        return { kind: "accepted", payload: validation };
-      },
-    },
-  });
-  if (result.kind === "submitted") {
-    return {
-      kind: "inline-key",
-      key: result.text,
-      validation: result.payload,
-    };
+    validateInlineKey: input.validateInlineKey,
+  };
+  if (input.picker === undefined) {
+    throw new Error("The provider flow requires the Dev TUI provider picker.");
   }
-  if (result.value === "own-key") {
-    throw new Error("The editable provider row returned without a submitted key.");
-  }
-  return result.value;
+  const choice = await input.picker(request);
+  if (choice === undefined) throw new WizardCancelledError();
+  return choice;
 }
 
 /**
@@ -151,13 +134,10 @@ export async function runProviderFlow(input: {
   appRoot: string;
   prompter: Prompter;
   signal?: AbortSignal;
+  picker?: ProviderPicker;
   deps?: Partial<ProviderFlowDeps>;
 }): Promise<ProviderFlowResult> {
   const { appRoot, prompter, signal } = input;
-  const { selectEditable } = prompter;
-  if (selectEditable === undefined) {
-    throw new Error("The provider flow requires an editable-select prompter.");
-  }
   const deps: ProviderFlowDeps = {
     getVercelAuthStatus,
     runLinkFlow,
@@ -166,26 +146,14 @@ export async function runProviderFlow(input: {
     ...input.deps,
   };
 
-  // Start the bounded auth check before input, but await it only if the user
-  // chooses Project. Other choices stay interactive and cancel unused work.
-  const authAbort = new AbortController();
-  const authSignal =
-    signal === undefined ? authAbort.signal : AbortSignal.any([signal, authAbort.signal]);
-  const authProbe: Promise<AuthProbeResult> = deps
-    .getVercelAuthStatus(appRoot, { signal: authSignal })
-    .then(
-      (status) => ({ kind: "resolved", status }),
-      (error: unknown) => ({ kind: "rejected", error }),
-    );
-
   let authStatus: VercelAuthStatus | undefined;
   let initialValue: ProviderConnection = "project";
-  let keyChoice: GatewayKeyChoice;
+  let keyChoice: Extract<ProviderPickerChoice, { kind: "inline-key" }>;
 
   try {
     while (true) {
       const choice = await selectProvider({
-        selectEditable,
+        picker: input.picker,
         options: providerOptions(authStatus),
         initialValue,
         validateInlineKey: (key, validationSignal) =>
@@ -195,7 +163,7 @@ export async function runProviderFlow(input: {
           ),
       });
 
-      if (choice === "external") {
+      if (choice.kind === "external") {
         if (prompter.acknowledge) {
           await prompter.acknowledge({
             message: EXTERNAL_PROVIDER_INSTRUCTIONS_TITLE,
@@ -210,16 +178,14 @@ export async function runProviderFlow(input: {
         return { kind: "external-provider" };
       }
 
-      if (choice !== "project") {
+      if (choice.kind === "inline-key") {
         keyChoice = choice;
         break;
       }
 
-      const auth = await withSpinner(prompter, "Checking your Vercel login…", async () => {
-        const result = await authProbe;
-        if (result.kind === "rejected") throw result.error;
-        return result.status;
-      });
+      const auth = await withSpinner(prompter, "Checking your Vercel login…", () =>
+        deps.getVercelAuthStatus(appRoot, { signal }),
+      );
       signal?.throwIfAborted();
       authStatus = auth;
       if (vercelAuthBlockerReason(authStatus) !== undefined) {
@@ -236,8 +202,6 @@ export async function runProviderFlow(input: {
   } catch (error) {
     if (error instanceof WizardCancelledError) return { kind: "cancelled" };
     throw error;
-  } finally {
-    authAbort.abort();
   }
 
   const key = keyChoice.key.trim();
