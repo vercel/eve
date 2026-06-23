@@ -49,15 +49,23 @@ export async function resolveToolDefinition(
     /*
      * Client-resolved tools (`defineClientTool`) carry no executor — eve never
      * runs them; the call parks for input and resolves out-of-band. Every other
-     * authored tool must reattach a live `execute` from its module export.
+     * authored tool must reattach a live `execute` from its module export. The
+     * shapes are mutually exclusive: reject a client-resolved export that also
+     * carries an `execute` (defense in depth — the compiler rejects it too).
      */
-    const execute =
-      resolvedRecord.clientResolved === true
-        ? undefined
-        : (expectFunction(
-            resolvedRecord.execute,
-            describe(definition, "to provide an execute function"),
-          ) as ResolvedToolDefinition["execute"]);
+    const clientResolved = resolvedRecord.clientResolved === true;
+    if (clientResolved && resolvedRecord.execute !== undefined) {
+      throw new ResolveAgentError(
+        describe(definition, 'not to define an "execute" function when it is client-resolved'),
+        { logicalPath: definition.logicalPath, sourceId: definition.sourceId },
+      );
+    }
+    const execute = clientResolved
+      ? undefined
+      : (expectFunction(
+          resolvedRecord.execute,
+          describe(definition, "to provide an execute function"),
+        ) as ResolvedToolDefinition["execute"]);
 
     return {
       description: definition.description,

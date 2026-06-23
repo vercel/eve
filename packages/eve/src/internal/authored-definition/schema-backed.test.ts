@@ -135,6 +135,20 @@ describe("normalizeToolDefinition", () => {
     ).toThrow(FAILURE_MESSAGE);
   });
 
+  it("rejects a client-resolved tool that also defines execute", () => {
+    expect(() =>
+      normalizeToolDefinition(
+        {
+          description: "Mixed shape.",
+          inputSchema: { type: "object" },
+          clientResolved: true,
+          execute: () => ({ status: "ignored" as const }),
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(/must not define an "execute"/);
+  });
+
   it("types approval context input from the tool input schema", () => {
     const tool = defineTool({
       description: "Requires city-scoped approval.",

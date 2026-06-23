@@ -18,4 +18,6 @@ provider rejected the resumed turn with "each tool_use must have a single
 result". See #203.
 
 `defineTool` is unchanged and still requires `execute`; only `defineClientTool`
-may omit it.
+may omit it. The two shapes are mutually exclusive: the compiler and runtime
+reject a client-resolved tool that also defines `execute` (and a non-client tool
+that omits it).

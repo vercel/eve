@@ -85,9 +85,18 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
    * Client-resolved tools (`defineClientTool`, e.g. an `ask_question` override)
    * have no executor: the model emits the call, the turn parks for input, and
    * the result is supplied out-of-band. They are the one authored shape allowed
-   * to omit `execute`; every other tool must provide one.
+   * to omit `execute`; every other tool must provide one. The two shapes are
+   * mutually exclusive — a client-resolved tool that also carried an `execute`
+   * would yield a second result for its call id, so reject that mix outright
+   * rather than silently dropping the executor.
    */
   const clientResolved = record.clientResolved === true;
+  if (clientResolved && record.execute !== undefined) {
+    throw new Error(
+      `A client-resolved tool must not define an "execute" function — its result ` +
+        `comes from the client/HITL input channel, not a server executor. ${message}`,
+    );
+  }
   const definition: MutableNormalizedAuthoredTool = {
     description: expectString(record.description, message),
     inputSchema,
