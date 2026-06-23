@@ -2,6 +2,7 @@ import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
 import type { VercelCaptureResult } from "#setup/primitives/index.js";
 import type { Prompter, PrompterValue, SingleSelectOptions } from "#setup/prompter.js";
+import { trustedSourcesToJSON } from "@vercel/sdk/models/updateprojectprojectsoptionsallowlist.js";
 import { describe, expect, it } from "vitest";
 import { vi } from "vitest";
 
@@ -325,6 +326,57 @@ describe("prepareVercelTrustedSourceAccess", () => {
     );
   });
 
+  it("serializes Trusted Sources through the SDK contract", async () => {
+    const captureVercel = captureSequence(
+      success(
+        projectResponse("prj_target", "inbound", [], {
+          projects: {
+            prj_other: {
+              label: "existing policy",
+              futureProjectField: "discard",
+            },
+          },
+          futureTopLevelField: "discard",
+        }),
+      ),
+      success({ id: "prj_target" }),
+    );
+
+    await expect(
+      applyVercelTrustedSourceAccess({
+        workspaceRoot: "/repo",
+        grant: {
+          ownerId: "team_test",
+          projectId: "prj_target",
+          projectName: "inbound",
+          targetEnvironment: "production",
+        },
+        deps: accessDeps(captureVercel),
+      }),
+    ).resolves.toMatchObject({ kind: "updated", targetProjectName: "inbound" });
+
+    expect(captureVercel).toHaveBeenNthCalledWith(
+      2,
+      expect.arrayContaining([
+        "--field",
+        `trustedSources=${trustedSourcesToJSON({
+          projects: {
+            prj_other: { label: "existing policy" },
+            prj_target: {
+              customAllow: [
+                rule("production", "production"),
+                rule("preview", "preview"),
+                rule("development", "preview"),
+                rule("development", "production"),
+              ],
+            },
+          },
+        })}`,
+      ]),
+      expect.any(Object),
+    );
+  });
+
   it("warns before granting the resolved development-to-production pair", async () => {
     const captureVercel = captureSequence(
       success(projectResponse("prj_target", "inbound")),
@@ -363,7 +415,7 @@ describe("prepareVercelTrustedSourceAccess", () => {
         "--method",
         "PATCH",
         "--field",
-        `trustedSources=${JSON.stringify({
+        `trustedSources=${trustedSourcesToJSON({
           projects: {
             prj_target: {
               customAllow: [

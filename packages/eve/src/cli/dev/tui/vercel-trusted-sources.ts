@@ -1,3 +1,8 @@
+import {
+  updateProjectTrustedSourcesFromJSON,
+  type UpdateProjectTrustedSources,
+} from "@vercel/sdk/models/updateprojectprojectsaction.js";
+import { trustedSourcesToJSON } from "@vercel/sdk/models/updateprojectprojectsoptionsallowlist.js";
 import { captureVercel } from "#setup/primitives/index.js";
 import type { Prompter } from "#setup/prompter.js";
 import { normalizeVercelApiResult } from "#setup/vercel-api-failure.js";
@@ -8,10 +13,6 @@ import {
   planTrustedSourceAccess,
   type TrustedSourceProject,
 } from "./vercel-trusted-sources-policy.js";
-import {
-  serializeTrustedSourcesUpdate,
-  VercelTrustedSourcesSchema,
-} from "./vendor/vercel-sdk-trusted-sources.js";
 
 type VercelTrustedSourcePreparation =
   | { readonly kind: "unchanged" }
@@ -42,8 +43,12 @@ const ProjectSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   customEnvironments: z.array(z.object({ slug: z.string().min(1) })).optional(),
-  trustedSources: VercelTrustedSourcesSchema.nullable().optional(),
+  trustedSources: z.unknown().nullable().optional(),
 });
+
+type VercelProject = Omit<z.infer<typeof ProjectSchema>, "trustedSources"> & {
+  readonly trustedSources?: UpdateProjectTrustedSources;
+};
 
 function parseJson(stdout: string): unknown {
   try {
@@ -53,9 +58,22 @@ function parseJson(stdout: string): unknown {
   }
 }
 
-function parseProject(stdout: string): z.infer<typeof ProjectSchema> | undefined {
+function parseTrustedSources(value: unknown): UpdateProjectTrustedSources | undefined {
+  const json = JSON.stringify(value);
+  if (json === undefined) return undefined;
+  const parsed = updateProjectTrustedSourcesFromJSON(json);
+  return parsed.ok ? parsed.value : undefined;
+}
+
+function parseProject(stdout: string): VercelProject | undefined {
   const parsed = ProjectSchema.safeParse(parseJson(stdout));
-  return parsed.success ? parsed.data : undefined;
+  if (!parsed.success) return undefined;
+
+  const { trustedSources, ...project } = parsed.data;
+  if (trustedSources === undefined || trustedSources === null) return project;
+
+  const policy = parseTrustedSources(trustedSources);
+  return policy === undefined ? undefined : { ...project, trustedSources: policy };
 }
 const ProjectUpdateSchema = z.object({ id: z.string().min(1) });
 
@@ -74,7 +92,7 @@ function environmentLabel(environment: string): string {
   }
 }
 
-function projectPolicyContext(project: z.infer<typeof ProjectSchema>): TrustedSourceProject {
+function projectPolicyContext(project: VercelProject): TrustedSourceProject {
   return {
     projectId: project.id,
     customEnvironmentSlugs: project.customEnvironments?.map(({ slug }) => slug) ?? [],
@@ -88,7 +106,7 @@ async function readProject(input: {
   readonly projectId: string;
   readonly signal?: AbortSignal;
 }): Promise<
-  | { readonly kind: "project"; readonly project: z.infer<typeof ProjectSchema> }
+  | { readonly kind: "project"; readonly project: VercelProject }
   | { readonly kind: "failed"; readonly message: string }
 > {
   const result = await input.deps.captureVercel(
@@ -218,7 +236,7 @@ export async function applyVercelTrustedSourceAccess(input: {
         "--method",
         "PATCH",
         "--field",
-        `trustedSources=${serializeTrustedSourcesUpdate(plan.trustedSources)}`,
+        `trustedSources=${trustedSourcesToJSON(plan.trustedSources)}`,
         "--raw",
       ],
       {

@@ -1,10 +1,9 @@
 import type {
-  TrustedSourceEnvironmentRule,
-  TrustedSourceEnvironmentSet,
-  VercelTrustedSources,
-} from "./vendor/vercel-sdk-trusted-sources.js";
+  UpdateProjectCustomAllow,
+  UpdateProjectTrustedSources,
+} from "@vercel/sdk/models/updateprojectprojectsaction.js";
 
-export type { TrustedSourceEnvironmentRule } from "./vendor/vercel-sdk-trusted-sources.js";
+export type TrustedSourceEnvironmentRule = UpdateProjectCustomAllow;
 
 export interface TrustedSourceProject {
   readonly projectId: string;
@@ -13,17 +12,20 @@ export interface TrustedSourceProject {
 
 type TrustedSourceAccessPlan =
   | { readonly kind: "unchanged" }
-  | { readonly kind: "update"; readonly trustedSources: VercelTrustedSources };
+  | { readonly kind: "update"; readonly trustedSources: UpdateProjectTrustedSources };
 
 const SYSTEM_ENVIRONMENTS = new Set(["development", "preview", "production"]);
 
-function environmentSetIncludes(set: TrustedSourceEnvironmentSet, environment: string): boolean {
+function environmentSetIncludes(
+  set: UpdateProjectCustomAllow["from"] | UpdateProjectCustomAllow["to"],
+  environment: string,
+): boolean {
   if (set.slugs?.includes(environment) === true) return true;
   return set.preset === "all-custom" && !SYSTEM_ENVIRONMENTS.has(environment);
 }
 
 function ruleIncludes(
-  rule: TrustedSourceEnvironmentRule,
+  rule: UpdateProjectCustomAllow,
   sourceEnvironment: string,
   targetEnvironment: string,
 ): boolean {
@@ -33,11 +35,11 @@ function ruleIncludes(
   );
 }
 
-function environmentRule(from: string, to: string): TrustedSourceEnvironmentRule {
+function environmentRule(from: string, to: string): UpdateProjectCustomAllow {
   return { from: { slugs: [from] }, to: { slugs: [to] } };
 }
 
-function defaultRules(project: TrustedSourceProject): TrustedSourceEnvironmentRule[] {
+function defaultRules(project: TrustedSourceProject): UpdateProjectCustomAllow[] {
   const rules = [
     environmentRule("production", "production"),
     environmentRule("preview", "preview"),
@@ -56,7 +58,7 @@ function defaultRules(project: TrustedSourceProject): TrustedSourceEnvironmentRu
 export function planTrustedSourceAccess(input: {
   readonly project: TrustedSourceProject;
   readonly targetEnvironment: string;
-  readonly trustedSources?: VercelTrustedSources;
+  readonly trustedSources?: UpdateProjectTrustedSources;
 }): TrustedSourceAccessPlan {
   const projectRule = input.trustedSources?.projects?.[input.project.projectId];
   const explicitRules = projectRule?.customAllow;
