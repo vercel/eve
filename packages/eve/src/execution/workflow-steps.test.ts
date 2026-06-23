@@ -521,7 +521,7 @@ describe("turnStep", () => {
     expect(second.serializedContext[ThreadKey.name]).toBe("alpha");
   });
 
-  it("refreshes the system prompt for authored-source dev bundles", async () => {
+  it("refreshes the system prompt from the current bundled deployment", async () => {
     const session = createStubSession({
       agent: {
         modelReference: { id: "test" },
@@ -531,11 +531,7 @@ describe("turnStep", () => {
     });
     installSessionStoreMocks([session]);
 
-    const compiledArtifactsSource = {
-      appRoot: "/tmp/eve-dev-agent",
-      kind: "disk",
-      moduleMapLoaderPath: "/tmp/eve-dev-agent/loader.ts",
-    } as const;
+    const compiledArtifactsSource = { kind: "bundled" } as const;
     const turnAgent = {
       ...TestTurnAgent,
       instructions: ["Updated instructions.", "Updated runtime context."],
@@ -588,6 +584,13 @@ describe("turnStep", () => {
     });
 
     expect(observedSystemPrompt).toBe("Updated instructions.\n\nUpdated runtime context.");
+    expect(createDurableSessionState).toHaveBeenLastCalledWith({
+      session: expect.objectContaining({
+        agent: expect.objectContaining({
+          system: "Updated instructions.\n\nUpdated runtime context.",
+        }),
+      }),
+    });
   });
 });
 
