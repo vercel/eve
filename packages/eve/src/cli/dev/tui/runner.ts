@@ -1053,12 +1053,55 @@ export class EveTUIRunner {
     });
   }
 
-  #renderCommandOutcome(text: string): void {
+  #renderCommandOutcome(text: string | undefined): void {
+    if (text === undefined) return;
     if (this.#renderer.renderCommandResult !== undefined) {
       this.#renderer.renderCommandResult(text);
       return;
     }
     this.#renderer.renderNotice?.(text);
+  }
+
+  async #handleExtensionCommand(
+    command: Extract<PromptCommand, { type: "extension" }>,
+    input: Pick<PromptCommandHandlerContext, "initialModelStep" | "title">,
+  ): Promise<PromptCommandOutcome | undefined> {
+    const handler = this.#promptCommandHandler;
+    if (handler === undefined)
+      return { message: `/${command.name} is not available in this session.` };
+
+    return await handler.handle(command, {
+      renderer: this.#renderer,
+      title: input.title,
+      initialModelStep: input.initialModelStep,
+      remoteConnection: this.#remoteConnection,
+    });
+  }
+
+  #renderStartupCommandInvocation(
+    command: Extract<PromptCommand, { type: "extension" }>,
+    trigger: "startup" | "command",
+  ): void {
+    if (trigger !== "startup") return;
+
+    const state = this.#remoteConnection?.current().connection.state;
+    const status = state === "auth-failed" || state === "unavailable" ? "failed" : undefined;
+    const argument = command.argument.length === 0 ? "" : ` ${command.argument}`;
+    this.#renderer.renderCommandInvocation?.(`/${command.name}${argument}`, status);
+  }
+
+  async #applyCommandEffect(effect: PromptCommandOutcome["effect"]): Promise<void> {
+    if (effect?.kind === "model-access-changed") {
+      this.#vercelStatus?.applyEffect({ kind: "refresh-identity" });
+      this.#authHintStale = true;
+      await this.#refreshModelAccess();
+      return;
+    }
+    if (effect === undefined) return;
+
+    this.#vercelStatus?.applyEffect(effect);
+    this.#authHintStale = true;
+    void this.#refreshSetupAttention(this.#agentInfo);
   }
 
   async #executeExtensionCommand(
@@ -1067,35 +1110,10 @@ export class EveTUIRunner {
     trigger: "startup" | "command",
     initialModelStep?: "provider",
   ): Promise<void> {
-    const context = {
-      renderer: this.#renderer,
-      title,
-      initialModelStep,
-      remoteConnection: this.#remoteConnection,
-    } satisfies PromptCommandHandlerContext;
-    const outcome =
-      this.#promptCommandHandler === undefined
-        ? { message: `/${command.name} is not available in this session.` }
-        : await this.#promptCommandHandler.handle(command, context);
-    if (trigger === "startup") {
-      const state = this.#remoteConnection?.current().connection.state;
-      const status = state === "auth-failed" || state === "unavailable" ? "failed" : undefined;
-      const argument = command.argument.length === 0 ? "" : ` ${command.argument}`;
-      this.#renderer.renderCommandInvocation?.(`/${command.name}${argument}`, status);
-    }
-    if (outcome?.message !== undefined) {
-      this.#renderCommandOutcome(outcome.message);
-    }
-    const effect = outcome?.effect;
-    if (effect?.kind === "model-access-changed") {
-      this.#vercelStatus?.applyEffect({ kind: "refresh-identity" });
-      this.#authHintStale = true;
-      await this.#refreshModelAccess();
-    } else if (effect !== undefined) {
-      this.#vercelStatus?.applyEffect(effect);
-      this.#authHintStale = true;
-      void this.#refreshSetupAttention(this.#agentInfo);
-    }
+    const outcome = await this.#handleExtensionCommand(command, { initialModelStep, title });
+    this.#renderStartupCommandInvocation(command, trigger);
+    this.#renderCommandOutcome(outcome?.message);
+    await this.#applyCommandEffect(outcome?.effect);
     this.#refreshHeaderFromRemoteConnection();
   }
 

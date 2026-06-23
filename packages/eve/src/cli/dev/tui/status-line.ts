@@ -28,6 +28,28 @@ export interface StatusLineInput {
   width: number;
 }
 
+function renderModel(
+  input: Pick<StatusLineInput, "model" | "remote" | "theme">,
+): string | undefined {
+  if (input.model === undefined) return undefined;
+  const model =
+    input.remote === undefined ? input.model : stripAnsi(input.model).replace(/\s+/gu, " ").trim();
+  return input.theme.colors.dim(model);
+}
+
+function renderEndpoint(
+  input: Pick<StatusLineInput, "endpoint" | "remote" | "theme" | "vercel">,
+): string | undefined {
+  if (input.remote !== undefined || input.endpoint === undefined) return undefined;
+
+  const c = input.theme.colors;
+  if (input.endpoint.kind === "external") return c.dim("External endpoint");
+  if (!input.endpoint.connected) return c.yellow(`${input.theme.glyph.warning} AI Gateway`);
+
+  const projectName = input.vercel?.identity?.projectName;
+  return c.dim(projectName === undefined ? "AI Gateway" : `AI Gateway (${projectName})`);
+}
+
 /**
  * Builds `↗ project (environment) · model · tokens · /deploy pending`.
  * Remote sessions omit endpoint state and keep their badge as the final
@@ -38,31 +60,11 @@ export function buildStatusLine(input: StatusLineInput): string | undefined {
   const c = theme.colors;
 
   const logLevel = input.logLevel === undefined ? undefined : c.cyan(`logs: ${input.logLevel}`);
-  const model =
-    input.model === undefined
-      ? undefined
-      : c.dim(
-          input.remote === undefined
-            ? input.model
-            : stripAnsi(input.model).replace(/\s+/gu, " ").trim(),
-        );
+  const model = renderModel(input);
   const tokens = input.tokens === undefined ? undefined : c.dim(input.tokens);
   const pending = input.vercel?.pendingDeploy ? c.yellow("/deploy pending") : undefined;
   const remote = input.remote === undefined ? undefined : formatRemoteStatus(input.remote, theme);
-
-  // The model-endpoint segment. Connected folds in the linked project name;
-  // not-connected is the one actionable signal, so it goes yellow with a ⚠.
-  const projectName = input.vercel?.identity?.projectName;
-  let endpoint: string | undefined;
-  if (input.remote === undefined && input.endpoint !== undefined) {
-    if (input.endpoint.kind === "external") {
-      endpoint = c.dim("External endpoint");
-    } else if (input.endpoint.connected) {
-      endpoint = c.dim(projectName === undefined ? "AI Gateway" : `AI Gateway (${projectName})`);
-    } else {
-      endpoint = c.yellow(`${theme.glyph.warning} AI Gateway`);
-    }
-  }
+  const endpoint = renderEndpoint(input);
 
   const separator = `  ${c.dim(theme.glyph.dot)}  `;
   const compose = (segments: ReadonlyArray<string | undefined>): string =>
