@@ -102,6 +102,106 @@ Cancellation is intentional control flow, not failure:
 - callbacks, clients, hooks, and instrumentation can distinguish cancelled, completed, and failed
   sessions.
 
+## Architecture diagrams
+
+### Turn cancellation: the session survives
+
+The server mints a new cancel token for each turn. The token is bound to both the session and that
+specific active turn; it is not authority over the entry session.
+
+In the diagrams, `S1` is a session id, `T7` is a turn id, `C1` is a continuation token, `K7` is a
+turn cancel token, and `R` is the stable raw identity derived by Telegram or Twilio.
+
+```text
+ TypeScript client      eve channel/API       runtime control plane       S1 execution tree
+        |                      |                        |                         |
+ send() |  POST message       |                        |                         |
+        |--------------------->|  start/resume S1       |                         |
+        |                      |----------------------->|-- dispatch T7 --------->| S1 entry
+        |                      |                        |                         `-- T7
+        |                      |                        |                             |-- model
+        |                      |                        |                             |-- tools
+        |                      |                        |                             `-- delegates
+        |<---------------------|  sessionId: S1         |                         |
+        |                      |  continuation: C1      |                         |
+        |                      |  cancelToken: K7       |                         |
+        |                      |                        |                         |
+ MessageResponse stores K7    |                        |                         |
+        |                      |                        |                         |
+ cancel()                     |                        |                         |
+        |  POST /session/S1/cancel                     |                         |
+        |  { scope: "turn", cancelToken: K7 }          |                         |
+        |--------------------->|-- authenticate         |                         |
+        |                      |-- forward (S1, K7) --->|                         |
+        |                      |                        |-- resolve K7 = (S1,T7)  |
+        |                      |                        |-- verify URL session S1 |
+        |                      |                        |-- cancel T7 subtree ---->|
+        |<---------------------|  202 accepted          |                         |
+        |                      |                        |<-- T7 settled -----------|
+        |                      |                        |-- retire K7              |
+        |                      |                        |-- S1 -> session.waiting  |
+        |                      |                        |   continuation C1 stays  |
+```
+
+Token lifecycle:
+
+```text
+ turn T7 starts       K7 valid only for (S1, T7)
+ turn T7 ends         K7 becomes stale, whether T7 completed, failed, or was cancelled
+ next turn T8 starts  server returns a new K8; K7 can never cancel T8
+
+ continuation C1 remains bound to entry session S1 throughout
+```
+
+This gives the active `MessageResponse` exactly enough authority to stop its own turn. A leaked or
+delayed K7 cannot terminate S1 and cannot affect a later turn.
+
+### Session cancellation: the entry session terminates
+
+Session cancellation uses the current continuation capability and the session id together. The
+runtime first closes the old entry's input path, then tears down the complete ownership tree.
+
+```text
+ Client or /new       channel layer        cancellation coordinator        session tree
+      |                    |                          |                          |
+      | cancel session S1  |                          |                          |
+      | continuation C1    |                          |                          |
+      |------------------->|  authenticate + bind     |                          |
+      |                    |  request to (S1, C1)     |                          |
+      |                    |------------------------->|                          |
+      |                    |                          |  S1: active -> closing   |
+      |                    |                          |                          |
+      |                    |                          |  release C1 from S1      |
+      |                    |                          |  ===================     |
+      |                    |                          |  reset linearizes here   |
+      |                    |                          |                          |
+      |                    |                          |-- cancel S1 tree ------->| S1 entry
+      |                    |                          |                          `-- active turn
+      |                    |                          |                              |-- model/tool
+      |                    |                          |                              `-- delegates
+      |<-------------------|  accepted                |                          |
+      |                    |                          |<-- all branches settle --|
+      |                    |                          |  S1: cancelled           |
+      |                    |                          |  stream: session.cancelled
+```
+
+The same channel identity can then start over:
+
+```text
+ stable Telegram/Twilio identity R
+                 |
+                 `-- channel continuation C1
+                              |
+            before reset:  C1 -> session S1 (cancelled and permanently closed)
+            after reset:   C1 -> no active session
+            next message:  C1 -> new session S2 (empty history and authored state)
+
+ Old cleanup is bound to S1. Even though S2 reuses C1, an old request naming S1 cannot cancel S2.
+```
+
+For bare `/new`, the flow stops after S1 is cancelled. For `/new <message>` or `/new` with an
+attachment, restart waits for the release barrier and then creates S2 with the replacement content.
+
 ## Architecture by layer
 
 ### 1. Public cancellation contract
