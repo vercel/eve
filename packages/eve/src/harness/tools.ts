@@ -5,6 +5,7 @@ import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
 import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.js";
 import { isObject } from "#shared/guards.js";
+import { parseJsonValue } from "#shared/json.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/provider-tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
@@ -77,7 +78,7 @@ export function buildToolSet(input: {
               if (typeof output === "string") {
                 return { type: "text" as const, value: output };
               }
-              return { type: "json" as const, value: (output ?? null) as JSONValue };
+              return { type: "json" as const, value: parseJsonValue(output ?? null) as JSONValue };
             },
           }
         : authorToModelOutput !== undefined

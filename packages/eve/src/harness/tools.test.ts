@@ -284,6 +284,33 @@ describe("buildToolSet", () => {
     expect(sdkTool.toModelOutput).toBeTypeOf("function");
   });
 
+  it("rejects non-JSON-serializable default model output", () => {
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "timestamp",
+        {
+          description: "Return a timestamp.",
+          execute: async () => ({ now: new Date("2026-01-02T03:04:05.000Z") }),
+          inputSchema: jsonSchema({}),
+          name: "timestamp",
+        },
+      ],
+    ]);
+
+    const result = buildToolSet({ tools });
+    const sdkTool = result.timestamp as {
+      toModelOutput?: (options: { toolCallId: string; input: unknown; output: unknown }) => unknown;
+    };
+
+    expect(() =>
+      sdkTool.toModelOutput?.({
+        toolCallId: "call_1",
+        input: {},
+        output: { now: new Date("2026-01-02T03:04:05.000Z") },
+      }),
+    ).toThrow("Expected a JSON-serializable value.");
+  });
+
   it("toModelOutput wrapper passes only output to the authored function", async () => {
     let capturedOutput: unknown;
     const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
