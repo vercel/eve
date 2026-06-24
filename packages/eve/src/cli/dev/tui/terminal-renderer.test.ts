@@ -676,7 +676,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
   it("clears the setup attention line once its issue is resolved", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderSetupWarning("1 setup issue: not logged in · /login");
+    renderer.renderSetupWarning("1 setup issue: not logged in · /vc:login");
     expect(screen.snapshot()).toContain("not logged in");
 
     renderer.clearSetupWarning();

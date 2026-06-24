@@ -26,8 +26,8 @@ export type TuiSetupCommand = PromptCommandExtensionName;
  * move past their opening question.
  */
 export const SETUP_FLOW_CONFIG = {
-  vc: { title: "Install the Vercel CLI", indicator: "spinner" },
-  login: { title: "Log in to Vercel", indicator: "spinner" },
+  "vc:install": { title: "Install the Vercel CLI", indicator: "spinner" },
+  "vc:login": { title: "Log in to Vercel", indicator: "spinner" },
   model: { title: "Configure the agent model", indicator: "pulse" },
   channels: { title: "Agent channels", indicator: "pulse" },
   deploy: { title: "Deploy to Vercel", indicator: "spinner" },
@@ -164,12 +164,12 @@ async function executeSetupCommand(
 
   try {
     switch (command) {
-      case "vc": {
+      case "vc:install": {
         return installVercelCliResultMessage(
           await flows.runInstallVercelCliFlow({ appRoot, prompter, signal }),
         );
       }
-      case "login": {
+      case "vc:login": {
         return loginResultMessage(await flows.runLoginFlow({ appRoot, prompter, signal }));
       }
       case "model": {
@@ -291,11 +291,11 @@ function vercelActionOutcome(error: unknown, command: string): TuiSetupCommandRe
 function vercelActionMessage(kind: string, command: string): string | undefined {
   switch (kind) {
     case "vercel-login":
-      return `You're not logged in to Vercel — run /login, then retry /${command}.`;
+      return `You're not logged in to Vercel — run /vc:login, then retry /${command}.`;
     case "vercel-forbidden":
-      return `Vercel denied access to that team — run /login to re-authenticate (for example to complete SSO), or pick a team you can access, then retry /${command}.`;
+      return `Vercel denied access to that team — run /vc:login to re-authenticate (for example to complete SSO), or pick a team you can access, then retry /${command}.`;
     case "vercel-cli-missing":
-      return `The Vercel CLI isn't installed — run /vc to install it, then retry /${command}.`;
+      return `The Vercel CLI isn't installed — run /vc:install to install it, then retry /${command}.`;
     default:
       return undefined;
   }
@@ -359,7 +359,7 @@ async function runDeployAndChat(
 function installVercelCliResultMessage(result: InstallVercelCliResult): TuiSetupCommandResult {
   switch (result.kind) {
     case "cancelled":
-      return { message: "/vc cancelled.", preserveFlowDiagnostics: false };
+      return { message: "/vc:install cancelled.", preserveFlowDiagnostics: false };
     case "already":
       return { message: "The Vercel CLI is already installed.", preserveFlowDiagnostics: false };
     case "failed":
@@ -370,7 +370,7 @@ function installVercelCliResultMessage(result: InstallVercelCliResult): TuiSetup
       };
     case "installed":
       return {
-        message: "Installed the Vercel CLI. Run /login next.",
+        message: "Installed the Vercel CLI. Run /vc:login next.",
         preserveFlowDiagnostics: false,
         // The CLI now resolves, so the status line's identity probe can run.
         effect: { kind: "refresh-identity" },
@@ -382,17 +382,18 @@ function installVercelCliResultMessage(result: InstallVercelCliResult): TuiSetup
 function loginResultMessage(result: LoginFlowResult): TuiSetupCommandResult {
   switch (result.kind) {
     case "cancelled":
-      return { message: "/login cancelled.", preserveFlowDiagnostics: false };
+      return { message: "/vc:login cancelled.", preserveFlowDiagnostics: false };
     case "already":
       return { message: "You're already logged in to Vercel.", preserveFlowDiagnostics: false };
     case "cli-missing":
       return {
-        message: "The Vercel CLI isn't installed — run /vc to install it, then retry /login.",
+        message:
+          "The Vercel CLI isn't installed — run /vc:install to install it, then retry /vc:login.",
         preserveFlowDiagnostics: true,
       };
     case "failed":
       return {
-        message: "Vercel login didn't complete — run /login to try again.",
+        message: "Vercel login didn't complete — run /vc:login to try again.",
         preserveFlowDiagnostics: true,
       };
     case "logged-in":
@@ -405,7 +406,7 @@ function loginResultMessage(result: LoginFlowResult): TuiSetupCommandResult {
       };
     case "unavailable":
       return {
-        message: "Couldn't reach Vercel — check your connection, then retry /login.",
+        message: "Couldn't reach Vercel — check your connection, then retry /vc:login.",
         preserveFlowDiagnostics: true,
       };
   }

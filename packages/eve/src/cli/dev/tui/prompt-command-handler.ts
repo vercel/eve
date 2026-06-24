@@ -101,10 +101,11 @@ export function createPromptCommandHandler(
         });
         return { message };
       }
-      if (target.kind !== "local") {
-        return { message: `/${command.name} is not available in this session.` };
-      }
 
+      // Availability is the `targets` allowlist checked above; the remaining
+      // setup commands run against `workspaceRoot`, which both a local and a
+      // remote target carry (`/vc:install` and `/vc:login` only need a working
+      // directory, not the local dev server).
       let setupCommands: typeof import("./setup-commands.js");
       try {
         setupCommands = await import("./setup-commands.js");

@@ -1016,8 +1016,8 @@ export class EveTUIRunner {
 
   /**
    * Re-evaluates the attention line after a setup command changed local state,
-   * so a fixed issue clears (e.g. the `not logged in · /login` line disappears
-   * once `/login` succeeds) instead of lingering stale. Authoritative: unlike
+   * so a fixed issue clears (e.g. the `not logged in · /vc:login` line disappears
+   * once `/vc:login` succeeds) instead of lingering stale. Authoritative: unlike
    * the boot probe it re-reads detections and auth and is not stale-guarded.
    */
   async #refreshSetupAttention(info: AgentInfoResult | undefined): Promise<void> {

@@ -43,7 +43,7 @@ function globalInstallArguments(kind: PackageManagerKind): string[] {
 }
 
 /**
- * THE INSTALL FLOW for the dev TUI's `/vc`: the fix command for the
+ * THE INSTALL FLOW for the dev TUI's `/vc:install`: the fix command for the
  * "Vercel CLI not found" diagnostic, so every diagnostic has a matching
  * command. Short-circuits when the CLI already resolves; otherwise runs a
  * global install with the project's package manager, streaming output to the

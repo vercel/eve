@@ -184,13 +184,13 @@ describe("formatSetupIssuesLine", () => {
     // outside the cheap-and-local BOOT_DETECTIONS and is rendered by the runner.
     expect(BOOT_DETECTIONS.some((detection) => detection.id === "login")).toBe(false);
     expect(formatSetupIssuesLine([LOGIN_SETUP_ISSUE])).toBe(
-      "1 setup issue: not logged in · /login",
+      "1 setup issue: not logged in · /vc:login",
     );
   });
 
   it("formats the CLI-missing hint, which points at its own fix command", () => {
     expect(formatSetupIssuesLine([CLI_MISSING_SETUP_ISSUE])).toBe(
-      "1 setup issue: Vercel CLI not found · /vc",
+      "1 setup issue: Vercel CLI not found · /vc:install",
     );
   });
 });

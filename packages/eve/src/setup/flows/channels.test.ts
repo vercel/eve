@@ -256,13 +256,13 @@ describe("runChannelsFlow", () => {
     });
   });
 
-  it("points a Vercel-dependent channel at /login when logged out, even if linked", async () => {
+  it("points a Vercel-dependent channel at /vc:login when logged out, even if linked", async () => {
     // Authentication is a separate axis from link: a linked-but-logged-out
-    // directory still cannot provision, so the row routes to /login, not /model.
+    // directory still cannot provision, so the row routes to /vc:login, not /model.
     for (const deployment of [UNLINKED, LINKED]) {
       expect(await slackRowFor({ deployment, authStatus: "logged-out" })).toMatchObject({
         disabled: true,
-        disabledReason: "Log in to Vercel first, see /login",
+        disabledReason: "Log in to Vercel first, see /vc:login",
         disabledReasonTone: "warning",
       });
     }
@@ -271,7 +271,7 @@ describe("runChannelsFlow", () => {
   it("points a Vercel-dependent channel at the CLI install when the CLI is missing", async () => {
     expect(await slackRowFor({ deployment: UNLINKED, authStatus: "cli-missing" })).toMatchObject({
       disabled: true,
-      disabledReason: "Vercel CLI not found, see /vc",
+      disabledReason: "Vercel CLI not found, see /vc:install",
       disabledReasonTone: "warning",
     });
   });
@@ -526,7 +526,7 @@ describe("runChannelsFlow", () => {
     const addChannelsDeps = createAddChannelsDeps();
     // Provisioning runs before the slack file is scaffolded, so a logged-out
     // failure throws with no channel landed; the flow must re-throw it (the
-    // command handler routes it to /login) rather than swallow it.
+    // command handler routes it to /vc:login) rather than swallow it.
     addChannelsDeps.provisionSlackbot = vi.fn(async () => {
       throw new HumanActionRequiredError({
         kind: "vercel-login",

@@ -83,8 +83,8 @@ describe("vercelAuthBlockerReason", () => {
       vercelAuthBlockerReason("unavailable"),
     ]).toEqual([
       undefined,
-      "Vercel CLI not found, see /vc",
-      "Log in to Vercel first, see /login",
+      "Vercel CLI not found, see /vc:install",
+      "Log in to Vercel first, see /vc:login",
       "Couldn't reach Vercel, check your connection",
     ]);
   });
