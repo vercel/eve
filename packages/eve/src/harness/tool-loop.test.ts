@@ -3904,6 +3904,65 @@ describe("createToolLoopHarness", () => {
     ).toEqual([]);
   });
 
+  it("continues after a provider-executed web_search returns without assistant text", async () => {
+    const toolCallId = "parallel_search_1";
+    setupMockAgent({
+      content: [
+        {
+          output: { results: [], searchId: "search-1" },
+          providerExecuted: true,
+          toolCallId,
+          toolName: "web_search",
+          type: "tool-result",
+        },
+      ],
+      finishReason: "stop",
+      response: {
+        messages: [
+          {
+            content: [
+              {
+                output: { type: "json", value: { results: [], searchId: "search-1" } },
+                toolCallId,
+                toolName: "web_search",
+                type: "tool-result",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [],
+      toolResults: [
+        {
+          output: { results: [], searchId: "search-1" },
+          providerExecuted: true,
+          toolCallId,
+          toolName: "web_search",
+          type: "tool-result",
+        },
+      ],
+    });
+
+    const harness = createToolLoopHarness(
+      createTestConfig("conversation", undefined, { tools: new Map() }),
+    );
+    const result = await harness(
+      createTestSession({
+        agent: {
+          modelReference: { id: "openai/gpt-5.5" },
+          system: "You are a test assistant.",
+          tools: [{ description: "Search the web", name: "web_search", inputSchema: null }],
+        },
+      }),
+      { message: "Search the web." },
+    );
+
+    expect(typeof result.next).toBe("function");
+    expect(result.session.history.at(-1)?.role).toBe("assistant");
+  });
+
   it("emits provider-executed web_search errors through normal failed action results", async () => {
     const toolCallId = "srvtoolu_error";
     setupMockAgent({

@@ -1514,10 +1514,15 @@ async function handleStepResult(input: {
   // dangling tool_use the next provider call rejects, and drop the result.
   const calledFinalOutput =
     nextSession.outputSchema !== undefined && extractFinalOutput(result) !== undefined;
+  const hasProviderExecutedToolResult = (result.toolResults ?? []).some(
+    (toolResult) => toolResult.providerExecuted === true,
+  );
 
   const continueLoop =
     !calledFinalOutput &&
-    (responseMessages.at(-1)?.role === "tool" || hasDeferredStepInput(nextSession));
+    (responseMessages.at(-1)?.role === "tool" ||
+      hasDeferredStepInput(nextSession) ||
+      (stepOutput === null && hasProviderExecutedToolResult));
   if (continueLoop) {
     if (emit) {
       emissionState = advanceStep(emissionState);
