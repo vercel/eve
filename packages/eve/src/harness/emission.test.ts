@@ -126,7 +126,35 @@ describe("setHarnessEmissionState", () => {
 });
 
 describe("emitStreamContent empty delivery", () => {
-  it("suppresses a split sentinel and completes with a null message", async () => {
+  it("emits each normal text delta before reading the next stream part", async () => {
+    const emit = createEmitStub();
+    let releaseSecondPart!: () => void;
+    const secondPartReady = new Promise<void>((resolve) => {
+      releaseSecondPart = resolve;
+    });
+    async function* controlledStream(): AsyncIterable<TextStreamPart<ToolSet>> {
+      yield { id: "text-1", text: "first", type: "text-delta" } as TextStreamPart<ToolSet>;
+      await secondPartReady;
+      yield { id: "text-1", text: " second", type: "text-delta" } as TextStreamPart<ToolSet>;
+      yield { finishReason: "stop", type: "finish-step" } as TextStreamPart<ToolSet>;
+    }
+
+    const run = emitStreamContent(emit, EMISSION_STATE, controlledStream());
+    try {
+      await vi.waitFor(() => expect(emit).toHaveBeenCalledTimes(1));
+      expect(vi.mocked(emit).mock.calls[0]?.[0]).toEqual(
+        expect.objectContaining({
+          data: expect.objectContaining({ messageDelta: "first", messageSoFar: "first" }),
+          type: "message.appended",
+        }),
+      );
+    } finally {
+      releaseSecondPart();
+      await run;
+    }
+  });
+
+  it("streams a split sentinel immediately and completes with a null message", async () => {
     const emit = createEmitStub();
 
     await emitStreamContent(
@@ -140,8 +168,17 @@ describe("emitStreamContent empty delivery", () => {
     );
 
     const events = vi.mocked(emit).mock.calls.map(([event]) => event);
-    expect(events.map((event) => event.type)).toEqual(["message.completed"]);
+    expect(events.map((event) => event.type)).toEqual([
+      "message.appended",
+      "message.appended",
+      "message.completed",
+    ]);
     expect(events[0]).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({ messageDelta: "  <eve-empty" }),
+      }),
+    );
+    expect(events.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({ finishReason: "stop", message: null }),
       }),

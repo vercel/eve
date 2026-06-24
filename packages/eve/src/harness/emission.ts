@@ -31,7 +31,7 @@ import {
   createTurnStartedEvent,
 } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
-import { EMPTY_DELIVERY_SENTINEL, hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
+import { hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
 import { toError } from "#shared/errors.js";
 import type { JsonObject } from "#shared/json.js";
 import {
@@ -355,9 +355,6 @@ export async function emitStreamContent(
 ): Promise<EmittedStreamContent> {
   let currentReasoning = "";
   let currentMessage = "";
-  let emittedMessage = "";
-  let pendingMessageDeltas: string[] = [];
-  let canBeEmptyDelivery = true;
   let finishReason: AssistantStepFinishReason = "stop";
   let streamError: Error | undefined;
   const toolCallIdsSeenInStream = new Set<string>();
@@ -366,28 +363,10 @@ export async function emitStreamContent(
   const inlineAuthorizationResults: TypedToolResult<ToolSet>[] = [];
   const inlineToolResultParts: InlineToolResultPart[] = [];
 
-  const flushPendingMessageDeltas = async (): Promise<void> => {
-    for (const delta of pendingMessageDeltas) {
-      emittedMessage += delta;
-      await emitFn(
-        createMessageAppendedEvent({
-          messageDelta: delta,
-          messageSoFar: emittedMessage,
-          sequence: state.sequence,
-          stepIndex: state.stepIndex,
-          turnId: state.turnId,
-        }),
-      );
-    }
-    pendingMessageDeltas = [];
-  };
-
   const flushCurrentMessage = async (): Promise<void> => {
     if (currentMessage.length === 0) {
       return;
     }
-    canBeEmptyDelivery = false;
-    await flushPendingMessageDeltas();
     await emitFn(
       createMessageCompletedEvent({
         finishReason: "tool-calls",
@@ -398,8 +377,6 @@ export async function emitStreamContent(
       }),
     );
     currentMessage = "";
-    emittedMessage = "";
-    canBeEmptyDelivery = true;
   };
 
   const emitProviderToolCall = async (toolCall: {
@@ -463,11 +440,15 @@ export async function emitStreamContent(
           currentReasoning = "";
         }
         currentMessage += part.text;
-        pendingMessageDeltas.push(part.text);
-        if (canBeEmptyDelivery && !couldBeEmptyDelivery(currentMessage)) {
-          canBeEmptyDelivery = false;
-        }
-        if (!canBeEmptyDelivery) await flushPendingMessageDeltas();
+        await emitFn(
+          createMessageAppendedEvent({
+            messageDelta: part.text,
+            messageSoFar: currentMessage,
+            sequence: state.sequence,
+            stepIndex: state.stepIndex,
+            turnId: state.turnId,
+          }),
+        );
         break;
       case "tool-call": {
         const toolCall = part as TypedToolCall<ToolSet>;
@@ -591,9 +572,8 @@ export async function emitStreamContent(
     );
   }
 
-  // A reserved terminal marker becomes a null completion. Channel adapters
-  // already treat null as no delivery, while the event keeps the successful
-  // terminal boundary observable without leaking the marker to stream clients.
+  // Channel adapters deliver terminal completions, so the reserved marker
+  // becomes a null completion without delaying normal streaming deltas.
   if (finishReason !== "tool-calls" && hasEmptyDeliverySentinel(currentMessage)) {
     await emitFn(
       createMessageCompletedEvent({
@@ -605,7 +585,6 @@ export async function emitStreamContent(
       }),
     );
   } else if (currentMessage.trim().length > 0) {
-    await flushPendingMessageDeltas();
     await emitFn(
       createMessageCompletedEvent({
         finishReason,
@@ -618,13 +597,6 @@ export async function emitStreamContent(
   }
 
   return { handledInlineToolResultCallIds, inlineAuthorizationResults, inlineToolResultParts };
-}
-
-function couldBeEmptyDelivery(text: string): boolean {
-  const candidate = text.trimStart();
-  if (candidate.length === 0 || EMPTY_DELIVERY_SENTINEL.startsWith(candidate)) return true;
-  if (!candidate.startsWith(EMPTY_DELIVERY_SENTINEL)) return false;
-  return candidate.slice(EMPTY_DELIVERY_SENTINEL.length).trim().length === 0;
 }
 
 function isInlineAuthorizationToolResult(toolResult: TypedToolResult<ToolSet>): boolean {
