@@ -112,7 +112,12 @@ export async function runRemoteAuthFlow(input: {
     // session), re-authenticate through the same dialogue and resolve once more.
     let resolution = await deps.resolveVercelDeployment({ workspaceRoot, host, signal });
     if (resolution.kind === "forbidden") {
-      const reauth = await deps.runLoginFlow({ appRoot: workspaceRoot, prompter, signal });
+      const reauth = await deps.runLoginFlow({
+        appRoot: workspaceRoot,
+        force: true,
+        prompter,
+        signal,
+      });
       const reauthOutcome = loginFailure(reauth);
       if (reauthOutcome !== undefined) return reauthOutcome;
       if (reauth.kind === "logged-in") completedMutations.push({ kind: "vercel-login" });

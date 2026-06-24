@@ -94,14 +94,12 @@ export async function probeRemoteInfo(input: {
     // Inspection is best-effort: an authorized response we cannot use must not
     // block the connection, since the conversation transport does not depend on
     // `/eve/v1/info`.
-    if (error instanceof AgentInfoResponseError) {
-      // Authorized 2xx whose body is not a recognized payload (e.g. version
-      // skew). The 2xx already proves the route exists and auth passed.
-      return { state: "ready" };
-    }
-    if (error instanceof ClientError && error.status === 404) {
-      // The deployment omits the info route entirely. Only call it ready if the
-      // public health route confirms a live eve behind this host.
+    if (
+      error instanceof AgentInfoResponseError ||
+      (error instanceof ClientError && error.status === 404)
+    ) {
+      // The info route can be missing or use an older payload shape. Only call
+      // the target ready once the public health route confirms a live Eve server.
       if (await probeDeploymentHealth(input.client)) return { state: "ready" };
     }
     return classifyRemoteError(error, input.phase);

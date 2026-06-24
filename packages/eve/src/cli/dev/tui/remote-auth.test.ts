@@ -148,6 +148,12 @@ describe("runRemoteAuthFlow", () => {
     });
     expect(harness.operations).toEqual(["login", "deployment", "login", "deployment", "token"]);
     expect(harness.deps.resolveVercelDeployment).toHaveBeenCalledTimes(2);
+    expect(harness.deps.runLoginFlow).toHaveBeenNthCalledWith(2, {
+      appRoot: WORKSPACE_ROOT,
+      force: true,
+      prompter: harness.prompter,
+      signal: undefined,
+    });
   });
 
   it("gets Trusted Sources consent, applies it, then requests the session token", async () => {

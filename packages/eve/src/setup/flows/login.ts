@@ -107,6 +107,8 @@ async function runVercelLoginWithControls(
 export async function runLoginFlow(input: {
   appRoot: string;
   prompter: Prompter;
+  /** Run the browser login even when the account-level Vercel session is valid. */
+  force?: boolean;
   signal?: AbortSignal;
   deps?: Partial<LoginFlowDeps>;
 }): Promise<LoginFlowResult> {
@@ -120,7 +122,8 @@ export async function runLoginFlow(input: {
   signal?.throwIfAborted();
   switch (initialStatus) {
     case "authenticated":
-      return { kind: "already" };
+      if (input.force !== true) return { kind: "already" };
+      break;
     case "cli-missing":
       return { kind: "cli-missing" };
     case "unavailable":

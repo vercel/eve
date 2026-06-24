@@ -110,7 +110,7 @@ describe("listRecentProjects", () => {
 });
 
 describe("searchProjects", () => {
-  it("returns one ranked matching page under the selected team", async () => {
+  it("returns a ranked matching page and its continuation cursor", async () => {
     mockedCaptureVercel.mockResolvedValue(
       captured({
         projects: [
@@ -122,14 +122,41 @@ describe("searchProjects", () => {
       }),
     );
 
-    await expect(searchProjects("/repo", "team-a", " V ")).resolves.toEqual([
-      { id: "prj_exact", name: "v" },
-      { id: "prj_prefix", name: "v-api" },
-      { id: "prj_infix", name: "env" },
-    ]);
+    await expect(searchProjects("/repo", "team-a", " V ")).resolves.toEqual({
+      projects: [
+        { id: "prj_exact", name: "v" },
+        { id: "prj_prefix", name: "v-api" },
+        { id: "prj_infix", name: "env" },
+      ],
+      next: 7,
+    });
     expect(mockedCaptureVercel).toHaveBeenCalledOnce();
     expect(mockedCaptureVercel).toHaveBeenCalledWith(
       ["project", "ls", "--format", "json", "--scope", "team-a", "--filter", "V"],
+      { cwd: "/repo", signal: undefined, timeoutMs: 15_000 },
+    );
+  });
+
+  it("loads and ranks a requested continuation page", async () => {
+    mockedCaptureVercel.mockResolvedValue(
+      captured({
+        projects: [
+          { id: "prj_infix", name: "env" },
+          { id: "prj_prefix", name: "v-api" },
+        ],
+        pagination: { next: null },
+      }),
+    );
+    const continuation = { next: 7 };
+
+    await expect(searchProjects("/repo", "team-a", "v", continuation)).resolves.toEqual({
+      projects: [
+        { id: "prj_prefix", name: "v-api" },
+        { id: "prj_infix", name: "env" },
+      ],
+    });
+    expect(mockedCaptureVercel).toHaveBeenCalledWith(
+      ["project", "ls", "--format", "json", "--scope", "team-a", "--filter", "v", "--next", "7"],
       { cwd: "/repo", signal: undefined, timeoutMs: 15_000 },
     );
   });

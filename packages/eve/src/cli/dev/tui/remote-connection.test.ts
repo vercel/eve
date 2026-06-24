@@ -193,13 +193,35 @@ describe("createRemoteConnectionController", () => {
       error: new Error("offline"),
       expected: { state: "unavailable", failure: { message: "offline" } },
     },
-    {
-      name: "an authorized response with an unusable info payload as ready",
-      error: new AgentInfoResponseError(["agent: Required"]),
-      expected: { state: "ready" },
-    },
   ])("classifies $name", async ({ error, expected }) => {
     await expect(checkFailure(error)).resolves.toMatchObject(expected);
+  });
+
+  it("stays ready after an unusable info payload when health confirms Eve", async () => {
+    const harness = createHarness({
+      info: async () => {
+        throw new AgentInfoResponseError(["agent: Required"]);
+      },
+    });
+    const health = vi.spyOn(harness.client, "health").mockResolvedValue({
+      ok: true,
+      status: "ready",
+      workflowId: "wf_test",
+    });
+
+    await expect(harness.controller.check()).resolves.toEqual({ state: "ready" });
+    expect(health).toHaveBeenCalledOnce();
+  });
+
+  it("is unavailable after an unusable info payload when health cannot confirm Eve", async () => {
+    const harness = createHarness({
+      info: async () => {
+        throw new AgentInfoResponseError(["agent: Required"]);
+      },
+    });
+    vi.spyOn(harness.client, "health").mockRejectedValue(new ClientError(404, "Not Found"));
+
+    await expect(harness.controller.check()).resolves.toMatchObject({ state: "unavailable" });
   });
 
   it("stays ready when the info route is missing but health confirms a live deployment", async () => {
