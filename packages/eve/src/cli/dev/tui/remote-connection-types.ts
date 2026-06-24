@@ -20,7 +20,11 @@ interface RemoteRequestFailure {
 
 export type RemoteConnectionState =
   | { readonly state: "checking" }
-  | { readonly state: "ready"; readonly info: AgentInfoResult }
+  // `info` is best-effort: a connection is ready once auth is satisfied and the
+  // deployment is reachable. Inspection data is absent when the deployment's
+  // `/eve/v1/info` is missing or returns an unrecognized shape (e.g. version
+  // skew); the conversation transport does not depend on it.
+  | { readonly state: "ready"; readonly info?: AgentInfoResult }
   | {
       readonly state: "auth-required";
       readonly challenge: RemoteAuthChallenge;

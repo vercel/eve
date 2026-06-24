@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { AgentInfoResponseError } from "#client/agent-info-error.js";
 import { Client } from "#client/client.js";
 import type { AgentInfoResult } from "#client/types.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
@@ -161,7 +162,7 @@ describe("Client request policy", () => {
     );
     const client = new Client({ host: "https://eve.test" });
 
-    await expect(client.info()).rejects.toThrow(SyntaxError);
+    await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
   });
 
   it("rejects an incomplete agent info payload", async () => {
@@ -175,7 +176,34 @@ describe("Client request policy", () => {
     );
     const client = new Client({ host: "https://eve.test" });
 
-    await expect(client.info()).rejects.toThrow(SyntaxError);
+    await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
+  });
+
+  it("names the offending fields when the agent info payload is incomplete", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        agent: { model: { id: "openai/gpt-5.5" } },
+        diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
+        kind: "eve-agent-info",
+        version: 1,
+      }),
+    );
+    const client = new Client({ host: "https://eve.test" });
+
+    const error = await client.info().catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(AgentInfoResponseError);
+    expect((error as AgentInfoResponseError).issues.length).toBeGreaterThan(0);
+    expect((error as AgentInfoResponseError).message).toContain(":");
+  });
+
+  it("rejects a non-JSON body from the agent info route", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<!doctype html>", { headers: { "content-type": "text/html" } }),
+    );
+    const client = new Client({ host: "https://eve.test" });
+
+    await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
   });
 
   it.each([null, { kind: "gateway", connected: true }, { kind: "external" }])(
@@ -192,7 +220,7 @@ describe("Client request policy", () => {
       );
       const client = new Client({ host: "https://eve.test" });
 
-      await expect(client.info()).rejects.toThrow(SyntaxError);
+      await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
     },
   );
 });

@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { Client, ClientError, type AgentInfoResult } from "#client/index.js";
+import {
+  AgentInfoResponseError,
+  Client,
+  ClientError,
+  type AgentInfoResult,
+} from "#client/index.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
 import {
   createDevelopmentCredentialGate,
@@ -189,12 +194,38 @@ describe("createRemoteConnectionController", () => {
       expected: { state: "unavailable", failure: { message: "offline" } },
     },
     {
-      name: "an invalid response",
-      error: new SyntaxError("bad JSON"),
-      expected: { state: "unavailable", failure: { message: "bad JSON" } },
+      name: "an authorized response with an unusable info payload as ready",
+      error: new AgentInfoResponseError(["agent: Required"]),
+      expected: { state: "ready" },
     },
   ])("classifies $name", async ({ error, expected }) => {
     await expect(checkFailure(error)).resolves.toMatchObject(expected);
+  });
+
+  it("stays ready when the info route is missing but health confirms a live deployment", async () => {
+    const harness = createHarness({
+      info: async () => {
+        throw new ClientError(404, "Not Found");
+      },
+    });
+    vi.spyOn(harness.client, "health").mockResolvedValue({
+      ok: true,
+      status: "ready",
+      workflowId: "wf_test",
+    });
+
+    await expect(harness.controller.check()).resolves.toEqual({ state: "ready" });
+  });
+
+  it("is unavailable when the info route is missing and health does not confirm a deployment", async () => {
+    const harness = createHarness({
+      info: async () => {
+        throw new ClientError(404, "Not Found");
+      },
+    });
+    vi.spyOn(harness.client, "health").mockRejectedValue(new ClientError(404, "Not Found"));
+
+    await expect(harness.controller.check()).resolves.toMatchObject({ state: "unavailable" });
   });
 
   it("resolves ambient credentials only after deployment authority is established", async () => {
