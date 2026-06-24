@@ -201,15 +201,29 @@ async function runDriverLoop(input: {
    * token. In-flight deliveries to that token after this returns are dropped.
    */
   const closeParkHook = async (): Promise<void> => {
-    if (iterator !== undefined) {
-      await closeHookIterator(iterator);
-    }
-    if (hook !== undefined) {
-      await disposeHook(hook);
-    }
+    const currentIterator = iterator;
+    const currentHook = hook;
     hook = undefined;
     iterator = undefined;
     pendingNext = null;
+
+    if (currentIterator !== undefined) {
+      try {
+        await closeHookIterator(currentIterator);
+      } catch (error) {
+        if (currentHook !== undefined) {
+          try {
+            await disposeHook(currentHook);
+          } catch {
+            // The iterator failure is authoritative; cleanup must not replace it.
+          }
+        }
+        throw error;
+      }
+    }
+    if (currentHook !== undefined) {
+      await disposeHook(currentHook);
+    }
   };
 
   const rekeyHook = async (nextToken: string): Promise<void> => {
@@ -223,7 +237,11 @@ async function runDriverLoop(input: {
     try {
       await closeParkHook();
     } catch (error) {
-      await disposeHook(nextHook);
+      try {
+        await disposeHook(nextHook);
+      } catch {
+        // The active hook release failure is authoritative.
+      }
       throw error;
     }
 

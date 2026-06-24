@@ -811,6 +811,69 @@ describe("workflowEntry", () => {
     );
   });
 
+  it.each(["iterator", "hook"] as const)(
+    "cleans both hooks once when the old %s fails during rekey",
+    async (failurePoint) => {
+      const baseSessionState = createBaseSessionState({ continuationToken: "slack:C01:" });
+      const rekeyedSessionState: DurableSessionState = {
+        ...baseSessionState,
+        continuationToken: "slack:C01:1800000000.123456",
+      };
+      const releaseError = new Error(`${failurePoint} release failed`);
+      const oldReturn = vi.fn(async (): Promise<IteratorResult<HookPayload>> => {
+        if (failurePoint === "iterator") throw releaseError;
+        return { done: true, value: undefined };
+      });
+      const oldDispose = vi.fn(() => {
+        if (failurePoint === "hook") throw releaseError;
+      });
+      const candidateDispose = vi.fn();
+      const candidateGetConflict = vi.fn(async () => null);
+      vi.mocked(createSessionStep).mockResolvedValue(
+        createSessionStepResultForMock(baseSessionState),
+      );
+      installHookMocks({
+        parkHooks: [
+          {
+            dispose: oldDispose,
+            return: oldReturn,
+            token: "slack:C01:",
+            values: [
+              {
+                kind: "deliver",
+                payloads: [{ message: "follow up" }],
+              },
+            ],
+          },
+          {
+            dispose: candidateDispose,
+            getConflict: candidateGetConflict,
+            token: "slack:C01:1800000000.123456",
+          },
+        ],
+        turnCompletions: [
+          turnResult({ action: "park", sessionState: baseSessionState }),
+          turnResult({ action: "park", sessionState: rekeyedSessionState }),
+        ],
+      });
+
+      await expect(
+        workflowEntry({
+          input: { message: "hello" },
+          serializedContext: createSerializedContext({
+            "eve.channel": { kind: "slack", state: {} },
+            "eve.continuationToken": "slack:C01:",
+          }),
+        }),
+      ).rejects.toBe(releaseError);
+
+      expect(candidateGetConflict).toHaveBeenCalledOnce();
+      expect(oldReturn).toHaveBeenCalledOnce();
+      expect(oldDispose).toHaveBeenCalledOnce();
+      expect(candidateDispose).toHaveBeenCalledOnce();
+    },
+  );
+
   it("disposes a conflicting rekey candidate before cleaning up the active hook", async () => {
     const baseSessionState = createBaseSessionState({ continuationToken: "slack:C01:" });
     const rekeyedSessionState: DurableSessionState = {

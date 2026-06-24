@@ -6,6 +6,7 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 
 function buildSerializedContext(overrides: {
   channelKind: string;
@@ -35,7 +36,7 @@ function buildSerializedContext(overrides: {
 }
 
 describe("workflowEntry integration", () => {
-  it("parks in conversation mode and resumes via the workflow hook", async () => {
+  it("parks in conversation mode and resumes via runtime delivery", async () => {
     const runtime = createTestRuntime({ agent: { name: "workflow-entry-conversation" } });
     const continuationToken = "http:workflow-entry-conversation";
 
@@ -73,10 +74,16 @@ describe("workflowEntry integration", () => {
           ),
         ).toBe(true);
 
-        await resumeHook(continuationToken, {
-          kind: "deliver",
-          payloads: [{ message: "follow up" }],
+        const workflowRuntime = createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
         });
+        await expect(
+          workflowRuntime.deliver({
+            auth: null,
+            continuationToken,
+            payload: { message: "follow up" },
+          }),
+        ).resolves.toEqual({ sessionId: run.runId });
 
         const secondTurn = await stream.nextTurn();
 

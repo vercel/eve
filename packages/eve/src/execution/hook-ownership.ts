@@ -49,6 +49,7 @@ function normalizeHookClaimError(error: unknown, token: string): unknown {
     return error;
   }
 
+  // Legacy worlds reject here when they cannot identify the owning run.
   return createHookConflictError(
     typeof error.token === "string" ? error.token : token,
     typeof error.conflictingRunId === "string" ? error.conflictingRunId : undefined,
