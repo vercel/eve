@@ -27,7 +27,6 @@ import {
   mergeGatewayAutoCaching,
   type PromptCachePath,
 } from "#harness/prompt-cache.js";
-import { mergeGatewayProviderPin } from "#harness/provider-tools.js";
 import { createRuntimeActionRequestFromToolCall } from "#harness/runtime-actions.js";
 import type { RuntimeToolResultActionResult } from "#runtime/actions/types.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
@@ -69,19 +68,6 @@ interface StepHooksInput {
    * Defaults to `true`.
    */
   readonly emitStepStarted?: boolean;
-  /**
-   * When set on the `gateway-auto` cache path, merges
-   * `providerOptions.gateway.only = [gatewayPinProvider]` so the AI
-   * Gateway only routes to the given provider. Used to keep
-   * provider-specific tools (e.g. Anthropic's `web_search_20250305`)
-   * on a provider that can serve them, converting a transient outage
-   * into a clean retryable 503 rather than a fallback-to-incompatible
-   * provider 400.
-   *
-   * Ignored when the author already set `gateway.only` or
-   * `gateway.order` on the model reference's provider options.
-   */
-  readonly gatewayPinProvider?: string;
   readonly marker: AnthropicCacheMarker | undefined;
   readonly session: HarnessSession;
 }
@@ -171,13 +157,9 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
     };
 
     if (input.cachePath.kind === "gateway-auto") {
-      let providerOptions = mergeGatewayAutoCaching(session.agent.modelReference.providerOptions);
-      if (input.gatewayPinProvider !== undefined) {
-        providerOptions = mergeGatewayProviderPin(providerOptions, input.gatewayPinProvider);
-      }
-      stepResult.providerOptions = providerOptions as NonNullable<
-        typeof stepResult.providerOptions
-      >;
+      stepResult.providerOptions = mergeGatewayAutoCaching(
+        session.agent.modelReference.providerOptions,
+      ) as NonNullable<typeof stepResult.providerOptions>;
     }
 
     return stepResult;

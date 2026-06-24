@@ -33,6 +33,11 @@ declare module "#public/channels/index.js" {
 
 vi.mock("ai", () => ({
   ToolLoopAgent: vi.fn(),
+  gateway: {
+    tools: {
+      parallelSearch: vi.fn(() => ({})),
+    },
+  },
   jsonSchema: vi.fn((s: unknown) => s),
   isStepCount: vi.fn((n: number) => n),
   tool: vi.fn((t: unknown) => t),
@@ -2923,147 +2928,50 @@ describe("createToolLoopHarness", () => {
     });
   });
 
-  describe("gateway provider tool routing pin", () => {
-    function setupStopResult(): void {
-      setupMockAgent({
-        finishReason: "stop",
-        response: { messages: [{ content: "ok", role: "assistant" }] },
-        text: "ok",
-        toolCalls: [],
-        toolResults: [],
-      });
-    }
-
-    it("pins providerOptions.gateway.only to the web_search backend for gateway models", async () => {
-      setupStopResult();
-      const session = createTestSession({
-        agent: {
-          modelReference: { id: "anthropic/claude-opus-4.7" },
-          system: "",
-          tools: [{ description: "Web search.", name: "web_search", inputSchema: null }],
-        },
-      });
-      const config: ToolLoopHarnessConfig = {
-        mode: "conversation",
-        resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
-        tools: new Map([
-          [
-            "web_search",
-            {
-              description: "Web search.",
-              inputSchema: jsonSchema({}),
-              name: "web_search",
-            },
-          ],
-        ]),
-      };
-      const runStep = createToolLoopHarness(config);
-      await runStep(session, { message: "hi" });
-
-      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
-      const prepareStep = getPrepareStep<unknown[], { providerOptions?: unknown }>(
-        agentCall?.prepareStep,
-      );
-      const stepResult = await prepareStep({
-        messages: [],
-        stepNumber: 0,
-        steps: [],
-        model: null,
-        context: undefined,
-      });
-      expect(stepResult.providerOptions).toEqual({
-        gateway: { caching: "auto", only: ["anthropic"] },
-      });
+  it("does not pin gateway routing when web_search is enabled", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "ok", role: "assistant" }] },
+      text: "ok",
+      toolCalls: [],
+      toolResults: [],
     });
-
-    it("does not pin when the step has no provider-specific tool in play", async () => {
-      setupStopResult();
-      const session = createTestSession({
-        agent: {
-          modelReference: { id: "anthropic/claude-opus-4.7" },
-          system: "",
-          tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
-        },
-      });
-      const config: ToolLoopHarnessConfig = {
-        mode: "conversation",
-        resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
-        tools: new Map([
-          [
-            "add",
-            {
-              description: "Adds numbers",
-              execute: vi.fn(),
-              inputSchema: jsonSchema({ type: "object" }),
-              name: "add",
-            },
-          ],
-        ]),
-      };
-      const runStep = createToolLoopHarness(config);
-      await runStep(session, { message: "hi" });
-
-      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
-      const prepareStep = getPrepareStep<unknown[], { providerOptions?: unknown }>(
-        agentCall?.prepareStep,
-      );
-      const stepResult = await prepareStep({
-        messages: [],
-        stepNumber: 0,
-        steps: [],
-        model: null,
-        context: undefined,
-      });
-      // Caching hint stays; no `only` pin because no provider-specific
-      // tool is in play.
-      expect(stepResult.providerOptions).toEqual({ gateway: { caching: "auto" } });
+    const session = createTestSession({
+      agent: {
+        modelReference: { id: "anthropic/claude-opus-4.7" },
+        system: "",
+        tools: [{ description: "Web search.", name: "web_search", inputSchema: null }],
+      },
     });
-
-    it("respects an author-supplied gateway.order over the auto pin", async () => {
-      setupStopResult();
-      const session = createTestSession({
-        agent: {
-          modelReference: {
-            id: "anthropic/claude-opus-4.7",
-            providerOptions: { gateway: { order: ["anthropic", "bedrock"] } },
+    const config: ToolLoopHarnessConfig = {
+      mode: "conversation",
+      resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
+      tools: new Map([
+        [
+          "web_search",
+          {
+            description: "Web search.",
+            inputSchema: jsonSchema({}),
+            name: "web_search",
           },
-          system: "",
-          tools: [{ description: "Web search.", name: "web_search", inputSchema: null }],
-        },
-      });
-      const config: ToolLoopHarnessConfig = {
-        mode: "conversation",
-        resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
-        tools: new Map([
-          [
-            "web_search",
-            {
-              description: "Web search.",
-              inputSchema: jsonSchema({}),
-              name: "web_search",
-            },
-          ],
-        ]),
-      };
-      const runStep = createToolLoopHarness(config);
-      await runStep(session, { message: "hi" });
+        ],
+      ]),
+    };
+    const runStep = createToolLoopHarness(config);
+    await runStep(session, { message: "hi" });
 
-      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
-      const prepareStep = getPrepareStep<unknown[], { providerOptions?: unknown }>(
-        agentCall?.prepareStep,
-      );
-      const stepResult = await prepareStep({
-        messages: [],
-        stepNumber: 0,
-        steps: [],
-        model: null,
-        context: undefined,
-      });
-      // `order` was preserved; no `only` was added.
-      expect(stepResult.providerOptions).toEqual({
-        gateway: { caching: "auto", order: ["anthropic", "bedrock"] },
-      });
+    const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+    const prepareStep = getPrepareStep<unknown[], { providerOptions?: unknown }>(
+      agentCall?.prepareStep,
+    );
+    const stepResult = await prepareStep({
+      messages: [],
+      stepNumber: 0,
+      steps: [],
+      model: null,
+      context: undefined,
     });
+    expect(stepResult.providerOptions).toEqual({ gateway: { caching: "auto" } });
   });
 
   it("emits assistant/tool events in response order when a step completes after tool work", async () => {

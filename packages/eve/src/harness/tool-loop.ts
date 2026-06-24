@@ -41,7 +41,6 @@ import type { InstrumentationDefinition } from "#public/instrumentation/index.js
 import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
 import { isCodeModeRuntimeActionInterrupt } from "#harness/code-mode-runtime-action-state.js";
 import { isCodeModeConnectionAuthInterrupt } from "#runtime/framework-tools/code-mode-connection-auth.js";
-import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import {
   hydrateSandboxAttachments,
@@ -123,13 +122,8 @@ import {
   applySystemCacheBreakpoint,
   detectPromptCachePath,
   getAnthropicCacheMarker,
-  type PromptCachePath,
 } from "#harness/prompt-cache.js";
-import {
-  resolveFrameworkToolFromUpstreamType,
-  resolveGatewayPinForWebSearchBackend,
-  resolveWebSearchBackend,
-} from "#harness/provider-tools.js";
+import { resolveFrameworkToolFromUpstreamType } from "#harness/provider-tools.js";
 import {
   createRuntimeActionRequestFromToolCall,
   resolvePendingRuntimeActions,
@@ -237,41 +231,6 @@ function enrichTelemetry(
     recordInputs: authored.recordInputs ?? true,
     recordOutputs: authored.recordOutputs ?? true,
   };
-}
-
-/**
- * Resolves the gateway provider slug to pin via
- * `providerOptions.gateway.only` for one harness step, or `undefined`
- * when no pin is needed.
- *
- * A pin is added when all of:
- * 1. The model is gateway-routed (the `gateway-auto` cache path —
- *    matches the existing `gateway.caching` hint condition).
- * 2. The effective toolset includes a framework provider tool whose
- *    backend pins to one provider (e.g. `web_search` on Anthropic).
- *
- * The author keeps the final say via `providerOptions.gateway.only` or
- * `.order` on their model reference — those overrides flow through
- * {@link mergeGatewayProviderPin} which is a no-op when either field is
- * already set.
- */
-function resolveGatewayPinForStep(input: {
-  readonly cachePath: PromptCachePath;
-  readonly modelReference: HarnessSession["agent"]["modelReference"];
-  readonly tools: ToolSet;
-}): string | undefined {
-  if (input.cachePath.kind !== "gateway-auto") {
-    return undefined;
-  }
-  if (input.tools[WEB_SEARCH_TOOL_DEFINITION.name] === undefined) {
-    return undefined;
-  }
-  const backend = resolveWebSearchBackend(input.modelReference);
-  if (backend === null) {
-    return undefined;
-  }
-  const pin = resolveGatewayPinForWebSearchBackend(backend);
-  return pin ?? undefined;
 }
 
 /**
@@ -688,24 +647,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       const effectiveTools = marker ? applyLastToolCacheBreakpoint(modelTools, marker) : modelTools;
 
-      // Pin gateway routing to the provider that owns any
-      // provider-specific tool in this step's toolset. Converts a
-      // transient primary outage into a retryable 503 instead of
-      // routing to an incompatible fallback provider. Skipped on the
-      // recovery retry because the offending tool was dropped — any
-      // provider can serve the request now.
-      const gatewayPinProvider = resolveGatewayPinForStep({
-        cachePath,
-        modelReference: session.agent.modelReference,
-        tools: effectiveTools,
-      });
-
       const hooks = buildStepHooks({
         cachePath,
         emit,
         emissionState,
         emitStepStarted: opts.suppressStepStartedEmission !== true,
-        gatewayPinProvider,
         marker,
         session,
       });
