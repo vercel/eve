@@ -8,6 +8,7 @@ import {
   Divider,
   Fields,
   LinkButton,
+  Select,
   Section,
   Table,
   Field,
@@ -62,13 +63,13 @@ describe("cardToBlocks", () => {
           {
             type: "button",
             action_id: "approve",
-            text: { type: "plain_text", text: "Approve" },
+            text: { type: "plain_text", text: "Approve", emoji: true },
             style: "primary",
           },
           {
             type: "button",
             action_id: "deny",
-            text: { type: "plain_text", text: "Deny" },
+            text: { type: "plain_text", text: "Deny", emoji: true },
             value: "force",
             style: "danger",
           },
@@ -80,16 +81,72 @@ describe("cardToBlocks", () => {
   it("converts link buttons with a synthetic action_id and url", () => {
     const blocks = cardToBlocks(
       Card({
-        children: [Actions([LinkButton({ url: "https://example.com/docs", label: "View docs" })])],
+        children: [
+          Actions([
+            LinkButton({ url: "https://example.com/docs", label: "View docs" }),
+            LinkButton({
+              id: "account",
+              url: "https://example.com/account",
+              label: "Account",
+            }),
+          ]),
+        ],
       }),
     );
-    const actions = blocks[0] as { elements: Array<Record<string, unknown>> };
-    expect(actions.elements[0]).toEqual({
-      type: "button",
-      action_id: "link:https://example.com/docs",
-      text: { type: "plain_text", text: "View docs" },
-      url: "https://example.com/docs",
+    expect(blocks[0]).toEqual({
+      elements: [
+        {
+          action_id: "link:https://example.com/docs",
+          text: { emoji: true, text: "View docs", type: "plain_text" },
+          type: "button",
+          url: "https://example.com/docs",
+        },
+        {
+          action_id: "account",
+          text: { emoji: true, text: "Account", type: "plain_text" },
+          type: "button",
+          url: "https://example.com/account",
+        },
+      ],
+      type: "actions",
     });
+  });
+
+  it("preserves a selected option", () => {
+    const blocks = cardToBlocks(
+      Card({
+        children: [
+          Actions([
+            Select({
+              id: "priority",
+              initialOption: "high",
+              label: "Priority",
+              options: [
+                { label: "Low", value: "low" },
+                { label: "High", value: "high" },
+              ],
+            }),
+          ]),
+        ],
+      }),
+    );
+    expect(blocks[0]).toMatchObject({
+      elements: [
+        {
+          initial_option: {
+            text: { text: "High", type: "plain_text" },
+            value: "high",
+          },
+        },
+      ],
+    });
+  });
+
+  it("limits the number of blocks", () => {
+    const blocks = cardToBlocks(
+      Card({ children: Array.from({ length: 60 }, (_, index) => CardText(`item ${index}`)) }),
+    );
+    expect(blocks).toHaveLength(50);
   });
 
   it("converts divider, image, and fields children", () => {
@@ -191,8 +248,6 @@ describe("cardToFallbackText", () => {
         children: [CardText("Body content"), Divider()],
       }),
     );
-    expect(text).toContain("Heading");
-    expect(text).toContain("Caption");
-    expect(text).toContain("Body content");
+    expect(text).toBe("Heading\nCaption\nBody content");
   });
 });
