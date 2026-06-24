@@ -1,5 +1,21 @@
 # eve
 
+## 0.13.6
+
+### Patch Changes
+
+- 7f66a06: Add opt-in GitHub channel hooks for check suite, check run, and workflow run webhooks, with normalized CI metadata and pull request dispatch.
+- a63dfa2: Project search now resolves exact names directly and ranks one fallback result page, avoiding unbounded substring-match pagination for short queries.
+- a63dfa2: Fixed remote `/vc:login` rejecting a freshly resolved Vercel project with "The local Vercel OIDC token does not match the resolved deployment: owner_id." The verified deployment now takes its owner id from Vercel's response instead of the team slug used to scope the lookup, so it matches the OIDC token's `owner_id` claim.
+- a63dfa2: In remote sessions, `/vc:login` resolves the target Vercel project and owning team from the deployment URL. When the target requires authentication and Vercel cannot resolve its host in the active scope, the flow asks you to select another team, then reruns the lookup in that scope. When access is denied, for example because a team SSO session expired, it re-authenticates and retries.
+- a63dfa2: Remote `eve dev --url` now treats `/eve/v1/info` as best-effort inspection rather than a connection gate. Once authentication succeeds and the deployment is reachable, the session connects even when the agent info route is absent (confirmed via the public health route) or returns an unrecognized shape (e.g. a deployment built from an older eve). Inspection-only data is simply omitted from the header in that case, and the underlying parse failure now names the offending fields instead of an opaque message.
+- a63dfa2: Remote `eve dev --url` sessions now show deployment and authentication state, try refreshed project-scoped OIDC credentials at startup, and open a cancellable `/vc:login` recovery flow when access is rejected. The flow can update the target project's Trusted Sources after confirmation.
+- c5071e6: Ensure every eve Workflow runtime entrypoint installs the eve queue namespace through a single guarded boundary.
+- c9e895b: Fix `eve dev` streaming throughput and time-to-first-token degrading as parked (`ask_question` / HITL) sessions accumulate. The dev runtime's NDJSON event-stream reader now forwards cancellation to the underlying run stream, so disconnecting from a parked session no longer leaks a filesystem polling loop for the life of the dev server.
+- c6b2da8: Add `$eve.channel_request_id` workflow attributes from Vercel's `x-vercel-id` header so session and turn workflow runs can be joined back to the inbound request that started or resumed them.
+- ab3e6e8: Give each threadless proactive Slack session a unique temporary continuation token so overlapping scheduled runs targeting the same channel do not conflict before they anchor to a Slack thread.
+- a63dfa2: The dev TUI's `/vc` and `/login` commands are now `/vc:install` and `/vc:login`. `/vc:login` is the single Vercel authentication command: it logs in locally and, in remote (`eve dev --url`) sessions, recovers access with Vercel OIDC.
+
 ## 0.13.5
 
 ### Patch Changes
