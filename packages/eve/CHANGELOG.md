@@ -1,5 +1,35 @@
 # eve
 
+## 0.13.3
+
+### Patch Changes
+
+- b33c611: use shared Chat SDK Block Kit primitives for Slack card rendering
+
+## 0.13.2
+
+### Patch Changes
+
+- d82e8d1: Consolidate model provider setup into one choice between project-backed AI Gateway, an inline `AI_GATEWAY_API_KEY`, and direct provider credentials. Gateway key validation now reports its latest result inline without leaving stale errors in the setup panel.
+- b29e2ae: Remote clients can now send Vercel OIDC credentials through a dedicated auth mode and reject malformed agent metadata before using it.
+
+## 0.13.1
+
+### Patch Changes
+
+- 9d8bd6e: Existing production sessions now refresh their system prompt from the latest deployment before each model step. Long-lived channel conversations retain their history and state while adopting updated agent instructions.
+
+## 0.13.0
+
+### Minor Changes
+
+- 306e14e: Remove the top-level `auth` field from `defineTool()` and require tool auth providers to be passed inline to `ctx.getToken(provider)` or `ctx.requireAuth(provider)`.
+- f00ca73: Search every Vercel project in the selected team and preserve the selected project ID through linking.
+
+### Patch Changes
+
+- 36b67fc: Make `eve init` respect ancestor package-manager workspaces when scaffolding nested packages. The scaffold now updates workspace-owned package policy at the npm, pnpm, Yarn, or Bun workspace root instead of writing nested root-only config into the generated package.
+
 ## 0.12.3
 
 ### Patch Changes

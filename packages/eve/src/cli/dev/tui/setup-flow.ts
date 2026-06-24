@@ -1,5 +1,6 @@
 import type { ChannelSetupChoice, ChannelSetupChoiceOptions } from "#setup/cli/index.js";
 import type { SearchActionOption } from "#setup/cli/select-state.js";
+import type { ProviderPickerChoice, ProviderPickerRequest } from "#setup/flows/provider.js";
 import type { SelectNotice } from "#setup/prompter.js";
 
 import type { SetupPanelOption } from "./setup-panel.js";
@@ -72,6 +73,8 @@ export interface SetupFlowRenderer {
       validate?: (value: string) => string | undefined;
     };
   }): Promise<SetupEditableSelectResult | undefined>;
+  /** Provider-only picker with masked async validation. Not part of Prompter. */
+  readProviderPicker(options: ProviderPickerRequest): Promise<ProviderPickerChoice | undefined>;
   readText(options: {
     message: string;
     placeholder?: string;

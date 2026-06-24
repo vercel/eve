@@ -35,15 +35,15 @@ describe("resolveDevelopmentClientOptions", () => {
   it("binds an authorized credential gate to a non-redirecting client", () => {
     const credentials = createDevelopmentCredentialGate("https://verified.example.com");
 
-    expect(
-      resolveRemoteDevelopmentClientOptions({
-        credentials,
-        serverUrl: "https://verified.example.com",
-      }),
-    ).toEqual({
-      headers: credentials.resolveHeaders,
-      host: "https://verified.example.com",
-      redirect: "manual",
+    const options = resolveRemoteDevelopmentClientOptions({
+      credentials,
+      serverUrl: "https://verified.example.com",
     });
+
+    expect(options.host).toBe("https://verified.example.com");
+    expect(options.redirect).toBe("manual");
+    expect(options.headers).toBe(credentials.resolveBypassHeaders);
+    // The token flows through the higher-level vercelOidc auth, never headers.
+    expect(options.auth).toEqual({ vercelOidc: { token: expect.any(Function) } });
   });
 });

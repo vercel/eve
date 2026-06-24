@@ -25,12 +25,13 @@ describe("resolveVerifiedRemoteDevelopmentClient", () => {
     });
 
     expect(options.redirect).toBe("manual");
-    expect(typeof options.headers).toBe("function");
-    if (typeof options.headers !== "function") throw new Error("Expected dynamic headers.");
-    const headers = new Headers(await options.headers());
-
-    expect(headers.get("authorization")).toBe("Bearer fresh-token");
-    expect(headers.get("x-vercel-trusted-oidc-idp-token")).toBe("fresh-token");
+    // The OIDC token rides the higher-level vercelOidc auth; the client expands
+    // it into the Authorization + trusted-OIDC headers (covered in client.test.ts).
+    if (options.auth === undefined || !("vercelOidc" in options.auth)) {
+      throw new Error("Expected vercelOidc auth.");
+    }
+    const { token } = options.auth.vercelOidc;
+    expect(typeof token === "function" ? await token() : token).toBe("fresh-token");
     expect(resolveDevelopmentOidcToken).toHaveBeenCalledWith({
       ownerId: "team_test",
       projectId: "prj_example",
@@ -51,9 +52,11 @@ describe("resolveVerifiedRemoteDevelopmentClient", () => {
       },
     });
 
-    expect(typeof options.headers).toBe("function");
-    if (typeof options.headers !== "function") throw new Error("Expected dynamic headers.");
-    await expect(options.headers()).resolves.toEqual({});
+    if (options.auth === undefined || !("vercelOidc" in options.auth)) {
+      throw new Error("Expected vercelOidc auth.");
+    }
+    const { token } = options.auth.vercelOidc;
+    expect(typeof token === "function" ? await token() : token).toBe("");
     expect(lastOidcTokenFailure()).toEqual(failure);
   });
 

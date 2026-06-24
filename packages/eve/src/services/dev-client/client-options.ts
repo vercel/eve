@@ -23,7 +23,8 @@ export function resolveRemoteDevelopmentClientOptions(input: {
     );
   }
   return {
-    headers: input.credentials.resolveHeaders,
+    auth: { vercelOidc: { token: () => input.credentials.resolveToken() } },
+    headers: input.credentials.resolveBypassHeaders,
     host: input.serverUrl,
     redirect: "manual",
   };

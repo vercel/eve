@@ -31,6 +31,14 @@ describe("isVercelAuthChallenge", () => {
     expect(isVercelAuthChallenge({ body: VERCEL_SSO_CHALLENGE_BODY, status: 401 })).toBe(true);
   });
 
+  it("requires HTTP 401 and the complete Vercel challenge signature", () => {
+    expect(isVercelAuthChallenge(new ClientError(500, VERCEL_SSO_CHALLENGE_BODY))).toBe(false);
+    expect(
+      isVercelAuthChallenge(new ClientError(401, "<title>Authentication Required</title>")),
+    ).toBe(false);
+    expect(isVercelAuthChallenge({ body: VERCEL_SSO_CHALLENGE_BODY })).toBe(false);
+  });
+
   it("returns false for non-error inputs", () => {
     expect(isVercelAuthChallenge(undefined)).toBe(false);
     expect(isVercelAuthChallenge(null)).toBe(false);

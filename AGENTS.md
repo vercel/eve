@@ -11,6 +11,9 @@ channels, subagents, and schedules are all files — and eve compiles and runs i
 See the [README](./README.md) for the full overview and
 [`docs/`](./docs) for user-facing documentation.
 
+Always style the framework name as `eve`, lowercase, in user-facing copy,
+docs, prompts, comments, and headings.
+
 ## Repository layout
 
 - `packages/eve` — the framework and `eve` CLI (the main package)
@@ -19,6 +22,7 @@ See the [README](./README.md) for the full overview and
 - `apps/frameworks`, `apps/templates`, `apps/docs` — framework integrations, templates, docs site
 - `docs` — published documentation content
 - `e2e/` — fixture-owned `eve eval` end-to-end tests
+- `research` — issue-backed implementation plans for proposed changes
 
 ## Git workflow
 
@@ -93,6 +97,16 @@ or scenario fixtures. Nothing is done until `typecheck`, `lint`, `fmt`,
 Machine-checkable invariants are enforced by `pnpm guard:invariants`, which
 runs in the CI lint job. If the guard fails, fix the violation rather than
 editing the baseline — baselines may only shrink.
+
+## Research plans
+
+Research documents live in the top-level `research/` directory and require
+`issue`, `status`, and `last_updated` frontmatter. Keep plans concise and focus
+primarily on the proposed authoring API and externally observable semantics.
+Include only the architecture needed to explain boundaries, data flow, and
+invariants; avoid speculative implementation detail, repeated rationale, and
+exhaustive task inventories. Use a compact diagram when it makes a lifecycle
+or ownership relationship materially clearer.
 
 ## Testing
 

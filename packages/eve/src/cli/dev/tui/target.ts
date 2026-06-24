@@ -43,3 +43,8 @@ export function resolveTuiTitle(input: {
     .join(" ");
   return humanized.length > 0 ? humanized : undefined;
 }
+
+/** Returns the URL host shown in remote status and authentication messages. */
+export function remoteHost(target: RemoteDevelopmentTarget): string {
+  return new URL(target.serverUrl).host;
+}

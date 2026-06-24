@@ -28,6 +28,7 @@ function fakePanelRenderer(): TuiSetupCommandRenderer & {
   return {
     readSelect: vi.fn(async () => []),
     readEditableSelect: vi.fn(async () => undefined),
+    readProviderPicker: vi.fn(async () => undefined),
     readText: vi.fn(async () => ""),
     readAcknowledge: vi.fn(async () => {}),
     readChoice: vi.fn(() => ({ choice: Promise.resolve(undefined), close: vi.fn() })),
@@ -110,7 +111,12 @@ describe("runTuiSetupCommand", () => {
       message: "Model changed to openai/gpt-5.5. Live on your next prompt.",
       preserveFlowDiagnostics: false,
     });
-    expect(flows.runModelFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
+    expect(flows.runModelFlow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appRoot: APP_ROOT,
+        deps: expect.objectContaining({ runProviderFlow: expect.any(Function) }),
+      }),
+    );
   });
 
   it("forwards an automatic provider entry to the model flow", async () => {

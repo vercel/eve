@@ -16,6 +16,7 @@
 
 import { ClientError } from "#client/client-error.js";
 import type { DevelopmentOidcTokenFailure } from "#services/dev-client/request-headers.js";
+import { isObject } from "#shared/guards.js";
 
 /**
  * Substrings that uniquely identify the Vercel Deployment Protection
@@ -41,17 +42,7 @@ const VERCEL_AUTH_CHALLENGE_MARKERS: readonly string[] = [
  * so the CLI keeps degrading gracefully when Vercel tweaks the page.
  */
 function bodyLooksLikeVercelAuthChallenge(body: string): boolean {
-  if (body.length === 0) {
-    return false;
-  }
-
-  for (const marker of VERCEL_AUTH_CHALLENGE_MARKERS) {
-    if (body.includes(marker)) {
-      return true;
-    }
-  }
-
-  return false;
+  return body.length > 0 && VERCEL_AUTH_CHALLENGE_MARKERS.every((marker) => body.includes(marker));
 }
 
 /**
@@ -69,19 +60,15 @@ function bodyLooksLikeVercelAuthChallenge(body: string): boolean {
  */
 export function isVercelAuthChallenge(error: unknown): boolean {
   if (error instanceof ClientError) {
-    return bodyLooksLikeVercelAuthChallenge(error.body);
+    return error.status === 401 && bodyLooksLikeVercelAuthChallenge(error.body);
   }
 
-  if (
-    error !== null &&
-    typeof error === "object" &&
-    "body" in error &&
-    typeof (error as { body: unknown }).body === "string"
-  ) {
-    return bodyLooksLikeVercelAuthChallenge((error as { body: string }).body);
-  }
-
-  return false;
+  return (
+    isObject(error) &&
+    error.status === 401 &&
+    typeof error.body === "string" &&
+    bodyLooksLikeVercelAuthChallenge(error.body)
+  );
 }
 
 /**
