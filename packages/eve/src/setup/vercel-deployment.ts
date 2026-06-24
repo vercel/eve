@@ -1,12 +1,12 @@
 import { captureVercel, type VercelCaptureFailure } from "#setup/primitives/index.js";
-import {
-  projectReferenceFromEnvironment,
-  readProjectLink,
-  type VercelProjectReference,
-} from "#setup/project-resolution.js";
+import type { VercelProjectReference } from "#setup/project-resolution.js";
 import { z } from "zod";
 
-import { isNotFoundApiFailure, normalizeVercelApiResult } from "./vercel-api-failure.js";
+import {
+  isForbiddenApiFailure,
+  isNotFoundApiFailure,
+  normalizeVercelApiResult,
+} from "./vercel-api-failure.js";
 
 const VercelDeploymentSchema = z.object({
   ownerId: z.string().min(1),
@@ -43,7 +43,7 @@ export type VercelDeploymentResolutionFailure =
 export type VercelDeploymentResolution =
   | { readonly kind: "resolved"; readonly target: VerifiedVercelTarget }
   | { readonly kind: "not-found" }
-  | { readonly kind: "unscoped" }
+  | { readonly kind: "forbidden" }
   | {
       readonly kind: "project-mismatch";
       readonly expectedProjectId: string;
@@ -57,10 +57,9 @@ export type VercelDeploymentResolution =
 
 export interface VercelDeploymentResolutionDeps {
   readonly captureVercel: typeof captureVercel;
-  readonly readProjectLink: typeof readProjectLink;
 }
 
-const defaultDeps: VercelDeploymentResolutionDeps = { captureVercel, readProjectLink };
+const defaultDeps: VercelDeploymentResolutionDeps = { captureVercel };
 const DEPLOYMENT_LOOKUP_TIMEOUT_MS = 10_000;
 
 function environmentForDeployment(deployment: z.infer<typeof VercelDeploymentSchema>): string {
@@ -79,19 +78,19 @@ export async function resolveVercelDeployment(input: {
   readonly deps?: Partial<VercelDeploymentResolutionDeps>;
 }): Promise<VercelDeploymentResolution> {
   const deps = { ...defaultDeps, ...input.deps };
-  const source =
-    input.source ??
-    projectReferenceFromEnvironment(process.env) ??
-    (await deps.readProjectLink(input.workspaceRoot));
-  if (source === undefined) return { kind: "unscoped" };
+  // A deployment hostname is globally unique, so Vercel resolves it under the
+  // caller's own access without a scope — including a team-owned deployment
+  // resolved from a personal default scope. An optional `source` (a known
+  // project link) scopes the lookup and is cross-checked below, but its absence
+  // is not fatal: the host alone yields the canonical owner and project.
+  const source = input.source;
 
   const result = normalizeVercelApiResult(
     await deps.captureVercel(
       [
         "api",
         `/v13/deployments/${encodeURIComponent(input.host)}`,
-        "--scope",
-        source.orgId,
+        ...(source !== undefined ? ["--scope", source.orgId] : []),
         "--raw",
       ],
       {
@@ -107,6 +106,9 @@ export async function resolveVercelDeployment(input: {
       return { kind: "cancelled" };
     }
     if (isNotFoundApiFailure(result.failure)) return { kind: "not-found" };
+    // A denied scope (e.g. an expired team SSO session) is distinct from a
+    // genuine miss: the caller can re-authenticate and retry.
+    if (isForbiddenApiFailure(result.failure)) return { kind: "forbidden" };
     return { kind: "failed", failure: { cause: "vercel", failure: result.failure } };
   }
 
@@ -131,7 +133,7 @@ export async function resolveVercelDeployment(input: {
     };
   }
 
-  if (parsed.data.projectId !== source.projectId) {
+  if (source !== undefined && parsed.data.projectId !== source.projectId) {
     return {
       kind: "project-mismatch",
       expectedProjectId: source.projectId,
@@ -148,11 +150,10 @@ export async function resolveVercelDeployment(input: {
       origin,
       deployment: {
         provider: "vercel",
-        // `source.orgId` may be a team slug (the project picker hands back the
-        // slug it scoped with), but the OIDC `owner_id` claim and Trusted
-        // Sources both key on the canonical team/owner id. Vercel's own
-        // response carries that id, so the verified target derives it here
-        // rather than echoing whatever identifier we queried with.
+        // The OIDC `owner_id` claim and Trusted Sources key on the canonical
+        // team/owner id. Vercel's response carries it, so the verified target
+        // takes the owner from there rather than from any scope the caller may
+        // have queried with (which can be a slug).
         ownerId: parsed.data.ownerId,
         projectId: parsed.data.projectId,
         projectName: parsed.data.name,

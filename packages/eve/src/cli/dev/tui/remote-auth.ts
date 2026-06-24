@@ -1,20 +1,12 @@
-import pc from "picocolors";
-
 import { resolveDevelopmentOidcToken } from "#services/dev-client/request-headers.js";
 import { formatDevelopmentOidcTokenFailure } from "#services/dev-client/vercel-auth-error.js";
 import { runLoginFlow, type LoginFlowResult } from "#setup/flows/login.js";
 import type { Prompter } from "#setup/prompter.js";
 import {
-  detectProjectIdentity,
-  readProjectLink,
-  type ProjectIdentity,
-} from "#setup/project-resolution.js";
-import {
   resolveVercelDeployment,
   type VercelDeploymentResolutionFailure,
   type VerifiedVercelTarget,
 } from "#setup/vercel-deployment.js";
-import { pickProject, pickTeam } from "#setup/vercel-project.js";
 import { WizardCancelledError } from "#setup/step.js";
 import {
   applyVercelTrustedSourceAccess,
@@ -32,10 +24,6 @@ import { toErrorMessage } from "#shared/errors.js";
 export type RemoteAuthFlow = typeof runRemoteAuthFlow;
 export interface RemoteAuthFlowDeps {
   readonly runLoginFlow: typeof runLoginFlow;
-  readonly detectProjectIdentity: typeof detectProjectIdentity;
-  readonly readProjectLink: typeof readProjectLink;
-  readonly pickTeam: typeof pickTeam;
-  readonly pickProject: typeof pickProject;
   readonly resolveVercelDeployment: typeof resolveVercelDeployment;
   readonly resolveOidcToken: typeof resolveDevelopmentOidcToken;
   readonly prepareVercelTrustedSourceAccess: typeof prepareVercelTrustedSourceAccess;
@@ -44,10 +32,6 @@ export interface RemoteAuthFlowDeps {
 
 const defaultDeps: RemoteAuthFlowDeps = {
   runLoginFlow,
-  detectProjectIdentity,
-  readProjectLink,
-  pickTeam,
-  pickProject,
   resolveVercelDeployment,
   resolveOidcToken: resolveDevelopmentOidcToken,
   prepareVercelTrustedSourceAccess,
@@ -91,58 +75,14 @@ function loginFailure(result: LoginFlowResult): RemoteAuthPreparation | undefine
   }
 }
 
-function currentProjectHint(identity: ProjectIdentity): string {
-  const project = pc.bold(identity.projectName);
-  return identity.teamName === undefined ? project : `${project} in ${identity.teamName}`;
-}
-
 function deploymentFailureMessage(failure: VercelDeploymentResolutionFailure): string {
   return failure.cause === "vercel" ? failure.failure.message : failure.message;
 }
 
-async function chooseProjectAction(
-  prompter: Prompter,
-  host: string,
-  identity: ProjectIdentity,
-): Promise<"current" | "change" | "cancel"> {
-  return prompter.select({
-    message: `Authenticate ${host}`,
-    hintLayout: "stacked",
-    options: [
-      {
-        value: "current",
-        label: "Use current project",
-        hint: currentProjectHint(identity),
-      },
-      {
-        value: "change",
-        label: "Select another Vercel project",
-      },
-      { value: "cancel", label: "Cancel" },
-    ],
-  });
-}
-
-async function selectProject(
-  deps: RemoteAuthFlowDeps,
-  workspaceRoot: string,
-  prompter: Prompter,
-  signal: AbortSignal | undefined,
-): Promise<{ readonly projectId: string; readonly team: string }> {
-  const team = await deps.pickTeam(prompter, workspaceRoot, undefined, { signal });
-  const picked = await deps.pickProject(prompter, workspaceRoot, team, {
-    allowCreateWhenEmpty: false,
-    signal,
-  });
-  if (picked.kind !== "existing") {
-    throw new Error("Remote authentication requires an existing Vercel project.");
-  }
-  return { projectId: picked.project.projectId, team: picked.team };
-}
-
 /**
- * Authenticates a remote through a verified Vercel project, updating Trusted
- * Sources when needed and keeping the selected credential in this TUI session.
+ * Authenticates a remote by resolving its deployment URL to the owning Vercel
+ * project, updating Trusted Sources when needed and keeping the resolved
+ * credential in this TUI session.
  */
 export async function runRemoteAuthFlow(input: {
   readonly workspaceRoot: string;
@@ -159,79 +99,52 @@ export async function runRemoteAuthFlow(input: {
   let mutationStarted = false;
 
   try {
-    const login = await deps.runLoginFlow({
-      appRoot: workspaceRoot,
-      prompter,
-      signal,
-    });
+    // Authenticate first so the resolve runs under real credentials. When the
+    // user is already logged in this is a no-op and shows no dialogue.
+    const login = await deps.runLoginFlow({ appRoot: workspaceRoot, prompter, signal });
     const loginOutcome = loginFailure(login);
     if (loginOutcome !== undefined) return loginOutcome;
     if (login.kind === "logged-in") completedMutations.push({ kind: "vercel-login" });
 
-    const identity = await deps.detectProjectIdentity(workspaceRoot, { signal });
-    signal?.throwIfAborted();
-
-    let shouldSelectProject = identity === undefined;
-    if (identity !== undefined) {
-      const action = await chooseProjectAction(prompter, host, identity);
-      if (action === "cancel") return cancelled(completedMutations);
-      shouldSelectProject = action === "change";
+    // A deployment hostname is globally unique, so Vercel resolves the project
+    // and owning team straight from the URL under the caller's own access — no
+    // team/project picker. If access is denied (for example an expired team SSO
+    // session), re-authenticate through the same dialogue and resolve once more.
+    let resolution = await deps.resolveVercelDeployment({ workspaceRoot, host, signal });
+    if (resolution.kind === "forbidden") {
+      const reauth = await deps.runLoginFlow({ appRoot: workspaceRoot, prompter, signal });
+      const reauthOutcome = loginFailure(reauth);
+      if (reauthOutcome !== undefined) return reauthOutcome;
+      if (reauth.kind === "logged-in") completedMutations.push({ kind: "vercel-login" });
+      signal?.throwIfAborted();
+      resolution = await deps.resolveVercelDeployment({ workspaceRoot, host, signal });
     }
 
-    let projectAuthority: { readonly orgId: string; readonly projectId: string } | undefined;
-    if (shouldSelectProject) {
-      try {
-        const project = await selectProject(deps, workspaceRoot, prompter, signal);
-        projectAuthority = { orgId: project.team, projectId: project.projectId };
-      } catch (error) {
-        if (error instanceof WizardCancelledError) return cancelled(completedMutations);
-        signal?.throwIfAborted();
-        return failed(
-          `Could not select a Vercel project: ${toErrorMessage(error)}`,
-          completedMutations,
-        );
-      }
-    }
-    if (!shouldSelectProject) {
-      const link = await deps.readProjectLink(workspaceRoot);
-      if (link !== undefined) {
-        projectAuthority = { orgId: link.orgId, projectId: link.projectId };
-      }
-    }
-    if (projectAuthority === undefined) {
-      return failed("The directory is not linked to a valid Vercel project.", completedMutations);
-    }
-    const deploymentResolution = await deps.resolveVercelDeployment({
-      workspaceRoot,
-      host,
-      signal,
-      source: projectAuthority,
-    });
     let target: VerifiedVercelTarget;
-    switch (deploymentResolution.kind) {
+    switch (resolution.kind) {
       case "resolved":
-        target = deploymentResolution.target;
+        target = resolution.target;
         break;
       case "cancelled":
         return cancelled(completedMutations);
-      case "not-found":
+      case "forbidden":
         return failed(
-          `Vercel did not resolve ${host} as a deployment in the selected account.`,
+          `Could not access ${host}. Re-authenticate (for example to complete a team's SSO), then retry /vc:auth.`,
           completedMutations,
         );
-      case "unscoped":
+      case "not-found":
         return failed(
-          `Could not verify ${host}: the directory is not linked to a Vercel account.`,
+          `Vercel did not resolve ${host} as a deployment you can access. If it belongs to a team that enforces SSO, re-authenticate and retry /vc:auth.`,
           completedMutations,
         );
       case "project-mismatch":
         return failed(
-          `Could not verify ${host}: Vercel resolved project ${deploymentResolution.actualProjectId}, not ${deploymentResolution.expectedProjectId}.`,
+          `Could not verify ${host}: Vercel resolved project ${resolution.actualProjectId}, not ${resolution.expectedProjectId}.`,
           completedMutations,
         );
       case "failed":
         return failed(
-          `Could not verify ${host} through Vercel: ${deploymentFailureMessage(deploymentResolution.failure)}`,
+          `Could not verify ${host} through Vercel: ${deploymentFailureMessage(resolution.failure)}`,
           completedMutations,
         );
     }

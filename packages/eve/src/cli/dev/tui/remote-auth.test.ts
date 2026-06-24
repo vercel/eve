@@ -1,9 +1,7 @@
-import pc from "picocolors";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
-import type { PrompterValue, SingleSelectOptions } from "#setup/prompter.js";
 
 import { runRemoteAuthFlow, type RemoteAuthFlowDeps } from "./remote-auth.js";
 import { formatRemoteAuthChallengeMessage } from "./remote-auth-result.js";
@@ -11,34 +9,22 @@ import { formatRemoteAuthChallengeMessage } from "./remote-auth-result.js";
 const WORKSPACE_ROOT = "/app/weather-agent";
 const HOST = "vpoke.playground-vercel.tools";
 const SERVER_URL = `https://${HOST}/`;
-const CURRENT_PROJECT = {
-  projectId: "prj_remote",
-  orgId: "team_acme",
-  projectName: "remote-agent",
-};
-const SELECTED_PROJECT = {
-  projectId: "prj_selected",
-  orgId: "team_acme",
-  projectName: "remote-agent",
-};
-const VERIFIED_TARGET = await resolveTestVercelTarget({
+const OWNER_ID = "team_acme";
+const PROJECT_ID = "prj_remote";
+
+const TARGET = await resolveTestVercelTarget({
   host: HOST,
-  projectId: "prj_remote",
-  ownerId: "team_acme",
-  projectName: "remote-agent",
-});
-const SELECTED_VERIFIED_TARGET = await resolveTestVercelTarget({
-  host: HOST,
-  projectId: "prj_selected",
-  ownerId: "team_acme",
+  projectId: PROJECT_ID,
+  ownerId: OWNER_ID,
   projectName: "remote-agent",
 });
 const TRUSTED_SOURCE_GRANT = {
-  ownerId: "team_acme",
-  projectId: "prj_selected",
+  ownerId: OWNER_ID,
+  projectId: PROJECT_ID,
   projectName: "remote-agent",
   targetEnvironment: "production",
 } as const;
+
 function oidcToken(ownerId: string, projectId: string, version = "1"): string {
   const encode = (value: unknown): string =>
     Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -51,11 +37,10 @@ type PreparationResult = Awaited<
   ReturnType<RemoteAuthFlowDeps["prepareVercelTrustedSourceAccess"]>
 >;
 type ApplicationResult = Awaited<ReturnType<RemoteAuthFlowDeps["applyVercelTrustedSourceAccess"]>>;
+
 interface HarnessOptions {
-  readonly projectAction?: "current" | "change" | "cancel";
-  readonly identity?: "current" | "none";
-  readonly login?: LoginResult;
-  readonly deployment?: DeploymentResult;
+  readonly logins?: readonly LoginResult[];
+  readonly deployments?: readonly DeploymentResult[];
   readonly preparation?: PreparationResult;
   readonly application?: ApplicationResult;
   readonly token?:
@@ -66,61 +51,30 @@ interface HarnessOptions {
 
 function createHarness(options: HarnessOptions = {}) {
   const operations: string[] = [];
-  const prompts: SingleSelectOptions<PrompterValue>[] = [];
-  const tokenProject =
-    options.identity === "none" || options.projectAction === "change"
-      ? { ownerId: SELECTED_PROJECT.orgId, projectId: SELECTED_PROJECT.projectId }
-      : { ownerId: CURRENT_PROJECT.orgId, projectId: CURRENT_PROJECT.projectId };
+  const logins = options.logins ?? [{ kind: "already" }];
+  const deployments = options.deployments ?? [{ kind: "resolved", target: TARGET }];
+  let loginCall = 0;
+  let deploymentCall = 0;
   let token =
     options.token?.kind === "missing"
       ? undefined
-      : (options.token?.value ?? oidcToken(tokenProject.ownerId, tokenProject.projectId));
+      : (options.token?.value ?? oidcToken(OWNER_ID, PROJECT_ID));
+
+  // No `select` is expected: the flow resolves from the URL with no picker.
   const { prompter } = createFakePrompter({
-    single: (prompt) => {
-      prompts.push(prompt);
-      return options.projectAction ?? "current";
+    single: () => {
+      throw new Error("unexpected select prompt");
     },
   });
+
   const deps: RemoteAuthFlowDeps = {
     runLoginFlow: vi.fn<RemoteAuthFlowDeps["runLoginFlow"]>(async () => {
       operations.push("login");
-      return options.login ?? { kind: "already" };
-    }),
-    detectProjectIdentity: vi.fn(async () => {
-      operations.push("identity");
-      return options.identity === "none"
-        ? undefined
-        : { projectName: "remote-agent", teamName: "Acme" };
-    }),
-    readProjectLink: vi.fn(async () => {
-      operations.push("read-link");
-      return CURRENT_PROJECT;
-    }),
-    pickTeam: vi.fn(async () => {
-      operations.push("team");
-      return "acme";
-    }),
-    // The real picker echoes back the team it was scoped with — a slug from
-    // `pickTeam`, not a `team_*` id. Mirror that so the suite exercises the
-    // slug flowing through as the deployment scope.
-    pickProject: vi.fn<RemoteAuthFlowDeps["pickProject"]>(async (_prompter, _root, team) => {
-      operations.push("project");
-      return {
-        kind: "existing",
-        project: {
-          projectId: SELECTED_PROJECT.projectId,
-          projectName: SELECTED_PROJECT.projectName,
-        },
-        team,
-      };
+      return logins[Math.min(loginCall++, logins.length - 1)]!;
     }),
     resolveVercelDeployment: vi.fn<RemoteAuthFlowDeps["resolveVercelDeployment"]>(async () => {
       operations.push("deployment");
-      const target =
-        options.projectAction === "change" || options.identity === "none"
-          ? SELECTED_VERIFIED_TARGET
-          : VERIFIED_TARGET;
-      return options.deployment ?? { kind: "resolved", target };
+      return deployments[Math.min(deploymentCall++, deployments.length - 1)]!;
     }),
     resolveOidcToken: vi.fn<RemoteAuthFlowDeps["resolveOidcToken"]>(async () => {
       operations.push("token");
@@ -145,7 +99,6 @@ function createHarness(options: HarnessOptions = {}) {
   return {
     deps,
     operations,
-    prompts,
     prompter,
     setToken(value: string | undefined) {
       token = value;
@@ -165,144 +118,137 @@ function createHarness(options: HarnessOptions = {}) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("runRemoteAuthFlow", () => {
-  it("shows the current project before authenticating it", async () => {
-    vi.spyOn(pc, "bold").mockImplementation((value) => `<bold>${value}</bold>`);
-    const harness = createHarness({ configureTrustedSources: true });
+  it("resolves the deployment from the URL and prepares the session token", async () => {
+    const harness = createHarness();
 
     await expect(harness.run()).resolves.toMatchObject({ kind: "prepared" });
 
-    expect(harness.prompts[0]?.options).toEqual([
-      {
-        value: "current",
-        label: "Use current project",
-        hint: "<bold>remote-agent</bold> in Acme",
-      },
-      {
-        value: "change",
-        label: "Select another Vercel project",
-      },
-      { value: "cancel", label: "Cancel" },
-    ]);
     expect(harness.deps.resolveVercelDeployment).toHaveBeenCalledWith({
       workspaceRoot: WORKSPACE_ROOT,
       host: HOST,
       signal: undefined,
-      source: { orgId: "team_acme", projectId: "prj_remote" },
     });
-    expect(harness.deps.prepareVercelTrustedSourceAccess).toHaveBeenCalledWith(
-      expect.objectContaining({
-        target: VERIFIED_TARGET,
-      }),
-    );
     expect(harness.deps.resolveOidcToken).toHaveBeenCalledWith({
-      ownerId: "team_acme",
-      projectId: "prj_remote",
+      ownerId: OWNER_ID,
+      projectId: PROJECT_ID,
       forceRefresh: true,
     });
+    expect(harness.operations).toEqual(["login", "deployment", "token"]);
   });
 
-  it("verifies and authenticates a selected project without relinking the directory", async () => {
-    vi.spyOn(pc, "bold").mockImplementation((value) => `<bold>${value}</bold>`);
-    const harness = createHarness({ projectAction: "change" });
-
-    await expect(harness.run()).resolves.toMatchObject({ kind: "prepared" });
-
-    expect(harness.deps.resolveVercelDeployment).toHaveBeenCalledWith({
-      workspaceRoot: WORKSPACE_ROOT,
-      host: HOST,
-      signal: undefined,
-      // `pickTeam` yields a slug; it scopes the lookup verbatim, while the
-      // resolved target's canonical owner id is what mints the OIDC token.
-      source: { orgId: "acme", projectId: "prj_selected" },
+  it("re-authenticates and resolves again when access is initially forbidden", async () => {
+    const harness = createHarness({
+      logins: [{ kind: "already" }, { kind: "logged-in" }],
+      deployments: [{ kind: "forbidden" }, { kind: "resolved", target: TARGET }],
     });
-    expect(harness.operations).toEqual([
-      "login",
-      "identity",
-      "team",
-      "project",
-      "deployment",
-      "token",
-    ]);
-    expect(harness.deps.resolveOidcToken).toHaveBeenCalledWith({
-      ownerId: "team_acme",
-      projectId: "prj_selected",
-      forceRefresh: true,
+
+    await expect(harness.run()).resolves.toMatchObject({
+      kind: "prepared",
+      completedMutations: [{ kind: "vercel-login" }],
     });
-    expect(harness.prompts).toHaveLength(1);
+    expect(harness.operations).toEqual(["login", "deployment", "login", "deployment", "token"]);
+    expect(harness.deps.resolveVercelDeployment).toHaveBeenCalledTimes(2);
   });
 
   it("gets Trusted Sources consent, applies it, then requests the session token", async () => {
     const harness = createHarness({
-      projectAction: "change",
       configureTrustedSources: true,
       preparation: { kind: "approved", grant: TRUSTED_SOURCE_GRANT },
-      application: {
-        kind: "updated",
-        targetProjectName: "remote-agent",
-      },
+      application: { kind: "updated", targetProjectName: "remote-agent" },
     });
 
     await expect(harness.run()).resolves.toMatchObject({ kind: "prepared" });
 
-    expect(
-      harness.operations.filter(
-        (operation) =>
-          operation.endsWith("ts") || operation === "deployment" || operation === "token",
-      ),
-    ).toEqual(["deployment", "prepare-ts", "apply-ts", "token"]);
+    expect(harness.operations).toEqual(["login", "deployment", "prepare-ts", "apply-ts", "token"]);
+    expect(harness.deps.prepareVercelTrustedSourceAccess).toHaveBeenCalledWith(
+      expect.objectContaining({ target: TARGET }),
+    );
   });
 
-  it("records a completed login when the next decision is cancelled", async () => {
-    const harness = createHarness({ login: { kind: "logged-in" }, projectAction: "cancel" });
+  it("returns a live token resolver that refreshes the project-scoped token", async () => {
+    const harness = createHarness();
 
-    await expect(harness.run()).resolves.toEqual({
-      kind: "cancelled",
-      completedMutations: [{ kind: "vercel-login" }],
+    const result = await harness.run();
+    expect(result).toMatchObject({ kind: "prepared" });
+    if (result.kind !== "prepared") throw new Error("Expected a prepared result");
+
+    const rotated = oidcToken(OWNER_ID, PROJECT_ID, "2");
+    harness.setToken(rotated);
+    await expect(result.resolveToken()).resolves.toBe(rotated);
+    expect(harness.deps.resolveOidcToken).toHaveBeenNthCalledWith(1, {
+      ownerId: OWNER_ID,
+      projectId: PROJECT_ID,
+      forceRefresh: true,
     });
+    expect(harness.deps.resolveOidcToken).toHaveBeenNthCalledWith(2, TARGET.deployment);
   });
 
-  it.each([
-    { name: "project choice", options: { projectAction: "cancel" } },
-    {
-      name: "Trusted Sources consent",
-      options: {
-        configureTrustedSources: true,
-        preparation: { kind: "cancelled" },
-      },
-    },
-  ] satisfies readonly { name: string; options: HarnessOptions }[])(
-    "cancels at $name before changing remote access",
-    async ({ options }) => {
-      const harness = createHarness(options);
+  it("cancels when login is cancelled", async () => {
+    const harness = createHarness({ logins: [{ kind: "cancelled" }] });
 
-      await expect(harness.run()).resolves.toEqual({ kind: "cancelled", completedMutations: [] });
-      expect(harness.operations).not.toContain("apply-ts");
-      expect(harness.operations).not.toContain("token");
-    },
-  );
+    await expect(harness.run()).resolves.toEqual({ kind: "cancelled", completedMutations: [] });
+    expect(harness.operations).not.toContain("deployment");
+  });
+
+  it("cancels Trusted Sources consent before changing remote access", async () => {
+    const harness = createHarness({
+      configureTrustedSources: true,
+      preparation: { kind: "cancelled" },
+    });
+
+    await expect(harness.run()).resolves.toEqual({ kind: "cancelled", completedMutations: [] });
+    expect(harness.operations).not.toContain("apply-ts");
+    expect(harness.operations).not.toContain("token");
+  });
+
+  it("cancels an abort that arrives before the first mutation", async () => {
+    const abort = new AbortController();
+    const harness = createHarness();
+    vi.mocked(harness.deps.resolveVercelDeployment).mockImplementationOnce(async () => {
+      abort.abort();
+      return { kind: "resolved", target: TARGET };
+    });
+
+    await expect(harness.run(abort.signal)).resolves.toEqual({
+      kind: "cancelled",
+      completedMutations: [],
+    });
+    expect(harness.operations).not.toContain("token");
+  });
 
   it.each([
     {
       name: "Vercel CLI",
-      options: { login: { kind: "cli-missing" } },
+      options: { logins: [{ kind: "cli-missing" }] },
       message: "not installed",
     },
     {
-      name: "deployment",
-      options: { deployment: { kind: "not-found" } },
+      name: "deployment not found",
+      options: { deployments: [{ kind: "not-found" }] },
       message: "did not resolve",
     },
     {
-      name: "project identity",
+      name: "access still forbidden after re-auth",
       options: {
-        projectAction: "change",
-        deployment: {
-          kind: "project-mismatch",
-          expectedProjectId: "prj_selected",
-          actualProjectId: "prj_other",
-        },
+        logins: [{ kind: "already" }, { kind: "already" }],
+        deployments: [{ kind: "forbidden" }, { kind: "forbidden" }],
       },
-      message: "resolved project prj_other, not prj_selected",
+      message: "Re-authenticate",
+    },
+    {
+      name: "deployment verification",
+      options: {
+        deployments: [
+          {
+            kind: "failed",
+            failure: {
+              cause: "vercel",
+              failure: { code: 1, stdout: "", stderr: "", message: "boom" },
+            },
+          },
+        ],
+      },
+      message: "Could not verify",
     },
     {
       name: "OIDC token",
@@ -337,41 +283,6 @@ describe("runRemoteAuthFlow", () => {
       });
     },
   );
-
-  it("cancels an abort that arrives before the first mutation", async () => {
-    const abort = new AbortController();
-    const harness = createHarness();
-    vi.mocked(harness.deps.resolveVercelDeployment).mockImplementationOnce(async () => {
-      abort.abort();
-      return { kind: "resolved", target: VERIFIED_TARGET };
-    });
-
-    await expect(harness.run(abort.signal)).resolves.toEqual({
-      kind: "cancelled",
-      completedMutations: [],
-    });
-    expect(harness.operations).not.toContain("token");
-  });
-
-  it("skips Trusted Sources for an Eve-only challenge and returns a live token resolver", async () => {
-    const harness = createHarness();
-
-    const result = await harness.run();
-    expect(result).toMatchObject({ kind: "prepared" });
-    expect(harness.deps.prepareVercelTrustedSourceAccess).not.toHaveBeenCalled();
-    expect(harness.deps.applyVercelTrustedSourceAccess).not.toHaveBeenCalled();
-    if (result.kind !== "prepared") throw new Error("Expected a prepared result");
-
-    const rotatedToken = oidcToken(CURRENT_PROJECT.orgId, CURRENT_PROJECT.projectId, "2");
-    harness.setToken(rotatedToken);
-    await expect(result.resolveToken()).resolves.toBe(rotatedToken);
-    expect(harness.deps.resolveOidcToken).toHaveBeenNthCalledWith(1, {
-      ownerId: CURRENT_PROJECT.orgId,
-      projectId: CURRENT_PROJECT.projectId,
-      forceRefresh: true,
-    });
-    expect(harness.deps.resolveOidcToken).toHaveBeenNthCalledWith(2, VERIFIED_TARGET.deployment);
-  });
 });
 
 describe("formatRemoteAuthChallengeMessage", () => {

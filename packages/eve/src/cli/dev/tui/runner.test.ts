@@ -1173,7 +1173,7 @@ describe("EveTUIRunner remote authentication", () => {
     return {
       target,
       credentials: createDevelopmentCredentialGate(target.serverUrl),
-      resolveDeployment: async () => ({ kind: "unscoped" }) as const,
+      resolveDeployment: async () => ({ kind: "not-found" }) as const,
       resolveOidcToken: async () => ({
         kind: "resolution-failed" as const,
         message: "No ambient token in this test.",
