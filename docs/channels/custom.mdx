@@ -48,7 +48,7 @@ Declare routes with the `POST()` and `GET()` helpers. Each route handler receive
 
 - `send(message, { auth, continuationToken, state? })` starts or resumes a session. Returns a `Session`.
 - `getSession(sessionId)` looks up an existing session. The returned `Session` exposes `getEventStream({ startIndex? })` for streaming.
-- `receive(channel, ...)` hands inbound work to a different channel for cross-channel hand-off.
+- `receive(channel, { message, target, auth, outputSchema? })` hands inbound work to a different channel for cross-channel hand-off.
 - `params` holds route parameters extracted from the path pattern.
 - `waitUntil(promise)` extends the request lifetime for background work.
 - `requestIp` is the client IP, or `null` when the host cannot provide it.
@@ -102,7 +102,13 @@ Route handlers can start a session on a different channel via `args.receive(chan
 
 ```ts
 import { defineChannel, POST } from "eve/channels";
+import { z } from "zod";
 import slack from "./slack.js";
+
+const investigationSchema = z.object({
+  summary: z.string(),
+  severity: z.enum(["low", "medium", "high"]),
+});
 
 export default defineChannel({
   routes: [
@@ -112,6 +118,7 @@ export default defineChannel({
       args.waitUntil(
         args.receive(slack, {
           message: `Investigate ${incident.reference}: ${incident.title}`,
+          outputSchema: investigationSchema,
           target: { channelId: "C0123ABC" },
           auth: {
             authenticator: "incidentio",
@@ -130,10 +137,14 @@ export default defineChannel({
 
 Semantics:
 
-- The target channel's authored `receive(input, { send })` hook owns the continuation-token format and initial state. Callers supply only `{ message, target, auth }`.
+- The target channel's authored `receive(input, { send })` hook owns the continuation-token format and initial state. Callers supply `{ message, target, auth, outputSchema? }`.
+- `outputSchema` accepts Standard JSON Schema (for example, Zod 4) or raw JSON Schema. eve applies it to the target's framework-provided `send`, so the target channel does not need schema-specific forwarding. The schema applies only to this turn; successful structured output emits `result.completed`.
+- `receive(...)` still resolves to a `Session`, not the structured value. Read the result asynchronously from `result.completed` in an agent hook or the session stream.
 - `auth` flows through to `session.auth.initiator` so the target's event handlers and the agent's tools can read who started the session.
 - Calling `args.receive(...)` does not also start a session on the current channel. The inbound channel's response is whatever the route handler returns explicitly.
 - The first argument is the target channel module's default export. Import it directly from `agent/channels/<name>.ts`. Identity is matched by reference.
+
+See [Output Schema](../guides/client/output-schema) for schema formats, result events, and per-turn behavior.
 
 ## Channel metadata
 

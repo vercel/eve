@@ -7,6 +7,7 @@ import { ContextKey } from "#context/key.js";
 import { AuthKey, ContinuationTokenKey, ModeKey, SessionIdKey } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
+import { setPendingInputBatch } from "#harness/input-requests.js";
 import { setPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
@@ -132,7 +133,11 @@ const threadContextAdapter: ChannelAdapter = {
     const thread = adapterCtx.ctx.ensure(ThreadKey, () => "unset");
     const message = payload.message ?? "";
 
-    return { message: `thread=${thread}; user=${message}` };
+    return {
+      inputResponses: payload.inputResponses,
+      message: `thread=${thread}; user=${message}`,
+      outputSchema: payload.outputSchema,
+    };
   },
 };
 
@@ -520,6 +525,79 @@ describe("turnStep", () => {
       expect(second.output).toBe("thread=alpha; user=follow up");
     }
     expect(second.serializedContext[ThreadKey.name]).toBe("alpha");
+  });
+
+  it("does not let stale input responses leak a failed turn's schema into the next delivery", async () => {
+    const outputSchema = {
+      properties: { assessment: { type: "string" } },
+      required: ["assessment"],
+      type: "object",
+    } as const;
+    const initialSession = createStubSession({ outputSchema });
+    const failedSession = createStubSession({ outputSchema });
+    installSessionStoreMocks([initialSession, failedSession]);
+
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+
+    const observedSchemas: Array<HarnessSession["outputSchema"]> = [];
+    let invocationCount = 0;
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (session): Promise<StepResult> => {
+        observedSchemas.push(session.outputSchema);
+        invocationCount += 1;
+        return invocationCount === 1
+          ? { next: null, session: failedSession }
+          : { next: { done: true, output: "plain follow-up" }, session };
+      };
+    });
+
+    const parentWritable = createTestWritable();
+    const first = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "assess this", outputSchema }],
+      },
+      parentWritable,
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+    expect(first.action).toBe("park");
+
+    await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [
+          {
+            inputResponses: [{ optionId: "approve", requestId: "stale-approval" }],
+            message: "answer normally",
+          },
+        ],
+      },
+      parentWritable,
+      serializedContext: first.serializedContext,
+      sessionState: first.sessionState,
+    });
+
+    expect(observedSchemas).toEqual([outputSchema, undefined]);
   });
 
   it("refreshes the system prompt from the current bundled deployment", async () => {
@@ -968,7 +1046,7 @@ describe("resolveEffectiveOutputSchema", () => {
 
   it("uses a run-scoped schema in either mode", () => {
     for (const mode of ["conversation", "task"] as const) {
-      const session = createStubSession();
+      const session = createStubSession({ outputSchema: agentSchema });
       const resolved = resolveEffectiveOutputSchema({
         agentOutputSchema: agentSchema,
         input: { outputSchema: runSchema },
@@ -1008,4 +1086,149 @@ describe("resolveEffectiveOutputSchema", () => {
     });
     expect(resolved).toBe(session);
   });
+
+  it("preserves the in-effect schema on a runtime-action continuation", () => {
+    const session = createStubSession({ outputSchema: runSchema });
+    const resolved = resolveEffectiveOutputSchema({
+      agentOutputSchema: agentSchema,
+      input: { runtimeActionResults: [] },
+      mode: "conversation",
+      session,
+    });
+    expect(resolved).toBe(session);
+  });
+
+  it("clears a failed turn's schema from the next plain conversation delivery", () => {
+    const resolved = resolveEffectiveOutputSchema({
+      agentOutputSchema: agentSchema,
+      input: { message: "try again without structured output" },
+      mode: "conversation",
+      session: createStubSession({ outputSchema: runSchema }),
+    });
+    expect(resolved.outputSchema).toBeUndefined();
+  });
+
+  it("treats an empty input-response array as a fresh conversation delivery", () => {
+    const resolved = resolveEffectiveOutputSchema({
+      agentOutputSchema: agentSchema,
+      input: { inputResponses: [], message: "try again without structured output" },
+      mode: "conversation",
+      session: createStubSession({ outputSchema: runSchema }),
+    });
+    expect(resolved.outputSchema).toBeUndefined();
+  });
+
+  it("preserves the caller's run schema across a conversation-mode HITL response", () => {
+    const session = createPendingInputSession(createStubSession({ outputSchema: runSchema }));
+    const resolved = resolveEffectiveOutputSchema({
+      agentOutputSchema: agentSchema,
+      input: { inputResponses: [{ optionId: "approve", requestId: "approval-1" }] },
+      mode: "conversation",
+      session,
+    });
+    expect(resolved).toBe(session);
+  });
+
+  it("preserves the caller's run schema across a task-mode HITL response", () => {
+    const session = createPendingInputSession(createStubSession({ outputSchema: runSchema }));
+    const resolved = resolveEffectiveOutputSchema({
+      agentOutputSchema: agentSchema,
+      input: { inputResponses: [{ optionId: "approve", requestId: "approval-1" }] },
+      mode: "task",
+      session,
+    });
+    expect(resolved).toBe(session);
+  });
+
+  it("preserves the caller's run schema when a message resolves pending HITL", () => {
+    const session = createPendingInputSession(createStubSession({ outputSchema: runSchema }));
+    const resolved = resolveEffectiveOutputSchema({
+      agentOutputSchema: agentSchema,
+      input: { message: "continue without approving" },
+      mode: "conversation",
+      session,
+    });
+    expect(resolved).toBe(session);
+  });
+
+  it("clears a failed turn's schema when non-empty input responses are stale", () => {
+    const resolved = resolveEffectiveOutputSchema({
+      agentOutputSchema: agentSchema,
+      input: {
+        inputResponses: [{ optionId: "approve", requestId: "stale-approval" }],
+        message: "start a fresh turn",
+      },
+      mode: "conversation",
+      session: createStubSession({ outputSchema: runSchema }),
+    });
+    expect(resolved.outputSchema).toBeUndefined();
+  });
+
+  it("clears a failed turn's schema for stale response-only input", () => {
+    const resolved = resolveEffectiveOutputSchema({
+      agentOutputSchema: agentSchema,
+      input: {
+        inputResponses: [{ text: "late reply", requestId: "stale-question" }],
+      },
+      mode: "conversation",
+      session: createStubSession({ outputSchema: runSchema }),
+    });
+    expect(resolved.outputSchema).toBeUndefined();
+  });
+
+  it("preserves the in-flight policy for a pending context-only delivery", () => {
+    const session = createPendingInputSession(createStubSession({ outputSchema: runSchema }));
+    const resolved = resolveEffectiveOutputSchema({
+      agentOutputSchema: agentSchema,
+      input: { context: ["delivery context"] },
+      mode: "task",
+      session,
+    });
+    expect(resolved).toBe(session);
+  });
+
+  it("replaces stale task state with the agent schema on a fresh task delivery", () => {
+    const resolved = resolveEffectiveOutputSchema({
+      agentOutputSchema: agentSchema,
+      input: { message: "run the task" },
+      mode: "task",
+      session: createStubSession({ outputSchema: runSchema }),
+    });
+    expect(resolved.outputSchema).toEqual(agentSchema);
+  });
+
+  it("clears stale task state on a fresh delivery when the agent has no schema", () => {
+    const resolved = resolveEffectiveOutputSchema({
+      agentOutputSchema: undefined,
+      input: { message: "run the task" },
+      mode: "task",
+      session: createStubSession({ outputSchema: runSchema }),
+    });
+    expect(resolved.outputSchema).toBeUndefined();
+  });
 });
+
+function createPendingInputSession(session: HarnessSession): HarnessSession {
+  return setPendingInputBatch({
+    requests: [
+      {
+        action: {
+          callId: "approval-call",
+          input: {},
+          kind: "tool-call",
+          toolName: "protected-action",
+        },
+        allowFreeform: false,
+        display: "confirmation",
+        options: [
+          { id: "approve", label: "Approve" },
+          { id: "deny", label: "Deny" },
+        ],
+        prompt: "Approve the protected action?",
+        requestId: "approval-1",
+      },
+    ],
+    responseMessages: [],
+    session,
+  });
+}

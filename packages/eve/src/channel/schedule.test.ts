@@ -93,6 +93,11 @@ describe("ScheduleDispatcher", () => {
   describe("run handler form", () => {
     it("invokes the author's run() with { receive, waitUntil, appAuth }", async () => {
       const runtime = createMockRuntime();
+      const outputSchema = {
+        properties: { summary: { type: "string" } },
+        required: ["summary"],
+        type: "object",
+      } as const;
       vi.stubEnv("SLACK_BOT_TOKEN", "xoxb-test");
       vi.stubEnv("SLACK_SIGNING_SECRET", "test-secret");
       try {
@@ -111,6 +116,7 @@ describe("ScheduleDispatcher", () => {
             observed.hasWaitUntil = typeof waitUntil === "function";
             await receive(definition, {
               message: "post the digest",
+              outputSchema,
               target: { channelId: "C0123ABC" },
               auth: appAuth,
             });
@@ -125,6 +131,7 @@ describe("ScheduleDispatcher", () => {
         const runInput = vi.mocked(runtime.run).mock.calls[0]![0];
         expect(runInput.continuationToken).toBe("slack:C0123ABC:");
         expect(runInput.auth).toEqual(SCHEDULE_APP_AUTH);
+        expect(runInput.input.outputSchema).toEqual(outputSchema);
       } finally {
         vi.unstubAllEnvs();
       }

@@ -150,8 +150,8 @@ export interface SendTurnPayload<TOutput = unknown> {
   /**
    * Optional schema the harness must satisfy before this turn terminates.
    *
-   * The client lowers Standard Schema implementations (Zod, Valibot,
-   * ArkType, etc.) to JSON Schema before sending the request. The server is
+   * The client lowers Standard JSON Schema implementations (for example,
+   * Zod 4) to plain JSON Schema before sending the request. The server is
    * authoritative for validation; {@link MessageResult.data} is typed to this
    * schema's output type and is not revalidated client-side.
    */

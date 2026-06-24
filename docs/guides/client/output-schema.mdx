@@ -42,9 +42,9 @@ console.log(result.data?.count);
 
 `result.data` is `undefined` when the turn did not produce a structured result.
 
-## Standard Schema
+## Standard JSON Schema
 
-The client also accepts Standard Schema implementations such as Zod, Valibot, and ArkType. The schema is lowered to JSON Schema before the request is sent:
+The client also accepts schemas that implement [Standard JSON Schema](https://standardschema.dev/json-schema), such as Zod 4. The schema is lowered to plain JSON Schema before the request is sent. Libraries that implement only Standard Schema validation need their JSON Schema adapter first; for example, Valibot provides `toStandardJsonSchema` through `@valibot/to-json-schema`.
 
 ```ts
 import { z } from "zod";

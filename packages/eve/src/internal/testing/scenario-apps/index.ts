@@ -1,4 +1,5 @@
 export { CUSTOM_CHANNEL_PORTABILITY_DESCRIPTOR } from "#internal/testing/scenario-apps/custom-channel-portability.js";
+export { CROSS_CHANNEL_OUTPUT_SCHEMA_PORTABILITY_DESCRIPTOR } from "#internal/testing/scenario-apps/cross-channel-output-schema-portability.js";
 export { DISCORD_ROUTE_PORTABILITY_DESCRIPTOR } from "#internal/testing/scenario-apps/discord-route-portability.js";
 export { EXTENSION_AGENT_DESCRIPTOR } from "#internal/testing/scenario-apps/extension-agent.js";
 export { GITHUB_ROUTE_PORTABILITY_DESCRIPTOR } from "#internal/testing/scenario-apps/github-route-portability.js";

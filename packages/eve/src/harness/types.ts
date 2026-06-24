@@ -93,8 +93,10 @@ export interface StepInput {
    */
   readonly context?: readonly string[];
   /**
-   * Run-scoped schema that replaces the session's current output schema when
-   * present. Omitted continuations keep the existing schema.
+   * Run-scoped schema that replaces the session's current output schema for
+   * this turn. Runtime-owned continuations and pending HITL resolution preserve
+   * it; a fresh delivery that omits it clears any schema retained by an earlier
+   * failed turn.
    */
   readonly outputSchema?: JsonObject;
   /**

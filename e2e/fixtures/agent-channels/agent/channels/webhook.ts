@@ -13,8 +13,9 @@ export default defineChannel({
       const body = (await req.json().catch(() => ({}))) as {
         message?: string;
         sessionRef?: string;
+        structured?: boolean;
       };
-      const session = await args.receive(target, {
+      const options = {
         message: body.message ?? "Reply with the single word: hello.",
         target: { sessionRef: body.sessionRef ?? crypto.randomUUID() },
         auth: {
@@ -23,7 +24,21 @@ export default defineChannel({
           principalId: "smoke-test",
           principalType: "service",
         },
-      });
+      } as const;
+      const session = body.structured
+        ? await args.receive(target, {
+            ...options,
+            outputSchema: {
+              additionalProperties: false,
+              properties: {
+                count: { type: "integer" },
+                title: { type: "string" },
+              },
+              required: ["title", "count"],
+              type: "object",
+            },
+          })
+        : await args.receive(target, options);
       return Response.json({ ok: true, sessionId: session.id });
     }),
   ],

@@ -77,11 +77,43 @@ export default defineSchedule({
 });
 ```
 
-- `receive(channel, { message, target, auth })`: starts a session on another channel. Same contract as a route handler's `args.receive`.
+- `receive(channel, { message, target, auth, outputSchema? })`: starts a session on another channel. Same contract as a route handler's `args.receive`; `outputSchema` accepts Standard JSON Schema (for example, Zod 4) or raw JSON Schema for this turn.
 - `waitUntil(promise)`: extends the cron task's lifetime so the parked session and any in-flight fetches settle before the task ends. Wrap the `receive` call in it.
 - `appAuth`: the app principal (`{ authenticator: "app", principalId: "eve:app", principalType: "runtime" }`). Pass it as `receive(..., { auth: appAuth })` for work the agent does on its own behalf.
 
 A handler-form session runs on the same durable runtime engine as any other session, so it can park (durably suspend), for instance when the channel handoff is waiting for a Slack reply. Only markdown task mode is barred from waiting.
+
+### Structured handoffs
+
+Pass `outputSchema` when a scheduled handoff needs a structured result:
+
+```ts title="agent/schedules/daily-assessment.ts"
+import { defineSchedule } from "eve/schedules";
+import { z } from "zod";
+
+import slack from "../channels/slack.js";
+
+const assessmentSchema = z.object({
+  summary: z.string(),
+  priority: z.enum(["low", "medium", "high"]),
+});
+
+export default defineSchedule({
+  cron: "0 9 * * 1-5",
+  run({ receive, waitUntil, appAuth }) {
+    waitUntil(
+      receive(slack, {
+        message: "Assess today's queue and summarize the priorities.",
+        target: { channelId: "C0123ABC" },
+        auth: appAuth,
+        outputSchema: assessmentSchema,
+      }),
+    );
+  },
+});
+```
+
+Adding a schema does not change the target's run mode or durability. The schema applies only to the delivered turn, and successful structured completion emits `result.completed` for an [agent hook](./guides/hooks) or session event consumer. `receive(...)` still resolves to a `Session`, so read the structured value asynchronously from that event rather than from the return value.
 
 ## Trigger a schedule while iterating
 

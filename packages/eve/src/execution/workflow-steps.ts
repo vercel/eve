@@ -448,8 +448,11 @@ export function reconcileSessionContinuationToken(
  * wins. With no run-scoped schema, a task run adopts the agent's declared
  * return schema — its function-output contract, which only applies when the
  * agent is invoked as a function (subagent / schedule / job), i.e. task mode.
- * A conversation run with no run-scoped schema enforces nothing. Continuation
- * steps (no new `StepInput`) preserve whatever is already in effect.
+ * A conversation run with no run-scoped schema enforces nothing. Fresh
+ * conversation deliveries replace the previous turn's policy. Runtime-owned
+ * continuation steps and pending HITL resolution preserve whatever is already
+ * in effect because their callers cannot attach the original run-scoped
+ * schema again.
  */
 export function resolveEffectiveOutputSchema(input: {
   readonly agentOutputSchema: JsonObject | undefined;
@@ -463,11 +466,21 @@ export function resolveEffectiveOutputSchema(input: {
     return { ...session, outputSchema: stepInput.outputSchema };
   }
 
-  if (mode === "task" && session.outputSchema === undefined && agentOutputSchema !== undefined) {
+  if (
+    stepInput === undefined ||
+    stepInput.runtimeActionResults !== undefined ||
+    hasPendingInputBatch(session.state)
+  ) {
+    return session;
+  }
+
+  if (mode === "task" && agentOutputSchema !== undefined) {
     return { ...session, outputSchema: agentOutputSchema };
   }
 
-  return session;
+  if (session.outputSchema === undefined) return session;
+  const { outputSchema: _outputSchema, ...withoutOutputSchema } = session;
+  return withoutOutputSchema;
 }
 
 const log = createLogger("execution.workflow-entry");

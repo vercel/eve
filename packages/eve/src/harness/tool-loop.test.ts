@@ -856,6 +856,8 @@ describe("createToolLoopHarness", () => {
         type: "step.failed",
       }),
     );
+    expect(events.some((event) => event.type === "result.completed")).toBe(false);
+    expect(result.session.outputSchema).toEqual({ type: "object" });
   });
 
   it("returns only the final assistant reply when a completed task step includes tool work", async () => {
