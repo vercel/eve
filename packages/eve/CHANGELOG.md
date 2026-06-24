@@ -1,5 +1,14 @@
 # eve
 
+## 0.13.5
+
+### Patch Changes
+
+- c927ecd: Confirm continuation-token ownership before an agent turn starts or a session re-keys. Competing sessions now fail before processing input, and successful delivery reports the hook owner atomically.
+- 5f0f69f: Use Parallel through AI Gateway for the built-in `web_search` tool with every string model. Gateway requests no longer select native provider search tools or pin routing to a model provider.
+- 430ed8c: Teach agents that conditionally delivered work can finish successfully without sending a message. Polling schedules can now intentionally skip delivery without treating an accidental blank model response as success.
+- 25b1b14: fix(eve): catch unserializable tool output values instead of sending them to the model
+
 ## 0.13.4
 
 ### Patch Changes
