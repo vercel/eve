@@ -104,7 +104,7 @@ describe("resolveConnectionPrincipal", () => {
   it("throws principal_required (non-retryable) when AuthKey is null", () => {
     const ctx = ctxWithAuth(null);
 
-    expect.assertions(4);
+    expect.assertions(5);
     try {
       contextStorage.run(ctx, () => resolveConnectionPrincipal("linear", userAuthDef));
     } catch (error) {
@@ -113,6 +113,7 @@ describe("resolveConnectionPrincipal", () => {
       expect(err.reason).toBe("principal_required");
       expect(err.retryable).toBe(false);
       expect(err.connectionName).toBe("linear");
+      expect(err.message).toContain("route auth that resolves an authenticated user");
     }
   });
 
@@ -126,7 +127,7 @@ describe("resolveConnectionPrincipal", () => {
 
     expect(() =>
       contextStorage.run(ctx, () => resolveConnectionPrincipal("linear", userAuthDef)),
-    ).toThrow(/principalType "user"/);
+    ).toThrow(/active session is scoped to "service"/);
   });
 
   it("accepts an explicit ctx argument and bypasses AsyncLocalStorage", () => {
@@ -168,7 +169,7 @@ describe("resolveConnectionPrincipal", () => {
   });
 
   it("throws principal_required for user-typed connections when no context is active", () => {
-    expect.assertions(4);
+    expect.assertions(5);
     try {
       resolveConnectionPrincipal("linear", userAuthDef);
     } catch (error) {
@@ -177,6 +178,7 @@ describe("resolveConnectionPrincipal", () => {
       expect(err.reason).toBe("principal_required");
       expect(err.retryable).toBe(false);
       expect(err.message).toMatch(/outside an eve context/);
+      expect(err.message).toContain("credentials shared by the agent");
     }
   });
 });

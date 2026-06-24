@@ -85,12 +85,7 @@ export function resolveConnectionPrincipal(
   const current = ctx?.get(AuthKey);
   if (current === null || current === undefined || current.principalType !== "user") {
     throw new ConnectionAuthorizationFailedError(connectionName, {
-      message:
-        ctx === undefined
-          ? `Connection "${connectionName}" declares principalType "user" ` +
-            `but was invoked outside an eve context, so no user principal can be resolved.`
-          : `Connection "${connectionName}" declares principalType "user" ` +
-            `but the active session has no authenticated user principal.`,
+      message: buildUserPrincipalRequiredMessage(connectionName, ctx, current?.principalType),
       reason: "principal_required",
       retryable: false,
     });
@@ -102,4 +97,25 @@ export function resolveConnectionPrincipal(
     issuer: current.issuer ?? current.authenticator,
     type: "user",
   };
+}
+
+function buildUserPrincipalRequiredMessage(
+  connectionName: string,
+  ctx: AlsContext | undefined,
+  currentPrincipalType: string | undefined,
+): string {
+  let detail: string;
+  if (ctx === undefined) {
+    detail = "it was invoked outside an eve context, so no authenticated user can be resolved.";
+  } else if (currentPrincipalType === undefined) {
+    detail = "the active session has no authenticated user.";
+  } else {
+    detail = `the active session is scoped to "${currentPrincipalType}", not an authenticated user.`;
+  }
+
+  return (
+    `Connection "${connectionName}" is user-scoped, but ${detail} ` +
+    `User-scoped connections require route auth that resolves an authenticated user. ` +
+    `If this connection should use credentials shared by the agent instead, configure it as an app-scoped connection.`
+  );
 }
