@@ -10,8 +10,9 @@ export default defineEval({
     t.completed();
     t.calledTool("web_search", { isError: false });
     t.noFailedActions();
+    t.messageIncludes(/New York Knicks/iu);
     t.judge.autoevals
-      .closedQA("The reply says that the New York Knicks won the 2026 NBA Finals.", {
+      .factuality("The New York Knicks won the 2026 NBA Finals.", {
         on: turn.message,
       })
       .atLeast(0.5);
