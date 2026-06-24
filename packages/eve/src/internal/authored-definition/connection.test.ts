@@ -101,6 +101,22 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       });
     });
 
+    it("preserves the optional auth evict hook", () => {
+      const evict = async () => {};
+      const result = normalizeMcpClientConnectionDefinition(
+        validInput({
+          auth: {
+            evict,
+            getToken: async () => ({ token: "x" }),
+            principalType: "app",
+          },
+        }),
+        MSG,
+      );
+
+      expect((result.auth as Record<string, unknown>).evict).toBe(evict);
+    });
+
     it("drops a malformed vercelConnect marker without throwing", () => {
       // A misbehaving auth provider could attach a malformed marker; the
       // normalizer treats it as absent rather than failing the whole

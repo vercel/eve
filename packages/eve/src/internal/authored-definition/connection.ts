@@ -27,6 +27,7 @@ const KNOWN_OPENAPI_TOP_LEVEL_KEYS = [
 ] as const;
 const KNOWN_AUTHORIZATION_KEYS = [
   "completeAuthorization",
+  "evict",
   "getToken",
   "principalType",
   "startAuthorization",
