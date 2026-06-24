@@ -10,8 +10,8 @@ export default defineChannel<undefined, void, { id: string }>({
   },
   events: {
     "message.completed"(event) {
-      if (event.finishReason !== "tool-calls") {
-        throw new Error(`Quiet sink received an unexpected message: ${event.message ?? ""}`);
+      if (event.finishReason !== "tool-calls" && event.message !== null) {
+        throw new Error(`Quiet sink received an unexpected message: ${event.message}`);
       }
     },
   },

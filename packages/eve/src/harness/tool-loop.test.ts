@@ -22,6 +22,7 @@ import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 import { isCodeModeEnvEnabled } from "#shared/code-mode.js";
+import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
 
 declare module "#public/channels/index.js" {
   interface ChannelMetadataMap {
@@ -500,12 +501,18 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
-  it("parks the conversation when a terminal 'stop' step has no visible assistant text", async () => {
+  it("parks without delivery when a terminal response contains the empty-delivery sentinel", async () => {
     setupMockAgent({
       finishReason: "stop",
-      fullStreamParts: [{ finishReason: "stop", type: "finish-step" }],
-      response: { messages: [{ content: "", role: "assistant" }] },
-      text: "",
+      response: {
+        messages: [
+          {
+            content: `internal ${EMPTY_DELIVERY_SENTINEL} trailing`,
+            role: "assistant",
+          },
+        ],
+      },
+      text: `internal ${EMPTY_DELIVERY_SENTINEL} trailing`,
       toolCalls: [],
       toolResults: [],
     });
@@ -513,22 +520,17 @@ describe("createToolLoopHarness", () => {
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
 
-    // A clean finish with no output is the model choosing silence (the
-    // post-delivery quiet step); it parks normally with no recovery and
-    // no failure events.
     const result = await runStep(createTestSession(), { message: "Hi" });
 
     expect(result.next).toBeNull();
+    expect(result.session.history).toEqual([{ content: "Hi", role: "user" }]);
     expect(vi.mocked(ToolLoopAgent).mock.calls.length).toBe(1);
-    expect(events.map((event) => event.type)).toEqual([
-      "session.started",
-      "turn.started",
-      "message.received",
-      "step.started",
-      "step.completed",
-      "turn.completed",
-      "session.waiting",
-    ]);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({ message: null }),
+        type: "message.completed",
+      }),
+    );
   });
 
   it("keeps executable tools direct when code mode is disabled", async () => {
@@ -673,9 +675,8 @@ describe("createToolLoopHarness", () => {
   it("returns an empty successful result when a task chooses not to deliver", async () => {
     setupMockAgent({
       finishReason: "stop",
-      fullStreamParts: [{ finishReason: "stop", type: "finish-step" }],
-      response: { messages: [{ content: "", role: "assistant" }] },
-      text: "",
+      response: { messages: [{ content: EMPTY_DELIVERY_SENTINEL, role: "assistant" }] },
+      text: EMPTY_DELIVERY_SENTINEL,
       toolCalls: [],
       toolResults: [],
     });
@@ -687,15 +688,12 @@ describe("createToolLoopHarness", () => {
 
     expect(result.next).toEqual({ done: true, output: "" });
     expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
-    expect(events.map((event) => event.type)).toEqual([
-      "session.started",
-      "turn.started",
-      "message.received",
-      "step.started",
-      "step.completed",
-      "turn.completed",
-      "session.completed",
-    ]);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({ message: null }),
+        type: "message.completed",
+      }),
+    );
   });
 
   it("emits result.completed when a run output schema is requested", async () => {
@@ -2711,6 +2709,13 @@ describe("createToolLoopHarness", () => {
       usage: {},
     };
 
+    const emptyStopResult: Record<string, unknown> = {
+      ...emptyResult,
+      finishReason: "stop",
+      response: { messages: [{ content: " \n", role: "assistant" }] },
+      text: " \n",
+    };
+
     /**
      * Stream-rejection shape of the empty response: ai@7.0.0-canary.169+
      * (vercel/ai#15938) enqueues NoOutputGeneratedError onto fullStream
@@ -2808,6 +2813,25 @@ describe("createToolLoopHarness", () => {
               typeof message.content === "string" && message.content.includes("was not delivered"),
           ),
         ).toBe(false);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it("reissues a blank 'stop' response instead of treating it as intentional silence", async () => {
+      setupFirstThenAgent(emptyStopResult, successResult);
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+
+      try {
+        const result = await runStep(createTestSession(), { message: "Hi" });
+
+        expect(result.next).toBeNull();
+        expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(2);
+        expect(result.session.history).toContainEqual({
+          content: "Here is your answer.",
+          role: "assistant",
+        });
       } finally {
         warnSpy.mockRestore();
       }

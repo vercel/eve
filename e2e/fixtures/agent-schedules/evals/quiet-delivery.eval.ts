@@ -44,11 +44,17 @@ export default defineEval({
       );
     }
 
-    const delivered = session.events.flatMap((event) =>
+    const terminalMessages = session.events.flatMap((event) =>
       event.type === "message.completed" && event.data.finishReason !== "tool-calls"
         ? [event.data.message]
         : [],
     );
+    if (!terminalMessages.includes(null)) {
+      throw new Error(
+        `Expected an empty-delivery completion; saw ${JSON.stringify(terminalMessages)}.`,
+      );
+    }
+    const delivered = terminalMessages.filter((message) => message !== null);
     if (delivered.length > 0) {
       throw new Error(
         `Expected empty delivery, but the schedule produced ${JSON.stringify(delivered)}.`,

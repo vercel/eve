@@ -8,6 +8,7 @@ import {
   setHarnessEmissionState,
 } from "#harness/emission.js";
 import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
+import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
 
 async function* streamOf(parts: TextStreamPart<ToolSet>[]): AsyncIterable<TextStreamPart<ToolSet>> {
   for (const part of parts) {
@@ -121,6 +122,79 @@ describe("setHarnessEmissionState", () => {
     const retrieved = getHarnessEmissionState(session.state);
 
     expect(retrieved).toEqual(state);
+  });
+});
+
+describe("emitStreamContent empty delivery", () => {
+  it("suppresses a split sentinel and completes with a null message", async () => {
+    const emit = createEmitStub();
+
+    await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        { id: "text-1", text: "  <eve-empty", type: "text-delta" },
+        { id: "text-1", text: "-delivery/>  ", type: "text-delta" },
+        { finishReason: "stop", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+    );
+
+    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    expect(events.map((event) => event.type)).toEqual(["message.completed"]);
+    expect(events[0]).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({ finishReason: "stop", message: null }),
+      }),
+    );
+  });
+
+  it("preserves normal text that initially resembles the sentinel", async () => {
+    const emit = createEmitStub();
+    const message = "<eve-empty-delivery is not a marker";
+
+    await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        { id: "text-1", text: "<eve-empty", type: "text-delta" },
+        { id: "text-1", text: "-delivery is not a marker", type: "text-delta" },
+        { finishReason: "stop", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+    );
+
+    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    expect(events.filter((event) => event.type === "message.appended")).toHaveLength(2);
+    expect(events.at(-1)).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({ message }),
+        type: "message.completed",
+      }),
+    );
+  });
+
+  it("skips delivery when the sentinel appears anywhere in the final message", async () => {
+    const emit = createEmitStub();
+
+    await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        {
+          id: "text-1",
+          text: `Internal preamble ${EMPTY_DELIVERY_SENTINEL} trailing text`,
+          type: "text-delta",
+        },
+        { finishReason: "stop", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+    );
+
+    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    expect(events.at(-1)).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({ message: null }),
+        type: "message.completed",
+      }),
+    );
   });
 });
 

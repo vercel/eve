@@ -77,7 +77,7 @@ export default defineSchedule({
 });
 ```
 
-The agent does not have to produce a message on every run. When a prompt makes delivery conditional, as in the alert check above, the agent can finish with no text. eve treats that as a successful run and sends nothing to the channel, so frequent polling schedules do not need a separate filter or delivery setting.
+The agent does not have to deliver a message on every run. When a prompt makes delivery conditional, as in the alert check above, eve tells the agent how to finish successfully without sending anything to the channel. Frequent polling schedules do not need a separate filter or delivery setting.
 
 - `receive(channel, { message, target, auth })`: starts a session on another channel. Same contract as a route handler's `args.receive`.
 - `waitUntil(promise)`: extends the cron task's lifetime so the parked session and any in-flight fetches settle before the task ends. Wrap the `receive` call in it.
