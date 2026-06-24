@@ -257,6 +257,7 @@ async function* createMockFullStream(
 }
 
 type MockAgentSettings = {
+  onToolExecutionStart?: (event: { toolCall: Record<string, unknown> }) => Promise<void> | void;
   onStepFinish?: (step: unknown) => Promise<void> | void;
   output?: unknown;
   prepareStep?: (input: unknown) => Promise<unknown> | unknown;
@@ -1588,6 +1589,95 @@ describe("createToolLoopHarness", () => {
       status: "completed",
       turnId: "turn_0",
     });
+  });
+
+  it("emits actions.requested when inline tool execution starts", async () => {
+    const toolCall = {
+      input: { a: 1, b: 2 },
+      toolCallId: "call-1",
+      toolName: "add",
+      type: "tool-call",
+    };
+    const toolResult = {
+      input: { a: 1, b: 2 },
+      output: "42",
+      toolCallId: "call-1",
+      toolName: "add",
+      type: "tool-result",
+    };
+    const result = {
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          {
+            content: [{ text: "Let me add those.", type: "text" }, toolCall],
+            role: "assistant",
+          },
+          {
+            content: [toolResult],
+            role: "tool",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [toolCall],
+      toolResults: [toolResult],
+    };
+
+    vi.mocked(ToolLoopAgent).mockImplementation(function (
+      this: Record<string, unknown>,
+      settings: MockAgentSettings,
+    ) {
+      const { onStepFinish, onToolExecutionStart, prepareStep } = settings;
+
+      this.stream = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
+        if (prepareStep) {
+          await prepareStep({
+            messages: options.messages,
+            steps: [],
+            stepNumber: 0,
+            model: {},
+            context: undefined,
+          });
+        }
+        const fullStream = (async function* (): AsyncIterable<Record<string, unknown>> {
+          yield { id: "text-1", text: "Let me add those.", type: "text-delta" };
+          yield toolCall;
+          await onToolExecutionStart?.({ toolCall });
+          yield toolResult;
+          yield { finishReason: "tool-calls", type: "finish-step" };
+        })();
+        if (onStepFinish) {
+          void Promise.resolve().then(() => onStepFinish(result));
+        }
+        return { fullStream, steps: Promise.resolve([result]) };
+      });
+
+      this.generate = vi.fn().mockResolvedValue(result);
+      return this as unknown as ToolLoopAgent;
+    } as unknown as MockAgentConstructor);
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+
+    await runStep(createTestSession(), { message: "Add 1 and 2" });
+
+    expect(getCompatibilityEventTypes(events)).toEqual([
+      "session.started",
+      "turn.started",
+      "message.received",
+      "step.started",
+      "actions.requested",
+      "message.completed",
+      "action.result",
+      "step.completed",
+    ]);
+    expect(events.filter((event) => event.type === "actions.requested")).toHaveLength(1);
+    expect(
+      events
+        .filter((event) => event.type === "actions.requested" || event.type === "action.result")
+        .map((event) => event.type),
+    ).toEqual(["actions.requested", "action.result"]);
   });
 
   it("skips AI-SDK-marked invalid tool calls so a malformed JSON payload does not crash the harness", async () => {

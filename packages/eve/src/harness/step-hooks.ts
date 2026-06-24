@@ -208,9 +208,14 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
  * arguments — the runtime event stream only sees successfully parsed
  * tool calls.
  *
- * `handledInlineToolResultCallIds` lists approval-resume tool-result
- * call ids the stream already handled inline (see `emitStreamContent`).
- * This skips them to avoid double-emission.
+ * `handledInlineActionRequestCallIds` lists tool-call request ids already
+ * emitted from the AI SDK's tool-execution-start callback. This skips the
+ * finish-time `actions.requested` projection while still emitting the
+ * corresponding `action.result`.
+ *
+ * `handledInlineToolResultCallIds` lists approval-resume tool-result call ids
+ * the stream already handled inline (see `emitStreamContent`). This skips them
+ * to avoid double-emission.
  */
 export async function emitStepActions(
   emitFn: HarnessEmitFn,
@@ -218,6 +223,7 @@ export async function emitStepActions(
   step: HarnessStepResult,
   options: {
     readonly excludedActionToolNames: ReadonlySet<string>;
+    readonly handledInlineActionRequestCallIds?: ReadonlySet<string>;
     readonly handledInlineToolResultCallIds?: ReadonlySet<string>;
     readonly tools: ToolLoopHarnessConfig["tools"];
   },
@@ -242,7 +248,11 @@ export async function emitStepActions(
 
   // actions.requested
   const actions = (step.toolCalls as TypedToolCall<ToolSet>[])
-    .filter((tc) => !isExcluded(tc.toolCallId, tc.toolName))
+    .filter(
+      (tc) =>
+        !isExcluded(tc.toolCallId, tc.toolName) &&
+        !options.handledInlineActionRequestCallIds?.has(tc.toolCallId),
+    )
     .map((toolCall) =>
       createRuntimeActionRequestFromToolCall({
         toolCall,

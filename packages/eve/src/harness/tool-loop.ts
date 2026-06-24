@@ -32,6 +32,7 @@ import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js
 import { toErrorMessage } from "#shared/errors.js";
 import {
   createActionResultEvent,
+  createActionsRequestedEvent,
   createCompactionCompletedEvent,
   createCompactionRequestedEvent,
   createInputRequestedEvent,
@@ -699,6 +700,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         modelReference: session.agent.modelReference,
         tools: effectiveTools,
       });
+      const excludedActionToolNames = new Set([
+        ASK_QUESTION_TOOL_NAME,
+        CODE_MODE_TOOL_NAME,
+        FINAL_OUTPUT_TOOL_NAME,
+      ]);
+      const handledInlineActionRequestCallIds = new Set<string>();
 
       const hooks = buildStepHooks({
         cachePath,
@@ -714,6 +721,28 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         headers: attributionHeaders,
         instructions,
         model,
+        onToolExecutionStart:
+          emit === undefined
+            ? undefined
+            : async ({ toolCall }: { toolCall: TypedToolCall<ToolSet> }) => {
+                if (excludedActionToolNames.has(toolCall.toolName)) {
+                  return;
+                }
+                handledInlineActionRequestCallIds.add(toolCall.toolCallId);
+                await emit(
+                  createActionsRequestedEvent({
+                    actions: [
+                      createRuntimeActionRequestFromToolCall({
+                        toolCall,
+                        tools: config.tools,
+                      }),
+                    ],
+                    sequence: emissionState.sequence,
+                    stepIndex: emissionState.stepIndex,
+                    turnId: emissionState.turnId,
+                  }),
+                );
+              },
         onToolExecutionEnd: logToolExecutionError,
         // Replaces the AI SDK's default `console.error`; the harness still
         // emits stream events, this just keeps the raw error from being silent.
@@ -748,11 +777,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             throw new EmptyModelResponseError();
           }
           await emitStepActions(emit, emissionState, stepResult, {
-            excludedActionToolNames: new Set([
-              ASK_QUESTION_TOOL_NAME,
-              CODE_MODE_TOOL_NAME,
-              FINAL_OUTPUT_TOOL_NAME,
-            ]),
+            excludedActionToolNames,
+            handledInlineActionRequestCallIds,
             handledInlineToolResultCallIds,
             tools: config.tools,
           });
