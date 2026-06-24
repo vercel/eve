@@ -198,6 +198,31 @@ describe("createVercelSandbox", () => {
     );
   });
 
+  it("honors an author-supplied runtime instead of forcing the eve image", async () => {
+    const templateSandbox = createMockSandbox({ name: "template-key" });
+    const sandboxModule = {
+      Sandbox: {
+        create: vi.fn().mockResolvedValueOnce(templateSandbox),
+        get: vi.fn().mockResolvedValueOnce(null),
+      },
+    };
+
+    const backend = createVercelSandbox({
+      createOptions: { runtime: "python3.13" } as never,
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+
+    await backend.prewarm({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      seedFiles: [],
+      templateKey: "template-key",
+    });
+
+    const createArgs = sandboxModule.Sandbox.create.mock.calls[0]?.[0];
+    expect(createArgs).toMatchObject({ runtime: "python3.13" });
+    expect(createArgs).not.toHaveProperty("__image");
+  });
+
   it("passes resolved credentials to Vercel sandbox lookups instead of inferring scope", async () => {
     const existingTemplate = createMockSandbox({
       name: "template-key",
