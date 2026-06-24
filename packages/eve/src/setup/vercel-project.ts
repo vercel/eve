@@ -1,52 +1,39 @@
 import { createPromptCommandOutput, whimsyFor } from "#setup/cli/index.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
 import { captureVercel, runVercel, type VercelCaptureFailure } from "#setup/primitives/index.js";
+import { hasVercelHostFramework } from "#setup/scaffold/index.js";
 import pc from "picocolors";
 import { z } from "zod";
 
-import type { ProjectResolution } from "./project-resolution.js";
+import {
+  assertNoLegacyProjectLinkDirectory,
+  type ProjectResolution,
+} from "./project-resolution.js";
 import type { Prompter } from "./prompter.js";
-import type { ResolvedVercelProjectSpec } from "./state.js";
-
-const JsonObjectSchema = z.record(z.string(), z.unknown());
-
-const VercelTeamListEntrySchema = z.object({
-  name: z.string(),
-  slug: z.string(),
-  current: z.boolean(),
-});
-
-type VercelTeamListEntry = z.infer<typeof VercelTeamListEntrySchema>;
-
-const VercelProjectListEntrySchema = z.object({
-  name: z.string(),
-  id: z.string(),
-});
-
-type VercelProjectListEntry = z.infer<typeof VercelProjectListEntrySchema>;
+import type { ResolvedVercelProjectSpec, VercelProjectIdentity } from "./state.js";
+import { withSpinner } from "./with-spinner.js";
+import {
+  isConflictApiFailure,
+  isForbiddenApiFailure,
+  isNotFoundApiFailure,
+  normalizeVercelApiResult,
+} from "./vercel-api-failure.js";
+import {
+  listRecentProjects,
+  listTeams,
+  parseVercelJson,
+  requireVercelTeamAccess,
+  searchProjects,
+  type VercelProjectListEntry,
+  type VercelProjectOperationOptions,
+} from "./vercel-project-api.js";
 
 const VercelProjectReferenceSchema = z.object({
-  id: z.string(),
-  name: z.string(),
+  id: z.string().min(1),
+  name: z.string().min(1),
 });
-
-type VercelProjectReference = z.infer<typeof VercelProjectReferenceSchema>;
 
 const EVE_FRAMEWORK_PRESET = "eve";
-
-const VercelApiErrorSchema = z.object({
-  error: z
-    .object({
-      code: z.string().optional(),
-      message: z.string().optional(),
-    })
-    .optional(),
-});
-
-export interface VercelProjectOperationOptions {
-  signal?: AbortSignal;
-}
-
 export interface PickProjectOptions extends VercelProjectOperationOptions {
   /** Whether an empty project list may fall back to entering a name to create. */
   allowCreateWhenEmpty?: boolean;
@@ -56,148 +43,17 @@ export function unresolvedProject(): ProjectResolution {
   return { kind: "unresolved" };
 }
 
-/**
- * Runs a network reach behind a section-like spinner so the user sees the CLI
- * is working, not hung. The spinner clears whether the work resolves or throws,
- * and degrades to nothing when the prompter has no spinner (headless/test).
- */
-export async function withNetworkSpinner<T>(
-  prompter: Prompter,
-  message: string,
-  task: () => Promise<T>,
-): Promise<T> {
-  const spinner = prompter.log.spinner?.(message);
-  try {
-    return await task();
-  } finally {
-    spinner?.stop();
-  }
-}
-
 /** Resolves the linked project id from a resolution, if any. */
 export function projectIdFromResolution(project: ProjectResolution): string | undefined {
   return project.kind === "unresolved" ? undefined : project.projectId;
 }
 
-function parseJson(stdout: string, description: string): unknown {
-  try {
-    return JSON.parse(stdout);
-  } catch {
-    throw new Error(`Could not parse ${description} JSON from Vercel CLI output.`);
-  }
-}
-
-function parseVercelJsonList<T>(stdout: string, key: string, entrySchema: z.ZodType<T>): T[] {
-  const parsed = parseJson(stdout, key);
-  const output = JsonObjectSchema.safeParse(parsed);
-  if (!output.success) throw new Error(`Could not read ${key} from Vercel CLI JSON output.`);
-  const entries = output.data[key];
-  if (!Array.isArray(entries)) throw new Error(`Vercel CLI JSON output did not include ${key}.`);
-  const validEntries: T[] = [];
-  for (const entry of entries) {
-    const parsedEntry = entrySchema.safeParse(entry);
-    if (parsedEntry.success) validEntries.push(parsedEntry.data);
-  }
-  return validEntries;
-}
-
-function parseTeamList(stdout: string | undefined): VercelTeamListEntry[] {
-  if (stdout === undefined) return [];
-  return parseVercelJsonList(stdout, "teams", VercelTeamListEntrySchema);
-}
-
-/** Lists the Vercel scopes available to the current CLI user. */
-export async function listTeams(
-  projectRoot: string,
-  options: VercelProjectOperationOptions = {},
-): Promise<VercelTeamListEntry[]> {
-  const result = await captureVercel(["teams", "ls", "--format", "json"], {
-    cwd: projectRoot,
-    signal: options.signal,
-  });
-  if (!result.ok) {
-    if (isForbiddenApiFailure(result.failure)) requireVercelTeamAccess(result.failure);
-    throw new Error(`Could not list Vercel teams. ${result.failure.message}`);
-  }
-  return parseTeamList(result.stdout);
-}
-
-function parseProjectList(stdout: string | undefined): VercelProjectListEntry[] {
-  if (stdout === undefined) return [];
-  return parseVercelJsonList(stdout, "projects", VercelProjectListEntrySchema);
-}
-
-/** Lists Vercel projects available under an explicit team or personal scope. */
-export async function listProjects(
-  projectRoot: string,
-  team: string,
-  options: VercelProjectOperationOptions = {},
-): Promise<VercelProjectListEntry[]> {
-  const result = await captureVercel(["project", "ls", "--format", "json", "--scope", team], {
-    cwd: projectRoot,
-    signal: options.signal,
-  });
-  if (!result.ok) {
-    if (isForbiddenApiFailure(result.failure)) requireVercelTeamAccess(result.failure);
-    throw new Error(`Could not list Vercel projects in ${team}. ${result.failure.message}`);
-  }
-  return parseProjectList(result.stdout);
-}
-
-function isNotFoundApiFailure(failure: VercelCaptureFailure): boolean {
-  if (failure.code === 404) return true;
-  const parsed = VercelApiErrorSchema.safeParse(safeParseJson(failure.stdout));
-  const error = parsed.success ? parsed.data.error : undefined;
-  const text = `${error?.code ?? ""} ${error?.message ?? ""} ${failure.stderr}`.toLowerCase();
-  return text.includes("not_found") || text.includes("not found") || text.includes("404");
-}
-
-function isConflictApiFailure(failure: VercelCaptureFailure): boolean {
-  const parsed = VercelApiErrorSchema.safeParse(safeParseJson(failure.stdout));
-  const error = parsed.success ? parsed.data.error : undefined;
-  const text =
-    `${error?.code ?? ""} ${error?.message ?? ""} ${failure.stdout} ${failure.stderr}`.toLowerCase();
-  return text.includes("409") || text.includes("conflict") || text.includes("already exists");
-}
-
-/**
- * True for a 403/forbidden failure on a scoped lookup: the session is
- * authenticated (`whoami` passed) but cannot act in this scope — typically a
- * team that enforces SAML/SSO the current token hasn't completed, or one the
- * user isn't a member of. Re-authenticating via `vercel login` resolves the
- * SSO case; the membership case needs an invite, which the prompt also names.
- */
-function isForbiddenApiFailure(failure: VercelCaptureFailure): boolean {
-  // `failure.code` is the child's exit code, not an HTTP status, so the 403
-  // lives in the API error payload (stdout JSON) or the CLI's stderr text.
-  const parsed = VercelApiErrorSchema.safeParse(safeParseJson(failure.stdout));
-  const error = parsed.success ? parsed.data.error : undefined;
-  const text =
-    `${error?.code ?? ""} ${error?.message ?? ""} ${failure.stdout} ${failure.stderr}`.toLowerCase();
-  return (
-    text.includes("403") ||
-    text.includes("forbidden") ||
-    text.includes("not_authorized") ||
-    text.includes("not authorized") ||
-    text.includes("sso") ||
-    text.includes("saml")
-  );
-}
-
-function safeParseJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return undefined;
-  }
-}
-
-function parseProjectReference(stdout: string, description: string): VercelProjectReference {
-  const parsed = VercelProjectReferenceSchema.safeParse(parseJson(stdout, description));
+function parseProjectReference(stdout: string, description: string): VercelProjectIdentity {
+  const parsed = VercelProjectReferenceSchema.safeParse(parseVercelJson(stdout, description));
   if (!parsed.success) {
     throw new Error(`Could not read Vercel project identity from ${description}.`);
   }
-  return parsed.data;
+  return { projectId: parsed.data.id, projectName: parsed.data.name };
 }
 
 /** Resolves one project by exact name or id through the Vercel API. */
@@ -206,10 +62,12 @@ export async function resolveProjectByNameOrId(
   team: string,
   projectNameOrId: string,
   options: VercelProjectOperationOptions = {},
-): Promise<VercelProjectReference | null> {
-  const result = await captureVercel(
-    ["api", `/v9/projects/${encodeURIComponent(projectNameOrId)}`, "--scope", team, "--raw"],
-    { cwd: projectRoot, signal: options.signal },
+): Promise<VercelProjectIdentity | null> {
+  const result = normalizeVercelApiResult(
+    await captureVercel(
+      ["api", `/v9/projects/${encodeURIComponent(projectNameOrId)}`, "--scope", team, "--raw"],
+      { cwd: projectRoot, signal: options.signal },
+    ),
   );
   if (result.ok) {
     return parseProjectReference(result.stdout, `project ${projectNameOrId}`);
@@ -229,22 +87,30 @@ async function createProject(
   projectName: string,
   onOutput: ReturnType<typeof createPromptCommandOutput>,
   options: VercelProjectOperationOptions,
-): Promise<VercelProjectReference> {
-  const result = await captureVercel(
-    [
-      "api",
-      "/v10/projects",
-      "--scope",
-      team,
-      "--method",
-      "POST",
-      "--raw-field",
-      `name=${projectName}`,
-      "--raw-field",
-      `framework=${EVE_FRAMEWORK_PRESET}`,
-      "--raw",
-    ],
-    { cwd: projectRoot, onOutput, signal: options.signal },
+): Promise<VercelProjectIdentity> {
+  const createProjectArgs = [
+    "api",
+    "/v10/projects",
+    "--scope",
+    team,
+    "--method",
+    "POST",
+    "--raw-field",
+    `name=${projectName}`,
+  ];
+  // Host framework integrations (Next.js, Nuxt, SvelteKit) own the top-level
+  // Vercel build. Leaving the preset unset lets Vercel detect that framework
+  // while vercel.json/build-output config owns the internal Eve service.
+  if (!(await hasVercelHostFramework(projectRoot))) {
+    createProjectArgs.push("--raw-field", `framework=${EVE_FRAMEWORK_PRESET}`);
+  }
+  createProjectArgs.push("--raw");
+  const result = normalizeVercelApiResult(
+    await captureVercel(createProjectArgs, {
+      cwd: projectRoot,
+      onOutput,
+      signal: options.signal,
+    }),
   );
   if (result.ok) {
     return parseProjectReference(result.stdout, `created project ${projectName}`);
@@ -310,7 +176,7 @@ function probeWhoami(projectRoot: string, options: VercelProjectOperationOptions
  * existing credentials found" / "not authenticated") rather than a transient
  * fault (DNS, network, API error, timeout). Only the former is a genuine
  * logged-out state; classifying any non-zero exit as logged-out would route a
- * network blip to `/login`.
+ * network blip to `/vc:login`.
  */
 function isLoggedOutFailure(failure: VercelCaptureFailure): boolean {
   const text = `${failure.stdout} ${failure.stderr}`.toLowerCase();
@@ -354,6 +220,24 @@ export function requireVercelAuth(failure: VercelCaptureFailure): never {
  */
 export type VercelAuthStatus = "authenticated" | "logged-out" | "cli-missing" | "unavailable";
 
+/** Returns the user-facing reason Vercel-backed setup is unavailable. */
+export function vercelAuthBlockerReason(authStatus: VercelAuthStatus): string | undefined {
+  switch (authStatus) {
+    case "authenticated":
+      return undefined;
+    case "cli-missing":
+      return "Vercel CLI not found, see /vc";
+    case "logged-out":
+      return "Log in to Vercel first, see /login";
+    case "unavailable":
+      return "Couldn't reach Vercel, check your connection";
+    default: {
+      const exhaustive: never = authStatus;
+      return exhaustive;
+    }
+  }
+}
+
 export async function getVercelAuthStatus(
   projectRoot: string,
   options: VercelProjectOperationOptions = {},
@@ -363,23 +247,6 @@ export async function getVercelAuthStatus(
   if (result.ok) return "authenticated";
   if (result.failure.errno === "ENOENT") return "cli-missing";
   return isLoggedOutFailure(result.failure) ? "logged-out" : "unavailable";
-}
-
-/**
- * Throws the re-auth action for a forbidden scope. The session is logged in,
- * but a scoped command was denied — the SSO/SAML or non-membership case. The
- * remedy is still `vercel login` (it completes the team's SSO and refreshes the
- * token), so the dev TUI routes it to `/login`; the reason names the membership
- * fallback for the case re-auth cannot fix.
- */
-export function requireVercelTeamAccess(failure: VercelCaptureFailure): never {
-  const stderr = failure.stderr.trim();
-  const detail = stderr ? ` ${stderr}` : "";
-  throw new HumanActionRequiredError({
-    kind: "vercel-forbidden",
-    command: "vercel login",
-    reason: `Vercel denied access to this scope.${detail} Re-authenticate (for example to complete a team's SSO) or switch to a team you can access.`,
-  });
 }
 
 /**
@@ -403,7 +270,7 @@ export async function requireAuth(
     await check();
     return;
   }
-  await withNetworkSpinner(prompter, whimsyFor("auth"), check);
+  await withSpinner(prompter, whimsyFor("auth"), check);
 }
 
 /**
@@ -487,7 +354,7 @@ export async function pickTeam(
     await validateTeam(prompter, projectRoot, presetTeam, options);
     return resolveTeam(projectRoot, presetTeam, options);
   }
-  const teams = await withNetworkSpinner(prompter, whimsyFor("teams"), () =>
+  const teams = await withSpinner(prompter, whimsyFor("teams"), () =>
     listTeams(projectRoot, options),
   );
   if (teams.length <= 1) {
@@ -505,16 +372,13 @@ export async function pickTeam(
   });
 }
 
-/**
- * A picked Vercel project. `exists` distinguishes a project the user selected
- * from the existing list (link it) from a name they typed because none exist
- * yet (create it), so the caller can build the right `new` vs `existing` plan.
- */
-export interface ArgsPickedProject {
-  /** Project slug: an existing project's name, or a name to create. */
-  project: string;
-  /** True for a selected existing project; false for a typed-in name to create. */
-  exists: boolean;
+const SEARCH_PROJECT_PREFIX = "\0search-project:";
+
+function appendProjects(
+  existing: readonly VercelProjectListEntry[],
+  found: readonly VercelProjectListEntry[],
+): VercelProjectListEntry[] {
+  return [...new Map([...existing, ...found].map((project) => [project.id, project])).values()];
 }
 
 /** Picks an existing project under a team, or a name to create when none exist. */
@@ -523,9 +387,9 @@ export async function pickProject(
   projectRoot: string,
   team: string,
   options: PickProjectOptions = {},
-): Promise<ArgsPickedProject> {
-  const projects = await withNetworkSpinner(prompter, whimsyFor("projects", team), () =>
-    listProjects(projectRoot, team, options),
+): Promise<ResolvedVercelProjectSpec> {
+  let projects = await withSpinner(prompter, whimsyFor("projects", team), () =>
+    listRecentProjects(projectRoot, team, options),
   );
   if (projects.length === 0) {
     if (options.allowCreateWhenEmpty === false) {
@@ -538,15 +402,48 @@ export async function pickProject(
       validate: (value) =>
         value.trim().length === 0 ? "Project name cannot be empty." : undefined,
     });
-    return { project, exists: false };
+    return { kind: "new", project, team };
   }
-  const project = await prompter.select({
-    message: "Project to link",
-    search: true,
-    placeholder: "type to filter projects",
-    options: projects.map((entry) => ({ value: entry.name, label: entry.name })),
-  });
-  return { project, exists: true };
+
+  while (true) {
+    const selected = await prompter.select({
+      message: "Project to link",
+      search: true,
+      placeholder: "type to filter projects",
+      searchAction: {
+        label: (query) => `Search for '${query}'`,
+        value: (query) => `${SEARCH_PROJECT_PREFIX}${query}`,
+        load: async (query) => {
+          const found = await searchProjects(projectRoot, team, query, { signal: options.signal });
+          projects = appendProjects(projects, found);
+          return projects.map((project) => ({ value: project.id, label: project.name }));
+        },
+      },
+      options: projects.map((project) => ({ value: project.id, label: project.name })),
+      initialValue: projects[0]?.id,
+    });
+    const query = selected.startsWith(SEARCH_PROJECT_PREFIX)
+      ? selected.slice(SEARCH_PROJECT_PREFIX.length)
+      : undefined;
+    if (query === undefined) {
+      const project = projects.find((candidate) => candidate.id === selected);
+      if (project === undefined) throw new Error("Selected Vercel project is not available.");
+      return {
+        kind: "existing",
+        project: { projectId: project.id, projectName: project.name },
+        team,
+      };
+    }
+
+    const found = await withSpinner(prompter, `Searching ${team} for "${query}"...`, () =>
+      searchProjects(projectRoot, team, query, { signal: options.signal }),
+    );
+    if (found.length === 0) {
+      prompter.note(`No projects matched "${query}" in ${team}.`);
+      continue;
+    }
+    projects = appendProjects(projects, found);
+  }
 }
 
 /** Returns a project name for a new Vercel project, prompting when the default exists. */
@@ -557,7 +454,7 @@ export async function pickNewProjectName(
   defaultProjectName: string,
   options: VercelProjectOperationOptions = {},
 ): Promise<string> {
-  let existing = await withNetworkSpinner(prompter, whimsyFor("project-name", team), () =>
+  let existing = await withSpinner(prompter, whimsyFor("project-name", team), () =>
     resolveProjectByNameOrId(projectRoot, team, defaultProjectName.trim(), options),
   );
   let projectName = defaultProjectName.trim();
@@ -593,8 +490,9 @@ export async function pickNewProjectName(
 
 /**
  * Ensures the concrete project exists (creating it for a `new` plan) and links
- * this directory to it. Pure executor: it acts on a fully-resolved spec and
- * never prompts for a team or project. Returns whether the link succeeded.
+ * this directory to it. Acts on a fully-resolved spec — never prompts for a
+ * team or project. Returns the linked project, or undefined if `vercel link`
+ * did not complete.
  */
 export async function linkProject(
   prompter: Prompter,
@@ -602,11 +500,12 @@ export async function linkProject(
   spec: ResolvedVercelProjectSpec,
   onOutput: ReturnType<typeof createPromptCommandOutput>,
   options: VercelProjectOperationOptions = {},
-): Promise<boolean> {
+): Promise<VercelProjectIdentity | undefined> {
+  await assertNoLegacyProjectLinkDirectory(projectRoot);
   const scope = ["--scope", spec.team];
-  let project: VercelProjectReference;
+  let project: VercelProjectIdentity;
   if (spec.kind === "new") {
-    project = await withNetworkSpinner(
+    project = await withSpinner(
       prompter,
       `Creating Vercel project "${spec.project}" in ${spec.team}...`,
       async () => {
@@ -615,17 +514,13 @@ export async function linkProject(
       },
     );
   } else {
-    const existing = await resolveProjectByNameOrId(projectRoot, spec.team, spec.project, options);
-    if (existing === null) {
-      throw new Error(`Vercel project "${spec.project}" was not found in ${spec.team}.`);
-    }
-    project = existing;
+    project = spec.project;
   }
-  return withNetworkSpinner(
+  const linked = await withSpinner(
     prompter,
-    `Linking this directory to Vercel project "${project.name}"...`,
+    `Linking this directory to Vercel project "${project.projectName}"...`,
     () =>
-      runVercel(["link", "--project", project.id, ...scope, "--yes"], {
+      runVercel(["link", "--project", project.projectId, ...scope, "--yes"], {
         cwd: projectRoot,
         onOutput,
         // The plan already names the team and project, so the link needs no
@@ -639,4 +534,5 @@ export async function linkProject(
         signal: options.signal,
       }),
   );
+  return linked ? project : undefined;
 }

@@ -31,9 +31,8 @@ type ModelMessageContentPart = Exclude<ModelMessage["content"], string>[number];
  * deciding whether compaction is needed; the real token count comes back
  * from the model each step via {@link CompactionConfig.lastKnownInputTokens}.
  *
- * Accepts any JSON-serializable value so the reactive pruning system can
- * apply the same heuristic to individual tool-result parts — keeping
- * every layer of context management on one consistent token ruler.
+ * Accepts any JSON-serializable value so callers can apply the same heuristic
+ * to whole message arrays or individual content parts on one consistent ruler.
  */
 export function estimateTokens(value: unknown): number {
   return JSON.stringify(value).length / 4;
@@ -118,7 +117,7 @@ export async function compactMessages(
   while (true) {
     const { older, recent } = splitMessagesForCompaction(messages, keep);
     if (older.length === 0) {
-      return recent;
+      return keepNonToolResultMessages(recent);
     }
 
     const prunedOlder: CompactionTranscriptMessage[] = older.map((message) => ({
@@ -136,19 +135,26 @@ export async function compactMessages(
       temperature: 0,
     });
 
-    // The recent window may trail with an assistant message (e.g.
-    // deferred-input continuations where no user message was appended).
-    // Providers that don't support assistant prefill reject the request.
-    // Append a synthetic user message so the model resumes from a user turn.
+    // Keep recent context as plain conversation: tool results are dropped (the
+    // summary above already captures the older ones) and assistant tool calls
+    // are stripped, so no tool_use survives without its result. The summarized
+    // older region is the durable record of tool activity.
+    const keptTail = keepNonToolResultMessages(recent);
+
+    // The kept tail may be empty or trail with an assistant message; the summary
+    // assistant message also precedes it. Providers that don't support assistant
+    // prefill reject a request that ends on assistant content, so append a
+    // synthetic user message to resume from a user turn.
+    const lastKeptRole = keptTail.at(-1)?.role;
     const trailingAssistantGuard: ModelMessage[] =
-      recent.length > 0 && recent.at(-1)?.role === "assistant"
+      lastKeptRole === undefined || lastKeptRole === "assistant"
         ? [{ role: "user", content: "Continue." }]
         : [];
 
     const compacted: ModelMessage[] = [
       { content: "Summary of our conversation so far:", role: "user" },
       { content: result.text, role: "assistant" },
-      ...recent,
+      ...keptTail,
       ...trailingAssistantGuard,
     ];
 
@@ -158,6 +164,54 @@ export async function compactMessages(
 
     keep -= 1;
   }
+}
+
+/**
+ * Returns the kept tail for a compacted history: recent messages with tool
+ * activity removed. Tool-result messages are dropped, and assistant messages are
+ * reduced to their text content (tool-call and reasoning parts stripped) so the
+ * rebuilt history never carries a tool_use without its matching result.
+ * Assistant messages with no remaining text are dropped; user messages are kept
+ * verbatim.
+ */
+function keepNonToolResultMessages(messages: readonly ModelMessage[]): ModelMessage[] {
+  const kept: ModelMessage[] = [];
+
+  for (const message of messages) {
+    if (message.role === "tool") {
+      continue;
+    }
+
+    if (message.role === "assistant") {
+      const text = assistantMessageText(message);
+      if (text.length > 0) {
+        kept.push({ content: text, role: "assistant" });
+      }
+      continue;
+    }
+
+    kept.push(message);
+  }
+
+  return kept;
+}
+
+/**
+ * Concatenated text content of an assistant message, ignoring tool-call,
+ * reasoning, and other non-text parts.
+ */
+function assistantMessageText(message: ModelMessage): string {
+  if (typeof message.content === "string") {
+    return message.content.trim();
+  }
+
+  return message.content
+    .filter(
+      (part): part is Extract<ModelMessageContentPart, { type: "text" }> => part.type === "text",
+    )
+    .map((part) => part.text)
+    .join("")
+    .trim();
 }
 
 function selectRecentWindowSize(

@@ -38,9 +38,14 @@ The command:
 
 - Creates a child directory using the current workspace or launcher package manager, and uses eve's default model
 - Installs dependencies and initializes Git
-- Starts the development server and opens the interactive [terminal UI](./guides/dev-tui)
+- When a supported coding-agent REPL (Claude Code, Codex, Cursor, Droid, Gemini CLI, opencode, or Pi) is on `PATH`, asks whether to open an available REPL or start the development server; otherwise starts the server and opens the interactive [terminal UI](./guides/dev-tui)
 
 Type a message and watch the model loop run. Pass `--channel-web-nextjs` to add the Web Chat application. Every app ships the built-in HTTP channel (`agent/channels/eve.ts`) regardless.
+
+When you choose one of those REPLs, eve starts it with a project-specific
+prompt that guides the setup. The prompt distinguishes `eve dev`, which starts
+eve's HMR server and the agent's terminal REPL, from `eve dev --no-ui`, which is
+the controllable background mode for verification.
 
 `eve init` holds the terminal, so stop it with Ctrl+C to get your shell back before editing the generated agent. The command does not create a Vercel project or deploy.
 
@@ -186,10 +191,10 @@ See [Sessions, runs and streaming](./concepts/sessions-runs-and-streaming) for t
 
 If a coding agent (Claude Code, Cursor, and the like) is doing the setup, hand it this prompt:
 
-<CopyPrompt text="Set up an eve agent for the user. eve is a filesystem-first TypeScript framework for durable agents, published as the npm package eve. Read its docs: once eve is installed they are bundled in the package at node_modules/eve/docs; before eve is installed, read the published Introduction and Getting Started pages. If the project has no eve app, scaffold one with `npx eve@latest init <name>`; add `--channel-web-nextjs` only when the user wants Web Chat. The init command installs dependencies, initializes Git, and starts the dev server, so run it in a controllable process and stop it with Ctrl+C before editing. To add eve to an existing app, run `eve init .`, or install the dependencies by hand with `npm install eve@latest ai zod` (init adds ai and zod; the by-hand path needs all three). Make sure agent/agent.ts and agent/instructions.md exist, then add a first typed tool at agent/tools/get_weather.ts using defineTool from eve/tools with a Zod inputSchema and an inline execute. Start the dev server again, then exercise the HTTP API: create a session with POST /eve/v1/session, attach to GET /eve/v1/session/:id/stream, and send a follow-up with the returned continuationToken. Verify with the project's typecheck, adapt model and provider choices to the project, and do not commit unless the user asks.">
+<CopyPrompt text="Set up an eve agent for the user. eve is a filesystem-first TypeScript framework for durable agents, published as the npm package eve. Read its docs: once eve is installed they are bundled in the package at node_modules/eve/docs; before eve is installed, read the published Introduction and Getting Started pages. If the project has no eve app, scaffold one with `npx eve@latest init <name>`; add `--channel-web-nextjs` only when the user wants Web Chat. In a coding-agent launch, init installs dependencies and prints the project-specific dev command instead of starting the interactive terminal UI. A fresh project also initializes Git; an existing app keeps its repository and scripts. To add eve to an existing app, run `eve init .`, or install the dependencies by hand with `npm install eve@latest ai zod` (init adds ai and zod; the by-hand path needs all three). Make sure agent/agent.ts and agent/instructions.md exist, then add a first typed tool at agent/tools/get_weather.ts using defineTool from eve/tools with a Zod inputSchema and an inline execute. Start eve in a controllable background process with `npx eve dev --no-ui`, wait for the server URL, then exercise the HTTP API: create a session with POST /eve/v1/session, attach to GET /eve/v1/session/:id/stream, and send a follow-up with the returned continuationToken. Stop the dev process after verification. Verify with the project's typecheck, adapt model and provider choices to the project, and do not commit unless the user asks.">
   Set up an eve agent: read the eve docs (bundled at node_modules/eve/docs once eve is
   installed), scaffold with `npx eve@latest init <name>` (or `npm install eve@latest ai zod` in an existing app), add
-  a typed tool at agent/tools/get_weather.ts, run it with `npm run dev`, then create a session, stream
+  a typed tool at agent/tools/get_weather.ts, run it with `npx eve dev --no-ui`, then create a session, stream
   it, and send a follow-up.
 </CopyPrompt>
 

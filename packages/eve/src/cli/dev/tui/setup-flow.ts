@@ -1,4 +1,6 @@
 import type { ChannelSetupChoice, ChannelSetupChoiceOptions } from "#setup/cli/index.js";
+import type { SearchActionOption } from "#setup/cli/select-state.js";
+import type { ProviderPickerChoice, ProviderPickerRequest } from "#setup/flows/provider.js";
 import type { SelectNotice } from "#setup/prompter.js";
 
 import type { SetupPanelOption } from "./setup-panel.js";
@@ -6,6 +8,9 @@ import type { SetupPanelOption } from "./setup-panel.js";
 export type SetupEditableSelectResult =
   | { kind: "selected"; value: string }
   | { kind: "edited"; value: string; text: string };
+
+/** Animation shown while a setup flow is between questions. */
+export type SetupFlowIndicator = "spinner" | "pulse";
 
 interface SetupSelectRequestBase {
   message: string;
@@ -18,10 +23,15 @@ interface SetupSingleSelectRequest extends SetupSelectRequestBase {
   initialValue?: string;
 }
 
+interface SetupSearchAction extends SearchActionOption {
+  load?(query: string): Promise<readonly SetupPanelOption[]>;
+}
+
 interface SetupSearchSelectRequest extends SetupSelectRequestBase {
   kind: "search";
   initialValue?: string;
   placeholder?: string;
+  searchAction?: SetupSearchAction;
 }
 
 interface SetupMultiSelectRequest extends SetupSelectRequestBase {
@@ -49,7 +59,7 @@ export type SetupSelectRequest =
   | SetupSearchableMultiSelectRequest;
 
 export interface SetupFlowRenderer {
-  begin(title: string): void;
+  begin(title: string, indicator?: SetupFlowIndicator): void;
   end(options?: { preserveDiagnostics?: boolean }): void;
   readSelect(options: SetupSelectRequest): Promise<readonly string[] | undefined>;
   readEditableSelect(options: {
@@ -63,6 +73,8 @@ export interface SetupFlowRenderer {
       validate?: (value: string) => string | undefined;
     };
   }): Promise<SetupEditableSelectResult | undefined>;
+  /** Provider-only picker with masked async validation. Not part of Prompter. */
+  readProviderPicker(options: ProviderPickerRequest): Promise<ProviderPickerChoice | undefined>;
   readText(options: {
     message: string;
     placeholder?: string;
@@ -74,7 +86,7 @@ export interface SetupFlowRenderer {
   readAcknowledge(options: { message: string; lines: readonly string[] }): Promise<void>;
   /**
    * Presents an inert context row and a separate action menu beside the live
-   * flow spinner. Returns the choice plus a `close()` that dismisses the menu
+   * flow indicator. Returns the choice plus a `close()` that dismisses the menu
    * when a concurrent wait resolves first. Used by the Slack install wait for
    * "Try again" / "Cancel": the poll keeps running while the prompt is up, and
    * whichever settles first wins.
@@ -84,7 +96,7 @@ export interface SetupFlowRenderer {
   renderLine(text: string, tone: "info" | "success" | "warning" | "error"): void;
   renderOutput(text: string): void;
   /**
-   * Arms a key trap for the flow's working state — the status spinner between
+   * Arms a key trap for the flow's working state — the status indicator between
    * questions, where no prompt is consuming keys. Ctrl-C or Esc resolves the
    * promise so the command can abandon an in-flight flow (e.g. a parked
    * `vercel connect create` browser OAuth). Open questions own their keys; the

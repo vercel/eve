@@ -45,9 +45,19 @@ function createProvisioningDeps() {
     validateTeam: vi.fn<ResolveProvisioningDeps["validateTeam"]>(async () => {}),
     resolveTeam: vi.fn<ResolveProvisioningDeps["resolveTeam"]>(async () => "acme"),
     pickTeam: vi.fn<ResolveProvisioningDeps["pickTeam"]>(async () => "acme"),
+    resolveProjectByNameOrId: vi.fn<ResolveProvisioningDeps["resolveProjectByNameOrId"]>(
+      async () => ({
+        projectId: "prj_existing",
+        projectName: "existing-project",
+      }),
+    ),
     pickProject: vi.fn<ResolveProvisioningDeps["pickProject"]>(async () => ({
-      exists: true,
-      project: "my-agent",
+      kind: "existing",
+      project: {
+        projectId: "prj_1",
+        projectName: "my-agent",
+      },
+      team: "acme",
     })),
     pickNewProjectName: vi.fn<ResolveProvisioningDeps["pickNewProjectName"]>(
       async () => "my-agent",
@@ -60,14 +70,13 @@ function createProvisioningDeps() {
 
 function createLinkProjectDeps() {
   return {
-    linkProject: vi.fn<LinkProjectDeps["linkProject"]>(async () => true),
+    linkProject: vi.fn<LinkProjectDeps["linkProject"]>(async () => ({
+      projectId: "prj_1",
+      projectName: "my-agent",
+    })),
     detectProjectResolution: vi.fn<LinkProjectDeps["detectProjectResolution"]>(async () => ({
       kind: "linked",
       projectId: "prj_1",
-    })),
-    resolveProjectByNameOrId: vi.fn<LinkProjectDeps["resolveProjectByNameOrId"]>(async () => ({
-      id: "prj_1",
-      name: "my-agent",
     })),
     unresolvedProject: vi.fn<LinkProjectDeps["unresolvedProject"]>(() => ({ kind: "unresolved" })),
   };

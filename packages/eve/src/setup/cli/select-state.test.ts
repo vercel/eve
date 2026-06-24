@@ -6,6 +6,7 @@ import {
   initialSelectState,
   orderedSelection,
   reduceSelect,
+  searchActionQuery,
   selectValueAtCursor,
   type SelectContext,
   type SelectState,
@@ -49,6 +50,15 @@ describe("filterOptions", () => {
 
   it("returns nothing when no option matches", () => {
     expect(filterOptions(OPTIONS, "zzz")).toEqual([]);
+  });
+
+  it("appends the search action after local matches", () => {
+    const visible = filterOptions([{ value: "veto", label: "veto" }], "v", {
+      label: (query) => `Search for '${query}'`,
+    });
+
+    expect(visible.map((option) => option.label)).toEqual(["veto", "Search for 'v'"]);
+    expect(searchActionQuery(visible[1]?.value ?? "")).toBe("v");
   });
 
   it("keeps featured options out of filtering: an empty query still returns the full list", () => {

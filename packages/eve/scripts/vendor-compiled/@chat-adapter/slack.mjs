@@ -66,8 +66,21 @@ function buildSlackWebApiStub(names, moduleName) {
 export default {
   packageName: "@chat-adapter/slack",
   compiledPath: "@chat-adapter/slack",
+  entries: [
+    {
+      outputPath: "index",
+    },
+    {
+      input: "@chat-adapter/slack/blocks",
+      outputPath: "blocks",
+    },
+  ],
   plugins: [createOptionalNativeStubPlugin(["bufferutil", "utf-8-validate"])],
   copyDeclarations: createDeclarationCopier({
+    files: [
+      { source: "index.d.ts", output: "index.d.ts" },
+      { source: "blocks.d.ts", output: "blocks.d.ts" },
+    ],
     rewrites: {
       chat: { kind: "vendored", compiledPath: "chat" },
       "@chat-adapter/shared": {

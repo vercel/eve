@@ -354,6 +354,23 @@ export async function listGitHubPullRequestFiles(
   return response.body.map(toPullRequestFile);
 }
 
+/** Lists files changed between two commits (three-dot compare). */
+export async function listGitHubCompareFiles(
+  input: GitHubResourceInput & {
+    readonly baseSha: string;
+    readonly headSha: string;
+  },
+): Promise<readonly GitHubPullRequestFile[]> {
+  const response = await callGitHubApi<{ readonly files?: unknown[] }>({
+    api: input.api,
+    credentials: input.credentials,
+    installationId: input.installationId,
+    method: "GET",
+    path: `/repos/${encodePath(input.owner)}/${encodePath(input.repo)}/compare/${input.baseSha}...${input.headSha}`,
+  });
+  return (response.body.files ?? []).map(toPullRequestFile);
+}
+
 /** Creates a reaction on a GitHub issue or review comment. */
 export function createGitHubReaction(
   input: GitHubResourceInput & {

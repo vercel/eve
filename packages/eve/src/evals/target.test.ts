@@ -69,6 +69,47 @@ describe("resolveEvalTargetHandle", () => {
       }),
     ).rejects.toThrow(/agent-basic-runtime/);
   });
+
+  it("accepts a scoped package target when the runtime reports the app basename", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
+      const url = fetchUrl(request);
+      if (url.endsWith("/eve/v1/health")) {
+        return Response.json({ ok: true, status: "ready", workflowId: "wf" });
+      }
+      return Response.json(infoPayload({ name: "agent" }));
+    });
+
+    await expect(
+      resolveEvalTargetHandle({
+        client: new Client({ host: "http://127.0.0.1:4275" }),
+        expectedAgentName: "@acme/agent",
+        kind: "remote",
+        url: "http://127.0.0.1:4275",
+      }),
+    ).resolves.toMatchObject({
+      kind: "remote",
+      url: "http://127.0.0.1:4275",
+    });
+  });
+
+  it("rejects a scoped package target when the unscoped runtime name differs", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
+      const url = fetchUrl(request);
+      if (url.endsWith("/eve/v1/health")) {
+        return Response.json({ ok: true, status: "ready", workflowId: "wf" });
+      }
+      return Response.json(infoPayload({ name: "other-agent" }));
+    });
+
+    await expect(
+      resolveEvalTargetHandle({
+        client: new Client({ host: "http://127.0.0.1:4275" }),
+        expectedAgentName: "@acme/agent",
+        kind: "remote",
+        url: "http://127.0.0.1:4275",
+      }),
+    ).rejects.toThrow(/@acme\/agent/);
+  });
 });
 
 function fetchUrl(request: string | URL | Request): string {

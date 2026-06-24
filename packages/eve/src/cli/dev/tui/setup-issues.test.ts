@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   BOOT_DETECTIONS,
   CLI_MISSING_SETUP_ISSUE,
+  automaticSetupCommand,
   detectSetupIssues,
   formatSetupIssuesLine,
   LOGIN_SETUP_ISSUE,
   orderedSetupIssues,
+  resolveModelProviderState,
   type BootDetectionContext,
 } from "./setup-issues.js";
 
@@ -58,14 +60,75 @@ function infoWithRouting(
 }
 
 describe("BOOT_DETECTIONS", () => {
-  it("diagnoses an unlinked directory as ONE issue — the missing link subsumes credentials", async () => {
+  it("keeps an unavailable runtime diagnostic-only", async () => {
     const issues = await detectSetupIssues(context());
-    expect(issues).toEqual([{ label: "model provider not linked", command: "/model" }]);
+    expect(issues).toEqual([
+      { kind: "attention", label: "model provider not linked", command: "/model" },
+    ]);
+    expect(automaticSetupCommand(issues)).toBeUndefined();
   });
 
-  it("stays quiet when either gateway credential is present, linked or not", async () => {
-    expect(await detectSetupIssues(context({ env: { AI_GATEWAY_API_KEY: "key" } }))).toEqual([]);
-    expect(await detectSetupIssues(context({ env: { VERCEL_OIDC_TOKEN: "token" } }))).toEqual([]);
+  it("opens model setup only when the runtime confirms the gateway is disconnected", async () => {
+    const info = infoWithRouting(
+      { kind: "gateway", target: "openai" },
+      { kind: "gateway", connected: false },
+    );
+
+    const issues = await detectSetupIssues(context({ info }));
+    expect(issues).toEqual([
+      {
+        kind: "model-provider-unconfigured",
+        label: "model provider not linked",
+        command: "/model",
+      },
+    ]);
+    expect(automaticSetupCommand(issues)).toEqual({
+      prompt: "/model",
+      initialModelStep: "provider",
+    });
+  });
+
+  it.each([
+    ["AI_GATEWAY_API_KEY", "key"],
+    ["VERCEL_OIDC_TOKEN", "token"],
+  ])(
+    "treats a newly loaded gateway credential as configured while runtime info catches up",
+    async (key, value) => {
+      const info = infoWithRouting(
+        { kind: "gateway", target: "openai" },
+        { kind: "gateway", connected: false },
+      );
+
+      await expect(detectSetupIssues(context({ env: { [key]: value }, info }))).resolves.toEqual(
+        [],
+      );
+    },
+  );
+
+  it("uses compiled gateway routing before a stale endpoint kind", () => {
+    const info = infoWithRouting(
+      { kind: "gateway", target: "openai" },
+      { kind: "external", provider: "anthropic" },
+    );
+
+    expect(resolveModelProviderState(info, { AI_GATEWAY_API_KEY: "key" })).toMatchObject({
+      agent: {
+        model: {
+          endpoint: { kind: "gateway", connected: true, credential: "api-key" },
+        },
+      },
+    });
+  });
+
+  it.each([
+    ["AI_GATEWAY_API_KEY", "key"],
+    ["VERCEL_OIDC_TOKEN", "token"],
+  ])("does not infer AI Gateway routing from a local credential alone", async (key, value) => {
+    const issues = await detectSetupIssues(context({ env: { [key]: value } }));
+
+    expect(issues).toEqual([
+      { kind: "attention", label: "model provider not linked", command: "/model" },
+    ]);
   });
 
   it("stays quiet for an external-provider model — gateway linking/credentials don't apply", async () => {
@@ -84,7 +147,8 @@ describe("BOOT_DETECTIONS", () => {
   });
 
   it("skips a throwing detection instead of failing the boot", async () => {
-    const issues = await detectSetupIssues(context({ env: { AI_GATEWAY_API_KEY: "k" } }), [
+    const info = infoWithRouting({ kind: "gateway", target: "openai" });
+    const issues = await detectSetupIssues(context({ env: { AI_GATEWAY_API_KEY: "k" }, info }), [
       {
         id: "broken",
         detect: () => {
@@ -99,16 +163,18 @@ describe("BOOT_DETECTIONS", () => {
 
 describe("formatSetupIssuesLine", () => {
   it("mirrors the Claude Code attention-line shape", () => {
-    expect(formatSetupIssuesLine([{ label: "AI Gateway credentials", command: "/model" }])).toBe(
-      "1 setup issue: AI Gateway credentials · /model",
-    );
+    expect(
+      formatSetupIssuesLine([
+        { kind: "attention", label: "AI Gateway credentials", command: "/model" },
+      ]),
+    ).toBe("1 setup issue: AI Gateway credentials · /model");
   });
 
   it("pluralizes and joins multiple issues", () => {
     expect(
       formatSetupIssuesLine([
-        { label: "AI Gateway credentials", command: "/model" },
-        { label: "Channels", command: "/channels" },
+        { kind: "attention", label: "AI Gateway credentials", command: "/model" },
+        { kind: "attention", label: "Channels", command: "/channels" },
       ]),
     ).toBe("2 setup issues: AI Gateway credentials · /model, Channels · /channels");
   });
@@ -131,7 +197,11 @@ describe("formatSetupIssuesLine", () => {
 
 describe("orderedSetupIssues", () => {
   it("puts the auth prerequisite before the boot detections", () => {
-    const modelIssue = { label: "model provider not linked", command: "/model" };
+    const modelIssue = {
+      kind: "model-provider-unconfigured" as const,
+      label: "model provider not linked",
+      command: "/model" as const,
+    };
     expect(orderedSetupIssues([modelIssue], CLI_MISSING_SETUP_ISSUE)).toEqual([
       CLI_MISSING_SETUP_ISSUE,
       modelIssue,
@@ -143,7 +213,9 @@ describe("orderedSetupIssues", () => {
   });
 
   it("returns the boot issues unchanged when no auth prerequisite is unmet", () => {
-    const boot = [{ label: "AI Gateway credentials missing", command: "/model" }];
+    const boot = [
+      { kind: "attention" as const, label: "AI Gateway credentials missing", command: "/model" },
+    ];
     expect(orderedSetupIssues(boot, undefined)).toEqual(boot);
   });
 });

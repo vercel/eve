@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import type { PromptOption } from "./prompt-ui.js";
 import { SelectComponent } from "./select-component.js";
-import { initialSelectState } from "./select-state.js";
+import { initialSelectState, searchActionQuery, type SearchActionOption } from "./select-state.js";
 
 const OPTIONS: PromptOption<string>[] = [
   { value: "web", label: "Web Chat" },
@@ -19,6 +19,7 @@ class TestSelect extends SelectComponent {
 function makeSelect(input: {
   multiple: boolean;
   search?: boolean;
+  searchAction?: SearchActionOption;
   required?: boolean;
   options?: PromptOption<string>[];
 }): TestSelect {
@@ -27,6 +28,7 @@ function makeSelect(input: {
     options,
     multiple: input.multiple,
     search: input.search ?? false,
+    searchAction: input.searchAction,
     required: input.required ?? false,
     initial: initialSelectState({ options, submitRow: input.multiple }),
     render: () => "",
@@ -75,6 +77,24 @@ describe("SelectComponent enter routing", () => {
 
     expect(select.filter).toBe("");
     expect([...select.selectedSet]).toEqual(["web"]);
+  });
+
+  test("search appends an action after matching options", () => {
+    const select = makeSelect({
+      multiple: false,
+      search: true,
+      options: [{ value: "veto", label: "veto" }],
+      searchAction: { label: (query) => `Search for '${query}'` },
+    });
+
+    select.emit("key", "v", { name: "v" });
+
+    const [match, action] = select.visibleOptions();
+    expect(match?.label).toBe("veto");
+    expect(action?.label).toBe("Search for 'v'");
+    expect(searchActionQuery(action?.value ?? "")).toBe("v");
+    select.optionCursor = 1;
+    expect(select.shouldSubmit()).toBe(true);
   });
 
   test("the Submit row reads Skip until something is picked", () => {

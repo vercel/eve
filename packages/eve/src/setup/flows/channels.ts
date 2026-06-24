@@ -18,7 +18,12 @@ import type { Prompter, SelectOption, SingleSelectOptions } from "../prompter.js
 import { WizardCancelledError } from "../step.js";
 import { runInteractive, type AnySetupBox } from "../runner.js";
 import { createDefaultSetupState, snapshotSetupState, type SetupState } from "../state.js";
-import { getVercelAuthStatus, type VercelAuthStatus } from "../vercel-project.js";
+import {
+  getVercelAuthStatus,
+  vercelAuthBlockerReason,
+  type VercelAuthStatus,
+} from "../vercel-project.js";
+import { withSpinner } from "../with-spinner.js";
 
 import { prompterSink } from "./in-project.js";
 
@@ -157,9 +162,8 @@ function vercelChannelBlocker(
   authStatus: VercelAuthStatus,
   projectLinked: boolean,
 ): string | undefined {
-  if (authStatus === "cli-missing") return "Vercel CLI not found, see /vc";
-  if (authStatus === "logged-out") return "Log in to Vercel first, see /login";
-  if (authStatus === "unavailable") return "Couldn't reach Vercel, check your connection";
+  const authBlocker = vercelAuthBlockerReason(authStatus);
+  if (authBlocker !== undefined) return authBlocker;
   if (!projectLinked) return "Requires Vercel account, see /model";
   return undefined;
 }
@@ -249,26 +253,20 @@ export async function runChannelsFlow(input: {
     ...input.deps,
   };
 
-  async function checkProject<T>(task: () => Promise<T>): Promise<T> {
-    const spinner = prompter.log.spinner?.("Checking the project…");
-    try {
-      return await task();
-    } finally {
-      spinner?.stop();
-    }
-  }
-
   // Link detection and the auth probe are independent `vercel` round-trips;
   // the registration compile is local. One ephemeral spinner covers all three
   // so the list paints with no persisted loading lines. Login is a separate
   // axis from link: a logged-out (or CLI-missing) session blocks a Vercel-backed
   // channel even when the directory is linked.
-  const [deployment, initialRegistrations, authStatus] = await checkProject(() =>
-    Promise.all([
-      deps.detectDeployment(appRoot, { signal }),
-      deps.inspectExistingChannelRegistrations(appRoot),
-      deps.getVercelAuthStatus(appRoot, { signal }),
-    ]),
+  const [deployment, initialRegistrations, authStatus] = await withSpinner(
+    prompter,
+    "Checking the project…",
+    () =>
+      Promise.all([
+        deps.detectDeployment(appRoot, { signal }),
+        deps.inspectExistingChannelRegistrations(appRoot),
+        deps.getVercelAuthStatus(appRoot, { signal }),
+      ]),
   );
   signal?.throwIfAborted();
   let registrations = initialRegistrations;
@@ -319,7 +317,9 @@ export async function runChannelsFlow(input: {
         signal,
       });
     } catch (error) {
-      const observed = await checkProject(() => deps.inspectExistingChannelRegistrations(appRoot));
+      const observed = await withSpinner(prompter, "Checking the project…", () =>
+        deps.inspectExistingChannelRegistrations(appRoot),
+      );
       if (channelLandedDuringSubflow(registrations, observed, pick)) {
         state = { ...state, channels: appendChannel(state.channels, pick) };
         registrations = observed;
@@ -334,7 +334,9 @@ export async function runChannelsFlow(input: {
     }
     if (result.kind === "done") {
       state = result.state;
-      registrations = await checkProject(() => deps.inspectExistingChannelRegistrations(appRoot));
+      registrations = await withSpinner(prompter, "Checking the project…", () =>
+        deps.inspectExistingChannelRegistrations(appRoot),
+      );
       signal?.throwIfAborted();
       // A fresh Slack connection only comes alive once deployed, so offer the
       // shortcut right here; "Later" falls back to the list like any other lap.
@@ -350,7 +352,9 @@ export async function runChannelsFlow(input: {
         };
       }
     } else {
-      const observed = await checkProject(() => deps.inspectExistingChannelRegistrations(appRoot));
+      const observed = await withSpinner(prompter, "Checking the project…", () =>
+        deps.inspectExistingChannelRegistrations(appRoot),
+      );
       if (channelLandedDuringSubflow(registrations, observed, pick)) {
         return { kind: "done", addedChannels: appendChannel(state.channels, pick) };
       }

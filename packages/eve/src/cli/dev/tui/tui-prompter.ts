@@ -4,9 +4,11 @@ import type {
   MultiSelectOptions,
   Prompter,
   PrompterValue,
+  SelectOption,
   SingleSelectOptions,
 } from "#setup/prompter.js";
 import { createSelectOptionCodec } from "#setup/cli/select-option-codec.js";
+import { searchActionQuery } from "#setup/cli/select-state.js";
 import { WizardCancelledError } from "#setup/step.js";
 
 import type { SetupFlowPrompterRenderer, SetupSelectRequest } from "./setup-flow.js";
@@ -23,6 +25,7 @@ function setupSelectRequest<T extends PrompterValue>(
   opts: SingleSelectOptions<T> | MultiSelectOptions<T>,
   options: SetupSelectRequest["options"],
   encode: (value: T) => string,
+  encodeOptions: (options: readonly SelectOption<T>[]) => SetupSelectRequest["options"],
 ): SetupSelectRequest {
   const base = { message: opts.message, options };
   const withNotices = <Request extends SetupSelectRequest>(request: Request): Request => {
@@ -64,6 +67,13 @@ function setupSelectRequest<T extends PrompterValue>(
   if (opts.search === true) {
     request = { ...base, kind: "search" };
     if (opts.placeholder !== undefined) request.placeholder = opts.placeholder;
+    if (opts.searchAction !== undefined) {
+      request.searchAction = { label: opts.searchAction.label };
+      const load = opts.searchAction.load;
+      if (load !== undefined) {
+        request.searchAction.load = async (query) => encodeOptions(await load(query));
+      }
+    }
   } else {
     // The public "inline" hint layout is the panel's "task-list" presentation.
     const kind = opts.hintLayout === "inline" ? "task-list" : (opts.hintLayout ?? "single");
@@ -95,10 +105,16 @@ export function createTuiPrompter(renderer: TuiPrompterRenderer): Prompter {
     opts: SingleSelectOptions<T> | MultiSelectOptions<T>,
   ): Promise<T | T[]> {
     const codec = createSelectOptionCodec(opts.options);
-    const request = setupSelectRequest(opts, codec.options, codec.encode);
+    const request = setupSelectRequest(opts, codec.options, codec.encode, codec.encodeOptions);
 
     const keys = guardCancel(await renderer.readSelect(request));
-    const values = keys.map((key) => codec.decode(key));
+    const values = keys.map((key) => {
+      const query = searchActionQuery(key);
+      if (query !== undefined && opts.multiple !== true && opts.searchAction !== undefined) {
+        return opts.searchAction.value(query);
+      }
+      return codec.decode(key);
+    });
     if (opts.multiple === true) return values;
     const value = values[0];
     if (value === undefined) {

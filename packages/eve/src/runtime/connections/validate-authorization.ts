@@ -85,6 +85,8 @@ export function normalizeAuthorizationSpec(
   const auth = authorization as Record<string, unknown>;
   const vercelConnect = extractVercelConnectMarker(auth.vercelConnect);
   const displayName = auth.displayName as string | undefined;
+  const evict =
+    typeof auth.evict === "function" ? (auth.evict as AuthorizationDefinition["evict"]) : undefined;
   if (auth.startAuthorization !== undefined && auth.completeAuthorization !== undefined) {
     let interactive: InteractiveAuthorizationDefinition = {
       completeAuthorization:
@@ -96,6 +98,7 @@ export function normalizeAuthorizationSpec(
     };
     if (vercelConnect !== undefined) interactive = { ...interactive, vercelConnect };
     if (displayName !== undefined) interactive = { ...interactive, displayName };
+    if (evict !== undefined) interactive = { ...interactive, evict };
     return interactive;
   }
 
@@ -106,6 +109,7 @@ export function normalizeAuthorizationSpec(
   };
   if (vercelConnect !== undefined) nonInteractive = { ...nonInteractive, vercelConnect };
   if (displayName !== undefined) nonInteractive = { ...nonInteractive, displayName };
+  if (evict !== undefined) nonInteractive = { ...nonInteractive, evict };
   return nonInteractive;
 }
 

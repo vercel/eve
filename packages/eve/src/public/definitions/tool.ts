@@ -6,10 +6,10 @@ import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { JsonObject } from "#shared/json.js";
 import type {
   AuthorizationDefinition,
+  ConnectionAuthorizationContext,
   NonInteractiveAuthorizationDefinition,
   TokenResult,
 } from "#runtime/connections/types.js";
-import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
 import {
   DYNAMIC_SENTINEL_KIND,
   TOOL_BRAND,
@@ -37,11 +37,12 @@ export interface NeedsApprovalContext<TInput = Record<string, unknown>> {
 export type { ToolModelOutput } from "#shared/tool-definition.js";
 
 /**
- * Authorization strategy declared on a {@link ToolDefinition} via the
- * `auth` field. Accepts the same shapes as a connection's `auth`:
+ * Authorization provider passed to {@link ToolContext.getToken} or
+ * {@link ToolContext.requireAuth}. Accepts the same shapes as a connection's
+ * `auth`:
  * - a `getToken`-only object (static API keys, pre-provisioned JWTs);
  *   `principalType` may be omitted and defaults to `"app"`.
- * - a full interactive OAuth definition (e.g. `connect("okta")` from
+ * - a full interactive OAuth definition (e.g. `connect("okta/myagent")` from
  *   `@vercel/connect/eve`, or {@link defineInteractiveAuthorization}).
  */
 export type ToolAuthDefinition =
@@ -50,35 +51,53 @@ export type ToolAuthDefinition =
     })
   | AuthorizationDefinition;
 
+export type ToolAuthProvider = ToolAuthDefinition;
+
+/**
+ * Controls Eve runtime behavior for an inline tool auth provider.
+ */
+export interface ToolAuthOptions {
+  /**
+   * Connection metadata passed through to provider callbacks. Tool-only
+   * providers usually leave this unset; connection-backed helpers can use it
+   * to receive the upstream server URL.
+   */
+  readonly connection?: ConnectionAuthorizationContext;
+  /**
+   * Optional human-readable provider name shown in sign-in UI. Presentation
+   * only; it does not affect OAuth scopes, token cache keys, or callback URLs.
+   */
+  readonly displayName?: string;
+  /**
+   * Optional Eve auth-flow key for token caches, callback URLs, pending
+   * authorization state, and authorization completion. This is not an OAuth
+   * scope. For Vercel Connect OAuth targeting such as `scopes`, `resources`,
+   * or `authorizationDetails`, configure the provider with
+   * `connect({ connector, tokenParams })`.
+   */
+  readonly authKey?: string;
+}
+
 /**
  * Authored tool context. Passed as the last argument to
  * {@link ToolDefinition.execute}.
  *
- * Extends {@link SessionContext} with token accessors. {@link getToken} and
- * {@link requireAuth} only do useful work when the tool declares `auth`;
- * calling them on a tool without `auth` throws.
+ * Extends {@link SessionContext} with token accessors. Passing a provider
+ * resolves that provider inline, which lets one tool use multiple credentials.
  */
 export type ToolContext = SessionContext & {
   /**
-   * Resolves the bearer token for this tool's declared `auth`,
-   * consulting the per-step token cache before invoking the authored
-   * `getToken`. For interactive strategies a cache miss throws
-   * `ConnectionAuthorizationRequiredError`; the runtime catches it,
-   * suspends the turn on a framework-owned callback URL, shows a
-   * "Sign in" affordance, and re-runs the tool after the OAuth
-   * callback completes.
-   *
-   * Throws when the tool does not declare an `auth` strategy.
+   * Resolves the bearer token for an inline provider. This accepts the same
+   * auth shapes as a connection's `auth` field, including `connect("...")`
+   * from `@vercel/connect/eve`.
    */
-  getToken(): Promise<TokenResult>;
+  getToken(provider: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult>;
   /**
-   * Signals that the caller must complete this tool's authorization flow
-   * before proceeding. Throws `ConnectionAuthorizationRequiredError`, which
-   * the runtime converts into a consent prompt (for interactive strategies)
-   * and re-runs the tool after sign-in. Use it to gate a tool on
-   * authorization without resolving a token first.
+   * Signals that the caller must complete authorization for an inline
+   * provider before proceeding. Use this after a downstream `401` rejects a
+   * token returned by {@link getToken}.
    */
-  requireAuth(): never;
+  requireAuth(provider: ToolAuthProvider, options?: ToolAuthOptions): never;
 };
 
 /**
@@ -93,20 +112,6 @@ export type ToolDefinition<TInput = unknown, TOutput = unknown> = PublicToolDefi
   TOutput
 > & {
   execute(input: TInput, ctx: ToolContext): Promise<TOutput> | TOutput;
-  /**
-   * Optional authorization strategy. When set, the execute context gains a
-   * working {@link ToolContext.getToken} / {@link ToolContext.requireAuth},
-   * and a thrown `ConnectionAuthorizationRequiredError` (implicit from
-   * `getToken()` or explicit via `requireAuth()`) drives the framework's
-   * interactive consent flow, the same machinery MCP connections use, scoped
-   * to this tool's name.
-   *
-   * Use `connect("...")` from `@vercel/connect/eve` for Vercel
-   * Connect-backed OAuth, {@link defineInteractiveAuthorization} for a
-   * custom interactive flow, or a plain `{ getToken }` object for
-   * static/pre-provisioned credentials.
-   */
-  auth?: ToolAuthDefinition;
   /**
    * Optional per-tool approval gate. The return value determines whether
    * user approval is required before executing this tool.
@@ -158,7 +163,6 @@ export function defineTool<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["toModelOutput"];
-  auth?: ToolAuthDefinition;
 }): ToolDefinition<
   StandardJSONSchemaV1.InferOutput<TInputSchema>,
   StandardJSONSchemaV1.InferOutput<TOutputSchema>
@@ -179,7 +183,6 @@ export function defineTool<
     unknown
   >["needsApproval"];
   toModelOutput?: ToolDefinition<unknown, TOutput>["toModelOutput"];
-  auth?: ToolAuthDefinition;
 }): ToolDefinition<StandardJSONSchemaV1.InferOutput<TSchema>, TOutput>;
 export function defineTool<
   TOutputSchema extends StandardJSONSchemaV1<unknown, unknown>,
@@ -198,7 +201,6 @@ export function defineTool<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["toModelOutput"];
-  auth?: ToolAuthDefinition;
 }): ToolDefinition<Record<string, unknown>, StandardJSONSchemaV1.InferOutput<TOutputSchema>>;
 export function defineTool<TOutput>(definition: {
   description: ToolDefinition<unknown, unknown>["description"];
@@ -207,7 +209,6 @@ export function defineTool<TOutput>(definition: {
   execute(input: Record<string, unknown>, ctx: ToolContext): Promise<TOutput> | TOutput;
   needsApproval?: ToolDefinition<Record<string, unknown>, unknown>["needsApproval"];
   toModelOutput?: ToolDefinition<unknown, TOutput>["toModelOutput"];
-  auth?: ToolAuthDefinition;
 }): ToolDefinition<Record<string, unknown>, TOutput>;
 export function defineTool<TInput = unknown, TOutput = unknown>(
   definition: ToolDefinition<TInput, TOutput>,
@@ -215,8 +216,11 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
 export function defineTool<TInput = unknown, TOutput = unknown>(
   definition: ToolDefinition<TInput, TOutput>,
 ): ToolDefinition<TInput, TOutput> {
-  if (definition.auth !== undefined) {
-    definition.auth = normalizeAuthorizationSpec(definition.auth, "defineTool:");
+  if ((definition as { readonly auth?: unknown }).auth !== undefined) {
+    throw new Error(
+      `defineTool: The "auth" field is no longer supported. ` +
+        `Pass auth providers inline to ctx.getToken(provider) or ctx.requireAuth(provider).`,
+    );
   }
   Object.assign(definition, { [TOOL_BRAND]: true });
   stampDefinitionKey(definition, `tool:${definition.description}`);

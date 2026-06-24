@@ -18,6 +18,7 @@ export {
   type SetupMode,
   type SetupState,
   snapshotSetupState,
+  type VercelProjectIdentity,
   type WiringMode,
 } from "./state.js";
 export {

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { WizardCancelledError } from "#setup/step.js";
+import { searchActionValue } from "#setup/cli/select-state.js";
 
 import { createTuiPrompter, type TuiPrompterRenderer } from "./tui-prompter.js";
 
@@ -35,6 +36,62 @@ describe("createTuiPrompter", () => {
 
     expect(picked).toBe(true);
     expect(renderer.readSelect).toHaveBeenCalledWith(expect.objectContaining({ kind: "single" }));
+  });
+
+  it("maps a searchable action back to its typed value", async () => {
+    const renderer = fakeRenderer({
+      readSelect: vi.fn(async () => [searchActionValue("older-agent")]),
+    });
+    const prompter = createTuiPrompter(renderer);
+
+    await expect(
+      prompter.select({
+        message: "Project to link",
+        search: true,
+        searchAction: {
+          label: (query) => `Search for '${query}'`,
+          value: (query) => `search:${query}`,
+        },
+        options: [{ value: "prj_recent", label: "recent-agent" }],
+      }),
+    ).resolves.toBe("search:older-agent");
+    expect(renderer.readSelect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "search",
+        searchAction: { label: expect.any(Function) },
+      }),
+    );
+  });
+
+  it("encodes replacement rows for an in-place search action", async () => {
+    let searchRequest:
+      | Extract<Parameters<TuiPrompterRenderer["readSelect"]>[0], { kind: "search" }>
+      | undefined;
+    const renderer = fakeRenderer({
+      readSelect: vi.fn(async (request) => {
+        if (request.kind !== "search") throw new Error("Expected a searchable request.");
+        searchRequest = request;
+        await expect(request.searchAction?.load?.("older-agent")).resolves.toEqual([
+          { value: "option-1", label: "older-agent" },
+        ]);
+        return ["option-1"];
+      }),
+    });
+    const prompter = createTuiPrompter(renderer);
+
+    await expect(
+      prompter.select({
+        message: "Project to link",
+        search: true,
+        searchAction: {
+          label: (query) => `Search for '${query}'`,
+          value: (query) => `search:${query}`,
+          load: async () => [{ value: "prj_older", label: "older-agent" }],
+        },
+        options: [{ value: "prj_recent", label: "recent-agent" }],
+      }),
+    ).resolves.toBe("prj_older");
+    expect(searchRequest?.searchAction?.label("older-agent")).toBe("Search for 'older-agent'");
   });
 
   it("returns the marked set from a multi-select", async () => {

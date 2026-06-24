@@ -124,11 +124,11 @@ import { defineMcpClientConnection } from "eve/connections";
 export default defineMcpClientConnection({
   url: "https://mcp.linear.app/sse",
   description: "Linear workspace: issues, projects, cycles, and comments.",
-  auth: connect("linear"),
+  auth: connect("linear/myagent"),
 });
 ```
 
-`"linear"` is the UID you chose when registering the Connect client. Connect-managed OAuth is user-scoped by default, so the runtime resolves the per-user token before each tool call. The full setup (Connect client provisioning, project linking, the runtime consent flow) lives in [Auth & route protection](./guides/auth-and-route-protection).
+`"linear/myagent"` is the UID you chose when registering the Connect client. Connect-managed OAuth is user-scoped by default, so the runtime resolves the per-user token before each tool call. The full setup (Connect client provisioning, project linking, the runtime consent flow) lives in [Auth & route protection](./guides/auth-and-route-protection).
 
 ## Self-hosted interactive OAuth
 
@@ -183,7 +183,7 @@ export default defineMcpClientConnection({
 
 Drop `resume` when the provider keeps flow state server-side, so nothing has to cross the step boundary.
 
-`displayName` is presentation-only. The connection's path-derived name still keys the authorization scope, token cache, and callback URL. You can also set `displayName` on the `auth` definition itself (e.g. `auth: { ...connect("sfdc"), displayName: "Salesforce" }`); that definition-level value wins over one the strategy stamps on the challenge, and channels fall back to title-casing the connection name when neither is set.
+`displayName` is presentation-only. The connection's path-derived name still keys the authorization flow, token cache, and callback URL. You can also set `displayName` on the `auth` definition itself (e.g. `auth: { ...connect("salesforce/myagent"), displayName: "Salesforce" }`); that definition-level value wins over one the strategy stamps on the challenge, and channels fall back to title-casing the connection name when neither is set.
 
 ### Signaling authorization state
 
@@ -205,23 +205,26 @@ To narrow a caught error, use `isConnectionAuthorizationRequiredError(err)` and 
 
 ### Handling a revoked token mid-call
 
-`getToken` only runs _before_ a tool call, so a grant revoked while a tool is mid-flight first surfaces as a downstream `401` inside your `execute`. A plain throw there is only a tool error, so the model sees a failure and the cached bearer sticks around. Instead, map a provider `401` to `ctx.requireAuth()` (or rethrow `ConnectionAuthorizationRequiredError`). eve then evicts the rejected token from its per-step cache and re-runs the consent flow with a fresh one, exactly as it does for a connection whose server rejects the bearer.
+`getToken` only runs _before_ a tool call, so a grant revoked while a tool is mid-flight first surfaces as a downstream `401` inside your `execute`. A plain throw there is only a tool error, so the model sees a failure and the cached bearer sticks around. Instead, map a provider `401` to `ctx.requireAuth(provider)`. eve then evicts the rejected token from its per-step cache and re-runs the consent flow with a fresh one, exactly as it does for a connection whose server rejects the bearer.
 
 ```ts title="agent/tools/list_issues.ts"
+import { connect } from "@vercel/connect/eve";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
+
+const linearAuth = connect("linear/myagent");
 
 export default defineTool({
   description: "List open Linear issues.",
   inputSchema: z.object({}),
   async execute(_input, ctx) {
-    const { token } = await ctx.getToken();
+    const { token } = await ctx.getToken(linearAuth);
     const res = await fetch("https://api.linear.app/graphql", {
       headers: { authorization: `Bearer ${token}` },
     });
     // The grant was revoked since getToken ran: re-challenge instead of
     // returning a dead-token error to the model.
-    if (res.status === 401) ctx.requireAuth();
+    if (res.status === 401) ctx.requireAuth(linearAuth);
     return await res.json();
   },
 });

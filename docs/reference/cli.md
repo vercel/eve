@@ -33,9 +33,9 @@ The optional `target` decides the mode:
 
 - A name (`eve init my-agent`) scaffolds a fresh project in a new `my-agent/` directory.
 - An existing directory, including `.` for the current one (`eve init .`), adds an agent to that project. The project needs a `package.json`, the `agent/` files must not exist yet, and the missing `eve`, `ai`, and `zod` dependencies are added without touching anything else.
-- Omitting the target scaffolds or updates the current directory, the same as `eve init .`.
+- Omitting the target scaffolds or updates the current directory, the same as `eve init .`. The exception is a coding agent (Claude Code, Cursor, and the like): running `eve init` with no target prints a setup guide instead of scaffolding, since a bare invocation means the agent has not chosen what to build yet.
 
-Either mode installs dependencies, initializes Git, and runs `eve dev` through the detected project package manager. Fresh projects inherit a parent workspace manager when one is present; otherwise they use the manager that launched `eve init`.
+Both scaffold modes install dependencies. A fresh project initializes Git; an existing project keeps its repository and scripts. On an interactive human terminal, when a supported coding-agent CLI (`claude`, `codex`, `cursor-agent`, `droid`, `gemini`, `opencode`, or `pi`) is on `PATH`, `eve init` offers the available REPLs and `eve dev` (the default). Each REPL receives a project-specific prompt that guides the user through building the agent. It also explains that bare `eve dev` starts HMR and the agent's terminal REPL, while `eve dev --no-ui` is the controllable verification path. Without any of those executables, human invocations run `eve dev` through the detected project package manager. Fresh projects inherit a parent workspace manager when one is present; otherwise they use the manager that launched `eve init`. Coding-agent invocations print the same project-specific handoff, and the agent can run that command with `--no-ui` for headless verification.
 
 | Flag                   | Type | Default | Description                                                                                                                            |
 | ---------------------- | ---- | ------- | -------------------------------------------------------------------------------------------------------------------------------------- |
@@ -119,7 +119,7 @@ Local dev keeps immutable runtime source snapshots under `.eve/dev-runtime/snaps
 eve link
 ```
 
-Links the current directory to an existing Vercel project. You select a team and then a project, and eve pulls the project's environment so an AI Gateway credential (`VERCEL_OIDC_TOKEN` or `AI_GATEWAY_API_KEY`) lands in `.env.local`, then verifies one actually did. Running it again re-links: the pickers always run, and the new choice wins. The command is interactive only; in CI, use `vercel link --project <name> --yes` instead. A running `eve dev` reloads env files automatically, so you don't need to restart after the pull.
+Links the current directory to an existing Vercel project. You select a team and then one of its recent projects; type a project name and choose **Search for '<name>'** to search the rest of that team's projects. Vercel links the selected project, eve verifies its project ID, and then pulls the project's environment so an AI Gateway credential (`VERCEL_OIDC_TOKEN` or `AI_GATEWAY_API_KEY`) lands in `.env.local`. Running it again re-links: the pickers always run, and the new choice wins. The command is interactive only; in CI, use `vercel link --project <name> --yes --non-interactive` instead. A running `eve dev` reloads env files automatically, so you don't need to restart after the pull.
 
 ## `eve deploy`
 

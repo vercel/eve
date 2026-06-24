@@ -256,8 +256,10 @@ async function buildPullRequestContext(
   try {
     return await buildGitHubPullRequestContext({
       api: config.api,
+      baseSha: state.baseSha,
       config: config.pullRequestContext,
       credentials: config.credentials,
+      headSha: state.headSha,
       installationId: state.installationId ?? undefined,
       owner: state.owner,
       pullRequestNumber: state.pullRequestNumber,

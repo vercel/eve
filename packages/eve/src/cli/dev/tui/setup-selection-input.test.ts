@@ -83,6 +83,31 @@ describe("setupSelectionIntent", () => {
     ).toEqual({ kind: "submit", values: ["slack"] });
   });
 
+  it("clears a searchable filter with escape before cancelling the panel", () => {
+    const options = [
+      { value: "recent", label: "recent-agent" },
+      { value: "older", label: "older-agent" },
+    ];
+    const searched = initialSelectState({ options, filter: "older" });
+
+    expect(
+      reduceSetupSelectInput({
+        key: { type: "escape" },
+        kind: "search",
+        options,
+        select: searched,
+      }),
+    ).toMatchObject({ kind: "update", select: { filter: "", cursor: 0 } });
+    expect(
+      reduceSetupSelectInput({
+        key: { type: "escape" },
+        kind: "search",
+        options,
+        select: initialSelectState({ options }),
+      }),
+    ).toEqual({ kind: "cancel" });
+  });
+
   it("applies bracketed-paste text to searchable fields", () => {
     const options = [
       { value: "new-york", label: "New York" },

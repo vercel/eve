@@ -1,5 +1,64 @@
 # eve
 
+## 0.13.3
+
+### Patch Changes
+
+- b33c611: use shared Chat SDK Block Kit primitives for Slack card rendering
+
+## 0.13.2
+
+### Patch Changes
+
+- d82e8d1: Consolidate model provider setup into one choice between project-backed AI Gateway, an inline `AI_GATEWAY_API_KEY`, and direct provider credentials. Gateway key validation now reports its latest result inline without leaving stale errors in the setup panel.
+- b29e2ae: Remote clients can now send Vercel OIDC credentials through a dedicated auth mode and reject malformed agent metadata before using it.
+
+## 0.13.1
+
+### Patch Changes
+
+- 9d8bd6e: Existing production sessions now refresh their system prompt from the latest deployment before each model step. Long-lived channel conversations retain their history and state while adopting updated agent instructions.
+
+## 0.13.0
+
+### Minor Changes
+
+- 306e14e: Remove the top-level `auth` field from `defineTool()` and require tool auth providers to be passed inline to `ctx.getToken(provider)` or `ctx.requireAuth(provider)`.
+- f00ca73: Search every Vercel project in the selected team and preserve the selected project ID through linking.
+
+### Patch Changes
+
+- 36b67fc: Make `eve init` respect ancestor package-manager workspaces when scaffolding nested packages. The scaffold now updates workspace-owned package policy at the npm, pnpm, Yarn, or Bun workspace root instead of writing nested root-only config into the generated package.
+
+## 0.12.3
+
+### Patch Changes
+
+- 680ff48: Text prompts now use block cursors, while active turns and model or channel setup use shared green progress pulses.
+- 27a9701: Resolve extensionless relative imports whose target basename contains dots when bundling authored modules. Local files such as `./mock-registry.schemas` and dependency requires such as `./Reflect.getPrototypeOf` now probe Eve's configured `.ts` and `.js` extensions before being treated as asset imports.
+- 3a64a8f: `eve init` with no target, when run by a coding agent, now prints a setup guide — what to ask the user, then the scaffold command — instead of scaffolding the current directory. The guide routes both channels (Slack credentials) and connections (per-user OAuth) through Vercel Connect so credentials are provisioned rather than hand-managed. `eve init <name>` and `eve init .` are unchanged.
+- 3a64a8f: `eve init` now offers to open an installed coding-agent REPL when its CLI is on `PATH`, while keeping `eve dev` as the default. It detects Claude Code, Codex, Cursor, Droid, Gemini CLI, opencode, and Pi. The selected REPL starts with a project-specific setup prompt and `eve dev --no-ui` verification guidance. Coding-agent and non-interactive launches, plus systems without any supported CLI, keep the existing development-server handoff.
+- 86a35eb: Add inline tool auth provider overloads so tools can call `ctx.getToken(provider, options?)` and `ctx.requireAuth(provider, options?)` without declaring a single top-level `auth`. Vercel Connect providers can be authored inline with `connect("service/agent")` or `connect({ connector, tokenParams })`; the existing top-level tool `auth` field and no-argument tool auth accessors remain supported for compatibility, but are now deprecated in favor of inline providers.
+- 25ab1e7: Preserve dev-runtime snapshots that are still referenced by local durable workflow data so parked HITL turns can resume after `eve dev` rebuilds.
+- 504f59e: Allow `eve eval` target checks to match a scoped package name such as `@acme/agent` against the runtime agent identity `agent`.
+- 0dca794: Restore Slack authorization status updates by posting a link-free public status while sending the sign-in challenge privately, then updating the public status when authorization completes.
+- 3548363: Strengthen Vercel and just-bash process streaming with deterministic completion, safe output cancellation, and idempotent process operations.
+
+## 0.12.2
+
+### Patch Changes
+
+- 8f7d97b: Keep Vercel Sandbox option types synchronized with the installed SDK by vendoring its upstream declaration files instead of maintaining a hand-written copy. Vercel-backed file reads now convert provider Node streams to Eve's public Web stream contract.
+
+## 0.12.1
+
+### Patch Changes
+
+- 3f3a86b: Improve conversation compaction for longer, more reliable sessions.
+- e296fb8: The dev TUI now opens `/model` when the runtime confirms no model provider is configured and refreshes model access after setup. Selected rows now use padded inverse labels with a filled arrow.
+- f68ecbe: Set the Eve Vercel framework preset when creating standalone Eve projects.
+- c084232: Verify remote Vercel deployment origins against the owner and project supplied by `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID`, or by a local project link, before sending ambient credentials. Remote dev and eval clients now refresh scoped OIDC tokens per request and refuse to forward credentials across redirects. Remote `eve dev` and `eve eval --url` targets now require `https://` (loopback hosts may still use `http://`).
+
 ## 0.12.0
 
 ### Minor Changes

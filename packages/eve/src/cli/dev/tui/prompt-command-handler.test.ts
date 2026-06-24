@@ -23,6 +23,7 @@ function setupFlowRenderer() {
     end: vi.fn(),
     readSelect: vi.fn(async () => undefined),
     readEditableSelect: vi.fn(async () => undefined),
+    readProviderPicker: vi.fn(async () => undefined),
     readText: vi.fn(async () => undefined),
     readAcknowledge: vi.fn(async () => {}),
     readChoice: vi.fn(() => ({ choice: Promise.resolve(undefined), close: vi.fn() })),
@@ -106,6 +107,43 @@ describe("createPromptCommandHandler", () => {
     ).resolves.toEqual({
       message: "/model needs eve dev running the local server (it is not available with --url).",
     });
+  });
+
+  it("forwards automatic provider entry and model-access changes", async () => {
+    const runTuiSetupCommand = vi.fn(async () => ({
+      message: "Connected to AI Gateway via AI_GATEWAY_API_KEY in .env.local.",
+      preserveFlowDiagnostics: false,
+      effect: { kind: "model-access-changed" } as const,
+    }));
+    vi.doMock("./setup-commands.js", () => ({
+      SETUP_FLOW_CONFIG: {
+        model: { title: "Configure the agent model", indicator: "pulse" },
+      },
+      runTuiSetupCommand,
+    }));
+
+    try {
+      const setupFlow = setupFlowRenderer();
+      const handler = createPromptCommandHandler({ appRoot: APP_ROOT });
+
+      await expect(
+        handler.handle(
+          { type: "extension", name: "model", argument: "" },
+          { ...context({ setupFlow }), initialModelStep: "provider" },
+        ),
+      ).resolves.toEqual({
+        message: "Connected to AI Gateway via AI_GATEWAY_API_KEY in .env.local.",
+        effect: { kind: "model-access-changed" },
+      });
+      expect(runTuiSetupCommand).toHaveBeenCalledWith(
+        expect.objectContaining({ initialModelStep: "provider" }),
+      );
+      expect(setupFlow.begin).toHaveBeenCalledWith("Configure the agent model", "pulse");
+      expect(setupFlow.end).toHaveBeenCalledWith({ preserveDiagnostics: false });
+    } finally {
+      vi.doUnmock("./setup-commands.js");
+      vi.resetModules();
+    }
   });
 
   it("folds setup-module load failures at the command adapter boundary", async () => {

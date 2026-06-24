@@ -5,6 +5,7 @@ import {
   reduceSelect,
   selectValueAtCursor,
   submitRowIndex,
+  type SearchActionOption,
   type SelectState,
 } from "#setup/cli/select-state.js";
 
@@ -47,6 +48,7 @@ export type SetupSelectInputResult =
 interface SetupSelectInput {
   key: TerminalKey;
   options: readonly PromptOption<string>[];
+  searchAction?: SearchActionOption;
   select: SelectState;
 }
 
@@ -77,6 +79,7 @@ function updatedSelect(
     kind: "update",
     select: reduceSelect(input.select, event, {
       options: input.options,
+      searchAction: input.searchAction,
       submitRow: isMultiSelect(input),
     }),
   };
@@ -84,7 +87,7 @@ function updatedSelect(
 
 function submitSetupSelect(input: SetupSelectInputState): SetupSelectInputResult {
   const visible = isSearchableSelect(input)
-    ? filterOptions(input.options, input.select.filter)
+    ? filterOptions(input.options, input.select.filter, input.searchAction)
     : [...input.options];
   if (isMultiSelect(input)) {
     if (input.select.cursor !== submitRowIndex(visible)) {
@@ -118,7 +121,11 @@ function editSetupSelect(input: SetupSelectInputState): SetupSelectInputResult {
       if (!isSearchableSelect(input)) return { kind: "ignore" };
 
       let select = input.select;
-      const context = { options: input.options, submitRow: isMultiSelect(input) };
+      const context = {
+        options: input.options,
+        searchAction: input.searchAction,
+        submitRow: isMultiSelect(input),
+      };
       for (const char of input.key.value.replaceAll("\n", " ")) {
         if (char >= " " && char !== "\u007f") {
           select = reduceSelect(select, { type: "char", char }, context);
@@ -136,6 +143,13 @@ export function reduceSetupSelectInput(input: SetupSelectInputState): SetupSelec
   const intent = setupSelectionIntent(input.key);
   switch (intent?.kind) {
     case "cancel":
+      if (
+        input.key.type === "escape" &&
+        isSearchableSelect(input) &&
+        input.select.filter.length > 0
+      ) {
+        return updatedSelect(input, { type: "clear" });
+      }
       return { kind: "cancel" };
     case "repaint":
       return { kind: "repaint" };

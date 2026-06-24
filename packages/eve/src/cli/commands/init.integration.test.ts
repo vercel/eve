@@ -18,8 +18,10 @@ import {
   type ScaffoldBaseProjectOptions,
 } from "#setup/scaffold/index.js";
 import { pathExists } from "#setup/path-exists.js";
+import { WizardCancelledError } from "#setup/step.js";
 
 import type { GitInitResult } from "./init-git.js";
+import { initAgentReplPrompt } from "./agent-instructions.js";
 import {
   EVE_INIT_PACKAGE_SPEC_ENV,
   runInitCommand,
@@ -67,6 +69,8 @@ function dependencies(
   runPackageManagerInstall: ReturnType<
     typeof vi.fn<InitCommandDependencies["runPackageManagerInstall"]>
   >;
+  selectInitHandoff: ReturnType<typeof vi.fn<InitCommandDependencies["selectInitHandoff"]>>;
+  spawnCodingAgentRepl: ReturnType<typeof vi.fn<InitCommandDependencies["spawnCodingAgentRepl"]>>;
   spawnPackageManager: ReturnType<typeof vi.fn<InitCommandDependencies["spawnPackageManager"]>>;
   tryInitializeGit: ReturnType<typeof vi.fn<InitCommandDependencies["tryInitializeGit"]>>;
 } {
@@ -99,6 +103,8 @@ function dependencies(
         webPackageVersions: { ...WEB_VERSIONS, ...options.webPackageVersions },
       }),
     runPackageManagerInstall: vi.fn(async () => true),
+    selectInitHandoff: vi.fn(async () => "eve-dev"),
+    spawnCodingAgentRepl: vi.fn(async () => true),
     spawnPackageManager: vi.fn(async () => true),
     tryInitializeGit: vi.fn(async () => gitResult),
   };
@@ -168,8 +174,6 @@ describe("runInitCommand", () => {
       "exec",
       "eve",
       "dev",
-      "--input",
-      "/model",
     ]);
     // Substring assertions keep the expectations color-agnostic; picocolors
     // decides at import time whether the strings carry escape codes. The boot
@@ -182,7 +186,54 @@ describe("runInitCommand", () => {
     expect(output.messages[1]).toContain("in 467ms");
     expect(output.messages[2]).toContain("Installed dependencies");
     expect(output.messages[2]).toContain("in 13.2s");
-    expect(output.messages[3]).toContain("$ eve dev --input /model");
+    expect(output.messages[3]).toContain("$ eve dev");
+  });
+
+  it("opens the selected coding-agent REPL instead of starting eve dev", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-repl-handoff-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.selectInitHandoff.mockResolvedValue("codex");
+
+    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+
+    const projectPath = join(parentDirectory, "my-agent");
+    expect(deps.spawnCodingAgentRepl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: "codex",
+        cwd: projectPath,
+        prompt: expect.stringContaining("pnpm exec eve dev --no-ui"),
+      }),
+    );
+    const prompt = deps.spawnCodingAgentRepl.mock.calls[0]?.[0].prompt;
+    expect(prompt).toBe(
+      initAgentReplPrompt({
+        devCommand: "pnpm exec eve dev",
+      }),
+    );
+    expect(prompt).toContain("What should the agent do?");
+    expect(prompt).toContain("HMR development server");
+    expect(prompt).not.toContain(projectPath);
+    expect(prompt).not.toContain("{{");
+    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+    expect(output.messages.at(-1)).toContain("$ codex");
+  });
+
+  it("keeps a completed init successful when its optional handoff is cancelled", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-repl-cancelled-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.selectInitHandoff.mockRejectedValue(new WizardCancelledError());
+
+    await expect(
+      runInitCommand(output, parentDirectory, "my-agent", {}, deps),
+    ).resolves.toBeUndefined();
+
+    const projectPath = join(parentDirectory, "my-agent");
+    await expect(pathExists(join(projectPath, "agent/agent.ts"))).resolves.toBe(true);
+    expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
+    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+    expect(output.errors).toEqual([]);
   });
 
   it("uses an explicit init package spec for fresh project scaffolds", async () => {
@@ -240,8 +291,6 @@ describe("runInitCommand", () => {
         "exec",
         "eve",
         "dev",
-        "--input",
-        "/model",
       ]);
       expect(output.messages[1]).toContain("Created an eve agent in ");
       expect(output.messages[1]).toContain(projectPath);
@@ -249,9 +298,9 @@ describe("runInitCommand", () => {
   );
 
   it.each([
-    ["npm", ["exec", "--", "eve", "dev", "--input", "/model"]],
-    ["yarn", ["eve", "dev", "--input", "/model"]],
-    ["bun", ["x", "eve", "dev", "--input", "/model"]],
+    ["npm", ["exec", "--", "eve", "dev"]],
+    ["yarn", ["eve", "dev"]],
+    ["bun", ["x", "eve", "dev"]],
   ] as const)(
     "scaffolds a fresh project owned by the invoking manager %s without pnpm policy",
     async (kind, devArguments) => {
@@ -303,20 +352,14 @@ describe("runInitCommand", () => {
       projectPath,
       expect.anything(),
     );
-    expect(deps.spawnPackageManager).toHaveBeenCalledWith("bun", projectPath, [
-      "x",
-      "eve",
-      "dev",
-      "--input",
-      "/model",
-    ]);
+    expect(deps.spawnPackageManager).toHaveBeenCalledWith("bun", projectPath, ["x", "eve", "dev"]);
   });
 
   it.each([
-    ["npm", "package-lock.json", "bun", ["exec", "--", "eve", "dev", "--input", "/model"]],
-    ["yarn", "yarn.lock", "npm", ["eve", "dev", "--input", "/model"]],
-    ["bun", "bun.lock", "npm", ["x", "eve", "dev", "--input", "/model"]],
-    ["pnpm", "pnpm-lock.yaml", "npm", ["exec", "eve", "dev", "--input", "/model"]],
+    ["npm", "package-lock.json", "bun", ["exec", "--", "eve", "dev"]],
+    ["yarn", "yarn.lock", "npm", ["eve", "dev"]],
+    ["bun", "bun.lock", "npm", ["x", "eve", "dev"]],
+    ["pnpm", "pnpm-lock.yaml", "npm", ["exec", "eve", "dev"]],
   ] as const)(
     "scaffolds a fresh named project with the ancestor %s lockfile before the launcher",
     async (kind, lockfile, invokingManager, devArguments) => {
@@ -348,6 +391,199 @@ describe("runInitCommand", () => {
     },
   );
 
+  it("scaffolds a fresh pnpm workspace member without nested workspace policy", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-init-pnpm-workspace-"));
+    const appsDirectory = join(workspaceRoot, "apps");
+    await mkdir(appsDirectory, { recursive: true });
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      `${JSON.stringify({ private: true, engines: { node: "22.x" } }, null, 2)}\n`,
+      "utf8",
+    );
+    await writeFile(join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n", "utf8");
+    const output = logger();
+    const deps = dependencies();
+    deps.detectInvokingPackageManager.mockReturnValue("npm");
+
+    await runInitCommand(output, appsDirectory, "my-agent", {}, deps);
+
+    const projectPath = join(appsDirectory, "my-agent");
+    await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
+    await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
+      "packages:\n  - apps/*\n\nallowBuilds:\n  sharp: false\n\nminimumReleaseAgeExclude:\n  - eve\n",
+    );
+    const projectPackageJson = JSON.parse(
+      await readFile(join(projectPath, "package.json"), "utf8"),
+    ) as {
+      dependencies: Record<string, string>;
+      engines?: unknown;
+      overrides?: unknown;
+      resolutions?: unknown;
+    };
+    expect(projectPackageJson.dependencies.eve).toBe("^0.6.0");
+    expect(projectPackageJson.engines).toBeUndefined();
+    expect(projectPackageJson.overrides).toBeUndefined();
+    expect(projectPackageJson.resolutions).toBeUndefined();
+    expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
+      engines: { node: "24.x" },
+    });
+    expect(output.messages.join("\n")).toContain(
+      `⚠ Updated workspace root configuration at ${join(workspaceRoot, "pnpm-workspace.yaml")}`,
+    );
+    expect(output.messages.join("\n")).toContain(
+      `⚠ Updated workspace root package.json at ${join(workspaceRoot, "package.json")} (Overrode package.json engines.node from "22.x" to "24.x"`,
+    );
+    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+      "pnpm",
+      projectPath,
+      expect.anything(),
+    );
+  });
+
+  it("scaffolds under an unclaimed pnpm workspace directory by adding a package pattern", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-init-pnpm-unclaimed-workspace-"));
+    const agentsDirectory = join(workspaceRoot, "agents");
+    await mkdir(agentsDirectory, { recursive: true });
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      `${JSON.stringify({ private: true, engines: { node: "22.x" } }, null, 2)}\n`,
+      "utf8",
+    );
+    await writeFile(join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n", "utf8");
+    const output = logger();
+    const deps = dependencies();
+    deps.detectInvokingPackageManager.mockReturnValue("npm");
+
+    await runInitCommand(output, agentsDirectory, "my-agent", {}, deps);
+
+    const projectPath = join(agentsDirectory, "my-agent");
+    await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
+    await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
+      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\nminimumReleaseAgeExclude:\n  - eve\n",
+    );
+    const projectPackageJson = JSON.parse(
+      await readFile(join(projectPath, "package.json"), "utf8"),
+    ) as {
+      engines?: unknown;
+      overrides?: unknown;
+      resolutions?: unknown;
+    };
+    expect(projectPackageJson.engines).toBeUndefined();
+    expect(projectPackageJson.overrides).toBeUndefined();
+    expect(projectPackageJson.resolutions).toBeUndefined();
+    expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
+      engines: { node: "24.x" },
+    });
+    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+      "pnpm",
+      projectPath,
+      expect.anything(),
+    );
+  });
+
+  it("adds Web Chat under an unclaimed pnpm workspace directory without nested workspace policy", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-init-web-pnpm-workspace-"));
+    const agentsDirectory = join(workspaceRoot, "agents");
+    await mkdir(agentsDirectory, { recursive: true });
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      `${JSON.stringify({ private: true, engines: { node: "22.x" } }, null, 2)}\n`,
+      "utf8",
+    );
+    await writeFile(join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n", "utf8");
+    const output = logger();
+    const deps = dependencies();
+    deps.detectInvokingPackageManager.mockReturnValue("npm");
+
+    await runInitCommand(output, agentsDirectory, "web-agent", { channelWebNextjs: true }, deps);
+
+    const projectPath = join(agentsDirectory, "web-agent");
+    await expect(pathExists(join(projectPath, "app/page.tsx"))).resolves.toBe(true);
+    await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
+    await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
+      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\nminimumReleaseAgeExclude:\n  - eve\n",
+    );
+    const projectPackageJson = JSON.parse(
+      await readFile(join(projectPath, "package.json"), "utf8"),
+    ) as {
+      dependencies: Record<string, string>;
+      engines?: unknown;
+      overrides?: unknown;
+      resolutions?: unknown;
+    };
+    expect(projectPackageJson.dependencies.eve).toBe("^0.6.0");
+    expect(projectPackageJson.dependencies.next).toBe("16.0.0");
+    expect(projectPackageJson.engines).toBeUndefined();
+    expect(projectPackageJson.overrides).toBeUndefined();
+    expect(projectPackageJson.resolutions).toBeUndefined();
+    expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
+      engines: { node: "24.x" },
+    });
+    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+      "pnpm",
+      projectPath,
+      expect.anything(),
+    );
+  });
+
+  it.each([
+    ["yarn", "yarn.lock", "resolutions", ["eve", "dev"]],
+    ["bun", "bun.lock", "overrides", ["x", "eve", "dev"]],
+  ] as const)(
+    "scaffolds a fresh %s workspace member without nested root-only package fields",
+    async (kind, lockfile, rootAiPinField, devArguments) => {
+      const workspaceRoot = await mkdtemp(join(tmpdir(), `eve-init-${kind}-workspace-member-`));
+      const appsDirectory = join(workspaceRoot, "apps");
+      await mkdir(appsDirectory, { recursive: true });
+      await writeFile(
+        join(workspaceRoot, "package.json"),
+        `${JSON.stringify(
+          {
+            private: true,
+            engines: { node: "22.x" },
+            workspaces: ["apps/*"],
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+      await writeFile(join(workspaceRoot, lockfile), "", "utf8");
+      const output = logger();
+      const deps = dependencies();
+      deps.detectInvokingPackageManager.mockReturnValue("npm");
+
+      await runInitCommand(output, appsDirectory, "my-agent", {}, deps);
+
+      const projectPath = join(appsDirectory, "my-agent");
+      const projectPackageJson = JSON.parse(
+        await readFile(join(projectPath, "package.json"), "utf8"),
+      ) as {
+        engines?: unknown;
+        overrides?: unknown;
+        resolutions?: unknown;
+      };
+      expect(projectPackageJson.engines).toBeUndefined();
+      expect(projectPackageJson.overrides).toBeUndefined();
+      expect(projectPackageJson.resolutions).toBeUndefined();
+      const rootPackageJson = JSON.parse(
+        await readFile(join(workspaceRoot, "package.json"), "utf8"),
+      ) as {
+        engines?: { node?: string };
+        overrides?: { ai?: string };
+        resolutions?: { ai?: string };
+      };
+      expect(rootPackageJson.engines?.node).toBe("24.x");
+      expect(rootPackageJson[rootAiPinField]?.ai).toBe("7.0.0");
+      expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+        kind,
+        projectPath,
+        expect.anything(),
+      );
+      expect(deps.spawnPackageManager).toHaveBeenCalledWith(kind, projectPath, [...devArguments]);
+    },
+  );
+
   it("adds Web Chat to an npm-owned fresh scaffold without pnpm configuration", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-agent-web-npm-"));
     const output = logger();
@@ -369,8 +605,6 @@ describe("runInitCommand", () => {
       "--",
       "eve",
       "dev",
-      "--input",
-      "/model",
     ]);
   });
 
@@ -385,7 +619,7 @@ describe("runInitCommand", () => {
     expect(deps.spawnPackageManager).toHaveBeenCalledWith(
       "pnpm",
       join(parentDirectory, "my-agent"),
-      ["exec", "eve", "dev", "--input", "/model"],
+      ["exec", "eve", "dev"],
     );
   });
 
@@ -416,8 +650,6 @@ describe("runInitCommand", () => {
       "exec",
       "eve",
       "dev",
-      "--input",
-      "/model",
     ]);
   });
 
@@ -615,6 +847,44 @@ describe("runInitCommand", () => {
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("bun", projectRoot, ["x", "eve", "dev"]);
   });
 
+  it("adds an agent to an existing pnpm workspace member without nested root-only policy", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-init-existing-pnpm-workspace-"));
+    const appsDirectory = join(workspaceRoot, "apps");
+    const projectRoot = join(appsDirectory, "host-app");
+    await mkdir(projectRoot, { recursive: true });
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      `${JSON.stringify({ private: true, engines: { node: "22.x" } }, null, 2)}\n`,
+      "utf8",
+    );
+    await writeFile(join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n", "utf8");
+    await writeFile(join(projectRoot, "package.json"), '{ "name": "host-app" }\n', "utf8");
+    const output = logger();
+    const deps = dependencies();
+    deps.detectInvokingPackageManager.mockReturnValue("npm");
+
+    await runInitCommand(output, appsDirectory, "host-app", {}, deps);
+
+    expect(await readFile(join(projectRoot, "agent/agent.ts"), "utf8")).toContain(
+      DEFAULT_AGENT_MODEL_ID,
+    );
+    await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
+    const projectPackageJson = JSON.parse(
+      await readFile(join(projectRoot, "package.json"), "utf8"),
+    ) as { dependencies: Record<string, string>; engines?: unknown };
+    expect(projectPackageJson.dependencies.eve).toBe("^0.6.0");
+    expect(projectPackageJson.engines).toBeUndefined();
+    expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
+      engines: { node: "24.x" },
+    });
+    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+      "pnpm",
+      projectRoot,
+      expect.anything(),
+    );
+    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+  });
+
   it("reports agent file conflicts before writing anything", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-conflict-"));
     const projectRoot = await createHostProject(parentDirectory);
@@ -623,9 +893,11 @@ describe("runInitCommand", () => {
     const output = logger();
     const deps = dependencies();
 
-    await expect(runInitCommand(output, parentDirectory, "host-app", {}, deps)).rejects.toThrow(
-      "agent/instructions.md",
-    );
+    await expect(
+      runInitCommand(output, parentDirectory, "host-app", {}, deps),
+    ).rejects.toMatchObject({
+      message: `Cannot add an eve agent to "${projectRoot}" because it already has: agent/instructions.md.`,
+    });
 
     await expect(pathExists(join(projectRoot, "agent/agent.ts"))).resolves.toBe(false);
     expect(await readFile(join(projectRoot, "agent/instructions.md"), "utf8")).toBe("existing\n");
@@ -646,26 +918,23 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
   });
 
-  it("scaffolds the current directory for a coding agent that omits the target", async () => {
+  it("hands a coding agent the setup guide when it omits the target", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-agent-bare-"));
     const output = logger();
     const deps = dependencies();
     deps.isCodingAgentLaunch.mockResolvedValue(true);
-    deps.detectInvokingPackageManager.mockReturnValue("pnpm");
 
     await runInitCommand(output, parentDirectory, undefined, {}, deps);
 
-    expect(await readFile(join(parentDirectory, "agent/agent.ts"), "utf8")).toContain(
-      DEFAULT_AGENT_MODEL_ID,
-    );
-    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
-      "pnpm",
-      parentDirectory,
-      expect.anything(),
-    );
-    expect(deps.tryInitializeGit).toHaveBeenCalledWith(parentDirectory);
+    // A bare `eve init` from an agent means it has not chosen what to build, so
+    // we print the guide and touch nothing — no scaffold, install, Git, or dev.
+    await expect(pathExists(join(parentDirectory, "agent"))).resolves.toBe(false);
+    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
+    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
-    expect(output.messages.join("\n")).toContain("Do not start `eve dev`");
+    const printed = output.messages.join("\n");
+    expect(printed).toContain("Set up an eve agent");
+    expect(printed).toContain("npx eve@latest init <name>");
   });
 
   it("scaffolds and initializes Git for a coding agent but does not spawn the dev server", async () => {
@@ -688,6 +957,8 @@ describe("runInitCommand", () => {
     expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
     // The dev server is handed off as text, never spawned — the dev TUI would
     // wedge the launching agent. The handoff's content is the unit test's job.
+    expect(deps.selectInitHandoff).not.toHaveBeenCalled();
+    expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
   });
 

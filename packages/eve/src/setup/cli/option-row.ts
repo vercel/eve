@@ -13,16 +13,19 @@
 
 /** The color primitives the row painter needs; satisfied by both the TUI theme and the CLI palette. */
 export interface RowColors {
+  blue(text: string): string;
   dim(text: string): string;
   green(text: string): string;
-  cyan(text: string): string;
+  inverse(text: string): string;
   yellow(text: string): string;
 }
 
 /** The glyphs the row painter draws; the TUI passes theme-derived values, the CLI the unicode set. */
 export interface RowGlyphs {
-  /** Hover marker — the icon a row changes to under the cursor. */
+  /** Hollow cursor marker for an inert row. */
   pointer: string;
+  /** Filled cursor marker for an actionable row. */
+  selectedPointer: string;
   /** Completed / checked marker. */
   success: string;
   /** Available, un-hovered marker. */
@@ -34,6 +37,7 @@ export interface RowGlyphs {
 /** Canonical unicode glyphs; the CLI prompts render with these. */
 export const UNICODE_ROW_GLYPHS: RowGlyphs = {
   pointer: "▷",
+  selectedPointer: "▶",
   success: "✓",
   placeholder: "◦",
   dot: "·",
@@ -60,9 +64,8 @@ interface OptionRowInput {
   /** Spaces inserted before the hint's dot so hints tab-align to a shared column. */
   hintPadding?: number;
   /**
-   * Accent for the cursor pointer and active label. Defaults to cyan; "warning"
-   * makes them yellow so the pointer matches an attention row (e.g. a required,
-   * yellow-labelled action).
+   * Accent for an available row. "warning" keeps an attention row yellow at
+   * rest and under the cursor highlight.
    */
   accent?: "warning";
 }
@@ -133,19 +136,18 @@ function disabledLabel(
 
 function optionRowPresentation(input: OptionRowInput): OptionRowPresentation {
   const { colors: c, glyphs, state } = input;
-  const activeColor = input.accent === "warning" ? c.yellow : c.cyan;
 
   switch (state.kind) {
     case "available":
       if (input.isCursor) {
         return {
-          glyph: activeColor(glyphs.pointer),
-          label: activeColor(input.label),
+          glyph: glyphs.selectedPointer,
+          label: input.label,
         };
       }
       return {
         glyph: state.checked ? c.green(glyphs.success) : unfocusedGlyph(input),
-        label: input.label,
+        label: input.accent === "warning" ? c.yellow(input.label) : input.label,
       };
     case "completed":
       return {
@@ -168,6 +170,23 @@ function optionRowPresentation(input: OptionRowInput): OptionRowPresentation {
   return exhaustive;
 }
 
+/** Paints a row with the shared leading cell and optional cursor highlight. */
+export function renderCursorRow(
+  text: string,
+  selected: boolean,
+  colors: Pick<RowColors, "blue" | "inverse" | "yellow">,
+  accent?: "warning",
+): string {
+  if (!selected) return ` ${text}`;
+  const color = accent === "warning" ? colors.yellow : colors.blue;
+  return colors.inverse(color(` ${text} `));
+}
+
+/** Prefixes a continuation line so its text starts in the option label column. */
+export function renderOptionRowContinuation(text: string): string {
+  return `   ${text}`;
+}
+
 /**
  * Paints one option row as `glyph label · hint`. The glyph reflects state with
  * hover taking precedence for focusable rows: available rows use the active
@@ -178,12 +197,16 @@ function optionRowPresentation(input: OptionRowInput): OptionRowPresentation {
 export function renderOptionRow(input: OptionRowInput): string {
   const { colors: c, glyphs } = input;
   const { glyph, label } = optionRowPresentation(input);
+  const selected = input.isCursor && input.state.kind === "available";
 
   let hintText = input.hint;
   if (input.isCursor && input.focusHint !== undefined) hintText = input.focusHint;
   let hint = "";
   if (hintText !== undefined) {
-    hint = c.dim(`${" ".repeat((input.hintPadding ?? 0) + 1)}${glyphs.dot} ${hintText}`);
+    const separatorWidth = Math.max(0, (input.hintPadding ?? 0) + 1 - Number(selected));
+    hint = c.dim(`${" ".repeat(separatorWidth)}${glyphs.dot} ${hintText}`);
   }
-  return `${glyph} ${label}${hint}`;
+  const content = `${glyph} ${label}`;
+  const row = renderCursorRow(content, selected, c, input.accent);
+  return `${row}${hint}`;
 }

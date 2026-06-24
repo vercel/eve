@@ -1,13 +1,13 @@
-import { basename } from "node:path";
-
 import { Command, CommanderError, InvalidArgumentError } from "#compiled/commander/index.js";
 import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { isCodingAgentLaunch } from "#cli/agent-detection.js";
 import { eveCliBanner } from "#cli/banner.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import { LOG_DISPLAY_MODES, parseLogDisplayMode } from "#cli/dev/tui/log-display-mode.js";
+import { resolveTuiTitle, type DevelopmentTuiTarget } from "#cli/dev/tui/target.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
@@ -51,6 +51,7 @@ interface ProductionCliOptions {
 }
 
 interface CliRuntimeDependencies {
+  isCodingAgentLaunch(): Promise<boolean>;
   buildHost(appRoot: string): Promise<string>;
   printApplicationInfo(
     logger: CliLogger,
@@ -261,44 +262,6 @@ export function resolveDevUiMode(input: {
   }
 
   return "tui";
-}
-
-/**
- * Resolves the terminal UI's header title: an explicit `--name`, else the
- * remote server's host (for `--url`), else the humanized app-folder name
- * (e.g. `apps/fixtures/weather-agent` → "Weather Agent"). Returns `undefined` when
- * nothing meaningful can be derived, so the runner falls back to its own
- * default.
- */
-export function resolveTuiTitle(input: {
-  name: string | undefined;
-  remoteServerUrl: string | undefined;
-  appRoot: string;
-}): string | undefined {
-  if (input.name !== undefined && input.name.length > 0) {
-    return input.name;
-  }
-
-  if (input.remoteServerUrl !== undefined) {
-    try {
-      return new URL(input.remoteServerUrl).host;
-    } catch {
-      return undefined;
-    }
-  }
-
-  const humanized = humanizeProjectName(basename(input.appRoot));
-  return humanized.length > 0 ? humanized : undefined;
-}
-
-function humanizeProjectName(name: string): string {
-  return name
-    .replace(/[-_.]+/gu, " ")
-    .trim()
-    .split(/\s+/u)
-    .filter((word) => word.length > 0)
-    .map((word) => word[0]!.toUpperCase() + word.slice(1))
-    .join(" ");
 }
 
 /**
@@ -535,13 +498,16 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
           report,
         );
         const display = resolveTuiDisplayOptions(options);
-        const title = resolveTuiTitle({ name: options.name, remoteServerUrl, appRoot });
+        const target: DevelopmentTuiTarget =
+          remoteServerUrl === undefined
+            ? { kind: "local", serverUrl, workspaceRoot: appRoot }
+            : { kind: "remote", serverUrl, workspaceRoot: appRoot };
+        const title = resolveTuiTitle({ name: options.name, target });
         if (title !== undefined) display.name = title;
         const tuiInput: RunDevelopmentTuiInput = {
-          appRoot: remoteServerUrl === undefined ? appRoot : undefined,
+          target,
           initialInput: options.input,
           onBootProgress: report,
-          serverUrl,
           ...display,
         };
         await runDevelopmentTui(tuiInput);
@@ -653,7 +619,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       "[evalIds...]",
       "Eval ids (or directory prefixes) to run (all discovered evals when omitted)",
     )
-    .option("--url <url>", "Remote agent URL (skip local host startup)")
+    .option("--url <url>", "Remote agent URL (skip local host startup)", parseDevelopmentServerUrl)
     .option("--tag <tag...>", "Run only evals carrying a tag")
     .option("--strict", "Fail the exit code when any score falls below its threshold")
     .option("--list", "Print discovered evals without running them")
@@ -690,6 +656,19 @@ export async function runCli(
     if (error instanceof CommanderError) {
       if (error.exitCode === 0) {
         return;
+      }
+
+      // A coding agent that fumbles `eve init` (e.g. an unknown flag) trips
+      // commander before the init action runs, so the action's own agent
+      // detection never fires. Commander has already written its usage error to
+      // stderr; add the setup guide on stdout so the agent gets actionable next
+      // steps — but still fall through to throw, so the malformed invocation
+      // keeps its nonzero exit instead of silently succeeding.
+      const detectCodingAgentLaunch = runtime.isCodingAgentLaunch ?? isCodingAgentLaunch;
+      const agentLaunched = await detectCodingAgentLaunch();
+      if (input[0] === "init" && agentLaunched) {
+        const { initAgentInstructions } = await import("#cli/commands/agent-instructions.js");
+        logger.log(initAgentInstructions());
       }
 
       throw new Error(error.message);

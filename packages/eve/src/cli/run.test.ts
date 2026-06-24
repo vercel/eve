@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { resolveDevUiMode, resolveTuiDisplayOptions, resolveTuiTitle, runCli } from "#cli/run.js";
+import { resolveDevUiMode, resolveTuiDisplayOptions, runCli } from "#cli/run.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import type { DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 
@@ -42,6 +42,36 @@ describe("CLI command registration", () => {
   });
 });
 
+describe("eve init for a coding agent that fumbles the invocation", () => {
+  // Detection must precede the commander failure: a bad/unknown arg trips
+  // parsing before the init action runs, so runCli itself falls back to the guide.
+  it("prints the setup guide but still fails on the malformed invocation", async () => {
+    const output: string[] = [];
+
+    // The guide is additive: the parse failure must still propagate (nonzero
+    // exit), so runCli rejects even though the agent gets actionable next steps.
+    await expect(
+      runCli(
+        ["init", "--unknown-flag"],
+        { error: (message) => output.push(message), log: (message) => output.push(message) },
+        { isCodingAgentLaunch: async () => true },
+      ),
+    ).rejects.toThrow();
+
+    expect(output.join("\n")).toContain("Set up an eve agent");
+  });
+
+  it("still surfaces the usage error for a human", async () => {
+    await expect(
+      runCli(
+        ["init", "--unknown-flag"],
+        { error: () => {}, log: () => {} },
+        { isCodingAgentLaunch: async () => false },
+      ),
+    ).rejects.toThrow();
+  });
+});
+
 describe("eve dev --input", () => {
   it("forwards the initial draft to the interactive TUI", async () => {
     const runDevelopmentTui = vi.fn(async () => {});
@@ -57,7 +87,11 @@ describe("eve dev --input", () => {
     expect(runDevelopmentTui).toHaveBeenCalledWith(
       expect.objectContaining({
         initialInput: "/model",
-        serverUrl: "https://example.com/",
+        target: {
+          kind: "remote",
+          serverUrl: "https://example.com/",
+          workspaceRoot: process.cwd(),
+        },
       }),
     );
   });
@@ -82,6 +116,22 @@ describe("eve dev --input", () => {
   });
 });
 
+describe("eve dev --url protocol", () => {
+  it("rejects an http:// remote URL up front instead of crashing during connect", async () => {
+    await expect(
+      runCli(["dev", "--url", "http://my-app.vercel.app"], { error: () => {}, log: () => {} }),
+    ).rejects.toThrow(/https/);
+  });
+});
+
+describe("eve eval --url protocol", () => {
+  it("rejects an http:// remote URL up front", async () => {
+    await expect(
+      runCli(["eval", "--url", "http://my-app.vercel.app"], { error: () => {}, log: () => {} }),
+    ).rejects.toThrow(/https/);
+  });
+});
+
 describe("eve dev --logs", () => {
   it("accepts sandbox as the initial TUI log mode", async () => {
     const runDevelopmentTui = vi.fn(async () => {});
@@ -97,7 +147,11 @@ describe("eve dev --logs", () => {
     expect(runDevelopmentTui).toHaveBeenCalledWith(
       expect.objectContaining({
         logs: "sandbox",
-        serverUrl: "https://example.com/",
+        target: {
+          kind: "remote",
+          serverUrl: "https://example.com/",
+          workspaceRoot: process.cwd(),
+        },
       }),
     );
   });
@@ -191,37 +245,5 @@ describe("resolveTuiDisplayOptions", () => {
     expect(resolved).not.toHaveProperty("subagents");
     expect(resolved).not.toHaveProperty("contextSize");
     expect(resolved.logs).toBe("stderr");
-  });
-});
-
-describe("resolveTuiTitle", () => {
-  it("humanizes the app folder name for a local server", () => {
-    expect(
-      resolveTuiTitle({
-        name: undefined,
-        remoteServerUrl: undefined,
-        appRoot: "/x/apps/fixtures/weather-agent",
-      }),
-    ).toBe("Weather Agent");
-  });
-
-  it("uses the remote host when connecting to a URL", () => {
-    expect(
-      resolveTuiTitle({
-        name: undefined,
-        remoteServerUrl: "https://example.com:8080",
-        appRoot: "/x",
-      }),
-    ).toBe("example.com:8080");
-  });
-
-  it("prefers an explicit --name over both", () => {
-    expect(
-      resolveTuiTitle({
-        name: "Custom",
-        remoteServerUrl: "https://example.com",
-        appRoot: "/x/weather-agent",
-      }),
-    ).toBe("Custom");
   });
 });

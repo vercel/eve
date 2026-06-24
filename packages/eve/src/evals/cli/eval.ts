@@ -92,29 +92,30 @@ export async function runEvalCommand(
   // Resolve target
   let server: DevelopmentServerHandle | undefined;
   let target: EveEvalTargetHandle;
+  let client: Awaited<ReturnType<typeof createEvalClient>>;
 
   try {
     if (options.url) {
-      const remoteClient = createEvalClient({ kind: "remote", url: options.url });
+      client = await createEvalClient(
+        { kind: "remote", url: options.url },
+        { workspaceRoot: appRoot },
+      );
       target = await resolveEvalTargetHandle({
-        client: remoteClient,
+        client,
         expectedAgentName: await readExpectedAgentName(appRoot),
         kind: "remote",
         url: options.url,
       });
     } else {
       server = await startDevelopmentServer(appRoot, { host: "127.0.0.1", port: 0 });
-      const localClient = createEvalClient({ kind: "local", url: server.url });
+      client = await createEvalClient({ kind: "local", url: server.url });
       target = await resolveEvalTargetHandle({
-        client: localClient,
+        client,
         expectedAgentName: await readExpectedAgentName(appRoot),
         kind: "local",
         url: server.url,
       });
     }
-
-    // Create client with auth using the same patterns as the dev-client
-    const client = createEvalClient(target);
 
     const reporters: EvalReporter[] = options.json === true ? [] : [new ConsoleReporter()];
     if (options.junit !== undefined) {

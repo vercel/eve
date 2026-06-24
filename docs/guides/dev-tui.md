@@ -16,13 +16,13 @@ On startup the TUI prints a brand line with your agent's name, plus a rotating t
  Use /channels to add more ways to reach your agent.
 ```
 
-If agent discovery reported problems, an error and warning count renders between the two lines. Instructions, tools, skills, and subagents are one `eve info` away, and `/help` lists every command. The TUI also runs a startup check. A missing model-provider setup surfaces as an attention line (`⚠ 1 setup issue: model provider not linked · /model`) so the fix is visible before the first message fails, with each command's outcome hanging under it on a `⎿` connector.
+If agent discovery reported problems, an error and warning count renders between the two lines. Instructions, tools, skills, and subagents are one `eve info` away, and `/help` lists every command. The TUI also runs a startup check. When the runtime confirms that no model provider is configured, it opens the `/model` provider picker before the first prompt. Unknown or linked-but-incomplete credential states remain visible as an attention line, with each command's outcome hanging under it on a `⎿` connector.
 
 ## Reading the transcript
 
 The conversation streams straight into your terminal's normal scrollback, so you keep native scrolling, copy and paste, and a transcript that persists after you exit. The scrollback holds your prompts, the agent's replies, reasoning, tool calls, nested subagents, connection-authorization prompts, and any captured `stdout`, `stderr`, or sandbox lifecycle lines.
 
-Each turn renders without boxes. A colored gutter glyph marks who is speaking, tool calls collapse to a one-line summary (`✓ get_weather  city="SF" → 73°F`), and a subagent's work is indented beneath its `◆` header. When input is ready, the prompt stays bare until you type. While a turn or setup action owns the terminal, only its live status shows.
+Each turn renders without boxes. A colored gutter glyph marks who is speaking, tool calls collapse to a one-line summary (`✓ get_weather  city="SF" → 73°F`), and a subagent's work is indented beneath its `◆` header. When input is ready, the prompt stays bare until you type. A green circle-dot pulses while the agent is waiting to answer and disappears when reasoning or answer content begins.
 
 A persistent line beneath the prompt or status shows the model, the session's token flow (`↑ 394.4K ↓ 4.3K`), the linked Vercel project and team (`▲ my-agent (acme)`), and a yellow `/deploy pending` marker once a channel added this session still needs `/deploy`. The Vercel segment stays hidden until the directory is linked.
 
@@ -30,7 +30,7 @@ Errors render compactly with docs links highlighted. A code bug escaping your ag
 
 ## Slash commands
 
-Each command echoes as an invocation line, asks through a bordered panel that takes the input area's place (one question at a time, separate from the chat transcript), and finishes with a one-line `⎿` result. Loading states stay on the ephemeral status line instead of piling into the transcript.
+Each command echoes as an invocation line, asks through a bordered panel that takes the input area's place (one question at a time, separate from the chat transcript), and finishes with a one-line `⎿` result. Loading states stay on the ephemeral status line instead of piling into the transcript; model and channel setup use the same green square pulse as the build phase. Setup menus render the selected option with a filled arrow and an inverse label padded by one space on each side. Text prompts use a blinking block cursor over the character at the caret. The selected label is blue normally and yellow for warning rows.
 
 | Command     | Does                                                                                                                              |
 | ----------- | --------------------------------------------------------------------------------------------------------------------------------- |
@@ -46,11 +46,11 @@ Each command echoes as an invocation line, asks through a bordered panel that ta
 
 ### Configure the model and provider
 
-Bare `/model` opens the configure menu. "Change model" runs the same searchable model picker setup uses (the Vercel AI Gateway catalog, pre-selected on the model the runtime is serving). A model change is written into your agent's authored source, and the command reports success only after eve confirms the new id. `/model <provider/model-id>` applies one directly, skipping the menu.
+Bare `/model` opens the configure menu. When no provider is configured, it opens the provider picker directly and Esc returns to the configure menu. "Change model" runs the same searchable model picker setup uses (the Vercel AI Gateway catalog, pre-selected on the model the runtime is serving). A model change is written into your agent's authored source, and the command reports success only after eve confirms the new id. A completed model or provider change closes the menu and returns its result to the transcript; Done or Esc closes it without a change. `/model <provider/model-id>` applies one directly, skipping the menu.
 
-The provider row opens the provider questions: which model provider to use, and how to connect. Picking something other than Vercel AI Gateway shows wiring instructions for your own provider and stops there, leaving any existing setup untouched. For Vercel AI Gateway, you either paste your own `AI_GATEWAY_API_KEY` (saved straight to `.env.local`) or connect via a project. Connecting via a project asks for a Vercel team, opens that team's existing-project list (picking again re-links), then pulls the project's environment so an AI Gateway credential lands in `.env.local`. The dev server reloads env files automatically, with no restart needed.
+The provider row opens one menu: AI Gateway via a project, AI Gateway via `AI_GATEWAY_API_KEY`, or **Other providers**. The key option becomes a masked input when highlighted. Enter validates it without replacing the menu. A rejected key shows a red `⨯ Invalid key` beside the masked value; retrying or editing clears that result. With a non-empty key, the first Esc or Ctrl-C clears the input and the second cancels the menu. An accepted key is saved to `.env.local`. The project option asks for a Vercel team, opens that team's recent projects, and lets you search all projects for older matches. Vercel links the selected project, eve verifies its project ID, then pulls its environment into `.env.local`. The **Other providers** option shows direct-provider wiring instructions and leaves the existing setup untouched. The dev server reloads env files and refreshes the status bar automatically, with no restart needed.
 
-The provider row demands attention (a bold yellow "Configure provider" with "Required to enable the agent") until a link or gateway credential is detected, then names the connection afterward (for example "AI Gateway (Linked to my-project in my-team)"). Each action's latest outcome stays visible beneath the menu (for example "✓ Model changed to openai/gpt-5.5"). When a turn fails because AI Gateway authentication is missing or stale, the error points you at `/model` directly.
+The provider row demands attention (a bold yellow "Configure model access" with a yellow "Not configured" hint that dims when unselected and uses the terminal foreground when selected) until a link or gateway credential is detected, then names the connection afterward (for example "AI Gateway (Linked to my-project in my-team)"). Setup menus mark the cursor row with a padded, filled-arrow inverse label that inherits the row's accent: blue normally and yellow for warning rows. In stacked menus, the selected row's description appears directly beneath that option. The completed command's outcome stays in the transcript after the panel closes. When a turn fails because AI Gateway authentication is missing or stale, the error points you at `/model` directly.
 
 ### Add a channel
 
@@ -119,7 +119,7 @@ Pass a URL and the TUI talks to a running deployment instead of starting a local
 eve dev https://<your-app>
 ```
 
-The bare URL is shorthand for `--url`. `--host`, `--port`, and `--no-ui` are ignored against a remote target. If the deployment sits behind Vercel preview protection, set `VERCEL_AUTOMATION_BYPASS_SECRET` locally first. See [Deployment](./deployment) for the smoke-test flow.
+The bare URL is shorthand for `--url`; `--host`, `--port`, and `--no-ui` cannot be combined with a remote target. Eve gets the expected Vercel owner and project from `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` when both are set, or from the current directory's Vercel link otherwise. It verifies the exact deployment origin before attaching a freshly resolved project-scoped OIDC token or `VERCEL_AUTOMATION_BYPASS_SECRET`. Unverified URLs remain anonymous, and credential-bearing requests do not follow redirects. See [Deployment](./deployment) for the smoke-test flow.
 
 ## What to read next
 

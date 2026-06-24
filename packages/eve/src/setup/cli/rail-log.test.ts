@@ -8,6 +8,7 @@ import type { PromptColors } from "./prompt-ui.js";
 const identity = (text: string) => text;
 
 const colors: PromptColors = {
+  blue: identity,
   bold: identity,
   cyan: identity,
   dim: identity,
