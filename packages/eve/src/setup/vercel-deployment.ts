@@ -59,6 +59,18 @@ export interface VercelDeploymentResolutionDeps {
   readonly captureVercel: typeof captureVercel;
 }
 
+type VercelDeploymentLookupScope =
+  | {
+      /** An explicit Vercel scope selected for this lookup. */
+      readonly scope?: string;
+      readonly source?: never;
+    }
+  | {
+      /** A known project source, which also cross-checks the returned project id. */
+      readonly scope?: never;
+      readonly source: Pick<VercelProjectReference, "orgId" | "projectId">;
+    };
+
 const defaultDeps: VercelDeploymentResolutionDeps = { captureVercel };
 const DEPLOYMENT_LOOKUP_TIMEOUT_MS = 10_000;
 
@@ -70,27 +82,27 @@ function environmentForDeployment(deployment: z.infer<typeof VercelDeploymentSch
 }
 
 /** Resolves a Vercel deployment URL to its project and target environment. */
-export async function resolveVercelDeployment(input: {
-  readonly workspaceRoot: string;
-  readonly host: string;
-  readonly source?: Pick<VercelProjectReference, "orgId" | "projectId">;
-  readonly signal?: AbortSignal;
-  readonly deps?: Partial<VercelDeploymentResolutionDeps>;
-}): Promise<VercelDeploymentResolution> {
+export async function resolveVercelDeployment(
+  input: {
+    readonly workspaceRoot: string;
+    readonly host: string;
+    readonly signal?: AbortSignal;
+    readonly deps?: Partial<VercelDeploymentResolutionDeps>;
+  } & VercelDeploymentLookupScope,
+): Promise<VercelDeploymentResolution> {
   const deps = { ...defaultDeps, ...input.deps };
   // A deployment hostname is globally unique, so Vercel resolves it under the
-  // caller's own access without a scope — including a team-owned deployment
-  // resolved from a personal default scope. An optional `source` (a known
-  // project link) scopes the lookup and is cross-checked below, but its absence
-  // is not fatal: the host alone yields the canonical owner and project.
+  // caller's own access without a scope. A selected scope repeats that lookup
+  // for one team; a known project source also cross-checks the returned project.
   const source = input.source;
+  const scope = input.scope ?? source?.orgId;
 
   const result = normalizeVercelApiResult(
     await deps.captureVercel(
       [
         "api",
         `/v13/deployments/${encodeURIComponent(input.host)}`,
-        ...(source !== undefined ? ["--scope", source.orgId] : []),
+        ...(scope !== undefined ? ["--scope", scope] : []),
         "--raw",
       ],
       {

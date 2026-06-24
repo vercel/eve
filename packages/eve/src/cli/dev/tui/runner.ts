@@ -204,7 +204,7 @@ export type AgentTUIRenderer = {
   renderSetupWarning?(text: string): void;
   /** Clears the setup attention line once its issue is resolved. */
   clearSetupWarning?(): void;
-  /** Commits the startup `/vc:auth` invocation to the transcript. */
+  /** Commits the startup `/vc:login` invocation to the transcript. */
   renderCommandInvocation?(text: string, status?: "failed"): void;
   renderCommandResult?(text: string): void;
   readonly setupFlow?: SetupFlowRenderer;
@@ -612,7 +612,7 @@ export class EveTUIRunner {
     await this.#renderAgentHeader();
     if (this.#remoteConnection?.current().connection.state === "auth-required") {
       await this.#executeExtensionCommand(
-        { type: "extension", name: "vc:auth", argument: "" },
+        { type: "extension", name: "vc:login", argument: "" },
         title,
         "startup",
       );

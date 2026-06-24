@@ -164,6 +164,7 @@ describe("createPromptCommandHandler", () => {
 
   it("reports a login that completed before remote authentication was cancelled", async () => {
     const setupFlow = setupFlowRenderer();
+    const runLoginFlow = vi.fn(async () => ({ kind: "cancelled" as const }));
     const remoteConnection: RemoteConnectionController = {
       current: () => ({
         target: REMOTE_TARGET,
@@ -185,28 +186,31 @@ describe("createPromptCommandHandler", () => {
     };
     const handler = createPromptCommandHandler({
       target: REMOTE_TARGET,
+      flows: { runLoginFlow },
     });
 
     await expect(
       handler.handle(
-        { type: "extension", name: "vc:auth", argument: "" },
+        { type: "extension", name: "vc:login", argument: "" },
         {
           ...context({ setupFlow }),
           remoteConnection,
         },
       ),
     ).resolves.toEqual({
-      message: "/vc:auth cancelled after logging in to Vercel.",
+      message: "/vc:login cancelled after logging in to Vercel.",
     });
+    expect(runLoginFlow).not.toHaveBeenCalled();
     expect(setupFlow.begin).toHaveBeenCalledWith("Authenticate via Vercel OIDC", "pulse");
     expect(setupFlow.end).toHaveBeenCalledWith({ preserveDiagnostics: true });
   });
 
-  it("reports mutations that completed before /vc:auth was interrupted", async () => {
+  it("reports mutations that completed before remote /vc:login was interrupted", async () => {
     const setupFlow = {
       ...setupFlowRenderer(),
       waitForInterrupt: () => ({ promise: Promise.resolve(), dispose: vi.fn() }),
     } satisfies SetupFlowRenderer;
+    const runLoginFlow = vi.fn(async () => ({ kind: "cancelled" as const }));
     const remoteConnection: RemoteConnectionController = {
       current: () => ({
         target: REMOTE_TARGET,
@@ -235,17 +239,19 @@ describe("createPromptCommandHandler", () => {
     };
     const handler = createPromptCommandHandler({
       target: REMOTE_TARGET,
+      flows: { runLoginFlow },
     });
 
     await expect(
       handler.handle(
-        { type: "extension", name: "vc:auth", argument: "" },
+        { type: "extension", name: "vc:login", argument: "" },
         { ...context({ setupFlow }), remoteConnection },
       ),
     ).resolves.toEqual({
       message:
-        "/vc:auth interrupted. Completed before interruption: updated Trusted Sources for remote-agent.",
+        "/vc:login interrupted. Completed before interruption: updated Trusted Sources for remote-agent.",
     });
+    expect(runLoginFlow).not.toHaveBeenCalled();
   });
 
   it("folds setup-module load failures at the command adapter boundary", async () => {

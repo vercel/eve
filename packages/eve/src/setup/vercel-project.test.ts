@@ -707,6 +707,24 @@ describe("pickTeam selection", () => {
     expect(selectMessages).toEqual(["Select your team"]);
   });
 
+  it("uses a current-team-aware heading when the caller supplies one", async () => {
+    stubVercel({
+      teams: [
+        { name: "Current", slug: "current", current: true },
+        { name: "Other", slug: "other", current: false },
+      ],
+    });
+    const { prompter, selectMessages } = answeringPrompter({ selects: ["other"] });
+
+    await expect(
+      pickTeam(prompter, "/tmp/parent", undefined, {
+        selectMessage: (currentTeam) => `Host is unavailable from ${currentTeam}.`,
+      }),
+    ).resolves.toBe("other");
+
+    expect(selectMessages).toEqual(["Host is unavailable from Current."]);
+  });
+
   it("uses the current scope without prompting when only one team exists", async () => {
     stubVercel({ teams: [{ name: "Solo", slug: "solo", current: true }] });
     const { prompter } = answeringPrompter({});

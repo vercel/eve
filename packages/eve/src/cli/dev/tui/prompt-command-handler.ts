@@ -36,8 +36,7 @@ export function createPromptCommandHandler(
       const { target } = options;
       // Local-only commands invoked on a remote target are rejected here; the
       // allowlist is derived from each command's `targets` so dispatch can't
-      // drift from discovery. (vc:auth's remote-only direction is enforced in
-      // its own branch below.)
+      // drift from discovery.
       if (target.kind === "remote" && !isPromptCommandAvailableFor(command.name, "remote")) {
         return {
           message: `/${command.name} needs eve dev running the local server (it is not available with --url).`,
@@ -84,15 +83,15 @@ export function createPromptCommandHandler(
         return { message: `/${command.name} is not supported by this renderer.` };
       }
 
-      if (command.name === "vc:auth") {
-        if (target.kind !== "remote" || context.remoteConnection === undefined) {
-          return { message: "/vc:auth is not available in this session." };
+      if (command.name === "vc:login" && target.kind === "remote") {
+        if (context.remoteConnection === undefined) {
+          return { message: "/vc:login is not available in this session." };
         }
         let runRemoteAuthCommand: (typeof import("./remote-auth-command.js"))["runRemoteAuthCommand"];
         try {
           ({ runRemoteAuthCommand } = await import("./remote-auth-command.js"));
         } catch (error) {
-          return { message: `/vc:auth failed: ${toErrorMessage(error)}` };
+          return { message: `/vc:login failed: ${toErrorMessage(error)}` };
         }
         const message = await runRemoteAuthCommand({
           connection: context.remoteConnection,
@@ -102,10 +101,8 @@ export function createPromptCommandHandler(
         return { message };
       }
 
-      // Availability is the `targets` allowlist checked above; the remaining
-      // setup commands run against `workspaceRoot`, which both a local and a
-      // remote target carry (`/vc:install` and `/vc:login` only need a working
-      // directory, not the local dev server).
+      // The remaining setup commands run against the local workspace, except
+      // `/vc:install`, which needs only a working directory on a remote session.
       let setupCommands: typeof import("./setup-commands.js");
       try {
         setupCommands = await import("./setup-commands.js");

@@ -72,6 +72,29 @@ describe("resolveVercelDeployment", () => {
     );
   });
 
+  it("scopes the lookup to a selected team without requiring a project", async () => {
+    const captureVercel = vi.fn<VercelDeploymentResolutionDeps["captureVercel"]>(async () => ({
+      ok: true,
+      stdout: JSON.stringify(STANDARD),
+    }));
+
+    await expect(
+      resolveVercelDeployment({
+        workspaceRoot: "/repo",
+        host: "inbound.example.com",
+        scope: "team_a",
+        deps: { captureVercel },
+      }),
+    ).resolves.toMatchObject({
+      kind: "resolved",
+      target: { deployment: { ownerId: "team_a", projectId: "prj_target" } },
+    });
+    expect(captureVercel).toHaveBeenCalledWith(
+      ["api", "/v13/deployments/inbound.example.com", "--scope", "team_a", "--raw"],
+      expect.objectContaining({ cwd: "/repo" }),
+    );
+  });
+
   it("derives the canonical owner id from the response, not the queried scope", async () => {
     const captureVercel = vi.fn<VercelDeploymentResolutionDeps["captureVercel"]>(async () => ({
       ok: true,

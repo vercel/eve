@@ -41,6 +41,11 @@ export interface PickProjectOptions extends VercelProjectOperationOptions {
   allowCreateWhenEmpty?: boolean;
 }
 
+export interface PickTeamOptions extends VercelProjectOperationOptions {
+  /** Builds the team selector heading from the current team's display name. */
+  selectMessage?: (currentTeam: string) => string;
+}
+
 export function unresolvedProject(): ProjectResolution {
   return { kind: "unresolved" };
 }
@@ -354,7 +359,7 @@ export async function pickTeam(
   prompter: Prompter,
   projectRoot: string,
   presetTeam: string | undefined,
-  options: VercelProjectOperationOptions = {},
+  options: PickTeamOptions = {},
 ): Promise<string> {
   if (presetTeam !== undefined) {
     await validateTeam(prompter, projectRoot, presetTeam, options);
@@ -366,15 +371,18 @@ export async function pickTeam(
   if (teams.length <= 1) {
     return teams.find((team) => team.current)?.slug ?? (await whoamiScope(projectRoot, options));
   }
+  const currentTeam = teams.find((team) => team.current);
   return prompter.select({
-    message: "Select your team",
+    message:
+      options.selectMessage?.(currentTeam?.name ?? (await whoamiScope(projectRoot, options))) ??
+      "Select your team",
     search: true,
     placeholder: "type to search teams",
     options: teams.map((team) => ({
       value: team.slug,
       label: team.current ? `${team.name} (current)` : team.name,
     })),
-    initialValue: teams.find((team) => team.current)?.slug,
+    initialValue: currentTeam?.slug,
   });
 }
 

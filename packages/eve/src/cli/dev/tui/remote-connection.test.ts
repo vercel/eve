@@ -277,6 +277,27 @@ describe("createRemoteConnectionController", () => {
     expect(resolveOidcToken).toHaveBeenCalledWith(VERIFIED_TARGET.deployment);
   });
 
+  it.each(["not-found", "forbidden"] as const)(
+    "probes anonymously when Vercel resolves the host as %s",
+    async (kind) => {
+      const tokens: string[] = [];
+      const resolveDeployment = vi.fn<(signal: AbortSignal) => Promise<VercelDeploymentResolution>>(
+        async () => ({ kind }),
+      );
+      const harness = createHarness({
+        resolveDeployment,
+        info: async (credentials) => {
+          tokens.push(await credentials.resolveToken());
+          return INFO;
+        },
+      });
+
+      await expect(harness.controller.check()).resolves.toEqual({ state: "ready", info: INFO });
+      expect(harness.info).toHaveBeenCalledOnce();
+      expect(tokens).toEqual([""]);
+    },
+  );
+
   it("uses the authenticated token resolver for every request", async () => {
     let request = 0;
     const info = vi.fn(async (credentials: DevelopmentCredentialGate) => {
@@ -409,7 +430,7 @@ describe("createRemoteConnectionController", () => {
     expect(tokens[2]).toBe("");
   });
 
-  it("clears ambient credentials before a later unverified check", async () => {
+  it("clears ambient credentials before a later unresolved deployment check", async () => {
     const tokens: string[] = [];
     const resolveDeployment = vi
       .fn<(signal: AbortSignal) => Promise<VercelDeploymentResolution>>()
@@ -427,9 +448,9 @@ describe("createRemoteConnectionController", () => {
     await expect(harness.controller.check()).resolves.toEqual({ state: "ready", info: INFO });
     await expect(harness.controller.check()).resolves.toEqual({ state: "ready", info: INFO });
 
-    expect(tokens[0]).toBe("ambient-token");
-    expect(tokens[1]).toBe("");
+    expect(tokens).toEqual(["ambient-token", ""]);
     expect(harness.controller.current().deployment).toBeUndefined();
+    await expect(harness.credentials.resolveToken()).resolves.toBe("");
   });
 
   it("does not publish a stale deployment lookup", async () => {

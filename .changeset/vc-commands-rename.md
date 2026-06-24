@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-The dev TUI's `/vc` and `/login` commands are now `/vc:install` and `/vc:login`, matching `/vc:auth`, and both are available in remote (`eve dev --url`) sessions. You can install the Vercel CLI or log in while connected to a remote — the prerequisites `/vc:auth` may need — instead of only in a local session.
+The dev TUI's `/vc` and `/login` commands are now `/vc:install` and `/vc:login`. `/vc:login` is the single Vercel authentication command: it logs in locally and, in remote (`eve dev --url`) sessions, recovers access with Vercel OIDC.

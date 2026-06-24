@@ -10,6 +10,7 @@ import {
 } from "#client/index.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
 import { createDevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
+import type { VercelDeploymentResolution } from "#setup/vercel-deployment.js";
 
 import {
   EveTUIRunner,
@@ -24,6 +25,7 @@ import { createPromptCommandHandler } from "./prompt-command-handler.js";
 import { promptCommandsFor } from "./prompt-commands.js";
 import type { RemoteAuthFlow } from "./remote-auth.js";
 import type { RemoteAuthCompletedMutation } from "./remote-auth-result.js";
+import type { RemoteConnectionControllerOptions } from "./remote-connection.js";
 import type { BootDetection, SetupIssue } from "./setup-issues.js";
 import type { SetupFlowRenderer } from "./setup-flow.js";
 import { createFakeSetupFlowRenderer } from "./test/fake-setup-flow-renderer.js";
@@ -1169,11 +1171,28 @@ describe("EveTUIRunner remote authentication", () => {
     workspaceRoot: "/tmp/weather-agent",
   } as const;
 
-  function remoteOptions() {
+  const unresolvedDeployment: VercelDeploymentResolution = {
+    kind: "failed",
+    failure: {
+      cause: "vercel",
+      failure: {
+        code: null,
+        message: "Vercel deployment lookup failed.",
+        stderr: "",
+        stdout: "",
+      },
+    },
+  };
+
+  function remoteOptions(
+    resolveDeployment: NonNullable<
+      RemoteConnectionControllerOptions["resolveDeployment"]
+    > = async () => unresolvedDeployment,
+  ) {
     return {
       target,
       credentials: createDevelopmentCredentialGate(target.serverUrl),
-      resolveDeployment: async () => ({ kind: "not-found" }) as const,
+      resolveDeployment,
       resolveOidcToken: async () => ({
         kind: "resolution-failed" as const,
         message: "No ambient token in this test.",
@@ -1203,6 +1222,7 @@ describe("EveTUIRunner remote authentication", () => {
     client: Client;
     flow: RemoteAuthFlow;
     renderer?: Partial<AgentTUIRenderer>;
+    resolveDeployment?: NonNullable<RemoteConnectionControllerOptions["resolveDeployment"]>;
   }): Promise<void> {
     await new EveTUIRunner({
       session: input.client.session(),
@@ -1214,11 +1234,44 @@ describe("EveTUIRunner remote authentication", () => {
         target,
         remoteAuthFlow: input.flow,
       }),
-      remote: remoteOptions(),
+      remote: remoteOptions(input.resolveDeployment),
     }).run();
   }
 
-  it("runs /vc:auth once at startup after the exact remote auth challenge", async () => {
+  it("runs /vc:login after an unresolved host returns an authentication challenge", async () => {
+    const client = stubClient();
+    const order: string[] = [];
+    let infoCalls = 0;
+    vi.spyOn(client, "info").mockImplementation(async () => {
+      order.push("info");
+      if (++infoCalls === 1) throw unauthorized();
+      return AGENT_INFO;
+    });
+    const flow = vi.fn<RemoteAuthFlow>(async () => {
+      order.push("login");
+      return {
+        kind: "prepared",
+        target: REMOTE_VERIFIED_TARGET,
+        resolveToken: async () => "fresh-token",
+        completedMutations: [],
+      };
+    });
+    const commandInvocations: Array<{ text: string; status: "failed" | undefined }> = [];
+
+    await runRemoteAuth({
+      client,
+      flow,
+      resolveDeployment: async () => ({ kind: "not-found" }),
+      renderer: {
+        renderCommandInvocation: (text, status) => commandInvocations.push({ text, status }),
+      },
+    });
+
+    expect(order).toEqual(["info", "login", "info"]);
+    expect(commandInvocations).toEqual([{ text: "/vc:login", status: undefined }]);
+  });
+
+  it("runs /vc:login once at startup after the exact remote auth challenge", async () => {
     const client = stubClient();
     vi.spyOn(client, "info")
       .mockRejectedValueOnce(unauthorized())
@@ -1235,7 +1288,7 @@ describe("EveTUIRunner remote authentication", () => {
     });
 
     expect(flow).toHaveBeenCalledOnce();
-    expect(commandInvocations).toEqual([{ text: "/vc:auth", status: undefined }]);
+    expect(commandInvocations).toEqual([{ text: "/vc:login", status: undefined }]);
   });
 
   it("requests Trusted Sources repair for an environment mismatch", async () => {
@@ -1253,7 +1306,7 @@ describe("EveTUIRunner remote authentication", () => {
     expect(flow).toHaveBeenCalledWith(expect.objectContaining({ configureTrustedSources: true }));
   });
 
-  it("renders a failed automatic /vc:auth as one command result without the request id", async () => {
+  it("renders a failed automatic /vc:login as one command result without the request id", async () => {
     const client = stubClient();
     vi.spyOn(client, "info")
       .mockRejectedValueOnce(unauthorized())
@@ -1279,7 +1332,7 @@ describe("EveTUIRunner remote authentication", () => {
       },
     });
 
-    expect(commandInvocations).toEqual([{ text: "/vc:auth", status: "failed" }]);
+    expect(commandInvocations).toEqual([{ text: "/vc:login", status: "failed" }]);
     expect(commandResults).toEqual([
       "Authentication was refreshed, but vpoke.playground-vercel.tools is unavailable: " +
         "Your trusted sources OIDC token's environment is not permitted to access this deployment.\n\n" +

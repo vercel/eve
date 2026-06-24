@@ -66,7 +66,7 @@ function mutedRenderer(
   };
 }
 
-/** Runs `/vc:auth` through one TUI panel, connection operation, and auth flow. */
+/** Runs remote `/vc:login` through one TUI panel, connection operation, and auth flow. */
 export async function runRemoteAuthCommand(input: RemoteAuthCommandInput): Promise<string> {
   // The pulsing square, matching /vc:install and /vc:login (and model/channels).
   input.renderer.begin("Authenticate via Vercel OIDC", "pulse");
@@ -109,12 +109,12 @@ export async function runRemoteAuthCommand(input: RemoteAuthCommandInput): Promi
         if (interrupted) {
           const completed = describeRemoteAuthCompletedMutations(outcome.completedMutations);
           return completed.length === 0
-            ? "/vc:auth interrupted."
-            : `/vc:auth interrupted. Completed before interruption: ${completed.join(", ")}.`;
+            ? "/vc:login interrupted."
+            : `/vc:login interrupted. Completed before interruption: ${completed.join(", ")}.`;
         }
         return outcome.completedMutations.some((mutation) => mutation.kind === "vercel-login")
-          ? "/vc:auth cancelled after logging in to Vercel."
-          : "/vc:auth cancelled.";
+          ? "/vc:login cancelled after logging in to Vercel."
+          : "/vc:login cancelled.";
       }
       case "failed":
         return outcome.message;

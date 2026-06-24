@@ -2,6 +2,7 @@ import { resolveDevelopmentOidcToken } from "#services/dev-client/request-header
 import { formatDevelopmentOidcTokenFailure } from "#services/dev-client/vercel-auth-error.js";
 import { runLoginFlow, type LoginFlowResult } from "#setup/flows/login.js";
 import type { Prompter } from "#setup/prompter.js";
+import { pickTeam } from "#setup/vercel-project.js";
 import {
   resolveVercelDeployment,
   type VercelDeploymentResolutionFailure,
@@ -19,11 +20,14 @@ import {
   type RemoteAuthPreparation,
 } from "./remote-auth-result.js";
 import { toErrorMessage } from "#shared/errors.js";
+import pc from "picocolors";
 
 /** Injectable entry point for the remote authentication flow. */
 export type RemoteAuthFlow = typeof runRemoteAuthFlow;
+
 export interface RemoteAuthFlowDeps {
   readonly runLoginFlow: typeof runLoginFlow;
+  readonly pickTeam: typeof pickTeam;
   readonly resolveVercelDeployment: typeof resolveVercelDeployment;
   readonly resolveOidcToken: typeof resolveDevelopmentOidcToken;
   readonly prepareVercelTrustedSourceAccess: typeof prepareVercelTrustedSourceAccess;
@@ -32,6 +36,7 @@ export interface RemoteAuthFlowDeps {
 
 const defaultDeps: RemoteAuthFlowDeps = {
   runLoginFlow,
+  pickTeam,
   resolveVercelDeployment,
   resolveOidcToken: resolveDevelopmentOidcToken,
   prepareVercelTrustedSourceAccess,
@@ -64,19 +69,34 @@ function loginFailure(result: LoginFlowResult): RemoteAuthPreparation | undefine
       return cancelled();
     case "cli-missing":
       return failed(
-        "The Vercel CLI is not installed. Install it with `npm i -g vercel@latest`, then retry /vc:auth.",
+        "The Vercel CLI is not installed. Install it with `npm i -g vercel@latest`, then retry /vc:login.",
       );
     case "failed":
-      return failed("Vercel login did not complete. Retry /vc:auth.");
+      return failed("Vercel login did not complete. Retry /vc:login.");
     case "unavailable":
       return failed(
-        "Vercel could not verify your account. Check your connection, then retry /vc:auth.",
+        "Vercel could not verify your account. Check your connection, then retry /vc:login.",
       );
   }
 }
 
 function deploymentFailureMessage(failure: VercelDeploymentResolutionFailure): string {
   return failure.cause === "vercel" ? failure.failure.message : failure.message;
+}
+
+async function selectVercelDeploymentScope(
+  deps: Pick<RemoteAuthFlowDeps, "pickTeam">,
+  workspaceRoot: string,
+  host: string,
+  prompter: Prompter,
+  signal: AbortSignal | undefined,
+): Promise<string> {
+  return await deps.pickTeam(prompter, workspaceRoot, undefined, {
+    signal,
+    selectMessage: (currentTeam) =>
+      `${pc.blue(host)} is not accessible via current team (${pc.bold(currentTeam)})\n` +
+      "You can try selecting another team:",
+  });
 }
 
 /**
@@ -106,10 +126,8 @@ export async function runRemoteAuthFlow(input: {
     if (loginOutcome !== undefined) return loginOutcome;
     if (login.kind === "logged-in") completedMutations.push({ kind: "vercel-login" });
 
-    // A deployment hostname is globally unique, so Vercel resolves the project
-    // and owning team straight from the URL under the caller's own access — no
-    // team/project picker. If access is denied (for example an expired team SSO
-    // session), re-authenticate through the same dialogue and resolve once more.
+    // Prefer direct host resolution. If the active Vercel scope cannot see the
+    // deployment, the picker supplies an explicit team scope.
     let resolution = await deps.resolveVercelDeployment({ workspaceRoot, host, signal });
     if (resolution.kind === "forbidden") {
       const reauth = await deps.runLoginFlow({
@@ -124,6 +142,26 @@ export async function runRemoteAuthFlow(input: {
       signal?.throwIfAborted();
       resolution = await deps.resolveVercelDeployment({ workspaceRoot, host, signal });
     }
+    if (resolution.kind === "not-found") {
+      try {
+        const scope = await selectVercelDeploymentScope(
+          deps,
+          workspaceRoot,
+          host,
+          prompter,
+          signal,
+        );
+        signal?.throwIfAborted();
+        resolution = await deps.resolveVercelDeployment({ workspaceRoot, host, scope, signal });
+      } catch (error) {
+        if (error instanceof WizardCancelledError) return cancelled(completedMutations);
+        signal?.throwIfAborted();
+        return failed(
+          `Could not select a Vercel team: ${toErrorMessage(error)}`,
+          completedMutations,
+        );
+      }
+    }
 
     let target: VerifiedVercelTarget;
     switch (resolution.kind) {
@@ -134,12 +172,12 @@ export async function runRemoteAuthFlow(input: {
         return cancelled(completedMutations);
       case "forbidden":
         return failed(
-          `Could not access ${host}. Re-authenticate (for example to complete a team's SSO), then retry /vc:auth.`,
+          `Could not access ${host}. Re-authenticate (for example to complete a team's SSO), then retry /vc:login.`,
           completedMutations,
         );
       case "not-found":
         return failed(
-          `Vercel did not resolve ${host} as a deployment you can access. If it belongs to a team that enforces SSO, re-authenticate and retry /vc:auth.`,
+          `Vercel did not resolve ${host} for the selected Vercel team.`,
           completedMutations,
         );
       case "project-mismatch":

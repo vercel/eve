@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import pc from "picocolors";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
@@ -11,12 +12,20 @@ const HOST = "vpoke.playground-vercel.tools";
 const SERVER_URL = `https://${HOST}/`;
 const OWNER_ID = "team_acme";
 const PROJECT_ID = "prj_remote";
+const SELECTED_TEAM = "labs";
+const SELECTED_PROJECT_ID = "prj_e0";
 
 const TARGET = await resolveTestVercelTarget({
   host: HOST,
   projectId: PROJECT_ID,
   ownerId: OWNER_ID,
   projectName: "remote-agent",
+});
+const SELECTED_TARGET = await resolveTestVercelTarget({
+  host: HOST,
+  projectId: SELECTED_PROJECT_ID,
+  ownerId: "team_labs",
+  projectName: "e0",
 });
 const TRUSTED_SOURCE_GRANT = {
   ownerId: OWNER_ID,
@@ -60,7 +69,6 @@ function createHarness(options: HarnessOptions = {}) {
       ? undefined
       : (options.token?.value ?? oidcToken(OWNER_ID, PROJECT_ID));
 
-  // No `select` is expected: the flow resolves from the URL with no picker.
   const { prompter } = createFakePrompter({
     single: () => {
       throw new Error("unexpected select prompt");
@@ -71,6 +79,10 @@ function createHarness(options: HarnessOptions = {}) {
     runLoginFlow: vi.fn<RemoteAuthFlowDeps["runLoginFlow"]>(async () => {
       operations.push("login");
       return logins[Math.min(loginCall++, logins.length - 1)]!;
+    }),
+    pickTeam: vi.fn<RemoteAuthFlowDeps["pickTeam"]>(async () => {
+      operations.push("team");
+      return SELECTED_TEAM;
     }),
     resolveVercelDeployment: vi.fn<RemoteAuthFlowDeps["resolveVercelDeployment"]>(async () => {
       operations.push("deployment");
@@ -134,6 +146,71 @@ describe("runRemoteAuthFlow", () => {
       forceRefresh: true,
     });
     expect(harness.operations).toEqual(["login", "deployment", "token"]);
+  });
+
+  it("selects a team when the unscoped deployment lookup misses", async () => {
+    const { prompter } = createFakePrompter({
+      single: () => {
+        throw new Error("unexpected select prompt");
+      },
+    });
+    let deploymentCall = 0;
+    const resolveVercelDeployment = vi.fn<RemoteAuthFlowDeps["resolveVercelDeployment"]>(async () =>
+      deploymentCall++ === 0
+        ? { kind: "not-found" }
+        : { kind: "resolved", target: SELECTED_TARGET },
+    );
+    const resolveOidcToken = vi.fn<RemoteAuthFlowDeps["resolveOidcToken"]>(async () => ({
+      kind: "resolved",
+      token: oidcToken("team_labs", SELECTED_PROJECT_ID),
+    }));
+    const pickTeam = vi.fn<RemoteAuthFlowDeps["pickTeam"]>(async () => SELECTED_TEAM);
+
+    await expect(
+      runRemoteAuthFlow({
+        workspaceRoot: WORKSPACE_ROOT,
+        serverUrl: SERVER_URL,
+        prompter,
+        deps: {
+          runLoginFlow: vi.fn<RemoteAuthFlowDeps["runLoginFlow"]>(async () => ({
+            kind: "already",
+          })),
+          pickTeam,
+          resolveVercelDeployment,
+          resolveOidcToken,
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "prepared",
+      target: SELECTED_TARGET,
+    });
+    expect(resolveVercelDeployment).toHaveBeenNthCalledWith(1, {
+      workspaceRoot: WORKSPACE_ROOT,
+      host: HOST,
+      signal: undefined,
+    });
+    expect(resolveVercelDeployment).toHaveBeenNthCalledWith(2, {
+      workspaceRoot: WORKSPACE_ROOT,
+      host: HOST,
+      signal: undefined,
+      scope: SELECTED_TEAM,
+    });
+    expect(pickTeam).toHaveBeenCalledWith(
+      prompter,
+      WORKSPACE_ROOT,
+      undefined,
+      expect.objectContaining({ signal: undefined, selectMessage: expect.any(Function) }),
+    );
+    const selectMessage = pickTeam.mock.calls[0]?.[3]?.selectMessage;
+    expect(selectMessage?.("Current Team")).toBe(
+      `${pc.blue(HOST)} is not accessible via current team (${pc.bold("Current Team")})\n` +
+        "You can try selecting another team:",
+    );
+    expect(resolveOidcToken).toHaveBeenCalledWith({
+      ownerId: "team_labs",
+      projectId: SELECTED_PROJECT_ID,
+      forceRefresh: true,
+    });
   });
 
   it("re-authenticates and resolves again when access is initially forbidden", async () => {
@@ -231,7 +308,7 @@ describe("runRemoteAuthFlow", () => {
     {
       name: "deployment not found",
       options: { deployments: [{ kind: "not-found" }] },
-      message: "did not resolve",
+      message: "selected Vercel team",
     },
     {
       name: "access still forbidden after re-auth",
@@ -296,7 +373,7 @@ describe("formatRemoteAuthChallengeMessage", () => {
     const message = formatRemoteAuthChallengeMessage("https://example.vercel.app");
 
     expect(message).toContain("https://example.vercel.app");
-    expect(message).toContain("/vc:auth");
+    expect(message).toContain("/vc:login");
     expect(message).toContain("VERCEL_AUTOMATION_BYPASS_SECRET");
     expect(message).toContain("Disable Deployment Protection");
     expect(message).toContain("https://vercel.com/docs/deployment-protection");

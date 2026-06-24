@@ -5,8 +5,6 @@ export type PromptCommandExtensionName =
   | "vc:install"
   | "vc:login";
 
-type PromptCommandName = PromptCommandExtensionName | "vc:auth";
-
 type PromptCommandTarget = "local" | "remote";
 
 /** The slash commands the prompt accepts. */
@@ -15,7 +13,7 @@ export type PromptCommand =
   | { type: "exit" }
   | { type: "help" }
   | { type: "loglevel"; argument: string }
-  | { type: "extension"; name: PromptCommandName; argument: string };
+  | { type: "extension"; name: PromptCommandExtensionName; argument: string };
 
 /**
  * Metadata for one slash command. The registry describes commands — their
@@ -75,18 +73,10 @@ const PROMPT_COMMAND_DEFINITIONS = [
   {
     name: "vc:login",
     aliases: [],
-    description: "Log in to Vercel",
+    description: "Authenticate with Vercel",
     takesArgument: false,
     build: () => ({ type: "extension", name: "vc:login", argument: "" }),
     targets: ["local", "remote"],
-  },
-  {
-    name: "vc:auth",
-    aliases: [],
-    description: "Authenticate this remote via Vercel OIDC",
-    takesArgument: false,
-    build: () => ({ type: "extension", name: "vc:auth", argument: "" }),
-    targets: ["remote"],
   },
   {
     name: "model",
@@ -142,7 +132,7 @@ export function promptCommandsFor(target: PromptCommandTarget): readonly PromptC
 
 /** Whether a command runs against this target — the one authority dispatch shares with discovery. */
 export function isPromptCommandAvailableFor(
-  name: PromptCommandName,
+  name: PromptCommandExtensionName,
   target: PromptCommandTarget,
 ): boolean {
   const definition = PROMPT_COMMAND_DEFINITIONS.find((entry) => entry.name === name);

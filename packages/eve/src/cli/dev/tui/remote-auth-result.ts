@@ -55,7 +55,7 @@ export function formatRemoteAuthChallengeMessage(serverUrl: string): string {
     `Vercel Deployment Protection blocked the request to ${serverUrl}.`,
     "",
     "To access the deployment from `eve dev`, do one of:",
-    "  • Run `/vc:auth` to select a Vercel project and refresh its OIDC token.",
+    "  • Run `/vc:login` to authenticate this remote via Vercel OIDC.",
     "  • Set VERCEL_AUTOMATION_BYPASS_SECRET to a Protection Bypass for",
     "    Automation token (Project Settings → Deployment Protection).",
     "  • Disable Deployment Protection on the target deployment.",

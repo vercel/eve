@@ -694,7 +694,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
   it("marks a failed automatic command and keeps its multiline outcome in one result block", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderCommandInvocation("/vc:auth", "failed");
+    renderer.renderCommandInvocation("/vc:login", "failed");
     renderer.renderCommandResult(
       "Authentication was refreshed, but example.vercel.app is unavailable: Access denied.\n\n" +
         "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH",
@@ -702,7 +702,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("▌ ⨯ /vc:auth");
+    expect(snapshot).toContain("▌ ⨯ /vc:login");
     expect(snapshot).toContain("⎿  Authentication was refreshed");
     expect(snapshot).toContain("TRUSTED_SOURCES_ENVIRONMENT_MISMATCH");
     expect(snapshot).not.toContain("· Authentication was refreshed");
@@ -2580,7 +2580,7 @@ describe("TerminalRenderer command typeahead", () => {
     const prompt = renderer.readPrompt();
     input.type("/");
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("Authenticate this remote via Vercel OIDC");
+    expect(snapshot).toContain("Authenticate with Vercel");
     expect(snapshot).not.toContain("Configure the agent's model and provider");
     input.enter();
     await prompt;

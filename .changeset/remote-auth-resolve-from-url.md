@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-`/vc:auth` now resolves the target Vercel project and owning team directly from the deployment URL instead of prompting you to pick a team and project. You can authenticate any deployment you can access — including custom domains and aliases — without a picker, and when access is denied (for example an expired team SSO session) it re-authenticates and retries.
+In remote sessions, `/vc:login` resolves the target Vercel project and owning team from the deployment URL. When the target requires authentication and Vercel cannot resolve its host in the active scope, the flow asks you to select another team, then reruns the lookup in that scope. When access is denied, for example because a team SSO session expired, it re-authenticates and retries.
