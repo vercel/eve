@@ -91,14 +91,14 @@ function run(input: {
 }
 
 describe("runTuiSetupCommand", () => {
-  it("uses the build pulse only for model and channel loading", () => {
+  it("uses the build pulse for every setup command except deploy", () => {
     expect(
       Object.fromEntries(
         Object.entries(SETUP_FLOW_CONFIG).map(([command, config]) => [command, config.indicator]),
       ),
     ).toEqual({
-      "vc:install": "spinner",
-      "vc:login": "spinner",
+      "vc:install": "pulse",
+      "vc:login": "pulse",
       model: "pulse",
       channels: "pulse",
       deploy: "spinner",

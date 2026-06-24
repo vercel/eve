@@ -198,7 +198,7 @@ describe("createPromptCommandHandler", () => {
     ).resolves.toEqual({
       message: "/vc:auth cancelled after logging in to Vercel.",
     });
-    expect(setupFlow.begin).toHaveBeenCalledWith("Authenticate via Vercel OIDC");
+    expect(setupFlow.begin).toHaveBeenCalledWith("Authenticate via Vercel OIDC", "pulse");
     expect(setupFlow.end).toHaveBeenCalledWith({ preserveDiagnostics: true });
   });
 

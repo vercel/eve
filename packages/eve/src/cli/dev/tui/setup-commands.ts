@@ -26,8 +26,8 @@ export type TuiSetupCommand = PromptCommandExtensionName;
  * move past their opening question.
  */
 export const SETUP_FLOW_CONFIG = {
-  "vc:install": { title: "Install the Vercel CLI", indicator: "spinner" },
-  "vc:login": { title: "Log in to Vercel", indicator: "spinner" },
+  "vc:install": { title: "Install the Vercel CLI", indicator: "pulse" },
+  "vc:login": { title: "Log in to Vercel", indicator: "pulse" },
   model: { title: "Configure the agent model", indicator: "pulse" },
   channels: { title: "Agent channels", indicator: "pulse" },
   deploy: { title: "Deploy to Vercel", indicator: "spinner" },
