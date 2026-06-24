@@ -24,11 +24,17 @@ export async function createVercelEveImageSandbox(input: {
   readonly createOptions: VercelSandboxCreateParams;
   readonly sandboxModule: VercelModule;
 }): Promise<VercelSandbox> {
-  const createOptions: VercelSandboxCreateParams = {
-    ...input.createOptions,
-    __image: VERCEL_EVE_SANDBOX_IMAGE,
-  };
+  // The eve base image is only a default. `__image` takes precedence over
+  // `runtime` in the SDK, so forcing it unconditionally silently drops an
+  // author-supplied runtime — apply it only when no runtime was requested.
+  const createOptions: VercelSandboxCreateParams = hasAuthorRuntime(input.createOptions)
+    ? input.createOptions
+    : { ...input.createOptions, __image: VERCEL_EVE_SANDBOX_IMAGE };
   return await input.sandboxModule.Sandbox.create(createOptions);
+}
+
+function hasAuthorRuntime(createOptions: VercelSandboxCreateParams): boolean {
+  return (createOptions as VercelSandboxCreateParams & { runtime?: unknown }).runtime !== undefined;
 }
 
 const VERCEL_EVE_SANDBOX_IMAGE = "vercel/eve:latest";
