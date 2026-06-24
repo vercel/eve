@@ -1506,7 +1506,24 @@ async function handleStepResult(input: {
   // so the prompt prefix stays stable and the provider's prompt cache keeps
   // hitting across steps. Compaction is the sole mechanism that ever rewrites
   // history, and it runs before the model call (see `maybeCompact`).
-  const updatedHistory: ModelMessage[] = [...promptMessages, ...responseMessages];
+  const hasProviderExecutedToolResult = (result.toolResults ?? []).some(
+    (toolResult) => toolResult.providerExecuted === true,
+  );
+  const continuationMessages: ModelMessage[] = [...responseMessages];
+  if (stepOutput === null && hasProviderExecutedToolResult) {
+    continuationMessages.push({
+      role: "tool",
+      content: (result.toolResults ?? [])
+        .filter((toolResult) => toolResult.providerExecuted === true)
+        .map((toolResult) => ({
+          type: "tool-result" as const,
+          toolCallId: toolResult.toolCallId,
+          toolName: toolResult.toolName,
+          output: { type: "json" as const, value: toolResult.output },
+        })),
+    });
+  }
+  const updatedHistory: ModelMessage[] = [...promptMessages, ...continuationMessages];
   let nextSession: HarnessSession = { ...baseSession, history: updatedHistory };
 
   // A `final_output` call is terminal even when the model emits it alongside
@@ -1514,15 +1531,10 @@ async function handleStepResult(input: {
   // dangling tool_use the next provider call rejects, and drop the result.
   const calledFinalOutput =
     nextSession.outputSchema !== undefined && extractFinalOutput(result) !== undefined;
-  const hasProviderExecutedToolResult = (result.toolResults ?? []).some(
-    (toolResult) => toolResult.providerExecuted === true,
-  );
 
   const continueLoop =
     !calledFinalOutput &&
-    (responseMessages.at(-1)?.role === "tool" ||
-      hasDeferredStepInput(nextSession) ||
-      (stepOutput === null && hasProviderExecutedToolResult));
+    (continuationMessages.at(-1)?.role === "tool" || hasDeferredStepInput(nextSession));
   if (continueLoop) {
     if (emit) {
       emissionState = advanceStep(emissionState);
