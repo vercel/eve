@@ -730,9 +730,10 @@ describe("scaffoldBaseProject", () => {
     await expect(readFile(join(projectRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
       PNPM_WORKSPACE_CONTENT,
     );
-    await expect(readFile(join(projectRoot, "AGENTS.md"), "utf8")).resolves.toContain(
-      "node_modules/eve/docs/",
-    );
+    const agentsMd = await readFile(join(projectRoot, "AGENTS.md"), "utf8");
+    expect(agentsMd).toContain("installed eve package docs");
+    expect(agentsMd).toContain("node_modules/eve/docs/");
+    expect(agentsMd).toContain("resolve the\ninstalled `eve` package location");
     // `vercel deploy` uploads everything a .vercelignore doesn't exclude, and
     // the platform default-ignores only the .env.local variants — eve's dev
     // artifacts and a bare .env must be excluded here or a source deploy

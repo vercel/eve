@@ -25,7 +25,9 @@ describe("initAgentInstructions", () => {
     // pre-scaffold guide renders the universal `npx eve dev` through the shared
     // prompt renderer rather than a launcher-specific command.
     expect(instructions).toContain("npx eve@latest init <name>");
+    expect(instructions).toContain("full docs are bundled");
     expect(instructions).toContain("node_modules/eve/docs/");
+    expect(instructions).toContain("resolve\nthe installed `eve` package location");
     expect(instructions).toContain("npx eve dev --no-ui");
     expect(instructions).not.toContain("npm run dev");
     expect(instructions).not.toContain("starts the dev server");
@@ -56,7 +58,9 @@ describe("initAgentDevHandoff", () => {
     // The intro names the scaffolded project; the shared sections then reference
     // paths relative to it rather than interpolating the working directory.
     expect(handoff).toContain("The project at `/tmp/triage-bot` is already scaffolded");
+    expect(handoff).toContain("full docs are bundled");
     expect(handoff).toContain("node_modules/eve/docs/");
+    expect(handoff).toContain("resolve\nthe installed `eve` package location");
     expect(handoff).toContain("agent/instructions.md");
     expect(handoff).not.toContain("/tmp/triage-bot/");
 
