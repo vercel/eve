@@ -52,7 +52,7 @@ export async function runDeployCommand(
     });
     if (result.kind === "needs-link") {
       logger.error(
-        "This directory is not linked to a Vercel project. Run `eve link` first (or `vercel link --project <name> --yes` in CI), then re-run `eve deploy`.",
+        "This directory is not linked to a Vercel project. Run `eve link` first (or `vercel link --project <name> --yes --non-interactive` in CI), then re-run `eve deploy`.",
       );
       process.exitCode = 1;
       return;

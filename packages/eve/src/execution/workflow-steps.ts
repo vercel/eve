@@ -38,6 +38,7 @@ import {
 } from "#protocol/message.js";
 import {
   CallbackBaseUrlKey,
+  clearPendingAuthorization,
   getPendingAuthorization,
   PendingAuthorizationResultKey,
   type AuthorizationResult,
@@ -61,7 +62,6 @@ import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { turnWorkflow } from "#execution/turn-workflow.js";
 import { createWorkflowRuntime, startWorkflowPreferLatest } from "#execution/workflow-runtime.js";
-import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
 /**
  * Result of one durable harness step, consumed by the turn workflow.
@@ -120,17 +120,10 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     }),
   );
 
-  const durableSession = await readDurableSession(input.sessionState);
+  let durableSession = await readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
-  const initialSession = hydrateDurableSession({
-    compactionOverrides: {
-      thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
-    },
-    durable: durableSession,
-    turnAgent: bundle.turnAgent,
-  });
 
   // Populate the callback base URL so getHookUrl() works during
   // tool execution. Reads from workflow metadata (available in steps).
@@ -180,6 +173,13 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     }
     if (authResults.length > 0) {
       ctx.set(PendingAuthorizationResultKey, authResults);
+      durableSession = {
+        ...durableSession,
+        state: clearPendingAuthorization(
+          durableSession.state,
+          authResults.map((result) => result.name),
+        ),
+      };
       completedAuths = completed;
       input =
         remainingPayloads.length > 0
@@ -193,6 +193,14 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   if (input.input?.kind === "deliver" && input.input.auth !== undefined) {
     ctx.set(AuthKey, input.input.auth ?? null);
   }
+
+  const initialSession = hydrateDurableSession({
+    compactionOverrides: {
+      thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
+    },
+    durable: durableSession,
+    turnAgent: bundle.turnAgent,
+  });
 
   const adapterCtx = buildAdapterContext(adapter, ctx);
 
@@ -315,17 +323,19 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         compactionOverrides: {
           thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
         },
-        refreshSystemPrompt: shouldRefreshSystemPromptFromTurnAgent(bundle.compiledArtifactsSource),
         session: lifecycleSession,
         turnAgent: bundle.turnAgent,
       });
 
       const step = createExecutionNodeStep({
         capabilities,
-        compiledArtifactsSource: bundle.compiledArtifactsSource,
         createRuntime: createWorkflowRuntime,
         handleEvent,
         mode,
+        modelResolutionScope: {
+          moduleMap: bundle.moduleMap,
+          nodeId: bundle.nodeId,
+        },
         node: bundle.graph.root,
       });
       return step(refreshedSession, stepInput);
@@ -387,15 +397,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     serializedContext: nextSerializedContext,
     sessionState: nextState,
   };
-}
-
-function shouldRefreshSystemPromptFromTurnAgent(
-  compiledArtifactsSource: RuntimeCompiledArtifactsSource,
-): boolean {
-  return (
-    compiledArtifactsSource.kind === "disk" &&
-    compiledArtifactsSource.moduleMapLoaderPath !== undefined
-  );
 }
 
 /**

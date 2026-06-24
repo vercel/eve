@@ -14,6 +14,7 @@ import {
 import type { Prompter } from "../prompter.js";
 import { runHeadless, runInteractive, type AnySetupBox } from "../runner.js";
 import { snapshotSetupState, type SetupState } from "../state.js";
+import { withSpinner } from "../with-spinner.js";
 
 import { inProjectSetupState, prompterSink } from "./in-project.js";
 
@@ -57,15 +58,11 @@ export async function runDeployFlow(input: {
   const { appRoot, prompter, interactive, signal } = input;
   const deps: DeployFlowDeps = { detectDeployment, ...input.deps };
 
-  const spinner = prompter.log.spinner?.("Checking the current Vercel link...");
-  let project: ProjectResolution;
-  try {
+  const project = await withSpinner(prompter, "Checking the current Vercel link...", async () => {
     const deployment = await deps.detectDeployment(appRoot, { signal });
     signal?.throwIfAborted();
-    project = projectResolutionFromDeployment(deployment);
-  } finally {
-    spinner?.stop();
-  }
+    return projectResolutionFromDeployment(deployment);
+  });
 
   const linked = isProjectResolved(project);
   if (!linked && !interactive) {

@@ -21,7 +21,6 @@ import {
   DynamicSkillManifestKey,
   SandboxKey,
 } from "#context/keys.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
 
 const log = createLogger("dynamic-skills");
@@ -40,13 +39,15 @@ function qualifyDynamicSkillNames(
 
   if (keys.length === 0) return result;
 
-  if (isSingle || keys.length === 1) {
+  // A single returned defineSkill is named after the file slug; a map names
+  // each entry by its bare key (authors namespace keys themselves if needed).
+  if (isSingle) {
     result.push({ name: slug, entryKey: keys[0]!, entry: entries[keys[0]!]! });
     return result;
   }
 
   for (const key of keys) {
-    result.push({ name: `${slug}__${key}`, entryKey: key, entry: entries[key]! });
+    result.push({ name: key, entryKey: key, entry: entries[key]! });
   }
   return result;
 }
@@ -119,9 +120,6 @@ export async function dispatchDynamicSkillEvent(input: {
   if (matching.length === 0) return;
 
   const resolveCtx = buildResolveContext(ctx, messages);
-  const authoredSkillNames = new Set(
-    ctx.require(BundleKey).resolvedAgent.skills.map((s) => s.name),
-  );
   const manifest = ctx.get(DynamicSkillManifestKey) ?? {};
   const updates: DynamicSkillUpdate[] = [];
 
@@ -178,18 +176,17 @@ export async function dispatchDynamicSkillEvent(input: {
     }
   }
 
+  // A dynamic skill whose name matches an authored skill overrides it: the
+  // dynamic write overwrites the authored file at the same sandbox path, so
+  // load_skill returns the dynamic body. Two dynamic resolvers emitting the
+  // same name is a genuine ambiguity and still throws.
   const dynamicSkillOwners = new Map<string, string>();
   for (const [resolverSlug, skills] of Object.entries(newManifest)) {
     for (const { name } of skills) {
-      if (authoredSkillNames.has(name)) {
-        throw new Error(
-          `Dynamic skill "${name}" from resolver "${resolverSlug}" conflicts with an authored skill.`,
-        );
-      }
       const previousOwner = dynamicSkillOwners.get(name);
       if (previousOwner !== undefined) {
         throw new Error(
-          `Dynamic skill "${name}" from resolver "${resolverSlug}" conflicts with dynamic resolver "${previousOwner}".`,
+          `Dynamic skill "${name}" from resolver "${resolverSlug}" collides with dynamic resolver "${previousOwner}". Namespace the map key manually, e.g. "${resolverSlug}__${name}".`,
         );
       }
       dynamicSkillOwners.set(name, resolverSlug);

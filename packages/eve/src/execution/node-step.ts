@@ -9,7 +9,10 @@ import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { resolveCodeModeEnabled } from "#shared/code-mode.js";
-import { resolveRuntimeModelReference } from "#runtime/agent/resolve-model.js";
+import {
+  resolveRuntimeModelReference,
+  type RuntimeModelResolutionScope,
+} from "#runtime/agent/resolve-model.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
 
@@ -18,7 +21,7 @@ import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
 import { SUBAGENT_TOOL_INPUT_SCHEMA } from "#runtime/subagents/registry.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { preserveFrameworkStateOnCompaction } from "#execution/compaction.js";
-import { buildUnauthorizedToolContext, createAuthorizedToolExecute } from "#execution/tool-auth.js";
+import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 
 const log = createLogger("execution.node-step");
 
@@ -44,7 +47,6 @@ export interface CreateExecutionNodeStepInput {
    * current run.
    */
   readonly capabilities?: SessionCapabilities;
-  readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   /**
    * Runtime constructor used by the subagent tool executor to start
    * delegated child runs on the same workflow runtime as the parent.
@@ -52,6 +54,7 @@ export interface CreateExecutionNodeStepInput {
   readonly createRuntime: CreateRuntime;
   readonly handleEvent?: HandleEventFn;
   readonly mode: RunMode;
+  readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
 }
 
@@ -60,7 +63,7 @@ export interface CreateExecutionNodeStepInput {
  * tool, sandbox, and subagent wiring.
  */
 export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): StepFn {
-  const resolveModel = createRuntimeModelResolver(input.compiledArtifactsSource);
+  const resolveModel = createRuntimeModelResolver(input.modelResolutionScope);
   const tools = createNodeHarnessTools({ node: input.node });
   return createToolLoopHarness({
     capabilities: input.capabilities,
@@ -108,12 +111,9 @@ function buildRuntimeIdentity(node: ResolvedRuntimeAgentNode): RuntimeIdentity {
 }
 
 function createRuntimeModelResolver(
-  compiledArtifactsSource: RuntimeCompiledArtifactsSource,
+  scope: RuntimeModelResolutionScope,
 ): (modelReference: Parameters<typeof resolveRuntimeModelReference>[0]) => Promise<LanguageModel> {
-  return (modelReference) =>
-    resolveRuntimeModelReference(modelReference, {
-      compiledArtifactsSource,
-    });
+  return (modelReference) => resolveRuntimeModelReference(modelReference, scope);
 }
 
 /**
@@ -210,7 +210,6 @@ function resolveHarnessToolDefinition(input: {
     approvalKey: def.approvalKey,
     description: def.description,
     execute: resolveAuthoredExecute({
-      auth: def.auth,
       isFrameworkTool,
       rawExecute,
       scope: def.name,
@@ -229,20 +228,17 @@ function resolveHarnessToolDefinition(input: {
  * - Framework tools (`eve:` source) run their `execute` verbatim — they
  *   manage their own context and never receive an authored
  *   {@link ToolContext}.
- * - Tools that declare `auth` are wrapped by
- *   {@link createAuthorizedToolExecute}, which builds a token-aware
- *   context and drives the interactive consent flow scoped to the tool
- *   name.
- * - Plain authored tools receive a freshly built callback context.
+ * - Authored tools are wrapped by {@link createToolExecuteWithAuth},
+ *   which builds a token-aware context. Providers passed to
+ *   `ctx.getToken(provider)` use tool-qualified auth scopes.
  * - Tools without `execute` (provider-managed) stay `undefined`.
  */
 function resolveAuthoredExecute(input: {
-  readonly auth: ResolvedToolDefinition["auth"];
   readonly isFrameworkTool: boolean;
   readonly rawExecute: ResolvedToolDefinition["execute"];
   readonly scope: string;
 }): HarnessToolDefinition["execute"] {
-  const { auth, isFrameworkTool, rawExecute, scope } = input;
+  const { isFrameworkTool, rawExecute, scope } = input;
   if (rawExecute === undefined) {
     return undefined;
   }
@@ -250,10 +246,7 @@ function resolveAuthoredExecute(input: {
     return rawExecute;
   }
   const authored = rawExecute as (toolInput: unknown, ctx: unknown) => unknown;
-  if (auth !== undefined) {
-    return createAuthorizedToolExecute({ auth, execute: authored, scope });
-  }
-  return (toolInput: unknown) => authored(toolInput, buildUnauthorizedToolContext(scope));
+  return createToolExecuteWithAuth({ execute: authored, scope });
 }
 
 function maybeJsonSchema(

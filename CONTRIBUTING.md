@@ -96,19 +96,49 @@ All of these run in CI, so running them locally before pushing saves a round tri
 
 User-facing docs live in [`docs/`](./docs) and are published with the `eve` npm package and rendered by the docs site in [`apps/docs`](./apps/docs). If your change alters public behavior, update the relevant doc in the same PR and run `pnpm docs:check`.
 
+## Before opening a pull request
+
+Every pull request must be tied to an issue. Before opening a PR, search the
+existing issues, discussions, and pull requests so you do not duplicate active
+work. If there is no existing issue, open one with the relevant template and
+describe the problem, use case, or bug reproduction.
+
+For changes to public APIs, agent behavior, compiler/runtime internals,
+dependencies, generated artifacts, fixture contracts, or any non-trivial
+implementation detail, wait for discussion on the issue before investing in the
+implementation. The goal is to agree that the problem is real and that the
+proposed direction fits eve before review shifts to code. Bug fixes should link
+to an issue with a reproduction or failing test case so the problem remains
+tracked even if a specific fix is not accepted.
+
+To avoid PRs that are unlikely to be reviewed or merged:
+
+- Do not send broad rewrites, style-only churn, formatting-only changes, or
+  generated-output refreshes unless a maintainer asked for them.
+- Do not bundle unrelated fixes or refactors into one PR. Split them so each PR
+  has one reviewable purpose.
+- Do not add runtime dependencies without prior agreement. Prefer eve-owned
+  wrappers, vendored code, or generated artifacts, and remember that the `eve`
+  package should keep runtime dependencies minimal.
+- Do not change public behavior based only on a hypothetical use case. Include a
+  concrete user story, reproduction, fixture, or test that shows the need.
+- Do not claim an issue silently. Comment before starting work, and check the
+  thread first in case someone else is already working on it.
+
 ## Submitting a pull request
 
 1. Fork the repo and create a branch from `main`.
-2. Make your change, including tests and docs where relevant.
-3. Sign off every commit with `git commit -s`.
-4. If the change affects the published `eve` package, add a changeset:
+2. Link the issue where the change was discussed and agreed on.
+3. Make your change, including tests and docs where relevant.
+4. Sign off every commit with `git commit -s`.
+5. If the change affects the published `eve` package, add a changeset:
 
    ```bash
    pnpm changeset
    ```
 
-5. Make sure `pnpm lint`, `pnpm typecheck`, and `pnpm test` pass.
-6. Open the PR with a clear description of the problem and solution.
+6. Make sure `pnpm lint`, `pnpm typecheck`, and `pnpm test` pass.
+7. Open the PR with a clear description of the problem and solution.
 
 Releases are managed with [Changesets](https://github.com/changesets/changesets) by the maintainers.
 

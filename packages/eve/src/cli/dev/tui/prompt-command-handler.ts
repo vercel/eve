@@ -75,8 +75,9 @@ export function createPromptCommandHandler(
       } catch (error) {
         return { message: `/${command.name} failed: ${toErrorMessage(error)}` };
       }
-      const { runTuiSetupCommand, SETUP_FLOW_TITLES } = setupCommands;
-      flow.begin(SETUP_FLOW_TITLES[command.name]);
+      const { runTuiSetupCommand, SETUP_FLOW_CONFIG } = setupCommands;
+      const flowConfig = SETUP_FLOW_CONFIG[command.name];
+      flow.begin(flowConfig.title, flowConfig.indicator);
       let preserveFlowDiagnostics = true;
       try {
         const commandInput: TuiSetupCommandInput = {
@@ -84,11 +85,14 @@ export function createPromptCommandHandler(
           appRoot,
           renderer: flow,
         };
+        if (context.initialModelStep !== undefined) {
+          commandInput.initialModelStep = context.initialModelStep;
+        }
         if (options.flows !== undefined) commandInput.flows = options.flows;
         const result = await runTuiSetupCommand(commandInput);
         preserveFlowDiagnostics = result.preserveFlowDiagnostics;
         const outcome: PromptCommandOutcome = { message: result.message };
-        if (result.vercelEffect !== undefined) outcome.vercelEffect = result.vercelEffect;
+        if (result.effect !== undefined) outcome.effect = result.effect;
         return outcome;
       } finally {
         flow.end({ preserveDiagnostics: preserveFlowDiagnostics });

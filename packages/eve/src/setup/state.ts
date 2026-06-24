@@ -37,7 +37,7 @@ export interface ArgsHeadlessProject {
   skipVercel?: boolean;
   /** Vercel team slug (scope). Undefined = the current vercel scope. */
   team?: string;
-  /** Existing project slug to link. Undefined = create a new project named after the agent. */
+  /** Existing project name or ID to link. Undefined = create a project named after the agent. */
   project?: string;
 }
 
@@ -60,6 +60,12 @@ export type ProvisioningMode =
   | { headless: true; project: ArgsHeadlessProject; aiGateway: ArgsHeadlessAiGateway }
   | { headless: false };
 
+/** Stable identity of an existing Vercel project selected for linking. */
+export interface VercelProjectIdentity {
+  projectId: string;
+  projectName: string;
+}
+
 /**
  * Resolved project decision, fully concrete. The variant determines whether
  * the flow creates a project, links an existing one, or avoids Vercel project
@@ -68,7 +74,7 @@ export type ProvisioningMode =
 export type ResolvedVercelProject =
   | { kind: "none" }
   | { kind: "new"; project: string; team: string }
-  | { kind: "existing"; project: string; team: string };
+  | { kind: "existing"; project: VercelProjectIdentity; team: string };
 
 /** A concrete project to ensure exists and link. */
 export type ResolvedVercelProjectSpec = Extract<

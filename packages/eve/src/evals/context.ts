@@ -79,6 +79,7 @@ export function createEvalContext(deps: {
     waiting: () => collector.recordRun(RunAssertions.waiting()),
     messageIncludes: (token) => collector.recordRun(RunAssertions.messageIncludes(token)),
     calledTool: (name, options) => collector.recordRun(RunAssertions.calledTool(name, options)),
+    loadedSkill: (skill, options) => collector.recordRun(RunAssertions.loadedSkill(skill, options)),
     notCalledTool: (name) => collector.recordRun(RunAssertions.notCalledTool(name)),
     toolOrder: (names) => collector.recordRun(RunAssertions.toolOrder(names)),
     usedNoTools: () => collector.recordRun(RunAssertions.usedNoTools()),

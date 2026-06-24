@@ -1,18 +1,18 @@
-import { copyFile, mkdir } from "node:fs/promises";
+import { cp, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
-const runtimeAssets = [
-  "src/cli/commands/init-agent-handoff.md",
-  "src/cli/commands/init-agent-instructions.md",
-];
+// The coding-agent setup and handoff prompts are composed at runtime from these
+// section files (see cli/commands/agent-instructions.ts), so they must ship in
+// the package next to the compiled module that reads them.
+const runtimeAssetDirs = ["src/cli/commands/agent-prompt"];
 
 export async function copyRuntimeAssets() {
-  for (const relativePath of runtimeAssets) {
+  for (const relativePath of runtimeAssetDirs) {
     const destinationPath = join(packageRoot, "dist", relativePath);
     await mkdir(dirname(destinationPath), { recursive: true });
-    await copyFile(join(packageRoot, relativePath), destinationPath);
+    await cp(join(packageRoot, relativePath), destinationPath, { recursive: true });
   }
 }
 

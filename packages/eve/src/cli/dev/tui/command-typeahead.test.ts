@@ -132,15 +132,40 @@ describe("typeaheadCompletion", () => {
 describe("renderCommandSuggestions", () => {
   it("marks the highlighted row and shows aliases and descriptions, not argument hints", () => {
     const state = moveTypeaheadSelection(typeaheadFor(COMMANDS, "/"), 1);
-    const rows = renderCommandSuggestions(state, theme, 80).map(stripAnsi);
+    const colored = createTheme({ color: true, unicode: true });
+    const rendered = renderCommandSuggestions(state, colored, 80);
+    expect(rendered[1]).toContain(
+      colored.colors.inverse(colored.colors.blue(` ${colored.glyph.selectedPointer} /model `)),
+    );
+    const rows = rendered.map(stripAnsi);
     expect(rows).toHaveLength(COMMANDS.length);
-    expect(rows[1]).toContain(theme.glyph.prompt);
-    expect(rows[0]).not.toContain(theme.glyph.prompt);
+    expect(rows[0]?.startsWith("   /help")).toBe(true);
+    expect(rows[1]?.startsWith(" ▶ /model ")).toBe(true);
+    expect(rows[1]).toContain(theme.glyph.selectedPointer);
+    expect(rows[0]).not.toContain(theme.glyph.selectedPointer);
     expect(rows[1]).toContain("/model");
     expect(rows[1]).toContain("model command");
     // The argument hint is held back for the inline exact-match view.
     expect(rows[1]).not.toContain("[provider/model]");
     expect(rows[3]).toContain("/exit (/quit)");
+  });
+
+  it("keeps aliases and descriptions fixed when the selected label gains padding", () => {
+    const initial = typeaheadFor(COMMANDS, "/");
+    const next = moveTypeaheadSelection(initial, 1);
+    const helpSelected = renderCommandSuggestions(initial, theme, 80).map(stripAnsi);
+    const helpUnselected = renderCommandSuggestions(next, theme, 80).map(stripAnsi);
+
+    expect(helpSelected[0]?.indexOf("help command")).toBe(
+      helpUnselected[0]?.indexOf("help command"),
+    );
+
+    const exitSelected = renderCommandSuggestions(
+      moveTypeaheadSelection(initial, -1),
+      theme,
+      80,
+    ).map(stripAnsi);
+    expect(exitSelected[3]?.indexOf("(/quit)")).toBe(helpUnselected[3]?.indexOf("(/quit)"));
   });
 
   it("windows long lists around the highlight without a count row", () => {
@@ -171,6 +196,6 @@ describe("renderCommandSuggestions", () => {
     const state = typeaheadFor(PROMPT_COMMANDS, "/");
     const rows = renderCommandSuggestions(state, theme, 80).map(stripAnsi);
     expect(rows[0]).toContain("/help");
-    expect(rows[0]).toContain(theme.glyph.prompt);
+    expect(rows[0]).toContain(theme.glyph.selectedPointer);
   });
 });

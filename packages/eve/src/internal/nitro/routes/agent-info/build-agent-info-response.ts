@@ -432,7 +432,7 @@ export function renderTool(
   return {
     ...toSource(tool),
     description: tool.description,
-    hasAuth: tool.auth !== undefined,
+    hasAuth: false,
     hasExecute: tool.execute !== undefined,
     hasModelOutputProjection: tool.toModelOutput !== undefined,
     hasOutputSchema: tool.outputSchema !== undefined && tool.outputSchema !== null,

@@ -15,6 +15,8 @@
  */
 
 import { ClientError } from "#client/client-error.js";
+import type { DevelopmentOidcTokenFailure } from "#services/dev-client/request-headers.js";
+import { isObject } from "#shared/guards.js";
 
 /**
  * Substrings that uniquely identify the Vercel Deployment Protection
@@ -40,17 +42,7 @@ const VERCEL_AUTH_CHALLENGE_MARKERS: readonly string[] = [
  * so the CLI keeps degrading gracefully when Vercel tweaks the page.
  */
 function bodyLooksLikeVercelAuthChallenge(body: string): boolean {
-  if (body.length === 0) {
-    return false;
-  }
-
-  for (const marker of VERCEL_AUTH_CHALLENGE_MARKERS) {
-    if (body.includes(marker)) {
-      return true;
-    }
-  }
-
-  return false;
+  return body.length > 0 && VERCEL_AUTH_CHALLENGE_MARKERS.every((marker) => body.includes(marker));
 }
 
 /**
@@ -68,19 +60,15 @@ function bodyLooksLikeVercelAuthChallenge(body: string): boolean {
  */
 export function isVercelAuthChallenge(error: unknown): boolean {
   if (error instanceof ClientError) {
-    return bodyLooksLikeVercelAuthChallenge(error.body);
+    return error.status === 401 && bodyLooksLikeVercelAuthChallenge(error.body);
   }
 
-  if (
-    error !== null &&
-    typeof error === "object" &&
-    "body" in error &&
-    typeof (error as { body: unknown }).body === "string"
-  ) {
-    return bodyLooksLikeVercelAuthChallenge((error as { body: string }).body);
-  }
-
-  return false;
+  return (
+    isObject(error) &&
+    error.status === 401 &&
+    typeof error.body === "string" &&
+    bodyLooksLikeVercelAuthChallenge(error.body)
+  );
 }
 
 /**
@@ -93,9 +81,15 @@ export function isVercelAuthChallenge(error: unknown): boolean {
  * short — multi-line CLI output is harder to scan than a focused
  * directive.
  */
-export function formatVercelAuthChallengeMessage(input: { readonly serverUrl: string }): string {
-  return [
-    `Vercel Deployment Protection blocked the request to ${input.serverUrl}.`,
+export function formatVercelAuthChallengeMessage(input: {
+  readonly serverUrl: string;
+  readonly oidcTokenFailure?: DevelopmentOidcTokenFailure;
+}): string {
+  const lines = [`Vercel Deployment Protection blocked the request to ${input.serverUrl}.`];
+  if (input.oidcTokenFailure !== undefined) {
+    lines.push("", formatOidcTokenFailure(input.oidcTokenFailure));
+  }
+  lines.push(
     "",
     "To access the deployment from `eve dev`, do one of:",
     "  • Run `vercel link` in this project so the CLI can mint an OIDC",
@@ -105,5 +99,25 @@ export function formatVercelAuthChallengeMessage(input: { readonly serverUrl: st
     "  • Disable Deployment Protection on the target deployment.",
     "",
     "Docs: https://vercel.com/docs/deployment-protection",
-  ].join("\n");
+  );
+  return lines.join("\n");
+}
+
+function formatOidcTokenFailure(failure: DevelopmentOidcTokenFailure): string {
+  switch (failure.kind) {
+    case "resolution-failed":
+      return `The local Vercel OIDC token could not be resolved: ${failure.message}`;
+    case "malformed-token":
+      return failure.reason === "missing-payload"
+        ? "Vercel returned a local OIDC token without a JWT payload."
+        : "Vercel returned a local OIDC token whose payload is not valid JSON.";
+    case "invalid-claims":
+      return `The local Vercel OIDC token has invalid claims: ${failure.invalidClaims.join(", ")}.`;
+    case "target-mismatch":
+      return `The local Vercel OIDC token does not match the resolved deployment: ${failure.mismatchedClaims.join(", ")}.`;
+    default: {
+      const exhaustive: never = failure;
+      return exhaustive;
+    }
+  }
 }

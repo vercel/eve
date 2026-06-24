@@ -54,16 +54,43 @@ export default defineAgent({
 
 See [Default harness](./concepts/default-harness#compaction) for how the loop applies it.
 
+## Workflow world
+
+By default, eve selects the Workflow SDK world for the host: Vercel Workflow on
+Vercel, and the SDK's local world in local development or `eve start`. Advanced
+self-hosted deployments can select the Workflow world package to use from the
+root `agent.ts`:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  experimental: {
+    workflow: {
+      world: "@workflow/world-postgres",
+    },
+  },
+});
+```
+
+Install that package in your app. It should export a default factory or
+`createWorld()` function.
+
+Put credentials and host-specific options in runtime environment variables read
+by the world package, not in `agent.ts`. If the installed package must stay
+external in hosted output, list it in `build.externalDependencies`.
+
 ## Other defineAgent fields
 
 `defineAgent` takes a few more fields, all optional. For the exported types, see the [TypeScript API](./reference/typescript-api).
 
-| Field          | Type                                    | Default     | Description                                                                                                                                                                                                                                              |
-| -------------- | --------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `modelOptions` | `AgentModelOptionsDefinition`           | none        | Provider option overrides forwarded to the model call.                                                                                                                                                                                                   |
-| `experimental` | `{ codeMode?: boolean }`                | flags unset | Opt-in flags that can change or disappear in any release. Treat them as unstable. `codeMode` routes executable tools through a sandboxed code-execution wrapper, where the model writes JavaScript that calls the tools inside the [sandbox](./sandbox). |
-| `outputSchema` | Standard Schema or a JSON Schema object | none        | Structured return type for task-mode runs (a subagent, schedule, or remote job). Interactive conversation turns ignore it unless the client supplies a per-message schema.                                                                               |
-| `build`        | `{ externalDependencies?: string[] }`   | none        | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                                 |
+| Field          | Type                                                    | Default     | Description                                                                                                                                                                                                                                                                                                                                                                       |
+| -------------- | ------------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `modelOptions` | `AgentModelOptionsDefinition`                           | none        | Provider option overrides forwarded to the model call.                                                                                                                                                                                                                                                                                                                            |
+| `experimental` | `{ codeMode?: boolean; workflow?: { world?: string } }` | flags unset | Opt-in flags that can change or disappear in any release. Treat them as unstable. `codeMode` routes executable tools through a sandboxed code-execution wrapper, where the model writes JavaScript that calls the tools inside the [sandbox](./sandbox). `workflow.world` selects the Workflow world package backing session state, queues, hooks, and streams on the root agent. |
+| `outputSchema` | Standard Schema or a JSON Schema object                 | none        | Structured return type for task-mode runs (a subagent, schedule, or remote job). Interactive conversation turns ignore it unless the client supplies a per-message schema.                                                                                                                                                                                                        |
+| `build`        | `{ externalDependencies?: string[] }`                   | none        | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                                                                                                                                                          |
 
 `codeMode` is experimental and may change or be removed.
 

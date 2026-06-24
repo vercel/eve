@@ -32,7 +32,10 @@ import type { JsonObject } from "#shared/json.js";
 export type CompileAgentNodeManifestFn = (
   manifest: AgentSourceManifest,
   context: ManifestCompileContext,
-  options?: { readonly externalDependencies?: readonly string[] },
+  options?: {
+    readonly externalDependencies?: readonly string[];
+    readonly allowWorkflowConfig?: boolean;
+  },
 ) => Promise<CompiledAgentNodeManifest>;
 
 /**
@@ -167,7 +170,7 @@ async function compileSubagent(input: {
       appRoot: input.appRoot,
     },
     input.context,
-    { externalDependencies: input.externalDependencies },
+    { allowWorkflowConfig: false, externalDependencies: input.externalDependencies },
   );
 
   const description = agent.config.description;

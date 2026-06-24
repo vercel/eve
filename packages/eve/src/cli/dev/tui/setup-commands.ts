@@ -7,6 +7,7 @@ import {
 } from "#setup/flows/install-vercel-cli.js";
 import { runLoginFlow, type LoginFlowResult } from "#setup/flows/login.js";
 import { runModelFlow, type ModelProviderOutcome } from "#setup/flows/model.js";
+import { runProviderFlow, type ProviderPicker } from "#setup/flows/provider.js";
 import { openUrl } from "#setup/primitives/open-url.js";
 import type { Prompter } from "#setup/prompter.js";
 import { slackMessageDeepLink } from "#setup/slack-connect.js";
@@ -14,29 +15,29 @@ import { WizardCancelledError } from "#setup/step.js";
 
 import { createTuiPrompter, type TuiPrompterRenderer } from "./tui-prompter.js";
 import type { PromptCommandExtensionName } from "./prompt-commands.js";
-import type { SetupFlowRenderer } from "./setup-flow.js";
+import type { SetupFlowIndicator, SetupFlowRenderer } from "./setup-flow.js";
 import type { VercelStatusEffect } from "./vercel-status.js";
 
 export type TuiSetupCommand = PromptCommandExtensionName;
 
 /**
- * Human panel titles per command. The bordered panel never repeats the echoed
- * command verbatim (the transcript already shows it), but it always carries a
- * title: flows move past their opening question (project pickers, name
- * prompts), and without a constant header those later questions float
- * unanchored in the panel.
+ * Panel title and loading indicator per command. The bordered panel never
+ * repeats the echoed command verbatim, but it keeps a constant title as flows
+ * move past their opening question.
  */
-export const SETUP_FLOW_TITLES: Record<TuiSetupCommand, string> = {
-  vc: "Install the Vercel CLI",
-  login: "Log in to Vercel",
-  model: "Configure the agent model",
-  channels: "Agent channels",
-  deploy: "Deploy to Vercel",
-};
+export const SETUP_FLOW_CONFIG = {
+  vc: { title: "Install the Vercel CLI", indicator: "spinner" },
+  login: { title: "Log in to Vercel", indicator: "spinner" },
+  model: { title: "Configure the agent model", indicator: "pulse" },
+  channels: { title: "Agent channels", indicator: "pulse" },
+  deploy: { title: "Deploy to Vercel", indicator: "spinner" },
+} satisfies Record<TuiSetupCommand, { title: string; indicator: SetupFlowIndicator }>;
 
 /** The prompter surface plus the working-state interrupt trap a command races against. */
 export type TuiSetupCommandRenderer = TuiPrompterRenderer &
-  Pick<SetupFlowRenderer, "waitForInterrupt">;
+  Pick<SetupFlowRenderer, "readProviderPicker" | "waitForInterrupt">;
+
+type MuteableSetupRenderer = TuiPrompterRenderer & Pick<SetupFlowRenderer, "readProviderPicker">;
 
 export interface TuiSetupCommandInput {
   command: TuiSetupCommand;
@@ -44,6 +45,8 @@ export interface TuiSetupCommandInput {
   appRoot: string;
   /** The renderer surface the TUI-native prompter drives. */
   renderer: TuiSetupCommandRenderer;
+  /** Initial model-flow step authorized by the runner's boot evidence. */
+  initialModelStep?: "provider";
   /** Test seam; defaults to the real TUI-native prompter over `renderer`. */
   createPrompter?: (renderer: TuiPrompterRenderer) => Prompter;
   /** Test seam; defaults to the real setup flows. */
@@ -63,8 +66,8 @@ export interface TuiSetupCommandResult {
   message: string;
   /** Keep warning/error lines after the bordered panel closes. */
   preserveFlowDiagnostics: boolean;
-  /** Status-line effect of this command, when it changed link/deploy state. */
-  vercelEffect?: VercelStatusEffect;
+  /** Status refresh required after the command settles. */
+  effect?: VercelStatusEffect | { kind: "model-access-changed" };
 }
 
 /**
@@ -73,14 +76,16 @@ export interface TuiSetupCommandResult {
  * output drops while the flow unwinds.
  */
 function muteableRenderer(
-  renderer: TuiPrompterRenderer,
+  renderer: TuiSetupCommandRenderer,
   isMuted: () => boolean,
-): TuiPrompterRenderer {
+): MuteableSetupRenderer {
   return {
     readSelect: (options) =>
       isMuted() ? Promise.resolve(undefined) : renderer.readSelect(options),
     readEditableSelect: (options) =>
       isMuted() ? Promise.resolve(undefined) : renderer.readEditableSelect(options),
+    readProviderPicker: (options) =>
+      isMuted() ? Promise.resolve(undefined) : renderer.readProviderPicker(options),
     readText: (options) => (isMuted() ? Promise.resolve(undefined) : renderer.readText(options)),
     readAcknowledge: (options) =>
       isMuted() ? Promise.resolve() : renderer.readAcknowledge(options),
@@ -106,7 +111,7 @@ function muteableRenderer(
  * Runs one TUI setup command (/model, /channels, /deploy) over the
  * shared setup flows, asking through the TUI's own bordered panel. Never throws:
  * every outcome — done, cancelled, failed — folds into the returned command
- * result. Ctrl-C or Esc on the working spinner (no question open) aborts the
+ * result. Ctrl-C or Esc on the working indicator (no question open) aborts the
  * active flow, then keeps command ownership until its subprocesses and setup
  * stack have unwound.
  */
@@ -116,25 +121,23 @@ export async function runTuiSetupCommand(
   const { command } = input;
   let interrupted = false;
   const controller = new AbortController();
-  const prompter = (input.createPrompter ?? createTuiPrompter)(
-    muteableRenderer(input.renderer, () => interrupted),
-  );
+  const renderer = muteableRenderer(input.renderer, () => interrupted);
+  const prompter = (input.createPrompter ?? createTuiPrompter)(renderer);
 
   const interrupt = input.renderer.waitForInterrupt();
   const INTERRUPTED = Symbol("interrupted");
-  const execution = executeSetupCommand(input, prompter, controller.signal);
+  const execution = executeSetupCommand(input, prompter, renderer, controller.signal);
   try {
     const outcome = await Promise.race([execution, interrupt.promise.then(() => INTERRUPTED)]);
     if (outcome !== INTERRUPTED) return outcome as TuiSetupCommandResult;
     interrupted = true;
     controller.abort(new WizardCancelledError());
     const settled = await execution;
-    const result: TuiSetupCommandResult = {
+    return {
+      ...settled,
       message: `/${command} interrupted.`,
       preserveFlowDiagnostics: true,
     };
-    if (settled.vercelEffect !== undefined) result.vercelEffect = settled.vercelEffect;
-    return result;
   } finally {
     interrupt.dispose();
     // A flow that threw or was abandoned mid-wait must not leave the footer spinning.
@@ -146,6 +149,7 @@ export async function runTuiSetupCommand(
 async function executeSetupCommand(
   input: TuiSetupCommandInput,
   prompter: Prompter,
+  renderer: MuteableSetupRenderer,
   signal: AbortSignal,
 ): Promise<TuiSetupCommandResult> {
   const { command, appRoot } = input;
@@ -169,7 +173,20 @@ async function executeSetupCommand(
         return loginResultMessage(await flows.runLoginFlow({ appRoot, prompter, signal }));
       }
       case "model": {
-        const result = await flows.runModelFlow({ appRoot, prompter, signal });
+        const pickProvider: ProviderPicker = (request) => renderer.readProviderPicker(request);
+        const modelInput: Parameters<TuiSetupFlows["runModelFlow"]>[0] = {
+          appRoot,
+          prompter,
+          signal,
+          deps: {
+            runProviderFlow: (providerInput) =>
+              runProviderFlow({ ...providerInput, picker: pickProvider }),
+          },
+        };
+        if (input.initialModelStep !== undefined) {
+          modelInput.initialStep = input.initialModelStep;
+        }
+        const result = await flows.runModelFlow(modelInput);
         if (result.kind === "cancelled") {
           return { message: "/model cancelled.", preserveFlowDiagnostics: false };
         }
@@ -185,10 +202,10 @@ async function executeSetupCommand(
           message: lines.join("\n"),
           preserveFlowDiagnostics: false,
         };
-        // Provider setup can relink the project. Re-probe once after the flow
-        // instead of threading link-specific state through every result layer.
+        // Provider setup can change both the local env and Vercel identity.
+        // The runner refreshes the complete model-access view after the flow.
         if (result.providerOutcome !== undefined) {
-          outcome.vercelEffect = { kind: "refresh-identity" };
+          outcome.effect = { kind: "model-access-changed" };
         }
         return outcome;
       }
@@ -214,7 +231,7 @@ async function executeSetupCommand(
             return {
               message: `Channels added: ${result.addedChannels.join(", ")} — run /deploy to ship them.`,
               preserveFlowDiagnostics: true,
-              vercelEffect: { kind: "channels-added" },
+              effect: { kind: "channels-added" },
             };
         }
       }
@@ -233,7 +250,7 @@ async function executeSetupCommand(
           message:
             result.productionUrl === undefined ? "Deployed." : `Deployed: ${result.productionUrl}`,
           preserveFlowDiagnostics: true,
-          vercelEffect: { kind: "deployed" },
+          effect: { kind: "deployed" },
         };
       }
     }
@@ -334,7 +351,7 @@ async function runDeployAndChat(
   return {
     message: `${live}\n${chatLine}`,
     preserveFlowDiagnostics: true,
-    vercelEffect: { kind: "deployed" },
+    effect: { kind: "deployed" },
   };
 }
 
@@ -356,7 +373,7 @@ function installVercelCliResultMessage(result: InstallVercelCliResult): TuiSetup
         message: "Installed the Vercel CLI. Run /login next.",
         preserveFlowDiagnostics: false,
         // The CLI now resolves, so the status line's identity probe can run.
-        vercelEffect: { kind: "refresh-identity" },
+        effect: { kind: "refresh-identity" },
       };
   }
 }
@@ -384,7 +401,7 @@ function loginResultMessage(result: LoginFlowResult): TuiSetupCommandResult {
         preserveFlowDiagnostics: false,
         // A now-valid `whoami` lets a previously-linked directory resolve its
         // project identity for the status line.
-        vercelEffect: { kind: "refresh-identity" },
+        effect: { kind: "refresh-identity" },
       };
     case "unavailable":
       return {
@@ -398,7 +415,7 @@ function pendingChannelsResult(message: string): TuiSetupCommandResult {
   return {
     message,
     preserveFlowDiagnostics: true,
-    vercelEffect: { kind: "channels-added" },
+    effect: { kind: "channels-added" },
   };
 }
 

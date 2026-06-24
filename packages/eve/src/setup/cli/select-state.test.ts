@@ -6,6 +6,7 @@ import {
   initialSelectState,
   orderedSelection,
   reduceSelect,
+  searchActionQuery,
   selectValueAtCursor,
   type SelectContext,
   type SelectState,
@@ -51,6 +52,15 @@ describe("filterOptions", () => {
     expect(filterOptions(OPTIONS, "zzz")).toEqual([]);
   });
 
+  it("appends the search action after local matches", () => {
+    const visible = filterOptions([{ value: "veto", label: "veto" }], "v", {
+      label: (query) => `Search for '${query}'`,
+    });
+
+    expect(visible.map((option) => option.label)).toEqual(["veto", "Search for 'v'"]);
+    expect(searchActionQuery(visible[1]?.value ?? "")).toBe("v");
+  });
+
   it("keeps featured options out of filtering: an empty query still returns the full list", () => {
     const options: PromptOption<string>[] = [
       { value: "anthropic/claude", label: "Claude", featured: true },
@@ -88,8 +98,10 @@ describe("reduceSelect", () => {
     ]);
   });
 
-  it("ignores backspace on an empty filter", () => {
+  it("backspaces one grapheme and ignores an empty filter", () => {
     expect(reduceSelect(initial, { type: "backspace" }, context())).toBe(initial);
+    const state = { filter: "😀", cursor: 0, selected: new Set<string>() };
+    expect(reduceSelect(state, { type: "backspace" }, context()).filter).toBe("");
   });
 
   it("wraps the cursor across the visible list", () => {

@@ -3,11 +3,16 @@ import { basename, join, resolve } from "node:path";
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor, type NodeEngineOverride } from "../../node-engine.js";
-import { getPackageManagerStrategy } from "../../primitives/pm/index.js";
 import { pathExists, writeTextFile } from "../files.js";
 import { resolveVersionToken } from "../version-tokens.js";
+import {
+  applyPackageManagerWorkspaceConfiguration,
+  isPackageManagerWorkspaceMember,
+  patchWorkspaceRootPackageJson,
+  type WorkspaceRootMutation,
+} from "../workspace-root.js";
 import { getSupportedModuleBaseName, matchesSupportedModuleBaseName } from "./module-files.js";
-import { patchPackageJson } from "./package-json.js";
+import { patchPackageJson, type PackageJsonPatch } from "./package-json.js";
 import {
   CURRENT_DIRECTORY_PROJECT_NAME,
   DEFAULT_EVE_PACKAGE_CONTRACT,
@@ -26,17 +31,20 @@ const DEFAULT_REACT_PACKAGE_VERSION = "__REACT_VERSION__";
 const DEFAULT_REACT_DOM_PACKAGE_VERSION = "__REACT_DOM_VERSION__";
 const DEFAULT_STREAMDOWN_PACKAGE_VERSION = "__STREAMDOWN_VERSION__";
 const DEFAULT_ZOD_PACKAGE_VERSION = "__ZOD_VERSION__";
-const DEFAULT_TSGO_PACKAGE_VERSION = "__TSGO_VERSION__";
+const NEXT_TYPESCRIPT_PACKAGE_VERSION = "6.0.3";
 const DEFAULT_TYPES_REACT_PACKAGE_VERSION = "__TYPES_REACT_VERSION__";
 const DEFAULT_TYPES_REACT_DOM_PACKAGE_VERSION = "__TYPES_REACT_DOM_VERSION__";
 const CONNECT_PACKAGE_NAME = "@vercel/connect";
 const NEXT_PACKAGE_NAME = "next";
-const PACKAGE_DEPENDENCY_FIELDS = [
-  "dependencies",
-  "devDependencies",
-  "peerDependencies",
-  "optionalDependencies",
+const VERCEL_HOST_FRAMEWORK_PACKAGE_NAMES = [
+  "@sveltejs/kit",
+  NEXT_PACKAGE_NAME,
+  "nuxt",
+  "nuxt3",
+  "nuxt-edge",
+  "nuxt-nightly",
 ] as const;
+const PACKAGE_DEPENDENCY_FIELDS = ["dependencies", "devDependencies"] as const;
 const USER_AUTHORED_CHANNEL_DIR = "agent/channels";
 const WEB_CHANNEL_PATH = "agent/channels/eve.ts";
 const WEB_NEXT_CONFIG_PATH = "next.config.ts";
@@ -167,15 +175,40 @@ async function hasPackageDependency(
   return isJsonObject(parsed) && packageJsonHasDependency(parsed, dependencyName);
 }
 
+async function hasAnyPackageDependency(
+  packageJsonPath: string,
+  dependencyNames: readonly string[],
+): Promise<boolean> {
+  if (!(await pathExists(packageJsonPath))) return false;
+
+  const parsed: unknown = JSON.parse(await readFile(packageJsonPath, "utf8"));
+  if (!isJsonObject(parsed)) return false;
+
+  return dependencyNames.some((dependencyName) => packageJsonHasDependency(parsed, dependencyName));
+}
+
 /**
  * Whether the project already carries a Next.js app: `package.json` declares a
- * `next` dependency in any dependency field. This is the exact predicate the
+ * `next` dependency in the same dependency fields Vercel framework detection
+ * checks. This is the exact predicate the
  * web scaffold skips on (`skipReason: "nextjs-project"`), so pickers can mark
  * Web Chat as already present precisely when scaffolding would be a no-op.
  * A missing `package.json` reads as "no app".
  */
 export async function isNextJsProject(projectRoot: string): Promise<boolean> {
   return hasPackageDependency(join(projectRoot, "package.json"), NEXT_PACKAGE_NAME);
+}
+
+/**
+ * Whether the root app declares a Vercel framework that should own the
+ * top-level deployment while eve runs as a sibling service. These match Eve's
+ * current framework integrations: Next.js, Nuxt, and SvelteKit.
+ */
+export async function hasVercelHostFramework(projectRoot: string): Promise<boolean> {
+  return hasAnyPackageDependency(
+    join(projectRoot, "package.json"),
+    VERCEL_HOST_FRAMEWORK_PACKAGE_NAMES,
+  );
 }
 
 async function ensurePackageDependency(
@@ -211,7 +244,6 @@ function resolveWebPackageVersions(
     reactDomPackageVersion: input?.reactDomPackageVersion ?? DEFAULT_REACT_DOM_PACKAGE_VERSION,
     streamdownPackageVersion: input?.streamdownPackageVersion ?? DEFAULT_STREAMDOWN_PACKAGE_VERSION,
     zodPackageVersion: input?.zodPackageVersion ?? DEFAULT_ZOD_PACKAGE_VERSION,
-    tsgoPackageVersion: input?.tsgoPackageVersion ?? DEFAULT_TSGO_PACKAGE_VERSION,
     typesReactPackageVersion:
       input?.typesReactPackageVersion ?? DEFAULT_TYPES_REACT_PACKAGE_VERSION,
     typesReactDomPackageVersion:
@@ -226,12 +258,16 @@ function formatEveDependencySpecifier(versionOrSpecifier: string): string {
 }
 
 async function patchWebPackageJson(
-  packageJsonPath: string,
+  projectRoot: string,
+  packageManager: PackageManagerKind,
+  workspaceProbeRoot: string,
   options: Required<WebPackageVersions>,
+  onWorkspaceRootMutation?: (mutation: WorkspaceRootMutation) => void | Promise<void>,
 ): Promise<{
   mutations: PackageJsonMutation[];
   nodeEngineOverride?: NodeEngineOverride;
 }> {
+  const packageJsonPath = join(projectRoot, "package.json");
   if (!(await pathExists(packageJsonPath))) return { mutations: [] };
 
   // Resolved here, not at the defaults site, so a project without a
@@ -260,19 +296,31 @@ async function patchWebPackageJson(
       "typesReactDomPackageVersion",
       options.typesReactDomPackageVersion,
     ),
-    "@typescript/native-preview": resolveVersionToken(
-      "tsgoPackageVersion",
-      options.tsgoPackageVersion,
-    ),
+    typescript: NEXT_TYPESCRIPT_PACKAGE_VERSION,
   } satisfies Record<string, string>;
   const scripts = WEB_APP_TEMPLATE_PACKAGE_JSON.scripts;
 
-  const patchResult = await patchPackageJson(packageJsonPath, {
+  const workspaceMember = isPackageManagerWorkspaceMember(packageManager, workspaceProbeRoot);
+  const packageJsonPatch: PackageJsonPatch = {
     dependencies,
     devDependencies,
     scripts,
-    nodeEngineRequirement: evePackage.nodeEngine,
-  });
+  };
+  if (!workspaceMember) {
+    packageJsonPatch.nodeEngineRequirement = evePackage.nodeEngine;
+  }
+  const patchResult = await patchPackageJson(packageJsonPath, packageJsonPatch);
+  const workspacePatchResult = await patchWorkspaceRootPackageJson(
+    packageManager,
+    workspaceProbeRoot,
+    {
+      aiPackageVersion: dependencies.ai,
+      nodeEngineRequirement: evePackage.nodeEngine,
+      onWorkspaceRootMutation,
+    },
+  );
+  const nodeEngineOverride =
+    workspacePatchResult.nodeEngineOverride ?? patchResult.nodeEngineOverride;
 
   return {
     mutations: [
@@ -283,7 +331,7 @@ async function patchWebPackageJson(
         scripts: Object.keys(scripts),
       },
     ],
-    nodeEngineOverride: patchResult.nodeEngineOverride,
+    nodeEngineOverride,
   };
 }
 
@@ -413,6 +461,12 @@ export interface EnsureChannelOptions {
   kind: ChannelKind;
   /** Manager that owns generated project configuration. Defaults to pnpm. */
   packageManager?: PackageManagerKind;
+  /**
+   * Final project path used to discover ancestor workspaces. This differs from
+   * `projectRoot` only when scaffolding writes into a temporary staging
+   * directory before moving the project into place.
+   */
+  workspaceProbeDirectory?: string;
   force?: boolean;
   /** Exact UID returned by Vercel Connect; takes precedence over the derived slug. */
   slackConnectorUid?: string;
@@ -421,6 +475,7 @@ export interface EnsureChannelOptions {
   webPackageVersions?: WebPackageVersions;
   /** When false, Web Chat leaves Vercel Services config unwritten for preview-only scaffolds. */
   configureVercelServices?: boolean;
+  onWorkspaceRootMutation?: (mutation: WorkspaceRootMutation) => void | Promise<void>;
 }
 
 export interface WebPackageVersions {
@@ -431,7 +486,6 @@ export interface WebPackageVersions {
   reactDomPackageVersion?: string;
   streamdownPackageVersion?: string;
   zodPackageVersion?: string;
-  tsgoPackageVersion?: string;
   typesReactPackageVersion?: string;
   typesReactDomPackageVersion?: string;
 }
@@ -463,7 +517,15 @@ async function ensureWebChannel(
   }
 
   const webPackageVersions = resolveWebPackageVersions(options.webPackageVersions);
-  const packageJsonPatch = await patchWebPackageJson(packageJsonPath, webPackageVersions);
+  const packageManager = options.packageManager ?? "pnpm";
+  const workspaceProbeRoot = resolve(options.workspaceProbeDirectory ?? options.projectRoot);
+  const packageJsonPatch = await patchWebPackageJson(
+    options.projectRoot,
+    packageManager,
+    workspaceProbeRoot,
+    webPackageVersions,
+    options.onWorkspaceRootMutation,
+  );
   const filesWritten: string[] = [];
   const filesOverwritten: string[] = [];
   const competingNextConfigFiles: string[] = [];
@@ -481,9 +543,12 @@ async function ensureWebChannel(
     }
   }
 
-  const packageManagerConfiguration = await getPackageManagerStrategy(
-    options.packageManager ?? "pnpm",
-  ).applyProjectConfiguration(options.projectRoot);
+  const packageManagerConfiguration = await applyPackageManagerWorkspaceConfiguration({
+    packageManager,
+    projectRoot: options.projectRoot,
+    workspaceProbeRoot,
+    onWorkspaceRootMutation: options.onWorkspaceRootMutation,
+  });
   filesWritten.push(...packageManagerConfiguration.filesWritten);
   filesSkipped.push(...packageManagerConfiguration.filesSkipped);
 
@@ -505,12 +570,16 @@ async function ensureWebChannel(
   }
 
   competingNextConfigFiles.push(...(await findCompetingNextConfigFiles(options.projectRoot)));
+  const uniqueFilesWritten = [...new Set(filesWritten)];
+  const uniqueFilesSkipped = [...new Set(filesSkipped)].filter(
+    (filePath) => !uniqueFilesWritten.includes(filePath),
+  );
 
   const result: WebChannelWrittenResult = {
     kind: "web",
     action: webEntryAlreadyExists ? "overwritten" : "created",
-    filesWritten,
-    filesSkipped,
+    filesWritten: uniqueFilesWritten,
+    filesSkipped: uniqueFilesSkipped,
     packageJsonUpdated: packageJsonPatch.mutations,
   };
   if (filesOverwritten.length > 0) {

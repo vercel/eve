@@ -25,8 +25,8 @@ const REPO_ROOT = fileURLToPath(new URL("../../../..", import.meta.url));
 const ROOT_TYPE_DEFINITIONS = fileURLToPath(
   new URL("../../../../node_modules/@types", import.meta.url),
 );
-const TSGO_BIN_PATH = fileURLToPath(
-  new URL("../../../../node_modules/@typescript/native-preview/bin/tsgo.js", import.meta.url),
+const TSC_BIN_PATH = fileURLToPath(
+  new URL("../../../../node_modules/typescript/bin/tsc", import.meta.url),
 );
 const COMPILED_VENDOR_TYPES = join(EVE_PACKAGE_ROOT, ".generated", "compiled");
 const PORTABILITY_TEST_TIMEOUT_MS = 30_000;
@@ -73,7 +73,7 @@ export default defineSandbox({
       "src/public/sandbox/microsandbox.ts",
       "src/public/sandbox/vercel.ts",
     ],
-    name: "lets tsgo typecheck sandbox backend factories from nested subpath imports",
+    name: "lets tsc typecheck sandbox backend factories from nested subpath imports",
     packageExports: {
       "./sandbox": {
         types: "./dist/src/public/sandbox/index.d.ts",
@@ -95,7 +95,7 @@ export default defineSandbox({
   {
     descriptor: SLACK_ROUTE_PORTABILITY_DESCRIPTOR,
     include: ["src/public/channels/slack/index.ts", "src/public/definitions/defineChannel.ts"],
-    name: "lets tsgo typecheck a default-exported slackChannel without extra annotations",
+    name: "lets tsc typecheck a default-exported slackChannel without extra annotations",
     packageExports: {
       "./channels/slack": {
         types: "./dist/src/public/channels/slack/index.d.ts",
@@ -105,7 +105,7 @@ export default defineSandbox({
   {
     descriptor: DISCORD_ROUTE_PORTABILITY_DESCRIPTOR,
     include: ["src/public/channels/discord/index.ts", "src/public/definitions/defineChannel.ts"],
-    name: "lets tsgo typecheck a default-exported discordChannel without extra annotations",
+    name: "lets tsc typecheck a default-exported discordChannel without extra annotations",
     packageExports: {
       "./channels/discord": {
         types: "./dist/src/public/channels/discord/index.d.ts",
@@ -115,7 +115,7 @@ export default defineSandbox({
   {
     descriptor: GITHUB_ROUTE_PORTABILITY_DESCRIPTOR,
     include: ["src/public/channels/github/index.ts", "src/public/definitions/defineChannel.ts"],
-    name: "lets tsgo typecheck a default-exported githubChannel without extra annotations",
+    name: "lets tsc typecheck a default-exported githubChannel without extra annotations",
     packageExports: {
       "./channels/github": {
         types: "./dist/src/public/channels/github/index.d.ts",
@@ -125,7 +125,7 @@ export default defineSandbox({
   {
     descriptor: TWILIO_ROUTE_PORTABILITY_DESCRIPTOR,
     include: ["src/public/channels/twilio/index.ts", "src/public/definitions/defineChannel.ts"],
-    name: "lets tsgo typecheck a default-exported twilioChannel without extra annotations",
+    name: "lets tsc typecheck a default-exported twilioChannel without extra annotations",
     packageExports: {
       "./channels/twilio": {
         types: "./dist/src/public/channels/twilio/index.d.ts",
@@ -135,7 +135,7 @@ export default defineSandbox({
   {
     descriptor: TEAMS_ROUTE_PORTABILITY_DESCRIPTOR,
     include: ["src/public/channels/teams/index.ts", "src/public/definitions/defineChannel.ts"],
-    name: "lets tsgo typecheck a default-exported teamsChannel without extra annotations",
+    name: "lets tsc typecheck a default-exported teamsChannel without extra annotations",
     packageExports: {
       "./channels/teams": {
         types: "./dist/src/public/channels/teams/index.d.ts",
@@ -145,7 +145,7 @@ export default defineSandbox({
   {
     descriptor: TELEGRAM_ROUTE_PORTABILITY_DESCRIPTOR,
     include: ["src/public/channels/telegram/index.ts", "src/public/definitions/defineChannel.ts"],
-    name: "lets tsgo typecheck a default-exported telegramChannel without extra annotations",
+    name: "lets tsc typecheck a default-exported telegramChannel without extra annotations",
     packageExports: {
       "./channels/telegram": {
         types: "./dist/src/public/channels/telegram/index.d.ts",
@@ -155,7 +155,7 @@ export default defineSandbox({
   {
     descriptor: EVE_ROUTE_PORTABILITY_DESCRIPTOR,
     include: ["src/public/channels/auth.ts", "src/public/channels/eve.ts"],
-    name: "lets tsgo typecheck a default-exported eveChannel without extra annotations",
+    name: "lets tsc typecheck a default-exported eveChannel without extra annotations",
     packageExports: {
       "./channels/auth": {
         types: "./dist/src/public/channels/auth.d.ts",
@@ -225,7 +225,7 @@ async function expectPortableFixtureToTypecheck(testCase: PortabilityCase): Prom
     )}\n`,
   );
 
-  await runFile(process.execPath, [TSGO_BIN_PATH, "-p", emitTsconfigPath], {
+  await runFile(process.execPath, [TSC_BIN_PATH, "-p", emitTsconfigPath], {
     cwd: REPO_ROOT,
   });
 
@@ -280,7 +280,7 @@ async function expectPortableFixtureToTypecheck(testCase: PortabilityCase): Prom
     )}\n`,
   );
 
-  await runFile(process.execPath, [TSGO_BIN_PATH, "-p", consumerTsconfigPath], {
+  await runFile(process.execPath, [TSC_BIN_PATH, "-p", consumerTsconfigPath], {
     cwd: appRoot,
   });
 }

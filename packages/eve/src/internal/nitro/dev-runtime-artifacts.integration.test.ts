@@ -5,8 +5,14 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
+import { createCompiledAgentManifest, ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
+import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { loadAuthoredModuleNamespace } from "#internal/authored-module-loader.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
+import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import { createRuntimeSession, withRuntimeSession } from "#runtime/sessions/runtime-session.js";
+import { createNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import {
   activateDevelopmentRuntimeArtifactsSnapshot,
   pruneDevelopmentRuntimeArtifactsSnapshots,
@@ -19,6 +25,100 @@ import {
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 
 const createScratchDirectory = useTemporaryDirectories();
+
+async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoot: string }> {
+  const appRoot = await createScratchDirectory("eve-dev-runtime-next-imports-");
+  const agentRoot = join(appRoot, "agent");
+  const compileDirectoryPath = join(appRoot, ".eve", "compile");
+  const manifestPath = join(compileDirectoryPath, "compiled-agent-manifest.json");
+  const moduleMapPath = join(compileDirectoryPath, "module-map.mjs");
+
+  await mkdir(agentRoot, { recursive: true });
+  await mkdir(join(appRoot, "src", "features", "editor", "eve"), { recursive: true });
+  await mkdir(compileDirectoryPath, { recursive: true });
+  await writeFile(join(appRoot, "package.json"), '{"name":"next-agent","type":"module"}\n');
+  await writeFile(
+    join(appRoot, "tsconfig.json"),
+    `${JSON.stringify(
+      {
+        compilerOptions: {
+          baseUrl: ".",
+          paths: {
+            "@/*": ["./src/*"],
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  await writeFile(
+    join(agentRoot, "agent.ts"),
+    [
+      'import { createEveModelRouter } from "./model-router";',
+      'import { authSessionAuth } from "@/features/editor/eve/auth-session";',
+      "",
+      "export const routed = createEveModelRouter(authSessionAuth);",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    join(agentRoot, "model-router.ts"),
+    [
+      "export function createEveModelRouter(auth: string) {",
+      "  return `router:${auth}`;",
+      "}",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    join(appRoot, "src", "features", "editor", "eve", "auth-session.ts"),
+    'export const authSessionAuth = "session-auth";\n',
+  );
+
+  const manifest = createCompiledAgentManifest({
+    agentRoot,
+    appRoot,
+    config: {
+      model: {
+        id: "openai/gpt-5.4-mini",
+        routing: {
+          kind: "gateway",
+          target: "openai/gpt-5.4-mini",
+        },
+      },
+      name: "Next Imports Agent",
+      source: {
+        logicalPath: "agent.ts",
+        sourceId: "agent.ts",
+        sourceKind: "module",
+      },
+    },
+    instructions: {
+      logicalPath: "instructions.md",
+      markdown: "Use the routed model.",
+      name: "instructions",
+      sourceId: "instructions.md",
+      sourceKind: "markdown",
+    },
+  });
+
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  await writeFile(
+    moduleMapPath,
+    createCompiledModuleMapSource({
+      manifest,
+      moduleMapPath,
+    }),
+  );
+
+  await publishDevelopmentRuntimeArtifactsSnapshot({
+    paths: { compileDirectoryPath },
+    project: { appRoot },
+  } as CompileAgentResult);
+
+  return { appRoot };
+}
 
 describe("development runtime artifact snapshots", () => {
   it("stages snapshots without moving the latest runtime pointer", async () => {
@@ -98,6 +198,119 @@ describe("development runtime artifact snapshots", () => {
     await expect(readdir(snapshotsRoot)).resolves.toEqual(
       expect.arrayContaining(["active", "recent", "retained"]),
     );
+    expect(existsSync(staleSnapshotRoot)).toBe(false);
+  });
+
+  it("preserves snapshots referenced by active durable workflow data", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-artifacts-prune-durable-");
+    const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
+    const activeSnapshotRoot = join(snapshotsRoot, "active");
+    const posixParkedTurnSnapshotRoot = join(snapshotsRoot, "parked-turn-posix");
+    const windowsParkedTurnSnapshotRoot = join(snapshotsRoot, "parked-turn-windows");
+    const completedTurnSnapshotRoot = join(snapshotsRoot, "completed-turn");
+    const staleSnapshotRoot = join(snapshotsRoot, "stale");
+    const oldSnapshotTime = new Date(1_000);
+    const now = 1_000_000;
+
+    for (const snapshotRoot of [
+      activeSnapshotRoot,
+      posixParkedTurnSnapshotRoot,
+      windowsParkedTurnSnapshotRoot,
+      completedTurnSnapshotRoot,
+      staleSnapshotRoot,
+    ]) {
+      await mkdir(snapshotRoot, { recursive: true });
+      await writeFile(join(snapshotRoot, "marker.txt"), snapshotRoot);
+      await utimes(snapshotRoot, oldSnapshotTime, oldSnapshotTime);
+    }
+
+    await activateDevelopmentRuntimeArtifactsSnapshot({
+      appRoot,
+      snapshot: {
+        runtimeAppRoot: join(activeSnapshotRoot, "source", "app"),
+        snapshotRoot: activeSnapshotRoot,
+        snapshotSourceRoot: join(activeSnapshotRoot, "source"),
+      },
+    });
+    await mkdir(join(appRoot, ".workflow-data", "default", "runs"), { recursive: true });
+    await writeFile(
+      join(appRoot, ".workflow-data", "default", "runs", "parked-turn.json"),
+      `${JSON.stringify(
+        {
+          status: "running",
+          input: {
+            serializedContext: {
+              "eve.bundle": {
+                source: {
+                  appRoot: join(posixParkedTurnSnapshotRoot, "source", "app").replaceAll("\\", "/"),
+                  kind: "disk",
+                },
+              },
+            },
+          },
+          workflowId: "workflow//eve//turnWorkflow",
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await writeFile(
+      join(appRoot, ".workflow-data", "default", "runs", "parked-turn-windows.json"),
+      `${JSON.stringify(
+        {
+          status: "running",
+          input: {
+            serializedContext: {
+              "eve.bundle": {
+                source: {
+                  appRoot: join(windowsParkedTurnSnapshotRoot, "source", "app").replaceAll(
+                    "/",
+                    "\\",
+                  ),
+                  kind: "disk",
+                },
+              },
+            },
+          },
+          workflowId: "workflow//eve//turnWorkflow",
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    await writeFile(
+      join(appRoot, ".workflow-data", "default", "runs", "completed-turn.json"),
+      `${JSON.stringify(
+        {
+          status: "completed",
+          input: {
+            serializedContext: {
+              "eve.bundle": {
+                source: {
+                  appRoot: join(completedTurnSnapshotRoot, "source", "app").replaceAll("\\", "/"),
+                  kind: "disk",
+                },
+              },
+            },
+          },
+          workflowId: "workflow//eve//turnWorkflow",
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await pruneDevelopmentRuntimeArtifactsSnapshots({
+      appRoot,
+      now,
+      recentWindowMs: 0,
+      retainCount: 0,
+    });
+
+    await expect(readdir(snapshotsRoot)).resolves.toEqual(
+      expect.arrayContaining(["active", "parked-turn-posix", "parked-turn-windows"]),
+    );
+    expect(existsSync(completedTurnSnapshotRoot)).toBe(false);
     expect(existsSync(staleSnapshotRoot)).toBe(false);
   });
 
@@ -199,6 +412,43 @@ describe("development runtime artifact snapshots", () => {
         "utf8",
       ),
     ).resolves.toContain(JSON.stringify(join(snapshot.runtimeAppRoot, "agent")));
+  });
+
+  it("hydrates Next-style agent imports from dev runtime snapshots", async () => {
+    const { appRoot } = await createNextStyleImportSnapshotFixture();
+
+    await withRuntimeSession(createRuntimeSession("next-imports-regression"), async () => {
+      const bundle = await getCompiledRuntimeAgentBundle({
+        compiledArtifactsSource: resolveNitroCompiledArtifactsSource(
+          createNitroArtifactsConfig({ appRoot, dev: true }),
+        ),
+      });
+      const agentModule = bundle.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules["agent.ts"];
+
+      expect(agentModule).toMatchObject({
+        routed: "router:session-auth",
+      });
+    });
+  });
+
+  it("hydrates Next-style agent imports when dev snapshot artifacts are loaded from disk", async () => {
+    const { appRoot } = await createNextStyleImportSnapshotFixture();
+    const runtimeAppRoot = readDevelopmentRuntimeArtifactsSnapshotRoot(
+      resolveDevelopmentRuntimeArtifactsPointerPath(appRoot),
+    );
+
+    expect(runtimeAppRoot).toBeDefined();
+
+    await withRuntimeSession(createRuntimeSession("next-imports-direct-disk-repro"), async () => {
+      const bundle = await getCompiledRuntimeAgentBundle({
+        compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(runtimeAppRoot!),
+      });
+      const agentModule = bundle.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules["agent.ts"];
+
+      expect(agentModule).toMatchObject({
+        routed: "router:session-auth",
+      });
+    });
   });
 
   it("keeps compatibility with v1 dev runtime pointers", async () => {

@@ -11,10 +11,8 @@ import {
   createTurnStartedEvent,
 } from "../src/protocol/message.js";
 import { createEveMessageStreamRoutePath } from "../src/protocol/routes.js";
-import {
-  VERCEL_PROTECTION_BYPASS_HEADER,
-  VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER,
-} from "../src/services/dev-client/request-headers.js";
+import { VERCEL_PROTECTION_BYPASS_HEADER } from "../src/services/dev-client/request-headers.js";
+import { VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER } from "../src/client/types.js";
 import { sendDevelopmentMessage } from "./dev-client-harness/send-message.js";
 import { createDevelopmentSessionState } from "./dev-client-harness/session.js";
 

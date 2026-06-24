@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
  * Build-stamp tokens authored in scaffold sources, mapped to the source of
  * truth each one is stamped from. `pnpm build` rewrites the tokens in `dist`
  * as its final step (`scripts/stamp-version-tokens.mjs`); dev-tree executions
- * — tsgo watch emits and tests running from `src` — never run that step, so
+ * — tsc watch emits and tests running from `src` — never run that step, so
  * {@link resolveVersionToken} resolves the same sources at the point of need.
  */
 type TokenSource =
@@ -38,7 +38,7 @@ const TOKEN_SOURCES: Readonly<Record<string, TokenSource>> = {
   [versionToken("REACT_DOM")]: { kind: "catalog", packageName: "react-dom" },
   [versionToken("STREAMDOWN")]: { kind: "catalog", packageName: "streamdown" },
   [versionToken("ZOD")]: { kind: "catalog", packageName: "zod" },
-  [versionToken("TSGO")]: { kind: "catalog", packageName: "@typescript/native-preview" },
+  [versionToken("TYPESCRIPT")]: { kind: "catalog", packageName: "typescript" },
   [versionToken("TYPES_REACT")]: { kind: "catalog", packageName: "@types/react" },
   [versionToken("TYPES_REACT_DOM")]: { kind: "catalog", packageName: "@types/react-dom" },
 };
@@ -135,7 +135,7 @@ function resolveTokenFromDevTree(token: string): string | undefined {
  * Returns a scaffold version value, resolving a build-stamp token at the point
  * of need when the running code is unstamped. The published package is stamped
  * by the build (`scripts/stamp-version-tokens.mjs`), so the fallback only ever
- * fires in a dev tree — tsgo watch emits and tests running from `src` — where
+ * fires in a dev tree — tsc watch emits and tests running from `src` — where
  * the live workspace catalog *is* the truth the stamp would have captured.
  * Outside a dev tree an unstamped token still throws, because writing the
  * literal token into a scaffolded package.json would break the generated

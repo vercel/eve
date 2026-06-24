@@ -6,7 +6,7 @@ import {
   VERCEL_OIDC_TOKEN_HEADER,
   VERCEL_PROTECTION_BYPASS_HEADER,
   VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER,
-} from "../src/services/dev-client/request-headers.js";
+} from "./dev-client-harness/request-headers.js";
 
 vi.mock("#compiled/@vercel/oidc/index.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("#compiled/@vercel/oidc/index.js")>();

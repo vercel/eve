@@ -1,5 +1,5 @@
 import { loadContext } from "#context/container.js";
-import { SandboxKey } from "#context/keys.js";
+import { DynamicSkillManifestKey, SandboxKey } from "#context/keys.js";
 import { loadSkillFromSandbox } from "#runtime/skills/sandbox-access.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import type { JsonObject } from "#shared/json.js";
@@ -29,7 +29,17 @@ async function executeLoadSkillTool(args: LoadSkillInput): Promise<unknown> {
   }
 
   const { skill } = args;
-  return await loadSkillFromSandbox(sandbox, skill);
+  return await loadSkillFromSandbox(sandbox, skill, availableSkillNames(ctx));
+}
+
+// Dynamic skill names for load_skill's not-found hint. Dynamic-only on purpose:
+// importing the bundle (for authored skills) would cycle through the
+// framework-tools barrel.
+function availableSkillNames(ctx: ReturnType<typeof loadContext>): string[] {
+  const dynamic = Object.values(ctx.get(DynamicSkillManifestKey) ?? {})
+    .flat()
+    .map((s) => s.name);
+  return [...new Set(dynamic)].sort();
 }
 
 // ---------------------------------------------------------------------------

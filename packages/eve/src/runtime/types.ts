@@ -182,16 +182,6 @@ export type ResolvedToolDefinition = Readonly<
      * handlers and the stream. See {@link ToolModelOutput}.
      */
     readonly toModelOutput?: (output: unknown) => ToolModelOutput | Promise<ToolModelOutput>;
-    /**
-     * Optional authorization strategy reattached from the authored
-     * module at resolve time. Carries live `getToken` /
-     * `startAuthorization` / `completeAuthorization` callbacks, so it
-     * cannot survive compilation and must be read off the resolved
-     * module like {@link execute}. When present, the execution layer
-     * builds token accessors onto the tool context and drives the
-     * interactive consent flow scoped to this tool's {@link name}.
-     */
-    readonly auth?: AuthorizationDefinition;
   };
 
 /**

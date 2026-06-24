@@ -1,7 +1,16 @@
-import type {
-  Sandbox as SdkSandbox,
-  SandboxUpdateParams,
-} from "#compiled/@vercel/sandbox/index.js";
+import type * as Vercel from "#compiled/@vercel/sandbox/index.js";
+
+type VercelCreateOptions = NonNullable<Parameters<typeof Vercel.Sandbox.create>[0]>;
+
+type VercelUpdateOptions = Parameters<Vercel.Sandbox["update"]>[0];
+
+type VercelSandboxInternalCreateOptions = {
+  readonly [key: `__${string}`]: unknown;
+};
+
+type VercelSandboxAuthorCreateOptions<T> = T extends unknown
+  ? Omit<T, "name" | "onResume" | "persistent" | "signal"> & VercelSandboxInternalCreateOptions
+  : never;
 
 /**
  * Options accepted by `vercel(opts)`. Forwarded to Vercel
@@ -29,19 +38,11 @@ import type {
  * snapshot, force a template rebuild (e.g. by changing the sandbox
  * definition so its template key changes).
  */
-export type VercelSandboxCreateOptions = Omit<
-  NonNullable<Parameters<typeof SdkSandbox.create>[0]>,
-  "name" | "onResume" | "persistent" | "signal"
-> &
-  VercelSandboxInternalCreateOptions;
-
-type VercelSandboxInternalCreateOptions = {
-  readonly [key: `__${string}`]: unknown;
-};
+export type VercelSandboxCreateOptions = VercelSandboxAuthorCreateOptions<VercelCreateOptions>;
 
 /**
  * Options accepted by the Vercel backend's `bootstrap({ use })` hook.
- * Aliases the Vercel SDK's `SandboxUpdateParams` because bootstrap
+ * Tracks the Vercel SDK's `Sandbox.update(...)` parameter because bootstrap
  * applies its options to the template via `sandbox.update(...)` after
  * `Sandbox.create()` and before the snapshot is captured. The Vercel
  * SDK persists `update`-d settings on the sandbox so they survive into
@@ -51,11 +52,11 @@ type VercelSandboxInternalCreateOptions = {
  * {@link VercelSandboxSessionUseOptions}; both are exposed as separate
  * named aliases so future divergence is non-breaking.
  */
-export type VercelSandboxBootstrapUseOptions = SandboxUpdateParams;
+export type VercelSandboxBootstrapUseOptions = VercelUpdateOptions;
 
 /**
  * Options accepted by the Vercel backend's `onSession({ use })` hook.
- * Aliases the Vercel SDK's `SandboxUpdateParams`; passed values are
+ * Tracks the Vercel SDK's `Sandbox.update(...)` parameter; passed values are
  * applied to the live session via the SDK's `update`.
  */
-export type VercelSandboxSessionUseOptions = SandboxUpdateParams;
+export type VercelSandboxSessionUseOptions = VercelUpdateOptions;

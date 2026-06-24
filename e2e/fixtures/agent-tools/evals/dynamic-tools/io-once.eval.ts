@@ -8,19 +8,19 @@ export default defineEval({
   description: "Dynamic tools smoke: resolver I/O runs once and replays from the durable cache.",
   async test(t) {
     const first = await t.send(
-      "Use the `dynamic-counted__get_io_count` tool and tell me the ioCallCount number from the result.",
+      "Use the `get_io_count` tool and tell me the ioCallCount number from the result.",
     );
     first.expectOk();
-    const firstCount = requireToolOutput(first, "dynamic-counted__get_io_count").ioCallCount;
+    const firstCount = requireToolOutput(first, "get_io_count").ioCallCount;
     if (firstCount !== 1) {
       throw new Error(`Turn 1: expected ioCallCount=1, got ${JSON.stringify(firstCount)}`);
     }
 
     const second = await t.send(
-      "Use the `dynamic-counted__get_io_count` tool again right now and tell me the ioCallCount value from the result.",
+      "Use the `get_io_count` tool again right now and tell me the ioCallCount value from the result.",
     );
     second.expectOk();
-    const secondCount = requireToolOutput(second, "dynamic-counted__get_io_count").ioCallCount;
+    const secondCount = requireToolOutput(second, "get_io_count").ioCallCount;
     if (secondCount !== 1) {
       throw new Error(
         `Turn 2: expected ioCallCount=1 (resolver I/O should not re-run), got ${JSON.stringify(secondCount)}.`,
@@ -29,7 +29,7 @@ export default defineEval({
 
     t.didNotFail();
     t.completed();
-    t.calledTool("dynamic-counted__get_io_count", {
+    t.calledTool("get_io_count", {
       isError: false,
       output: { ioCallCount: 1 },
     });

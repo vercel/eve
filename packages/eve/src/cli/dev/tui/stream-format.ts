@@ -7,7 +7,13 @@
 import type { AssistantResponseStatsMode } from "./types.js";
 
 export type TerminalKey =
-  | { type: "character"; value: string }
+  | {
+      type: "text";
+      value: string;
+      /** Terminal framing, not proof that the text came from a physical keypress. */
+      framing: "unframed" | "bracketed-paste";
+    }
+  | { type: "newline" }
   | { type: "backspace" }
   | { type: "delete" }
   | { type: "enter" }
@@ -30,7 +36,7 @@ export type TerminalKey =
   | { type: "ctrl-c" }
   | { type: "ignore" };
 
-/** One decoded key plus how many bytes it consumed from the input buffer. */
+/** One decoded key plus the UTF-16 code units it consumed from the input buffer. */
 export interface KeyToken {
   key?: TerminalKey;
   consumed: number;
@@ -40,6 +46,46 @@ export interface KeyToken {
 
 // Final byte of a CSI escape sequence (`ESC [ … <final>`), range 0x40–0x7e.
 const CSI_FINAL = /[\u0040-\u007e]/u;
+
+// Bracketed paste markers (DEC private mode 2004). The terminal wraps pasted
+// text in these so an embedded newline inserts literally instead of submitting.
+const PASTE_START = "\x1B[200~";
+const PASTE_END = "\x1B[201~";
+
+/**
+ * Preserves newlines and tabs, normalizes CR to LF, and drops C0, DEL, and C1
+ * controls. The first end marker closes the frame. This prevents escape
+ * injection, not display spoofing by bidi or zero-width characters.
+ */
+export function sanitizePastedText(text: string): string {
+  let printable = "";
+  for (const character of text.replace(/\r\n?/gu, "\n")) {
+    if (character === "\n" || character === "\t") {
+      printable += character;
+      continue;
+    }
+    const code = character.codePointAt(0);
+    if (code === undefined) continue;
+    if (code < 0x20 || code === 0x7f || (code >= 0x80 && code <= 0x9f)) continue;
+    printable += character;
+  }
+  return printable;
+}
+
+/**
+ * True when `buffer` is a bracketed paste whose closing marker hasn't arrived.
+ * {@link nextKey} reports such a buffer as `incomplete` indefinitely, so the
+ * caller needs this to recover if the end marker never comes (a process that
+ * emits a bare start marker and dies, a malformed terminal).
+ */
+export function isIncompletePaste(buffer: string): boolean {
+  return buffer.startsWith(PASTE_START) && !buffer.includes(PASTE_END, PASTE_START.length);
+}
+
+/** Drops a leading bracketed-paste start marker, leaving the buffered payload. */
+export function stripPasteStart(buffer: string): string {
+  return buffer.startsWith(PASTE_START) ? buffer.slice(PASTE_START.length) : buffer;
+}
 
 /** Removes C0 control characters and DEL from text intended for the prompt. */
 export function stripPromptControlCharacters(text: string): string {
@@ -72,6 +118,21 @@ export function nextKey(buffer: string): KeyToken {
       return { key: parseKey(Buffer.from(buffer.slice(0, 3))), consumed: 3 };
     }
     if (second === "[") {
+      // Bracketed paste: capture everything between the start and end markers as
+      // one chunk so embedded newlines insert literally instead of each one
+      // submitting the line. Wait for the closing marker if it hasn't arrived.
+      if (buffer.startsWith(PASTE_START)) {
+        const end = buffer.indexOf(PASTE_END, PASTE_START.length);
+        if (end === -1) return { consumed: 0, incomplete: true };
+        return {
+          key: {
+            type: "text",
+            value: sanitizePastedText(buffer.slice(PASTE_START.length, end)),
+            framing: "bracketed-paste",
+          },
+          consumed: end + PASTE_END.length,
+        };
+      }
       for (let i = 2; i < buffer.length; i += 1) {
         if (CSI_FINAL.test(buffer[i]!)) {
           return { key: parseKey(Buffer.from(buffer.slice(0, i + 1))), consumed: i + 1 };
@@ -124,6 +185,11 @@ export function parseKey(chunk: Buffer): TerminalKey {
     case "\r":
     case "\n":
       return { type: "enter" };
+    // Shift+Enter inserts a newline instead of submitting. Terminals report it
+    // as xterm modifyOtherKeys (`CSI 27 ; 2 ; 13 ~`) or the kitty/CSI-u form.
+    case "\x1b[27;2;13~":
+    case "\x1b[13;2u":
+      return { type: "newline" };
     case "\u007f":
     case "\b":
       return { type: "backspace" };
@@ -154,11 +220,12 @@ export function parseKey(chunk: Buffer): TerminalKey {
     case "\x1B":
       return { type: "escape" };
     default: {
-      // Strip C0 control characters and DEL so pasted text — which arrives as
-      // one batched chunk that may carry newlines/tabs — inserts cleanly
-      // instead of injecting literal control bytes into the line.
+      // Strip C0 control characters and DEL from an unframed printable run.
+      // Bracketed paste and control keys were tokenized above.
       const printable = stripPromptControlCharacters(value);
-      return printable.length > 0 ? { type: "character", value: printable } : { type: "ignore" };
+      return printable.length > 0
+        ? { type: "text", value: printable, framing: "unframed" }
+        : { type: "ignore" };
     }
   }
 }

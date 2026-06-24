@@ -1,8 +1,12 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, extname, join, resolve } from "node:path";
 
 import { pathExists } from "../../path-exists.js";
+import {
+  workspacePatternForProject,
+  workspacePatternsClaimProject,
+} from "../../scaffold/workspace-glob.js";
 
 import type { PackageManagerStrategy } from "./types.js";
 
@@ -101,14 +105,117 @@ async function ensurePnpmWorkspacePolicy(filePath: string): Promise<"skipped" | 
 }
 
 /** Whether pnpm can walk from this project into a parent-owned workspace. */
-export function hasAncestorPnpmWorkspace(projectRoot: string): boolean {
+export function findAncestorPnpmWorkspaceRoot(projectRoot: string): string | undefined {
   let dir = dirname(resolve(projectRoot));
   while (true) {
-    if (existsSync(join(dir, PNPM_WORKSPACE_PATH))) return true;
+    if (existsSync(join(dir, PNPM_WORKSPACE_PATH))) return dir;
     const parent = dirname(dir);
-    if (parent === dir) return false;
+    if (parent === dir) return undefined;
     dir = parent;
   }
+}
+
+/** Whether pnpm can walk from this project into a parent-owned workspace. */
+export function hasAncestorPnpmWorkspace(projectRoot: string): boolean {
+  return findAncestorPnpmWorkspaceRoot(projectRoot) !== undefined;
+}
+
+function parsePnpmWorkspacePackagePatterns(source: string): string[] | undefined {
+  const lines = source.split(/\r?\n/u);
+  const packagesIndex = lines.findIndex((line) => /^\s*packages:/u.test(line));
+  if (packagesIndex < 0) return undefined;
+
+  // This deliberately supports the common workspace shapes eve needs to edit:
+  // a block sequence (`packages:\n  - apps/*`) and a simple inline sequence.
+  // More complex YAML falls back to "unknown"; callers then treat the ancestor
+  // as workspace-owned instead of creating nested standalone package-manager
+  // state under an ambiguous monorepo.
+  const inlineMatch = /^\s*packages:\s*\[(.*)\]\s*(?:#.*)?$/u.exec(lines[packagesIndex] ?? "");
+  if (inlineMatch !== null) {
+    const entries = inlineMatch[1]!.trim();
+    if (entries.length === 0) return [];
+    return entries
+      .split(",")
+      .map((entry) => entry.trim().replace(/^['"]|['"]$/gu, ""))
+      .filter((entry) => entry.length > 0);
+  }
+
+  if (lines[packagesIndex]?.trim() !== "packages:") return undefined;
+
+  const patterns: string[] = [];
+  for (const line of lines.slice(packagesIndex + 1)) {
+    if (/^\S/u.test(line)) break;
+    const match = /^\s*-\s*(.+?)\s*$/u.exec(line);
+    if (match === null) continue;
+    patterns.push(match[1]!.replace(/^['"]|['"]$/gu, ""));
+  }
+  return patterns;
+}
+
+/**
+ * Returns the ancestor workspace root only when the workspace manifest's
+ * package candidates include `projectRoot`. If the manifest cannot be parsed,
+ * it is treated as a workspace owner so setup does not silently create nested
+ * standalone package-manager state in an ambiguous monorepo.
+ */
+export function findClaimingAncestorPnpmWorkspaceRoot(projectRoot: string): string | undefined {
+  const workspaceRoot = findAncestorPnpmWorkspaceRoot(projectRoot);
+  if (workspaceRoot === undefined) return undefined;
+
+  let patterns: string[] | undefined;
+  try {
+    patterns = parsePnpmWorkspacePackagePatterns(
+      readFileSync(join(workspaceRoot, PNPM_WORKSPACE_PATH), "utf8"),
+    );
+  } catch {
+    return workspaceRoot;
+  }
+  if (patterns === undefined) return workspaceRoot;
+
+  return workspacePatternsClaimProject(patterns, workspaceRoot, projectRoot)
+    ? workspaceRoot
+    : undefined;
+}
+
+function withPnpmWorkspacePackagePattern(source: string, pattern: string): string {
+  const normalized = source.endsWith("\n") ? source : `${source}\n`;
+  const lines = normalized.split("\n");
+  const packagesIndex = lines.findIndex((line) => line.trim() === "packages:");
+
+  if (packagesIndex < 0) {
+    const prefix = normalized.trim().length === 0 ? "" : `${normalized}\n`;
+    return `${prefix}packages:\n  - ${pattern}\n`;
+  }
+
+  const blockEnd = findYamlBlockEnd(lines, packagesIndex);
+  let insertAt = blockEnd;
+  while (insertAt > packagesIndex + 1 && lines[insertAt - 1] === "") {
+    insertAt -= 1;
+  }
+  lines.splice(insertAt, 0, `  - ${pattern}`);
+  return lines.join("\n");
+}
+
+export async function ensurePnpmWorkspaceIncludesProject(
+  projectRoot: string,
+): Promise<"skipped" | "written"> {
+  const workspaceRoot = findAncestorPnpmWorkspaceRoot(projectRoot);
+  if (workspaceRoot === undefined || resolve(workspaceRoot) === resolve(projectRoot)) {
+    return "skipped";
+  }
+  if (findClaimingAncestorPnpmWorkspaceRoot(projectRoot) === workspaceRoot) {
+    return "skipped";
+  }
+
+  const filePath = join(workspaceRoot, PNPM_WORKSPACE_PATH);
+  const current = await readFile(filePath, "utf8");
+  const next = withPnpmWorkspacePackagePattern(
+    current,
+    workspacePatternForProject(workspaceRoot, projectRoot),
+  );
+  if (next === current) return "skipped";
+  await writeFile(filePath, next, "utf8");
+  return "written";
 }
 
 /**
@@ -151,9 +258,14 @@ export function pnpmWorkspaceClaimsProject(
 export const pnpmPackageManager = {
   kind: "pnpm",
   scaffoldFiles: { [PNPM_WORKSPACE_PATH]: PNPM_WORKSPACE_CONTENT },
-  async applyProjectConfiguration(projectRoot) {
-    const filePath = join(projectRoot, PNPM_WORKSPACE_PATH);
-    const result = await ensurePnpmWorkspacePolicy(filePath);
+  async applyProjectConfiguration(projectRoot, options) {
+    const workspaceProbeRoot = options?.workspaceProbeRoot ?? projectRoot;
+    const workspaceMembershipResult = await ensurePnpmWorkspaceIncludesProject(workspaceProbeRoot);
+    const workspaceRoot = findClaimingAncestorPnpmWorkspaceRoot(workspaceProbeRoot);
+    const filePath = join(workspaceRoot ?? projectRoot, PNPM_WORKSPACE_PATH);
+    const policyResult = await ensurePnpmWorkspacePolicy(filePath);
+    const result =
+      workspaceMembershipResult === "written" || policyResult === "written" ? "written" : "skipped";
     return result === "written"
       ? { filesSkipped: [], filesWritten: [filePath] }
       : { filesSkipped: [filePath], filesWritten: [] };

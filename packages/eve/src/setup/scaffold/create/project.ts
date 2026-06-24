@@ -3,10 +3,15 @@ import { basename, join, resolve } from "node:path";
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor } from "../../node-engine.js";
-import { getPackageManagerStrategy } from "../../primitives/pm/index.js";
 import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "../update/module-files.js";
 import { pathExists, writeTextFile } from "../files.js";
 import { resolveVersionToken } from "../version-tokens.js";
+import {
+  applyPackageManagerWorkspaceConfiguration,
+  isPackageManagerWorkspaceMember,
+  patchWorkspaceRootPackageJson,
+  type WorkspaceRootMutation,
+} from "../workspace-root.js";
 import { WEB_APP_TEMPLATE_FILES } from "./web-template.js";
 
 export const CURRENT_DIRECTORY_PROJECT_NAME = ".";
@@ -16,7 +21,7 @@ const ALLOWED_CREATE_IN_PLACE_ENTRIES = new Set([".DS_Store", ".git", ".gitkeep"
 export const DEFAULT_AI_PACKAGE_VERSION = "__AI_SDK_VERSION__";
 export const DEFAULT_CONNECT_PACKAGE_VERSION = "__VERCEL_CONNECT_VERSION__";
 export const DEFAULT_ZOD_PACKAGE_VERSION = "__ZOD_VERSION__";
-const DEFAULT_TSGO_PACKAGE_VERSION = "__TSGO_VERSION__";
+const DEFAULT_TYPESCRIPT_PACKAGE_VERSION = "__TYPESCRIPT_VERSION__";
 
 /**
  * The eve package metadata that generated projects consume together. Keeping
@@ -53,7 +58,7 @@ interface TemplateContext {
   aiPackageVersion: string;
   connectPackageVersion: string;
   zodPackageVersion: string;
-  tsgoPackageVersion: string;
+  typescriptPackageVersion: string;
   nodeTypesVersion: string;
   nodeEngine: string;
 }
@@ -107,7 +112,7 @@ function renderTemplate(content: string, ctx: TemplateContext): string {
     .replaceAll("__EVE_INIT_AI_SDK_VERSION__", ctx.aiPackageVersion)
     .replaceAll("__EVE_INIT_CONNECT_VERSION__", ctx.connectPackageVersion)
     .replaceAll("__EVE_INIT_ZOD_VERSION__", ctx.zodPackageVersion)
-    .replaceAll("__EVE_INIT_TSGO_VERSION__", ctx.tsgoPackageVersion)
+    .replaceAll("__EVE_INIT_TYPESCRIPT_VERSION__", ctx.typescriptPackageVersion)
     .replaceAll("__EVE_INIT_TYPES_NODE_VERSION__", ctx.nodeTypesVersion)
     .replaceAll("__EVE_INIT_NODE_ENGINE__", ctx.nodeEngine);
 }
@@ -152,7 +157,7 @@ export default defineAgent({
 // and abort the install (ERESOLVE). Forcing `ai` through `overrides` (npm/bun)
 // and `resolutions` (yarn) keeps the whole tree on that exact version; pnpm
 // already tolerates the unmet optional peer and ignores both fields.
-function packageJsonTemplate(): string {
+function packageJsonTemplate(includeRootOnlyFields: boolean): string {
   return `{
   "name": "__EVE_INIT_APP_NAME__",
   "version": "0.0.0",
@@ -165,7 +170,7 @@ function packageJsonTemplate(): string {
     "build": "eve build",
     "dev": "eve dev",
     "start": "eve start",
-    "typecheck": "tsgo"
+    "typecheck": "tsc"
   },
   "dependencies": {
     "@vercel/connect": "__EVE_INIT_CONNECT_VERSION__",
@@ -175,8 +180,13 @@ function packageJsonTemplate(): string {
   },
   "devDependencies": {
     "@types/node": "__EVE_INIT_TYPES_NODE_VERSION__",
-    "@typescript/native-preview": "__EVE_INIT_TSGO_VERSION__"
-  },
+    "typescript": "__EVE_INIT_TYPESCRIPT_VERSION__"
+  }${includeRootOnlyFields ? ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX : ""}
+}
+`;
+}
+
+const ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX = `,
   "overrides": {
     "ai": "__EVE_INIT_AI_SDK_VERSION__"
   },
@@ -186,9 +196,7 @@ function packageJsonTemplate(): string {
   "engines": {
     "node": "__EVE_INIT_NODE_ENGINE__"
   }
-}
 `;
-}
 
 const AGENT_INSTRUCTIONS_TEMPLATE = `# Identity
 
@@ -245,13 +253,12 @@ This project uses the eve framework. Before writing code, always read the releva
 
 function templateFiles(
   byokProvider: boolean,
-  packageManager: PackageManagerKind,
+  includeRootOnlyPackageJsonFields: boolean,
 ): Record<string, string> {
   return {
     "agent/agent.ts": byokProvider ? BYOK_AGENT_TEMPLATE : BASE_AGENT_TEMPLATE,
     ...SHARED_TEMPLATE_FILES,
-    "package.json": packageJsonTemplate(),
-    ...getPackageManagerStrategy(packageManager).scaffoldFiles,
+    "package.json": packageJsonTemplate(includeRootOnlyPackageJsonFields),
   };
 }
 
@@ -290,7 +297,14 @@ export interface ScaffoldBaseProjectOptions {
   aiPackageVersion?: string;
   connectPackageVersion?: string;
   zodPackageVersion?: string;
-  tsgoPackageVersion?: string;
+  typescriptPackageVersion?: string;
+  /**
+   * Final project path used to discover ancestor workspaces. This differs from
+   * the write target only when the CLI stages a scaffold before moving it into
+   * place.
+   */
+  workspaceProbeDirectory?: string;
+  onWorkspaceRootMutation?: (mutation: WorkspaceRootMutation) => void | Promise<void>;
   /**
    * Scaffold an inline provider `byok` block in `agent.ts` that reads the
    * provider key from `process.env` instead of relying on the managed Vercel
@@ -307,6 +321,8 @@ export async function scaffoldBaseProject(options: ScaffoldBaseProjectOptions): 
   const packageManager = options.packageManager ?? "pnpm";
   const evePackage = resolveEvePackageContract(options.evePackage);
   const nodeEngine = pinnedNodeEngineMajor(evePackage.nodeEngine);
+  const workspaceProbeRoot = resolve(options.workspaceProbeDirectory ?? targetRoot);
+  const workspaceMember = isPackageManagerWorkspaceMember(packageManager, workspaceProbeRoot);
 
   if (createInPlace) {
     await assertCanCreateInPlace(targetRoot, overwriteExisting);
@@ -333,9 +349,9 @@ export async function scaffoldBaseProject(options: ScaffoldBaseProjectOptions): 
       "zodPackageVersion",
       options.zodPackageVersion ?? DEFAULT_ZOD_PACKAGE_VERSION,
     ),
-    tsgoPackageVersion: resolveVersionToken(
-      "tsgoPackageVersion",
-      options.tsgoPackageVersion ?? DEFAULT_TSGO_PACKAGE_VERSION,
+    typescriptPackageVersion: resolveVersionToken(
+      "typescriptPackageVersion",
+      options.typescriptPackageVersion ?? DEFAULT_TYPESCRIPT_PACKAGE_VERSION,
     ),
     nodeTypesVersion: nodeEngine,
     nodeEngine,
@@ -343,7 +359,7 @@ export async function scaffoldBaseProject(options: ScaffoldBaseProjectOptions): 
 
   await mkdir(targetRoot, { recursive: true });
 
-  for (const [relPath, content] of Object.entries(templateFiles(byokProvider, packageManager))) {
+  for (const [relPath, content] of Object.entries(templateFiles(byokProvider, !workspaceMember))) {
     const filePath = `${targetRoot}/${relPath}`;
     const existed = await pathExists(filePath);
     await writeTextFile(filePath, renderTemplate(content, ctx), {
@@ -353,6 +369,19 @@ export async function scaffoldBaseProject(options: ScaffoldBaseProjectOptions): 
       await options.onOverwriteFile?.(filePath);
     }
   }
+
+  await applyPackageManagerWorkspaceConfiguration({
+    packageManager,
+    projectRoot: targetRoot,
+    workspaceProbeRoot,
+    onWorkspaceRootMutation: options.onWorkspaceRootMutation,
+  });
+
+  await patchWorkspaceRootPackageJson(packageManager, workspaceProbeRoot, {
+    aiPackageVersion: ctx.aiPackageVersion,
+    nodeEngineRequirement: evePackage.nodeEngine,
+    onWorkspaceRootMutation: options.onWorkspaceRootMutation,
+  });
 
   return targetRoot;
 }

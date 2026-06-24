@@ -1,5 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { z } from "zod";
 
 import { captureVercel } from "./primitives/run-vercel.js";
 
@@ -14,17 +15,66 @@ export interface DeploymentInfo {
   productionUrl?: string;
 }
 
-interface VercelProjectJson {
-  projectId?: unknown;
-  orgId?: unknown;
+const VercelProjectReferenceSchema = z.object({
+  projectId: z.string().min(1),
+  orgId: z.string().min(1),
+  projectName: z.string().min(1).optional(),
+});
+const VercelProjectEnvironmentSchema = z.object({
+  VERCEL_ORG_ID: VercelProjectReferenceSchema.shape.orgId,
+  VERCEL_PROJECT_ID: VercelProjectReferenceSchema.shape.projectId,
+});
+
+/** Validated Vercel owner and project identifiers. */
+export type VercelProjectReference = z.infer<typeof VercelProjectReferenceSchema>;
+
+/** Parses the complete Vercel owner and project environment pair. */
+export function projectReferenceFromEnvironment(
+  environment: Readonly<Record<string, string | undefined>>,
+): VercelProjectReference | undefined {
+  const parsed = VercelProjectEnvironmentSchema.safeParse(environment);
+  if (!parsed.success) return undefined;
+  return {
+    orgId: parsed.data.VERCEL_ORG_ID,
+    projectId: parsed.data.VERCEL_PROJECT_ID,
+  };
+}
+
+/** Rejects Vercel's unsupported legacy link directory before link mutation. */
+export async function assertNoLegacyProjectLinkDirectory(projectRoot: string): Promise<void> {
+  try {
+    if (!(await stat(join(projectRoot, ".now"))).isDirectory()) return;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return;
+    throw error;
+  }
+
+  throw new Error(
+    "Legacy Vercel link directory `.now` is not supported. Remove `.now` before linking this project.",
+  );
+}
+
+/** Reads a validated project reference from Vercel's link metadata directory. */
+export async function readProjectLink(
+  projectPath: string,
+): Promise<VercelProjectReference | undefined> {
+  await assertNoLegacyProjectLinkDirectory(projectPath);
+  try {
+    const raw = await readFile(join(projectPath, ".vercel", "project.json"), "utf8");
+    const parsed = VercelProjectReferenceSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 interface VercelApiProject {
   targets?: { production?: { alias?: unknown } };
 }
 
-export interface ProjectDetectionOptions {
-  signal?: AbortSignal;
+/** Cancellation options shared by Vercel project read/operation helpers. */
+export interface VercelProjectOperationOptions {
+  readonly signal?: AbortSignal;
 }
 
 function pickShortestAlias(aliases: unknown): string | undefined {
@@ -43,7 +93,7 @@ async function fetchProductionAlias(
   projectId: string,
   orgId: string,
   projectPath: string,
-  options: ProjectDetectionOptions,
+  options: VercelProjectOperationOptions,
 ): Promise<string | undefined> {
   const result = await captureVercel(
     ["api", `/v9/projects/${projectId}?teamId=${orgId}`, "--scope", orgId],
@@ -65,35 +115,23 @@ async function fetchProductionAlias(
  */
 export async function detectDeployment(
   projectPath: string,
-  options: ProjectDetectionOptions = {},
+  options: VercelProjectOperationOptions = {},
 ): Promise<DeploymentInfo> {
   options.signal?.throwIfAborted();
-  let projectJsonRaw: string;
-  try {
-    projectJsonRaw = await readFile(join(projectPath, ".vercel", "project.json"), "utf8");
-  } catch {
-    return { state: "unlinked" };
-  }
+  const link = await readProjectLink(projectPath);
+  if (link === undefined) return { state: "unlinked" };
 
-  let projectJson: VercelProjectJson;
-  try {
-    projectJson = JSON.parse(projectJsonRaw) as VercelProjectJson;
-  } catch {
-    return { state: "unlinked" };
-  }
-
-  const projectId = typeof projectJson.projectId === "string" ? projectJson.projectId : undefined;
-  const orgId = typeof projectJson.orgId === "string" ? projectJson.orgId : undefined;
-  if (!projectId || !orgId) {
-    return { state: "unlinked" };
-  }
-
-  const productionUrl = await fetchProductionAlias(projectId, orgId, projectPath, options);
+  const productionUrl = await fetchProductionAlias(
+    link.projectId,
+    link.orgId,
+    projectPath,
+    options,
+  );
   options.signal?.throwIfAborted();
   return {
     state: productionUrl ? "deployed" : "linked",
-    projectId,
-    orgId,
+    projectId: link.projectId,
+    orgId: link.orgId,
     productionUrl,
   };
 }
@@ -115,7 +153,7 @@ async function fetchVercelName(
   apiPath: string,
   orgId: string,
   projectPath: string,
-  options: ProjectDetectionOptions,
+  options: VercelProjectOperationOptions,
 ): Promise<string | undefined> {
   const result = await captureVercel(["api", apiPath, "--scope", orgId], {
     cwd: projectPath,
@@ -145,33 +183,23 @@ async function fetchVercelName(
  */
 export async function detectProjectIdentity(
   projectPath: string,
-  options: ProjectDetectionOptions = {},
+  options: VercelProjectOperationOptions = {},
 ): Promise<ProjectIdentity | undefined> {
   options.signal?.throwIfAborted();
-  let projectJsonRaw: string;
-  try {
-    projectJsonRaw = await readFile(join(projectPath, ".vercel", "project.json"), "utf8");
-  } catch {
-    return undefined;
-  }
-  let projectJson: VercelProjectJson;
-  try {
-    projectJson = JSON.parse(projectJsonRaw) as VercelProjectJson;
-  } catch {
-    return undefined;
-  }
-  const projectId = typeof projectJson.projectId === "string" ? projectJson.projectId : undefined;
-  const orgId = typeof projectJson.orgId === "string" ? projectJson.orgId : undefined;
-  if (!projectId || !orgId) return undefined;
+  const link = await readProjectLink(projectPath);
+  if (link === undefined) return undefined;
 
   // Independent lookups; fetched concurrently because this read gates the
   // first paint of every surface that names the link (/model, the dashboard).
   const [projectName, teamName] = await Promise.all([
-    fetchVercelName(`/v9/projects/${projectId}?teamId=${orgId}`, orgId, projectPath, options).then(
-      (name) => name ?? projectId,
-    ),
-    orgId.startsWith("team_")
-      ? fetchVercelName(`/v2/teams/${orgId}`, orgId, projectPath, options)
+    fetchVercelName(
+      `/v9/projects/${link.projectId}?teamId=${link.orgId}`,
+      link.orgId,
+      projectPath,
+      options,
+    ).then((name) => name ?? link.projectId),
+    link.orgId.startsWith("team_")
+      ? fetchVercelName(`/v2/teams/${link.orgId}`, link.orgId, projectPath, options)
       : Promise.resolve(undefined),
   ]);
   options.signal?.throwIfAborted();
@@ -203,7 +231,7 @@ export function projectResolutionFromDeployment(deployment: DeploymentInfo): Pro
  */
 export async function detectProjectResolution(
   projectRoot: string,
-  options: ProjectDetectionOptions = {},
+  options: VercelProjectOperationOptions = {},
 ): Promise<ProjectResolution> {
   return projectResolutionFromDeployment(await detectDeployment(projectRoot, options));
 }

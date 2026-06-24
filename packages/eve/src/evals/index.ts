@@ -16,6 +16,7 @@ export type { InputRequest } from "#runtime/input/types.js";
 export type {
   EveEvalValueMatcher,
   EveEvalToolCallMatchOptions,
+  EveEvalSkillLoadMatchOptions,
   EveEvalSubagentCallMatchOptions,
 } from "#evals/match.js";
 

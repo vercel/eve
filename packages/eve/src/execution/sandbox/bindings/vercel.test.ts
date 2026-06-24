@@ -1,3 +1,5 @@
+import { Readable } from "node:stream";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SandboxTemplateNotProvisionedError } from "#public/definitions/sandbox-backend.js";
@@ -15,8 +17,8 @@ function createMockCommandResult() {
 /*
  * A detached command, as returned by `runCommand({ detached: true })`,
  * is adapted into the `Experimental_SandboxProcess` shape — the adapter
- * drains `logs()`, then awaits `wait()`. This mock yields no log lines
- * and exits 0 so `spawn` and `run` resolve without real I/O.
+ * drains `logs()` alongside `wait()`. This mock yields no log lines and
+ * exits 0 so `spawn` and `run` resolve without real I/O.
  */
 function createMockDetachedCommand() {
   return {
@@ -45,6 +47,7 @@ function createMockSandbox(input: {
       unlink: vi.fn().mockResolvedValue(undefined),
     },
     name: input.name,
+    readFile: vi.fn<(file: { path: string }) => Promise<object | null>>().mockResolvedValue(null),
     runCommand: vi.fn().mockResolvedValue(createMockCommandResult()),
     snapshot: vi.fn().mockResolvedValue({ snapshotId: `${input.name}-snapshot` }),
     status: input.status ?? "running",
@@ -66,6 +69,45 @@ function createTestVercelSandbox(input: Parameters<typeof createVercelSandbox>[0
     createSandbox: async ({ createOptions, sandboxModule }) =>
       await sandboxModule.Sandbox.create(createOptions),
   });
+}
+
+async function createTestVercelSession() {
+  const templateSandbox = createMockSandbox({ name: "template" });
+  const sessionSandbox = createMockSandbox({ name: "session" });
+  const sandboxModule = {
+    Sandbox: {
+      create: vi.fn().mockResolvedValueOnce(templateSandbox).mockResolvedValueOnce(sessionSandbox),
+      get: vi.fn().mockResolvedValue(null),
+    },
+  };
+  const backend = createTestVercelSandbox({
+    loadSandboxModule: async () => sandboxModule as never,
+  });
+
+  await backend.prewarm({
+    runtimeContext: { appRoot: "/tmp/test-app-root" },
+    seedFiles: [],
+    templateKey: "template-key",
+  });
+  const handle = await backend.create({
+    runtimeContext: { appRoot: "/tmp/test-app-root" },
+    sessionKey: "session-key",
+    templateKey: "template-key",
+  });
+
+  return { handle, sessionSandbox };
+}
+
+async function consumeWebStream(stream: ReadableStream<Uint8Array>): Promise<string> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  while (true) {
+    const result = await reader.read();
+    if (result.done) {
+      return Buffer.concat(chunks).toString("utf8");
+    }
+    chunks.push(result.value);
+  }
 }
 
 beforeEach(() => {
@@ -1358,6 +1400,60 @@ describe("createVercelSandbox", () => {
     );
     expect(handle.session.resolvePath("python-analysis/run.py")).toBe(
       "/workspace/python-analysis/run.py",
+    );
+  });
+
+  it("converts Vercel Node file streams to the public Web stream contract", async () => {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+    sessionSandbox.readFile.mockResolvedValueOnce(
+      Readable.from([Buffer.from("hello "), Buffer.from("sandbox")]),
+    );
+
+    const stream = await handle.session.readFile({ path: "/workspace/message.txt" });
+
+    expect(stream).not.toBeNull();
+    expect(await consumeWebStream(stream!)).toBe("hello sandbox");
+    expect(sessionSandbox.readFile).toHaveBeenCalledWith({ path: "/workspace/message.txt" });
+  });
+
+  it("passes existing Web file streams through unchanged", async () => {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+    const providerStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(Buffer.from("web stream"));
+        controller.close();
+      },
+    });
+    sessionSandbox.readFile.mockResolvedValueOnce(providerStream);
+
+    const stream = await handle.session.readFile({ path: "/workspace/message.txt" });
+
+    expect(stream).toBe(providerStream);
+    expect(await consumeWebStream(stream!)).toBe("web stream");
+  });
+
+  it("preserves missing Vercel files as null", async () => {
+    const { handle } = await createTestVercelSession();
+
+    await expect(handle.session.readFile({ path: "/workspace/missing.txt" })).resolves.toBeNull();
+  });
+
+  it("propagates Vercel file-read errors unchanged", async () => {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+    const providerError = new Error("provider read failed");
+    sessionSandbox.readFile.mockRejectedValueOnce(providerError);
+
+    await expect(handle.session.readFile({ path: "/workspace/message.txt" })).rejects.toBe(
+      providerError,
+    );
+  });
+
+  it("rejects unsupported Vercel file-stream values", async () => {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+    sessionSandbox.readFile.mockResolvedValueOnce({ readable: true });
+
+    await expect(handle.session.readFile({ path: "/workspace/message.txt" })).rejects.toThrow(
+      "Vercel Sandbox returned an unsupported file stream.",
     );
   });
 

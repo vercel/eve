@@ -3,13 +3,46 @@ import { describe, expect, it } from "vitest";
 import {
   formatCompactTokenCount,
   formatTokenFlow,
+  isIncompletePaste,
   nextKey,
   parseKey,
+  sanitizePastedText,
+  stripPasteStart,
   stripPromptControlCharacters,
   takeUntil,
 } from "./stream-format.js";
 
 const FLOW_GLYPHS = { arrowUp: "↑", arrowDown: "↓" };
+
+describe("sanitizePastedText", () => {
+  it("keeps newlines and tabs but drops other control characters and ESC", () => {
+    expect(sanitizePastedText("a\tb\nc")).toBe("a\tb\nc");
+    expect(sanitizePastedText("a\x1b[31mb\x07c")).toBe("a[31mbc");
+  });
+
+  it("normalizes CRLF and lone CR to LF", () => {
+    expect(sanitizePastedText("a\r\nb\rc")).toBe("a\nb\nc");
+  });
+
+  it("drops C1 control bytes that terminals read as control introducers", () => {
+    // 0x9b is single-byte CSI, 0x9d is OSC: leaving them in would let a paste
+    // smuggle in an escape sequence.
+    expect(sanitizePastedText("abc")).toBe("abc");
+  });
+});
+
+describe("incomplete bracketed paste", () => {
+  it("flags a paste whose end marker hasn't arrived, and clears once it has", () => {
+    expect(isIncompletePaste("\x1b[200~partial")).toBe(true);
+    expect(isIncompletePaste("\x1b[200~done\x1b[201~")).toBe(false);
+    expect(isIncompletePaste("plain text")).toBe(false);
+  });
+
+  it("strips the start marker so recovery can read the buffered payload", () => {
+    expect(stripPasteStart("\x1b[200~oops")).toBe("oops");
+    expect(stripPasteStart("no marker")).toBe("no marker");
+  });
+});
 
 describe("formatCompactTokenCount", () => {
   it("keeps small counts plain and abbreviates with one trimmed decimal", () => {
@@ -57,11 +90,55 @@ describe("nextKey", () => {
   });
 
   it("takes a printable run as a single character token", () => {
-    expect(nextKey("hello")).toEqual({ key: { type: "character", value: "hello" }, consumed: 5 });
+    expect(nextKey("hello")).toEqual({
+      key: { type: "text", value: "hello", framing: "unframed" },
+      consumed: 5,
+    });
+  });
+
+  it("decodes a bracketed paste as one token, preserving newlines", () => {
+    const buffer = "\x1b[200~first\nsecond\x1b[201~";
+    expect(nextKey(buffer)).toEqual({
+      key: { type: "text", value: "first\nsecond", framing: "bracketed-paste" },
+      consumed: buffer.length,
+    });
+  });
+
+  it("sanitizes the paste payload as it decodes, not just at insert time", () => {
+    // A hostile frame carrying ESC and a bell must come out stripped, pinning
+    // the sanitize call on the decode path itself.
+    const buffer = "\x1b[200~a\x1b[31mb\x07c\x1b[201~";
+    expect(nextKey(buffer)).toEqual({
+      key: { type: "text", value: "a[31mbc", framing: "bracketed-paste" },
+      consumed: buffer.length,
+    });
+  });
+
+  it("waits for the bracketed-paste end marker before decoding", () => {
+    expect(nextKey("\x1b[200~still arriving")).toEqual({ consumed: 0, incomplete: true });
+  });
+
+  it("re-tokenizes input that follows a bracketed paste", () => {
+    const buffer = "\x1b[200~hi\x1b[201~\r";
+    const token = nextKey(buffer);
+    expect(token).toEqual({
+      key: { type: "text", value: "hi", framing: "bracketed-paste" },
+      consumed: buffer.length - 1,
+    });
+    expect(nextKey(buffer.slice(token.consumed))).toEqual({ key: { type: "enter" }, consumed: 1 });
+  });
+
+  it("decodes Shift+Enter as a newline while a bare Enter still submits", () => {
+    expect(nextKey("\x1b[27;2;13~")).toEqual({ key: { type: "newline" }, consumed: 10 });
+    expect(nextKey("\x1b[13;2u")).toEqual({ key: { type: "newline" }, consumed: 7 });
+    expect(nextKey("\r")).toEqual({ key: { type: "enter" }, consumed: 1 });
   });
 
   it("stops a printable run at a control byte", () => {
-    expect(nextKey("ab\rcd")).toEqual({ key: { type: "character", value: "ab" }, consumed: 2 });
+    expect(nextKey("ab\rcd")).toEqual({
+      key: { type: "text", value: "ab", framing: "unframed" },
+      consumed: 2,
+    });
   });
 
   it("decodes a lone control byte", () => {
@@ -72,7 +149,11 @@ describe("nextKey", () => {
 
 describe("parseKey", () => {
   it("strips control characters from pasted/batched input", () => {
-    expect(parseKey(Buffer.from("hi\tthere"))).toEqual({ type: "character", value: "hithere" });
+    expect(parseKey(Buffer.from("hi\tthere"))).toEqual({
+      type: "text",
+      value: "hithere",
+      framing: "unframed",
+    });
     expect(parseKey(Buffer.from("\r"))).toEqual({ type: "enter" });
   });
 });

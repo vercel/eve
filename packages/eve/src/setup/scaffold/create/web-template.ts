@@ -80,7 +80,7 @@ export const WEB_APP_TEMPLATE_PACKAGE_JSON = {
     build: "next build",
     dev: "next dev",
     start: "next start",
-    typecheck: "tsgo --noEmit -p tsconfig.json",
+    typecheck: "tsc --noEmit -p tsconfig.json",
   },
   dependencies: {
     "@radix-ui/react-use-controllable-state": "1.2.2",
@@ -115,5 +115,6 @@ export const WEB_APP_TEMPLATE_PACKAGE_JSON = {
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    typescript: "6.0.3",
   },
 } as const;

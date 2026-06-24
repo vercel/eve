@@ -195,6 +195,20 @@ function typeOnlyFixtures(): void {
       return { ok: true, typedCity };
     },
   });
+
+  defineTool({
+    description: "Removed top-level tool auth.",
+    inputSchema: { type: "object" },
+    // @ts-expect-error Tool auth providers must be passed inline to ctx.getToken(provider).
+    auth: {
+      async getToken() {
+        return { token: "static" };
+      },
+    },
+    execute() {
+      return null;
+    },
+  });
 }
 
 void typeOnlyFixtures;

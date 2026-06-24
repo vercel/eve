@@ -6,7 +6,6 @@ import { expectFunction, expectObjectRecord } from "#internal/authored-module.js
 import { registerDefinitionSource, stampDefinitionKey } from "#public/tool-result-narrowing.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "#runtime/resolve-helpers.js";
-import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 
 /**
@@ -89,8 +88,7 @@ type OptionalResolvedFields = {
     | "needsApproval"
     | "toModelOutput"
     | "inputStandardSchema"
-    | "outputStandardSchema"
-    | "auth"]?: ResolvedToolDefinition[K];
+    | "outputStandardSchema"]?: ResolvedToolDefinition[K];
 };
 
 /**
@@ -124,13 +122,6 @@ function extractOptionalHooks(
 
   if (record.outputSchema !== undefined && isFlexibleSchema(record.outputSchema)) {
     optional.outputStandardSchema = record.outputSchema;
-  }
-
-  if (record.auth !== undefined) {
-    optional.auth = normalizeAuthorizationSpec(
-      record.auth,
-      `${describe(definition, "to provide a valid auth object")}:`,
-    );
   }
 
   return optional;

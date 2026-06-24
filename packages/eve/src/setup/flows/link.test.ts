@@ -26,9 +26,19 @@ function createBoxDeps() {
       validateTeam: vi.fn<ResolveProvisioningDeps["validateTeam"]>(async () => {}),
       resolveTeam: vi.fn<ResolveProvisioningDeps["resolveTeam"]>(async () => "acme"),
       pickTeam: vi.fn<ResolveProvisioningDeps["pickTeam"]>(async () => "acme"),
+      resolveProjectByNameOrId: vi.fn<ResolveProvisioningDeps["resolveProjectByNameOrId"]>(
+        async () => ({
+          projectId: "prj_existing",
+          projectName: "existing-project",
+        }),
+      ),
       pickProject: vi.fn<ResolveProvisioningDeps["pickProject"]>(async () => ({
-        exists: true,
-        project: "weather-app",
+        kind: "existing",
+        project: {
+          projectId: "prj_1",
+          projectName: "weather-app",
+        },
+        team: "acme",
       })),
       pickNewProjectName: vi.fn<ResolveProvisioningDeps["pickNewProjectName"]>(
         async () => "my-agent",
@@ -38,14 +48,13 @@ function createBoxDeps() {
       >(async () => {}),
     },
     linkProject: {
-      linkProject: vi.fn<LinkProjectDeps["linkProject"]>(async () => true),
+      linkProject: vi.fn<LinkProjectDeps["linkProject"]>(async () => ({
+        projectId: "prj_1",
+        projectName: "weather-app",
+      })),
       detectProjectResolution: vi.fn<LinkProjectDeps["detectProjectResolution"]>(async () => ({
         kind: "linked",
         projectId: "prj_1",
-      })),
-      resolveProjectByNameOrId: vi.fn<LinkProjectDeps["resolveProjectByNameOrId"]>(async () => ({
-        id: "prj_1",
-        name: "weather-app",
       })),
       unresolvedProject: vi.fn<LinkProjectDeps["unresolvedProject"]>(() => ({
         kind: "unresolved",

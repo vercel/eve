@@ -31,6 +31,14 @@ describe("isVercelAuthChallenge", () => {
     expect(isVercelAuthChallenge({ body: VERCEL_SSO_CHALLENGE_BODY, status: 401 })).toBe(true);
   });
 
+  it("requires HTTP 401 and the complete Vercel challenge signature", () => {
+    expect(isVercelAuthChallenge(new ClientError(500, VERCEL_SSO_CHALLENGE_BODY))).toBe(false);
+    expect(
+      isVercelAuthChallenge(new ClientError(401, "<title>Authentication Required</title>")),
+    ).toBe(false);
+    expect(isVercelAuthChallenge({ body: VERCEL_SSO_CHALLENGE_BODY })).toBe(false);
+  });
+
   it("returns false for non-error inputs", () => {
     expect(isVercelAuthChallenge(undefined)).toBe(false);
     expect(isVercelAuthChallenge(null)).toBe(false);
@@ -79,5 +87,32 @@ describe("formatVercelAuthChallengeMessage", () => {
 
     expect(message).not.toContain("<");
     expect(message).not.toContain("doctype");
+  });
+
+  it("includes invalid local OIDC claims in the repair context", () => {
+    const message = formatVercelAuthChallengeMessage({
+      serverUrl: "https://example.vercel.app",
+      oidcTokenFailure: {
+        kind: "invalid-claims",
+        invalidClaims: ["owner_id", "project_id"],
+      },
+    });
+
+    expect(message).toContain("invalid claims");
+    expect(message).toContain("owner_id");
+    expect(message).toContain("project_id");
+  });
+
+  it("identifies the claims that do not match the resolved target", () => {
+    const message = formatVercelAuthChallengeMessage({
+      serverUrl: "https://example.vercel.app",
+      oidcTokenFailure: {
+        kind: "target-mismatch",
+        mismatchedClaims: ["owner_id", "project_id"],
+      },
+    });
+
+    expect(message).toContain("owner_id");
+    expect(message).toContain("project_id");
   });
 });
