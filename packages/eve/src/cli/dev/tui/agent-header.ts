@@ -7,7 +7,6 @@
  */
 
 import type { AgentInfoResult } from "#client/index.js";
-import { EVE_BETA_TERMS_URL } from "#cli/banner.js";
 import type { Theme } from "./theme.js";
 import { truncate } from "./tool-format.js";
 
@@ -53,11 +52,6 @@ export function buildAgentHeader(input: AgentHeaderInput): string[] {
   const lines: string[] = [];
   const brand = c.bold("eve");
   lines.push(` ${brand} ${c.dim(truncate(name, Math.max(8, width - 8)))}`);
-  lines.push(
-    ` ${c.dim(
-      truncate(`eve is currently in preview: ${EVE_BETA_TERMS_URL}`, Math.max(8, width - 2)),
-    )}`,
-  );
 
   if (info && (info.diagnostics.discoveryErrors > 0 || info.diagnostics.discoveryWarnings > 0)) {
     const parts: string[] = [];

@@ -12,7 +12,7 @@ Important naming note:
 
 ## Legal and safeguards
 
-eve is currently a preview and subject to the Vercel beta terms; the framework, APIs, documentation, and behavior may change before general availability.
+eve is in preview; the framework, APIs, documentation, and behavior may change before general availability.
 
 As the deployer, it is your responsibility to ensure your agent complies with applicable laws.
 

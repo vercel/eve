@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { AgentInfoResult, AgentInfoToolEntry } from "#client/index.js";
 
 import { AGENT_HEADER_TIPS, buildAgentHeader, pickAgentHeaderTip } from "./agent-header.js";
-import { EVE_BETA_TERMS_URL } from "#cli/banner.js";
 import { createTheme } from "./theme.js";
 
 const FRAMEWORK_TOOL: AgentInfoToolEntry = {
@@ -112,45 +111,26 @@ const INFO: AgentInfoResult = {
 
 describe("buildAgentHeader", () => {
   const theme = createTheme({ color: false, unicode: false });
-  const previewLine = ` eve is currently in preview: ${EVE_BETA_TERMS_URL}`;
 
-  it("renders the brand line with the agent name and preview label", () => {
+  it("renders the brand line with the agent name", () => {
     const lines = buildAgentHeader({ name: "agent-subagents", info: INFO, theme, width: 120 });
 
-    expect(lines).toEqual([" eve agent-subagents", previewLine]);
+    expect(lines).toEqual([" eve agent-subagents"]);
   });
 
-  it("renders the same brand and preview lines when info is unavailable", () => {
+  it("renders just the brand line when info is unavailable", () => {
     expect(buildAgentHeader({ name: "weather-agent", theme, width: 120 })).toEqual([
       " eve weather-agent",
-      previewLine,
     ]);
   });
 
   it("renders the tip line for local sessions only", () => {
     const tip = AGENT_HEADER_TIPS[0]!;
     const local = buildAgentHeader({ name: "weather-agent", info: INFO, theme, width: 120, tip });
-    expect(local).toEqual([" eve weather-agent", previewLine, ` ${tip}`]);
+    expect(local).toEqual([" eve weather-agent", ` ${tip}`]);
 
     const remote = buildAgentHeader({ name: "weather-agent", info: INFO, theme, width: 120 });
     expect(remote.join("\n")).not.toContain("/channels");
-  });
-
-  it("keeps the preview URL visible and plain on a color terminal (no OSC 8 escape)", () => {
-    const colorTheme = createTheme({ color: true, unicode: false });
-    const lines = buildAgentHeader({
-      name: "weather-agent",
-      info: INFO,
-      theme: colorTheme,
-      width: 120,
-    });
-    const preview = lines.find((line) => line.includes("eve is currently in preview"))!;
-
-    // The bare URL stays visible so the terminal's own URL matcher makes it
-    // ⌘/ctrl-clickable. OSC 8 explicit hyperlinks are deliberately avoided —
-    // their click handling is unreliable (e.g. Ghostty bug #11907).
-    expect(preview).toContain(EVE_BETA_TERMS_URL);
-    expect(preview).not.toContain("\x1b]8;;");
   });
 
   it("keeps the discovery-diagnostics line when the compiler reported problems", () => {
