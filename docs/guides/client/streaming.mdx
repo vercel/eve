@@ -76,6 +76,12 @@ The most common UI events are:
 
 For the complete event table, see [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming).
 
+## Authorization pauses
+
+`authorization.required` is different from the normal `session.waiting` boundary. It means a connection needs OAuth or another authorization challenge before the parked turn can continue. Chat UIs should render the authorization prompt, disable ordinary text input for that session, and persist the event with the rest of the chat history.
+
+If you support refresh while an authorization prompt is pending, keep the session cursor from the started session and rehydrate the saved events on load. Do not treat a missing `session.waiting` after `authorization.required` as a finished conversation; the callback or a structured decline should resume the same eve session.
+
 ## Reconnection
 
 The client reconnects after transient stream disconnects. It resumes from the number of events already consumed in the current session:

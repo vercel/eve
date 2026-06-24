@@ -39,7 +39,7 @@ Stream that session's events as newline-delimited JSON (`application/x-ndjson; c
 ```bash
 curl -N https://<deployment>/eve/v1/session/ses_01h.../stream
 # {"type":"turn.started",...}
-# {"type":"text.delta","delta":"It is "}
+# {"type":"message.appended","data":{"messageDelta":"It is ",...}}
 # {"type":"message.completed",...}
 ```
 
