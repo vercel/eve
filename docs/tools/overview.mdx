@@ -77,6 +77,8 @@ toModelOutput(output) {
 
 `toModelOutput` receives the full, typed `execute` return and only affects the model. Channel event handlers and hooks still get the full output on `action.result`, so a channel can render rich platform output (Slack Block Kit, say) the model never sees. Return `{ type: "text", value }` for a summary, or `{ type: "json", value }` for a smaller object.
 
+Tool outputs must be JSON-serializable. Return plain objects, arrays, strings, numbers, booleans, or `null`; convert values like `Date`, `Map`, `Set`, `NaN`, and cyclic objects before returning them from `execute` or from a `{ type: "json" }` `toModelOutput`.
+
 Do not return secrets, credentials, unnecessary personal data, or unbounded sensitive content from tools. Filter, minimize, and redact tool outputs before returning them.
 
 ## What to read next

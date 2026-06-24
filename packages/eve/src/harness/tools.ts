@@ -5,6 +5,7 @@ import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
 import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.js";
 import { isObject } from "#shared/guards.js";
+import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/provider-tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
@@ -16,7 +17,12 @@ import {
   modelFacingAuthorizationOutput,
 } from "#harness/authorization.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
+import { withToolOutputSerializationError } from "#harness/tool-output-serialization.js";
 import { isCodeModeToolExecutionOptions } from "#runtime/framework-tools/code-mode-connection-auth.js";
+
+type ToolModelOutputValue =
+  | { readonly type: "json"; readonly value: JSONValue }
+  | { readonly type: "text"; readonly value: string };
 
 /**
  * Builds an AI SDK `ToolSet` from unified harness tool definitions.
@@ -62,7 +68,13 @@ export function buildToolSet(input: {
       outputSchema: definition.outputSchema,
       ...(definition.execute !== undefined
         ? {
-            toModelOutput: ({ output }: { output: unknown }) => {
+            toModelOutput: async ({
+              output,
+              toolCallId,
+            }: {
+              readonly output: unknown;
+              readonly toolCallId?: string;
+            }) => {
               if (isAuthorizationPendingModelOutput(output)) {
                 return {
                   type: "text" as const,
@@ -70,22 +82,36 @@ export function buildToolSet(input: {
                 };
               }
               if (authorToModelOutput !== undefined) {
-                return authorToModelOutput(output) as
-                  | { type: "text"; value: string }
-                  | { type: "json"; value: JSONValue };
+                return normalizeToolModelOutput({
+                  output: await authorToModelOutput(output),
+                  toolCallId,
+                  toolName: definition.name,
+                });
               }
               if (typeof output === "string") {
                 return { type: "text" as const, value: output };
               }
-              return { type: "json" as const, value: (output ?? null) as JSONValue };
+              return normalizeToolModelOutput({
+                output: { type: "json" as const, value: output ?? null },
+                toolCallId,
+                toolName: definition.name,
+              });
             },
           }
         : authorToModelOutput !== undefined
           ? {
-              toModelOutput: ({ output }: { output: unknown }) =>
-                authorToModelOutput(output) as
-                  | { type: "text"; value: string }
-                  | { type: "json"; value: JSONValue },
+              toModelOutput: async ({
+                output,
+                toolCallId,
+              }: {
+                readonly output: unknown;
+                readonly toolCallId?: string;
+              }) =>
+                normalizeToolModelOutput({
+                  output: await authorToModelOutput(output),
+                  toolCallId,
+                  toolName: definition.name,
+                }),
             }
           : {}),
     });
@@ -138,11 +164,75 @@ export function wrapToolExecute(
   if (execute === undefined) return undefined;
   return async (input, options) => {
     const output = await execute(input);
-    if (!isAuthorizationSignal(output)) return output;
-    if (isCodeModeToolExecutionOptions(options)) return output;
-    stashToolInterrupt(loadContext(), options.toolCallId, output);
-    return modelFacingAuthorizationOutput(output);
+    if (isAuthorizationSignal(output)) {
+      if (isCodeModeToolExecutionOptions(options)) return output;
+      stashToolInterrupt(loadContext(), options.toolCallId, output);
+      return modelFacingAuthorizationOutput(output);
+    }
+    return normalizeToolJsonOutput({
+      boundary: "execute",
+      output,
+      toolCallId: options.toolCallId,
+      toolName: definition.name,
+    });
   };
+}
+
+function normalizeToolJsonOutput(input: {
+  readonly boundary: "execute" | "toModelOutput";
+  readonly output: unknown;
+  readonly toolCallId?: string;
+  readonly toolName: string;
+}): JsonValue {
+  const candidate = input.output === undefined ? null : input.output;
+
+  return withToolOutputSerializationError(input, () => {
+    parseJsonValue(candidate);
+    return candidate as JsonValue;
+  });
+}
+
+function normalizeToolModelOutput(input: {
+  readonly output: unknown;
+  readonly toolCallId?: string;
+  readonly toolName: string;
+}): ToolModelOutputValue {
+  return withToolOutputSerializationError(
+    {
+      boundary: "toModelOutput",
+      toolCallId: input.toolCallId,
+      toolName: input.toolName,
+    },
+    () => {
+      if (input.output === null || typeof input.output !== "object") {
+        throw new TypeError("Expected a tool model output object.");
+      }
+
+      const output = input.output as { readonly type?: unknown; readonly value?: unknown };
+
+      if (output.type === "text") {
+        if (typeof output.value !== "string") {
+          throw new TypeError('Expected text model output to include a string "value".');
+        }
+
+        return { type: "text", value: output.value };
+      }
+
+      if (output.type === "json") {
+        return {
+          type: "json",
+          value: normalizeToolJsonOutput({
+            boundary: "toModelOutput",
+            output: output.value,
+            toolCallId: input.toolCallId,
+            toolName: input.toolName,
+          }) as JSONValue,
+        };
+      }
+
+      throw new TypeError('Expected tool model output type to be "text" or "json".');
+    },
+  );
 }
 
 /**
