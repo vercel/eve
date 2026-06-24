@@ -1506,23 +1506,23 @@ async function handleStepResult(input: {
   // so the prompt prefix stays stable and the provider's prompt cache keeps
   // hitting across steps. Compaction is the sole mechanism that ever rewrites
   // history, and it runs before the model call (see `maybeCompact`).
-  const hasProviderExecutedToolResult = (result.toolResults ?? []).some(
-    (toolResult) => toolResult.providerExecuted === true,
+  const providerExecutedToolCallIds = new Set(
+    (result.toolResults ?? [])
+      .filter((toolResult) => toolResult.providerExecuted === true)
+      .map((toolResult) => toolResult.toolCallId),
   );
-  const continuationMessages: ModelMessage[] = [...responseMessages];
-  if (stepOutput === null && hasProviderExecutedToolResult) {
-    continuationMessages.push({
-      role: "tool",
-      content: (result.toolResults ?? [])
-        .filter((toolResult) => toolResult.providerExecuted === true)
-        .map((toolResult) => ({
-          type: "tool-result" as const,
-          toolCallId: toolResult.toolCallId,
-          toolName: toolResult.toolName,
-          output: { type: "json" as const, value: toolResult.output },
-        })),
-    });
-  }
+  const continuationMessages: ModelMessage[] = responseMessages.map((message) =>
+    message.role === "assistant" && Array.isArray(message.content)
+      ? {
+          ...message,
+          content: message.content.map((part) =>
+            part.type === "tool-call" && providerExecutedToolCallIds.has(part.toolCallId)
+              ? { ...part, providerExecuted: true }
+              : part,
+          ),
+        }
+      : message,
+  );
   const updatedHistory: ModelMessage[] = [...promptMessages, ...continuationMessages];
   let nextSession: HarnessSession = { ...baseSession, history: updatedHistory };
 
@@ -1534,7 +1534,9 @@ async function handleStepResult(input: {
 
   const continueLoop =
     !calledFinalOutput &&
-    (continuationMessages.at(-1)?.role === "tool" || hasDeferredStepInput(nextSession));
+    (continuationMessages.at(-1)?.role === "tool" ||
+      hasDeferredStepInput(nextSession) ||
+      (stepOutput === null && providerExecutedToolCallIds.size > 0));
   if (continueLoop) {
     if (emit) {
       emissionState = advanceStep(emissionState);
