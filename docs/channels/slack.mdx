@@ -103,7 +103,7 @@ export default slackChannel({
 
 ### Human-in-the-loop (HITL)
 
-HITL renders as Slack buttons and selects. When the user responds, the parked session (paused awaiting input) resumes.
+HITL renders as Slack buttons and selects. Each prompt is bound to the verified Slack actor who caused it, independently of any custom session auth returned by `onAppMention` or `onDirectMessage`. A click from another user is rejected privately and does not resume the parked session. Prompts posted before responder binding was enabled cannot be answered after upgrading; start a new request to render a bound prompt.
 
 Authorization prompts split public status from private credentials. A sign-in challenge (OAuth URL, device code) is a credential. Anyone who completes it binds their identity to the session's connection. The default `authorization.required` handler posts a public, link-free status in the thread, delivers the actual challenge ephemerally to the triggering user, device code included, and then updates that public status when `authorization.completed` fires. The handler receives a private-delivery context with `postEphemeral`, `postDirectMessage` (needs the `im:write` scope), and `state`. There is, intentionally, no public `post` and no raw API access.
 

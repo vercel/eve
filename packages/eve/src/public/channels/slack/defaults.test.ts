@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import { defaultEvents } from "#public/channels/slack/defaults.js";
+import { defaultEvents, defaultInputRequestedHandler } from "#public/channels/slack/defaults.js";
 import type { SlackChannelState, SlackEventContext } from "#public/channels/slack/slackChannel.js";
 
 const sessionCtx = {} as SessionContext;
@@ -35,6 +35,38 @@ function authRequiredEvent(
     turnId: "turn_0",
   };
 }
+
+function inputRequestedEvent() {
+  return {
+    requests: [
+      {
+        action: {
+          callId: "call-1",
+          input: {},
+          kind: "tool-call" as const,
+          toolName: "ask",
+        },
+        prompt: "Question?",
+        requestId: "request-1",
+      },
+    ],
+    sequence: 0,
+    stepIndex: 0,
+    turnId: "turn-1",
+  };
+}
+
+describe("defaultInputRequestedHandler", () => {
+  it("posts a visible diagnostic when no Slack actor is bound to the session", async () => {
+    const { channel, post } = buildChannelStub({ triggeringUserId: null });
+
+    await defaultInputRequestedHandler()(inputRequestedEvent(), channel, sessionCtx);
+
+    expect(post).toHaveBeenCalledWith(
+      "I can't collect this response because no Slack user is bound to this session. Start a new request from Slack to continue.",
+    );
+  });
+});
 
 describe("defaultEvents authorization.required", () => {
   it("posts a public status and delivers the challenge ephemerally to the triggering user", async () => {

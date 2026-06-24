@@ -113,6 +113,21 @@ describe("createSendFn", () => {
     });
   });
 
+  it("preserves adapter-owned fields on deliveries", async () => {
+    const runtime = createRuntime(null);
+    vi.mocked(runtime.deliver).mockResolvedValue({ sessionId: "existing-session-id" });
+    const send = createSendFn(runtime, ADAPTER, "test");
+    const payload = { message: "hello", slackTriggeringUserId: "U_LATEST" };
+
+    await send(payload, { auth: null, continuationToken: "token" });
+
+    expect(runtime.deliver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ slackTriggeringUserId: "U_LATEST" }),
+      }),
+    );
+  });
+
   it("forwards outputSchema through deliver and run payloads", async () => {
     const outputSchema = {
       properties: { title: { type: "string" } },

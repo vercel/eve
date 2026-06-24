@@ -31,6 +31,7 @@ export function createSendFn<TState = undefined>(
       inputResponses,
       context,
       outputSchema,
+      ...adapterPayload
     } = normalizeSendInput(input);
     const message = serializeUrlFilePartsInMessage(rawMessage);
 
@@ -38,7 +39,7 @@ export function createSendFn<TState = undefined>(
       const { sessionId } = await runtime.deliver({
         auth,
         continuationToken,
-        payload: { inputResponses, message, context, outputSchema },
+        payload: { ...adapterPayload, inputResponses, message, context, outputSchema },
       });
 
       return createSession(sessionId, rawToken, runtime);

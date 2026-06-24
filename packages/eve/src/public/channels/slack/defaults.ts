@@ -22,6 +22,8 @@ import type {
 const log = createLogger("slack.defaults");
 const REASONING_TYPING_REFRESH_INTERVAL_MS = 5_000;
 const REASONING_TYPING_MIN_PROGRESS_CHARS = 4;
+const UNBOUND_HITL_RESPONSE =
+  "I can't collect this response because no Slack user is bound to this session. Start a new request from Slack to continue.";
 
 /**
  * Workspace-scoped projection of the Slack actor that produced
@@ -96,9 +98,16 @@ function firstNonEmptyLine(text: string): string | undefined {
 export function defaultInputRequestedHandler(): NonNullable<SlackChannelEvents["input.requested"]> {
   return async (data, channel, _ctx) => {
     if (data.requests.length === 0) return;
+    const responderUserId = channel.state.triggeringUserId;
+    if (typeof responderUserId !== "string" || responderUserId.length === 0) {
+      await channel.thread.post(UNBOUND_HITL_RESPONSE);
+      return;
+    }
     const promptText = truncateMessageText(data.requests.map((r) => r.prompt).join("\n"));
     await channel.thread.post({
-      blocks: data.requests.flatMap(renderInputRequestBlocks),
+      blocks: data.requests.flatMap((request) =>
+        renderInputRequestBlocks(request, responderUserId),
+      ),
       text: promptText,
     });
   };
