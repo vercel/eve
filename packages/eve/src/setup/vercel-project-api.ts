@@ -7,7 +7,8 @@ import type { VercelProjectOperationOptions } from "./project-resolution.js";
 
 export type { VercelProjectOperationOptions };
 
-const PROJECT_LIST_TIMEOUT_MS = 15_000;
+/** Shared deadline for Vercel project list and exact-lookup requests. */
+export const VERCEL_PROJECT_REQUEST_TIMEOUT_MS = 15_000;
 
 const VercelTeamListEntrySchema = z.object({
   name: z.string(),
@@ -23,6 +24,12 @@ const VercelProjectListEntrySchema = z.object({
 });
 
 export type VercelProjectListEntry = z.infer<typeof VercelProjectListEntrySchema>;
+
+/** One ranked Vercel project search page and its optional continuation cursor. */
+export interface VercelProjectSearchPage {
+  readonly projects: VercelProjectListEntry[];
+  readonly next?: number;
+}
 
 const VercelPaginationSchema = z.object({
   next: z.number().int().nonnegative().nullable().optional(),
@@ -133,7 +140,7 @@ async function fetchProjectPage(
   const result = await captureVercel(args, {
     cwd: projectRoot,
     signal: options.signal,
-    timeoutMs: PROJECT_LIST_TIMEOUT_MS,
+    timeoutMs: VERCEL_PROJECT_REQUEST_TIMEOUT_MS,
   });
   options.signal?.throwIfAborted();
   if (!result.ok) {
@@ -154,18 +161,35 @@ export async function listRecentProjects(
   return (await fetchProjectPage(projectRoot, team, options)).items;
 }
 
-/** Searches every matching Vercel project page in one account scope. */
+function projectSearchRank(project: VercelProjectListEntry, query: string): number {
+  const name = project.name.toLowerCase();
+  const normalizedQuery = query.toLowerCase();
+  if (name === normalizedQuery) return 0;
+  if (name.startsWith(normalizedQuery)) return 1;
+  return 2;
+}
+
+/** Ranks exact and prefix project-name matches ahead of substring matches. */
+export function rankProjectSearchResults(
+  projects: readonly VercelProjectListEntry[],
+  query: string,
+): VercelProjectListEntry[] {
+  const search = query.trim();
+  return [...projects].sort(
+    (left, right) => projectSearchRank(left, search) - projectSearchRank(right, search),
+  );
+}
+
+/** Searches one ranked Vercel project page and retains its continuation cursor. */
 export async function searchProjects(
   projectRoot: string,
   team: string,
   query: string,
-  options: VercelProjectOperationOptions = {},
-): Promise<VercelProjectListEntry[]> {
+  options: VercelProjectOperationOptions & { readonly next?: number } = {},
+): Promise<VercelProjectSearchPage> {
   const search = query.trim();
   if (search.length === 0) throw new Error("Project search query cannot be empty.");
-  return drainPages(
-    `project search in ${team}`,
-    (project) => project.id,
-    (next) => fetchProjectPage(projectRoot, team, { ...options, search, next }),
-  );
+  const page = await fetchProjectPage(projectRoot, team, { ...options, search });
+  const projects = rankProjectSearchResults(page.items, search);
+  return page.next === undefined ? { projects } : { projects, next: page.next };
 }

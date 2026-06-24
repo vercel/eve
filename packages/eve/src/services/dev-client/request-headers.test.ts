@@ -33,6 +33,21 @@ describe("resolveDevelopmentOidcToken", () => {
     });
   });
 
+  it("forces a refresh for an explicitly selected project", async () => {
+    const expected = token({ owner_id: target.ownerId, project_id: target.projectId });
+    vi.mocked(getVercelOidcToken).mockResolvedValue(expected);
+
+    await expect(resolveDevelopmentOidcToken({ ...target, forceRefresh: true })).resolves.toEqual({
+      kind: "resolved",
+      token: expected,
+    });
+    expect(getVercelOidcToken).toHaveBeenCalledWith({
+      team: target.ownerId,
+      project: target.projectId,
+      expirationBufferMs: Number.MAX_SAFE_INTEGER,
+    });
+  });
+
   it("reports a token minted for a different project", async () => {
     vi.mocked(getVercelOidcToken).mockResolvedValue(
       token({ owner_id: target.ownerId, project_id: "prj_other" }),

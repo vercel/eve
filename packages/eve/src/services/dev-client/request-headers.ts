@@ -11,6 +11,8 @@ const VercelOidcClaimsSchema = z.object({
 export interface DevelopmentOidcTarget {
   readonly ownerId: string;
   readonly projectId: string;
+  /** Ignore an ambient token and ask Vercel for this exact project. */
+  readonly forceRefresh?: boolean;
 }
 
 type VercelOidcClaimName = keyof z.infer<typeof VercelOidcClaimsSchema>;
@@ -46,9 +48,12 @@ export async function resolveDevelopmentOidcToken(
   input: DevelopmentOidcTarget,
 ): Promise<DevelopmentOidcTokenResolution> {
   try {
-    const token = (
-      await getVercelOidcToken({ team: input.ownerId, project: input.projectId })
-    ).trim();
+    const options: NonNullable<Parameters<typeof getVercelOidcToken>[0]> = {
+      team: input.ownerId,
+      project: input.projectId,
+    };
+    if (input.forceRefresh === true) options.expirationBufferMs = Number.MAX_SAFE_INTEGER;
+    const token = (await getVercelOidcToken(options)).trim();
     return validateDevelopmentOidcToken(token, input);
   } catch (error) {
     return { kind: "resolution-failed", message: toErrorMessage(error) };

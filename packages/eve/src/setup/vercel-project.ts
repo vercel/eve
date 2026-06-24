@@ -22,10 +22,12 @@ import {
   listRecentProjects,
   listTeams,
   parseVercelJson,
+  rankProjectSearchResults,
   requireVercelTeamAccess,
   searchProjects,
   type VercelProjectListEntry,
   type VercelProjectOperationOptions,
+  VERCEL_PROJECT_REQUEST_TIMEOUT_MS,
 } from "./vercel-project-api.js";
 
 const VercelProjectReferenceSchema = z.object({
@@ -66,7 +68,11 @@ export async function resolveProjectByNameOrId(
   const result = normalizeVercelApiResult(
     await captureVercel(
       ["api", `/v9/projects/${encodeURIComponent(projectNameOrId)}`, "--scope", team, "--raw"],
-      { cwd: projectRoot, signal: options.signal },
+      {
+        cwd: projectRoot,
+        signal: options.signal,
+        timeoutMs: VERCEL_PROJECT_REQUEST_TIMEOUT_MS,
+      },
     ),
   );
   if (result.ok) {
@@ -226,9 +232,9 @@ export function vercelAuthBlockerReason(authStatus: VercelAuthStatus): string | 
     case "authenticated":
       return undefined;
     case "cli-missing":
-      return "Vercel CLI not found, see /vc";
+      return "Vercel CLI not found, see /vc:install";
     case "logged-out":
-      return "Log in to Vercel first, see /login";
+      return "Log in to Vercel first, see /vc:login";
     case "unavailable":
       return "Couldn't reach Vercel, check your connection";
     default: {
@@ -373,12 +379,46 @@ export async function pickTeam(
 }
 
 const SEARCH_PROJECT_PREFIX = "\0search-project:";
+const SEARCH_MORE_PROJECTS_PREFIX = "\0search-more-projects:";
 
-function appendProjects(
+type ProjectSearchResults = Awaited<ReturnType<typeof searchProjects>>;
+
+interface ProjectSearchContinuation {
+  readonly query: string;
+  readonly next: number;
+}
+
+function searchMoreProjectsValue(continuation: ProjectSearchContinuation): string {
+  return `${SEARCH_MORE_PROJECTS_PREFIX}${continuation.next}:${continuation.query}`;
+}
+
+function prioritizeSearchResults(
   existing: readonly VercelProjectListEntry[],
   found: readonly VercelProjectListEntry[],
 ): VercelProjectListEntry[] {
-  return [...new Map([...existing, ...found].map((project) => [project.id, project])).values()];
+  const projects = new Map(found.map((project) => [project.id, project]));
+  for (const project of existing) {
+    if (!projects.has(project.id)) projects.set(project.id, project);
+  }
+  return [...projects.values()];
+}
+
+async function findProjectSearchResults(
+  projectRoot: string,
+  team: string,
+  query: string,
+  options: VercelProjectOperationOptions,
+  next?: number,
+): Promise<ProjectSearchResults> {
+  const search = query.trim();
+  if (search.length === 0) throw new Error("Project search query cannot be empty.");
+
+  if (next === undefined) {
+    const exact = await resolveProjectByNameOrId(projectRoot, team, search, options);
+    if (exact !== null) return { projects: [{ id: exact.projectId, name: exact.projectName }] };
+  }
+
+  return await searchProjects(projectRoot, team, search, { ...options, next });
 }
 
 /** Picks an existing project under a team, or a name to create when none exist. */
@@ -391,6 +431,29 @@ export async function pickProject(
   let projects = await withSpinner(prompter, whimsyFor("projects", team), () =>
     listRecentProjects(projectRoot, team, options),
   );
+  let searchResults: readonly VercelProjectListEntry[] = [];
+  let searchContinuation: ProjectSearchContinuation | undefined;
+  const projectOptions = () => {
+    const result = projects.map((project) => ({ value: project.id, label: project.name }));
+    if (searchContinuation !== undefined) {
+      result.push({
+        value: searchMoreProjectsValue(searchContinuation),
+        label: `Show more matches for '${searchContinuation.query}'`,
+      });
+    }
+    return result;
+  };
+  const applySearchResults = (
+    query: string,
+    found: ProjectSearchResults,
+    append: boolean,
+  ): void => {
+    const existing = append ? searchResults : [];
+    searchResults = rankProjectSearchResults([...existing, ...found.projects], query);
+    projects = prioritizeSearchResults(projects, searchResults);
+    searchContinuation =
+      found.next === undefined ? undefined : { query: query.trim(), next: found.next };
+  };
   if (projects.length === 0) {
     if (options.allowCreateWhenEmpty === false) {
       throw new Error(
@@ -414,14 +477,33 @@ export async function pickProject(
         label: (query) => `Search for '${query}'`,
         value: (query) => `${SEARCH_PROJECT_PREFIX}${query}`,
         load: async (query) => {
-          const found = await searchProjects(projectRoot, team, query, { signal: options.signal });
-          projects = appendProjects(projects, found);
-          return projects.map((project) => ({ value: project.id, label: project.name }));
+          const found = await findProjectSearchResults(projectRoot, team, query, {
+            signal: options.signal,
+          });
+          applySearchResults(query, found, false);
+          return projectOptions();
         },
       },
-      options: projects.map((project) => ({ value: project.id, label: project.name })),
+      options: projectOptions(),
       initialValue: projects[0]?.id,
     });
+    const continuation = searchContinuation;
+    if (continuation !== undefined && selected === searchMoreProjectsValue(continuation)) {
+      const found = await withSpinner(
+        prompter,
+        `Searching ${team} for "${continuation.query}"...`,
+        () =>
+          findProjectSearchResults(
+            projectRoot,
+            team,
+            continuation.query,
+            { signal: options.signal },
+            continuation.next,
+          ),
+      );
+      applySearchResults(continuation.query, found, true);
+      continue;
+    }
     const query = selected.startsWith(SEARCH_PROJECT_PREFIX)
       ? selected.slice(SEARCH_PROJECT_PREFIX.length)
       : undefined;
@@ -436,13 +518,13 @@ export async function pickProject(
     }
 
     const found = await withSpinner(prompter, `Searching ${team} for "${query}"...`, () =>
-      searchProjects(projectRoot, team, query, { signal: options.signal }),
+      findProjectSearchResults(projectRoot, team, query, { signal: options.signal }),
     );
-    if (found.length === 0) {
+    applySearchResults(query, found, false);
+    if (found.projects.length === 0 && found.next === undefined) {
       prompter.note(`No projects matched "${query}" in ${team}.`);
       continue;
     }
-    projects = appendProjects(projects, found);
   }
 }
 

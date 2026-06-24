@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { Client, ClientError, type AgentInfoResult } from "#client/index.js";
+import {
+  AgentInfoResponseError,
+  Client,
+  ClientError,
+  type AgentInfoResult,
+} from "#client/index.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
 import {
   createDevelopmentCredentialGate,
@@ -83,6 +88,11 @@ const VERCEL_SSO_CHALLENGE = `
 <a href="https://vercel.com/sso-api?url=https%3A%2F%2Fvpoke.playground-vercel.tools">
   Vercel Authentication
 </a>`;
+const TRUSTED_SOURCES_MISMATCH = [
+  "The caller environment is not permitted.",
+  "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH",
+].join("\n\n");
+
 function eveUnauthorized(error = "Authorization is required for this route."): ClientError {
   return new ClientError(401, JSON.stringify({ code: "unauthorized", error, ok: false }));
 }
@@ -158,6 +168,22 @@ describe("createRemoteConnectionController", () => {
       },
     },
     {
+      name: "a 403 Trusted Sources environment mismatch",
+      error: new ClientError(403, TRUSTED_SOURCES_MISMATCH),
+      expected: {
+        state: "auth-required",
+        challenge: { kind: "vercel-deployment-protection" },
+      },
+    },
+    {
+      name: "the same Trusted Sources code on a non-403 response",
+      error: new ClientError(500, TRUSTED_SOURCES_MISMATCH),
+      expected: {
+        state: "unavailable",
+        failure: { code: "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH" },
+      },
+    },
+    {
       name: "an ordinary HTTP failure",
       error: new ClientError(503, "Unavailable"),
       expected: { state: "unavailable", failure: { message: "Unavailable" } },
@@ -167,13 +193,61 @@ describe("createRemoteConnectionController", () => {
       error: new Error("offline"),
       expected: { state: "unavailable", failure: { message: "offline" } },
     },
-    {
-      name: "an invalid response",
-      error: new SyntaxError("bad JSON"),
-      expected: { state: "unavailable", failure: { message: "bad JSON" } },
-    },
   ])("classifies $name", async ({ error, expected }) => {
     await expect(checkFailure(error)).resolves.toMatchObject(expected);
+  });
+
+  it("stays ready after an unusable info payload when health confirms Eve", async () => {
+    const harness = createHarness({
+      info: async () => {
+        throw new AgentInfoResponseError(["agent: Required"]);
+      },
+    });
+    const health = vi.spyOn(harness.client, "health").mockResolvedValue({
+      ok: true,
+      status: "ready",
+      workflowId: "wf_test",
+    });
+
+    await expect(harness.controller.check()).resolves.toEqual({ state: "ready" });
+    expect(health).toHaveBeenCalledOnce();
+  });
+
+  it("is unavailable after an unusable info payload when health cannot confirm Eve", async () => {
+    const harness = createHarness({
+      info: async () => {
+        throw new AgentInfoResponseError(["agent: Required"]);
+      },
+    });
+    vi.spyOn(harness.client, "health").mockRejectedValue(new ClientError(404, "Not Found"));
+
+    await expect(harness.controller.check()).resolves.toMatchObject({ state: "unavailable" });
+  });
+
+  it("stays ready when the info route is missing but health confirms a live deployment", async () => {
+    const harness = createHarness({
+      info: async () => {
+        throw new ClientError(404, "Not Found");
+      },
+    });
+    vi.spyOn(harness.client, "health").mockResolvedValue({
+      ok: true,
+      status: "ready",
+      workflowId: "wf_test",
+    });
+
+    await expect(harness.controller.check()).resolves.toEqual({ state: "ready" });
+  });
+
+  it("is unavailable when the info route is missing and health does not confirm a deployment", async () => {
+    const harness = createHarness({
+      info: async () => {
+        throw new ClientError(404, "Not Found");
+      },
+    });
+    vi.spyOn(harness.client, "health").mockRejectedValue(new ClientError(404, "Not Found"));
+
+    await expect(harness.controller.check()).resolves.toMatchObject({ state: "unavailable" });
   });
 
   it("resolves ambient credentials only after deployment authority is established", async () => {
@@ -252,7 +326,7 @@ describe("createRemoteConnectionController", () => {
       kind: "prepared",
       target: VERIFIED_TARGET,
       resolveToken: async () => "rejected-token",
-      completedMutations: [{ kind: "vercel-login" }],
+      completedMutations: [{ kind: "trusted-sources-updated", targetProjectName: "remote-agent" }],
     }));
     const harness = createHarness({ info });
 
@@ -261,7 +335,7 @@ describe("createRemoteConnectionController", () => {
       kind: "failed",
       message:
         "The selected Vercel project did not authorize vpoke.playground-vercel.tools. " +
-        "Completed before the failure: logged in to Vercel.",
+        "Completed before the failure: updated Trusted Sources for remote-agent.",
     });
     expect(attempt).toHaveBeenCalledOnce();
     expect(info).toHaveBeenCalledTimes(2);

@@ -4,6 +4,7 @@ import { resolveVercelDeployment, type VerifiedVercelTarget } from "#setup/verce
 export async function resolveTestVercelTarget(input: {
   readonly host: string;
   readonly projectId?: string;
+  readonly ownerId?: string;
   readonly projectName?: string;
   readonly environment?: "preview" | "production";
 }): Promise<VerifiedVercelTarget> {
@@ -12,13 +13,14 @@ export async function resolveTestVercelTarget(input: {
     workspaceRoot: "/test-workspace",
     host: input.host,
     source: {
-      orgId: "team_test",
+      orgId: input.ownerId ?? "team_test",
       projectId: input.projectId ?? "prj_test",
     },
     deps: {
       captureVercel: async () => ({
         ok: true,
         stdout: JSON.stringify({
+          ownerId: input.ownerId ?? "team_test",
           projectId: input.projectId ?? "prj_test",
           name: input.projectName ?? "test-project",
           target: environment,
