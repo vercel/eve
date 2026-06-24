@@ -3923,6 +3923,7 @@ describe("createToolLoopHarness", () => {
             content: [
               {
                 input: { objective: "Search the web." },
+                providerExecuted: true,
                 toolCallId,
                 toolName: "web_search",
                 type: "tool-call",
@@ -3966,24 +3967,31 @@ describe("createToolLoopHarness", () => {
     );
 
     expect(typeof result.next).toBe("function");
-    expect(result.session.history.at(-1)).toEqual({
-      content: [
-        {
-          input: { objective: "Search the web." },
-          providerExecuted: true,
-          toolCallId,
-          toolName: "web_search",
-          type: "tool-call",
-        },
-        {
-          output: { type: "json", value: { results: [], searchId: "search-1" } },
-          toolCallId,
-          toolName: "web_search",
-          type: "tool-result",
-        },
-      ],
-      role: "assistant",
-    });
+    expect(result.session.history.slice(-2)).toEqual([
+      {
+        content: [
+          {
+            input: { objective: "Search the web." },
+            providerExecuted: false,
+            toolCallId,
+            toolName: "web_search",
+            type: "tool-call",
+          },
+        ],
+        role: "assistant",
+      },
+      {
+        content: [
+          {
+            output: { type: "json", value: { results: [], searchId: "search-1" } },
+            toolCallId,
+            toolName: "web_search",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+    ]);
   });
 
   it("emits provider-executed web_search errors through normal failed action results", async () => {

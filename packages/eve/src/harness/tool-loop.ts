@@ -10,6 +10,7 @@ import {
   type ModelMessage,
   type SystemModelMessage,
   type TelemetryOptions,
+  type ToolModelMessage,
   ToolLoopAgent,
   type ToolSet,
   type TypedToolCall,
@@ -1507,22 +1508,32 @@ async function handleStepResult(input: {
   // hitting across steps. Compaction is the sole mechanism that ever rewrites
   // history, and it runs before the model call (see `maybeCompact`).
   const providerExecutedToolCallIds = new Set(
-    (result.toolResults ?? [])
+    (stepOutput === null ? (result.toolResults ?? []) : [])
       .filter((toolResult) => toolResult.providerExecuted === true)
       .map((toolResult) => toolResult.toolCallId),
   );
+  const providerExecutedToolResults: ToolModelMessage["content"] = [];
   const continuationMessages: ModelMessage[] = responseMessages.map((message) =>
     message.role === "assistant" && Array.isArray(message.content)
       ? {
           ...message,
-          content: message.content.map((part) =>
-            part.type === "tool-call" && providerExecutedToolCallIds.has(part.toolCallId)
-              ? { ...part, providerExecuted: true }
-              : part,
-          ),
+          content: message.content.flatMap((part) => {
+            if (part.type === "tool-result" && providerExecutedToolCallIds.has(part.toolCallId)) {
+              providerExecutedToolResults.push(part);
+              return [];
+            }
+            return [
+              part.type === "tool-call" && providerExecutedToolCallIds.has(part.toolCallId)
+                ? { ...part, providerExecuted: false }
+                : part,
+            ];
+          }),
         }
       : message,
   );
+  if (providerExecutedToolResults.length > 0) {
+    continuationMessages.push({ role: "tool", content: providerExecutedToolResults });
+  }
   const updatedHistory: ModelMessage[] = [...promptMessages, ...continuationMessages];
   let nextSession: HarnessSession = { ...baseSession, history: updatedHistory };
 
@@ -1534,9 +1545,7 @@ async function handleStepResult(input: {
 
   const continueLoop =
     !calledFinalOutput &&
-    (continuationMessages.at(-1)?.role === "tool" ||
-      hasDeferredStepInput(nextSession) ||
-      (stepOutput === null && providerExecutedToolCallIds.size > 0));
+    (continuationMessages.at(-1)?.role === "tool" || hasDeferredStepInput(nextSession));
   if (continueLoop) {
     if (emit) {
       emissionState = advanceStep(emissionState);
