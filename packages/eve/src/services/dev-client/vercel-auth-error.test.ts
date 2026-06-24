@@ -4,6 +4,7 @@ import { ClientError } from "#client/client-error.js";
 import {
   formatVercelAuthChallengeMessage,
   isVercelAuthChallenge,
+  vercelTrustedSourcesErrorCode,
 } from "#services/dev-client/vercel-auth-error.js";
 
 /**
@@ -66,27 +67,21 @@ describe("isVercelAuthChallenge", () => {
   });
 });
 
-describe("formatVercelAuthChallengeMessage", () => {
-  it("renders the target URL and the supported escape hatches", () => {
-    const message = formatVercelAuthChallengeMessage({
-      serverUrl: "https://example.vercel.app",
-    });
-
-    expect(message).toContain("https://example.vercel.app");
-    expect(message).toContain("VERCEL_AUTOMATION_BYPASS_SECRET");
-    expect(message).toContain("Disable Deployment Protection");
-    // Documentation pointer keeps the message actionable when neither
-    // escape hatch fits the user's setup.
-    expect(message).toContain("https://vercel.com/docs/deployment-protection");
+describe("vercelTrustedSourcesErrorCode", () => {
+  it("extracts the stable code without retaining the request id", () => {
+    expect(
+      vercelTrustedSourcesErrorCode(
+        [
+          "The caller environment is not permitted.",
+          "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH",
+          "iad1::request-id",
+        ].join("\n\n"),
+      ),
+    ).toBe("TRUSTED_SOURCES_ENVIRONMENT_MISMATCH");
   });
 
-  it("does not include the raw HTML challenge body", () => {
-    const message = formatVercelAuthChallengeMessage({
-      serverUrl: "https://example.vercel.app",
-    });
-
-    expect(message).not.toContain("<");
-    expect(message).not.toContain("doctype");
+  it("returns undefined for an unrelated error", () => {
+    expect(vercelTrustedSourcesErrorCode("Unavailable")).toBeUndefined();
   });
 
   it("includes invalid local OIDC claims in the repair context", () => {

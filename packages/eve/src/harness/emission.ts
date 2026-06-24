@@ -31,6 +31,7 @@ import {
   createTurnStartedEvent,
 } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
+import { hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
 import { toError } from "#shared/errors.js";
 import type { JsonObject } from "#shared/json.js";
 import {
@@ -571,8 +572,19 @@ export async function emitStreamContent(
     );
   }
 
-  // Flush remaining text.
-  if (currentMessage.length > 0) {
+  // Channel adapters deliver terminal completions, so the reserved marker
+  // becomes a null completion without delaying normal streaming deltas.
+  if (finishReason !== "tool-calls" && hasEmptyDeliverySentinel(currentMessage)) {
+    await emitFn(
+      createMessageCompletedEvent({
+        finishReason,
+        message: null,
+        sequence: state.sequence,
+        stepIndex: state.stepIndex,
+        turnId: state.turnId,
+      }),
+    );
+  } else if (currentMessage.trim().length > 0) {
     await emitFn(
       createMessageCompletedEvent({
         finishReason,

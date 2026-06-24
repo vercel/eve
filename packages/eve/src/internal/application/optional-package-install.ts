@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { Worker } from "node:worker_threads";
 
 /**
  * Environment flag set by `eve dev` so runtime code can distinguish the
@@ -135,13 +136,23 @@ export async function loadOptionalEnginePackage<T>(input: {
           appRoot: input.appRoot,
           packageName: input.packageName,
         }));
+    const isInstalledModuleLoadable =
+      input.importInstalledModule === undefined
+        ? async () => await isInstalledEnginePackageLoadable(input)
+        : async () => {
+            try {
+              await importInstalledModule();
+              return true;
+            } catch {
+              return false;
+            }
+          };
 
     try {
       await withOptionalPackageInstallLock(input, async () => {
-        try {
-          await importInstalledModule();
+        if (await isInstalledModuleLoadable()) {
           return;
-        } catch {}
+        }
 
         await installPackageIntoProject({
           appRoot: input.appRoot,
@@ -155,7 +166,17 @@ export async function loadOptionalEnginePackage<T>(input: {
       );
     }
 
-    return await importInstalledModule();
+    try {
+      return await importInstalledModule();
+    } catch (postInstallImportError) {
+      throw new Error(
+        `${input.missingMessage} Automatic installation completed, but "${input.packageName}" ` +
+          `still could not be loaded from "${input.appRoot}". This usually means the package ` +
+          "manager installed into a different workspace, node_modules is unavailable, or the " +
+          `Node/package-manager environment changed while eve dev was running. Last load error: ${toMessage(postInstallImportError)}`,
+        { cause: postInstallImportError },
+      );
+    }
   }
 }
 
@@ -163,7 +184,28 @@ async function importInstalledEnginePackage<T>(input: {
   readonly appRoot: string;
   readonly packageName: string;
 }): Promise<T> {
-  const packageRoot = join(input.appRoot, "node_modules", ...input.packageName.split("/"));
+  const entrypointHref = await resolveInstalledEnginePackageEntrypointHref(input);
+  return (await import(entrypointHref)) as T;
+}
+
+async function isInstalledEnginePackageLoadable(input: {
+  readonly appRoot: string;
+  readonly packageName: string;
+}): Promise<boolean> {
+  try {
+    const entrypointHref = await resolveInstalledEnginePackageEntrypointHref(input);
+    await importEntrypointInWorker(entrypointHref);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveInstalledEnginePackageEntrypointHref(input: {
+  readonly appRoot: string;
+  readonly packageName: string;
+}): Promise<string> {
+  const packageRoot = findInstalledPackageRoot(input);
   const packageJsonPath = join(packageRoot, "package.json");
   const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
     readonly exports?: unknown;
@@ -174,7 +216,99 @@ async function importInstalledEnginePackage<T>(input: {
   if (entry.startsWith("/")) {
     throw new Error(`Invalid absolute entrypoint for optional package "${input.packageName}".`);
   }
-  return (await import(pathToFileURL(join(packageRoot, entry)).href)) as T;
+  return pathToFileURL(join(packageRoot, entry)).href;
+}
+
+async function importEntrypointInWorker(entrypointHref: string): Promise<void> {
+  const worker = new Worker(
+    `
+const { parentPort, workerData } = require("node:worker_threads");
+
+(async () => {
+  try {
+    await import(workerData.entrypointHref);
+    parentPort.postMessage({ ok: true });
+  } catch (error) {
+    parentPort.postMessage({
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+})();
+`,
+    {
+      eval: true,
+      workerData: { entrypointHref },
+    },
+  );
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const settle = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      worker.off("error", handleError);
+      worker.off("exit", handleExit);
+      worker.off("message", handleMessage);
+      void worker.terminate().catch(() => {});
+      callback();
+    };
+    const handleError = (error: Error) => settle(() => reject(error));
+    const handleExit = (code: number) => {
+      if (code !== 0) {
+        settle(() =>
+          reject(
+            new Error(`Optional dependency worker exited before loading module (code ${code}).`),
+          ),
+        );
+      }
+    };
+    const handleMessage = (message: unknown) => {
+      const result = message as { readonly ok?: unknown; readonly message?: unknown };
+      settle(() => {
+        if (result.ok === true) {
+          resolve();
+          return;
+        }
+        reject(
+          new Error(
+            typeof result.message === "string"
+              ? result.message
+              : "Optional dependency worker failed to load module.",
+          ),
+        );
+      });
+    };
+
+    worker.once("error", handleError);
+    worker.once("exit", handleExit);
+    worker.once("message", handleMessage);
+  });
+}
+
+function findInstalledPackageRoot(input: {
+  readonly appRoot: string;
+  readonly packageName: string;
+}): string {
+  const packagePathSegments = input.packageName.split("/");
+  const checkedPaths: string[] = [];
+  let current = input.appRoot;
+
+  for (;;) {
+    const packageRoot = join(current, "node_modules", ...packagePathSegments);
+    checkedPaths.push(packageRoot);
+    if (existsSync(join(packageRoot, "package.json"))) {
+      return packageRoot;
+    }
+
+    const parent = dirname(current);
+    if (parent === current) {
+      throw new Error(
+        `Could not find installed optional dependency "${input.packageName}". Checked: ${checkedPaths.join(", ")}`,
+      );
+    }
+    current = parent;
+  }
 }
 
 function resolvePackageEntryPoint(packageJson: {

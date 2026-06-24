@@ -5,9 +5,9 @@ import { always, never, once } from "#public/tools/approval/approval-helpers.js"
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import {
   WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA,
-  WEB_SEARCH_GATEWAY_OUTPUT_SCHEMA,
   WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA,
   WEB_SEARCH_OPENAI_OUTPUT_SCHEMA,
+  WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA,
 } from "#runtime/framework-tools/web-search.js";
 import type { JsonObject } from "#shared/json.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -20,6 +20,45 @@ function getJsonSchema(tool: unknown): unknown {
 
 function getOutputJsonSchema(tool: unknown): unknown {
   return (tool as { outputSchema: { jsonSchema: unknown } }).outputSchema.jsonSchema;
+}
+
+async function executeSdkTool(input: {
+  readonly tool: unknown;
+  readonly toolCallId?: string;
+  readonly toolInput?: unknown;
+}): Promise<unknown> {
+  const execute = (
+    input.tool as {
+      readonly execute?: (
+        toolInput: unknown,
+        options: { readonly toolCallId: string },
+      ) => Promise<unknown> | unknown;
+    }
+  ).execute;
+  expect(execute).toBeTypeOf("function");
+  return await execute!(input.toolInput ?? {}, { toolCallId: input.toolCallId ?? "call_1" });
+}
+
+async function projectSdkToolOutput(input: {
+  readonly output: unknown;
+  readonly tool: unknown;
+  readonly toolCallId?: string;
+}): Promise<unknown> {
+  const toModelOutput = (
+    input.tool as {
+      readonly toModelOutput?: (options: {
+        readonly input: unknown;
+        readonly output: unknown;
+        readonly toolCallId: string;
+      }) => Promise<unknown> | unknown;
+    }
+  ).toModelOutput;
+  expect(toModelOutput).toBeTypeOf("function");
+  return await toModelOutput!({
+    input: {},
+    output: input.output,
+    toolCallId: input.toolCallId ?? "call_1",
+  });
 }
 
 describe("buildToolSet", () => {
@@ -126,8 +165,32 @@ describe("buildToolSet", () => {
   });
 
   it.each([
-    [{ id: "openai/gpt-5.4" }, WEB_SEARCH_OPENAI_OUTPUT_SCHEMA],
-    [{ id: "anthropic/claude-opus-4.6" }, WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA],
+    [{ id: "openai/gpt-5.4" }, WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA],
+    [{ id: "anthropic/claude-opus-4.6" }, WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA],
+    [
+      {
+        id: "openai.chat/gpt-5.4",
+        source: {
+          exportName: "model",
+          logicalPath: "agent.ts",
+          sourceId: "agent.ts",
+          sourceKind: "module",
+        },
+      },
+      WEB_SEARCH_OPENAI_OUTPUT_SCHEMA,
+    ],
+    [
+      {
+        id: "anthropic.messages/claude-opus-4.6",
+        source: {
+          exportName: "model",
+          logicalPath: "agent.ts",
+          sourceId: "agent.ts",
+          sourceKind: "module",
+        },
+      },
+      WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA,
+    ],
     [
       {
         id: "google.generative-ai/gemini-3.1-pro",
@@ -140,7 +203,7 @@ describe("buildToolSet", () => {
       },
       WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA,
     ],
-    [{ id: "mistral/mistral-large" }, WEB_SEARCH_GATEWAY_OUTPUT_SCHEMA],
+    [{ id: "mistral/mistral-large" }, WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA],
   ] satisfies Array<readonly [RuntimeModelReference, JsonObject]>)(
     "injects the selected web_search provider output schema",
     async (modelReference, expectedOutputSchema) => {
@@ -315,6 +378,125 @@ describe("buildToolSet", () => {
 
     expect(capturedOutput).toEqual({ full: "data", secret: "hidden" });
     expect(projected).toEqual({ type: "text", value: "summary" });
+  });
+
+  it("rejects non-JSON-serializable execute output at the tool boundary", async () => {
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "timestamp",
+        {
+          description: "Return a timestamp.",
+          execute: async () => ({ now: new Date("2026-01-02T03:04:05.000Z") }),
+          inputSchema: jsonSchema({}),
+          name: "timestamp",
+        },
+      ],
+    ]);
+
+    const result = buildToolSet({ tools });
+
+    await expect(
+      executeSdkTool({
+        tool: result.timestamp,
+        toolCallId: "call_timestamp",
+      }),
+    ).rejects.toThrow(
+      'Tool "timestamp" call "call_timestamp" returned a non-JSON-serializable result. Expected a JSON-serializable value.',
+    );
+  });
+
+  it("preserves valid execute output identity", async () => {
+    const output = { summary: "ok" };
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "report",
+        {
+          description: "Return a report.",
+          execute: async () => output,
+          inputSchema: jsonSchema({}),
+          name: "report",
+        },
+      ],
+    ]);
+
+    const result = buildToolSet({ tools });
+
+    await expect(executeSdkTool({ tool: result.report })).resolves.toBe(output);
+  });
+
+  it("normalizes top-level undefined execute output to null", async () => {
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "maybe_empty",
+        {
+          description: "Return no value.",
+          execute: async () => undefined,
+          inputSchema: jsonSchema({}),
+          name: "maybe_empty",
+        },
+      ],
+    ]);
+
+    const result = buildToolSet({ tools });
+
+    await expect(executeSdkTool({ tool: result.maybe_empty })).resolves.toBeNull();
+  });
+
+  it("rejects non-JSON-serializable toModelOutput JSON values", async () => {
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "timestamp",
+        {
+          description: "Return a timestamp.",
+          execute: async () => ({ ok: true }),
+          inputSchema: jsonSchema({}),
+          name: "timestamp",
+          toModelOutput: () => ({
+            type: "json" as const,
+            value: { now: new Date("2026-01-02T03:04:05.000Z") },
+          }),
+        },
+      ],
+    ]);
+
+    const result = buildToolSet({ tools });
+
+    await expect(
+      projectSdkToolOutput({
+        output: { ok: true },
+        tool: result.timestamp,
+        toolCallId: "call_timestamp",
+      }),
+    ).rejects.toThrow(
+      'Tool "timestamp" call "call_timestamp" returned a non-JSON-serializable model output. Expected a JSON-serializable value.',
+    );
+  });
+
+  it("passes valid text toModelOutput values through", async () => {
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "report",
+        {
+          description: "Return a report.",
+          execute: async () => ({ ok: true }),
+          inputSchema: jsonSchema({}),
+          name: "report",
+          toModelOutput: () => ({ type: "text" as const, value: "visible" }),
+        },
+      ],
+    ]);
+
+    const result = buildToolSet({ tools });
+
+    await expect(
+      projectSdkToolOutput({
+        output: { ok: true },
+        tool: result.report,
+      }),
+    ).resolves.toEqual({
+      type: "text",
+      value: "visible",
+    });
   });
 
   describe("tool-level needsApproval override", () => {

@@ -514,13 +514,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       };
 
       if (remoteServerUrl) {
-        logger.log(
-          renderCliTaggedLine(theme, {
-            message: `connecting to ${remoteServerUrl}`,
-            tag: "dev",
-            tone: "info",
-          }),
-        );
+        logger.log(`↗ remote mode targeting ${theme.info(new URL(remoteServerUrl).host)}`);
 
         if (mode === "headless") {
           logger.log(

@@ -1,5 +1,39 @@
 # eve
 
+## 0.13.5
+
+### Patch Changes
+
+- c927ecd: Confirm continuation-token ownership before an agent turn starts or a session re-keys. Competing sessions now fail before processing input, and successful delivery reports the hook owner atomically.
+- 5f0f69f: Use Parallel through AI Gateway for the built-in `web_search` tool with every string model. Gateway requests no longer select native provider search tools or pin routing to a model provider.
+- 430ed8c: Teach agents that conditionally delivered work can finish successfully without sending a message. Polling schedules can now intentionally skip delivery without treating an accidental blank model response as success.
+- 25b1b14: fix(eve): catch unserializable tool output values instead of sending them to the model
+
+## 0.13.4
+
+### Patch Changes
+
+- efca390: Make optional sandbox engine loading more resilient after auto-install. eve now
+  probes installed engine packages in a cache-isolated worker, checks ancestor
+  `node_modules` directories for workspace-hoisted installs, and reports a clear
+  post-install diagnostic when an engine package still cannot be loaded.
+- 7079d08: Bundle client-safe vendored dependencies in a neutral chunk group so `eve/react` can use the Zod-backed `/eve/v1/info` validator without pulling in Node-only vendored runtime helpers.
+- 598b5e0: Clear pending connection/tool authorization state after a matching callback resumes a session, so Slack threads do not keep waiting for already-completed auth and swallow follow-up messages.
+- 9298c90: Upgrade the Workflow development packages to their latest beta releases.
+
+## 0.13.3
+
+### Patch Changes
+
+- b33c611: use shared Chat SDK Block Kit primitives for Slack card rendering
+
+## 0.13.2
+
+### Patch Changes
+
+- d82e8d1: Consolidate model provider setup into one choice between project-backed AI Gateway, an inline `AI_GATEWAY_API_KEY`, and direct provider credentials. Gateway key validation now reports its latest result inline without leaving stale errors in the setup panel.
+- b29e2ae: Remote clients can now send Vercel OIDC credentials through a dedicated auth mode and reject malformed agent metadata before using it.
+
 ## 0.13.1
 
 ### Patch Changes

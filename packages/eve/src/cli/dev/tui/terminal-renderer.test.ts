@@ -9,6 +9,7 @@ import {
 } from "#internal/nitro/host/dev-watcher-log.js";
 
 import type { AgentTUIStreamEvent, AgentTUIStreamResult } from "./runner.js";
+import { promptCommandsFor } from "./prompt-commands.js";
 import { TerminalRenderer } from "./terminal-renderer.js";
 import { MockScreen, MockUserInput } from "./test/mock-terminal.js";
 
@@ -675,7 +676,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
   it("clears the setup attention line once its issue is resolved", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderSetupWarning("1 setup issue: not logged in · /login");
+    renderer.renderSetupWarning("1 setup issue: not logged in · /vc:login");
     expect(screen.snapshot()).toContain("not logged in");
 
     renderer.clearSetupWarning();
@@ -689,6 +690,22 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     expect(screen.snapshot()).toContain("\u23bf  /model cancelled.");
+  });
+
+  it("marks a failed automatic command and keeps its multiline outcome in one result block", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandInvocation("/vc:auth", "failed");
+    renderer.renderCommandResult(
+      "Authentication was refreshed, but example.vercel.app is unavailable: Access denied.\n\n" +
+        "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH",
+    );
+    renderer.shutdown();
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("▌ ⨯ /vc:auth");
+    expect(snapshot).toContain("⎿  Authentication was refreshed");
+    expect(snapshot).toContain("TRUSTED_SOURCES_ENVIRONMENT_MISMATCH");
+    expect(snapshot).not.toContain("· Authentication was refreshed");
   });
 
   it("shows a bare prompt with no placeholder and accepts typing", async () => {
@@ -1763,27 +1780,118 @@ describe("TerminalRenderer setup panel", () => {
     renderer.shutdown();
   });
 
-  it("returns an untouched editable row as a plain selection", async () => {
-    const { input, renderer } = makeRenderer();
+  it("validates a masked key without replacing the provider frame", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    let resolveValidation:
+      | ((result: { kind: "valid" } | { kind: "invalid"; message: string }) => void)
+      | undefined;
+    const validate = vi.fn(
+      () =>
+        new Promise<{ kind: "valid" } | { kind: "invalid"; message: string }>((resolve) => {
+          resolveValidation = resolve;
+        }),
+    );
 
-    const answer = renderer.setupFlow.readEditableSelect?.({
-      message: "Vercel project",
-      options: [
-        { value: "new", label: "Create a new project", hint: "Named 'weather-agent'" },
-        { value: "link", label: "Link an existing project" },
-      ],
-      initialValue: "new",
-      editable: {
-        value: "new",
-        defaultValue: "weather-agent",
-        formatHint: (value) => `Named '${value}'`,
+    const answer = renderer.setupFlow.readProviderPicker({
+      message: "Provider",
+      options: [{ value: "own-key", label: "AI Gateway via AI_GATEWAY_API_KEY" }],
+      initialValue: "own-key",
+      validateInlineKey: validate,
+    });
+
+    expect(screen.rawOutput()).toContain("\x1b[7m");
+    input.type("bad-key");
+    input.enter();
+    expect(screen.snapshot()).toContain("Provider");
+    expect(screen.snapshot()).toContain("•••••••");
+    expect(screen.snapshot()).not.toContain("bad-key");
+    expect(screen.snapshot()).toContain("Validating…");
+
+    resolveValidation?.({ kind: "invalid", message: "Rejected." });
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("Invalid key");
+    });
+    input.type("x");
+    expect(screen.snapshot()).not.toContain("Invalid key");
+
+    input.enter();
+    resolveValidation?.({ kind: "valid" });
+    await expect(answer).resolves.toEqual({
+      kind: "inline-key",
+      key: "bad-keyx",
+      validation: { kind: "valid" },
+    });
+    expect(validate).toHaveBeenCalledTimes(2);
+    renderer.shutdown();
+  });
+
+  it.each([
+    { name: "Escape", sequence: "\x1b", waitForEscape: true },
+    { name: "Ctrl-C", sequence: "\u0003", waitForEscape: false },
+  ])(
+    "clears a masked key before $name cancels its editable row",
+    async ({ sequence, waitForEscape }) => {
+      const { screen, input, renderer } = makeRenderer();
+      const answer = renderer.setupFlow.readProviderPicker({
+        message: "Provider",
+        options: [{ value: "own-key", label: "AI Gateway via AI_GATEWAY_API_KEY" }],
+        initialValue: "own-key",
+        validateInlineKey: async () => ({ kind: "valid" }),
+      });
+      let settled = false;
+      void answer.finally(() => {
+        settled = true;
+      });
+
+      input.type("sk-secret");
+      expect(screen.snapshot()).toContain("esc to clear");
+      input.send(sequence);
+      if (waitForEscape) await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(settled).toBe(false);
+      expect(screen.snapshot()).not.toContain("•••••••••");
+      expect(screen.snapshot()).toContain("type your key");
+      expect(screen.snapshot()).toContain("esc to cancel");
+
+      input.send(sequence);
+      if (waitForEscape) await new Promise((resolve) => setTimeout(resolve, 50));
+      await expect(answer).resolves.toBeUndefined();
+      renderer.shutdown();
+    },
+  );
+
+  it("aborts stale validation and keeps the latest result", async () => {
+    const { input, renderer } = makeRenderer();
+    const validations: Array<{ key: string; signal: AbortSignal; finish(): void }> = [];
+    const answer = renderer.setupFlow.readProviderPicker({
+      message: "Provider",
+      options: [{ value: "own-key", label: "AI Gateway key" }],
+      initialValue: "own-key",
+      validateInlineKey: (key, signal) => {
+        return new Promise<{ kind: "valid" }>((resolve) => {
+          validations.push({ key, signal, finish: () => resolve({ kind: "valid" }) });
+        });
       },
     });
-    expect(answer).toBeDefined();
 
-    // Enter without editing resolves to the default name, not a rename.
+    input.type("sk-first");
     input.enter();
-    await expect(answer).resolves.toEqual({ kind: "selected", value: "new" });
+    await vi.waitFor(() => expect(validations).toHaveLength(1));
+    input.send("\u0003");
+    expect(validations[0]?.signal.aborted).toBe(true);
+    input.type("sk-second");
+    input.enter();
+    await vi.waitFor(() => expect(validations).toHaveLength(2));
+
+    validations[0]?.finish();
+    await Promise.resolve();
+    await Promise.resolve();
+    validations[1]?.finish();
+    await expect(answer).resolves.toEqual({
+      kind: "inline-key",
+      key: "sk-second",
+      validation: { kind: "valid" },
+    });
     renderer.shutdown();
   });
 
@@ -2457,6 +2565,48 @@ describe("TerminalRenderer command typeahead", () => {
     await answer;
     renderer.shutdown();
   });
+
+  it("uses the target-specific command list for typeahead", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      availablePromptCommands: promptCommandsFor("remote"),
+    });
+
+    const prompt = renderer.readPrompt();
+    input.type("/");
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("Authenticate this remote via Vercel OIDC");
+    expect(snapshot).not.toContain("Configure the agent's model and provider");
+    input.enter();
+    await prompt;
+    renderer.shutdown();
+  });
+
+  it("echoes a known unavailable command as a command, not chat", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      availablePromptCommands: promptCommandsFor("remote"),
+    });
+
+    const prompt = renderer.readPrompt();
+    input.type("/model");
+    input.enter();
+
+    await expect(prompt).resolves.toBe("/model");
+    renderer.shutdown();
+    expect(screen.snapshot()).toContain("▌ /model");
+    expect(screen.snapshot()).not.toContain("❯ /model");
+  });
 });
 
 describe("TerminalRenderer status line", () => {
@@ -2472,13 +2622,24 @@ describe("TerminalRenderer status line", () => {
       serverUrl: "http://localhost:3000",
       info: agentInfoWithModel("anthropic/claude-sonnet-4-6", {
         kind: "gateway",
-        connected: true,
-        credential: "oidc",
+        connected: false,
       }),
     });
 
     const prompt = renderer.readPrompt();
     renderer.setVercelStatus(vercelStatus);
+
+    expect(screen.snapshot()).toContain("⚠ AI Gateway");
+
+    renderer.renderAgentHeader({
+      name: "Weather Agent",
+      serverUrl: "http://localhost:3000",
+      info: agentInfoWithModel("anthropic/claude-sonnet-4-6", {
+        kind: "gateway",
+        connected: true,
+        credential: "oidc",
+      }),
+    });
 
     const lines = screen.snapshot().split("\n");
     const promptRow = lines.findIndex((line) => line.includes("❯"));
@@ -2487,6 +2648,7 @@ describe("TerminalRenderer status line", () => {
     expect(statusRow).toContain("anthropic/claude-sonnet-4-6");
     // The linked project folds into the connected gateway label.
     expect(statusRow).toContain("AI Gateway (my-agent)");
+    expect(statusRow).not.toContain("⚠ AI Gateway");
     // No token segment before any turn reports usage (↑ 0 ↓ 0 is noise).
     expect(statusRow).not.toContain("↑ 0");
     expect(statusRow).not.toContain("/deploy pending");
@@ -2526,6 +2688,49 @@ describe("TerminalRenderer status line", () => {
 
     renderer.setupFlow.end({ preserveDiagnostics: false });
     expect(screen.snapshot()).toContain("AI Gateway (my-agent)");
+    renderer.shutdown();
+  });
+
+  it("lays out the remote authentication panel and inset status line", async () => {
+    const { screen, input, renderer } = makeRenderer(100, 40);
+    renderer.renderNotice("anchor");
+    renderer.setRemoteConnectionStatus({
+      target: {
+        kind: "remote",
+        serverUrl: "https://vpoke.playground-vercel.tools",
+        workspaceRoot: "/tmp/weather-agent",
+      },
+      connection: {
+        state: "authenticating",
+        challenge: { kind: "eve-oidc" },
+      },
+    });
+
+    renderer.setupFlow.begin("Authenticate via Vercel OIDC");
+    const answer = renderer.setupFlow.readSelect({
+      kind: "search",
+      message: "Select your team",
+      placeholder: "type to search teams",
+      options: [
+        { value: "vercel", label: "Vercel" },
+        { value: "labs", label: "Vercel Labs" },
+      ],
+    });
+
+    const lines = screen.snapshot().split("\n");
+    const title = lines.indexOf("   Authenticate via Vercel OIDC");
+    expect(lines.slice(title, title + 3)).toEqual([
+      "   Authenticate via Vercel OIDC",
+      "",
+      "   Select your team",
+    ]);
+    const status = lines.indexOf("   ↗ vpoke.playground-vercel.tools  · Authenticating via OIDC…");
+    expect(status).toBeGreaterThan(title);
+    expect(lines[status - 1]).toBe("");
+
+    input.send("\x1b");
+    await expect(answer).resolves.toBeUndefined();
+    renderer.setupFlow.end({ preserveDiagnostics: false });
     renderer.shutdown();
   });
 

@@ -27,7 +27,12 @@ import {
   typeaheadFor,
   type CommandTypeaheadState,
 } from "./command-typeahead.js";
-import { isPromptControlCommand, parsePromptCommand, PROMPT_COMMANDS } from "./prompt-commands.js";
+import {
+  isPromptControlCommand,
+  parsePromptCommand,
+  PROMPT_COMMANDS,
+  type PromptCommandSpec,
+} from "./prompt-commands.js";
 import {
   renderFlowPanel,
   renderAcknowledgeQuestion,
@@ -46,6 +51,7 @@ import type {
   SetupSelectRequest,
 } from "./setup-flow.js";
 import type { SelectNotice } from "#setup/prompter.js";
+import type { ProviderPickerChoice, ProviderPickerRequest } from "#setup/flows/provider.js";
 import {
   initialSelectState,
   reduceSelect,
@@ -73,6 +79,11 @@ import {
   renderBlockLines,
 } from "./blocks.js";
 import { formatDevRebuildStatus, summarizeChangedFiles } from "./dev-rebuild-status.js";
+import {
+  initialProviderPickerState,
+  transitionProviderPicker,
+  type ProviderPickerEvent,
+} from "./provider-picker.js";
 import { buildAgentHeader } from "./agent-header.js";
 import {
   EMPTY_LINE,
@@ -97,6 +108,7 @@ import {
   stripTerminalControls,
 } from "./terminal-text.js";
 import type { VercelStatusSnapshot } from "./vercel-status.js";
+import type { RemoteConnectionSnapshot } from "./remote-connection.js";
 import { summarizeToolArgs, summarizeToolResult } from "./tool-format.js";
 import { reduceSetupSelectInput, setupSelectionIntent } from "./setup-selection-input.js";
 import {
@@ -193,6 +205,7 @@ type SetupFlowState = {
  * a `vercel deploy` build error) survives the settle.
  */
 const FLOW_OUTPUT_BUFFER_CAP = 40;
+const STATUS_LINE_LEFT_PADDING = "  ";
 
 const defaultAssistantResponseStats: AssistantResponseStatsMode = "tokensPerSecond";
 
@@ -209,6 +222,8 @@ export type TerminalRendererOptions = {
   logs?: LogDisplayMode;
   color?: boolean;
   unicode?: boolean;
+  /** Slash commands available in this local or remote session. */
+  availablePromptCommands?: readonly PromptCommandSpec[];
 };
 
 export type AgentHeaderOptions = {
@@ -276,6 +291,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #assistantResponseStats: AssistantResponseStatsMode;
   readonly #defaultContextSize?: number;
   readonly #captureForeignOutput: boolean;
+  readonly #availablePromptCommands: readonly PromptCommandSpec[];
   /** Which captured log sources render. Mutable via {@link setLogDisplayMode}. */
   #logs: LogDisplayMode;
 
@@ -318,6 +334,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #connectionAuthPendingCount = 0;
   /** Vercel segment of the bottom status line; pushed by the runner. */
   #vercelStatus?: VercelStatusSnapshot;
+  /** Remote target and connection/authentication state; pushed by the runner. */
+  #remoteConnection?: RemoteConnectionSnapshot;
   #inputText = "";
   #inputCursor = 0;
   readonly #promptHistory = new PromptHistory();
@@ -377,7 +395,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #pendingEchoedPrompt?: string;
   /** The active setup flow's bordered panel: progress, question, status. */
   #setupFlow?: SetupFlowState;
-  /** The clearable setup attention line (`⚠ … · /login`), rendered in the live footer. */
+  /** The clearable setup attention line (`⚠ … · /vc:login`), rendered in the live footer. */
   #setupAttention?: string;
   /** Armed by {@link SetupFlowRenderer.waitForInterrupt}; fired by the idle key trap. */
   #flowInterrupt?: () => void;
@@ -388,6 +406,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     end: (options) => this.#endSetupFlow(options?.preserveDiagnostics ?? true),
     readSelect: (options) => this.#readSetupSelect(options),
     readEditableSelect: (options) => this.#readSetupEditableSelect(options),
+    readProviderPicker: (options) => this.#readProviderPicker(options),
     readText: (options) => this.#readSetupText(options),
     readAcknowledge: (options) => this.#readSetupAcknowledge(options),
     readChoice: (options) => this.#readSetupChoice(options),
@@ -418,6 +437,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#contextSize = options?.contextSize;
     this.#captureForeignOutput = options?.captureForeignOutput ?? this.#output === process.stdout;
     this.#logs = options?.logs ?? "none";
+    this.#availablePromptCommands = options?.availablePromptCommands ?? PROMPT_COMMANDS;
   }
 
   /**
@@ -459,7 +479,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     let editor: LineState = lineOf(stripPromptControlCharacters(options?.initialDraft ?? ""));
     this.#promptHistory.begin(editor.text);
     this.#syncInput(editor);
-    this.#typeahead = typeaheadFor(PROMPT_COMMANDS, editor.text);
+    this.#typeahead = typeaheadFor(this.#availablePromptCommands, editor.text);
     this.#startCaretBlink();
     this.#paint();
 
@@ -468,7 +488,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         editor = next;
         this.#showCaret();
         this.#syncInput(editor);
-        this.#typeahead = typeaheadFor(PROMPT_COMMANDS, next.text, this.#typeahead);
+        this.#typeahead = typeaheadFor(this.#availablePromptCommands, next.text, this.#typeahead);
         this.#paint();
       };
       const recall = (entry: string | undefined) => {
@@ -1024,6 +1044,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
+  setRemoteConnectionStatus(status: RemoteConnectionSnapshot): void {
+    this.#remoteConnection = status;
+    this.#paint();
+  }
+
   reset(): void {
     this.#blocks = [];
     this.#blockById.clear();
@@ -1080,7 +1105,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /**
    * Sets the setup attention line (yellow `⚠`, commands blue) as a live footer
    * element above the prompt. Unlike committed scrollback, it can be cleared:
-   * once the underlying issue is fixed (e.g. `/login` succeeds) the runner calls
+   * once the underlying issue is fixed (e.g. `/vc:login` succeeds) the runner calls
    * {@link clearSetupWarning} and the line disappears rather than lingering
    * stale in the transcript.
    */
@@ -1103,6 +1128,21 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #clearSetupAttention(): void {
     if (this.#setupAttention === undefined) return;
     this.#setupAttention = undefined;
+    this.#paint();
+  }
+
+  /** Commits a slash-command invocation that was started without prompt input. */
+  renderCommandInvocation(text: string, status?: "failed"): void {
+    const content = stripTerminalControls(text);
+    if (content.trim().length === 0) return;
+    this.#start();
+    const block: Block = {
+      kind: "command",
+      body: content,
+      live: false,
+    };
+    if (status === "failed") block.status = "error";
+    this.#pushBlock(block);
     this.#paint();
   }
 
@@ -1408,25 +1448,25 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     flow.question = (width) => {
       const state: SetupSelectPanelState = {
-        kind: "editable",
+        kind: "inline-edit",
+        layout: "task-list",
         message: opts.message,
         options: opts.options,
         select,
         edit: {
           optionValue: opts.editable.value,
-          editor,
-          defaultValue: opts.editable.defaultValue,
-          formatHint: opts.editable.formatHint,
           caretVisible: this.#caretVisible,
+          editor: {
+            kind: "rename",
+            editor,
+            defaultValue: opts.editable.defaultValue,
+            formatHint: opts.editable.formatHint,
+          },
         },
       };
       if (error !== undefined) state.error = error;
       return renderSelectQuestion(state, this.#theme, width);
     };
-    // Hovering the editable row makes it a live field: seed the editor with the
-    // default (caret blinking at the end) so typing and backspace edit it in
-    // place — no → to enter or ← to leave. Moving off the row clears the field
-    // and stops the blink; returning re-seeds the default.
     const onEditableRow = () =>
       selectValueAtCursor([...opts.options], select.cursor) === opts.editable.value;
     const syncEditableRow = () => {
@@ -1462,8 +1502,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
             settle({ kind: "selected", value });
             return;
           }
-          // An untouched field resolves as a plain selection (the default name);
-          // any edit resolves as the renamed text.
           const text = (editor.text || opts.editable.defaultValue).trim();
           const invalid = opts.editable.validate?.(text);
           if (invalid !== undefined) {
@@ -1496,13 +1534,135 @@ export class TerminalRenderer implements AgentTUIRenderer {
             break;
         }
 
-        // Text keys edit the hovered row's name in place; on a non-editable row
-        // there is nothing to type into, so they are ignored.
         if (!onEditableRow()) return;
         const edited = applyLineEditorKey(editor, key);
         if (edited !== undefined) applyEditor(edited);
       },
       () => this.#stopCaretBlink(),
+    );
+    return await question.promise;
+  }
+
+  async #readProviderPicker(
+    opts: ProviderPickerRequest,
+  ): Promise<ProviderPickerChoice | undefined> {
+    const flow = this.#beginSetupQuestion();
+    let interaction = initialProviderPickerState(opts.options, opts.initialValue);
+    let validation: AbortController | undefined;
+
+    flow.question = (width) =>
+      renderSelectQuestion(
+        {
+          kind: "inline-edit",
+          layout: "stacked",
+          message: opts.message,
+          options: opts.options,
+          select: interaction.select,
+          edit: {
+            optionValue: "own-key",
+            caretVisible: this.#caretVisible,
+            editor: { kind: "key", phase: interaction.phase },
+          },
+        },
+        this.#theme,
+        width,
+      );
+
+    const syncCaret = () => {
+      if (interaction.phase.kind === "editing" || interaction.phase.kind === "invalid") {
+        this.#startCaretBlink();
+      } else {
+        this.#stopCaretBlink();
+      }
+    };
+    syncCaret();
+    this.#paint();
+
+    const question = this.#captureSetupQuestion<ProviderPickerChoice | undefined>(
+      (key, settle, reject) => {
+        const dispatch = (event: ProviderPickerEvent) => {
+          const transition = transitionProviderPicker(interaction, event, opts.options);
+          switch (transition.kind) {
+            case "ignore":
+              return;
+            case "clear":
+              validation?.abort();
+              validation = undefined;
+              interaction = transition.state;
+              syncCaret();
+              this.#paint();
+              return;
+            case "cancel":
+              settle(undefined);
+              return;
+            case "render":
+              interaction = transition.state;
+              syncCaret();
+              this.#paint();
+              return;
+            case "validate": {
+              interaction = transition.state;
+              syncCaret();
+              this.#paint();
+              const controller = new AbortController();
+              validation = controller;
+              let result: ReturnType<typeof opts.validateInlineKey>;
+              try {
+                result = opts.validateInlineKey(transition.key, controller.signal);
+              } catch (error) {
+                reject(error);
+                return;
+              }
+              void result.then(
+                (outcome) => {
+                  if (validation !== controller || controller.signal.aborted) return;
+                  validation = undefined;
+                  dispatch({ type: "validated", validation: outcome });
+                },
+                (error: unknown) => {
+                  if (validation !== controller || controller.signal.aborted) return;
+                  validation = undefined;
+                  reject(error);
+                },
+              );
+              return;
+            }
+            case "settle":
+              settle(transition.result);
+              return;
+          }
+        };
+
+        const intent = setupSelectionIntent(key);
+        switch (intent?.kind) {
+          case "cancel":
+            dispatch({ type: "cancel" });
+            return;
+          case "move":
+            dispatch({ type: "move", direction: intent.direction });
+            return;
+          case "submit":
+            dispatch({ type: "submit" });
+            return;
+          case "repaint":
+            this.#paint();
+            return;
+          case undefined:
+            break;
+        }
+
+        if (interaction.phase.kind !== "editing" && interaction.phase.kind !== "invalid") return;
+        const edited = applyLineEditorKey(interaction.phase.editor, key);
+        if (edited !== undefined) {
+          this.#showCaret();
+          dispatch({ type: "edit", editor: edited });
+        }
+      },
+      () => {
+        validation?.abort();
+        validation = undefined;
+        this.#stopCaretBlink();
+      },
     );
     return await question.promise;
   }
@@ -1652,13 +1812,19 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * only the repeated input attachment and panel teardown lifecycle.
    */
   #captureSetupQuestion<T>(
-    consume: (key: TerminalKey, settle: (value: T) => void) => void,
+    consume: (
+      key: TerminalKey,
+      settle: (value: T) => void,
+      reject: (error: unknown) => void,
+    ) => void,
     beforeClose?: () => void,
   ): { promise: Promise<T>; settle(value: T): void } {
     let settled = false;
     let resolve!: (value: T) => void;
-    const promise = new Promise<T>((resolvePromise) => {
+    let rejectPromise!: (error: unknown) => void;
+    const promise = new Promise<T>((resolvePromise, reject) => {
       resolve = resolvePromise;
+      rejectPromise = reject;
     });
     const settle = (value: T): void => {
       if (settled) return;
@@ -1667,7 +1833,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#closeSetupQuestion();
       resolve(value);
     };
-    this.#consumeKey = (key) => consume(key, settle);
+    const reject = (error: unknown): void => {
+      if (settled) return;
+      settled = true;
+      beforeClose?.();
+      this.#closeSetupQuestion();
+      rejectPromise(error);
+    };
+    this.#consumeKey = (key) => consume(key, settle, reject);
     this.#attachInput();
     return { promise, settle };
   }
@@ -2554,6 +2727,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         content,
       };
       rows.push(...renderFlowPanel(state, this.#theme, width));
+      this.#pushRemoteStatusLine(rows, width);
       return rows;
     }
 
@@ -2638,13 +2812,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * pending deploy) when any segment has content.
    */
   #pushStatusLine(rows: string[], width: number): void {
-    const input: Parameters<typeof buildStatusLine>[0] = { theme: this.#theme, width };
+    const padding = this.#remoteConnection === undefined ? "" : STATUS_LINE_LEFT_PADDING;
+    const contentWidth = Math.max(1, width - padding.length);
+    const input: Parameters<typeof buildStatusLine>[0] = {
+      theme: this.#theme,
+      width: contentWidth,
+    };
     if (this.#logLevelHintActive) input.logLevel = this.#logs;
     const model = this.#agentHeader?.info?.agent.model.id;
     if (model !== undefined) input.model = model;
-    // The runtime boundary owns endpoint readiness: the dev server computes it
-    // from its full process.env and returns it on /eve/v1/info, so the status
-    // bar (local or --url) reads one authority instead of re-deriving locally.
+    // The runner resolves model-provider state with `/info` before caching this
+    // header, so the status bar consumes that shared snapshot.
     const endpoint = this.#agentHeader?.info?.agent.model.endpoint;
     if (endpoint !== undefined) input.endpoint = endpoint;
     // Skip the token segment entirely until a turn moves a token — a `↑ 0 ↓ 0`
@@ -2657,8 +2835,22 @@ export class TerminalRenderer implements AgentTUIRenderer {
       input.tokens = formatTokenFlow(flow, this.#theme.glyph);
     }
     if (this.#vercelStatus !== undefined) input.vercel = this.#vercelStatus;
+    if (this.#remoteConnection !== undefined) input.remote = this.#remoteConnection;
     const line = buildStatusLine(input);
-    if (line !== undefined) rows.push(line);
+    if (line !== undefined) rows.push(clip(`${padding}${line}`, width));
+  }
+
+  #pushRemoteStatusLine(rows: string[], width: number): void {
+    if (this.#remoteConnection === undefined) return;
+    const contentWidth = Math.max(1, width - STATUS_LINE_LEFT_PADDING.length);
+    const line = buildStatusLine({
+      remote: this.#remoteConnection,
+      theme: this.#theme,
+      width: contentWidth,
+    });
+    if (line !== undefined) {
+      rows.push("", clip(`${STATUS_LINE_LEFT_PADDING}${line}`, width));
+    }
   }
 
   #statusMeta(): string {

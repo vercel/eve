@@ -1,4 +1,5 @@
 import { EVE_HEALTH_ROUTE_PATH, EVE_INFO_ROUTE_PATH } from "#protocol/routes.js";
+import { AgentInfoResponseError } from "#client/agent-info-error.js";
 import { AgentInfoResultSchema } from "#client/agent-info-schema.js";
 import { ClientError } from "#client/client-error.js";
 import { ClientSession } from "#client/session.js";
@@ -66,6 +67,10 @@ export class Client {
    * OIDC outside local development.
    *
    * @throws {ClientError} If the server returns a non-successful status.
+   * @throws {AgentInfoResponseError} If an authorized response carries a body
+   * that is not a recognized agent-info payload (not JSON, or a mismatched
+   * shape). Inspection is best-effort: a working connection does not depend on
+   * this route, so connection probes treat this distinctly from a failed request.
    */
   async info(): Promise<AgentInfoResult> {
     const response = await this.fetch(EVE_INFO_ROUTE_PATH);
@@ -75,10 +80,20 @@ export class Client {
       throw new ClientError(response.status, body);
     }
 
-    const result = AgentInfoResultSchema.safeParse(await response.json());
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new AgentInfoResponseError();
+    }
+
+    const result = AgentInfoResultSchema.safeParse(payload);
     if (!result.success) {
-      throw new SyntaxError(
-        "The server returned an unrecognized response from the Eve agent info route.",
+      throw new AgentInfoResponseError(
+        result.error.issues.slice(0, 5).map((issue) => {
+          const path = issue.path.join(".");
+          return path.length === 0 ? issue.message : `${path}: ${issue.message}`;
+        }),
       );
     }
 

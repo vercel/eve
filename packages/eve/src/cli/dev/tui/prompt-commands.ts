@@ -1,4 +1,13 @@
-export type PromptCommandExtensionName = "model" | "channels" | "deploy" | "login" | "vc";
+export type PromptCommandExtensionName =
+  | "model"
+  | "channels"
+  | "deploy"
+  | "vc:install"
+  | "vc:login";
+
+type PromptCommandName = PromptCommandExtensionName | "vc:auth";
+
+type PromptCommandTarget = "local" | "remote";
 
 /** The slash commands the prompt accepts. */
 export type PromptCommand =
@@ -6,7 +15,7 @@ export type PromptCommand =
   | { type: "exit" }
   | { type: "help" }
   | { type: "loglevel"; argument: string }
-  | { type: "extension"; name: PromptCommandExtensionName; argument: string };
+  | { type: "extension"; name: PromptCommandName; argument: string };
 
 /**
  * Metadata for one slash command. The registry describes commands — their
@@ -27,12 +36,16 @@ export interface PromptCommandSpec {
   readonly build: (argument: string) => PromptCommand;
 }
 
+interface PromptCommandDefinition extends PromptCommandSpec {
+  readonly targets: readonly PromptCommandTarget[];
+}
+
 /**
  * Every slash command the prompt accepts, in typeahead display order. One
  * module owns the command list so the runner's dispatch, the renderer's
  * transcript-echo suppression, and command discovery cannot drift apart.
  */
-export const PROMPT_COMMANDS: readonly PromptCommandSpec[] = [
+const PROMPT_COMMAND_DEFINITIONS = [
   // `help` leads so that the typeahead's default highlight — what a bare `/`
   // plus Enter submits — is the safest command, not session-resetting `/new`.
   {
@@ -41,6 +54,7 @@ export const PROMPT_COMMANDS: readonly PromptCommandSpec[] = [
     description: "Show available commands",
     takesArgument: false,
     build: () => ({ type: "help" }),
+    targets: ["local", "remote"],
   },
   {
     name: "new",
@@ -48,20 +62,31 @@ export const PROMPT_COMMANDS: readonly PromptCommandSpec[] = [
     description: "Start a fresh session",
     takesArgument: false,
     build: () => ({ type: "new" }),
+    targets: ["local", "remote"],
   },
   {
-    name: "vc",
+    name: "vc:install",
     aliases: [],
     description: "Install the Vercel CLI",
     takesArgument: false,
-    build: () => ({ type: "extension", name: "vc", argument: "" }),
+    build: () => ({ type: "extension", name: "vc:install", argument: "" }),
+    targets: ["local", "remote"],
   },
   {
-    name: "login",
+    name: "vc:login",
     aliases: [],
     description: "Log in to Vercel",
     takesArgument: false,
-    build: () => ({ type: "extension", name: "login", argument: "" }),
+    build: () => ({ type: "extension", name: "vc:login", argument: "" }),
+    targets: ["local", "remote"],
+  },
+  {
+    name: "vc:auth",
+    aliases: [],
+    description: "Authenticate this remote via Vercel OIDC",
+    takesArgument: false,
+    build: () => ({ type: "extension", name: "vc:auth", argument: "" }),
+    targets: ["remote"],
   },
   {
     name: "model",
@@ -70,6 +95,7 @@ export const PROMPT_COMMANDS: readonly PromptCommandSpec[] = [
     argumentHint: "[provider/model]",
     takesArgument: true,
     build: (argument) => ({ type: "extension", name: "model", argument }),
+    targets: ["local"],
   },
   {
     name: "loglevel",
@@ -78,6 +104,7 @@ export const PROMPT_COMMANDS: readonly PromptCommandSpec[] = [
     argumentHint: "[all|stderr|sandbox|none]",
     takesArgument: true,
     build: (argument) => ({ type: "loglevel", argument }),
+    targets: ["local", "remote"],
   },
   {
     name: "channels",
@@ -85,6 +112,7 @@ export const PROMPT_COMMANDS: readonly PromptCommandSpec[] = [
     description: "Add chat channels to the agent",
     takesArgument: false,
     build: () => ({ type: "extension", name: "channels", argument: "" }),
+    targets: ["local"],
   },
   {
     name: "deploy",
@@ -92,6 +120,7 @@ export const PROMPT_COMMANDS: readonly PromptCommandSpec[] = [
     description: "Deploy the agent to Vercel",
     takesArgument: false,
     build: () => ({ type: "extension", name: "deploy", argument: "" }),
+    targets: ["local"],
   },
   {
     name: "exit",
@@ -99,8 +128,27 @@ export const PROMPT_COMMANDS: readonly PromptCommandSpec[] = [
     description: "Quit the TUI",
     takesArgument: false,
     build: () => ({ type: "exit" }),
+    targets: ["local", "remote"],
   },
-];
+] satisfies readonly PromptCommandDefinition[];
+
+export const PROMPT_COMMANDS: readonly PromptCommandSpec[] = PROMPT_COMMAND_DEFINITIONS;
+
+export function promptCommandsFor(target: PromptCommandTarget): readonly PromptCommandSpec[] {
+  return PROMPT_COMMAND_DEFINITIONS.filter((definition) =>
+    definition.targets.some((supportedTarget) => supportedTarget === target),
+  );
+}
+
+/** Whether a command runs against this target — the one authority dispatch shares with discovery. */
+export function isPromptCommandAvailableFor(
+  name: PromptCommandName,
+  target: PromptCommandTarget,
+): boolean {
+  const definition = PROMPT_COMMAND_DEFINITIONS.find((entry) => entry.name === name);
+  const targets: readonly PromptCommandTarget[] | undefined = definition?.targets;
+  return targets?.includes(target) ?? false;
+}
 
 /**
  * Recognizes the slash commands the prompt accepts. `/new` clears the
@@ -132,8 +180,10 @@ export function isPromptControlCommand(prompt: string): boolean {
  * The table `/help` prints: one line per command — slash name, argument
  * hint, and aliases padded into a column, description after.
  */
-export function formatPromptCommandHelp(): string {
-  const entries = PROMPT_COMMANDS.map((spec) => {
+export function formatPromptCommandHelp(
+  commands: readonly PromptCommandSpec[] = PROMPT_COMMANDS,
+): string {
+  const entries = commands.map((spec) => {
     const hint = spec.argumentHint === undefined ? "" : ` ${spec.argumentHint}`;
     const aliases = spec.aliases.map((alias) => ` (/${alias})`).join("");
     return { invocation: `/${spec.name}${hint}${aliases}`, description: spec.description };

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildStatusLine } from "./status-line.js";
 import { stripAnsi, visibleLength } from "./terminal-text.js";
 import { createTheme } from "./theme.js";
+import type { RemoteConnectionSnapshot } from "./remote-connection.js";
 
 const theme = createTheme();
 const plain = createTheme({ color: false });
@@ -10,6 +11,30 @@ const ascii = createTheme({ color: false, unicode: false });
 
 const identity = { projectName: "my-agent", teamName: "acme" };
 const connected = { kind: "gateway", connected: true, credential: "oidc" } as const;
+const remoteTarget = {
+  kind: "remote",
+  serverUrl: "https://vpoke.playground-vercel.tools",
+  workspaceRoot: "/tmp/weather-agent",
+} as const;
+
+function remote(connection: RemoteConnectionSnapshot["connection"]): RemoteConnectionSnapshot {
+  return { target: remoteTarget, connection };
+}
+
+function deployedRemote(
+  connection: RemoteConnectionSnapshot["connection"],
+): RemoteConnectionSnapshot {
+  return {
+    ...remote(connection),
+    deployment: {
+      provider: "vercel",
+      ownerId: "team_acme",
+      projectId: "prj_inbound",
+      projectName: "inbound",
+      environment: "production",
+    },
+  };
+}
 
 describe("buildStatusLine", () => {
   it("renders all segments in order with dot separators", () => {
@@ -25,6 +50,17 @@ describe("buildStatusLine", () => {
     expect(line).toBe(
       "anthropic/claude-sonnet-4-6  ·  12,300 tokens 6%  ·  AI Gateway (my-agent)  ·  /deploy pending",
     );
+  });
+
+  it("strips terminal controls from a remote model id", () => {
+    expect(
+      buildStatusLine({
+        model: "openai/gpt\x1b[31m-5\n",
+        remote: remote({ state: "ready", info: {} as never }),
+        theme: plain,
+        width: 120,
+      }),
+    ).toBe(" ↗ vpoke.playground-vercel.tools   ·  openai/gpt-5");
   });
 
   it("dims every segment except the yellow pending-deploy marker", () => {
@@ -168,5 +204,144 @@ describe("buildStatusLine", () => {
       width: 120,
     });
     expect(stripAnsi(line!)).toBe("m  -  ! AI Gateway");
+  });
+
+  it("renders the remote badge first and projects each authentication state", () => {
+    expect(
+      buildStatusLine({
+        remote: remote({ state: "checking" }),
+        theme: plain,
+        width: 120,
+      }),
+    ).toBe(" ↗ vpoke.playground-vercel.tools  · Checking access…");
+    expect(
+      buildStatusLine({
+        remote: remote({
+          state: "auth-required",
+          challenge: { kind: "eve-oidc" },
+        }),
+        theme: plain,
+        width: 120,
+      }),
+    ).toBe(" ↗ vpoke.playground-vercel.tools  · Authenticate via OIDC");
+    expect(
+      buildStatusLine({
+        remote: remote({
+          state: "authenticating",
+          challenge: { kind: "eve-oidc" },
+        }),
+        theme: plain,
+        width: 120,
+      }),
+    ).toBe(" ↗ vpoke.playground-vercel.tools  · Authenticating via OIDC…");
+    expect(
+      buildStatusLine({
+        remote: remote({
+          state: "auth-failed",
+          challenge: { kind: "eve-oidc" },
+        }),
+        theme: plain,
+        width: 120,
+      }),
+    ).toBe(" ↗ vpoke.playground-vercel.tools  · Authentication failed");
+    expect(
+      buildStatusLine({
+        remote: remote({
+          state: "unavailable",
+          failure: { message: "offline" },
+        }),
+        theme: plain,
+        width: 120,
+      }),
+    ).toBe(" ↗ vpoke.playground-vercel.tools  · Remote unavailable");
+    expect(
+      buildStatusLine({
+        remote: deployedRemote({ state: "ready", info: {} as never }),
+        theme: plain,
+        width: 120,
+      }),
+    ).toBe(" ↗ inbound (production) ");
+  });
+
+  it("paints the remote badge from its connection state", () => {
+    const disconnected = buildStatusLine({
+      remote: remote({
+        state: "unavailable",
+        failure: { message: "offline" },
+      }),
+      theme,
+      width: 120,
+    })!;
+    const notConnected = buildStatusLine({
+      remote: remote({
+        state: "auth-required",
+        challenge: { kind: "eve-oidc" },
+      }),
+      theme,
+      width: 120,
+    })!;
+    const connectedLine = buildStatusLine({
+      remote: deployedRemote({ state: "ready", info: {} as never }),
+      theme,
+      width: 120,
+    })!;
+
+    expect(disconnected).toContain(
+      "\x1b[7m\x1b[33m ↗ vpoke.playground-vercel.tools \x1b[39m\x1b[27m",
+    );
+    expect(notConnected).toContain(
+      "\x1b[7m\x1b[33m ↗ vpoke.playground-vercel.tools \x1b[39m\x1b[27m",
+    );
+    expect(notConnected).not.toContain("\x1b[43m");
+    expect(notConnected).not.toContain("/vc:auth");
+    expect(connectedLine).toContain("\x1b[7m\x1b[34m ↗ inbound (production) \x1b[39m\x1b[27m");
+    const badges = `${disconnected}${notConnected}${connectedLine}`;
+    expect(badges).not.toContain("\x1b[44m");
+    expect(badges).not.toContain("\x1b[100m");
+  });
+
+  it("omits endpoint status for a remote and preserves the badge as width narrows", () => {
+    const line = buildStatusLine({
+      remote: deployedRemote({ state: "ready", info: {} as never }),
+      model: "openai/gpt-5.5",
+      tokens: "↑ 200 ↓ 100",
+      endpoint: { kind: "gateway", connected: false },
+      theme,
+      width: 120,
+    })!;
+
+    expect(stripAnsi(line)).not.toContain("AI Gateway");
+    expect(
+      stripAnsi(
+        buildStatusLine({
+          remote: deployedRemote({ state: "ready", info: {} as never }),
+          model: "openai/gpt-5.5",
+          tokens: "↑ 200 ↓ 100",
+          theme: plain,
+          width: 24,
+        })!,
+      ),
+    ).toBe(" ↗ inbound (production) ");
+  });
+
+  it("closes the remote badge style when the narrowest variant is clipped", () => {
+    const line = buildStatusLine({
+      remote: deployedRemote({ state: "ready", info: {} as never }),
+      theme,
+      width: 8,
+    });
+
+    expect(line).toBeDefined();
+    expect(line?.endsWith("\x1b[0m")).toBe(true);
+    expect(stripAnsi(line ?? "")).toBe(" ↗ inbou");
+  });
+
+  it("uses the ASCII separator when unicode is unavailable", () => {
+    const line = buildStatusLine({
+      remote: remote({ state: "checking" }),
+      theme: ascii,
+      width: 120,
+    });
+    expect(line).toBe(" -> vpoke.playground-vercel.tools  - Checking access…");
   });
 });

@@ -4,6 +4,7 @@
 
 export { EveAgentStore } from "#client/eve-agent-store.js";
 export { Client } from "#client/client.js";
+export { AgentInfoResponseError } from "#client/agent-info-error.js";
 export { ClientError } from "#client/client-error.js";
 export { defaultMessageReducer } from "#client/message-reducer.js";
 export { createDataUrlFilePart, createTextWithFileContent } from "#client/file-parts.js";

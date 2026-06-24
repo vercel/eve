@@ -6,6 +6,7 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 
 function buildSerializedContext(overrides: {
   channelKind: string;
@@ -35,7 +36,7 @@ function buildSerializedContext(overrides: {
 }
 
 describe("workflowEntry integration", () => {
-  it("parks in conversation mode and resumes via the workflow hook", async () => {
+  it("parks in conversation mode and resumes via runtime delivery", async () => {
     const runtime = createTestRuntime({ agent: { name: "workflow-entry-conversation" } });
     const continuationToken = "http:workflow-entry-conversation";
 
@@ -73,10 +74,16 @@ describe("workflowEntry integration", () => {
           ),
         ).toBe(true);
 
-        await resumeHook(continuationToken, {
-          kind: "deliver",
-          payloads: [{ message: "follow up" }],
+        const workflowRuntime = createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
         });
+        await expect(
+          workflowRuntime.deliver({
+            auth: null,
+            continuationToken,
+            payload: { message: "follow up" },
+          }),
+        ).resolves.toEqual({ sessionId: run.runId });
 
         const secondTurn = await stream.nextTurn();
 
@@ -92,6 +99,72 @@ describe("workflowEntry integration", () => {
       } finally {
         stream.dispose();
         await run.cancel();
+      }
+    });
+  });
+
+  it("fails a competing continuation owner before its first turn", async () => {
+    const runtime = createTestRuntime({ agent: { name: "workflow-entry-hook-owner" } });
+    const continuationToken = "http:workflow-entry-hook-owner";
+
+    await runtime.run(async () => {
+      const owner = await start(workflowEntry, [
+        {
+          input: { message: "owner message" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const ownerStream = captureTurnEvents(owner);
+      await waitForHook({ runId: owner.runId }, { token: continuationToken });
+
+      const firstTurn = await ownerStream.nextTurn();
+      expect(firstTurn.at(-1)?.type).toBe("session.waiting");
+
+      const contender = await start(workflowEntry, [
+        {
+          input: { message: "contending message" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const contenderStream = captureTurnEvents(contender);
+
+      try {
+        const contenderEvents = await contenderStream.nextTurn();
+
+        expect(contenderEvents.at(-1)?.type).toBe("session.failed");
+        expect(
+          contenderEvents.some(
+            (event) => event.type === "message.completed" || event.type === "turn.started",
+          ),
+        ).toBe(false);
+        await expect(contender.returnValue).rejects.toThrow(/Hook token/);
+
+        await resumeHook(continuationToken, {
+          kind: "deliver",
+          payloads: [{ message: "owner follow up" }],
+        });
+        const ownerFollowUp = await ownerStream.nextTurn();
+
+        expect(ownerFollowUp.at(-1)?.type).toBe("session.waiting");
+        expect(
+          ownerFollowUp.some(
+            (event) =>
+              event.type === "message.completed" &&
+              event.data.message?.includes("owner follow up") === true,
+          ),
+        ).toBe(true);
+      } finally {
+        contenderStream.dispose();
+        ownerStream.dispose();
+        await owner.cancel();
       }
     });
   });

@@ -29,7 +29,7 @@ import { WizardCancelledError } from "../step.js";
 import { withSpinner } from "../with-spinner.js";
 
 import { inProjectSetupState, prompterSink } from "./in-project.js";
-import { runVercelFlow } from "./vercel.js";
+import { runProviderFlow } from "./provider.js";
 
 /** The current model id, its routing, and whether `/model` can rewrite it. */
 export interface CurrentAgentModel {
@@ -57,7 +57,7 @@ export interface ModelFlowDeps {
   /** Reads how the model is backed right now, for the menu's provider row. */
   detectProviderStatus: typeof detectModelProviderStatus;
   /** The provider sub-flow behind the menu's provider row. */
-  runVercelFlow: typeof runVercelFlow;
+  runProviderFlow: typeof runProviderFlow;
 }
 
 /**
@@ -130,7 +130,7 @@ function providerStatusHint(
  * string literal, so an SDK model call (`gateway(...)` / `anthropic(...)`) is
  * disabled regardless of how it routes. The provider row keys off routing: an
  * external endpoint disables it (gateway credentials don't apply); a gateway
- * endpoint gates it bold-yellow "Configure provider" until a link or credential
+ * endpoint gates it bold-yellow "Configure model access" until a link or credential
  * is detectable (the genuine "no provider connected" state), then "Change
  * provider" naming it.
  */
@@ -142,7 +142,11 @@ function modelMenuRows(
 ): SelectOption<ModelMenuRow>[] {
   let modelRow: SelectOption<ModelMenuRow>;
   if (editable) {
-    modelRow = { value: "model", label: "Change model" };
+    modelRow = {
+      value: "model",
+      label: "Change model",
+      description: "The model your agent uses",
+    };
     if (current !== null) modelRow.hint = current;
   } else {
     modelRow = {
@@ -156,19 +160,17 @@ function modelMenuRows(
   let providerRow: SelectOption<ModelMenuRow>;
   if (routing?.kind === "external") {
     providerRow = {
+      disabled: true,
       value: "provider",
       label: "Change provider",
-      disabled: true,
       description: "Disabled in external endpoint mode",
     };
   } else if (provider.kind === "unset") {
     providerRow = {
       value: "provider",
-      // The label's own color covers every glyph, so it holds whether or not
-      // the cursor row's accent wrap is around it. `accent: "warning"` turns the
-      // cursor pointer yellow to match.
-      label: pc.bold(pc.yellow("Configure provider")),
-      hint: "Required to enable the agent",
+      label: pc.bold("Configure model access"),
+      hint: pc.yellow("Not configured"),
+      description: "How your agent reaches the model provider",
       accent: "warning",
     };
   } else {
@@ -176,12 +178,17 @@ function modelMenuRows(
       value: "provider",
       label: "Change provider",
       hint: providerStatusHint(provider, pc.bold),
+      description: "How your agent reaches the model provider",
     };
   }
 
   // An explicit exit row, like the channels list — Esc works too, but the menu
   // must not make Esc the only way out.
-  return [modelRow, providerRow, { value: "done", label: "Done" }];
+  return [
+    modelRow,
+    providerRow,
+    { value: "done", label: "Done", description: "Return to the prompt" },
+  ];
 }
 
 /**
@@ -223,9 +230,9 @@ export async function detectModelProviderStatus(
  * onboarding uses ({@link selectModel}), pre-selected on the model the
  * runtime currently serves, then the static source edit that bakes the
  * choice into `agent.ts` (activation is the dev server's HMR watcher).
- * The provider row runs {@link runVercelFlow} — the provider gate (AI
- * Gateway or your own), then link-or-paste-a-key.
- * Completed model and provider changes return to the prompt with their result.
+ * The provider row runs {@link runProviderFlow}, whose single menu chooses a
+ * project-backed gateway, an inline gateway key, or an external provider.
+ * A completed model or provider change returns to the prompt with its result.
  * Cancelled flows and external-provider instructions return to the menu.
  */
 export async function runModelFlow(input: {
@@ -241,15 +248,15 @@ export async function runModelFlow(input: {
     readCurrentModel: readCurrentAgentModel,
     applyModel: changeAgentModel,
     detectProviderStatus: detectModelProviderStatus,
-    runVercelFlow,
+    runProviderFlow,
     ...input.deps,
   };
 
   // The model read is local, the provider status is a `vercel` round-trip;
   // one ephemeral spinner covers both so the menu paints with no persisted
   // loading lines.
-  const detectProvider = (): Promise<ModelProviderStatus> =>
-    deps.detectProviderStatus(appRoot, { signal });
+  const detectProvider = (useFlowSignal = true): Promise<ModelProviderStatus> =>
+    deps.detectProviderStatus(appRoot, useFlowSignal && signal !== undefined ? { signal } : {});
   let [{ id: current, routing, editable }, provider] = await withSpinner(
     prompter,
     "Checking the project…",
@@ -322,23 +329,25 @@ export async function runModelFlow(input: {
       break;
     }
 
-    const result = await deps.runVercelFlow({ appRoot, prompter, signal });
-    signal?.throwIfAborted();
+    const result = await deps.runProviderFlow({ appRoot, prompter, signal });
     // Backing out of the provider sub-flow changed nothing; the cursor stays on
     // the provider row so a retry is one keypress away.
     if (result.kind === "cancelled") {
+      if (signal?.aborted) return { kind: "cancelled" };
       nextSelection = "provider";
       continue;
     }
     // External-provider setup only shows instructions, so keep the menu open.
-    if ("outcome" in result) {
+    if (result.kind === "external-provider") {
+      if (signal?.aborted) return { kind: "cancelled" };
       nextSelection = "done";
       continue;
     }
     // Only a completed link/own-key sub-flow can move the link or
-    // credentials, so this is the one place the status is re-read.
-    provider = await withSpinner(prompter, "Checking the project…", detectProvider);
-    signal?.throwIfAborted();
+    // credentials, so this is the one place the status is re-read. Once that
+    // sub-flow commits, finish without the aborted interaction signal so the
+    // TUI can refresh the state that is already on disk.
+    provider = await withSpinner(prompter, "Checking the project…", () => detectProvider(false));
     providerOutcome = { status: provider };
     if (result.credential !== undefined) providerOutcome.credential = result.credential;
     break;

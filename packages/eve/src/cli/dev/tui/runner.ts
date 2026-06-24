@@ -45,8 +45,17 @@ import { parseLogDisplayMode } from "./log-display-mode.js";
 import {
   formatPromptCommandHelp,
   parsePromptCommand,
+  PROMPT_COMMANDS,
   type PromptCommand,
+  type PromptCommandSpec,
 } from "./prompt-commands.js";
+import {
+  createRemoteConnectionController,
+  type RemoteConnectionController,
+  type RemoteConnectionControllerOptions,
+  type RemoteConnectionSnapshot,
+} from "./remote-connection.js";
+import type { DevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
 import {
   BOOT_DETECTIONS,
   CLI_MISSING_SETUP_ISSUE,
@@ -55,11 +64,13 @@ import {
   formatSetupIssuesLine,
   LOGIN_SETUP_ISSUE,
   orderedSetupIssues,
+  resolveModelProviderState,
   type BootDetection,
   type BootDetectionContext,
   type SetupIssue,
 } from "./setup-issues.js";
 import type { SetupFlowRenderer } from "./setup-flow.js";
+import type { RemoteDevelopmentTarget } from "./target.js";
 import type {
   AssistantResponseStatsMode,
   LogDisplayMode,
@@ -193,6 +204,8 @@ export type AgentTUIRenderer = {
   renderSetupWarning?(text: string): void;
   /** Clears the setup attention line once its issue is resolved. */
   clearSetupWarning?(): void;
+  /** Commits the startup `/vc:auth` invocation to the transcript. */
+  renderCommandInvocation?(text: string, status?: "failed"): void;
   renderCommandResult?(text: string): void;
   readonly setupFlow?: SetupFlowRenderer;
   readPrompt?(options?: AgentTUISessionOptions): Promise<string | undefined>;
@@ -264,6 +277,8 @@ export type AgentTUIRenderer = {
    * line ignore it.
    */
   setVercelStatus?(status: VercelStatusSnapshot): void;
+  /** Sets the remote deployment badge and its current connection/authentication state. */
+  setRemoteConnectionStatus?(status: RemoteConnectionSnapshot): void;
   /**
    * Clears the rendered transcript and resets per-conversation display
    * state, leaving the UI interactive on a fresh screen. Used by the
@@ -282,6 +297,7 @@ export interface PromptCommandHandlerContext {
   readonly title: string;
   /** Provider entry authorized by confirmed boot-time model-access evidence. */
   readonly initialModelStep?: "provider";
+  readonly remoteConnection?: RemoteConnectionController;
 }
 
 /** What one handled slash command leaves behind for the runner to apply. */
@@ -336,6 +352,15 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   initialInput?: string;
   /** Handles non-core slash commands without adding feature branches to the runner. */
   promptCommandHandler?: PromptCommandHandler;
+  /** Commands shown in discovery for this local or remote session. */
+  availablePromptCommands?: readonly PromptCommandSpec[];
+  /** Remote target and mutable OIDC token source, when connected through `--url`. */
+  remote?: {
+    readonly target: RemoteDevelopmentTarget;
+    readonly credentials: DevelopmentCredentialGate;
+    readonly resolveOidcToken: NonNullable<RemoteConnectionControllerOptions["resolveOidcToken"]>;
+    readonly resolveDeployment: NonNullable<RemoteConnectionControllerOptions["resolveDeployment"]>;
+  };
   /** Boot-time installation-state checks; defaults to the built-ins. */
   bootDetections?: readonly BootDetection[];
   /** Test seam for the status line's Vercel link probe; defaults to the real one. */
@@ -371,6 +396,8 @@ export class EveTUIRunner {
   /** Seeds the first prompt's editable buffer; consumed once in {@link #run}. */
   readonly #initialInput?: string;
   readonly #promptCommandHandler?: PromptCommandHandler;
+  readonly #availablePromptCommands: readonly PromptCommandSpec[];
+  readonly #remoteConnection?: RemoteConnectionController;
   readonly #bootDetections: readonly BootDetection[];
   readonly #getVercelAuthStatus: typeof getVercelAuthStatus;
   #onBootProgress?: DevBootProgressReporter;
@@ -473,11 +500,25 @@ export class EveTUIRunner {
     if (options.promptCommandHandler !== undefined) {
       this.#promptCommandHandler = options.promptCommandHandler;
     }
+    this.#availablePromptCommands = options.availablePromptCommands ?? PROMPT_COMMANDS;
+    if (options.remote !== undefined) {
+      if (this.#client === undefined) {
+        throw new Error("A remote TUI requires a configured development client.");
+      }
+      this.#remoteConnection = createRemoteConnectionController({
+        client: this.#client,
+        credentials: options.remote.credentials,
+        target: options.remote.target,
+        onChange: (snapshot) => this.#renderer.setRemoteConnectionStatus?.(snapshot),
+        resolveOidcToken: options.remote.resolveOidcToken,
+        resolveDeployment: options.remote.resolveDeployment,
+      });
+    }
     this.#bootDetections = options.bootDetections ?? BOOT_DETECTIONS;
     this.#getVercelAuthStatus = options.getVercelAuthStatus ?? getVercelAuthStatus;
     if (options.onBootProgress !== undefined) this.#onBootProgress = options.onBootProgress;
-    if (options.serverUrl !== undefined) {
-      this.#serverUrl = options.serverUrl;
+    if (options.serverUrl !== undefined) this.#serverUrl = options.serverUrl;
+    if (options.serverUrl !== undefined && options.remote === undefined) {
       this.#runtimeArtifacts = createDevelopmentRuntimeArtifactSessionRefresher({
         serverUrl: options.serverUrl,
       });
@@ -498,32 +539,40 @@ export class EveTUIRunner {
     }
 
     let info: AgentInfoResult | undefined;
-    try {
-      info = await devBootPhase(
-        "connecting to agent",
-        () => (this.#client ? this.#client.info() : Promise.resolve(undefined)),
-        this.#onBootProgress,
-      );
-    } catch {
-      info = undefined;
+    if (this.#remoteConnection !== undefined) {
+      const connection = await this.#remoteConnection.check();
+      if (connection.state === "ready") info = connection.info;
+    } else {
+      try {
+        info = await devBootPhase(
+          "connecting to agent",
+          () => (this.#client ? this.#client.info() : Promise.resolve(undefined)),
+          this.#onBootProgress,
+        );
+      } catch {
+        info = undefined;
+      }
     }
     this.#reportBeforeFirstPaint();
-    this.#replaceAgentInfo(info);
-    await this.#renderSetupIssues(info);
+    const headerInfo = this.#replaceAgentInfo(info);
+    await this.#renderSetupIssues(headerInfo);
   }
 
-  #replaceAgentInfo(info: AgentInfoResult | undefined): void {
-    this.#agentInfo = info;
+  #replaceAgentInfo(info: AgentInfoResult | undefined): AgentInfoResult | undefined {
+    const headerInfo =
+      this.#appRoot === undefined ? info : resolveModelProviderState(info, process.env);
+    this.#agentInfo = headerInfo;
     const serverUrl = this.#serverUrl;
-    if (serverUrl === undefined) return;
+    if (serverUrl === undefined) return headerInfo;
 
     const header: AgentTUIAgentHeader = {
       name: this.#name,
       serverUrl,
     };
-    if (info !== undefined) header.info = info;
+    if (headerInfo !== undefined) header.info = headerInfo;
     if (this.#appRoot !== undefined) header.tip = this.#headerTip;
     this.#renderer.renderAgentHeader?.(header);
+    return headerInfo;
   }
 
   #reportBeforeFirstPaint(): void {
@@ -545,6 +594,7 @@ export class EveTUIRunner {
       // Drops any in-flight link probe so a late resolution cannot paint
       // into a torn-down terminal.
       this.#vercelStatus?.dispose();
+      this.#remoteConnection?.dispose();
     }
   }
 
@@ -560,6 +610,13 @@ export class EveTUIRunner {
     let initialDraft = this.#initialInput;
 
     await this.#renderAgentHeader();
+    if (this.#remoteConnection?.current().connection.state === "auth-required") {
+      await this.#executeExtensionCommand(
+        { type: "extension", name: "vc:auth", argument: "" },
+        title,
+        "startup",
+      );
+    }
     this.#subscribeDevelopmentSandboxLogs();
     // Fire-and-forget: the link identity is network-bound to resolve, and the
     // first prompt must not wait on it. The segment appears when it lands.
@@ -622,7 +679,7 @@ export class EveTUIRunner {
         // Help renders locally; unlike extension commands it must work even
         // without a prompt-command handler (e.g. remote --url sessions).
         if (command?.type === "help") {
-          this.#renderCommandOutcome(formatPromptCommandHelp());
+          this.#renderCommandOutcome(formatPromptCommandHelp(this.#availablePromptCommands));
           pendingInputResponses = undefined;
           streamWithoutPrompt = false;
           prompt = undefined;
@@ -643,26 +700,8 @@ export class EveTUIRunner {
           try {
             const initialModelStep =
               command.name === "model" ? automaticSetup?.initialModelStep : undefined;
-            const context: PromptCommandHandlerContext =
-              initialModelStep === undefined
-                ? { renderer: this.#renderer, title }
-                : { renderer: this.#renderer, title, initialModelStep };
             automaticSetup = undefined;
-            const outcome =
-              this.#promptCommandHandler === undefined
-                ? { message: `/${command.name} is not available in this session.` }
-                : await this.#promptCommandHandler.handle(command, context);
-            if (outcome?.message !== undefined) this.#renderCommandOutcome(outcome.message);
-            const effect = outcome?.effect;
-            if (effect?.kind === "model-access-changed") {
-              this.#vercelStatus?.applyEffect({ kind: "refresh-identity" });
-              this.#authHintStale = true;
-              await this.#refreshModelAccess();
-            } else if (effect !== undefined) {
-              this.#vercelStatus?.applyEffect(effect);
-              this.#authHintStale = true;
-              void this.#refreshSetupAttention(this.#agentInfo);
-            }
+            await this.#executeExtensionCommand(command, title, "command", initialModelStep);
           } catch (error) {
             if (isInterruptedError(error)) return;
             throw error;
@@ -898,6 +937,7 @@ export class EveTUIRunner {
       // as in-stream failures so it renders as an inline region right
       // where the assistant response would have appeared, then let the
       // loop recover onto a fresh session before the next prompt.
+      this.#remoteConnection?.reportFailure(error);
       this.#sessionFailed = true;
       return {
         events: errorOnlyTUIStream({
@@ -976,8 +1016,8 @@ export class EveTUIRunner {
 
   /**
    * Re-evaluates the attention line after a setup command changed local state,
-   * so a fixed issue clears (e.g. the `not logged in · /login` line disappears
-   * once `/login` succeeds) instead of lingering stale. Authoritative: unlike
+   * so a fixed issue clears (e.g. the `not logged in · /vc:login` line disappears
+   * once `/vc:login` succeeds) instead of lingering stale. Authoritative: unlike
    * the boot probe it re-reads detections and auth and is not stale-guarded.
    */
   async #refreshSetupAttention(info: AgentInfoResult | undefined): Promise<void> {
@@ -1013,12 +1053,80 @@ export class EveTUIRunner {
     });
   }
 
-  #renderCommandOutcome(text: string): void {
+  #renderCommandOutcome(text: string | undefined): void {
+    if (text === undefined) return;
     if (this.#renderer.renderCommandResult !== undefined) {
       this.#renderer.renderCommandResult(text);
       return;
     }
     this.#renderer.renderNotice?.(text);
+  }
+
+  async #handleExtensionCommand(
+    command: Extract<PromptCommand, { type: "extension" }>,
+    input: Pick<PromptCommandHandlerContext, "initialModelStep" | "title">,
+  ): Promise<PromptCommandOutcome | undefined> {
+    const handler = this.#promptCommandHandler;
+    if (handler === undefined)
+      return { message: `/${command.name} is not available in this session.` };
+
+    return await handler.handle(command, {
+      renderer: this.#renderer,
+      title: input.title,
+      initialModelStep: input.initialModelStep,
+      remoteConnection: this.#remoteConnection,
+    });
+  }
+
+  #renderStartupCommandInvocation(
+    command: Extract<PromptCommand, { type: "extension" }>,
+    trigger: "startup" | "command",
+  ): void {
+    if (trigger !== "startup") return;
+
+    const state = this.#remoteConnection?.current().connection.state;
+    const status = state === "auth-failed" || state === "unavailable" ? "failed" : undefined;
+    const argument = command.argument.length === 0 ? "" : ` ${command.argument}`;
+    this.#renderer.renderCommandInvocation?.(`/${command.name}${argument}`, status);
+  }
+
+  async #applyCommandEffect(effect: PromptCommandOutcome["effect"]): Promise<void> {
+    if (effect?.kind === "model-access-changed") {
+      this.#vercelStatus?.applyEffect({ kind: "refresh-identity" });
+      this.#authHintStale = true;
+      await this.#refreshModelAccess();
+      return;
+    }
+    if (effect === undefined) return;
+
+    this.#vercelStatus?.applyEffect(effect);
+    this.#authHintStale = true;
+    void this.#refreshSetupAttention(this.#agentInfo);
+  }
+
+  async #executeExtensionCommand(
+    command: Extract<PromptCommand, { type: "extension" }>,
+    title: string,
+    trigger: "startup" | "command",
+    initialModelStep?: "provider",
+  ): Promise<void> {
+    const outcome = await this.#handleExtensionCommand(command, { initialModelStep, title });
+    this.#renderStartupCommandInvocation(command, trigger);
+    this.#renderCommandOutcome(outcome?.message);
+    await this.#applyCommandEffect(outcome?.effect);
+    this.#refreshHeaderFromRemoteConnection();
+  }
+
+  #refreshHeaderFromRemoteConnection(): void {
+    const connection = this.#remoteConnection?.current().connection;
+    if (connection?.state !== "ready" || connection.info === this.#agentInfo) return;
+    this.#agentInfo = connection.info;
+    if (this.#serverUrl === undefined) return;
+    this.#renderer.renderAgentHeader?.({
+      info: connection.info,
+      name: this.#name,
+      serverUrl: this.#serverUrl,
+    });
   }
 
   /**
@@ -1056,16 +1164,16 @@ export class EveTUIRunner {
 
   /**
    * Setup commands can write env files before the dev watcher reloads them.
-   * Reload first, then replace the cached `/info` response that owns the status
-   * bar's endpoint state. The slower Vercel auth probe stays off the prompt path.
+   * Reload first, then cache the credential-normalized `/info` snapshot shared
+   * by the status bar and setup detector. The Vercel auth probe stays off the
+   * prompt path.
    */
   async #refreshModelAccess(): Promise<void> {
     const appRoot = this.#appRoot;
     if (appRoot === undefined) return;
 
     loadDevelopmentEnvironmentFiles(appRoot);
-    const refreshedInfo = await this.#readAgentInfo();
-    this.#replaceAgentInfo(refreshedInfo);
+    const refreshedInfo = this.#replaceAgentInfo(await this.#readAgentInfo());
     void this.#refreshSetupAttention(refreshedInfo);
   }
 
@@ -1410,6 +1518,7 @@ function createRenderer(options: EveTUIRunnerOptions): AgentTUIRenderer {
     assistantResponseStats: options.assistantResponseStats,
     contextSize: options.contextSize,
     logs: options.logs,
+    availablePromptCommands: options.availablePromptCommands,
     input: options.userInput,
     output: options.screen,
   });

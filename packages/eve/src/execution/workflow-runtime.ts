@@ -1,5 +1,5 @@
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
-import { getHookByToken, getRun, resumeHook, start } from "#compiled/@workflow/core/runtime.js";
+import { getRun, resumeHook, start } from "#compiled/@workflow/core/runtime.js";
 import type { Run } from "#compiled/@workflow/core/runtime.js";
 import type { WorkflowFunction, WorkflowMetadata } from "#compiled/@workflow/core/runtime/start.js";
 
@@ -19,6 +19,7 @@ import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { buildRunContext } from "#execution/runtime-context.js";
+import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
@@ -105,7 +106,9 @@ export function createWorkflowRuntime(config: {
 
       let events: ReadableStream<HandleMessageStreamEvent> | undefined;
       const getEvents = () => {
-        events ??= parseNdjsonStream(() => getRun(run.runId).getReadable());
+        events ??= parseNdjsonStream<HandleMessageStreamEvent>(() =>
+          getRun(run.runId).getReadable(),
+        );
         return events;
       };
 
@@ -127,8 +130,7 @@ export function createWorkflowRuntime(config: {
         requestId: input.requestId,
       };
       try {
-        const hook = normalizeWorkflowHook(await getHookByToken(input.continuationToken));
-        await resumeHook(input.continuationToken, hookPayload);
+        const hook = normalizeWorkflowHook(await resumeHook(input.continuationToken, hookPayload));
         return { sessionId: hook.runId };
       } catch (error) {
         // "No hook" is the expected resume-or-start signal: normalize it to
@@ -147,7 +149,7 @@ export function createWorkflowRuntime(config: {
       sessionId: string,
       options?: GetEventStreamOptions,
     ): Promise<ReadableStream<HandleMessageStreamEvent>> {
-      return parseNdjsonStream(() =>
+      return parseNdjsonStream<HandleMessageStreamEvent>(() =>
         getRun(sessionId).getReadable({ startIndex: options?.startIndex }),
       );
     },
@@ -207,50 +209,4 @@ function normalizeWorkflowHook(value: unknown): WorkflowHookRecord {
   return {
     runId,
   };
-}
-
-function parseNdjsonStream(
-  createByteStream: () => ReadableStream<Uint8Array>,
-): ReadableStream<HandleMessageStreamEvent> {
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  return new ReadableStream<HandleMessageStreamEvent>({
-    async start(controller) {
-      const reader = createByteStream().getReader();
-      try {
-        while (true) {
-          const { value, done } = await reader.read();
-
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-
-          for (
-            let newlineIndex = buffer.indexOf("\n");
-            newlineIndex !== -1;
-            newlineIndex = buffer.indexOf("\n")
-          ) {
-            const line = buffer.slice(0, newlineIndex).trim();
-            buffer = buffer.slice(newlineIndex + 1);
-
-            if (line.length > 0) {
-              controller.enqueue(JSON.parse(line) as HandleMessageStreamEvent);
-            }
-          }
-        }
-
-        buffer += decoder.decode();
-        const trailing = buffer.trim();
-        if (trailing.length > 0) {
-          controller.enqueue(JSON.parse(trailing) as HandleMessageStreamEvent);
-        }
-        controller.close();
-      } catch (error) {
-        controller.error(error);
-      } finally {
-        reader.releaseLock();
-      }
-    },
-  });
 }

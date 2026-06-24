@@ -186,23 +186,43 @@ const agent = useEveAgent({ reducer: toolCounter });
 
 ## Resumable sessions
 
-The browser conversation lives durably on the server. Persist the `session` cursor to pick it back up after a reload:
+The browser conversation lives durably on the server. Persist both the rendered event log and the `session` cursor to pick it back up after a reload:
 
 ```tsx
-const [initialSession] = useState(() => {
-  const raw = localStorage.getItem("eve-session");
-  return raw ? JSON.parse(raw) : undefined;
+import type { HandleMessageStreamEvent, SessionState } from "eve/client";
+
+type SavedEveChat = {
+  events?: readonly HandleMessageStreamEvent[];
+  session?: SessionState;
+};
+
+const [saved] = useState<SavedEveChat>(() => {
+  const raw = localStorage.getItem("eve-chat");
+  return raw ? JSON.parse(raw) : {};
 });
 
 const agent = useEveAgent({
-  initialSession,
-  onSessionChange(session) {
-    localStorage.setItem("eve-session", JSON.stringify(session));
+  initialEvents: saved.events ?? [],
+  initialSession: saved.session,
+  onFinish(snapshot) {
+    localStorage.setItem(
+      "eve-chat",
+      JSON.stringify({
+        events: snapshot.events,
+        session: snapshot.session,
+      }),
+    );
   },
 });
 ```
 
-Store the full `session` object (`sessionId`, `continuationToken`, `streamIndex`), not a single field.
+Store the full `session` object (`sessionId`, `continuationToken`, `streamIndex`), not a single field. The session cursor lets eve continue the durable conversation; the event log lets your UI render historical messages without replaying the whole stream. A database-backed chat app should usually persist stream events as they arrive with `onEvent` and then save a final snapshot in `onFinish`.
+
+For multiple chat threads, keep one saved event log and session cursor per thread. `host`, `reducer`, `session`, `initialEvents`, `initialSession`, `auth`, `headers`, `maxReconnectAttempts`, and `optimistic` are read when the hook creates its store, so remount the chat component when switching threads, for example with `key={chat.id}`.
+
+If the user can refresh or navigate immediately after pressing send, create your app-level chat row and store the pending user message before calling `send()`. After the request starts, persist the session state as soon as it contains a `sessionId`, then reconnect an interrupted in-flight turn with `session.stream({ startIndex: savedEvents.length })` from the lower-level client.
+
+Connection authorization prompts need one extra bit of UI state. eve emits `authorization.required` when a tool needs OAuth or another connection grant. Treat that as a parked chat turn for rendering and persistence: show the authorization prompt, disable ordinary text input for that thread, and keep the session cursor so the callback or a structured decline can continue the same session.
 
 ## Custom hosts and headers
 

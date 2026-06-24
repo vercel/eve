@@ -181,4 +181,14 @@ describe("resolveAssistantStepText", () => {
   it("returns null when the fallback is empty", () => {
     expect(resolveAssistantStepText([], "")).toBeNull();
   });
+
+  it("returns null when assistant text is only whitespace", () => {
+    const messages: ModelMessage[] = [{ content: " \n\t", role: "assistant" }];
+
+    expect(resolveAssistantStepText(messages, undefined)).toBeNull();
+  });
+
+  it("returns null when the fallback is only whitespace", () => {
+    expect(resolveAssistantStepText([], " \n\t")).toBeNull();
+  });
 });

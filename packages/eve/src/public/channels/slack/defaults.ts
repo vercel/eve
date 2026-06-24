@@ -162,7 +162,11 @@ export const defaultEvents: SlackChannelInternalEvents = {
       return;
     }
     channel.state.pendingToolCallMessage = null;
-    if (event.message) await channel.thread.post(event.message);
+    if (!event.message) {
+      await channel.thread.startTyping();
+      return;
+    }
+    await channel.thread.post(event.message);
   },
 
   async "turn.failed"(event, channel, _ctx) {

@@ -243,6 +243,37 @@ export function setPendingAuthorization(
   return { ...sessionState, [PENDING_AUTHORIZATION_KEY]: value };
 }
 
+export function clearPendingAuthorization(
+  sessionState: Record<string, unknown> | undefined,
+  names?: readonly string[],
+): Record<string, unknown> | undefined {
+  if (sessionState === undefined || sessionState[PENDING_AUTHORIZATION_KEY] === undefined) {
+    return sessionState;
+  }
+
+  if (names !== undefined) {
+    if (names.length === 0) return sessionState;
+
+    const pending = getPendingAuthorization(sessionState);
+    if (pending !== undefined) {
+      const completedNames = new Set(names);
+      const challenges = pending.challenges.filter(
+        (challenge) => !completedNames.has(challenge.name),
+      );
+      if (challenges.length > 0) {
+        return {
+          ...sessionState,
+          [PENDING_AUTHORIZATION_KEY]: { challenges },
+        };
+      }
+    }
+  }
+
+  const state = { ...sessionState };
+  delete state[PENDING_AUTHORIZATION_KEY];
+  return Object.keys(state).length > 0 ? state : undefined;
+}
+
 export function getPendingAuthorization(
   sessionState: Record<string, unknown> | undefined,
 ): PendingAuthorizationState | undefined {

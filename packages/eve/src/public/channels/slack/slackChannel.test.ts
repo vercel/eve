@@ -320,6 +320,31 @@ describe("slackChannel() default event handlers", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("message.completed clears typing without posting for empty delivery", async () => {
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("message.completed", {
+        finishReason: "stop",
+        message: null,
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe("https://slack.com/api/assistant.threads.setStatus");
+    expect(parseSlackRequestBody(init as RequestInit)).toMatchObject({ status: "" });
+  });
+
   it("input.requested posts an approval card with Slack-unique button action ids", async () => {
     const adapter = withState(
       getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),

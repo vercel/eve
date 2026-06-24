@@ -42,6 +42,7 @@ import {
   runProxyInputRequestStep,
 } from "#execution/workflow-steps.js";
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
+import { claimHookOwnership, closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
 
 // workflow-entry.ts is the durable workflow body — the bundler rejects
 // node built-ins here, so `internal/logging.ts` cannot be imported.
@@ -175,24 +176,13 @@ async function runDriverLoop(input: {
   const nextTurnCompletionToken = (): string =>
     `${input.sessionState.sessionId}:turn-completion:${String(turnDispatchIndex++)}`;
 
-  // Register before the first turn when a placeholder token exists.
+  // Claim before the first turn when a placeholder token exists.
   // Tokenless channels must anchor during that turn before hook registration.
   let parkToken = "";
   let hook: Hook<HookPayload> | undefined;
   let iterator: AsyncIterator<HookPayload> | undefined;
   let pendingNext: Promise<IteratorResult<HookPayload>> | null = null;
   const bufferedDeliveries: DeliverHookPayload[] = [];
-
-  const createParkHook = (nextToken: string): void => {
-    parkToken = nextToken;
-    hook = createHook<HookPayload>({ token: parkToken });
-    iterator = hook[Symbol.asyncIterator]();
-    pendingNext = null;
-  };
-
-  if (input.sessionState.continuationToken) {
-    createParkHook(input.sessionState.continuationToken);
-  }
 
   const getNextPromise = (): Promise<IteratorResult<HookPayload>> => {
     if (iterator === undefined) {
@@ -208,65 +198,94 @@ async function runDriverLoop(input: {
   };
 
   /**
-   * Disposes the current park hook and creates a fresh one at
-   * `nextToken`. Channels that re-key mid-session must coordinate
-   * with their senders — in-flight deliveries to the old token after
-   * this returns are silently dropped.
+   * Stops accepting deliveries on the current park hook and releases its
+   * token. In-flight deliveries to that token after this returns are dropped.
    */
   const closeParkHook = async (): Promise<void> => {
-    if (iterator !== undefined) {
-      await closeHookIterator(iterator);
-    }
-    if (hook !== undefined) {
-      await disposeHook(hook);
-    }
+    const currentIterator = iterator;
+    const currentHook = hook;
     hook = undefined;
     iterator = undefined;
     pendingNext = null;
+
+    if (currentIterator !== undefined) {
+      try {
+        await closeHookIterator(currentIterator);
+      } catch (error) {
+        if (currentHook !== undefined) {
+          try {
+            await disposeHook(currentHook);
+          } catch {
+            // The iterator failure is authoritative; cleanup must not replace it.
+          }
+        }
+        throw error;
+      }
+    }
+    if (currentHook !== undefined) {
+      await disposeHook(currentHook);
+    }
   };
 
   const rekeyHook = async (nextToken: string): Promise<void> => {
     if (!nextToken || (hook !== undefined && nextToken === parkToken)) return;
-    await closeParkHook();
-    createParkHook(nextToken);
+
+    // Claim the replacement before releasing the current token. A failed
+    // claim leaves the active hook intact until normal failure cleanup.
+    const nextHook = createHook<HookPayload>({ token: nextToken });
+    await claimHookOwnership(nextHook);
+
+    try {
+      await closeParkHook();
+    } catch (error) {
+      try {
+        await disposeHook(nextHook);
+      } catch {
+        // The active hook release failure is authoritative.
+      }
+      throw error;
+    }
+
+    parkToken = nextToken;
+    hook = nextHook;
+    iterator = nextHook[Symbol.asyncIterator]();
+    pendingNext = null;
   };
 
-  let action: NextDriverAction = await dispatchAndAwaitTurn({
-    capabilities: input.capabilities,
-    completionToken: nextTurnCompletionToken(),
-    delivery: input.initialInput,
-    mode: input.mode,
-    parentWritable: input.driverWritable,
-    serializedContext: input.serializedContext,
-    sessionState: input.sessionState,
-  });
-
-  if (action.kind === "done") {
-    await closeHookIterator(authIterator);
-    await disposeHook(authHook);
-    await closeParkHook();
-    return await finalizeDone({
-      action,
-      driverWritable: input.driverWritable,
-    });
-  }
-
-  if (!action.sessionState.continuationToken) {
-    await closeHookIterator(authIterator);
-    await disposeHook(authHook);
-    await closeParkHook();
-    throw new Error(
-      "Cannot park: no continuation token available. The channel must " +
-        "post the first message during the initial turn (anchoring the " +
-        "session) or `send()` must be called with an explicit " +
-        "continuationToken.",
-    );
-  }
-
-  // Rekey if the first turn changed the continuation token.
-  await rekeyHook(action.sessionState.continuationToken);
-
   try {
+    if (input.sessionState.continuationToken) {
+      await rekeyHook(input.sessionState.continuationToken);
+    }
+
+    let action: NextDriverAction = await dispatchAndAwaitTurn({
+      capabilities: input.capabilities,
+      completionToken: nextTurnCompletionToken(),
+      delivery: input.initialInput,
+      mode: input.mode,
+      parentWritable: input.driverWritable,
+      serializedContext: input.serializedContext,
+      sessionState: input.sessionState,
+    });
+
+    if (action.kind === "done") {
+      return await finalizeDone({
+        action,
+        driverWritable: input.driverWritable,
+      });
+    }
+
+    if (!action.sessionState.continuationToken) {
+      throw new Error(
+        "Cannot park: no continuation token available. The channel must " +
+          "post the first message during the initial turn (anchoring the " +
+          "session) or `send()` must be called with an explicit " +
+          "continuationToken.",
+      );
+    }
+
+    // Rekey if the first turn changed the continuation token.
+    await rekeyHook(action.sessionState.continuationToken);
+
     while (true) {
       switch (action.kind) {
         case "done":
@@ -673,30 +692,4 @@ const NO_READY_MESSAGE = Symbol("no-ready-message");
 async function takeReadyPayload<T>(promise: Promise<T>): Promise<T | typeof NO_READY_MESSAGE> {
   await Promise.resolve();
   return await Promise.race([promise, Promise.resolve(NO_READY_MESSAGE)]);
-}
-
-async function closeHookIterator(iterator: AsyncIterator<HookPayload>): Promise<void> {
-  if (typeof iterator.return !== "function") {
-    return;
-  }
-
-  await iterator.return(undefined);
-}
-
-async function disposeHook(hook: {
-  dispose?: () => unknown;
-  [Symbol.dispose]?: () => unknown;
-}): Promise<void> {
-  const explicitDispose = hook.dispose;
-  if (typeof explicitDispose === "function") {
-    await explicitDispose.call(hook);
-    return;
-  }
-
-  const symbolDispose = hook[Symbol.dispose];
-  if (typeof symbolDispose !== "function") {
-    return;
-  }
-
-  await symbolDispose.call(hook);
 }

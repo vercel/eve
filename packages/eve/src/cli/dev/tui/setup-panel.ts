@@ -29,6 +29,7 @@ import {
 } from "#setup/cli/select-state.js";
 import type { SelectNotice } from "#setup/prompter.js";
 
+import type { ProviderPickerPhase } from "./provider-picker.js";
 import { maskLine, visibleLine, type LineState } from "./line-editor.js";
 import type { Theme } from "./theme.js";
 import {
@@ -61,23 +62,36 @@ interface SetupSelectPanelBase extends SetupQuestionPanelBase {
   loadingFrame?: string;
 }
 
-interface SetupEditableRow {
-  /**
-   * The row whose hint is a live rename field. Hovering it (cursor on the row)
-   * makes it editable directly — typing and backspace edit the name in place —
-   * so the editor's text and a blinking caret render only on that row.
-   */
+/**
+ * A menu row that turns into an inline editor while the cursor rests on it.
+ * `optionValue` names the row; the `editor` discriminant chooses the widget —
+ * an in-place rename field, or a masked provider-key field with its own
+ * validation phases. Hovering the row makes it editable directly (typing and
+ * backspace edit in place), so the editor's text and a blinking caret render
+ * only on that row. Layout and inline editing are orthogonal, so the editor
+ * travels as a payload rather than as its own panel `kind`.
+ */
+interface SetupInlineEditRow {
   optionValue: string;
-  editor: LineState;
-  defaultValue: string;
-  formatHint: (value: string) => string;
   caretVisible: boolean;
+  editor:
+    | {
+        kind: "rename";
+        editor: LineState;
+        defaultValue: string;
+        formatHint: (value: string) => string;
+      }
+    | {
+        kind: "key";
+        phase: ProviderPickerPhase;
+      };
 }
 
 /**
  * Select presentation variants. The discriminant owns the interaction grammar
  * so feature combinations are deliberate rather than resolved by conditional
- * precedence inside the renderer.
+ * precedence inside the renderer. Inline editing is the exception: it composes
+ * with a layout instead of defining one, so `inline-edit` carries both.
  */
 type SetupOptionSelectPanelState =
   | (SetupSelectPanelBase & { kind: "single" })
@@ -86,7 +100,11 @@ type SetupOptionSelectPanelState =
   | (SetupSelectPanelBase & { kind: "searchable-multi"; placeholder?: string })
   | (SetupSelectPanelBase & { kind: "stacked" })
   | (SetupSelectPanelBase & { kind: "task-list" })
-  | (SetupSelectPanelBase & { kind: "editable"; edit: SetupEditableRow });
+  | (SetupSelectPanelBase & {
+      kind: "inline-edit";
+      layout: "stacked" | "task-list";
+      edit: SetupInlineEditRow;
+    });
 
 interface SetupActionsPanelState {
   kind: "actions";
@@ -169,6 +187,7 @@ function questionFooter(hints: readonly string[], theme: Theme): string[] {
 
 const BOLD_OR_DIM_CLOSE = "\x1b[22m";
 const DIM_OPEN = "\x1b[2m";
+const ANSI_FOREGROUND_COLOR = new RegExp(`${String.fromCharCode(27)}\\[(?:3[0-9]|9[0-7])m`, "g");
 
 /**
  * Dims a line that may carry embedded bold spans (e.g. a flow bolding a
@@ -177,6 +196,11 @@ const DIM_OPEN = "\x1b[2m";
  */
 function dimWithEmphasis(text: string, theme: Theme): string {
   return theme.colors.dim(text.replaceAll(BOLD_OR_DIM_CLOSE, `${BOLD_OR_DIM_CLOSE}${DIM_OPEN}`));
+}
+
+/** A selected row must not inherit an authored hint color. */
+function foregroundWithEmphasis(text: string): string {
+  return text.replaceAll(DIM_OPEN, "").replace(ANSI_FOREGROUND_COLOR, "");
 }
 
 function toneGlyph(tone: FlowPanelLine["tone"], theme: Theme): string {
@@ -295,18 +319,13 @@ interface SelectPresentation {
   selection: "single" | "multiple";
   filter: { placeholder: string | undefined } | undefined;
   layout: SelectLayout;
-  edit: SetupEditableRow | undefined;
+  edit: SetupInlineEditRow | undefined;
 }
 
 function selectPresentation(state: SetupOptionSelectPanelState): SelectPresentation {
   switch (state.kind) {
     case "single":
-      return {
-        selection: "single",
-        filter: undefined,
-        layout: "plain",
-        edit: undefined,
-      };
+      return { selection: "single", filter: undefined, layout: "plain", edit: undefined };
     case "search":
       return {
         selection: "single",
@@ -315,12 +334,7 @@ function selectPresentation(state: SetupOptionSelectPanelState): SelectPresentat
         edit: undefined,
       };
     case "multi":
-      return {
-        selection: "multiple",
-        filter: undefined,
-        layout: "plain",
-        edit: undefined,
-      };
+      return { selection: "multiple", filter: undefined, layout: "plain", edit: undefined };
     case "searchable-multi":
       return {
         selection: "multiple",
@@ -329,26 +343,11 @@ function selectPresentation(state: SetupOptionSelectPanelState): SelectPresentat
         edit: undefined,
       };
     case "stacked":
-      return {
-        selection: "single",
-        filter: undefined,
-        layout: "stacked",
-        edit: undefined,
-      };
+      return { selection: "single", filter: undefined, layout: "stacked", edit: undefined };
     case "task-list":
-      return {
-        selection: "single",
-        filter: undefined,
-        layout: "task-list",
-        edit: undefined,
-      };
-    case "editable":
-      return {
-        selection: "single",
-        filter: undefined,
-        layout: "task-list",
-        edit: state.edit,
-      };
+      return { selection: "single", filter: undefined, layout: "task-list", edit: undefined };
+    case "inline-edit":
+      return { selection: "single", filter: undefined, layout: state.layout, edit: state.edit };
   }
 }
 
@@ -401,19 +400,72 @@ function noticeBody(notice: SelectNotice, layout: SelectLayout, theme: Theme): s
   return notice.text;
 }
 
-function editableOption(
+function renameHint(
   option: SetupPanelOption,
-  isCursor: boolean,
-  edit: SetupEditableRow | undefined,
+  caretVisible: boolean,
+  rename: Extract<SetupInlineEditRow["editor"], { kind: "rename" }>,
   theme: Theme,
 ): SetupPanelOption {
-  if (!isCursor || edit?.optionValue !== option.value) return option;
-
-  const value = edit.editor.text || edit.defaultValue;
-  const caretAt = edit.editor.text.length === 0 ? value.length : edit.editor.cursor;
-  const caret = edit.caretVisible ? theme.colors.cyan(theme.glyph.caret) : "";
+  const value = rename.editor.text || rename.defaultValue;
+  const caretAt = rename.editor.text.length === 0 ? value.length : rename.editor.cursor;
+  const caret = caretVisible ? theme.colors.cyan(theme.glyph.caret) : "";
   const editableValue = `${value.slice(0, caretAt)}${caret}${value.slice(caretAt)}`;
-  return { ...option, hint: edit.formatHint(editableValue) };
+  return { ...option, hint: rename.formatHint(editableValue) };
+}
+
+function keyHint(
+  option: SetupPanelOption,
+  caretVisible: boolean,
+  key: Extract<SetupInlineEditRow["editor"], { kind: "key" }>,
+  theme: Theme,
+  maxHintWidth: number,
+): SetupPanelOption {
+  const phase = key.phase;
+  if (phase.kind === "inactive") return option;
+
+  const display = maskLine(phase.editor);
+  const cursorEnabled = phase.kind !== "validating" && phase.kind !== "invalid";
+  let prefix = "";
+  let suffix = "";
+  if (phase.kind === "validating") {
+    prefix = "Validating… ";
+  } else if (phase.kind === "invalid") {
+    suffix = `    ${theme.colors.red(`${theme.glyph.error} ${theme.colors.bold("Invalid key")}`)}`;
+  }
+
+  const placeholder = phase.editor.text.length === 0 ? "type your key" : undefined;
+  const cursorLine = placeholder === undefined ? display : { text: placeholder, cursor: 0 };
+  const inputWidth = Math.max(1, maxHintWidth - visibleLength(`>  ${prefix}${suffix}`));
+  const visible = visibleLine(cursorLine, inputWidth, theme.glyph.ellipsis);
+  const value = cursorEnabled
+    ? renderInputWithBlockCursor({
+        ...visible,
+        visible: caretVisible,
+        inverse: theme.colors.inverse,
+      })
+    : renderInputText(`${visible.before}${visible.under}${visible.after}`);
+  return { ...option, hint: `>  ${prefix}${value}${suffix}` };
+}
+
+/**
+ * Applies the inline editor's live hint to its bound row when the cursor rests
+ * on it. Every other row — and every row when the cursor is elsewhere — renders
+ * unchanged. The bound row's `editor` discriminant selects the widget.
+ */
+function inlineEditOption(
+  option: SetupPanelOption,
+  isCursor: boolean,
+  edit: SetupInlineEditRow | undefined,
+  theme: Theme,
+  maxHintWidth: number,
+): SetupPanelOption {
+  if (!isCursor || edit === undefined || option.value !== edit.optionValue) return option;
+  switch (edit.editor.kind) {
+    case "rename":
+      return renameHint(option, edit.caretVisible, edit.editor, theme);
+    case "key":
+      return keyHint(option, edit.caretVisible, edit.editor, theme, maxHintWidth);
+  }
 }
 
 function optionWithoutStackedHint(
@@ -453,10 +505,21 @@ function appendSelectOptionRows(input: {
   end: number;
   cursor: number;
   visibleLabelWidth: number;
+  width: number;
   theme: Theme;
 }): void {
-  const { rows, state, presentation, visible, start, end, cursor, visibleLabelWidth, theme } =
-    input;
+  const {
+    rows,
+    state,
+    presentation,
+    visible,
+    start,
+    end,
+    cursor,
+    visibleLabelWidth,
+    width,
+    theme,
+  } = input;
   const c = theme.colors;
 
   for (let index = start; index < end; index += 1) {
@@ -466,7 +529,11 @@ function appendSelectOptionRows(input: {
       rows.push("");
     }
 
-    const rendered = editableOption(option, isCursor, presentation.edit, theme);
+    const inlineHintWidth =
+      presentation.layout === "stacked"
+        ? Math.max(1, width - 6)
+        : Math.max(1, width - Math.max(visibleLabelWidth, option.label.length) - 9);
+    const rendered = inlineEditOption(option, isCursor, presentation.edit, theme, inlineHintWidth);
     const { option: rowOption, stackedHint } = optionWithoutStackedHint(
       rendered,
       presentation.layout,
@@ -477,18 +544,37 @@ function appendSelectOptionRows(input: {
         isCursor,
         isChecked: presentation.selection === "multiple" && state.select.selected.has(option.value),
         placeholder: optionUsesPlaceholder(presentation, index, visible.length),
-        hintPadding: visibleLabelWidth - option.label.length,
+        hintPadding: Math.max(0, visibleLabelWidth - rowOption.label.length),
         theme,
       })}`,
     );
 
     if (stackedHint !== undefined) {
-      rows.push(`  ${renderOptionRowContinuation(dimWithEmphasis(stackedHint, theme))}`);
+      const editRow = presentation.edit;
+      const isActiveProviderKey =
+        isCursor &&
+        editRow !== undefined &&
+        editRow.optionValue === option.value &&
+        editRow.editor.kind === "key" &&
+        editRow.editor.phase.kind !== "inactive";
+      for (const line of stackedHint.split("\n")) {
+        const renderedHint = !isCursor
+          ? dimWithEmphasis(line, theme)
+          : isActiveProviderKey
+            ? line
+            : foregroundWithEmphasis(line);
+        rows.push(`  ${renderOptionRowContinuation(renderedHint)}`);
+      }
     }
     // Disabled descriptions explain why an inert row cannot be selected, so
     // keep them visible even though the cursor skips that row.
     if (option.description !== undefined && (option.disabled === true || isCursor)) {
-      rows.push(`    ${c.dim(option.description)}`);
+      const description = c.dim(option.description);
+      rows.push(
+        presentation.layout === "stacked"
+          ? `  ${renderOptionRowContinuation(description)}`
+          : `    ${description}`,
+      );
     }
     if (presentation.layout === "stacked" && index < end - 1) rows.push("");
   }
@@ -533,14 +619,25 @@ function selectFooterHints(
   cursor: number,
 ): string[] {
   const hints: string[] = [];
-  if (presentation.edit !== undefined && visible[cursor]?.value === presentation.edit.optionValue) {
-    hints.push("type to rename");
+  let cancelHint = "esc to cancel";
+  const edit = presentation.edit;
+  if (edit !== undefined && visible[cursor]?.value === edit.optionValue) {
+    if (edit.editor.kind === "key") {
+      const phase = edit.editor.phase;
+      if (phase.kind !== "inactive" && phase.editor.text.length > 0) {
+        cancelHint = "esc to clear";
+      }
+      if (phase.kind === "validating") return [cancelHint];
+      hints.push("type your key");
+    } else {
+      hints.push("type to rename");
+    }
   }
   if (presentation.filter !== undefined) hints.push("type to filter");
   hints.push("↑/↓ move");
   hints.push(presentation.selection === "multiple" ? "space to toggle" : "enter to select");
   if (presentation.selection === "multiple") hints.push("enter on Submit to confirm");
-  hints.push("esc to cancel");
+  hints.push(cancelHint);
   return hints;
 }
 
@@ -589,9 +686,8 @@ export function renderSelectQuestion(
   const submitIndex = presentation.selection === "multiple" ? submitRowIndex(visible) : -1;
   const cursor = state.select.cursor;
 
-  // An empty message (e.g. a panel-titled menu) contributes no header rows;
-  // the panel's own spacing does the separating.
   const rows = selectMessageRows(state.message, presentation.layout, theme);
+
   if (presentation.filter !== undefined) {
     rows.push(
       `  ${searchFilter(
@@ -639,6 +735,7 @@ export function renderSelectQuestion(
     end,
     cursor,
     visibleLabelWidth,
+    width,
     theme,
   });
   appendSubmitRow(rows, cursor, submitIndex, theme);

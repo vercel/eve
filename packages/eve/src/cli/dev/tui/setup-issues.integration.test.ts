@@ -58,9 +58,13 @@ async function linkedAppRoot(): Promise<string> {
 }
 
 describe("BOOT_DETECTIONS against a real directory", () => {
-  it("stays quiet when linked with a credential present", async () => {
+  it("stays quiet when a compiled gateway model has a credential present", async () => {
     const appRoot = await linkedAppRoot();
-    const issues = await detectSetupIssues({ appRoot, env: { AI_GATEWAY_API_KEY: "k" } });
+    const issues = await detectSetupIssues({
+      appRoot,
+      env: { AI_GATEWAY_API_KEY: "k" },
+      info: DISCONNECTED_GATEWAY_INFO,
+    });
     expect(issues).toEqual([]);
   });
 
