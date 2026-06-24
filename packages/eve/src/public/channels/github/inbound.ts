@@ -119,6 +119,40 @@ export interface GitHubPullRequestEvent {
   readonly raw: JsonObject;
 }
 
+/** GitHub App identity attached to CI webhook payloads. */
+export interface GitHubAppRef {
+  readonly slug: string | null;
+}
+
+/** Common fields normalized from GitHub CI webhook payloads. */
+export interface GitHubCiEvent {
+  readonly action: string;
+  readonly app: GitHubAppRef;
+  readonly conclusion: string | null;
+  readonly headSha: string | null;
+  readonly pullRequests: readonly number[];
+  readonly raw: JsonObject;
+  readonly status: string | null;
+}
+
+/** Normalized `check_suite` webhook payload. */
+export interface GitHubCheckSuiteEvent extends GitHubCiEvent {
+  readonly checkSuiteId: number;
+}
+
+/** Normalized `check_run` webhook payload. */
+export interface GitHubCheckRunEvent extends GitHubCiEvent {
+  readonly checkRunId: number;
+}
+
+/** Normalized `workflow_run` webhook payload. */
+export interface GitHubWorkflowRunEvent extends GitHubCiEvent {
+  readonly workflowRunId: number;
+}
+
+/** Normalized payload accepted by one of the GitHub CI event hooks. */
+export type GitHubCiPayload = GitHubCheckRunEvent | GitHubCheckSuiteEvent | GitHubWorkflowRunEvent;
+
 export interface GitHubPingEvent extends GitHubInboundEventBase {
   readonly kind: "ping";
 }
@@ -166,6 +200,30 @@ export interface GitHubPullRequestWebhookEvent extends GitHubInboundEventBase {
   readonly pullRequest: GitHubPullRequestEvent;
 }
 
+export interface GitHubCheckSuiteWebhookEvent extends GitHubInboundEventBase {
+  readonly checkSuite: GitHubCheckSuiteEvent;
+  readonly conversation: GitHubConversationRef;
+  readonly kind: "check_suite";
+}
+
+export interface GitHubCheckRunWebhookEvent extends GitHubInboundEventBase {
+  readonly checkRun: GitHubCheckRunEvent;
+  readonly conversation: GitHubConversationRef;
+  readonly kind: "check_run";
+}
+
+export interface GitHubWorkflowRunWebhookEvent extends GitHubInboundEventBase {
+  readonly conversation: GitHubConversationRef;
+  readonly kind: "workflow_run";
+  readonly workflowRun: GitHubWorkflowRunEvent;
+}
+
+/** Parsed CI webhook envelopes consumed by the GitHub channel. */
+export type GitHubCiWebhookEvent =
+  | GitHubCheckRunWebhookEvent
+  | GitHubCheckSuiteWebhookEvent
+  | GitHubWorkflowRunWebhookEvent;
+
 interface GitHubInboundEventBase {
   readonly delivery: GitHubDelivery;
   readonly installationId: number | undefined;
@@ -176,11 +234,14 @@ interface GitHubInboundEventBase {
 
 /** Parsed GitHub webhook event shape consumed by the channel. */
 export type GitHubInboundEvent =
+  | GitHubCheckRunWebhookEvent
+  | GitHubCheckSuiteWebhookEvent
   | GitHubIssueCommentEvent
   | GitHubIssueWebhookEvent
   | GitHubPingEvent
   | GitHubPullRequestReviewCommentEvent
-  | GitHubPullRequestWebhookEvent;
+  | GitHubPullRequestWebhookEvent
+  | GitHubWorkflowRunWebhookEvent;
 
 /** Parsed mention trigger for a bot-directed GitHub comment. */
 export interface GitHubCommentTrigger {
@@ -276,6 +337,9 @@ export function parseGitHubWebhookEvent(input: {
   }
   if (eventName === "issues") return parseIssueEvent(base);
   if (eventName === "pull_request") return parsePullRequestEvent(base);
+  if (eventName === "check_suite") return parseCheckSuiteEvent(base);
+  if (eventName === "check_run") return parseCheckRunEvent(base);
+  if (eventName === "workflow_run") return parseWorkflowRunEvent(base);
   return null;
 }
 
@@ -444,6 +508,93 @@ function parsePullRequestEvent(base: GitHubInboundEventBase): GitHubPullRequestW
       pullRequestNumber,
       raw: parseJsonObject(pullRequest),
     },
+  };
+}
+
+function parseCheckSuiteEvent(base: GitHubInboundEventBase): GitHubCheckSuiteWebhookEvent | null {
+  const rawCheckSuite = readEventObject(base.raw.check_suite);
+  if (rawCheckSuite === null) return null;
+  const checkSuiteId = readId(rawCheckSuite);
+  if (checkSuiteId === null) return null;
+  const checkSuite = normalizeCiEvent(base.raw, rawCheckSuite, normalizeApp(rawCheckSuite.app));
+  return {
+    ...base,
+    checkSuite: { ...checkSuite, checkSuiteId },
+    conversation: ciConversation(checkSuite.pullRequests),
+    kind: "check_suite",
+  };
+}
+
+function parseCheckRunEvent(base: GitHubInboundEventBase): GitHubCheckRunWebhookEvent | null {
+  const rawCheckRun = readEventObject(base.raw.check_run);
+  if (rawCheckRun === null) return null;
+  const checkRunId = readId(rawCheckRun);
+  if (checkRunId === null) return null;
+  const checkRun = normalizeCiEvent(base.raw, rawCheckRun, normalizeApp(rawCheckRun.app));
+  return {
+    ...base,
+    checkRun: { ...checkRun, checkRunId },
+    conversation: ciConversation(checkRun.pullRequests),
+    kind: "check_run",
+  };
+}
+
+function parseWorkflowRunEvent(base: GitHubInboundEventBase): GitHubWorkflowRunWebhookEvent | null {
+  const rawWorkflowRun = readEventObject(base.raw.workflow_run);
+  if (rawWorkflowRun === null) return null;
+  const workflowRunId = readId(rawWorkflowRun);
+  if (workflowRunId === null) return null;
+  const workflowRun = normalizeCiEvent(base.raw, rawWorkflowRun, { slug: "github-actions" });
+  return {
+    ...base,
+    conversation: ciConversation(workflowRun.pullRequests),
+    kind: "workflow_run",
+    workflowRun: { ...workflowRun, workflowRunId },
+  };
+}
+
+function normalizeCiEvent(webhook: JsonObject, raw: JsonObject, app: GitHubAppRef): GitHubCiEvent {
+  return {
+    action: readAction(webhook),
+    app,
+    conclusion: readNullableString(raw.conclusion),
+    headSha: readNullableString(raw.head_sha),
+    pullRequests: readPullRequestNumbers(raw.pull_requests),
+    raw,
+    status: readNullableString(raw.status),
+  };
+}
+
+function readEventObject(value: unknown): JsonObject | null {
+  return isObject(value) ? parseJsonObject(value) : null;
+}
+
+function readId(value: JsonObject): number | null {
+  return typeof value.id === "number" ? value.id : null;
+}
+
+function normalizeApp(value: unknown): GitHubAppRef {
+  return {
+    slug: isObject(value) && typeof value.slug === "string" ? value.slug : null,
+  };
+}
+
+function readNullableString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function readPullRequestNumbers(value: unknown): readonly number[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((pullRequest) =>
+    isObject(pullRequest) && typeof pullRequest.number === "number" ? [pullRequest.number] : [],
+  );
+}
+
+function ciConversation(pullRequests: readonly number[]): GitHubConversationRef {
+  return {
+    issueNumber: null,
+    kind: "pull_request",
+    pullRequestNumber: pullRequests[0] ?? null,
   };
 }
 

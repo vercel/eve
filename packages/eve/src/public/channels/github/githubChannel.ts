@@ -16,6 +16,8 @@ import { GITHUB_CHANNEL_DEFAULT_ROUTE } from "#public/channels/github/constants.
 import { createDefaultEvents, defaultOnComment } from "#public/channels/github/defaults.js";
 import {
   parseGitHubWebhookEvent,
+  type GitHubCheckRunEvent,
+  type GitHubCheckSuiteEvent,
   type GitHubComment,
   type GitHubConversationRef,
   type GitHubDelivery,
@@ -24,12 +26,16 @@ import {
   type GitHubPullRequestEvent,
   type GitHubRepositoryRef,
   type GitHubUser,
+  type GitHubWorkflowRunEvent,
 } from "#public/channels/github/inbound.js";
 import {
+  dispatchCheckRun,
+  dispatchCheckSuite,
   dispatchIssue,
   dispatchIssueComment,
   dispatchPullRequest,
   dispatchPullRequestReviewComment,
+  dispatchWorkflowRun,
 } from "#public/channels/github/dispatch.js";
 import {
   continuationTokenFromState,
@@ -101,8 +107,8 @@ export type GitHubInboundResult = {
 } | null;
 
 /**
- * Return type of the `onComment`/`onIssue`/`onPullRequest` hooks: a
- * {@link GitHubInboundResult} or a promise for one.
+ * Return type of GitHub inbound hooks: a {@link GitHubInboundResult} or a
+ * promise for one.
  */
 export type GitHubInboundResultOrPromise = GitHubInboundResult | Promise<GitHubInboundResult>;
 
@@ -159,6 +165,26 @@ export interface GitHubChannelConfig {
   onComment?(ctx: GitHubInboundContext, comment: GitHubComment): GitHubInboundResultOrPromise;
 
   /**
+   * Opt-in handler for `check_suite` webhook events. There is no default
+   * dispatch. A dispatched turn is anchored to the first associated pull
+   * request.
+   */
+  onCheckSuite?(
+    ctx: GitHubInboundContext,
+    checkSuite: GitHubCheckSuiteEvent,
+  ): GitHubInboundResultOrPromise;
+
+  /**
+   * Opt-in handler for `check_run` webhook events. There is no default
+   * dispatch. A dispatched turn is anchored to the first associated pull
+   * request.
+   */
+  onCheckRun?(
+    ctx: GitHubInboundContext,
+    checkRun: GitHubCheckRunEvent,
+  ): GitHubInboundResultOrPromise;
+
+  /**
    * Opt-in handler for `issues` webhook events. There is no default dispatch;
    * define this to act on issues (e.g. `issue.action === "opened"`).
    */
@@ -171,6 +197,16 @@ export interface GitHubChannelConfig {
   onPullRequest?(
     ctx: GitHubInboundContext,
     pullRequest: GitHubPullRequestEvent,
+  ): GitHubInboundResultOrPromise;
+
+  /**
+   * Opt-in handler for `workflow_run` webhook events. There is no default
+   * dispatch. A dispatched turn is anchored to the first associated pull
+   * request.
+   */
+  onWorkflowRun?(
+    ctx: GitHubInboundContext,
+    workflowRun: GitHubWorkflowRunEvent,
   ): GitHubInboundResultOrPromise;
 }
 
@@ -268,6 +304,42 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
                 config,
                 event,
                 handler: config.onPullRequest,
+                send,
+              }),
+            );
+            return jsonOk({ ok: true });
+          }
+
+          if (event.kind === "check_suite" && config.onCheckSuite !== undefined) {
+            waitUntil(
+              dispatchCheckSuite({
+                config,
+                event,
+                handler: config.onCheckSuite,
+                send,
+              }),
+            );
+            return jsonOk({ ok: true });
+          }
+
+          if (event.kind === "check_run" && config.onCheckRun !== undefined) {
+            waitUntil(
+              dispatchCheckRun({
+                config,
+                event,
+                handler: config.onCheckRun,
+                send,
+              }),
+            );
+            return jsonOk({ ok: true });
+          }
+
+          if (event.kind === "workflow_run" && config.onWorkflowRun !== undefined) {
+            waitUntil(
+              dispatchWorkflowRun({
+                config,
+                event,
+                handler: config.onWorkflowRun,
                 send,
               }),
             );

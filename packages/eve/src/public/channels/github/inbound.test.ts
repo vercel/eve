@@ -138,6 +138,78 @@ describe("GitHub inbound parsing", () => {
     });
   });
 
+  it.each([
+    {
+      event: "check_suite",
+      idField: "checkSuiteId",
+      object: "check_suite",
+    },
+    {
+      event: "check_run",
+      idField: "checkRunId",
+      object: "check_run",
+    },
+  ])("normalizes $event webhook payloads", ({ event, idField, object }) => {
+    const parsed = parse(
+      event,
+      basePayload({
+        action: "completed",
+        [object]: {
+          app: { slug: "github-actions" },
+          conclusion: "failure",
+          head_sha: "abc123",
+          id: 9001,
+          pull_requests: [{ number: 7 }, { number: 9 }],
+          status: "completed",
+        },
+      }),
+    );
+
+    expect(parsed).toMatchObject({
+      [object === "check_suite" ? "checkSuite" : "checkRun"]: {
+        action: "completed",
+        app: { slug: "github-actions" },
+        conclusion: "failure",
+        headSha: "abc123",
+        [idField]: 9001,
+        pullRequests: [7, 9],
+        status: "completed",
+      },
+      conversation: { kind: "pull_request", pullRequestNumber: 7 },
+      kind: event,
+    });
+  });
+
+  it("normalizes workflow_run payloads with the GitHub Actions app identity", () => {
+    const event = parse(
+      "workflow_run",
+      basePayload({
+        action: "completed",
+        workflow_run: {
+          conclusion: "failure",
+          head_sha: "abc123",
+          id: 9001,
+          pull_requests: [{ number: 7 }],
+          status: "completed",
+        },
+      }),
+    );
+
+    expect(event).toMatchObject({
+      conversation: { kind: "pull_request", pullRequestNumber: 7 },
+      kind: "workflow_run",
+      workflowRun: {
+        action: "completed",
+        app: { slug: "github-actions" },
+        conclusion: "failure",
+        headSha: "abc123",
+        pullRequests: [7],
+        status: "completed",
+        workflowRunId: 9001,
+      },
+    });
+  });
+
   it("extracts and strips the bot mention from a comment body", () => {
     expect(
       extractGitHubCommentTrigger({
