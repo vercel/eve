@@ -96,6 +96,72 @@ describe("workflowEntry integration", () => {
     });
   });
 
+  it("fails a competing continuation owner before its first turn", async () => {
+    const runtime = createTestRuntime({ agent: { name: "workflow-entry-hook-owner" } });
+    const continuationToken = "http:workflow-entry-hook-owner";
+
+    await runtime.run(async () => {
+      const owner = await start(workflowEntry, [
+        {
+          input: { message: "owner message" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const ownerStream = captureTurnEvents(owner);
+      await waitForHook({ runId: owner.runId }, { token: continuationToken });
+
+      const firstTurn = await ownerStream.nextTurn();
+      expect(firstTurn.at(-1)?.type).toBe("session.waiting");
+
+      const contender = await start(workflowEntry, [
+        {
+          input: { message: "contending message" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const contenderStream = captureTurnEvents(contender);
+
+      try {
+        const contenderEvents = await contenderStream.nextTurn();
+
+        expect(contenderEvents.at(-1)?.type).toBe("session.failed");
+        expect(
+          contenderEvents.some(
+            (event) => event.type === "message.completed" || event.type === "turn.started",
+          ),
+        ).toBe(false);
+        await expect(contender.returnValue).rejects.toThrow(/Hook token/);
+
+        await resumeHook(continuationToken, {
+          kind: "deliver",
+          payloads: [{ message: "owner follow up" }],
+        });
+        const ownerFollowUp = await ownerStream.nextTurn();
+
+        expect(ownerFollowUp.at(-1)?.type).toBe("session.waiting");
+        expect(
+          ownerFollowUp.some(
+            (event) =>
+              event.type === "message.completed" &&
+              event.data.message?.includes("owner follow up") === true,
+          ),
+        ).toBe(true);
+      } finally {
+        contenderStream.dispose();
+        ownerStream.dispose();
+        await owner.cancel();
+      }
+    });
+  });
+
   it("emits completed structured results for a conversation turn outputSchema", async () => {
     const runtime = createTestRuntime({ agent: { name: "workflow-entry-output-schema" } });
     const continuationToken = "http:workflow-entry-output-schema";

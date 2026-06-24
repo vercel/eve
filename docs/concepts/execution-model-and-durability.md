@@ -54,6 +54,8 @@ Some work has to wait, including a human approving a [tool](../tools), an intera
 
 eve does not maintain a durable FIFO queue of user messages for a session. The `continuationToken` is a resume handle for the session's current workflow hook, not a general message-queue address.
 
+Only one active session can own a continuation token. When a session starts with a token, eve commits the park hook before processing its first turn and fails a competing session if another run already owns that token. A tokenless session claims its token after the first turn establishes one. Competing input is not forwarded to the owner.
+
 When a session is waiting, a delivery to the current continuation token wakes the session and starts the next turn. When a turn is already active, the hook may accept additional deliveries, but the runtime only drains them at specific workflow boundaries. If more than one delivery is ready when the driver checks, eve may fold them into the next turn; that drain is best-effort and depends on workflow and transport timing.
 
 So don't rely on concurrent sends to the same session behaving like a typical ordered chat queue. For deterministic behavior, send one user turn at a time and wait for `session.waiting` before sending the next message to the same session. If your channel can receive bursts while the agent is working, keep your own per-session queue in the channel or app layer, then deliver the next message after the session parks again. Separate sessions still run independently.

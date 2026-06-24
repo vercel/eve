@@ -1,5 +1,5 @@
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
-import { getHookByToken, getRun, resumeHook, start } from "#compiled/@workflow/core/runtime.js";
+import { getRun, resumeHook, start } from "#compiled/@workflow/core/runtime.js";
 import type { Run } from "#compiled/@workflow/core/runtime.js";
 import type { WorkflowFunction, WorkflowMetadata } from "#compiled/@workflow/core/runtime/start.js";
 
@@ -126,8 +126,7 @@ export function createWorkflowRuntime(config: {
         payloads: [input.payload],
       };
       try {
-        const hook = normalizeWorkflowHook(await getHookByToken(input.continuationToken));
-        await resumeHook(input.continuationToken, hookPayload);
+        const hook = normalizeWorkflowHook(await resumeHook(input.continuationToken, hookPayload));
         return { sessionId: hook.runId };
       } catch (error) {
         // "No hook" is the expected resume-or-start signal: normalize it to

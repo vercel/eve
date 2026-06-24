@@ -9,6 +9,7 @@ import {
   resolveInstalledPackageInfo,
   resolvePackageRoot,
   resolvePackageSourceDirectoryPath,
+  resolvePackageSourceFilePath,
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
 
@@ -583,6 +584,72 @@ describe("WorkflowBundleBuilder", () => {
       await expect(builder.build()).rejects.toThrow(
         /Workflow bundle cannot import Node\.js builtin "node:util".*use step/s,
       );
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("bundles hook ownership checks through the workflow core shim", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-hook-conflict-"));
+    const outDir = join(tempRoot, "workflow-build");
+    const flowFilePath = join(tempRoot, "flow.ts");
+    const compiledArtifactsBootstrapPath = join(tempRoot, "compiled-artifacts-bootstrap.mjs");
+    const workflowCoreShimPath = resolvePackageSourceFilePath(
+      "src/internal/workflow-bundle/workflow-core-shim.ts",
+    ).replaceAll("\\", "/");
+
+    try {
+      await Promise.all([
+        writeFile(
+          compiledArtifactsBootstrapPath,
+          [
+            "export async function __eveInstallCompiledArtifactsStep() {",
+            '  "use step";',
+            "  return null;",
+            "}",
+            "",
+          ].join("\n"),
+        ),
+        writeFile(
+          flowFilePath,
+          [
+            `import { createHook } from ${JSON.stringify(workflowCoreShimPath)};`,
+            "export async function claimHook() {",
+            '  "use workflow";',
+            '  const hook = createHook({ token: "shared-token" });',
+            "  const conflict = await hook.getConflict();",
+            "  return conflict?.runId ?? null;",
+            "}",
+            "",
+          ].join("\n"),
+        ),
+      ]);
+
+      const builder = new FixtureWorkflowBundleBuilder(
+        {
+          appRoot: tempRoot,
+          compiledArtifactsBootstrapPath,
+          outDir,
+          rootDir: resolvePackageRoot(),
+          watch: false,
+        },
+        [flowFilePath],
+      );
+
+      await builder.build();
+
+      const workflowsSource = await readFile(join(outDir, "workflows.mjs"), "utf8");
+      const encodedChunksMatch = workflowsSource.match(
+        /Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)\.toString\("utf8"\)/,
+      );
+      expect(encodedChunksMatch).not.toBeNull();
+
+      const encodedChunks = JSON.parse(encodedChunksMatch?.[1] ?? "[]") as string[];
+      const decodedWorkflowCode = Buffer.from(encodedChunks.join(""), "base64").toString("utf8");
+
+      expect(decodedWorkflowCode).toContain("getConflict");
+      expect(decodedWorkflowCode).toContain("WORKFLOW_CREATE_HOOK");
+      expect(decodedWorkflowCode).not.toContain("runtime/run.js");
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
     }

@@ -225,7 +225,7 @@ defineChannel<{ ref: string | null }>({
 });
 ```
 
-The workflow runtime disposes the current park hook at the next step boundary and registers a new one at the new token. Inbound deliveries already addressed to the old token are dropped, so coordinate with your senders to use the new token.
+At the next workflow boundary, the runtime claims the new park hook before releasing the old token. If another active session already owns the new token, the re-keying session fails instead of taking it over. After a successful re-key, inbound deliveries still addressed to the old token are dropped, so coordinate with your senders to use the new token.
 
 ## File uploads
 

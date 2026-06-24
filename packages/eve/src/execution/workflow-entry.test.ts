@@ -93,6 +93,7 @@ vi.mock("./session-callback-step.js", () => ({
 
 interface ParkHookConfig {
   readonly dispose?: () => void;
+  readonly getConflict?: () => Promise<{ readonly runId: string } | null>;
   readonly return?: () => Promise<IteratorResult<HookPayload>>;
   readonly token: string;
   readonly values?: readonly HookPayload[];
@@ -111,8 +112,10 @@ describe("workflowEntry", () => {
 
   it("injects the workflow run id as the canonical session id before the first turn", async () => {
     const sessionState = createBaseSessionState();
+    const getConflict = vi.fn(async () => null);
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
     installHookMocks({
+      parkHooks: [{ getConflict, token: "http:test" }],
       turnCompletions: [
         turnResult({
           action: "done",
@@ -155,6 +158,77 @@ describe("workflowEntry", () => {
         sessionState,
       }),
     );
+    expect(getConflict).toHaveBeenCalledOnce();
+    expect(getConflict.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(dispatchTurnStep).mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+  });
+
+  it("fails a conflicting park hook before dispatching the first turn", async () => {
+    const sessionState = createBaseSessionState();
+    const dispose = vi.fn();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      parkHooks: [
+        {
+          dispose,
+          getConflict: vi.fn(async () => ({ runId: "wrun_owner" })),
+          token: "http:test",
+        },
+      ],
+      turnCompletions: [],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "duplicate" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).rejects.toMatchObject({
+      conflictingRunId: "wrun_owner",
+      name: "HookConflictError",
+      token: "http:test",
+    });
+
+    expect(dispatchTurnStep).not.toHaveBeenCalled();
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it("normalizes the getConflict fallback error before dispatching the first turn", async () => {
+    const sessionState = createBaseSessionState();
+    const dispose = vi.fn();
+    const fallbackError = Object.assign(new Error("legacy hook conflict"), {
+      name: "HookConflictError",
+      token: "http:test",
+    });
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      parkHooks: [
+        {
+          dispose,
+          getConflict: vi.fn(async () => {
+            throw fallbackError;
+          }),
+          token: "http:test",
+        },
+      ],
+      turnCompletions: [],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "duplicate" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).rejects.toMatchObject({
+      conflictingRunId: undefined,
+      message: 'Hook token "http:test" is already in use',
+      name: "HookConflictError",
+      token: "http:test",
+    });
+
+    expect(dispatchTurnStep).not.toHaveBeenCalled();
+    expect(dispose).toHaveBeenCalledOnce();
   });
 
   it("buffers follow-up user input until a pending subagent batch resolves", async () => {
@@ -677,12 +751,15 @@ describe("workflowEntry", () => {
 
     const oldReturn = createIteratorReturn();
     const oldDispose = vi.fn();
+    const oldGetConflict = vi.fn(async () => null);
     const newReturn = createIteratorReturn();
     const newDispose = vi.fn();
+    const newGetConflict = vi.fn(async () => null);
     installHookMocks({
       parkHooks: [
         {
           dispose: oldDispose,
+          getConflict: oldGetConflict,
           return: oldReturn,
           token: "slack:C01:",
           values: [
@@ -694,6 +771,7 @@ describe("workflowEntry", () => {
         },
         {
           dispose: newDispose,
+          getConflict: newGetConflict,
           return: newReturn,
           token: "slack:C01:1800000000.123456",
           values: [],
@@ -723,6 +801,79 @@ describe("workflowEntry", () => {
     expect(oldDispose).toHaveBeenCalledTimes(1);
     expect(newReturn).toHaveBeenCalledTimes(1);
     expect(newDispose).toHaveBeenCalledTimes(1);
+    expect(oldGetConflict).toHaveBeenCalledOnce();
+    expect(newGetConflict).toHaveBeenCalledOnce();
+    expect(newGetConflict.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(oldReturn).mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(newGetConflict.mock.invocationCallOrder[0]).toBeLessThan(
+      oldDispose.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+  });
+
+  it("disposes a conflicting rekey candidate before cleaning up the active hook", async () => {
+    const baseSessionState = createBaseSessionState({ continuationToken: "slack:C01:" });
+    const rekeyedSessionState: DurableSessionState = {
+      ...baseSessionState,
+      continuationToken: "slack:C01:1800000000.123456",
+    };
+    vi.mocked(createSessionStep).mockResolvedValue(
+      createSessionStepResultForMock(baseSessionState),
+    );
+
+    const oldReturn = createIteratorReturn();
+    const oldDispose = vi.fn();
+    const candidateDispose = vi.fn();
+    const candidateGetConflict = vi.fn(async () => ({ runId: "wrun_owner" }));
+    installHookMocks({
+      parkHooks: [
+        {
+          dispose: oldDispose,
+          return: oldReturn,
+          token: "slack:C01:",
+          values: [
+            {
+              kind: "deliver",
+              payloads: [{ message: "follow up" }],
+            },
+          ],
+        },
+        {
+          dispose: candidateDispose,
+          getConflict: candidateGetConflict,
+          token: "slack:C01:1800000000.123456",
+        },
+      ],
+      turnCompletions: [
+        turnResult({ action: "park", sessionState: baseSessionState }),
+        turnResult({ action: "park", sessionState: rekeyedSessionState }),
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "hello" },
+        serializedContext: createSerializedContext({
+          "eve.channel": { kind: "slack", state: {} },
+          "eve.continuationToken": "slack:C01:",
+        }),
+      }),
+    ).rejects.toMatchObject({
+      conflictingRunId: "wrun_owner",
+      name: "HookConflictError",
+      token: "slack:C01:1800000000.123456",
+    });
+
+    expect(candidateGetConflict).toHaveBeenCalledOnce();
+    expect(candidateDispose).toHaveBeenCalledOnce();
+    expect(oldReturn).toHaveBeenCalledOnce();
+    expect(oldDispose).toHaveBeenCalledOnce();
+    expect(candidateDispose.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(oldReturn).mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(candidateDispose.mock.invocationCallOrder[0]).toBeLessThan(
+      oldDispose.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
   });
 
   it("disposes the workflow hook after the loop exits", async () => {
@@ -930,6 +1081,7 @@ function installHookMocks(input: {
 
     return createMockHook({
       dispose: config.dispose,
+      getConflict: config.getConflict,
       return: config.return,
       symbolDispose: input.symbolDispose,
       token,
@@ -940,6 +1092,7 @@ function installHookMocks(input: {
 
 function createMockHook<T>(input: {
   readonly dispose?: () => void;
+  readonly getConflict?: () => Promise<{ readonly runId: string } | null>;
   readonly next?: () => Promise<IteratorResult<T>>;
   readonly return?: () => Promise<IteratorResult<T>>;
   readonly symbolDispose?: () => void;
@@ -948,6 +1101,7 @@ function createMockHook<T>(input: {
 }): unknown {
   const values = [...input.values];
   const dispose = input.dispose ?? vi.fn();
+  const getConflict = input.getConflict ?? vi.fn(async () => null);
   const symbolDispose = input.symbolDispose ?? vi.fn();
   const iteratorReturn = input.return;
 
@@ -968,6 +1122,7 @@ function createMockHook<T>(input: {
     },
     [Symbol.dispose]: symbolDispose,
     dispose,
+    getConflict,
     token: input.token,
   });
 }
