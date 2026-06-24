@@ -231,7 +231,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
     case "message.completed":
       return updateAssistantMessage(data, event.data.turnId, (message) => {
         if (event.data.message === null) {
-          return completeExistingTextPart(message);
+          return removeTextPart(message, event.data.stepIndex);
         }
 
         return upsertPart(ensureStepStartPart(message, event.data.stepIndex), {
@@ -361,14 +361,11 @@ function upsertPart(message: EveAssistantMessage, next: EveMessagePart): EveAssi
   };
 }
 
-function completeExistingTextPart(message: EveAssistantMessage): EveAssistantMessage {
-  const index = findLastIndex(message.parts, (part) => part.type === "text");
-  if (index === -1) {
-    return message;
-  }
-
-  const existing = message.parts[index];
-  if (existing?.type !== "text") {
+function removeTextPart(message: EveAssistantMessage, stepIndex: number): EveAssistantMessage {
+  const parts = message.parts.filter(
+    (part) => part.type !== "text" || part.stepIndex !== stepIndex,
+  );
+  if (parts.length === message.parts.length) {
     return message;
   }
 
@@ -378,11 +375,7 @@ function completeExistingTextPart(message: EveAssistantMessage): EveAssistantMes
       ...message.metadata,
       status: "complete",
     },
-    parts: [
-      ...message.parts.slice(0, index),
-      { ...existing, state: "done" },
-      ...message.parts.slice(index + 1),
-    ],
+    parts,
   };
 }
 
@@ -579,13 +572,4 @@ function stringifyUnknown(value: unknown): string {
   } catch {
     return "Action failed.";
   }
-}
-
-function findLastIndex<T>(items: readonly T[], predicate: (item: T) => boolean): number {
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    if (predicate(items[index] as T)) {
-      return index;
-    }
-  }
-  return -1;
 }

@@ -5,6 +5,7 @@ import {
   createActionResultEvent,
   createActionsRequestedEvent,
   createInputRequestedEvent,
+  createMessageAppendedEvent,
   createMessageCompletedEvent,
   createReasoningCompletedEvent,
   createResultCompletedEvent,
@@ -529,6 +530,49 @@ describe("defaultMessageReducer", () => {
         ],
         role: "assistant",
       },
+    ]);
+  });
+
+  it("removes streamed text for a null message completion", () => {
+    const reducer = defaultMessageReducer();
+    let data = reducer.reduce(
+      reducer.initial(),
+      createMessageCompletedEvent({
+        message: "Earlier step.",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createMessageAppendedEvent({
+        messageDelta: "<eve-empty-delivery/>",
+        messageSoFar: "<eve-empty-delivery/>",
+        sequence: 1,
+        stepIndex: 1,
+        turnId: "turn_1",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createMessageCompletedEvent({
+        message: null,
+        sequence: 1,
+        stepIndex: 1,
+        turnId: "turn_1",
+      }),
+    );
+
+    expect(data.messages[0]?.parts).toEqual([
+      { type: "step-start" },
+      {
+        state: "done",
+        stepIndex: 0,
+        text: "Earlier step.",
+        type: "text",
+      },
+      { type: "step-start" },
     ]);
   });
 });
