@@ -1,5 +1,5 @@
-import { setWorld } from "#compiled/@workflow/core/runtime.js";
 import type { World } from "#compiled/@workflow/world/index.js";
+import { setWorld } from "#internal/workflow/runtime.js";
 
 export interface ConfiguredWorkflowWorldModule {
   readonly [name: string]: unknown;

@@ -62,6 +62,7 @@ import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { turnWorkflow } from "#execution/turn-workflow.js";
 import { createWorkflowRuntime, startWorkflowPreferLatest } from "#execution/workflow-runtime.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
 
 /**
  * Result of one durable harness step, consumed by the turn workflow.
@@ -634,9 +635,6 @@ export async function routeProxiedDeliverStep(input: {
     payload: input.payload,
     state: durableSession.state,
   });
-
-  const { resumeHook } = await import("#compiled/@workflow/core/runtime.js");
-  process.env.WORKFLOW_QUEUE_NAMESPACE = "eve";
 
   for (const forChild of routed.forChildren) {
     await resumeHook(forChild.childContinuationToken, {

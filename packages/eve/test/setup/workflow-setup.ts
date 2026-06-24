@@ -1,16 +1,13 @@
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { setWorld } from "@workflow/core/runtime";
 import { createLocalWorld } from "@workflow/world-local";
 import { afterAll } from "vitest";
 
 import { resolvePackageRoot } from "#internal/application/package.js";
 import { resolveWorkflowTestOutputDirectory } from "#internal/testing/workflow-vitest-plugin.js";
-import {
-  applyEveWorkflowQueueNamespace,
-  EVE_WORKFLOW_QUEUE_PREFIX,
-} from "#internal/workflow/queue-namespace.js";
+import { EVE_WORKFLOW_QUEUE_PREFIX } from "#internal/workflow/queue-namespace.js";
+import { setWorld } from "#internal/workflow/runtime.js";
 
 const packageRoot = resolvePackageRoot();
 const outDir = resolveWorkflowTestOutputDirectory(packageRoot);
@@ -22,7 +19,6 @@ const world = createLocalWorld({
 
 await world.start?.();
 await world.clear();
-applyEveWorkflowQueueNamespace();
 world.registerHandler(EVE_WORKFLOW_QUEUE_PREFIX, createLazyHandler(join(outDir, "workflows.mjs")));
 setWorld(world);
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getWorld, resumeHook, start } from "#compiled/@workflow/core/runtime.js";
+import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";

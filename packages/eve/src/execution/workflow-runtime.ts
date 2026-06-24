@@ -1,6 +1,4 @@
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
-import { getRun, resumeHook, start } from "#compiled/@workflow/core/runtime.js";
-import type { Run } from "#compiled/@workflow/core/runtime.js";
 import type { WorkflowFunction, WorkflowMetadata } from "#compiled/@workflow/core/runtime/start.js";
 
 import type {
@@ -14,7 +12,7 @@ import type {
 import { serializeContext } from "#context/serialize.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { applyEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
+import { getRun, resumeHook, start, type Run } from "#internal/workflow/runtime.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -122,7 +120,6 @@ export function createWorkflowRuntime(config: {
     },
 
     async deliver(input: DeliverInput): Promise<{ sessionId: string }> {
-      applyEveWorkflowQueueNamespace();
       const hookPayload: Extract<HookPayload, { kind: "deliver" }> = {
         auth: input.auth,
         kind: "deliver",
@@ -164,7 +161,6 @@ export async function startWorkflowPreferLatest<TArgs extends unknown[], TResult
   workflow: WorkflowFunction<TArgs, TResult> | WorkflowMetadata,
   args: TArgs,
 ): Promise<Run<unknown> | Run<TResult>> {
-  applyEveWorkflowQueueNamespace();
   if (!shouldRouteToLatestDeployment()) {
     return await start(workflow, args);
   }

@@ -10,10 +10,8 @@ let cachedPackageInfo: InstalledPackageInfo | undefined;
 // deployments can still report package metadata without resolving package.json.
 const BUNDLED_FALLBACK_PACKAGE_VERSION: string = "__EVE_PACKAGE_VERSION__";
 const WORKFLOW_MODULE_ALIASES = {
-  "workflow/api": "src/compiled/@workflow/core/runtime.js",
   "workflow/errors": "src/compiled/@workflow/errors/index.js",
   "workflow/internal/private": "src/compiled/@workflow/core/private.js",
-  "workflow/runtime": "src/compiled/@workflow/core/runtime.js",
 } as const;
 
 function resolveFallbackPackageVersion(): string {
@@ -261,6 +259,10 @@ export function resolveInstalledPackageInfo(): InstalledPackageInfo {
 export function resolveWorkflowModulePath(specifier: string): string {
   if (specifier === "workflow") {
     return resolvePackageSourceFilePath("src/internal/workflow/index.ts");
+  }
+
+  if (specifier === "workflow/api" || specifier === "workflow/runtime") {
+    return resolvePackageSourceFilePath("src/internal/workflow/runtime.ts");
   }
 
   if (specifier === "workflow/internal/builtins") {

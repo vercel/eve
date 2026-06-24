@@ -434,14 +434,12 @@ describe("WorkflowBundleBuilder", () => {
       expect(flowConfig.environment).toEqual({
         EVE_EXISTING_FLAG: "kept",
         NODE_OPTIONS: "--experimental-require-module",
-        WORKFLOW_QUEUE_NAMESPACE: "eve",
       });
-      expect(
-        await readFile(
-          join(outputDir, "functions", ".well-known", "workflow", "v1", "flow.func", "index.js"),
-          "utf8",
-        ),
-      ).toContain("/.well-known/workflow/v1/flow");
+      const generatedFlowFunctionSource = await readFile(
+        join(outputDir, "functions", ".well-known", "workflow", "v1", "flow.func", "index.js"),
+        "utf8",
+      );
+      expect(generatedFlowFunctionSource).toContain("/.well-known/workflow/v1/flow");
       expect(
         await readFile(
           join(

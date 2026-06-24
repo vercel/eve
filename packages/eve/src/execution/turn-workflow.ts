@@ -6,6 +6,7 @@ import {
   type TurnWorkflowInput,
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import { turnStep } from "#execution/workflow-steps.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
 
 const TASK_MODE_WAIT_ERROR_MESSAGE = "Task mode cannot wait for follow-up input (`next: null`).";
 
@@ -132,7 +133,5 @@ export async function notifyDriverStep(input: {
 }): Promise<void> {
   "use step";
 
-  process.env.WORKFLOW_QUEUE_NAMESPACE = "eve";
-  const { resumeHook } = await import("#compiled/@workflow/core/runtime.js");
   await resumeHook(input.completionToken, input.payload);
 }

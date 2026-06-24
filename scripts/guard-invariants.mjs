@@ -77,6 +77,10 @@
  *             ISO `last_updated` date. Research documents are implementation
  *             plans attached to tracked GitHub work, not an unowned parallel
  *             backlog.
+ *   rule 33 — Workflow runtime imports and queue-namespace environment writes
+ *             must go through the `src/internal/workflow/runtime.ts` facade and
+ *             `queue-namespace.ts`. This guarantees every queue-producing
+ *             Workflow API observes eve's namespace before it can run.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -164,6 +168,7 @@ function isTsLike(relPath) {
  *   rule26: Violation[];
  *   rule27: Violation[];
  *   rule28: Violation[];
+ *   rule33: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -190,6 +195,7 @@ async function scanRepo(state) {
     checkRule26(posix, lines, state.rule26);
     checkRule27(posix, lines, state.rule27);
     checkRule28(posix, lines, state.rule28);
+    checkRule33(posix, lines, state.rule33);
   }
 }
 
@@ -238,6 +244,46 @@ function checkRule15(posix, lines, violations) {
         file: posix,
         line: idx + 1,
         message: `imports from "@workflow/*". Channel and harness code must stay workflow-agnostic. Move the workflow primitive call into src/runtime/ or src/execution/ and have the channel/harness call a thin runtime helper instead.`,
+      });
+    }
+  });
+}
+
+// ---------- Rule 33: namespaced Workflow runtime boundary ----------
+
+const RAW_WORKFLOW_RUNTIME_SPECIFIER_RE =
+  /["'](?:#compiled\/@workflow\/core\/runtime(?:\.js|\/[^"']+\.js)|@workflow\/core\/runtime(?:\/[^"']+)?|workflow\/(?:api|runtime))["']/;
+const WORKFLOW_QUEUE_NAMESPACE_WRITE_RE =
+  /process\.env(?:\.WORKFLOW_QUEUE_NAMESPACE|\[\s*(?:WORKFLOW_QUEUE_NAMESPACE_ENV|["']WORKFLOW_QUEUE_NAMESPACE["'])\s*\])\s*=/;
+const WORKFLOW_RUNTIME_FACADES = new Set(["packages/eve/src/internal/workflow/runtime.ts"]);
+const WORKFLOW_QUEUE_NAMESPACE_MODULE = "packages/eve/src/internal/workflow/queue-namespace.ts";
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule33(posix, lines, violations) {
+  lines.forEach((line, idx) => {
+    const isTypeOnlyImport = /^\s*(?:import|export)\s+type\b/.test(line);
+    const isRuntimeImport =
+      /^(?:import|export)\b|^}\s*from\b|\b(?:import|require)\s*\(/.test(line.trimStart()) &&
+      RAW_WORKFLOW_RUNTIME_SPECIFIER_RE.test(line);
+    if (!WORKFLOW_RUNTIME_FACADES.has(posix) && !isTypeOnlyImport && isRuntimeImport) {
+      violations.push({
+        rule: 33,
+        file: posix,
+        line: idx + 1,
+        message: `imports the raw Workflow runtime. Import from "#internal/workflow/runtime.js" so eve's queue namespace is installed before any queue-producing API runs.`,
+      });
+    }
+
+    if (posix !== WORKFLOW_QUEUE_NAMESPACE_MODULE && WORKFLOW_QUEUE_NAMESPACE_WRITE_RE.test(line)) {
+      violations.push({
+        rule: 33,
+        file: posix,
+        line: idx + 1,
+        message: `writes WORKFLOW_QUEUE_NAMESPACE outside the canonical namespace module. Remove the write; importing "#internal/workflow/runtime.js" installs the namespace once.`,
       });
     }
   });
@@ -928,6 +974,7 @@ async function main() {
     rule26: /** @type {Violation[]} */ ([]),
     rule27: /** @type {Violation[]} */ ([]),
     rule28: /** @type {Violation[]} */ ([]),
+    rule33: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1009,6 +1056,9 @@ async function main() {
 
   // Rule 32
   violations.push(...(await checkRule32ResearchFrontmatter()));
+
+  // Rule 33
+  violations.push(...state.rule33);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

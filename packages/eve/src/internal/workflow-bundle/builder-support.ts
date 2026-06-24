@@ -387,9 +387,10 @@ export async function bundleFinalWorkflowOutput(input: {
   workingDir: string;
 }): Promise<void> {
   const workflowBundleCode = input.code.endsWith("\n") ? input.code : `${input.code}\n`;
+  const workflowRuntimePath = resolveWorkflowModulePath("workflow/runtime").replaceAll("\\", "/");
   const workflowFunctionCode = `// biome-ignore-all lint: generated file
 /* eslint-disable */
-import { workflowEntrypoint } from 'workflow/runtime';
+import { workflowEntrypoint } from ${JSON.stringify(workflowRuntimePath)};
 
 const workflowCode = \`${workflowBundleCode.replace(/[\\`$]/g, "\\$&")}\`;
 
