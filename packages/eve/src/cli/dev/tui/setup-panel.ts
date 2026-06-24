@@ -64,8 +64,9 @@ interface SetupSelectPanelBase extends SetupQuestionPanelBase {
 interface SetupEditableRow {
   /**
    * The row whose hint is a live rename field. Hovering it (cursor on the row)
-   * makes it editable directly — typing and backspace edit the name in place —
-   * so the editor's text and a blinking caret render only on that row.
+   * makes it editable directly. The default renders as a placeholder until
+   * typing starts, so the editor's text and a blinking caret render only on
+   * that row.
    */
   optionValue: string;
   editor: LineState;
@@ -177,6 +178,12 @@ const DIM_OPEN = "\x1b[2m";
  */
 function dimWithEmphasis(text: string, theme: Theme): string {
   return theme.colors.dim(text.replaceAll(BOLD_OR_DIM_CLOSE, `${BOLD_OR_DIM_CLOSE}${DIM_OPEN}`));
+}
+
+/** Restores normal intensity for a span nested inside an otherwise dim hint. */
+function solidWithinDim(text: string, theme: Theme): string {
+  if (!theme.color) return text;
+  return `${BOLD_OR_DIM_CLOSE}${text}${DIM_OPEN}`;
 }
 
 function toneGlyph(tone: FlowPanelLine["tone"], theme: Theme): string {
@@ -410,9 +417,17 @@ function editableOption(
   if (!isCursor || edit?.optionValue !== option.value) return option;
 
   const value = edit.editor.text || edit.defaultValue;
-  const caretAt = edit.editor.text.length === 0 ? value.length : edit.editor.cursor;
-  const caret = edit.caretVisible ? theme.colors.cyan(theme.glyph.caret) : "";
-  const editableValue = `${value.slice(0, caretAt)}${caret}${value.slice(caretAt)}`;
+  const caretLine = { text: value, cursor: edit.editor.cursor };
+  // The placeholder caret overlays its first character. Entered text uses the
+  // editor's real cursor position, including the stable trailing cell at EOF.
+  let editableValue = renderInputWithBlockCursor({
+    ...visibleLine(caretLine, Number.POSITIVE_INFINITY),
+    visible: edit.caretVisible,
+    inverse: theme.colors.inverse,
+  });
+  if (edit.editor.text.length > 0) {
+    editableValue = solidWithinDim(editableValue, theme);
+  }
   return { ...option, hint: edit.formatHint(editableValue) };
 }
 

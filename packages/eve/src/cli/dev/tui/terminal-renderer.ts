@@ -1423,15 +1423,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
       if (error !== undefined) state.error = error;
       return renderSelectQuestion(state, this.#theme, width);
     };
-    // Hovering the editable row makes it a live field: seed the editor with the
-    // default (caret blinking at the end) so typing and backspace edit it in
-    // place — no → to enter or ← to leave. Moving off the row clears the field
-    // and stops the blink; returning re-seeds the default.
+    // Hovering the editable row makes it a live field. The editor stays empty
+    // until typing starts, leaving the default as a placeholder with the caret
+    // at its start. Moving off the row clears the field and stops the blink.
     const onEditableRow = () =>
       selectValueAtCursor([...opts.options], select.cursor) === opts.editable.value;
     const syncEditableRow = () => {
       if (onEditableRow()) {
-        if (editor.text.length === 0) editor = lineOf(opts.editable.defaultValue);
         this.#startCaretBlink();
       } else {
         editor = lineOf("");

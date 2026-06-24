@@ -135,7 +135,7 @@ describe("createTuiPrompter", () => {
         editable: {
           value: "new",
           defaultValue: "weather-agent",
-          formatHint: (value) => `Named '${value}'`,
+          formatHint: (value) => `Name: ${value}`,
         },
       }),
     ).resolves.toEqual({ kind: "edited", value: "new", text: "custom-name" });

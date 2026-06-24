@@ -297,7 +297,7 @@ export function resolveProvisioning(
         {
           value: "new" as const,
           label: "Create a new project",
-          hint: `Named ${agentName}`,
+          hint: `Name: ${agentName}`,
         },
         { value: "link" as const, label: "Link an existing project" },
       ];
@@ -310,7 +310,7 @@ export function resolveProvisioning(
               editable: {
                 value: "new",
                 defaultValue: agentName,
-                formatHint: (value) => `Named ${value}`,
+                formatHint: (value) => `Name: ${value}`,
                 validate: (value) =>
                   value.trim().length === 0 ? "Project name cannot be empty." : undefined,
               },
@@ -329,7 +329,7 @@ export function resolveProvisioning(
                     id: "new",
                     value: "new",
                     label: "Create a new project",
-                    hint: `Named ${agentName}`,
+                    hint: `Name: ${agentName}`,
                   },
                   { id: "link", value: "link", label: "Link an existing project" },
                 ],
