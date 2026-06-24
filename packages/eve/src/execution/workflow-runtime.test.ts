@@ -91,7 +91,7 @@ describe("createWorkflowRuntime#deliver", () => {
   });
 
   it("resumes hooks with the channel request id", async () => {
-    getHookByTokenMock.mockResolvedValue({ runId: "driver-run" });
+    resumeHookMock.mockResolvedValue({ runId: "driver-run" });
 
     await expect(
       buildRuntime().deliver({
@@ -104,6 +104,8 @@ describe("createWorkflowRuntime#deliver", () => {
 
     expect(resumeHookMock).toHaveBeenCalledWith("test:token", {
       auth: null,
+      kind: "deliver",
+      payloads: [{ message: "hello" }],
       requestId: "req_deliver",
     });
   });

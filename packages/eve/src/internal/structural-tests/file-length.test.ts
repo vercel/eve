@@ -16,11 +16,6 @@ const LONG_SOURCE_FILE_ALLOWLIST = new Set<string>([
   "cli/dev/tui/setup-panel.ts",
   "cli/dev/tui/terminal-renderer.ts",
   "compiler/manifest.ts",
-  // TODO: split by concern — tipped over the cap (was exactly at 700) when the
-  // `$eve.channel_request_id` workflow attributes landed. Extract the
-  // deliver-routing helpers (`routeDeliverForChildren`, `waitForNextDeliver`)
-  // into a sibling module, then drop this entry.
-  "execution/workflow-entry.ts",
   "harness/tool-loop.ts",
   "internal/nitro/host/create-application-nitro.ts",
   "protocol/message.ts",
