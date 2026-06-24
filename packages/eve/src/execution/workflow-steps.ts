@@ -38,6 +38,7 @@ import {
 } from "#protocol/message.js";
 import {
   CallbackBaseUrlKey,
+  clearPendingAuthorization,
   getPendingAuthorization,
   PendingAuthorizationResultKey,
   type AuthorizationResult,
@@ -119,17 +120,10 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     }),
   );
 
-  const durableSession = await readDurableSession(input.sessionState);
+  let durableSession = await readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
-  const initialSession = hydrateDurableSession({
-    compactionOverrides: {
-      thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
-    },
-    durable: durableSession,
-    turnAgent: bundle.turnAgent,
-  });
 
   // Populate the callback base URL so getHookUrl() works during
   // tool execution. Reads from workflow metadata (available in steps).
@@ -179,6 +173,13 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     }
     if (authResults.length > 0) {
       ctx.set(PendingAuthorizationResultKey, authResults);
+      durableSession = {
+        ...durableSession,
+        state: clearPendingAuthorization(
+          durableSession.state,
+          authResults.map((result) => result.name),
+        ),
+      };
       completedAuths = completed;
       input =
         remainingPayloads.length > 0
@@ -192,6 +193,14 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   if (input.input?.kind === "deliver" && input.input.auth !== undefined) {
     ctx.set(AuthKey, input.input.auth ?? null);
   }
+
+  const initialSession = hydrateDurableSession({
+    compactionOverrides: {
+      thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
+    },
+    durable: durableSession,
+    turnAgent: bundle.turnAgent,
+  });
 
   const adapterCtx = buildAdapterContext(adapter, ctx);
 
