@@ -1,9 +1,9 @@
 import type { HandleMessageStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
-/** Proves an every-minute polling schedule can complete without delivery. */
+/** Proves an every-minute polling schedule can leave its target channel silent. */
 export default defineEval({
-  description: "Conditional schedule delivery: an empty alert check sends no message.",
+  description: "Conditional channel delivery: an empty scheduled alert check sends no message.",
 
   async test(t) {
     if (!t.target.capabilities.devRoutes) {
@@ -12,6 +12,11 @@ export default defineEval({
     }
 
     const dispatch = await t.target.dispatchSchedule("quiet-alerts");
+    if (dispatch.scheduleId !== "quiet-alerts") {
+      throw new Error(
+        `Expected quiet-alerts dispatch, got ${JSON.stringify(dispatch.scheduleId)}.`,
+      );
+    }
     const [sessionId] = dispatch.sessionIds;
     if (sessionId === undefined) {
       throw new Error("Quiet schedule dispatch returned no session ids.");
@@ -31,6 +36,12 @@ export default defineEval({
     );
     if (!checkedAlerts) {
       throw new Error(`Expected check-alerts to run; saw ${formatTypes(session.events)}.`);
+    }
+
+    if (!session.events.some((event) => event.type === "session.waiting")) {
+      throw new Error(
+        `Expected the target channel session to reach its waiting boundary; saw ${formatTypes(session.events)}.`,
+      );
     }
 
     const delivered = session.events.flatMap((event) =>
