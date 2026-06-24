@@ -667,6 +667,81 @@ describe("turnStep", () => {
     expect(persistedSession?.state?.retained).toBe("yes");
     expect(getPendingAuthorization(persistedSession?.state)).toBeUndefined();
   });
+
+  it("clears pending authorization after a matching callback resumes the turn", async () => {
+    const challenge = {
+      challenge: {
+        instructions: "Sign in to continue",
+        url: "https://idp.example/authorize",
+      },
+      hookUrl: "https://app.example/eve/v1/connections/statuspage/callback/sess-test:auth",
+      name: "statuspage",
+      resume: { nonce: "n1" },
+    };
+    const session = createStubSession({
+      state: setPendingAuthorization({ retained: "yes" }, { challenges: [challenge] }),
+    });
+    installSessionStoreMocks([session]);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never);
+
+    let observedPendingAuth: unknown;
+    let observedStepInput: unknown = "not-called";
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (session, stepInput): Promise<StepResult> => {
+        observedPendingAuth = getPendingAuthorization(session.state);
+        observedStepInput = stepInput;
+        return { next: null, session };
+      };
+    });
+
+    const result = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [
+          {
+            authorizationCallback: {
+              callback: { code: "oauth-code" },
+              connectionName: "statuspage",
+            },
+          },
+        ],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(observedPendingAuth).toBeUndefined();
+    expect(observedStepInput).toBeUndefined();
+    expect(result).toMatchObject({
+      action: "park",
+      hasPendingAuthorization: false,
+    });
+    if (result.action === "park") {
+      expect(result.authorizationNames).toBeUndefined();
+    }
+    const persistedSession = vi.mocked(createDurableSessionState).mock.calls.at(-1)?.[0].session;
+    expect(persistedSession?.state?.retained).toBe("yes");
+    expect(getPendingAuthorization(persistedSession?.state)).toBeUndefined();
+  });
 });
 
 describe("emitTerminalSessionFailureStep", () => {

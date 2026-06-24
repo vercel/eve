@@ -6,9 +6,17 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
+import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
+import { ConnectionAuthorizationRequiredError } from "#public/connections/errors.js";
+import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { ToolContext } from "#public/definitions/tool.js";
+import type { AuthorizationDefinition, TokenResult } from "#runtime/connections/types.js";
+import type { ResolvedToolDefinition } from "#runtime/types.js";
 
 function buildSerializedContext(overrides: {
+  auth?: Record<string, unknown>;
   channelKind: string;
   continuationToken: string;
   mode: string;
@@ -23,7 +31,7 @@ function buildSerializedContext(overrides: {
   };
 }): Record<string, unknown> {
   const context: Record<string, unknown> = {
-    "eve.auth": null,
+    "eve.auth": overrides.auth ?? null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
     "eve.channel": { kind: overrides.channelKind, state: {} },
     "eve.continuationToken": overrides.continuationToken,
@@ -36,6 +44,184 @@ function buildSerializedContext(overrides: {
 }
 
 describe("workflowEntry integration", () => {
+  it("resumes normal follow-ups after an interactive authorization callback", async () => {
+    let completeCalls = 0;
+    const weatherAuth: AuthorizationDefinition<{ nonce: string }> = {
+      principalType: "user",
+      async getToken(): Promise<TokenResult> {
+        throw new ConnectionAuthorizationRequiredError("weather");
+      },
+      async startAuthorization({ callbackUrl }) {
+        return {
+          challenge: {
+            displayName: "Weather",
+            instructions: "Sign in to continue.",
+            url: `https://idp.example/authorize?callback=${encodeURIComponent(callbackUrl)}`,
+          },
+          resume: { nonce: "weather-nonce" },
+        };
+      },
+      async completeAuthorization({ callback, resume }): Promise<TokenResult> {
+        completeCalls += 1;
+        expect(callback.params.code).toBe("oauth-code");
+        expect(resume).toEqual({ nonce: "weather-nonce" });
+        return { token: "weather-token" };
+      },
+    };
+    const getWeatherTool: ResolvedToolDefinition = {
+      description: "Get the current weather for a city.",
+      execute: createToolExecuteWithAuth({
+        scope: "get_weather",
+        async execute(rawInput, rawCtx) {
+          const ctx = rawCtx as ToolContext;
+          const token = await ctx.getToken(weatherAuth, {
+            authKey: "weather",
+            displayName: "Weather",
+          });
+          const city =
+            typeof rawInput === "object" &&
+            rawInput !== null &&
+            typeof (rawInput as { city?: unknown }).city === "string"
+              ? (rawInput as { city: string }).city
+              : "Lisbon";
+          return {
+            city,
+            condition: "Sunny",
+            summary: `authorized with ${token.token}`,
+            temperatureF: 72,
+          };
+        },
+      }),
+      inputSchema: {
+        additionalProperties: false,
+        properties: {
+          city: { type: "string" },
+        },
+        required: ["city"],
+        type: "object",
+      },
+      logicalPath: "tools/get_weather.ts",
+      name: "get_weather",
+      sourceId: "tools/get_weather.ts",
+      sourceKind: "module",
+    };
+    const runtime = createTestRuntime({
+      agent: { name: "workflow-entry-auth-followup" },
+      tools: [getWeatherTool],
+    });
+    const manifestTool = runtime.manifest.tools.find((tool) => tool.name === getWeatherTool.name);
+    if (manifestTool === undefined) {
+      throw new Error("Expected get_weather to be present in the test manifest.");
+    }
+    runtime.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[manifestTool.sourceId] = {
+      default: {
+        execute: getWeatherTool.execute,
+      },
+    };
+    const continuationToken = "http:workflow-entry-auth-followup";
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "Use the get_weather tool to check the weather in Lisbon." },
+          serializedContext: buildSerializedContext({
+            auth: {
+              attributes: {},
+              authenticator: "test-idp",
+              issuer: "test-idp",
+              principalId: "user-1",
+              principalType: "user",
+            },
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+
+      const stream = captureEvents(run);
+
+      try {
+        const firstTurn = await stream.nextUntil(
+          "initial auth-required event",
+          (event) => event.type === "authorization.required",
+        );
+        const required = filterEventsByType(firstTurn, "authorization.required");
+
+        expect(firstTurn.at(-1)?.type).toBe("authorization.required");
+        expect(required).toHaveLength(1);
+        expect(required[0]?.data).toMatchObject({
+          name: "weather",
+          authorization: { displayName: "Weather" },
+        });
+
+        await resumeHook(`${run.runId}:auth`, {
+          kind: "deliver",
+          payloads: [
+            {
+              authorizationCallback: {
+                callback: {
+                  method: "GET",
+                  params: { code: "oauth-code" },
+                },
+                connectionName: "weather",
+              },
+            },
+          ],
+        });
+
+        const authorizedTurn = await stream.nextUntil(
+          "authorization callback turn",
+          (event) => event.type === "session.waiting",
+        );
+        const completed = filterEventsByType(authorizedTurn, "authorization.completed");
+
+        expect(completeCalls).toBe(1);
+        expect(authorizedTurn.at(-1)?.type).toBe("session.waiting");
+        expect(completed).toHaveLength(1);
+        expect(completed[0]?.data).toMatchObject({
+          name: "weather",
+          outcome: "authorized",
+        });
+        expect(
+          authorizedTurn.some(
+            (event) =>
+              event.type === "message.completed" &&
+              event.data.message?.includes("Used local weather tool for Lisbon") === true,
+          ),
+        ).toBe(true);
+
+        await waitForHook(
+          { runId: run.runId },
+          {
+            token: continuationToken,
+          },
+        );
+        await resumeHook(continuationToken, {
+          kind: "deliver",
+          payloads: [{ message: "follow up after auth" }],
+        });
+
+        const followupTurn = await stream.nextUntil(
+          "post-auth follow-up turn",
+          (event) => event.type === "session.waiting",
+        );
+
+        expect(followupTurn.at(-1)?.type).toBe("session.waiting");
+        expect(
+          followupTurn.some(
+            (event) =>
+              event.type === "message.completed" &&
+              event.data.message?.includes("follow up after auth") === true,
+          ),
+        ).toBe(true);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
   it("parks in conversation mode and resumes via runtime delivery", async () => {
     const runtime = createTestRuntime({ agent: { name: "workflow-entry-conversation" } });
     const continuationToken = "http:workflow-entry-conversation";
@@ -360,3 +546,93 @@ describe("workflowEntry integration", () => {
     });
   });
 });
+
+interface CapturedEventStream {
+  dispose(): void;
+  nextUntil(
+    label: string,
+    predicate: (event: HandleMessageStreamEvent) => boolean,
+  ): Promise<HandleMessageStreamEvent[]>;
+}
+
+function captureEvents(run: Parameters<typeof captureTurnEvents>[0]): CapturedEventStream {
+  const reader = run.readable.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let disposed = false;
+
+  return {
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      reader.releaseLock();
+    },
+    nextUntil(label, predicate) {
+      if (disposed) {
+        return Promise.reject(new Error("CapturedEventStream: stream already disposed."));
+      }
+      return withTimeout(readUntil(reader, decoder, buffer, predicate), label).then((result) => {
+        buffer = result.buffer;
+        return result.events;
+      });
+    },
+  };
+}
+
+async function readUntil(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  decoder: InstanceType<typeof TextDecoder>,
+  initialBuffer: string,
+  predicate: (event: HandleMessageStreamEvent) => boolean,
+): Promise<{ buffer: string; events: HandleMessageStreamEvent[] }> {
+  const events: HandleMessageStreamEvent[] = [];
+  let buffer = initialBuffer;
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      throw new Error("Workflow stream closed before reaching the expected event.");
+    }
+
+    buffer += decoder.decode(value);
+
+    for (
+      let newlineIndex = buffer.indexOf("\n");
+      newlineIndex !== -1;
+      newlineIndex = buffer.indexOf("\n")
+    ) {
+      const line = buffer.slice(0, newlineIndex).trim();
+      buffer = buffer.slice(newlineIndex + 1);
+
+      if (line.length === 0) {
+        continue;
+      }
+
+      const event = JSON.parse(line) as HandleMessageStreamEvent;
+      events.push(event);
+
+      if (predicate(event)) {
+        return { buffer, events };
+      }
+    }
+  }
+}
+
+async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error(`Timed out waiting for ${label}.`));
+        }, 10_000);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+    }
+  }
+}
