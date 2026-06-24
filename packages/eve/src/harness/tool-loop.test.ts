@@ -670,6 +670,34 @@ describe("createToolLoopHarness", () => {
     expect(result.next).toEqual({ done: true, output: "Hello!" });
   });
 
+  it("returns an empty successful result when a task chooses not to deliver", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      fullStreamParts: [{ finishReason: "stop", type: "finish-step" }],
+      response: { messages: [{ content: "", role: "assistant" }] },
+      text: "",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("task", emit));
+
+    const result = await runStep(createTestSession(), { message: "Check for alerts." });
+
+    expect(result.next).toEqual({ done: true, output: "" });
+    expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
+    expect(events.map((event) => event.type)).toEqual([
+      "session.started",
+      "turn.started",
+      "message.received",
+      "step.started",
+      "step.completed",
+      "turn.completed",
+      "session.completed",
+    ]);
+  });
+
   it("emits result.completed when a run output schema is requested", async () => {
     const schema = {
       properties: { title: { type: "string" } },
