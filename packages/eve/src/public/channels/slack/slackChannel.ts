@@ -584,9 +584,13 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
         threadTs = posted.id;
       }
 
+      // Threadless proactive runs need distinct identities until their first
+      // Slack post supplies the real thread timestamp and re-keys the session.
+      const continuationThreadTs = threadTs || crypto.randomUUID();
+
       return send(input.message, {
         auth: input.auth,
-        continuationToken: slackContinuationToken(channelId, threadTs),
+        continuationToken: slackContinuationToken(channelId, continuationThreadTs),
         state: {
           channelId,
           threadTs: threadTs || null,

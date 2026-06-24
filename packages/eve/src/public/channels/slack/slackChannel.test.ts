@@ -1471,6 +1471,34 @@ describe("slackChannel().receive", () => {
     expect(options.auth.principalId).toBe("p");
   });
 
+  it("gives each threadless proactive session a unique temporary continuation token", async () => {
+    const randomUUID = vi
+      .spyOn(crypto, "randomUUID")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000001")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000002");
+    const send = vi.fn().mockResolvedValue({ id: "s", continuationToken: "ct" });
+
+    try {
+      const receive = buildReceive();
+      const input = {
+        message: "run the check",
+        target: { channelId: "C123" },
+        auth: null,
+      };
+
+      await receive(input, { send });
+      await receive(input, { send });
+
+      expect(send.mock.calls.map(([, options]) => options.continuationToken)).toEqual([
+        "C123:00000000-0000-4000-8000-000000000001",
+        "C123:00000000-0000-4000-8000-000000000002",
+      ]);
+      expect(send.mock.calls.map(([, options]) => options.state.threadTs)).toEqual([null, null]);
+    } finally {
+      randomUUID.mockRestore();
+    }
+  });
+
   it("requires channelId", async () => {
     const send = vi.fn();
     await expect(
