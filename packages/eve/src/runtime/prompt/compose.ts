@@ -7,12 +7,9 @@ import type {
 import { createWorkspacePromptSection } from "#runtime/workspace/spec.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
 import { formatConnectionsSection } from "#runtime/prompt/connections.js";
-import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
 
 const PARALLEL_ACTION_INSTRUCTION =
   "Tool execution\nA single tool or subagent call runs as one serial action. If you call multiple independent tools or subagents in one response, eve treats that batch as parallel work. Only batch work that is independent and does not rely on another call in the same response.";
-
-export const CONDITIONAL_DELIVERY_INSTRUCTION = `Conditional delivery\nOnly when the current task explicitly makes delivery conditional and there is nothing to report, reply with exactly ${EMPTY_DELIVERY_SENTINEL} and no other text. Do not use this marker for ordinary conversations, after input or approval responses, or merely because you have no additional commentary. Never return an empty response; use the marker to intentionally deliver nothing.`;
 
 /**
  * Input for composing the base authored instructions prompt for one
@@ -35,7 +32,6 @@ export function composeRuntimeBasePrompt(input: ComposeRuntimeBasePromptInput): 
     ...createInstructionsPromptBlocks(input.instructions),
     ...createWorkspacePromptBlocks(input.workspaceSpec),
     ...(input.toolsAvailable ? [PARALLEL_ACTION_INSTRUCTION] : []),
-    CONDITIONAL_DELIVERY_INSTRUCTION,
     ...createConnectionsPromptBlocks(input.connections),
     ...createSkillsPromptBlocks(input.skills),
   ];

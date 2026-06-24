@@ -16,6 +16,7 @@ import {
   type TypedToolResult,
 } from "ai";
 import type { SessionCapabilities } from "#channel/types.js";
+import { isScheduleAppAuth } from "#channel/schedule-auth.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createErrorId,
@@ -26,6 +27,7 @@ import {
 } from "#internal/logging.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { contextStorage } from "#context/container.js";
+import { AuthKey, ParentSessionKey } from "#context/keys.js";
 import { buildDynamicInstructionMessages } from "#context/dynamic-instruction-lifecycle.js";
 import { buildDynamicTools } from "#context/build-dynamic-tools.js";
 import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
@@ -116,7 +118,11 @@ import {
   summarizeKnownModelCallRequestError,
 } from "#harness/model-call-error.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
-import { EMPTY_DELIVERY_SENTINEL, hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
+import {
+  CONDITIONAL_DELIVERY_INSTRUCTION,
+  EMPTY_DELIVERY_SENTINEL,
+  hasEmptyDeliverySentinel,
+} from "#shared/empty-delivery.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
 import { ensureOtelIntegration } from "#harness/otel-integration.js";
 import {
@@ -541,6 +547,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     // Direct harness unit tests may run without an ambient context.
     const ctx = contextStorage.getStore();
+    const emptyDeliveryEnabled =
+      session.outputSchema === undefined &&
+      ctx !== undefined &&
+      isScheduleAppAuth(ctx.get(AuthKey)) &&
+      ctx.get(ParentSessionKey) === undefined;
 
     // --- Execute via ToolLoopAgent ------------------------------------------
 
@@ -572,6 +583,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       if (skillAnnouncement !== undefined && skillAnnouncement.length > 0) {
         systemMessages.push({ role: "system", content: skillAnnouncement });
       }
+    }
+    if (emptyDeliveryEnabled) {
+      systemMessages.push({ role: "system", content: CONDITIONAL_DELIVERY_INSTRUCTION });
     }
 
     const modelMessages = nonSystemMessages;
@@ -866,6 +880,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             }),
           (current) =>
             attemptEmptyResponseRecovery({
+              emptyDeliveryEnabled,
               error: current.error,
               retryCallOptions: current.retryCallOptions,
               runOneModelCall,
@@ -1348,7 +1363,15 @@ function rethrowNoOutputAsEmptyResponse(error: unknown): never {
  * (its toolset change busts the prompt cache anyway), this one trails as
  * a user note to keep the cached prefix valid.
  */
-const EMPTY_RESPONSE_NUDGE = `Your previous reply was empty and was not delivered. Answer now from the tool results above; do not re-run tools or mention this notice. If the current task explicitly requires conditional delivery and there is nothing to report, reply with exactly ${EMPTY_DELIVERY_SENTINEL}.`;
+const EMPTY_RESPONSE_NUDGE =
+  "Your previous reply was empty and was not delivered. Answer now from the tool results above; do not re-run tools or mention this notice.";
+
+function buildEmptyResponseNudge(emptyDeliveryEnabled: boolean): string {
+  if (!emptyDeliveryEnabled) {
+    return EMPTY_RESPONSE_NUDGE;
+  }
+  return `${EMPTY_RESPONSE_NUDGE} If the current task explicitly requires conditional delivery and there is nothing to report, reply with exactly ${EMPTY_DELIVERY_SENTINEL}.`;
+}
 
 /**
  * Recovers a model call that completed without content (see
@@ -1367,6 +1390,7 @@ const EMPTY_RESPONSE_NUDGE = `Your previous reply was empty and was not delivere
  * restore what the earlier recovery removed.
  */
 async function attemptEmptyResponseRecovery(input: {
+  readonly emptyDeliveryEnabled: boolean;
   readonly error: unknown;
   readonly retryCallOptions?: RecoveryRetryCallOptions;
   readonly runOneModelCall: RecoveryModelCallFn;
@@ -1387,7 +1411,7 @@ async function attemptEmptyResponseRecovery(input: {
       ...input.retryCallOptions,
       retryReason: "empty-response",
       suppressStepStartedEmission: true,
-      trailingUserNote: EMPTY_RESPONSE_NUDGE,
+      trailingUserNote: buildEmptyResponseNudge(input.emptyDeliveryEnabled),
     });
     return { outcome: "recovered", result };
   } catch (retryError) {

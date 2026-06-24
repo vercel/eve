@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  composeRuntimeBasePrompt,
-  CONDITIONAL_DELIVERY_INSTRUCTION,
-} from "../src/runtime/prompt/compose.js";
+import { composeRuntimeBasePrompt } from "../src/runtime/prompt/compose.js";
 
 describe("composeRuntimeBasePrompt", () => {
   it("composes the authored instructions prompt into one runtime instruction block", () => {
@@ -16,10 +13,7 @@ describe("composeRuntimeBasePrompt", () => {
           sourceKind: "markdown",
         },
       }),
-    ).toEqual([
-      "Instructions (instructions)\nYou are a weather assistant.",
-      CONDITIONAL_DELIVERY_INSTRUCTION,
-    ]);
+    ).toEqual(["Instructions (instructions)\nYou are a weather assistant."]);
   });
 
   it("adds a parallel tool execution instruction when tools are available", () => {
@@ -32,7 +26,6 @@ describe("composeRuntimeBasePrompt", () => {
         "Tool execution",
         "A single tool or subagent call runs as one serial action. If you call multiple independent tools or subagents in one response, eve treats that batch as parallel work. Only batch work that is independent and does not rely on another call in the same response.",
       ].join("\n"),
-      CONDITIONAL_DELIVERY_INSTRUCTION,
     ]);
   });
 
@@ -47,7 +40,7 @@ describe("composeRuntimeBasePrompt", () => {
           sourceKind: "markdown",
         },
       }),
-    ).toEqual([CONDITIONAL_DELIVERY_INSTRUCTION]);
+    ).toEqual([]);
   });
 
   it("adds a shallow workspace awareness section when authored project files are mounted", () => {
@@ -68,12 +61,11 @@ describe("composeRuntimeBasePrompt", () => {
         "- Use the `bash` tool with `ls`, `find`, and `rg` to inspect deeper contents when needed.",
         "- Do not claim these files are unavailable unless a workspace or tool call actually fails.",
       ].join("\n"),
-      CONDITIONAL_DELIVERY_INSTRUCTION,
     ]);
   });
 
-  it("always explains conditional empty delivery without injecting sandbox guidance", () => {
-    expect(composeRuntimeBasePrompt({})).toEqual([CONDITIONAL_DELIVERY_INSTRUCTION]);
+  it("does not inject runtime-owned delivery or sandbox guidance", () => {
+    expect(composeRuntimeBasePrompt({})).toEqual([]);
   });
 
   it("orders workspace and tool execution sections predictably", () => {
@@ -99,7 +91,6 @@ describe("composeRuntimeBasePrompt", () => {
         "Tool execution",
         "A single tool or subagent call runs as one serial action. If you call multiple independent tools or subagents in one response, eve treats that batch as parallel work. Only batch work that is independent and does not rely on another call in the same response.",
       ].join("\n"),
-      CONDITIONAL_DELIVERY_INSTRUCTION,
     ]);
   });
 });

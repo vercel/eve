@@ -3,8 +3,16 @@ import { type FilePart, jsonSchema, type LanguageModel, ToolLoopAgent, type User
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { LiveStepToolsKey, SessionDynamicInstructionsKey } from "#context/keys.js";
-import { ChannelInstrumentationKey, SandboxKey } from "#context/keys.js";
+import {
+  AuthKey,
+  ChannelInstrumentationKey,
+  InitiatorAuthKey,
+  LiveStepToolsKey,
+  ParentSessionKey,
+  SandboxKey,
+  SessionDynamicInstructionsKey,
+} from "#context/keys.js";
+import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
@@ -22,7 +30,10 @@ import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 import { isCodeModeEnvEnabled } from "#shared/code-mode.js";
-import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
+import {
+  CONDITIONAL_DELIVERY_INSTRUCTION,
+  EMPTY_DELIVERY_SENTINEL,
+} from "#shared/empty-delivery.js";
 
 declare module "#public/channels/index.js" {
   interface ChannelMetadataMap {
@@ -108,6 +119,22 @@ function createTestConfig(
     ]),
     ...overrides,
   };
+}
+
+function createScheduleContext(): ContextContainer {
+  const ctx = new ContextContainer();
+  ctx.set(AuthKey, SCHEDULE_APP_AUTH);
+  ctx.set(InitiatorAuthKey, SCHEDULE_APP_AUTH);
+  return ctx;
+}
+
+function setDelegatedParent(ctx: ContextContainer): void {
+  ctx.set(ParentSessionKey, {
+    callId: "call-parent",
+    rootSessionId: "session-root",
+    sessionId: "session-parent",
+    turn: { id: "turn-parent", sequence: 0 },
+  });
 }
 
 function createEventCollector(): {
@@ -2807,12 +2834,70 @@ describe("createToolLoopHarness", () => {
           content: expect.stringContaining("was not delivered"),
           role: "user",
         });
+        expect(reissueMessages.at(-1)?.content).not.toContain(EMPTY_DELIVERY_SENTINEL);
         expect(
           result.session.history.some(
             (message) =>
               typeof message.content === "string" && message.content.includes("was not delivered"),
           ),
         ).toBe(false);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it("offers conditional delivery on an empty-response retry for a scheduled turn", async () => {
+      setupFirstThenAgent(emptyResult, successResult);
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { emit } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+
+      try {
+        await contextStorage.run(createScheduleContext(), () =>
+          runStep(createTestSession(), { message: "Check for alerts." }),
+        );
+
+        const reissueAgent = vi.mocked(ToolLoopAgent).mock.results[1]?.value as {
+          stream: ReturnType<typeof vi.fn>;
+        };
+        const reissueMessages = reissueAgent.stream.mock.calls[0]?.[0]?.messages as Array<{
+          content: unknown;
+          role: string;
+        }>;
+        expect(reissueMessages.at(-1)).toMatchObject({
+          content: expect.stringContaining(EMPTY_DELIVERY_SENTINEL),
+          role: "user",
+        });
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it("does not offer conditional delivery on a scheduled retry with an output schema", async () => {
+      setupFirstThenAgent(emptyResult, finalOutputResult("Done.", { status: "ok" }));
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { emit } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("task", emit));
+
+      try {
+        await contextStorage.run(createScheduleContext(), () =>
+          runStep(createTestSession({ outputSchema: { type: "object" } }), {
+            message: "Check for alerts.",
+          }),
+        );
+
+        const reissueAgent = vi.mocked(ToolLoopAgent).mock.results[1]?.value as {
+          stream: ReturnType<typeof vi.fn>;
+        };
+        const reissueMessages = reissueAgent.stream.mock.calls[0]?.[0]?.messages as Array<{
+          content: unknown;
+          role: string;
+        }>;
+        expect(reissueMessages.at(-1)).toMatchObject({
+          content: expect.stringContaining("was not delivered"),
+          role: "user",
+        });
+        expect(reissueMessages.at(-1)?.content).not.toContain(EMPTY_DELIVERY_SENTINEL);
       } finally {
         warnSpy.mockRestore();
       }
@@ -6836,6 +6921,84 @@ describe("createToolLoopHarness", () => {
       const session = createTestSession();
 
       await runStep(session, { message: "Hi" });
+
+      const { instructions } = getLastAgentSettings();
+      expect(instructions).toBe("You are a test assistant.");
+    });
+
+    it.each(["conversation", "task"] as const)(
+      "adds conditional-delivery guidance to a top-level scheduled %s turn",
+      async (mode) => {
+        setupMockAgent(defaultModelResult());
+        const runStep = createToolLoopHarness(createTestConfig(mode));
+
+        await contextStorage.run(createScheduleContext(), () =>
+          runStep(createTestSession(), { message: "Check for alerts." }),
+        );
+
+        const { instructions } = getLastAgentSettings();
+        expect(instructions).toEqual([
+          { role: "system", content: "You are a test assistant." },
+          { role: "system", content: CONDITIONAL_DELIVERY_INSTRUCTION },
+        ]);
+      },
+    );
+
+    it.each(["conversation", "task"] as const)(
+      "does not add conditional-delivery guidance when a scheduled %s turn has an output schema",
+      async (mode) => {
+        setupMockAgent(finalOutputResult("Done.", { status: "ok" }));
+        const runStep = createToolLoopHarness(createTestConfig(mode));
+
+        await contextStorage.run(createScheduleContext(), () =>
+          runStep(createTestSession({ outputSchema: { type: "object" } }), {
+            message: "Check for alerts.",
+          }),
+        );
+
+        const { instructions } = getLastAgentSettings();
+        expect(instructions).toBe("You are a test assistant.");
+      },
+    );
+
+    it("does not add conditional-delivery guidance to an ordinary task run", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(createTestConfig("task"));
+
+      await runStep(createTestSession(), { message: "Run this task." });
+
+      const { instructions } = getLastAgentSettings();
+      expect(instructions).toBe("You are a test assistant.");
+    });
+
+    it("does not add conditional-delivery guidance to a human continuation", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const ctx = createScheduleContext();
+      ctx.set(AuthKey, {
+        attributes: {},
+        authenticator: "slack",
+        principalId: "U123",
+        principalType: "user",
+      });
+
+      await contextStorage.run(ctx, () =>
+        runStep(createTestSession(), { message: "What happened?" }),
+      );
+
+      const { instructions } = getLastAgentSettings();
+      expect(instructions).toBe("You are a test assistant.");
+    });
+
+    it("does not add conditional-delivery guidance to a delegated run", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(createTestConfig("task"));
+      const ctx = createScheduleContext();
+      setDelegatedParent(ctx);
+
+      await contextStorage.run(ctx, () =>
+        runStep(createTestSession(), { message: "Handle delegated work." }),
+      );
 
       const { instructions } = getLastAgentSettings();
       expect(instructions).toBe("You are a test assistant.");
