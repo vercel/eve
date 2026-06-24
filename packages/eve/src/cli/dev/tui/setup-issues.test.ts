@@ -8,6 +8,7 @@ import {
   formatSetupIssuesLine,
   LOGIN_SETUP_ISSUE,
   orderedSetupIssues,
+  resolveModelProviderState,
   type BootDetectionContext,
 } from "./setup-issues.js";
 
@@ -87,9 +88,47 @@ describe("BOOT_DETECTIONS", () => {
     });
   });
 
-  it("stays quiet when either gateway credential is present, linked or not", async () => {
-    expect(await detectSetupIssues(context({ env: { AI_GATEWAY_API_KEY: "key" } }))).toEqual([]);
-    expect(await detectSetupIssues(context({ env: { VERCEL_OIDC_TOKEN: "token" } }))).toEqual([]);
+  it.each([
+    ["AI_GATEWAY_API_KEY", "key"],
+    ["VERCEL_OIDC_TOKEN", "token"],
+  ])(
+    "treats a newly loaded gateway credential as configured while runtime info catches up",
+    async (key, value) => {
+      const info = infoWithRouting(
+        { kind: "gateway", target: "openai" },
+        { kind: "gateway", connected: false },
+      );
+
+      await expect(detectSetupIssues(context({ env: { [key]: value }, info }))).resolves.toEqual(
+        [],
+      );
+    },
+  );
+
+  it("uses compiled gateway routing before a stale endpoint kind", () => {
+    const info = infoWithRouting(
+      { kind: "gateway", target: "openai" },
+      { kind: "external", provider: "anthropic" },
+    );
+
+    expect(resolveModelProviderState(info, { AI_GATEWAY_API_KEY: "key" })).toMatchObject({
+      agent: {
+        model: {
+          endpoint: { kind: "gateway", connected: true, credential: "api-key" },
+        },
+      },
+    });
+  });
+
+  it.each([
+    ["AI_GATEWAY_API_KEY", "key"],
+    ["VERCEL_OIDC_TOKEN", "token"],
+  ])("does not infer AI Gateway routing from a local credential alone", async (key, value) => {
+    const issues = await detectSetupIssues(context({ env: { [key]: value } }));
+
+    expect(issues).toEqual([
+      { kind: "attention", label: "model provider not linked", command: "/model" },
+    ]);
   });
 
   it("stays quiet for an external-provider model — gateway linking/credentials don't apply", async () => {
@@ -108,7 +147,8 @@ describe("BOOT_DETECTIONS", () => {
   });
 
   it("skips a throwing detection instead of failing the boot", async () => {
-    const issues = await detectSetupIssues(context({ env: { AI_GATEWAY_API_KEY: "k" } }), [
+    const info = infoWithRouting({ kind: "gateway", target: "openai" });
+    const issues = await detectSetupIssues(context({ env: { AI_GATEWAY_API_KEY: "k" }, info }), [
       {
         id: "broken",
         detect: () => {

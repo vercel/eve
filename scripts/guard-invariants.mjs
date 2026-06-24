@@ -72,6 +72,11 @@
  *             for project creation and the dedicated current commands
  *             (`eve link`, `eve channels add`, `eve deploy`) afterward.
  *             Changelogs and changesets are historical records and excluded.
+ *   rule 32 — Every Markdown file under `research/` must have valid YAML
+ *             frontmatter with non-empty `issue` and `status` fields plus an
+ *             ISO `last_updated` date. Research documents are implementation
+ *             plans attached to tracked GitHub work, not an unowned parallel
+ *             backlog.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -665,6 +670,88 @@ async function checkRule31RemovedCliReferences() {
   return violations;
 }
 
+// ---------- Rule 32: research document frontmatter ----------
+
+const RESEARCH_DIR = "research";
+const RESEARCH_LAST_UPDATED_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * @returns {Promise<Violation[]>}
+ */
+async function checkRule32ResearchFrontmatter() {
+  /** @type {Violation[]} */
+  const violations = [];
+  const researchRoot = join(REPO_ROOT, RESEARCH_DIR);
+
+  try {
+    await readdir(researchRoot);
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return violations;
+    }
+    throw error;
+  }
+
+  for await (const { absPath, relPath } of walkFiles(researchRoot)) {
+    const posix = toPosix(relPath);
+    if (!posix.endsWith(".md")) continue;
+
+    const content = await readFile(absPath, "utf8");
+    if (!matter.test(content)) {
+      violations.push({
+        rule: 32,
+        file: posix,
+        message:
+          "research documents must start with YAML frontmatter containing `issue`, `status`, and `last_updated` fields.",
+      });
+      continue;
+    }
+
+    let data;
+    try {
+      data = matter(content).data;
+    } catch (error) {
+      violations.push({
+        rule: 32,
+        file: posix,
+        message: `research frontmatter must be valid YAML: ${error instanceof Error ? error.message : String(error)}`,
+      });
+      continue;
+    }
+
+    if (data === null || typeof data !== "object" || Array.isArray(data)) {
+      violations.push({
+        rule: 32,
+        file: posix,
+        message: "research frontmatter must parse to an object.",
+      });
+      continue;
+    }
+
+    for (const field of ["issue", "status"]) {
+      if (typeof data[field] === "string" && data[field].trim().length > 0) continue;
+      violations.push({
+        rule: 32,
+        file: posix,
+        message: `research frontmatter must set \`${field}\` to a non-empty string.`,
+      });
+    }
+
+    if (
+      typeof data.last_updated !== "string" ||
+      !RESEARCH_LAST_UPDATED_RE.test(data.last_updated)
+    ) {
+      violations.push({
+        rule: 32,
+        file: posix,
+        message: "research frontmatter must set `last_updated` to a quoted `YYYY-MM-DD` string.",
+      });
+    }
+  }
+
+  return violations;
+}
+
 /**
  * @returns {Promise<Set<string>>}
  */
@@ -919,6 +1006,9 @@ async function main() {
 
   // Rule 31
   violations.push(...(await checkRule31RemovedCliReferences()));
+
+  // Rule 32
+  violations.push(...(await checkRule32ResearchFrontmatter()));
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

@@ -7,6 +7,7 @@ import {
   renderFlowPanel,
   renderSelectQuestion,
   renderTextQuestion,
+  type SetupPanelOption,
 } from "./setup-panel.js";
 import { stripAnsi } from "./terminal-text.js";
 import { createTheme } from "./theme.js";
@@ -130,6 +131,32 @@ describe("renderFlowPanel", () => {
 });
 
 describe("renderSelectQuestion", () => {
+  it("shows a stacked menu's selected-row description beneath that option", () => {
+    const options: SetupPanelOption[] = [
+      { value: "model", label: "Change model", description: "The model your agent uses" },
+      {
+        value: "provider",
+        label: "Configure model access",
+        description: "How your agent reaches the model provider",
+      },
+    ];
+    const rows = renderSelectQuestion(
+      {
+        kind: "stacked",
+        message: "",
+        options,
+        select: initialSelectState({ options, defaultValue: "provider" }),
+      },
+      theme,
+      80,
+    );
+
+    expect(rows.indexOf("     How your agent reaches the model provider")).toBe(
+      rows.findIndex((row) => row.includes("▶ Configure model access")) + 1,
+    );
+    expect(rows.join("\n")).not.toContain("The model your agent uses");
+  });
+
   it("paints an unnumbered single-select with one state-glyph column", () => {
     const rows = renderSelectQuestion(
       {
@@ -388,22 +415,25 @@ describe("renderSelectQuestion", () => {
       { value: "new", label: "Create a new project", hint: "Name: weather-agent" },
       { value: "link", label: "Link an existing project" },
     ];
-    const baseEdit = {
-      optionValue: "new",
-      defaultValue: "weather-agent",
-      formatHint: (value: string) => `Name: ${value}`,
-      caretVisible: true,
-    };
+    const renameEditor = (editor: ReturnType<typeof lineOf>) =>
+      ({
+        kind: "rename",
+        editor,
+        defaultValue: "weather-agent",
+        formatHint: (value: string) => `Name: ${value}`,
+      }) as const;
+    const baseEdit = { optionValue: "new", caretVisible: true };
 
     // Hovering the editable row leaves the real buffer empty and parks the
     // caret before the suggested name, so typing replaces the placeholder.
     const hover = renderSelectQuestion(
       {
-        kind: "editable",
+        kind: "inline-edit",
+        layout: "task-list",
         message: "Vercel project",
         options,
         select: initialSelectState({ options }),
-        edit: { ...baseEdit, editor: lineOf("") },
+        edit: { ...baseEdit, editor: renameEditor(lineOf("")) },
       },
       colorTheme,
       80,
@@ -416,11 +446,12 @@ describe("renderSelectQuestion", () => {
     // Caret off (blink) collapses to nothing — no stray space before the placeholder.
     const hoverOff = renderSelectQuestion(
       {
-        kind: "editable",
+        kind: "inline-edit",
+        layout: "task-list",
         message: "Vercel project",
         options,
         select: initialSelectState({ options }),
-        edit: { ...baseEdit, caretVisible: false, editor: lineOf("") },
+        edit: { ...baseEdit, caretVisible: false, editor: renameEditor(lineOf("")) },
       },
       colorTheme,
       80,
@@ -432,11 +463,12 @@ describe("renderSelectQuestion", () => {
     // than covers the final character and blinking does not shift the text.
     const edited = renderSelectQuestion(
       {
-        kind: "editable",
+        kind: "inline-edit",
+        layout: "task-list",
         message: "Vercel project",
         options,
         select: initialSelectState({ options }),
-        edit: { ...baseEdit, editor: lineOf("weather-fixtur") },
+        edit: { ...baseEdit, editor: renameEditor(lineOf("weather-fixtur")) },
       },
       colorTheme,
       80,
@@ -447,11 +479,16 @@ describe("renderSelectQuestion", () => {
 
     const editedOff = renderSelectQuestion(
       {
-        kind: "editable",
+        kind: "inline-edit",
+        layout: "task-list",
         message: "Vercel project",
         options,
         select: initialSelectState({ options }),
-        edit: { ...baseEdit, caretVisible: false, editor: lineOf("weather-fixtur") },
+        edit: {
+          ...baseEdit,
+          caretVisible: false,
+          editor: renameEditor(lineOf("weather-fixtur")),
+        },
       },
       colorTheme,
       80,
@@ -459,24 +496,71 @@ describe("renderSelectQuestion", () => {
     expect(stripAnsi(edited.join("\n"))).toBe(stripAnsi(editedOff.join("\n")));
   });
 
-  it("hides the rename caret and hint when the cursor is off the editable row", () => {
+  it("keeps a long masked key's inline failure visible within a narrow panel", () => {
+    const options = [
+      {
+        value: "own-key",
+        label: "AI Gateway via AI_GATEWAY_API_KEY",
+        hint: ">  type your key",
+      },
+    ];
+    const width = 44;
+    const rows = renderSelectQuestion(
+      {
+        kind: "inline-edit",
+        layout: "stacked",
+        message: "Provider",
+        options,
+        select: initialSelectState({ options }),
+        edit: {
+          optionValue: "own-key",
+          caretVisible: false,
+          editor: {
+            kind: "key",
+            phase: {
+              kind: "invalid",
+              editor: lineOf(`sk-${"x".repeat(80)}`),
+              message: "The AI Gateway rejected this key.",
+            },
+          },
+        },
+      },
+      colorTheme,
+      width,
+    );
+    const row = rows.find((line) => line.includes("Invalid key"));
+    const plain = stripAnsi(row ?? "");
+
+    expect(plain).toContain("…");
+    expect(plain).toContain("    ⨯ Invalid key");
+    expect(plain.length).toBeLessThanOrEqual(width);
+    expect(row).toContain(
+      colorTheme.colors.red(`${colorTheme.glyph.error} ${colorTheme.colors.bold("Invalid key")}`),
+    );
+  });
+
+  it("hides the rename cursor and hint when the cursor is off the editable row", () => {
     const options = [
       { value: "new", label: "Create a new project", hint: "Name: weather-agent" },
       { value: "link", label: "Link an existing project" },
     ];
     const rows = renderSelectQuestion(
       {
-        kind: "editable",
+        kind: "inline-edit",
+        layout: "task-list",
         message: "Vercel project",
         options,
         // Cursor parked on the second (non-editable) row.
         select: { ...initialSelectState({ options }), cursor: 1 },
         edit: {
           optionValue: "new",
-          defaultValue: "weather-agent",
-          formatHint: (value: string) => `Name: ${value}`,
           caretVisible: true,
-          editor: lineOf(""),
+          editor: {
+            kind: "rename",
+            editor: lineOf(""),
+            defaultValue: "weather-agent",
+            formatHint: (value: string) => `Name: ${value}`,
+          },
         },
       },
       theme,
@@ -550,7 +634,8 @@ describe("renderSelectQuestion", () => {
 
   it("keeps a stacked hint dim across an embedded bold span", () => {
     const colored = createTheme({ color: true, unicode: true });
-    const options = [
+    const options: SetupPanelOption[] = [
+      { value: "model", label: "Change model" },
       {
         value: "provider",
         label: "Change provider",
@@ -573,12 +658,48 @@ describe("renderSelectQuestion", () => {
     expect(text).toContain("\x1b[1mmy-agent\x1b[22m\x1b[2m)");
   });
 
-  it("keeps a warning row yellow under the cursor highlight", () => {
-    const options = [
+  it("uses the terminal foreground for a selected yellow hint and dims it otherwise", () => {
+    const hint = colorTheme.colors.yellow("Not configured");
+    const options: SetupPanelOption[] = [
+      { value: "model", label: "Change model" },
       {
         value: "provider",
         label: "Configure model access",
-        accent: "warning" as const,
+        hint,
+      },
+    ];
+    const selectedRows = renderSelectQuestion(
+      {
+        kind: "stacked",
+        message: "",
+        options,
+        select: initialSelectState({ options, defaultValue: "provider" }),
+      },
+      colorTheme,
+      80,
+    );
+    const unselectedRows = renderSelectQuestion(
+      {
+        kind: "stacked",
+        message: "",
+        options,
+        select: initialSelectState({ options, defaultValue: "model" }),
+      },
+      colorTheme,
+      80,
+    );
+
+    expect(selectedRows).toContain("     Not configured");
+    expect(selectedRows).not.toContain(`     ${hint}`);
+    expect(unselectedRows).toContain(`     ${colorTheme.colors.dim(hint)}`);
+  });
+
+  it("keeps a warning row yellow under the cursor highlight", () => {
+    const options: SetupPanelOption[] = [
+      {
+        value: "provider",
+        label: "Configure model access",
+        accent: "warning",
       },
     ];
     const rows = renderSelectQuestion(
@@ -595,6 +716,30 @@ describe("renderSelectQuestion", () => {
     expect(rows).toContain(
       `  ${colorTheme.colors.inverse(colorTheme.colors.yellow(" ▶ Configure model access "))}`,
     );
+  });
+
+  it("renders each line of a stacked hint beneath its option", () => {
+    const options = [
+      {
+        value: "project",
+        label: "AI Gateway via Project",
+        hint: "Authenticates with AI Gateway automatically\nin a new or existing project. No keys to manage.",
+      },
+    ];
+    const rows = renderSelectQuestion(
+      {
+        kind: "stacked",
+        message: "Which model provider do you want to use?",
+        options,
+        select: initialSelectState({ options }),
+      },
+      theme,
+      80,
+    );
+
+    expect(rows).toContain("     Authenticates with AI Gateway automatically");
+    expect(rows).toContain("     in a new or existing project. No keys to manage.");
+    expect(rows.every((row) => !row.includes("\n"))).toBe(true);
   });
 
   it("renders checkboxes and the Submit row for a multi-select", () => {
@@ -719,18 +864,13 @@ describe("renderTextQuestion", () => {
     const text = rows.join("\n");
 
     expect(rows[0]).toBe("  Project name");
-    // The input line sits directly under the message — no blank row between.
     expect(rows[1]).toContain("my-agent");
     expect(text).toContain("enter to submit · esc to cancel");
   });
 
   it("draws the blinking cursor as a block over the grapheme under it", () => {
     const rows = renderTextQuestion(
-      {
-        message: "Project name",
-        editor: { text: "hello", cursor: 3 },
-        mask: false,
-      },
+      { message: "Project name", editor: { text: "hello", cursor: 3 }, mask: false },
       colorTheme,
       60,
       true,

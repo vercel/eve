@@ -23,6 +23,7 @@ function setupFlowRenderer() {
     end: vi.fn(),
     readSelect: vi.fn(async () => undefined),
     readEditableSelect: vi.fn(async () => undefined),
+    readProviderPicker: vi.fn(async () => undefined),
     readText: vi.fn(async () => undefined),
     readAcknowledge: vi.fn(async () => {}),
     readChoice: vi.fn(() => ({ choice: Promise.resolve(undefined), close: vi.fn() })),

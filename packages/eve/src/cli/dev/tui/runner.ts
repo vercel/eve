@@ -55,6 +55,7 @@ import {
   formatSetupIssuesLine,
   LOGIN_SETUP_ISSUE,
   orderedSetupIssues,
+  resolveModelProviderState,
   type BootDetection,
   type BootDetectionContext,
   type SetupIssue,
@@ -508,22 +509,25 @@ export class EveTUIRunner {
       info = undefined;
     }
     this.#reportBeforeFirstPaint();
-    this.#replaceAgentInfo(info);
-    await this.#renderSetupIssues(info);
+    const headerInfo = this.#replaceAgentInfo(info);
+    await this.#renderSetupIssues(headerInfo);
   }
 
-  #replaceAgentInfo(info: AgentInfoResult | undefined): void {
-    this.#agentInfo = info;
+  #replaceAgentInfo(info: AgentInfoResult | undefined): AgentInfoResult | undefined {
+    const headerInfo =
+      this.#appRoot === undefined ? info : resolveModelProviderState(info, process.env);
+    this.#agentInfo = headerInfo;
     const serverUrl = this.#serverUrl;
-    if (serverUrl === undefined) return;
+    if (serverUrl === undefined) return headerInfo;
 
     const header: AgentTUIAgentHeader = {
       name: this.#name,
       serverUrl,
     };
-    if (info !== undefined) header.info = info;
+    if (headerInfo !== undefined) header.info = headerInfo;
     if (this.#appRoot !== undefined) header.tip = this.#headerTip;
     this.#renderer.renderAgentHeader?.(header);
+    return headerInfo;
   }
 
   #reportBeforeFirstPaint(): void {
@@ -1056,16 +1060,16 @@ export class EveTUIRunner {
 
   /**
    * Setup commands can write env files before the dev watcher reloads them.
-   * Reload first, then replace the cached `/info` response that owns the status
-   * bar's endpoint state. The slower Vercel auth probe stays off the prompt path.
+   * Reload first, then cache the credential-normalized `/info` snapshot shared
+   * by the status bar and setup detector. The Vercel auth probe stays off the
+   * prompt path.
    */
   async #refreshModelAccess(): Promise<void> {
     const appRoot = this.#appRoot;
     if (appRoot === undefined) return;
 
     loadDevelopmentEnvironmentFiles(appRoot);
-    const refreshedInfo = await this.#readAgentInfo();
-    this.#replaceAgentInfo(refreshedInfo);
+    const refreshedInfo = this.#replaceAgentInfo(await this.#readAgentInfo());
     void this.#refreshSetupAttention(refreshedInfo);
   }
 

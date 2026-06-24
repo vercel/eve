@@ -129,6 +129,7 @@ const AGENT_INFO: AgentInfoResult = {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.useRealTimers();
 });
 
@@ -1380,6 +1381,7 @@ describe("EveTUIRunner boot setup detection", () => {
       ...AGENT_INFO.agent,
       model: {
         ...AGENT_INFO.agent.model,
+        routing: { kind: "gateway", target: "openai" },
         endpoint: { kind: "gateway", connected: false },
       },
     },
@@ -1503,17 +1505,7 @@ describe("EveTUIRunner boot setup detection", () => {
     );
   });
 
-  it("refreshes the gateway endpoint after automatic provider setup", async () => {
-    const connectedInfo: AgentInfoResult = {
-      ...AGENT_INFO,
-      agent: {
-        ...AGENT_INFO.agent,
-        model: {
-          ...AGENT_INFO.agent.model,
-          endpoint: { kind: "gateway", connected: true, credential: "api-key" },
-        },
-      },
-    };
+  it("normalizes a committed local key after automatic provider setup", async () => {
     const clearSetupWarning = vi.fn();
     const headers: AgentTUIAgentHeader[] = [];
     const detect = vi.fn(({ info }: { info?: AgentInfoResult }) =>
@@ -1528,7 +1520,10 @@ describe("EveTUIRunner boot setup detection", () => {
         : [],
     );
     const { client, runner } = providerSetupRefreshRunner({
-      refreshInfo: async () => connectedInfo,
+      refreshInfo: async () => {
+        vi.stubEnv("AI_GATEWAY_API_KEY", "test-key");
+        return disconnectedGatewayInfo;
+      },
       bootDetections: [{ id: "test", detect }],
       renderer: {
         clearSetupWarning,
@@ -1540,7 +1535,11 @@ describe("EveTUIRunner boot setup detection", () => {
     await vi.waitFor(() => expect(clearSetupWarning).toHaveBeenCalled());
 
     expect(client.info).toHaveBeenCalledTimes(2);
-    expect(detect.mock.calls.at(-1)?.[0].info).toBe(connectedInfo);
+    expect(detect.mock.calls.at(-1)?.[0].info?.agent.model.endpoint).toEqual({
+      kind: "gateway",
+      connected: true,
+      credential: "api-key",
+    });
     expect(headers.map((header) => header.info?.agent.model.endpoint)).toEqual([
       { kind: "gateway", connected: false },
       { kind: "gateway", connected: true, credential: "api-key" },
