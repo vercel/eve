@@ -1,5 +1,17 @@
 # eve
 
+## 0.13.4
+
+### Patch Changes
+
+- efca390: Make optional sandbox engine loading more resilient after auto-install. eve now
+  probes installed engine packages in a cache-isolated worker, checks ancestor
+  `node_modules` directories for workspace-hoisted installs, and reports a clear
+  post-install diagnostic when an engine package still cannot be loaded.
+- 7079d08: Bundle client-safe vendored dependencies in a neutral chunk group so `eve/react` can use the Zod-backed `/eve/v1/info` validator without pulling in Node-only vendored runtime helpers.
+- 598b5e0: Clear pending connection/tool authorization state after a matching callback resumes a session, so Slack threads do not keep waiting for already-completed auth and swallow follow-up messages.
+- 9298c90: Upgrade the Workflow development packages to their latest beta releases.
+
 ## 0.13.3
 
 ### Patch Changes
