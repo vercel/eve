@@ -287,7 +287,7 @@ describe("buildStatusLine", () => {
     })!;
 
     expect(disconnected).toContain(
-      "\x1b[7m\x1b[90m ↗ vpoke.playground-vercel.tools \x1b[39m\x1b[27m",
+      "\x1b[7m\x1b[33m ↗ vpoke.playground-vercel.tools \x1b[39m\x1b[27m",
     );
     expect(notConnected).toContain(
       "\x1b[7m\x1b[33m ↗ vpoke.playground-vercel.tools \x1b[39m\x1b[27m",

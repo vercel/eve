@@ -139,10 +139,10 @@ function formatRemoteBadge(
   const c = theme.colors;
   switch (state) {
     case "checking":
-    case "unavailable":
       return c.inverse(c.gray(label));
     case "ready":
       return c.inverse(c.blue(label));
+    case "unavailable":
     case "auth-required":
     case "authenticating":
     case "auth-failed":
