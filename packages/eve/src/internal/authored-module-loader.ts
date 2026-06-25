@@ -59,6 +59,20 @@ function getChannelModuleCache(): Map<string, unknown> | undefined {
 }
 
 /**
+ * Registers the canonical channel export for source-loaded modules.
+ *
+ * Dynamic tools are bundled separately in development. Reusing this export
+ * keeps their channel imports identical to the channel the runtime resolves
+ * and stamps with its path-derived kind.
+ */
+export function cacheAuthoredChannelModule(modulePath: string, channel: unknown): void {
+  const globals = globalThis as Record<string, unknown>;
+  const cache = getChannelModuleCache() ?? new Map<string, unknown>();
+  globals[CHANNEL_MODULE_CACHE_KEY] = cache;
+  cache.set(toCanonicalPath(modulePath), channel);
+}
+
+/**
  * In-flight load deduplication map keyed by the absolute module path.
  *
  * The compiler walks every authored slot concurrently
@@ -170,7 +184,7 @@ async function loadBundledAuthoredModule(
               return undefined;
             }
 
-            const resolvedPath = resolve(resolved.id);
+            const resolvedPath = toCanonicalPath(resolved.id);
 
             if (!channelCache.has(resolvedPath)) {
               return undefined;

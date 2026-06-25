@@ -5,7 +5,10 @@ import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { collectModuleRefsForManifest, type CompiledModuleMap } from "#compiler/module-map.js";
 import type { RuntimeDiskCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
-import { loadAuthoredModuleNamespace } from "#internal/authored-module-loader.js";
+import {
+  cacheAuthoredChannelModule,
+  loadAuthoredModuleNamespace,
+} from "#internal/authored-module-loader.js";
 
 /**
  * Loads a disk-backed module map by hydrating authored modules directly from
@@ -63,18 +66,30 @@ async function hydrateCompiledNodeScope(input: {
   agentRoot: string;
   manifest: CompiledAgentNodeManifest;
 }): Promise<CompiledModuleMap["nodes"][string]["modules"]> {
-  const refs = collectModuleRefsForManifest(input.manifest).sort((left, right) =>
-    left.sourceId.localeCompare(right.sourceId),
+  const channelSourceIds = new Set(
+    input.manifest.channels
+      .filter((channel) => channel.kind === "channel")
+      .map((channel) => channel.sourceId),
   );
+  const refs = collectModuleRefsForManifest(input.manifest).sort((left, right) => {
+    const leftIsChannel = channelSourceIds.has(left.sourceId);
+    const rightIsChannel = channelSourceIds.has(right.sourceId);
+    if (leftIsChannel !== rightIsChannel) return leftIsChannel ? -1 : 1;
+    return left.sourceId.localeCompare(right.sourceId);
+  });
   const externalDependencies = input.manifest.config.build?.externalDependencies ?? [];
   const modules: CompiledModuleMap["nodes"][string]["modules"] = {};
 
   for (const ref of refs) {
     const modulePath = join(input.agentRoot, ref.logicalPath);
-
-    modules[ref.sourceId] = await loadAuthoredModuleNamespace(modulePath, {
+    const moduleNamespace = await loadAuthoredModuleNamespace(modulePath, {
       externalDependencies,
     });
+    modules[ref.sourceId] = moduleNamespace;
+
+    if (channelSourceIds.has(ref.sourceId)) {
+      cacheAuthoredChannelModule(modulePath, moduleNamespace.default);
+    }
   }
 
   return modules;
