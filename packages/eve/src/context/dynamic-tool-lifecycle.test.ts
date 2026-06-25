@@ -884,6 +884,45 @@ describe("framework dynamic tools (no bundler transform)", () => {
     ).toBe(true);
   });
 
+  it("replays needsApproval from session-scoped dynamic tools", async () => {
+    const ctx = createCtx();
+    const approvalFn = vi.fn(() => true);
+    const entry: DynamicToolEntry = {
+      description: "destructive op",
+      inputSchema: { type: "object" },
+      needsApproval: approvalFn,
+      execute: async (): Promise<unknown> => ({ ok: true }),
+    };
+    const resolver = createResolver("session_guard", ["session.started"], () => ({
+      guarded: entry,
+    }));
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+
+    ctx.clearVirtualContext();
+
+    const tools = buildDynamicTools(ctx);
+    expect(tools).toHaveLength(1);
+    expect(tools[0]!.name).toBe("guarded");
+    expect(
+      tools[0]!.needsApproval!({
+        approvedTools: new Set(),
+        toolInput: { draftId: "draft_123" },
+        toolName: "guarded",
+      }),
+    ).toBe(true);
+    expect(approvalFn).toHaveBeenCalledExactlyOnceWith({
+      approvedTools: new Set(),
+      toolInput: { draftId: "draft_123" },
+      toolName: "guarded",
+    });
+  });
+
   it("propagates outputSchema from dynamic entries into harness tools and metadata", async () => {
     const ctx = createCtx();
     const outputSchema = {

@@ -10,6 +10,7 @@ import {
 import type { DurableDynamicToolMetadata } from "#context/keys.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { createLogger } from "#internal/logging.js";
+import type { NeedsApprovalContext } from "#public/definitions/tool.js";
 
 const log = createLogger("dynamic-tools");
 
@@ -52,11 +53,32 @@ function replayTools(metadata: readonly DurableDynamicToolMetadata[]): HarnessTo
       execute: (input: unknown) => stepFn(m.closureVars, input, buildCallbackContext()),
       inputSchema: jsonSchema(m.inputSchema),
       name: m.name,
+      needsApproval: buildReplayedNeedsApproval(m),
       outputSchema: m.outputSchema === undefined ? undefined : jsonSchema(m.outputSchema),
     });
   }
 
   return tools;
+}
+
+function buildReplayedNeedsApproval(
+  metadata: DurableDynamicToolMetadata,
+): HarnessToolDefinition["needsApproval"] | undefined {
+  if (metadata.needsApprovalStepFnName === undefined) {
+    return undefined;
+  }
+
+  const approvalStepFn = lookupStepFunction(metadata.needsApprovalStepFnName);
+  if (approvalStepFn === null) {
+    log.warn(
+      `Dynamic tool "${metadata.name}" references approval function "${metadata.needsApprovalStepFnName}" ` +
+        "which is not registered — requiring approval by default.",
+    );
+    return () => true;
+  }
+
+  return (approvalCtx: NeedsApprovalContext) =>
+    Boolean(approvalStepFn(metadata.closureVars ?? {}, approvalCtx));
 }
 
 /**
