@@ -16,7 +16,15 @@ import {
 } from "#execution/eve-workflow-attributes.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { getRun, resumeHook, start, type Run } from "#internal/workflow/runtime.js";
+import {
+  getRun,
+  resumeHook,
+  start,
+  type Run,
+  type StartOptionsWithoutDeploymentId,
+  type WorkflowFunction,
+  type WorkflowMetadata,
+} from "#internal/workflow/runtime.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
@@ -29,17 +37,6 @@ import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
-
-type WorkflowFunction<TArgs extends unknown[], TResult> = (...args: TArgs) => Promise<TResult>;
-
-interface WorkflowMetadata {
-  readonly workflowId: string;
-}
-
-interface WorkflowStartOptions {
-  readonly allowReservedAttributes?: boolean;
-  readonly attributes?: Record<string, string>;
-}
 
 export const LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE =
   "deploymentId 'latest' requires a World that implements resolveLatestDeploymentId()";
@@ -200,7 +197,7 @@ export function createWorkflowRuntime(config: {
 export async function startWorkflowPreferLatest<TArgs extends unknown[], TResult>(
   workflow: WorkflowFunction<TArgs, TResult> | WorkflowMetadata,
   args: TArgs,
-  options?: WorkflowStartOptions,
+  options?: StartOptionsWithoutDeploymentId,
 ): Promise<Run<unknown> | Run<TResult>> {
   if (!shouldRouteToLatestDeployment()) {
     return options === undefined
