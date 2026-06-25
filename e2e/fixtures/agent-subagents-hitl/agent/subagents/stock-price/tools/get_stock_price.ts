@@ -1,4 +1,5 @@
 import { defineTool } from "eve/tools";
+import { once } from "eve/tools/approval";
 import { z } from "zod";
 
 const MOCK_PRICES: Record<string, { price: number; change: number }> = {
@@ -15,7 +16,7 @@ export default defineTool({
   inputSchema: z.object({
     ticker: z.string().describe("Stock ticker symbol"),
   }),
-  approval: () => "user-approval",
+  approval: once(),
   async execute(input) {
     const ticker = input.ticker.toUpperCase();
     const data = MOCK_PRICES[ticker];
