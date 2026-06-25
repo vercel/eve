@@ -863,6 +863,8 @@ describe("framework dynamic tools (no bundler transform)", () => {
       execute: async (): Promise<unknown> => ({ ok: true }),
     };
     const resolver = createResolver("connection", ["step.started"], () => ({ risky: entry }));
+    testRegistry.delete("eve:framework-dynamic:connection:risky");
+    testRegistry.delete("eve:dynamic-tool-approval:connection:risky");
 
     await dispatchDynamicToolEvent({
       ctx,
@@ -882,6 +884,8 @@ describe("framework dynamic tools (no bundler transform)", () => {
         toolName: "risky",
       }),
     ).toBe(true);
+    expect(testRegistry.has("eve:framework-dynamic:connection:risky")).toBe(false);
+    expect(testRegistry.has("eve:dynamic-tool-approval:connection:risky")).toBe(false);
   });
 
   it("replays needsApproval from session-scoped dynamic tools", async () => {

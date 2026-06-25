@@ -257,6 +257,9 @@ async function resolveToolsFromEvent(
       dynamicToolOwners.set(name, resolver.slug);
 
       liveTools.push(toHarnessToolDefinition(name, entry));
+      if (event.type === "step.started") {
+        continue;
+      }
 
       const stepFn =
         "__executeStepFn" in entry
