@@ -9,6 +9,7 @@
 import type { ToolSet } from "ai";
 
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
+import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { NeedsApprovalContext } from "#public/definitions/tool.js";
 import type { JsonValue } from "#public/types/json.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
@@ -39,19 +40,26 @@ export interface TokenResult {
  */
 export type ConnectionProtocol = "mcp" | "openapi";
 
-/** A single header value, supporting static strings and dynamic resolution. */
-export type HeaderValue = string | Promise<string> | (() => string | Promise<string>);
+/** A single header value, supporting static strings and per-caller resolution. */
+export type HeaderValue =
+  | string
+  | Promise<string>
+  | ((ctx: SessionContext) => string | Promise<string>);
 
 /**
  * Arbitrary HTTP headers sent with every request to a connection server.
  *
  * Static form: key-value pairs where each value may be a string, Promise,
- * or function. Function form: a callback returning the full headers map,
- * useful when multiple headers must be resolved together.
+ * or callback. Function form: a callback returning the full headers map,
+ * useful when multiple headers must be resolved together. Header callbacks
+ * receive the active {@link SessionContext}, so credentials and routing
+ * metadata can be selected from the current caller.
  */
 export type HeadersDefinition =
   | Readonly<Record<string, HeaderValue>>
-  | (() => Record<string, string> | Promise<Record<string, string>>);
+  | ((
+      ctx: SessionContext,
+    ) => Readonly<Record<string, string>> | Promise<Readonly<Record<string, string>>>);
 
 /**
  * Client-side tool filter applied after `listTools()`.
@@ -154,20 +162,37 @@ export type AuthorizationDefinition<Resume extends JsonValue = JsonValue> =
   | InteractiveAuthorizationDefinition<Resume>;
 
 /**
- * Protocol-agnostic `auth` shape accepted by every connection
- * `define*` factory (`defineMcpClientConnection`,
- * `defineOpenAPIConnection`, and so on).
+ * Auth provider returned directly from or resolved by a connection's `auth`
+ * field.
  *
  * Identical to {@link AuthorizationDefinition} except the
  * non-interactive form may omit `principalType`; normalization
  * defaults it to `"app"`. The resolved token is sent as
  * `Authorization: Bearer <token>`.
  */
-export type ConnectionAuthDefinition =
+export type ConnectionAuthProvider =
   | (Omit<NonInteractiveAuthorizationDefinition, "principalType"> & {
       readonly principalType?: NonInteractiveAuthorizationDefinition["principalType"];
     })
   | AuthorizationDefinition;
+
+/**
+ * Resolves a connection auth provider from the active turn.
+ *
+ * Use this when the provider, connector, or credential source depends on
+ * `ctx.session`, such as selecting a tenant-specific Vercel Connect client.
+ * The returned provider is validated and normalized before use.
+ */
+export type ConnectionAuthResolver = (
+  ctx: SessionContext,
+) => ConnectionAuthProvider | Promise<ConnectionAuthProvider>;
+
+/**
+ * Protocol-agnostic `auth` shape accepted by every connection `define*`
+ * factory. Pass a provider directly for static configuration, or a resolver
+ * to select the provider from the current caller's session context.
+ */
+export type ConnectionAuthDefinition = ConnectionAuthProvider | ConnectionAuthResolver;
 
 /**
  * Fields shared by every {@link AuthorizationDefinition} shape.

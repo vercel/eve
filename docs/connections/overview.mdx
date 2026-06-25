@@ -57,6 +57,38 @@ export default defineMcpClientConnection({
 });
 ```
 
+## Per-caller auth and headers
+
+When credentials or routing depend on the caller, make `auth` or `headers` a function. eve calls it inside the active turn and passes the same session context exposed to tools and hooks:
+
+```ts title="agent/connections/warehouse.ts"
+import { defineOpenAPIConnection } from "eve/connections";
+
+export default defineOpenAPIConnection({
+  spec: "https://warehouse.example.com/openapi.json",
+  description: "The caller's tenant-scoped warehouse.",
+  auth: (ctx) => ({
+    principalType: "user",
+    getToken: async () => ({
+      token: await tenantToken(ctx.session.auth.current),
+    }),
+  }),
+  headers: (ctx) => ({
+    "X-Tenant-Id": tenantId(ctx.session.auth.current),
+  }),
+});
+```
+
+An `auth` resolver returns the same provider object accepted by static `auth`, including a `connect(...)` provider for interactive OAuth. The resolver itself can be async. Header callbacks can return the whole map, as above, or resolve individual values:
+
+```ts
+headers: {
+  "X-Tenant-Id": (ctx) => tenantId(ctx.session.auth.current),
+}
+```
+
+Use `principalType: "user"` for per-user tokens so eve rejects unauthenticated callers and keys its step-local token cache by user. The resolver supplements route auth; it does not authenticate the inbound request. Static auth objects and header maps remain available when every caller shares the same configuration.
+
 ## Per-connection approval
 
 To put every tool a connection serves behind a human, use the helpers from `eve/tools/approval`:

@@ -11,6 +11,7 @@ import type { StreamEventHook } from "#public/definitions/hook.js";
 import type { NeedsApprovalContext, ToolModelOutput } from "#public/definitions/tool.js";
 import type {
   AuthorizationDefinition,
+  ConnectionAuthResolver,
   ConnectionProtocol,
   HeadersDefinition,
   ToolFilterDefinition,
@@ -92,7 +93,7 @@ export type ResolvedSchedule = Readonly<
  */
 export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
   readonly approval?: (ctx: NeedsApprovalContext) => boolean;
-  readonly authorization?: Readonly<AuthorizationDefinition>;
+  readonly authorization?: Readonly<AuthorizationDefinition> | ConnectionAuthResolver;
   readonly connectionName: string;
   readonly description: string;
   readonly headers?: Readonly<HeadersDefinition>;

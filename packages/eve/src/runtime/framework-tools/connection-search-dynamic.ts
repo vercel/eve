@@ -16,6 +16,7 @@ import type { JsonValue } from "#public/types/json.js";
 import type { JsonObject } from "#shared/json.js";
 import { writeCachedToken } from "#runtime/connections/authorization-tokens.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
+import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
 import { stampChallengeDisplayName } from "#runtime/connections/scoped-authorization.js";
 import {
   type ConnectionRegistry,
@@ -115,14 +116,15 @@ function scoreMatch(queryTokens: string[], tool: ConnectionToolMetadata): number
   return score;
 }
 
-function resolveInteractiveAuth(
+async function resolveInteractiveAuth(
   registry: ConnectionRegistry,
   connectionName: string,
-): InteractiveAuthorizationDefinition | undefined {
+): Promise<InteractiveAuthorizationDefinition | undefined> {
   const conn = registry.getConnections().find((c) => c.connectionName === connectionName);
-  if (!conn?.authorization) return undefined;
-  if (!supportsInteractiveAuthorization(conn.authorization)) return undefined;
-  return conn.authorization as unknown as InteractiveAuthorizationDefinition;
+  if (conn === undefined) return undefined;
+  const authorization = await resolveConnectionAuthorization(conn);
+  if (!supportsInteractiveAuthorization(authorization)) return undefined;
+  return authorization as InteractiveAuthorizationDefinition;
 }
 
 /**
@@ -140,7 +142,7 @@ async function completePendingAuthorizations(registry: ConnectionRegistry): Prom
   for (const conn of registry.getConnections()) {
     const result = getAuthorizationResult(conn.connectionName);
     if (!result) continue;
-    const auth = resolveInteractiveAuth(registry, conn.connectionName);
+    const auth = await resolveInteractiveAuth(registry, conn.connectionName);
     if (!auth) continue;
     const principal = resolveConnectionPrincipal(conn.connectionName, auth);
     const token = await (
@@ -204,7 +206,7 @@ async function executeConnectionSearch(
           continue;
         }
 
-        const auth = resolveInteractiveAuth(registry, conn.connectionName);
+        const auth = await resolveInteractiveAuth(registry, conn.connectionName);
         if (auth) {
           const hookUrl = getHookUrl(conn.connectionName);
           if (hookUrl) {
@@ -428,10 +430,9 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
           async execute(input: Record<string, unknown>) {
             const reg = loadContext().get(ConnectionRegistryKey)!;
             const conn = reg.getConnections().find((c) => c.connectionName === connectionName);
-            const interactiveAuth: InteractiveAuthorizationDefinition<JsonValue> | undefined =
-              conn?.authorization && supportsInteractiveAuthorization(conn.authorization)
-                ? (conn.authorization as InteractiveAuthorizationDefinition<JsonValue>)
-                : undefined;
+            const interactiveAuth = (await resolveInteractiveAuth(reg, connectionName)) as
+              | InteractiveAuthorizationDefinition<JsonValue>
+              | undefined;
 
             let justCompletedAuth = false;
             if (interactiveAuth) {
