@@ -118,8 +118,12 @@ describe("normalizeToolDefinition", () => {
       },
       approval(ctx) {
         const city: string | undefined = ctx.toolInput?.city;
+        const callerId: string | undefined = ctx.session.auth.current?.principalId;
+        const turnId: string = ctx.session.turn.id;
         // @ts-expect-error approval input is schema-typed, not an open record.
         const missing = ctx.toolInput?.missing;
+        void callerId;
+        void turnId;
         void missing;
         return city !== undefined ? "user-approval" : "not-applicable";
       },

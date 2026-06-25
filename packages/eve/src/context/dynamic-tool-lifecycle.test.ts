@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
 import type { DurableDynamicToolMetadata } from "#context/keys.js";
+import type { ApprovalContext } from "#public/definitions/approval.js";
 import { defineTool } from "#public/definitions/tool.js";
 
 vi.mock("#context/build-callback-context.js", () => ({
@@ -444,6 +445,24 @@ function createCtx(): ContextContainer {
   return ctx;
 }
 
+function createApprovalContext(input: {
+  readonly toolInput?: Record<string, unknown>;
+  readonly toolName: string;
+}): ApprovalContext {
+  return {
+    approvedTools: new Set(),
+    getSandbox: vi.fn(),
+    getSkill: vi.fn(),
+    session: {
+      auth: { current: null, initiator: null },
+      id: "test-session",
+      turn: { id: "test-turn", sequence: 0 },
+    },
+    toolInput: input.toolInput,
+    toolName: input.toolName,
+  } as ApprovalContext;
+}
+
 function makeEvent(type: string): HandleMessageStreamEvent {
   return { type, data: {} } as HandleMessageStreamEvent;
 }
@@ -877,13 +896,8 @@ describe("framework dynamic tools (no bundler transform)", () => {
     expect(tools).toHaveLength(1);
     expect(tools[0]!.name).toBe("risky");
     expect(tools[0]!.approval).toBe(approvalFn);
-    expect(
-      tools[0]!.approval!({
-        approvedTools: new Set(),
-        toolInput: undefined,
-        toolName: "risky",
-      }),
-    ).toBe("user-approval");
+    const approvalCtx = createApprovalContext({ toolName: "risky" });
+    expect(tools[0]!.approval!(approvalCtx)).toBe("user-approval");
     expect(testRegistry.has("eve:framework-dynamic:connection:risky")).toBe(false);
     expect(testRegistry.has("eve:dynamic-tool-approval:connection:risky")).toBe(false);
   });
@@ -913,18 +927,12 @@ describe("framework dynamic tools (no bundler transform)", () => {
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(1);
     expect(tools[0]!.name).toBe("guarded");
-    expect(
-      tools[0]!.approval!({
-        approvedTools: new Set(),
-        toolInput: { draftId: "draft_123" },
-        toolName: "guarded",
-      }),
-    ).resolves.toBe("user-approval");
-    expect(approvalFn).toHaveBeenCalledExactlyOnceWith({
-      approvedTools: new Set(),
+    const approvalCtx = createApprovalContext({
       toolInput: { draftId: "draft_123" },
       toolName: "guarded",
     });
+    await expect(tools[0]!.approval!(approvalCtx)).resolves.toBe("user-approval");
+    expect(approvalFn).toHaveBeenCalledExactlyOnceWith(approvalCtx);
   });
 
   it("propagates outputSchema from dynamic entries into harness tools and metadata", async () => {

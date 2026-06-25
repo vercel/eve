@@ -5,7 +5,7 @@ import { applySandboxToolSet, buildSandboxHostTools } from "#harness/code-mode.j
 import { CODE_MODE_SURFACE, WORKFLOW_SURFACE } from "#harness/sandbox-surface.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import { LiveStepToolsKey } from "#context/keys.js";
+import { LiveStepToolsKey, SessionKey } from "#context/keys.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { buildToolSet } from "#harness/tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
@@ -245,8 +245,22 @@ describe("applySandboxToolSet", () => {
     buildSession.set(SessionMarkerKey, "build-session");
     const callSession = new ContextContainer();
     callSession.set(SessionMarkerKey, "call-session");
+    callSession.set(SessionKey, {
+      auth: {
+        current: {
+          attributes: { tenant: "tenant_call" },
+          authenticator: "jwt",
+          principalId: "caller_call",
+          principalType: "user",
+        },
+        initiator: null,
+      },
+      sessionId: "call-session",
+      turn: { id: "turn-call", sequence: 1 },
+    });
 
     let observedSession: string | undefined;
+    let observedCaller: string | undefined;
     const harnessTools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
       [
         "guarded",
@@ -255,8 +269,9 @@ describe("applySandboxToolSet", () => {
           execute: async () => "ok",
           inputSchema: jsonSchema({ type: "object" }),
           name: "guarded",
-          approval: () => {
+          approval: (ctx) => {
             observedSession = contextStorage.getStore()?.get(SessionMarkerKey);
+            observedCaller = ctx.session.auth.current?.principalId;
             return "user-approval";
           },
         },
@@ -276,12 +291,18 @@ describe("applySandboxToolSet", () => {
     );
 
     expect(observedSession).toBe("call-session");
+    expect(observedCaller).toBe("caller_call");
     expect(result).toBe(true);
   });
 
   it("preserves dynamic tool approval gates in sandbox host tools", async () => {
     const needsApproval = () => "user-approval" as const;
     const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: "test-session",
+      turn: { id: "turn-test", sequence: 0 },
+    });
     ctx.setVirtualContext(LiveStepToolsKey, [
       {
         description: "Requires approval.",
@@ -299,7 +320,9 @@ describe("applySandboxToolSet", () => {
       needsApproval?: (input: unknown) => Promise<boolean> | boolean;
     };
 
-    await expect(guardedTool.needsApproval?.({ line: "victoria" })).resolves.toBe(true);
+    await expect(
+      contextStorage.run(ctx, () => guardedTool.needsApproval?.({ line: "victoria" })),
+    ).resolves.toBe(true);
   });
 
   it("dual-routes runtime action tools to both modelTools and hostTools", async () => {

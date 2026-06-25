@@ -10,6 +10,7 @@ import {
   LiveStepToolsKey,
   ParentSessionKey,
   SandboxKey,
+  SessionKey,
   SessionDynamicInstructionsKey,
 } from "#context/keys.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
@@ -621,6 +622,19 @@ describe("createToolLoopHarness", () => {
 
     const needsApproval = vi.fn(() => "user-approval" as const);
     const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: {
+        current: {
+          attributes: { tenant: "tenant_test" },
+          authenticator: "jwt",
+          principalId: "caller_test",
+          principalType: "user",
+        },
+        initiator: null,
+      },
+      sessionId: "test-session",
+      turn: { id: "turn-test", sequence: 0 },
+    });
     ctx.setVirtualContext(LiveStepToolsKey, [
       {
         description: "Get TfL line status.",
@@ -644,19 +658,30 @@ describe("createToolLoopHarness", () => {
       | undefined;
     expect(agentCall).toBeDefined();
     await expect(
-      agentCall!.toolApproval?.({
-        toolCall: {
-          input: { line: "victoria" },
-          toolCallId: "call_1",
-          toolName: "tfl__getLineStatus",
-        },
-      }),
+      contextStorage.run(ctx, () =>
+        agentCall!.toolApproval?.({
+          toolCall: {
+            input: { line: "victoria" },
+            toolCallId: "call_1",
+            toolName: "tfl__getLineStatus",
+          },
+        }),
+      ),
     ).resolves.toBe("user-approval");
-    expect(needsApproval).toHaveBeenCalledExactlyOnceWith({
-      approvedTools: new Set(),
-      toolInput: { line: "victoria" },
-      toolName: "tfl__getLineStatus",
-    });
+    expect(needsApproval).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        approvedTools: new Set(),
+        session: expect.objectContaining({
+          auth: expect.objectContaining({
+            current: expect.objectContaining({ principalId: "caller_test" }),
+          }),
+          id: "test-session",
+          turn: { id: "turn-test", sequence: 0 },
+        }),
+        toolInput: { line: "victoria" },
+        toolName: "tfl__getLineStatus",
+      }),
+    );
   });
 
   it("preserves a user-authored web_search tool instead of replacing it with the provider tool", async () => {

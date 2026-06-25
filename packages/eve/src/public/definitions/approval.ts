@@ -1,14 +1,19 @@
+import type { SessionContext } from "#public/definitions/callback-context.js";
+
 type ApprovalToolInput<TInput> = TInput extends object ? Readonly<TInput> : TInput;
 
 /**
  * Context passed to an {@link Approval} function.
+ *
+ * Extends {@link SessionContext} so approval policies can make decisions from
+ * the active session, current caller, and turn.
  *
  * `approvedTools` is the set of tool names (or compound approval keys)
  * already approved at least once in the current session. `toolName` is the
  * runtime name of the tool being evaluated. `toolInput` is the raw input the
  * model passed, available for input-aware decisions.
  */
-export interface ApprovalContext<TInput = Record<string, unknown>> {
+export interface ApprovalContext<TInput = Record<string, unknown>> extends SessionContext {
   readonly approvedTools: ReadonlySet<string>;
   readonly toolInput?: ApprovalToolInput<TInput>;
   readonly toolName: string;

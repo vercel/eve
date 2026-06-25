@@ -1,6 +1,8 @@
 import { jsonSchema, type ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
 
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionKey } from "#context/keys.js";
 import { once } from "#public/tools/approval/approval-helpers.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -728,18 +730,27 @@ describe("resolvePendingInput", () => {
     const approval = buildToolApproval(rebuilt);
     if (typeof approval !== "function") throw new TypeError("Expected generic approval function.");
 
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: "sess-test",
+      turn: { id: "turn-test", sequence: 0 },
+    });
+
     return expect(
-      approval({
-        messages: [],
-        runtimeContext: {},
-        toolCall: {
-          input: {},
-          toolCallId: "call-1",
-          toolName: "linear_whoami",
-        } as never,
-        tools: rebuilt,
-        toolsContext: {} as never,
-      }),
+      contextStorage.run(ctx, () =>
+        approval({
+          messages: [],
+          runtimeContext: {},
+          toolCall: {
+            input: {},
+            toolCallId: "call-1",
+            toolName: "linear_whoami",
+          } as never,
+          tools: rebuilt,
+          toolsContext: {} as never,
+        }),
+      ),
     ).resolves.toBe("not-applicable");
   });
 });

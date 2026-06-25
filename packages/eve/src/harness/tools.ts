@@ -16,6 +16,7 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ApprovalStatus } from "#public/definitions/approval.js";
 import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/provider-tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
+import { buildCallbackContext } from "#context/build-callback-context.js";
 import { loadContext } from "#context/container.js";
 import {
   authorizationPendingModelText,
@@ -313,6 +314,7 @@ function buildApprovalFn(
     const toolInputRecord = isObject(toolInput) ? toolInput : undefined;
 
     const status = await definition.approval({
+      ...buildCallbackContext(),
       approvedTools: input.approvedTools ?? new Set(),
       toolInput: toolInputRecord,
       toolName: definition.name,

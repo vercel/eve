@@ -1,6 +1,8 @@
 import { type JSONSchema7, jsonSchema } from "ai";
 import { describe, expect, it } from "vitest";
 
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionKey, type Session } from "#context/keys.js";
 import { always, never, once } from "#public/tools/approval/approval-helpers.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import {
@@ -26,16 +28,25 @@ async function resolveApproval(
   tools: ReturnType<typeof buildToolSet>,
   toolName: string,
   input: unknown,
+  session: Session = {
+    auth: { current: null, initiator: null },
+    sessionId: "session-1",
+    turn: { id: "turn-1", sequence: 0 },
+  },
 ): Promise<unknown> {
   const approval = buildToolApproval(tools);
   if (typeof approval !== "function") throw new TypeError("Expected generic approval function.");
-  return approval({
-    messages: [],
-    runtimeContext: {},
-    toolCall: { input, toolCallId: "call_1", toolName } as never,
-    tools,
-    toolsContext: {} as never,
-  });
+  const ctx = new ContextContainer();
+  ctx.set(SessionKey, session);
+  return contextStorage.run(ctx, () =>
+    approval({
+      messages: [],
+      runtimeContext: {},
+      toolCall: { input, toolCallId: "call_1", toolName } as never,
+      tools,
+      toolsContext: {} as never,
+    }),
+  );
 }
 
 async function executeSdkTool(input: {
@@ -693,6 +704,66 @@ describe("buildToolSet", () => {
       await resolveApproval(result, "vercel__list_projects", toolInput);
 
       expect(capturedInput).toEqual(toolInput);
+    });
+
+    it("passes the active caller and session context into approval", async () => {
+      let capturedCtx: Parameters<NonNullable<HarnessToolDefinition["approval"]>>[0] | undefined;
+      const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+        [
+          "delete_project",
+          {
+            approval: (ctx) => {
+              capturedCtx = ctx;
+              return ctx.session.auth.current?.attributes.tenant === "tenant_abc"
+                ? "user-approval"
+                : "denied";
+            },
+            description: "Delete a project.",
+            execute: async () => "ok",
+            inputSchema: jsonSchema({}),
+            name: "delete_project",
+          },
+        ],
+      ]);
+      const session: Session = {
+        auth: {
+          current: {
+            attributes: { tenant: "tenant_abc" },
+            authenticator: "jwt",
+            principalId: "user_current",
+            principalType: "user",
+          },
+          initiator: {
+            attributes: { tenant: "tenant_abc" },
+            authenticator: "jwt",
+            principalId: "user_initiator",
+            principalType: "user",
+          },
+        },
+        parent: {
+          callId: "call_parent",
+          rootSessionId: "session_root",
+          sessionId: "session_parent",
+          turn: { id: "turn_parent", sequence: 1 },
+        },
+        sessionId: "session_current",
+        turn: { id: "turn_current", sequence: 2 },
+      };
+
+      const result = buildToolSet({ tools });
+      await expect(resolveApproval(result, "delete_project", {}, session)).resolves.toBe(
+        "user-approval",
+      );
+
+      expect(capturedCtx?.session).toEqual({
+        auth: session.auth,
+        id: "session_current",
+        parent: session.parent,
+        turn: session.turn,
+      });
+      expect(capturedCtx?.session.auth.current?.principalId).toBe("user_current");
+      expect(capturedCtx?.getSandbox).toBeTypeOf("function");
+      expect(capturedCtx?.getSkill).toBeTypeOf("function");
     });
 
     it("input-aware approval skips when compound key is in approvedTools", async () => {
