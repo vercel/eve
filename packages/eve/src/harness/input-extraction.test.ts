@@ -164,6 +164,26 @@ describe("extractToolApprovalInputRequests", () => {
     ]);
   });
 
+  it("skips automatic approval decisions", () => {
+    const result = extractToolApprovalInputRequests({
+      content: [
+        {
+          approvalId: "approval-1",
+          isAutomatic: true,
+          toolCall: {
+            input: { command: "rm -rf /tmp" },
+            toolCallId: "call-1",
+            toolName: "bash",
+            type: "tool-call",
+          },
+          type: "tool-approval-request",
+        },
+      ],
+    });
+
+    expect(result).toEqual([]);
+  });
+
   it("skips approval requests without matching tool-call data", () => {
     const result = extractToolApprovalInputRequests({
       content: [

@@ -4781,6 +4781,117 @@ describe("createToolLoopHarness", () => {
     });
   });
 
+  it.each([
+    { approved: true, label: "approval", reason: undefined },
+    { approved: false, label: "denial", reason: "Blocked by policy." },
+  ])("does not park on automatic $label records", async ({ approved, reason }) => {
+    const toolCall = {
+      input: { command: "rm -rf /tmp/demo" },
+      toolCallId: "call-1",
+      toolName: "bash",
+      type: "tool-call" as const,
+    };
+    const approvalRequest = {
+      approvalId: "approval-1",
+      isAutomatic: true,
+      toolCall,
+      type: "tool-approval-request" as const,
+    };
+    const approvalResponse = {
+      approvalId: "approval-1",
+      approved,
+      reason,
+      toolCall,
+      type: "tool-approval-response" as const,
+    };
+    const toolResult = {
+      input: toolCall.input,
+      output: { ok: true },
+      toolCallId: toolCall.toolCallId,
+      toolName: toolCall.toolName,
+      type: "tool-result" as const,
+    };
+    const responseMessages = [
+      {
+        content: [
+          toolCall,
+          {
+            approvalId: approvalRequest.approvalId,
+            isAutomatic: true,
+            toolCallId: toolCall.toolCallId,
+            type: "tool-approval-request" as const,
+          },
+        ],
+        role: "assistant" as const,
+      },
+      {
+        content: [
+          {
+            approvalId: approvalResponse.approvalId,
+            approved,
+            reason,
+            type: "tool-approval-response" as const,
+          },
+          {
+            output: approved
+              ? { type: "json" as const, value: toolResult.output }
+              : { type: "execution-denied" as const, reason },
+            toolCallId: toolCall.toolCallId,
+            toolName: toolCall.toolName,
+            type: "tool-result" as const,
+          },
+        ],
+        role: "tool" as const,
+      },
+    ];
+
+    setupMockAgent({
+      content: [toolCall, approvalRequest, approvalResponse, ...(approved ? [toolResult] : [])],
+      finishReason: "tool-calls",
+      response: { messages: responseMessages },
+      text: "",
+      toolCalls: [toolCall],
+      toolResults: approved ? [toolResult] : [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        tools: new Map([
+          [
+            "bash",
+            {
+              description: "Run shell commands",
+              execute: vi.fn().mockResolvedValue({ ok: true }),
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "bash",
+            },
+          ],
+        ]),
+      }),
+    );
+    const session = createTestSession({
+      agent: {
+        modelReference: { id: "test-model" },
+        system: "You are a test assistant.",
+        tools: [
+          { description: "Run shell commands", name: "bash", inputSchema: { type: "object" } },
+        ],
+      },
+    });
+
+    const result = await runStep(session, { message: "Delete the temp directory." });
+
+    expect(typeof result.next).toBe("function");
+    expect(result.session.history).toEqual([
+      { content: "Delete the temp directory.", role: "user" },
+      ...responseMessages,
+    ]);
+    expect(events.filter((event) => event.type === "input.requested")).toEqual([]);
+    expect(events.filter((event) => event.type === "actions.requested")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "action.result")).toHaveLength(1);
+  });
+
   it("continues with a follow-up user message after resolving an ignored tool approval", async () => {
     const generateCalls: unknown[] = [];
     const agentResults = [
