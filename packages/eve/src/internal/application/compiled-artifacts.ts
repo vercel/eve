@@ -174,7 +174,10 @@ function createWorkflowWorldBootstrapBody(
     return [];
   }
 
-  return ["", "await installConfiguredWorkflowWorld({ module: workflowWorldModule });"];
+  return [
+    "",
+    `await installConfiguredWorkflowWorld({ module: workflowWorldModule, packageName: ${JSON.stringify(world)} });`,
+  ];
 }
 
 function createInstrumentationPluginSource(input: {

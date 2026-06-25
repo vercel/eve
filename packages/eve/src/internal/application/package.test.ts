@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveWorkflowModulePath } from "#internal/application/package.js";
+import {
+  resolveExpectedWorkflowVersion,
+  resolveWorkflowModulePath,
+} from "#internal/application/package.js";
 
 describe("resolveWorkflowModulePath", () => {
   it("resolves historical workflow specifiers to narrowed runtime modules", () => {
@@ -17,5 +20,13 @@ describe("resolveWorkflowModulePath", () => {
     expect(resolveWorkflowModulePath("workflow/runtime")).toMatch(
       /\/src\/internal\/workflow\/runtime\.ts$/,
     );
+  });
+});
+
+describe("resolveExpectedWorkflowVersion", () => {
+  it("reads the @workflow/core line from eve's own package.json", () => {
+    // Single source of truth: eve declares the workflow line it bundles in its
+    // own package.json, so this resolves to a concrete prerelease version.
+    expect(resolveExpectedWorkflowVersion()).toMatch(/^\d+\.\d+\.\d+/);
   });
 });
