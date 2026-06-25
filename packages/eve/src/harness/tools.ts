@@ -31,7 +31,9 @@ type ToolModelOutputValue =
   | { readonly type: "json"; readonly value: JSONValue }
   | { readonly type: "text"; readonly value: string };
 
-const toolApprovals = new WeakMap<object, (toolInput: unknown) => Promise<ApprovalStatus>>();
+type NativeApprovalStatus = Exclude<ApprovalStatus, boolean>;
+
+const toolApprovals = new WeakMap<object, (toolInput: unknown) => Promise<NativeApprovalStatus>>();
 
 /**
  * Builds an AI SDK `ToolSet` from unified harness tool definitions.
@@ -304,17 +306,18 @@ export async function buildToolSetWithProviderTools(input: {
 function buildApprovalFn(
   definition: HarnessToolDefinition,
   input: { readonly approvedTools?: ReadonlySet<string> },
-): (toolInput: unknown) => Promise<ApprovalStatus> {
+): (toolInput: unknown) => Promise<NativeApprovalStatus> {
   return async (toolInput: unknown) => {
     if (definition.approval === undefined) return undefined;
 
     const toolInputRecord = isObject(toolInput) ? toolInput : undefined;
 
-    return definition.approval({
+    const status = await definition.approval({
       approvedTools: input.approvedTools ?? new Set(),
       toolInput: toolInputRecord,
       toolName: definition.name,
     });
+    return typeof status === "boolean" ? (status ? "user-approval" : "not-applicable") : status;
   };
 }
 
@@ -329,7 +332,7 @@ export function buildLegacyNeedsApproval(
 }
 
 function buildLegacyNeedsApprovalFn(
-  approval: (toolInput: unknown) => Promise<ApprovalStatus>,
+  approval: (toolInput: unknown) => Promise<NativeApprovalStatus>,
 ): (toolInput: unknown) => Promise<boolean> {
   return async (toolInput) => {
     const status = await approval(toolInput);

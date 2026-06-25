@@ -509,6 +509,35 @@ describe("buildToolSet", () => {
   });
 
   describe("tool-level approval override", () => {
+    it("normalizes boolean approval results", async () => {
+      const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+        [
+          "dangerous",
+          {
+            approval: () => true,
+            description: "Perform a dangerous action.",
+            execute: async () => "ok",
+            inputSchema: jsonSchema({}),
+            name: "dangerous",
+          },
+        ],
+        [
+          "safe",
+          {
+            approval: async () => false,
+            description: "Perform a safe action.",
+            execute: async () => "ok",
+            inputSchema: jsonSchema({}),
+            name: "safe",
+          },
+        ],
+      ]);
+
+      const result = buildToolSet({ tools });
+      await expect(resolveApproval(result, "dangerous", {})).resolves.toBe("user-approval");
+      await expect(resolveApproval(result, "safe", {})).resolves.toBe("not-applicable");
+    });
+
     it("preserves async AI SDK 7 approval statuses", async () => {
       const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
         [

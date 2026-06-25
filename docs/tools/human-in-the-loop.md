@@ -45,6 +45,8 @@ approval: ({ toolInput }) =>
   (toolInput?.amount ?? 0) > 1000 ? "user-approval" : "not-applicable",
 ```
 
+For compatibility with the previous predicate shape, policies may return booleans: `true` is treated as `"user-approval"` and `false` as `"not-applicable"`. Boolean promises are supported too.
+
 Policies can also return `"approved"` or `"denied"` to decide automatically. Use `{ type: "approved" | "denied", reason }` when the model should receive a reason. The `Approval`, `ApprovalContext`, and `ApprovalStatus` types are exported from both `eve/tools` and `eve/tools/approval`.
 
 Gating a side effect on approval is also how you make non-idempotent work safe across replays: a charge or email that sits behind `always()` can't fire from a re-run step without a fresh human decision.

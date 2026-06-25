@@ -17,11 +17,12 @@ export interface ApprovalContext<TInput = Record<string, unknown>> {
 /**
  * Approval decision returned by an {@link Approval} function.
  *
- * These statuses mirror AI SDK 7's call-level tool approval contract while
- * keeping eve's public API independent of AI SDK types.
+ * AI SDK 7 statuses are accepted directly. For compatibility, `true` maps to
+ * `"user-approval"` and `false` maps to `"not-applicable"`.
  */
 export type ApprovalStatus =
   | undefined
+  | boolean
   | "not-applicable"
   | "approved"
   | "denied"
