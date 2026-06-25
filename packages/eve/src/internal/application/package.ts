@@ -249,6 +249,63 @@ export function resolveInstalledPackageInfo(): InstalledPackageInfo {
   return cachedPackageInfo;
 }
 
+const EXPECTED_WORKFLOW_VERSION_PACKAGE = "@workflow/core";
+
+function readWorkflowVersionFromManifest(value: unknown): string | undefined {
+  const manifest = value as {
+    dependencies?: Record<string, unknown>;
+    devDependencies?: Record<string, unknown>;
+    peerDependencies?: Record<string, unknown>;
+  };
+
+  for (const section of [
+    manifest.devDependencies,
+    manifest.dependencies,
+    manifest.peerDependencies,
+  ]) {
+    const declared = section?.[EXPECTED_WORKFLOW_VERSION_PACKAGE];
+
+    if (typeof declared === "string" && declared.trim().length > 0) {
+      return declared;
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Resolves the `@workflow/core` version this eve release bundles, read from
+ * eve's own `package.json`.
+ *
+ * This is the single source of truth for the `@workflow/*` line eve targets, so
+ * compatibility checks (see `assertWorkflowWorldCompatibility`) never hardcode a
+ * version. eve's `package.json` is published with its `devDependencies` intact
+ * even though those packages are vendored, so the entry is readable from an
+ * installed eve as well as a source checkout. Returns `undefined` when the
+ * entry cannot be read so callers can no-op rather than fail.
+ */
+export function resolveExpectedWorkflowVersion(): string | undefined {
+  const packageRoot = tryResolvePackageRoot();
+
+  if (packageRoot !== undefined) {
+    try {
+      return readWorkflowVersionFromManifest(
+        JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")),
+      );
+    } catch {
+      // Fall through to module-resolution lookup below.
+    }
+  }
+
+  try {
+    return readWorkflowVersionFromManifest(
+      JSON.parse(readFileSync(require.resolve(`${EVE_PACKAGE_NAME}/package.json`), "utf8")),
+    );
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Resolves a Workflow runtime module from eve's narrowed Workflow dependencies.
  *

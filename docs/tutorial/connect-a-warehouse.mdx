@@ -26,6 +26,8 @@ export default defineMcpClientConnection({
 
 `"warehouse"` is the UID you chose when registering the Connect client. By default this OAuth is user-scoped. Each end-user authorizes in their own browser, and eve resolves that user's token before every tool call.
 
+Before testing the warehouse from a web app, make sure the eve channel route auth maps your signed-in app user to `principalType: "user"`. A Connect-backed connection can only start per-user OAuth when the active session already has an authenticated user principal. If route auth still only accepts `localDev()`, a runtime token, or a placeholder guard, the first warehouse tool call fails with `reason: "principal_required"` instead of showing the sign-in challenge.
+
 Once Connect is enabled on your account, wire it up:
 
 1. Install the package: `npm install @vercel/connect`.
