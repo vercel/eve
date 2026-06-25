@@ -26,11 +26,9 @@ const log = createLogger("execution.node-step");
 
 const BUILT_IN_AGENT_TOOL_DESCRIPTION = [
   "Delegate a focused subtask to a fresh copy of yourself.",
-  "Use this to isolate complex, multi-step work or split a large task into independent pieces.",
-  "For a small fixed set of independent subtasks, issue multiple `agent` calls in the same response; eve runs them concurrently and returns all results before you continue.",
-  "Each child inherits your instructions, tools, connections, and sandbox but starts with fresh history and state.",
-  "Include all required context, constraints, scope, and expected output in `message`.",
-  "Because parallel children share the sandbox, give them non-overlapping write scopes and combine their results in the parent.",
+  "Use it to isolate complex work or split a large task into independent pieces.",
+  "Issue multiple `agent` calls in one response to run a small fixed set in parallel.",
+  "Each child has fresh history and state but shares your tools and sandbox, so include essential context in `message` and give parallel writers non-overlapping scopes.",
 ].join(" ");
 
 /**

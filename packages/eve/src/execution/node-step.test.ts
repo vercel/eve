@@ -223,10 +223,11 @@ describe("createNodeHarnessTools", () => {
     const agentTool = createNodeHarnessTools({ node: createTestNode() }).get("agent");
 
     expect(agentTool?.description).toContain("split a large task into independent pieces");
-    expect(agentTool?.description).toContain("issue multiple `agent` calls in the same response");
-    expect(agentTool?.description).toContain("eve runs them concurrently");
-    expect(agentTool?.description).toContain("all required context");
-    expect(agentTool?.description).toContain("non-overlapping write scopes");
+    expect(agentTool?.description).toContain("multiple `agent` calls in one response");
+    expect(agentTool?.description).toContain("run a small fixed set in parallel");
+    expect(agentTool?.description).toContain("include essential context");
+    expect(agentTool?.description).toContain("non-overlapping scopes");
+    expect(agentTool?.description).not.toContain("eve");
   });
 });
 
