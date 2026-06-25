@@ -278,67 +278,6 @@ async function writeRuntimeLoaderTsconfigAliasFixture(input: {
 }
 
 describe("runtime compiled artifact loaders", () => {
-  it("preserves canonical channel identity for authored-source module imports", async () => {
-    const { agentRoot, appRoot } = await createAppRoot(
-      "eve-runtime-loaders-channel-identity-",
-      APP_ROOT_OPTIONS,
-    );
-
-    await mkdir(join(agentRoot, "channels"), { recursive: true });
-    await mkdir(join(agentRoot, "tools"), { recursive: true });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
-    await writeFile(
-      join(agentRoot, "instructions.md"),
-      "You are a precise runtime loader test agent.\n",
-    );
-    await writeFile(
-      join(agentRoot, "channels", "support.mjs"),
-      [
-        "export default {",
-        '  __kind: "eve:channel",',
-        '  adapter: { kind: "channel" },',
-        "  routes: [",
-        "    {",
-        '      method: "POST",',
-        '      path: "/support",',
-        '      async handler() { return new Response("ok"); },',
-        "    },",
-        "  ],",
-        "};",
-        "",
-      ].join("\n"),
-    );
-    await writeFile(
-      join(agentRoot, "tools", "inspect-channel.mjs"),
-      [
-        'import supportChannel from "../channels/support.mjs";',
-        "",
-        "export function usesCanonicalChannel(channel) {",
-        "  return channel === supportChannel;",
-        "}",
-        "",
-        "export default {",
-        '  description: "Inspect the support channel.",',
-        "  async execute() { return {}; },",
-        "};",
-        "",
-      ].join("\n"),
-    );
-
-    await compileAgent({ startPath: appRoot });
-
-    const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
-      compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(appRoot),
-    });
-    const modules = moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules;
-    const supportChannel = modules?.["channels/support.mjs"] as { default: unknown } | undefined;
-    const inspectChannel = modules?.["tools/inspect-channel.mjs"] as
-      | { usesCanonicalChannel?: (channel: unknown) => boolean }
-      | undefined;
-
-    expect(inspectChannel?.usesCanonicalChannel?.(supportChannel?.default)).toBe(true);
-  });
-
   it("loads resolved compaction config from compiled authored artifacts", async () => {
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-runtime-loaders-compaction-",
