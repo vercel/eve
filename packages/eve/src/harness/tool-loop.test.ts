@@ -586,6 +586,30 @@ describe("createToolLoopHarness", () => {
     expect(agentCall!.tools).not.toHaveProperty("code_mode");
   });
 
+  it("forwards the agent reasoning effort to the model call", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const runStep = createToolLoopHarness(createTestConfig());
+    const session = createTestSession({
+      agent: {
+        modelReference: { id: "test-model" },
+        reasoning: "high",
+        system: "You are a test assistant.",
+        tools: [],
+      },
+    });
+
+    await runStep(session, { message: "Think carefully" });
+
+    expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0]).toMatchObject({ reasoning: "high" });
+  });
+
   it("preserves approval gates on step-scoped dynamic tools", async () => {
     setupMockAgent({
       finishReason: "stop",
