@@ -1,10 +1,29 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import { defaultEvents } from "#public/channels/slack/defaults.js";
+import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
+import { defaultEvents, defaultInputRequestedHandler } from "#public/channels/slack/defaults.js";
+import { buildHitlResponderBlockId } from "#public/channels/slack/hitl.js";
 import type { SlackChannelState, SlackEventContext } from "#public/channels/slack/slackChannel.js";
 
-const sessionCtx = {} as SessionContext;
+function buildSessionContext(current: SessionAuthContext | null): SessionContext {
+  return {
+    getSandbox: async () => {
+      throw new Error("not available in this test");
+    },
+    getSkill: () => {
+      throw new Error("not available in this test");
+    },
+    session: {
+      auth: { current, initiator: current },
+      id: "test-session",
+      turn: { id: "test-turn", sequence: 0 },
+    },
+  };
+}
+
+const sessionCtx = buildSessionContext(null);
 
 function buildChannelStub(state: Partial<SlackChannelState> = {}) {
   const postEphemeral = vi.fn().mockResolvedValue({ id: "eph1" });
@@ -35,6 +54,73 @@ function authRequiredEvent(
     turnId: "turn_0",
   };
 }
+
+function inputRequestedEvent() {
+  return {
+    requests: [
+      {
+        action: {
+          callId: "call-1",
+          input: {},
+          kind: "tool-call" as const,
+          toolName: "ask",
+        },
+        prompt: "Question?",
+        requestId: "request-1",
+      },
+    ],
+    sequence: 0,
+    stepIndex: 0,
+    turnId: "turn-1",
+  };
+}
+
+describe("defaultInputRequestedHandler", () => {
+  it("binds each prompt to the current Slack auth instead of channel state", async () => {
+    const { channel, post } = buildChannelStub({ triggeringUserId: "U_STALE" });
+    const handler = defaultInputRequestedHandler();
+    const slackAuth = (userId: string) =>
+      buildSlackAuthContext({
+        channelId: "C123",
+        teamId: "T123",
+        threadTs: "111.222",
+        userId,
+      });
+
+    await handler(inputRequestedEvent(), channel, buildSessionContext(slackAuth("U_FIRST")));
+    await handler(inputRequestedEvent(), channel, buildSessionContext(slackAuth("U_SECOND")));
+
+    const blockIds = post.mock.calls.map(([message]) => {
+      const blocks = (message as { blocks: Array<{ block_id?: string }> }).blocks;
+      return blocks.find((block) => block.block_id !== undefined)?.block_id;
+    });
+    expect(blockIds).toEqual(
+      ["U_FIRST", "U_SECOND"].map((responderUserId) =>
+        buildHitlResponderBlockId({ requestId: "request-1", responderUserId }),
+      ),
+    );
+  });
+
+  it("posts a visible diagnostic when the current caller is not Slack-authenticated", async () => {
+    const { channel, post } = buildChannelStub({ triggeringUserId: "U_STALE" });
+    const current: SessionAuthContext = {
+      attributes: { user_id: "U_UNTRUSTED" },
+      authenticator: "custom",
+      principalId: "app-user-1",
+      principalType: "user",
+    };
+
+    await defaultInputRequestedHandler()(
+      inputRequestedEvent(),
+      channel,
+      buildSessionContext(current),
+    );
+
+    expect(post).toHaveBeenCalledWith(
+      "I can't collect this response because the current caller is not authenticated by Slack. Start a new request from Slack to continue.",
+    );
+  });
+});
 
 describe("defaultEvents authorization.required", () => {
   it("posts a public status and delivers the challenge ephemerally to the triggering user", async () => {

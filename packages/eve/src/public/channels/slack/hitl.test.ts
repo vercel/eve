@@ -4,6 +4,7 @@ import type { InputRequest } from "#runtime/input/types.js";
 import {
   buildAnsweredBlocks,
   buildFreeformModalView,
+  buildHitlResponderBlockId,
   deriveHitlResponse,
   freeformRequestIdFromActionId,
   HITL_ACTION_PREFIX,
@@ -24,6 +25,10 @@ function makeRequest(overrides: Partial<InputRequest>): InputRequest {
     requestId: "call_abc123",
     ...overrides,
   };
+}
+
+function makeResponderBlockId(responderUserId: string, requestId: string): string {
+  return buildHitlResponderBlockId({ requestId, responderUserId });
 }
 
 describe("deriveHitlResponse", () => {
@@ -80,6 +85,13 @@ describe("isHitlAction", () => {
 });
 
 describe("renderInputRequestBlocks", () => {
+  it("keeps responder block ids bounded and unique for long request ids", () => {
+    const firstBlockId = makeResponderBlockId("U0123456789", "a".repeat(230));
+    const secondBlockId = makeResponderBlockId("U0123456789", `${"a".repeat(229)}b`);
+    expect(firstBlockId.length).toBeLessThanOrEqual(255);
+    expect(secondBlockId).not.toBe(firstBlockId);
+  });
+
   it("emits a section + buttons block for an option list with no display hint", () => {
     const blocks = renderInputRequestBlocks(
       makeRequest({
@@ -88,6 +100,7 @@ describe("renderInputRequestBlocks", () => {
           { id: "deny", label: "Deny", style: "danger" },
         ],
       }),
+      "U01",
     );
 
     expect(blocks).toHaveLength(2);
@@ -98,6 +111,12 @@ describe("renderInputRequestBlocks", () => {
       elements: Array<Record<string, unknown>>;
     };
     expect(actions.type).toBe("actions");
+    expect(actions).toMatchObject({
+      block_id: buildHitlResponderBlockId({
+        requestId: "call_abc123",
+        responderUserId: "U01",
+      }),
+    });
     expect(actions.elements).toHaveLength(2);
     const actionIds = actions.elements.map((element) => element.action_id);
     expect(new Set(actionIds).size).toBe(actionIds.length);
@@ -124,6 +143,7 @@ describe("renderInputRequestBlocks", () => {
           { id: "weekly", label: "Weekly", description: "Best for low-volume reports" },
         ],
       }),
+      "U01",
     );
 
     const actions = blocks[1] as {
@@ -156,6 +176,7 @@ describe("renderInputRequestBlocks", () => {
         display: "select",
         options,
       }),
+      "U01",
     );
 
     const actions = blocks[1] as {
@@ -172,7 +193,10 @@ describe("renderInputRequestBlocks", () => {
   });
 
   it("renders a 'Type your answer' freeform button when the request has no options", () => {
-    const blocks = renderInputRequestBlocks(makeRequest({ prompt: "What's the date range?" }));
+    const blocks = renderInputRequestBlocks(
+      makeRequest({ prompt: "What's the date range?" }),
+      "U01",
+    );
 
     expect(blocks).toHaveLength(2);
     const actions = blocks[1] as { type: string; elements: Array<Record<string, unknown>> };
@@ -194,6 +218,7 @@ describe("renderInputRequestBlocks", () => {
         allowFreeform: true,
         options: [{ id: "yes", label: "Yes" }],
       }),
+      "U01",
     );
     // current behavior: options take precedence; freeform button is the
     // fallback when no options are supplied. This documents the
@@ -212,7 +237,7 @@ describe("renderInputRequestBlocks", () => {
       options: [{ id: "yes_please", label: "Yes please" }],
     });
 
-    const blocks = renderInputRequestBlocks(request);
+    const blocks = renderInputRequestBlocks(request, "U01");
     const button = (blocks[1] as { elements: Array<{ action_id: string; value: string }> })
       .elements[0]!;
 
@@ -238,7 +263,7 @@ describe("renderInputRequestBlocks", () => {
 
   it("truncates section-block prompts past the Slack 3000-char cap", () => {
     const longPrompt = "x".repeat(SLACK_SECTION_TEXT_MAX_LENGTH + 500);
-    const blocks = renderInputRequestBlocks(makeRequest({ prompt: longPrompt }));
+    const blocks = renderInputRequestBlocks(makeRequest({ prompt: longPrompt }), "U01");
     const promptBlock = blocks[0] as { text: { text: string } };
     expect(promptBlock.text.text.length).toBeLessThanOrEqual(SLACK_SECTION_TEXT_MAX_LENGTH);
     expect(promptBlock.text.text.endsWith("...")).toBe(true);
@@ -251,7 +276,7 @@ describe("renderInputRequestBlocks", () => {
       options: [{ id: "weekly_report", label: "Weekly report" }],
     });
 
-    const blocks = renderInputRequestBlocks(request);
+    const blocks = renderInputRequestBlocks(request, "U01");
     const widget = (
       blocks[1] as { elements: Array<{ action_id: string; options: Array<{ value: string }> }> }
     ).elements[0]!;
@@ -276,6 +301,7 @@ describe("buildFreeformModalView", () => {
         threadTs: "1.0",
         messageTs: "1.1",
         requestId: "call_abc",
+        responderBlockId: makeResponderBlockId("U01", "call_abc"),
       },
       prompt: "What's the date range?",
     });
@@ -303,6 +329,7 @@ describe("buildFreeformModalView", () => {
         threadTs: "1.0",
         messageTs: "1.1",
         requestId: "call_abc",
+        responderBlockId: makeResponderBlockId("U01", "call_abc"),
       },
       prompt: longPrompt,
     });
@@ -320,6 +347,7 @@ describe("buildFreeformModalView", () => {
         threadTs: "1.0",
         messageTs: "1.1",
         requestId: "call_abc",
+        responderBlockId: makeResponderBlockId("U01", "call_abc"),
       },
     });
     const blocks = view.blocks as Array<Record<string, unknown>>;
@@ -328,7 +356,7 @@ describe("buildFreeformModalView", () => {
 });
 
 describe("buildAnsweredBlocks", () => {
-  it("preserves the prompt block, appends a confirmation, and attributes the click", () => {
+  it("preserves the prompt and appends the answer confirmation", () => {
     const promptBlock = {
       type: "section",
       text: { type: "mrkdwn", text: "Approve deploy?" },
@@ -336,21 +364,17 @@ describe("buildAnsweredBlocks", () => {
     const blocks = buildAnsweredBlocks({
       promptBlock,
       answerLabel: "Approve",
-      userId: "U01",
     });
-    expect(blocks).toHaveLength(3);
+
+    expect(blocks).toHaveLength(2);
     expect(blocks[0]).toBe(promptBlock);
     expect(blocks[1]).toMatchObject({
       type: "section",
       text: { text: ":white_check_mark: *Approve*", type: "mrkdwn" },
     });
-    expect(blocks[2]).toMatchObject({
-      type: "context",
-      elements: [{ type: "mrkdwn", text: "Answered by <@U01>" }],
-    });
   });
 
-  it("omits the attribution block when no userId is supplied", () => {
+  it("renders the confirmation without a prompt block", () => {
     const blocks = buildAnsweredBlocks({ promptBlock: undefined, answerLabel: "Deny" });
     expect(blocks).toHaveLength(1);
     expect(blocks[0]).toMatchObject({

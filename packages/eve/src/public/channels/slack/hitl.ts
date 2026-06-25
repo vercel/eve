@@ -12,6 +12,8 @@
  * UX grounds without changing the read path.
  */
 
+import { createHash } from "node:crypto";
+
 import {
   truncateModalTitle,
   truncatePlainText,
@@ -25,6 +27,15 @@ import type { InputRequest } from "#runtime/input/types.js";
  * interactive widgets can avoid collisions.
  */
 export const HITL_ACTION_PREFIX = "eve_input:";
+
+/**
+ * `block_id` prefix that binds a rendered HITL request to the Slack user
+ * allowed to answer it. Slack returns the block id unchanged in its signed
+ * interaction payload, so the inbound handler can reject cross-user clicks
+ * before resuming the parked turn. The request digest also keeps every actions
+ * block unique when one message contains multiple requests.
+ */
+export const HITL_RESPONDER_BLOCK_PREFIX = "eve_input_responder:";
 
 /**
  * `action_id` prefix for the "Type your answer" button that opens a
@@ -83,6 +94,21 @@ interface DerivedHitlResponse {
 }
 
 /**
+ * Builds the bounded Slack block id that binds one request to one responder.
+ * Hashing the pair keeps the wire value below Slack's 255-character limit
+ * regardless of request-id length.
+ */
+export function buildHitlResponderBlockId(input: {
+  readonly requestId: string;
+  readonly responderUserId: string;
+}): string {
+  const digest = createHash("sha256")
+    .update(JSON.stringify([input.responderUserId, input.requestId]))
+    .digest("base64url");
+  return `${HITL_RESPONDER_BLOCK_PREFIX}${digest}`;
+}
+
+/**
  * Decodes one Slack interactivity action into an HITL response, or
  * returns `null` when the action does not match an HITL widget the
  * framework rendered.
@@ -132,12 +158,19 @@ export function isHitlAction(actionId: string): boolean {
  *
  * Always emits at least the prompt section.
  */
-export function renderInputRequestBlocks(request: InputRequest): unknown[] {
+export function renderInputRequestBlocks(
+  request: InputRequest,
+  responderUserId: string,
+): unknown[] {
   const prompt = {
     text: { text: truncateSectionText(request.prompt), type: "mrkdwn" },
     type: "section",
   };
   const actionId = `${HITL_ACTION_PREFIX}${request.requestId}`;
+  const blockId = buildHitlResponderBlockId({
+    requestId: request.requestId,
+    responderUserId,
+  });
 
   const options = request.options;
   const acceptsFreeform = request.allowFreeform === true || !options || options.length === 0;
@@ -152,7 +185,7 @@ export function renderInputRequestBlocks(request: InputRequest): unknown[] {
             options: options.map(buildOption),
             placeholder: { type: "plain_text", text: "Choose an option" },
           };
-    return [prompt, { type: "actions", elements: [widget] }];
+    return [prompt, { type: "actions", block_id: blockId, elements: [widget] }];
   }
 
   if (options && options.length > 0) {
@@ -160,6 +193,7 @@ export function renderInputRequestBlocks(request: InputRequest): unknown[] {
       prompt,
       {
         type: "actions",
+        block_id: blockId,
         elements: options.map((opt, index) => buildButton(opt, actionId, index)),
       },
     ];
@@ -170,6 +204,7 @@ export function renderInputRequestBlocks(request: InputRequest): unknown[] {
       prompt,
       {
         type: "actions",
+        block_id: blockId,
         elements: [
           {
             type: "button",
@@ -198,6 +233,7 @@ export interface HitlFreeformModalMetadata {
   readonly threadTs: string;
   readonly messageTs: string;
   readonly requestId: string;
+  readonly responderBlockId: string;
 }
 
 /**
@@ -288,8 +324,7 @@ function buildOption(opt: NonNullable<InputRequest["options"]>[number]): Record<
 /**
  * Renders the "answered" replacement blocks for a previously-posted
  * HITL card. Preserves the original prompt block (so context stays
- * visible), appends a confirmation line naming the chosen answer, and
- * attributes the click to the user when their id is known.
+ * visible) and appends a confirmation line naming the chosen answer.
  *
  * Slack's `chat.update` replaces every block in one shot, so the caller
  * passes the full list to `blocks` and the rendered fallback text to
@@ -298,7 +333,6 @@ function buildOption(opt: NonNullable<InputRequest["options"]>[number]): Record<
 export function buildAnsweredBlocks(input: {
   readonly promptBlock: unknown;
   readonly answerLabel: string;
-  readonly userId?: string;
 }): unknown[] {
   const blocks: unknown[] = [];
   if (input.promptBlock !== undefined && input.promptBlock !== null) {
@@ -308,11 +342,5 @@ export function buildAnsweredBlocks(input: {
     type: "section",
     text: { type: "mrkdwn", text: `:white_check_mark: *${input.answerLabel}*` },
   });
-  if (input.userId && input.userId.length > 0) {
-    blocks.push({
-      type: "context",
-      elements: [{ type: "mrkdwn", text: `Answered by <@${input.userId}>` }],
-    });
-  }
   return blocks;
 }

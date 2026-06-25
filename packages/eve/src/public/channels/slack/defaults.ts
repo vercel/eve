@@ -22,6 +22,8 @@ import type {
 const log = createLogger("slack.defaults");
 const REASONING_TYPING_REFRESH_INTERVAL_MS = 5_000;
 const REASONING_TYPING_MIN_PROGRESS_CHARS = 4;
+const UNBOUND_HITL_RESPONSE =
+  "I can't collect this response because the current caller is not authenticated by Slack. Start a new request from Slack to continue.";
 
 /**
  * Workspace-scoped projection of the Slack actor that produced
@@ -87,6 +89,12 @@ function firstNonEmptyLine(text: string): string | undefined {
   return undefined;
 }
 
+function slackResponderUserId(auth: SessionAuthContext | null): string | undefined {
+  if (auth?.authenticator !== "slack-webhook") return undefined;
+  const userId = auth.attributes["user_id"];
+  return typeof userId === "string" && userId.length > 0 ? userId : undefined;
+}
+
 /**
  * Default `input.requested` handler — renders each pending HITL
  * request as Slack `block_actions`. Buttons by default; radio for
@@ -94,11 +102,18 @@ function firstNonEmptyLine(text: string): string | undefined {
  * requests. Override by declaring `events["input.requested"]`.
  */
 export function defaultInputRequestedHandler(): NonNullable<SlackChannelEvents["input.requested"]> {
-  return async (data, channel, _ctx) => {
+  return async (data, channel, ctx) => {
     if (data.requests.length === 0) return;
+    const responderUserId = slackResponderUserId(ctx.session.auth.current);
+    if (responderUserId === undefined) {
+      await channel.thread.post(UNBOUND_HITL_RESPONSE);
+      return;
+    }
     const promptText = truncateMessageText(data.requests.map((r) => r.prompt).join("\n"));
     await channel.thread.post({
-      blocks: data.requests.flatMap(renderInputRequestBlocks),
+      blocks: data.requests.flatMap((request) =>
+        renderInputRequestBlocks(request, responderUserId),
+      ),
       text: promptText,
     });
   };
