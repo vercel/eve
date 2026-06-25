@@ -111,7 +111,13 @@ export default defineEval({
       startIndex: firstTurn.events.length,
     });
     const observed = observedNarration(secondTurn.events);
-    await t.require(observed, equals(narration));
+    t.check(
+      observed,
+      satisfies(
+        (value: string | undefined) => value === narration,
+        `channel observed ${JSON.stringify(narration)}; received ${JSON.stringify(observed)}`,
+      ),
+    );
 
     firstTurn.succeeded();
     secondTurn.succeeded();
