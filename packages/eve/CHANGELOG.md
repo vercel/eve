@@ -1,5 +1,11 @@
 # eve
 
+## 0.13.8
+
+### Patch Changes
+
+- 9d72bb1: Seed session, subagent, and turn workflow attributes when their runs are created so Workflow turbo mode cannot race tag writes against run creation.
+
 ## 0.13.7
 
 ### Patch Changes
