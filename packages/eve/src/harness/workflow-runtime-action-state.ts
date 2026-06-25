@@ -47,10 +47,46 @@ export function buildRuntimeActionFromWorkflowInterrupt(
   };
 }
 
-export function getRuntimeActionKeyFromWorkflowInterrupt(
+/** Returns every pending runtime-action interrupt in deterministic ledger order. */
+export function getWorkflowRuntimeActionInterrupts(
   interrupt: WorkflowSandboxInterrupt,
-): string {
-  return getRuntimeActionRequestKey(buildRuntimeActionFromWorkflowInterrupt(interrupt));
+): WorkflowSandboxInterrupt[] {
+  return interrupt.continuation.ledger.flatMap((entry) => {
+    if (
+      entry.kind !== "tool" ||
+      entry.status !== "interrupted" ||
+      entry.interruptPayload.kind !== WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        continuation: interrupt.continuation,
+        input: entry.inputJson === "" ? undefined : JSON.parse(entry.inputJson),
+        interruptId: entry.interruptId,
+        outerToolCallId: interrupt.continuation.outerToolCallId,
+        payload: entry.interruptPayload,
+        toolCallId: entry.toolCallId,
+        toolName: entry.name,
+        type: "code-mode-interrupt" as const,
+      },
+    ];
+  });
+}
+
+export function buildRuntimeActionsFromWorkflowInterrupt(
+  interrupt: WorkflowSandboxInterrupt,
+): RuntimeActionRequest[] {
+  return getWorkflowRuntimeActionInterrupts(interrupt).map((pending) =>
+    buildRuntimeActionFromWorkflowInterrupt(pending),
+  );
+}
+
+export function getRuntimeActionKeysFromWorkflowInterrupt(
+  interrupt: WorkflowSandboxInterrupt,
+): string[] {
+  return buildRuntimeActionsFromWorkflowInterrupt(interrupt).map(getRuntimeActionRequestKey);
 }
 
 function sanitizeCallId(id: string): string {

@@ -28,13 +28,19 @@ export default defineEval({
     t.didNotFail();
     t.completed();
     t.calledTool("Workflow", { input: isFanOutProgram, times: 1 });
-    t.event(
-      (events) =>
-        events.filter(
-          (event) => event.type === "subagent.called" && event.data.name === "echo-marker",
-        ).length === 2,
-      "Workflow dispatched exactly two echo-marker children",
-    );
+    t.event((events) => {
+      const calledIndexes = events.flatMap((event, index) =>
+        event.type === "subagent.called" && event.data.name === "echo-marker" ? [index] : [],
+      );
+      const firstCompletedIndex = events.findIndex(
+        (event) => event.type === "subagent.completed" && event.data.subagentName === "echo-marker",
+      );
+      return (
+        calledIndexes.length === 2 &&
+        firstCompletedIndex >= 0 &&
+        calledIndexes.every((index) => index < firstCompletedIndex)
+      );
+    }, "Workflow dispatched exactly two echo-marker children before either completed");
     t.calledSubagent("echo-marker", { output: /SUBAGENT_TOKEN=echo-marker-9F2X/ });
     t.messageIncludes(DOUBLE_SUBAGENT_TOKEN);
     t.noFailedActions();
