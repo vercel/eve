@@ -1,5 +1,15 @@
 # eve
 
+## 0.13.7
+
+### Patch Changes
+
+- c8014d1: Improve Vercel Connect-backed connection auth by allowing authored definitions to include the `evict` hook and clarifying `principal_required` guidance when user-scoped connections run without an authenticated user principal.
+- ff44c4c: Clarify scaffolded guidance for locating bundled eve package docs in workspaces and local installs.
+- 30c5965: Preserve dynamic tool approval gates when session- and turn-scoped tools are replayed from durable metadata. If a replayed approval callback cannot be recovered, eve now requires approval by default instead of silently running the tool unguarded.
+- 55af52e: Acknowledge Slack view submissions with an empty response body so submitted modals close without an error.
+- dd960df: Fix Vercel CLI detection on Windows by invoking npm's command shims through `cmd.exe`, so an installed `vercel` command is no longer misreported as missing.
+
 ## 0.13.6
 
 ### Patch Changes
