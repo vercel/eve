@@ -179,6 +179,75 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain("It's 73°F in SF.");
   });
 
+  it("renders interleaved tool lifecycles in arrival order", async () => {
+    const { screen, renderer } = makeRenderer();
+    await renderer.renderStream(
+      streamOf([
+        {
+          type: "tool-call",
+          toolCallId: "first",
+          toolName: "first_search",
+          input: { query: "first" },
+        },
+        { type: "tool-result", toolCallId: "first", output: { result: "first result" } },
+        {
+          type: "tool-call",
+          toolCallId: "second",
+          toolName: "second_search",
+          input: { query: "second" },
+        },
+        { type: "tool-result", toolCallId: "second", output: { result: "second result" } },
+        { type: "finish" },
+      ]),
+      { submittedPrompt: "run both searches", continueSession: false },
+    );
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("✓ first_search");
+    expect(snapshot).toContain("first result");
+    expect(snapshot).toContain("✓ second_search");
+    expect(snapshot).toContain("second result");
+    expect(snapshot.indexOf("first_search")).toBeLessThan(snapshot.indexOf("second_search"));
+    renderer.shutdown();
+  });
+
+  it("renders a concurrent tool batch before any result arrives", async () => {
+    const { screen, renderer } = makeRenderer(120, 140);
+    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const rendering = renderer.renderStream(
+      {
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(controller) {
+            streamController = controller;
+          },
+        }),
+      },
+      { submittedPrompt: "search the tri-state area", continueSession: true },
+    );
+
+    const controller = streamController;
+    expect(controller).toBeDefined();
+    controller?.enqueue({ type: "step-start" });
+    for (let index = 1; index <= 100; index += 1) {
+      controller?.enqueue({
+        type: "tool-call",
+        toolCallId: `search-${index}`,
+        toolName: "web_search",
+        input: { query: `tri-state-${index}` },
+      });
+    }
+
+    await screen.waitForText("tri-state-100");
+
+    const snapshot = screen.snapshot();
+    expect(snapshot.match(/web_search/g)).toHaveLength(100);
+    expect(snapshot).not.toContain("✓ web_search");
+
+    controller?.close();
+    await rendering;
+    renderer.shutdown();
+  });
+
   it("omits the interrupt hint while waiting for the first stream event", async () => {
     const { screen, renderer } = makeRenderer();
     let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;

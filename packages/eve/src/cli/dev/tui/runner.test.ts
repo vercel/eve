@@ -822,7 +822,7 @@ describe("EveTUIRunner reused step indexes", () => {
 });
 
 describe("EveTUIRunner replay guards", () => {
-  it("ignores replayed tool batches and divergent text attempts in one turn", async () => {
+  it("deduplicates repeated call IDs and divergent text attempts in one turn", async () => {
     const prompts: Array<string | undefined> = ["weather", undefined];
     const emitted: AgentTUIStreamEvent[] = [];
     const session = sessionYielding([
@@ -1002,13 +1002,55 @@ describe("EveTUIRunner replay guards", () => {
       .map((event) => event.delta)
       .join("");
 
-    expect(toolCalls).toHaveLength(1);
-    expect(toolCalls[0]).toMatchObject({ toolCallId: "call-original" });
-    expect(toolResults).toHaveLength(1);
-    expect(toolResults[0]).toMatchObject({ toolCallId: "call-original" });
+    expect(toolCalls.map((event) => event.toolCallId)).toEqual(["call-original", "call-replay"]);
+    expect(toolResults.map((event) => event.toolCallId)).toEqual(["call-original", "call-replay"]);
     expect(assistantText).toBe("Using the first answer.");
     expect(assistantText).not.toContain("retry");
     expect(emitted.filter((event) => event.type === "finish")).toHaveLength(1);
+  });
+
+  it("renders every call in a 100-way bash fan-out with identical input", async () => {
+    const prompts: Array<string | undefined> = ["run the fan-out", undefined];
+    const emitted: AgentTUIStreamEvent[] = [];
+    const sentence = Array.from({ length: 100 }, (_, index) => `word-${index + 1}`).join(" ");
+    const command = `printf '%s\\n' '${sentence}'`;
+    const session = sessionYielding([
+      ...Array.from({ length: 100 }, (_, index) => ({
+        type: "actions.requested",
+        data: {
+          actions: [
+            {
+              callId: `bash-${index + 1}`,
+              input: { command },
+              kind: "tool-call",
+              toolName: "bash",
+            },
+          ],
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn_0",
+        },
+      })),
+      { type: "session.waiting", data: { wait: "next-user-message" } },
+    ]);
+
+    const renderer: AgentTUIRenderer = {
+      readPrompt: vi.fn(async () => prompts.shift()),
+      renderStream: vi.fn(async (result) => {
+        for await (const event of result.events as AsyncIterable<AgentTUIStreamEvent>) {
+          emitted.push(event);
+        }
+      }),
+    };
+
+    const runner = new EveTUIRunner({ session, renderer, name: "Weather Agent" });
+    await runner.run();
+
+    const toolCalls = emitted.filter((event) => event.type === "tool-call");
+    expect(toolCalls).toHaveLength(100);
+    expect(toolCalls.map((event) => event.toolCallId)).toEqual(
+      Array.from({ length: 100 }, (_, index) => `bash-${index + 1}`),
+    );
   });
 
   it("renders a known tool result that arrives after turn.completed", async () => {

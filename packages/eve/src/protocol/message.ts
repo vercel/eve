@@ -158,11 +158,12 @@ export interface MessageReceivedStreamEvent {
 }
 
 /**
- * Stream event emitted when the harness requests one stable runtime action
- * batch.
+ * Stream event emitted when the model requests one or more actions.
  *
- * `data.actions.length === 1` is the serial case. `data.actions.length > 1`
- * is the parallel case for that assistant batch.
+ * A `tool-call` is one action kind, alongside `load-skill` and subagent calls.
+ * Calls may arrive incrementally before execution, so consumers must correlate
+ * action lifecycles by call ID rather than assume one event contains every call
+ * from an assistant step.
  */
 export interface ActionsRequestedStreamEvent {
   data: {
@@ -679,7 +680,8 @@ function summarizeUserContent(message: string | UserContent): string {
 }
 
 /**
- * Creates the `actions.requested` event for one stable execution batch.
+ * Creates the `actions.requested` event for one observed group of model action
+ * requests.
  */
 export function createActionsRequestedEvent(input: {
   readonly actions: readonly RuntimeActionRequest[];

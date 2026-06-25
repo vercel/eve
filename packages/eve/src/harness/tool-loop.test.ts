@@ -1957,9 +1957,19 @@ describe("createToolLoopHarness", () => {
     expect(isHarnessBetweenTurns(result.session)).toBe(false);
   });
 
-  it("emits failed action.result from tool response messages when toolResults are missing", async () => {
+  it("emits failed action.result from tool response messages when the stream and toolResults omit it", async () => {
     setupMockAgent({
       finishReason: "tool-calls",
+      fullStreamParts: [
+        { id: "text-1", text: "Let me try that.", type: "text-delta" },
+        {
+          input: { city: "Vienna" },
+          toolCallId: "call-1",
+          toolName: "add",
+          type: "tool-call",
+        },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ],
       response: {
         messages: [
           {
@@ -2023,9 +2033,19 @@ describe("createToolLoopHarness", () => {
     });
   });
 
-  it("does not duplicate action.result when toolResults and response messages both include it", async () => {
+  it("prefers toolResults over response messages when the stream omits the result", async () => {
     setupMockAgent({
       finishReason: "tool-calls",
+      fullStreamParts: [
+        { id: "text-1", text: "Let me try that.", type: "text-delta" },
+        {
+          input: { city: "Vienna" },
+          toolCallId: "call-1",
+          toolName: "add",
+          type: "tool-call",
+        },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ],
       response: {
         messages: [
           {
@@ -3232,6 +3252,7 @@ describe("createToolLoopHarness", () => {
       "message.completed",
       "actions.requested",
       "action.result",
+      "message.completed",
       "step.completed",
       "turn.completed",
       "session.waiting",
@@ -3241,8 +3262,15 @@ describe("createToolLoopHarness", () => {
       events.filter((event) => event.type === "message.completed").map((event) => event.data),
     ).toEqual([
       {
+        finishReason: "tool-calls",
+        message: "I'll search for that.",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_0",
+      },
+      {
         finishReason: "stop",
-        message: "I'll search for that.The answer is 42.",
+        message: "The answer is 42.",
         sequence: 0,
         stepIndex: 0,
         turnId: "turn_0",
@@ -3250,7 +3278,7 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
-  it("emits one stable parallel batch when streamed tool results interleave with later tool calls", async () => {
+  it("emits each streamed tool call before its later result", async () => {
     setupMockAgent({
       finishReason: "stop",
       fullStreamParts: [
@@ -3385,31 +3413,19 @@ describe("createToolLoopHarness", () => {
       "message.completed",
       "actions.requested",
       "action.result",
+      "actions.requested",
       "action.result",
+      "message.completed",
       "step.completed",
       "turn.completed",
       "session.waiting",
     ]);
 
-    expect(events.find((event) => event.type === "actions.requested")?.data).toEqual({
-      actions: [
-        {
-          callId: "call-1",
-          input: { city: "New York" },
-          kind: "tool-call",
-          toolName: "get_weather",
-        },
-        {
-          callId: "call-2",
-          input: { city: "Los Angeles" },
-          kind: "tool-call",
-          toolName: "get_weather",
-        },
-      ],
-      sequence: 0,
-      stepIndex: 0,
-      turnId: "turn_0",
-    });
+    expect(
+      events
+        .filter((event) => event.type === "actions.requested")
+        .map((event) => event.data.actions.map((action) => action.callId)),
+    ).toEqual([["call-1"], ["call-2"]]);
   });
 
   it("emits stream content before step actions", async () => {
@@ -4379,7 +4395,7 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
-  it("keeps the same parallel batch when tool calls arrive before results and preserves result arrival order", async () => {
+  it("emits parallel tool calls incrementally and preserves stream result order", async () => {
     setupMockAgent({
       finishReason: "stop",
       fullStreamParts: [
@@ -4506,34 +4522,20 @@ describe("createToolLoopHarness", () => {
 
     await runStep(session, { message: "Get the weather for two cities" });
 
-    expect(events.find((event) => event.type === "actions.requested")?.data).toEqual({
-      actions: [
-        {
-          callId: "call-1",
-          input: { city: "New York" },
-          kind: "tool-call",
-          toolName: "get_weather",
-        },
-        {
-          callId: "call-2",
-          input: { city: "Los Angeles" },
-          kind: "tool-call",
-          toolName: "get_weather",
-        },
-      ],
-      sequence: 0,
-      stepIndex: 0,
-      turnId: "turn_0",
-    });
+    expect(
+      events
+        .filter((event) => event.type === "actions.requested")
+        .map((event) => event.data.actions.map((action) => action.callId)),
+    ).toEqual([["call-1"], ["call-2"]]);
 
     expect(
       events
         .filter((event) => event.type === "action.result")
         .map((event) => event.data.result.callId),
-    ).toEqual(["call-1", "call-2"]);
+    ).toEqual(["call-2", "call-1"]);
   });
 
-  it("emits one stable action batch per assistant message when a turn contains multiple tool groups", async () => {
+  it("emits each tool call as it streams across multiple assistant groups", async () => {
     setupMockAgent({
       finishReason: "stop",
       response: {
@@ -4650,7 +4652,10 @@ describe("createToolLoopHarness", () => {
       "message.completed",
       "actions.requested",
       "action.result",
+      "message.completed",
+      "actions.requested",
       "action.result",
+      "message.completed",
       "step.completed",
       "turn.completed",
       "session.waiting",
@@ -4660,7 +4665,7 @@ describe("createToolLoopHarness", () => {
       events
         .filter((event) => event.type === "actions.requested")
         .map((event) => event.data.actions.map((action) => action.callId)),
-    ).toEqual([["call-1", "call-2"]]);
+    ).toEqual([["call-1"], ["call-2"]]);
   });
 
   it("emits input.requested for tool approval requests and parks without persisting unresolved messages", async () => {
@@ -4748,11 +4753,28 @@ describe("createToolLoopHarness", () => {
       "message.received",
       "step.started",
       "message.completed",
+      "actions.requested",
       "step.completed",
       "input.requested",
       "turn.completed",
       "session.waiting",
     ]);
+    expect(events.find((event) => event.type === "actions.requested")).toEqual({
+      data: {
+        actions: [
+          {
+            callId: "call-1",
+            input: { command: "rm -rf /tmp/demo" },
+            kind: "tool-call",
+            toolName: "bash",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_0",
+      },
+      type: "actions.requested",
+    });
     expect(events.find((event) => event.type === "input.requested")).toEqual({
       data: {
         requests: [

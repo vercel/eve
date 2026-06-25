@@ -324,6 +324,44 @@ describe("slackChannel() default event handlers", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("surfaces pre-tool assistant text when the following action is requested", async () => {
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("message.completed", {
+        finishReason: "tool-calls",
+        message: "\nChecking the issue context first.\nThen I will run a search.",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+    await callEvent(
+      adapter,
+      makeEvent("actions.requested", {
+        actions: [{ callId: "call_1", input: {}, kind: "tool-call", toolName: "search" }],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe("https://slack.com/api/assistant.threads.setStatus");
+    expect(parseSlackRequestBody(init as RequestInit)).toMatchObject({
+      status: "Checking the issue context first.",
+    });
+    expect(ctx.state.pendingToolCallMessage).toBeNull();
+  });
+
   it("message.completed clears typing without posting for empty delivery", async () => {
     const adapter = withState(
       getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),

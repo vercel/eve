@@ -38,12 +38,24 @@ import {
   createRuntimeToolResultFromStepResult,
   createRuntimeToolResultFromValue,
 } from "#harness/action-result-helpers.js";
-import { resolveToolCallInputObject } from "#harness/runtime-actions.js";
-import type { RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
+import {
+  createRuntimeActionRequestFromToolCall,
+  resolveToolCallInputObject,
+} from "#harness/runtime-actions.js";
+import type {
+  RuntimeActionRequest,
+  RuntimeToolResultActionResult,
+} from "#runtime/actions/types.js";
 import { isAuthorizationSignal, isPendingAuthorizationToolOutput } from "#harness/authorization.js";
 import { contextStorage } from "#context/container.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
-import type { HarnessEmitFn, HarnessSession, SessionStateMap, StepInput } from "#harness/types.js";
+import type {
+  HarnessEmitFn,
+  HarnessSession,
+  HarnessToolMap,
+  SessionStateMap,
+  StepInput,
+} from "#harness/types.js";
 
 // ---------------------------------------------------------------------------
 // Emission state
@@ -311,54 +323,43 @@ export function normalizeAssistantStepFinishReason(
 /**
  * Result of consuming one step's `fullStream`.
  *
- * `handledInlineToolResultCallIds` lists approval-resume tool-result
- * call ids the stream already handled inline — either emitted as
- * `action.result` events or routed to the authorization park path.
- * `emitStepActions` skips these to avoid double-emission.
- *
- * `inlineToolResultParts` holds the same tool-results in
- * `ToolResultPart` shape. The AI SDK omits them from
- * `stepResult.response.messages` on the approval-resume path, so the
- * harness splices them into persisted history to keep the prior turn's
- * `tool_use` block balanced with a matching `tool_result` on replay.
- *
- * `inlineAuthorizationResults` holds approval-resume tool-results whose
- * output is an {@link AuthorizationSignal}. These are surfaced into
- * `stepResult.toolResults` for the park detector instead of being emitted
- * as plain `action.result` events.
+ * Inline results avoid duplicate post-step events. Approval-resume results
+ * also repair persisted history or route authorization back to the park
+ * detector.
  */
 interface EmittedStreamContent {
+  readonly emittedActionCallIds: ReadonlySet<string>;
   readonly handledInlineToolResultCallIds: ReadonlySet<string>;
   readonly inlineAuthorizationResults: readonly TypedToolResult<ToolSet>[];
   readonly inlineToolResultParts: readonly InlineToolResultPart[];
+}
+
+interface StreamActionEmissionOptions {
+  readonly excludedActionToolNames: ReadonlySet<string>;
+  readonly tools: HarnessToolMap;
 }
 
 /**
  * Consumes the AI SDK `fullStream` and emits real-time text and reasoning
  * events.
  *
- * `tool-result` parts that have no preceding `tool-call` in this stream
- * are emitted inline as `action.result` events. This is the
- * approval-resume path: when a previously-parked tool call is approved,
- * the AI SDK enqueues the executed tool-result onto the same step's
- * stream before the next LLM call. Emitting `action.result` inline keeps
- * it ahead of the message events that depend on it.
- *
- * Tool-call, tool-approval-request, and non-resumed tool-result events
- * are still emitted by `emitStepActions` from the `onStepFinish`
- * callback so the existing single-step batch ordering is preserved.
+ * Emits local and provider tool results in source order. A result without a
+ * streamed call resumes a call from an earlier step. `emitStepActions` emits
+ * the remaining events.
  */
 export async function emitStreamContent(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
   fullStream: AsyncIterable<TextStreamPart<ToolSet>>,
+  options?: StreamActionEmissionOptions,
 ): Promise<EmittedStreamContent> {
   let currentReasoning = "";
   let currentMessage = "";
   let finishReason: AssistantStepFinishReason = "stop";
   let streamError: Error | undefined;
   const toolCallIdsSeenInStream = new Set<string>();
-  const emittedProviderToolCallIds = new Set<string>();
+  const emittedActionCallIds = new Set<string>();
+  const emittedActionResultCallIds = new Set<string>();
   const handledInlineToolResultCallIds = new Set<string>();
   const inlineAuthorizationResults: TypedToolResult<ToolSet>[] = [];
   const inlineToolResultParts: InlineToolResultPart[] = [];
@@ -379,25 +380,16 @@ export async function emitStreamContent(
     currentMessage = "";
   };
 
-  const emitProviderToolCall = async (toolCall: {
-    readonly input?: unknown;
-    readonly toolCallId: string;
-    readonly toolName: string;
-  }): Promise<void> => {
-    if (emittedProviderToolCallIds.has(toolCall.toolCallId)) {
+  const emitActionRequest = async (action: RuntimeActionRequest): Promise<void> => {
+    if (emittedActionCallIds.has(action.callId)) {
       return;
     }
 
-    emittedProviderToolCallIds.add(toolCall.toolCallId);
-    const action = {
-      callId: toolCall.toolCallId,
-      input: resolveToolCallInputObject(toolCall.input, {
-        callId: toolCall.toolCallId,
-        toolName: toolCall.toolName,
-      }),
-      kind: "tool-call",
-      toolName: toolCall.toolName,
-    } satisfies RuntimeToolCallActionRequest;
+    if (currentMessage.trim().length > 0) {
+      await flushCurrentMessage();
+    }
+
+    emittedActionCallIds.add(action.callId);
     await emitFn(
       createActionsRequestedEvent({
         actions: [action],
@@ -406,6 +398,64 @@ export async function emitStreamContent(
         turnId: state.turnId,
       }),
     );
+  };
+
+  const emitProviderToolCall = async (toolCall: {
+    readonly input?: unknown;
+    readonly toolCallId: string;
+    readonly toolName: string;
+  }): Promise<void> => {
+    await emitActionRequest({
+      callId: toolCall.toolCallId,
+      input: resolveToolCallInputObject(toolCall.input, {
+        callId: toolCall.toolCallId,
+        toolName: toolCall.toolName,
+      }),
+      kind: "tool-call",
+      toolName: toolCall.toolName,
+    });
+  };
+
+  const emitActionResult = async (result: RuntimeToolResultActionResult): Promise<void> => {
+    if (emittedActionResultCallIds.has(result.callId)) {
+      return;
+    }
+    emittedActionResultCallIds.add(result.callId);
+    await emitFn(
+      createActionResultEvent({
+        result,
+        sequence: state.sequence,
+        stepIndex: state.stepIndex,
+        turnId: state.turnId,
+      }),
+    );
+  };
+
+  const emitToolCall = async (toolCall: TypedToolCall<ToolSet>): Promise<void> => {
+    if (
+      options === undefined ||
+      toolCall.invalid === true ||
+      options.excludedActionToolNames.has(toolCall.toolName)
+    ) {
+      return;
+    }
+
+    try {
+      await emitActionRequest(
+        createRuntimeActionRequestFromToolCall({
+          toolCall,
+          tools: options.tools,
+        }),
+      );
+    } catch (error) {
+      // A malformed tool call can arrive before the SDK marks its final call
+      // invalid. Let the SDK's recovery path handle it instead of failing the
+      // whole step while projecting UI events.
+      if (error instanceof TypeError) {
+        return;
+      }
+      throw error;
+    }
   };
 
   for await (const part of fullStream) {
@@ -455,59 +505,53 @@ export async function emitStreamContent(
         toolCallIdsSeenInStream.add(toolCall.toolCallId);
         if (toolCall.providerExecuted === true) {
           await emitProviderToolCall(toolCall);
+        } else {
+          await emitToolCall(toolCall);
         }
         break;
       }
       case "tool-result": {
         const inlineToolResult = part as TypedToolResult<ToolSet>;
+        // Preliminary chunks can be superseded by the terminal result.
+        if (inlineToolResult.preliminary === true) {
+          break;
+        }
         if (inlineToolResult.providerExecuted === true) {
           await emitProviderToolCall({
             input: "input" in inlineToolResult ? inlineToolResult.input : undefined,
             toolCallId: inlineToolResult.toolCallId,
             toolName: inlineToolResult.toolName,
           });
-          await emitFn(
-            createActionResultEvent({
-              result: createRuntimeToolResultFromStepResult(inlineToolResult),
-              sequence: state.sequence,
-              stepIndex: state.stepIndex,
-              turnId: state.turnId,
-            }),
-          );
-          // Provider-executed results are already kept in the provider-owned
-          // assistant response shape. Do not synthesize local `role: "tool"`
-          // history for them; just surface the normal action result above.
+          await emitActionResult(createRuntimeToolResultFromStepResult(inlineToolResult));
+          // Provider results already live in the assistant response. Do not
+          // add a local tool message.
           break;
         }
 
-        // Approval-resume: the AI SDK enqueues a previously-parked
-        // tool's result onto the parent stream before re-entering the
-        // LLM call. The tool-call itself was emitted on a prior step's
-        // stream, so it is absent here. Surface `action.result`
-        // inline so it precedes the message events that consume it.
         if (toolCallIdsSeenInStream.has(part.toolCallId)) {
+          if (isInlineAuthorizationToolResult(inlineToolResult)) {
+            break;
+          }
+          if (emittedActionCallIds.has(part.toolCallId)) {
+            await emitActionResult(createRuntimeToolResultFromStepResult(inlineToolResult));
+            handledInlineToolResultCallIds.add(part.toolCallId);
+          }
           break;
         }
+
+        // An approved tool can resume with its result but no matching call in
+        // this step. Emit it before the message that consumes it.
         await flushCurrentMessage();
         if (isInlineAuthorizationToolResult(inlineToolResult)) {
-          // Approval-resume auth: route to the park detector via
-          // inlineAuthorizationResults instead of emitting a plain
-          // action.result that the model would treat as a normal output.
+          // Keep authorization output for the park detector instead of
+          // emitting a normal tool result.
           handledInlineToolResultCallIds.add(part.toolCallId);
           inlineAuthorizationResults.push(inlineToolResult);
           break;
         }
-        await emitFn(
-          createActionResultEvent({
-            result: createRuntimeToolResultFromStepResult(inlineToolResult),
-            sequence: state.sequence,
-            stepIndex: state.stepIndex,
-            turnId: state.turnId,
-          }),
-        );
+        await emitActionResult(createRuntimeToolResultFromStepResult(inlineToolResult));
         handledInlineToolResultCallIds.add(part.toolCallId);
-        // Match AI SDK's `createToolModelOutput` shape (json for non-strings,
-        // text for strings) so persisted history is shape-compatible.
+        // Preserve the SDK's text/json output shape in persisted history.
         const rawOutput: unknown = inlineToolResult.output;
         inlineToolResultParts.push({
           type: "tool-result",
@@ -524,19 +568,24 @@ export async function emitStreamContent(
         const toolError = part as TypedToolError<ToolSet>;
         if (toolError.providerExecuted === true) {
           await emitProviderToolCall(toolError);
-          await emitFn(
-            createActionResultEvent({
-              result: createRuntimeToolResultFromValue({
-                callId: toolError.toolCallId,
-                isError: true,
-                output: toError(toolError.error),
-                toolName: toolError.toolName,
-              }),
-              sequence: state.sequence,
-              stepIndex: state.stepIndex,
-              turnId: state.turnId,
+          await emitActionResult(
+            createRuntimeToolResultFromValue({
+              callId: toolError.toolCallId,
+              isError: true,
+              output: toError(toolError.error),
+              toolName: toolError.toolName,
             }),
           );
+        } else if (emittedActionCallIds.has(toolError.toolCallId)) {
+          await emitActionResult(
+            createRuntimeToolResultFromValue({
+              callId: toolError.toolCallId,
+              isError: true,
+              output: toError(toolError.error),
+              toolName: toolError.toolName,
+            }),
+          );
+          handledInlineToolResultCallIds.add(toolError.toolCallId);
         }
         break;
       }
@@ -596,7 +645,12 @@ export async function emitStreamContent(
     );
   }
 
-  return { handledInlineToolResultCallIds, inlineAuthorizationResults, inlineToolResultParts };
+  return {
+    emittedActionCallIds,
+    handledInlineToolResultCallIds,
+    inlineAuthorizationResults,
+    inlineToolResultParts,
+  };
 }
 
 function isInlineAuthorizationToolResult(toolResult: TypedToolResult<ToolSet>): boolean {

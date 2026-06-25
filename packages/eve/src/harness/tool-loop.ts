@@ -707,12 +707,17 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       const executeModelCall = async (): Promise<HarnessStepResult> => {
         if (emit) {
+          const excludedActionToolNames = new Set([ASK_QUESTION_TOOL_NAME, FINAL_OUTPUT_TOOL_NAME]);
           const streamResult = await agent.stream({ messages: callMessages });
           const {
+            emittedActionCallIds,
             handledInlineToolResultCallIds,
             inlineAuthorizationResults,
             inlineToolResultParts,
-          } = await emitStreamContent(emit, emissionState, streamResult.fullStream);
+          } = await emitStreamContent(emit, emissionState, streamResult.fullStream, {
+            excludedActionToolNames,
+            tools: config.tools,
+          });
           const stepResult = await hooks.stepResult;
           if (
             isEmptyModelResponse(stepResult) &&
@@ -722,7 +727,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             throw new EmptyModelResponseError();
           }
           await emitStepActions(emit, emissionState, stepResult, {
-            excludedActionToolNames: new Set([ASK_QUESTION_TOOL_NAME, FINAL_OUTPUT_TOOL_NAME]),
+            emittedActionCallIds,
+            excludedActionToolNames,
             handledInlineToolResultCallIds,
             tools: config.tools,
           });

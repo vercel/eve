@@ -47,7 +47,7 @@ function registerHandler(
   nitro: Nitro,
   options: {
     handlerPath: string;
-    method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+    method?: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
     route: string;
   },
 ): void {
@@ -328,11 +328,17 @@ export async function configureNitroRoutes(
       method: "GET",
       route: "/",
     });
-    registerHandler(nitro, {
-      handlerPath: resolvePackageSourceFilePath("src/internal/nitro/routes/health.ts"),
-      method: "GET",
-      route: EVE_HEALTH_ROUTE_PATH,
-    });
+    // Register health for GET and HEAD: each (method, route) pair is a
+    // distinct Nitro handler, so HEAD must be registered explicitly or load
+    // balancers and uptime monitors that probe with HEAD get a 404. Nitro
+    // runs the handler for HEAD and omits the body, leaving GET unchanged.
+    for (const method of ["GET", "HEAD"] as const) {
+      registerHandler(nitro, {
+        handlerPath: resolvePackageSourceFilePath("src/internal/nitro/routes/health.ts"),
+        method,
+        route: EVE_HEALTH_ROUTE_PATH,
+      });
+    }
 
     // The agent info endpoint needs `appRoot` baked at build time (used by
     // the disk-source fallback in dev) and runs request-time auth, so it

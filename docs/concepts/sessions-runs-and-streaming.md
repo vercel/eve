@@ -40,7 +40,7 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `turn.started`            | A new turn began.                                                                                                |
 | `message.received`        | An inbound user message was accepted.                                                                            |
 | `step.started`            | A model step began.                                                                                              |
-| `actions.requested`       | The model requested tool calls.                                                                                  |
+| `actions.requested`       | The model requested one or more actions, including tool calls; calls stream before execution.                    |
 | `action.result`           | A tool call returned.                                                                                            |
 | `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or `ask_question`); carries `requests`. |
 | `subagent.called`         | A subagent was delegated; carries `childSessionId` to attach to.                                                 |
