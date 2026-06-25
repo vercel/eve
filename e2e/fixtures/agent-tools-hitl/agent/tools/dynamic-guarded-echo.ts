@@ -13,7 +13,7 @@ export default defineDynamic({
           inputSchema: z.object({
             note: z.string().optional(),
           }),
-          needsApproval: () => true,
+          approval: () => "user-approval",
           async execute(input) {
             return {
               echoed: input.note ?? null,

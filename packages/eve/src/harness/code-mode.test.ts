@@ -255,9 +255,9 @@ describe("applySandboxToolSet", () => {
           execute: async () => "ok",
           inputSchema: jsonSchema({ type: "object" }),
           name: "guarded",
-          needsApproval: () => {
+          approval: () => {
             observedSession = contextStorage.getStore()?.get(SessionMarkerKey);
-            return true;
+            return "user-approval";
           },
         },
       ],
@@ -280,7 +280,7 @@ describe("applySandboxToolSet", () => {
   });
 
   it("preserves dynamic tool approval gates in sandbox host tools", async () => {
-    const needsApproval = () => true;
+    const needsApproval = () => "user-approval" as const;
     const ctx = new ContextContainer();
     ctx.setVirtualContext(LiveStepToolsKey, [
       {
@@ -288,7 +288,7 @@ describe("applySandboxToolSet", () => {
         execute: async () => "ok",
         inputSchema: jsonSchema({ type: "object" }),
         name: "tfl__getLineStatus",
-        needsApproval,
+        approval: needsApproval,
       },
     ]);
 

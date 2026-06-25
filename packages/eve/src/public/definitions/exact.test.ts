@@ -105,6 +105,20 @@ function typeOnlyFixtures(): void {
     run() {},
   });
 
+  defineSchedule({
+    cron: "0 9 * * *",
+    markdown: "Send a digest.",
+    // @ts-expect-error Schedules do not support approval policies.
+    approval: () => "user-approval",
+  });
+
+  defineSchedule({
+    cron: "0 9 * * *",
+    markdown: "Send a digest.",
+    // @ts-expect-error Schedules do not support tool approval policies.
+    needsApproval: () => true,
+  });
+
   const skillWithName = {
     description: "Use source docs.",
     markdown: "Prefer primary sources.",
@@ -205,6 +219,16 @@ function typeOnlyFixtures(): void {
         return { token: "static" };
       },
     },
+    execute() {
+      return null;
+    },
+  });
+
+  defineTool({
+    description: "Removed tool approval key.",
+    inputSchema: { type: "object" },
+    // @ts-expect-error Authored tools use `approval`, not `needsApproval`.
+    needsApproval: () => true,
     execute() {
       return null;
     },

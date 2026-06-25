@@ -1,4 +1,10 @@
-import { type JSONValue, type ToolSet, tool } from "ai";
+import {
+  type JSONValue,
+  type ToolApprovalConfiguration,
+  type ToolApprovalStatus,
+  type ToolSet,
+  tool,
+} from "ai";
 
 import type { SessionCapabilities } from "#channel/types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
@@ -7,6 +13,7 @@ import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.
 import { isObject } from "#shared/guards.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { ApprovalStatus } from "#public/definitions/approval.js";
 import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/provider-tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { loadContext } from "#context/container.js";
@@ -23,6 +30,8 @@ import { isCodeModeToolExecutionOptions } from "#runtime/framework-tools/code-mo
 type ToolModelOutputValue =
   | { readonly type: "json"; readonly value: JSONValue }
   | { readonly type: "text"; readonly value: string };
+
+const toolApprovals = new WeakMap<object, (toolInput: unknown) => Promise<ApprovalStatus>>();
 
 /**
  * Builds an AI SDK `ToolSet` from unified harness tool definitions.
@@ -60,11 +69,11 @@ export function buildToolSet(input: {
     }
 
     const authorToModelOutput = definition.toModelOutput;
-    tools[definition.name] = tool({
+    const approval = buildApprovalFn(definition, input);
+    const aiTool = tool({
       description: definition.description,
       execute: wrapToolExecute(definition),
       inputSchema: definition.inputSchema,
-      needsApproval: buildNeedsApprovalFn(definition, input),
       outputSchema: definition.outputSchema,
       ...(definition.execute !== undefined
         ? {
@@ -115,6 +124,10 @@ export function buildToolSet(input: {
             }
           : {}),
     });
+    tools[definition.name] = aiTool;
+    if (definition.approval !== undefined) {
+      toolApprovals.set(aiTool, approval);
+    }
   }
 
   return tools as ToolSet;
@@ -288,19 +301,60 @@ export async function buildToolSetWithProviderTools(input: {
   return tools;
 }
 
-function buildNeedsApprovalFn(
+function buildApprovalFn(
   definition: HarnessToolDefinition,
   input: { readonly approvedTools?: ReadonlySet<string> },
-): (toolInput: unknown) => Promise<boolean> {
+): (toolInput: unknown) => Promise<ApprovalStatus> {
   return async (toolInput: unknown) => {
-    if (definition.needsApproval === undefined) return false;
+    if (definition.approval === undefined) return undefined;
 
     const toolInputRecord = isObject(toolInput) ? toolInput : undefined;
 
-    return definition.needsApproval({
+    return definition.approval({
       approvedTools: input.approvedTools ?? new Set(),
       toolInput: toolInputRecord,
       toolName: definition.name,
     });
+  };
+}
+
+/** Adapts an eve approval policy for code mode's AI SDK 6 host-tool hook. */
+export function buildLegacyNeedsApproval(
+  toolDefinition: ToolSet[string],
+): ((toolInput: unknown) => Promise<boolean>) | undefined {
+  const approval = toolApprovals.get(toolDefinition);
+  if (approval === undefined) return undefined;
+
+  return buildLegacyNeedsApprovalFn(approval);
+}
+
+function buildLegacyNeedsApprovalFn(
+  approval: (toolInput: unknown) => Promise<ApprovalStatus>,
+): (toolInput: unknown) => Promise<boolean> {
+  return async (toolInput) => {
+    const status = await approval(toolInput);
+    if (status === "denied" || (typeof status === "object" && status?.type === "denied")) {
+      throw new Error(
+        typeof status === "object" && status.reason !== undefined
+          ? status.reason
+          : "Tool call denied by approval policy.",
+      );
+    }
+    return (
+      status === "user-approval" || (typeof status === "object" && status?.type === "user-approval")
+    );
+  };
+}
+
+/** Builds the AI SDK 7 call-level approval policy for an assembled tool set. */
+export function buildToolApproval(
+  tools: ToolSet,
+): ToolApprovalConfiguration<ToolSet, Record<string, unknown>> {
+  return async ({ toolCall }) => {
+    const toolDefinition = tools[toolCall.toolName];
+    if (toolDefinition === undefined) return undefined;
+
+    const approval = toolApprovals.get(toolDefinition);
+    return (await approval?.(toolCall.input)) as ToolApprovalStatus;
   };
 }

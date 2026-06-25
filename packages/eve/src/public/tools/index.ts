@@ -10,7 +10,6 @@ export {
   disableTool,
   isDisabledToolSentinel,
   isEnableWorkflowToolSentinel,
-  type NeedsApprovalContext,
   type ToolAuthOptions,
   type ToolAuthProvider,
   type ToolDefinition,
@@ -18,6 +17,7 @@ export {
   type ToolModelOutput,
   ExperimentalWorkflow,
 } from "#public/definitions/tool.js";
+export type { Approval, ApprovalContext, ApprovalStatus } from "#public/definitions/approval.js";
 export type {
   DynamicToolEntry,
   DynamicEvents,

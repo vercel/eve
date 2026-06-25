@@ -595,7 +595,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
 
-    const needsApproval = vi.fn(() => true);
+    const needsApproval = vi.fn(() => "user-approval" as const);
     const ctx = new ContextContainer();
     ctx.setVirtualContext(LiveStepToolsKey, [
       {
@@ -603,7 +603,7 @@ describe("createToolLoopHarness", () => {
         execute: vi.fn().mockResolvedValue({ ok: true }),
         inputSchema: jsonSchema({ type: "object" }),
         name: "tfl__getLineStatus",
-        needsApproval,
+        approval: needsApproval,
       },
     ]);
 
@@ -612,12 +612,22 @@ describe("createToolLoopHarness", () => {
     await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "Hi" }));
 
     const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as
-      | { tools: Record<string, { needsApproval?: (toolInput: unknown) => Promise<boolean> }> }
+      | {
+          toolApproval?: (options: {
+            toolCall: { input: unknown; toolCallId: string; toolName: string };
+          }) => Promise<unknown>;
+        }
       | undefined;
     expect(agentCall).toBeDefined();
-    const dynamicTool = agentCall!.tools.tfl__getLineStatus!;
-
-    await expect(dynamicTool.needsApproval?.({ line: "victoria" })).resolves.toBe(true);
+    await expect(
+      agentCall!.toolApproval?.({
+        toolCall: {
+          input: { line: "victoria" },
+          toolCallId: "call_1",
+          toolName: "tfl__getLineStatus",
+        },
+      }),
+    ).resolves.toBe("user-approval");
     expect(needsApproval).toHaveBeenCalledExactlyOnceWith({
       approvedTools: new Set(),
       toolInput: { line: "victoria" },

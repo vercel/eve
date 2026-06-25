@@ -9,7 +9,7 @@
 import type { ToolSet } from "ai";
 
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
-import type { NeedsApprovalContext } from "#public/definitions/tool.js";
+import type { Approval } from "#public/definitions/approval.js";
 import type { JsonValue } from "#public/types/json.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 
@@ -416,9 +416,7 @@ export interface ConnectionClient {
 export interface ConnectionRegistry {
   dispose(): Promise<void>;
   getClient(connectionName: string): ConnectionClient;
-  getConnectionApproval(
-    connectionName: string,
-  ): ((ctx: NeedsApprovalContext) => boolean) | undefined;
+  getConnectionApproval(connectionName: string): Approval | undefined;
   getConnectionNames(): readonly string[];
   getConnections(): readonly ResolvedConnectionDefinition[];
 }

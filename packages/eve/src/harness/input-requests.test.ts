@@ -13,10 +13,8 @@ import {
   resolvePendingInput,
   setPendingInputBatch,
 } from "#harness/input-requests.js";
-import { buildToolSet } from "#harness/tools.js";
+import { buildToolApproval, buildToolSet } from "#harness/tools.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
-
-type NeedsApprovalFn = (input: unknown, context: unknown) => Promise<boolean> | boolean;
 
 function createHarnessSession(): HarnessSession {
   return {
@@ -656,8 +654,8 @@ describe("resolvePendingInput", () => {
     // A tool requiring both approval and auth is approved first, then its
     // execute parks for sign-in. On resume the step re-runs and the toolset
     // is rebuilt from the persisted approvedTools. The recorded approval must
-    // survive on session.state across the park, so needsApproval returns
-    // false and the user is never asked to approve a second time.
+    // survive on session.state across the park, so approval returns
+    // "not-applicable" and the user is never asked to approve a second time.
     // See research/per-tool-auth-known-issues.md, issue 3.
     const session = setPendingInputBatch({
       requests: [
@@ -718,7 +716,7 @@ describe("resolvePendingInput", () => {
           execute: async () => ({ ok: true }),
           inputSchema: jsonSchema({ type: "object" }),
           name: "linear_whoami",
-          needsApproval: once(),
+          approval: once(),
         },
       ],
     ]);
@@ -727,9 +725,21 @@ describe("resolvePendingInput", () => {
       approvedTools: getApprovedTools(result.session),
       tools,
     });
-    const needsApproval = (rebuilt.linear_whoami as { needsApproval?: NeedsApprovalFn })
-      .needsApproval;
+    const approval = buildToolApproval(rebuilt);
+    if (typeof approval !== "function") throw new TypeError("Expected generic approval function.");
 
-    return expect(needsApproval?.({}, {})).resolves.toBe(false);
+    return expect(
+      approval({
+        messages: [],
+        runtimeContext: {},
+        toolCall: {
+          input: {},
+          toolCallId: "call-1",
+          toolName: "linear_whoami",
+        } as never,
+        tools: rebuilt,
+        toolsContext: {} as never,
+      }),
+    ).resolves.toBe("not-applicable");
   });
 });

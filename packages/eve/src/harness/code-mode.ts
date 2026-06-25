@@ -15,7 +15,11 @@ import {
 import { loadCodeModeModule, type CodeModeOptions } from "#shared/code-mode.js";
 import { ALL_SANDBOX_SURFACES, type SandboxSurface } from "#harness/sandbox-surface.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
-import { buildToolSet, buildToolSetFromDefinitions } from "#harness/tools.js";
+import {
+  buildLegacyNeedsApproval,
+  buildToolSet,
+  buildToolSetFromDefinitions,
+} from "#harness/tools.js";
 
 /**
  * Framework tools that must never enter a sandbox — they stay directly callable
@@ -209,6 +213,7 @@ function createRuntimeActionHostTool(harnessTool: HarnessToolDefinition): ToolSe
 
 function wrapHostToolForCodeMode(tool: ToolSet[string]): ToolSet[string] {
   const execute = tool.execute;
+  const needsApproval = buildLegacyNeedsApproval(tool);
 
   if (execute === undefined) {
     return tool;
@@ -242,10 +247,14 @@ function wrapHostToolForCodeMode(tool: ToolSet[string]): ToolSet[string] {
     return output;
   };
 
-  return {
+  const wrapped = {
     ...tool,
     execute: (input: never, options: never) => invoke(input, options),
   } as ToolSet[string];
+  if (needsApproval !== undefined) {
+    wrapped.needsApproval = needsApproval;
+  }
+  return wrapped;
 }
 
 async function resolveExecuteOutput(output: unknown): Promise<unknown> {

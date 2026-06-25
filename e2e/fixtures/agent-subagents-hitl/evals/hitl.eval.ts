@@ -19,7 +19,7 @@ function subagentOutputs(events: readonly HandleMessageStreamEvent[]): string[] 
 
 /**
  * Parent/child HITL proxying: the stock-price subagent's tool approval
- * (`needsApproval: () => true`) surfaces on the parent stream, the approval
+ * (`approval: () => "user-approval"`) surfaces on the parent stream, the approval
  * routes back down, and the child's result splices into the parent reply.
  * Parking is server-side.
  */

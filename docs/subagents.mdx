@@ -88,7 +88,7 @@ A declared subagent's tool name is the bare path-derived name, with no prefix. `
 
 Because the name lives in the same runtime tool namespace as authored tools, a subagent named `researcher` collides with a tool named `researcher`. eve rejects the build rather than picking a winner, so keep subagent directory names distinct from tool names.
 
-Do not rely on subagent delegation by itself as an approval boundary. Put sensitive tools behind `needsApproval`, connection approval, route/session authorization, or other controls wherever those tools can be called.
+Do not rely on subagent delegation by itself as an approval boundary. Put sensitive tools behind `approval`, connection approval, route/session authorization, or other controls wherever those tools can be called.
 
 Each delegated subagent spins up its own child session and stream. The parent stream carries only the control-plane events `subagent.called` and `subagent.completed`. To follow the child's full progress, read `subagent.called.data.childSessionId` and subscribe at `GET /eve/v1/session/:childSessionId/stream`.
 
