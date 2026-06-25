@@ -34,6 +34,41 @@ OpenAPI connections use the shared connection fields from [Connections](/docs/co
 
 Use `baseUrl` when the spec's `servers` list is absent, points at the wrong environment, or needs to be pinned for this agent.
 
+## Path parameters
+
+When an operation path contains dynamic segments, declare each segment as an OpenAPI path parameter. eve exposes path, query, header, and cookie parameters as top-level tool inputs, then substitutes `in: "path"` values into the matching `{name}` placeholder before making the request.
+
+```ts title="agent/connections/cart.ts"
+import { defineOpenAPIConnection } from "eve/connections";
+
+export default defineOpenAPIConnection({
+  baseUrl: "https://api.example.com",
+  description: "Cart and checkout API.",
+  spec: {
+    openapi: "3.0.3",
+    info: { title: "Cart API", version: "1.0.0" },
+    paths: {
+      "/api/{dynamicsegment}/somethingelse": {
+        get: {
+          operationId: "getSomethingElse",
+          parameters: [
+            {
+              name: "dynamicsegment",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          responses: { "200": { description: "OK" } },
+        },
+      },
+    },
+  },
+});
+```
+
+The parameter `name` must exactly match the placeholder inside the path. If the spec omits the `in: "path"` parameter, the generated tool has no input for that segment and eve cannot fill it in from query parameters.
+
 ## Operation filters
 
 To narrow which generated tools the model sees, set exactly one of `operations.allow` or `operations.block`:
