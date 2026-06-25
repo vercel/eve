@@ -8,6 +8,7 @@ import {
   createWorkflowSandboxTool,
   readWorkflowSandboxResolution,
   requestWorkflowSandboxInterrupt,
+  type WorkflowSandboxContinuationSecurity,
   type WorkflowSandboxLifecycle,
   WORKFLOW_TOOL_NAME,
 } from "#shared/workflow-sandbox.js";
@@ -22,6 +23,7 @@ interface WorkflowToolSet {
  * untouched. Only subagent and remote-agent runtime actions enter the sandbox.
  */
 export async function applyWorkflowTool(input: {
+  readonly continuationSecurity: WorkflowSandboxContinuationSecurity;
   readonly harnessTools: HarnessToolMap;
   readonly lifecycle?: WorkflowSandboxLifecycle;
   readonly tools: ToolSet;
@@ -33,6 +35,7 @@ export async function applyWorkflowTool(input: {
   }
 
   const workflowTool = await createWorkflowSandboxTool({
+    continuationSecurity: input.continuationSecurity,
     hostTools,
     lifecycle: input.lifecycle,
   });

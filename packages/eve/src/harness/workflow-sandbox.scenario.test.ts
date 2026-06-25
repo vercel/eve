@@ -39,11 +39,16 @@ const concurrentProgram = `return await Promise.all([
   tools["echo-marker"]({ message: "alpha" }),
   tools["echo-marker"]({ message: "beta" }),
 ]);`;
+const continuationSecurity = {
+  maxAgeMs: 365 * 24 * 60 * 60 * 1000,
+  signingKey: "workflow-sandbox-scenario-test-key",
+};
 
 describe("Workflow concurrent continuation", () => {
   it("collects promptly interrupted Promise.all siblings in one ledger", async () => {
     const tools = orchestrationTools();
     const { modelTools } = await applyWorkflowTool({
+      continuationSecurity,
       harnessTools: tools,
       tools: buildToolSet({ tools }),
     });
@@ -55,8 +60,11 @@ describe("Workflow concurrent continuation", () => {
       { js: concurrentProgram },
       { messages: [], toolCallId: "workflow-call" },
     );
-    const interrupt = await getWorkflowSandboxInterrupt(initialOutput);
+    const interrupt = await getWorkflowSandboxInterrupt(initialOutput, continuationSecurity);
 
+    expect(interrupt!.continuation.auth.expiresAtMs - interrupt!.continuation.auth.issuedAtMs).toBe(
+      continuationSecurity.maxAgeMs,
+    );
     expect(getWorkflowRuntimeActionInterrupts(interrupt!).map((entry) => entry.input)).toEqual([
       { message: "alpha" },
       { message: "beta" },
@@ -73,6 +81,7 @@ describe("Workflow concurrent continuation", () => {
       },
     };
     const { hostTools, modelTools } = await applyWorkflowTool({
+      continuationSecurity,
       harnessTools: tools,
       lifecycle,
       tools: buildToolSet({ tools }),
@@ -86,7 +95,7 @@ describe("Workflow concurrent continuation", () => {
       { js: concurrentProgram },
       { messages: [], toolCallId: "workflow-call" },
     );
-    const racedInterrupt = await getWorkflowSandboxInterrupt(initialOutput);
+    const racedInterrupt = await getWorkflowSandboxInterrupt(initialOutput, continuationSecurity);
     expect(racedInterrupt?.input).toEqual({ message: "beta" });
 
     const pending = getWorkflowRuntimeActionInterrupts(racedInterrupt!);
@@ -96,12 +105,16 @@ describe("Workflow concurrent continuation", () => {
     ]);
 
     const firstContinuation = await continueWorkflowSandboxInterrupt({
+      continuationSecurity,
       interrupt: pending[0]!,
       lifecycle,
       resolution: "alpha-result",
       tools: hostTools,
     });
-    const firstUnwrapped = await unwrapWorkflowSandboxResult(firstContinuation);
+    const firstUnwrapped = await unwrapWorkflowSandboxResult(
+      firstContinuation,
+      continuationSecurity,
+    );
     expect(firstUnwrapped).toMatchObject({
       interrupt: { input: { message: "beta" } },
       status: "interrupted",
@@ -109,12 +122,15 @@ describe("Workflow concurrent continuation", () => {
     if (firstUnwrapped.status !== "interrupted") throw new Error("Expected second interrupt.");
 
     const finalContinuation = await continueWorkflowSandboxInterrupt({
+      continuationSecurity,
       interrupt: firstUnwrapped.interrupt,
       lifecycle,
       resolution: "beta-result",
       tools: hostTools,
     });
-    await expect(unwrapWorkflowSandboxResult(finalContinuation)).resolves.toEqual({
+    await expect(
+      unwrapWorkflowSandboxResult(finalContinuation, continuationSecurity),
+    ).resolves.toEqual({
       output: ["alpha-result", "beta-result"],
       status: "completed",
     });

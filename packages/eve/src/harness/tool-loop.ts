@@ -51,6 +51,10 @@ import {
   stageAttachmentsToSandbox,
 } from "#harness/attachment-staging.js";
 import { applyWorkflowTool, buildWorkflowHostTools } from "#harness/workflow-sandbox.js";
+import {
+  ensureWorkflowContinuationSecurity,
+  getWorkflowContinuationSecurity,
+} from "#harness/workflow-continuation-security.js";
 import { createWorkflowLifecycle } from "#harness/workflow-lifecycle.js";
 import {
   clearPendingWorkflowInterrupt,
@@ -461,6 +465,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
 
     session = pending.session;
+    if (config.workflow === true) {
+      session = ensureWorkflowContinuationSecurity(session);
+    }
     let messages: ModelMessage[] = pending.messages;
 
     if (stepInput.input?.context !== undefined) {
@@ -645,6 +652,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         config.workflow === true
           ? (
               await applyWorkflowTool({
+                continuationSecurity: getWorkflowContinuationSecurity(session),
                 harnessTools: config.tools,
                 lifecycle:
                   emit !== undefined
@@ -1393,7 +1401,8 @@ async function handleStepResult(input: {
   };
 
   if (config.workflow === true) {
-    const workflowInterrupt = await getWorkflowSandboxInterrupt(result);
+    const continuationSecurity = getWorkflowContinuationSecurity(baseSession);
+    const workflowInterrupt = await getWorkflowSandboxInterrupt(result, continuationSecurity);
     if (workflowInterrupt !== undefined) {
       if (!isWorkflowRuntimeActionInterrupt(workflowInterrupt)) {
         throw new Error(`Unsupported Workflow interrupt kind "${workflowInterrupt.payload.kind}".`);
@@ -1765,6 +1774,7 @@ async function continuePendingWorkflowInterrupt(input: {
           skipReplayed: true,
           tools: input.config.tools,
         });
+  const continuationSecurity = getWorkflowContinuationSecurity(input.session);
 
   let continuationOutput: unknown;
   try {
@@ -1780,12 +1790,16 @@ async function continuePendingWorkflowInterrupt(input: {
     // eslint-disable-next-line no-constant-condition
     while (true) {
       continuationOutput = await continueWorkflowSandboxInterrupt({
+        continuationSecurity,
         interrupt: currentInterrupt,
         lifecycle,
         resolution: childResults[resultIndex]?.output,
         tools: hostTools,
       });
-      const loopUnwrapped = await unwrapWorkflowSandboxResult(continuationOutput);
+      const loopUnwrapped = await unwrapWorkflowSandboxResult(
+        continuationOutput,
+        continuationSecurity,
+      );
       if (loopUnwrapped.status !== "interrupted") break;
       if (!isWorkflowRuntimeActionInterrupt(loopUnwrapped.interrupt)) break;
       if (resultIndex + 1 >= childResults.length) break;
@@ -1805,7 +1819,7 @@ async function continuePendingWorkflowInterrupt(input: {
     };
   }
 
-  const unwrapped = await unwrapWorkflowSandboxResult(continuationOutput);
+  const unwrapped = await unwrapWorkflowSandboxResult(continuationOutput, continuationSecurity);
   const finalOutput = unwrapped.status === "interrupted" ? unwrapped.interrupt : unwrapped.output;
   const baseMessages = [...input.session.history, ...pending.responseMessages];
   const replacedMessages = replaceWorkflowToolResult(

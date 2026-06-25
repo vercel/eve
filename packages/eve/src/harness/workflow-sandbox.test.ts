@@ -6,6 +6,8 @@ import { applyWorkflowTool, buildWorkflowHostTools } from "#harness/workflow-san
 import { buildToolSet } from "#harness/tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
 
+const continuationSecurity = { signingKey: "workflow-sandbox-test-key" };
+
 function orchestrationTools(): HarnessToolMap {
   return new Map<string, HarnessToolDefinition>([
     [
@@ -51,7 +53,11 @@ describe("applyWorkflowTool", () => {
   it("adds only agent runtime actions to the sandbox", async () => {
     const harnessTools = orchestrationTools();
     const flatTools = buildToolSet({ tools: harnessTools });
-    const { hostTools, modelTools } = await applyWorkflowTool({ harnessTools, tools: flatTools });
+    const { hostTools, modelTools } = await applyWorkflowTool({
+      continuationSecurity,
+      harnessTools,
+      tools: flatTools,
+    });
 
     expect(modelTools.Workflow).toBeDefined();
     expect(modelTools.researcher).toBeDefined();
@@ -65,6 +71,7 @@ describe("applyWorkflowTool", () => {
   it("describes Workflow as an agents-only orchestrator", async () => {
     const harnessTools = orchestrationTools();
     const { modelTools } = await applyWorkflowTool({
+      continuationSecurity,
       harnessTools,
       tools: buildToolSet({ tools: harnessTools }),
     });
@@ -99,7 +106,11 @@ describe("applyWorkflowTool", () => {
       ],
     ]);
     const flatTools = buildToolSet({ tools: harnessTools });
-    const { hostTools, modelTools } = await applyWorkflowTool({ harnessTools, tools: flatTools });
+    const { hostTools, modelTools } = await applyWorkflowTool({
+      continuationSecurity,
+      harnessTools,
+      tools: flatTools,
+    });
 
     expect(modelTools.Workflow).toBeUndefined();
     expect(modelTools.bash).toBeDefined();
