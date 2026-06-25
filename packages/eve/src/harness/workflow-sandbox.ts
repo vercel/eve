@@ -1,9 +1,7 @@
 import { jsonSchema, type ToolSet } from "ai";
 
-import type { SessionCapabilities } from "#channel/types.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessToolMap } from "#harness/types.js";
-import { buildToolSet } from "#harness/tools.js";
 import { WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND } from "#harness/workflow-runtime-action-state.js";
 import { workflowToolDescription } from "#harness/workflow-tool-description.js";
 import {
@@ -28,14 +26,7 @@ export async function applyWorkflowTool(input: {
   readonly lifecycle?: WorkflowSandboxLifecycle;
   readonly tools: ToolSet;
 }): Promise<WorkflowToolSet> {
-  const hostTools: Record<string, ToolSet[string]> = {};
-
-  for (const name of Object.keys(input.tools)) {
-    const harnessTool = input.harnessTools.get(name);
-    if (harnessTool?.runtimeAction !== undefined) {
-      hostTools[name] = createWorkflowRuntimeActionHostTool(harnessTool);
-    }
-  }
+  const hostTools = createWorkflowHostTools(input.harnessTools, Object.keys(input.tools));
 
   if (Object.keys(hostTools).length === 0) {
     return { hostTools, modelTools: input.tools };
@@ -80,17 +71,21 @@ function workflowApiReference(generatedDescription: string): string {
 }
 
 /** Rebuilds the subagent-only host surface used to resume a parked workflow. */
-export async function buildWorkflowHostTools(input: {
-  readonly approvedTools?: ReadonlySet<string>;
-  readonly capabilities?: SessionCapabilities;
-  readonly tools: HarnessToolMap;
-}): Promise<ToolSet> {
-  const flatTools = buildToolSet({
-    approvedTools: input.approvedTools,
-    capabilities: input.capabilities,
-    tools: input.tools,
-  });
-  return (await applyWorkflowTool({ harnessTools: input.tools, tools: flatTools })).hostTools;
+export function buildWorkflowHostTools(input: { readonly tools: HarnessToolMap }): ToolSet {
+  return createWorkflowHostTools(input.tools, input.tools.keys());
+}
+
+function createWorkflowHostTools(tools: HarnessToolMap, names: Iterable<string>): ToolSet {
+  const hostTools: Record<string, ToolSet[string]> = {};
+
+  for (const name of names) {
+    const tool = tools.get(name);
+    if (tool?.runtimeAction !== undefined) {
+      hostTools[name] = createWorkflowRuntimeActionHostTool(tool);
+    }
+  }
+
+  return hostTools as ToolSet;
 }
 
 function createWorkflowRuntimeActionHostTool(harnessTool: HarnessToolDefinition): ToolSet[string] {

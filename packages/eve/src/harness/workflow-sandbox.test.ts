@@ -106,11 +106,29 @@ describe("applyWorkflowTool", () => {
     expect(hostTools).toEqual({});
   });
 
-  it("rebuilds only workflow agent host tools for continuation", async () => {
-    const hostTools = await buildWorkflowHostTools({ tools: orchestrationTools() });
+  it("rebuilds only workflow agent host tools for continuation", () => {
+    const hostTools = buildWorkflowHostTools({ tools: orchestrationTools() });
 
     expect(hostTools.researcher).toBeDefined();
     expect(hostTools.remote_reviewer).toBeDefined();
     expect(hostTools.bash).toBeUndefined();
+  });
+
+  it("does not construct ordinary tools while rebuilding the continuation surface", () => {
+    const tools: HarnessToolMap = new Map([
+      [
+        "bash",
+        {
+          description: "Run a shell command.",
+          execute: async () => "ok",
+          get inputSchema(): never {
+            throw new Error("ordinary tool schema should not be read");
+          },
+          name: "bash",
+        },
+      ],
+    ]);
+
+    expect(buildWorkflowHostTools({ tools })).toEqual({});
   });
 });

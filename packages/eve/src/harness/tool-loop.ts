@@ -16,7 +16,6 @@ import {
   type TypedToolCall,
   type TypedToolResult,
 } from "ai";
-import type { SessionCapabilities } from "#channel/types.js";
 import { isScheduleAppAuth } from "#channel/schedule-auth.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
@@ -779,7 +778,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // Workflow continuations replay the sandbox after step.started so nested
     // action lifecycle events keep the active turn's emission coordinates.
     const pendingWorkflowInterrupt = await continuePendingWorkflowInterrupt({
-      capabilities: config.capabilities,
       childResults: stepInput.input?.runtimeActionResults,
       config,
       emit,
@@ -1734,7 +1732,6 @@ async function finishConversationTurn(input: {
 
 /** Replays a parked dynamic workflow with completed child-agent results. */
 async function continuePendingWorkflowInterrupt(input: {
-  readonly capabilities?: SessionCapabilities;
   readonly childResults?: readonly { readonly output?: unknown }[];
   readonly config: ToolLoopHarnessConfig;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
@@ -1762,9 +1759,7 @@ async function continuePendingWorkflowInterrupt(input: {
 
   let continuationOutput: unknown;
   try {
-    const hostTools = await buildWorkflowHostTools({
-      approvedTools: getApprovedTools(input.session),
-      capabilities: input.capabilities,
+    const hostTools = buildWorkflowHostTools({
       tools: input.config.tools,
     });
 

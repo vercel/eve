@@ -11,7 +11,14 @@ const WORKFLOW_SANDBOX_MODULE_SPECIFIER = [
   "index.js",
 ].join("/");
 
-type WorkflowSandboxModule = typeof CodeModeModule;
+type WorkflowSandboxModule = Pick<
+  typeof CodeModeModule,
+  | "continueCodeModeInterrupt"
+  | "createCodeModeTool"
+  | "getCodeModeInterrupt"
+  | "requestCodeModeInterrupt"
+  | "unwrapCodeModeResult"
+>;
 
 type WorkflowSandboxGlobal = typeof globalThis & {
   [WORKFLOW_SANDBOX_MODULE_KEY]?: WorkflowSandboxModule;
@@ -91,11 +98,7 @@ export function readWorkflowSandboxResolution(options: unknown): unknown {
 function createWorkflowSandboxOptions(
   lifecycle: WorkflowSandboxLifecycle | undefined,
 ): CodeModeModule.CodeModeOptions {
-  const options: CodeModeModule.CodeModeOptions = {
-    approval: { mode: "interrupt" },
-  };
-  if (lifecycle !== undefined) options.lifecycle = lifecycle;
-  return options;
+  return lifecycle === undefined ? {} : { lifecycle };
 }
 
 async function loadWorkflowSandboxModule(): Promise<WorkflowSandboxModule> {
