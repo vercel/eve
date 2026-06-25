@@ -52,12 +52,14 @@ pnpm test:e2e           # fixture-owned eve eval suites (CI only)
 pnpm test:tui           # TUI smoke scripts (not e2e)
 ```
 
-Use judgment while iterating. Unit tests are fast enough to run after meaningful
-behavioral edits, but integration and scenario tests are comparatively slow.
-Do not run them after every change; run the narrowest relevant test when a
-change needs behavioral validation. Copy edits, typo fixes, small code
-reorganizations, and similar non-behavioral changes can proceed without local
-integration or scenario runs. CI is the final full-suite validation.
+We value fast local iteration whenever possible. Run `pnpm fmt`, `pnpm lint`,
+and `pnpm typecheck` frequently to catch inexpensive failures early, and run
+unit tests after material behavioral changes. Integration and scenario tests
+are comparatively slow, so do not run them after every change; run the
+narrowest relevant test when a change needs behavioral validation. Copy edits,
+typo fixes, small code reorganizations, and similar non-behavioral changes can
+proceed without local integration or scenario runs. CI is always the official
+line of defense, and every required check must pass before merge.
 
 ## Coding principles
 
