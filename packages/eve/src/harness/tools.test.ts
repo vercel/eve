@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey, type Session } from "#context/keys.js";
+import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { always, never, once } from "#public/tools/approval/approval-helpers.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import {
@@ -764,6 +765,52 @@ describe("buildToolSet", () => {
       expect(capturedCtx?.session.auth.current?.principalId).toBe("user_current");
       expect(capturedCtx?.getSandbox).toBeTypeOf("function");
       expect(capturedCtx?.getSkill).toBeTypeOf("function");
+    });
+
+    it("uses the active principal for schedule approval", async () => {
+      const human: NonNullable<Session["auth"]["current"]> = {
+        attributes: {},
+        authenticator: "test",
+        principalId: "eve:app",
+        principalType: "user",
+      };
+      const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+        [
+          "refund",
+          {
+            approval: ({ session }) => {
+              const auth = session.auth.current;
+              return auth?.authenticator === SCHEDULE_APP_AUTH.authenticator &&
+                auth.principalId === SCHEDULE_APP_AUTH.principalId &&
+                auth.principalType === SCHEDULE_APP_AUTH.principalType
+                ? "not-applicable"
+                : "user-approval";
+            },
+            description: "Refund a charge.",
+            execute: async () => "ok",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "refund",
+          },
+        ],
+      ]);
+      const scheduleSession: Session = {
+        auth: { current: SCHEDULE_APP_AUTH, initiator: SCHEDULE_APP_AUTH },
+        sessionId: "schedule-session",
+        turn: { id: "schedule-turn", sequence: 0 },
+      };
+      const humanResumedSession: Session = {
+        auth: { current: human, initiator: SCHEDULE_APP_AUTH },
+        sessionId: "schedule-session",
+        turn: { id: "human-turn", sequence: 1 },
+      };
+      const result = buildToolSet({ tools });
+
+      await expect(resolveApproval(result, "refund", {}, scheduleSession)).resolves.toBe(
+        "not-applicable",
+      );
+      await expect(resolveApproval(result, "refund", {}, humanResumedSession)).resolves.toBe(
+        "user-approval",
+      );
     });
 
     it("input-aware approval skips when compound key is in approvedTools", async () => {

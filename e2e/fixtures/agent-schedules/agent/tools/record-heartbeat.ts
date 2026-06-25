@@ -13,6 +13,14 @@ export default defineTool({
   inputSchema: z.object({
     note: z.string().min(1).describe("Any short note describing the heartbeat."),
   }),
+  approval: ({ session }) => {
+    const auth = session.auth.current;
+    return auth?.authenticator === "app" &&
+      auth.principalId === "eve:app" &&
+      auth.principalType === "runtime"
+      ? "not-applicable"
+      : "user-approval";
+  },
   async execute({ note }) {
     return { ok: true, note, token: "schedule-heartbeat-ok-P2N" };
   },
