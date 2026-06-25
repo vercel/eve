@@ -285,6 +285,147 @@ describe("emitStreamContent action requests", () => {
       type: "message.completed",
     });
   });
+
+  it("projects local and provider tool results at the same stream position", async () => {
+    const tools = new Map<string, HarnessToolDefinition>([
+      [
+        "web_search",
+        {
+          description: "Search the web.",
+          execute: async () => ({ results: [] }),
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "web_search",
+        },
+      ],
+    ]);
+    const parts = (providerExecuted: boolean): TextStreamPart<ToolSet>[] => {
+      const providerExecution: { readonly providerExecuted?: true } = providerExecuted
+        ? { providerExecuted: true }
+        : {};
+      return [
+        { id: "text-1", text: "Searching now.", type: "text-delta" },
+        {
+          input: { query: "eve" },
+          ...providerExecution,
+          toolCallId: "call-1",
+          toolName: "web_search",
+          type: "tool-call",
+        },
+        {
+          output: { results: ["partial"] },
+          preliminary: true,
+          ...providerExecution,
+          toolCallId: "call-1",
+          toolName: "web_search",
+          type: "tool-result",
+        },
+        {
+          output: { results: ["eve"] },
+          ...providerExecution,
+          toolCallId: "call-1",
+          toolName: "web_search",
+          type: "tool-result",
+        },
+        { id: "text-2", text: "Done.", type: "text-delta" },
+        { finishReason: "stop", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[];
+    };
+    const localEmit = createEmitStub();
+    const providerEmit = createEmitStub();
+
+    await emitStreamContent(localEmit, EMISSION_STATE, streamOf(parts(false)), {
+      excludedActionToolNames: new Set(),
+      tools,
+    });
+    await emitStreamContent(providerEmit, EMISSION_STATE, streamOf(parts(true)), {
+      excludedActionToolNames: new Set(),
+      tools,
+    });
+
+    const localEvents = vi.mocked(localEmit).mock.calls.map(([event]) => event);
+    const providerEvents = vi.mocked(providerEmit).mock.calls.map(([event]) => event);
+
+    expect(localEvents).toEqual(providerEvents);
+    expect(localEvents.map((event) => event.type)).toEqual([
+      "message.appended",
+      "message.completed",
+      "actions.requested",
+      "action.result",
+      "message.appended",
+      "message.completed",
+    ]);
+    expect(localEvents[3]).toMatchObject({
+      data: { result: { output: { results: ["eve"] } } },
+      type: "action.result",
+    });
+  });
+
+  it("projects local and provider tool failures at the same stream position", async () => {
+    const tools = new Map<string, HarnessToolDefinition>([
+      [
+        "web_search",
+        {
+          description: "Search the web.",
+          execute: async () => ({ results: [] }),
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "web_search",
+        },
+      ],
+    ]);
+    const parts = (providerExecuted: boolean): TextStreamPart<ToolSet>[] => {
+      const providerExecution: { readonly providerExecuted?: true } = providerExecuted
+        ? { providerExecuted: true }
+        : {};
+      return [
+        {
+          input: { query: "eve" },
+          ...providerExecution,
+          toolCallId: "call-1",
+          toolName: "web_search",
+          type: "tool-call",
+        },
+        {
+          error: new Error("Search failed"),
+          input: { query: "eve" },
+          ...providerExecution,
+          toolCallId: "call-1",
+          toolName: "web_search",
+          type: "tool-error",
+        },
+        { id: "text-1", text: "I could not find a result.", type: "text-delta" },
+        { finishReason: "stop", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[];
+    };
+    const localEmit = createEmitStub();
+    const providerEmit = createEmitStub();
+
+    await emitStreamContent(localEmit, EMISSION_STATE, streamOf(parts(false)), {
+      excludedActionToolNames: new Set(),
+      tools,
+    });
+    await emitStreamContent(providerEmit, EMISSION_STATE, streamOf(parts(true)), {
+      excludedActionToolNames: new Set(),
+      tools,
+    });
+
+    const localEvents = vi.mocked(localEmit).mock.calls.map(([event]) => event);
+    const providerEvents = vi.mocked(providerEmit).mock.calls.map(([event]) => event);
+
+    expect(localEvents).toEqual(providerEvents);
+    expect(localEvents.map((event) => event.type)).toEqual([
+      "actions.requested",
+      "action.result",
+      "message.appended",
+      "message.completed",
+    ]);
+    expect(localEvents[1]).toMatchObject({
+      data: {
+        result: { callId: "call-1", isError: true, output: "Search failed" },
+        status: "failed",
+      },
+      type: "action.result",
+    });
+  });
 });
 
 describe("emitStreamContent error-part handling", () => {

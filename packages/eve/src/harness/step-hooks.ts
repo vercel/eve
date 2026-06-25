@@ -190,9 +190,8 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
  * arguments — the runtime event stream only sees successfully parsed
  * tool calls.
  *
- * `handledInlineToolResultCallIds` lists approval-resume tool-result
- * call ids the stream already handled inline (see `emitStreamContent`).
- * This skips them to avoid double-emission.
+ * `handledInlineToolResultCallIds` contains results emitted by
+ * `emitStreamContent` or sent to authorization. Skip them here.
  */
 export async function emitStepActions(
   emitFn: HarnessEmitFn,
@@ -220,16 +219,16 @@ export async function emitStepActions(
       .map((toolCall) => toolCall.toolCallId),
   ]);
 
-  const isBaseExcluded = (toolCallId: string, toolName: string): boolean =>
+  const isExcluded = (toolCallId: string, toolName: string): boolean =>
     excludedCallIds.has(toolCallId) || options.excludedActionToolNames.has(toolName);
 
-  // Calls observed from fullStream already emitted actions.requested. Keep
-  // their terminal results below, but do not repeat the request event.
+  // Streamed calls already emitted their request. The loop below emits their
+  // result.
   const actions = (step.toolCalls as TypedToolCall<ToolSet>[])
     .filter(
       (toolCall) =>
-        !isBaseExcluded(toolCall.toolCallId, toolCall.toolName) &&
-        options.emittedActionCallIds?.has(toolCall.toolCallId) !== true,
+        !isExcluded(toolCall.toolCallId, toolCall.toolName) &&
+        !options.emittedActionCallIds?.has(toolCall.toolCallId),
     )
     .map((toolCall) =>
       createRuntimeActionRequestFromToolCall({
@@ -258,7 +257,7 @@ export async function emitStepActions(
   );
 
   for (const result of reconcileToolResults(step)) {
-    if (isBaseExcluded(result.callId, result.toolName)) {
+    if (isExcluded(result.callId, result.toolName)) {
       continue;
     }
 

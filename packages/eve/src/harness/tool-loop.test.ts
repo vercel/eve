@@ -1957,9 +1957,19 @@ describe("createToolLoopHarness", () => {
     expect(isHarnessBetweenTurns(result.session)).toBe(false);
   });
 
-  it("emits failed action.result from tool response messages when toolResults are missing", async () => {
+  it("emits failed action.result from tool response messages when the stream and toolResults omit it", async () => {
     setupMockAgent({
       finishReason: "tool-calls",
+      fullStreamParts: [
+        { id: "text-1", text: "Let me try that.", type: "text-delta" },
+        {
+          input: { city: "Vienna" },
+          toolCallId: "call-1",
+          toolName: "add",
+          type: "tool-call",
+        },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ],
       response: {
         messages: [
           {
@@ -2023,9 +2033,19 @@ describe("createToolLoopHarness", () => {
     });
   });
 
-  it("does not duplicate action.result when toolResults and response messages both include it", async () => {
+  it("prefers toolResults over response messages when the stream omits the result", async () => {
     setupMockAgent({
       finishReason: "tool-calls",
+      fullStreamParts: [
+        { id: "text-1", text: "Let me try that.", type: "text-delta" },
+        {
+          input: { city: "Vienna" },
+          toolCallId: "call-1",
+          toolName: "add",
+          type: "tool-call",
+        },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ],
       response: {
         messages: [
           {
@@ -3231,8 +3251,8 @@ describe("createToolLoopHarness", () => {
       "step.started",
       "message.completed",
       "actions.requested",
-      "message.completed",
       "action.result",
+      "message.completed",
       "step.completed",
       "turn.completed",
       "session.waiting",
@@ -3392,10 +3412,10 @@ describe("createToolLoopHarness", () => {
       "step.started",
       "message.completed",
       "actions.requested",
+      "action.result",
       "actions.requested",
+      "action.result",
       "message.completed",
-      "action.result",
-      "action.result",
       "step.completed",
       "turn.completed",
       "session.waiting",
@@ -4375,7 +4395,7 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
-  it("emits parallel tool calls incrementally while preserving existing result order", async () => {
+  it("emits parallel tool calls incrementally and preserves stream result order", async () => {
     setupMockAgent({
       finishReason: "stop",
       fullStreamParts: [
@@ -4512,7 +4532,7 @@ describe("createToolLoopHarness", () => {
       events
         .filter((event) => event.type === "action.result")
         .map((event) => event.data.result.callId),
-    ).toEqual(["call-1", "call-2"]);
+    ).toEqual(["call-2", "call-1"]);
   });
 
   it("emits each tool call as it streams across multiple assistant groups", async () => {
@@ -4631,11 +4651,11 @@ describe("createToolLoopHarness", () => {
       "step.started",
       "message.completed",
       "actions.requested",
+      "action.result",
       "message.completed",
       "actions.requested",
+      "action.result",
       "message.completed",
-      "action.result",
-      "action.result",
       "step.completed",
       "turn.completed",
       "session.waiting",
