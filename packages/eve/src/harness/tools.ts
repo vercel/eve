@@ -26,7 +26,6 @@ import {
 } from "#harness/authorization.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { withToolOutputSerializationError } from "#harness/tool-output-serialization.js";
-import { isCodeModeToolExecutionOptions } from "#runtime/framework-tools/code-mode-connection-auth.js";
 
 type ToolModelOutputValue =
   | { readonly type: "json"; readonly value: JSONValue }
@@ -167,11 +166,7 @@ export function buildToolSetFromDefinitions(input: {
  * stashed out-of-band ({@link stashToolInterrupt}) for the park detector while
  * the AI SDK records an opaque {@link AuthorizationPendingModelOutput} that
  * omits OAuth URLs, user codes, and hook URLs from model-facing history.
- *
- * Code-mode host executions consume the raw signal directly (see
- * `harness/code-mode.ts`) and their output is not a model-facing tool result,
- * so they pass through untouched. Returns `undefined` for client-side tools
- * (no `execute`).
+ * Returns `undefined` for client-side tools (no `execute`).
  */
 export function wrapToolExecute(
   definition: HarnessToolDefinition,
@@ -181,7 +176,6 @@ export function wrapToolExecute(
   return async (input, options) => {
     const output = await execute(input);
     if (isAuthorizationSignal(output)) {
-      if (isCodeModeToolExecutionOptions(options)) return output;
       stashToolInterrupt(loadContext(), options.toolCallId, output);
       return modelFacingAuthorizationOutput(output);
     }
@@ -320,34 +314,6 @@ function buildApprovalFn(
       toolName: definition.name,
     });
     return typeof status === "boolean" ? (status ? "user-approval" : "not-applicable") : status;
-  };
-}
-
-/** Adapts an eve approval policy for code mode's AI SDK 6 host-tool hook. */
-export function buildLegacyNeedsApproval(
-  toolDefinition: ToolSet[string],
-): ((toolInput: unknown) => Promise<boolean>) | undefined {
-  const approval = toolApprovals.get(toolDefinition);
-  if (approval === undefined) return undefined;
-
-  return buildLegacyNeedsApprovalFn(approval);
-}
-
-function buildLegacyNeedsApprovalFn(
-  approval: (toolInput: unknown) => Promise<NativeApprovalStatus>,
-): (toolInput: unknown) => Promise<boolean> {
-  return async (toolInput) => {
-    const status = await approval(toolInput);
-    if (status === "denied" || (typeof status === "object" && status?.type === "denied")) {
-      throw new Error(
-        typeof status === "object" && status.reason !== undefined
-          ? status.reason
-          : "Tool call denied by approval policy.",
-      );
-    }
-    return (
-      status === "user-approval" || (typeof status === "object" && status?.type === "user-approval")
-    );
   };
 }
 

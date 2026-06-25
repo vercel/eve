@@ -19,10 +19,10 @@ import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
 import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import {
-  getRuntimeActionKeyFromInterrupt,
-  isCodeModeRuntimeActionInterrupt,
-} from "#harness/code-mode-runtime-action-state.js";
-import { getPendingCodeModeInterrupt } from "#harness/code-mode-interrupt-state.js";
+  getRuntimeActionKeyFromWorkflowInterrupt,
+  isWorkflowRuntimeActionInterrupt,
+} from "#harness/workflow-runtime-action-state.js";
+import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import type { JsonObject } from "#shared/json.js";
@@ -90,7 +90,7 @@ export type DurableStepResult =
       readonly sessionState: DurableSessionState;
     }
   | {
-      readonly action: "dispatch-code-mode-runtime-actions";
+      readonly action: "dispatch-workflow-runtime-actions";
       readonly pendingRuntimeActionKeys: readonly string[];
       readonly serializedContext: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
@@ -356,14 +356,16 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   if (stepResult.next === null) {
     writer.releaseLock();
 
-    const codeModeInterrupt = getPendingCodeModeInterrupt(stepResult.session.state);
+    const workflowInterrupt = getPendingWorkflowInterrupt(stepResult.session.state);
     if (
-      codeModeInterrupt !== undefined &&
-      isCodeModeRuntimeActionInterrupt(codeModeInterrupt.interrupt)
+      workflowInterrupt !== undefined &&
+      isWorkflowRuntimeActionInterrupt(workflowInterrupt.interrupt)
     ) {
       return {
-        action: "dispatch-code-mode-runtime-actions",
-        pendingRuntimeActionKeys: [getRuntimeActionKeyFromInterrupt(codeModeInterrupt.interrupt)],
+        action: "dispatch-workflow-runtime-actions",
+        pendingRuntimeActionKeys: [
+          getRuntimeActionKeyFromWorkflowInterrupt(workflowInterrupt.interrupt),
+        ],
         serializedContext: nextSerializedContext,
         sessionState: nextState,
       };

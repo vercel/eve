@@ -30,7 +30,6 @@ import { setPendingInputBatch } from "#harness/input-requests.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
-import { isCodeModeEnvEnabled } from "#shared/code-mode.js";
 import {
   CONDITIONAL_DELIVERY_INSTRUCTION,
   EMPTY_DELIVERY_SENTINEL,
@@ -108,7 +107,6 @@ function createTestConfig(
   overrides?: Partial<ToolLoopHarnessConfig>,
 ): ToolLoopHarnessConfig {
   return {
-    codeMode: isCodeModeEnvEnabled(),
     handleEvent: emit,
     mode,
     resolveModel: vi.fn().mockResolvedValue({} as LanguageModel),
@@ -566,7 +564,7 @@ describe("createToolLoopHarness", () => {
     );
   });
 
-  it("keeps executable tools direct when code mode is disabled", async () => {
+  it("keeps executable tools directly available to the model", async () => {
     setupMockAgent({
       finishReason: "stop",
       response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -575,7 +573,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
 
-    const config = createTestConfig("conversation", undefined, { codeMode: false });
+    const config = createTestConfig("conversation");
     const runStep = createToolLoopHarness(config);
     const session = createTestSession();
 
@@ -584,7 +582,7 @@ describe("createToolLoopHarness", () => {
     const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
     expect(agentCall).toBeDefined();
     expect(agentCall!.tools).toHaveProperty("add");
-    expect(agentCall!.tools).not.toHaveProperty("code_mode");
+    expect(agentCall!.tools).not.toHaveProperty("Workflow");
   });
 
   it("forwards the agent reasoning effort to the model call", async () => {
@@ -620,7 +618,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
 
-    const needsApproval = vi.fn(() => "user-approval" as const);
+    const approval = vi.fn(() => "user-approval" as const);
     const ctx = new ContextContainer();
     ctx.set(SessionKey, {
       auth: {
@@ -641,11 +639,11 @@ describe("createToolLoopHarness", () => {
         execute: vi.fn().mockResolvedValue({ ok: true }),
         inputSchema: jsonSchema({ type: "object" }),
         name: "tfl__getLineStatus",
-        approval: needsApproval,
+        approval,
       },
     ]);
 
-    const config = createTestConfig("conversation", undefined, { codeMode: false });
+    const config = createTestConfig("conversation");
     const runStep = createToolLoopHarness(config);
     await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "Hi" }));
 
@@ -668,7 +666,7 @@ describe("createToolLoopHarness", () => {
         }),
       ),
     ).resolves.toBe("user-approval");
-    expect(needsApproval).toHaveBeenCalledExactlyOnceWith(
+    expect(approval).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
         approvedTools: new Set(),
         session: expect.objectContaining({
@@ -705,7 +703,6 @@ describe("createToolLoopHarness", () => {
       },
     });
     const config: ToolLoopHarnessConfig = {
-      codeMode: true,
       mode: "conversation",
       resolveModel: vi.fn().mockResolvedValue({} as LanguageModel),
       tools: new Map([
@@ -733,16 +730,12 @@ describe("createToolLoopHarness", () => {
     const runStep = createToolLoopHarness(config);
     await runStep(session, { message: "search" });
 
-    // The ToolLoopAgent should expose the user's web_search override through code mode,
+    // The ToolLoopAgent should expose the user's web_search override directly,
     // not replace it with a provider-managed tool.
     const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
     expect(agentCall).toBeDefined();
-    expect(agentCall!.tools).not.toHaveProperty("web_search");
-    expect(agentCall!.tools).toHaveProperty("code_mode");
-    const codeModeTool = (agentCall!.tools as Record<string, unknown>).code_mode as {
-      description?: string;
-    };
-    expect(codeModeTool?.description).toContain("Custom search.");
+    expect(agentCall!.tools).toHaveProperty("web_search");
+    expect(agentCall!.tools).not.toHaveProperty("Workflow");
   });
 
   it("returns done when task mode finishes with stop", async () => {
@@ -2611,8 +2604,6 @@ describe("createToolLoopHarness", () => {
     });
 
     it("retries with the offending tool dropped and a one-shot system note", async () => {
-      vi.stubEnv("CODE_MODE", "1");
-
       const resolveRuntimeContext = vi.fn((input: InstrumentationStepStartedEventInput) => ({
         runtimeContext: {
           "test.attempt": Array.isArray(input.modelInput.instructions) ? "retry" : "original",
@@ -2645,7 +2636,6 @@ describe("createToolLoopHarness", () => {
         },
       });
       const config: ToolLoopHarnessConfig = {
-        codeMode: true,
         mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
         tools: new Map([
@@ -2694,7 +2684,7 @@ describe("createToolLoopHarness", () => {
       const retryCall = vi.mocked(ToolLoopAgent).mock.calls[1]?.[0];
       const retryTools = retryCall!.tools as Record<string, unknown>;
       expect(retryTools.web_search).toBeUndefined();
-      expect(retryTools.code_mode).toBeDefined();
+      expect(retryTools.add).toBeDefined();
       expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].runtimeContext).toMatchObject({
         "test.attempt": "original",
       });
@@ -5754,7 +5744,6 @@ describe("createToolLoopHarness", () => {
         ],
       ]);
       const config = createTestConfig("conversation", undefined, {
-        codeMode: false,
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
         tools,
       });

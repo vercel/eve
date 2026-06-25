@@ -1,20 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  formatSlackContextBlock,
-  parseAppMentionEvent,
-  parseDirectMessageEvent,
-  type SlackInboundContext,
-} from "#public/channels/slack/inbound.js";
-
-const FULL_CONTEXT: SlackInboundContext = {
-  channelId: "C01",
-  fullName: "Jane Smith",
-  teamId: "T01",
-  threadTs: "1700000000.000001",
-  userId: "U01",
-  userName: "jane.smith",
-};
+import { parseAppMentionEvent, parseDirectMessageEvent } from "#public/channels/slack/inbound.js";
 
 describe("parseAppMentionEvent", () => {
   it("returns a SlackMessage with mrkdwn re-rendered as GFM", () => {
@@ -274,30 +260,5 @@ describe("parseDirectMessageEvent", () => {
       event: { type: "message", channel_type: "im", user: "U01" },
     });
     expect(result).toBeNull();
-  });
-});
-
-describe("formatSlackContextBlock", () => {
-  it("renders every available field between tag delimiters", () => {
-    const block = formatSlackContextBlock(FULL_CONTEXT);
-    expect(block.startsWith("<slack_context>")).toBe(true);
-    expect(block.endsWith("</slack_context>")).toBe(true);
-    expect(block).toContain("user_id: U01");
-    expect(block).toContain("user_name: jane.smith");
-    expect(block).toContain("full_name: Jane Smith");
-    expect(block).toContain("channel_id: C01");
-    expect(block).toContain("thread_ts: 1700000000.000001");
-    expect(block).toContain("team_id: T01");
-  });
-
-  it("omits optional fields that are not supplied", () => {
-    const block = formatSlackContextBlock({
-      channelId: "C01",
-      threadTs: "1.0",
-      userId: "U01",
-    });
-    expect(block).not.toContain("user_name");
-    expect(block).not.toContain("full_name");
-    expect(block).not.toContain("team_id");
   });
 });

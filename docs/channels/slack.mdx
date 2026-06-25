@@ -54,27 +54,21 @@ Inbound hooks decide whether to dispatch a turn and with what `auth`. Return `{ 
 - `onDirectMessage(ctx, message)` handles `message.im` events (needs `im:history` scope). Bot-authored messages and edits are filtered out first.
 - `onInteraction(action, ctx)` handles `block_actions` callbacks not consumed by HITL.
 
-You get the triggering mention by default, but not the earlier replies in the thread. Pull them in with `loadThreadContextMessages` and return them as `context`, which eve appends to history as user messages the model sees on every later turn. Use `since: "last-agent-reply"` so repeated mentions in one thread inject only what is new:
+eve attaches the triggering Slack user id to the same model message as the message text. This keeps speaker attribution intact when several people use one thread without making profile lookup requests.
+
+You get the triggering mention by default, but not the earlier replies in the thread. Enable `threadContext` to fetch and inject them with every message attributed by stable Slack user id. Use `since: "last-agent-reply"` so repeated mentions inject only what is new:
 
 ```ts
-import { defaultSlackAuth, loadThreadContextMessages, slackChannel } from "eve/channels/slack";
+import { slackChannel } from "eve/channels/slack";
 import { connectSlackCredentials } from "@vercel/connect/eve";
 
 export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
-  async onAppMention(ctx, message) {
-    const auth = defaultSlackAuth(message, ctx);
-    const prior = await loadThreadContextMessages(ctx.thread, message, {
-      since: "last-agent-reply",
-    });
-    if (prior.length === 0) return { auth };
-    const transcript = prior
-      .map((m) => `${m.isMe ? "you" : (m.user ?? "user")}: ${m.markdown}`)
-      .join("\n");
-    return { auth, context: [`Recent thread messages since your last reply:\n\n${transcript}`] };
-  },
+  threadContext: { since: "last-agent-reply" },
 });
 ```
+
+`threadContext` performs one `conversations.replies` request for each triggering thread reply and requires the matching Slack history scope. Omit it when the agent should see only direct mentions. `loadThreadContextMessages` remains available when you need custom filtering or non-model processing of the raw thread messages.
 
 ### Delivery
 

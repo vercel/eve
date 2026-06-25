@@ -12,6 +12,7 @@ import type { Approval } from "#public/definitions/approval.js";
 import type { ToolModelOutput } from "#public/definitions/tool.js";
 import type {
   AuthorizationDefinition,
+  ConnectionAuthResolver,
   ConnectionProtocol,
   HeadersDefinition,
   ToolFilterDefinition,
@@ -93,7 +94,7 @@ export type ResolvedSchedule = Readonly<
  */
 export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
   readonly approval?: Approval;
-  readonly authorization?: Readonly<AuthorizationDefinition>;
+  readonly authorization?: Readonly<AuthorizationDefinition> | ConnectionAuthResolver;
   readonly connectionName: string;
   readonly description: string;
   readonly headers?: Readonly<HeadersDefinition>;
@@ -373,7 +374,7 @@ export interface ResolvedAgent {
   /**
    * Whether the author opted into the framework `Workflow` orchestration tool
    * by re-exporting the `Workflow` marker as the default export of a file in
-   * `agent/tools/`. When true, the harness exposes a code-mode-style sandbox
+   * `agent/tools/`. When true, the harness exposes an isolated JavaScript sandbox
    * whose only callable operations are this agent's subagents and remote
    * agents.
    */

@@ -140,10 +140,6 @@ function normalizeExperimentalDefinition(
 
   const compiledExperimental: Mutable<NonNullable<CompiledAgentDefinition["experimental"]>> = {};
 
-  if (experimental.codeMode !== undefined) {
-    compiledExperimental.codeMode = experimental.codeMode;
-  }
-
   if (experimental.workflow !== undefined) {
     compiledExperimental.workflow = {
       world: experimental.workflow.world,

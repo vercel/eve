@@ -189,19 +189,11 @@ export interface ToolLoopHarnessConfig {
    */
   readonly capabilities?: SessionCapabilities;
   /**
-   * Routes executable tools through the sandboxed code-execution wrapper
-   * instead of exposing them directly to the model. Resolved by the
-   * runtime from the agent's `experimental.codeMode` flag (with the
-   * `EVE_EXPERIMENTAL_CODE_MODE` env backstop). Defaults to `false`.
-   */
-  readonly codeMode?: boolean;
-  /**
-   * Exposes the `Workflow` orchestration tool — a code-mode-style sandbox
+   * Exposes the `Workflow` orchestration tool — an isolated JavaScript sandbox
    * whose only callable operations are this agent's subagents and remote
    * agents. Resolved by the runtime from the agent's `workflowEnabled` flag
    * (set when `agent/tools/workflow.ts` re-exports the `Workflow` marker).
-   * Independent of {@link ToolLoopHarnessConfig.codeMode} — both may be on at
-   * once. Defaults to `false`.
+   * Defaults to `false`.
    */
   readonly workflow?: boolean;
   readonly handleEvent?: HandleEventFn;

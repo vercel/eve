@@ -2,20 +2,20 @@ import type { HarnessRuntimeActionDefinition } from "#harness/execute-tool.js";
 import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
 import type { RuntimeActionRequest } from "#runtime/actions/types.js";
 import type { JsonObject } from "#shared/json.js";
-import type { CodeModeInterrupt } from "#shared/code-mode.js";
+import type { WorkflowSandboxInterrupt } from "#shared/workflow-sandbox.js";
 
-export const CODE_MODE_RUNTIME_ACTION_INTERRUPT_KIND = "eve.runtime-action";
+export const WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND = "eve.workflow-runtime-action";
 
-export function isCodeModeRuntimeActionInterrupt(interrupt: unknown): boolean {
+export function isWorkflowRuntimeActionInterrupt(interrupt: unknown): boolean {
   return (
     isRecord(interrupt) &&
     isRecord(interrupt.payload) &&
-    interrupt.payload.kind === CODE_MODE_RUNTIME_ACTION_INTERRUPT_KIND
+    interrupt.payload.kind === WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND
   );
 }
 
-export function buildRuntimeActionFromInterrupt(
-  interrupt: CodeModeInterrupt,
+export function buildRuntimeActionFromWorkflowInterrupt(
+  interrupt: WorkflowSandboxInterrupt,
 ): RuntimeActionRequest {
   const raw = interrupt.payload as Record<string, unknown>;
   const runtimeAction = raw.runtimeAction as HarnessRuntimeActionDefinition;
@@ -47,8 +47,10 @@ export function buildRuntimeActionFromInterrupt(
   };
 }
 
-export function getRuntimeActionKeyFromInterrupt(interrupt: CodeModeInterrupt): string {
-  return getRuntimeActionRequestKey(buildRuntimeActionFromInterrupt(interrupt));
+export function getRuntimeActionKeyFromWorkflowInterrupt(
+  interrupt: WorkflowSandboxInterrupt,
+): string {
+  return getRuntimeActionRequestKey(buildRuntimeActionFromWorkflowInterrupt(interrupt));
 }
 
 function sanitizeCallId(id: string): string {

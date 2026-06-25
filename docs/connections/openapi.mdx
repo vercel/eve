@@ -55,8 +55,8 @@ Filters match `operationId`. If an operation does not declare one, use the deter
 
 OpenAPI connections support the shared connection options:
 
-- `auth` for static tokens, Vercel Connect, or self-hosted interactive OAuth.
-- `headers` for API-key schemes or extra server configuration.
+- `auth` for static tokens, Vercel Connect, self-hosted interactive OAuth, or a per-caller provider resolver.
+- `headers` for static or per-caller API-key schemes and extra server configuration.
 - `approval` for human-in-the-loop gates before generated operation tools run.
 
 See [Connections](/docs/connections) for the shared auth, headers, and approval shapes.

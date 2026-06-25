@@ -49,8 +49,7 @@ export interface PublicToolDefinition<
   inputSchema: PublicToolInputSchema<TInput>;
   /**
    * Optional schema describing the value returned by the tool executor.
-   * Code mode uses this to expose typed host-tool return values to the
-   * generated program, and the AI SDK can use it for tool result typing.
+   * The AI SDK can use this for tool result typing.
    */
   outputSchema?: PublicToolOutputSchema<TOutput>;
 }

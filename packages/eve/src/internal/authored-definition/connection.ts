@@ -1,7 +1,7 @@
 import type { McpClientConnectionDefinition } from "#public/definitions/connections/mcp.js";
 import type { OpenAPIConnectionDefinition } from "#public/definitions/connections/openapi.js";
 import type {
-  AuthorizationDefinition,
+  ConnectionAuthDefinition,
   HeadersDefinition,
   ToolFilterDefinition,
 } from "#runtime/connections/types.js";
@@ -219,14 +219,18 @@ function validateDescription(record: Record<string, unknown>, message: string): 
 function normalizeAuthorization(
   record: Record<string, unknown>,
   message: string,
-): AuthorizationDefinition | undefined {
+): ConnectionAuthDefinition | undefined {
   if (record.auth === undefined) {
     return undefined;
   }
 
+  if (typeof record.auth === "function") {
+    return record.auth as ConnectionAuthDefinition;
+  }
+
   const auth = expectObjectRecord(
     record.auth,
-    `${message} The "auth" field must be an object with a "getToken" method.`,
+    `${message} The "auth" field must be an object with a "getToken" method or a function.`,
   );
   expectOnlyKnownKeys(auth, KNOWN_AUTHORIZATION_KEYS, `${message} The "auth" field`);
 
@@ -242,7 +246,7 @@ function normalizeHeaders(
   }
 
   if (typeof record.headers === "function") {
-    return record.headers as () => Record<string, string> | Promise<Record<string, string>>;
+    return record.headers as HeadersDefinition;
   }
 
   if (

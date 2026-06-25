@@ -16,7 +16,7 @@ Every agent gets an `agent` tool by default. The model calls it to delegate a su
 }
 ```
 
-The copy shares the parent's sandbox and tools, and a child's file writes are immediately visible to the parent. That is what makes parallel calls natural: fan out a few copies to fix different files at once. The copy inherits auth and connections, but starts with fresh conversation history and fresh state. If a declared subagent calls `agent`, the child is a copy of _that_ subagent, not the root.
+The copy shares the parent's sandbox and tools, and a child's file writes are immediately visible to the parent. That is what makes parallel calls natural: emit multiple `agent` calls in one response to fan out a small, fixed set of independent subtasks. eve runs that batch concurrently and returns every result before the parent continues. Give children non-overlapping write scopes when they work in the shared sandbox. The copy inherits auth and connections, but starts with fresh conversation history and fresh state. If a declared subagent calls `agent`, the child is a copy of _that_ subagent, not the root.
 
 The parent transfers data to the child through the `message` input it gives the subagent. Do not include sensitive data in a subagent request unless that child and its inherited tools, connections, sandbox, and telemetry path are appropriate for that data.
 

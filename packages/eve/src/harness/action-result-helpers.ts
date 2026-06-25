@@ -39,8 +39,8 @@ function toJsonValue(value: unknown): JsonValue {
  *
  * This is the single coercion point for `action.result` projection. Both
  * native tool execution (via {@link createRuntimeToolResultFromStepResult} /
- * {@link createRuntimeToolResultFromMessagePart}) and code-mode nested tool
- * calls funnel through here, so the raw-output-vs-`toModelOutput` decision —
+ * {@link createRuntimeToolResultFromMessagePart}) and Workflow child calls
+ * funnel through here, so the raw-output-vs-`toModelOutput` decision —
  * always raw — is decided once. The output is validated as JSON here so bad
  * values never reach protocol events or persisted history.
  */

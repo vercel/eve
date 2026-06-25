@@ -24,6 +24,7 @@ export function createSendFn<TState = undefined>(
     const callback = (options as { callback?: SendOptions<TState>["callback"] }).callback;
     const mode = (options as { mode?: SendOptions<TState>["mode"] }).mode ?? "conversation";
     const state = (options as { state?: TState }).state;
+    const title = (options as { title?: string }).title;
     const rawToken = (options as { continuationToken: string }).continuationToken;
     const continuationToken = `${channelName}:${rawToken}`;
 
@@ -75,6 +76,7 @@ export function createSendFn<TState = undefined>(
       input: { message: message ?? "", context, outputSchema },
       mode,
       requestId: metadata.requestId,
+      title,
     };
     const handle = await runtime.run(runInput);
 

@@ -210,7 +210,12 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
   }
 
   if (manifest.config.experimental !== undefined) {
-    config.experimental = { codeMode: manifest.config.experimental.codeMode };
+    config.experimental = {
+      workflow:
+        manifest.config.experimental.workflow === undefined
+          ? undefined
+          : { world: manifest.config.experimental.workflow.world },
+    };
   }
 
   if (manifest.config.outputSchema !== undefined) {

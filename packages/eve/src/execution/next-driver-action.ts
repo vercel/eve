@@ -35,7 +35,7 @@ export type NextDriverAction =
       readonly serializedContext: Record<string, unknown>;
     }
   | {
-      readonly kind: "dispatch-code-mode-runtime-actions";
+      readonly kind: "dispatch-workflow-runtime-actions";
       readonly pendingActionKeys: readonly string[];
       readonly sessionState: DurableSessionState;
       readonly serializedContext: Record<string, unknown>;

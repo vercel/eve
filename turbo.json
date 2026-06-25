@@ -46,7 +46,6 @@
     },
     "test": {
       "cache": false,
-      "env": ["EVE_EXPERIMENTAL_CODE_MODE"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!.eve/**",
@@ -77,7 +76,6 @@
     },
     "test:integration": {
       "cache": false,
-      "env": ["EVE_EXPERIMENTAL_CODE_MODE"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!.eve/**",
@@ -93,7 +91,6 @@
     },
     "test:scenario": {
       "cache": false,
-      "env": ["EVE_EXPERIMENTAL_CODE_MODE"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!.eve/**",
@@ -109,7 +106,6 @@
     },
     "test:unit": {
       "cache": false,
-      "env": ["EVE_EXPERIMENTAL_CODE_MODE"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!.eve/**",

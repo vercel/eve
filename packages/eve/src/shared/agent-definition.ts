@@ -100,20 +100,8 @@ export interface PublicAgentCompactionDefinition {
  * Experimental, opt-in agent capabilities authored in `agent.ts`.
  *
  * These options are unstable and may change or be removed in any release.
- * Each agent (the root agent and every subagent) carries its own flags, so
- * code mode can be enabled for the whole graph, only a subagent, or only
- * the parent.
  */
 export interface AgentExperimentalDefinition {
-  /**
-   * Routes executable tools through a sandboxed code-execution wrapper
-   * instead of exposing them directly to the model. The model writes
-   * JavaScript that calls the tools inside the sandbox.
-   *
-   * When unset, eve falls back to the `EVE_EXPERIMENTAL_CODE_MODE`
-   * environment variable (`"1"` enables it) for backwards compatibility.
-   */
-  readonly codeMode?: boolean;
   /**
    * Durable Workflow runtime configuration. Root agents may use this to select
    * the Workflow world backing sessions and runs.

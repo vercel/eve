@@ -35,7 +35,6 @@ import type { NitroBuildSurface, PreparedApplicationHost } from "#internal/nitro
 import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output-config.js";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
 import { transformDynamicToolExecute } from "#internal/workflow-bundle/dynamic-tool-transform.js";
-import { resolveCodeModeEnabled } from "#shared/code-mode.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 
 /**
@@ -99,22 +98,10 @@ function includesWorkflowStepRegistrations(surface: NitroBuildSurface): boolean 
   return includesWorkflowSurface(surface);
 }
 
-/**
- * Reports whether any agent in the compiled graph runs in code mode, so the
- * host build only bundles the sandbox worker assets when they are needed.
- *
- * Each node resolves its own `experimental.codeMode` flag with the
- * `EVE_EXPERIMENTAL_CODE_MODE` env backstop, matching the runtime decision.
- */
-function manifestEnablesCodeMode(manifest: CompiledAgentManifest): boolean {
+/** Whether any agent needs the dynamic Workflow sandbox runtime. */
+function manifestEnablesWorkflow(manifest: CompiledAgentManifest): boolean {
   const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
-  // The Workflow tool reuses the code-mode runtime (QuickJS sandbox), so its
-  // dependency must be bundled whenever any node enables code mode OR the
-  // Workflow tool.
-  return nodes.some(
-    (node) =>
-      resolveCodeModeEnabled(node.config.experimental?.codeMode) || node.workflowEnabled === true,
-  );
+  return nodes.some((node) => node.workflowEnabled === true);
 }
 
 function manifestHasWebSocketChannel(manifest: CompiledAgentManifest): boolean {
@@ -688,11 +675,9 @@ export async function createApplicationNitro(
     includesApplicationSurface(surface) &&
     (dev || manifestHasWebSocketChannel(preparedHost.compileResult.manifest));
   const nitroPlugins: string[] = [];
-  if (manifestEnablesCodeMode(preparedHost.compileResult.manifest)) {
+  if (manifestEnablesWorkflow(preparedHost.compileResult.manifest)) {
     nitroPlugins.push(
-      resolvePackageSourceFilePath(
-        "src/internal/nitro/host/code-mode-runtime-dependency-plugin.ts",
-      ),
+      resolvePackageSourceFilePath("src/internal/nitro/host/workflow-sandbox-runtime-plugin.ts"),
     );
   }
   if (preparedHost.compiledArtifacts.instrumentationPluginPath !== undefined) {

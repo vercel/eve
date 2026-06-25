@@ -4,7 +4,21 @@ import type { SessionContext } from "#public/definitions/callback-context.js";
 import { defaultEvents } from "#public/channels/slack/defaults.js";
 import type { SlackChannelState, SlackEventContext } from "#public/channels/slack/slackChannel.js";
 
-const sessionCtx = {} as SessionContext;
+function sessionContext(
+  current: SessionContext["session"]["auth"]["current"] = null,
+): SessionContext {
+  return {
+    getSandbox: vi.fn(),
+    getSkill: vi.fn(),
+    session: {
+      auth: { current, initiator: null },
+      id: "test-session",
+      turn: { id: "test-turn", sequence: 0 },
+    },
+  };
+}
+
+const sessionCtx = sessionContext();
 
 function buildChannelStub(state: Partial<SlackChannelState> = {}) {
   const postEphemeral = vi.fn().mockResolvedValue({ id: "eph1" });
@@ -51,6 +65,20 @@ describe("defaultEvents authorization.required", () => {
     const message = postEphemeral.mock.calls[0]?.[1] as { text: string; blocks: unknown[] };
     expect(message.text).toContain("https://connect.example.com/a/sca_1");
     expect(channel.state.pendingAuthMessageTs).toEqual({ notion: "ts1" });
+  });
+
+  it("targets the current Slack caller instead of stale channel state", async () => {
+    const { channel, postEphemeral } = buildChannelStub({ triggeringUserId: "U_FIRST" });
+    const currentCaller = sessionContext({
+      attributes: { user_id: "U_CURRENT" },
+      authenticator: "slack-webhook",
+      principalId: "slack:T01:U_CURRENT",
+      principalType: "user",
+    });
+
+    await defaultEvents["authorization.required"]!(authRequiredEvent(), channel, currentCaller);
+
+    expect(postEphemeral.mock.calls[0]?.[0]).toBe("U_CURRENT");
   });
 
   it("renders the device user code in the ephemeral blocks and fallback text", async () => {

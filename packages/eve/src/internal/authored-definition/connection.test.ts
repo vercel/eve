@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { normalizeMcpClientConnectionDefinition } from "#internal/authored-definition/connection.js";
+import type {
+  ConnectionAuthDefinition,
+  ConnectionAuthProvider,
+} from "#runtime/connections/types.js";
 
 const MSG = "Expected the connection export to match the public eve shape.";
 
@@ -16,6 +20,13 @@ function validInput(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function authProvider(auth: ConnectionAuthDefinition | undefined): ConnectionAuthProvider {
+  if (auth === undefined || typeof auth === "function") {
+    throw new Error("Expected a static auth provider.");
+  }
+  return auth;
+}
+
 describe("normalizeMcpClientConnectionDefinition", () => {
   describe("happy path", () => {
     it("accepts a valid definition with a getToken function", () => {
@@ -23,7 +34,7 @@ describe("normalizeMcpClientConnectionDefinition", () => {
 
       expect(result.url).toBe("https://mcp.example.com/sse");
       expect(result.description).toBe("A test connection.");
-      expect(typeof result.auth?.getToken).toBe("function");
+      expect(typeof authProvider(result.auth).getToken).toBe("function");
     });
 
     it("preserves the author's getToken reference", () => {
@@ -33,7 +44,7 @@ describe("normalizeMcpClientConnectionDefinition", () => {
         MSG,
       );
 
-      expect(result.auth?.getToken).toBe(getToken);
+      expect(authProvider(result.auth).getToken).toBe(getToken);
     });
 
     it('defaults getToken-only auth to principalType "app"', () => {
@@ -44,6 +55,18 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       );
 
       expect(result.auth).toMatchObject({ getToken, principalType: "app" });
+    });
+
+    it("preserves a context-aware auth resolver without invoking it at build time", () => {
+      let calls = 0;
+      const auth = () => {
+        calls += 1;
+        return { getToken: async () => ({ token: "x" }) };
+      };
+      const result = normalizeMcpClientConnectionDefinition(validInput({ auth }), MSG);
+
+      expect(result.auth).toBe(auth);
+      expect(calls).toBe(0);
     });
 
     it("accepts the full three-method interactive-OAuth shape", () => {
@@ -65,9 +88,9 @@ describe("normalizeMcpClientConnectionDefinition", () => {
         MSG,
       );
 
-      expect(result.auth?.getToken).toBe(getToken);
-      expect(result.auth?.startAuthorization).toBe(startAuthorization);
-      expect(result.auth?.completeAuthorization).toBe(completeAuthorization);
+      expect(authProvider(result.auth).getToken).toBe(getToken);
+      expect(authProvider(result.auth).startAuthorization).toBe(startAuthorization);
+      expect(authProvider(result.auth).completeAuthorization).toBe(completeAuthorization);
     });
 
     it("accepts an http URL", () => {
