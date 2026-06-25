@@ -331,7 +331,8 @@ async function handleViewSubmission(
   },
   _deps: InteractionHandlerDeps,
 ): Promise<Response> {
-  const ack = new Response("ok", { status: 200 });
+  // Slack view submissions require an empty 200 body to close the modal.
+  const ack = new Response(null, { status: 200 });
   const view = payload.view as
     | {
         callback_id?: string;
