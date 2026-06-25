@@ -1,7 +1,7 @@
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
-import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
+import { buildSlackAuthContext, slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
 import {
   buildAuthCompletedText,
   buildAuthEphemeralBlocks,
@@ -195,9 +195,12 @@ export const defaultEvents: SlackChannelInternalEvents = {
     );
   },
 
-  async "authorization.required"(event, channel, _ctx) {
+  async "authorization.required"(event, channel, ctx) {
     const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
-    const triggeringUserId = channel.state.triggeringUserId ?? null;
+    const triggeringUserId =
+      slackUserIdFromAuthContext(ctx.session.auth.current) ??
+      channel.state.triggeringUserId ??
+      null;
     const challengeUrl = event.authorization?.url;
 
     // Post a public, link-free status so everyone in the thread can see
