@@ -15,7 +15,7 @@ export default defineTool({
   inputSchema: z.object({
     ticker: z.string().describe("Stock ticker symbol"),
   }),
-  needsApproval: () => true,
+  approval: () => "user-approval",
   async execute(input) {
     const ticker = input.ticker.toUpperCase();
     const data = MOCK_PRICES[ticker];

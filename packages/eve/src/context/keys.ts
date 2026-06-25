@@ -98,7 +98,7 @@ export interface DurableDynamicToolMetadata {
   readonly resolverSlug: string;
   readonly entryKey: string;
   readonly executeStepFnName?: string;
-  readonly needsApprovalStepFnName?: string;
+  readonly approvalStepFnName?: string;
   readonly closureVars?: Record<string, unknown>;
 }
 

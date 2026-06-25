@@ -83,6 +83,11 @@ export function extractToolApprovalInputRequests(input: {
       readonly toolCall?: TypedToolCall<ToolSet>;
       readonly toolCallId?: string;
     };
+    // AI SDK records automatic decisions as request/response pairs for history;
+    // only unresolved requests should become eve input.
+    if (approvalRequest.isAutomatic === true) {
+      continue;
+    }
     const toolCall =
       approvalRequest.toolCall ??
       (approvalRequest.toolCallId === undefined

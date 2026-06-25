@@ -116,12 +116,16 @@ describe("normalizeToolDefinition", () => {
       execute(input) {
         return input.city;
       },
-      needsApproval(ctx) {
+      approval(ctx) {
         const city: string | undefined = ctx.toolInput?.city;
+        const callerId: string | undefined = ctx.session.auth.current?.principalId;
+        const turnId: string = ctx.session.turn.id;
         // @ts-expect-error approval input is schema-typed, not an open record.
         const missing = ctx.toolInput?.missing;
+        void callerId;
+        void turnId;
         void missing;
-        return city !== undefined;
+        return city !== undefined ? "user-approval" : "not-applicable";
       },
     });
 
@@ -135,10 +139,26 @@ describe("normalizeToolDefinition", () => {
       execute(input) {
         return input.city;
       },
-      needsApproval: once(),
+      approval: once(),
     });
 
     expect(normalizeToolDefinition(tool, FAILURE_MESSAGE).kind).toBe("tool");
+  });
+
+  it("rejects the removed needsApproval field", () => {
+    expect(() =>
+      normalizeToolDefinition(
+        {
+          description: "Uses the removed approval key.",
+          execute() {
+            return null;
+          },
+          inputSchema: { type: "object" },
+          needsApproval: () => true,
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('Unknown key "needsApproval"');
   });
 
   it("rejects authored tools whose `toModelOutput` is not a function", () => {

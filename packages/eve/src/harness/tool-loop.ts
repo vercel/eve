@@ -135,7 +135,11 @@ import {
   type HarnessStepResult,
   isInvalidToolCall,
 } from "#harness/step-hooks.js";
-import { buildToolSetFromDefinitions, buildToolSetWithProviderTools } from "#harness/tools.js";
+import {
+  buildToolApproval,
+  buildToolSetFromDefinitions,
+  buildToolSetWithProviderTools,
+} from "#harness/tools.js";
 import {
   continueWorkflowSandboxInterrupt,
   getWorkflowSandboxInterrupt,
@@ -685,6 +689,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         runtimeContext: telemetryRuntimeContext,
         stopWhen: isStepCount(1),
         telemetry: enrichTelemetry(telemetryConfig, agentName, telemetryRuntimeContext),
+        toolApproval: buildToolApproval(modelTools),
         tools: effectiveTools,
       };
       const agent = new ToolLoopAgent(agentSettings);

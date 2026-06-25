@@ -1,7 +1,7 @@
 import { jsonSchema, zodSchema, type FlexibleSchema, type ModelMessage } from "ai";
 
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import type { NeedsApprovalContext } from "#public/definitions/tool.js";
+import type { ApprovalContext } from "#public/definitions/approval.js";
 import type { DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import {
@@ -36,7 +36,7 @@ function toHarnessToolDefinition(name: string, entry: DynamicToolEntry): Harness
       entry.execute(input as Record<string, unknown>, buildCallbackContext()),
     inputSchema: convertInputSchema(entry.inputSchema),
     name,
-    needsApproval: entry.needsApproval,
+    approval: entry.approval,
     outputSchema: convertOptionalOutputSchema(entry.outputSchema),
     ...(entry.toModelOutput !== undefined
       ? { toModelOutput: entry.toModelOutput as (output: unknown) => unknown }
@@ -291,14 +291,12 @@ async function resolveToolsFromEvent(
         serializedClosureVars = {};
       }
 
-      let needsApprovalStepFnName: string | undefined;
-      if (entry.needsApproval !== undefined) {
-        needsApprovalStepFnName = `eve:dynamic-tool-approval:${resolver.slug}:${entryKey}`;
-        const originalNeedsApproval = entry.needsApproval.bind(entry);
-        registerStepFunction(
-          needsApprovalStepFnName,
-          (_closureVars: unknown, approvalCtx: unknown) =>
-            originalNeedsApproval(approvalCtx as NeedsApprovalContext),
+      let approvalStepFnName: string | undefined;
+      if (entry.approval !== undefined) {
+        approvalStepFnName = `eve:dynamic-tool-approval:${resolver.slug}:${entryKey}`;
+        const originalApproval = entry.approval.bind(entry);
+        registerStepFunction(approvalStepFnName, (_closureVars: unknown, approvalCtx: unknown) =>
+          originalApproval(approvalCtx as ApprovalContext),
         );
       }
 
@@ -313,7 +311,7 @@ async function resolveToolsFromEvent(
         resolverSlug: resolver.slug,
         entryKey,
         executeStepFnName,
-        needsApprovalStepFnName,
+        approvalStepFnName,
         closureVars: serializedClosureVars,
       });
     }

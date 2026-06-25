@@ -13,7 +13,7 @@ Either way the run parks at `session.waiting`, durably, for as long as it takes 
 
 ## Approvals
 
-Approval is a property of a [tool](/docs/tools) that pauses for a person before it runs. Gate a tool with `needsApproval` and the helpers from `eve/tools/approval`:
+Approval is a property of a [tool](/docs/tools) that pauses for a person before it runs. Gate a tool with `approval` and the helpers from `eve/tools/approval`:
 
 ```ts title="agent/tools/refund_charge.ts"
 import { defineTool } from "eve/tools";
@@ -22,8 +22,8 @@ import { z } from "zod";
 
 export default defineTool({
   description: "Refund a charge.",
-  inputSchema: z.object({ chargeId: z.string(), amount: z.number() }),
-  needsApproval: always(), // or once() / never() / a predicate
+  inputSchema: z.object({ tenantId: z.string(), chargeId: z.string(), amount: z.number() }),
+  approval: always(), // or once() / never() / a policy
   async execute(input) {
     return refund(input);
   },
@@ -36,13 +36,23 @@ export default defineTool({
 | `once()`   | Require approval only the first time the tool runs in a session; auto-allow after. |
 | `always()` | Require approval before every call.                                                |
 
-By default, omitted `needsApproval` behaves like `never()`, so tool calls may execute without human approval. Require human approval or other safeguards for sensitive, irreversible, regulated, financial, healthcare, employment, housing, legal, safety-impacting, user-impacting, or external side-effecting actions.
+By default, omitted `approval` behaves like `never()`, so tool calls may execute without human approval. Require human approval or other safeguards for sensitive, irreversible, regulated, financial, healthcare, employment, housing, legal, safety-impacting, user-impacting, or external side-effecting actions.
 
-When the decision depends on the input, pass your own predicate instead of a helper. It receives `{ toolName, toolInput, approvedTools }` and returns a boolean. `toolInput` can be undefined, so guard the access. To require approval only when an amount crosses a threshold:
+When the decision depends on the input, pass your own policy instead of a helper. It receives the same session context as tool execution, plus `{ toolName, toolInput, approvedTools }`, and returns an AI SDK 7 approval status synchronously or as a promise. Use `ctx.session.auth.current` to guard by the caller of the current turn and `ctx.session.auth.initiator` to guard by the caller that created the session. Return `"user-approval"` to pause for a person or `"not-applicable"` to continue without a prompt. `toolInput` can be undefined, so guard the access. This policy denies cross-tenant calls, then requires approval only when an amount crosses a threshold:
 
 ```ts
-needsApproval: ({ toolInput }) => (toolInput?.amount ?? 0) > 1000,
+approval: ({ session, toolInput }) => {
+  const callerTenant = session.auth.current?.attributes.tenantId;
+  if (callerTenant === undefined || callerTenant !== toolInput?.tenantId) {
+    return { type: "denied", reason: "Caller cannot access this tenant." };
+  }
+  return (toolInput?.amount ?? 0) > 1000 ? "user-approval" : "not-applicable";
+},
 ```
+
+For compatibility with the previous predicate shape, policies may return booleans: `true` is treated as `"user-approval"` and `false` as `"not-applicable"`. Boolean promises are supported too.
+
+Policies can also return `"approved"` or `"denied"` to decide automatically. Use `{ type: "approved" | "denied", reason }` when the model should receive a reason. The `Approval`, `ApprovalContext`, and `ApprovalStatus` types are exported from both `eve/tools` and `eve/tools/approval`.
 
 Gating a side effect on approval is also how you make non-idempotent work safe across replays: a charge or email that sits behind `always()` can't fire from a re-run step without a fresh human decision.
 

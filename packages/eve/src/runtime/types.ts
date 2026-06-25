@@ -8,7 +8,8 @@ import type { ChannelRouteMethod, RouteContext } from "#public/definitions/chann
 import type { RouteHandler, WebSocketRouteHandler } from "#channel/routes.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import type { StreamEventHook } from "#public/definitions/hook.js";
-import type { NeedsApprovalContext, ToolModelOutput } from "#public/definitions/tool.js";
+import type { Approval } from "#public/definitions/approval.js";
+import type { ToolModelOutput } from "#public/definitions/tool.js";
 import type {
   AuthorizationDefinition,
   ConnectionAuthResolver,
@@ -92,7 +93,7 @@ export type ResolvedSchedule = Readonly<
  * server that requires no authentication (e.g. localhost) may omit both.
  */
 export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
-  readonly approval?: (ctx: NeedsApprovalContext) => boolean;
+  readonly approval?: Approval;
   readonly authorization?: Readonly<AuthorizationDefinition> | ConnectionAuthResolver;
   readonly connectionName: string;
   readonly description: string;
@@ -163,9 +164,9 @@ export type ResolvedToolDefinition = Readonly<
     /**
      * Optional per-tool approval gate. When set, determines whether user
      * approval is required before executing this tool. See
-     * {@link NeedsApprovalContext} for the available context.
+     * {@link Approval} for the shared callback contract.
      */
-    readonly needsApproval?: (ctx: NeedsApprovalContext) => boolean;
+    readonly approval?: Approval;
     /**
      * Optional function that derives a compound approval key from the tool
      * input. When present, the runtime records this key (instead of just

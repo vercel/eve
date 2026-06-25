@@ -1,6 +1,6 @@
 import type { FlexibleSchema } from "ai";
 
-import type { NeedsApprovalContext } from "#public/definitions/tool.js";
+import type { Approval } from "#public/definitions/approval.js";
 
 /**
  * Runtime-owned action metadata attached to one harness-visible tool.
@@ -24,7 +24,7 @@ export interface HarnessToolDefinition {
   readonly execute?: (input: any) => any;
   readonly inputSchema: FlexibleSchema;
   readonly name: string;
-  readonly needsApproval?: (ctx: NeedsApprovalContext) => boolean;
+  readonly approval?: Approval;
   readonly outputSchema?: FlexibleSchema;
   readonly runtimeAction?: HarnessRuntimeActionDefinition;
   readonly toModelOutput?: (output: unknown) => unknown;

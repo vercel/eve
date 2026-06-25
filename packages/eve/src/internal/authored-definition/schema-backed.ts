@@ -60,15 +60,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(
     record,
-    [
-      "auth",
-      "description",
-      "execute",
-      "inputSchema",
-      "needsApproval",
-      "outputSchema",
-      "toModelOutput",
-    ],
+    ["auth", "description", "execute", "inputSchema", "approval", "outputSchema", "toModelOutput"],
     message,
   );
   const inputSchema =
@@ -88,12 +80,12 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
 
   /*
    * The compiler runs at build time and only validates that optional hooks
-   * (`needsApproval`), when present, have the expected shape. The live
+   * (`approval`), when present, have the expected shape. The live
    * references are captured later by `resolve-agent.ts` when it materializes
    * the module export and attaches them to the ResolvedToolDefinition.
    */
-  if (record.needsApproval !== undefined) {
-    expectFunction(record.needsApproval, message);
+  if (record.approval !== undefined) {
+    expectFunction(record.approval, message);
   }
 
   if (record.toModelOutput !== undefined) {

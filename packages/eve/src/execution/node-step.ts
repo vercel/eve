@@ -221,7 +221,7 @@ function resolveHarnessToolDefinition(input: {
     }),
     inputSchema: def.inputStandardSchema ?? jsonSchema(def.inputSchema ?? {}),
     name: def.name,
-    needsApproval: def.needsApproval,
+    approval: def.approval,
     outputSchema: def.outputStandardSchema ?? maybeJsonSchema(def.outputSchema),
     toModelOutput: def.toModelOutput,
   };

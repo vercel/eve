@@ -5,7 +5,7 @@ import type {
 } from "#runtime/connections/types.js";
 import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
 import { stampConnectionProtocol } from "#public/definitions/connections/protocol.js";
-import type { NeedsApprovalContext } from "#public/definitions/tool.js";
+import type { Approval } from "#public/definitions/approval.js";
 import { stampDefinitionKey } from "#public/tool-result-narrowing.js";
 
 /**
@@ -62,7 +62,7 @@ export interface McpClientConnectionDefinition {
    * When omitted, tool calls execute without approval, consistent
    * with authored tools.
    */
-  approval?: (ctx: NeedsApprovalContext) => boolean;
+  approval?: Approval;
   /**
    * Arbitrary HTTP headers sent with every request to the MCP server.
    *
