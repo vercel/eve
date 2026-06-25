@@ -11,10 +11,8 @@ const DYNAMIC_INSTRUCTIONS_TOKEN = "dynamic-instructions-ok-M3K8";
 export default defineEval({
   description: "Skills smoke: dynamic instructions injection at session start.",
   async test(t) {
-    const turn = await t.send("Acknowledge this message.");
-    turn.expectOk();
+    await t.send("Acknowledge this message.");
 
-    t.didNotFail();
     t.completed();
     t.messageIncludes(DYNAMIC_INSTRUCTIONS_TOKEN);
   },

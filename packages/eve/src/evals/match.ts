@@ -1,3 +1,5 @@
+import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { InputRequest } from "#runtime/input/types.js";
 import type { EveEvalSubagentCall, EveEvalToolCall } from "#evals/types.js";
 
 /**
@@ -18,6 +20,15 @@ import type { EveEvalSubagentCall, EveEvalToolCall } from "#evals/types.js";
  */
 export type EveEvalValueMatcher<T = unknown> = T | RegExp | ((value: T) => unknown);
 
+type EveEvalDeepMatcher<T> =
+  | RegExp
+  | ((value: T) => unknown)
+  | (T extends readonly (infer TEntry)[]
+      ? readonly EveEvalDeepMatcher<TEntry>[]
+      : T extends object
+        ? { readonly [K in keyof T]?: EveEvalDeepMatcher<T[K]> }
+        : T);
+
 /**
  * Constraints applied to tool calls by `t.calledTool`. All provided
  * constraints must hold for a call to match.
@@ -29,6 +40,8 @@ export interface EveEvalToolCallMatchOptions {
   readonly output?: EveEvalValueMatcher;
   /** Required error state of matching calls. */
   readonly isError?: boolean;
+  /** Required lifecycle outcome of matching calls. */
+  readonly status?: EveEvalToolCall["status"];
   /** Exact number of matching calls required. Defaults to "at least one". */
   readonly times?: number;
 }
@@ -48,7 +61,38 @@ export interface EveEvalSubagentCallMatchOptions {
   readonly remoteUrl?: EveEvalValueMatcher;
   /** Matcher over the `subagent.completed` output. */
   readonly output?: EveEvalValueMatcher;
+  /** Required error state of matching delegations. */
+  readonly isError?: boolean;
+  /** Required lifecycle outcome of matching delegations. */
+  readonly status?: EveEvalSubagentCall["status"];
+  /** Exact number of matching delegations required. Defaults to "at least one". */
+  readonly times?: number;
 }
+
+/** Constraints accepted by `expectInputRequests`. */
+export interface EveEvalInputRequestMatchOptions {
+  readonly display?: EveEvalValueMatcher<InputRequest["display"]>;
+  readonly input?: EveEvalValueMatcher;
+  readonly optionIds?: EveEvalValueMatcher<readonly string[]>;
+  readonly prompt?: EveEvalValueMatcher<string>;
+  readonly times?: number;
+  readonly toolName?: string;
+}
+
+/** One typed stream-event matcher used by scoped event assertions. */
+export type EveEvalEventMatch<
+  TType extends HandleMessageStreamEvent["type"] = HandleMessageStreamEvent["type"],
+> = TType extends HandleMessageStreamEvent["type"]
+  ? {
+      readonly type: TType;
+      readonly data?: EveEvalDeepMatcher<
+        Extract<HandleMessageStreamEvent, { type: TType }> extends { data: infer TData }
+          ? TData
+          : never
+      >;
+      readonly times?: number;
+    }
+  : never;
 
 /**
  * Returns true when the observed value satisfies a matcher (literal, RegExp,
@@ -93,7 +137,11 @@ export function toolCallMatches(
   if (options.output !== undefined && !matchesValue(options.output, call.output)) {
     return false;
   }
-  if (options.isError !== undefined && call.isError !== options.isError) return false;
+  if (options.isError !== undefined) {
+    if (call.status === "pending" || call.status === "rejected") return false;
+    if (call.isError !== options.isError) return false;
+  }
+  if (options.status !== undefined && call.status !== options.status) return false;
   return true;
 }
 
@@ -111,7 +159,46 @@ export function subagentCallMatches(
   if (options.output !== undefined && !matchesValue(options.output, call.output)) {
     return false;
   }
+  if (options.isError !== undefined) {
+    if (call.status === "pending" || call.status === "rejected") return false;
+    if (call.isError !== options.isError) return false;
+  }
+  if (options.status !== undefined && call.status !== options.status) return false;
   return true;
+}
+
+/** Returns true when one HITL request satisfies every supplied constraint. */
+export function inputRequestMatches(
+  request: InputRequest,
+  options: EveEvalInputRequestMatchOptions,
+): boolean {
+  if (options.display !== undefined && !matchesValue(options.display, request.display))
+    return false;
+  if (options.prompt !== undefined && !matchesValue(options.prompt, request.prompt)) return false;
+  if (options.optionIds !== undefined) {
+    const optionIds = (request.options ?? []).map((option) => option.id);
+    if (!matchesValue(options.optionIds, optionIds)) return false;
+  }
+  if (options.toolName !== undefined) {
+    if (request.action.kind !== "tool-call" || request.action.toolName !== options.toolName) {
+      return false;
+    }
+  }
+  if (options.input !== undefined) {
+    if (request.action.kind !== "tool-call" || !matchesValue(options.input, request.action.input)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Returns true when one stream event satisfies a typed event matcher. */
+export function eventMatches(event: HandleMessageStreamEvent, matcher: EveEvalEventMatch): boolean {
+  return (
+    event.type === matcher.type &&
+    (matcher.data === undefined ||
+      matchesValue(matcher.data, "data" in event ? event.data : undefined))
+  );
 }
 
 /**

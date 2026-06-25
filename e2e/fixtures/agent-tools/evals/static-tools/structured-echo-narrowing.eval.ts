@@ -7,15 +7,13 @@ import { defineEval } from "eve/evals";
 export default defineEval({
   description: "Static tools smoke: structured tool-result narrowing via toolResultFrom.",
   async test(t) {
-    const turn = await t.send(
+    await t.send(
       'Call the `structured-echo` tool with label "smoke-test". Reply with the echoed value verbatim.',
     );
-    turn.expectOk();
 
-    t.didNotFail();
     t.completed();
     t.calledTool("structured-echo", {
-      isError: false,
+      status: "completed",
       output: (value: unknown) =>
         typeof value === "object" &&
         value !== null &&

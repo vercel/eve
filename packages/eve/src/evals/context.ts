@@ -1,8 +1,9 @@
 import type { SendTurnInput } from "#client/types.js";
 import { EvalSessionManager } from "#evals/session.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
-import * as RunAssertions from "#evals/assertions/run.js";
+import { createScopedAssertions } from "#evals/assertions/scoped.js";
 import { buildJudgeContext } from "#evals/judge.js";
+import { EvalRequirementFailed, EvalSkipped } from "#evals/control-flow.js";
 import type {
   Assertion,
   AssertionHandle,
@@ -19,12 +20,13 @@ import type {
  */
 export function createEvalContext(deps: {
   readonly manager: EvalSessionManager;
+  readonly collector: AssertionCollector;
   readonly target: EveEvalTargetHandle;
   readonly signal: AbortSignal;
   readonly judge: EveEvalJudgeConfig | undefined;
   readonly log: (message: string) => void;
 }): { readonly context: EveEvalContext; readonly collector: AssertionCollector } {
-  const collector = new AssertionCollector();
+  const collector = deps.collector;
   let lastPrompt = "";
 
   const primary = () => deps.manager.primary;
@@ -72,32 +74,41 @@ export function createEvalContext(deps: {
     log: deps.log,
     sleep: (ms) => sleep(ms, deps.signal),
     newSession: () => deps.manager.newSession(),
-
-    // Run-level assertions (lazy; default gate).
-    completed: () => collector.recordRun(RunAssertions.completed()),
-    didNotFail: () => collector.recordRun(RunAssertions.didNotFail()),
-    waiting: () => collector.recordRun(RunAssertions.waiting()),
-    messageIncludes: (token) => collector.recordRun(RunAssertions.messageIncludes(token)),
-    calledTool: (name, options) => collector.recordRun(RunAssertions.calledTool(name, options)),
-    loadedSkill: (skill, options) => collector.recordRun(RunAssertions.loadedSkill(skill, options)),
-    notCalledTool: (name) => collector.recordRun(RunAssertions.notCalledTool(name)),
-    toolOrder: (names) => collector.recordRun(RunAssertions.toolOrder(names)),
-    usedNoTools: () => collector.recordRun(RunAssertions.usedNoTools()),
-    maxToolCalls: (max) => collector.recordRun(RunAssertions.maxToolCalls(max)),
-    calledSubagent: (name, options) =>
-      collector.recordRun(RunAssertions.calledSubagent(name, options)),
-    noFailedActions: () => collector.recordRun(RunAssertions.noFailedActions()),
-    event: (predicate, label) => collector.recordRun(RunAssertions.event(predicate, label)),
-    outputEquals: (value) => collector.recordRun(RunAssertions.outputEquals(value)),
-    outputMatches: (schema) => collector.recordRun(RunAssertions.outputMatches(schema)),
+    ...createScopedAssertions(collector, (result) => result),
 
     // Value-level assertion over an explicit value.
     check: (value, assertion) => recordCheck(collector, value, assertion),
+    require: (value, assertion) => requireCheck(collector, value, assertion),
+    skip: (reason) => {
+      if (reason.trim().length === 0) throw new Error("skip() requires a non-empty reason.");
+      throw new EvalSkipped(reason);
+    },
 
     judge,
   };
 
   return { context, collector };
+}
+
+async function requireCheck<T>(
+  collector: AssertionCollector,
+  value: T,
+  assertion: Assertion,
+): Promise<T> {
+  let score = 0;
+  const gated = assertion.gate(assertion.threshold);
+  const handle = collector.recordValue({
+    name: gated.name,
+    severity: "gate",
+    threshold: gated.threshold,
+    score: async () => {
+      score = await gated.score(value);
+      return { score };
+    },
+  });
+  await handle;
+  if (score < (gated.threshold ?? 1)) throw new EvalRequirementFailed();
+  return value;
 }
 
 function recordCheck(

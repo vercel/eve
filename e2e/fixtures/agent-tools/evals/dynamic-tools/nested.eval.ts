@@ -11,19 +11,15 @@ export default defineEval({
     );
     first.expectOk();
 
-    const second = await t.send(
-      "Now call the `nested_status` tool and tell me exactly what it returned.",
-    );
-    second.expectOk();
+    await t.send("Now call the `nested_status` tool and tell me exactly what it returned.");
 
-    t.didNotFail();
     t.completed();
     t.calledTool("nested_query", {
-      isError: false,
+      status: "completed",
       output: { action: "query", endpoint: "/v2/query", source: "helper" },
     });
     t.calledTool("nested_status", {
-      isError: false,
+      status: "completed",
       output: { tier: "premium", source: "inline" },
     });
   },

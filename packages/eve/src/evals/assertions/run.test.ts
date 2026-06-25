@@ -21,7 +21,11 @@ function makeResult(overrides: {
 }
 
 function toolCall(name: string, input: EveEvalToolCall["input"] = {}): EveEvalToolCall {
-  return { name, input, output: undefined, isError: false, turnIndex: 0 };
+  return { name, input, output: undefined, isError: false, status: "pending", turnIndex: 0 };
+}
+
+function completedToolCall(name: string): EveEvalToolCall {
+  return { ...toolCall(name), isError: false, output: "ok", status: "completed" };
 }
 
 function message(text: string): HandleMessageStreamEvent {
@@ -58,6 +62,60 @@ describe("run assertions", () => {
       (await Run.calledTool("get_weather", { input: { city: "NYC" } }).evaluate(result)).score,
     ).toBe(0);
     expect((await Run.calledTool("missing").evaluate(result)).score).toBe(0);
+  });
+
+  it("calledTool and notCalledTool match lifecycle status without treating pending as successful", async () => {
+    const result = makeResult({
+      derived: {
+        toolCalls: [toolCall("guarded"), completedToolCall("done")],
+        toolCallCount: 2,
+      },
+    });
+    expect((await Run.calledTool("guarded", { status: "pending" }).evaluate(result)).score).toBe(1);
+    expect((await Run.calledTool("guarded", { isError: false }).evaluate(result)).score).toBe(0);
+    expect(
+      (await Run.notCalledTool("guarded", { status: "completed" }).evaluate(result)).score,
+    ).toBe(1);
+  });
+
+  it("matches typed event counts and ordered event groups", async () => {
+    const called = {
+      type: "subagent.called",
+      data: {
+        name: "child",
+        callId: "c",
+        childSessionId: "s",
+        sessionId: "p",
+        sequence: 1,
+        toolName: "subagent",
+        turnId: "t",
+        workflowId: "w",
+      },
+    } as HandleMessageStreamEvent;
+    const completed = {
+      type: "subagent.completed",
+      data: { callId: "c", output: "ok", sequence: 2, subagentName: "child", turnId: "t" },
+    } as HandleMessageStreamEvent;
+    const result = makeResult({ events: [called, called, completed] });
+
+    expect(
+      (
+        await Run.typedEvent({
+          type: "subagent.called",
+          data: { name: "child" },
+          times: 2,
+        }).evaluate(result)
+      ).score,
+    ).toBe(1);
+    expect((await Run.notEvent({ type: "turn.failed" }).evaluate(result)).score).toBe(1);
+    expect(
+      (
+        await Run.eventOrder([
+          { type: "subagent.called", data: { name: "child" }, times: 2 },
+          { type: "subagent.completed", data: { subagentName: "child" } },
+        ]).evaluate(result)
+      ).score,
+    ).toBe(1);
   });
 
   it("loadedSkill matches a load_skill call by skill id", async () => {

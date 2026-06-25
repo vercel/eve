@@ -37,6 +37,7 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
             input: { query: "test" },
             output: null,
             isError: false,
+            status: "completed",
             turnIndex: 0,
             sessionId: "session-123",
           },
@@ -94,6 +95,7 @@ describe("Braintrust", () => {
       passed: 0,
       failed: 0,
       scored: 0,
+      skipped: 0,
       errored: 0,
     });
   });

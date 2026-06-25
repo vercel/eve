@@ -2,6 +2,7 @@ import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js"
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import {
   deepEquals,
+  eventMatches,
   subagentCallMatches,
   testRegExp,
   toolCallMatches,
@@ -9,8 +10,17 @@ import {
   type EveEvalSubagentCallMatchOptions,
   type EveEvalToolCallMatchOptions,
 } from "#evals/match.js";
+import type { EveEvalEventMatch } from "#evals/match.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import type { AssertionOutcome, RunAssertion } from "#evals/assertions/collector.js";
+
+/** Minimal captured scope consumed by deterministic eval assertions. */
+export interface EveEvalAssertionSubject {
+  readonly derived: import("#evals/types.js").EveEvalDerivedFacts;
+  readonly events: readonly HandleMessageStreamEvent[];
+  readonly output: unknown;
+  readonly status: "completed" | "failed" | "waiting";
+}
 
 const PASS: AssertionOutcome = { score: 1 };
 const fail = (message: string, metadata?: Readonly<Record<string, unknown>>): AssertionOutcome => ({
@@ -142,11 +152,16 @@ export function loadedSkill(
 /**
  * Asserts no tool call with `name` happened.
  */
-export function notCalledTool(name: string): RunAssertion {
+export function notCalledTool(
+  name: string,
+  options: Omit<EveEvalToolCallMatchOptions, "times"> = {},
+): RunAssertion {
   return {
     name: `notCalledTool(${name})`,
     evaluate(result) {
-      const count = result.derived.toolCalls.filter((call) => call.name === name).length;
+      const count = result.derived.toolCalls.filter(
+        (call) => call.name === name && toolCallMatches(call, options),
+      ).length;
       if (count === 0) return PASS;
       return fail(`"${name}" was called ${count} time(s)`);
     },
@@ -157,20 +172,32 @@ export function notCalledTool(name: string): RunAssertion {
  * Asserts the named tools were called in the given order (subsequence match:
  * other calls may interleave).
  */
-export function toolOrder(names: readonly string[]): RunAssertion {
+export function toolOrder(
+  names: readonly string[],
+  options: { readonly phase?: "requested" | "resolved" | "both" } = {},
+): RunAssertion {
   return {
-    name: `toolOrder(${names.join(" → ")})`,
+    name: `toolOrder(${names.join(" → ")}${options.phase ? `, ${options.phase}` : ""})`,
     evaluate(result) {
-      const observed = result.derived.toolCalls.map((call) => call.name);
-      let cursor = 0;
-      for (const name of observed) {
-        if (name === names[cursor]) cursor += 1;
-        if (cursor === names.length) break;
-      }
-      if (cursor === names.length) return PASS;
-      return fail(
-        `missing "${names[cursor]}" after [${names.slice(0, cursor).join(", ")}]; observed order: [${observed.join(", ")}]`,
+      const phase = options.phase ?? "requested";
+      const requested = result.derived.toolCalls.map((call) => call.name);
+      const resolved = result.events.flatMap((event) =>
+        event.type === "action.result" && event.data.result.kind === "tool-result"
+          ? [event.data.result.toolName]
+          : [],
       );
+      const sequences =
+        phase === "both" ? [requested, resolved] : [phase === "resolved" ? resolved : requested];
+
+      for (const observed of sequences) {
+        const missing = missingOrderedName(names, observed);
+        if (missing !== undefined) {
+          return fail(
+            `missing "${missing.name}" after [${names.slice(0, missing.cursor).join(", ")}]; observed ${phase} order: [${observed.join(", ")}]`,
+          );
+        }
+      }
+      return PASS;
     },
   };
 }
@@ -241,7 +268,9 @@ export function calledSubagent(
     evaluate(result) {
       const named = result.derived.subagentCalls.filter((call) => call.name === name);
       const matching = named.filter((call) => subagentCallMatches(call, options));
-      if (matching.length > 0) return PASS;
+      const passed =
+        options.times === undefined ? matching.length > 0 : matching.length === options.times;
+      if (passed) return { score: 1, metadata: { matchingCalls: matching.length } };
 
       if (named.length === 0) {
         const observed = result.derived.subagentCalls.map((call) => call.name);
@@ -249,9 +278,12 @@ export function calledSubagent(
           observedSubagentCalls: result.derived.subagentCalls,
         });
       }
-      return fail(`subagent "${name}" was called but no call matched the constraints`, {
-        observedSubagentCalls: named,
-      });
+      return fail(
+        `subagent "${name}" was called but ${matching.length} call(s) matched the constraints`,
+        {
+          observedSubagentCalls: named,
+        },
+      );
     },
   };
 }
@@ -269,6 +301,66 @@ export function event(
     evaluate(result) {
       if (predicate(result.events)) return PASS;
       return fail(`event predicate "${label}" did not hold`);
+    },
+  };
+}
+
+/** Asserts a typed stream event exists, optionally with an exact count. */
+export function typedEvent(matcher: EveEvalEventMatch): RunAssertion {
+  return {
+    name: `event(${matcher.type})`,
+    evaluate(result) {
+      const matching = result.events.filter((entry) => eventMatches(entry, matcher));
+      const passed =
+        matcher.times === undefined ? matching.length > 0 : matching.length === matcher.times;
+      if (passed) return { score: 1, metadata: { matchingEvents: matching.length } };
+      const expected = matcher.times === undefined ? "at least one" : `exactly ${matcher.times}`;
+      return fail(
+        `expected ${expected} matching ${matcher.type} event(s), found ${matching.length}; observed: [${result.events.map((entry) => entry.type).join(", ")}]`,
+      );
+    },
+  };
+}
+
+/** Asserts no typed stream event matches. */
+export function notEvent(matcher: EveEvalEventMatch): RunAssertion {
+  return {
+    name: `notEvent(${matcher.type})`,
+    evaluate(result) {
+      const matching = result.events.filter((entry) => eventMatches(entry, matcher));
+      return matching.length === 0
+        ? PASS
+        : fail(`expected no matching ${matcher.type} events, found ${matching.length}`);
+    },
+  };
+}
+
+/** Asserts typed event groups occur in order, ignoring unrelated events. */
+export function eventOrder(matchers: readonly EveEvalEventMatch[]): RunAssertion {
+  return {
+    name: `eventOrder(${matchers.map((matcher) => matcher.type).join(" → ")})`,
+    evaluate(result) {
+      let previousLast = -1;
+      for (const matcher of matchers) {
+        const indexes = result.events.flatMap((entry, index) =>
+          eventMatches(entry, matcher) ? [index] : [],
+        );
+        const countPassed =
+          matcher.times === undefined ? indexes.length > 0 : indexes.length === matcher.times;
+        if (!countPassed) {
+          const expected =
+            matcher.times === undefined ? "at least one" : `exactly ${matcher.times}`;
+          return fail(
+            `expected ${expected} matching ${matcher.type} event(s), found ${indexes.length}`,
+          );
+        }
+        const first = indexes[0];
+        if (first === undefined || first <= previousLast) {
+          return fail(`event group ${matcher.type} did not occur after the previous group`);
+        }
+        previousLast = indexes[indexes.length - 1] ?? previousLast;
+      }
+      return PASS;
     },
   };
 }
@@ -321,4 +413,17 @@ function failureDetail(prefix: string, code: string | undefined): string {
 function truncate(text: string | undefined, max = 200): string {
   if (text === undefined) return "undefined";
   return text.length <= max ? text : `${text.slice(0, max)}…`;
+}
+
+function missingOrderedName(
+  expected: readonly string[],
+  observed: readonly string[],
+): { readonly cursor: number; readonly name: string } | undefined {
+  let cursor = 0;
+  for (const name of observed) {
+    if (name === expected[cursor]) cursor += 1;
+    if (cursor === expected.length) return undefined;
+  }
+  const name = expected[cursor];
+  return name === undefined ? undefined : { cursor, name };
 }

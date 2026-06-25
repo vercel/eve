@@ -5,6 +5,7 @@ import type {
   AssertionSeverity,
   EveEvalTaskResult,
 } from "#evals/types.js";
+import type { EveEvalAssertionSubject } from "#evals/assertions/run.js";
 
 /**
  * Outcome of evaluating one assertion: a 0–1 score (boolean assertions use
@@ -17,13 +18,12 @@ export interface AssertionOutcome {
 }
 
 /**
- * A run-level assertion (e.g. `t.completed()`), evaluated lazily against the
- * final task result after `test(t)` returns. The evaluation is deferred so
- * the assertion always sees the complete run regardless of call order.
+ * A scoped assertion evaluated lazily after `test(t)` returns. The selected
+ * subject may be the aggregate run, one session, or one immutable turn.
  */
 export interface RunAssertion {
   readonly name: string;
-  evaluate(result: EveEvalTaskResult): AssertionOutcome | Promise<AssertionOutcome>;
+  evaluate(result: EveEvalAssertionSubject): AssertionOutcome | Promise<AssertionOutcome>;
 }
 
 interface MutableEntry {
@@ -32,6 +32,7 @@ interface MutableEntry {
   threshold: number | undefined;
   readonly kind: "deferred" | "resolved";
   readonly spec?: RunAssertion;
+  readonly selectSubject?: (result: EveEvalTaskResult) => EveEvalAssertionSubject;
   score: number;
   message?: string;
   metadata?: Readonly<Record<string, unknown>>;
@@ -52,12 +53,22 @@ export class AssertionCollector {
 
   /** Register a run-level assertion evaluated against the final result. */
   recordRun(spec: RunAssertion, severity: AssertionSeverity = "gate"): AssertionHandle {
+    return this.recordScoped(spec, (result) => result, severity);
+  }
+
+  /** Register a deferred assertion against a turn or session scope. */
+  recordScoped(
+    spec: RunAssertion,
+    selectSubject: (result: EveEvalTaskResult) => EveEvalAssertionSubject,
+    severity: AssertionSeverity = "gate",
+  ): AssertionHandle {
     const entry: MutableEntry = {
       name: spec.name,
       severity,
       threshold: undefined,
       kind: "deferred",
       spec,
+      selectSubject,
       score: 0,
       failed: false,
     };
@@ -113,7 +124,7 @@ export class AssertionCollector {
     const results: AssertionResult[] = [];
     for (const entry of this.#entries) {
       if (entry.kind === "deferred" && entry.spec !== undefined) {
-        const outcome = await entry.spec.evaluate(result);
+        const outcome = await entry.spec.evaluate(entry.selectSubject?.(result) ?? result);
         entry.score = outcome.score;
         entry.message = outcome.message;
         entry.metadata = outcome.metadata;

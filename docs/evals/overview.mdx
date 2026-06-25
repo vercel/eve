@@ -69,7 +69,7 @@ Everything is optional. `judge` sets the default model for [LLM-as-judge](./judg
 
 Each surface matches a genuinely different kind of judgment:
 
-- **Run-level methods** read the whole run, like `t.completed()`, `t.calledTool("get_weather")`, `t.usedNoTools()`, and `t.toolOrder([...])`. They take no value because they observe the run itself. See [Assertions](./assertions).
+- **Scoped methods** read the whole run when called on `t`, one session when called on an `EveEvalSession`, or one response when called on an `EveEvalTurn`. See [Assertions](./assertions).
 - **`t.check(value, assertion)`** grades an explicit value with a deterministic builder from `eve/evals/expect`, such as `t.check(t.reply, includes("sunny"))`. Grade `t.reply`, an intermediate draft, parsed JSON, or anything else. See [Assertions](./assertions).
 - **`t.judge.autoevals.*`** is the LLM-as-judge surface, like `t.judge.autoevals.closedQA("cites a source")`. It grades `t.reply` by default and uses the configured judge model, never the agent under test. See [Judge](./judge).
 
@@ -88,6 +88,8 @@ t.calledTool("get_weather").soft(); // record as a metric, don't gate
 t.judge.autoevals.closedQA("cites a source"); // soft, tracked (no threshold)
 t.judge.autoevals.factuality(reference).atLeast(0.7); // soft, gated under --strict at 0.7
 ```
+
+Use `await t.require(value, assertion)` for a gate that must pass before the script can safely continue. Use `t.skip(reason)` for an intentionally unsupported target capability.
 
 ## Run evals with eve eval
 

@@ -5,6 +5,8 @@ import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import { executeTask } from "#evals/runner/execute-task.js";
 import type { EveEval, EveEvalContext } from "#evals/types.js";
 import { createEvalTargetHandle } from "#evals/target.js";
+import { satisfies } from "#evals/expect/index.js";
+import { z } from "zod";
 
 const target = createEvalTargetHandle({
   capabilities: { devRoutes: true },
@@ -74,8 +76,15 @@ describe("executeTask", () => {
       target,
       evaluation: createTestEval(async (t) => {
         await t.send("run pwd");
-        const [request] = t.expectInputRequests({ toolName: "bash" });
-        expect(request?.requestId).toBe("approval_1");
+        const [request] = t.expectInputRequests({
+          display: "confirmation",
+          input: { command: "pwd" },
+          optionIds: ["approve", "deny"],
+          prompt: /Approve/,
+          times: 1,
+          toolName: "bash",
+        });
+        expect(request.requestId).toBe("approval_1");
         await t.respondAll("approve");
       }, "approve"),
     });
@@ -160,6 +169,76 @@ describe("executeTask", () => {
     expect(result.derived.toolCalls.map((call) => call.sessionId)).toEqual(["secondary"]);
   });
 
+  it("records assertions against individual turns without leaking other turns", async () => {
+    const server = createScriptedServer([
+      {
+        sessionId: "session_1",
+        events: [
+          turnStarted("turn_1"),
+          actionsRequested("turn_1", "alpha"),
+          turnCompleted("turn_1"),
+          sessionWaiting(),
+        ],
+      },
+      {
+        sessionId: "session_1",
+        events: [
+          turnStarted("turn_2"),
+          messageCompleted("done", "turn_2"),
+          turnCompleted("turn_2"),
+          sessionCompleted(),
+        ],
+      },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        const first = await t.send("first");
+        const second = await t.send("second");
+        expect(first.expectToolCall("alpha", { status: "pending" }).name).toBe("alpha");
+        first.calledTool("alpha", { status: "pending", times: 1 });
+        second.notCalledTool("alpha");
+        t.calledTool("alpha", { times: 1 });
+      }, "turn-scopes"),
+    });
+
+    expect(outcome.assertions).toHaveLength(3);
+    expect(outcome.assertions.every((assertion) => assertion.passed)).toBe(true);
+  });
+
+  it("records a required assertion and stops dependent control flow", async () => {
+    let continued = false;
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        await t.require(
+          1,
+          satisfies<number>((value) => value > 2, "greater than two"),
+        );
+        continued = true;
+      }, "require"),
+    });
+
+    expect(continued).toBe(false);
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.assertions[0]).toMatchObject({ passed: false, severity: "gate" });
+  });
+
+  it("captures an explicit skip without an execution error", async () => {
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval((t) => t.skip("dev routes unavailable"), "skip"),
+    });
+
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.skipReason).toBe("dev routes unavailable");
+  });
+
   it("attaches to a target-created session and captures its stream", async () => {
     const server = createScriptedServer([], {
       streams: [
@@ -176,17 +255,57 @@ describe("executeTask", () => {
     });
     vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
 
-    const { result } = await executeTask({
+    const outcome = await executeTask({
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
-        await t.target.attachSession("channel-session");
+        const session = await t.target.attachSession("channel-session");
+        session.completed();
+        session.messageIncludes("channel done");
       }, "attach"),
     });
 
+    const { result } = outcome;
     expect(result.output).toBe("channel done");
     expect(result.sessions?.map((session) => session.sessionId)).toEqual(["channel-session"]);
     expect(result.events.map((event) => event.type)).toContain("message.completed");
+    expect(outcome.assertions.every((assertion) => assertion.passed)).toBe(true);
+  });
+
+  it("uses structured turn data as the scoped and aggregate output", async () => {
+    const server = createScriptedServer([
+      {
+        sessionId: "structured",
+        events: [
+          turnStarted("turn_1"),
+          {
+            type: "result.completed",
+            data: {
+              result: { count: 2, title: "Done" },
+              sequence: 1,
+              stepIndex: 0,
+              turnId: "turn_1",
+            },
+          },
+          turnCompleted("turn_1"),
+          sessionCompleted(),
+        ],
+      },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        const turn = await t.send({ message: "structured", outputSchema: { type: "object" } });
+        turn.outputMatches(z.object({ count: z.number(), title: z.string() }));
+        t.outputEquals({ count: 2, title: "Done" });
+      }, "structured-output"),
+    });
+
+    expect(outcome.result.output).toEqual({ count: 2, title: "Done" });
+    expect(outcome.assertions.every((assertion) => assertion.passed)).toBe(true);
   });
 
   it("captures a schedule-dispatch capability failure as the task error", async () => {

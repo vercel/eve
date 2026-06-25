@@ -8,6 +8,7 @@ interface MutableToolCall {
   input: JsonObject;
   output: unknown;
   isError: boolean;
+  status: EveEvalToolCall["status"];
   turnIndex: number;
   sessionId?: string;
 }
@@ -17,6 +18,7 @@ interface MutableSubagentCall {
   remoteUrl?: string;
   output?: unknown;
   isError: boolean;
+  status: EveEvalSubagentCall["status"];
   turnIndex: number;
   sessionId?: string;
 }
@@ -70,6 +72,7 @@ export function deriveRunFacts(
     const call: MutableSubagentCall = {
       name,
       isError: false,
+      status: "pending",
       turnIndex: Math.max(turnIndex, 0),
       sessionId,
     };
@@ -93,6 +96,7 @@ export function deriveRunFacts(
             input: action.input,
             output: undefined,
             isError: false,
+            status: "pending",
             turnIndex: Math.max(turnIndex, 0),
             sessionId,
           };
@@ -111,12 +115,14 @@ export function deriveRunFacts(
           if (call !== undefined) {
             call.output = result.output;
             call.isError = failed;
+            call.status = status;
           }
         } else if (result.kind === "subagent-result") {
           const call = subagentCallsByCallId.get(result.callId);
           if (call !== undefined) {
             call.output = call.output ?? result.output;
             call.isError = failed;
+            call.status = status;
           }
         }
         break;
@@ -138,6 +144,7 @@ export function deriveRunFacts(
       case "subagent.completed": {
         const call = ensureSubagentCall(event.data.callId, event.data.subagentName);
         call.output = event.data.output;
+        if (call.status === "pending") call.status = "completed";
         break;
       }
 

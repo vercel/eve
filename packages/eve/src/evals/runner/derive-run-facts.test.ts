@@ -31,7 +31,7 @@ function actionResult(input: {
   callId: string;
   toolName: string;
   output?: unknown;
-  status?: "completed" | "failed";
+  status?: "completed" | "failed" | "rejected";
   isError?: boolean;
 }): HandleMessageStreamEvent {
   return {
@@ -103,6 +103,7 @@ describe("deriveRunFacts", () => {
         input: { city: "Brooklyn" },
         output: { tempF: 72 },
         isError: false,
+        status: "completed",
         turnIndex: 0,
         sessionId: "s1",
       },
@@ -111,6 +112,7 @@ describe("deriveRunFacts", () => {
         input: { command: "pwd" },
         output: "command denied",
         isError: true,
+        status: "failed",
         turnIndex: 0,
         sessionId: "s1",
       },
@@ -126,6 +128,27 @@ describe("deriveRunFacts", () => {
 
     const facts = deriveRunFacts(events);
     expect(facts.toolCalls[0]?.isError).toBe(true);
+  });
+
+  it("distinguishes pending, completed, failed, and rejected tool calls", () => {
+    const events: HandleMessageStreamEvent[] = [
+      actionsRequested([
+        { callId: "pending", toolName: "pending" },
+        { callId: "completed", toolName: "completed" },
+        { callId: "failed", toolName: "failed" },
+        { callId: "rejected", toolName: "rejected" },
+      ]),
+      actionResult({ callId: "completed", toolName: "completed" }),
+      actionResult({ callId: "failed", toolName: "failed", status: "failed" }),
+      actionResult({ callId: "rejected", toolName: "rejected", status: "rejected" }),
+    ];
+
+    expect(deriveRunFacts(events).toolCalls.map((call) => call.status)).toEqual([
+      "pending",
+      "completed",
+      "failed",
+      "rejected",
+    ]);
   });
 
   it("stamps the turn index from turn.started boundaries", () => {
@@ -212,6 +235,7 @@ describe("deriveRunFacts", () => {
         remoteUrl: "http://127.0.0.1:4001",
         output: "Sunny, 72F",
         isError: false,
+        status: "completed",
         turnIndex: 0,
         sessionId: "s0",
       },

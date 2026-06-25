@@ -15,7 +15,6 @@ export default defineEval({
   async test(t) {
     await t.send('Reply with exactly the text "smoke ping" and nothing else.');
     t.completed();
-    t.didNotFail();
     t.messageIncludes("smoke ping");
     t.usedNoTools();
   },

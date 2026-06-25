@@ -9,17 +9,15 @@ export default defineEval({
     const first = await t.send("Call the `shared` tool and report the source and turn values.");
     first.expectOk();
 
-    const second = await t.send("Call the `session_only` tool and report the source value.");
-    second.expectOk();
+    await t.send("Call the `session_only` tool and report the source value.");
 
-    t.didNotFail();
     t.completed();
     t.calledTool("shared", {
-      isError: false,
+      status: "completed",
       output: { source: "turn" },
     });
     t.calledTool("session_only", {
-      isError: false,
+      status: "completed",
       output: { source: "session" },
     });
   },

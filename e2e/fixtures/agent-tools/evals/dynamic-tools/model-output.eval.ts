@@ -5,15 +5,13 @@ import { defineEval } from "eve/evals";
 export default defineEval({
   description: "Dynamic tools smoke: action.result carries the raw execute output.",
   async test(t) {
-    const turn = await t.send(
+    await t.send(
       "Use the `check_model_output` tool with value 'hello' and tell me what the result contains.",
     );
-    turn.expectOk();
 
-    t.didNotFail();
     t.completed();
     t.calledTool("check_model_output", {
-      isError: false,
+      status: "completed",
       output: { raw: true, secret: "internal-only-data", value: "hello" },
     });
   },

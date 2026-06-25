@@ -1,13 +1,13 @@
 ---
 title: "Assertions"
-description: "Run-level methods, t.check value assertions, the matcher mini-language, and gate vs soft severity."
+description: "Scoped methods, value assertions, the matcher mini-language, and gate vs soft severity."
 ---
 
-Assertions are how an eval grades what its `test(t)` function produced. Each one **records** a result onto `t` and returns a chainable handle. The runner reads the recorded results to compute the verdict, so a single run reports every failing assertion rather than dying on the first. There are two deterministic surfaces: run-level methods on `t`, and `t.check` for grading a specific value. For model-graded assertions, see [Judge](./judge).
+Assertions are how an eval grades what its `test(t)` function produced. Each one records a result and returns a chainable handle. The runner reads every recorded result to compute the verdict, so a single run reports every failing assertion rather than dying on the first. There are two deterministic surfaces: scoped methods and `t.check` for grading a specific value. For model-graded assertions, see [Judge](./judge).
 
-## Run-level assertions
+## Scoped assertions
 
-Run-level assertions read the whole run, so they take no value. They are methods on `t` and gate by default. Several key off whether a run **parked**: paused on an unanswered human-in-the-loop (HITL) input request, waiting for an approval or answer before it can continue.
+Scoped assertions take no explicit value and gate by default. Call them on `t` to inspect the whole run, on an `EveEvalSession` to inspect one session, or on an `EveEvalTurn` to inspect one response. Several key off whether a scope **parked**: paused on unanswered human-in-the-loop (HITL) input.
 
 | Assertion                                           | Asserts                                                                                 |
 | --------------------------------------------------- | --------------------------------------------------------------------------------------- |
@@ -16,14 +16,16 @@ Run-level assertions read the whole run, so they take no value. They are methods
 | `t.waiting()`                                       | The run parked on HITL input (for approval-shaped evals)                                |
 | `t.messageIncludes(token)`                          | Joined assistant text contains `token` (string or RegExp)                               |
 | `t.outputEquals(value)` / `t.outputMatches(schema)` | Deep equality or Standard Schema (e.g. Zod) validation of the agent's structured output |
-| `t.calledTool(name, opts?)`                         | A matching tool call happened (`input`, `output`, `isError`, `times` constraints)       |
+| `t.calledTool(name, opts?)`                         | A matching tool call happened (`input`, `output`, `status`, `isError`, `times`)         |
 | `t.loadedSkill(skill, opts?)`                       | Sugar for `t.calledTool("load_skill", { input: { skill }, ...opts })`                   |
-| `t.notCalledTool(name)`                             | No call to `name`                                                                       |
-| `t.toolOrder([...names])`                           | Tool names appear in order (other calls may interleave)                                 |
+| `t.notCalledTool(name, opts?)`                      | No matching call to `name`                                                              |
+| `t.toolOrder([...names], opts?)`                    | Tool names appear in requested/resolved order                                           |
 | `t.usedNoTools()`                                   | No tool calls at all                                                                    |
 | `t.maxToolCalls(n)`                                 | At most `n` tool calls                                                                  |
 | `t.noFailedActions()`                               | No tool, subagent, or skill action reported a failure                                   |
 | `t.calledSubagent(name, opts?)`                     | A subagent delegation happened (`remoteUrl`, `output` constraints)                      |
+| `t.event(type, opts?)` / `t.notEvent(type, opts?)`  | Typed event presence, data, and count matching                                          |
+| `t.eventOrder([...matchers])`                       | Matching event groups occur in order                                                    |
 | `t.event(predicate, label)`                         | Escape hatch: any predicate over the typed event stream                                 |
 
 `t.completed()` subsumes `t.didNotFail()`, so reach for `completed` unless you specifically want to allow a parked run. The structured output that `t.outputEquals` and `t.outputMatches` read is the agent's structured output (see the [output schema guide](../guides/client/output-schema)).
@@ -34,6 +36,17 @@ t.completed();
 t.calledTool("get_weather");
 ```
 
+The same vocabulary narrows naturally in multi-turn and externally-created session evals:
+
+```ts
+const first = await t.send("Call get_weather for Brooklyn");
+first.calledTool("get_weather", { status: "completed", times: 1 });
+
+const attached = await t.target.attachSession(sessionId);
+attached.didNotFail();
+attached.messageIncludes("Sunny");
+```
+
 `t.calledTool` and `t.usedNoTools` are mutually exclusive; assert one or the other, never both in the same run.
 
 ## Value assertions with `t.check`
@@ -41,31 +54,41 @@ t.calledTool("get_weather");
 `t.check(value, assertion)` grades an explicit value against a builder from `eve/evals/expect`. The value can be `t.reply`, a turn's `.message`, parsed JSON, or any local you computed:
 
 ```ts
-import { includes, equals, matches, similarity } from "eve/evals/expect";
+import { includes, equals, matches, satisfies, similarity } from "eve/evals/expect";
 
-t.check(t.reply, includes("sunny")); // substring (gate)
+t.check(t.reply, includes(/sunny/i)); // substring or RegExp (gate)
 t.check(parsed, equals({ city: "Brooklyn" })); // deep structural equality (gate)
 t.check(parsed, matches(WeatherSchema)); // Standard Schema, e.g. Zod (gate)
 t.check(t.reply, similarity("Sunny, 72F")); // fuzzy 0–1 Levenshtein (soft)
+t.check(
+  latencyMs,
+  satisfies((value) => value < 1_000, "latency under one second"),
+);
 ```
 
-| Builder                | Scores                                           | Default |
-| ---------------------- | ------------------------------------------------ | ------- |
-| `includes(substring)`  | value (coerced to string) contains `substring`   | gate    |
-| `equals(value)`        | deep structural equality                         | gate    |
-| `matches(schema)`      | validates against a Standard Schema              | gate    |
-| `similarity(expected)` | normalized Levenshtein similarity, 1 = identical | soft    |
+| Builder                | Scores                                                  | Default |
+| ---------------------- | ------------------------------------------------------- | ------- |
+| `includes(value)`      | coerced string contains a substring or matches a RegExp | gate    |
+| `equals(value)`        | deep structural equality                                | gate    |
+| `matches(schema)`      | validates against a Standard Schema                     | gate    |
+| `similarity(expected)` | normalized Levenshtein similarity, 1 = identical        | soft    |
+| `satisfies(fn, label)` | custom boolean predicate                                | gate    |
 
 Pick the cheapest builder that captures what "correct" means. When exact match is too strict but a judge model is overkill, `similarity` is the middle ground. For nuanced grading, reach for the [judge](./judge).
 
 ## The matcher mini-language
 
-`t.calledTool` and `t.calledSubagent` take a matcher object: `{ input, output, isError, times }` for tools, `{ remoteUrl, output }` for subagents. Each field accepts a literal (objects partial-deep-match), a RegExp, or a function. A matcher function receives the value and returns either a boolean (acts as a predicate) or an expected value to compare against (handy for runner-assigned values like environment-provided URLs):
+`t.calledTool` and `t.calledSubagent` take matcher objects. Tools accept `{ input, output, status, isError, times }`; subagents accept `{ remoteUrl, output, status, isError, times }`. `status` is `"pending"`, `"completed"`, `"failed"`, or `"rejected"`. Pending and rejected calls never satisfy `isError: false` because they did not successfully execute.
+
+Matcher values accept a literal (objects partial-deep-match), a RegExp, or a function. A matcher function receives the observed value and returns a boolean verdict or a resolved expected value:
 
 ```ts
 t.calledTool("bash", { input: { command: /^pwd/ }, isError: false, times: 1 });
 
 t.calledTool("echo", { output: (value) => String(value).includes(marker) });
+
+parked.calledTool("guarded", { status: "pending", times: 1 });
+t.calledTool("guarded", { status: "completed", output: /approved/, times: 1 });
 
 t.calledSubagent("weather", {
   remoteUrl: () => process.env.WEATHER_AGENT_URL!,
@@ -77,7 +100,17 @@ t.calledSubagent("weather", {
 
 Beyond the raw `t.events` stream, the runner derives typed facts the assertions read: tool calls (name, input, output, error state), subagent calls, and HITL input requests. A turn that leaves the session open for a next message is the normal end state of a successful turn; parking on unanswered HITL input is tracked separately, and that is what `t.completed()` and `t.waiting()` key off.
 
-The built-in assertions cover almost everything. When you need to read the stream directly, `t.event(predicate, label)` is the escape hatch:
+Typed event matching covers presence, absence, exact counts, partial event data, and ordering:
+
+```ts
+turn.notEvent("result.completed");
+turn.eventOrder([
+  { type: "subagent.called", data: { name: "researcher" }, times: 2 },
+  { type: "subagent.completed", data: { subagentName: "researcher" }, times: 2 },
+]);
+```
+
+When a protocol invariant needs cross-event correlation, `t.event(predicate, label)` remains the escape hatch:
 
 ```ts
 t.event(
@@ -85,6 +118,18 @@ t.event(
     events.some((e) => e.type === "message.completed" && e.data.message?.includes(marker)),
   "assistant reply includes the marker",
 );
+```
+
+## Required preconditions
+
+`t.check` records a result and lets the script continue. When later control flow depends on the value, use `await t.require(value, assertion)`. It records a gate, returns the original value when it passes, and stops the test body without adding a duplicate execution error when it fails:
+
+```ts
+await t.require(
+  sessionIds,
+  satisfies((ids) => ids.length > 0, "dispatch started a session"),
+);
+await t.target.attachSession(sessionIds[0]!);
 ```
 
 ## Severity

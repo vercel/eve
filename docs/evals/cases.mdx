@@ -69,25 +69,21 @@ export default defineEval({
 });
 ```
 
-For a precondition no built-in assertion expresses, `throw`. A thrown error marks the eval `failed` with the message in the result:
+Use scoped assertions for intermediate turns. When later control flow depends on a value-level check, `t.require` records a gate and stops the script if it fails:
 
 ```ts title="evals/session-continuity.eval.ts"
 import { defineEval } from "eve/evals";
-import { includes } from "eve/evals/expect";
+import { equals } from "eve/evals/expect";
 
 export default defineEval({
   async test(t) {
-    await t.send("My favorite word is marigold.");
-    const firstSessionId = t.sessionId;
+    const first = await t.send("My favorite word is marigold.");
 
     const second = await t.send("Thanks for remembering.");
-    second.expectOk();
-    if (t.sessionId !== firstSessionId) {
-      throw new Error(`Expected one session; got ${firstSessionId} then ${t.sessionId}.`);
-    }
+    await t.require(second.sessionId, equals(first.sessionId));
 
     t.completed();
-    t.check(second.message, includes("Thanks for remembering."));
+    second.messageIncludes("Thanks for remembering.");
   },
 });
 ```
@@ -98,12 +94,16 @@ export default defineEval({
 
 - `t.send(input)` sends a turn and waits for it to settle. It accepts the same input as `ClientSession.send()` (a string or a structured message) and resolves to a turn carrying `.message` and `.expectOk()`.
 - `t.sendFile(text, path, mediaType?)` attaches a local file as a data URL.
-- `t.expectInputRequests(filter?)` asserts the previous turn parked on HITL input and returns the pending requests.
+- `t.expectInputRequests(filter?)` asserts the previous turn parked and returns a non-empty tuple. Filters match tool name, action input, prompt, display, option ids, and exact count.
 - `t.respond(...responses)` answers specific pending input requests and sends them as the next turn.
 - `t.respondAll(optionId)` answers every pending input request with the same option and sends the responses as the next turn.
 - `t.reply` is the last assistant message (or `null`); `t.sessionId` is the current session id; `t.events` is the full typed event stream captured so far.
 
 Each `send` (and `respond`/`respondAll`) resolves to a turn whose `expectOk()` throws only when the turn ended failed. A session left open for a next message is the normal end state of a successful turn.
+
+Use `expectOk()` only when the next operation depends on that intermediate turn succeeding. A final `t.completed()` already records a complete-run gate.
+
+To intentionally omit an eval for the current target, call `t.skip(reason)`. Skipped evals are reported separately and do not affect the exit code.
 
 Events from every session are captured in the result and artifacts. `t.log(message)` records debug lines into the eval artifact; `--verbose` also streams them to stdout as evals run. `t.signal` is an `AbortSignal` that fires on timeout.
 
