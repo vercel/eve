@@ -241,6 +241,11 @@ export interface RunInput {
   /** Inbound channel request id used to correlate workflow attributes. */
   readonly requestId?: string;
   /**
+   * Human-readable workflow title for top-level sessions. When omitted, the
+   * runtime derives `$eve.title` from {@link input.message}.
+   */
+  readonly title?: string;
+  /**
    * Optional terminal callback. When present, the runtime posts a single
    * callback when the session completes or fails.
    */

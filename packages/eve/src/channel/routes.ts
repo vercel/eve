@@ -66,6 +66,11 @@ type BaseSendOptions = {
   callback?: SessionCallback;
   continuationToken: string;
   mode?: RunMode;
+  /**
+   * Human-readable title for a newly started workflow session. Defaults to
+   * the first user message and is ignored when resuming an existing session.
+   */
+  title?: string;
 };
 
 /**

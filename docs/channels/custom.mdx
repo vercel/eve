@@ -46,7 +46,7 @@ export default defineChannel({
 
 Declare routes with the `POST()` and `GET()` helpers. Each route handler receives the raw `Request` and a helpers object:
 
-- `send(message, { auth, continuationToken, state? })` starts or resumes a session. Returns a `Session`.
+- `send(message, { auth, continuationToken, state?, title? })` starts or resumes a session. `title` overrides the new workflow session's display title without changing the model message. Returns a `Session`.
 - `getSession(sessionId)` looks up an existing session. The returned `Session` exposes `getEventStream({ startIndex? })` for streaming.
 - `receive(channel, ...)` hands inbound work to a different channel for cross-channel hand-off.
 - `params` holds route parameters extracted from the path pattern.
@@ -182,7 +182,7 @@ When a parent agent dispatches a subagent, the framework forwards the parent's c
 
 ## Continuation tokens
 
-Each call to `send(message, { auth, continuationToken, state? })` from a channel route addresses a session by its channel-local raw token. The framework prepends the channel name, derived from the file stem under `agent/channels/`, before handing the token to the runtime.
+Each call to `send(message, { auth, continuationToken, state?, title? })` from a channel route addresses a session by its channel-local raw token. The framework prepends the channel name, derived from the file stem under `agent/channels/`, before handing the token to the runtime.
 
 ```ts
 import { slackContinuationToken } from "eve/channels/slack";

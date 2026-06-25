@@ -1030,11 +1030,12 @@ describe("slackChannel() inbound mention pipeline", () => {
     const { send } = await firePost(channel, buildSignedRequest({ body }));
 
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload] = send.mock.calls[0]!;
+    const [payload, options] = send.mock.calls[0]!;
     const { context, message } = payload as { context?: readonly string[]; message: string };
     expect(context).toBeUndefined();
     expect(message).toContain("sender_id: U01");
     expect(message).toContain("message_ts:");
+    expect(options.title).toBe("hello");
   });
 
   it("adds one ID-attributed thread transcript without extra profile lookups", async () => {

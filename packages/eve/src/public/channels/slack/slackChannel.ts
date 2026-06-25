@@ -839,6 +839,7 @@ async function dispatchInboundMessage(input: {
           teamId: message.teamId ?? null,
           triggeringUserId: inboundContext.userId || null,
         },
+        title: message.markdown,
       },
     );
   } catch (error) {
