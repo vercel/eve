@@ -151,6 +151,7 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
     model: ResolvedAgent["config"]["model"];
     name: string;
     outputSchema?: ResolvedAgent["config"]["outputSchema"];
+    reasoning?: ResolvedAgent["config"]["reasoning"];
     source?: ResolvedAgent["config"]["source"];
   } = {
     model:
@@ -214,6 +215,10 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
 
   if (manifest.config.outputSchema !== undefined) {
     config.outputSchema = manifest.config.outputSchema;
+  }
+
+  if (manifest.config.reasoning !== undefined) {
+    config.reasoning = manifest.config.reasoning;
   }
 
   if (manifest.config.source !== undefined) {

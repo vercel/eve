@@ -6,8 +6,13 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
+import {
+  buildSessionAttributes,
+  buildSubagentRootAttributes,
+} from "#execution/eve-workflow-attributes.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { ConnectionAuthorizationRequiredError } from "#public/connections/errors.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
@@ -472,22 +477,32 @@ describe("workflowEntry integration", () => {
     const continuationToken = "http:workflow-entry-tags";
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
+      const serializedContext = buildSerializedContext({
+        channelKind: "http",
+        continuationToken,
+        mode: "conversation",
+      });
+      const run = await start(
+        workflowEntry,
+        [
+          {
+            input: { message: "session tag round-trip" },
+            serializedContext,
+          },
+        ],
         {
-          input: { message: "session tag round-trip" },
-          serializedContext: buildSerializedContext({
-            channelKind: "http",
-            continuationToken,
-            mode: "conversation",
-          }),
+          allowReservedAttributes: true,
+          attributes: normalizeEveAttributes(
+            buildSessionAttributes({
+              inputMessage: "session tag round-trip",
+              serializedContext,
+            }),
+          ),
         },
-      ]);
+      );
 
       const stream = captureTurnEvents(run);
       try {
-        // Drain the first turn — by the time it completes `createSessionStep`
-        // has run and emitted the session-level `$eve.*` keys from inside
-        // its own step body.
         await stream.nextTurn();
 
         const world = await getWorld();
@@ -511,22 +526,39 @@ describe("workflowEntry integration", () => {
     const runtime = createTestRuntime({ agent: { name: "workflow-entry-subagent-tags" } });
 
     await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          input: { message: "subagent tag round-trip" },
-          serializedContext: buildSerializedContext({
-            channelKind: "subagent",
-            continuationToken: "subagent:parent-session:call-subagent-1",
-            mode: "task",
-            parent: {
-              callId: "call-subagent-1",
-              rootSessionId: "root-session",
-              sessionId: "parent-session",
-              turn: { id: "turn-parent", sequence: 2 },
-            },
-          }),
+      const serializedContext = buildSerializedContext({
+        channelKind: "subagent",
+        continuationToken: "subagent:parent-session:call-subagent-1",
+        mode: "task",
+        parent: {
+          callId: "call-subagent-1",
+          rootSessionId: "root-session",
+          sessionId: "parent-session",
+          turn: { id: "turn-parent", sequence: 2 },
         },
-      ]);
+      });
+      const run = await start(
+        workflowEntry,
+        [
+          {
+            input: { message: "subagent tag round-trip" },
+            serializedContext,
+          },
+        ],
+        {
+          allowReservedAttributes: true,
+          attributes: normalizeEveAttributes(
+            buildSubagentRootAttributes({
+              identity: { nodeId: "researcher" },
+              parentCallId: "call-subagent-1",
+              parentSessionId: "parent-session",
+              parentTurnId: "turn-parent",
+              rootSessionId: "root-session",
+              serializedContext,
+            }),
+          ),
+        },
+      );
 
       await expect(run.returnValue).resolves.toEqual({
         output: expect.stringContaining("subagent tag round-trip"),

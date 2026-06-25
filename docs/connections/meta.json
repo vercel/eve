@@ -1,4 +1,4 @@
 {
   "title": "Connections",
-  "pages": ["overview"]
+  "pages": ["overview", "mcp", "openapi"]
 }

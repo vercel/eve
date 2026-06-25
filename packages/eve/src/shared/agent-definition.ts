@@ -1,4 +1,4 @@
-import type { LanguageModel } from "ai";
+import type { CallSettings, LanguageModel } from "ai";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
@@ -10,6 +10,11 @@ import type { ModuleSourceRef } from "#shared/source-ref.js";
 export interface AgentModelOptionsDefinition {
   readonly providerOptions?: Record<string, JsonObject>;
 }
+
+/**
+ * Provider-agnostic reasoning effort forwarded to the AI SDK model call.
+ */
+export type AgentReasoningDefinition = NonNullable<CallSettings["reasoning"]>;
 
 /**
  * How an agent's model is reached at runtime, decided at compile time from the
@@ -167,6 +172,7 @@ export type InternalAgentDefinition = {
   experimental?: AgentExperimentalDefinition;
   model: InternalAgentModelDefinition;
   outputSchema?: JsonObject;
+  reasoning?: AgentReasoningDefinition;
   source?: ModuleSourceRef;
 };
 
@@ -206,6 +212,11 @@ export type PublicAgentDefinition = {
    */
   readonly modelContextWindowTokens?: number;
   readonly modelOptions?: AgentModelOptionsDefinition;
+  /**
+   * Provider-agnostic reasoning effort for the agent's turn model calls.
+   * Support for individual levels depends on the selected model and provider.
+   */
+  readonly reasoning?: AgentReasoningDefinition;
   /**
    * Optional structured return type used when this agent runs in task mode
    * (for example as a subagent, schedule, or remote job). Interactive

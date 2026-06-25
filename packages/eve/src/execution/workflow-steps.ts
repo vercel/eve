@@ -59,7 +59,7 @@ import { createExecutionNodeStep } from "#execution/node-step.js";
 import { emitProxiedInputRequest, routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-attributes.js";
-import { setEveAttributes } from "#runtime/attributes/emit.js";
+import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { turnWorkflow } from "#execution/turn-workflow.js";
 import { createWorkflowRuntime, startWorkflowPreferLatest } from "#execution/workflow-runtime.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
@@ -105,22 +105,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   "use step";
 
   let input = rawInput;
-
-  // Tag this turn run with the lineage attributes the dashboard uses to
-  // roll turns up under their parent session. Emitted from inside this
-  // step — which the turn workflow already pays for — so we never spend
-  // a standalone `__builtin_set_attributes` step in the workflow body.
-  // The values are constant for the run, so emitting on every step
-  // iteration is idempotent (last-write-wins) and avoids guessing which
-  // iteration is "first". Best effort — `setEveAttributes` swallows
-  // runtime failures.
-  await setEveAttributes(
-    buildTurnAttributes({
-      parentSessionId: input.sessionState.sessionId,
-      requestId: input.input?.kind === "deliver" ? input.input.requestId : undefined,
-      rootSessionId: readRootSessionId(input.serializedContext) ?? input.sessionState.sessionId,
-    }),
-  );
 
   let durableSession = await readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
@@ -653,7 +637,16 @@ export async function dispatchTurnStep(
 ): Promise<{ readonly runId: string }> {
   "use step";
 
-  const run = await startWorkflowPreferLatest(turnWorkflow, [createTurnWorkflowInput(input)]);
+  const run = await startWorkflowPreferLatest(turnWorkflow, [createTurnWorkflowInput(input)], {
+    allowReservedAttributes: true,
+    attributes: normalizeEveAttributes(
+      buildTurnAttributes({
+        parentSessionId: input.sessionState.sessionId,
+        requestId: input.delivery.kind === "deliver" ? input.delivery.requestId : undefined,
+        rootSessionId: readRootSessionId(input.serializedContext) ?? input.sessionState.sessionId,
+      }),
+    ),
+  });
 
   return { runId: run.runId };
 }

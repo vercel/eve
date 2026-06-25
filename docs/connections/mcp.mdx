@@ -1,0 +1,61 @@
+---
+title: "MCP Connections"
+description: "Connect an eve agent to a remote MCP server and control which tools the model can discover."
+---
+
+MCP connections point eve at an MCP server you do not author. The server publishes its tools and schemas, and eve exposes matched tools to the model through `connection_search`.
+
+Use MCP when the service already has an MCP server, when the server needs to own tool schemas dynamically, or when one connection should expose a family of related remote tools.
+
+## Define an MCP connection
+
+`defineMcpClientConnection` needs a `url` and a `description`:
+
+```ts title="agent/connections/linear.ts"
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.linear.app/sse",
+  description: "Linear workspace: issues, projects, cycles, and comments.",
+  auth: {
+    getToken: async () => ({ token: process.env.LINEAR_API_TOKEN! }),
+  },
+});
+```
+
+The `url` must speak Streamable HTTP or SSE. Write the `description` for the model, not for yourself. It shows up in `connection_search`, and the model uses it to decide which connection to query.
+
+The file path provides the connection name. `agent/connections/linear.ts` registers as `linear`, and remote tools appear as `linear__<tool>` after discovery.
+
+## Tool filters
+
+To narrow which remote tools the model sees, set exactly one of `tools.allow` or `tools.block`. Filtered-out tools do not appear in `connection_search`:
+
+```ts title="agent/connections/linear.ts"
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.linear.app/sse",
+  description: "Linear: read-only.",
+  auth: { getToken: async () => ({ token: process.env.LINEAR_API_TOKEN! }) },
+  tools: { allow: ["search_issues", "get_issue"] },
+});
+```
+
+Use `allow` for the smallest safe surface, especially on MCP servers that expose write tools alongside read tools. Use `block` only when the server has a broad stable surface and you need to hide a few tools.
+
+## Auth, headers, and approval
+
+MCP connections support the shared connection options:
+
+- `auth` for static tokens, Vercel Connect, or self-hosted interactive OAuth.
+- `headers` for API-key schemes or extra server configuration.
+- `approval` for human-in-the-loop gates before connection tools run.
+
+See [Connections](/docs/connections) for the shared auth, headers, and approval shapes.
+
+## What to read next
+
+- [OpenAPI connections](./openapi): generate tools from OpenAPI operations.
+- [Auth & route protection](../guides/auth-and-route-protection): the full interactive-OAuth flow with Vercel Connect.
+- [Security model](../concepts/security-model): how connection credentials stay out of the model's reach.

@@ -26,7 +26,7 @@
  */
 
 import { ChannelRequestIdKey } from "#context/keys.js";
-import type { EveAttributeValue } from "#runtime/attributes/emit.js";
+import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
 import { isNonEmptyString } from "#shared/guards.js";
 
 /**

@@ -23,6 +23,8 @@ async function createTempDir(): Promise<string> {
 
 const TEST_EVE_PACKAGE = { version: "0.25.0", nodeEngine: ">=24" } as const;
 const LATEST_EVE_PACKAGE = { version: "latest", nodeEngine: ">=24" } as const;
+const RELEASE_AGE_POLICY =
+  'minimumReleaseAgeExclude:\n  - "@ai-sdk/*"\n  - "@rolldown/*"\n  - "@vercel/*"\n  - "@workflow/*"\n  - ai\n  - eve\n  - nitro\n  - rolldown\n  - workflow\n';
 
 const TEST_WEB_PACKAGE_VERSIONS = {
   evePackage: TEST_EVE_PACKAGE,
@@ -432,7 +434,7 @@ describe("ensureChannel", () => {
     });
 
     await expect(readFile(pnpmWorkspacePath, "utf8")).resolves.toBe(
-      "packages:\n  - packages/*\nallowBuilds:\n  esbuild: true\n  sharp: false\n\nminimumReleaseAgeExclude:\n  - eve\n",
+      `packages:\n  - packages/*\nallowBuilds:\n  esbuild: true\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
     );
     expect(result.filesWritten).toContain(pnpmWorkspacePath);
   });
@@ -455,12 +457,12 @@ describe("ensureChannel", () => {
     });
 
     await expect(readFile(pnpmWorkspacePath, "utf8")).resolves.toBe(
-      `${existingPolicy}\nminimumReleaseAgeExclude:\n  - eve\n`,
+      `${existingPolicy}\n${RELEASE_AGE_POLICY}`,
     );
     expect(result.filesWritten).toContain(pnpmWorkspacePath);
   });
 
-  test("adds the eve release age exclusion to an existing pnpm workspace exclusion list", async () => {
+  test("adds the release age exclusions to an existing pnpm workspace exclusion list", async () => {
     const projectRoot = await createTempDir();
     const pnpmWorkspacePath = join(projectRoot, "pnpm-workspace.yaml");
     await writeFile(
@@ -481,7 +483,7 @@ describe("ensureChannel", () => {
     });
 
     await expect(readFile(pnpmWorkspacePath, "utf8")).resolves.toBe(
-      "minimumReleaseAgeExclude:\n  - react\n  - eve\nallowBuilds:\n  sharp: false\n",
+      'minimumReleaseAgeExclude:\n  - react\n  - "@ai-sdk/*"\n  - "@rolldown/*"\n  - "@vercel/*"\n  - "@workflow/*"\n  - ai\n  - eve\n  - nitro\n  - rolldown\n  - workflow\nallowBuilds:\n  sharp: false\n',
     );
     expect(result.filesWritten).toContain(pnpmWorkspacePath);
   });
@@ -515,7 +517,7 @@ describe("ensureChannel", () => {
     expect(result.filesWritten).not.toContain(join(projectRoot, "pnpm-workspace.yaml"));
     await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\nminimumReleaseAgeExclude:\n  - eve\n",
+      `packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectRoot, "package.json"), "utf8"),
@@ -790,7 +792,7 @@ describe("scaffoldBaseProject", () => {
 
     await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "packages:\n  - apps/*\n\nallowBuilds:\n  sharp: false\n\nminimumReleaseAgeExclude:\n  - eve\n",
+      `packages:\n  - apps/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectRoot, "package.json"), "utf8"),
@@ -833,7 +835,7 @@ describe("scaffoldBaseProject", () => {
 
     await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\nminimumReleaseAgeExclude:\n  - eve\n",
+      `packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectRoot, "package.json"), "utf8"),

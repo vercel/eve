@@ -136,12 +136,7 @@ describe("workflowEntry", () => {
     expect(createSessionStep).toHaveBeenCalledWith({
       compiledArtifactsSource: {},
       continuationToken: "http:test",
-      inputMessage: "hello there",
       nodeId: undefined,
-      serializedContext: expect.objectContaining({
-        "eve.continuationToken": "http:test",
-        "eve.mode": "conversation",
-      }),
       sessionId: "wrun_test_123",
     });
     expect(dispatchTurnStep).toHaveBeenCalledWith(

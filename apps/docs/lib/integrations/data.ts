@@ -310,7 +310,7 @@ Point your frontend at the session routes eve serves (\`/eve/v1/session\`) and s
 const connectionPresentations: Record<string, ConnectionPresentation> = {
   linear: {
     logo: "linear",
-    docsHref: "/docs/connections",
+    docsHref: "/docs/connections/mcp",
     keywords: ["mcp", "issues", "project management", "oauth", "connect"],
     authModes: ["user", "app"],
   },
@@ -324,7 +324,7 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
   },
   datadog: {
     logo: "datadog",
-    docsHref: "/docs/connections",
+    docsHref: "/docs/connections/mcp",
     keywords: ["mcp", "observability", "metrics", "monitoring", "logs"],
     authModes: ["jwtBearer"],
     configureNote:
@@ -332,7 +332,7 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
   },
   honeycomb: {
     logo: "honeycomb",
-    docsHref: "/docs/connections",
+    docsHref: "/docs/connections/mcp",
     keywords: ["mcp", "observability", "traces", "queries"],
     authModes: ["jwtBearer"],
   },

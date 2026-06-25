@@ -1,6 +1,7 @@
 import { jsonSchema, zodSchema, type FlexibleSchema, type ModelMessage } from "ai";
 
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { NeedsApprovalContext } from "#public/definitions/tool.js";
 import type { DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import {
@@ -256,6 +257,9 @@ async function resolveToolsFromEvent(
       dynamicToolOwners.set(name, resolver.slug);
 
       liveTools.push(toHarnessToolDefinition(name, entry));
+      if (event.type === "step.started") {
+        continue;
+      }
 
       const stepFn =
         "__executeStepFn" in entry
@@ -287,6 +291,17 @@ async function resolveToolsFromEvent(
         serializedClosureVars = {};
       }
 
+      let needsApprovalStepFnName: string | undefined;
+      if (entry.needsApproval !== undefined) {
+        needsApprovalStepFnName = `eve:dynamic-tool-approval:${resolver.slug}:${entryKey}`;
+        const originalNeedsApproval = entry.needsApproval.bind(entry);
+        registerStepFunction(
+          needsApprovalStepFnName,
+          (_closureVars: unknown, approvalCtx: unknown) =>
+            originalNeedsApproval(approvalCtx as NeedsApprovalContext),
+        );
+      }
+
       metadata.push({
         name,
         description: entry.description,
@@ -298,6 +313,7 @@ async function resolveToolsFromEvent(
         resolverSlug: resolver.slug,
         entryKey,
         executeStepFnName,
+        needsApprovalStepFnName,
         closureVars: serializedClosureVars,
       });
     }

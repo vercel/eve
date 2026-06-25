@@ -1,6 +1,6 @@
 ---
 title: "agent.ts"
-description: "Set the agent's runtime config in agent.ts with defineAgent, including the model and compaction."
+description: "Set the agent's runtime config in agent.ts with defineAgent, including the model, reasoning effort, and compaction."
 ---
 
 An agent's `agent.ts` calls `defineAgent` (from `eve`) to set its runtime config.
@@ -38,6 +38,23 @@ export default defineAgent({
 ```
 
 Model use is subject to the terms, data-processing commitments, retention behavior, and available controls of the selected provider and routing path. Review the [AI Gateway model catalog](https://vercel.com/ai-gateway/models) for gateway-routed models, and review the provider's terms when you configure a direct `LanguageModel`.
+
+## Reasoning effort
+
+Set `reasoning` to control the model's reasoning effort through AI SDK's
+provider-agnostic option:
+
+```ts title="agent/agent.ts"
+export default defineAgent({
+  model: "openai/gpt-5.5",
+  reasoning: "high",
+});
+```
+
+Supported values are `"provider-default"`, `"none"`, `"minimal"`, `"low"`,
+`"medium"`, `"high"`, and `"xhigh"`. The selected model and provider determine
+which levels are available and how they map to provider-native settings. Use
+`modelOptions.providerOptions` when you need provider-specific reasoning controls.
 
 ## Compaction
 
@@ -85,12 +102,13 @@ external in hosted output, list it in `build.externalDependencies`.
 
 `defineAgent` takes a few more fields, all optional. For the exported types, see the [TypeScript API](./reference/typescript-api).
 
-| Field          | Type                                                    | Default     | Description                                                                                                                                                                                                                                                                                                                                                                       |
-| -------------- | ------------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `modelOptions` | `AgentModelOptionsDefinition`                           | none        | Provider option overrides forwarded to the model call.                                                                                                                                                                                                                                                                                                                            |
-| `experimental` | `{ codeMode?: boolean; workflow?: { world?: string } }` | flags unset | Opt-in flags that can change or disappear in any release. Treat them as unstable. `codeMode` routes executable tools through a sandboxed code-execution wrapper, where the model writes JavaScript that calls the tools inside the [sandbox](./sandbox). `workflow.world` selects the Workflow world package backing session state, queues, hooks, and streams on the root agent. |
-| `outputSchema` | Standard Schema or a JSON Schema object                 | none        | Structured return type for task-mode runs (a subagent, schedule, or remote job). Interactive conversation turns ignore it unless the client supplies a per-message schema.                                                                                                                                                                                                        |
-| `build`        | `{ externalDependencies?: string[] }`                   | none        | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                                                                                                                                                          |
+| Field          | Type                                                    | Default          | Description                                                                                                                                                                                                                                                                                                                                                                       |
+| -------------- | ------------------------------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reasoning`    | `AgentReasoningDefinition`                              | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                                                                                                                                                                                     |
+| `modelOptions` | `AgentModelOptionsDefinition`                           | none             | Provider option overrides forwarded to the model call.                                                                                                                                                                                                                                                                                                                            |
+| `experimental` | `{ codeMode?: boolean; workflow?: { world?: string } }` | flags unset      | Opt-in flags that can change or disappear in any release. Treat them as unstable. `codeMode` routes executable tools through a sandboxed code-execution wrapper, where the model writes JavaScript that calls the tools inside the [sandbox](./sandbox). `workflow.world` selects the Workflow world package backing session state, queues, hooks, and streams on the root agent. |
+| `outputSchema` | Standard Schema or a JSON Schema object                 | none             | Structured return type for task-mode runs (a subagent, schedule, or remote job). Interactive conversation turns ignore it unless the client supplies a per-message schema.                                                                                                                                                                                                        |
+| `build`        | `{ externalDependencies?: string[] }`                   | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                                                                                                                                                          |
 
 `codeMode` is experimental and may change or be removed.
 

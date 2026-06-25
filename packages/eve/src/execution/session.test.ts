@@ -75,11 +75,12 @@ describe("createSession", () => {
       continuationToken: "root-token",
       outputSchema,
       sessionId: "sess-root",
-      turnAgent: createTestTurnAgent({ outputSchema }),
+      turnAgent: createTestTurnAgent({ outputSchema, reasoning: "high" }),
     });
 
     expect(session.agent.compactionModelReference).toEqual({ id: "summary-model" });
     expect(session.agent.modelReference).toEqual({ id: "test-model" });
+    expect(session.agent.reasoning).toBe("high");
     expect(session.outputSchema).toEqual(outputSchema);
     expect(session.agent.system).toBe("You are a helpful assistant.\n\nBe concise.");
     expect(session.agent.tools).toEqual([
@@ -206,6 +207,23 @@ describe("createSession", () => {
 
     expect(durable.outputSchema).toEqual(runOutputSchema);
     expect(hydrated.outputSchema).toEqual(runOutputSchema);
+  });
+
+  it("restores current reasoning configuration when hydrating a durable session", () => {
+    const session = createSession({
+      continuationToken: "root-token",
+      sessionId: "sess-root",
+      turnAgent: createTestTurnAgent({ reasoning: "low" }),
+    });
+
+    const durable = projectToDurableSession(session);
+    const hydrated = hydrateDurableSession({
+      durable,
+      turnAgent: createTestTurnAgent({ reasoning: "high" }),
+    });
+
+    expect(durable.agent).toEqual({ system: session.agent.system });
+    expect(hydrated.agent.reasoning).toBe("high");
   });
 });
 

@@ -191,7 +191,11 @@ describe("dispatchTurnStep", () => {
     return {
       capabilities: undefined,
       completionToken: "turn-complete",
-      delivery: { kind: "deliver", payloads: [{ message: "hello" }] },
+      delivery: {
+        kind: "deliver",
+        payloads: [{ message: "hello" }],
+        requestId: "req_turn",
+      },
       mode: "conversation",
       parentWritable,
       serializedContext: { state: "driver" },
@@ -207,6 +211,13 @@ describe("dispatchTurnStep", () => {
     await expect(dispatchTurnStep(input)).resolves.toEqual({ runId: "turn-run" });
 
     expect(startMock).toHaveBeenCalledWith(turnWorkflow, [createTurnWorkflowInput(input)], {
+      allowReservedAttributes: true,
+      attributes: {
+        "$eve.channel_request_id": "req_turn",
+        "$eve.parent": "sess-test",
+        "$eve.root": "sess-test",
+        "$eve.type": "turn",
+      },
       deploymentId: "latest",
     });
   });
@@ -219,7 +230,15 @@ describe("dispatchTurnStep", () => {
     await expect(dispatchTurnStep(input)).resolves.toEqual({ runId: "turn-run" });
 
     expect(startMock).toHaveBeenCalledTimes(1);
-    expect(startMock).toHaveBeenCalledWith(turnWorkflow, [createTurnWorkflowInput(input)]);
+    expect(startMock).toHaveBeenCalledWith(turnWorkflow, [createTurnWorkflowInput(input)], {
+      allowReservedAttributes: true,
+      attributes: {
+        "$eve.channel_request_id": "req_turn",
+        "$eve.parent": "sess-test",
+        "$eve.root": "sess-test",
+        "$eve.type": "turn",
+      },
+    });
   });
 
   it("falls back to the current deployment when latest is unsupported", async () => {
@@ -233,9 +252,24 @@ describe("dispatchTurnStep", () => {
 
     const wireInput = createTurnWorkflowInput(input);
     expect(startMock).toHaveBeenNthCalledWith(1, turnWorkflow, [wireInput], {
+      allowReservedAttributes: true,
+      attributes: {
+        "$eve.channel_request_id": "req_turn",
+        "$eve.parent": "sess-test",
+        "$eve.root": "sess-test",
+        "$eve.type": "turn",
+      },
       deploymentId: "latest",
     });
-    expect(startMock).toHaveBeenNthCalledWith(2, turnWorkflow, [wireInput]);
+    expect(startMock).toHaveBeenNthCalledWith(2, turnWorkflow, [wireInput], {
+      allowReservedAttributes: true,
+      attributes: {
+        "$eve.channel_request_id": "req_turn",
+        "$eve.parent": "sess-test",
+        "$eve.root": "sess-test",
+        "$eve.type": "turn",
+      },
+    });
   });
 });
 
@@ -317,7 +351,15 @@ describe("dispatchRuntimeActionsStep", () => {
           }),
         }),
       ],
-      { deploymentId: "latest" },
+      {
+        allowReservedAttributes: true,
+        attributes: expect.objectContaining({
+          "$eve.parent": "parent-session",
+          "$eve.root": "parent-session",
+          "$eve.type": "subagent",
+        }),
+        deploymentId: "latest",
+      },
     );
   });
 
