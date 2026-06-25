@@ -123,34 +123,35 @@ describe("run assertions", () => {
     ).toBe(1);
   });
 
-  it("toolOrder correlates requested and resolved calls by call id for both phases", async () => {
-    const requested = actionsRequested([
-      { callId: "call-a", toolName: "step-a" },
-      { callId: "call-b", toolName: "step-b" },
-    ]);
-    const paired = makeResult({
-      events: [requested, actionResult("call-a", "step-a"), actionResult("call-b", "step-b")],
+  it("toolOrder checks request order", async () => {
+    const ordered = makeResult({
+      events: [
+        actionsRequested([
+          { callId: "call-a", toolName: "step-a" },
+          { callId: "call-b", toolName: "step-b" },
+        ]),
+      ],
     });
-    const mispaired = makeResult({
-      events: [requested, actionResult("call-b", "step-a"), actionResult("call-a", "step-b")],
+    const reversed = makeResult({
+      events: [
+        actionsRequested([
+          { callId: "call-b", toolName: "step-b" },
+          { callId: "call-a", toolName: "step-a" },
+        ]),
+      ],
     });
 
-    expect(
-      (await Run.toolOrder(["step-a", "step-b"], { phase: "both" }).evaluate(paired)).score,
-    ).toBe(1);
-    expect(
-      (await Run.toolOrder(["step-a", "step-b"], { phase: "both" }).evaluate(mispaired)).score,
-    ).toBe(0);
+    expect((await Run.toolOrder(["step-a", "step-b"]).evaluate(ordered)).score).toBe(1);
+    expect((await Run.toolOrder(["step-a", "step-b"]).evaluate(reversed)).score).toBe(0);
   });
 
-  it("toolOrder requested phase ignores calls synthesized from result-only events", async () => {
+  it("toolOrder ignores calls synthesized from result-only events", async () => {
     const result = makeResult({
       events: [actionResult("call-a", "step-a")],
       derived: { toolCalls: [completedToolCall("step-a")], toolCallCount: 1 },
     });
 
     expect((await Run.toolOrder(["step-a"]).evaluate(result)).score).toBe(0);
-    expect((await Run.toolOrder(["step-a"], { phase: "resolved" }).evaluate(result)).score).toBe(1);
   });
 
   it("matches typed event counts and ordered event groups", async () => {

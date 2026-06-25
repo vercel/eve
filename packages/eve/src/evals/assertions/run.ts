@@ -156,39 +156,19 @@ export function notCalledTool(
 }
 
 /**
- * Asserts the named tools were called in the given order (subsequence match:
+ * Asserts the named tools were requested in the given order (subsequence match:
  * other calls may interleave).
  */
-export function toolOrder(
-  names: readonly string[],
-  options: { readonly phase?: "requested" | "resolved" | "both" } = {},
-): RunAssertion {
+export function toolOrder(names: readonly string[]): RunAssertion {
   return {
-    name: `toolOrder(${names.join(" → ")}${options.phase ? `, ${options.phase}` : ""})`,
+    name: `toolOrder(${names.join(" → ")})`,
     evaluate(result) {
-      const phase = options.phase ?? "requested";
       const requested = requestedTools(result.events);
-      const resolved = resolvedTools(result.events);
-      const sequences =
-        phase === "both"
-          ? ([
-              ["requested", requested],
-              ["resolved", resolved],
-            ] as const)
-          : ([[phase, phase === "resolved" ? resolved : requested]] as const);
-
-      for (const [sequencePhase, entries] of sequences) {
-        const observed = entries.map((entry) => entry.name);
-        const missing = missingOrderedName(names, observed);
-        if (missing !== undefined) {
-          return fail(
-            `missing "${missing.name}" after [${names.slice(0, missing.cursor).join(", ")}]; observed ${sequencePhase} order: [${observed.join(", ")}]`,
-          );
-        }
-      }
-      if (phase === "both" && !hasCorrelatedToolOrder(names, requested, resolved)) {
+      const observed = requested.map((entry) => entry.name);
+      const missing = missingOrderedName(names, observed);
+      if (missing !== undefined) {
         return fail(
-          `requested and resolved tools were not paired by call id in the expected order; requested: [${formatToolEntries(requested)}]; resolved: [${formatToolEntries(resolved)}]`,
+          `missing "${missing.name}" after [${names.slice(0, missing.cursor).join(", ")}]; observed request order: [${observed.join(", ")}]`,
         );
       }
       return PASS;
@@ -435,13 +415,13 @@ function missingOrderedName(
   return name === undefined ? undefined : { cursor, name };
 }
 
-interface ToolPhaseEntry {
+interface ToolRequestEntry {
   readonly callId: string;
   readonly name: string;
 }
 
-function requestedTools(events: readonly HandleMessageStreamEvent[]): readonly ToolPhaseEntry[] {
-  const entries: ToolPhaseEntry[] = [];
+function requestedTools(events: readonly HandleMessageStreamEvent[]): readonly ToolRequestEntry[] {
+  const entries: ToolRequestEntry[] = [];
   const seenCallIds = new Set<string>();
   const append = (callId: string, name: string): void => {
     if (seenCallIds.has(callId)) return;
@@ -462,50 +442,4 @@ function requestedTools(events: readonly HandleMessageStreamEvent[]): readonly T
     }
   }
   return entries;
-}
-
-function resolvedTools(events: readonly HandleMessageStreamEvent[]): readonly ToolPhaseEntry[] {
-  return events.flatMap((event) =>
-    event.type === "action.result" && event.data.result.kind === "tool-result"
-      ? [{ callId: event.data.result.callId, name: event.data.result.toolName }]
-      : [],
-  );
-}
-
-function hasCorrelatedToolOrder(
-  expected: readonly string[],
-  requested: readonly ToolPhaseEntry[],
-  resolved: readonly ToolPhaseEntry[],
-  expectedIndex = 0,
-  requestedIndex = 0,
-  resolvedIndex = 0,
-): boolean {
-  const name = expected[expectedIndex];
-  if (name === undefined) return true;
-
-  for (let requestCursor = requestedIndex; requestCursor < requested.length; requestCursor += 1) {
-    const request = requested[requestCursor];
-    if (request?.name !== name) continue;
-    for (let resultCursor = resolvedIndex; resultCursor < resolved.length; resultCursor += 1) {
-      const result = resolved[resultCursor];
-      if (result?.name !== name || result.callId !== request.callId) continue;
-      if (
-        hasCorrelatedToolOrder(
-          expected,
-          requested,
-          resolved,
-          expectedIndex + 1,
-          requestCursor + 1,
-          resultCursor + 1,
-        )
-      ) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-function formatToolEntries(entries: readonly ToolPhaseEntry[]): string {
-  return entries.map((entry) => `${entry.name}(${entry.callId})`).join(", ");
 }

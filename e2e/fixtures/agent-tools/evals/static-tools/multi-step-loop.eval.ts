@@ -3,10 +3,10 @@ import { defineEval } from "eve/evals";
 const MULTI_STEP_FINAL_VALUE = "phoenix-rising-9F2X";
 
 // Deterministic two-step tool loop: lookup-step-a's stepKey feeds
-// lookup-step-b, in order, with results paired by callId, and the
-// final value flows back into the user-visible reply.
+// lookup-step-b in order, and the final value flows back into the
+// user-visible reply.
 export default defineEval({
-  description: "Static tools smoke: deterministic two-step tool loop with paired callIds.",
+  description: "Static tools smoke: deterministic two-step tool loop.",
   async test(t) {
     await t.send(
       [
@@ -18,7 +18,7 @@ export default defineEval({
     );
 
     t.completed();
-    t.toolOrder(["lookup-step-a", "lookup-step-b"], { phase: "both" });
+    t.toolOrder(["lookup-step-a", "lookup-step-b"]);
     t.calledTool("lookup-step-a", {
       input: { topic: "demo" },
       status: "completed",

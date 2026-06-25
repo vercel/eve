@@ -195,11 +195,8 @@ export interface EveEvalAssertions {
     name: string,
     options?: Omit<EveEvalToolCallMatchOptions, "times">,
   ): AssertionHandle;
-  /** `phase: "both"` also requires each request/result pair to share a call id. */
-  toolOrder(
-    names: readonly string[],
-    options?: { readonly phase?: "requested" | "resolved" | "both" },
-  ): AssertionHandle;
+  /** Asserts that tool requests appeared in order, allowing unrelated requests between them. */
+  toolOrder(names: readonly string[]): AssertionHandle;
   usedNoTools(): AssertionHandle;
   maxToolCalls(max: number): AssertionHandle;
   calledSubagent(name: string, options?: EveEvalSubagentCallMatchOptions): AssertionHandle;

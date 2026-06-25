@@ -35,7 +35,7 @@ export function createScopedAssertions(
     calledTool: (name, options) => record(RunAssertions.calledTool(name, options)),
     loadedSkill: (skill, options) => record(RunAssertions.loadedSkill(skill, options)),
     notCalledTool: (name, options) => record(RunAssertions.notCalledTool(name, options)),
-    toolOrder: (names, options) => record(RunAssertions.toolOrder(names, options)),
+    toolOrder: (names) => record(RunAssertions.toolOrder(names)),
     usedNoTools: () => record(RunAssertions.usedNoTools()),
     maxToolCalls: (max) => record(RunAssertions.maxToolCalls(max)),
     calledSubagent: (name, options) => record(RunAssertions.calledSubagent(name, options)),
