@@ -195,6 +195,7 @@ export interface EveEvalAssertions {
     name: string,
     options?: Omit<EveEvalToolCallMatchOptions, "times">,
   ): AssertionHandle;
+  /** `phase: "both"` also requires each request/result pair to share a call id. */
   toolOrder(
     names: readonly string[],
     options?: { readonly phase?: "requested" | "resolved" | "both" },

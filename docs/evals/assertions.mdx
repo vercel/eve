@@ -19,7 +19,7 @@ Scoped assertions take no explicit value and gate by default. Call them on `t` t
 | `t.calledTool(name, opts?)`                         | A matching tool call happened (`input`, `output`, `status`, `isError`, `times`)         |
 | `t.loadedSkill(skill, opts?)`                       | Sugar for `t.calledTool("load_skill", { input: { skill }, ...opts })`                   |
 | `t.notCalledTool(name, opts?)`                      | No matching call to `name`                                                              |
-| `t.toolOrder([...names], opts?)`                    | Tool names appear in requested/resolved order                                           |
+| `t.toolOrder([...names], opts?)`                    | Tool names appear in requested/resolved order; `phase: "both"` also pairs call IDs      |
 | `t.usedNoTools()`                                   | No tool calls at all                                                                    |
 | `t.maxToolCalls(n)`                                 | At most `n` tool calls                                                                  |
 | `t.noFailedActions()`                               | No tool, subagent, or skill action reported a failure                                   |

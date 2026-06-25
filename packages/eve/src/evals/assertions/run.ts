@@ -37,9 +37,8 @@ export function completed(): RunAssertion {
   return {
     name: "completed",
     evaluate(result) {
-      if (result.status === "failed") {
-        return fail(failureDetail("run failed", result.derived.failureCode));
-      }
+      const failure = runFailure(result);
+      if (failure !== undefined) return failure;
       if (result.derived.parked) {
         return fail(
           `run parked on ${result.derived.inputRequests.length} unanswered input request(s)`,
@@ -75,19 +74,7 @@ export function didNotFail(): RunAssertion {
   return {
     name: "didNotFail",
     evaluate(result) {
-      if (result.status === "failed") {
-        return fail(failureDetail("run failed", result.derived.failureCode));
-      }
-      const failedEvent = result.events.find(
-        (
-          event,
-        ): event is Extract<HandleMessageStreamEvent, { type: "step.failed" | "turn.failed" }> =>
-          event.type === "turn.failed" || event.type === "step.failed",
-      );
-      if (failedEvent !== undefined) {
-        return fail(`${failedEvent.type} (${failedEvent.data.code}): ${failedEvent.data.message}`);
-      }
-      return PASS;
+      return runFailure(result) ?? PASS;
     },
   };
 }
@@ -180,22 +167,29 @@ export function toolOrder(
     name: `toolOrder(${names.join(" → ")}${options.phase ? `, ${options.phase}` : ""})`,
     evaluate(result) {
       const phase = options.phase ?? "requested";
-      const requested = result.derived.toolCalls.map((call) => call.name);
-      const resolved = result.events.flatMap((event) =>
-        event.type === "action.result" && event.data.result.kind === "tool-result"
-          ? [event.data.result.toolName]
-          : [],
-      );
+      const requested = requestedTools(result.events);
+      const resolved = resolvedTools(result.events);
       const sequences =
-        phase === "both" ? [requested, resolved] : [phase === "resolved" ? resolved : requested];
+        phase === "both"
+          ? ([
+              ["requested", requested],
+              ["resolved", resolved],
+            ] as const)
+          : ([[phase, phase === "resolved" ? resolved : requested]] as const);
 
-      for (const observed of sequences) {
+      for (const [sequencePhase, entries] of sequences) {
+        const observed = entries.map((entry) => entry.name);
         const missing = missingOrderedName(names, observed);
         if (missing !== undefined) {
           return fail(
-            `missing "${missing.name}" after [${names.slice(0, missing.cursor).join(", ")}]; observed ${phase} order: [${observed.join(", ")}]`,
+            `missing "${missing.name}" after [${names.slice(0, missing.cursor).join(", ")}]; observed ${sequencePhase} order: [${observed.join(", ")}]`,
           );
         }
+      }
+      if (phase === "both" && !hasCorrelatedToolOrder(names, requested, resolved)) {
+        return fail(
+          `requested and resolved tools were not paired by call id in the expected order; requested: [${formatToolEntries(requested)}]; resolved: [${formatToolEntries(resolved)}]`,
+        );
       }
       return PASS;
     },
@@ -410,6 +404,19 @@ function failureDetail(prefix: string, code: string | undefined): string {
   return code === undefined ? prefix : `${prefix} (code: ${code})`;
 }
 
+function runFailure(result: EveEvalAssertionSubject): AssertionOutcome | undefined {
+  if (result.status === "failed") {
+    return fail(failureDetail("run failed", result.derived.failureCode));
+  }
+  const failedEvent = result.events.find(
+    (event): event is Extract<HandleMessageStreamEvent, { type: "step.failed" | "turn.failed" }> =>
+      event.type === "turn.failed" || event.type === "step.failed",
+  );
+  return failedEvent === undefined
+    ? undefined
+    : fail(`${failedEvent.type} (${failedEvent.data.code}): ${failedEvent.data.message}`);
+}
+
 function truncate(text: string | undefined, max = 200): string {
   if (text === undefined) return "undefined";
   return text.length <= max ? text : `${text.slice(0, max)}…`;
@@ -426,4 +433,79 @@ function missingOrderedName(
   }
   const name = expected[cursor];
   return name === undefined ? undefined : { cursor, name };
+}
+
+interface ToolPhaseEntry {
+  readonly callId: string;
+  readonly name: string;
+}
+
+function requestedTools(events: readonly HandleMessageStreamEvent[]): readonly ToolPhaseEntry[] {
+  const entries: ToolPhaseEntry[] = [];
+  const seenCallIds = new Set<string>();
+  const append = (callId: string, name: string): void => {
+    if (seenCallIds.has(callId)) return;
+    seenCallIds.add(callId);
+    entries.push({ callId, name });
+  };
+
+  for (const event of events) {
+    if (event.type === "actions.requested") {
+      for (const action of event.data.actions) {
+        if (action.kind === "tool-call") append(action.callId, action.toolName);
+      }
+    } else if (event.type === "input.requested") {
+      for (const request of event.data.requests) {
+        const { action } = request;
+        if (action.kind === "tool-call") append(action.callId, action.toolName);
+      }
+    }
+  }
+  return entries;
+}
+
+function resolvedTools(events: readonly HandleMessageStreamEvent[]): readonly ToolPhaseEntry[] {
+  return events.flatMap((event) =>
+    event.type === "action.result" && event.data.result.kind === "tool-result"
+      ? [{ callId: event.data.result.callId, name: event.data.result.toolName }]
+      : [],
+  );
+}
+
+function hasCorrelatedToolOrder(
+  expected: readonly string[],
+  requested: readonly ToolPhaseEntry[],
+  resolved: readonly ToolPhaseEntry[],
+  expectedIndex = 0,
+  requestedIndex = 0,
+  resolvedIndex = 0,
+): boolean {
+  const name = expected[expectedIndex];
+  if (name === undefined) return true;
+
+  for (let requestCursor = requestedIndex; requestCursor < requested.length; requestCursor += 1) {
+    const request = requested[requestCursor];
+    if (request?.name !== name) continue;
+    for (let resultCursor = resolvedIndex; resultCursor < resolved.length; resultCursor += 1) {
+      const result = resolved[resultCursor];
+      if (result?.name !== name || result.callId !== request.callId) continue;
+      if (
+        hasCorrelatedToolOrder(
+          expected,
+          requested,
+          resolved,
+          expectedIndex + 1,
+          requestCursor + 1,
+          resultCursor + 1,
+        )
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function formatToolEntries(entries: readonly ToolPhaseEntry[]): string {
+  return entries.map((entry) => `${entry.name}(${entry.callId})`).join(", ");
 }

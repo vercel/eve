@@ -35,6 +35,33 @@ function message(text: string): HandleMessageStreamEvent {
   } as HandleMessageStreamEvent;
 }
 
+function actionsRequested(
+  actions: readonly { readonly callId: string; readonly toolName: string }[],
+): HandleMessageStreamEvent {
+  return {
+    type: "actions.requested",
+    data: {
+      actions: actions.map((action) => ({ ...action, input: {}, kind: "tool-call" as const })),
+      sequence: 1,
+      stepIndex: 0,
+      turnId: "t1",
+    },
+  };
+}
+
+function actionResult(callId: string, toolName: string): HandleMessageStreamEvent {
+  return {
+    type: "action.result",
+    data: {
+      result: { callId, kind: "tool-result", output: null, toolName },
+      sequence: 2,
+      status: "completed",
+      stepIndex: 0,
+      turnId: "t1",
+    },
+  };
+}
+
 describe("run assertions", () => {
   it("completed passes a clean run and fails a failed or parked run", async () => {
     expect((await Run.completed().evaluate(makeResult({ status: "completed" }))).score).toBe(1);
@@ -42,6 +69,24 @@ describe("run assertions", () => {
     expect((await Run.completed().evaluate(makeResult({ derived: { parked: true } }))).score).toBe(
       0,
     );
+  });
+
+  it("completed rejects failure events even when the terminal status is completed", async () => {
+    const failedEvent = {
+      type: "step.failed",
+      data: {
+        code: "STEP_FAILED",
+        message: "step failed",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "t1",
+      },
+    } as HandleMessageStreamEvent;
+
+    expect(
+      (await Run.completed().evaluate(makeResult({ status: "completed", events: [failedEvent] })))
+        .score,
+    ).toBe(0);
   });
 
   it("messageIncludes matches substrings of completed messages", async () => {
@@ -76,6 +121,36 @@ describe("run assertions", () => {
     expect(
       (await Run.notCalledTool("guarded", { status: "completed" }).evaluate(result)).score,
     ).toBe(1);
+  });
+
+  it("toolOrder correlates requested and resolved calls by call id for both phases", async () => {
+    const requested = actionsRequested([
+      { callId: "call-a", toolName: "step-a" },
+      { callId: "call-b", toolName: "step-b" },
+    ]);
+    const paired = makeResult({
+      events: [requested, actionResult("call-a", "step-a"), actionResult("call-b", "step-b")],
+    });
+    const mispaired = makeResult({
+      events: [requested, actionResult("call-b", "step-a"), actionResult("call-a", "step-b")],
+    });
+
+    expect(
+      (await Run.toolOrder(["step-a", "step-b"], { phase: "both" }).evaluate(paired)).score,
+    ).toBe(1);
+    expect(
+      (await Run.toolOrder(["step-a", "step-b"], { phase: "both" }).evaluate(mispaired)).score,
+    ).toBe(0);
+  });
+
+  it("toolOrder requested phase ignores calls synthesized from result-only events", async () => {
+    const result = makeResult({
+      events: [actionResult("call-a", "step-a")],
+      derived: { toolCalls: [completedToolCall("step-a")], toolCallCount: 1 },
+    });
+
+    expect((await Run.toolOrder(["step-a"]).evaluate(result)).score).toBe(0);
+    expect((await Run.toolOrder(["step-a"], { phase: "resolved" }).evaluate(result)).score).toBe(1);
   });
 
   it("matches typed event counts and ordered event groups", async () => {
