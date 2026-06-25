@@ -37,6 +37,9 @@ const BASE_VERSIONS = {
   zodPackageVersion: "4.0.0",
 } as const;
 
+const RELEASE_AGE_POLICY =
+  'minimumReleaseAgeExclude:\n  - "@ai-sdk/*"\n  - "@rolldown/*"\n  - "@vercel/*"\n  - "@workflow/*"\n  - ai\n  - eve\n  - nitro\n  - rolldown\n  - workflow\n';
+
 const WEB_VERSIONS = {
   ...BASE_VERSIONS,
   nextPackageVersion: "16.0.0",
@@ -410,7 +413,7 @@ describe("runInitCommand", () => {
     const projectPath = join(appsDirectory, "my-agent");
     await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "packages:\n  - apps/*\n\nallowBuilds:\n  sharp: false\n\nminimumReleaseAgeExclude:\n  - eve\n",
+      `packages:\n  - apps/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectPath, "package.json"), "utf8"),
@@ -459,7 +462,7 @@ describe("runInitCommand", () => {
     const projectPath = join(agentsDirectory, "my-agent");
     await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\nminimumReleaseAgeExclude:\n  - eve\n",
+      `packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectPath, "package.json"), "utf8"),
@@ -501,7 +504,7 @@ describe("runInitCommand", () => {
     await expect(pathExists(join(projectPath, "app/page.tsx"))).resolves.toBe(true);
     await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\nminimumReleaseAgeExclude:\n  - eve\n",
+      `packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectPath, "package.json"), "utf8"),

@@ -12,11 +12,27 @@ import type { PackageManagerStrategy } from "./types.js";
 
 export const PNPM_WORKSPACE_PATH = "pnpm-workspace.yaml";
 export const PNPM_WORKSPACE_MEMBERSHIP_ARGUMENTS = ["list", "--depth", "-1", "--json"] as const;
+const RELEASE_AGE_EXCLUSIONS = [
+  "@ai-sdk/*",
+  "@rolldown/*",
+  "@vercel/*",
+  "@workflow/*",
+  "ai",
+  "eve",
+  "nitro",
+  "rolldown",
+  "workflow",
+] as const;
+
+function formatReleaseAgeExclusion(exclusion: string): string {
+  return `  - ${exclusion.includes("*") ? JSON.stringify(exclusion) : exclusion}`;
+}
+
 // eve@0.6.0-beta.13 through 0.7.0 imported `oxc-parser` at runtime while
 // declaring it only as a devDependency. Fixed releases use their own manifest.
 export const PNPM_WORKSPACE_CONTENT = [
   "minimumReleaseAgeExclude:",
-  "  - eve",
+  ...RELEASE_AGE_EXCLUSIONS.map(formatReleaseAgeExclusion),
   "allowBuilds:",
   "  sharp: false",
   "# Compatibility for eve releases with an incomplete runtime manifest.",
@@ -27,8 +43,14 @@ export const PNPM_WORKSPACE_CONTENT = [
   "",
 ].join("\n");
 
-const EVE_RELEASE_AGE_EXCLUSION = "  - eve";
 const SHARP_BUILD_POLICY = "  sharp: false";
+
+function releaseAgeExclusionName(line: string): string {
+  return line
+    .trim()
+    .replace(/^-\s+/u, "")
+    .replace(/^["']|["']$/gu, "");
+}
 
 function findYamlBlockEnd(lines: readonly string[], startIndex: number): number {
   let blockEnd = startIndex + 1;
@@ -64,19 +86,24 @@ function withSharpBuildPolicy(source: string): string {
   return lines.join("\n");
 }
 
-function withExperimentalEveReleaseAgeExclusion(source: string): string {
+function withReleaseAgeExclusions(source: string): string {
   const normalized = source.endsWith("\n") ? source : `${source}\n`;
   const lines = normalized.split("\n");
   const excludeIndex = lines.findIndex((line) => line === "minimumReleaseAgeExclude:");
 
   if (excludeIndex < 0) {
     const prefix = normalized.trim().length === 0 ? "" : `${normalized}\n`;
-    return `${prefix}minimumReleaseAgeExclude:\n${EVE_RELEASE_AGE_EXCLUSION}\n`;
+    const exclusions = RELEASE_AGE_EXCLUSIONS.map(formatReleaseAgeExclusion).join("\n");
+    return `${prefix}minimumReleaseAgeExclude:\n${exclusions}\n`;
   }
 
   const blockEnd = findYamlBlockEnd(lines, excludeIndex);
   const excludeBlock = lines.slice(excludeIndex + 1, blockEnd);
-  if (excludeBlock.some((line) => line.trim() === "- eve")) {
+  const existingExclusions = new Set(excludeBlock.map(releaseAgeExclusionName));
+  const missingExclusions = RELEASE_AGE_EXCLUSIONS.filter(
+    (exclusion) => !existingExclusions.has(exclusion),
+  );
+  if (missingExclusions.length === 0) {
     return source;
   }
 
@@ -84,7 +111,7 @@ function withExperimentalEveReleaseAgeExclusion(source: string): string {
   while (insertAt > excludeIndex + 1 && lines[insertAt - 1] === "") {
     insertAt -= 1;
   }
-  lines.splice(insertAt, 0, EVE_RELEASE_AGE_EXCLUSION);
+  lines.splice(insertAt, 0, ...missingExclusions.map(formatReleaseAgeExclusion));
   return lines.join("\n");
 }
 
@@ -95,7 +122,7 @@ async function ensurePnpmWorkspacePolicy(filePath: string): Promise<"skipped" | 
   }
 
   const current = await readFile(filePath, "utf8");
-  const next = withExperimentalEveReleaseAgeExclusion(withSharpBuildPolicy(current));
+  const next = withReleaseAgeExclusions(withSharpBuildPolicy(current));
   if (next === current) {
     return "skipped";
   }
