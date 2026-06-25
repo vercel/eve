@@ -33,9 +33,13 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: anthropic("claude-opus-4.8"),
+  model: anthropic("claude-opus-4-8"),
 });
 ```
+
+Direct provider model ids use the provider's native format. For Anthropic, the
+version uses hyphens (`claude-opus-4-8`), while the Gateway id above uses a dot
+(`anthropic/claude-opus-4.8`).
 
 Model use is subject to the terms, data-processing commitments, retention behavior, and available controls of the selected provider and routing path. Review the [AI Gateway model catalog](https://vercel.com/ai-gateway/models) for gateway-routed models, and review the provider's terms when you configure a direct `LanguageModel`.
 
