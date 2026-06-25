@@ -57,10 +57,10 @@ run({ app: "agent-subagents-hitl", kind: "local-build" }, async (target) => {
 
   // Delegate explicitly. An implicit prompt ("what is the value of GOOG?")
   // leaves the choice to the model, which may answer directly instead of
-  // delegating; naming the subagent keeps the flow this smoke exercises
-  // deterministic. The price itself is fixed by the subagent's fixture tool.
+  // delegating. Explicitly limiting the request to one delegation also keeps
+  // the model from re-checking the fixed fixture result with a second child.
   input.type(
-    `Use the stock-price subagent with message 'Call the get_stock_price tool with ticker "${TICKER}".'. When it finishes, include the exact stock price in your reply.`,
+    `Call the stock-price subagent exactly once with message 'Call the get_stock_price tool with ticker "${TICKER}".'. After that single call finishes, do not call any subagent or tool again; include the exact stock price in your final reply.`,
   );
   input.enter();
 

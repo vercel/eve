@@ -28,7 +28,7 @@ export default defineEval({
 
   async test(t) {
     await t.send(
-      `Use the stock-price subagent with message 'Call the get_stock_price tool with ticker "GOOG".'. When it finishes, include the exact stock price in your reply.`,
+      `Call the stock-price subagent exactly once with message 'Call the get_stock_price tool with ticker "GOOG".'. After that single call finishes, do not call any subagent or tool again; include the exact stock price in your final reply.`,
     );
 
     // The child's approval request must surface on the parent stream.
@@ -38,6 +38,13 @@ export default defineEval({
 
     const resumed = await t.respondAll("approve");
     resumed.expectOk();
+    t.event(
+      (events) =>
+        events.filter(
+          (event) => event.type === "subagent.called" && event.data.name === "stock-price",
+        ).length === 1,
+      "stock-price subagent was called exactly once",
+    );
 
     if (resumed.inputRequests.length > 0) {
       const requests = resumed.inputRequests.map((request) => ({
