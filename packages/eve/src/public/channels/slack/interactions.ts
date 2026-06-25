@@ -331,7 +331,12 @@ async function handleViewSubmission(
   },
   _deps: InteractionHandlerDeps,
 ): Promise<Response> {
-  const ack = new Response("ok", { status: 200 });
+  // A `view_submission` must be acknowledged with an empty 200 body (or a
+  // `response_action` JSON). A non-empty body like "ok" is invalid here, so
+  // Slack shows a generic error and leaves the modal open even though the
+  // submission was accepted. (Block Actions ignore the body, so the "ok" ack
+  // elsewhere is fine — only modal submissions need an empty body.)
+  const ack = new Response(null, { status: 200 });
   const view = payload.view as
     | {
         callback_id?: string;
