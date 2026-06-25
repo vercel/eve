@@ -1,0 +1,68 @@
+---
+title: "OpenAPI Connections"
+description: "Turn an OpenAPI 3.x document into eve connection tools, one tool per operation."
+---
+
+OpenAPI connections turn any OpenAPI 3.x document into connection tools, one per operation. Use OpenAPI when a service already publishes an HTTP API contract and you want eve to derive the model-facing tools from that contract.
+
+## Define an OpenAPI connection
+
+`defineOpenAPIConnection` takes an HTTPS URL that eve fetches at runtime, or an inline parsed object:
+
+```ts title="agent/connections/petstore.ts"
+import { defineOpenAPIConnection } from "eve/connections";
+
+export default defineOpenAPIConnection({
+  spec: "https://petstore3.swagger.io/api/v3/openapi.json",
+  description: "Pet store inventory and orders.",
+  auth: { getToken: async () => ({ token: process.env.PETSTORE_TOKEN! }) },
+});
+```
+
+Each operation becomes `<connection>__<operationId>` (e.g. `petstore__getInventory`). When an operation has no `operationId`, eve derives a deterministic `<method>_<sanitized-path>` name instead.
+
+The file path provides the connection name. `agent/connections/petstore.ts` registers as `petstore`, so operation tools are qualified under `petstore__`.
+
+## OpenAPI fields
+
+OpenAPI connections use the shared connection fields from [Connections](/docs/connections), plus two OpenAPI-specific fields:
+
+| Field        | Purpose                                                                                                       |
+| ------------ | ------------------------------------------------------------------------------------------------------------- |
+| `baseUrl`    | Base URL operation paths resolve against. Optional; defaults to the document's first usable `servers` entry.  |
+| `operations` | Filter keyed on `operationId` (`allow` or `block`). Mirrors `tools` on MCP connections, but names operations. |
+
+Use `baseUrl` when the spec's `servers` list is absent, points at the wrong environment, or needs to be pinned for this agent.
+
+## Operation filters
+
+To narrow which generated tools the model sees, set exactly one of `operations.allow` or `operations.block`:
+
+```ts title="agent/connections/petstore.ts"
+import { defineOpenAPIConnection } from "eve/connections";
+
+export default defineOpenAPIConnection({
+  spec: "https://petstore3.swagger.io/api/v3/openapi.json",
+  description: "Pet store inventory and orders.",
+  auth: { getToken: async () => ({ token: process.env.PETSTORE_TOKEN! }) },
+  operations: { allow: ["getInventory", "placeOrder"] },
+});
+```
+
+Filters match `operationId`. If an operation does not declare one, use the deterministic name eve derives from the method and path.
+
+## Auth, headers, and approval
+
+OpenAPI connections support the shared connection options:
+
+- `auth` for static tokens, Vercel Connect, or self-hosted interactive OAuth.
+- `headers` for API-key schemes or extra server configuration.
+- `approval` for human-in-the-loop gates before generated operation tools run.
+
+See [Connections](/docs/connections) for the shared auth, headers, and approval shapes.
+
+## What to read next
+
+- [MCP connections](./mcp): connect to remote MCP servers.
+- [Auth & route protection](../guides/auth-and-route-protection): the full interactive-OAuth flow with Vercel Connect.
+- [Security model](../concepts/security-model): how connection credentials stay out of the model's reach.

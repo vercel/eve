@@ -33,7 +33,7 @@ Once Connect is enabled on your account, wire it up:
 3. Link the client to your project.
 4. Run `vercel link` and `vercel env pull` so `VERCEL_OIDC_TOKEN` is available locally.
 
-For the full reference, see [Connections](../connections).
+For the full reference, see [MCP connections](../connections/mcp).
 
 ## What the user sees
 
@@ -49,8 +49,8 @@ The first time, the model picks a warehouse tool but there's no token yet, so th
 
 Right before each request to the MCP server, eve resolves the bearer and sends it as `Authorization: Bearer <token>`. The model only ever sees tool names, descriptions, and results. The credential stays out of its reach.
 
-If you want more control, gate the connection behind approval (`approval: once()`) or narrow which tools the model sees (`tools.allow`). See [Connections](../connections).
+If you want more control, gate the connection behind approval (`approval: once()`) or narrow which tools the model sees (`tools.allow`). See [MCP connections](../connections/mcp).
 
 → Next: [Run analysis](./run-analysis)
 
-Learn more: [Connections](../connections) · [Auth and route protection](../guides/auth-and-route-protection)
+Learn more: [MCP connections](../connections/mcp) · [Auth and route protection](../guides/auth-and-route-protection)

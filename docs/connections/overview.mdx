@@ -1,6 +1,7 @@
 ---
 title: "Connections"
 description: "Expose external MCP and OpenAPI servers to the model, with connection tokens the model never sees."
+url: /connections
 ---
 
 A connection wires an agent into an external server you don't author, either an MCP server (Linear, GitHub, a warehouse) or any HTTP API with an OpenAPI document. eve handles the parts you'd otherwise hand-roll, discovering the remote tools, surfacing them to the model, and brokering auth.
@@ -9,23 +10,17 @@ Connections live under `agent/connections/`. The runtime name comes from the fil
 
 ## MCP connections
 
-`defineMcpClientConnection` points at an MCP server. Supply a `url` and a `description`:
+Use an MCP connection when the external service already exposes an MCP server. The server publishes its tools and schemas, and eve makes the matched tools callable by the model.
 
-```ts title="agent/connections/linear.ts"
-import { defineMcpClientConnection } from "eve/connections";
+Read [MCP connections](/docs/connections/mcp) for `defineMcpClientConnection`, transport requirements, and MCP tool filters.
 
-export default defineMcpClientConnection({
-  url: "https://mcp.linear.app/sse",
-  description: "Linear workspace: issues, projects, cycles, and comments.",
-  auth: {
-    getToken: async () => ({ token: process.env.LINEAR_API_TOKEN! }),
-  },
-});
-```
+## OpenAPI connections
 
-The `url` must speak Streamable HTTP or SSE. Write the `description` for the model, not for yourself. It shows up in `connection_search`, and the model uses it to decide which connection to query.
+Use an OpenAPI connection when the service exposes an OpenAPI 3.x document. eve turns operations in the document into connection tools, one per operation.
 
-### Static-token auth
+Read [OpenAPI connections](/docs/connections/openapi) for `defineOpenAPIConnection`, `baseUrl`, and operation filters.
+
+## Static-token auth
 
 `getToken` returns a `TokenResult` (`{ token, expiresAt? }`), and eve sends it as `Authorization: Bearer <token>` on every request. Because it runs on each connection attempt, you can mint a fresh token from wherever you keep secrets, including an env var, a secrets manager, an internal vault, or your own OAuth exchange. If the token has a known TTL, set `expiresAt` (milliseconds since epoch) and eve refreshes ahead of time rather than waiting for a `401`.
 
@@ -33,24 +28,28 @@ When `getToken` is the only auth, `principalType` defaults to `"app"`: one share
 
 eve resolves and caches connection tokens per step; they never land in conversation history or reach the model.
 
-### No auth
+## No auth
 
 Drop `auth` entirely for servers that need no token, such as a localhost server during development or a public one:
 
-```ts
+```ts title="agent/connections/local.ts"
+import { defineMcpClientConnection } from "eve/connections";
+
 export default defineMcpClientConnection({
   url: "http://localhost:3001/mcp",
   description: "Local dev server.",
 });
 ```
 
-We recommend using no-auth connections only for services that are intentionally public, local-only, or otherwise protected outside eve. Do not use no-auth connections for sensitive third-party services.
+Use no-auth connections only for services that are intentionally public, local-only, or otherwise protected outside eve. Do not use no-auth connections for sensitive third-party services.
 
-### Headers
+## Headers
 
-Use `headers` when the server wants a non-Bearer scheme (an API-key header) or extra configuration. Headers stack on top of `auth`:
+Use `headers` when the server wants a non-Bearer scheme (an API-key header) or extra configuration. Headers stack on top of `auth` and work for both MCP and OpenAPI connections:
 
-```ts
+```ts title="agent/connections/example.ts"
+import { defineMcpClientConnection } from "eve/connections";
+
 export default defineMcpClientConnection({
   url: "https://example.com/mcp",
   description: "Example service.",
@@ -58,24 +57,12 @@ export default defineMcpClientConnection({
 });
 ```
 
-### Tool filters
-
-To narrow which remote tools the model sees, set exactly one of `tools.allow` or `tools.block`. Filtered-out tools do not appear in `connection_search`:
-
-```ts
-export default defineMcpClientConnection({
-  url: "https://mcp.linear.app/sse",
-  description: "Linear: read-only.",
-  auth: { getToken: async () => ({ token: process.env.LINEAR_API_TOKEN! }) },
-  tools: { allow: ["search_issues", "get_issue"] },
-});
-```
-
-### Per-connection approval
+## Per-connection approval
 
 To put every tool a connection serves behind a human, use the helpers from `eve/tools/approval`:
 
-```ts
+```ts title="agent/connections/linear.ts"
+import { defineMcpClientConnection } from "eve/connections";
 import { once } from "eve/tools/approval";
 
 export default defineMcpClientConnection({
@@ -86,32 +73,9 @@ export default defineMcpClientConnection({
 });
 ```
 
-`never()` lets every call through, `once()` asks for approval the first time in a session, and `always()` asks every time. The pause and resume is the same human-in-the-loop flow covered in [Tools](./tools).
+`never()` lets every call through, `once()` asks for approval the first time in a session, and `always()` asks every time. The pause and resume is the same human-in-the-loop flow covered in [Tools](/docs/tools).
 
-For connection tools that can create, modify, delete, transmit, purchase, message, or access sensitive data, use approval, tool allow-lists, or other safeguards appropriate to the action.
-
-## OpenAPI connections
-
-`defineOpenAPIConnection` turns any OpenAPI 3.x document into connection tools, one per operation. Pass an HTTPS URL eve fetches at runtime, or an inline parsed object:
-
-```ts title="agent/connections/petstore.ts"
-import { defineOpenAPIConnection } from "eve/connections";
-
-export default defineOpenAPIConnection({
-  spec: "https://petstore3.swagger.io/api/v3/openapi.json",
-  description: "Pet store inventory and orders.",
-  auth: { getToken: async () => ({ token: process.env.PETSTORE_TOKEN! }) },
-});
-```
-
-Each operation becomes `<connection>__<operationId>` (e.g. `petstore__getInventory`). When an operation has no `operationId`, eve derives a deterministic `<method>_<sanitized-path>` name instead.
-
-`auth`, `headers`, and `approval` work exactly as they do for MCP. There are two fields specific to OpenAPI:
-
-| Field        | Purpose                                                                                                                 |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| `baseUrl`    | Base URL operation paths resolve against. Optional; defaults to the document's first usable `servers` entry.            |
-| `operations` | Filter keyed on `operationId` (`allow` or `block`). Mirrors `tools` on MCP connections, but names operations not tools. |
+For connection tools that can create, modify, delete, transmit, purchase, message, or access sensitive data, use approval, allow-lists, or other safeguards appropriate to the action.
 
 ## Interactive OAuth via Vercel Connect
 
@@ -128,7 +92,7 @@ export default defineMcpClientConnection({
 });
 ```
 
-`"linear/myagent"` is the UID you chose when registering the Connect client. Connect-managed OAuth is user-scoped by default, so the runtime resolves the per-user token before each tool call. The full setup (Connect client provisioning, project linking, the runtime consent flow) lives in [Auth & route protection](./guides/auth-and-route-protection).
+`"linear/myagent"` is the UID you chose when registering the Connect client. Connect-managed OAuth is user-scoped by default, so the runtime resolves the per-user token before each tool call. The full setup (Connect client provisioning, project linking, the runtime consent flow) lives in [Auth & route protection](/docs/guides/auth-and-route-protection).
 
 ## Self-hosted interactive OAuth
 
@@ -236,7 +200,8 @@ A tool can require both sign-in (`auth`) and a human approval. The model's appro
 
 ## What to read next
 
+- [MCP connections](/docs/connections/mcp): connect to remote MCP servers.
+- [OpenAPI connections](/docs/connections/openapi): generate tools from OpenAPI operations.
 - [Integrations](/integrations): browse every channel and connection eve ships, in one gallery.
-- [Tools](./tools): authored tools live alongside connection-provided tools; the same approval helpers apply.
-- [Auth & route protection](./guides/auth-and-route-protection): the full interactive-OAuth flow with Vercel Connect.
-- [Security model](./concepts/security-model): how connection credentials stay out of the model's reach.
+- [Tools](/docs/tools): authored tools live alongside connection-provided tools; the same approval helpers apply.
+- [Security model](/docs/concepts/security-model): how connection credentials stay out of the model's reach.
