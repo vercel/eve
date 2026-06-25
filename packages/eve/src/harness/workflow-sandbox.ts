@@ -1,4 +1,4 @@
-import type { ToolSet } from "ai";
+import { jsonSchema, type ToolSet } from "ai";
 
 import type { SessionCapabilities } from "#channel/types.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -47,16 +47,36 @@ export async function applyWorkflowTool(input: {
   });
   const generated = typeof workflowTool.description === "string" ? workflowTool.description : "";
   const framing = workflowToolDescription(Object.keys(hostTools));
+  const apiReference = workflowApiReference(generated);
   const modelTools: Record<string, ToolSet[string]> = { ...input.tools };
   modelTools[WORKFLOW_TOOL_NAME] = {
     ...workflowTool,
-    description: generated.length > 0 ? `${framing}\n\n${generated}` : framing,
+    description: apiReference.length > 0 ? `${framing}\n\n${apiReference}` : framing,
+    inputSchema: jsonSchema({
+      type: "object",
+      properties: {
+        js: {
+          type: "string",
+          description:
+            "Complete JavaScript orchestration program. Call only the agents listed in the Workflow description and return one JSON-serializable result.",
+        },
+      },
+      required: ["js"],
+      additionalProperties: false,
+    }),
   } as ToolSet[string];
 
   return {
     hostTools,
     modelTools: modelTools as ToolSet,
   };
+}
+
+function workflowApiReference(generatedDescription: string): string {
+  const marker = "Tools:\n";
+  const start = generatedDescription.indexOf(marker);
+  if (start < 0) return generatedDescription;
+  return `Available agent API:\n${generatedDescription.slice(start + marker.length)}`;
 }
 
 /** Rebuilds the subagent-only host surface used to resume a parked workflow. */

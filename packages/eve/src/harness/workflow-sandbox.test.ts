@@ -1,4 +1,4 @@
-import { jsonSchema } from "ai";
+import { asSchema, jsonSchema } from "ai";
 import { describe, expect, it } from "vitest";
 
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -70,10 +70,20 @@ describe("applyWorkflowTool", () => {
     });
 
     const description = (modelTools.Workflow as { description?: string }).description ?? "";
-    expect(description).toContain("Orchestrate this agent's subagents");
+    expect(description).toContain("Use `Workflow` for:");
+    expect(description).toContain("Do not use `Workflow` when:");
     expect(description).toContain("Promise.all");
     expect(description).toContain("researcher");
+    expect(description).toContain("Available agent API:");
     expect(description).not.toContain("bash");
+    expect(description).not.toContain("code-mode");
+
+    const inputSchema = asSchema(modelTools.Workflow?.inputSchema).jsonSchema;
+    expect(inputSchema).toMatchObject({
+      properties: {
+        js: { description: expect.stringContaining("JavaScript orchestration program") },
+      },
+    });
   });
 
   it("does not add Workflow when no agent runtime actions exist", async () => {
