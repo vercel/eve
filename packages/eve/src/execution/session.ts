@@ -66,6 +66,7 @@ export function createSession(input: CreateSessionInput): HarnessSession {
     agent: {
       compactionModelReference: turnAgent.compactionModel,
       modelReference: turnAgent.model,
+      reasoning: turnAgent.reasoning,
       system: turnAgent.instructions.join("\n\n"),
       tools,
     },
@@ -105,6 +106,7 @@ export function refreshSessionFromTurnAgent(input: {
     agent: {
       compactionModelReference: input.turnAgent.compactionModel,
       modelReference: input.turnAgent.model,
+      reasoning: input.turnAgent.reasoning,
       system: input.turnAgent.instructions.join("\n\n"),
       tools: createSessionToolDefinitions(input.turnAgent),
     },
@@ -200,6 +202,7 @@ export function hydrateDurableSession(input: {
     agent: {
       compactionModelReference: turnAgent.compactionModel,
       modelReference: turnAgent.model,
+      reasoning: turnAgent.reasoning,
       system: durable.agent.system,
       tools,
     },

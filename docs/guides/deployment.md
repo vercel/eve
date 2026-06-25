@@ -74,11 +74,11 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: anthropic("claude-opus-4.8"),
+  model: anthropic("claude-opus-4-8"),
 });
 ```
 
-With that shape, the model call goes directly to Anthropic and the runtime reads `ANTHROPIC_API_KEY`. The same pattern works for OpenAI after installing `@ai-sdk/openai`, using `openai("...")`, and setting `OPENAI_API_KEY`. This is the usual choice when self-deploying without any Vercel-managed services.
+With that shape, the model call goes directly to Anthropic and the runtime reads `ANTHROPIC_API_KEY`. Direct Anthropic model ids use hyphens (`claude-opus-4-8`), unlike the dotted Gateway id (`anthropic/claude-opus-4.8`). The same pattern works for OpenAI after installing `@ai-sdk/openai`, using `openai("...")`, and setting `OPENAI_API_KEY`. This is the usual choice when self-deploying without any Vercel-managed services.
 
 ## 4. Sandbox backend
 

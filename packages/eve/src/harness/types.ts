@@ -9,6 +9,7 @@ import type { InputResponse } from "#runtime/input/types.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 import type { InternalToolDefinition } from "#shared/tool-definition.js";
+import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 
 /**
@@ -43,6 +44,7 @@ export interface SessionAgent {
    */
   readonly compactionModelReference?: RuntimeModelReference;
   readonly modelReference: RuntimeModelReference;
+  readonly reasoning?: AgentReasoningDefinition;
   readonly system: string;
   readonly tools: readonly SessionToolDefinition[];
 }
