@@ -12,10 +12,9 @@ export default defineEval({
         "Reply with just the resulting number.",
     );
 
-    t.completed();
+    t.succeeded();
     t.calledTool("run_python", {
       input: { numbers: [2, 3, 4] },
-      status: "completed",
       output: { sum: 9 },
     });
     t.messageIncludes(/\b9\b/);

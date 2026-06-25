@@ -27,7 +27,7 @@ export default defineEval({
     plain.expectOk();
     plain.notEvent("result.completed");
 
-    t.completed();
+    t.succeeded();
     // Real models choose their own field values; assert schema conformance
     // rather than an exact payload.
     structured.outputMatches(StructuredOutput);

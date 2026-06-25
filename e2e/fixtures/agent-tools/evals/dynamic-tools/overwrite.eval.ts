@@ -11,13 +11,11 @@ export default defineEval({
 
     await t.send("Call the `session_only` tool and report the source value.");
 
-    t.completed();
+    t.succeeded();
     t.calledTool("shared", {
-      status: "completed",
       output: { source: "turn" },
     });
     t.calledTool("session_only", {
-      status: "completed",
       output: { source: "session" },
     });
   },

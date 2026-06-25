@@ -9,7 +9,7 @@ export default defineEval({
       "List every tool you have access to. Is there a tool called 'dynamic-null'? Answer yes or no.",
     );
 
-    t.completed();
+    t.succeeded();
     t.notCalledTool("dynamic-null");
   },
 });

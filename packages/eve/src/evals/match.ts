@@ -1,5 +1,6 @@
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#runtime/input/types.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { EveEvalSubagentCall, EveEvalToolCall } from "#evals/types.js";
 
 /**
@@ -12,17 +13,13 @@ import type { EveEvalSubagentCall, EveEvalToolCall } from "#evals/types.js";
  *   compare with `Object.is`
  * - a **RegExp** tests string values directly and the JSON serialization of
  *   anything else
- * - a **function** receives the observed value and either returns a boolean
- *   verdict, or returns a resolved expected value that is then compared like a
- *   literal — e.g. `(o) => o === process.env.EVE_WEATHER_AGENT_HOST`. To assert
- *   a literal boolean field, use the literal directly; boolean returns are
- *   always treated as verdicts.
+ * - a **function** receives the observed value and returns a boolean verdict
  */
-export type EveEvalValueMatcher<T = unknown> = T | RegExp | ((value: T) => unknown);
+export type EveEvalValueMatcher<T = JsonValue | undefined> = EveEvalDeepMatcher<T>;
 
 type EveEvalDeepMatcher<T> =
   | RegExp
-  | ((value: T) => unknown)
+  | ((value: T) => boolean)
   | (T extends readonly (infer TEntry)[]
       ? readonly EveEvalDeepMatcher<TEntry>[]
       : T extends object
@@ -35,15 +32,13 @@ type EveEvalDeepMatcher<T> =
  */
 export interface EveEvalToolCallMatchOptions {
   /** Partial-deep matcher over the call input (see {@link EveEvalValueMatcher}). */
-  readonly input?: EveEvalValueMatcher;
+  readonly input?: EveEvalValueMatcher<JsonObject>;
   /** Matcher over the call output. */
   readonly output?: EveEvalValueMatcher;
-  /** Required error state of matching calls. */
-  readonly isError?: boolean;
-  /** Required lifecycle outcome of matching calls. */
+  /** Required lifecycle outcome. Defaults to `"completed"`. */
   readonly status?: EveEvalToolCall["status"];
   /** Exact number of matching calls required. Defaults to "at least one". */
-  readonly times?: number;
+  readonly count?: number;
 }
 
 /**
@@ -58,24 +53,21 @@ export type EveEvalSkillLoadMatchOptions = Omit<EveEvalToolCallMatchOptions, "in
  */
 export interface EveEvalSubagentCallMatchOptions {
   /** Matcher over the `subagent.called` remote URL. */
-  readonly remoteUrl?: EveEvalValueMatcher;
+  readonly remoteUrl?: EveEvalValueMatcher<string | undefined>;
   /** Matcher over the `subagent.completed` output. */
   readonly output?: EveEvalValueMatcher;
-  /** Required error state of matching delegations. */
-  readonly isError?: boolean;
-  /** Required lifecycle outcome of matching delegations. */
+  /** Required lifecycle outcome. Defaults to `"completed"`. */
   readonly status?: EveEvalSubagentCall["status"];
   /** Exact number of matching delegations required. Defaults to "at least one". */
-  readonly times?: number;
+  readonly count?: number;
 }
 
-/** Constraints accepted by `expectInputRequests`. */
+/** Constraints accepted by `requireInputRequest`. */
 export interface EveEvalInputRequestMatchOptions {
   readonly display?: EveEvalValueMatcher<InputRequest["display"]>;
-  readonly input?: EveEvalValueMatcher;
+  readonly input?: EveEvalValueMatcher<JsonObject>;
   readonly optionIds?: EveEvalValueMatcher<readonly string[]>;
   readonly prompt?: EveEvalValueMatcher<string>;
-  readonly times?: number;
   readonly toolName?: string;
 }
 
@@ -90,7 +82,7 @@ export type EveEvalEventMatch<
           ? TData
           : never
       >;
-      readonly times?: number;
+      readonly count?: number;
     }
   : never;
 
@@ -104,12 +96,7 @@ export function matchesValue(matcher: unknown, value: unknown): boolean {
   }
 
   if (typeof matcher === "function") {
-    const outcome = (matcher as (value: unknown) => unknown)(value);
-    if (typeof outcome === "boolean") return outcome;
-    // A resolver returned an expected value; functions compare by identity to
-    // keep resolved values from recursing forever.
-    if (typeof outcome === "function") return Object.is(outcome, value);
-    return matchesValue(outcome, value);
+    return (matcher as (value: unknown) => boolean)(value);
   }
 
   if (Array.isArray(matcher)) {
@@ -127,7 +114,7 @@ export function matchesValue(matcher: unknown, value: unknown): boolean {
 
 /**
  * Returns true when one derived tool call satisfies the `input`/`output`/
- * `isError` constraints (the `times` count is the caller's concern).
+ * lifecycle constraints (the `count` option is the caller's concern).
  */
 export function toolCallMatches(
   call: EveEvalToolCall,
@@ -137,11 +124,7 @@ export function toolCallMatches(
   if (options.output !== undefined && !matchesValue(options.output, call.output)) {
     return false;
   }
-  if (options.isError !== undefined) {
-    if (call.status === "pending" || call.status === "rejected") return false;
-    if (call.isError !== options.isError) return false;
-  }
-  if (options.status !== undefined && call.status !== options.status) return false;
+  if (call.status !== (options.status ?? "completed")) return false;
   return true;
 }
 
@@ -159,11 +142,7 @@ export function subagentCallMatches(
   if (options.output !== undefined && !matchesValue(options.output, call.output)) {
     return false;
   }
-  if (options.isError !== undefined) {
-    if (call.status === "pending" || call.status === "rejected") return false;
-    if (call.isError !== options.isError) return false;
-  }
-  if (options.status !== undefined && call.status !== options.status) return false;
+  if (call.status !== (options.status ?? "completed")) return false;
   return true;
 }
 
@@ -202,7 +181,7 @@ export function eventMatches(event: HandleMessageStreamEvent, matcher: EveEvalEv
 }
 
 /**
- * Strict structural equality used by `t.outputEquals`: unlike matcher
+ * Strict structural equality used by scoped `outputEquals`: unlike matcher
  * comparison, objects must carry exactly the same keys on both sides.
  */
 export function deepEquals(a: unknown, b: unknown): boolean {

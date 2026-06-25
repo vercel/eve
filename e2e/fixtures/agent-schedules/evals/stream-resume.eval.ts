@@ -46,6 +46,6 @@ export default defineEval({
       equals(expected.map((event) => event.type)),
     );
     t.log(`replayed ${replayed.length} events from index ${cutoff}; matches the durable log`);
-    t.completed();
+    t.succeeded();
   },
 });

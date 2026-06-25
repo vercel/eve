@@ -11,9 +11,8 @@ export default defineEval({
   async test(t) {
     await t.send("Call the `override-target` tool and report the `source` value it returns.");
 
-    t.completed();
+    t.succeeded();
     t.calledTool("override-target", {
-      status: "completed",
       output: { source: "dynamic", token: OVERRIDE_TOKEN },
     });
   },

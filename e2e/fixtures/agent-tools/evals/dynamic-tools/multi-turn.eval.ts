@@ -13,7 +13,6 @@ export default defineEval({
     first.expectOk();
     first.calledTool(ECHO_TOOL, {
       output: { token: DYNAMIC_ECHO_TOKEN },
-      status: "completed",
     });
 
     const second = await t.send(
@@ -21,14 +20,12 @@ export default defineEval({
     );
     second.calledTool(ECHO_TOOL, {
       output: { token: DYNAMIC_ECHO_TOKEN },
-      status: "completed",
     });
 
-    t.completed();
+    t.succeeded();
     t.calledTool(ECHO_TOOL, {
-      status: "completed",
       output: { token: DYNAMIC_ECHO_TOKEN },
-      times: 2,
+      count: 2,
     });
   },
 });

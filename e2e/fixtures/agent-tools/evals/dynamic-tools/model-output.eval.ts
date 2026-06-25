@@ -9,9 +9,8 @@ export default defineEval({
       "Use the `check_model_output` tool with value 'hello' and tell me what the result contains.",
     );
 
-    t.completed();
+    t.succeeded();
     t.calledTool("check_model_output", {
-      status: "completed",
       output: { raw: true, secret: "internal-only-data", value: "hello" },
     });
   },

@@ -22,14 +22,14 @@ export default defineEval({
     const sessionId = dispatch.sessionIds[0]!;
 
     const session = await t.target.attachSession(sessionId);
-    session.didNotFail();
-    session.calledTool("check-alerts", { status: "completed" });
+    session.succeeded();
+    session.calledTool("check-alerts");
     session.event("session.waiting");
-    session.event("message.completed", { data: { message: null }, times: 1 });
+    session.event("message.completed", { data: { message: null }, count: 1 });
     session.notEvent("message.completed", {
       data: (data) => data.finishReason !== "tool-calls" && data.message !== null,
     });
 
-    t.completed();
+    t.succeeded();
   },
 });

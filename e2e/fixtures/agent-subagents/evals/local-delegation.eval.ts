@@ -14,7 +14,7 @@ export default defineEval({
       "Use the echo-marker subagent with message 'ping'. Once it returns, reply with the subagent's exact output included verbatim.",
     );
 
-    t.completed();
+    t.succeeded();
     t.calledSubagent("echo-marker", { output: /SUBAGENT_TOKEN=echo-marker-9F2X/ });
     t.messageIncludes(SUBAGENT_TOKEN);
   },

@@ -11,9 +11,8 @@ export default defineEval({
       `Please call the \`${ECHO_TOOL}\` tool with message 'hello from smoke test' and tell me what it returned.`,
     );
 
-    t.completed();
+    t.succeeded();
     t.calledTool(ECHO_TOOL, {
-      status: "completed",
       output: { echoed: "hello from smoke test", token: DYNAMIC_ECHO_TOKEN },
     });
   },

@@ -77,19 +77,18 @@ describe("executeTask", () => {
       target,
       evaluation: createTestEval(async (t) => {
         const parked = await t.send("run pwd");
-        parked.calledTool("bash", { status: "pending", times: 1 });
-        const [request] = t.expectInputRequests({
+        parked.calledTool("bash", { status: "pending", count: 1 });
+        const request = t.requireInputRequest({
           display: "confirmation",
           input: { command: "pwd" },
           optionIds: ["approve", "deny"],
           prompt: /Approve/,
-          times: 1,
           toolName: "bash",
         });
         expect(request.requestId).toBe("approval_1");
         const approved = await t.respondAll("approve");
-        approved.calledTool("bash", { status: "completed", times: 1 });
-        t.calledTool("bash", { status: "completed", times: 1 });
+        approved.calledTool("bash", { status: "completed", count: 1 });
+        t.calledTool("bash", { status: "completed", count: 1 });
       }, "approve"),
     });
 
@@ -202,14 +201,53 @@ describe("executeTask", () => {
       evaluation: createTestEval(async (t) => {
         const first = await t.send("first");
         const second = await t.send("second");
-        expect(first.expectToolCall("alpha", { status: "pending" }).name).toBe("alpha");
-        first.calledTool("alpha", { status: "pending", times: 1 });
+        expect(first.requireToolCall("alpha", { status: "pending" }).name).toBe("alpha");
+        first.calledTool("alpha", { status: "pending", count: 1 });
         second.notCalledTool("alpha");
-        t.calledTool("alpha", { times: 1 });
+        t.calledTool("alpha", { status: "pending", count: 1 });
       }, "turn-scopes"),
     });
 
-    expect(outcome.assertions).toHaveLength(3);
+    expect(outcome.assertions).toHaveLength(4);
+    expect(outcome.assertions.every((assertion) => assertion.passed)).toBe(true);
+  });
+
+  it("snapshots session assertions when they are recorded", async () => {
+    const server = createScriptedServer([
+      {
+        sessionId: "session_1",
+        events: [
+          turnStarted("turn_1"),
+          actionsRequested("turn_1", "alpha", "call_1"),
+          turnCompleted("turn_1"),
+          sessionWaiting(),
+        ],
+      },
+      {
+        sessionId: "session_1",
+        events: [
+          turnStarted("turn_2"),
+          actionsRequested("turn_2", "alpha", "call_2"),
+          turnCompleted("turn_2"),
+          sessionWaiting(),
+        ],
+      },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        const session = t.newSession();
+        await session.send("first");
+        session.calledTool("alpha", { status: "pending", count: 1 });
+        session.event("turn.started", { count: 1 });
+        await session.send("second");
+      }, "session-snapshot"),
+    });
+
+    expect(outcome.assertions).toHaveLength(2);
     expect(outcome.assertions.every((assertion) => assertion.passed)).toBe(true);
   });
 
@@ -232,6 +270,35 @@ describe("executeTask", () => {
     expect(outcome.assertions[0]).toMatchObject({ passed: false, severity: "gate" });
   });
 
+  it("records a failed required tool lookup without an execution error", async () => {
+    const server = createScriptedServer([
+      {
+        sessionId: "session_1",
+        events: [
+          turnStarted("turn_1"),
+          messageCompleted("done", "turn_1"),
+          turnCompleted("turn_1"),
+          sessionCompleted(),
+        ],
+      },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        const turn = await t.send("run");
+        turn.requireToolCall("missing");
+      }, "required-tool"),
+    });
+
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.assertions).toEqual([
+      expect.objectContaining({ name: "requireToolCall", passed: false, severity: "gate" }),
+    ]);
+  });
+
   it("captures an explicit skip without an execution error", async () => {
     const outcome = await executeTask({
       client: new Client({ host: target.url }),
@@ -241,6 +308,23 @@ describe("executeTask", () => {
 
     expect(outcome.error).toBeUndefined();
     expect(outcome.skipReason).toBe("dev routes unavailable");
+  });
+
+  it("rejects a skip after an assertion has already been recorded", async () => {
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval((t) => {
+        t.check(
+          1,
+          satisfies((value: number) => value === 1, "equals one"),
+        );
+        t.skip("too late");
+      }, "late-skip"),
+    });
+
+    expect(outcome.skipReason).toBeUndefined();
+    expect(outcome.error).toContain("skip() must be called before");
   });
 
   it("attaches to a target-created session and captures its stream", async () => {
@@ -264,7 +348,7 @@ describe("executeTask", () => {
       target,
       evaluation: createTestEval(async (t) => {
         const session = await t.target.attachSession("channel-session");
-        session.completed();
+        session.succeeded();
         session.messageIncludes("channel done");
       }, "attach"),
     });
@@ -304,7 +388,7 @@ describe("executeTask", () => {
       evaluation: createTestEval(async (t) => {
         const turn = await t.send({ message: "structured", outputSchema: { type: "object" } });
         turn.outputMatches(z.object({ count: z.number(), title: z.string() }));
-        t.outputEquals({ count: 2, title: "Done" });
+        turn.outputEquals({ count: 2, title: "Done" });
       }, "structured-output"),
     });
 
@@ -470,10 +554,14 @@ function actionResult(turnId: string, toolName: string, output: string): HandleM
   };
 }
 
-function actionsRequested(turnId: string, toolName: string): HandleMessageStreamEvent {
+function actionsRequested(
+  turnId: string,
+  toolName: string,
+  callId = "call_weather",
+): HandleMessageStreamEvent {
   return {
     data: {
-      actions: [{ callId: "call_weather", input: { city: "Lisbon" }, kind: "tool-call", toolName }],
+      actions: [{ callId, input: { city: "Lisbon" }, kind: "tool-call", toolName }],
       sequence: 2,
       stepIndex: 0,
       turnId,

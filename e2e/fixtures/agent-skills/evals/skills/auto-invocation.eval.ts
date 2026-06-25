@@ -13,8 +13,8 @@ export default defineEval({
   async test(t) {
     await t.send("Please use the echo marker skill and follow its instructions exactly.");
 
-    t.completed();
-    t.loadedSkill("echo-marker", { status: "completed" });
+    t.succeeded();
+    t.loadedSkill("echo-marker");
     t.messageIncludes(ECHO_MARKER_TOKEN);
   },
 });

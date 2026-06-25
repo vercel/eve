@@ -5,8 +5,8 @@ export default defineEval({
   async test(t) {
     const turn = await t.send("Who won the 2026 NBA finals");
 
-    t.completed();
-    t.calledTool("web_search", { status: "completed" });
+    t.succeeded();
+    t.calledTool("web_search");
     t.noFailedActions();
     t.messageIncludes(/New York Knicks/iu);
     t.judge.autoevals

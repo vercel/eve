@@ -17,11 +17,11 @@ export default defineEval({
     });
 
     const session = await t.target.attachSession(sessionId);
-    session.completed();
+    session.succeeded();
     session.notCalledTool(METADATA_TOOL);
     session.noFailedActions();
 
-    t.completed();
+    t.succeeded();
     t.notCalledTool(METADATA_TOOL);
   },
 });

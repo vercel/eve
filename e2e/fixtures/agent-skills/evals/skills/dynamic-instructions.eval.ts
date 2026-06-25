@@ -13,7 +13,7 @@ export default defineEval({
   async test(t) {
     await t.send("Acknowledge this message.");
 
-    t.completed();
+    t.succeeded();
     t.messageIncludes(DYNAMIC_INSTRUCTIONS_TOKEN);
   },
 });

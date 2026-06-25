@@ -18,13 +18,12 @@ export default defineEval({
     );
     parked.expectOk();
 
-    t.expectInputRequests({
+    t.requireInputRequest({
       display: "confirmation",
       optionIds: ["approve", "deny"],
-      times: 1,
       toolName: TFL_APPROVAL_JOURNEY_MODES_TOOL,
     });
-    parked.calledTool(TFL_APPROVAL_JOURNEY_MODES_TOOL, { status: "pending", times: 1 });
+    parked.calledTool(TFL_APPROVAL_JOURNEY_MODES_TOOL, { status: "pending", count: 1 });
 
     const approved = await t.respondAll("approve");
     approved.expectOk();
@@ -34,15 +33,14 @@ export default defineEval({
         result: { kind: "tool-result", toolName: TFL_APPROVAL_JOURNEY_MODES_TOOL },
         status: "completed",
       },
-      times: 1,
+      count: 1,
     });
 
-    t.completed();
-    t.calledTool(SEARCH_TOOL, { status: "completed" });
+    t.succeeded();
+    t.calledTool(SEARCH_TOOL);
     t.calledTool(TFL_APPROVAL_JOURNEY_MODES_TOOL, {
       output: hasBusAndTube,
-      status: "completed",
-      times: 1,
+      count: 1,
     });
     t.messageIncludes(/\bbus\b/iu);
     t.messageIncludes(/\btube\b/iu);

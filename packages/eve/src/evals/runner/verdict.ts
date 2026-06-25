@@ -13,7 +13,6 @@ export function computeEvalVerdict(input: {
   readonly assertions: readonly AssertionResult[];
   readonly skipReason?: string;
 }): EveEvalVerdict {
-  if (input.skipReason !== undefined) return "skipped";
   if (input.error !== undefined) return "failed";
 
   let demoted = false;
@@ -23,5 +22,6 @@ export function computeEvalVerdict(input: {
     demoted = true;
   }
 
+  if (input.skipReason !== undefined) return "skipped";
   return demoted ? "scored" : "passed";
 }

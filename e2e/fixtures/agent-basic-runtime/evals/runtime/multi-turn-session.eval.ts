@@ -17,7 +17,7 @@ export default defineEval({
 
     await t.require(second.sessionId, equals(first.sessionId));
 
-    t.completed();
+    t.succeeded();
     t.messageIncludes(/marigold/i);
   },
 });

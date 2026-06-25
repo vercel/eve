@@ -12,9 +12,8 @@ export default defineEval({
       `Run the bash command \`cat ${BOOTSTRAP_MARKER_PATH}\` and reply with the file contents verbatim.`,
     );
 
-    t.completed();
+    t.succeeded();
     t.calledTool("bash", {
-      status: "completed",
       output: new RegExp(BOOTSTRAP_MARKER_TOKEN),
     });
   },

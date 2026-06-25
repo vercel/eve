@@ -12,12 +12,11 @@ export default defineEval({
   description: "HITL smoke: replayed dynamic tools preserve approval.",
   async test(t) {
     const parked = await t.send(`Call the \`${TOOL_NAME}\` tool with note "before-approval".`);
-    t.expectInputRequests({
+    t.requireInputRequest({
       display: "confirmation",
-      times: 1,
       toolName: TOOL_NAME,
     });
-    parked.calledTool(TOOL_NAME, { status: "pending", times: 1 });
+    parked.calledTool(TOOL_NAME, { status: "pending", count: 1 });
 
     const approved = await t.respondAll("approve");
     approved.expectOk();
@@ -30,14 +29,13 @@ export default defineEval({
         },
         status: "completed",
       },
-      times: 1,
+      count: 1,
     });
 
-    t.completed();
+    t.succeeded();
     t.calledTool(TOOL_NAME, {
       output: new RegExp(DYNAMIC_GUARDED_ECHO_TOKEN),
-      status: "completed",
-      times: 1,
+      count: 1,
     });
   },
 });

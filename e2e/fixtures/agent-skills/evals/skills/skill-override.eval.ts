@@ -14,7 +14,7 @@ export default defineEval({
   async test(t) {
     await t.send("Please use the house rules skill and follow its instructions exactly.");
 
-    t.completed();
+    t.succeeded();
     t.loadedSkill("house-rules", { output: new RegExp(HOUSE_RULES_OVERRIDE_TOKEN, "u") });
     t.messageIncludes(HOUSE_RULES_OVERRIDE_TOKEN);
   },

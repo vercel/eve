@@ -2,4 +2,4 @@
 "eve": minor
 ---
 
-Add turn- and session-scoped eval assertions, lifecycle-aware tool and subagent matching, typed event checks, immediate requirements, and explicit skipped results. E2E evals now use these built-ins instead of manually scanning event streams.
+Add snapshot-based turn and session assertions, lifecycle-aware tool and subagent matching, typed event checks, recorded requirements, and explicit skipped results. The simplified API uses `succeeded`/`parked`, completed calls by default, exact `count` options, and `require*` lookups so evals no longer need manual event scans or thrown assertion errors.

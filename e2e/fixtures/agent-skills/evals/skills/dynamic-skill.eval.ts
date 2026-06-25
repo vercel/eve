@@ -13,7 +13,7 @@ export default defineEval({
   async test(t) {
     await t.send("Please use the dynamic tenant policy skill and follow its instructions exactly.");
 
-    t.completed();
+    t.succeeded();
     t.loadedSkill("dynamic-tenant-policy", {
       output: new RegExp(DYNAMIC_SKILL_TOKEN, "u"),
     });

@@ -18,18 +18,17 @@ export default defineEval({
     );
 
     // The child's approval request must surface on the parent stream.
-    t.expectInputRequests({ times: 1, toolName: "get_stock_price" });
+    t.requireInputRequest({ toolName: "get_stock_price" });
 
     await t.sleep();
 
     const resumed = await t.respondAll("approve");
     t.check(resumed.inputRequests, equals([]));
     t.noFailedActions();
-    t.completed();
+    t.succeeded();
     t.calledSubagent("stock-price", {
       output: new RegExp(GOOG_PRICE),
-      status: "completed",
-      times: 1,
+      count: 1,
     });
     t.messageIncludes(GOOG_PRICE);
   },

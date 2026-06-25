@@ -20,9 +20,8 @@ export default defineEval({
         "and reply with the combined file contents verbatim.",
     );
 
-    t.completed();
+    t.succeeded();
     t.calledTool("bash", {
-      status: "completed",
       output: new RegExp(`${SESSION_MARKER_TOKEN}[\\s\\S]*${WORKSPACE_SEED_TOKEN}`),
     });
     t.messageIncludes(SESSION_MARKER_TOKEN);

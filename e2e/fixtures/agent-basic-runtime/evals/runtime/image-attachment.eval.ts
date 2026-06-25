@@ -22,7 +22,7 @@ export default defineEval({
       "image/png",
     );
 
-    t.completed();
+    t.succeeded();
     t.messageIncludes(/cat/i);
   },
 });

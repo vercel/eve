@@ -17,17 +17,15 @@ export default defineEval({
       ].join("\n"),
     );
 
-    t.completed();
+    t.succeeded();
     t.toolOrder(["lookup-step-a", "lookup-step-b"]);
     t.calledTool("lookup-step-a", {
       input: { topic: "demo" },
-      status: "completed",
-      times: 1,
+      count: 1,
     });
     t.calledTool("lookup-step-b", {
       input: { stepKey: "K-9F2X" },
-      status: "completed",
-      times: 1,
+      count: 1,
     });
     t.noFailedActions();
     t.messageIncludes(MULTI_STEP_FINAL_VALUE);

@@ -53,7 +53,7 @@ export function createEvalContext(deps: {
     get sessionId() {
       return primary().sessionId;
     },
-    expectInputRequests: (filter) => primary().expectInputRequests(filter),
+    requireInputRequest: (filter) => primary().requireInputRequest(filter),
     respond: (...responses) => primary().respond(...responses),
     respondAll: (optionId) => primary().respondAll(optionId),
     send: (input) => {
@@ -74,13 +74,16 @@ export function createEvalContext(deps: {
     log: deps.log,
     sleep: (ms) => sleep(ms, deps.signal),
     newSession: () => deps.manager.newSession(),
-    ...createScopedAssertions(collector, (result) => result),
+    ...createScopedAssertions(collector, { timing: "final", select: (result) => result }),
 
     // Value-level assertion over an explicit value.
     check: (value, assertion) => recordCheck(collector, value, assertion),
     require: (value, assertion) => requireCheck(collector, value, assertion),
     skip: (reason) => {
       if (reason.trim().length === 0) throw new Error("skip() requires a non-empty reason.");
+      if (collector.hasEntries || deps.manager.hasActivity()) {
+        throw new Error("skip() must be called before sending messages or recording assertions.");
+      }
       throw new EvalSkipped(reason);
     },
 
@@ -95,19 +98,15 @@ async function requireCheck<T>(
   value: T,
   assertion: Assertion,
 ): Promise<T> {
-  let score = 0;
   const gated = assertion.gate(assertion.threshold);
-  const handle = collector.recordValue({
+  const passed = await collector.recordRequirement({
     name: gated.name,
-    severity: "gate",
     threshold: gated.threshold,
     score: async () => {
-      score = await gated.score(value);
-      return { score };
+      return { score: await gated.score(value) };
     },
   });
-  await handle;
-  if (score < (gated.threshold ?? 1)) throw new EvalRequirementFailed();
+  if (!passed) throw new EvalRequirementFailed();
   return value;
 }
 

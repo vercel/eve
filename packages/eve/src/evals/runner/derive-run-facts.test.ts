@@ -46,7 +46,7 @@ function actionResult(input: {
       },
       sequence: 1,
       stepIndex: 0,
-      status: input.status ?? "completed",
+      status: input.status ?? (input.isError === true ? "failed" : "completed"),
       turnId: "t1",
     },
   };
@@ -102,7 +102,6 @@ describe("deriveRunFacts", () => {
         name: "get_weather",
         input: { city: "Brooklyn" },
         output: { tempF: 72 },
-        isError: false,
         status: "completed",
         turnIndex: 0,
         sessionId: "s1",
@@ -111,7 +110,6 @@ describe("deriveRunFacts", () => {
         name: "bash",
         input: { command: "pwd" },
         output: "command denied",
-        isError: true,
         status: "failed",
         turnIndex: 0,
         sessionId: "s1",
@@ -120,14 +118,14 @@ describe("deriveRunFacts", () => {
     expect(facts.toolCallCount).toBe(2);
   });
 
-  it("marks tool calls failed when the result carries isError", () => {
+  it("uses the normalized failed lifecycle status for error results", () => {
     const events: HandleMessageStreamEvent[] = [
       actionsRequested([{ callId: "c1", toolName: "bash" }]),
       actionResult({ callId: "c1", toolName: "bash", isError: true }),
     ];
 
     const facts = deriveRunFacts(events);
-    expect(facts.toolCalls[0]?.isError).toBe(true);
+    expect(facts.toolCalls[0]?.status).toBe("failed");
   });
 
   it("distinguishes pending, completed, failed, and rejected tool calls", () => {
@@ -159,7 +157,6 @@ describe("deriveRunFacts", () => {
         name: "bash",
         input: {},
         output: undefined,
-        isError: false,
         status: "pending",
         turnIndex: 0,
         sessionId: undefined,
@@ -184,7 +181,6 @@ describe("deriveRunFacts", () => {
         name: "bash",
         input: {},
         output: "approved",
-        isError: false,
         status: "completed",
         turnIndex: 0,
         sessionId: undefined,
@@ -203,7 +199,6 @@ describe("deriveRunFacts", () => {
         name: "bash",
         input: {},
         output: null,
-        isError: false,
         status: "rejected",
         turnIndex: 0,
         sessionId: undefined,
@@ -304,7 +299,6 @@ describe("deriveRunFacts", () => {
         name: "weather",
         remoteUrl: "http://127.0.0.1:4001",
         output: "Sunny, 72F",
-        isError: false,
         status: "completed",
         turnIndex: 0,
         sessionId: "s0",

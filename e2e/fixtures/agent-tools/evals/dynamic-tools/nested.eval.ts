@@ -13,13 +13,11 @@ export default defineEval({
 
     await t.send("Now call the `nested_status` tool and tell me exactly what it returned.");
 
-    t.completed();
+    t.succeeded();
     t.calledTool("nested_query", {
-      status: "completed",
       output: { action: "query", endpoint: "/v2/query", source: "helper" },
     });
     t.calledTool("nested_status", {
-      status: "completed",
       output: { tier: "premium", source: "inline" },
     });
   },

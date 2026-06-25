@@ -27,9 +27,8 @@ export default defineEval({
       "Use the `network-probe` tool and tell me whether sandbox network egress was blocked.",
     );
 
-    t.completed();
+    t.succeeded();
     t.calledTool("network-probe", {
-      status: "completed",
       output: isBlocked,
     });
   },

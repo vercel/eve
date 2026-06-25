@@ -10,12 +10,12 @@ export default defineEval({
       "Use the `check_messages` tool with label 'turn1' and tell me the messageCount.",
     );
     first.expectOk();
-    const firstOutput = first.expectToolCall("check_messages", { status: "completed" }).output;
+    const firstOutput = first.requireToolCall("check_messages").output;
 
     const second = await t.send(
       "Use the `check_messages` tool again with label 'turn2' and tell me the messageCount.",
     );
-    const secondOutput = second.expectToolCall("check_messages", { status: "completed" }).output;
+    const secondOutput = second.requireToolCall("check_messages").output;
     t.check(
       [firstOutput, secondOutput],
       satisfies(([firstValue, secondValue]: readonly unknown[]) => {
@@ -30,12 +30,12 @@ export default defineEval({
       }, "message count increases across turns"),
     );
 
-    t.completed();
+    t.succeeded();
     // The accumulated-history property is verified per-turn above
     // (firstCount >= 1, secondCount > firstCount). The model may call the
     // tool more than once in a turn, so assert it was called without error
     // rather than pinning an exact count.
-    t.calledTool("check_messages", { status: "completed" });
+    t.calledTool("check_messages");
   },
 });
 

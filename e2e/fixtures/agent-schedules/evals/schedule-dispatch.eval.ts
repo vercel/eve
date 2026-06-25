@@ -39,12 +39,11 @@ export default defineEval({
     // to a turn boundary.
     const session = await t.target.attachSession(sessionId);
 
-    session.completed();
+    session.succeeded();
     session.calledTool("record-heartbeat", {
       output: new RegExp(HEARTBEAT_TOKEN),
-      status: "completed",
     });
 
-    t.completed();
+    t.succeeded();
   },
 });

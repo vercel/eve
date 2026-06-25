@@ -64,13 +64,13 @@ describe("computeEvalVerdict", () => {
     ).toBe("passed");
   });
 
-  it("reports an explicit skip ahead of other verdict inputs", () => {
+  it("never lets an explicit skip mask errors or failed gates", () => {
     expect(
       computeEvalVerdict({
         assertions: [assertion({ severity: "gate", score: 0, passed: false })],
         error: "ignored",
         skipReason: "unsupported target",
       }),
-    ).toBe("skipped");
+    ).toBe("failed");
   });
 });

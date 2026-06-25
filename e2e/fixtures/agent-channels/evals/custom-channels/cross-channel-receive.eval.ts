@@ -27,10 +27,10 @@ export default defineEval({
     );
 
     const session = await t.target.attachSession(payload.sessionId!);
-    session.completed();
+    session.succeeded();
     session.event("message.completed");
     session.messageIncludes("hello");
 
-    t.completed();
+    t.succeeded();
   },
 });

@@ -18,7 +18,7 @@ export default defineEval({
       message: "Say hello.",
     });
 
-    t.completed();
+    t.succeeded();
     t.messageIncludes(CLIENT_CONTEXT_TOKEN);
   },
 });

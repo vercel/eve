@@ -6,9 +6,8 @@ export default defineEval({
   async test(t) {
     await t.send("Call the `alpha` tool and tell me the name and index it returned.");
 
-    t.completed();
+    t.succeeded();
     t.calledTool("alpha", {
-      status: "completed",
       output: { name: "alpha", index: 0 },
     });
   },

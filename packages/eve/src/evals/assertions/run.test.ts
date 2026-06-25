@@ -21,11 +21,11 @@ function makeResult(overrides: {
 }
 
 function toolCall(name: string, input: EveEvalToolCall["input"] = {}): EveEvalToolCall {
-  return { name, input, output: undefined, isError: false, status: "pending", turnIndex: 0 };
+  return { name, input, output: undefined, status: "pending", turnIndex: 0 };
 }
 
 function completedToolCall(name: string): EveEvalToolCall {
-  return { ...toolCall(name), isError: false, output: "ok", status: "completed" };
+  return { ...toolCall(name), output: "ok", status: "completed" };
 }
 
 function message(text: string): HandleMessageStreamEvent {
@@ -63,15 +63,15 @@ function actionResult(callId: string, toolName: string): HandleMessageStreamEven
 }
 
 describe("run assertions", () => {
-  it("completed passes a clean run and fails a failed or parked run", async () => {
-    expect((await Run.completed().evaluate(makeResult({ status: "completed" }))).score).toBe(1);
-    expect((await Run.completed().evaluate(makeResult({ status: "failed" }))).score).toBe(0);
-    expect((await Run.completed().evaluate(makeResult({ derived: { parked: true } }))).score).toBe(
+  it("succeeded passes a clean run and fails a failed or parked run", async () => {
+    expect((await Run.succeeded().evaluate(makeResult({ status: "completed" }))).score).toBe(1);
+    expect((await Run.succeeded().evaluate(makeResult({ status: "failed" }))).score).toBe(0);
+    expect((await Run.succeeded().evaluate(makeResult({ derived: { parked: true } }))).score).toBe(
       0,
     );
   });
 
-  it("completed rejects failure events even when the terminal status is completed", async () => {
+  it("succeeded rejects failure events even when the terminal status is completed", async () => {
     const failedEvent = {
       type: "step.failed",
       data: {
@@ -84,7 +84,16 @@ describe("run assertions", () => {
     } as HandleMessageStreamEvent;
 
     expect(
-      (await Run.completed().evaluate(makeResult({ status: "completed", events: [failedEvent] })))
+      (await Run.succeeded().evaluate(makeResult({ status: "completed", events: [failedEvent] })))
+        .score,
+    ).toBe(0);
+  });
+
+  it("parked requires a clean HITL park", async () => {
+    expect((await Run.parked().evaluate(makeResult({ derived: { parked: true } }))).score).toBe(1);
+    expect((await Run.parked().evaluate(makeResult({}))).score).toBe(0);
+    expect(
+      (await Run.parked().evaluate(makeResult({ status: "failed", derived: { parked: true } })))
         .score,
     ).toBe(0);
   });
@@ -97,7 +106,10 @@ describe("run assertions", () => {
 
   it("calledTool matches by name and input, with an exact-count option", async () => {
     const result = makeResult({
-      derived: { toolCalls: [toolCall("get_weather", { city: "SF" })], toolCallCount: 1 },
+      derived: {
+        toolCalls: [{ ...completedToolCall("get_weather"), input: { city: "SF" } }],
+        toolCallCount: 1,
+      },
     });
     expect((await Run.calledTool("get_weather").evaluate(result)).score).toBe(1);
     expect(
@@ -109,7 +121,7 @@ describe("run assertions", () => {
     expect((await Run.calledTool("missing").evaluate(result)).score).toBe(0);
   });
 
-  it("calledTool and notCalledTool match lifecycle status without treating pending as successful", async () => {
+  it("calledTool defaults to completed while notCalledTool rejects every lifecycle state", async () => {
     const result = makeResult({
       derived: {
         toolCalls: [toolCall("guarded"), completedToolCall("done")],
@@ -117,10 +129,20 @@ describe("run assertions", () => {
       },
     });
     expect((await Run.calledTool("guarded", { status: "pending" }).evaluate(result)).score).toBe(1);
-    expect((await Run.calledTool("guarded", { isError: false }).evaluate(result)).score).toBe(0);
+    expect((await Run.calledTool("guarded").evaluate(result)).score).toBe(0);
     expect(
-      (await Run.notCalledTool("guarded", { status: "completed" }).evaluate(result)).score,
+      (await Run.calledTool("done", { output: (value) => value === "ok" }).evaluate(result)).score,
     ).toBe(1);
+    expect((await Run.notCalledTool("guarded").evaluate(result)).score).toBe(0);
+    expect((await Run.notCalledTool("missing").evaluate(result)).score).toBe(1);
+  });
+
+  it("validates exact-count options", () => {
+    expect(() => Run.calledTool("search", { count: -1 })).toThrow(/non-negative integer/);
+    expect(() => Run.calledSubagent("child", { count: 1.5 })).toThrow(/non-negative integer/);
+    expect(() => Run.typedEvent({ type: "turn.completed", count: Number.NaN })).toThrow(
+      /non-negative integer/,
+    );
   });
 
   it("toolOrder checks request order", async () => {
@@ -179,7 +201,7 @@ describe("run assertions", () => {
         await Run.typedEvent({
           type: "subagent.called",
           data: { name: "child" },
-          times: 2,
+          count: 2,
         }).evaluate(result)
       ).score,
     ).toBe(1);
@@ -187,9 +209,17 @@ describe("run assertions", () => {
     expect(
       (
         await Run.eventOrder([
-          { type: "subagent.called", data: { name: "child" }, times: 2 },
+          { type: "subagent.called", data: { name: "child" }, count: 2 },
           { type: "subagent.completed", data: { subagentName: "child" } },
         ]).evaluate(result)
+      ).score,
+    ).toBe(1);
+    expect(
+      (
+        await Run.eventsSatisfy(
+          "completion follows delegation",
+          (events) => events.at(-1)?.type === "subagent.completed",
+        ).evaluate(result)
       ).score,
     ).toBe(1);
   });
@@ -197,7 +227,12 @@ describe("run assertions", () => {
   it("loadedSkill matches a load_skill call by skill id", async () => {
     const result = makeResult({
       derived: {
-        toolCalls: [toolCall("load_skill", { skill: "custom__talk-like-a-dog" })],
+        toolCalls: [
+          {
+            ...completedToolCall("load_skill"),
+            input: { skill: "custom__talk-like-a-dog" },
+          },
+        ],
         toolCallCount: 1,
       },
     });

@@ -11,7 +11,6 @@ export default defineEval({
     first.expectOk();
     first.calledTool("get_io_count", {
       output: { ioCallCount: 1 },
-      status: "completed",
     });
 
     const second = await t.send(
@@ -19,12 +18,10 @@ export default defineEval({
     );
     second.calledTool("get_io_count", {
       output: { ioCallCount: 1 },
-      status: "completed",
     });
 
-    t.completed();
+    t.succeeded();
     t.calledTool("get_io_count", {
-      status: "completed",
       output: { ioCallCount: 1 },
     });
   },

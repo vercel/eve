@@ -16,11 +16,13 @@ import { extractCompletedResult } from "#client/output-schema.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import { deriveRunFacts } from "#evals/runner/derive-run-facts.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
-import { createScopedAssertions } from "#evals/assertions/scoped.js";
+import { createOutputAssertions, createScopedAssertions } from "#evals/assertions/scoped.js";
+import { EvalRequirementFailed } from "#evals/control-flow.js";
 import { inputRequestMatches, toolCallMatches } from "#evals/match.js";
 import type {
   EveEvalAssertions,
   EveEvalDerivedFacts,
+  EveEvalOutputAssertions,
   EveEvalSession,
   EveEvalSessionResult,
   EveEvalToolCall,
@@ -50,7 +52,7 @@ export class EveEvalTurnFailedError extends Error {
   }
 }
 
-export interface EvalSessionDriver extends EveEvalAssertions {}
+export interface EvalSessionDriver extends EveEvalAssertions, EveEvalOutputAssertions {}
 
 export class EvalSessionDriver implements EveEvalSession {
   readonly #session: ClientSession;
@@ -70,7 +72,14 @@ export class EvalSessionDriver implements EveEvalSession {
     this.#signal = input.signal;
     Object.assign(
       this,
-      createScopedAssertions(this.#collector, () => this.#assertionSubject()),
+      createScopedAssertions(this.#collector, {
+        timing: "snapshot",
+        select: () => this.#assertionSubject(),
+      }),
+      createOutputAssertions(this.#collector, {
+        timing: "snapshot",
+        select: () => this.#assertionSubject(),
+      }),
     );
   }
 
@@ -94,26 +103,26 @@ export class EvalSessionDriver implements EveEvalSession {
     return this.#session.state;
   }
 
-  expectInputRequests(
-    filter: EveEvalInputRequestMatchOptions = {},
-  ): readonly [InputRequest, ...InputRequest[]] {
+  requireInputRequest(filter: EveEvalInputRequestMatchOptions = {}): InputRequest {
     if (this.#pendingInputRequests.length === 0) {
-      throw new Error("Expected pending input requests, but the last turn did not park.");
+      this.#failRequirement(
+        "requireInputRequest",
+        "expected one pending input request, but the last turn did not park",
+      );
     }
 
     const matching = this.#pendingInputRequests.filter((request) =>
       inputRequestMatches(request, filter),
     );
-    if (matching.length === 0) {
-      throw new Error(`No pending input requests matched ${formatInputRequestFilter(filter)}.`);
-    }
-    if (filter.times !== undefined && matching.length !== filter.times) {
-      throw new Error(
-        `Expected exactly ${filter.times} pending input request(s) matching ${formatInputRequestFilter(filter)}, found ${matching.length}.`,
+    if (this.#pendingInputRequests.length !== 1 || matching.length !== 1) {
+      this.#failRequirement(
+        "requireInputRequest",
+        `expected exactly one pending input request matching ${formatInputRequestFilter(filter)}, found ${matching.length} match(es) across ${this.#pendingInputRequests.length} pending request(s)`,
       );
     }
 
-    return matching as [InputRequest, ...InputRequest[]];
+    this.#collector.recordOutcome({ name: "requireInputRequest", outcome: { score: 1 } });
+    return matching[0]!;
   }
 
   async respond(...responses: InputResponse[]): Promise<EveEvalTurn> {
@@ -125,7 +134,10 @@ export class EvalSessionDriver implements EveEvalSession {
   }
 
   async respondAll(optionId: string): Promise<EveEvalTurn> {
-    const requests = this.expectInputRequests();
+    const requests = this.#pendingInputRequests;
+    if (requests.length === 0) {
+      throw new Error("respondAll() requires at least one pending input request.");
+    }
     for (const request of requests) {
       assertRequestHasOption(request, optionId);
     }
@@ -238,14 +250,19 @@ export class EvalSessionDriver implements EveEvalSession {
     const derived = deriveRunFacts(this.#events, { sessionId });
     return {
       derived,
-      events: this.#events,
+      events: [...this.#events],
       output: outputOf(this.#lastTurn),
       status: this.#lastTurn?.status ?? "completed",
     } as const;
   }
+
+  #failRequirement(name: string, message: string): never {
+    this.#collector.recordOutcome({ name, outcome: { score: 0, message } });
+    throw new EvalRequirementFailed();
+  }
 }
 
-interface EvalTurn extends EveEvalAssertions {}
+interface EvalTurn extends EveEvalAssertions, EveEvalOutputAssertions {}
 
 class EvalTurn implements EveEvalTurn {
   readonly data: unknown;
@@ -255,6 +272,7 @@ class EvalTurn implements EveEvalTurn {
   readonly sessionId: string;
   readonly status: "completed" | "failed" | "waiting";
   readonly toolCalls: readonly EveEvalToolCall[];
+  readonly #collector: AssertionCollector;
   readonly #derived: EveEvalDerivedFacts;
 
   constructor(input: {
@@ -275,15 +293,18 @@ class EvalTurn implements EveEvalTurn {
     this.sessionId = input.sessionId;
     this.status = input.status;
     this.toolCalls = input.toolCalls;
+    this.#collector = input.collector;
     this.#derived = input.derived;
     Object.assign(
       this,
-      createScopedAssertions(input.collector, () => ({
-        derived: this.#derived,
-        events: this.events,
-        output: outputOf(this),
-        status: this.status,
-      })),
+      createScopedAssertions(input.collector, {
+        timing: "snapshot",
+        select: () => this.#assertionSubject(),
+      }),
+      createOutputAssertions(input.collector, {
+        timing: "snapshot",
+        select: () => this.#assertionSubject(),
+      }),
     );
   }
 
@@ -292,19 +313,31 @@ class EvalTurn implements EveEvalTurn {
     throw new EveEvalTurnFailedError(this);
   }
 
-  expectToolCall(
+  requireToolCall(
     name: string,
-    options: Omit<EveEvalToolCallMatchOptions, "times"> = {},
+    options: Omit<EveEvalToolCallMatchOptions, "count"> = {},
   ): EveEvalToolCall {
     const matching = this.toolCalls.filter(
       (call) => call.name === name && toolCallMatches(call, options),
     );
     if (matching.length !== 1) {
-      throw new Error(
-        `Expected exactly one matching "${name}" tool call in this turn, found ${matching.length}; observed [${this.toolCalls.map((call) => call.name).join(", ")}].`,
+      inputRequirementFailed(
+        this.#collector,
+        "requireToolCall",
+        `expected exactly one matching "${name}" tool call in this turn, found ${matching.length}; observed [${this.toolCalls.map((call) => call.name).join(", ")}]`,
       );
     }
+    this.#collector.recordOutcome({ name: "requireToolCall", outcome: { score: 1 } });
     return matching[0]!;
+  }
+
+  #assertionSubject() {
+    return {
+      derived: this.#derived,
+      events: this.events,
+      output: outputOf(this),
+      status: this.status,
+    } as const;
   }
 }
 
@@ -360,6 +393,10 @@ export class EvalSessionManager {
     return this.#sessions.find((session) => session.lastTurn !== undefined);
   }
 
+  hasActivity(): boolean {
+    return this.#sessions.length > 0;
+  }
+
   #createSession(): EvalSessionDriver {
     const session = new EvalSessionDriver({
       collector: this.#collector,
@@ -384,6 +421,15 @@ function attachSignal(input: SendTurnInput, signal: AbortSignal | undefined): Se
 
 function formatInputRequestFilter(filter: EveEvalInputRequestMatchOptions): string {
   return JSON.stringify(filter);
+}
+
+function inputRequirementFailed(
+  collector: AssertionCollector,
+  name: string,
+  message: string,
+): never {
+  collector.recordOutcome({ name, outcome: { score: 0, message } });
+  throw new EvalRequirementFailed();
 }
 
 function outputOf(turn: EveEvalTurn | undefined): unknown {

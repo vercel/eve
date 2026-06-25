@@ -13,7 +13,7 @@ export default defineEval({
   async test(t) {
     await t.send("Please use the dynamic multi alpha skill and follow its instructions exactly.");
 
-    t.completed();
+    t.succeeded();
     t.loadedSkill("alpha", {
       output: new RegExp(DYNAMIC_MULTI_ALPHA_TOKEN, "u"),
     });

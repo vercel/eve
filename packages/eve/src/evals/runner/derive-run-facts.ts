@@ -1,13 +1,12 @@
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#runtime/input/types.js";
-import type { JsonObject } from "#shared/json.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { EveEvalDerivedFacts, EveEvalSubagentCall, EveEvalToolCall } from "#evals/types.js";
 
 interface MutableToolCall {
   name: string;
   input: JsonObject;
-  output: unknown;
-  isError: boolean;
+  output: JsonValue | undefined;
   status: EveEvalToolCall["status"];
   turnIndex: number;
   sessionId?: string;
@@ -16,8 +15,7 @@ interface MutableToolCall {
 interface MutableSubagentCall {
   name: string;
   remoteUrl?: string;
-  output?: unknown;
-  isError: boolean;
+  output?: JsonValue;
   status: EveEvalSubagentCall["status"];
   turnIndex: number;
   sessionId?: string;
@@ -73,7 +71,6 @@ export function deriveRunFacts(
       name,
       input,
       output: undefined,
-      isError: false,
       status: "pending",
       turnIndex: Math.max(turnIndex, 0),
       sessionId,
@@ -89,7 +86,6 @@ export function deriveRunFacts(
 
     const call: MutableSubagentCall = {
       name,
-      isError: false,
       status: "pending",
       turnIndex: Math.max(turnIndex, 0),
       sessionId,
@@ -116,18 +112,14 @@ export function deriveRunFacts(
 
       case "action.result": {
         const { result, status } = event.data;
-        const failed = status === "failed" || result.isError === true;
-
         if (result.kind === "tool-result") {
           const call = ensureToolCall(result.callId, result.toolName, {});
           call.output = result.output;
-          call.isError = failed;
           call.status = status;
         } else if (result.kind === "subagent-result") {
           const call = subagentCallsByCallId.get(result.callId);
           if (call !== undefined) {
             call.output = call.output ?? result.output;
-            call.isError = failed;
             call.status = status;
           }
         }

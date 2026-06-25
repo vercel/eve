@@ -12,7 +12,6 @@ export default defineEval({
     first.expectOk();
     first.calledTool("check_stability", {
       output: { branch: "first" },
-      status: "completed",
     });
 
     const second = await t.send(
@@ -20,14 +19,12 @@ export default defineEval({
     );
     second.calledTool("check_stability", {
       output: { branch: "first" },
-      status: "completed",
     });
 
-    t.completed();
+    t.succeeded();
     t.calledTool("check_stability", {
-      status: "completed",
       output: { branch: "first" },
-      times: 2,
+      count: 2,
     });
   },
 });

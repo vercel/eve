@@ -17,16 +17,15 @@ export default defineEval({
       ].join("\n"),
     );
 
-    t.expectInputRequests({
+    t.requireInputRequest({
       display: (value) => value === undefined || value === "select",
       optionIds: ["red", "blue"],
-      times: 1,
       toolName: "ask_question",
     });
 
     await t.respondAll("blue");
 
-    t.completed();
+    t.succeeded();
     t.messageIncludes(/\bblue\b/i);
   },
 });

@@ -18,17 +18,15 @@ export default defineEval({
 
     turn.calledTool(TFL_JOURNEY_MODES_TOOL, {
       output: hasBusAndTube,
-      status: "completed",
-      times: 1,
+      count: 1,
     });
 
-    t.completed();
+    t.succeeded();
     t.toolOrder([SEARCH_TOOL, TFL_JOURNEY_MODES_TOOL]);
-    t.calledTool(SEARCH_TOOL, { status: "completed" });
+    t.calledTool(SEARCH_TOOL);
     t.calledTool(TFL_JOURNEY_MODES_TOOL, {
       output: hasBusAndTube,
-      status: "completed",
-      times: 1,
+      count: 1,
     });
     t.messageIncludes(/\bbus\b/iu);
     t.messageIncludes(/\btube\b/iu);

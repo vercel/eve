@@ -18,10 +18,9 @@ export default defineEval({
       ].join("\n"),
     );
 
-    t.completed();
-    t.calledTool("write_file", { status: "completed" });
+    t.succeeded();
+    t.calledTool("write_file");
     t.calledTool("grep", {
-      status: "completed",
       output: new RegExp(FILE_TOOLS_TOKEN),
     });
     t.messageIncludes(FILE_TOOLS_TOKEN);

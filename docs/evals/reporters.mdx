@@ -33,7 +33,7 @@ export default defineEval({
   reporters: [Braintrust({ projectName: "weather-agent" })],
   async test(t) {
     await t.send("What is the weather in Brooklyn?");
-    t.completed();
+    t.succeeded();
   },
 });
 ```

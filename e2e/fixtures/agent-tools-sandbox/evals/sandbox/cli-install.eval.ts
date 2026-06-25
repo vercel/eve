@@ -13,9 +13,8 @@ export default defineEval({
       `Run the bash command \`${SANDBOX_CLI_NAME} sandbox\` and reply with its output verbatim.`,
     );
 
-    t.completed();
+    t.succeeded();
     t.calledTool("bash", {
-      status: "completed",
       output: new RegExp(`${SANDBOX_CLI_TOKEN}:sandbox`),
     });
     t.messageIncludes(`${SANDBOX_CLI_TOKEN}:sandbox`);
