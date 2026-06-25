@@ -39,13 +39,35 @@ export default defineEval({
     const resumed = await t.respondAll("approve");
     resumed.expectOk();
 
-    const outputs = subagentOutputs(t.events);
-    if (!outputs.some((output) => output.includes(GOOG_PRICE))) {
+    if (resumed.inputRequests.length > 0) {
+      const requests = resumed.inputRequests.map((request) => ({
+        requestId: request.requestId,
+        toolName: request.action.kind === "tool-call" ? request.action.toolName : undefined,
+      }));
       throw new Error(
-        `No subagent.completed output contained the GOOG price; got [${outputs.join(", ")}].`,
+        `Subagent re-parked after approval with input requests: ${JSON.stringify(requests)}.`,
       );
     }
 
+    const outputs = subagentOutputs(t.events);
+    if (!outputs.some((output) => output.includes(GOOG_PRICE))) {
+      const failedActions = t.events.flatMap((event) => {
+        if (event.type !== "action.result") return [];
+        if (event.data.status !== "failed" && event.data.result.isError !== true) return [];
+        return [event.data.result];
+      });
+      const recentEventTypes = t.events.slice(-20).map((event) => event.type);
+      throw new Error(
+        [
+          `No subagent.completed output contained the GOOG price; got [${outputs.join(", ")}].`,
+          `Resumed turn status: ${resumed.status}.`,
+          `Failed actions: ${JSON.stringify(failedActions)}.`,
+          `Recent events: [${recentEventTypes.join(", ")}].`,
+        ].join(" "),
+      );
+    }
+
+    t.noFailedActions();
     t.didNotFail();
     t.completed();
     t.messageIncludes(GOOG_PRICE);

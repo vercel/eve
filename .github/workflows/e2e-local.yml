@@ -83,5 +83,6 @@ jobs:
             .junit
             e2e/fixtures/*/.eve/evals
             apps/fixtures/*/.eve/evals
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
