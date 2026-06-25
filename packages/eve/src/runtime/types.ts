@@ -372,7 +372,7 @@ export interface ResolvedAgent {
   /**
    * Whether the author opted into the framework `Workflow` orchestration tool
    * by re-exporting the `Workflow` marker as the default export of a file in
-   * `agent/tools/`. When true, the harness exposes a code-mode-style sandbox
+   * `agent/tools/`. When true, the harness exposes an isolated JavaScript sandbox
    * whose only callable operations are this agent's subagents and remote
    * agents.
    */

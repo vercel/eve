@@ -55,9 +55,8 @@ const CONNECTION_SEARCH_OUTPUT_SCHEMA: JsonObject = {
 
 /**
  * Durable context key for connection search results. Written by
- * `executeConnectionSearch` so the resolver can find discovered tools
- * even in code-mode (where tool results are wrapped inside the
- * `code_mode` tool and not directly visible in messages).
+ * `executeConnectionSearch` so the resolver can find discovered tools without
+ * relying on model-facing tool result history.
  */
 const ConnectionSearchResultsKey = new ContextKey<readonly ConnectionSearchResultItem[]>(
   "eve.connectionSearchResults",

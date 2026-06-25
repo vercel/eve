@@ -18,7 +18,6 @@ import {
 } from "#harness/authorization.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { withToolOutputSerializationError } from "#harness/tool-output-serialization.js";
-import { isCodeModeToolExecutionOptions } from "#runtime/framework-tools/code-mode-connection-auth.js";
 
 type ToolModelOutputValue =
   | { readonly type: "json"; readonly value: JSONValue }
@@ -151,11 +150,7 @@ export function buildToolSetFromDefinitions(input: {
  * stashed out-of-band ({@link stashToolInterrupt}) for the park detector while
  * the AI SDK records an opaque {@link AuthorizationPendingModelOutput} that
  * omits OAuth URLs, user codes, and hook URLs from model-facing history.
- *
- * Code-mode host executions consume the raw signal directly (see
- * `harness/code-mode.ts`) and their output is not a model-facing tool result,
- * so they pass through untouched. Returns `undefined` for client-side tools
- * (no `execute`).
+ * Returns `undefined` for client-side tools (no `execute`).
  */
 export function wrapToolExecute(
   definition: HarnessToolDefinition,
@@ -165,7 +160,6 @@ export function wrapToolExecute(
   return async (input, options) => {
     const output = await execute(input);
     if (isAuthorizationSignal(output)) {
-      if (isCodeModeToolExecutionOptions(options)) return output;
       stashToolInterrupt(loadContext(), options.toolCallId, output);
       return modelFacingAuthorizationOutput(output);
     }

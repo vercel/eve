@@ -127,7 +127,7 @@ describe("extractToolApprovalInputRequests", () => {
     ]);
   });
 
-  it("extracts a code-mode approval request from a sibling tool call", () => {
+  it("extracts an approval request from a sibling tool call", () => {
     const result = extractToolApprovalInputRequests({
       content: [
         {

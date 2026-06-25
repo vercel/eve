@@ -223,42 +223,6 @@ describe("createMockAuthoredRuntimeModel", () => {
     ]);
   });
 
-  it("emits code-mode source for weather tools when code mode is the visible tool", async () => {
-    const result = await generateWithPrompt(
-      [
-        {
-          content: "What is the weather for Lisbon?",
-          role: "user",
-        },
-      ],
-      [
-        {
-          description: [
-            "Run sandboxed JavaScript with these host tools.",
-            "declare const tools: {",
-            "  /** Get the current weather for a city. */",
-            "  get_weather: (input: { city: string }) => Promise<unknown>;",
-            "};",
-          ].join("\n"),
-          name: "code_mode",
-          type: "function",
-        },
-      ],
-    );
-
-    expect(result.finishReason).toEqual({ raw: undefined, unified: "tool-calls" });
-    expect(result.content).toEqual([
-      {
-        input: JSON.stringify({
-          js: 'return await tools.get_weather({ city: "Lisbon" });',
-        }),
-        toolCallId: "call_code_mode",
-        toolName: "code_mode",
-        type: "tool-call",
-      },
-    ]);
-  });
-
   it("builds ask_question input from prompt text and option labels", async () => {
     const result = await generateWithPrompt(
       [

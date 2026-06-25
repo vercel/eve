@@ -337,7 +337,7 @@ export interface EnableWorkflowToolSentinel {
 }
 
 /**
- * Opt-in marker for the framework `Workflow` tool, a code-mode sandbox whose
+ * Opt-in marker for the framework `Workflow` tool, an isolated JavaScript sandbox whose
  * only callable operations are this agent's subagents and remote agents, for
  * orchestrating them from model-authored JavaScript. Re-export it as the
  * default export of `agent/tools/workflow.ts`:

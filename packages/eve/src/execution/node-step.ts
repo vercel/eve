@@ -8,7 +8,6 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
-import { resolveCodeModeEnabled } from "#shared/code-mode.js";
 import {
   resolveRuntimeModelReference,
   type RuntimeModelResolutionScope,
@@ -67,7 +66,6 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
   const tools = createNodeHarnessTools({ node: input.node });
   return createToolLoopHarness({
     capabilities: input.capabilities,
-    codeMode: resolveCodeModeEnabled(input.node.agent.config?.experimental?.codeMode),
     workflow: input.node.agent.workflowEnabled === true,
     handleEvent: input.handleEvent,
     mode: input.mode,

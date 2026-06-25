@@ -14,7 +14,6 @@ import {
   resolveMockFixtureToken,
   resolveWeatherCity,
 } from "#runtime/agent/mock-model-fixtures.js";
-import { CODE_MODE_TOOL_NAME } from "#shared/code-mode.js";
 import {
   type BootstrapGenerateResult,
   type BootstrapPrompt,
@@ -220,29 +219,6 @@ function createAuthoredToolCallResult(
 
   const city = resolveWeatherCity(lastUserMessage);
   const toolInput = createMockAuthoredToolInput(tool, lastUserMessage, city);
-
-  if (tool.name === CODE_MODE_TOOL_NAME) {
-    const nestedToolName = findRelevantCodeModeHostTool(tool.description, lastUserMessage);
-
-    if (nestedToolName === null) {
-      return null;
-    }
-
-    const js = `return await tools${formatCodeModeToolAccess(nestedToolName)}({ city: ${JSON.stringify(
-      city,
-    )} });`;
-
-    return createToolCallGenerateResult({
-      input: {
-        js,
-      },
-      inputTokens: estimateTokenCount(getPromptText(options.prompt)),
-      modelId,
-      outputTokens: estimateTokenCount(js),
-      toolCallId: createToolCallId(tool.name),
-      toolName: tool.name,
-    });
-  }
 
   return createToolCallGenerateResult({
     input: toolInput,
@@ -552,50 +528,6 @@ function findRelevantTool(
       ),
     ) ?? null
   );
-}
-
-function findRelevantCodeModeHostTool(
-  description: string | undefined,
-  message: string,
-): string | null {
-  if (description === undefined) {
-    return null;
-  }
-
-  return findRelevantTool(parseCodeModeHostTools(description), message)?.name ?? null;
-}
-
-function parseCodeModeHostTools(description: string): AvailableBootstrapTool[] {
-  const tools: AvailableBootstrapTool[] = [];
-  let pendingDescription: string | undefined;
-
-  for (const line of description.split("\n")) {
-    const comment = /^\s*\/\*\*\s*(.*?)\s*\*\/\s*$/u.exec(line);
-
-    if (comment?.[1] !== undefined) {
-      pendingDescription = comment[1];
-      continue;
-    }
-
-    const declaration = /^\s*(?:([$A-Z_a-z][$\w]*)|(["'])(.*?)\2)\s*:\s*\(input:/u.exec(line);
-    const name = declaration?.[1] ?? declaration?.[3];
-
-    if (name === undefined) {
-      continue;
-    }
-
-    tools.push({
-      description: pendingDescription,
-      name,
-    });
-    pendingDescription = undefined;
-  }
-
-  return tools;
-}
-
-function formatCodeModeToolAccess(toolName: string): string {
-  return /^[$A-Z_a-z][$\w]*$/u.test(toolName) ? `.${toolName}` : `[${JSON.stringify(toolName)}]`;
 }
 
 function normalizeText(value: string): string {

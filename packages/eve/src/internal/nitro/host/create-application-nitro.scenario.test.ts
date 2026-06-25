@@ -149,7 +149,6 @@ describe("createApplicationNitro", () => {
   });
 
   afterEach(() => {
-    delete process.env.EVE_EXPERIMENTAL_CODE_MODE;
     delete process.env.VERCEL;
   });
 
@@ -552,48 +551,30 @@ describe("createApplicationNitro", () => {
     );
   });
 
-  it("includes the code-mode runtime plugin only when code mode is enabled", async () => {
+  it("includes the Workflow sandbox runtime plugin only when Workflow is enabled", async () => {
     const directNitroStub = createNitroStub();
-    const codeModeNitroStub = createNitroStub();
+    const workflowNitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(directNitroStub.nitro);
-    createNitroMock.mockResolvedValueOnce(codeModeNitroStub.nitro);
+    createNitroMock.mockResolvedValueOnce(workflowNitroStub.nitro);
 
     const { createApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
 
-    await createApplicationNitro(createPreparedHost(), false);
-    vi.stubEnv("EVE_EXPERIMENTAL_CODE_MODE", "1");
-    await createApplicationNitro(createPreparedHost(), false);
+    const directHost = createPreparedHost();
+    const workflowHost = createPreparedHost();
+    workflowHost.compileResult.manifest.workflowEnabled = true;
+
+    await createApplicationNitro(directHost, false);
+    await createApplicationNitro(workflowHost, false);
 
     const directPlugins = createNitroMock.mock.calls[0]?.[0].plugins as string[];
-    const codeModePlugins = createNitroMock.mock.calls[1]?.[0].plugins as string[];
+    const workflowPlugins = createNitroMock.mock.calls[1]?.[0].plugins as string[];
 
     expect(directPlugins).not.toEqual(
-      expect.arrayContaining([expect.stringContaining("code-mode-runtime-dependency-plugin.ts")]),
+      expect.arrayContaining([expect.stringContaining("workflow-sandbox-runtime-plugin.ts")]),
     );
-    expect(codeModePlugins).toEqual(
-      expect.arrayContaining([expect.stringContaining("code-mode-runtime-dependency-plugin.ts")]),
-    );
-  });
-
-  it("includes the code-mode runtime plugin when an agent opts in via experimental.codeMode", async () => {
-    const nitroStub = createNitroStub();
-    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
-
-    const { createApplicationNitro } =
-      await import("#internal/nitro/host/create-application-nitro.js");
-
-    const preparedHost = createPreparedHost();
-    preparedHost.compileResult.manifest.config = {
-      ...preparedHost.compileResult.manifest.config,
-      experimental: { codeMode: true },
-    } as typeof preparedHost.compileResult.manifest.config;
-
-    await createApplicationNitro(preparedHost, false);
-
-    const plugins = createNitroMock.mock.calls[0]?.[0].plugins as string[];
-    expect(plugins).toEqual(
-      expect.arrayContaining([expect.stringContaining("code-mode-runtime-dependency-plugin.ts")]),
+    expect(workflowPlugins).toEqual(
+      expect.arrayContaining([expect.stringContaining("workflow-sandbox-runtime-plugin.ts")]),
     );
   });
 

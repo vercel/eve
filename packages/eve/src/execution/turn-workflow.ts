@@ -57,12 +57,12 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
         return;
       }
 
-      if (result.action === "dispatch-code-mode-runtime-actions") {
+      if (result.action === "dispatch-workflow-runtime-actions") {
         await notifyDriverStep({
           completionToken: input.completionToken,
           payload: {
             action: {
-              kind: "dispatch-code-mode-runtime-actions",
+              kind: "dispatch-workflow-runtime-actions",
               pendingActionKeys: result.pendingRuntimeActionKeys,
               serializedContext: result.serializedContext,
               sessionState: result.sessionState,

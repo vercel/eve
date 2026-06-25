@@ -3,7 +3,7 @@ title: "Dynamic Workflows"
 description: "The experimental Workflow tool: let the model orchestrate its own subagents from model-authored JavaScript as one durable step."
 ---
 
-The experimental `Workflow` tool lets the model write JavaScript that coordinates the agent's own subagents as a single durable step. The program can run them in sequence, feed one result into the next, fan out over a list, and combine the results. You enable the capability and the model decides and runs the orchestration. It is the agents-only slice of [code mode](../agent-config#other-defineagent-fields) (the broader `codeMode` flag that routes all of an agent's tools through model-authored JavaScript).
+The experimental `Workflow` tool lets the model write JavaScript that coordinates the agent's own subagents as a single durable step. The program can run them in sequence, feed one result into the next, fan out over a list, and combine the results. You enable the capability and the model decides and runs the orchestration.
 
 A single turn can already call several subagents, and parallel tool calls dispatch concurrently. What a workflow adds is _programmatic_ coordination. The program decides how many subagents to run based on an earlier result, which output feeds which call, and how to combine everything. That is logic the model cannot express as a few one-off calls.
 
@@ -62,12 +62,6 @@ That is an allowlist, not a denylist. The sandbox cannot read files, open a sock
 - **Durable.** The whole orchestration counts as one step. Subagents dispatched together run concurrently, and if a run parks (suspends durably without holding compute; see [Execution model & durability](../concepts/execution-model-and-durability)) on a long-running or human-gated child, it resumes where it left off after a restart.
 - **Approval-safe.** A subagent that needs human approval (HITL, human-in-the-loop) mid-run surfaces its request to the user, and the workflow picks back up once that is answered, same as direct delegation.
 - **Observable.** Every orchestrated subagent emits the usual `subagent.called` / `subagent.completed` events on the parent stream and gets its own child session and stream. The telemetry matches direct delegation, so existing dashboards and cost attribution keep working.
-
-## Relationship to code mode
-
-[Code mode](../agent-config#other-defineagent-fields) is the broader version, where the model drives _all_ of an agent's tools (files, shell, web, and agents) from JavaScript. A workflow covers only the subagents. The two do not interfere. Enabling the `Workflow` tool leaves code mode untouched, and an agent can run both at once.
-
-`codeMode` is experimental and may change or be removed.
 
 ## What to read next
 

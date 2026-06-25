@@ -33,7 +33,7 @@ import {
 } from "#execution/workflow-errors.js";
 import { resolveVercelProductionCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { createSessionStep } from "#execution/create-session-step.js";
-import { dispatchCodeModeRuntimeActionsStep } from "#execution/dispatch-code-mode-runtime-actions-step.js";
+import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import {
   dispatchTurnStep,
@@ -289,11 +289,11 @@ async function runDriverLoop(input: {
             driverWritable: input.driverWritable,
           });
 
-        case "dispatch-code-mode-runtime-actions":
+        case "dispatch-workflow-runtime-actions":
         case "dispatch-runtime-actions": {
           const dispatchStep =
-            action.kind === "dispatch-code-mode-runtime-actions"
-              ? dispatchCodeModeRuntimeActionsStep
+            action.kind === "dispatch-workflow-runtime-actions"
+              ? dispatchWorkflowRuntimeActionsStep
               : dispatchRuntimeActionsStep;
 
           const dispatchResult = await dispatchStep({

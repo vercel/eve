@@ -15,7 +15,6 @@ import {
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import { readToolInterrupt, stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { wrapToolExecute } from "#harness/tools.js";
-import { markCodeModeToolExecutionOptions } from "#runtime/framework-tools/code-mode-connection-auth.js";
 
 function signalWithVerifier(): AuthorizationSignal {
   return requestAuthorization([
@@ -101,19 +100,6 @@ describe("wrapToolExecute", () => {
     expect(output).not.toHaveProperty("challenges");
     // The full signal (with resume) is available to the park detector.
     expect(readToolInterrupt(ctx, "call_1")).toBe(signal);
-  });
-
-  it("passes the full signal through untouched for code-mode host execution", async () => {
-    const signal = signalWithVerifier();
-    const wrapped = wrapToolExecute({ ...baseDef, execute: async () => signal })!;
-    const ctx = new ContextContainer();
-    const options = markCodeModeToolExecutionOptions({ toolCallId: "call_2" }) as {
-      toolCallId: string;
-    };
-    const output = await contextStorage.run(ctx, () => wrapped({}, options));
-
-    expect(output).toBe(signal); // not redacted — code-mode reads the raw signal
-    expect(readToolInterrupt(ctx, "call_2")).toBeUndefined(); // not stashed
   });
 
   it("passes non-interrupt outputs through unchanged", async () => {

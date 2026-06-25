@@ -340,7 +340,6 @@ const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
     description: z.string().optional(),
     experimental: z
       .object({
-        codeMode: z.boolean().optional(),
         workflow: compiledAgentWorkflowDefinitionSchema.optional(),
       })
       .strict()
@@ -680,7 +679,6 @@ export function createCompiledAgentNodeManifest(input: {
         input.config.experimental === undefined
           ? undefined
           : {
-              codeMode: input.config.experimental.codeMode,
               workflow:
                 input.config.experimental.workflow === undefined
                   ? undefined
