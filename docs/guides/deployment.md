@@ -140,7 +140,8 @@ Eve writes the standard Nitro output under `.output/` instead of Vercel Build Ou
 
 Self-deployed agents should make the Vercel-specific choices explicit:
 
-- Let the Workflow SDK use its default local world, which stores workflow state under `.workflow-data`, configure your host so that directory is on persistent storage, or select another world with `experimental.workflow.world` in the root `agent.ts`.
+- Let the Workflow SDK use its default local world, which stores workflow state under `.workflow-data`, configure your host so that directory is on persistent storage, or select another world with `experimental.workflow.world` in the root `agent.ts`. When you select a custom world, install a world package built against the same `@workflow/*` line as your eve release (currently the `5.0.0-beta` line). The npm `latest` tag may lag, so pin the version explicitly, for example `pnpm add @workflow/world-postgres@5.0.0-beta.x`. A mismatched world (such as a `4.x` package against a `5.x` core) fails with a `ZodError: invalid_union` during run replay.
+- If you put a reverse proxy or ingress in front of eve, forward **both** `/eve/` and `/.well-known/workflow/`. The workflow world delivers run callbacks to `/.well-known/workflow/v1/flow`; a proxy restricted to `/eve/` lets sessions start but silently stalls runs forever, because the callbacks never reach eve.
 - Install the AI SDK package for your provider, then use a direct provider model object and `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` when you want no Gateway dependency.
 - Use `AI_GATEWAY_API_KEY` if you still want Gateway routing from a non-Vercel host.
 - Replace `vercelOidc()` with auth that your host can verify.
@@ -148,7 +149,7 @@ Self-deployed agents should make the Vercel-specific choices explicit:
 - If the agent defines schedules, the default `eve build && eve start` path starts Nitro's schedule runner, and Vercel wires schedules to Vercel Cron automatically. If you adapt the output to a custom HTTP-only host or preset, make sure it also runs Nitro scheduled tasks, or trigger the same work from your own scheduler.
 - Treat Vercel Cron, Vercel Sandbox prewarm, Vercel Deployment Protection bypass, and the Agent Runs dashboard as Vercel-only conveniences.
 
-The HTTP contract is unchanged: health, session creation, streaming, channels, tools, and subagents use the same routes. Any client that can reach and authenticate to those routes can talk to the agent.
+The HTTP contract is unchanged: health, session creation, streaming, channels, tools, and subagents use the same routes under `/eve/`, and the workflow dispatch route lives under `/.well-known/workflow/`. A reverse proxy must preserve both prefixes. Any client that can reach and authenticate to those routes can talk to the agent.
 
 ## 9. Verify the deployment
 

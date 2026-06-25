@@ -96,11 +96,21 @@ export default defineAgent({
 ```
 
 Install that package in your app. It should export a default factory or
-`createWorld()` function.
+`createWorld()` function. Pin a version built against the same `@workflow/*`
+line as your eve release (currently the `5.0.0-beta` line):
+
+```bash
+pnpm add @workflow/world-postgres@5.0.0-beta.x
+```
+
+The npm `latest` tag can lag behind that line, so an unpinned install may pull
+an incompatible major that fails with `ZodError: invalid_union` at run replay.
 
 Put credentials and host-specific options in runtime environment variables read
-by the world package, not in `agent.ts`. If the installed package must stay
-external in hosted output, list it in `build.externalDependencies`.
+by the world package, not in `agent.ts`. For the Postgres world, that means
+putting the connection string or credentials in the env vars it reads. If the
+installed package must stay external in hosted output, list it in
+`build.externalDependencies`.
 
 ## Other defineAgent fields
 
