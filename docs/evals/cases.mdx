@@ -5,6 +5,14 @@ description: "Author single-turn and multi-turn evals with test(t), and fan one 
 
 Each eval file is one graded case by default, and a single file can fan out over a dataset by default-exporting an array (covered below). The runner executes each `test(t)` function against the target, captures every event, and computes a verdict from the [assertions](./assertions) you recorded. Every eval shares one shape, whether single-turn, multi-turn, human-in-the-loop (HITL), or dataset-driven: one `async test(t)` function that drives the agent and asserts inline.
 
+Before adding a case, create the required config at the root of `evals/`. An empty config is enough when you do not need shared judge, reporter, concurrency, or timeout settings:
+
+```ts title="evals/evals.config.ts"
+import { defineEvalConfig } from "eve/evals";
+
+export default defineEvalConfig({});
+```
+
 ## Single-turn evals
 
 The common case sends one turn and asserts on the reply. `t.send(input)` resolves once the turn settles, and `t.reply` is the last assistant message:
@@ -42,6 +50,7 @@ Identity is the file path, so directories are the grouping mechanism. `evals/wea
 
 ```text
 evals/
+├── evals.config.ts
 ├── weather/
 │   ├── shared.ts                    # helpers, not an eval
 │   ├── brooklyn-forecast.eval.ts
