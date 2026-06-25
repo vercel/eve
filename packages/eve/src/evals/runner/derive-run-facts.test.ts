@@ -151,6 +151,76 @@ describe("deriveRunFacts", () => {
     ]);
   });
 
+  it("derives pending tool calls from HITL input requests", () => {
+    const facts = deriveRunFacts([turnStarted("t1", 0), inputRequested(["approval"])]);
+
+    expect(facts.toolCalls).toEqual([
+      {
+        name: "bash",
+        input: {},
+        output: undefined,
+        isError: false,
+        status: "pending",
+        turnIndex: 0,
+        sessionId: undefined,
+      },
+    ]);
+  });
+
+  it("pairs HITL tool calls with resumed results by call id", () => {
+    const events: HandleMessageStreamEvent[] = [
+      turnStarted("t1", 0),
+      inputRequested(["approval"]),
+      turnStarted("t2", 1),
+      actionResult({
+        callId: "approval-call",
+        toolName: "bash",
+        output: "approved",
+      }),
+    ];
+
+    expect(deriveRunFacts(events).toolCalls).toEqual([
+      {
+        name: "bash",
+        input: {},
+        output: "approved",
+        isError: false,
+        status: "completed",
+        turnIndex: 0,
+        sessionId: undefined,
+      },
+    ]);
+  });
+
+  it("derives resolved tool calls from result-only turn events", () => {
+    const facts = deriveRunFacts([
+      turnStarted("t2", 1),
+      actionResult({ callId: "approval-call", toolName: "bash", status: "rejected" }),
+    ]);
+
+    expect(facts.toolCalls).toEqual([
+      {
+        name: "bash",
+        input: {},
+        output: null,
+        isError: false,
+        status: "rejected",
+        turnIndex: 0,
+        sessionId: undefined,
+      },
+    ]);
+  });
+
+  it("deduplicates tool calls surfaced by request and HITL events", () => {
+    const events: HandleMessageStreamEvent[] = [
+      turnStarted("t1", 0),
+      actionsRequested([{ callId: "approval-call", toolName: "bash" }]),
+      inputRequested(["approval"]),
+    ];
+
+    expect(deriveRunFacts(events).toolCalls).toHaveLength(1);
+  });
+
   it("stamps the turn index from turn.started boundaries", () => {
     const events: HandleMessageStreamEvent[] = [
       turnStarted("t1", 0),

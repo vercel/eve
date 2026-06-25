@@ -63,6 +63,7 @@ describe("executeTask", () => {
         sessionId: "session_1",
         events: [
           turnStarted("turn_2"),
+          actionResult("turn_2", "bash", "approved"),
           messageCompleted("approved", "turn_2"),
           turnCompleted("turn_2"),
           sessionCompleted(),
@@ -75,7 +76,8 @@ describe("executeTask", () => {
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
-        await t.send("run pwd");
+        const parked = await t.send("run pwd");
+        parked.calledTool("bash", { status: "pending", times: 1 });
         const [request] = t.expectInputRequests({
           display: "confirmation",
           input: { command: "pwd" },
@@ -85,7 +87,9 @@ describe("executeTask", () => {
           toolName: "bash",
         });
         expect(request.requestId).toBe("approval_1");
-        await t.respondAll("approve");
+        const approved = await t.respondAll("approve");
+        approved.calledTool("bash", { status: "completed", times: 1 });
+        t.calledTool("bash", { status: "completed", times: 1 });
       }, "approve"),
     });
 
@@ -450,6 +454,19 @@ function inputRequested(
       turnId,
     },
     type: "input.requested",
+  };
+}
+
+function actionResult(turnId: string, toolName: string, output: string): HandleMessageStreamEvent {
+  return {
+    data: {
+      result: { callId: "call_1", kind: "tool-result", output, toolName },
+      sequence: 1,
+      status: "completed",
+      stepIndex: 0,
+      turnId,
+    },
+    type: "action.result",
   };
 }
 

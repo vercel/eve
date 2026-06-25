@@ -65,6 +65,24 @@ export function deriveRunFacts(
   let reasoningBlockCount = 0;
   let failureCode: string | undefined;
 
+  const ensureToolCall = (callId: string, name: string, input: JsonObject): MutableToolCall => {
+    const existing = toolCallsByCallId.get(callId);
+    if (existing !== undefined) return existing;
+
+    const call: MutableToolCall = {
+      name,
+      input,
+      output: undefined,
+      isError: false,
+      status: "pending",
+      turnIndex: Math.max(turnIndex, 0),
+      sessionId,
+    };
+    toolCalls.push(call);
+    toolCallsByCallId.set(callId, call);
+    return call;
+  };
+
   const ensureSubagentCall = (callId: string, name: string): MutableSubagentCall => {
     const existing = subagentCallsByCallId.get(callId);
     if (existing !== undefined) return existing;
@@ -91,17 +109,7 @@ export function deriveRunFacts(
       case "actions.requested": {
         for (const action of event.data.actions) {
           if (action.kind !== "tool-call") continue;
-          const call: MutableToolCall = {
-            name: action.toolName,
-            input: action.input,
-            output: undefined,
-            isError: false,
-            status: "pending",
-            turnIndex: Math.max(turnIndex, 0),
-            sessionId,
-          };
-          toolCalls.push(call);
-          toolCallsByCallId.set(action.callId, call);
+          ensureToolCall(action.callId, action.toolName, action.input);
         }
         break;
       }
@@ -111,12 +119,10 @@ export function deriveRunFacts(
         const failed = status === "failed" || result.isError === true;
 
         if (result.kind === "tool-result") {
-          const call = toolCallsByCallId.get(result.callId);
-          if (call !== undefined) {
-            call.output = result.output;
-            call.isError = failed;
-            call.status = status;
-          }
+          const call = ensureToolCall(result.callId, result.toolName, {});
+          call.output = result.output;
+          call.isError = failed;
+          call.status = status;
         } else if (result.kind === "subagent-result") {
           const call = subagentCallsByCallId.get(result.callId);
           if (call !== undefined) {
@@ -150,6 +156,9 @@ export function deriveRunFacts(
 
       case "input.requested": {
         inputRequests.push(...event.data.requests);
+        for (const request of event.data.requests) {
+          ensureToolCall(request.action.callId, request.action.toolName, request.action.input);
+        }
         break;
       }
 
