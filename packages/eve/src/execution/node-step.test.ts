@@ -12,7 +12,7 @@ import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import type { RuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
-import { createExecutionNodeStep } from "#execution/node-step.js";
+import { createExecutionNodeStep, createNodeHarnessTools } from "#execution/node-step.js";
 import { createSession } from "#execution/session.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
 
@@ -217,6 +217,18 @@ function createNoopRuntime(): Runtime {
       .mockRejectedValue(new Error("runtime.getEventStream should not be called in this test")),
   };
 }
+
+describe("createNodeHarnessTools", () => {
+  it("guides the model to split large tasks across parallel recursive agent calls", () => {
+    const agentTool = createNodeHarnessTools({ node: createTestNode() }).get("agent");
+
+    expect(agentTool?.description).toContain("split a large task into independent pieces");
+    expect(agentTool?.description).toContain("issue multiple `agent` calls in the same response");
+    expect(agentTool?.description).toContain("eve runs them concurrently");
+    expect(agentTool?.description).toContain("all required context");
+    expect(agentTool?.description).toContain("non-overlapping write scopes");
+  });
+});
 
 describe("createExecutionNodeStep", () => {
   it("builds a usable harness step for the root node", async () => {

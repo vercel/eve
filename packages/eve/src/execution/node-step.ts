@@ -24,6 +24,15 @@ import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 
 const log = createLogger("execution.node-step");
 
+const BUILT_IN_AGENT_TOOL_DESCRIPTION = [
+  "Delegate a focused subtask to a fresh copy of yourself.",
+  "Use this to isolate complex, multi-step work or split a large task into independent pieces.",
+  "For a small fixed set of independent subtasks, issue multiple `agent` calls in the same response; eve runs them concurrently and returns all results before you continue.",
+  "Each child inherits your instructions, tools, connections, and sandbox but starts with fresh history and state.",
+  "Include all required context, constraints, scope, and expected output in `message`.",
+  "Because parallel children share the sandbox, give them non-overlapping write scopes and combine their results in the parent.",
+].join(" ");
+
 /**
  * Factory that creates a {@link Runtime} for the given compiled
  * artifacts source and optional node id. Matches the signature of
@@ -140,7 +149,7 @@ export function createNodeHarnessTools(input: {
 
   if (!tools.has("agent")) {
     tools.set("agent", {
-      description: "Launch a new agent to handle a complex, multi-step subtask.",
+      description: BUILT_IN_AGENT_TOOL_DESCRIPTION,
       inputSchema: jsonSchema(SUBAGENT_TOOL_INPUT_SCHEMA),
       name: "agent",
       runtimeAction: {
