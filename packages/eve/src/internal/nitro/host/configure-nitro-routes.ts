@@ -13,6 +13,7 @@ import {
   normalizeEsmImportSpecifier,
   stringifyEsmImportSpecifier,
 } from "#internal/application/import-specifier.js";
+import { isVercelBuildEnvironment } from "#internal/application/paths.js";
 import {
   resolvePackageRoot,
   resolvePackageSourceFilePath,
@@ -397,11 +398,23 @@ export async function configureNitroRoutes(
       : join(preparedHost.workflowBuildDir, "workflows.mjs")
     : undefined;
 
-  // Direct handler registration is dev-only: it only helps when the local
-  // workflow queue runs inside the same Nitro dev worker. Production
-  // deployments dispatch through Vercel's queue trigger.
+  // Register the direct queue→bundle binding whenever the local/configured
+  // world drives the queue itself, which is true in `eve dev` AND in
+  // self-hosted (non-Vercel) production. In both cases the world dispatches
+  // each job to the matching POST handler in-process, bypassing HTTP loopback
+  // (see `@workflow/world-local`'s queue dispatch: a registered direct handler
+  // short-circuits the `WORKFLOW_LOCAL_BASE_URL` fetch path). Vercel-managed
+  // deploys instead dispatch through Vercel's queue trigger, which calls the
+  // flow route over HTTP, so we never register the binding there — gating on
+  // "not a Vercel build" preserves that path exactly. We additionally require a
+  // configured custom world: without one there is no local world to bind to in
+  // production, so a binding would be dead weight.
+  const hasConfiguredWorkflowWorld =
+    preparedHost.compileResult.manifest.config.experimental?.workflow?.world !== undefined;
+  const localWorldDrivesQueue =
+    nitro.options.dev || (!isVercelBuildEnvironment() && hasConfiguredWorkflowWorld);
   const directHandlerEntries: WorkflowDirectHandlerEntry[] =
-    nitro.options.dev && workflowBundlePath !== undefined
+    localWorldDrivesQueue && workflowBundlePath !== undefined
       ? [{ bundlePath: workflowBundlePath, queuePrefix: EVE_WORKFLOW_QUEUE_PREFIX }]
       : [];
   // Generated handlers will JSON-stringify this at write-time, so we hand them
