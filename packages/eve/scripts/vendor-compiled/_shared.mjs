@@ -36,16 +36,7 @@
  * ```
  */
 import { createHash } from "node:crypto";
-import {
-  copyFile,
-  mkdir,
-  readFile,
-  readdir,
-  realpath,
-  rm,
-  stat,
-  writeFile,
-} from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, parse, posix, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -798,9 +789,7 @@ async function writeTypeOnlyModule({ module, compiledRoot, packageRoot }) {
 
 /**
  * Stable fingerprint of every input that drives the vendored output:
- * resolved package versions and locations plus the content of every file in
- * `scriptFiles`. pnpm embeds patch and peer-dependency hashes in the resolved
- * location, so a patched package cannot reuse output built from the original.
+ * resolved package versions plus the content of every file in `scriptFiles`.
  * When the fingerprint matches the previously recorded stamp the work is
  * a no-op, which makes `build:compiled` safe to invoke concurrently from
  * sibling Turbo tasks without racing on shared destination directories.
@@ -817,19 +806,13 @@ async function computeStamp({ scriptFiles, modules, packageRoot }) {
     scriptHash.update("\0");
   }
 
-  const moduleResolutions = {};
   const moduleVersions = {};
   for (const module of modules) {
-    const { packageJson, packageRoot: resolvedPackageRoot } = await findPackageJson(
-      module.packageName,
-      packageRoot,
-    );
-    moduleResolutions[module.packageName] = await realpath(resolvedPackageRoot);
+    const { packageJson } = await findPackageJson(module.packageName, packageRoot);
     moduleVersions[module.packageName] = packageJson.version ?? "0.0.0";
   }
 
   return {
-    moduleResolutions,
     moduleVersions,
     scriptHash: scriptHash.digest("hex"),
   };

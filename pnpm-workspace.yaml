@@ -59,6 +59,3 @@ minimumReleaseAgeExclude:
   - typescript
   - vercel
   - workflow
-
-patchedDependencies:
-  experimental-ai-sdk-code-mode@1.0.14: patches/experimental-ai-sdk-code-mode@1.0.14.patch
