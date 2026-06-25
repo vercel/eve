@@ -5,6 +5,30 @@ import { normalizeAgentDefinition } from "#internal/authored-definition/core.js"
 const FAILURE_MESSAGE = "Expected the agent config to match the public eve shape.";
 
 describe("normalizeAgentDefinition", () => {
+  it("accepts provider-agnostic reasoning effort", () => {
+    const definition = normalizeAgentDefinition(
+      {
+        model: "openai/gpt-5.5",
+        reasoning: "high",
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.reasoning).toBe("high");
+  });
+
+  it("rejects unsupported reasoning effort", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          reasoning: "maximum",
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
+  });
+
   it("accepts a workflow world package name", () => {
     const definition = normalizeAgentDefinition(
       {

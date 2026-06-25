@@ -46,6 +46,7 @@ export function normalizeAgentDefinition(
       "modelContextWindowTokens",
       "modelOptions",
       "outputSchema",
+      "reasoning",
     ],
     message,
   );
@@ -88,7 +89,31 @@ export function normalizeAgentDefinition(
     definition.outputSchema = record.outputSchema as NormalizedAgentDefinition["outputSchema"];
   }
 
+  if (record.reasoning !== undefined) {
+    definition.reasoning = normalizeAgentReasoningDefinition(record.reasoning, message);
+  }
+
   return definition as Readonly<NormalizedAgentDefinition>;
+}
+
+function normalizeAgentReasoningDefinition(
+  value: unknown,
+  message: string,
+): NonNullable<NormalizedAgentDefinition["reasoning"]> {
+  const reasoning = expectString(value, message);
+
+  switch (reasoning) {
+    case "provider-default":
+    case "none":
+    case "minimal":
+    case "low":
+    case "medium":
+    case "high":
+    case "xhigh":
+      return reasoning;
+    default:
+      throw new Error(message);
+  }
 }
 
 function expectPositiveInteger(value: unknown, message: string): number {
