@@ -99,17 +99,12 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     // chain-root id can never drift between persisted session and tags.
     const rootSessionIdFromParent = readRootSessionId(input.serializedContext);
 
-    // `createSessionStep` emits the session/subagent-root `$eve.*` tags
-    // from inside its own step body (see create-session-step.ts), so no
-    // separate attribute step is spent here in the workflow body.
     const { state: sessionState } = await createSessionStep({
       compiledArtifactsSource: serializedBundle.source,
       continuationToken,
-      inputMessage: input.input.message,
       nodeId: serializedBundle.nodeId,
       outputSchema: input.input.outputSchema,
       rootSessionId: rootSessionIdFromParent,
-      serializedContext: input.serializedContext,
       sessionId,
     });
 

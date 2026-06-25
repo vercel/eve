@@ -1,5 +1,4 @@
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
-import type { WorkflowFunction, WorkflowMetadata } from "#compiled/@workflow/core/runtime/start.js";
 
 import type {
   DeliverInput,
@@ -10,11 +9,18 @@ import type {
   Runtime,
 } from "#channel/types.js";
 import { serializeContext } from "#context/serialize.js";
+import {
+  buildSessionAttributes,
+  buildSubagentRootAttributes,
+  readParentLineage,
+} from "#execution/eve-workflow-attributes.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { getRun, resumeHook, start, type Run } from "#internal/workflow/runtime.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
+import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { buildRunContext } from "#execution/runtime-context.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
@@ -23,6 +29,18 @@ import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
+
+type WorkflowFunction<TArgs extends unknown[], TResult> = (...args: TArgs) => Promise<TResult>;
+
+interface WorkflowMetadata {
+  readonly workflowId: string;
+}
+
+interface WorkflowStartOptions {
+  readonly allowReservedAttributes?: boolean;
+  readonly attributes?: Record<string, string>;
+}
+
 export const LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE =
   "deploymentId 'latest' requires a World that implements resolveLatestDeploymentId()";
 
@@ -86,15 +104,37 @@ export function createWorkflowRuntime(config: {
       });
       const ctx = buildRunContext({ bundle, run: input });
       const serializedContext = serializeContext(ctx);
+      const parentLineage = readParentLineage(serializedContext);
+      const attributes =
+        parentLineage.sessionId === undefined
+          ? buildSessionAttributes({
+              inputMessage: input.input.message,
+              serializedContext,
+            })
+          : buildSubagentRootAttributes({
+              identity: { nodeId: bundle.nodeId ?? ROOT_RUNTIME_AGENT_NODE_ID },
+              parentCallId: parentLineage.callId,
+              parentSessionId: parentLineage.sessionId,
+              parentTurnId: parentLineage.turnId,
+              rootSessionId: parentLineage.rootSessionId ?? parentLineage.sessionId,
+              serializedContext,
+            });
 
       let run: Awaited<ReturnType<typeof startWorkflowPreferLatest>>;
       try {
-        run = await startWorkflowPreferLatest(workflowEntryReference, [
+        run = await startWorkflowPreferLatest(
+          workflowEntryReference,
+          [
+            {
+              input: input.input,
+              serializedContext,
+            },
+          ],
           {
-            input: input.input,
-            serializedContext,
+            allowReservedAttributes: true,
+            attributes: normalizeEveAttributes(attributes),
           },
-        ]);
+        );
       } catch (error) {
         logError(log, "failed to start workflow run", error, {
           continuationToken: input.continuationToken,
@@ -160,19 +200,24 @@ export function createWorkflowRuntime(config: {
 export async function startWorkflowPreferLatest<TArgs extends unknown[], TResult>(
   workflow: WorkflowFunction<TArgs, TResult> | WorkflowMetadata,
   args: TArgs,
+  options?: WorkflowStartOptions,
 ): Promise<Run<unknown> | Run<TResult>> {
   if (!shouldRouteToLatestDeployment()) {
-    return await start(workflow, args);
+    return options === undefined
+      ? await start(workflow, args)
+      : await start(workflow, args, options);
   }
 
   try {
-    return await start(workflow, args, { deploymentId: "latest" });
+    return await start(workflow, args, { ...options, deploymentId: "latest" });
   } catch (error) {
     if (!isLatestDeploymentUnsupportedError(error)) {
       throw error;
     }
 
-    return await start(workflow, args);
+    return options === undefined
+      ? await start(workflow, args)
+      : await start(workflow, args, options);
   }
 }
 

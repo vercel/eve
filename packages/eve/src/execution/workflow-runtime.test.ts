@@ -177,7 +177,15 @@ describe("createWorkflowRuntime#run", () => {
           }),
         },
       ],
-      { deploymentId: "latest" },
+      {
+        allowReservedAttributes: true,
+        attributes: {
+          "$eve.title": "hello",
+          "$eve.trigger": "http",
+          "$eve.type": "session",
+        },
+        deploymentId: "latest",
+      },
     );
   });
 
@@ -205,8 +213,56 @@ describe("createWorkflowRuntime#run", () => {
           }),
         },
       ],
-      { deploymentId: "latest" },
+      {
+        allowReservedAttributes: true,
+        attributes: {
+          "$eve.channel_request_id": "req_run",
+          "$eve.title": "hello",
+          "$eve.trigger": "http",
+          "$eve.type": "session",
+        },
+        deploymentId: "latest",
+      },
     );
+  });
+
+  it("seeds subagent lineage attributes when starting a delegated session", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      compiledArtifactsSource,
+      nodeId: "researcher",
+    } as never);
+    startMock.mockResolvedValue({ runId: "subagent-run" });
+
+    await createWorkflowRuntime({
+      compiledArtifactsSource,
+      nodeId: "researcher",
+    }).run({
+      adapter: { kind: "subagent" },
+      auth: null,
+      continuationToken: "subagent:parent-session:call-1",
+      input: { message: "research this" },
+      mode: "task",
+      parent: {
+        callId: "call-1",
+        rootSessionId: "root-session",
+        sessionId: "parent-session",
+        turn: { id: "turn-1", sequence: 1 },
+      },
+    });
+
+    expect(startMock).toHaveBeenCalledWith(workflowEntryReference, expect.any(Array), {
+      allowReservedAttributes: true,
+      attributes: {
+        "$eve.parent": "parent-session",
+        "$eve.parent_call": "call-1",
+        "$eve.parent_turn": "turn-1",
+        "$eve.root": "root-session",
+        "$eve.subagent": "researcher",
+        "$eve.trigger": "subagent",
+        "$eve.type": "subagent",
+      },
+    });
   });
 
   it("falls back to the current deployment when latest is unsupported", async () => {
@@ -225,9 +281,22 @@ describe("createWorkflowRuntime#run", () => {
     });
 
     expect(startMock).toHaveBeenNthCalledWith(1, workflowEntryReference, expect.any(Array), {
+      allowReservedAttributes: true,
+      attributes: {
+        "$eve.title": "hello",
+        "$eve.trigger": "http",
+        "$eve.type": "session",
+      },
       deploymentId: "latest",
     });
-    expect(startMock).toHaveBeenNthCalledWith(2, workflowEntryReference, expect.any(Array));
+    expect(startMock).toHaveBeenNthCalledWith(2, workflowEntryReference, expect.any(Array), {
+      allowReservedAttributes: true,
+      attributes: {
+        "$eve.title": "hello",
+        "$eve.trigger": "http",
+        "$eve.type": "session",
+      },
+    });
   });
 
   it.each(["preview", "development", undefined])(
@@ -254,7 +323,14 @@ describe("createWorkflowRuntime#run", () => {
       });
 
       expect(startMock).toHaveBeenCalledTimes(1);
-      expect(startMock).toHaveBeenCalledWith(workflowEntryReference, expect.any(Array));
+      expect(startMock).toHaveBeenCalledWith(workflowEntryReference, expect.any(Array), {
+        allowReservedAttributes: true,
+        attributes: {
+          "$eve.title": "hello",
+          "$eve.trigger": "http",
+          "$eve.type": "session",
+        },
+      });
     },
   );
 
