@@ -25,7 +25,6 @@ catalog:
   "@ai-sdk/otel": "^1.0.0"
   "@ai-sdk/provider": "^4.0.0"
   "@ai-sdk/provider-utils": "^5.0.0"
-  "@ai-sdk/react": "^4.0.0"
   "@types/node": "25.9.1"
   "@types/react": "19.2.15"
   "@types/react-dom": "19.2.3"
