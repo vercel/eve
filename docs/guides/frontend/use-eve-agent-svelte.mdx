@@ -78,7 +78,7 @@ await agent.send({
 
 ## Human-in-the-loop prompts
 
-A tool opts into approval with `needsApproval` ([Tools](../../tools)). When one fires, the pending request rides along on a `dynamic-tool` part of the latest message at `part.toolMetadata?.eve?.inputRequest`. Read it, then answer through the same session with `agent.send({ inputResponses })`:
+A tool opts into approval with `approval` ([Tools](../../tools)). When one fires, the pending request rides along on a `dynamic-tool` part of the latest message at `part.toolMetadata?.eve?.inputRequest`. Read it, then answer through the same session with `agent.send({ inputResponses })`:
 
 ```ts
 import type { EveDynamicToolPart, EveMessagePart } from "eve/svelte";

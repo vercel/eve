@@ -424,7 +424,7 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
           inputSchema: (result.inputSchema ?? {
             type: "object",
           }) as JsonObject,
-          needsApproval: approval,
+          approval,
           outputSchema: result.outputSchema as JsonObject | undefined,
           async execute(input: Record<string, unknown>) {
             const reg = loadContext().get(ConnectionRegistryKey)!;

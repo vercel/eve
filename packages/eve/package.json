@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.13.8",
+  "version": "0.14.0",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -320,7 +320,7 @@
     "commander": "14.0.3",
     "emulate": "0.6.0",
     "eventsource-parser": "3.0.8",
-    "experimental-ai-sdk-code-mode": "1.0.14",
+    "experimental-ai-sdk-code-mode": "1.0.16",
     "gray-matter": "4.0.3",
     "jose": "6.2.3",
     "jsonc-parser": "3.3.1",

@@ -46,7 +46,7 @@ eve never runs authored tools during discovery. The model sees descriptors first
 
 ## Gate a tool on human approval
 
-A tool can require a person to sign off before it runs. Set `needsApproval` with the helpers from `eve/tools/approval`:
+A tool can require a person to sign off before it runs. Set `approval` with the helpers from `eve/tools/approval`:
 
 ```ts title="agent/tools/refund_charge.ts"
 import { defineTool } from "eve/tools";
@@ -56,14 +56,14 @@ import { z } from "zod";
 export default defineTool({
   description: "Refund a charge.",
   inputSchema: z.object({ chargeId: z.string(), amount: z.number() }),
-  needsApproval: always(), // or once() / never() / a predicate
+  approval: always(), // or once() / never() / a policy
   async execute(input) {
     return refund(input);
   },
 });
 ```
 
-Approval is one half of eve's [human-in-the-loop](./human-in-the-loop) model — the page covers the `always/once/never` helpers, input-dependent predicates, and how a gated call pauses and resumes durably.
+Approval is one half of eve's [human-in-the-loop](./human-in-the-loop) model — the page covers the `always/once/never` helpers, input-dependent policies, and how a gated call pauses and resumes durably.
 
 ## Shape what the model sees with `toModelOutput`
 

@@ -1,5 +1,21 @@
 # eve
 
+## 0.14.0
+
+### Minor Changes
+
+- 78ef30a: Standardize authored tools and connections on an `approval` function that receives the active session context and returns AI SDK 7 approval statuses, with synchronous and asynchronous policies supported. Boolean results remain supported as aliases for user approval and no approval, schedules no longer accept approval configuration, and no AI SDK 6 `needsApproval` adapter remains.
+- 5c32eb0: Remove `defineAgent({ experimental: { codeMode } })` and the `EVE_EXPERIMENTAL_CODE_MODE` fallback. Tools are always exposed directly to the model; model-authored JavaScript orchestration remains available through the experimental `Workflow` tool for subagents and remote agents.
+
+### Patch Changes
+
+- a3d8441: Fix dynamic `Workflow` fan-out so concurrent subagent calls dispatch together, replay in deterministic program order, and resume reliably across runtime isolates. Generated pnpm workspaces now exempt the bundled code-mode package from release-age gating so fresh eve releases install immediately.
+- 91e43ae: Upgrade eve to the stable AI SDK 7 release and copy vendored AI SDK declarations directly from the installed packages. Newly scaffolded pnpm workspaces now exempt the AI SDK, Vercel, and Workflow package families from minimum release age checks.
+- 89969b2: Add a top-level `defineAgent({ reasoning })` option that forwards provider-agnostic reasoning effort to the agent's turn model calls.
+- 5c32eb0: Strengthen the built-in `agent` tool guidance so models know when and how to split large tasks across a fixed batch of parallel recursive calls.
+- 7c532fe: MCP and OpenAPI connections can now resolve `auth` providers and headers from the active session context, enabling per-caller and per-tenant credentials.
+- 72b3d0e: Keep Slack sender ids attached to their message text and add an opt-in `threadContext` setting that injects ID-attributed thread replies since a configurable boundary. Workflow titles retain the original Slack text, while later turns and authorization prompts consistently use the current caller.
+
 ## 0.13.8
 
 ### Patch Changes

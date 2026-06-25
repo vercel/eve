@@ -6,7 +6,7 @@ import type {
   ToolModelOutput,
 } from "#shared/tool-definition.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { NeedsApprovalContext } from "#public/definitions/tool.js";
+import type { Approval } from "#public/definitions/approval.js";
 import type { SessionAuth } from "#context/keys.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 
@@ -88,13 +88,13 @@ export interface DynamicToolEntry<TInput = Record<string, unknown>, TOutput = an
   readonly toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
   /**
    * Optional per-call approval gate, mirroring the authored-tool
-   * `needsApproval` contract: return `true` to require user approval
+   * `approval` contract: return `"user-approval"` to require user approval
    * before the call executes. Only honored for step-scoped dynamic
    * tools, whose live `execute` closures survive into the harness;
    * session/turn-scoped tools replay from durable metadata and cannot
    * carry a function across replay.
    */
-  readonly needsApproval?: (ctx: NeedsApprovalContext) => boolean;
+  readonly approval?: Approval;
 }
 
 /**

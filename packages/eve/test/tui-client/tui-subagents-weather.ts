@@ -11,7 +11,7 @@ import { theme } from "./lib/theme.ts";
  * Multi-message subagent smoke driving `e2e/fixtures/agent-subagents-hitl` and its
  * `stock-price` subagent. The subagent emits a pre-tool message
  * ("I'll look up..."), calls `get_stock_price` (which has
- * `needsApproval: () => true`), and then emits a post-tool message
+ * `approval: once()`), and then emits a post-tool message
  * with the result. This is the real-world flow that broke the earlier
  * stepIndex-keyed implementation, both pre and post messages were
  * landing under `stepIndex: 0` and collapsing into one box.
@@ -57,10 +57,10 @@ run({ app: "agent-subagents-hitl", kind: "local-build" }, async (target) => {
 
   // Delegate explicitly. An implicit prompt ("what is the value of GOOG?")
   // leaves the choice to the model, which may answer directly instead of
-  // delegating; naming the subagent keeps the flow this smoke exercises
-  // deterministic. The price itself is fixed by the subagent's fixture tool.
+  // delegating. Explicitly limiting the request to one delegation also keeps
+  // the model from re-checking the fixed fixture result with a second child.
   input.type(
-    `Use the stock-price subagent with message 'Call the get_stock_price tool with ticker "${TICKER}".'. When it finishes, include the exact stock price in your reply.`,
+    `Call the stock-price subagent exactly once with message 'Call the get_stock_price tool exactly once with ticker "${TICKER}". After it returns, do not call any tool again; return the result.'. After that single subagent call finishes, do not call any subagent or tool again; include the exact stock price in your final reply.`,
   );
   input.enter();
 

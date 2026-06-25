@@ -19,7 +19,7 @@ import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
 import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import {
-  getRuntimeActionKeyFromWorkflowInterrupt,
+  getRuntimeActionKeysFromWorkflowInterrupt,
   isWorkflowRuntimeActionInterrupt,
 } from "#harness/workflow-runtime-action-state.js";
 import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
@@ -363,9 +363,9 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     ) {
       return {
         action: "dispatch-workflow-runtime-actions",
-        pendingRuntimeActionKeys: [
-          getRuntimeActionKeyFromWorkflowInterrupt(workflowInterrupt.interrupt),
-        ],
+        pendingRuntimeActionKeys: getRuntimeActionKeysFromWorkflowInterrupt(
+          workflowInterrupt.interrupt,
+        ),
         serializedContext: nextSerializedContext,
         sessionState: nextState,
       };

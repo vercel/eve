@@ -6,11 +6,11 @@ const TOOL_NAME = "dynamic_guarded_echo";
 
 /**
  * HITL flow: a session-scoped dynamic tool's approval gate survives durable
- * replay. If replay drops `needsApproval`, the tool executes immediately and
+ * replay. If replay drops `approval`, the tool executes immediately and
  * this eval fails before approval.
  */
 export default defineEval({
-  description: "HITL smoke: replayed dynamic tools preserve needsApproval.",
+  description: "HITL smoke: replayed dynamic tools preserve approval.",
   async test(t) {
     await t.send(`Call the \`${TOOL_NAME}\` tool with note "before-approval".`);
     const [request] = t.expectInputRequests({

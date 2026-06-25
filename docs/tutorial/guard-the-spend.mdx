@@ -5,7 +5,7 @@ description: "Part 8 of the Build an Agent tutorial. Gate expensive queries with
 
 A single warehouse query can scan terabytes and run up the bill. So before the analytics assistant fires off an expensive scan, make it stop and check with you. The agent pauses, asks you, and resumes with your answer. That's human-in-the-loop, and you wire it up with one field on the tool.
 
-`needsApproval` runs before `execute`. Return `true` and the turn parks on an approval request; you answer, and the run picks up from that exact step. The function gets the tool input, so you can make the decision cost-based.
+`approval` runs before `execute`. Return `"user-approval"` and the turn parks on an approval request; you answer, and the run picks up from that exact step. The function gets the tool input, so you can make the decision cost-based.
 
 ## Estimate, then gate
 
@@ -32,7 +32,8 @@ export default defineTool({
   description: "Run a read-only SQL query against the analytics tables.",
   inputSchema: z.object({ sql: z.string() }),
   // Cost-based gate: only the expensive queries need a human yes.
-  needsApproval: ({ toolInput }) => estimateScanGb(toolInput?.sql ?? "") > THRESHOLD_GB,
+  approval: ({ toolInput }) =>
+    estimateScanGb(toolInput?.sql ?? "") > THRESHOLD_GB ? "user-approval" : "not-applicable",
   async execute({ sql }) {
     const { columns, rows } = await runReadOnlySql(sql);
     return { columns, rows: rows.slice(0, 500), truncated: rows.length > 500 };
@@ -50,7 +51,7 @@ Ask for something that forces a large unfiltered scan:
 Total revenue across all customers, all time, broken out by day.
 ```
 
-The model proposes the query, `needsApproval` returns `true`, and the turn parks. The stream emits `input.requested`, then `session.waiting`. How the prompt looks depends on the channel, whether buttons in the TUI, Block Kit in Slack, or a UI control on the web. Approve it and the run resumes from exactly that step, then the query runs. Deny it and the tool is skipped, with the model told why.
+The model proposes the query, `approval` returns `"user-approval"`, and the turn parks. The stream emits `input.requested`, then `session.waiting`. How the prompt looks depends on the channel, whether buttons in the TUI, Block Kit in Slack, or a UI control on the web. Approve it and the run resumes from exactly that step, then the query runs. Deny it and the tool is skipped, with the model told why.
 
 Each session has exactly one active continuation. Answer an approval against a stale handle and it's rejected, so there's no way to double-resume the same parked turn.
 

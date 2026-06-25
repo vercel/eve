@@ -441,7 +441,7 @@ export function renderTool(
     origin: input.origin,
     outputSchema: tool.outputSchema,
     replacesFrameworkTool: input.replacesFrameworkTool,
-    requiresApproval: tool.needsApproval !== undefined,
+    requiresApproval: tool.approval !== undefined,
   };
 }
 

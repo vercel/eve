@@ -26,8 +26,8 @@ export function toPublicToolDefinition(definition: ResolvedToolDefinition): Tool
     outputSchema: definition.outputSchema,
   };
 
-  if (definition.needsApproval !== undefined) {
-    publicDefinition.needsApproval = definition.needsApproval;
+  if (definition.approval !== undefined) {
+    publicDefinition.approval = definition.approval;
   }
 
   return publicDefinition;

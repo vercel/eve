@@ -18,6 +18,7 @@ const RELEASE_AGE_EXCLUSIONS = [
   "@vercel/*",
   "@workflow/*",
   "ai",
+  "experimental-ai-sdk-code-mode",
   "eve",
   "nitro",
   "rolldown",

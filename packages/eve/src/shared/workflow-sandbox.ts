@@ -26,6 +26,8 @@ type WorkflowSandboxGlobal = typeof globalThis & {
 
 export type WorkflowSandboxInterrupt = CodeModeModule.CodeModeInterrupt;
 export type WorkflowSandboxLifecycle = NonNullable<CodeModeModule.CodeModeOptions["lifecycle"]>;
+export type WorkflowSandboxContinuationSecurity =
+  CodeModeModule.CodeModeContinuationSecurityOptions;
 
 let workflowSandboxModulePromise: Promise<WorkflowSandboxModule> | undefined;
 
@@ -34,13 +36,14 @@ export function installWorkflowSandboxModule(module: WorkflowSandboxModule): voi
 }
 
 export async function createWorkflowSandboxTool(input: {
+  readonly continuationSecurity: WorkflowSandboxContinuationSecurity;
   readonly hostTools: ToolSet;
   readonly lifecycle?: WorkflowSandboxLifecycle;
 }): Promise<ToolSet[string]> {
   const { createCodeModeTool } = await loadWorkflowSandboxModule();
   return createCodeModeTool(
     input.hostTools,
-    createWorkflowSandboxOptions(input.lifecycle),
+    createWorkflowSandboxOptions(input.continuationSecurity, input.lifecycle),
   ) as ToolSet[string];
 }
 
@@ -56,12 +59,14 @@ export async function requestWorkflowSandboxInterrupt(input: {
 
 export async function getWorkflowSandboxInterrupt(
   result: unknown,
+  continuationSecurity: WorkflowSandboxContinuationSecurity,
 ): Promise<WorkflowSandboxInterrupt | undefined> {
   const { getCodeModeInterrupt } = await loadWorkflowSandboxModule();
-  return getCodeModeInterrupt(result as never);
+  return getCodeModeInterrupt(result as never, continuationSecurity);
 }
 
 export async function continueWorkflowSandboxInterrupt(input: {
+  readonly continuationSecurity: WorkflowSandboxContinuationSecurity;
   readonly interrupt: WorkflowSandboxInterrupt;
   readonly lifecycle?: WorkflowSandboxLifecycle;
   readonly resolution: unknown;
@@ -70,7 +75,7 @@ export async function continueWorkflowSandboxInterrupt(input: {
   const { continueCodeModeInterrupt } = await loadWorkflowSandboxModule();
   return continueCodeModeInterrupt({
     interrupt: input.interrupt,
-    options: createWorkflowSandboxOptions(input.lifecycle),
+    options: createWorkflowSandboxOptions(input.continuationSecurity, input.lifecycle),
     resolution: input.resolution,
     tools: input.tools,
   } as never);
@@ -78,12 +83,13 @@ export async function continueWorkflowSandboxInterrupt(input: {
 
 export async function unwrapWorkflowSandboxResult(
   value: unknown,
+  continuationSecurity: WorkflowSandboxContinuationSecurity,
 ): Promise<
   | { readonly output: unknown; readonly status: "completed" }
   | { readonly interrupt: WorkflowSandboxInterrupt; readonly status: "interrupted" }
 > {
   const { unwrapCodeModeResult } = await loadWorkflowSandboxModule();
-  return unwrapCodeModeResult(value) as
+  return unwrapCodeModeResult(value, continuationSecurity) as
     | { readonly output: unknown; readonly status: "completed" }
     | { readonly interrupt: WorkflowSandboxInterrupt; readonly status: "interrupted" };
 }
@@ -96,9 +102,14 @@ export function readWorkflowSandboxResolution(options: unknown): unknown {
 }
 
 function createWorkflowSandboxOptions(
+  continuationSecurity: WorkflowSandboxContinuationSecurity,
   lifecycle: WorkflowSandboxLifecycle | undefined,
 ): CodeModeModule.CodeModeOptions {
-  return lifecycle === undefined ? {} : { lifecycle };
+  const options: CodeModeModule.CodeModeOptions = {
+    continuationSecurity,
+  };
+  if (lifecycle !== undefined) options.lifecycle = lifecycle;
+  return options;
 }
 
 async function loadWorkflowSandboxModule(): Promise<WorkflowSandboxModule> {

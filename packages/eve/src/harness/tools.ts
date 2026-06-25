@@ -1,4 +1,10 @@
-import { type JSONValue, type ToolSet, tool } from "ai";
+import {
+  type JSONValue,
+  type ToolApprovalConfiguration,
+  type ToolApprovalStatus,
+  type ToolSet,
+  tool,
+} from "ai";
 
 import type { SessionCapabilities } from "#channel/types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
@@ -7,8 +13,10 @@ import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.
 import { isObject } from "#shared/guards.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { ApprovalStatus } from "#public/definitions/approval.js";
 import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/provider-tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
+import { buildCallbackContext } from "#context/build-callback-context.js";
 import { loadContext } from "#context/container.js";
 import {
   authorizationPendingModelText,
@@ -22,6 +30,10 @@ import { withToolOutputSerializationError } from "#harness/tool-output-serializa
 type ToolModelOutputValue =
   | { readonly type: "json"; readonly value: JSONValue }
   | { readonly type: "text"; readonly value: string };
+
+type NativeApprovalStatus = Exclude<ApprovalStatus, boolean>;
+
+const toolApprovals = new WeakMap<object, (toolInput: unknown) => Promise<NativeApprovalStatus>>();
 
 /**
  * Builds an AI SDK `ToolSet` from unified harness tool definitions.
@@ -59,11 +71,11 @@ export function buildToolSet(input: {
     }
 
     const authorToModelOutput = definition.toModelOutput;
-    tools[definition.name] = tool({
+    const approval = buildApprovalFn(definition, input);
+    const aiTool = tool({
       description: definition.description,
       execute: wrapToolExecute(definition),
       inputSchema: definition.inputSchema,
-      needsApproval: buildNeedsApprovalFn(definition, input),
       outputSchema: definition.outputSchema,
       ...(definition.execute !== undefined
         ? {
@@ -114,6 +126,10 @@ export function buildToolSet(input: {
             }
           : {}),
     });
+    tools[definition.name] = aiTool;
+    if (definition.approval !== undefined) {
+      toolApprovals.set(aiTool, approval);
+    }
   }
 
   return tools as ToolSet;
@@ -282,19 +298,34 @@ export async function buildToolSetWithProviderTools(input: {
   return tools;
 }
 
-function buildNeedsApprovalFn(
+function buildApprovalFn(
   definition: HarnessToolDefinition,
   input: { readonly approvedTools?: ReadonlySet<string> },
-): (toolInput: unknown) => Promise<boolean> {
+): (toolInput: unknown) => Promise<NativeApprovalStatus> {
   return async (toolInput: unknown) => {
-    if (definition.needsApproval === undefined) return false;
+    if (definition.approval === undefined) return undefined;
 
     const toolInputRecord = isObject(toolInput) ? toolInput : undefined;
 
-    return definition.needsApproval({
+    const status = await definition.approval({
+      ...buildCallbackContext(),
       approvedTools: input.approvedTools ?? new Set(),
       toolInput: toolInputRecord,
       toolName: definition.name,
     });
+    return typeof status === "boolean" ? (status ? "user-approval" : "not-applicable") : status;
+  };
+}
+
+/** Builds the AI SDK 7 call-level approval policy for an assembled tool set. */
+export function buildToolApproval(
+  tools: ToolSet,
+): ToolApprovalConfiguration<ToolSet, Record<string, unknown>> {
+  return async ({ toolCall }) => {
+    const toolDefinition = tools[toolCall.toolName];
+    if (toolDefinition === undefined) return undefined;
+
+    const approval = toolApprovals.get(toolDefinition);
+    return (await approval?.(toolCall.input)) as ToolApprovalStatus;
   };
 }

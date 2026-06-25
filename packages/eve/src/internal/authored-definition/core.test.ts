@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
+import {
+  normalizeAgentDefinition,
+  normalizeScheduleDefinition,
+} from "#internal/authored-definition/core.js";
 
 const FAILURE_MESSAGE = "Expected the agent config to match the public eve shape.";
 
@@ -77,5 +80,20 @@ describe("normalizeAgentDefinition", () => {
         FAILURE_MESSAGE,
       ),
     ).toThrow('"experimental.workflow.world" must be a non-empty package name');
+  });
+});
+
+describe("normalizeScheduleDefinition", () => {
+  it.each(["approval", "needsApproval"])("rejects the removed %s field", (field) => {
+    expect(() =>
+      normalizeScheduleDefinition(
+        {
+          cron: "0 9 * * *",
+          markdown: "Send a digest.",
+          [field]: () => "user-approval",
+        },
+        "Expected the schedule config to match the public eve shape.",
+      ),
+    ).toThrow(`Unknown key "${field}"`);
   });
 });
