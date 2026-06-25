@@ -25,7 +25,10 @@ export default defineEval({
     session.succeeded();
     session.calledTool("check-alerts");
     session.event("session.waiting");
-    session.event("message.completed", { data: { message: null }, count: 1 });
+    session.event("message.completed", {
+      data: (data) => data.finishReason !== "tool-calls" && data.message === null,
+      count: 1,
+    });
     session.notEvent("message.completed", {
       data: (data) => data.finishReason !== "tool-calls" && data.message !== null,
     });

@@ -117,11 +117,9 @@ export function deriveRunFacts(
           call.output = result.output;
           call.status = status;
         } else if (result.kind === "subagent-result") {
-          const call = subagentCallsByCallId.get(result.callId);
-          if (call !== undefined) {
-            call.output = call.output ?? result.output;
-            call.status = status;
-          }
+          const call = ensureSubagentCall(result.callId, result.subagentName);
+          call.output = call.output ?? result.output;
+          call.status = status;
         }
         break;
       }

@@ -34,21 +34,17 @@ export default defineEval({
     );
     turn.expectOk();
 
-    t.didNotFail();
-    t.completed();
-    t.calledTool(TOOL_NAME, { isError: false, times: FANOUT_SIZE });
+    t.succeeded();
+    t.calledTool(TOOL_NAME, { count: FANOUT_SIZE });
     t.noFailedActions();
-    t.event(
-      (events) => fanoutRequestsPrecedeFirstResult({ events, toolName: TOOL_NAME }),
-      "ten authored requests precede the first authored result",
+    turn.eventsSatisfy("ten authored requests precede the first authored result", (events) =>
+      fanoutRequestsPrecedeFirstResult({ events, toolName: TOOL_NAME }),
     );
-    t.event(
-      (events) => fanoutRequestsUseExpectedLabels({ events, labels: LABELS, toolName: TOOL_NAME }),
-      "ten authored requests use their distinct labels",
+    turn.eventsSatisfy("ten authored requests use their distinct labels", (events) =>
+      fanoutRequestsUseExpectedLabels({ events, labels: LABELS, toolName: TOOL_NAME }),
     );
-    t.event(
-      (events) => authoredFanoutExecutionsOverlap({ events, toolName: TOOL_NAME }),
-      "ten authored executions overlap",
+    turn.eventsSatisfy("ten authored executions overlap", (events) =>
+      authoredFanoutExecutionsOverlap({ events, toolName: TOOL_NAME }),
     );
   },
 });

@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 
 import type { HandleMessageStreamEvent } from "eve/client";
 import { defineEval, type EveEvalTargetHandle } from "eve/evals";
+import { equals, satisfies } from "eve/evals/expect";
 
 const STREAMED_ACTION_TOOL = "streamed-action";
 const OBSERVATION_TOOL = "read-channel-action-narration";
@@ -95,36 +96,27 @@ export default defineEval({
       token,
     });
     const firstTurn = await t.target.attachSession(started.sessionId);
-    const narration = preToolNarration(firstTurn.events);
-    if (narration === undefined) {
-      throw new Error(
-        "Expected a non-empty tool-calls message.completed event before the streamed-action request.",
-      );
-    }
+    const narration = await t.require(
+      preToolNarration(firstTurn.events) ?? "",
+      satisfies((value: string) => value.length > 0, "pre-tool narration is non-empty"),
+    );
 
     const continued = await postChannel(t.target, "/action-narration/continue", {
       message: `Call \`${OBSERVATION_TOOL}\` exactly once, then reply with the narration value it returned.`,
       token,
     });
-    if (continued.sessionId !== started.sessionId) {
-      throw new Error(
-        `Expected the channel continuation to resume ${started.sessionId}, received ${continued.sessionId}.`,
-      );
-    }
+    await t.require(continued.sessionId, equals(started.sessionId));
 
     const secondTurn = await t.target.attachSession(continued.sessionId, {
       startIndex: firstTurn.events.length,
     });
     const observed = observedNarration(secondTurn.events);
-    if (observed !== narration) {
-      throw new Error(
-        `Expected the channel to observe ${JSON.stringify(narration)}, received ${JSON.stringify(observed)}.`,
-      );
-    }
+    await t.require(observed, equals(narration));
 
-    t.didNotFail();
-    t.completed();
-    t.calledTool(STREAMED_ACTION_TOOL, { isError: false, times: 1 });
-    t.calledTool(OBSERVATION_TOOL, { isError: false, times: 1 });
+    firstTurn.succeeded();
+    secondTurn.succeeded();
+    t.succeeded();
+    t.calledTool(STREAMED_ACTION_TOOL, { count: 1 });
+    t.calledTool(OBSERVATION_TOOL, { count: 1 });
   },
 });

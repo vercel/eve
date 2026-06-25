@@ -52,6 +52,29 @@ function actionResult(input: {
   };
 }
 
+function subagentResult(input: {
+  callId: string;
+  subagentName: string;
+  output: unknown;
+  status: "completed" | "failed" | "rejected";
+}): HandleMessageStreamEvent {
+  return {
+    type: "action.result",
+    data: {
+      result: {
+        callId: input.callId,
+        kind: "subagent-result",
+        output: input.output as never,
+        subagentName: input.subagentName,
+      },
+      sequence: 1,
+      stepIndex: 0,
+      status: input.status,
+      turnId: "t1",
+    },
+  };
+}
+
 function inputRequested(requestIds: readonly string[]): HandleMessageStreamEvent {
   return {
     type: "input.requested",
@@ -305,6 +328,28 @@ describe("deriveRunFacts", () => {
       },
     ]);
     expect(facts.subagentCallCount).toBe(1);
+  });
+
+  it("derives failed subagent calls from result-only events", () => {
+    const facts = deriveRunFacts([
+      turnStarted("t1", 0),
+      subagentResult({
+        callId: "c1",
+        subagentName: "weather",
+        output: { code: "REMOTE_AGENT_START_FAILED" },
+        status: "failed",
+      }),
+    ]);
+
+    expect(facts.subagentCalls).toEqual([
+      {
+        name: "weather",
+        output: { code: "REMOTE_AGENT_START_FAILED" },
+        status: "failed",
+        turnIndex: 0,
+        sessionId: undefined,
+      },
+    ]);
   });
 
   it("extracts inline subagent calls from subagent.started events", () => {

@@ -15,6 +15,7 @@ export default defineEval({
 
     t.succeeded();
     t.loadedSkill("echo-marker");
+    t.noFailedActions();
     t.messageIncludes(ECHO_MARKER_TOKEN);
   },
 });
