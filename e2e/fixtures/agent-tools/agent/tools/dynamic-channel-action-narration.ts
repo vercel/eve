@@ -2,6 +2,7 @@ import { isChannel } from "eve/channels";
 import { defineDynamic, defineTool } from "eve/tools";
 import { z } from "zod";
 
+import { actionNarrationObservation } from "../action-narration-state.js";
 import actionNarration from "../channels/action-narration.js";
 
 /**
@@ -13,8 +14,8 @@ export default defineDynamic({
     "step.started": (_event, ctx) => {
       if (!isChannel(ctx.channel, actionNarration)) return null;
 
-      const narration = ctx.channel.metadata.observedNarration;
-      if (typeof narration !== "string" || narration.length === 0) return null;
+      const narration = actionNarrationObservation.get();
+      if (narration === null || narration.length === 0) return null;
 
       return {
         "read-channel-action-narration": defineTool({

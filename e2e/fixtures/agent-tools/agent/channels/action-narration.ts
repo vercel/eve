@@ -1,9 +1,10 @@
 import { defineChannel, POST } from "eve/channels";
 
+import { actionNarrationObservation } from "../action-narration-state.js";
+
 const STREAMED_ACTION_TOOL = "streamed-action";
 
 interface ActionNarrationState {
-  observedNarration: string | null;
   pendingNarration: string | null;
 }
 
@@ -13,7 +14,7 @@ interface ActionNarrationRequest {
 }
 
 function initialState(): ActionNarrationState {
-  return { observedNarration: null, pendingNarration: null };
+  return { pendingNarration: null };
 }
 
 function firstNonEmptyLine(message: string): string | null {
@@ -60,10 +61,6 @@ export default defineChannel({
     return { state };
   },
 
-  metadata(state) {
-    return { observedNarration: state.observedNarration };
-  },
-
   routes: [
     POST<ActionNarrationState>("/action-narration/start", async (request, { send }) => {
       const input = await readRequest(request);
@@ -79,6 +76,7 @@ export default defineChannel({
   events: {
     "turn.started"(_event, channel) {
       channel.state.pendingNarration = null;
+      actionNarrationObservation.update(() => null);
     },
 
     "message.completed"(event, channel) {
@@ -92,8 +90,9 @@ export default defineChannel({
       );
       if (!requestedStreamedAction) return;
 
-      channel.state.observedNarration = channel.state.pendingNarration;
+      const narration = channel.state.pendingNarration;
       channel.state.pendingNarration = null;
+      actionNarrationObservation.update(() => narration);
     },
   },
 });
