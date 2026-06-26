@@ -1,5 +1,11 @@
 # eve
 
+## 0.15.3
+
+### Patch Changes
+
+- d8449cf: Keep provider-managed web search calls replayable when the model emits narration before results or when the provider returns an error.
+
 ## 0.15.2
 
 ### Patch Changes
