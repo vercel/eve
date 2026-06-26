@@ -8,6 +8,30 @@ import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { resolveConnectionDefinition } from "#runtime/resolve-connection.js";
 import type { ConnectionAuthResolver, HeadersDefinition } from "#runtime/connections/types.js";
 
+const mcpCompiledDef: CompiledConnectionDefinition = {
+  connectionName: "test-mcp",
+  description: "Test MCP connection",
+  logicalPath: "connections/test-mcp.ts",
+  protocol: "mcp",
+  sourceId: "connections/test-mcp",
+  sourceKind: "module",
+  url: "https://mcp.example.com",
+};
+
+function moduleMapReturning(exportValue: Record<string, unknown>): CompiledModuleMap {
+  return {
+    nodes: {
+      [ROOT_COMPILED_AGENT_NODE_ID]: {
+        modules: {
+          [mcpCompiledDef.sourceId]: {
+            default: exportValue,
+          },
+        },
+      },
+    },
+  };
+}
+
 describe("resolveConnectionDefinition", () => {
   it("preserves context-aware auth and header callbacks for request-time resolution", async () => {
     const auth: ConnectionAuthResolver = (ctx) => ({
@@ -44,5 +68,27 @@ describe("resolveConnectionDefinition", () => {
 
     expect(resolved.authorization).toBe(auth);
     expect(resolved.headers).toBe(headers);
+  });
+
+  it('carries session: "stateful" through to the resolved definition', async () => {
+    const resolved = await resolveConnectionDefinition(
+      mcpCompiledDef,
+      moduleMapReturning({
+        url: "https://mcp.example.com",
+        description: "test",
+        session: "stateful",
+      }),
+      undefined,
+    );
+    expect(resolved.session).toBe("stateful");
+  });
+
+  it("leaves session undefined when not set", async () => {
+    const resolved = await resolveConnectionDefinition(
+      mcpCompiledDef,
+      moduleMapReturning({ url: "https://mcp.example.com", description: "test" }),
+      undefined,
+    );
+    expect(resolved.session).toBeUndefined();
   });
 });

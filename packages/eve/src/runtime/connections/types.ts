@@ -40,6 +40,22 @@ export interface TokenResult {
  */
 export type ConnectionProtocol = "mcp" | "openapi";
 
+/**
+ * Whether an MCP connection persists its server-assigned `Mcp-Session-Id`
+ * across eve step boundaries.
+ *
+ * - `"stateless"` (default): every step negotiates a fresh MCP session.
+ * - `"stateful"`: the negotiated `Mcp-Session-Id` is persisted in
+ *   `session.state` (keyed by connection name + principal) and replayed on
+ *   the next step, so a stateful MCP server sees one continuous session for
+ *   the life of the eve session. Re-initializes automatically on a server
+ *   `404` (expired/unknown session).
+ *
+ * A string union (not a boolean) so future modes (e.g. `"per-turn"`) can be
+ * added without a breaking change.
+ */
+export type McpSessionMode = "stateful" | "stateless";
+
 /** A single header value, supporting static strings and per-caller resolution. */
 export type HeaderValue =
   | string

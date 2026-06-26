@@ -15,6 +15,7 @@ import type {
   ConnectionAuthResolver,
   ConnectionProtocol,
   HeadersDefinition,
+  McpSessionMode,
   ToolFilterDefinition,
 } from "#runtime/connections/types.js";
 import type { OpenAPISpecSource } from "#public/definitions/connections/openapi.js";
@@ -105,6 +106,11 @@ export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
    * OpenAPI connections).
    */
   readonly protocol: ConnectionProtocol;
+  /**
+   * MCP session persistence mode. Present only for `protocol: "mcp"`
+   * connections; `undefined` (treated as `"stateless"`) for OpenAPI.
+   */
+  readonly session?: McpSessionMode;
   /**
    * OpenAPI document source (URL or inline object). Present only for
    * `protocol: "openapi"` connections; the OpenAPI client fetches and

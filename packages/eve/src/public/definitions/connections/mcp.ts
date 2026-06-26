@@ -1,6 +1,7 @@
 import type {
   ConnectionAuthDefinition,
   HeadersDefinition,
+  McpSessionMode,
   ToolFilterDefinition,
 } from "#runtime/connections/types.js";
 import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
@@ -80,6 +81,18 @@ export interface McpClientConnectionDefinition {
    * Specify exactly one of `allow` or `block`.
    */
   tools?: ToolFilterDefinition;
+  /**
+   * Whether this connection keeps its MCP session alive across eve step
+   * boundaries.
+   *
+   * Defaults to `"stateless"`: each step opens a new MCP session. Set to
+   * `"stateful"` to persist the server-assigned `Mcp-Session-Id` and reuse
+   * it on later steps, so a stateful MCP server (one that returns an
+   * `Mcp-Session-Id` on `initialize`) treats the whole eve session as a
+   * single session. The id is scoped per authenticated principal and
+   * re-negotiated automatically if the server expires it.
+   */
+  session?: McpSessionMode;
 }
 
 /**
