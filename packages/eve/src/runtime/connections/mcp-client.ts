@@ -7,6 +7,8 @@ import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
+import { createSessionCapturingFetch } from "#runtime/connections/mcp-session-fetch.js";
+import type { McpSessionSlot } from "#runtime/connections/mcp-session-store.js";
 import { isObject } from "#shared/guards.js";
 import type {
   AuthorizationDefinition,
@@ -34,9 +36,11 @@ export class McpConnectionClient implements ConnectionClient {
   #toolsPromise: Promise<McpToolCache> | undefined;
   #tools: McpToolCache | undefined;
   #connection: ResolvedConnectionDefinition;
+  #sessionSlot: McpSessionSlot | undefined;
 
-  constructor(connection: ResolvedConnectionDefinition) {
+  constructor(connection: ResolvedConnectionDefinition, sessionSlot?: McpSessionSlot) {
     this.#connection = connection;
+    this.#sessionSlot = sessionSlot;
   }
 
   /**
@@ -68,17 +72,19 @@ export class McpConnectionClient implements ConnectionClient {
   async #createClient(): Promise<MCPClient> {
     const headers = await resolveHeaders(this.#connection);
     const url = this.#connection.url;
+    const fetch =
+      this.#sessionSlot !== undefined ? createSessionCapturingFetch(this.#sessionSlot) : undefined;
 
     try {
       return await createMCPClient({
-        transport: { type: "http", url, headers },
+        transport: { type: "http", url, headers, fetch },
       });
     } catch (error) {
       if (!isMcpHttpFallbackRetryableError(error)) {
         throw error;
       }
       return await createMCPClient({
-        transport: { type: "sse", url, headers },
+        transport: { type: "sse", url, headers, fetch },
       });
     }
   }
@@ -117,20 +123,20 @@ export class McpConnectionClient implements ConnectionClient {
    * opaque transport error.
    */
   async executeTool(toolName: string, args: unknown): Promise<unknown> {
-    try {
-      const { tools } = await this.#ensureTools();
-
-      const sdkTool = tools[toolName];
-      if (sdkTool?.execute === undefined) {
-        throw new Error(
-          `Tool "${toolName}" not found in connection "${this.#connection.connectionName}".`,
-        );
+    return await this.#withSessionRetry(async () => {
+      try {
+        const { tools } = await this.#ensureTools();
+        const sdkTool = tools[toolName];
+        if (sdkTool?.execute === undefined) {
+          throw new Error(
+            `Tool "${toolName}" not found in connection "${this.#connection.connectionName}".`,
+          );
+        }
+        return await sdkTool.execute(args, {} as never);
+      } catch (error) {
+        return await this.#rethrowClassified(error);
       }
-
-      return await sdkTool.execute(args, {} as never);
-    } catch (error) {
-      return await this.#rethrowClassified(error);
-    }
+    });
   }
 
   async #ensureTools(): Promise<McpToolCache> {
@@ -153,11 +159,13 @@ export class McpConnectionClient implements ConnectionClient {
   }
 
   async #fetchTools(): Promise<McpToolCache> {
-    try {
-      return await this.#fetchToolsInner();
-    } catch (error) {
-      return await this.#rethrowClassified(error);
-    }
+    return await this.#withSessionRetry(async () => {
+      try {
+        return await this.#fetchToolsInner();
+      } catch (error) {
+        return await this.#rethrowClassified(error);
+      }
+    });
   }
 
   async #fetchToolsInner(): Promise<McpToolCache> {
@@ -198,6 +206,26 @@ export class McpConnectionClient implements ConnectionClient {
     this.#clientPromise = undefined;
     this.#toolsPromise = undefined;
     this.#tools = undefined;
+  }
+
+  /**
+   * Runs `operation`, and on a server `404` for a stateful connection clears
+   * the persisted session id, tears down the client, and retries once so the
+   * next attempt re-`initialize`s a fresh session. The MCP spec requires a
+   * client to start a new session when the server returns `404` for a request
+   * bearing a session id.
+   */
+  async #withSessionRetry<T>(operation: () => Promise<T>): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      if (this.#sessionSlot === undefined || readHttpStatus(error) !== 404) {
+        throw error;
+      }
+      this.#sessionSlot.sessionId = undefined;
+      await this.close();
+      return await operation();
+    }
   }
 
   /**

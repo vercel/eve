@@ -221,6 +221,63 @@ describe("McpConnectionClient", () => {
   });
 });
 
+describe("McpConnectionClient stateful session", () => {
+  beforeEach(() => {
+    createMCPClient.mockReset();
+  });
+
+  it("passes a custom fetch to the transport only for stateful connections", async () => {
+    const client = { close: vi.fn(), listTools: vi.fn(), toolsFromDefinitions: vi.fn() };
+    createMCPClient.mockResolvedValue(client);
+
+    await new McpConnectionClient(makeConnection({ session: "stateful" }), {
+      stateKey: "k",
+    }).connect();
+    expect(createMCPClient.mock.calls[0]![0].transport.fetch).toBeTypeOf("function");
+
+    createMCPClient.mockClear();
+    await new McpConnectionClient(makeConnection()).connect();
+    expect(createMCPClient.mock.calls[0]![0].transport.fetch).toBeUndefined();
+  });
+
+  it("clears the slot and retries once on a 404 during tool execution", async () => {
+    const sdkTool = {
+      execute: vi.fn().mockRejectedValueOnce({ status: 404 }).mockResolvedValueOnce("ok"),
+    };
+    const client = {
+      close: vi.fn(),
+      listTools: vi.fn().mockResolvedValue({ tools: [{ name: "t", inputSchema: {} }] }),
+      toolsFromDefinitions: vi.fn().mockReturnValue({ t: sdkTool }),
+    };
+    createMCPClient.mockResolvedValue(client);
+
+    const slot = { stateKey: "k", sessionId: "stale" } as { stateKey: string; sessionId?: string };
+    const result = await new McpConnectionClient(
+      makeConnection({ session: "stateful" }),
+      slot,
+    ).executeTool("t", {});
+
+    expect(result).toBe("ok");
+    expect(slot.sessionId).toBeUndefined();
+    expect(sdkTool.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a 404 for a stateless connection", async () => {
+    const sdkTool = { execute: vi.fn().mockRejectedValue({ status: 404 }) };
+    const client = {
+      close: vi.fn(),
+      listTools: vi.fn().mockResolvedValue({ tools: [{ name: "t", inputSchema: {} }] }),
+      toolsFromDefinitions: vi.fn().mockReturnValue({ t: sdkTool }),
+    };
+    createMCPClient.mockResolvedValue(client);
+
+    await expect(
+      new McpConnectionClient(makeConnection()).executeTool("t", {}),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(sdkTool.execute).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("isMcpAuthRequiredError", () => {
   it("treats a 401 invalid_token as authorization-required", () => {
     const error = Object.assign(
