@@ -49,17 +49,21 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
                 <span className="ml-auto text-gray-900 text-label-13">
                   {visited.size} {visited.size === 1 ? "file" : "files"}
                 </span>
-                {visited.size > 1 ? (
-                  <button
-                    type="button"
-                    onClick={reset}
-                    aria-label="Reset selection"
-                    title="Reset"
-                    className="cursor-pointer text-gray-600 transition-colors hover:text-gray-1000"
-                  >
-                    <IconTrash aria-hidden size={14} />
-                  </button>
-                ) : null}
+                <button
+                  type="button"
+                  onClick={reset}
+                  disabled={visited.size <= 1}
+                  aria-label="Reset selection"
+                  title="Reset"
+                  className={cn(
+                    "transition-colors",
+                    visited.size > 1
+                      ? "cursor-pointer text-gray-600 hover:text-gray-1000"
+                      : "cursor-not-allowed text-gray-400",
+                  )}
+                >
+                  <IconTrash aria-hidden size={14} />
+                </button>
               </div>
               <div className="space-y-0.5 p-2">
                 {items.map((item, i) => {
