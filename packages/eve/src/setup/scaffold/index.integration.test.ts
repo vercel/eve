@@ -746,9 +746,14 @@ describe("scaffoldBaseProject", () => {
     }
   });
 
-  test.each(["npm", "yarn", "bun"] as const)(
-    "omits the pnpm workspace policy from a scaffold owned by %s",
-    async (packageManager) => {
+  test.each([
+    ["pnpm", undefined],
+    ["npm", "overrides"],
+    ["yarn", "resolutions"],
+    ["bun", "overrides"],
+  ] as const)(
+    "scaffolds a standalone %s project with its own package-manager metadata",
+    async (packageManager, aiPinField) => {
       const targetDirectory = await createTempDir();
       const projectRoot = await scaffoldBaseProject({
         projectName: "demo-agent",
@@ -764,7 +769,21 @@ describe("scaffoldBaseProject", () => {
       await expect(readFile(join(projectRoot, "package.json"), "utf8")).resolves.toContain(
         '"eve": "^0.25.0"',
       );
-      await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
+      await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(
+        packageManager === "pnpm",
+      );
+      const packageJson: unknown = JSON.parse(
+        await readFile(join(projectRoot, "package.json"), "utf8"),
+      );
+      if (aiPinField === undefined) {
+        expect(packageJson).not.toHaveProperty("overrides");
+        expect(packageJson).not.toHaveProperty("resolutions");
+      } else {
+        expect(packageJson).toHaveProperty(`${aiPinField}.ai`, "7.0.0");
+        expect(packageJson).not.toHaveProperty(
+          aiPinField === "overrides" ? "resolutions" : "overrides",
+        );
+      }
     },
   );
 

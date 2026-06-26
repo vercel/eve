@@ -153,15 +153,10 @@ describe("runInitCommand", () => {
     );
     const manifest = await readFile(join(projectPath, "package.json"), "utf8");
     expect(manifest).toContain('"eve": "^0.6.0"');
-    // `@vercel/connect`'s optional `ai` peer rejects prereleases, so npm/yarn
-    // need `ai` forced to the pinned prerelease or the install fails (ERESOLVE).
-    const packageJson = JSON.parse(manifest) as {
-      dependencies: Record<string, string>;
-      overrides: Record<string, string>;
-      resolutions: Record<string, string>;
-    };
-    expect(packageJson.overrides.ai).toBe(packageJson.dependencies.ai);
-    expect(packageJson.resolutions.ai).toBe(packageJson.dependencies.ai);
+    // pnpm accepts the optional prerelease peer without a manager-specific pin.
+    const packageJson: unknown = JSON.parse(manifest);
+    expect(packageJson).not.toHaveProperty("overrides");
+    expect(packageJson).not.toHaveProperty("resolutions");
     await expect(pathExists(join(projectPath, "app"))).resolves.toBe(false);
     await expect(pathExists(join(projectPath, ".vercel"))).resolves.toBe(false);
     await expect(pathExists(join(projectPath, "vercel.json"))).resolves.toBe(false);
@@ -305,12 +300,12 @@ describe("runInitCommand", () => {
   );
 
   it.each([
-    ["npm", ["exec", "--", "eve", "dev", "--input", "/model"]],
-    ["yarn", ["eve", "dev", "--input", "/model"]],
-    ["bun", ["x", "eve", "dev", "--input", "/model"]],
+    ["npm", "overrides", ["exec", "--", "eve", "dev", "--input", "/model"]],
+    ["yarn", "resolutions", ["eve", "dev", "--input", "/model"]],
+    ["bun", "overrides", ["x", "eve", "dev", "--input", "/model"]],
   ] as const)(
     "scaffolds a fresh project owned by the invoking manager %s without pnpm policy",
-    async (kind, devArguments) => {
+    async (kind, aiPinField, devArguments) => {
       const parentDirectory = await mkdtemp(join(tmpdir(), `eve-init-agent-${kind}-`));
       const output = logger();
       const deps = dependencies();
@@ -325,6 +320,13 @@ describe("runInitCommand", () => {
       // The workspace policy is pnpm configuration; a scaffold owned by
       // another manager must not receive it.
       await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
+      const packageJson: unknown = JSON.parse(
+        await readFile(join(projectPath, "package.json"), "utf8"),
+      );
+      expect(packageJson).toHaveProperty(aiPinField);
+      expect(packageJson).not.toHaveProperty(
+        aiPinField === "overrides" ? "resolutions" : "overrides",
+      );
       expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
         kind,
         projectPath,
