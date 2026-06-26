@@ -26,4 +26,14 @@ describe("defineMcpClientConnection", () => {
 
     expect(typeof definition.auth).toBe("function");
   });
+
+  it("preserves the optional session mode", () => {
+    const definition = defineMcpClientConnection({
+      description: "test connection",
+      session: { mode: "stateful" },
+      url: "https://mcp.example.com",
+    });
+
+    expect(definition.session).toEqual({ mode: "stateful" });
+  });
 });

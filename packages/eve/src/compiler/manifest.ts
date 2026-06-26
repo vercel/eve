@@ -468,6 +468,16 @@ const compiledConnectionDefinitionSchema = z
      * runtime.
      */
     protocol: z.enum(["mcp", "openapi"]).default("mcp"),
+    /**
+     * MCP session policy. Omitted for older manifests and for connections
+     * using the default stateless behavior.
+     */
+    session: z
+      .object({
+        mode: z.enum(["stateful", "stateless"]),
+      })
+      .strict()
+      .optional(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
     /**

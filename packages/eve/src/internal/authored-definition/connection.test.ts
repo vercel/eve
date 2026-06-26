@@ -102,6 +102,15 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       expect(result.url).toBe("http://localhost:3000/mcp");
     });
 
+    it("accepts stateful MCP session mode", () => {
+      const result = normalizeMcpClientConnectionDefinition(
+        validInput({ session: { mode: "stateful" } }),
+        MSG,
+      );
+
+      expect(result.session).toEqual({ mode: "stateful" });
+    });
+
     it("preserves the optional vercelConnect marker on auth", () => {
       // The `connect()` helper from `@vercel/connect/eve` attaches a
       // `vercelConnect: { connector }` marker so downstream tooling can
@@ -176,6 +185,20 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       expect(() =>
         normalizeMcpClientConnectionDefinition(validInput({ url: "ftp://example.com" }), MSG),
       ).toThrow(/must use the http or https protocol/);
+    });
+  });
+
+  describe("session validation", () => {
+    it("rejects unknown session modes", () => {
+      expect(() =>
+        normalizeMcpClientConnectionDefinition(validInput({ session: { mode: "sticky" } }), MSG),
+      ).toThrow(/session\.mode.*must be "stateful" or "stateless"/);
+    });
+
+    it("rejects the legacy string session shape", () => {
+      expect(() =>
+        normalizeMcpClientConnectionDefinition(validInput({ session: "stateful" }), MSG),
+      ).toThrow(/The "session" field.*must be an object/);
     });
   });
 

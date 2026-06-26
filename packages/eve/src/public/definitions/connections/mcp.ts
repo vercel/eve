@@ -1,6 +1,7 @@
 import type {
   ConnectionAuthDefinition,
   HeadersDefinition,
+  McpSessionConfig,
   ToolFilterDefinition,
 } from "#runtime/connections/types.js";
 import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
@@ -80,6 +81,16 @@ export interface McpClientConnectionDefinition {
    * Specify exactly one of `allow` or `block`.
    */
   tools?: ToolFilterDefinition;
+  /**
+   * MCP session policy for this connection.
+   *
+   * Omit for the default stateless behavior. Set `{ mode: "stateful" }`
+   * for MCP servers that attach server-side state to the negotiated session
+   * and expect later tool calls to reuse it. eve scopes the stored session
+   * metadata to the current eve session, connection, and authenticated
+   * principal.
+   */
+  session?: McpSessionConfig;
 }
 
 /**

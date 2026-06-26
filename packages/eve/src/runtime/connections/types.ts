@@ -12,6 +12,7 @@ import type { ConnectionAuthorizationChallenge } from "#public/connections/error
 import type { Approval } from "#public/definitions/approval.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { JsonValue } from "#public/types/json.js";
+import type { McpSessionUpdate } from "#runtime/connections/mcp-session-store.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 
 /**
@@ -39,6 +40,18 @@ export interface TokenResult {
  * client implementation. Never authored directly.
  */
 export type ConnectionProtocol = "mcp" | "openapi";
+
+/**
+ * MCP session policy for a connection.
+ *
+ * - `{ mode: "stateless" }` (default): every step opens and closes its own MCP client.
+ * - `{ mode: "stateful" }`: eve stores the Streamable HTTP session metadata in
+ *   framework-owned session state and reattaches on later steps.
+ */
+export type McpSessionMode = "stateful" | "stateless";
+export interface McpSessionConfig {
+  readonly mode: McpSessionMode;
+}
 
 /** A single header value, supporting static strings and per-caller resolution. */
 export type HeaderValue =
@@ -442,6 +455,7 @@ export interface ConnectionClient {
 
 /** Per-session container mapping connection names to clients. */
 export interface ConnectionRegistry {
+  collectMcpSessionUpdates(): readonly McpSessionUpdate[];
   dispose(): Promise<void>;
   getClient(connectionName: string): ConnectionClient;
   getConnectionApproval(connectionName: string): Approval | undefined;

@@ -71,6 +71,8 @@ Every [subagent](../subagents) starts with its own fresh state, whether it's a b
 
 `defineState` holds conversation-scoped working memory that lives and dies with the session, including counters, the current plan, and what the user has told you this conversation. It is the agent's short-term memory, persisted durably for the life of the session. Anything that has to outlive the session, be shared across sessions or users, or be queried independently of a turn belongs in an external store, either a [connection](../connections) or your own database.
 
+Connection protocol metadata is separate from authored state. For example, a stateful [MCP connection](../connections/mcp#stateful-sessions) stores its negotiated MCP session id in framework-owned session state so eve can reattach across step boundaries. Use `defineState` for the durable semantic fact behind that workflow, such as the selected workspace id, not for raw protocol session ids.
+
 ## What to read next
 
 - Read state inside dynamic resolvers → [Dynamic capabilities](./dynamic-capabilities)

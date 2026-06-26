@@ -45,4 +45,35 @@ describe("resolveConnectionDefinition", () => {
     expect(resolved.authorization).toBe(auth);
     expect(resolved.headers).toBe(headers);
   });
+
+  it("carries compiled MCP session mode through to the resolved definition", async () => {
+    const definition: CompiledConnectionDefinition = {
+      connectionName: "warehouse",
+      description: "Tenant warehouse",
+      logicalPath: "connections/warehouse.ts",
+      protocol: "mcp",
+      session: { mode: "stateful" },
+      sourceId: "connections/warehouse",
+      sourceKind: "module",
+      url: "https://warehouse.example.com/mcp",
+    };
+    const moduleMap: CompiledModuleMap = {
+      nodes: {
+        [ROOT_COMPILED_AGENT_NODE_ID]: {
+          modules: {
+            [definition.sourceId]: {
+              default: {
+                description: definition.description,
+                url: definition.url,
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const resolved = await resolveConnectionDefinition(definition, moduleMap, undefined);
+
+    expect(resolved.session).toEqual({ mode: "stateful" });
+  });
 });

@@ -68,6 +68,7 @@ export async function compileConnectionDefinition(
       ...shared,
       description: normalized.description,
       protocol: "mcp",
+      session: normalized.session,
       url: normalized.url,
     };
     auth = normalized.auth;

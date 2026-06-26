@@ -1,6 +1,11 @@
 import type { Approval } from "#public/definitions/approval.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { McpConnectionClient } from "#runtime/connections/mcp-client.js";
+import {
+  collectMcpSessionUpdates,
+  type McpSessionSlots,
+  type McpSessionUpdate,
+} from "#runtime/connections/mcp-session-store.js";
 import { OpenApiConnectionClient } from "#runtime/connections/openapi-client.js";
 import type { ConnectionClient, ConnectionRegistry } from "#runtime/connections/types.js";
 
@@ -14,9 +19,14 @@ import type { ConnectionClient, ConnectionRegistry } from "#runtime/connections/
 export class ConnectionRegistryImpl implements ConnectionRegistry {
   #clients = new Map<string, ConnectionClient>();
   #connections: readonly ResolvedConnectionDefinition[];
+  #sessionSlots: McpSessionSlots;
 
-  constructor(connections: readonly ResolvedConnectionDefinition[]) {
+  constructor(
+    connections: readonly ResolvedConnectionDefinition[],
+    sessionSlots?: McpSessionSlots,
+  ) {
     this.#connections = connections;
+    this.#sessionSlots = sessionSlots ?? new Map();
   }
 
   /**
@@ -37,7 +47,7 @@ export class ConnectionRegistryImpl implements ConnectionRegistry {
     const client: ConnectionClient =
       connection.protocol === "openapi"
         ? new OpenApiConnectionClient(connection)
-        : new McpConnectionClient(connection);
+        : new McpConnectionClient(connection, this.#sessionSlots.get(connectionName));
     this.#clients.set(connectionName, client);
     return client;
   }
@@ -63,6 +73,10 @@ export class ConnectionRegistryImpl implements ConnectionRegistry {
    */
   getConnections(): readonly ResolvedConnectionDefinition[] {
     return this.#connections;
+  }
+
+  collectMcpSessionUpdates(): readonly McpSessionUpdate[] {
+    return collectMcpSessionUpdates(this.#sessionSlots);
   }
 
   /**

@@ -1,10 +1,16 @@
-import { createMCPClient, type MCPClient } from "#compiled/@ai-sdk/mcp/index.js";
+import {
+  createMCPClient,
+  type InitializeResult,
+  type MCPClient,
+  type MCPClientConfig,
+} from "#compiled/@ai-sdk/mcp/index.js";
 import type { ToolSet } from "ai";
 
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { ConnectionAuthorizationRequiredError } from "#public/connections/errors.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
+import type { McpSessionSlot } from "#runtime/connections/mcp-session-store.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
 import { isObject } from "#shared/guards.js";
@@ -34,9 +40,11 @@ export class McpConnectionClient implements ConnectionClient {
   #toolsPromise: Promise<McpToolCache> | undefined;
   #tools: McpToolCache | undefined;
   #connection: ResolvedConnectionDefinition;
+  #sessionSlot: McpSessionSlot | undefined;
 
-  constructor(connection: ResolvedConnectionDefinition) {
+  constructor(connection: ResolvedConnectionDefinition, sessionSlot?: McpSessionSlot) {
     this.#connection = connection;
+    this.#sessionSlot = sessionSlot;
   }
 
   /**
@@ -55,7 +63,7 @@ export class McpConnectionClient implements ConnectionClient {
       return this.#clientPromise;
     }
 
-    this.#clientPromise = this.#createClient();
+    this.#clientPromise = this.#withSessionRetry(() => this.#createClient());
     try {
       this.#client = await this.#clientPromise;
       return this.#client;
@@ -68,19 +76,94 @@ export class McpConnectionClient implements ConnectionClient {
   async #createClient(): Promise<MCPClient> {
     const headers = await resolveHeaders(this.#connection);
     const url = this.#connection.url;
+    const saved = this.#sessionSlot?.current;
+    const replayingSavedSession = saved !== undefined;
 
     try {
-      return await createMCPClient({
-        transport: { type: "http", url, headers },
-      });
+      const config: MCPClientConfig = {
+        transport: {
+          headers,
+          type: "http",
+          url,
+          ...this.#statefulHttpSessionOptions(saved),
+        },
+      };
+      if (saved !== undefined) {
+        config.initialInitializeResult = saved.initializeResult;
+      }
+      const client = await createMCPClient(config);
+      this.#captureInitializedSession(client);
+      return client;
     } catch (error) {
+      if (replayingSavedSession && readHttpStatus(error) === 404) {
+        throw error;
+      }
       if (!isMcpHttpFallbackRetryableError(error)) {
         throw error;
       }
-      return await createMCPClient({
+      const client = await createMCPClient({
         transport: { type: "sse", url, headers },
       });
+      return client;
     }
+  }
+
+  #statefulHttpSessionOptions(
+    saved: { readonly initializeResult: InitializeResult; readonly sessionId: string } | undefined,
+  ):
+    | {
+        readonly initialProtocolVersion?: string;
+        readonly initialSessionId?: string;
+        readonly onSessionExpired: (sessionId: string) => void;
+        readonly onSessionIdChange: (sessionId: string | undefined) => void;
+        readonly terminateSessionOnClose: false;
+      }
+    | undefined {
+    const slot = this.#sessionSlot;
+    if (slot === undefined) {
+      return undefined;
+    }
+
+    return {
+      initialProtocolVersion: saved?.initializeResult.protocolVersion,
+      initialSessionId: saved?.sessionId,
+      onSessionExpired() {
+        slot.current = undefined;
+        slot.pendingSessionId = undefined;
+      },
+      onSessionIdChange(sessionId) {
+        if (sessionId === undefined) {
+          slot.current = undefined;
+          slot.pendingSessionId = undefined;
+          return;
+        }
+
+        const initializeResult = slot.current?.initializeResult ?? saved?.initializeResult;
+        if (initializeResult === undefined) {
+          slot.pendingSessionId = sessionId;
+          return;
+        }
+
+        slot.current = { initializeResult, sessionId };
+        slot.pendingSessionId = undefined;
+      },
+      terminateSessionOnClose: false,
+    };
+  }
+
+  #captureInitializedSession(client: MCPClient): void {
+    const slot = this.#sessionSlot;
+    if (slot === undefined) {
+      return;
+    }
+
+    const sessionId = slot.pendingSessionId ?? slot.current?.sessionId;
+    if (sessionId === undefined) {
+      return;
+    }
+
+    slot.current = { initializeResult: client.initializeResult, sessionId };
+    slot.pendingSessionId = undefined;
   }
 
   /**
@@ -117,20 +200,22 @@ export class McpConnectionClient implements ConnectionClient {
    * opaque transport error.
    */
   async executeTool(toolName: string, args: unknown): Promise<unknown> {
-    try {
-      const { tools } = await this.#ensureTools();
+    return await this.#withSessionRetry(async () => {
+      try {
+        const { tools } = await this.#ensureTools();
 
-      const sdkTool = tools[toolName];
-      if (sdkTool?.execute === undefined) {
-        throw new Error(
-          `Tool "${toolName}" not found in connection "${this.#connection.connectionName}".`,
-        );
+        const sdkTool = tools[toolName];
+        if (sdkTool?.execute === undefined) {
+          throw new Error(
+            `Tool "${toolName}" not found in connection "${this.#connection.connectionName}".`,
+          );
+        }
+
+        return await sdkTool.execute(args, {} as never);
+      } catch (error) {
+        return await this.#rethrowClassified(error);
       }
-
-      return await sdkTool.execute(args, {} as never);
-    } catch (error) {
-      return await this.#rethrowClassified(error);
-    }
+    });
   }
 
   async #ensureTools(): Promise<McpToolCache> {
@@ -153,11 +238,13 @@ export class McpConnectionClient implements ConnectionClient {
   }
 
   async #fetchTools(): Promise<McpToolCache> {
-    try {
-      return await this.#fetchToolsInner();
-    } catch (error) {
-      return await this.#rethrowClassified(error);
-    }
+    return await this.#withSessionRetry(async () => {
+      try {
+        return await this.#fetchToolsInner();
+      } catch (error) {
+        return await this.#rethrowClassified(error);
+      }
+    });
   }
 
   async #fetchToolsInner(): Promise<McpToolCache> {
@@ -198,6 +285,21 @@ export class McpConnectionClient implements ConnectionClient {
     this.#clientPromise = undefined;
     this.#toolsPromise = undefined;
     this.#tools = undefined;
+  }
+
+  async #withSessionRetry<T>(operation: () => Promise<T>): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      if (this.#sessionSlot === undefined || readHttpStatus(error) !== 404) {
+        throw error;
+      }
+
+      this.#sessionSlot.current = undefined;
+      this.#sessionSlot.pendingSessionId = undefined;
+      await this.close();
+      return await operation();
+    }
   }
 
   /**

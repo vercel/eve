@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import type {
+  DurableMcpSessionState,
+  McpSessionSlot,
+} from "#runtime/connections/mcp-session-store.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
 
@@ -17,6 +21,16 @@ function makeConnection(name: string): ResolvedConnectionDefinition {
     sourceKind: "module",
     url: `https://${name}.example.com/mcp`,
   };
+}
+
+const initializeResult = {
+  capabilities: {},
+  protocolVersion: "2025-11-25",
+  serverInfo: { name: "test-server", version: "1.0.0" },
+} as const;
+
+function durableState(sessionId: string): DurableMcpSessionState {
+  return { initializeResult, sessionId };
 }
 
 describe("ConnectionRegistryImpl", () => {
@@ -85,5 +99,20 @@ describe("ConnectionRegistryImpl", () => {
     const after = registry.getClient("linear");
 
     expect(before).not.toBe(after);
+  });
+
+  it("reports MCP session updates from slots", () => {
+    const slot: McpSessionSlot = {
+      current: durableState("negotiated"),
+      stateKey: "eve.mcp.session.linear.anonymous",
+    };
+    const registry = new ConnectionRegistryImpl(
+      [{ ...makeConnection("linear"), session: { mode: "stateful" } }],
+      new Map([["linear", slot]]),
+    );
+
+    expect(registry.collectMcpSessionUpdates()).toEqual([
+      { state: durableState("negotiated"), stateKey: "eve.mcp.session.linear.anonymous" },
+    ]);
   });
 });

@@ -9,6 +9,10 @@ import {
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { ConnectionAuthorizationTokensKey } from "#runtime/connections/authorization-tokens.js";
+import type {
+  DurableMcpSessionState,
+  McpSessionSlot,
+} from "#runtime/connections/mcp-session-store.js";
 import {
   isMcpAuthRequiredError,
   McpConnectionClient,
@@ -66,6 +70,16 @@ function makeConnection(
     url: "https://mcp.example.com",
     ...overrides,
   };
+}
+
+const initializeResult = {
+  capabilities: {},
+  protocolVersion: "2025-11-25",
+  serverInfo: { name: "test-server", version: "1.0.0" },
+} as const;
+
+function durableState(sessionId: string): DurableMcpSessionState {
+  return { initializeResult, sessionId };
 }
 
 describe("McpConnectionClient", () => {
@@ -218,6 +232,145 @@ describe("McpConnectionClient", () => {
         url: "https://mcp.example.com",
       },
     });
+  });
+
+  it("reattaches a stateful HTTP client with persisted MCP session metadata", async () => {
+    const client = {
+      close: vi.fn(),
+      initializeResult,
+      listTools: vi.fn(),
+      toolsFromDefinitions: vi.fn(),
+    };
+    createMCPClient.mockResolvedValue(client);
+
+    const slot: McpSessionSlot = {
+      current: durableState("saved-session"),
+      initial: durableState("saved-session"),
+      stateKey: "eve.mcp.session.test.anonymous",
+    };
+    const mcpClient = new McpConnectionClient(
+      makeConnection({ session: { mode: "stateful" } }),
+      slot,
+    );
+
+    await expect(mcpClient.connect()).resolves.toBe(client);
+
+    expect(createMCPClient).toHaveBeenCalledWith({
+      initialInitializeResult: initializeResult,
+      transport: expect.objectContaining({
+        headers: { Authorization: "Bearer test-token" },
+        initialProtocolVersion: "2025-11-25",
+        initialSessionId: "saved-session",
+        terminateSessionOnClose: false,
+        type: "http",
+        url: "https://mcp.example.com",
+      }),
+    });
+    const transport = createMCPClient.mock.calls[0]?.[0]?.transport;
+    expect(transport.onSessionIdChange).toEqual(expect.any(Function));
+    expect(transport.onSessionExpired).toEqual(expect.any(Function));
+    expect(slot.current).toEqual(durableState("saved-session"));
+  });
+
+  it("captures a newly negotiated MCP session id with the initialize result", async () => {
+    const client = {
+      close: vi.fn(),
+      initializeResult,
+      listTools: vi.fn(),
+      toolsFromDefinitions: vi.fn(),
+    };
+    createMCPClient.mockImplementation(async (config) => {
+      config.transport.onSessionIdChange?.("new-session");
+      return client;
+    });
+
+    const slot: McpSessionSlot = { stateKey: "eve.mcp.session.test.anonymous" };
+    const mcpClient = new McpConnectionClient(
+      makeConnection({ session: { mode: "stateful" } }),
+      slot,
+    );
+
+    await expect(mcpClient.connect()).resolves.toBe(client);
+
+    expect(slot.current).toEqual(durableState("new-session"));
+  });
+
+  it("clears an expired saved session and retries client creation without replay metadata", async () => {
+    const client = {
+      close: vi.fn(),
+      initializeResult,
+      listTools: vi.fn(),
+      toolsFromDefinitions: vi.fn(),
+    };
+    createMCPClient
+      .mockRejectedValueOnce(
+        Object.assign(new Error("MCP HTTP Transport Error (HTTP 404): expired"), {
+          statusCode: 404,
+        }),
+      )
+      .mockImplementationOnce(async (config) => {
+        config.transport.onSessionIdChange?.("replacement-session");
+        return client;
+      });
+
+    const slot: McpSessionSlot = {
+      current: durableState("expired-session"),
+      initial: durableState("expired-session"),
+      stateKey: "eve.mcp.session.test.anonymous",
+    };
+    const mcpClient = new McpConnectionClient(
+      makeConnection({ session: { mode: "stateful" } }),
+      slot,
+    );
+
+    await expect(mcpClient.connect()).resolves.toBe(client);
+
+    expect(createMCPClient).toHaveBeenCalledTimes(2);
+    expect(createMCPClient.mock.calls[0]?.[0]).toMatchObject({
+      initialInitializeResult: initializeResult,
+      transport: { initialSessionId: "expired-session" },
+    });
+    expect(createMCPClient.mock.calls[1]?.[0]).not.toHaveProperty("initialInitializeResult");
+    expect(createMCPClient.mock.calls[1]?.[0]?.transport.initialSessionId).toBeUndefined();
+    expect(slot.current).toEqual(durableState("replacement-session"));
+  });
+
+  it("retries once with a fresh MCP session when a saved session expires during tool listing", async () => {
+    const expired = Object.assign(new Error("MCP HTTP Transport Error (HTTP 404): expired"), {
+      statusCode: 404,
+    });
+    const firstClient = {
+      close: vi.fn(),
+      initializeResult,
+      listTools: vi.fn().mockRejectedValue(expired),
+      toolsFromDefinitions: vi.fn(),
+    };
+    const secondClient = {
+      close: vi.fn(),
+      initializeResult,
+      listTools: vi.fn().mockResolvedValue({ tools: [] }),
+      toolsFromDefinitions: vi.fn().mockReturnValue({}),
+    };
+    createMCPClient.mockResolvedValueOnce(firstClient).mockImplementationOnce(async (config) => {
+      config.transport.onSessionIdChange?.("replacement-session");
+      return secondClient;
+    });
+
+    const slot: McpSessionSlot = {
+      current: durableState("expired-session"),
+      initial: durableState("expired-session"),
+      stateKey: "eve.mcp.session.test.anonymous",
+    };
+    const mcpClient = new McpConnectionClient(
+      makeConnection({ session: { mode: "stateful" } }),
+      slot,
+    );
+
+    await expect(mcpClient.getToolMetadata()).resolves.toEqual([]);
+
+    expect(firstClient.close).toHaveBeenCalledTimes(1);
+    expect(createMCPClient).toHaveBeenCalledTimes(2);
+    expect(slot.current).toEqual(durableState("replacement-session"));
   });
 });
 

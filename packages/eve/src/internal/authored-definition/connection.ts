@@ -13,6 +13,7 @@ const KNOWN_TOP_LEVEL_KEYS = [
   "auth",
   "description",
   "headers",
+  "session",
   "tools",
   "url",
 ] as const;
@@ -62,6 +63,7 @@ export function normalizeMcpClientConnectionDefinition(
 
   const authorization = normalizeAuthorization(record, message);
   const headers = normalizeHeaders(record, message);
+  const session = normalizeMcpSession(record, message);
   const tools = normalizeToolFilter(record, message);
 
   if (authorization !== undefined && headers !== undefined && typeof headers !== "function") {
@@ -84,6 +86,9 @@ export function normalizeMcpClientConnectionDefinition(
   if (headers !== undefined) {
     result.headers = headers;
   }
+  if (session !== undefined) {
+    result.session = session;
+  }
   if (tools !== undefined) {
     result.tools = tools;
   }
@@ -96,6 +101,26 @@ export function normalizeMcpClientConnectionDefinition(
   }
 
   return result;
+}
+
+function normalizeMcpSession(
+  record: Record<string, unknown>,
+  message: string,
+): McpClientConnectionDefinition["session"] | undefined {
+  const session = record.session;
+  if (session === undefined) {
+    return undefined;
+  }
+  if (typeof session !== "object" || session === null || Array.isArray(session)) {
+    throw new Error(`${message} The "session" field must be an object with a "mode" field.`);
+  }
+  const sessionRecord = expectObjectRecord(session, `${message} The "session" field`);
+  expectOnlyKnownKeys(sessionRecord, ["mode"], `${message} The "session" field`);
+
+  if (sessionRecord.mode !== "stateful" && sessionRecord.mode !== "stateless") {
+    throw new Error(`${message} The "session.mode" field must be "stateful" or "stateless".`);
+  }
+  return { mode: sessionRecord.mode };
 }
 
 /**

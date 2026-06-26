@@ -71,6 +71,7 @@ export async function resolveConnectionDefinition(
       headers?: Readonly<HeadersDefinition>;
       logicalPath: string;
       protocol: ResolvedConnectionDefinition["protocol"];
+      session?: ResolvedConnectionDefinition["session"];
       sourceId: string;
       sourceKind: "module";
       spec?: ResolvedConnectionDefinition["spec"];
@@ -111,6 +112,10 @@ export async function resolveConnectionDefinition(
 
     if (filter !== undefined) {
       result.tools = filter as Readonly<ToolFilterDefinition>;
+    }
+
+    if (definition.protocol === "mcp" && definition.session !== undefined) {
+      result.session = definition.session;
     }
 
     if (definition.protocol === "openapi" && resolvedRecord.spec !== undefined) {

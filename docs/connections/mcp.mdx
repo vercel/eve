@@ -54,8 +54,74 @@ MCP connections support the shared connection options:
 
 See [Connections](/docs/connections) for the shared auth, headers, and approval shapes.
 
+## Stateful sessions
+
+By default, every eve step opens a new MCP client session. Keep that default for MCP servers whose tools are independent from call to call.
+
+For Streamable HTTP MCP servers that keep server-side session state, opt in with `session: { mode: "stateful" }`:
+
+```ts title="agent/connections/stateful-server.ts"
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.example.com/mcp",
+  description: "Stateful MCP server.",
+  session: { mode: "stateful" },
+});
+```
+
+When the server negotiates an MCP session, eve stores the protocol session id and initialize result in framework-owned session state. On the next step, eve reattaches through the MCP Streamable HTTP session hooks instead of sending another `initialize` request.
+
+The stored session is scoped to the current eve session, connection name, and authenticated principal. If the MCP server returns `404` for a stored session, eve clears it and retries once with a fresh MCP session.
+
+### Pair stateful MCP with `defineState`
+
+`session: { mode: "stateful" }` is transport continuity. It preserves the MCP protocol session metadata that the server negotiated, and eve owns that metadata internally. Do not store raw MCP session ids in authored state.
+
+Use [`defineState`](../guides/state) for semantic application state that your agent understands, such as the workspace, project, or account the user selected. That state survives even if the upstream MCP server expires its protocol session and eve has to initialize a fresh one.
+
+For example, a stateful MCP server might remember the active workspace after a setup tool runs:
+
+```ts title="agent/connections/workspace-server.ts"
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.example.com/mcp",
+  description: "Workspace MCP server.",
+  session: { mode: "stateful" },
+});
+```
+
+Then keep the user's chosen workspace in authored state, because that is a business fact rather than MCP transport metadata:
+
+```ts title="agent/lib/workspace-state.ts"
+import { defineState } from "eve/context";
+
+export const activeWorkspace = defineState("my-agent.active-workspace", () => ({
+  workspaceId: null as string | null,
+}));
+```
+
+```ts title="agent/tools/remember-workspace.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+import { activeWorkspace } from "../lib/workspace-state.js";
+
+export default defineTool({
+  description: "Remember the workspace the user selected for later MCP calls.",
+  inputSchema: z.object({ workspaceId: z.string() }),
+  execute({ workspaceId }) {
+    activeWorkspace.update(() => ({ workspaceId }));
+    return { workspaceId };
+  },
+});
+```
+
+With that split, normal follow-up MCP calls can reuse the server-side MCP session. If the server later returns `404` and eve reinitializes the MCP session, the agent still has the selected `workspaceId` in `defineState()` and can repeat the server's setup call or include the workspace id in future tool arguments.
+
 ## What to read next
 
 - [OpenAPI connections](./openapi): generate tools from OpenAPI operations.
+- [State](../guides/state): durable per-session memory with `defineState`.
 - [Auth & route protection](../guides/auth-and-route-protection): the full interactive-OAuth flow with Vercel Connect.
 - [Security model](../concepts/security-model): how connection credentials stay out of the model's reach.
