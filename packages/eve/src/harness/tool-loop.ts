@@ -1398,8 +1398,23 @@ async function handleStepResult(input: {
     result.finishReason !== "tool-calls" &&
     result.toolCalls.length === 0 &&
     hasEmptyDeliverySentinel(resolvedStepOutput);
-  const responseMessages = emptyDelivery ? [] : result.response.messages;
+  const rawResponseMessages = emptyDelivery ? [] : result.response.messages;
   const stepOutput = emptyDelivery ? null : resolvedStepOutput;
+
+  const providerExecutedOutcomeIds = new Set<string>();
+  for (const part of [...(result.content ?? []), ...(result.toolResults ?? [])]) {
+    if (
+      (part.type === "tool-result" || part.type === "tool-error") &&
+      part.providerExecuted === true
+    ) {
+      providerExecutedOutcomeIds.add(part.toolCallId);
+    }
+  }
+  const normalizedProviderHistory = normalizeProviderToolHistory({
+    messages: rawResponseMessages,
+    providerExecutedOutcomeIds,
+  });
+  const responseMessages = normalizedProviderHistory.messages;
 
   const baseSession: HarnessSession = {
     ...session,
@@ -1539,20 +1554,7 @@ async function handleStepResult(input: {
   // so the prompt prefix stays stable and the provider's prompt cache keeps
   // hitting across steps. Compaction is the sole mechanism that ever rewrites
   // history, and it runs before the model call (see `maybeCompact`).
-  const providerExecutedOutcomeIds = new Set<string>();
-  for (const part of [...(result.content ?? []), ...(result.toolResults ?? [])]) {
-    if (
-      (part.type === "tool-result" || part.type === "tool-error") &&
-      part.providerExecuted === true
-    ) {
-      providerExecutedOutcomeIds.add(part.toolCallId);
-    }
-  }
-  const normalizedProviderHistory = normalizeProviderToolHistory({
-    messages: responseMessages,
-    providerExecutedOutcomeIds,
-  });
-  const continuationMessages = normalizedProviderHistory.messages;
+  const continuationMessages = responseMessages;
   const updatedHistory: ModelMessage[] = [...promptMessages, ...continuationMessages];
   let nextSession: HarnessSession = { ...baseSession, history: updatedHistory };
 

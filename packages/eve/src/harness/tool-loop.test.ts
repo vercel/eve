@@ -1,5 +1,12 @@
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
-import { type FilePart, jsonSchema, type LanguageModel, ToolLoopAgent, type UserContent } from "ai";
+import {
+  type FilePart,
+  jsonSchema,
+  type LanguageModel,
+  type ModelMessage,
+  ToolLoopAgent,
+  type UserContent,
+} from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -4216,6 +4223,158 @@ describe("createToolLoopHarness", () => {
           },
         ],
         role: "tool",
+      },
+    ]);
+  });
+
+  it("normalizes provider history before parking on an input request", async () => {
+    const searchCallId = "parallel_search_before_question";
+    const questionCallId = "question-after-search";
+    const webSearchOutput = { results: [], searchId: "search-1" };
+    const questionInput = {
+      options: [{ id: "one", label: "One" }],
+      prompt: "Choose one.",
+    };
+    setupMockAgent({
+      content: [
+        {
+          input: { objective: "Search the web." },
+          toolCallId: searchCallId,
+          toolName: "web_search",
+          type: "tool-call",
+        },
+        {
+          output: webSearchOutput,
+          providerExecuted: true,
+          toolCallId: searchCallId,
+          toolName: "web_search",
+          type: "tool-result",
+        },
+        {
+          input: questionInput,
+          toolCallId: questionCallId,
+          toolName: "ask_question",
+          type: "tool-call",
+        },
+      ],
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          {
+            content: [
+              { text: "I looked that up and need a choice.", type: "text" },
+              {
+                input: { objective: "Search the web." },
+                toolCallId: searchCallId,
+                toolName: "web_search",
+                type: "tool-call",
+              },
+              {
+                output: { type: "json", value: webSearchOutput },
+                toolCallId: searchCallId,
+                toolName: "web_search",
+                type: "tool-result",
+              },
+              {
+                input: questionInput,
+                toolCallId: questionCallId,
+                toolName: "ask_question",
+                type: "tool-call",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      text: "I looked that up and need a choice.",
+      toolCalls: [
+        {
+          input: { objective: "Search the web." },
+          toolCallId: searchCallId,
+          toolName: "web_search",
+          type: "tool-call",
+        },
+        {
+          input: questionInput,
+          toolCallId: questionCallId,
+          toolName: "ask_question",
+          type: "tool-call",
+        },
+      ],
+      toolResults: [
+        {
+          output: webSearchOutput,
+          providerExecuted: true,
+          toolCallId: searchCallId,
+          toolName: "web_search",
+          type: "tool-result",
+        },
+      ],
+    });
+
+    const harness = createToolLoopHarness(
+      createTestConfig("conversation", undefined, { tools: new Map() }),
+    );
+    const result = await harness(
+      createTestSession({
+        agent: {
+          modelReference: { id: "anthropic/claude-sonnet-4.6" },
+          system: "You are a test assistant.",
+          tools: [
+            { description: "Search the web", name: "web_search", inputSchema: null },
+            {
+              description: "Ask the user a question.",
+              name: "ask_question",
+              inputSchema: { type: "object" },
+            },
+          ],
+        },
+      }),
+      { message: "Search, then ask me a question." },
+    );
+
+    const pendingResponseMessages = (
+      result.session.state?.["eve.runtime.pendingInputBatch"] as
+        | { responseMessages?: readonly ModelMessage[] }
+        | undefined
+    )?.responseMessages;
+
+    expect(result.next).toBeNull();
+    expect(pendingResponseMessages).toEqual([
+      {
+        content: [
+          { text: "I looked that up and need a choice.", type: "text" },
+          {
+            input: { objective: "Search the web." },
+            providerExecuted: false,
+            toolCallId: searchCallId,
+            toolName: "web_search",
+            type: "tool-call",
+          },
+        ],
+        role: "assistant",
+      },
+      {
+        content: [
+          {
+            output: { type: "json", value: webSearchOutput },
+            toolCallId: searchCallId,
+            toolName: "web_search",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+      {
+        content: [
+          {
+            input: questionInput,
+            toolCallId: questionCallId,
+            toolName: "ask_question",
+            type: "tool-call",
+          },
+        ],
+        role: "assistant",
       },
     ]);
   });
