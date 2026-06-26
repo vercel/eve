@@ -24,7 +24,7 @@ import {
   createNitroArtifactsConfig,
   type NitroArtifactsConfigInput,
 } from "#internal/nitro/host/artifacts-config.js";
-import { EVE_WORKFLOW_QUEUE_PREFIX } from "#internal/workflow/queue-namespace.js";
+import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
 import {
   computeChannelRouteRegistrations,
   registerChannelVirtualHandlers,
@@ -269,6 +269,7 @@ export async function configureNitroRoutes(
   if (includesWorkflowBundles(input.surface)) {
     const packageRoot = resolvePackageRoot();
     const builder = new WorkflowBundleBuilder({
+      agentName: preparedHost.compileResult.manifest.config.name,
       appRoot: preparedHost.appRoot,
       compiledArtifactsBootstrapPath: preparedHost.compiledArtifacts.bootstrapPath,
       outDir: preparedHost.workflowBuildDir,
@@ -421,7 +422,14 @@ export async function configureNitroRoutes(
     nitro.options.dev || (!isVercelBuildEnvironment() && hasConfiguredWorkflowWorld);
   const directHandlerEntries: WorkflowDirectHandlerEntry[] =
     localWorldDrivesQueue && workflowBundlePath !== undefined
-      ? [{ bundlePath: workflowBundlePath, queuePrefix: EVE_WORKFLOW_QUEUE_PREFIX }]
+      ? [
+          {
+            bundlePath: workflowBundlePath,
+            queuePrefix: deriveEveWorkflowQueuePrefix(
+              preparedHost.compileResult.manifest.config.name,
+            ),
+          },
+        ]
       : [];
   // Generated handlers will JSON-stringify this at write-time, so we hand them
   // an ESM-safe specifier (Windows drive paths get converted to file://) but

@@ -79,8 +79,8 @@
  *             backlog.
  *   rule 33 — Workflow runtime imports and queue-namespace environment writes
  *             must go through the `src/internal/workflow/runtime.ts` facade and
- *             `queue-namespace.ts`. This guarantees every queue-producing
- *             Workflow API observes eve's namespace before it can run.
+ *             `queue-namespace.ts`. The generated agent bootstrap installs the
+ *             agent-scoped namespace before queue-producing APIs can run.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -274,7 +274,7 @@ function checkRule33(posix, lines, violations) {
         rule: 33,
         file: posix,
         line: idx + 1,
-        message: `imports the raw Workflow runtime. Import from "#internal/workflow/runtime.js" so eve's queue namespace is installed before any queue-producing API runs.`,
+        message: `imports the raw Workflow runtime. Import from "#internal/workflow/runtime.js" to preserve eve's single Workflow runtime package identity.`,
       });
     }
 
@@ -283,7 +283,7 @@ function checkRule33(posix, lines, violations) {
         rule: 33,
         file: posix,
         line: idx + 1,
-        message: `writes WORKFLOW_QUEUE_NAMESPACE outside the canonical namespace module. Remove the write; importing "#internal/workflow/runtime.js" installs the namespace once.`,
+        message: `writes WORKFLOW_QUEUE_NAMESPACE outside the canonical namespace module. Use installEveWorkflowQueueNamespace() so every queue surface derives the same agent-scoped value.`,
       });
     }
   });
