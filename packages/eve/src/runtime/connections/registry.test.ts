@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
+import type { McpSessionSlot } from "#runtime/connections/mcp-session-store.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
 
-function makeConnection(name: string): ResolvedConnectionDefinition {
+function makeConnection(
+  nameOrOpts: string | (Partial<ResolvedConnectionDefinition> & { connectionName: string }),
+): ResolvedConnectionDefinition {
+  const name = typeof nameOrOpts === "string" ? nameOrOpts : nameOrOpts.connectionName;
+  const overrides = typeof nameOrOpts === "string" ? {} : nameOrOpts;
   return {
     authorization: {
       getToken: async () => ({ token: `token-${name}` }),
@@ -16,6 +21,7 @@ function makeConnection(name: string): ResolvedConnectionDefinition {
     sourceId: `connections/${name}`,
     sourceKind: "module",
     url: `https://${name}.example.com/mcp`,
+    ...overrides,
   };
 }
 
@@ -85,5 +91,22 @@ describe("ConnectionRegistryImpl", () => {
     const after = registry.getClient("linear");
 
     expect(before).not.toBe(after);
+  });
+
+  it("hands the matching session slot to a stateful mcp client and reports updates", async () => {
+    const slots = new Map([
+      ["a", { stateKey: "eve.mcp.session.a.anonymous", initialId: undefined } as McpSessionSlot],
+    ]);
+    const registry = new ConnectionRegistryImpl(
+      [makeConnection({ connectionName: "a", session: "stateful" })],
+      slots,
+    );
+
+    // The client mutates its slot when it negotiates a session.
+    slots.get("a")!.sessionId = "negotiated";
+
+    expect(registry.collectMcpSessionUpdates()).toEqual([
+      { stateKey: "eve.mcp.session.a.anonymous", sessionId: "negotiated" },
+    ]);
   });
 });

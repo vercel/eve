@@ -12,6 +12,7 @@ import type { ConnectionAuthorizationChallenge } from "#public/connections/error
 import type { Approval } from "#public/definitions/approval.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { JsonValue } from "#public/types/json.js";
+import type { McpSessionUpdate } from "#runtime/connections/mcp-session-store.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 
 /**
@@ -455,6 +456,12 @@ export interface ConnectionClient {
 
 /** Per-session container mapping connection names to clients. */
 export interface ConnectionRegistry {
+  /**
+   * Durable writes for stateful MCP connections whose session id changed
+   * this step. The `connectionProvider` applies these to `session.state` on
+   * commit. Empty when no stateful connection negotiated or rotated a session.
+   */
+  collectMcpSessionUpdates(): readonly McpSessionUpdate[];
   dispose(): Promise<void>;
   getClient(connectionName: string): ConnectionClient;
   getConnectionApproval(connectionName: string): Approval | undefined;
