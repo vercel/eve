@@ -12,7 +12,15 @@ export default defineEval({
 
     for (let turnNumber = 1; turnNumber <= TURN_COUNT; turnNumber += 1) {
       const marker = `sequential-turn-${String(turnNumber).padStart(3, "0")}`;
-      const turn = (await t.send(marker)).expectOk();
+      const startedAt = performance.now();
+      const result = await t.send(marker);
+      const elapsedSeconds = (performance.now() - startedAt) / 1_000;
+
+      t.log(
+        `turn ${String(turnNumber).padStart(3, "0")}/${TURN_COUNT} completed in ${elapsedSeconds.toFixed(3)}s`,
+      );
+
+      const turn = result.expectOk();
 
       sessionId ??= turn.sessionId;
       await t.require(turn.sessionId, equals(sessionId));
