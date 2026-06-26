@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { STABLE_WORKFLOW_NAMES } from "#execution/workflow-runtime.js";
+import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import { EVE_WORKFLOW_QUEUE_TOPIC } from "#internal/workflow/queue-namespace.js";
 
 import { transformWorkflowDirectives } from "./workflow-transformer.js";
@@ -144,12 +145,14 @@ function resolveModuleSpecifier(
 } {
   const inNodeModules = isInNodeModules(filePath);
   const inWorkspace = !inNodeModules && isWorkspacePackage(filePath, projectRoot);
+  const pkg = findPackageJson(filePath);
 
   if (!inNodeModules && !inWorkspace) {
-    return { moduleSpecifier: undefined, stableModuleSpecifier: undefined };
+    return {
+      moduleSpecifier: undefined,
+      stableModuleSpecifier: pkg?.name === EVE_PACKAGE_NAME ? EVE_PACKAGE_NAME : undefined,
+    };
   }
-
-  const pkg = findPackageJson(filePath);
 
   if (pkg === null) {
     return { moduleSpecifier: undefined, stableModuleSpecifier: undefined };

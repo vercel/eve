@@ -444,8 +444,8 @@ export class EveTUIRunner {
   readonly #subagentRuns = new Map<string, SubagentRun>();
   /**
    * callId → AbortController for the parallel child-session stream pump
-   * launched on `subagent.called`. Cancelled on `subagent.completed` or
-   * when the runner shuts down.
+   * launched on `subagent.called`. Cancelled on `subagent.completed`, when
+   * the session resets, or when the runner shuts down.
    */
   readonly #subagentChildPumps = new Map<string, AbortController>();
   /**
@@ -587,6 +587,7 @@ export class EveTUIRunner {
     } finally {
       this.#disposed = true;
       this.#authProbeAbort.abort();
+      this.#abortSubagentChildPumps();
       // Restore captured stdout/stderr before a fatal error reaches the CLI.
       this.#unsubscribeDevelopmentSandboxLogs?.();
       this.#unsubscribeDevelopmentSandboxLogs = undefined;
@@ -819,10 +820,7 @@ export class EveTUIRunner {
    * In-flight subagent child-session streams are aborted.
    */
   #startNewSession(): void {
-    for (const controller of this.#subagentChildPumps.values()) {
-      controller.abort();
-    }
-    this.#subagentChildPumps.clear();
+    this.#abortSubagentChildPumps();
     this.#subagentRuns.clear();
     this.#pendingInputRequests.clear();
     this.#connectionAuthRuns.clear();
@@ -832,6 +830,13 @@ export class EveTUIRunner {
       this.#session = this.#client.session();
     }
     this.#runtimeArtifacts?.clear();
+  }
+
+  #abortSubagentChildPumps(): void {
+    for (const controller of this.#subagentChildPumps.values()) {
+      controller.abort();
+    }
+    this.#subagentChildPumps.clear();
   }
 
   async #readPromptWithIdleRefresh(options: AgentTUISessionOptions): Promise<string | undefined> {

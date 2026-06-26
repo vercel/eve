@@ -13,7 +13,7 @@ import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
 import { createLogger } from "#internal/logging.js";
 import type {
-  DevelopmentServerHandle,
+  DevelopmentServer,
   DevelopmentServerOptions,
   ProductionServerHandle,
 } from "#internal/nitro/host/types.js";
@@ -64,7 +64,7 @@ interface CliRuntimeDependencies {
     options: EvalCliOptions,
     logger: CliLogger,
   ): Promise<void>;
-  startHost(appRoot: string, options?: DevelopmentServerOptions): Promise<DevelopmentServerHandle>;
+  startHost(appRoot: string, options?: DevelopmentServerOptions): DevelopmentServer;
   startProductionHost(
     appRoot: string,
     options?: {
@@ -131,7 +131,7 @@ async function loadRunEvalCommand(): Promise<CliRuntimeDependencies["runEvalComm
 }
 
 async function loadStartHost(): Promise<CliRuntimeDependencies["startHost"]> {
-  return (await import("#internal/nitro/host.js")).startDevelopmentServer;
+  return (await import("#internal/nitro/host.js")).createDevelopmentServer;
 }
 
 async function loadStartProductionHost(): Promise<CliRuntimeDependencies["startProductionHost"]> {
@@ -379,10 +379,22 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .command("init [target]")
     .description("Create a new eve agent, or add one to an existing project directory.")
     .option("--channel-web-nextjs", "Add the Web Chat application (Next.js)")
-    .action(async (target: string | undefined, options: { channelWebNextjs?: boolean }) => {
-      const { runInitCommand } = await import("#cli/commands/init.js");
-      await runInitCommand(logger, appRoot, target, options);
-    });
+    .option("-y, --yes", "Accepted for compatibility; has no effect")
+    .action(
+      async (
+        target: string | undefined,
+        options: { channelWebNextjs?: boolean; yes?: boolean },
+      ) => {
+        if (options.yes) {
+          logger.error("warning: --yes has no effect for eve init.");
+        }
+
+        const { runInitCommand } = await import("#cli/commands/init.js");
+        await runInitCommand(logger, appRoot, target, {
+          channelWebNextjs: options.channelWebNextjs,
+        });
+      },
+    );
 
   registerProjectCommands({ program, logger, appRoot });
 
@@ -487,11 +499,13 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       if (options.input !== undefined && mode === "headless") {
         throw new InvalidArgumentError("--input requires the interactive UI.");
       }
-      const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
-
-      loadDevelopmentEnvironmentFiles(appRoot);
-
-      const runInteractiveUi = async (serverUrl: string, report?: DevBootProgressReporter) => {
+      const runInteractiveUi = async (
+        input: {
+          readonly appRoot?: string;
+          readonly serverUrl: string;
+        },
+        report?: DevBootProgressReporter,
+      ): Promise<void> => {
         const runDevelopmentTui = await devBootPhase(
           "loading interactive UI",
           async () => runtime.runDevelopmentTui ?? (await loadRunDevelopmentTui()),
@@ -500,8 +514,12 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
         const display = resolveTuiDisplayOptions(options);
         const target: DevelopmentTuiTarget =
           remoteServerUrl === undefined
-            ? { kind: "local", serverUrl, workspaceRoot: appRoot }
-            : { kind: "remote", serverUrl, workspaceRoot: appRoot };
+            ? {
+                kind: "local",
+                serverUrl: input.serverUrl,
+                workspaceRoot: input.appRoot ?? appRoot,
+              }
+            : { kind: "remote", serverUrl: input.serverUrl, workspaceRoot: appRoot };
         const title = resolveTuiTitle({ name: options.name, target });
         if (title !== undefined) display.name = title;
         const tuiInput: RunDevelopmentTuiInput = {
@@ -514,6 +532,8 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       };
 
       if (remoteServerUrl) {
+        const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
+        loadDevelopmentEnvironmentFiles(appRoot);
         logger.log(`↗ remote mode targeting ${theme.info(new URL(remoteServerUrl).host)}`);
 
         if (mode === "headless") {
@@ -528,7 +548,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
         }
 
         logger.log("");
-        await runInteractiveUi(remoteServerUrl);
+        await runInteractiveUi({ serverUrl: remoteServerUrl });
         return;
       }
 
@@ -539,23 +559,26 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       buildProgress?.update("Building your agent");
 
       let closed = false;
-      let server: DevelopmentServerHandle | undefined;
+      let server: DevelopmentServer | undefined;
       const closeServer = async () => {
         if (closed || server === undefined) {
           return;
         }
 
         closed = true;
+        // No-op when this instance attached to a server another process owns.
         await server.close();
       };
 
       try {
         const startHost = runtime.startHost ?? (await loadStartHost());
-        server = await startHost(appRoot, {
+        server = startHost(appRoot, {
+          existing: mode === "tui" ? "attach-if-unconfigured" : "reject",
           host: options.host,
           onBootProgress,
           port: options.port,
         });
+        const handle = await server.start();
 
         // The terminal UI's header already shows the server URL, and startup
         // no longer clears the screen, so the line would linger as noise.
@@ -563,7 +586,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
         if (mode !== "tui") {
           logger.log(
             renderCliTaggedLine(theme, {
-              message: `server listening at ${server.url}`,
+              message: `server listening at ${handle.url}`,
               tag: "dev",
               tone: "success",
             }),
@@ -589,7 +612,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
           });
         }
 
-        await runInteractiveUi(server.url, onBootProgress);
+        await runInteractiveUi({ appRoot: handle.appRoot, serverUrl: handle.url }, onBootProgress);
       } finally {
         buildProgress?.stop();
         await closeServer();
@@ -652,12 +675,11 @@ export async function runCli(
         return;
       }
 
-      // A coding agent that fumbles `eve init` (e.g. an unknown flag) trips
-      // commander before the init action runs, so the action's own agent
-      // detection never fires. Commander has already written its usage error to
-      // stderr; add the setup guide on stdout so the agent gets actionable next
-      // steps — but still fall through to throw, so the malformed invocation
-      // keeps its nonzero exit instead of silently succeeding.
+      // A coding agent that fumbles `eve init` can trip commander before the
+      // init action runs, so the action's own agent detection never fires.
+      // Commander has already written its usage error to stderr; add the setup
+      // guide on stdout so the agent gets actionable next steps, but still fall
+      // through to throw so the malformed invocation keeps its nonzero exit.
       const detectCodingAgentLaunch = runtime.isCodingAgentLaunch ?? isCodingAgentLaunch;
       const agentLaunched = await detectCodingAgentLaunch();
       if (input[0] === "init" && agentLaunched) {

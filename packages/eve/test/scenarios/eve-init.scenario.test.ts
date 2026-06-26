@@ -317,21 +317,20 @@ describe("eve init smoke", () => {
     await expect(pathExists(join(scratch, "agent/agent.ts"))).resolves.toBe(false);
   });
 
-  it("prints the setup guide but still fails when a coding agent passes a bad flag", async () => {
+  it("warns and continues when a coding agent passes the compatibility yes flag", async () => {
     const scratch = await createScratchDirectory("eve-init-agent-fumble-");
     const fakePnpmRoot = await createScratchDirectory("eve-init-agent-fumble-pnpm-");
     const fakePnpm = await createFakePnpmEnvironment(fakePnpmRoot);
 
-    const result = await runEveBin(scratch, ["init", "--unknown-flag"], {
+    const result = await runEveBin(scratch, ["init", "fumble-agent", "--yes"], {
       ...fakePnpm.env,
       AI_AGENT: "claude",
     });
 
-    // The guide is still printed, but a malformed invocation must preserve its
-    // parse failure — exiting 0 would lie to any script or agent checking it.
-    expect(result.exitCode).not.toBe(0);
-    expect(result.stdout).toContain("Set up an eve agent");
-    await expect(pathExists(join(scratch, "agent/agent.ts"))).resolves.toBe(false);
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(result.stderr).toContain("warning: --yes has no effect for eve init.");
+    expect(result.stdout).toContain("eve dev --no-ui");
+    await expect(pathExists(join(scratch, "fumble-agent", "agent/agent.ts"))).resolves.toBe(true);
   });
 
   it("scaffolds the current empty directory when the target is omitted", async () => {

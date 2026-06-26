@@ -42,17 +42,32 @@ describe("CLI command registration", () => {
   });
 });
 
-describe("eve init for a coding agent that fumbles the invocation", () => {
-  // Detection must precede the commander failure: a bad/unknown arg trips
-  // parsing before the init action runs, so runCli itself falls back to the guide.
-  it("prints the setup guide but still fails on the malformed invocation", async () => {
+describe("eve init compatibility flags", () => {
+  it("lists --yes as an accepted compatibility flag", async () => {
     const output: string[] = [];
 
-    // The guide is additive: the parse failure must still propagate (nonzero
-    // exit), so runCli rejects even though the agent gets actionable next steps.
+    await runCli(["init", "--help"], {
+      error: (message) => output.push(message),
+      log: (message) => output.push(message),
+    });
+
+    expect(output.join("\n")).toContain("-y, --yes");
+  });
+
+  it("still rejects unknown init options", async () => {
+    await expect(
+      runCli(["init", "my-agent", "--template"], { error: () => {}, log: () => {} }),
+    ).rejects.toThrow();
+  });
+});
+
+describe("eve CLI malformed argument handling", () => {
+  it("prints the setup guide for a coding agent when init has too many targets", async () => {
+    const output: string[] = [];
+
     await expect(
       runCli(
-        ["init", "--unknown-flag"],
+        ["init", "first", "second"],
         { error: (message) => output.push(message), log: (message) => output.push(message) },
         { isCodingAgentLaunch: async () => true },
       ),
@@ -61,13 +76,9 @@ describe("eve init for a coding agent that fumbles the invocation", () => {
     expect(output.join("\n")).toContain("Set up an eve agent");
   });
 
-  it("still surfaces the usage error for a human", async () => {
+  it("still surfaces the usage error for commands other than init", async () => {
     await expect(
-      runCli(
-        ["init", "--unknown-flag"],
-        { error: () => {}, log: () => {} },
-        { isCodingAgentLaunch: async () => false },
-      ),
+      runCli(["dev", "--unknown-flag"], { error: () => {}, log: () => {} }),
     ).rejects.toThrow();
   });
 });
@@ -163,12 +174,19 @@ describe("eve dev boot progress", () => {
     const close = vi.fn(async () => {});
     let hostReporter: DevelopmentServerOptions["onBootProgress"] = undefined;
     let tuiReporter: RunDevelopmentTuiInput["onBootProgress"] = undefined;
-    const startHost = vi.fn(async (_appRoot: string, options?: DevelopmentServerOptions) => {
-      hostReporter = options?.onBootProgress;
-      hostReporter?.({ phase: "compiling agent", type: "phase-started" });
-      hostReporter?.({ elapsedMs: 1, phase: "compiling agent", type: "phase-finished" });
-      return { close, url: "http://127.0.0.1:2000" };
-    });
+    const startHost = vi.fn((_appRoot: string, options?: DevelopmentServerOptions) => ({
+      start: async () => {
+        hostReporter = options?.onBootProgress;
+        hostReporter?.({ phase: "compiling agent", type: "phase-started" });
+        hostReporter?.({ elapsedMs: 1, phase: "compiling agent", type: "phase-finished" });
+        return {
+          kind: "started" as const,
+          appRoot: "/canonical/app",
+          url: "http://127.0.0.1:2000",
+        };
+      },
+      close,
+    }));
     const runDevelopmentTui = vi.fn(async (input: RunDevelopmentTuiInput) => {
       tuiReporter = input.onBootProgress;
       throw new Error("TUI startup failed");
@@ -191,6 +209,62 @@ describe("eve dev boot progress", () => {
     expect(hostReporter).toBeTypeOf("function");
     expect(tuiReporter).toBe(hostReporter);
     expect(writes.at(-1)).toBe("\r\u001B[K");
+    expect(close).toHaveBeenCalledOnce();
+  });
+});
+
+describe("eve dev local server ownership", () => {
+  it("uses the host's canonical root and leaves an attached server running", async () => {
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "existing" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close: async () => {},
+    }));
+    const runDevelopmentTui = vi.fn(async () => {});
+
+    await withInteractiveTerminal(() =>
+      runCli(["dev"], { error: () => {}, log: () => {} }, { runDevelopmentTui, startHost }),
+    );
+
+    expect(startHost).toHaveBeenCalledWith(expect.any(String), {
+      existing: "attach-if-unconfigured",
+      host: undefined,
+      onBootProgress: expect.any(Function),
+      port: undefined,
+    });
+    expect(runDevelopmentTui).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "App",
+        target: {
+          kind: "local",
+          serverUrl: "http://127.0.0.1:4321/",
+          workspaceRoot: "/canonical/app",
+        },
+      }),
+    );
+  });
+
+  it("closes a server started for the interactive TUI", async () => {
+    const close = vi.fn(async () => {});
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "started" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close,
+    }));
+
+    await withInteractiveTerminal(() =>
+      runCli(
+        ["dev"],
+        { error: () => {}, log: () => {} },
+        { runDevelopmentTui: vi.fn(async () => {}), startHost },
+      ),
+    );
     expect(close).toHaveBeenCalledOnce();
   });
 });

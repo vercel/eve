@@ -1,7 +1,5 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
-import { join } from "node:path";
 
 import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install.js";
 
@@ -12,6 +10,11 @@ import { createApplicationNitro } from "#internal/nitro/host/create-application-
 import { createNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import type { AuthoredSourceWatcherHandle } from "#internal/nitro/host/dev-authored-source-watcher.js";
 import { prepareApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
+import { resolveDiscoveryProject } from "#discover/project.js";
+import { DevelopmentServerState } from "#internal/nitro/host/dev-server-state.js";
+import { toErrorMessage } from "#shared/errors.js";
+import { isEveServerHealthy } from "#shared/eve-server-health.js";
+import { isLoopbackServerUrl } from "#shared/network-address.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 import {
   pruneLocalSandboxTemplatesInBackground,
@@ -25,8 +28,10 @@ import {
   getInitializedDevelopmentSandboxBackendNames,
 } from "#execution/sandbox/development-run.js";
 import type {
+  DevelopmentServer,
   DevelopmentServerHandle,
   DevelopmentServerOptions,
+  StartedDevelopmentServer,
 } from "#internal/nitro/host/types.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { pruneDevelopmentRuntimeArtifactsSnapshotsInBackground } from "#internal/nitro/dev-runtime-artifacts.js";
@@ -41,21 +46,8 @@ import { devBootPhase } from "#internal/dev-boot-progress.js";
 const MAX_ALLOWED_DEVELOPMENT_SERVER_PORT = 65_535;
 const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
 const PORT_ENV = "PORT";
-const DEVELOPMENT_PROCESS_ID_FILE = "dev-process.pid";
-const DEVELOPMENT_SERVER_METADATA_FILE = "dev-server.json";
 const DEFAULT_DEVELOPMENT_SERVER_HOST = "127.0.0.1";
 const IPV6_LOOPBACK_HOSTNAME = "[::1]";
-const DEVELOPMENT_SERVER_URL_PLACEHOLDER = "http://localhost:PORT";
-
-interface DevelopmentServerMetadata {
-  readonly processId: number;
-  readonly url: string;
-}
-
-interface ActiveDevelopmentProcess {
-  readonly processId: number;
-  readonly url?: string;
-}
 
 /**
  * Hostnames Nitro/srvx surface when listening on an IPv6 wildcard interface.
@@ -125,118 +117,6 @@ function readEnvironmentPort(): number | undefined {
   return parsed;
 }
 
-function resolveDevelopmentProcessIdPath(appRoot: string): string {
-  return join(appRoot, ".eve", DEVELOPMENT_PROCESS_ID_FILE);
-}
-
-function resolveDevelopmentServerMetadataPath(appRoot: string): string {
-  return join(appRoot, ".eve", DEVELOPMENT_SERVER_METADATA_FILE);
-}
-
-function parseProcessId(value: string): number | undefined {
-  const trimmed = value.trim();
-
-  if (!/^\d+$/.test(trimmed)) {
-    return undefined;
-  }
-
-  const processId = Number(trimmed);
-  return Number.isSafeInteger(processId) && processId > 0 ? processId : undefined;
-}
-
-function isProcessRunning(processId: number): boolean {
-  try {
-    process.kill(processId, 0);
-    return true;
-  } catch (error) {
-    return (
-      error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "EPERM"
-    );
-  }
-}
-
-function formatKillCommand(processId: number): string {
-  if (process.platform === "win32") {
-    return `taskkill /PID ${processId}`;
-  }
-
-  return `kill ${processId}`;
-}
-
-function parseDevelopmentServerMetadata(value: string): DevelopmentServerMetadata | undefined {
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    return undefined;
-  }
-
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    !("pid" in parsed) ||
-    typeof parsed.pid !== "number" ||
-    !Number.isSafeInteger(parsed.pid) ||
-    parsed.pid <= 0 ||
-    !("url" in parsed) ||
-    typeof parsed.url !== "string"
-  ) {
-    return undefined;
-  }
-
-  const url = normalizeDevelopmentServerClientUrl(parsed.url);
-
-  try {
-    const parsedUrl = new URL(url);
-    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
-      return undefined;
-    }
-  } catch {
-    return undefined;
-  }
-
-  return {
-    processId: parsed.pid,
-    url,
-  };
-}
-
-async function readDevelopmentServerMetadata(
-  appRoot: string,
-): Promise<DevelopmentServerMetadata | undefined> {
-  try {
-    return parseDevelopmentServerMetadata(
-      await readFile(resolveDevelopmentServerMetadataPath(appRoot), "utf8"),
-    );
-  } catch {
-    return undefined;
-  }
-}
-
-async function readActiveDevelopmentProcess(
-  appRoot: string,
-): Promise<ActiveDevelopmentProcess | undefined> {
-  let processId: number | undefined;
-
-  try {
-    processId = parseProcessId(await readFile(resolveDevelopmentProcessIdPath(appRoot), "utf8"));
-  } catch {
-    return undefined;
-  }
-
-  if (processId === undefined || !isProcessRunning(processId)) {
-    return undefined;
-  }
-
-  const metadata = await readDevelopmentServerMetadata(appRoot);
-
-  return {
-    processId,
-    url: metadata?.processId === processId ? metadata.url : undefined,
-  };
-}
-
 async function detectDevelopmentCommandPackageManager(
   appRoot: string,
 ): Promise<PackageManagerKind> {
@@ -255,62 +135,17 @@ async function formatDevelopmentServerConnectCommand(
   return [packageManager, ...eveDevArguments(packageManager), serverUrl].join(" ");
 }
 
-async function writeDevelopmentServerMetadata(appRoot: string, serverUrl: string): Promise<void> {
-  await writeFile(
-    resolveDevelopmentServerMetadataPath(appRoot),
-    `${JSON.stringify(
-      {
-        pid: process.pid,
-        updatedAt: new Date().toISOString(),
-        url: normalizeDevelopmentServerClientUrl(serverUrl),
-      },
-      null,
-      2,
-    )}\n`,
-    "utf8",
+async function createDevelopmentServerAlreadyRunningError(
+  appRoot: string,
+  serverUrl: string,
+): Promise<Error> {
+  const connectCommand = await formatDevelopmentServerConnectCommand(appRoot, serverUrl);
+  return new Error(
+    [
+      "A dev server is already running for this eve agent.",
+      `To connect to the existing instance, run: ${connectCommand}`,
+    ].join("\n"),
   );
-}
-
-async function writeDevelopmentProcessId(appRoot: string): Promise<() => Promise<void>> {
-  const processIdPath = resolveDevelopmentProcessIdPath(appRoot);
-  const metadataPath = resolveDevelopmentServerMetadataPath(appRoot);
-  const activeProcess = await readActiveDevelopmentProcess(appRoot);
-
-  if (activeProcess !== undefined) {
-    const connectUrl = activeProcess.url ?? DEVELOPMENT_SERVER_URL_PLACEHOLDER;
-    const connectCommand = await formatDevelopmentServerConnectCommand(appRoot, connectUrl);
-    throw new Error(
-      [
-        `A dev server is already running for this eve agent (pid ${activeProcess.processId}).`,
-        `To connect to the existing instance, run: ${connectCommand}`,
-        `To stop it, run: ${formatKillCommand(activeProcess.processId)}`,
-      ].join("\n"),
-    );
-  }
-
-  await mkdir(join(appRoot, ".eve"), { recursive: true });
-  await writeFile(processIdPath, `${process.pid}\n`, "utf8");
-
-  return async () => {
-    let currentProcessId: number | undefined;
-
-    try {
-      currentProcessId = parseProcessId(await readFile(processIdPath, "utf8"));
-    } catch {
-      return;
-    }
-
-    if (currentProcessId === process.pid) {
-      await rm(processIdPath, { force: true });
-      await rm(metadataPath, { force: true });
-      return;
-    }
-
-    const metadata = await readDevelopmentServerMetadata(appRoot);
-    if (metadata?.processId === process.pid) {
-      await rm(metadataPath, { force: true });
-    }
-  };
 }
 
 function resolveDevelopmentServerPorts(input: {
@@ -413,6 +248,72 @@ function guardDevelopmentServerWebSocketUpgrades(
   devServer.upgrade = guardedUpgrade;
 }
 
+async function closeDevelopmentServerResources(input: {
+  readonly authoredSourceWatcher: AuthoredSourceWatcherHandle | undefined;
+  readonly devServer: NitroDevelopmentServer | undefined;
+  readonly developmentSandboxRunId: string;
+  readonly nitro: Nitro | undefined;
+}): Promise<{ readonly errors: readonly unknown[]; readonly listenerClosed: boolean }> {
+  const errors: unknown[] = [];
+  const attempt = async (operation: () => Promise<void>): Promise<boolean> => {
+    try {
+      await operation();
+      return true;
+    } catch (error) {
+      errors.push(error);
+      return false;
+    }
+  };
+
+  const authoredSourceWatcher = input.authoredSourceWatcher;
+  if (authoredSourceWatcher !== undefined) {
+    await attempt(() => authoredSourceWatcher.close());
+  }
+  const devServer = input.devServer;
+  const listenerClosed = devServer === undefined ? true : await attempt(() => devServer.close());
+  const nitro = input.nitro;
+  if (nitro !== undefined) {
+    await attempt(() => nitro.close());
+  }
+  await attempt(() =>
+    stopDevelopmentSandboxResources({
+      backendNames: getInitializedDevelopmentSandboxBackendNames(input.developmentSandboxRunId),
+      devRunId: input.developmentSandboxRunId,
+      log: (message) => console.warn(`[eve:dev] ${message}`),
+    }),
+  );
+
+  return { errors, listenerClosed };
+}
+
+function createDevelopmentServerCleanupError(errors: readonly unknown[]): Error | undefined {
+  if (errors.length === 0) {
+    return undefined;
+  }
+
+  if (errors.length === 1) {
+    const error = errors[0];
+    return error instanceof Error
+      ? error
+      : new Error(`Failed to close the development server: ${toErrorMessage(error)}`, {
+          cause: error,
+        });
+  }
+
+  return new AggregateError(errors, "Multiple development-server resources failed to close.");
+}
+
+function createDevelopmentServerStartupCleanupError(
+  startupError: unknown,
+  cleanupErrors: readonly unknown[],
+): AggregateError {
+  return new AggregateError(
+    [startupError, ...cleanupErrors],
+    `${toErrorMessage(startupError)} Cleanup also failed.`,
+    { cause: startupError },
+  );
+}
+
 async function listenForDevelopmentServer(input: {
   readonly devServer: NitroDevelopmentServer;
   readonly host?: string;
@@ -457,24 +358,45 @@ async function listenForDevelopmentServer(input: {
   );
 }
 
-/**
- * Starts the development Nitro server for an eve application.
- *
- * Authored schedules are never registered with Nitro's cron scheduler in
- * dev mode. To fire one authored schedule on demand, `POST` the dev-only
- * `/eve/v1/dev/schedules/:scheduleId` route — the handler returns
- * `{ scheduleId, sessionIds }` so callers can subscribe to the existing
- * per-session stream route.
- */
-export async function startDevelopmentServer(
+interface DevelopmentServerStartResult {
+  readonly handle: DevelopmentServerHandle;
+  /** Teardown for a server this process owns; undefined when attached to an existing owner. */
+  readonly close: (() => Promise<void>) | undefined;
+}
+
+async function startNitroDevelopmentServer(
   rootDir: string,
-  options: DevelopmentServerOptions = {},
-): Promise<DevelopmentServerHandle> {
+  options: DevelopmentServerOptions,
+): Promise<DevelopmentServerStartResult> {
   // Marks this process tree as an `eve dev` session so runtime features
   // that must never run in production (for example auto-installing
   // optional sandbox engine packages) can gate on it.
   process.env[EVE_DEV_ENV_FLAG] ??= "1";
-  loadDevelopmentEnvironmentFiles(rootDir);
+
+  const project = await resolveDiscoveryProject(rootDir);
+  loadDevelopmentEnvironmentFiles(project.appRoot);
+
+  const environmentPort = readEnvironmentPort();
+  const requestedPort = options.port ?? environmentPort;
+  const hasExplicitEndpoint =
+    options.host !== undefined || options.port !== undefined || environmentPort !== undefined;
+  const state = new DevelopmentServerState(project);
+  const existingServerUrl = await state.read();
+
+  if (
+    existingServerUrl !== undefined &&
+    isLoopbackServerUrl(existingServerUrl) &&
+    (await isEveServerHealthy(existingServerUrl))
+  ) {
+    if (options.existing === "attach-if-unconfigured" && !hasExplicitEndpoint) {
+      return {
+        handle: { kind: "existing", appRoot: project.appRoot, url: existingServerUrl },
+        close: undefined,
+      };
+    }
+    throw await createDevelopmentServerAlreadyRunningError(project.appRoot, existingServerUrl);
+  }
+
   const previousDevelopmentSandboxRunId = process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV];
   const developmentSandboxRunId = createDevelopmentSandboxRunId();
   process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV] = developmentSandboxRunId;
@@ -482,15 +404,13 @@ export async function startDevelopmentServer(
   let devServer: NitroDevelopmentServer | undefined;
   let restoreWorkflowLocalQueueEnvironment: (() => void) | undefined;
   let authoredSourceWatcher: AuthoredSourceWatcherHandle | undefined;
-  let removeDevelopmentProcessId: (() => Promise<void>) | undefined;
 
   try {
     const preparedHost = await devBootPhase(
       "compiling agent",
-      () => prepareApplicationHost(rootDir, { dev: true }),
+      () => prepareApplicationHost(project.appRoot, { dev: true }),
       options.onBootProgress,
     );
-    removeDevelopmentProcessId = await writeDevelopmentProcessId(preparedHost.appRoot);
     pruneDevelopmentRuntimeArtifactsSnapshotsInBackground(preparedHost.appRoot);
     const compiledArtifactsSource = resolveNitroCompiledArtifactsSource(
       createNitroArtifactsConfig({
@@ -514,7 +434,6 @@ export async function startDevelopmentServer(
     guardDevelopmentServerWebSocketUpgrades(activeNitro, devServer);
     const hostname =
       options.host ?? activeNitro.options.devServer.hostname ?? DEFAULT_DEVELOPMENT_SERVER_HOST;
-    const requestedPort = options.port ?? readEnvironmentPort();
     const retryOnAddressInUse = requestedPort === undefined;
     const server = await devBootPhase(
       "binding port",
@@ -533,7 +452,6 @@ export async function startDevelopmentServer(
     }
 
     const serverUrl = normalizeDevelopmentServerClientUrl(server.url);
-    await writeDevelopmentServerMetadata(preparedHost.appRoot, serverUrl);
     restoreWorkflowLocalQueueEnvironment = installWorkflowLocalQueueEnvironment(serverUrl);
     await devBootPhase(
       "building dev bundle",
@@ -549,10 +467,14 @@ export async function startDevelopmentServer(
       async () => {
         const { startAuthoredSourceWatcher } =
           await import("#internal/nitro/host/dev-authored-source-watcher.js");
-        return startAuthoredSourceWatcher({ nitro: activeNitro, preparedHost });
+        return startAuthoredSourceWatcher({
+          nitro: activeNitro,
+          preparedHost,
+        });
       },
       options.onBootProgress,
     );
+    await state.write(serverUrl);
     const restoreWorkflowLocalQueueEnvironmentOnClose = restoreWorkflowLocalQueueEnvironment;
     if (restoreWorkflowLocalQueueEnvironmentOnClose === undefined) {
       throw new Error("Workflow local queue environment was not initialized.");
@@ -561,41 +483,106 @@ export async function startDevelopmentServer(
     const authoredSourceWatcherOnClose = authoredSourceWatcher;
     const devServerOnClose = devServer;
     const nitroOnClose = activeNitro;
-    return {
-      async close() {
+    let closePromise: Promise<void> | undefined;
+    const close = (): Promise<void> => {
+      closePromise ??= (async () => {
+        const cleanup = await closeDevelopmentServerResources({
+          authoredSourceWatcher: authoredSourceWatcherOnClose,
+          devServer: devServerOnClose,
+          developmentSandboxRunId,
+          nitro: nitroOnClose,
+        });
+        if (cleanup.listenerClosed) {
+          await state.remove().catch(() => {});
+        }
+
         try {
-          await authoredSourceWatcherOnClose.close();
-          await devServerOnClose.close();
-          await nitroOnClose.close();
-          await stopDevelopmentSandboxResources({
-            backendNames: getInitializedDevelopmentSandboxBackendNames(developmentSandboxRunId),
-            devRunId: developmentSandboxRunId,
-            log: (message) => console.warn(`[eve:dev] ${message}`),
-          });
+          const cleanupError = createDevelopmentServerCleanupError(cleanup.errors);
+          if (cleanupError !== undefined) {
+            throw cleanupError;
+          }
         } finally {
           clearInitializedDevelopmentSandboxBackendNames(developmentSandboxRunId);
-          await removeDevelopmentProcessId?.();
           restoreWorkflowLocalQueueEnvironmentOnClose();
           restoreDevelopmentSandboxRunId(previousDevelopmentSandboxRunId);
         }
-      },
-      url: serverUrl,
+      })();
+      return closePromise;
+    };
+    return {
+      handle: { kind: "started", appRoot: project.appRoot, url: serverUrl },
+      close,
     };
   } catch (error) {
-    await authoredSourceWatcher?.close().catch(() => {});
+    const cleanup = await closeDevelopmentServerResources({
+      authoredSourceWatcher,
+      devServer,
+      developmentSandboxRunId,
+      nitro,
+    });
+    const cleanupErrors = [...cleanup.errors];
     restoreWorkflowLocalQueueEnvironment?.();
-    await devServer?.close().catch(() => {});
-    await nitro?.close().catch(() => {});
-    await stopDevelopmentSandboxResources({
-      backendNames: getInitializedDevelopmentSandboxBackendNames(developmentSandboxRunId),
-      devRunId: developmentSandboxRunId,
-      log: (message) => console.warn(`[eve:dev] ${message}`),
-    }).catch(() => {});
     clearInitializedDevelopmentSandboxBackendNames(developmentSandboxRunId);
-    await removeDevelopmentProcessId?.().catch(() => {});
+    if (cleanup.listenerClosed) {
+      await state.remove().catch(() => {});
+    }
     restoreDevelopmentSandboxRunId(previousDevelopmentSandboxRunId);
+    if (cleanupErrors.length > 0) {
+      throw createDevelopmentServerStartupCleanupError(error, cleanupErrors);
+    }
     throw error;
   }
+}
+
+/**
+ * Creates a development server for an eve application. Call `start()` to boot an
+ * owned Nitro server or attach to a running owner, and `close()` to tear down a
+ * server this instance started. `close()` waits for an in-progress `start()`,
+ * resolves after failed-start cleanup, and is a no-op when it attached to an
+ * existing owner or was never started.
+ *
+ * Authored schedules are never registered with Nitro's cron scheduler in dev
+ * mode. To fire one authored schedule on demand, `POST` the dev-only
+ * `/eve/v1/dev/schedules/:scheduleId` route — the handler returns
+ * `{ scheduleId, sessionIds }` so callers can subscribe to the existing
+ * per-session stream route.
+ */
+export function createDevelopmentServer(
+  rootDir: string,
+  options?: DevelopmentServerOptions & { existing?: "reject" },
+): DevelopmentServer<StartedDevelopmentServer>;
+export function createDevelopmentServer(
+  rootDir: string,
+  options?: DevelopmentServerOptions,
+): DevelopmentServer;
+export function createDevelopmentServer(
+  rootDir: string,
+  options: DevelopmentServerOptions = {},
+): DevelopmentServer {
+  let startPromise: Promise<DevelopmentServerHandle> | undefined;
+  let closeStartedServer: (() => Promise<void>) | undefined;
+
+  return {
+    start(): Promise<DevelopmentServerHandle> {
+      if (startPromise !== undefined) {
+        throw new Error("DevelopmentServer.start() was already called.");
+      }
+
+      startPromise = startNitroDevelopmentServer(rootDir, options).then(({ handle, close }) => {
+        closeStartedServer = close;
+        return handle;
+      });
+      return startPromise;
+    },
+    async close(): Promise<void> {
+      if (startPromise === undefined) {
+        return;
+      }
+
+      await startPromise.catch(() => undefined);
+      await closeStartedServer?.();
+    },
+  };
 }
 
 function restoreDevelopmentSandboxRunId(previous: string | undefined): void {

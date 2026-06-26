@@ -282,9 +282,12 @@ describe("runCli", () => {
       error: vi.fn(),
       log: vi.fn(),
     };
-    const startHost = vi.fn(async () => {
-      throw new Error("dev started");
-    });
+    const startHost = vi.fn(() => ({
+      start: async () => {
+        throw new Error("dev started");
+      },
+      close: async () => {},
+    }));
 
     await expect(
       runCli([], logger, {

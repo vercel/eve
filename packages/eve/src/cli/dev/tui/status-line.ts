@@ -7,6 +7,8 @@ import type { VercelStatusSnapshot } from "./vercel-status.js";
 import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 
 export interface StatusLineInput {
+  /** Port of the connected local development server; omitted for remote sessions. */
+  serverPort?: string;
   /** Resolved model slug, e.g. "anthropic/claude-sonnet-4-6"; absent when `/eve/v1/info` failed. */
   model?: string;
   /** Preformatted token-flow segment (formatTokenFlow output), e.g. `↑ 394.4K ↓ 4.3K`. */
@@ -37,6 +39,14 @@ function renderModel(
   return input.theme.colors.dim(model);
 }
 
+function renderServerPort(
+  input: Pick<StatusLineInput, "remote" | "serverPort" | "theme">,
+): string | undefined {
+  if (input.remote !== undefined || input.serverPort === undefined) return undefined;
+  const c = input.theme.colors;
+  return c.inverse(c.gray(` :${input.serverPort} `));
+}
+
 function renderEndpoint(
   input: Pick<StatusLineInput, "endpoint" | "remote" | "theme" | "vercel">,
 ): string | undefined {
@@ -51,35 +61,45 @@ function renderEndpoint(
 }
 
 /**
- * Builds `↗ project (environment) · model · tokens · /deploy pending`.
- * Remote sessions omit endpoint state and keep their badge as the final
- * narrow-width fallback. Returns undefined when every segment is empty.
+ * Builds a leading local `:port` or remote badge followed by model, token, and
+ * deploy status segments. Both badges are the final narrow-width fallback.
+ * Remote sessions omit endpoint state. Returns undefined when every segment is
+ * empty.
  */
 export function buildStatusLine(input: StatusLineInput): string | undefined {
   const { theme, width } = input;
   const c = theme.colors;
 
   const logLevel = input.logLevel === undefined ? undefined : c.cyan(`logs: ${input.logLevel}`);
+  const serverPort = renderServerPort(input);
   const model = renderModel(input);
   const tokens = input.tokens === undefined ? undefined : c.dim(input.tokens);
   const pending = input.vercel?.pendingDeploy ? c.yellow("/deploy pending") : undefined;
   const remote = input.remote === undefined ? undefined : formatRemoteStatus(input.remote, theme);
   const endpoint = renderEndpoint(input);
+  const leading = remote?.full ?? serverPort;
+  const badge = remote?.badge ?? serverPort;
 
-  const separator = `  ${c.dim(theme.glyph.dot)}  `;
-  const compose = (segments: ReadonlyArray<string | undefined>): string =>
-    segments.filter((segment) => segment !== undefined).join(separator);
+  const separator = ` ${c.dim(theme.glyph.dot)} `;
+  const compose = (
+    target: string | undefined,
+    segments: ReadonlyArray<string | undefined>,
+  ): string => {
+    const body = segments.filter((segment) => segment !== undefined).join(separator);
+    if (target === undefined || body.length === 0) return target ?? body;
+    return `${target} ${body}`;
+  };
 
-  // Descending fidelity; the first variant that fits wins. The remote target
-  // leads every variant and gets the final stand-alone fallback. Without a
-  // remote, the logs hint retains its previous priority.
+  // Descending fidelity; the first variant that fits wins. The server badge
+  // leads every variant and gets the final stand-alone fallback. Without one,
+  // the logs hint retains its previous priority.
   const variants = [
-    compose([remote?.full, logLevel, model, tokens, endpoint, pending]),
-    compose([remote?.full, logLevel, model, tokens, pending]),
-    compose([remote?.full, logLevel, tokens, pending]),
-    compose([remote?.full, logLevel]),
-    compose([remote?.badge, logLevel]),
-    compose([remote?.badge]),
+    compose(leading, [logLevel, model, tokens, endpoint, pending]),
+    compose(leading, [logLevel, model, tokens, pending]),
+    compose(leading, [logLevel, tokens, pending]),
+    compose(leading, [logLevel]),
+    compose(badge, [logLevel]),
+    compose(badge, []),
   ];
 
   if (variants[0]!.length === 0) return undefined;
@@ -102,7 +122,7 @@ function formatRemoteStatus(
       : `${snapshot.deployment.projectName} (${snapshot.deployment.environment})`;
   const arrow = theme.unicode ? "↗" : "->";
   const badge = formatRemoteBadge(` ${arrow} ${label} `, snapshot.connection.state, theme);
-  const separator = ` ${c.dim(theme.glyph.dot)} `;
+  const separator = `${c.dim(theme.glyph.dot)} `;
   let suffix: string | undefined;
 
   switch (snapshot.connection.state) {

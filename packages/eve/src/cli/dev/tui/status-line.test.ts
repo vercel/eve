@@ -37,6 +37,19 @@ function deployedRemote(
 }
 
 describe("buildStatusLine", () => {
+  it("leads local sessions with a gray colon-prefixed port badge", () => {
+    const input = {
+      serverPort: "3000",
+      model: "openai/gpt-5.5",
+    } as const;
+
+    const line = buildStatusLine({ ...input, theme, width: 120 })!;
+    expect(stripAnsi(line)).toBe(" :3000  openai/gpt-5.5");
+    expect(buildStatusLine({ ...input, theme: plain, width: " :3000 ".length })).toBe(" :3000 ");
+    expect(line).toContain("\x1b[7m\x1b[90m :3000 \x1b[39m\x1b[27m");
+    expect(line).not.toContain("\x1b[7m\x1b[34m :3000 ");
+  });
+
   it("renders all segments in order with dot separators", () => {
     const line = buildStatusLine({
       model: "anthropic/claude-sonnet-4-6",
@@ -48,7 +61,7 @@ describe("buildStatusLine", () => {
     });
 
     expect(line).toBe(
-      "anthropic/claude-sonnet-4-6  ·  12,300 tokens 6%  ·  AI Gateway (my-agent)  ·  /deploy pending",
+      "anthropic/claude-sonnet-4-6 · 12,300 tokens 6% · AI Gateway (my-agent) · /deploy pending",
     );
   });
 
@@ -60,7 +73,7 @@ describe("buildStatusLine", () => {
         theme: plain,
         width: 120,
       }),
-    ).toBe(" ↗ vpoke.playground-vercel.tools   ·  openai/gpt-5");
+    ).toBe(" ↗ vpoke.playground-vercel.tools  openai/gpt-5");
   });
 
   it("dims every segment except the yellow pending-deploy marker", () => {
@@ -85,7 +98,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(withProject).toBe("m  ·  AI Gateway (my-agent)");
+    expect(withProject).toBe("m · AI Gateway (my-agent)");
 
     // Connected without a linked project (a raw key): bare "AI Gateway".
     const noProject = buildStatusLine({
@@ -94,7 +107,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(noProject).toBe("m  ·  AI Gateway");
+    expect(noProject).toBe("m · AI Gateway");
   });
 
   it("renders the pending marker even when no segment else resolved", () => {
@@ -117,7 +130,7 @@ describe("buildStatusLine", () => {
     } as const;
 
     const full = buildStatusLine({ ...input, width: 120 })!;
-    expect(full.startsWith("logs: sandbox  ·  ")).toBe(true);
+    expect(full.startsWith("logs: sandbox · ")).toBe(true);
 
     // Narrow enough that only the leading hint survives.
     expect(buildStatusLine({ ...input, width: 13 })).toBe("logs: sandbox");
@@ -150,7 +163,7 @@ describe("buildStatusLine", () => {
     expect(noEndpoint).toContain("anthropic/claude-sonnet-4-6");
 
     const noModel = buildStatusLine({ ...input, width: visibleLength(noEndpoint) - 1 })!;
-    expect(noModel).toBe("12,300 tokens  ·  /deploy pending");
+    expect(noModel).toBe("12,300 tokens · /deploy pending");
   });
 
   it("renders the three model-endpoint states", () => {
@@ -160,7 +173,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(external).toBe("anthropic/claude-sonnet-4-6  ·  External endpoint");
+    expect(external).toBe("anthropic/claude-sonnet-4-6 · External endpoint");
 
     const linked = buildStatusLine({
       model: "m",
@@ -169,7 +182,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(linked).toBe("m  ·  AI Gateway (my-agent)");
+    expect(linked).toBe("m · AI Gateway (my-agent)");
 
     const notConnected = buildStatusLine({
       model: "m",
@@ -177,7 +190,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(notConnected).toBe("m  ·  ⚠ AI Gateway");
+    expect(notConnected).toBe("m · ⚠ AI Gateway");
   });
 
   it("paints only the not-connected endpoint yellow", () => {
@@ -203,7 +216,7 @@ describe("buildStatusLine", () => {
       theme: ascii,
       width: 120,
     });
-    expect(stripAnsi(line!)).toBe("m  -  ! AI Gateway");
+    expect(stripAnsi(line!)).toBe("m - ! AI Gateway");
   });
 
   it("renders the remote badge first and projects each authentication state", () => {
@@ -213,7 +226,7 @@ describe("buildStatusLine", () => {
         theme: plain,
         width: 120,
       }),
-    ).toBe(" ↗ vpoke.playground-vercel.tools  · Checking access…");
+    ).toBe(" ↗ vpoke.playground-vercel.tools · Checking access…");
     expect(
       buildStatusLine({
         remote: remote({
@@ -223,7 +236,7 @@ describe("buildStatusLine", () => {
         theme: plain,
         width: 120,
       }),
-    ).toBe(" ↗ vpoke.playground-vercel.tools  · Authenticate via OIDC");
+    ).toBe(" ↗ vpoke.playground-vercel.tools · Authenticate via OIDC");
     expect(
       buildStatusLine({
         remote: remote({
@@ -233,7 +246,7 @@ describe("buildStatusLine", () => {
         theme: plain,
         width: 120,
       }),
-    ).toBe(" ↗ vpoke.playground-vercel.tools  · Authenticating via OIDC…");
+    ).toBe(" ↗ vpoke.playground-vercel.tools · Authenticating via OIDC…");
     expect(
       buildStatusLine({
         remote: remote({
@@ -243,7 +256,7 @@ describe("buildStatusLine", () => {
         theme: plain,
         width: 120,
       }),
-    ).toBe(" ↗ vpoke.playground-vercel.tools  · Authentication failed");
+    ).toBe(" ↗ vpoke.playground-vercel.tools · Authentication failed");
     expect(
       buildStatusLine({
         remote: remote({
@@ -253,7 +266,7 @@ describe("buildStatusLine", () => {
         theme: plain,
         width: 120,
       }),
-    ).toBe(" ↗ vpoke.playground-vercel.tools  · Remote unavailable");
+    ).toBe(" ↗ vpoke.playground-vercel.tools · Remote unavailable");
     expect(
       buildStatusLine({
         remote: deployedRemote({ state: "ready", info: {} as never }),
@@ -343,6 +356,6 @@ describe("buildStatusLine", () => {
       theme: ascii,
       width: 120,
     });
-    expect(line).toBe(" -> vpoke.playground-vercel.tools  - Checking access…");
+    expect(line).toBe(" -> vpoke.playground-vercel.tools - Checking access…");
   });
 });

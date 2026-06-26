@@ -2809,10 +2809,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     return rows;
   }
 
-  /**
-   * Appends the persistent bottom status line (model · tokens · Vercel link ·
-   * pending deploy) when any segment has content.
-   */
+  /** Appends the persistent bottom status line below the prompt when it has content. */
   #pushStatusLine(rows: string[], width: number): void {
     const padding = this.#remoteConnection === undefined ? "" : STATUS_LINE_LEFT_PADDING;
     const contentWidth = Math.max(1, width - padding.length);
@@ -2821,6 +2818,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
       width: contentWidth,
     };
     if (this.#logLevelHintActive) input.logLevel = this.#logs;
+    const serverUrl = this.#agentHeader?.serverUrl;
+    if (serverUrl !== undefined && this.#remoteConnection === undefined) {
+      const serverPort = new URL(serverUrl).port;
+      if (serverPort.length > 0) input.serverPort = serverPort;
+    }
     const model = this.#agentHeader?.info?.agent.model.id;
     if (model !== undefined) input.model = model;
     // The runner resolves model-provider state with `/info` before caching this

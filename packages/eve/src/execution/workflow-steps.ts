@@ -43,6 +43,7 @@ import {
   PendingAuthorizationResultKey,
   type AuthorizationResult,
 } from "#harness/authorization.js";
+import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
 import type { AuthorizationCallback } from "#runtime/connections/types.js";
 import {
@@ -114,13 +115,13 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
 
-  // Populate the callback base URL so getHookUrl() works during
-  // tool execution. Reads from workflow metadata (available in steps).
+  // Populate the callback base URL so getHookUrl() works during tool
+  // execution, preferring eve's active local origin over metadata fallback.
   try {
     const { getWorkflowMetadata } = await import("#compiled/@workflow/core/index.js");
     const metadata = getWorkflowMetadata();
     if (typeof metadata.url === "string") {
-      ctx.set(CallbackBaseUrlKey, metadata.url.replace(/\/$/, ""));
+      ctx.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl(metadata.url));
     }
   } catch {
     // Outside a workflow context (e.g. tests) — getHookUrl will return undefined.

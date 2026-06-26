@@ -23,6 +23,7 @@ import {
 } from "./runner.js";
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
 import { promptCommandsFor } from "./prompt-commands.js";
+import { interruptedError } from "./errors.js";
 import type { RemoteAuthFlow } from "./remote-auth.js";
 import type { RemoteAuthCompletedMutation } from "./remote-auth-result.js";
 import type { RemoteConnectionControllerOptions } from "./remote-connection.js";
@@ -1504,6 +1505,66 @@ describe("EveTUIRunner renderer teardown", () => {
 
     expect(shutdown).toHaveBeenCalledTimes(1);
   });
+
+  it("aborts child-session streams when Ctrl-C exits the runner", async () => {
+    const client = stubClient();
+    const childSession = client.session({ sessionId: "child-session", streamIndex: 0 });
+    let childSignal: AbortSignal | undefined;
+    vi.spyOn(client, "session").mockReturnValue(childSession);
+    vi.spyOn(childSession, "stream").mockImplementation((options) => {
+      const signal = options?.signal;
+      if (signal === undefined) {
+        throw new Error("Expected the child stream to receive an abort signal.");
+      }
+      childSignal = signal;
+      return {
+        async *[Symbol.asyncIterator]() {
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          yield {
+            type: "session.waiting",
+            data: { wait: "next-user-message" },
+          } as HandleMessageStreamEvent;
+        },
+      };
+    });
+
+    const runner = new EveTUIRunner({
+      client,
+      name: "Weather Agent",
+      renderer: fakeRenderer({
+        readPrompt: vi
+          .fn()
+          .mockResolvedValueOnce("delegate")
+          .mockRejectedValueOnce(interruptedError()),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events as AsyncIterable<unknown>) void event;
+        }),
+      }),
+      session: sessionYielding([
+        {
+          type: "subagent.called",
+          data: {
+            callId: "call-child",
+            childSessionId: "child-session",
+            name: "weather-child",
+            sequence: 0,
+            sessionId: "parent-session",
+            toolName: "delegate_weather",
+            turnId: "turn-parent",
+            workflowId: "workflow-parent",
+          },
+        },
+        { type: "turn.completed", data: { sequence: 0, turnId: "turn-parent" } },
+        { type: "session.waiting", data: { wait: "next-user-message" } },
+      ]),
+    });
+
+    await runner.run();
+
+    expect(childSignal?.aborted).toBe(true);
+  });
 });
 
 describe("EveTUIRunner Vercel status line", () => {
@@ -1536,7 +1597,9 @@ describe("EveTUIRunner Vercel status line", () => {
     await runner.run();
 
     expect(pushes).toEqual([{ identity, pendingDeploy: false }]);
-    expect(detectIdentity).toHaveBeenCalledWith("/tmp/weather-agent");
+    expect(detectIdentity).toHaveBeenCalledWith("/tmp/weather-agent", {
+      signal: expect.any(AbortSignal),
+    });
   });
 
   it("applies command effects: channels mark pending, deploy clears and re-probes", async () => {
