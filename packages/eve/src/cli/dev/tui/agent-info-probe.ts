@@ -5,7 +5,7 @@ import {
   type Client,
 } from "#client/index.js";
 
-const defaultRetryDelaysMs = [100] as const;
+const RETRY_DELAY_MS = 100;
 
 export type AgentInfoProbeResult =
   | { readonly kind: "ready"; readonly info: AgentInfoResult }
@@ -28,21 +28,18 @@ function sleep(delayMs: number): Promise<void> {
  */
 export async function probeAgentInfo(input: {
   readonly client: Pick<Client, "info">;
-  readonly retryDelaysMs?: readonly number[];
-  readonly wait?: (delayMs: number) => Promise<void>;
 }): Promise<AgentInfoProbeResult> {
-  const retryDelaysMs = input.retryDelaysMs ?? defaultRetryDelaysMs;
-  const wait = input.wait ?? sleep;
+  try {
+    return { kind: "ready", info: await input.client.info() };
+  } catch (error) {
+    if (!isRetryableAgentInfoFailure(error)) return { kind: "unavailable", error };
+  }
 
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      return { kind: "ready", info: await input.client.info() };
-    } catch (error) {
-      const delayMs = retryDelaysMs[attempt];
-      if (!isRetryableAgentInfoFailure(error) || delayMs === undefined) {
-        return { kind: "unavailable", error };
-      }
-      await wait(delayMs);
-    }
+  await sleep(RETRY_DELAY_MS);
+
+  try {
+    return { kind: "ready", info: await input.client.info() };
+  } catch (error) {
+    return { kind: "unavailable", error };
   }
 }

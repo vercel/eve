@@ -1318,11 +1318,11 @@ export class EveTUIRunner {
   }
 
   async #readAgentInfo(): Promise<AgentInfoResult | undefined> {
-    try {
-      return await this.#client?.info();
-    } catch {
-      return undefined;
-    }
+    const client = this.#client;
+    if (client === undefined) return;
+
+    const probe = await probeAgentInfo({ client });
+    return probe.kind === "ready" ? probe.info : undefined;
   }
 
   async #handleRuntimeArtifactsChanged(): Promise<void> {

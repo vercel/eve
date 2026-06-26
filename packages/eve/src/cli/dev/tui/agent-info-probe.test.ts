@@ -41,39 +41,70 @@ const AGENT_INFO = {
   workspace: { resourceRoot: null, rootEntries: [] },
 } satisfies AgentInfoResult;
 
+async function advanceRetry(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await vi.advanceTimersByTimeAsync(100);
+}
+
 describe("probeAgentInfo", () => {
   it("retries a transient server failure and returns inspection once the server is ready", async () => {
-    const info = vi
-      .fn<() => Promise<AgentInfoResult>>()
-      .mockRejectedValueOnce(new ClientError(500, "Runner did not become ready in time"))
-      .mockResolvedValueOnce(AGENT_INFO);
-    const client = { info } satisfies Pick<Client, "info">;
+    vi.useFakeTimers();
+    try {
+      const info = vi
+        .fn<() => Promise<AgentInfoResult>>()
+        .mockRejectedValueOnce(new ClientError(500, "Runner did not become ready in time"))
+        .mockResolvedValueOnce(AGENT_INFO);
+      const client = { info } satisfies Pick<Client, "info">;
 
-    await expect(
-      probeAgentInfo({
-        client,
-        retryDelaysMs: [1],
-        wait: async () => {},
-      }),
-    ).resolves.toEqual({ kind: "ready", info: AGENT_INFO });
-    expect(info).toHaveBeenCalledTimes(2);
+      const probe = probeAgentInfo({ client });
+      await advanceRetry();
+
+      await expect(probe).resolves.toEqual({ kind: "ready", info: AGENT_INFO });
+      expect(info).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("retries a network failure", async () => {
-    const info = vi
-      .fn<() => Promise<AgentInfoResult>>()
-      .mockRejectedValueOnce(new TypeError("fetch failed"))
-      .mockResolvedValueOnce(AGENT_INFO);
-    const client = { info } satisfies Pick<Client, "info">;
+    vi.useFakeTimers();
+    try {
+      const info = vi
+        .fn<() => Promise<AgentInfoResult>>()
+        .mockRejectedValueOnce(new TypeError("fetch failed"))
+        .mockResolvedValueOnce(AGENT_INFO);
+      const client = { info } satisfies Pick<Client, "info">;
 
-    await expect(
-      probeAgentInfo({
-        client,
-        retryDelaysMs: [1],
-        wait: async () => {},
-      }),
-    ).resolves.toEqual({ kind: "ready", info: AGENT_INFO });
-    expect(info).toHaveBeenCalledTimes(2);
+      const probe = probeAgentInfo({ client });
+      await advanceRetry();
+
+      await expect(probe).resolves.toEqual({ kind: "ready", info: AGENT_INFO });
+      expect(info).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops after one retry", async () => {
+    vi.useFakeTimers();
+    try {
+      const firstFailure = new ClientError(500, "Runner did not become ready in time");
+      const secondFailure = new ClientError(500, "Still unavailable");
+      const info = vi
+        .fn<() => Promise<AgentInfoResult>>()
+        .mockRejectedValueOnce(firstFailure)
+        .mockRejectedValueOnce(secondFailure);
+      const client = { info } satisfies Pick<Client, "info">;
+
+      const probe = probeAgentInfo({ client });
+      await advanceRetry();
+
+      await expect(probe).resolves.toEqual({ kind: "unavailable", error: secondFailure });
+      expect(info).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([
@@ -84,13 +115,7 @@ describe("probeAgentInfo", () => {
     const info = vi.fn<() => Promise<AgentInfoResult>>().mockRejectedValueOnce(error);
     const client = { info } satisfies Pick<Client, "info">;
 
-    await expect(
-      probeAgentInfo({
-        client,
-        retryDelaysMs: [1],
-        wait: async () => {},
-      }),
-    ).resolves.toEqual({ kind: "unavailable", error });
+    await expect(probeAgentInfo({ client })).resolves.toEqual({ kind: "unavailable", error });
     expect(info).toHaveBeenCalledOnce();
   });
 });

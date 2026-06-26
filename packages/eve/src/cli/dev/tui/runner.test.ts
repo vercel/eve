@@ -386,7 +386,7 @@ describe("EveTUIRunner agent header", () => {
     expect(session.send).toHaveBeenCalledTimes(2);
   });
 
-  it("refreshes the agent header while waiting for prompt input", async () => {
+  it("retries a transient info failure while refreshing the agent header", async () => {
     vi.useFakeTimers();
     const headers: AgentTUIAgentHeader[] = [];
     const prompt = createDeferred<string | undefined>();
@@ -400,7 +400,10 @@ describe("EveTUIRunner agent header", () => {
       },
     };
     const client = stubClient();
-    vi.spyOn(client, "info").mockResolvedValueOnce(AGENT_INFO).mockResolvedValueOnce(nextInfo);
+    vi.spyOn(client, "info")
+      .mockResolvedValueOnce(AGENT_INFO)
+      .mockRejectedValueOnce(new ClientError(500, "Runner did not become ready in time"))
+      .mockResolvedValueOnce(nextInfo);
     const revisions = ["snapshot-a", "snapshot-b"];
     const fetchMock = vi.fn(async () =>
       Response.json({ revision: revisions.shift() ?? "snapshot-b" }),
@@ -429,9 +432,12 @@ describe("EveTUIRunner agent header", () => {
 
     await vi.advanceTimersByTimeAsync(500);
     await settleAsyncWork();
+    await vi.advanceTimersByTimeAsync(100);
+    await settleAsyncWork();
 
     expect(headers).toHaveLength(2);
     expect(headers[1]?.info?.agent.model.id).toBe("anthropic/claude-sonnet-4.6");
+    expect(client.info).toHaveBeenCalledTimes(3);
     expect(session.send).not.toHaveBeenCalled();
 
     prompt.resolve(undefined);
