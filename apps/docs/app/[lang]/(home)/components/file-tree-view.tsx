@@ -97,6 +97,11 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
               </div>
             </div>
           </div>
+          {/* Dissolve the lower edge of the card into its background. */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-32 bg-linear-to-t from-background-100 to-transparent"
+          />
         </div>
       </div>
     </div>
