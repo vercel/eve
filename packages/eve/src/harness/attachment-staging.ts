@@ -11,6 +11,7 @@ import { SandboxKey } from "#context/keys.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { fileDataToBytes } from "#internal/attachments/data.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
+import { createLogger } from "#internal/logging.js";
 import { deserializeUrlFilePart, isSerializedUrlFilePart } from "#internal/attachments/url-refs.js";
 import {
   decodeSandboxRef,
@@ -27,6 +28,8 @@ import { toErrorMessage } from "#shared/errors.js";
  * translates to the backend-native location.
  */
 export const ATTACHMENTS_ROOT = "/workspace/attachments";
+
+const log = createLogger("harness.attachment-staging");
 
 const UNSAFE_FILENAME_CHARS = /[^\w.-]+/g;
 const SHA_PREFIX_LENGTH = 16;
@@ -229,10 +232,22 @@ async function hydrateMessageContent(content: unknown, sandbox: SandboxSession):
       }
       const bytes = await sandbox.readBinaryFile({ path: ref.path });
       if (bytes === null) {
-        throw new Error(
-          `Sandbox-ref FilePart references missing file: "${ref.path}". ` +
-            "The staging pipeline invariant (every eve-sandbox: ref has bytes on disk) was violated.",
+        // Resuming a durable session can outlive the sandbox that staged
+        // an earlier turn's attachment: an ephemeral backend tears the
+        // sandbox down between turns, so the bytes behind a historical
+        // ref are gone. Degrade to a text reference instead of failing
+        // the whole turn — the run continues and the model is told the
+        // attachment is no longer reachable rather than chasing a path
+        // that has nothing behind it.
+        log.warn(
+          "sandbox-ref attachment bytes missing on hydration — degrading to text reference",
+          {
+            mediaType: ref.mediaType,
+            path: ref.path,
+            size: ref.size,
+          },
         );
+        return renderMissingSandboxRefAsTextPart(ref);
       }
       return { ...filePart, data: bytes, mediaType: ref.mediaType };
     }),
@@ -271,6 +286,20 @@ function shouldInlineSandboxRefAsBytes(ref: SandboxRef): boolean {
  */
 function renderSandboxRefAsTextPart(ref: SandboxRef): TextPart {
   return { text: `Attached file ${ref.path} (${ref.mediaType})`, type: "text" };
+}
+
+/**
+ * Renders a sandbox-resident attachment whose staged bytes are gone (the
+ * staging sandbox was torn down before the session resumed) as a
+ * {@link TextPart}. Unlike {@link renderSandboxRefAsTextPart}, this states
+ * the file is unreachable so the model does not try to read a path that no
+ * longer resolves.
+ */
+function renderMissingSandboxRefAsTextPart(ref: SandboxRef): TextPart {
+  return {
+    text: `Attached file ${ref.path} (${ref.mediaType}) is no longer available in this session.`,
+    type: "text",
+  };
 }
 
 async function stageFilePart(
