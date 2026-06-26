@@ -64,10 +64,15 @@ export interface EveEvalSubagentCallMatchOptions {
 
 /** Constraints accepted by `requireInputRequest`. */
 export interface EveEvalInputRequestMatchOptions {
+  /** Matcher over the request's display hint. */
   readonly display?: EveEvalValueMatcher<InputRequest["display"]>;
+  /** Partial-deep matcher over a tool-call action's input. */
   readonly input?: EveEvalValueMatcher<JsonObject>;
+  /** Matcher over the complete option-id list in request order. */
   readonly optionIds?: EveEvalValueMatcher<readonly string[]>;
+  /** Matcher over the request prompt. */
   readonly prompt?: EveEvalValueMatcher<string>;
+  /** Required tool name for a tool-call action. */
   readonly toolName?: string;
 }
 
@@ -76,12 +81,15 @@ export type EveEvalEventMatch<
   TType extends HandleMessageStreamEvent["type"] = HandleMessageStreamEvent["type"],
 > = TType extends HandleMessageStreamEvent["type"]
   ? {
+      /** Stream-event type to match. */
       readonly type: TType;
+      /** Partial-deep matcher over the event data. */
       readonly data?: EveEvalDeepMatcher<
         Extract<HandleMessageStreamEvent, { type: TType }> extends { data: infer TData }
           ? TData
           : never
       >;
+      /** Exact number of matching events required. Defaults to "at least one". */
       readonly count?: number;
     }
   : never;

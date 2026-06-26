@@ -467,6 +467,7 @@ export interface EveEvalResult {
   /** Per-eval verdict; see {@link EveEvalVerdict}. */
   readonly verdict: EveEvalVerdict;
   readonly error?: string;
+  /** Why the eval intentionally skipped, present only for a `"skipped"` verdict. */
   readonly skipReason?: string;
   readonly startedAt: string;
   readonly completedAt: string;

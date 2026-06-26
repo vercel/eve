@@ -95,6 +95,15 @@ t.calledSubagent("weather", {
 });
 ```
 
+`requireInputRequest` uses the same matcher language for `input`, `prompt`, and `display`. Its `optionIds` matcher receives option ids in request order; a literal array must match that complete ordered list exactly:
+
+```ts
+const request = session.requireInputRequest({
+  toolName: "ask_question",
+  optionIds: ["red", "blue"],
+});
+```
+
 ## Run state and derived facts
 
 Beyond the raw `t.events` stream, the runner derives typed facts the assertions read: tool calls (name, input, output, lifecycle status), subagent calls, and HITL input requests. A turn that leaves the session open for a next message is the normal end state of a successful turn; parking on unanswered HITL input is tracked separately.

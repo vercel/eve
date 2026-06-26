@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
-import type { EveEvalDerivedFacts, EveEvalTaskResult, EveEvalToolCall } from "#evals/types.js";
+import type {
+  EveEvalDerivedFacts,
+  EveEvalSubagentCall,
+  EveEvalTaskResult,
+  EveEvalToolCall,
+} from "#evals/types.js";
 import * as Run from "#evals/assertions/run.js";
 
 function makeResult(overrides: {
@@ -26,6 +31,15 @@ function toolCall(name: string, input: EveEvalToolCall["input"] = {}): EveEvalTo
 
 function completedToolCall(name: string): EveEvalToolCall {
   return { ...toolCall(name), output: "ok", status: "completed" };
+}
+
+function subagentCall(name: string, status: EveEvalSubagentCall["status"]): EveEvalSubagentCall {
+  return {
+    name,
+    output: status === "completed" ? "ok" : undefined,
+    status,
+    turnIndex: 0,
+  };
 }
 
 function message(text: string): HandleMessageStreamEvent {
@@ -145,6 +159,30 @@ describe("run assertions", () => {
     );
   });
 
+  it("calledSubagent matches every lifecycle status and exact counts", async () => {
+    const result = makeResult({
+      derived: {
+        subagentCalls: [
+          subagentCall("child", "pending"),
+          subagentCall("child", "completed"),
+          subagentCall("child", "failed"),
+          subagentCall("child", "rejected"),
+        ],
+        subagentCallCount: 4,
+      },
+    });
+
+    expect((await Run.calledSubagent("child").evaluate(result)).score).toBe(1);
+    for (const status of ["pending", "completed", "failed", "rejected"] as const) {
+      expect((await Run.calledSubagent("child", { status, count: 1 }).evaluate(result)).score).toBe(
+        1,
+      );
+    }
+    expect(
+      (await Run.calledSubagent("child", { status: "completed", count: 2 }).evaluate(result)).score,
+    ).toBe(0);
+  });
+
   it("toolOrder checks request order", async () => {
     const ordered = makeResult({
       events: [
@@ -222,6 +260,36 @@ describe("run assertions", () => {
         ).evaluate(result)
       ).score,
     ).toBe(1);
+  });
+
+  it("eventOrder rejects interleaved event groups", async () => {
+    const called = {
+      type: "subagent.called",
+      data: {
+        name: "child",
+        callId: "c",
+        childSessionId: "s",
+        sessionId: "p",
+        sequence: 1,
+        toolName: "subagent",
+        turnId: "t",
+        workflowId: "w",
+      },
+    } as HandleMessageStreamEvent;
+    const completed = {
+      type: "subagent.completed",
+      data: { callId: "c", output: "ok", sequence: 2, subagentName: "child", turnId: "t" },
+    } as HandleMessageStreamEvent;
+    const result = makeResult({ events: [called, completed, called] });
+
+    expect(
+      (
+        await Run.eventOrder([
+          { type: "subagent.called", data: { name: "child" }, count: 2 },
+          { type: "subagent.completed", data: { subagentName: "child" } },
+        ]).evaluate(result)
+      ).score,
+    ).toBe(0);
   });
 
   it("loadedSkill matches a load_skill call by skill id", async () => {

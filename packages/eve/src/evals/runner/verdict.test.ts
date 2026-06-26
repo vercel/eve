@@ -64,6 +64,15 @@ describe("computeEvalVerdict", () => {
     ).toBe("passed");
   });
 
+  it("returns skipped when an eval intentionally skips without another failure", () => {
+    expect(
+      computeEvalVerdict({
+        assertions: [],
+        skipReason: "unsupported target",
+      }),
+    ).toBe("skipped");
+  });
+
   it("never lets an explicit skip mask errors or failed gates", () => {
     expect(
       computeEvalVerdict({
