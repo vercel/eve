@@ -20,6 +20,7 @@ import { isCardElement, type CardElement, type FileUpload } from "#compiled/chat
 import { createLogger, logError } from "#internal/logging.js";
 import { encodeSlackApiBody } from "#public/channels/slack/api-encoding.js";
 import { cardToBlocks, cardToFallbackText } from "#public/channels/slack/blocks.js";
+import { truncateTypingStatus } from "#public/channels/slack/limits.js";
 import {
   gfmToSlackMrkdwn,
   rewriteBareMentions,
@@ -481,13 +482,14 @@ export function buildSlackBinding(input: {
     async startTyping(status) {
       if (!input.channelId || !currentThreadTs) return;
       try {
+        const normalizedStatus = status === undefined ? "" : truncateTypingStatus(status);
         const body: Record<string, unknown> = {
           channel_id: input.channelId,
           thread_ts: currentThreadTs,
-          status: status ?? "",
+          status: normalizedStatus,
         };
-        if (status !== undefined && status.length > 0) {
-          body.loading_messages = [status];
+        if (normalizedStatus.length > 0) {
+          body.loading_messages = [normalizedStatus];
         }
         const response = await request("assistant.threads.setStatus", body);
         if (response.ok !== true) {

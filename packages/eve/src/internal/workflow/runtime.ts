@@ -1,4 +1,3 @@
-import "#internal/workflow/queue-namespace.js";
 import * as workflowRuntime from "#compiled/@workflow/core/runtime.js";
 
 export * from "#compiled/@workflow/core/runtime.js";

@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { STABLE_WORKFLOW_NAMES } from "#execution/workflow-runtime.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
-import { EVE_WORKFLOW_QUEUE_TOPIC } from "#internal/workflow/queue-namespace.js";
+import { deriveEveWorkflowQueueTopic } from "#internal/workflow/queue-namespace.js";
 
 import { transformWorkflowDirectives } from "./workflow-transformer.js";
 
@@ -32,13 +32,15 @@ export type WorkflowManifest = {
   };
 };
 
-export const WORKFLOW_QUEUE_TRIGGER = {
-  type: "queue/v2beta",
-  topic: EVE_WORKFLOW_QUEUE_TOPIC,
-  consumer: "default",
-  retryAfterSeconds: 5,
-  initialDelaySeconds: 0,
-} as const;
+export function createEveWorkflowQueueTrigger(agentName: string) {
+  return {
+    type: "queue/v2beta" as const,
+    topic: deriveEveWorkflowQueueTopic(agentName),
+    consumer: "default",
+    retryAfterSeconds: 5,
+    initialDelaySeconds: 0,
+  };
+}
 
 type PackageInfo = {
   dir: string;

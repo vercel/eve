@@ -6,12 +6,18 @@ import { afterAll } from "vitest";
 
 import { resolvePackageRoot } from "#internal/application/package.js";
 import { resolveWorkflowTestOutputDirectory } from "#internal/testing/workflow-vitest-plugin.js";
-import { EVE_WORKFLOW_QUEUE_PREFIX } from "#internal/workflow/queue-namespace.js";
+import {
+  deriveEveWorkflowQueuePrefix,
+  installEveWorkflowQueueNamespace,
+} from "#internal/workflow/queue-namespace.js";
 import { setWorld } from "#internal/workflow/runtime.js";
+
+import { WORKFLOW_TEST_AGENT_NAME } from "./workflow-global-setup.js";
 
 const packageRoot = resolvePackageRoot();
 const outDir = resolveWorkflowTestOutputDirectory(packageRoot);
 const poolId = process.env.VITEST_POOL_ID ?? "0";
+installEveWorkflowQueueNamespace(WORKFLOW_TEST_AGENT_NAME);
 const world = createLocalWorld({
   dataDir: join(packageRoot, ".workflow-data"),
   tag: `vitest-${poolId}`,
@@ -19,7 +25,10 @@ const world = createLocalWorld({
 
 await world.start?.();
 await world.clear();
-world.registerHandler(EVE_WORKFLOW_QUEUE_PREFIX, createLazyHandler(join(outDir, "workflows.mjs")));
+world.registerHandler(
+  deriveEveWorkflowQueuePrefix(WORKFLOW_TEST_AGENT_NAME),
+  createLazyHandler(join(outDir, "workflows.mjs")),
+);
 setWorld(world);
 
 afterAll(async () => {

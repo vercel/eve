@@ -61,9 +61,9 @@ identically at build and runtime, and Vercel has no team variable at runtime.
 
 Most local and deployed evals run the fixture agents and judges against real
 models (`openai/gpt-5.5`), so the environment must provide the corresponding
-model-provider credentials. `agent-workflow-stress` uses an authored AI SDK
-mock model so its 100-turn runs stay fast and deterministic. Its concurrent and
-sequential evals cover high-volume session execution and repeated session
+model-provider credentials. `agent-workflow-stress` uses eve's `mockModel`
+fixture helper so its 100-turn runs stay fast and deterministic. Its concurrent
+and sequential evals cover high-volume session execution and repeated session
 resumption respectively.
 
 ## Fixtures

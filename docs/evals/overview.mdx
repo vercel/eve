@@ -58,6 +58,44 @@ export default defineEvalConfig({
 
 Everything is optional. `judge` sets the default model for [LLM-as-judge](./judge) assertions (`t.judge.*`); a tree of fully deterministic evals can omit it. `reporters`, `maxConcurrency`, and `timeoutMs` round out the defaults. Config `reporters` observe every eval in the run, so set one `Braintrust()` here instead of adding it to each eval. CLI flags (`--max-concurrency`, `--timeout`) and per-eval values take precedence over the config defaults.
 
+## Deterministic fixture models
+
+Use `mockModel` when an eval fixture needs to exercise eve's runtime without calling a model provider. A static fixture can be one line:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+import { mockModel } from "eve/evals";
+
+export default defineAgent({
+  model: mockModel("A deterministic reply"),
+});
+```
+
+Pass a callback when the reply depends on the conversation. The callback receives an eve-owned view of the prompt, including `lastUserMessage`, `userMessages`, `userMessageCount`, available `tools`, and prior `toolResults`:
+
+```ts title="agent/agent.ts"
+export default defineAgent({
+  model: mockModel(
+    ({ lastUserMessage, userMessageCount }) => `Turn ${userMessageCount}: ${lastUserMessage}`,
+  ),
+});
+```
+
+The callback may return `{ text, toolCalls, usage }` for deterministic tool loops or explicit token counts. Use the options form only when a fixture also needs a custom model identity:
+
+```ts title="agent/agent.ts"
+model: mockModel({
+  modelId: "weather-script",
+  provider: "my-fixtures",
+  respond: ({ toolResults }) =>
+    toolResults.length === 0
+      ? { toolCalls: [{ name: "get_weather", input: { city: "Brooklyn" } }] }
+      : `Weather: ${JSON.stringify(toolResults[0]?.output)}`,
+});
+```
+
+`mockModel()` uses `"Mock response"` when no response is supplied. It handles both generated and streamed responses, derives deterministic response metadata, and estimates token usage. Because the model is part of the agent definition, use it for a dedicated fixture agent; it remains mocked whether that fixture runs locally or as a deployed eval target.
+
 ## The `t` context
 
 `t` is both the driver and the assertion surface. There are no separate `input`, `run`, `checks`, or `scores` fields. You write ordinary control flow, sending turns and asserting inline.
