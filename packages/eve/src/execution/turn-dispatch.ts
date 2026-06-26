@@ -1,12 +1,8 @@
-import { createHook } from "#compiled/@workflow/core/index.js";
-
 import type { DeliverHookPayload, HookPayload, SessionCapabilities } from "#channel/types.js";
+import { TurnControlReceiver } from "#execution/turn-control-receiver.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import type { SessionDeliveryHook } from "#execution/session-delivery-hook.js";
-import { nextTurnControl, serviceTurnDeliveryRequest } from "#execution/turn-delivery-relay.js";
-import type { TurnCompletionPayload } from "#execution/turn-workflow.js";
 import { dispatchTurnStep } from "#execution/workflow-steps.js";
 import type { RunMode } from "#shared/run-mode.js";
 
@@ -14,7 +10,7 @@ import type { RunMode } from "#shared/run-mode.js";
 export async function dispatchAndAwaitTurn(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly capabilities?: SessionCapabilities;
-  readonly completionToken: string;
+  readonly controlToken: string;
   readonly delivery: HookPayload;
   readonly deliveryHook: SessionDeliveryHook;
   readonly mode: RunMode;
@@ -22,21 +18,16 @@ export async function dispatchAndAwaitTurn(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<NextDriverAction> {
-  const completion = createHook<TurnCompletionPayload>({ token: input.completionToken });
-  const completionIterator = completion[Symbol.asyncIterator]();
-  let pendingCompletion: Promise<IteratorResult<TurnCompletionPayload>> | null = null;
-  const getCompletionPromise = (): Promise<IteratorResult<TurnCompletionPayload>> => {
-    pendingCompletion ??= completionIterator.next();
-    return pendingCompletion;
-  };
-  const consumeCompletion = (): void => {
-    pendingCompletion = null;
-  };
+  const control = new TurnControlReceiver({
+    bufferedDeliveries: input.bufferedDeliveries,
+    deliveryHook: input.deliveryHook,
+    token: input.controlToken,
+  });
 
   try {
     await dispatchTurnStep({
       capabilities: input.capabilities,
-      completionToken: completion.token,
+      completionToken: control.token,
       delivery: input.delivery,
       mode: input.mode,
       parentWritable: input.parentWritable,
@@ -44,34 +35,8 @@ export async function dispatchAndAwaitTurn(input: {
       sessionState: input.sessionState,
     });
 
-    while (true) {
-      const payload = await nextTurnControl({
-        consumeCompletion,
-        getCompletionPromise,
-        onClosed: "Turn completion hook closed before delivering a result.",
-        rekeyHook: input.deliveryHook.rekey,
-      });
-
-      if (payload.kind === "turn-result") {
-        if (payload.bufferedDeliveries !== undefined) {
-          input.bufferedDeliveries.unshift(...payload.bufferedDeliveries);
-        }
-        return payload.action;
-      }
-
-      if (payload.kind !== "turn-delivery-request") continue;
-
-      const terminal = await serviceTurnDeliveryRequest({
-        bufferedDeliveries: input.bufferedDeliveries,
-        consumeCompletion,
-        deliveryHook: input.deliveryHook,
-        getCompletionPromise,
-        request: payload,
-      });
-      if (terminal !== undefined) return terminal;
-    }
+    return await control.waitForAction();
   } finally {
-    await closeHookIterator(completionIterator);
-    await disposeHook(completion);
+    await control.dispose();
   }
 }

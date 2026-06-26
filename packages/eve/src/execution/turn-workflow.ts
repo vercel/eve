@@ -1,8 +1,8 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
-import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
+import type { DeliverHookPayload } from "#channel/types.js";
+import { sendTurnControlStep, type TurnInboxPayload } from "#execution/turn-control-protocol.js";
 import { dispatchTurnRuntimeActionsStep } from "#execution/dispatch-turn-runtime-actions-step.js";
-import type { DurableSessionState } from "#execution/durable-session-store.js";
 import {
   migrateTurnWorkflowInput,
   type TurnStepInput,
@@ -11,44 +11,13 @@ import {
 import { claimHookOwnership, closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
+import { TurnExecutionCursor } from "#execution/turn-execution-cursor.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { runProxyInputRequestStep, turnStep } from "#execution/workflow-steps.js";
 import { resolveRuntimeActionResultsForKeys } from "#harness/runtime-actions.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
 
 const TASK_MODE_WAIT_ERROR_MESSAGE = "Task mode cannot wait for follow-up input (`next: null`).";
-
-/** Payloads delivered to the private inbox owned by one active turn. */
-export type TurnInboxPayload =
-  | HookPayload
-  | {
-      readonly delivery: DeliverHookPayload;
-      readonly kind: "driver-delivery";
-      readonly requestId: string;
-    };
-
-/**
- * Control payloads emitted from the active turn to its session driver.
- * Older drivers only receive the two legacy terminal variants because they
- * do not advertise the turn-inbox capability.
- */
-export type TurnCompletionPayload =
-  | {
-      readonly action: NextDriverAction;
-      readonly bufferedDeliveries?: readonly DeliverHookPayload[];
-      readonly kind: "turn-result";
-    }
-  | { readonly kind: "turn-error"; readonly error: unknown }
-  | { readonly continuationToken: string; readonly kind: "turn-continuation-token" }
-  | {
-      readonly continuationToken: string;
-      readonly inboxToken: string;
-      readonly kind: "turn-delivery-request";
-      readonly requestId: string;
-    }
-  | { readonly kind: "turn-delivery-accepted"; readonly requestId: string }
-  | { readonly kind: "turn-delivery-cancelled"; readonly requestId: string };
 
 export type { TurnWorkflowInput };
 
@@ -69,41 +38,26 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
   const inbox = createHook<TurnInboxPayload>({ token: `${input.completionToken}:inbox` });
   const iterator = inbox[Symbol.asyncIterator]();
   const bufferedDeliveries: DeliverHookPayload[] = [];
-  let currentStepInput: TurnStepInput = input.stepInput;
-
-  // Reports each mid-turn continuation-token change to the driver exactly
-  // once so it can rekey the public delivery hook in lock-step with the session.
-  let lastToken = input.stepInput.sessionState.continuationToken;
-  const syncToken = async (nextToken: string): Promise<void> => {
-    if (nextToken === "" || nextToken === lastToken) return;
-    lastToken = nextToken;
-    await notifyDriverStep({
-      completionToken: input.completionToken,
-      payload: { continuationToken: nextToken, kind: "turn-continuation-token" },
-    });
-  };
+  const cursor = new TurnExecutionCursor({
+    controlToken: input.completionToken,
+    parentWritable: input.stepInput.parentWritable,
+    serializedContext: input.stepInput.serializedContext,
+    sessionState: input.stepInput.sessionState,
+  });
+  let nextStepInput = input.stepInput.input;
 
   try {
     await claimHookOwnership(inbox);
 
     while (true) {
-      const result = await turnStep(currentStepInput);
+      const result = await turnStep(cursor.createStepInput(nextStepInput));
 
       if (result.action === "done") {
-        await notifyDriverStep({
-          completionToken: input.completionToken,
-          payload: {
-            action: {
-              kind: "done",
-              output: result.output ?? "",
-              isError: result.isError,
-              serializedContext: result.serializedContext,
-              sessionState: result.sessionState,
-            },
-            bufferedDeliveries: optionalBufferedDeliveries(bufferedDeliveries),
-            kind: "turn-result",
-          },
-        });
+        await cursor.finish(
+          result,
+          { kind: "done", output: result.output ?? "", isError: result.isError },
+          bufferedDeliveries,
+        );
         return;
       }
 
@@ -116,34 +70,25 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
           : undefined;
 
       if (pendingActionKeys !== undefined) {
-        await syncToken(result.sessionState.continuationToken);
+        await cursor.adopt(result);
         const dispatchResult = await dispatchTurnRuntimeActionsStep({
           parentContinuationToken: inbox.token,
-          parentWritable: currentStepInput.parentWritable,
-          serializedContext: result.serializedContext,
-          sessionState: result.sessionState,
+          parentWritable: cursor.parentWritable,
+          serializedContext: cursor.serializedContext,
+          sessionState: cursor.sessionState,
           workflowInterrupt: result.action === "dispatch-workflow-runtime-actions",
         });
-        await syncToken(dispatchResult.sessionState.continuationToken);
+        await cursor.adopt(dispatchResult);
 
-        const resumed = await waitForRuntimeActionResults({
+        const results = await waitForRuntimeActionResults({
           bufferedDeliveries,
-          completionToken: input.completionToken,
+          cursor,
           inbox,
           initialResults: dispatchResult.results,
           iterator,
-          parentWritable: currentStepInput.parentWritable,
           pendingActionKeys,
-          serializedContext: result.serializedContext,
-          sessionState: dispatchResult.sessionState,
-          syncToken,
         });
-        currentStepInput = {
-          input: { kind: "runtime-action-result", results: resumed.results },
-          parentWritable: currentStepInput.parentWritable,
-          serializedContext: resumed.serializedContext,
-          sessionState: resumed.sessionState,
-        };
+        nextStepInput = { kind: "runtime-action-result", results };
         continue;
       }
 
@@ -155,35 +100,22 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
 
         if (!canPark) throw new Error(TASK_MODE_WAIT_ERROR_MESSAGE);
 
-        await notifyDriverStep({
-          completionToken: input.completionToken,
-          payload: {
-            action: {
-              authorizationNames: result.authorizationNames,
-              kind: "park",
-              serializedContext: result.serializedContext,
-              sessionState: result.sessionState,
-            },
-            bufferedDeliveries: optionalBufferedDeliveries(bufferedDeliveries),
-            kind: "turn-result",
+        await cursor.finish(
+          result,
+          {
+            authorizationNames: result.authorizationNames,
+            kind: "park",
           },
-        });
+          bufferedDeliveries,
+        );
         return;
       }
 
-      await syncToken(result.sessionState.continuationToken);
-      currentStepInput = {
-        input: undefined,
-        parentWritable: currentStepInput.parentWritable,
-        serializedContext: result.serializedContext,
-        sessionState: result.sessionState,
-      };
+      await cursor.adopt(result);
+      nextStepInput = undefined;
     }
   } catch (error) {
-    await notifyDriverStep({
-      completionToken: input.completionToken,
-      payload: { error: normalizeSerializableError(error), kind: "turn-error" },
-    });
+    await cursor.send({ error: normalizeSerializableError(error), kind: "turn-error" });
     throw error;
   } finally {
     await closeHookIterator(iterator);
@@ -193,22 +125,12 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
 
 async function waitForRuntimeActionResults(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
-  readonly completionToken: string;
+  readonly cursor: TurnExecutionCursor;
   readonly inbox: Hook<TurnInboxPayload>;
   readonly initialResults: readonly RuntimeActionResult[];
   readonly iterator: AsyncIterator<TurnInboxPayload>;
-  readonly parentWritable: WritableStream<Uint8Array>;
   readonly pendingActionKeys: readonly string[];
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-  readonly syncToken: (nextToken: string) => Promise<void>;
-}): Promise<{
-  readonly results: readonly RuntimeActionResult[];
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}> {
-  let currentSerializedContext = input.serializedContext;
-  let currentSessionState = input.sessionState;
+}): Promise<readonly RuntimeActionResult[]> {
   let pendingDeliveryRequest: string | undefined;
   let deliveryRequestIndex = 0;
   const results: RuntimeActionResult[] = [...input.initialResults];
@@ -222,28 +144,21 @@ async function waitForRuntimeActionResults(input: {
       if (pendingDeliveryRequest !== undefined) {
         // The entry may already be racing public input against this wait.
         // Cancellation keeps that input available for the next parent turn.
-        await notifyDriverStep({
-          completionToken: input.completionToken,
-          payload: { kind: "turn-delivery-cancelled", requestId: pendingDeliveryRequest },
+        await input.cursor.send({
+          kind: "turn-delivery-cancelled",
+          requestId: pendingDeliveryRequest,
         });
       }
-      return {
-        results: ready,
-        serializedContext: currentSerializedContext,
-        sessionState: currentSessionState,
-      };
+      return ready;
     }
 
-    if (currentSessionState.hasProxyInputRequests && pendingDeliveryRequest === undefined) {
+    if (input.cursor.sessionState.hasProxyInputRequests && pendingDeliveryRequest === undefined) {
       pendingDeliveryRequest = `${input.inbox.token}:delivery:${String(deliveryRequestIndex++)}`;
-      await notifyDriverStep({
-        completionToken: input.completionToken,
-        payload: {
-          continuationToken: currentSessionState.continuationToken,
-          inboxToken: input.inbox.token,
-          kind: "turn-delivery-request",
-          requestId: pendingDeliveryRequest,
-        },
+      await input.cursor.send({
+        continuationToken: input.cursor.sessionState.continuationToken,
+        inboxToken: input.inbox.token,
+        kind: "turn-delivery-request",
+        requestId: pendingDeliveryRequest,
       });
     }
 
@@ -259,13 +174,11 @@ async function waitForRuntimeActionResults(input: {
     if (value.kind === "subagent-input-request") {
       const proxyResult = await runProxyInputRequestStep({
         hookPayload: value,
-        parentWritable: input.parentWritable,
-        serializedContext: currentSerializedContext,
-        sessionState: currentSessionState,
+        parentWritable: input.cursor.parentWritable,
+        serializedContext: input.cursor.serializedContext,
+        sessionState: input.cursor.sessionState,
       });
-      currentSerializedContext = proxyResult.serializedContext;
-      currentSessionState = proxyResult.sessionState;
-      await input.syncToken(currentSessionState.continuationToken);
+      await input.cursor.adopt(proxyResult);
       continue;
     }
 
@@ -274,29 +187,20 @@ async function waitForRuntimeActionResults(input: {
     // through the request handshake. A stale, non-matching request id means
     // the turn already resolved and the driver re-buffered the delivery.
     if (value.kind === "driver-delivery" && value.requestId === pendingDeliveryRequest) {
-      await notifyDriverStep({
-        completionToken: input.completionToken,
-        payload: { kind: "turn-delivery-accepted", requestId: value.requestId },
-      });
+      await input.cursor.send({ kind: "turn-delivery-accepted", requestId: value.requestId });
       pendingDeliveryRequest = undefined;
 
       const remainder = await routeDeliverToChildren({
         auth: value.delivery.auth,
-        parentWritable: input.parentWritable,
+        parentWritable: input.cursor.parentWritable,
         payloads: value.delivery.payloads,
-        sessionState: currentSessionState,
+        sessionState: input.cursor.sessionState,
       });
       if (remainder !== undefined) {
         input.bufferedDeliveries.push({ ...value.delivery, payloads: [remainder] });
       }
     }
   }
-}
-
-function optionalBufferedDeliveries(
-  deliveries: readonly DeliverHookPayload[],
-): readonly DeliverHookPayload[] | undefined {
-  return deliveries.length === 0 ? undefined : [...deliveries];
 }
 
 async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
@@ -307,8 +211,8 @@ async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
       const result = await turnStep(currentStepInput);
 
       if (result.action === "done") {
-        await notifyDriverStep({
-          completionToken: input.completionToken,
+        await sendTurnControlStep({
+          controlToken: input.completionToken,
           payload: {
             action: {
               kind: "done",
@@ -324,8 +228,8 @@ async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
       }
 
       if (result.action === "dispatch-workflow-runtime-actions") {
-        await notifyDriverStep({
-          completionToken: input.completionToken,
+        await sendTurnControlStep({
+          controlToken: input.completionToken,
           payload: {
             action: {
               kind: "dispatch-workflow-runtime-actions",
@@ -364,8 +268,8 @@ async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
                 authorizationNames: result.authorizationNames,
               };
 
-        await notifyDriverStep({
-          completionToken: input.completionToken,
+        await sendTurnControlStep({
+          controlToken: input.completionToken,
           payload: { action, kind: "turn-result" },
         });
         return;
@@ -379,20 +283,10 @@ async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
       };
     }
   } catch (error) {
-    await notifyDriverStep({
-      completionToken: input.completionToken,
+    await sendTurnControlStep({
+      controlToken: input.completionToken,
       payload: { error: normalizeSerializableError(error), kind: "turn-error" },
     });
     throw error;
   }
-}
-
-/** Resumes the driver's control hook with one turn lifecycle payload. */
-export async function notifyDriverStep(input: {
-  readonly completionToken: string;
-  readonly payload: TurnCompletionPayload;
-}): Promise<void> {
-  "use step";
-
-  await resumeHook(input.completionToken, input.payload);
 }

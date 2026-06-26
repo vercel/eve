@@ -6,7 +6,7 @@ import type { HookPayload } from "#channel/types.js";
 import { ChannelRequestIdKey } from "#context/keys.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import type { TurnCompletionPayload } from "#execution/turn-workflow.js";
+import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { dispatchTurnStep } from "#execution/workflow-steps.js";
@@ -98,7 +98,7 @@ describe("workflowEntry", () => {
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
     installHookMocks({
       deliveryHooks: [{ getConflict, token: "http:test" }],
-      turnCompletions: [
+      turnControls: [
         turnResult({
           action: "done",
           output: "ok",
@@ -153,7 +153,7 @@ describe("workflowEntry", () => {
           token: "http:test",
         },
       ],
-      turnCompletions: [],
+      turnControls: [],
     });
 
     await expect(
@@ -189,7 +189,7 @@ describe("workflowEntry", () => {
           token: "http:test",
         },
       ],
-      turnCompletions: [],
+      turnControls: [],
     });
 
     await expect(
@@ -212,7 +212,7 @@ describe("workflowEntry", () => {
     const sessionState = createBaseSessionState();
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
     installHookMocks({
-      turnCompletions: [turnResult({ action: "done", output: "ok", sessionState })],
+      turnControls: [turnResult({ action: "done", output: "ok", sessionState })],
     });
 
     await workflowEntry({
@@ -245,7 +245,7 @@ describe("workflowEntry", () => {
           ],
         },
       ],
-      turnCompletions: [
+      turnControls: [
         turnResult({ action: "park", sessionState }),
         turnResult({ action: "done", output: "ok", sessionState }),
       ],
@@ -281,7 +281,7 @@ describe("workflowEntry", () => {
     vi.mocked(createHook).mockImplementation((options?: { readonly token?: string }) => {
       const token = options?.token ?? "";
       if (isTurnCompletionToken(token)) {
-        return createMockHook<TurnCompletionPayload>({
+        return createMockHook<TurnControlPayload>({
           next: async () => {
             completionIndex += 1;
             if (completionIndex === 1) {
@@ -348,7 +348,7 @@ describe("workflowEntry", () => {
 
     vi.mocked(createHook).mockImplementation((options?: { readonly token?: string }) => {
       const token = options?.token ?? "";
-      if (token.endsWith(":turn-completion:0")) {
+      if (token.endsWith(":turn-control:0")) {
         return createMockHook({
           token,
           values: [
@@ -363,7 +363,7 @@ describe("workflowEntry", () => {
           ],
         }) as never;
       }
-      if (token.endsWith(":turn-completion:1")) {
+      if (token.endsWith(":turn-control:1")) {
         return createMockHook({
           token,
           values: [turnResult({ action: "done", output: "after delivery", sessionState })],
@@ -398,7 +398,7 @@ describe("workflowEntry", () => {
     const sessionState = createBaseSessionState();
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
     installHookMocks({
-      turnCompletions: [
+      turnControls: [
         turnResult({
           action: "done",
           output: "ok",
@@ -447,7 +447,7 @@ describe("workflowEntry", () => {
           values: [],
         },
       ],
-      turnCompletions: [turnResult({ action: "park", sessionState: rekeyedSessionState })],
+      turnControls: [turnResult({ action: "park", sessionState: rekeyedSessionState })],
     });
 
     const result = await workflowEntry({
@@ -489,7 +489,7 @@ describe("workflowEntry", () => {
           values: [],
         },
       ],
-      turnCompletions: [turnResult({ action: "park", sessionState: anchoredSessionState })],
+      turnControls: [turnResult({ action: "park", sessionState: anchoredSessionState })],
     });
 
     const result = await workflowEntry({
@@ -545,7 +545,7 @@ describe("workflowEntry", () => {
           values: [],
         },
       ],
-      turnCompletions: [
+      turnControls: [
         turnResult({ action: "park", sessionState: baseSessionState }),
         turnResult({ action: "park", sessionState: rekeyedSessionState }),
       ],
@@ -598,7 +598,7 @@ describe("workflowEntry", () => {
         },
       ],
       symbolDispose,
-      turnCompletions: [
+      turnControls: [
         turnResult({ action: "park", sessionState }),
         turnResult({ action: "done", output: "after resume", sessionState }),
       ],
@@ -643,7 +643,7 @@ function turnResult(input: {
   readonly output?: string;
   readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-}): TurnCompletionPayload {
+}): TurnControlPayload {
   const serializedContext = input.serializedContext ?? { "eve.sessionId": "wrun_test_123" };
   if (input.action === "done") {
     return {
@@ -669,18 +669,18 @@ function turnResult(input: {
 function installHookMocks(input: {
   readonly deliveryHooks?: readonly DeliveryHookConfig[];
   readonly symbolDispose?: () => void;
-  readonly turnCompletions: readonly TurnCompletionPayload[];
+  readonly turnControls: readonly TurnControlPayload[];
 }): void {
-  const turnCompletions = [...input.turnCompletions];
+  const turnControls = [...input.turnControls];
   const deliveryHooks = [...(input.deliveryHooks ?? [])];
 
   vi.mocked(createHook).mockImplementation((options?: { readonly token?: string }) => {
     const token = options?.token;
 
     if (token === undefined || isTurnCompletionToken(token)) {
-      const value = turnCompletions.shift();
+      const value = turnControls.shift();
       return createMockHook({
-        token: token ?? "turn-completion",
+        token: token ?? "turn-control",
         values: value === undefined ? [] : [value],
       }) as never;
     }
@@ -762,5 +762,5 @@ function nonTurnHookTokens(): string[] {
 }
 
 function isTurnCompletionToken(token: string): boolean {
-  return /:turn-completion:\d+$/.test(token);
+  return /:turn-control:\d+$/.test(token);
 }

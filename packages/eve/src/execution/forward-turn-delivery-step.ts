@@ -1,4 +1,4 @@
-import type { TurnInboxPayload } from "#execution/turn-workflow.js";
+import type { TurnInboxPayload } from "#execution/turn-control-protocol.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 
 /** Forwards one accepted public delivery to the private inbox of its requesting turn. */

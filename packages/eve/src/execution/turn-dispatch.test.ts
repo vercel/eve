@@ -5,7 +5,7 @@ import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import type { SessionDeliveryHook } from "#execution/session-delivery-hook.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
-import type { TurnCompletionPayload } from "#execution/turn-workflow.js";
+import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 
 const createHookMock = vi.fn();
 
@@ -29,7 +29,7 @@ describe("dispatchAndAwaitTurn", () => {
 
   it("rekeys the public hook when the active turn changes its continuation token", async () => {
     const state = createState("slack:C1:T1");
-    installCompletionHook([
+    installControlHook([
       { continuationToken: "slack:C1:T1", kind: "turn-continuation-token" },
       {
         action: { kind: "park", serializedContext: {}, sessionState: state },
@@ -41,7 +41,7 @@ describe("dispatchAndAwaitTurn", () => {
 
     await dispatchAndAwaitTurn({
       bufferedDeliveries: [],
-      completionToken: "turn-completion",
+      controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
       deliveryHook,
       mode: "conversation",
@@ -55,7 +55,7 @@ describe("dispatchAndAwaitTurn", () => {
 
   it("rekeys while a turn delivery request is already waiting", async () => {
     const state = createState("slack:C1:T1");
-    installCompletionHook([
+    installControlHook([
       {
         continuationToken: "slack:C1:",
         inboxToken: "turn-inbox",
@@ -74,7 +74,7 @@ describe("dispatchAndAwaitTurn", () => {
 
     await dispatchAndAwaitTurn({
       bufferedDeliveries: [],
-      completionToken: "turn-completion",
+      controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
       deliveryHook,
       mode: "conversation",
@@ -130,7 +130,7 @@ describe("dispatchAndAwaitTurn", () => {
     const bufferedDeliveries: DeliverHookPayload[] = [];
     await dispatchAndAwaitTurn({
       bufferedDeliveries,
-      completionToken: "turn-completion",
+      controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
       deliveryHook: createDeliveryHook({
         next: async () => ({
@@ -160,7 +160,7 @@ function createDeliveryHook(overrides: Partial<SessionDeliveryHook> = {}): Sessi
   };
 }
 
-function installCompletionHook(values: readonly TurnCompletionPayload[]): void {
+function installControlHook(values: readonly TurnControlPayload[]): void {
   const queue = [...values];
   createHookMock.mockReturnValue(
     createMockHook(async () => {
@@ -170,9 +170,9 @@ function installCompletionHook(values: readonly TurnCompletionPayload[]): void {
   );
 }
 
-function createMockHook(next: () => Promise<IteratorResult<TurnCompletionPayload>>): unknown {
+function createMockHook(next: () => Promise<IteratorResult<TurnControlPayload>>): unknown {
   return {
-    token: "turn-completion",
+    token: "turn-control",
     dispose: vi.fn(),
     [Symbol.asyncIterator]() {
       return {

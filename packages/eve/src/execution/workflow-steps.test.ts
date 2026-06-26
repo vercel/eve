@@ -190,7 +190,7 @@ describe("dispatchTurnStep", () => {
 
     return {
       capabilities: undefined,
-      completionToken: "turn-complete",
+      completionToken: "turn-control",
       delivery: {
         kind: "deliver",
         payloads: [{ message: "hello" }],

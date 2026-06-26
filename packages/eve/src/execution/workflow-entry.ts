@@ -153,11 +153,11 @@ async function runDriverLoop(input: {
   });
   const authIterator: AsyncIterator<HookPayload> = authHook[Symbol.asyncIterator]();
   // Fast descendant resumes can start the next turn before the prior
-  // completion hook disposal is persisted by the Workflow SDK, so each
+  // control hook disposal is persisted by the Workflow SDK, so each
   // turn needs its own session-scoped token.
   let turnDispatchIndex = 0;
-  const nextTurnCompletionToken = (): string =>
-    `${input.sessionState.sessionId}:turn-completion:${String(turnDispatchIndex++)}`;
+  const nextTurnControlToken = (): string =>
+    `${input.sessionState.sessionId}:turn-control:${String(turnDispatchIndex++)}`;
 
   const bufferedDeliveries: DeliverHookPayload[] = [];
   const deliveryHook = createSessionDeliveryHook(bufferedDeliveries);
@@ -170,7 +170,7 @@ async function runDriverLoop(input: {
     let action: NextDriverAction = await dispatchAndAwaitTurn({
       bufferedDeliveries,
       capabilities: input.capabilities,
-      completionToken: nextTurnCompletionToken(),
+      controlToken: nextTurnControlToken(),
       delivery: input.initialInput,
       deliveryHook,
       mode: input.mode,
@@ -222,7 +222,7 @@ async function runDriverLoop(input: {
             action = await dispatchAndAwaitTurn({
               bufferedDeliveries,
               capabilities: input.capabilities,
-              completionToken: nextTurnCompletionToken(),
+              controlToken: nextTurnControlToken(),
               delivery: {
                 kind: "deliver",
                 payloads: allPayloads,
@@ -262,7 +262,7 @@ async function runDriverLoop(input: {
           action = await dispatchAndAwaitTurn({
             bufferedDeliveries,
             capabilities: input.capabilities,
-            completionToken: nextTurnCompletionToken(),
+            controlToken: nextTurnControlToken(),
             delivery: {
               auth: nextDeliver.auth,
               kind: "deliver",
