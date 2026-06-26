@@ -1,8 +1,9 @@
-import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
+import { createHook, getWorkflowMetadata, type Hook } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import { sendTurnControlStep, type TurnInboxPayload } from "#execution/turn-control-protocol.js";
-import { dispatchTurnRuntimeActionsStep } from "#execution/dispatch-turn-runtime-actions-step.js";
+import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
+import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
 import {
   migrateTurnWorkflowInput,
   type TurnStepInput,
@@ -12,6 +13,7 @@ import { claimHookOwnership, closeHookIterator, disposeHook } from "#execution/h
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { TurnExecutionCursor } from "#execution/turn-execution-cursor.js";
+import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { runProxyInputRequestStep, turnStep } from "#execution/workflow-steps.js";
 import { resolveRuntimeActionResultsForKeys } from "#harness/runtime-actions.js";
@@ -71,12 +73,16 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
 
       if (pendingActionKeys !== undefined) {
         await cursor.adopt(result);
-        const dispatchResult = await dispatchTurnRuntimeActionsStep({
+        const dispatch =
+          result.action === "dispatch-workflow-runtime-actions"
+            ? dispatchWorkflowRuntimeActionsStep
+            : dispatchRuntimeActionsStep;
+        const dispatchResult = await dispatch({
+          callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
           parentContinuationToken: inbox.token,
           parentWritable: cursor.parentWritable,
           serializedContext: cursor.serializedContext,
           sessionState: cursor.sessionState,
-          workflowInterrupt: result.action === "dispatch-workflow-runtime-actions",
         });
         await cursor.adopt(dispatchResult);
 

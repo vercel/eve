@@ -107,6 +107,29 @@ describe("createSessionDeliveryHook", () => {
     expect(candidateHook.dispose).toHaveBeenCalledOnce();
   });
 
+  it("drains a committed delivery once and tolerates the retired hook re-arm rejecting", async () => {
+    // The old hook commits exactly one delivery before disposal (captured by
+    // the armed iterator read). Re-arming the retired hook awaits the exhausted
+    // cursor, which rejects; the delivery must surface exactly once and the
+    // rejection must not throw or resurrect it across later drain cycles.
+    const bufferedDeliveries: DeliverHookPayload[] = [];
+    installHooks(
+      createCursorHook({ committed: [deliveryPayload("old")], token: "old" }),
+      createCursorHook({ committed: [], token: "replacement" }),
+      createCursorHook({ committed: [], token: "third" }),
+    );
+    const deliveryHook = createSessionDeliveryHook(bufferedDeliveries);
+
+    await deliveryHook.rekey("old");
+    await deliveryHook.rekey("replacement");
+    // A further rekey forces extra drain cycles that would surface a duplicate
+    // if a retired re-arm re-yielded the already-consumed payload.
+    await deliveryHook.rekey("third");
+    await deliveryHook.dispose();
+
+    expect(bufferedDeliveries).toEqual([deliveryPayload("old")]);
+  });
+
   it("disposes without closing or settling a pending read", async () => {
     const hook = createMockHook({ token: "active" });
     installHooks(hook);
@@ -153,6 +176,43 @@ function createMockHook(input: {
     getConflict,
     token: input.token,
   });
+  return { dispose, hook, return: iteratorReturn, token: input.token };
+}
+
+/**
+ * Builds a hook whose `await hook` and async iterator share one delivery
+ * cursor: each read advances a queue of committed payloads, and awaiting an
+ * exhausted cursor rejects with a `HookNotFoundError` — the contract the
+ * retired-hook re-arm in `session-delivery-hook` relies on.
+ */
+function createCursorHook(input: {
+  readonly committed: readonly HookPayload[];
+  readonly token: string;
+}): MockHook {
+  const queue: IteratorResult<HookPayload>[] = input.committed.map((value) => ({
+    done: false,
+    value,
+  }));
+  const pull = (): IteratorResult<HookPayload> => queue.shift() ?? { done: true, value: undefined };
+  const dispose = vi.fn();
+  const iteratorReturn = vi.fn(async () => ({ done: true, value: undefined }) as const);
+  const hook = {
+    [Symbol.asyncIterator]() {
+      return { next: vi.fn(async () => pull()), return: iteratorReturn };
+    },
+    dispose,
+    getConflict: vi.fn(async () => null),
+    // eslint-disable-next-line unicorn/no-thenable -- a Workflow Hook is itself a thenable
+    then<T>(onFulfilled: (value: HookPayload) => T, onRejected?: (reason: unknown) => T) {
+      const item = queue.shift();
+      const settled =
+        item === undefined
+          ? Promise.reject(Object.assign(new Error("hook disposed"), { name: "HookNotFoundError" }))
+          : Promise.resolve(item.value);
+      return settled.then(onFulfilled, onRejected);
+    },
+    token: input.token,
+  };
   return { dispose, hook, return: iteratorReturn, token: input.token };
 }
 

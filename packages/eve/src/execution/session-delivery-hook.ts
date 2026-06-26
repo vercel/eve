@@ -62,6 +62,13 @@ export function createSessionDeliveryHook(
 
     state.pending = true;
     state.resolved = undefined;
+    // A retired hook is disposed, so its iterator can no longer be advanced;
+    // awaiting the hook itself surfaces the next payload that committed to the
+    // token before disposal. `await hook` and the iterator share one delivery
+    // cursor, so a payload already drained via the iterator is never re-yielded,
+    // and once the committed payloads are exhausted the read rejects (swallowed
+    // below) instead of resolving again. Re-arming a retired hook is therefore
+    // safe: it cannot double-count or resurrect a delivery.
     const next = state.retired
       ? Promise.resolve(state.hook).then(
           (value): IteratorResult<HookPayload> => ({ done: false, value }),
@@ -78,8 +85,10 @@ export function createSessionDeliveryHook(
         if (state.enabled) enqueue(read);
       },
       () => {
-        // `claimHookOwnership` owns candidate-claim errors. An active hook read
-        // cannot reject under the public delivery contract.
+        // `claimHookOwnership` owns candidate-claim errors, and an active hook
+        // read cannot reject under the public delivery contract. A retired hook
+        // read rejects once its committed payloads are exhausted; dropping it
+        // here leaves the retired state quiescent (pending, never re-enqueued).
       },
     );
   };

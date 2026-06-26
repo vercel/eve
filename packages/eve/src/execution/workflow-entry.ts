@@ -179,113 +179,100 @@ async function runDriverLoop(input: {
       sessionState: input.sessionState,
     });
 
-    if (action.kind === "done") {
-      return await finalizeDone({
-        action,
-        driverWritable: input.driverWritable,
-      });
-    }
-
-    if (!action.sessionState.continuationToken) {
-      throw new Error(
-        "Cannot park: no continuation token available. The channel must " +
-          "post the first message during the initial turn (anchoring the " +
-          "session) or `send()` must be called with an explicit " +
-          "continuationToken.",
-      );
-    }
-
-    // Rekey if the first turn changed the continuation token.
-    await deliveryHook.rekey(action.sessionState.continuationToken);
-
     while (true) {
-      switch (action.kind) {
-        case "done":
-          return await finalizeDone({
-            action,
-            driverWritable: input.driverWritable,
-          });
+      if (action.kind === "done") {
+        return await finalizeDone({
+          action,
+          driverWritable: input.driverWritable,
+        });
+      }
 
-        case "park": {
-          if (action.authorizationNames && action.authorizationNames.length > 0) {
-            const expected = action.authorizationNames.length;
-            const allPayloads: DeliverPayload[] = [];
+      if (action.kind !== "park") {
+        // Turn-owned turns resolve runtime actions in-line and only ever
+        // report `done`/`park`. The driver-owned `dispatch-*` arms exist
+        // solely for pre-change pinned drivers, which run their own code.
+        throw new Error(`Driver received unexpected turn action "${action.kind}".`);
+      }
 
-            while (allPayloads.length < expected) {
-              const next = await authIterator.next();
-              if (next.done) break;
-              if (next.value.kind === "deliver") {
-                allPayloads.push(...next.value.payloads);
-              }
-            }
+      if (!action.sessionState.continuationToken) {
+        throw new Error(
+          "Cannot park: no continuation token available. The channel must " +
+            "post the first message during the initial turn (anchoring the " +
+            "session) or `send()` must be called with an explicit " +
+            "continuationToken.",
+        );
+      }
 
-            action = await dispatchAndAwaitTurn({
-              bufferedDeliveries,
-              capabilities: input.capabilities,
-              controlToken: nextTurnControlToken(),
-              delivery: {
-                kind: "deliver",
-                payloads: allPayloads,
-              },
-              deliveryHook,
-              mode: input.mode,
-              parentWritable: input.driverWritable,
-              serializedContext: action.serializedContext,
-              sessionState: action.sessionState,
-            });
+      // Rekey to the parked turn's continuation token before awaiting the next
+      // delivery — covers both the first turn's anchor and any later rekey.
+      await deliveryHook.rekey(action.sessionState.continuationToken);
 
-            await deliveryHook.rekey(action.sessionState.continuationToken);
-            break;
+      if (action.authorizationNames && action.authorizationNames.length > 0) {
+        const expected = action.authorizationNames.length;
+        const allPayloads: DeliverPayload[] = [];
+
+        while (allPayloads.length < expected) {
+          const next = await authIterator.next();
+          if (next.done) break;
+          if (next.value.kind === "deliver") {
+            allPayloads.push(...next.value.payloads);
           }
-
-          const nextDeliver = await waitForNextDeliver({
-            bufferedDeliveries,
-            deliveryHook,
-          });
-
-          if (nextDeliver === null) {
-            return { output: "" };
-          }
-
-          const remainder = await routeDeliverToChildren({
-            auth: nextDeliver.auth,
-            parentWritable: input.driverWritable,
-            payloads: nextDeliver.payloads,
-            sessionState: action.sessionState,
-          });
-
-          if (remainder === undefined) {
-            // Fully routed to a descendant; parent has no turn to run.
-            continue;
-          }
-
-          action = await dispatchAndAwaitTurn({
-            bufferedDeliveries,
-            capabilities: input.capabilities,
-            controlToken: nextTurnControlToken(),
-            delivery: {
-              auth: nextDeliver.auth,
-              kind: "deliver",
-              payloads: [remainder],
-              requestId: nextDeliver.requestId,
-            },
-            deliveryHook,
-            mode: input.mode,
-            parentWritable: input.driverWritable,
-            serializedContext: action.serializedContext,
-            sessionState: action.sessionState,
-          });
-
-          await deliveryHook.rekey(action.sessionState.continuationToken);
-          break;
         }
 
-        default:
-          // Turn-owned turns resolve runtime actions in-line and only ever
-          // report `done`/`park`. The driver-owned `dispatch-*` arms exist
-          // solely for pre-change pinned drivers, which run their own code.
-          throw new Error(`Driver received unexpected turn action "${action.kind}".`);
+        action = await dispatchAndAwaitTurn({
+          bufferedDeliveries,
+          capabilities: input.capabilities,
+          controlToken: nextTurnControlToken(),
+          delivery: {
+            kind: "deliver",
+            payloads: allPayloads,
+          },
+          deliveryHook,
+          mode: input.mode,
+          parentWritable: input.driverWritable,
+          serializedContext: action.serializedContext,
+          sessionState: action.sessionState,
+        });
+        continue;
       }
+
+      const nextDeliver = await waitForNextDeliver({
+        bufferedDeliveries,
+        deliveryHook,
+      });
+
+      if (nextDeliver === null) {
+        return { output: "" };
+      }
+
+      const remainder = await routeDeliverToChildren({
+        auth: nextDeliver.auth,
+        parentWritable: input.driverWritable,
+        payloads: nextDeliver.payloads,
+        sessionState: action.sessionState,
+      });
+
+      if (remainder === undefined) {
+        // Fully routed to a descendant; parent has no turn to run.
+        continue;
+      }
+
+      action = await dispatchAndAwaitTurn({
+        bufferedDeliveries,
+        capabilities: input.capabilities,
+        controlToken: nextTurnControlToken(),
+        delivery: {
+          auth: nextDeliver.auth,
+          kind: "deliver",
+          payloads: [remainder],
+          requestId: nextDeliver.requestId,
+        },
+        deliveryHook,
+        mode: input.mode,
+        parentWritable: input.driverWritable,
+        serializedContext: action.serializedContext,
+        sessionState: action.sessionState,
+      });
     }
   } finally {
     await deliveryHook.dispose();

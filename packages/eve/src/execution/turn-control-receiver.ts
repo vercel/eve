@@ -47,15 +47,13 @@ export class TurnControlReceiver {
         "Turn control hook closed before delivering a result.",
       );
 
-      if (payload.kind === "turn-result") {
-        this.bufferTurnDeliveries(payload);
-        return payload.action;
-      }
-
-      if (payload.kind !== "turn-delivery-request") continue;
-
-      const terminal = await this.serviceDeliveryRequest(payload);
+      const terminal = this.readTerminalControl(payload);
       if (terminal !== undefined) return terminal;
+
+      if (payload.kind === "turn-delivery-request") {
+        const resolved = await this.serviceDeliveryRequest(payload);
+        if (resolved !== undefined) return resolved;
+      }
     }
   }
 
@@ -143,9 +141,10 @@ export class TurnControlReceiver {
       delivery = winner.value.value;
     }
 
+    // Forwarding is provisional until the turn acknowledges it. If the inbox is
+    // already gone (the turn ended or was replaced), the turn's terminal or
+    // cancellation still re-buffers the delivery for the next parent turn.
     try {
-      // Forwarding is provisional until the turn acknowledges it. A concurrent
-      // cancellation or terminal result puts the delivery back for the parent.
       await forwardTurnDeliveryStep({
         inboxToken: request.inboxToken,
         payload: {
@@ -156,43 +155,40 @@ export class TurnControlReceiver {
       });
     } catch (error) {
       if (!(error instanceof Error && error.name === "HookNotFoundError")) throw error;
-      this.bufferedDeliveries.unshift(delivery);
-      return await this.waitForTerminalControlAfterForwardFailure(request.requestId);
     }
 
+    return await this.awaitForwardedDelivery(request.requestId, delivery);
+  }
+
+  /**
+   * Waits for the active turn to resolve a forwarded delivery. The turn either
+   * accepts it (consumed) or releases it on cancellation or termination, in
+   * which case the delivery returns to the buffer ahead of the turn's own
+   * remainders so the next parent turn still observes it in arrival order.
+   */
+  private async awaitForwardedDelivery(
+    requestId: string,
+    outstanding: DeliverHookPayload,
+  ): Promise<NextDriverAction | undefined> {
     while (true) {
       const payload = await this.nextControl(
-        "Turn control hook closed before accepting a delivery.",
+        "Turn control hook closed before resolving a forwarded delivery.",
       );
 
       if (payload.kind === "turn-delivery-accepted") {
-        if (payload.requestId === request.requestId) return undefined;
+        if (payload.requestId === requestId) return undefined;
         continue;
       }
 
-      if (payload.kind === "turn-delivery-cancelled" && payload.requestId === request.requestId) {
-        this.bufferedDeliveries.unshift(delivery);
+      if (payload.kind === "turn-delivery-cancelled" && payload.requestId === requestId) {
+        this.bufferedDeliveries.unshift(outstanding);
         return undefined;
       }
 
       if (payload.kind === "turn-result") {
-        this.bufferedDeliveries.unshift(delivery);
+        this.bufferedDeliveries.unshift(outstanding);
       }
-      const terminal = this.readTerminalControl(payload);
-      if (terminal !== undefined) return terminal;
-    }
-  }
 
-  private async waitForTerminalControlAfterForwardFailure(
-    requestId: string,
-  ): Promise<NextDriverAction | undefined> {
-    while (true) {
-      const payload = await this.nextControl(
-        "Turn control hook closed after delivery forwarding failed.",
-      );
-      if (payload.kind === "turn-delivery-cancelled" && payload.requestId === requestId) {
-        return undefined;
-      }
       const terminal = this.readTerminalControl(payload);
       if (terminal !== undefined) return terminal;
     }

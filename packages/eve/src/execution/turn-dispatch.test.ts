@@ -149,6 +149,42 @@ describe("dispatchAndAwaitTurn", () => {
       "later delivery",
     ]);
   });
+
+  it("re-buffers a forwarded delivery when the turn inbox is already gone", async () => {
+    const state = createState("http:test");
+    const delivery: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "relayed" }] };
+    vi.mocked(forwardTurnDeliveryStep).mockRejectedValue(
+      Object.assign(new Error("inbox gone"), { name: "HookNotFoundError" }),
+    );
+    installControlHook([
+      {
+        continuationToken: "http:test",
+        inboxToken: "turn-inbox",
+        kind: "turn-delivery-request",
+        requestId: "request-1",
+      },
+      {
+        action: { kind: "park", serializedContext: {}, sessionState: state },
+        kind: "turn-result",
+      },
+    ]);
+
+    const bufferedDeliveries: DeliverHookPayload[] = [delivery];
+    const action = await dispatchAndAwaitTurn({
+      bufferedDeliveries,
+      controlToken: "turn-control",
+      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
+      deliveryHook: createDeliveryHook(),
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: {},
+      sessionState: state,
+    });
+
+    expect(forwardTurnDeliveryStep).toHaveBeenCalledOnce();
+    expect(action.kind).toBe("park");
+    expect(bufferedDeliveries).toEqual([delivery]);
+  });
 });
 
 function createDeliveryHook(overrides: Partial<SessionDeliveryHook> = {}): SessionDeliveryHook {

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { HookPayload } from "#channel/types.js";
-import { dispatchTurnRuntimeActionsStep } from "#execution/dispatch-turn-runtime-actions-step.js";
+import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
+import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { turnWorkflow } from "#execution/turn-workflow.js";
 import {
@@ -32,8 +33,16 @@ vi.mock("./workflow-steps.js", () => ({
   turnStep: vi.fn(),
 }));
 
-vi.mock("./dispatch-turn-runtime-actions-step.js", () => ({
-  dispatchTurnRuntimeActionsStep: vi.fn(),
+vi.mock("./dispatch-runtime-actions-step.js", () => ({
+  dispatchRuntimeActionsStep: vi.fn(),
+}));
+
+vi.mock("./dispatch-workflow-runtime-actions-step.js", () => ({
+  dispatchWorkflowRuntimeActionsStep: vi.fn(),
+}));
+
+vi.mock("./workflow-callback-url.js", () => ({
+  resolveWorkflowCallbackBaseUrl: vi.fn((metadataUrl: string) => metadataUrl),
 }));
 
 describe("turnWorkflow", () => {
@@ -256,7 +265,7 @@ describe("turnWorkflow", () => {
         ],
       },
     ]);
-    vi.mocked(dispatchTurnRuntimeActionsStep).mockResolvedValue({
+    vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
       results: [],
       sessionState: pendingState,
     });
@@ -288,15 +297,14 @@ describe("turnWorkflow", () => {
       kind: "turn-continuation-token",
     });
     expect(resumeHookMock.mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(dispatchTurnRuntimeActionsStep).mock.invocationCallOrder[0] ??
-        Number.POSITIVE_INFINITY,
+      vi.mocked(dispatchRuntimeActionsStep).mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
-    expect(dispatchTurnRuntimeActionsStep).toHaveBeenCalledWith({
+    expect(dispatchRuntimeActionsStep).toHaveBeenCalledWith({
+      callbackBaseUrl: "https://eve.example.com",
       parentContinuationToken: "turn-token:inbox",
       parentWritable,
       serializedContext: { state: "pending" },
       sessionState: pendingState,
-      workflowInterrupt: false,
     });
     expect(vi.mocked(turnStep).mock.calls[1]?.[0]).toMatchObject({
       input: {
@@ -324,7 +332,7 @@ describe("turnWorkflow", () => {
     const pendingState = createSessionState();
     const completedState = createSessionState();
     installInbox([]);
-    vi.mocked(dispatchTurnRuntimeActionsStep).mockResolvedValue({
+    vi.mocked(dispatchWorkflowRuntimeActionsStep).mockResolvedValue({
       results: [
         {
           callId: "call-1",
@@ -357,12 +365,12 @@ describe("turnWorkflow", () => {
     });
     await turnWorkflow(input);
 
-    expect(dispatchTurnRuntimeActionsStep).toHaveBeenCalledWith({
+    expect(dispatchWorkflowRuntimeActionsStep).toHaveBeenCalledWith({
+      callbackBaseUrl: "https://eve.example.com",
       parentContinuationToken: "turn-token:inbox",
       parentWritable,
       serializedContext: { state: "pending" },
       sessionState: pendingState,
-      workflowInterrupt: true,
     });
     expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toEqual({
       kind: "runtime-action-result",
@@ -407,7 +415,7 @@ describe("turnWorkflow", () => {
         ],
       },
     ]);
-    vi.mocked(dispatchTurnRuntimeActionsStep).mockResolvedValue({
+    vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
       results: [],
       sessionState: pendingState,
     });
