@@ -34,6 +34,8 @@ export interface PromptColors {
 export interface PromptOption<T extends PromptValue> {
   value: T;
   label: string;
+  /** Completion action kept after searchable results instead of being filtered. */
+  trailingAction?: boolean;
   /** Supporting copy; stacked prompts render newline-separated text on separate rows. */
   hint?: string;
   /** Short inline annotation shown dimmed only while the cursor is on this row. */

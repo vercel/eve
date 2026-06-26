@@ -128,6 +128,56 @@ describe("eve dev --input", () => {
 });
 
 describe("eve dev --url protocol", () => {
+  it("uses the local TUI credential path only for this app's running dev server", async () => {
+    const runDevelopmentTui = vi.fn(async () => {});
+
+    await withInteractiveTerminal(() =>
+      runCli(
+        ["dev", "--url", "http://127.0.0.1:2000"],
+        { error: () => {}, log: () => {} },
+        {
+          isActiveDevelopmentServerForApp: async () => true,
+          runDevelopmentTui,
+        },
+      ),
+    );
+
+    expect(runDevelopmentTui).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: {
+          kind: "local",
+          serverUrl: "http://127.0.0.1:2000/",
+          workspaceRoot: process.cwd(),
+        },
+      }),
+    );
+  });
+
+  it("keeps an unverified loopback URL on the remote credential path", async () => {
+    const runDevelopmentTui = vi.fn(async () => {});
+
+    await withInteractiveTerminal(() =>
+      runCli(
+        ["dev", "--url", "http://127.0.0.1:2000"],
+        { error: () => {}, log: () => {} },
+        {
+          isActiveDevelopmentServerForApp: async () => false,
+          runDevelopmentTui,
+        },
+      ),
+    );
+
+    expect(runDevelopmentTui).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: {
+          kind: "remote",
+          serverUrl: "http://127.0.0.1:2000/",
+          workspaceRoot: process.cwd(),
+        },
+      }),
+    );
+  });
+
   it("rejects an http:// remote URL up front instead of crashing during connect", async () => {
     await expect(
       runCli(["dev", "--url", "http://my-app.vercel.app"], { error: () => {}, log: () => {} }),

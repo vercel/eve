@@ -266,19 +266,14 @@ describe("configureNitroRoutes", () => {
       method: "GET",
       route: "/eve/v1/dev/runtime-artifacts",
     });
-    expect(devNitro.options.handlers).toContainEqual({
-      handler: "#eve-route/eve/v1/dev/runtime-artifacts/rebuild",
-      method: "POST",
-      route: "/eve/v1/dev/runtime-artifacts/rebuild",
-    });
-    expect(prodNitro.options.handlers).not.toContainEqual(
+    expect(devNitro.options.handlers).not.toContainEqual(
       expect.objectContaining({
-        route: "/eve/v1/dev/runtime-artifacts",
+        route: "/eve/v1/dev/runtime-artifacts/rebuild",
       }),
     );
     expect(prodNitro.options.handlers).not.toContainEqual(
       expect.objectContaining({
-        route: "/eve/v1/dev/runtime-artifacts/rebuild",
+        route: "/eve/v1/dev/runtime-artifacts",
       }),
     );
   });

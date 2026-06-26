@@ -11,6 +11,18 @@ export function resolveDevelopmentClientOptions(serverUrl: string): ClientOption
   return { host: serverUrl };
 }
 
+/** Builds a non-redirecting local client with an explicit per-request bearer source. */
+export function resolveLocalDevelopmentClientOptions(input: {
+  readonly serverUrl: string;
+  readonly token: () => Promise<string>;
+}): ClientOptions {
+  return {
+    auth: { bearer: input.token },
+    host: input.serverUrl,
+    redirect: "manual",
+  };
+}
+
 /** Builds non-redirecting client options backed by one verified credential gate. */
 export function resolveRemoteDevelopmentClientOptions(input: {
   readonly credentials: DevelopmentCredentialGate;

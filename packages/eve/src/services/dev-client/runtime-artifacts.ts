@@ -26,10 +26,12 @@ export async function readDevelopmentRuntimeArtifactsRevision(input: {
 }
 
 export async function rebuildDevelopmentRuntimeArtifacts(input: {
+  readonly force?: boolean;
   readonly serverUrl: string;
 }): Promise<string | undefined> {
   try {
     const url = new URL(EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH, input.serverUrl);
+    if (input.force === true) url.searchParams.set("force", "1");
     const response = await fetch(url, { method: "POST" });
     return await parseDevelopmentRuntimeArtifactsRevision(response);
   } catch {

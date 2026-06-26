@@ -287,6 +287,33 @@ describe("normalizeDevelopmentServerClientUrl", () => {
   });
 });
 
+describe("isActiveDevelopmentServerForApp", () => {
+  it("matches only this app's recorded healthy loopback server", async () => {
+    const { isActiveDevelopmentServerForApp } = await import("./start-development-server.js");
+    seedStateRecord({ url: "http://127.0.0.1:42123/" });
+    mocks.fetch.mockResolvedValue(new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", mocks.fetch);
+
+    try {
+      await expect(
+        isActiveDevelopmentServerForApp({
+          appRoot: "/tmp/eve-test",
+          serverUrl: "http://127.0.0.1:42123/",
+        }),
+      ).resolves.toBe(true);
+      await expect(
+        isActiveDevelopmentServerForApp({
+          appRoot: "/tmp/eve-test",
+          serverUrl: "http://127.0.0.1:42124/",
+        }),
+      ).resolves.toBe(false);
+    } finally {
+      mocks.files.clear();
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe("createDevelopmentServer", () => {
   beforeEach(() => {
     vi.clearAllMocks();

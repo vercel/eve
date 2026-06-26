@@ -1,11 +1,14 @@
 import { Client } from "#client/index.js";
 import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import {
-  resolveDevelopmentClientOptions,
+  resolveLocalDevelopmentClientOptions,
   resolveRemoteDevelopmentClientOptions,
 } from "#services/dev-client/client-options.js";
 import { createDevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
-import { resolveDevelopmentOidcToken } from "#services/dev-client/request-headers.js";
+import {
+  resolveDevelopmentOidcToken,
+  resolveLinkedDevelopmentOidcToken,
+} from "#services/dev-client/request-headers.js";
 import { isVercelAuthChallenge } from "#services/dev-client/vercel-auth-error.js";
 import { resolveVercelDeployment } from "#setup/vercel-deployment.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -80,7 +83,10 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
 
   const client = new Client(
     prepared.kind === "local"
-      ? resolveDevelopmentClientOptions(serverUrl)
+      ? resolveLocalDevelopmentClientOptions({
+          serverUrl,
+          token: () => resolveLinkedDevelopmentOidcToken(prepared.target.workspaceRoot),
+        })
       : resolveRemoteDevelopmentClientOptions({
           serverUrl,
           credentials: prepared.remote.credentials,

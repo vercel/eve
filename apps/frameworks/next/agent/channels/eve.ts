@@ -31,5 +31,5 @@ function authjsSession(): AuthFn<Request> {
 }
 
 export default eveChannel({
-  auth: [authjsSession(), localDev(), vercelOidc()],
+  auth: [authjsSession(), vercelOidc(), localDev()],
 });

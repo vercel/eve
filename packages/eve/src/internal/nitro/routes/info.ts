@@ -63,7 +63,7 @@ export async function handleAgentInfoRequest(
   input: AgentInfoRouteInput,
   request: Request,
 ): Promise<Response> {
-  const authResult = await routeAuth(request, [localDev(), vercelOidc()]);
+  const authResult = await routeAuth(request, [vercelOidc(), localDev()]);
   if (authResult instanceof Response) return authResult;
 
   return new Response(JSON.stringify(await createAgentInfoPayload(input)), {

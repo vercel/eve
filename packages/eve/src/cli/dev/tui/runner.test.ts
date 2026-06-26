@@ -662,6 +662,57 @@ describe("EveTUIRunner native continuation state", () => {
   });
 });
 
+describe("EveTUIRunner connection authorization", () => {
+  it("continues a parked interactive authorization session until the callback completes", async () => {
+    const prompts: Array<string | undefined> = ["connect linear", undefined];
+    const updates: Array<{ name: string; state: string }> = [];
+    const pendingCounts: number[] = [];
+    const session = sessionYielding([
+      {
+        type: "authorization.required",
+        data: {
+          authorization: { url: "https://connect.vercel.com/authorize/linear" },
+          description: "Authorization required for linear",
+          name: "linear",
+          webhookUrl: "https://eve.test/connections/linear/callback",
+        },
+      },
+      { type: "session.waiting", data: { wait: "connection-authorization" } },
+    ]);
+    vi.spyOn(session, "stream").mockImplementation(async function* () {
+      yield {
+        type: "authorization.completed",
+        data: { name: "linear", outcome: "authorized" },
+      } as HandleMessageStreamEvent;
+      yield {
+        type: "session.waiting",
+        data: { wait: "next-user-message" },
+      } as HandleMessageStreamEvent;
+    });
+    const renderer: AgentTUIRenderer = {
+      readPrompt: vi.fn(async () => prompts.shift()),
+      upsertConnectionAuth: (update) => updates.push({ name: update.name, state: update.state }),
+      setConnectionAuthPendingCount: (count) => pendingCounts.push(count),
+      renderStream: vi.fn(async (result) => {
+        for await (const event of result.events as AsyncIterable<AgentTUIStreamEvent>) {
+          void event;
+        }
+      }),
+    };
+
+    const runner = new EveTUIRunner({ session, renderer, name: "Weather Agent" });
+    await runner.run();
+
+    expect(session.stream).toHaveBeenCalledTimes(1);
+    expect(updates).toEqual([
+      { name: "linear", state: "required" },
+      { name: "linear", state: "pending" },
+      { name: "linear", state: "authorized" },
+    ]);
+    expect(pendingCounts).toEqual([1, 0]);
+  });
+});
+
 describe("EveTUIRunner failure rendering", () => {
   it("renders one error block for a step/turn/session failure cascade", async () => {
     const prompts: Array<string | undefined> = ["hello", undefined];
@@ -1690,6 +1741,46 @@ describe("EveTUIRunner Vercel status line", () => {
 
     expect(infoCallsAtPrompt).toEqual([1, 1, 2]);
     expect(info).toHaveBeenCalledTimes(2);
+  });
+
+  it("forces a runtime rebuild after /connect adds a connection", async () => {
+    const client = stubClient();
+    vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
+    const requests: URL[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+        const url = new URL(
+          typeof input === "string" ? input : input instanceof URL ? input : input.url,
+        );
+        requests.push(url);
+        return Response.json({ revision: url.searchParams.get("force") === "1" ? "next" : "base" });
+      }),
+    );
+    const prompts: Array<string | undefined> = ["/connect", undefined];
+    const renderer = fakeRenderer({ readPrompt: vi.fn(async () => prompts.shift()) });
+    const connectOutcome = {
+      message: "Connections added: linear.",
+      effect: { kind: "connection-added" },
+    } satisfies PromptCommandOutcome;
+
+    const runner = new EveTUIRunner({
+      session: stubSession(),
+      client,
+      renderer,
+      serverUrl: "http://localhost:3000",
+      name: "Weather Agent",
+      promptCommandHandler: { handle: async () => connectOutcome },
+    });
+    await runner.run();
+
+    expect(
+      requests.some(
+        (url) =>
+          url.pathname === "/eve/v1/dev/runtime-artifacts/rebuild" &&
+          url.searchParams.get("force") === "1",
+      ),
+    ).toBe(true);
   });
 
   it("never pushes Vercel status for a remote --url session", async () => {

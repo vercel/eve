@@ -12,7 +12,7 @@ import { eveChannel } from "eve/channels/eve";
 import { localDev, vercelOidc } from "eve/channels/auth";
 
 export default eveChannel({
-  auth: [localDev(), vercelOidc()],
+  auth: [vercelOidc(), localDev()],
 });
 ```
 
@@ -54,7 +54,7 @@ The `auth` option decides who can call these routes. The built-in helpers cover 
 
 Neither admits browser users or external clients in production. For a public app, wire the channel to your own auth (Clerk, Auth.js, your own OIDC/JWT verification, an API-key verifier, or any custom `AuthFn`). Vercel OIDC is optional; use it only when Vercel-issued deployment tokens are part of your trust model.
 
-`eve init` scaffolds an `agent/channels/eve.ts` with a production placeholder so you replace it before going live. The generated channel allows Vercel OIDC and localhost, and includes `placeholderAuth()`, which returns a setup-focused 401 in production until you swap it for real auth. Delete the file and eve falls back to `[localDev(), vercelOidc()]`, which still does not admit browser users in production.
+`eve init` scaffolds an `agent/channels/eve.ts` with a production placeholder so you replace it before going live. The generated channel checks Vercel OIDC before falling back to localhost access, and includes `placeholderAuth()`, which returns a setup-focused 401 in production until you swap it for real auth. Delete the file and eve falls back to `[vercelOidc(), localDev()]`, which still does not admit browser users in production.
 
 For the full auth model and helper list, see [Auth & route protection](../guides/auth-and-route-protection).
 
@@ -67,7 +67,7 @@ import { eveChannel, defaultEveAuth } from "eve/channels/eve";
 import { localDev, vercelOidc } from "eve/channels/auth";
 
 export default eveChannel({
-  auth: [localDev(), vercelOidc()],
+  auth: [vercelOidc(), localDev()],
   onMessage(ctx, message) {
     const callerId = ctx.eve.caller?.principalId ?? "anonymous";
     return {
