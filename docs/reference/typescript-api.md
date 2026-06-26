@@ -49,6 +49,7 @@ export default defineTool({
 | `defineRemoteAgent`                                   | `eve`                                         | `agent/subagents/<id>/agent.ts`      | [Remote agents](../guides/remote-agents)               |
 | `defineEval`                                          | `eve/evals`                                   | `evals/*.eval.ts`                    | [Evals](../evals/overview)                             |
 | `defineEvalConfig`                                    | `eve/evals`                                   | `evals/evals.config.ts`              | [Evals](../evals/overview)                             |
+| `mockModel`                                           | `eve/evals`                                   | Deterministic fixture agent models   | [Evals](../evals/overview)                             |
 | `useEveAgent`                                         | `eve/react`, `eve/vue`, `eve/svelte`          | frontend                             | [Frontend](../guides/frontend/overview)                |
 
 A few non-`define*` helpers round out the set: `disableTool` and `ExperimentalWorkflow` from `eve/tools` (see [Default harness](../concepts/default-harness)), the route verbs `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`WS` from `eve/channels`, the approval policies `always`/`once`/`never` from `eve/tools/approval`, and the channel auth helpers `localDev`/`vercelOidc`/`placeholderAuth` from `eve/channels/auth`. To wrap a built-in tool, import its default value from `eve/tools/defaults` (`bash`, `readFile`, `writeFile`, `glob`, `grep`, `webFetch`, `webSearch`, `todo`, `loadSkill`). `AgentReasoningDefinition` is exported from `eve` for the top-level `defineAgent({ reasoning })` setting. `AgentWorkflowDefinition` and `AgentWorkflowWorldDefinition` are exported from `eve` for the `defineAgent({ experimental: { workflow } })` config shape.
@@ -85,7 +86,7 @@ A few non-`define*` helpers round out the set: `disableTool` and `ExperimentalWo
 | `eve/context`                                               | `defineState`, session and state types                               |
 | `eve/sandbox`                                               | `defineSandbox`, backends                                            |
 | `eve/instrumentation`                                       | `defineInstrumentation`, `isChannel`                                 |
-| `eve/evals`                                                 | `defineEval`, `defineEvalConfig`, eval types                         |
+| `eve/evals`                                                 | `defineEval`, `defineEvalConfig`, `mockModel`, eval types            |
 | `eve/evals/expect`                                          | `includes`, `equals`, `matches`, `similarity`                        |
 | `eve/evals/reporters`                                       | `Braintrust`, `JUnit`, `EvalReporter`                                |
 | `eve/evals/loaders`                                         | `loadJson`, `loadYaml`                                               |
