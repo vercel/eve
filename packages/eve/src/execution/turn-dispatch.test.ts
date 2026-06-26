@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { DeliverHookPayload } from "#channel/types.js";
+import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
+import type { SessionDeliveryHook } from "#execution/session-delivery-hook.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
 import type { TurnCompletionPayload } from "#execution/turn-workflow.js";
 
@@ -36,16 +37,15 @@ describe("dispatchAndAwaitTurn", () => {
       },
     ]);
     const rekeyHook = vi.fn();
+    const deliveryHook = createDeliveryHook({ rekey: rekeyHook });
 
     await dispatchAndAwaitTurn({
       bufferedDeliveries: [],
       completionToken: "turn-completion",
-      consumeNext: vi.fn(),
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
-      getNextPromise: vi.fn(),
+      deliveryHook,
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
-      rekeyHook,
       serializedContext: {},
       sessionState: createState("slack:C1:"),
     });
@@ -70,16 +70,15 @@ describe("dispatchAndAwaitTurn", () => {
       },
     ]);
     const rekeyHook = vi.fn();
+    const deliveryHook = createDeliveryHook({ rekey: rekeyHook });
 
     await dispatchAndAwaitTurn({
       bufferedDeliveries: [],
       completionToken: "turn-completion",
-      consumeNext: vi.fn(),
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
-      getNextPromise: () => new Promise(() => {}),
+      deliveryHook,
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
-      rekeyHook,
       serializedContext: {},
       sessionState: createState("slack:C1:"),
     });
@@ -132,15 +131,15 @@ describe("dispatchAndAwaitTurn", () => {
     await dispatchAndAwaitTurn({
       bufferedDeliveries,
       completionToken: "turn-completion",
-      consumeNext: vi.fn(),
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
-      getNextPromise: async () => ({
-        done: false,
-        value: { kind: "deliver", payloads: [{ message: "later delivery" }] },
+      deliveryHook: createDeliveryHook({
+        next: async () => ({
+          done: false,
+          value: { kind: "deliver", payloads: [{ message: "later delivery" }] },
+        }),
       }),
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
-      rekeyHook: vi.fn(),
       serializedContext: {},
       sessionState: state,
     });
@@ -151,6 +150,15 @@ describe("dispatchAndAwaitTurn", () => {
     ]);
   });
 });
+
+function createDeliveryHook(overrides: Partial<SessionDeliveryHook> = {}): SessionDeliveryHook {
+  return {
+    consumeNext: vi.fn(),
+    next: vi.fn(() => new Promise<IteratorResult<HookPayload>>(() => {})),
+    rekey: vi.fn(),
+    ...overrides,
+  };
+}
 
 function installCompletionHook(values: readonly TurnCompletionPayload[]): void {
   const queue = [...values];

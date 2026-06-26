@@ -1,6 +1,7 @@
-import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
+import type { DeliverHookPayload } from "#channel/types.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
+import type { SessionDeliveryHook } from "#execution/session-delivery-hook.js";
 import type { TurnCompletionPayload } from "#execution/turn-workflow.js";
 import { rebuildSerializableError } from "#execution/workflow-errors.js";
 
@@ -10,19 +11,17 @@ type DeliveryRequest = Extract<TurnCompletionPayload, { readonly kind: "turn-del
 export async function serviceTurnDeliveryRequest(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly consumeCompletion: () => void;
-  readonly consumeNext: () => void;
+  readonly deliveryHook: SessionDeliveryHook;
   readonly getCompletionPromise: () => Promise<IteratorResult<TurnCompletionPayload>>;
-  readonly getNextPromise: () => Promise<IteratorResult<HookPayload>>;
   readonly request: DeliveryRequest;
-  readonly rekeyHook: (nextToken: string) => Promise<void>;
 }): Promise<NextDriverAction | undefined> {
-  await input.rekeyHook(input.request.continuationToken);
+  await input.deliveryHook.rekey(input.request.continuationToken);
 
   let delivery = input.bufferedDeliveries.shift();
   while (delivery === undefined) {
     const winner = await Promise.race([
       input.getCompletionPromise().then((value) => ({ kind: "control" as const, value })),
-      input.getNextPromise().then((value) => ({ kind: "delivery" as const, value })),
+      input.deliveryHook.next().then((value) => ({ kind: "delivery" as const, value })),
     ]);
 
     if (winner.kind === "control") {
@@ -31,7 +30,7 @@ export async function serviceTurnDeliveryRequest(input: {
         throw new Error("Turn completion hook closed during a delivery request.");
       }
       if (winner.value.value.kind === "turn-continuation-token") {
-        await input.rekeyHook(winner.value.value.continuationToken);
+        await input.deliveryHook.rekey(winner.value.value.continuationToken);
         continue;
       }
       const terminal = readTerminalTurnControl(winner.value.value, input.bufferedDeliveries);
@@ -49,7 +48,7 @@ export async function serviceTurnDeliveryRequest(input: {
       throw new Error("Session delivery hook closed during a turn delivery request.");
     }
 
-    input.consumeNext();
+    input.deliveryHook.consumeNext();
     if (winner.value.value.kind !== "deliver") continue;
     delivery = winner.value.value;
   }
@@ -72,7 +71,7 @@ export async function serviceTurnDeliveryRequest(input: {
       bufferedDeliveries: input.bufferedDeliveries,
       consumeCompletion: input.consumeCompletion,
       getCompletionPromise: input.getCompletionPromise,
-      rekeyHook: input.rekeyHook,
+      rekeyHook: input.deliveryHook.rekey,
       requestId: input.request.requestId,
     });
   }
@@ -82,7 +81,7 @@ export async function serviceTurnDeliveryRequest(input: {
       consumeCompletion: input.consumeCompletion,
       getCompletionPromise: input.getCompletionPromise,
       onClosed: "Turn completion hook closed before accepting a delivery.",
-      rekeyHook: input.rekeyHook,
+      rekeyHook: input.deliveryHook.rekey,
     });
 
     if (payload.kind === "turn-delivery-accepted") {

@@ -461,9 +461,9 @@ describe("workflowEntry", () => {
     expect(result).toEqual({ output: "" });
     // Initial hook created before the turn, then rekeyed after.
     expect(nonTurnHookTokens()).toEqual(["slack:C01:", "slack:C01:1800000000.123456"]);
-    expect(initialReturn).toHaveBeenCalledTimes(1);
+    expect(initialReturn).not.toHaveBeenCalled();
     expect(initialDispose).toHaveBeenCalledTimes(1);
-    expect(rekeyedReturn).toHaveBeenCalledTimes(1);
+    expect(rekeyedReturn).not.toHaveBeenCalled();
     expect(rekeyedDispose).toHaveBeenCalledTimes(1);
   });
 
@@ -502,7 +502,7 @@ describe("workflowEntry", () => {
 
     expect(result).toEqual({ output: "" });
     expect(nonTurnHookTokens()).toEqual(["slack:C01:1800000000.123456"]);
-    expect(anchoredReturn).toHaveBeenCalledTimes(1);
+    expect(anchoredReturn).not.toHaveBeenCalled();
     expect(anchoredDispose).toHaveBeenCalledTimes(1);
   });
 
@@ -565,82 +565,70 @@ describe("workflowEntry", () => {
       kind: "deliver",
       payloads: [{ message: "follow up" }],
     });
-    expect(oldReturn).toHaveBeenCalledTimes(1);
+    expect(oldReturn).not.toHaveBeenCalled();
     expect(oldDispose).toHaveBeenCalledTimes(1);
-    expect(newReturn).toHaveBeenCalledTimes(1);
+    expect(newReturn).not.toHaveBeenCalled();
     expect(newDispose).toHaveBeenCalledTimes(1);
     expect(oldGetConflict).toHaveBeenCalledOnce();
     expect(newGetConflict).toHaveBeenCalledOnce();
-    expect(newGetConflict.mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(oldReturn).mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
-    );
     expect(newGetConflict.mock.invocationCallOrder[0]).toBeLessThan(
       oldDispose.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
   });
 
-  it.each(["iterator", "hook"] as const)(
-    "cleans both hooks once when the old %s fails during rekey",
-    async (failurePoint) => {
-      const baseSessionState = createBaseSessionState({ continuationToken: "slack:C01:" });
-      const rekeyedSessionState: DurableSessionState = {
-        ...baseSessionState,
-        continuationToken: "slack:C01:1800000000.123456",
-      };
-      const releaseError = new Error(`${failurePoint} release failed`);
-      const oldReturn = vi.fn(async (): Promise<IteratorResult<HookPayload>> => {
-        if (failurePoint === "iterator") throw releaseError;
-        return { done: true, value: undefined };
-      });
-      const oldDispose = vi.fn(() => {
-        if (failurePoint === "hook") throw releaseError;
-      });
-      const candidateDispose = vi.fn();
-      const candidateGetConflict = vi.fn(async () => null);
-      vi.mocked(createSessionStep).mockResolvedValue(
-        createSessionStepResultForMock(baseSessionState),
-      );
-      installHookMocks({
-        parkHooks: [
-          {
-            dispose: oldDispose,
-            return: oldReturn,
-            token: "slack:C01:",
-            values: [
-              {
-                kind: "deliver",
-                payloads: [{ message: "follow up" }],
-              },
-            ],
-          },
-          {
-            dispose: candidateDispose,
-            getConflict: candidateGetConflict,
-            token: "slack:C01:1800000000.123456",
-          },
-        ],
-        turnCompletions: [
-          turnResult({ action: "park", sessionState: baseSessionState }),
-          turnResult({ action: "park", sessionState: rekeyedSessionState }),
-        ],
-      });
+  it("cleans the replacement when the old hook fails during rekey", async () => {
+    const baseSessionState = createBaseSessionState({ continuationToken: "slack:C01:" });
+    const rekeyedSessionState: DurableSessionState = {
+      ...baseSessionState,
+      continuationToken: "slack:C01:1800000000.123456",
+    };
+    const releaseError = new Error("hook release failed");
+    const oldDispose = vi.fn(() => {
+      throw releaseError;
+    });
+    const candidateDispose = vi.fn();
+    const candidateGetConflict = vi.fn(async () => null);
+    vi.mocked(createSessionStep).mockResolvedValue(
+      createSessionStepResultForMock(baseSessionState),
+    );
+    installHookMocks({
+      parkHooks: [
+        {
+          dispose: oldDispose,
+          token: "slack:C01:",
+          values: [
+            {
+              kind: "deliver",
+              payloads: [{ message: "follow up" }],
+            },
+          ],
+        },
+        {
+          dispose: candidateDispose,
+          getConflict: candidateGetConflict,
+          token: "slack:C01:1800000000.123456",
+        },
+      ],
+      turnCompletions: [
+        turnResult({ action: "park", sessionState: baseSessionState }),
+        turnResult({ action: "park", sessionState: rekeyedSessionState }),
+      ],
+    });
 
-      await expect(
-        workflowEntry({
-          input: { message: "hello" },
-          serializedContext: createSerializedContext({
-            "eve.channel": { kind: "slack", state: {} },
-            "eve.continuationToken": "slack:C01:",
-          }),
+    await expect(
+      workflowEntry({
+        input: { message: "hello" },
+        serializedContext: createSerializedContext({
+          "eve.channel": { kind: "slack", state: {} },
+          "eve.continuationToken": "slack:C01:",
         }),
-      ).rejects.toBe(releaseError);
+      }),
+    ).rejects.toBe(releaseError);
 
-      expect(candidateGetConflict).toHaveBeenCalledOnce();
-      expect(oldReturn).toHaveBeenCalledOnce();
-      expect(oldDispose).toHaveBeenCalledOnce();
-      expect(candidateDispose).toHaveBeenCalledOnce();
-    },
-  );
+    expect(candidateGetConflict).toHaveBeenCalledOnce();
+    expect(oldDispose).toHaveBeenCalledOnce();
+    expect(candidateDispose).toHaveBeenCalledOnce();
+  });
 
   it("disposes a conflicting rekey candidate before cleaning up the active hook", async () => {
     const baseSessionState = createBaseSessionState({ continuationToken: "slack:C01:" });
@@ -697,11 +685,8 @@ describe("workflowEntry", () => {
 
     expect(candidateGetConflict).toHaveBeenCalledOnce();
     expect(candidateDispose).toHaveBeenCalledOnce();
-    expect(oldReturn).toHaveBeenCalledOnce();
+    expect(oldReturn).not.toHaveBeenCalled();
     expect(oldDispose).toHaveBeenCalledOnce();
-    expect(candidateDispose.mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(oldReturn).mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
-    );
     expect(candidateDispose.mock.invocationCallOrder[0]).toBeLessThan(
       oldDispose.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
@@ -741,7 +726,7 @@ describe("workflowEntry", () => {
     });
 
     expect(result).toEqual({ output: "after resume" });
-    expect(returnIterator).toHaveBeenCalledTimes(1);
+    expect(returnIterator).not.toHaveBeenCalled();
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(symbolDispose).not.toHaveBeenCalled();
   });

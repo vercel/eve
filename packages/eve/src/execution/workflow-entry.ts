@@ -1,9 +1,4 @@
-import {
-  createHook,
-  getWorkflowMetadata,
-  getWritable,
-  type Hook,
-} from "#compiled/@workflow/core/index.js";
+import { createHook, getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 
 import type {
   DeliverHookPayload,
@@ -29,7 +24,11 @@ import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/workflow-steps.js";
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
-import { claimHookOwnership, closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
+import { closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
+import {
+  createSessionDeliveryHook,
+  type SessionDeliveryHook,
+} from "#execution/session-delivery-hook.js";
 
 // workflow-entry.ts is the durable workflow body — the bundler rejects
 // node built-ins here, so `internal/logging.ts` cannot be imported.
@@ -160,97 +159,22 @@ async function runDriverLoop(input: {
   const nextTurnCompletionToken = (): string =>
     `${input.sessionState.sessionId}:turn-completion:${String(turnDispatchIndex++)}`;
 
-  // Claim before the first turn when a placeholder token exists.
-  // Tokenless channels must anchor during that turn before hook registration.
-  let parkToken = "";
-  let hook: Hook<HookPayload> | undefined;
-  let iterator: AsyncIterator<HookPayload> | undefined;
-  let pendingNext: Promise<IteratorResult<HookPayload>> | null = null;
   const bufferedDeliveries: DeliverHookPayload[] = [];
-
-  const getNextPromise = (): Promise<IteratorResult<HookPayload>> => {
-    if (iterator === undefined) {
-      throw new Error("Cannot wait for deliveries before a continuation token is available.");
-    }
-
-    pendingNext ??= iterator.next();
-    return pendingNext;
-  };
-
-  const consumeNext = (): void => {
-    pendingNext = null;
-  };
-
-  /**
-   * Stops accepting deliveries on the current park hook and releases its
-   * token. In-flight deliveries to that token after this returns are dropped.
-   */
-  const closeParkHook = async (): Promise<void> => {
-    const currentIterator = iterator;
-    const currentHook = hook;
-    hook = undefined;
-    iterator = undefined;
-    pendingNext = null;
-
-    if (currentIterator !== undefined) {
-      try {
-        await closeHookIterator(currentIterator);
-      } catch (error) {
-        if (currentHook !== undefined) {
-          try {
-            await disposeHook(currentHook);
-          } catch {
-            // The iterator failure is authoritative; cleanup must not replace it.
-          }
-        }
-        throw error;
-      }
-    }
-    if (currentHook !== undefined) {
-      await disposeHook(currentHook);
-    }
-  };
-
-  const rekeyHook = async (nextToken: string): Promise<void> => {
-    if (!nextToken || (hook !== undefined && nextToken === parkToken)) return;
-
-    // Claim the replacement before releasing the current token. A failed
-    // claim leaves the active hook intact until normal failure cleanup.
-    const nextHook = createHook<HookPayload>({ token: nextToken });
-    await claimHookOwnership(nextHook);
-
-    try {
-      await closeParkHook();
-    } catch (error) {
-      try {
-        await disposeHook(nextHook);
-      } catch {
-        // The active hook release failure is authoritative.
-      }
-      throw error;
-    }
-
-    parkToken = nextToken;
-    hook = nextHook;
-    iterator = nextHook[Symbol.asyncIterator]();
-    pendingNext = null;
-  };
+  const deliveryHook = createSessionDeliveryHook(bufferedDeliveries);
 
   try {
     if (input.sessionState.continuationToken) {
-      await rekeyHook(input.sessionState.continuationToken);
+      await deliveryHook.rekey(input.sessionState.continuationToken);
     }
 
     let action: NextDriverAction = await dispatchAndAwaitTurn({
       bufferedDeliveries,
       capabilities: input.capabilities,
       completionToken: nextTurnCompletionToken(),
-      consumeNext,
       delivery: input.initialInput,
-      getNextPromise,
+      deliveryHook,
       mode: input.mode,
       parentWritable: input.driverWritable,
-      rekeyHook,
       serializedContext: input.serializedContext,
       sessionState: input.sessionState,
     });
@@ -272,7 +196,7 @@ async function runDriverLoop(input: {
     }
 
     // Rekey if the first turn changed the continuation token.
-    await rekeyHook(action.sessionState.continuationToken);
+    await deliveryHook.rekey(action.sessionState.continuationToken);
 
     while (true) {
       switch (action.kind) {
@@ -299,27 +223,24 @@ async function runDriverLoop(input: {
               bufferedDeliveries,
               capabilities: input.capabilities,
               completionToken: nextTurnCompletionToken(),
-              consumeNext,
               delivery: {
                 kind: "deliver",
                 payloads: allPayloads,
               },
-              getNextPromise,
+              deliveryHook,
               mode: input.mode,
               parentWritable: input.driverWritable,
-              rekeyHook,
               serializedContext: action.serializedContext,
               sessionState: action.sessionState,
             });
 
-            await rekeyHook(action.sessionState.continuationToken);
+            await deliveryHook.rekey(action.sessionState.continuationToken);
             break;
           }
 
           const nextDeliver = await waitForNextDeliver({
             bufferedDeliveries,
-            consumeNext,
-            getNextPromise,
+            deliveryHook,
           });
 
           if (nextDeliver === null) {
@@ -342,22 +263,20 @@ async function runDriverLoop(input: {
             bufferedDeliveries,
             capabilities: input.capabilities,
             completionToken: nextTurnCompletionToken(),
-            consumeNext,
             delivery: {
               auth: nextDeliver.auth,
               kind: "deliver",
               payloads: [remainder],
               requestId: nextDeliver.requestId,
             },
-            getNextPromise,
+            deliveryHook,
             mode: input.mode,
             parentWritable: input.driverWritable,
-            rekeyHook,
             serializedContext: action.serializedContext,
             sessionState: action.sessionState,
           });
 
-          await rekeyHook(action.sessionState.continuationToken);
+          await deliveryHook.rekey(action.sessionState.continuationToken);
           break;
         }
 
@@ -369,7 +288,7 @@ async function runDriverLoop(input: {
       }
     }
   } finally {
-    await closeParkHook();
+    await deliveryHook.dispose();
     await closeHookIterator(authIterator);
     await disposeHook(authHook);
   }
@@ -399,16 +318,15 @@ async function finalizeDone(input: {
 
 async function waitForNextDeliver(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
-  readonly consumeNext: () => void;
-  readonly getNextPromise: () => Promise<IteratorResult<HookPayload>>;
+  readonly deliveryHook: SessionDeliveryHook;
 }): Promise<DeliverHookPayload | null> {
   if (input.bufferedDeliveries.length > 0) {
     return coalesceDeliveries(input.bufferedDeliveries.splice(0));
   }
 
   while (true) {
-    const first = await input.getNextPromise();
-    input.consumeNext();
+    const first = await input.deliveryHook.next();
+    input.deliveryHook.consumeNext();
 
     if (first.done) {
       return null;
@@ -421,13 +339,13 @@ async function waitForNextDeliver(input: {
     let coalesced = first.value;
 
     while (true) {
-      const ready = await takeReadyPayload(input.getNextPromise());
+      const ready = await takeReadyPayload(input.deliveryHook.next());
 
       if (ready === NO_READY_MESSAGE) {
         break;
       }
 
-      input.consumeNext();
+      input.deliveryHook.consumeNext();
 
       if (ready.done) {
         break;

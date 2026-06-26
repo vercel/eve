@@ -4,6 +4,7 @@ import type { DeliverHookPayload, HookPayload, SessionCapabilities } from "#chan
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
+import type { SessionDeliveryHook } from "#execution/session-delivery-hook.js";
 import { nextTurnControl, serviceTurnDeliveryRequest } from "#execution/turn-delivery-relay.js";
 import type { TurnCompletionPayload } from "#execution/turn-workflow.js";
 import { dispatchTurnStep } from "#execution/workflow-steps.js";
@@ -14,12 +15,10 @@ export async function dispatchAndAwaitTurn(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly capabilities?: SessionCapabilities;
   readonly completionToken: string;
-  readonly consumeNext: () => void;
   readonly delivery: HookPayload;
-  readonly getNextPromise: () => Promise<IteratorResult<HookPayload>>;
+  readonly deliveryHook: SessionDeliveryHook;
   readonly mode: RunMode;
   readonly parentWritable: WritableStream<Uint8Array>;
-  readonly rekeyHook: (nextToken: string) => Promise<void>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<NextDriverAction> {
@@ -50,7 +49,7 @@ export async function dispatchAndAwaitTurn(input: {
         consumeCompletion,
         getCompletionPromise,
         onClosed: "Turn completion hook closed before delivering a result.",
-        rekeyHook: input.rekeyHook,
+        rekeyHook: input.deliveryHook.rekey,
       });
 
       if (payload.kind === "turn-result") {
@@ -65,11 +64,9 @@ export async function dispatchAndAwaitTurn(input: {
       const terminal = await serviceTurnDeliveryRequest({
         bufferedDeliveries: input.bufferedDeliveries,
         consumeCompletion,
-        consumeNext: input.consumeNext,
+        deliveryHook: input.deliveryHook,
         getCompletionPromise,
-        getNextPromise: input.getNextPromise,
         request: payload,
-        rekeyHook: input.rekeyHook,
       });
       if (terminal !== undefined) return terminal;
     }
