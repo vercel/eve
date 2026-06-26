@@ -440,8 +440,8 @@ export interface CompactionCompletedStreamEvent {
 }
 
 /**
- * Stream event emitted when a connection needs user authorization before
- * its tools can be used.
+ * Stream event emitted when a connection or tool needs user authorization
+ * before it can continue.
  */
 export interface AuthorizationRequiredStreamEvent {
   data: {
@@ -460,11 +460,16 @@ export interface AuthorizationRequiredStreamEvent {
  * Outcome of one completed authorization attempt, emitted on
  * {@link AuthorizationCompletedStreamEvent}.
  */
-export type ConnectionAuthorizationOutcome = "authorized" | "declined" | "failed" | "timed-out";
+export type AuthorizationOutcome = "authorized" | "declined" | "failed" | "timed-out";
+
+/**
+ * @deprecated Use {@link AuthorizationOutcome}.
+ */
+export type ConnectionAuthorizationOutcome = AuthorizationOutcome;
 
 /**
  * Stream event emitted once `completeAuthorization` has resolved
- * (successfully or otherwise) for one pending connection. Carries a
+ * (successfully or otherwise) for one pending authorization. Carries a
  * stable `outcome` plus an optional human-readable `reason`.
  *
  * Emitted when the tool completes authorization on resume, before the
@@ -479,7 +484,7 @@ export interface AuthorizationCompletedStreamEvent {
      */
     authorization?: ConnectionAuthorizationChallenge;
     name: string;
-    outcome: ConnectionAuthorizationOutcome;
+    outcome: AuthorizationOutcome;
     reason?: string;
     sequence: number;
     stepIndex: number;
@@ -701,12 +706,12 @@ export function createActionsRequestedEvent(input: {
 }
 
 /**
- * Creates the `authorization.required` event for one connection
- * that needs user authorization before its tools can be used.
+ * Creates the `authorization.required` event for one authorization source
+ * that needs user authorization before it can continue.
  *
  * `authorization` and `webhookUrl` are present together when the runtime
  * has suspended the turn on a framework-owned webhook; both are absent
- * for `getToken`-only connections that authorize out of band.
+ * for `getToken`-only authorization sources that authorize out of band.
  */
 export function createAuthorizationRequiredEvent(input: {
   readonly authorization?: ConnectionAuthorizationChallenge;
@@ -738,13 +743,13 @@ export function createAuthorizationRequiredEvent(input: {
 
 /**
  * Creates the `authorization.completed` event emitted once per
- * connection after `completeAuthorization` has resolved or the
+ * authorization source after `completeAuthorization` has resolved or the
  * authorization deadline has expired.
  */
 export function createAuthorizationCompletedEvent(input: {
   readonly authorization?: ConnectionAuthorizationChallenge;
   readonly name: string;
-  readonly outcome: ConnectionAuthorizationOutcome;
+  readonly outcome: AuthorizationOutcome;
   readonly reason?: string;
   readonly sequence: number;
   readonly stepIndex: number;

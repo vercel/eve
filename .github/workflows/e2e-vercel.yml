@@ -99,7 +99,7 @@ jobs:
             pnpm exec eve build
           DEPLOYMENT_URL="$(pnpm exec vc deploy --prebuilt --yes --target=preview "${token_args[@]}" | tail -n 1)"
 
-          npx eve eval --strict --url "$DEPLOYMENT_URL" --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}.xml"
+          npx eve eval --strict --verbose --url "$DEPLOYMENT_URL" --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}.xml"
 
       - name: Upload eval artifacts
         if: failure()

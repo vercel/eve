@@ -41,6 +41,7 @@ import {
   type FlowPanelContent,
   type FlowPanelIndicator,
   type FlowPanelLine,
+  type FlowPanelStatus,
   type SetupPanelOption,
   type SetupSelectPanelState,
 } from "./setup-panel.js";
@@ -48,6 +49,7 @@ import type {
   SetupEditableSelectResult,
   SetupFlowIndicator,
   SetupFlowRenderer,
+  SetupFlowStatus,
   SetupSelectRequest,
 } from "./setup-flow.js";
 import type { SelectNotice } from "#setup/prompter.js";
@@ -177,6 +179,10 @@ function completedTurnStatus(interrupted: boolean, continueSession: boolean): st
 
 type SetupFlowIndicatorState = { kind: "spinner" } | { kind: "pulse"; startedAtMs: number };
 
+type SetupFlowStatusState =
+  | { kind: "progress"; text: string }
+  | { kind: "external-action"; text: string; emphasis: string };
+
 type TurnIndicatorState =
   | { kind: "idle" }
   | { kind: "waiting"; startedAtMs: number }
@@ -186,7 +192,7 @@ type SetupFlowState = {
   title: string;
   indicator: SetupFlowIndicatorState;
   lines: FlowPanelLine[];
-  status?: string;
+  status?: SetupFlowStatusState;
   /** Latest subprocess output line; replaced per write, never persisted. */
   preview?: string;
   /** Recent subprocess output, flushed as context when a warning settles it. */
@@ -641,7 +647,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (this.#turnIndicator.kind !== "waiting") {
       this.#turnIndicator = { kind: "waiting", startedAtMs: Date.now() };
     }
-    this.#status = STATUS.processing;
+    this.#status = this.#connectionAuthPendingCount > 0 ? STATUS.connectionAuth : STATUS.processing;
     this.#addSubmittedPrompt(options?.submittedPrompt);
     this.#interrupted = false;
     this.#totalTokens = undefined;
@@ -1007,18 +1013,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   upsertConnectionAuth(update: ConnectionAuthUpdate): void {
     if (this.#connectionAuth === "hidden") return;
-    const isTerminal =
-      update.state === "authorized" ||
-      update.state === "declined" ||
-      update.state === "failed" ||
-      update.state === "timed-out";
+    const terminalMessage = connectionAuthTerminalMessage(update.state);
     this.#upsertBlock({
       id: connectionAuthSectionId(update.name),
       kind: "connection-auth",
       title: `${stripTerminalControls(update.name)} · authorization · ${update.state}`,
-      body: formatConnectionAuthContent(update),
+      body: formatConnectionAuthContent(update, terminalMessage),
       preformatted: true,
-      live: !isTerminal,
+      live: terminalMessage === undefined,
     });
     this.#paint();
   }
@@ -1297,7 +1299,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     };
 
     let notices = opts.notices;
-    if (opts.kind === "task-list") {
+    if (opts.kind === "task-list" || (opts.kind === "search" && opts.layout === "task-list")) {
       const start = flow.taskListLineStart ?? flow.lines.length;
       const outcomes: SelectNotice[] = flow.lines
         .slice(start)
@@ -1381,7 +1383,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   ): ReturnType<SetupFlowRenderer["readChoice"]> {
     this.#start();
     const flow = this.#requireSetupFlow();
-    flow.status = opts.status;
+    flow.status = { kind: "progress", text: stripTerminalControls(opts.status) };
     // No action is pre-selected: the user must move into the action group before
     // Enter can act, rather than firing "Try again" by reflex.
     let cursor: number | undefined;
@@ -1901,8 +1903,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * status into the working indicator; `undefined` clears it. Nothing is ever
    * committed to the transcript.
    */
-  #setFlowStatus(text: string | undefined): void {
-    const content = text === undefined ? undefined : stripTerminalControls(text);
+  #setFlowStatus(status: SetupFlowStatus | undefined): void {
+    const content: SetupFlowStatusState | undefined =
+      status === undefined
+        ? undefined
+        : typeof status === "string"
+          ? { kind: "progress", text: stripTerminalControls(status) }
+          : {
+              kind: "external-action",
+              text: stripTerminalControls(status.text),
+              emphasis: stripTerminalControls(status.emphasis),
+            };
     if (this.#setupFlow !== undefined) {
       this.#setupFlow.status = content;
       if (content === undefined) this.#setupFlow.preview = undefined;
@@ -1918,7 +1929,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
     this.#start();
     this.#startWorking();
-    this.#status = content;
+    this.#status = content.text;
     this.#paint();
   }
 
@@ -2262,10 +2273,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   #finalizeAllBlocks() {
     for (const block of this.#blocks) {
-      // Blocks awaiting an approval decision or action.result stay live past
-      // the end of the stream. Committing them here would freeze the pending
-      // glyph into scrollback before the later decision/result can settle it.
-      if (block.status === "approval" || block.status === "running") continue;
+      // Blocks awaiting an approval decision, action.result, or OAuth callback
+      // stay live past this stream boundary so their later terminal update can
+      // replace the same transcript block.
+      if (
+        block.status === "approval" ||
+        block.status === "running" ||
+        (block.kind === "connection-auth" && block.live)
+      ) {
+        continue;
+      }
       block.live = false;
     }
   }
@@ -2675,7 +2692,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     return isProgressPulseVisible(Date.now() - startedAtMs) ? glyph : " ";
   }
 
-  #setupFlowIndicator(flow: SetupFlowState): FlowPanelIndicator {
+  #setupFlowIndicator(flow: SetupFlowState, status?: SetupFlowStatusState): FlowPanelIndicator {
     if (flow.indicator.kind === "spinner") {
       return { glyph: this.#spinnerFrame(), color: "yellow" };
     }
@@ -2684,7 +2701,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         flow.indicator.startedAtMs,
         this.#theme.unicode ? PROGRESS_PULSE_GLYPH : PROGRESS_PULSE_ASCII_GLYPH,
       ),
-      color: "green",
+      color: status?.kind === "external-action" ? "yellow" : "green",
     };
   }
 
@@ -2698,7 +2715,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // very state the line shows (link, pending deploy, model), so mid-flow
       // values are guaranteed stale; it reappears, refreshed, when the
       // panel closes.
-      const indicator = this.#setupFlowIndicator(flow);
+      const indicator = this.#setupFlowIndicator(flow, flow.status);
+      const status: FlowPanelStatus | undefined =
+        flow.status === undefined ? undefined : { ...flow.status, indicator };
       let content: FlowPanelContent;
       // A live status indicator rides alongside an open question only when one is
       // explicitly set (the install wait); ordinary questions leave it cleared,
@@ -2706,15 +2725,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
       if (flow.question !== undefined) {
         const rows = flow.question(width);
         content = { kind: "question", rows };
-        if (flow.status !== undefined) {
-          content = { kind: "question", rows, status: { text: flow.status, indicator } };
+        if (status !== undefined) {
+          content = { kind: "question", rows, status };
         }
-      } else if (flow.status !== undefined) {
-        content = { kind: "status", status: { text: flow.status, indicator } };
+      } else if (status !== undefined) {
+        content = { kind: "status", status };
         if (flow.preview !== undefined) {
           content = {
             kind: "status",
-            status: { text: flow.status, indicator },
+            status,
             preview: flow.preview,
           };
         }
@@ -3403,15 +3422,38 @@ function connectionAuthSectionId(connectionName: string): string {
   return `connection-auth:${connectionName}`;
 }
 
-function formatConnectionAuthContent(update: ConnectionAuthUpdate): string {
+function connectionAuthTerminalMessage(state: ConnectionAuthUpdate["state"]): string | undefined {
+  switch (state) {
+    case "authorized":
+      return "Authorization complete";
+    case "declined":
+      return "Authorization declined";
+    case "failed":
+      return "Authorization failed";
+    case "timed-out":
+      return "Authorization timed out";
+    case "required":
+    case "pending":
+      return undefined;
+  }
+}
+
+function formatConnectionAuthContent(
+  update: ConnectionAuthUpdate,
+  terminalMessage: string | undefined,
+): string {
   const lines: string[] = [];
-  const description = stripTerminalControls(update.description);
-  if (description.length > 0) lines.push(description);
-  const challenge = update.challenge;
-  if (challenge?.url) lines.push(`URL: ${stripTerminalControls(challenge.url)}`);
-  if (challenge?.userCode) lines.push(`Code: ${stripTerminalControls(challenge.userCode)}`);
-  if (challenge?.expiresAt) lines.push(`Expires: ${stripTerminalControls(challenge.expiresAt)}`);
-  if (challenge?.instructions) lines.push(stripTerminalControls(challenge.instructions));
+  if (terminalMessage !== undefined) {
+    lines.push(terminalMessage);
+  } else {
+    const description = stripTerminalControls(update.description);
+    if (description.length > 0) lines.push(description);
+    const challenge = update.challenge;
+    if (challenge?.url) lines.push(`URL: ${stripTerminalControls(challenge.url)}`);
+    if (challenge?.userCode) lines.push(`Code: ${stripTerminalControls(challenge.userCode)}`);
+    if (challenge?.expiresAt) lines.push(`Expires: ${stripTerminalControls(challenge.expiresAt)}`);
+    if (challenge?.instructions) lines.push(stripTerminalControls(challenge.instructions));
+  }
   if (update.reason !== undefined) {
     const reason = stripTerminalControls(update.reason);
     if (reason.length > 0) lines.push(`Reason: ${reason}`);

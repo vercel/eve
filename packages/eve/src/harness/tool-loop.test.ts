@@ -1,5 +1,12 @@
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
-import { type FilePart, jsonSchema, type LanguageModel, ToolLoopAgent, type UserContent } from "ai";
+import {
+  type FilePart,
+  jsonSchema,
+  type LanguageModel,
+  type ModelMessage,
+  ToolLoopAgent,
+  type UserContent,
+} from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -4058,7 +4065,7 @@ describe("createToolLoopHarness", () => {
       createTestConfig("conversation", emit, { tools: new Map() }),
     );
 
-    await harness(session, { message: "Use web_search." });
+    const result = await harness(session, { message: "Use web_search." });
 
     expect(events.filter((event) => event.type === "actions.requested")).toEqual([
       {
@@ -4104,6 +4111,272 @@ describe("createToolLoopHarness", () => {
         .slice(finalMessageIndex + 1)
         .filter((event) => event.type === "actions.requested" || event.type === "action.result"),
     ).toEqual([]);
+    expect(result.next).toBeNull();
+    expect(result.session.history.at(-1)?.role).toBe("assistant");
+  });
+
+  it("continues after provider-executed web_search follows assistant narration", async () => {
+    const toolCallId = "parallel_search_narrated";
+    const webSearchOutput = {
+      search_id: "search-1",
+      results: [
+        { excerpts: ["Current result"], title: "Current result", url: "https://example.com" },
+      ],
+      usage: [{ count: 1, name: "sku_search" }],
+    };
+    setupMockAgent({
+      content: [
+        { text: "I will look that up.", type: "text" },
+        {
+          input: { objective: "Search the web." },
+          toolCallId,
+          toolName: "web_search",
+          type: "tool-call",
+        },
+        {
+          output: webSearchOutput,
+          providerExecuted: true,
+          toolCallId,
+          toolName: "web_search",
+          type: "tool-result",
+        },
+      ],
+      finishReason: "stop",
+      response: {
+        messages: [
+          {
+            content: [
+              { text: "I will look that up.", type: "text" },
+              {
+                input: { objective: "Search the web." },
+                toolCallId,
+                toolName: "web_search",
+                type: "tool-call",
+              },
+              {
+                output: { type: "json", value: webSearchOutput },
+                toolCallId,
+                toolName: "web_search",
+                type: "tool-result",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      text: "I will look that up.",
+      toolCalls: [
+        {
+          input: { objective: "Search the web." },
+          toolCallId,
+          toolName: "web_search",
+          type: "tool-call",
+        },
+      ],
+      toolResults: [
+        {
+          output: webSearchOutput,
+          providerExecuted: true,
+          toolCallId,
+          toolName: "web_search",
+          type: "tool-result",
+        },
+      ],
+    });
+
+    const harness = createToolLoopHarness(
+      createTestConfig("conversation", undefined, { tools: new Map() }),
+    );
+    const result = await harness(
+      createTestSession({
+        agent: {
+          modelReference: { id: "anthropic/claude-sonnet-4.6" },
+          system: "You are a test assistant.",
+          tools: [{ description: "Search the web", name: "web_search", inputSchema: null }],
+        },
+      }),
+      { message: "Search the web." },
+    );
+
+    expect(typeof result.next).toBe("function");
+    expect(result.session.history.slice(-2)).toEqual([
+      {
+        content: [
+          { text: "I will look that up.", type: "text" },
+          {
+            input: { objective: "Search the web." },
+            providerExecuted: false,
+            toolCallId,
+            toolName: "web_search",
+            type: "tool-call",
+          },
+        ],
+        role: "assistant",
+      },
+      {
+        content: [
+          {
+            output: { type: "json", value: webSearchOutput },
+            toolCallId,
+            toolName: "web_search",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+    ]);
+  });
+
+  it("normalizes provider history before parking on an input request", async () => {
+    const searchCallId = "parallel_search_before_question";
+    const questionCallId = "question-after-search";
+    const webSearchOutput = { results: [], searchId: "search-1" };
+    const questionInput = {
+      options: [{ id: "one", label: "One" }],
+      prompt: "Choose one.",
+    };
+    setupMockAgent({
+      content: [
+        {
+          input: { objective: "Search the web." },
+          toolCallId: searchCallId,
+          toolName: "web_search",
+          type: "tool-call",
+        },
+        {
+          output: webSearchOutput,
+          providerExecuted: true,
+          toolCallId: searchCallId,
+          toolName: "web_search",
+          type: "tool-result",
+        },
+        {
+          input: questionInput,
+          toolCallId: questionCallId,
+          toolName: "ask_question",
+          type: "tool-call",
+        },
+      ],
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          {
+            content: [
+              { text: "I looked that up and need a choice.", type: "text" },
+              {
+                input: { objective: "Search the web." },
+                toolCallId: searchCallId,
+                toolName: "web_search",
+                type: "tool-call",
+              },
+              {
+                output: { type: "json", value: webSearchOutput },
+                toolCallId: searchCallId,
+                toolName: "web_search",
+                type: "tool-result",
+              },
+              {
+                input: questionInput,
+                toolCallId: questionCallId,
+                toolName: "ask_question",
+                type: "tool-call",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      text: "I looked that up and need a choice.",
+      toolCalls: [
+        {
+          input: { objective: "Search the web." },
+          toolCallId: searchCallId,
+          toolName: "web_search",
+          type: "tool-call",
+        },
+        {
+          input: questionInput,
+          toolCallId: questionCallId,
+          toolName: "ask_question",
+          type: "tool-call",
+        },
+      ],
+      toolResults: [
+        {
+          output: webSearchOutput,
+          providerExecuted: true,
+          toolCallId: searchCallId,
+          toolName: "web_search",
+          type: "tool-result",
+        },
+      ],
+    });
+
+    const harness = createToolLoopHarness(
+      createTestConfig("conversation", undefined, { tools: new Map() }),
+    );
+    const result = await harness(
+      createTestSession({
+        agent: {
+          modelReference: { id: "anthropic/claude-sonnet-4.6" },
+          system: "You are a test assistant.",
+          tools: [
+            { description: "Search the web", name: "web_search", inputSchema: null },
+            {
+              description: "Ask the user a question.",
+              name: "ask_question",
+              inputSchema: { type: "object" },
+            },
+          ],
+        },
+      }),
+      { message: "Search, then ask me a question." },
+    );
+
+    const pendingResponseMessages = (
+      result.session.state?.["eve.runtime.pendingInputBatch"] as
+        | { responseMessages?: readonly ModelMessage[] }
+        | undefined
+    )?.responseMessages;
+
+    expect(result.next).toBeNull();
+    expect(pendingResponseMessages).toEqual([
+      {
+        content: [
+          { text: "I looked that up and need a choice.", type: "text" },
+          {
+            input: { objective: "Search the web." },
+            providerExecuted: false,
+            toolCallId: searchCallId,
+            toolName: "web_search",
+            type: "tool-call",
+          },
+        ],
+        role: "assistant",
+      },
+      {
+        content: [
+          {
+            output: { type: "json", value: webSearchOutput },
+            toolCallId: searchCallId,
+            toolName: "web_search",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+      {
+        content: [
+          {
+            input: questionInput,
+            toolCallId: questionCallId,
+            toolName: "ask_question",
+            type: "tool-call",
+          },
+        ],
+        role: "assistant",
+      },
+    ]);
   });
 
   it("continues after a provider-executed web_search returns without assistant text", async () => {
@@ -4126,6 +4399,88 @@ describe("createToolLoopHarness", () => {
               {
                 input: { objective: "Search the web." },
                 providerExecuted: true,
+                toolCallId,
+                toolName: "web_search",
+                type: "tool-call",
+              },
+              {
+                output: { type: "json", value: { results: [], searchId: "search-1" } },
+                toolCallId,
+                toolName: "web_search",
+                type: "tool-result",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [],
+      toolResults: [
+        {
+          output: { results: [], searchId: "search-1" },
+          providerExecuted: true,
+          toolCallId,
+          toolName: "web_search",
+          type: "tool-result",
+        },
+      ],
+    });
+
+    const harness = createToolLoopHarness(
+      createTestConfig("conversation", undefined, { tools: new Map() }),
+    );
+    const result = await harness(
+      createTestSession({
+        agent: {
+          modelReference: { id: "openai/gpt-5.5" },
+          system: "You are a test assistant.",
+          tools: [{ description: "Search the web", name: "web_search", inputSchema: null }],
+        },
+      }),
+      { message: "Search the web." },
+    );
+
+    expect(typeof result.next).toBe("function");
+    expect(result.session.history.at(-1)).toEqual({
+      content: [
+        {
+          input: { objective: "Search the web." },
+          providerExecuted: true,
+          toolCallId,
+          toolName: "web_search",
+          type: "tool-call",
+        },
+        {
+          output: { type: "json", value: { results: [], searchId: "search-1" } },
+          toolCallId,
+          toolName: "web_search",
+          type: "tool-result",
+        },
+      ],
+      role: "assistant",
+    });
+  });
+
+  it("normalizes an unmarked provider call without assistant text", async () => {
+    const toolCallId = "parallel_search_unmarked";
+    setupMockAgent({
+      content: [
+        {
+          output: { results: [], searchId: "search-1" },
+          providerExecuted: true,
+          toolCallId,
+          toolName: "web_search",
+          type: "tool-result",
+        },
+      ],
+      finishReason: "stop",
+      response: {
+        messages: [
+          {
+            content: [
+              {
+                input: { objective: "Search the web." },
                 toolCallId,
                 toolName: "web_search",
                 type: "tool-call",
@@ -4202,10 +4557,17 @@ describe("createToolLoopHarness", () => {
       content: [
         {
           input: { query: "eve release note current" },
-          providerExecuted: true,
           toolCallId,
           toolName: "web_search",
           type: "tool-call",
+        },
+        {
+          error: new Error("Search failed"),
+          input: { query: "eve release note current" },
+          providerExecuted: true,
+          toolCallId,
+          toolName: "web_search",
+          type: "tool-error",
         },
       ],
       finishReason: "stop",
@@ -4233,10 +4595,15 @@ describe("createToolLoopHarness", () => {
             content: [
               {
                 input: { query: "eve release note current" },
-                providerExecuted: true,
                 toolCallId,
                 toolName: "web_search",
                 type: "tool-call",
+              },
+              {
+                output: { type: "error-text", value: "Search failed" },
+                toolCallId,
+                toolName: "web_search",
+                type: "tool-result",
               },
             ],
             role: "assistant",
@@ -4247,7 +4614,6 @@ describe("createToolLoopHarness", () => {
       toolCalls: [
         {
           input: { query: "eve release note current" },
-          providerExecuted: true,
           toolCallId,
           toolName: "web_search",
           type: "tool-call",
@@ -4268,7 +4634,7 @@ describe("createToolLoopHarness", () => {
       createTestConfig("conversation", emit, { tools: new Map() }),
     );
 
-    await harness(session, { message: "Use web_search." });
+    const result = await harness(session, { message: "Use web_search." });
 
     expect(events.filter((event) => event.type === "action.result")).toEqual([
       {
@@ -4291,6 +4657,11 @@ describe("createToolLoopHarness", () => {
           turnId: "turn_0",
         },
       },
+    ]);
+    expect(typeof result.next).toBe("function");
+    expect(result.session.history.slice(-2).map((message) => message.role)).toEqual([
+      "assistant",
+      "tool",
     ]);
   });
 

@@ -107,12 +107,14 @@ describe("bundleFinalWorkflowOutput", () => {
         code: "globalThis.__private_workflows = new Map();",
         format: "esm",
         outfile: target,
+        queueNamespace: "evetest",
         workingDir: resolvePackageRoot(),
       });
 
       const source = await readFile(target, "utf8");
       const runtimePath = resolveWorkflowModulePath("workflow/runtime").replaceAll("\\", "/");
       expect(source).toContain(`from ${JSON.stringify(runtimePath)}`);
+      expect(source).toContain('workflowEntrypoint(workflowCode, { namespace: "evetest" })');
       expect(source).not.toContain('from "workflow/runtime"');
     } finally {
       await rm(dir, { recursive: true, force: true });

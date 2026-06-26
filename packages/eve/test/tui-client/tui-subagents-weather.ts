@@ -4,7 +4,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { Client } from "eve/client";
 import { EveTUIRunner, MockScreen, MockUserInput } from "./lib/tui.ts";
 
-import { run } from "./lib/run.ts";
+import { run, type RunOptions } from "./lib/run.ts";
 import { theme } from "./lib/theme.ts";
 
 /**
@@ -33,7 +33,15 @@ const TICKER = "GOOG";
 const PRICE = "178.92";
 process.env.EVE_TUI_UNICODE = "1";
 
-run({ app: "agent-subagents-hitl", kind: "local-build" }, async (target) => {
+const WEATHER_SMOKE_TARGET: RunOptions = {
+  app: "agent-subagents-hitl",
+  kind: "local-build",
+  // The spawned server must use the deterministic authored-model adapter;
+  // otherwise this TUI rendering smoke depends on an AI Gateway credential.
+  startEnv: { ...process.env, EVE_MOCK_AUTHORED_MODELS: "1" },
+};
+
+run(WEATHER_SMOKE_TARGET, async (target) => {
   const client = new Client({ host: target.baseUrl });
   const session = client.session();
   const screen = new MockScreen({ columns: 140, rows: 60 });

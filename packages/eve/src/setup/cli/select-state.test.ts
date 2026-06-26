@@ -49,15 +49,21 @@ describe("filterOptions", () => {
   });
 
   it("returns nothing when no option matches", () => {
-    expect(filterOptions(OPTIONS, "zzz")).toEqual([]);
+    const done = { value: "done", label: "Done", trailingAction: true };
+    expect(filterOptions([...OPTIONS, done], "zzz")).toEqual([done]);
   });
 
   it("appends the search action after local matches", () => {
-    const visible = filterOptions([{ value: "veto", label: "veto" }], "v", {
-      label: (query) => `Search for '${query}'`,
-    });
+    const visible = filterOptions(
+      [
+        { value: "veto", label: "veto" },
+        { value: "done", label: "Done", trailingAction: true },
+      ],
+      "v",
+      { label: (query) => `Search for '${query}'` },
+    );
 
-    expect(visible.map((option) => option.label)).toEqual(["veto", "Search for 'v'"]);
+    expect(visible.map((option) => option.label)).toEqual(["veto", "Search for 'v'", "Done"]);
     expect(searchActionQuery(visible[1]?.value ?? "")).toBe("v");
   });
 

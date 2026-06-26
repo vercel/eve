@@ -194,8 +194,7 @@ export class Client {
       // Skip the header entirely on an empty token rather than emitting a
       // malformed `Bearer ` value the server has to reject. The dev client's
       // OIDC resolver returns "" when no token is available locally; the
-      // request then goes out unauthenticated and the framework's
-      // `vercelOidc()` channel handler returns a clean 401.
+      // request then follows the framework channel's local-dev fallback.
       const token = (await resolveTokenValue(auth.bearer)).trim();
       return token.length === 0 ? {} : { authorization: `Bearer ${token}` };
     }

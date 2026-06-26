@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { authenticateOidcStrategy } from "../../src/runtime/governance/auth/oidc.js";
 
@@ -16,15 +16,8 @@ import { authenticateOidcStrategy } from "../../src/runtime/governance/auth/oidc
  * verifier tests (`verifyVercelOidc`, `verifyJwtHmac`, etc.) live
  * alongside the source module under `src/public/channels/auth.test.ts`.
  */
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
-
 describe("authenticateOidcStrategy", () => {
   it("upgrades a current-project Vercel token to principalType: runtime", async () => {
-    vi.stubEnv("VERCEL_PROJECT_ID", "prj_test");
-    vi.stubEnv("VERCEL_TARGET_ENV", "preview");
-
     const oidcServer = await startOidcTestIssuer();
 
     try {
@@ -47,6 +40,10 @@ describe("authenticateOidcStrategy", () => {
           acceptCurrentVercelProject: true,
           audiences: ["https://vercel.com/acme"],
           clockSkewSeconds: 30,
+          currentVercelProject: {
+            environment: "preview",
+            projectId: "prj_test",
+          },
           discoveryUrl: oidcServer.discoveryUrl,
           issuer: oidcServer.issuer,
           kind: "oidc",

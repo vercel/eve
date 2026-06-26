@@ -83,13 +83,16 @@ export type ToolFilterDefinition =
  * - `{ type: "user", id, issuer }`: per end-user identity; the token
  *   cache keys on `issuer + id` so the same `id` across different
  *   IdPs (Slack `U123` vs Google `U123`) never collides.
+ * - `{ type: "user", id }`: Vercel Connect's native user subject, used for a
+ *   verified Vercel development user. The Vercel OIDC issuer is not forwarded
+ *   because Connect rejects it.
  */
 export type ConnectionPrincipal =
   | { readonly type: "app" }
   | {
       readonly type: "user";
       readonly id: string;
-      readonly issuer: string;
+      readonly issuer?: string;
       readonly attributes?: Readonly<Record<string, string | readonly string[]>>;
     };
 

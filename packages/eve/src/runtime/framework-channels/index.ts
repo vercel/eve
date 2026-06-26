@@ -15,15 +15,12 @@ import type { ResolvedChannelDefinition } from "#runtime/types.js";
 const EVE_CHANNEL_NAME = "eve";
 
 /**
- * Framework default for the eve channel. Mirrors verbatim the scaffold
- * written by eve into `agent/channels/eve.ts`, so the
- * behavior of "no authored file" and "scaffolded file untouched" is
- * byte-identical — and the local-dev / Vercel branching lives in a
- * single named helper (`localDev`) instead of an env check buried in
- * the framework.
+ * Framework default for the eve channel.
  */
 export function getFrameworkChannelDefinitions(): readonly ResolvedChannelDefinition[] {
-  const compiled = eveChannel({ auth: [localDev(), vercelOidc()] }) as CompiledChannel;
+  const compiled = eveChannel({
+    auth: [vercelOidc(), localDev()],
+  }) as CompiledChannel;
 
   const result: ResolvedChannelDefinition[] = [];
 

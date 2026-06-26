@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  canonicalConnectorNameForEntry,
   catalogSlugs,
   CONNECTION_CATALOG,
   connectorServiceForEntry,
@@ -41,12 +42,13 @@ describe("catalog integrity", () => {
   test("every Connect entry resolves a `vercel connect create` service", () => {
     for (const entry of CONNECTION_CATALOG) {
       expect(connectorServiceForEntry(entry)).toBeTruthy();
+      expect(canonicalConnectorNameForEntry(entry)).toBeTruthy();
     }
   });
 });
 
 describe("connectorServiceForEntry", () => {
-  test("prefers the explicit service over the MCP host", () => {
+  test("prefers the explicit service over the MCP endpoint", () => {
     expect(
       connectorServiceForEntry({
         mcp: { url: "https://mcp.example.com/sse" },
@@ -68,6 +70,26 @@ describe("connectorServiceForEntry", () => {
     expect(
       connectorServiceForEntry({ auth: { kind: "bearer-env", envVar: "TOKEN" } }),
     ).toBeUndefined();
+  });
+});
+
+describe("canonicalConnectorNameForEntry", () => {
+  test("uses the configured connector name without inferring a UID namespace", () => {
+    expect(canonicalConnectorNameForEntry(getCatalogEntry("notion")!)).toBe("notion");
+    expect(
+      canonicalConnectorNameForEntry({
+        auth: { kind: "connect", connector: "custom", service: "mcp.example.com/mcp" },
+      }),
+    ).toBe("custom");
+  });
+});
+
+describe("curated Connect services", () => {
+  test("uses the provider's managed service identifier", () => {
+    expect(connectorServiceForEntry(getCatalogEntry("linear")!)).toBe("mcp.linear.app");
+    expect(connectorServiceForEntry(getCatalogEntry("notion")!)).toBe("mcp.notion.com");
+    expect(connectorServiceForEntry(getCatalogEntry("datadog")!)).toBe("mcp.datadoghq.com");
+    expect(connectorServiceForEntry(getCatalogEntry("honeycomb")!)).toBe("mcp.honeycomb.io");
   });
 });
 

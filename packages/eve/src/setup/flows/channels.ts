@@ -216,7 +216,7 @@ function channelListRows(
     if (channel.hint !== undefined) row.hint = channel.hint;
     rows.push(row);
   }
-  rows.push({ value: "done", label: "Done" });
+  rows.push({ value: "done", label: "Done", trailingAction: true });
   return rows;
 }
 

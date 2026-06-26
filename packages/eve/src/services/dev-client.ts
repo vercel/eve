@@ -32,6 +32,17 @@ export interface DevelopmentRuntimeArtifactSessionRefresher {
   }): Promise<ClientSession>;
 
   /**
+   * Forces one rebuild after a local setup action wrote authored source.
+   */
+  refreshAfterSourceChange(input: {
+    readonly createSession: () => ClientSession;
+    readonly onRuntimeArtifactsChanged?: (
+      change: DevelopmentRuntimeArtifactChange,
+    ) => void | Promise<void>;
+    readonly session: ClientSession;
+  }): Promise<ClientSession>;
+
+  /**
    * Checks for a runtime-artifact revision change while the UI is idle.
    */
   refreshIdle(input: {
@@ -88,12 +99,29 @@ class LocalDevelopmentRuntimeArtifactSessionRefresher implements DevelopmentRunt
     return await this.#refreshSession({ ...input, rebuild: false });
   }
 
+  async refreshAfterSourceChange(input: {
+    readonly createSession: () => ClientSession;
+    readonly onRuntimeArtifactsChanged?: (
+      change: DevelopmentRuntimeArtifactChange,
+    ) => void | Promise<void>;
+    readonly session: ClientSession;
+  }): Promise<ClientSession> {
+    return await this.#refreshSession({
+      ...input,
+      force: true,
+      rebuild: true,
+      resetActiveSession: true,
+    });
+  }
+
   async #refreshSession(input: {
     readonly createSession: () => ClientSession;
     readonly onRuntimeArtifactsChanged?: (
       change: DevelopmentRuntimeArtifactChange,
     ) => void | Promise<void>;
+    readonly force?: boolean;
     readonly rebuild: boolean;
+    readonly resetActiveSession?: boolean;
     readonly session: ClientSession;
   }): Promise<ClientSession> {
     if (!this.#isLocal) {
@@ -102,7 +130,10 @@ class LocalDevelopmentRuntimeArtifactSessionRefresher implements DevelopmentRunt
 
     const revision =
       (input.rebuild
-        ? await rebuildDevelopmentRuntimeArtifacts({ serverUrl: this.#serverUrl })
+        ? await rebuildDevelopmentRuntimeArtifacts({
+            force: input.force,
+            serverUrl: this.#serverUrl,
+          })
         : undefined) ??
       (await readDevelopmentRuntimeArtifactsRevision({ serverUrl: this.#serverUrl }));
     if (revision === undefined) {
@@ -111,10 +142,13 @@ class LocalDevelopmentRuntimeArtifactSessionRefresher implements DevelopmentRunt
 
     let session = input.session;
     const previousRevision = this.#artifactRevision;
-    if (previousRevision !== undefined && previousRevision !== revision) {
+    const revisionChanged = previousRevision !== undefined && previousRevision !== revision;
+    if (revisionChanged || input.resetActiveSession === true) {
       if (session.state.continuationToken !== undefined) {
         session = input.createSession();
       }
+    }
+    if (revisionChanged) {
       await input.onRuntimeArtifactsChanged?.({ previousRevision, revision });
     }
     this.#artifactRevision = revision;
