@@ -1,5 +1,6 @@
 "use client";
 
+import { RotateCcw } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { IconPlusCircle } from "@/components/geistcn-icons";
 import { cn } from "@/lib/utils";
@@ -25,6 +26,11 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
     setVisited((prev) => new Set(prev).add(index));
   }
 
+  function reset() {
+    setSelectedIndex(0);
+    setVisited(new Set([0]));
+  }
+
   return (
     // Full-width container so the header divider can bleed to the page frame's
     // vertical borders, forming a cross with the layout grid.
@@ -44,6 +50,17 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
                 <span className="ml-auto text-gray-900 text-label-13">
                   {visited.size} {visited.size === 1 ? "file" : "files"}
                 </span>
+                {visited.size > 1 ? (
+                  <button
+                    type="button"
+                    onClick={reset}
+                    aria-label="Reset selection"
+                    title="Reset"
+                    className="cursor-pointer text-gray-600 transition-colors hover:text-gray-1000"
+                  >
+                    <RotateCcw className="size-3.5" />
+                  </button>
+                ) : null}
               </div>
               <div className="space-y-0.5 p-2">
                 {items.map((item, i) => {
