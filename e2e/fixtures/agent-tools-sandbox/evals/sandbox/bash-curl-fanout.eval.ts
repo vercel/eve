@@ -19,8 +19,6 @@ const REQUESTS = [
 ] as const;
 
 interface CurlMeasurement {
-  readonly clientCompletedAtMs: number;
-  readonly clientStartedAtMs: number;
   readonly label: string;
   readonly query: string;
   readonly serverCompletedAtMs: number;
@@ -61,12 +59,7 @@ function commandFor(request: (typeof REQUESTS)[number]): string {
   url.searchParams.set("label", request.label);
   url.searchParams.set("q", request.query);
 
-  return [
-    "started=$(date +%s%3N)",
-    `response=$(curl -fsS --max-time 30 '${url.href}')`,
-    "completed=$(date +%s%3N)",
-    'printf \'{"clientStartedAtMs":%s,"clientCompletedAtMs":%s,"server":%s}\\n\' "$started" "$completed" "$response"',
-  ].join("; ");
+  return `curl -fsS --max-time 30 '${url.href}'`;
 }
 
 function consecutiveCurlStartsOverlap(input: {
@@ -90,7 +83,6 @@ function consecutiveCurlStartsOverlap(input: {
     measurements.every(
       (measurement) =>
         expectedQueryByLabel.get(measurement.label) === measurement.query &&
-        measurement.clientStartedAtMs < measurement.clientCompletedAtMs &&
         measurement.serverReceivedAtMs < measurement.serverCompletedAtMs,
     ) &&
     consecutiveStartsOverlap(measurements)
@@ -98,9 +90,10 @@ function consecutiveCurlStartsOverlap(input: {
 }
 
 function consecutiveStartsOverlap(measurements: readonly CurlMeasurement[]): boolean {
+  // The delay server provides one monotonic clock for every curl request.
   const orderedByStart = [...measurements].sort(
     (left, right) =>
-      left.clientStartedAtMs - right.clientStartedAtMs || left.label.localeCompare(right.label),
+      left.serverReceivedAtMs - right.serverReceivedAtMs || left.label.localeCompare(right.label),
   );
 
   for (let index = 1; index < orderedByStart.length; index += 1) {
@@ -109,7 +102,7 @@ function consecutiveStartsOverlap(measurements: readonly CurlMeasurement[]): boo
     if (
       previous === undefined ||
       current === undefined ||
-      previous.clientCompletedAtMs <= current.clientStartedAtMs
+      previous.serverCompletedAtMs <= current.serverReceivedAtMs
     ) {
       return false;
     }
@@ -132,17 +125,12 @@ function parseCurlMeasurement(value: unknown): readonly CurlMeasurement[] {
 
   for (const line of stdout.split("\n")) {
     const parsed = parseJson(line);
-    const clientStartedAtMs = readFiniteNumberField(parsed, "clientStartedAtMs");
-    const clientCompletedAtMs = readFiniteNumberField(parsed, "clientCompletedAtMs");
-    const server = readField(parsed, "server");
-    const label = readStringField(server, "label");
-    const query = readStringField(server, "query");
-    const serverReceivedAtMs = readFiniteNumberField(server, "receivedAtMs");
-    const serverCompletedAtMs = readFiniteNumberField(server, "completedAtMs");
+    const label = readStringField(parsed, "label");
+    const query = readStringField(parsed, "query");
+    const serverReceivedAtMs = readFiniteNumberField(parsed, "receivedAtMs");
+    const serverCompletedAtMs = readFiniteNumberField(parsed, "completedAtMs");
 
     if (
-      clientStartedAtMs !== undefined &&
-      clientCompletedAtMs !== undefined &&
       label !== undefined &&
       query !== undefined &&
       serverReceivedAtMs !== undefined &&
@@ -150,8 +138,6 @@ function parseCurlMeasurement(value: unknown): readonly CurlMeasurement[] {
     ) {
       return [
         {
-          clientCompletedAtMs,
-          clientStartedAtMs,
           label,
           query,
           serverCompletedAtMs,
@@ -167,7 +153,6 @@ function formatCurlFanoutTrace(events: readonly HandleMessageStreamEvent[]): str
   return JSON.stringify({
     calls: curlMeasurements(events).map((measurement) => ({
       ...measurement,
-      clientDurationMs: measurement.clientCompletedAtMs - measurement.clientStartedAtMs,
       serverDurationMs: measurement.serverCompletedAtMs - measurement.serverReceivedAtMs,
     })),
   });
