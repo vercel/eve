@@ -4,7 +4,7 @@ import { resumeHook } from "#internal/workflow/runtime.js";
 
 /** Payloads delivered to the private inbox owned by one active turn. */
 export type TurnInboxPayload =
-  | HookPayload
+  | Exclude<HookPayload, DeliverHookPayload>
   | {
       readonly delivery: DeliverHookPayload;
       readonly kind: "driver-delivery";
