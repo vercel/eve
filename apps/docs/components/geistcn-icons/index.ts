@@ -14,6 +14,7 @@ export { IconPlusCircle } from "./icon-plus-circle";
 export { IconRobot } from "./icon-robot";
 export { IconSandbox } from "./icon-sandbox";
 export { IconSparkles } from "./icon-sparkles";
+export { IconTrash } from "./icon-trash";
 export { IconUser } from "./icon-user";
 export { IconWorkflow } from "./icon-workflow";
 export { IconWrench } from "./icon-wrench";

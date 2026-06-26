@@ -1,8 +1,7 @@
 "use client";
 
-import { RotateCcw } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { IconPlusCircle } from "@/components/geistcn-icons";
+import { IconPlusCircle, IconTrash } from "@/components/geistcn-icons";
 import { cn } from "@/lib/utils";
 
 export interface FileTreeItem {
@@ -58,7 +57,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
                     title="Reset"
                     className="cursor-pointer text-gray-600 transition-colors hover:text-gray-1000"
                   >
-                    <RotateCcw className="size-3.5" />
+                    <IconTrash aria-hidden size={14} />
                   </button>
                 ) : null}
               </div>
