@@ -18,6 +18,7 @@ describe("turn workflow wire migrations", () => {
     const input = {
       capabilities: undefined,
       completionToken: "turn-token",
+      driverCapabilities: { turnInbox: true },
       mode: "conversation",
       stepInput: {
         input: createDelivery(),
@@ -49,6 +50,7 @@ describe("turn workflow wire migrations", () => {
     ).toEqual({
       capabilities: undefined,
       completionToken: "turn-token",
+      driverCapabilities: { turnInbox: true },
       mode: "conversation",
       stepInput: {
         input: delivery,

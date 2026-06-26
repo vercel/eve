@@ -61,8 +61,11 @@ import { emitProxiedInputRequest, routeDeliverPayload } from "#execution/subagen
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
-import { turnWorkflow } from "#execution/turn-workflow.js";
-import { createWorkflowRuntime, startWorkflowPreferLatest } from "#execution/workflow-runtime.js";
+import {
+  createWorkflowRuntime,
+  startWorkflowPreferLatest,
+  turnWorkflowReference,
+} from "#execution/workflow-runtime.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 
 /**
@@ -640,16 +643,20 @@ export async function dispatchTurnStep(
 ): Promise<{ readonly runId: string }> {
   "use step";
 
-  const run = await startWorkflowPreferLatest(turnWorkflow, [createTurnWorkflowInput(input)], {
-    allowReservedAttributes: true,
-    attributes: normalizeEveAttributes(
-      buildTurnAttributes({
-        parentSessionId: input.sessionState.sessionId,
-        requestId: input.delivery.kind === "deliver" ? input.delivery.requestId : undefined,
-        rootSessionId: readRootSessionId(input.serializedContext) ?? input.sessionState.sessionId,
-      }),
-    ),
-  });
+  const run = await startWorkflowPreferLatest(
+    turnWorkflowReference,
+    [createTurnWorkflowInput(input)],
+    {
+      allowReservedAttributes: true,
+      attributes: normalizeEveAttributes(
+        buildTurnAttributes({
+          parentSessionId: input.sessionState.sessionId,
+          requestId: input.delivery.kind === "deliver" ? input.delivery.requestId : undefined,
+          rootSessionId: readRootSessionId(input.serializedContext) ?? input.sessionState.sessionId,
+        }),
+      ),
+    },
+  );
 
   return { runId: run.runId };
 }

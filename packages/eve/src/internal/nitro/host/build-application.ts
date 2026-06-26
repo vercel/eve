@@ -173,6 +173,7 @@ async function readVercelServerRuntime(outputDir: string): Promise<string | unde
 }
 
 async function emitVercelWorkflowFunctions(input: {
+  agentName: string;
   appRoot: string;
   compiledArtifactsBootstrapPath: string;
   flowNitroOutputDir: string;
@@ -180,6 +181,7 @@ async function emitVercelWorkflowFunctions(input: {
   workflowBuildDir: string;
 }): Promise<void> {
   const builder = new WorkflowBundleBuilder({
+    agentName: input.agentName,
     appRoot: input.appRoot,
     compiledArtifactsBootstrapPath: input.compiledArtifactsBootstrapPath,
     outDir: input.workflowBuildDir,
@@ -265,6 +267,7 @@ export async function buildApplication(rootDir: string): Promise<string> {
     });
     const flowNitroOutputDir = await buildVercelNitroSurface(preparedHost, "flow");
     await emitVercelWorkflowFunctions({
+      agentName: preparedHost.compileResult.manifest.config.name,
       appRoot: preparedHost.appRoot,
       compiledArtifactsBootstrapPath: preparedHost.compiledArtifacts.bootstrapPath,
       flowNitroOutputDir,

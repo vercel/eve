@@ -13,8 +13,9 @@ pnpm exec eve eval --strict
 ```
 
 Every retained e2e eval is deterministic and self-contained. Coverage that
-needs external services, injected env, or provider credentials is intentionally
-not part of this suite.
+needs external services or injected env is intentionally not part of this
+suite. Most fixtures use the shared model-provider credentials; dedicated
+runtime stress fixtures may use an authored deterministic model instead.
 
 Each retained fixture package also exposes the same command as:
 
@@ -58,9 +59,12 @@ npx eve eval --strict --url "$DEPLOYMENT_URL"
 Do not set `VERCEL_TEAM_ID` at build: sandbox template keys must derive
 identically at build and runtime, and Vercel has no team variable at runtime.
 
-Both local and deployed evals run the fixture agents and judges against real
+Most local and deployed evals run the fixture agents and judges against real
 models (`openai/gpt-5.5`), so the environment must provide the corresponding
-model-provider credentials.
+model-provider credentials. `agent-workflow-stress` uses an authored AI SDK
+mock model so its 100-turn runs stay fast and deterministic. Its concurrent and
+sequential evals cover high-volume session execution and repeated session
+resumption respectively.
 
 ## Fixtures
 
