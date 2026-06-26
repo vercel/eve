@@ -1,5 +1,16 @@
 # eve
 
+## 0.16.0
+
+### Minor Changes
+
+- 24faac0: Add a searchable `/connect` flow to the local dev TUI. It scaffolds an MCP connection, resolves its Vercel Connect connector, and reuses the model setup flow to create or link a Vercel project when needed. Local Vercel users now authorize Connect with their Vercel user ID instead of a reserved OIDC issuer.
+
+### Patch Changes
+
+- ddda14c: Fresh agents now start model setup from their prefilled `/model` prompt, installing the Vercel CLI and logging in when those prerequisites are missing. Other `eve dev` sessions leave missing model setup as an attention prompt.
+- ca8512a: Generated projects now emit peer-resolution metadata only for their selected package manager. pnpm scaffolds no longer include npm or Yarn fields that can make frozen Vercel installs fail.
+
 ## 0.15.5
 
 ### Patch Changes
