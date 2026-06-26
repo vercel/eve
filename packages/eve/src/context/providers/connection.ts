@@ -1,11 +1,7 @@
 import { ContextKey } from "#context/key.js";
 import { AuthKey } from "#context/keys.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
-import {
-  mcpSessionStateKey,
-  type McpSessionSlot,
-  type McpSessionSlots,
-} from "#runtime/connections/mcp-session-store.js";
+import { mcpSessionStateKey, type McpSessionSlot } from "#runtime/connections/mcp-session-store.js";
 import type { ConnectionRegistry } from "#runtime/connections/types.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getActiveRuntimeNode } from "#context/node.js";
@@ -42,8 +38,7 @@ export const connectionProvider: FrameworkContextProvider<ConnectionRegistry> = 
       }
     }
 
-    const sessionSlots: McpSessionSlots = slots;
-    return { value: new ConnectionRegistryImpl(connections, sessionSlots) };
+    return { value: new ConnectionRegistryImpl(connections, slots) };
   },
 
   commit(registry, session) {

@@ -260,6 +260,40 @@ describe("McpConnectionClient stateful session", () => {
     expect(result).toBe("ok");
     expect(slot.sessionId).toBeUndefined();
     expect(sdkTool.execute).toHaveBeenCalledTimes(2);
+    expect(client.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fall back to SSE when the initialize for a replayed session id gets a 404", async () => {
+    // The FIRST HTTP `initialize` rejects with 404 inside #createClient — the
+    // session id on disk expired. The guard must rethrow past the SSE fallback
+    // so #withSessionRetry clears the slot, closes, and retries; the SECOND
+    // createMCPClient resolves a working client over HTTP. Without the guard
+    // the first 404 would route to the SSE fallback (transport.type === "sse").
+    createMCPClient.mockRejectedValueOnce({ status: 404 });
+    const client = {
+      close: vi.fn(),
+      listTools: vi.fn().mockResolvedValue({ tools: [{ name: "t", inputSchema: {} }] }),
+      toolsFromDefinitions: vi
+        .fn()
+        .mockReturnValue({ t: { execute: vi.fn().mockResolvedValue("ok") } }),
+    };
+    createMCPClient.mockResolvedValue(client);
+
+    const slot = { stateKey: "k", sessionId: "stale" } as {
+      stateKey: string;
+      sessionId?: string;
+    };
+    const result = await new McpConnectionClient(
+      makeConnection({ session: "stateful" }),
+      slot,
+    ).executeTool("t", {});
+
+    expect(result).toBe("ok");
+    expect(createMCPClient.mock.calls.length).toBeGreaterThanOrEqual(2);
+    // No createMCPClient call may have attempted the SSE transport.
+    for (const call of createMCPClient.mock.calls) {
+      expect(call[0].transport.type).toBe("http");
+    }
   });
 
   it("does not retry a 404 for a stateless connection", async () => {

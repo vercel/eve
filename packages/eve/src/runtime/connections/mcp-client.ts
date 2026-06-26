@@ -80,6 +80,12 @@ export class McpConnectionClient implements ConnectionClient {
         transport: { type: "http", url, headers, fetch },
       });
     } catch (error) {
+      // A 404 while replaying a persisted session id means the session expired
+      // on the server — handled by #withSessionRetry re-initializing a fresh
+      // session. Skip the SSE fallback: this is not a transport incompatibility.
+      if (this.#sessionSlot?.sessionId !== undefined && readHttpStatus(error) === 404) {
+        throw error;
+      }
       if (!isMcpHttpFallbackRetryableError(error)) {
         throw error;
       }
