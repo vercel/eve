@@ -95,7 +95,7 @@ describe("curated Connect services", () => {
 
 describe("mcpServiceHost", () => {
   test("extracts the host from a URL", () => {
-    expect(mcpServiceHost("https://mcp.linear.app/sse")).toBe("mcp.linear.app");
+    expect(mcpServiceHost("https://mcp.linear.app/mcp")).toBe("mcp.linear.app");
   });
 
   test("returns undefined for missing or unparseable input", () => {

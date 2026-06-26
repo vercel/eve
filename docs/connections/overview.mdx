@@ -110,7 +110,7 @@ import { defineMcpClientConnection } from "eve/connections";
 import { once } from "eve/tools/approval";
 
 export default defineMcpClientConnection({
-  url: "https://mcp.linear.app/sse",
+  url: "https://mcp.linear.app/mcp",
   description: "Linear workspace.",
   auth: { getToken: async () => ({ token: process.env.LINEAR_API_TOKEN! }) },
   approval: once(),
@@ -130,7 +130,7 @@ import { connect } from "@vercel/connect/eve";
 import { defineMcpClientConnection } from "eve/connections";
 
 export default defineMcpClientConnection({
-  url: "https://mcp.linear.app/sse",
+  url: "https://mcp.linear.app/mcp",
   description: "Linear workspace: issues, projects, cycles, and comments.",
   auth: connect("linear/myagent"),
 });
@@ -147,7 +147,7 @@ import { connect } from "@vercel/connect/eve";
 import { defineMcpClientConnection } from "eve/connections";
 
 export default defineMcpClientConnection({
-  url: "https://mcp.linear.app/sse",
+  url: "https://mcp.linear.app/mcp",
   description: "Linear workspace: issues, projects, cycles, and comments.",
   auth: connect({ connector: "linear/myagent", principalType: "app" }),
 });
@@ -176,7 +176,7 @@ import {
 } from "eve/connections";
 
 export default defineMcpClientConnection({
-  url: "https://mcp.linear.app/sse",
+  url: "https://mcp.linear.app/mcp",
   description: "Linear workspace.",
   auth: defineInteractiveAuthorization<{ verifier: string }>({
     // Probed before every tool call. Return a token to run the tool;
