@@ -1,5 +1,11 @@
 # eve
 
+## 0.15.5
+
+### Patch Changes
+
+- 8078807: Render authorization prompts in the default web chat projection. Scaffolded web UIs now show OAuth sign-in affordances from `authorization.required` events and update them when authorization completes.
+
 ## 0.15.4
 
 ### Patch Changes
