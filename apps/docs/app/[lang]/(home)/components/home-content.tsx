@@ -45,8 +45,8 @@ export const HomeContent = () => (
     </section>
     <div className="grid divide-y border-y sm:border-x">
       <FileTree />
-      <NextjsInterop />
       <ArchitectureDiagram />
+      <NextjsInterop />
       <FeatureGrid />
       <CTA />
     </div>
