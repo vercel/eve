@@ -159,7 +159,7 @@ export async function FileTree() {
           // Render the highlighted output through the geistdocs CodeBlock so the
           // snippets match the docs (line numbers, copy button, geist theme),
           // with its default border/background stripped to sit flush in the panel.
-          pre: (props: ComponentProps<"pre">) => (
+          pre: ({ children, ...props }: ComponentProps<"pre">) => (
             <CodeBlock
               {...props}
               data-line-numbers="true"
@@ -174,7 +174,9 @@ export async function FileTree() {
                 // `!` overrides the more specific geistdocs `.line::before` rule.
                 "[&_.line]:before:!mr-4 [&_.line]:before:!w-5 [&_.line]:before:!text-left",
               )}
-            />
+            >
+              {children}
+            </CodeBlock>
           ),
         },
       }),
