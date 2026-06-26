@@ -19,7 +19,7 @@ const outDir = resolveWorkflowTestOutputDirectory(packageRoot);
 const poolId = process.env.VITEST_POOL_ID ?? "0";
 installEveWorkflowQueueNamespace(WORKFLOW_TEST_AGENT_NAME);
 const world = createLocalWorld({
-  dataDir: join(packageRoot, ".workflow-data"),
+  dataDir: join(packageRoot, ".workflow-data", `vitest-${poolId}`),
   tag: `vitest-${poolId}`,
 });
 
