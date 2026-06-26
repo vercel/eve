@@ -55,7 +55,7 @@ export interface WorkflowEntryResult {
  * on a child stream and resume the parked parent with a
  * `subagent-result` on completion.
  *
- * Owns the public park hook and the session lifecycle; each turn-owned
+ * Owns the public delivery hook and the session lifecycle; each turn-owned
  * turn resolves its own runtime actions in-line and reports back only
  * `done`/`park` via the closed-contract {@link NextDriverAction}. The
  * only session-shape flag the driver reads (besides identity) is

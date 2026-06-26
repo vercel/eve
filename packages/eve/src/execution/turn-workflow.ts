@@ -72,7 +72,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
   let currentStepInput: TurnStepInput = input.stepInput;
 
   // Reports each mid-turn continuation-token change to the driver exactly
-  // once so it can rekey the public park hook in lock-step with the session.
+  // once so it can rekey the public delivery hook in lock-step with the session.
   let lastToken = input.stepInput.sessionState.continuationToken;
   const syncToken = async (nextToken: string): Promise<void> => {
     if (nextToken === "" || nextToken === lastToken) return;
