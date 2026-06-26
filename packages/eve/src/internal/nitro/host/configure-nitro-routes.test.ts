@@ -25,6 +25,7 @@ interface PreparedApplicationHostStub {
     manifest: {
       channels: [];
       config: {
+        name: string;
         experimental?: { workflow?: { world?: string } };
       };
     };
@@ -108,7 +109,12 @@ function createNitroStub(
 }
 
 function createPreparedHost(
-  input: { appRoot?: string; workflowWorld?: string; workflowBuildDir?: string } = {},
+  input: {
+    agentName?: string;
+    appRoot?: string;
+    workflowWorld?: string;
+    workflowBuildDir?: string;
+  } = {},
 ): PreparedApplicationHost {
   const appRoot = input.appRoot ?? "G:\\projects\\test-eve";
 
@@ -119,8 +125,11 @@ function createPreparedHost(
         channels: [],
         config:
           input.workflowWorld === undefined
-            ? {}
-            : { experimental: { workflow: { world: input.workflowWorld } } },
+            ? { name: input.agentName ?? "test-agent" }
+            : {
+                name: input.agentName ?? "test-agent",
+                experimental: { workflow: { world: input.workflowWorld } },
+              },
       },
       project: {
         agentRoot: `${appRoot}\\agent`,
@@ -245,7 +254,7 @@ describe("configureNitroRoutes", () => {
       "const __eveWorkflowWorld = await __eveGetWorkflowWorld();",
     );
     expect(workflowHandlerSource).toContain(
-      '__eveWorkflowWorld.registerHandler("__eve_wkf_workflow_", POST);',
+      '__eveWorkflowWorld.registerHandler("__eve746573742d6167656e74_wkf_workflow_", POST);',
     );
     expect(readWriteFileSourceMatching("/workflow/steps-handler.mjs")).toBeUndefined();
   });
@@ -369,7 +378,7 @@ describe("configureNitroRoutes", () => {
       "const __eveWorkflowWorld = await __eveGetWorkflowWorld();",
     );
     expect(workflowHandlerSource).toContain(
-      '__eveWorkflowWorld.registerHandler("__eve_wkf_workflow_", POST);',
+      '__eveWorkflowWorld.registerHandler("__eve746573742d6167656e74_wkf_workflow_", POST);',
     );
     expect(readWriteFileSourceMatching("/workflow/steps-handler.mjs")).toBeUndefined();
   });
