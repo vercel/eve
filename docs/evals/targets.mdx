@@ -16,7 +16,7 @@ export default defineEval({
   async test(t) {
     const { sessionIds } = await t.target.dispatchSchedule("heartbeat");
     await t.target.attachSession(sessionIds[0]!);
-    t.completed();
+    t.succeeded();
     t.calledTool("send_report");
   },
 });
@@ -26,7 +26,7 @@ export default defineEval({
 - `t.target.dispatchSchedule(id)` triggers a [schedule](../schedules) through the dev-only schedule route and returns the session ids it created. It works only against a target with dev routes enabled (the local `eve eval` dev server, or a deployment running in development mode), and throws otherwise.
 - `t.target.attachSession(sessionId, { startIndex? })` consumes one turn from a session created outside the eval, by a channel or a schedule, so its events feed the run-level assertions. `startIndex` skips events before that position, so a session already partway through its stream resumes from where you left off rather than replaying from the start.
 
-Sessions attached this way are full `EveEvalSession`s: you can keep driving them with `send` and read their event streams. The run-level assertions on `t` (`t.completed()`, `t.calledTool(...)`) read the whole run, including attached sessions.
+Sessions attached this way are full `EveEvalSession`s: you can keep driving them and assert directly on that session (`session.succeeded()`, `session.calledTool(...)`). Aggregate assertions on `t` continue to read the whole run, including every attached session.
 
 ## Authentication
 

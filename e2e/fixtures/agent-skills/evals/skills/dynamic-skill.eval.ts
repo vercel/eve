@@ -11,13 +11,9 @@ const DYNAMIC_SKILL_TOKEN = "dynamic-skill-ok-P4K9";
 export default defineEval({
   description: "Skills smoke: dynamic single-skill resolution.",
   async test(t) {
-    const turn = await t.send(
-      "Please use the dynamic tenant policy skill and follow its instructions exactly.",
-    );
-    turn.expectOk();
+    await t.send("Please use the dynamic tenant policy skill and follow its instructions exactly.");
 
-    t.didNotFail();
-    t.completed();
+    t.succeeded();
     t.loadedSkill("dynamic-tenant-policy", {
       output: new RegExp(DYNAMIC_SKILL_TOKEN, "u"),
     });

@@ -23,25 +23,17 @@ export default defineEval({
     const turn = await t.send(
       "Use the Workflow tool exactly once to fan out two independent echo-marker subagent calls. In its JavaScript, create the messages 'workflow alpha' and 'workflow beta', map them through echo-marker inside Promise.all, and return the resulting two-element array. Do not call echo-marker outside Workflow. Then reply with the returned array verbatim as JSON.",
     );
-    turn.expectOk();
 
-    t.didNotFail();
-    t.completed();
-    t.calledTool("Workflow", { input: isFanOutProgram, times: 1 });
-    t.event((events) => {
-      const calledIndexes = events.flatMap((event, index) =>
-        event.type === "subagent.called" && event.data.name === "echo-marker" ? [index] : [],
-      );
-      const firstCompletedIndex = events.findIndex(
-        (event) => event.type === "subagent.completed" && event.data.subagentName === "echo-marker",
-      );
-      return (
-        calledIndexes.length === 2 &&
-        firstCompletedIndex >= 0 &&
-        calledIndexes.every((index) => index < firstCompletedIndex)
-      );
-    }, "Workflow dispatched exactly two echo-marker children before either completed");
-    t.calledSubagent("echo-marker", { output: /SUBAGENT_TOKEN=echo-marker-9F2X/ });
+    t.succeeded();
+    t.calledTool("Workflow", { input: isFanOutProgram, count: 1 });
+    turn.eventOrder([
+      { type: "subagent.called", data: { name: "echo-marker" }, count: 2 },
+      { type: "subagent.completed", data: { subagentName: "echo-marker" }, count: 2 },
+    ]);
+    t.calledSubagent("echo-marker", {
+      output: /SUBAGENT_TOKEN=echo-marker-9F2X/,
+      count: 2,
+    });
     t.messageIncludes(DOUBLE_SUBAGENT_TOKEN);
     t.noFailedActions();
   },

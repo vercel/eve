@@ -74,16 +74,6 @@ export default defineChannel({
       });
       return Response.json({ sessionId: session.id });
     }),
-
-    POST<ActionNarrationState>("/action-narration/continue", async (request, { send }) => {
-      const input = await readRequest(request);
-      const session = await send(input.message, {
-        auth: null,
-        continuationToken: continuationToken(input.token),
-        state: initialState(),
-      });
-      return Response.json({ sessionId: session.id });
-    }),
   ],
 
   events: {

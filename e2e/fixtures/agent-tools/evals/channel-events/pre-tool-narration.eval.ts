@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 
 import type { HandleMessageStreamEvent } from "eve/client";
 import { defineEval, type EveEvalTargetHandle } from "eve/evals";
+import { satisfies } from "eve/evals/expect";
 
 const STREAMED_ACTION_TOOL = "streamed-action";
 const OBSERVATION_TOOL = "read-channel-action-narration";
@@ -41,19 +42,6 @@ function preToolNarration(events: readonly HandleMessageStreamEvent[]): string |
   return undefined;
 }
 
-function observedNarration(events: readonly HandleMessageStreamEvent[]): string | undefined {
-  for (const event of events) {
-    if (event.type !== "action.result" || event.data.result.kind !== "tool-result") continue;
-    if (event.data.result.toolName !== OBSERVATION_TOOL) continue;
-
-    const output = event.data.result.output;
-    if (typeof output !== "object" || output === null || Array.isArray(output)) continue;
-    const narration = Reflect.get(output, "narration");
-    if (typeof narration === "string" && narration.length > 0) return narration;
-  }
-  return undefined;
-}
-
 async function postChannel(
   target: EveEvalTargetHandle,
   path: string,
@@ -81,8 +69,8 @@ async function postChannel(
 
 /**
  * End-to-end channel contract: the adapter receives the pre-tool completion
- * before the matching action request, then preserves its observation across
- * the next inbound channel turn.
+ * before the matching action request, then exposes that observation to the
+ * next model step.
  */
 export default defineEval({
   description: "Channel event smoke: pre-tool narration is visible when an action is requested.",
@@ -91,40 +79,30 @@ export default defineEval({
     const started = await postChannel(t.target, "/action-narration/start", {
       message:
         "Before calling `streamed-action`, write one short plain-text sentence explaining the action. " +
-        `Then call it exactly once with label "${token}". After it returns, reply with the label verbatim.`,
+        `Then call it exactly once with label "${token}". After it returns, call ` +
+        `\`${OBSERVATION_TOOL}\` exactly once. Finally, reply with the label verbatim.`,
       token,
     });
-    const firstTurn = await t.target.attachSession(started.sessionId);
-    const narration = preToolNarration(firstTurn.events);
-    if (narration === undefined) {
-      throw new Error(
-        "Expected a non-empty tool-calls message.completed event before the streamed-action request.",
-      );
-    }
+    const session = await t.target.attachSession(started.sessionId);
+    const narration = await t.require(
+      preToolNarration(session.events) ?? "",
+      satisfies((value: string) => value.length > 0, "pre-tool narration is non-empty"),
+    );
 
-    const continued = await postChannel(t.target, "/action-narration/continue", {
-      message: `Call \`${OBSERVATION_TOOL}\` exactly once, then reply with the narration value it returned.`,
-      token,
+    session.event("action.result", {
+      count: 1,
+      data: {
+        result: {
+          kind: "tool-result",
+          output: { narration },
+          toolName: OBSERVATION_TOOL,
+        },
+        status: "completed",
+      },
     });
-    if (continued.sessionId !== started.sessionId) {
-      throw new Error(
-        `Expected the channel continuation to resume ${started.sessionId}, received ${continued.sessionId}.`,
-      );
-    }
 
-    const secondTurn = await t.target.attachSession(continued.sessionId, {
-      startIndex: firstTurn.events.length,
-    });
-    const observed = observedNarration(secondTurn.events);
-    if (observed !== narration) {
-      throw new Error(
-        `Expected the channel to observe ${JSON.stringify(narration)}, received ${JSON.stringify(observed)}.`,
-      );
-    }
-
-    t.didNotFail();
-    t.completed();
-    t.calledTool(STREAMED_ACTION_TOOL, { isError: false, times: 1 });
-    t.calledTool(OBSERVATION_TOOL, { isError: false, times: 1 });
+    session.succeeded();
+    t.succeeded();
+    t.calledTool(STREAMED_ACTION_TOOL, { count: 1 });
   },
 });

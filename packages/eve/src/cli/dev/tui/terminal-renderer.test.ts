@@ -1812,40 +1812,62 @@ describe("TerminalRenderer setup panel", () => {
     renderer.shutdown();
   });
 
-  it("renames the hovered editable row directly via typing and backspace", async () => {
+  it("uses the default name as a placeholder when renaming the hovered row", async () => {
     const { screen, input, renderer } = makeRenderer();
 
     const answer = renderer.setupFlow.readEditableSelect?.({
       message: "Vercel project",
       options: [
-        { value: "new", label: "Create a new project", hint: "Named 'weather-agent'" },
+        { value: "new", label: "Create a new project", hint: "Name: weather-agent" },
         { value: "link", label: "Link an existing project" },
       ],
       initialValue: "new",
       editable: {
         value: "new",
         defaultValue: "weather-agent",
-        formatHint: (value) => `Named '${value}'`,
+        formatHint: (value) => `Name: ${value}`,
       },
     });
     expect(answer).toBeDefined();
 
     // Hovering the editable row is already a live field — no → to enter.
     expect(screen.snapshot()).toContain("type to rename");
-    expect(screen.snapshot()).toContain("Named 'weather-agent");
-    // Backspace edits the seeded default in place, exactly like typing.
+    expect(screen.snapshot()).toContain("Name: weather-agent");
+    // The default is not real editor text, so backspace cannot partially erase
+    // it. Typing replaces the placeholder with the new name.
     input.backspace();
-    input.backspace();
-    // "nt" trimmed off the end of the seeded default.
-    expect(screen.snapshot()).not.toContain("weather-agent");
-    input.type("!");
-    expect(screen.snapshot()).toContain("Named 'weather-age!");
+    expect(screen.snapshot()).toContain("Name: weather-agent");
+    input.type("weather-age!");
+    expect(screen.snapshot()).toContain("Name: weather-age!");
     input.enter();
     await expect(answer).resolves.toEqual({
       kind: "edited",
       value: "new",
       text: "weather-age!",
     });
+    renderer.shutdown();
+  });
+
+  it("returns an untouched editable row as a plain selection", async () => {
+    const { input, renderer } = makeRenderer();
+
+    const answer = renderer.setupFlow.readEditableSelect?.({
+      message: "Vercel project",
+      options: [
+        { value: "new", label: "Create a new project", hint: "Name: weather-agent" },
+        { value: "link", label: "Link an existing project" },
+      ],
+      initialValue: "new",
+      editable: {
+        value: "new",
+        defaultValue: "weather-agent",
+        formatHint: (value) => `Name: ${value}`,
+      },
+    });
+    expect(answer).toBeDefined();
+
+    input.enter();
+    await expect(answer).resolves.toEqual({ kind: "selected", value: "new" });
     renderer.shutdown();
   });
 

@@ -106,7 +106,7 @@ export default rows.map((row) =>
     },
     async test(t) {
       await t.send(row.prompt);
-      t.didNotFail();
+      t.succeeded();
     },
   }),
 );

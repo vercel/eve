@@ -1,4 +1,5 @@
 import { defineEval } from "eve/evals";
+import { equals } from "eve/evals/expect";
 
 // Durable sessions keep their sandbox filesystem across turns: a file written
 // in turn one must still be readable in turn two of the same session. The
@@ -15,23 +16,15 @@ export default defineEval({
         "Reply with the single word: done.",
     );
     first.expectOk();
-    const firstSessionId = t.sessionId;
 
     const second = await t.send(
       `Run the bash command \`cat ${PERSIST_PATH}\` and reply with the file contents verbatim.`,
     );
-    second.expectOk();
 
-    if (t.sessionId !== firstSessionId) {
-      throw new Error(
-        `Expected both turns in one session; got ${String(firstSessionId)} then ${String(t.sessionId)}.`,
-      );
-    }
+    await t.require(second.sessionId, equals(first.sessionId));
 
-    t.didNotFail();
-    t.completed();
+    t.succeeded();
     t.calledTool("bash", {
-      isError: false,
       output: new RegExp(PERSIST_TOKEN),
     });
     t.messageIncludes(PERSIST_TOKEN);

@@ -73,13 +73,11 @@ export default defineEval({
     );
     turn.expectOk();
 
-    t.didNotFail();
-    t.completed();
+    t.succeeded();
     t.calledTool(TOOL_NAME, {
       input: { label: LABEL },
-      isError: false,
-      times: 1,
+      count: 1,
     });
-    t.event(streamedBeforeLocalExecution, "local action request precedes execution");
+    turn.eventsSatisfy("local action request precedes execution", streamedBeforeLocalExecution);
   },
 });

@@ -4,11 +4,9 @@ export default defineEval({
   description: "Provider tools smoke: gateway web search answers a current-events question.",
   async test(t) {
     const turn = await t.send("Who won the 2026 NBA finals");
-    turn.expectOk();
 
-    t.didNotFail();
-    t.completed();
-    t.calledTool("web_search", { isError: false });
+    t.succeeded();
+    t.calledTool("web_search");
     t.noFailedActions();
     t.messageIncludes(/New York Knicks/iu);
     t.judge.autoevals

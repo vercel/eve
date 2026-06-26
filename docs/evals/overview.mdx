@@ -33,7 +33,7 @@ export default defineEval({
   description: "Basic message and tool-usage coverage for the weather agent.",
   async test(t) {
     await t.send("What is the weather in Brooklyn?");
-    t.completed();
+    t.succeeded();
     t.calledTool("get_weather");
     t.check(t.reply, includes("Sunny"));
   },
@@ -62,14 +62,14 @@ Everything is optional. `judge` sets the default model for [LLM-as-judge](./judg
 
 `t` is both the driver and the assertion surface. There are no separate `input`, `run`, `checks`, or `scores` fields. You write ordinary control flow, sending turns and asserting inline.
 
-- **Drive** the agent: `t.send(...)`, `t.respond(...)`, `t.respondAll(...)`, `t.sendFile(...)`, `t.expectInputRequests(...)`, `t.newSession()`. Read what came back with `t.reply` (the last assistant message), `t.sessionId`, and `t.events`. See [Cases](./cases).
+- **Drive** the agent: `t.send(...)`, `t.respond(...)`, `t.respondAll(...)`, `t.sendFile(...)`, `t.requireInputRequest(...)`, `t.newSession()`. Read what came back with `t.reply` (the last assistant message), `t.sessionId`, and `t.events`. See [Cases](./cases).
 - **Assert** with three surfaces, covered next.
 
 ## Three assertion surfaces
 
 Each surface matches a genuinely different kind of judgment:
 
-- **Run-level methods** read the whole run, like `t.completed()`, `t.calledTool("get_weather")`, `t.usedNoTools()`, and `t.toolOrder([...])`. They take no value because they observe the run itself. See [Assertions](./assertions).
+- **Scoped methods** read the final whole run on `t`, snapshot one independent session when invoked there, or inspect one immutable `EveEvalTurn`. See [Assertions](./assertions).
 - **`t.check(value, assertion)`** grades an explicit value with a deterministic builder from `eve/evals/expect`, such as `t.check(t.reply, includes("sunny"))`. Grade `t.reply`, an intermediate draft, parsed JSON, or anything else. See [Assertions](./assertions).
 - **`t.judge.autoevals.*`** is the LLM-as-judge surface, like `t.judge.autoevals.closedQA("cites a source")`. It grades `t.reply` by default and uses the configured judge model, never the agent under test. See [Judge](./judge).
 
@@ -83,11 +83,13 @@ Every assertion returns a chainable handle, so severity rides on the assertion i
 Override per assertion: `.gate(threshold?)` promotes to a hard gate, `.soft(threshold?)` demotes to tracked, and `.atLeast(threshold)` is a soft assertion with a bar.
 
 ```ts
-t.completed(); // gate
+t.succeeded(); // gate
 t.calledTool("get_weather").soft(); // record as a metric, don't gate
 t.judge.autoevals.closedQA("cites a source"); // soft, tracked (no threshold)
 t.judge.autoevals.factuality(reference).atLeast(0.7); // soft, gated under --strict at 0.7
 ```
+
+Use `await t.require(value, assertion)` for a gate that must pass before the script can safely continue. Use `t.skip(reason)` as the first operation for an intentionally unsupported target capability.
 
 ## Run evals with eve eval
 
@@ -101,7 +103,7 @@ Exit code `0` means every eval passed its gates. See [Running evals](./running) 
 
 ## A good baseline
 
-Most apps do fine with a few small smoke evals. Assert behavior with `t.completed()` plus one or two content checks, keep dataset fixtures in `evals/data/`, and reach for a judge or Braintrust only when you need fuzzy grading or shared result review. In CI, run `eve eval --strict` so soft threshold misses fail the build too.
+Most apps do fine with a few small smoke evals. Assert behavior with `t.succeeded()` plus one or two content checks, keep dataset fixtures in `evals/data/`, and reach for a judge or Braintrust only when you need fuzzy grading or shared result review. In CI, run `eve eval --strict` so soft threshold misses fail the build too.
 
 ## What to read next
 

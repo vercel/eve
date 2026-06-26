@@ -1,5 +1,5 @@
-import type { HandleMessageStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
+import { equals, satisfies } from "eve/evals/expect";
 
 // Token returned by agent/tools/record-heartbeat.ts; mirrored here because the
 // agent tree compiles independently of the eval tree.
@@ -20,64 +20,30 @@ export default defineEval({
 
   async test(t) {
     if (!t.target.capabilities.devRoutes) {
-      t.log("Target has no dev routes (deployed build); schedule dispatch is dev-only. Skipping.");
-      return;
+      t.skip("Target has no dev routes; schedule dispatch is dev-only.");
     }
 
     const dispatch = await t.target.dispatchSchedule("heartbeat");
-    if (dispatch.scheduleId !== "heartbeat") {
-      throw new Error(
-        `Expected scheduleId "heartbeat"; got ${JSON.stringify(dispatch.scheduleId)}.`,
-      );
-    }
-    const [sessionId] = dispatch.sessionIds;
-    if (sessionId === undefined) {
-      throw new Error("Schedule dispatch returned no session ids.");
-    }
+    await t.require(dispatch.scheduleId, equals("heartbeat"));
+    await t.require(
+      dispatch.sessionIds,
+      satisfies(
+        (sessionIds: readonly string[]) => sessionIds.length > 0,
+        "schedule started a session",
+      ),
+    );
+    const sessionId = dispatch.sessionIds[0]!;
     t.log(`heartbeat dispatched session ${sessionId}`);
 
     // Replay the dispatched session's stream from durable storage and drive it
     // to a turn boundary.
     const session = await t.target.attachSession(sessionId);
 
-    const failures = session.events.filter(
-      (event) =>
-        event.type === "session.failed" ||
-        event.type === "turn.failed" ||
-        event.type === "step.failed",
-    );
-    if (failures.length > 0) {
-      throw new Error(`Dispatched schedule session failed: ${formatTypes(failures)}`);
-    }
+    session.succeeded();
+    session.calledTool("record-heartbeat", {
+      output: new RegExp(HEARTBEAT_TOKEN),
+    });
 
-    const heartbeat = heartbeatToolResults(session.events);
-    if (heartbeat.length === 0) {
-      throw new Error(
-        `Expected at least one record-heartbeat result in the dispatched session; saw event types ${formatTypes(session.events)}.`,
-      );
-    }
-    if (!heartbeat.some((output) => output.includes(HEARTBEAT_TOKEN))) {
-      throw new Error(
-        `record-heartbeat ran but no result carried the token ${HEARTBEAT_TOKEN}: ${JSON.stringify(heartbeat)}`,
-      );
-    }
-
-    t.didNotFail();
-    t.completed();
+    t.succeeded();
   },
 });
-
-function heartbeatToolResults(events: readonly HandleMessageStreamEvent[]): string[] {
-  const results: string[] = [];
-  for (const event of events) {
-    if (event.type !== "action.result") continue;
-    const result = event.data.result;
-    if (result.kind !== "tool-result" || result.toolName !== "record-heartbeat") continue;
-    results.push(JSON.stringify(result.output ?? ""));
-  }
-  return results;
-}
-
-function formatTypes(events: readonly HandleMessageStreamEvent[]): string {
-  return JSON.stringify(events.map((event) => event.type));
-}

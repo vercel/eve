@@ -15,16 +15,13 @@ import {
 export default defineEval({
   description: "Sandbox: onSession marker and seeded workspace file are both present per session.",
   async test(t) {
-    const turn = await t.send(
+    await t.send(
       `Run the bash command \`cat ${SESSION_MARKER_PATH} ${WORKSPACE_SEED_PATH}\` ` +
         "and reply with the combined file contents verbatim.",
     );
-    turn.expectOk();
 
-    t.didNotFail();
-    t.completed();
+    t.succeeded();
     t.calledTool("bash", {
-      isError: false,
       output: new RegExp(`${SESSION_MARKER_TOKEN}[\\s\\S]*${WORKSPACE_SEED_TOKEN}`),
     });
     t.messageIncludes(SESSION_MARKER_TOKEN);

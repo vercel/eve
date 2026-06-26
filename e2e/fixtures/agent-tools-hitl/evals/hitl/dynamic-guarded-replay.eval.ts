@@ -1,5 +1,4 @@
 import { defineEval } from "eve/evals";
-import type { HandleMessageStreamEvent } from "eve/client";
 
 const DYNAMIC_GUARDED_ECHO_TOKEN = "dynamic-guarded-echo-ok-L8R6";
 const TOOL_NAME = "dynamic_guarded_echo";
@@ -12,38 +11,31 @@ const TOOL_NAME = "dynamic_guarded_echo";
 export default defineEval({
   description: "HITL smoke: replayed dynamic tools preserve approval.",
   async test(t) {
-    await t.send(`Call the \`${TOOL_NAME}\` tool with note "before-approval".`);
-    const [request] = t.expectInputRequests({
+    const parked = await t.send(`Call the \`${TOOL_NAME}\` tool with note "before-approval".`);
+    t.requireInputRequest({
       display: "confirmation",
       toolName: TOOL_NAME,
     });
-    if (request === undefined) {
-      throw new Error(`Expected ${TOOL_NAME} to park for approval.`);
-    }
-    if (dynamicGuardedEchoResults(t.events).length > 0) {
-      throw new Error(`${TOOL_NAME} executed before approval.`);
-    }
+    parked.calledTool(TOOL_NAME, { status: "pending", count: 1 });
 
     const approved = await t.respondAll("approve");
     approved.expectOk();
-    const results = dynamicGuardedEchoResults(t.events);
-    if (results.length !== 1 || !results[0]!.includes(DYNAMIC_GUARDED_ECHO_TOKEN)) {
-      throw new Error(`Approved ${TOOL_NAME} call did not execute with the expected token.`);
-    }
+    approved.event("action.result", {
+      data: {
+        result: {
+          kind: "tool-result",
+          toolName: TOOL_NAME,
+          output: new RegExp(DYNAMIC_GUARDED_ECHO_TOKEN),
+        },
+        status: "completed",
+      },
+      count: 1,
+    });
 
-    t.didNotFail();
-    t.completed();
+    t.succeeded();
+    t.calledTool(TOOL_NAME, {
+      output: new RegExp(DYNAMIC_GUARDED_ECHO_TOKEN),
+      count: 1,
+    });
   },
 });
-
-function dynamicGuardedEchoResults(events: readonly HandleMessageStreamEvent[]): string[] {
-  const results: string[] = [];
-  for (const event of events) {
-    if (event.type !== "action.result") continue;
-    if (event.data.status === "rejected") continue;
-    const result = event.data.result;
-    if (result.kind !== "tool-result" || result.toolName !== TOOL_NAME) continue;
-    results.push(JSON.stringify(result.output ?? ""));
-  }
-  return results;
-}

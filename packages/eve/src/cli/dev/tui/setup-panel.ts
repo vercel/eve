@@ -66,10 +66,9 @@ interface SetupSelectPanelBase extends SetupQuestionPanelBase {
  * A menu row that turns into an inline editor while the cursor rests on it.
  * `optionValue` names the row; the `editor` discriminant chooses the widget —
  * an in-place rename field, or a masked provider-key field with its own
- * validation phases. Hovering the row makes it editable directly (typing and
- * backspace edit in place), so the editor's text and a blinking caret render
- * only on that row. Layout and inline editing are orthogonal, so the editor
- * travels as a payload rather than as its own panel `kind`.
+ * validation phases. Rename defaults stay placeholders until typing begins;
+ * provider keys edit in place. Layout and inline editing are orthogonal, so
+ * the editor travels as a payload rather than as its own panel `kind`.
  */
 interface SetupInlineEditRow {
   optionValue: string;
@@ -196,6 +195,12 @@ const ANSI_FOREGROUND_COLOR = new RegExp(`${String.fromCharCode(27)}\\[(?:3[0-9]
  */
 function dimWithEmphasis(text: string, theme: Theme): string {
   return theme.colors.dim(text.replaceAll(BOLD_OR_DIM_CLOSE, `${BOLD_OR_DIM_CLOSE}${DIM_OPEN}`));
+}
+
+/** Restores normal intensity for a span nested inside an otherwise dim hint. */
+function solidWithinDim(text: string, theme: Theme): string {
+  if (!theme.color) return text;
+  return `${BOLD_OR_DIM_CLOSE}${text}${DIM_OPEN}`;
 }
 
 /** A selected row must not inherit an authored hint color. */
@@ -407,9 +412,17 @@ function renameHint(
   theme: Theme,
 ): SetupPanelOption {
   const value = rename.editor.text || rename.defaultValue;
-  const caretAt = rename.editor.text.length === 0 ? value.length : rename.editor.cursor;
-  const caret = caretVisible ? theme.colors.cyan(theme.glyph.caret) : "";
-  const editableValue = `${value.slice(0, caretAt)}${caret}${value.slice(caretAt)}`;
+  const caretLine = { text: value, cursor: rename.editor.cursor };
+  // The placeholder caret overlays its first character. Entered text uses the
+  // editor's real cursor position, including the stable trailing cell at EOF.
+  let editableValue = renderInputWithBlockCursor({
+    ...visibleLine(caretLine, Number.POSITIVE_INFINITY),
+    visible: caretVisible,
+    inverse: theme.colors.inverse,
+  });
+  if (rename.editor.text.length > 0) {
+    editableValue = solidWithinDim(editableValue, theme);
+  }
   return { ...option, hint: rename.formatHint(editableValue) };
 }
 
