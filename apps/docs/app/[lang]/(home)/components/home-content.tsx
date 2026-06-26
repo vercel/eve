@@ -5,6 +5,7 @@ import { CTA } from "./cta";
 import { FeatureGrid } from "./feature-grid";
 import { FileTree } from "./file-tree";
 import { InstallSwitcher } from "./install-switcher";
+import { NextjsInterop } from "./nextjs-interop";
 
 const title = "eve";
 const tagline = "Like Next.js for web apps, but for agents.";
@@ -44,6 +45,7 @@ export const HomeContent = () => (
     </section>
     <div className="grid divide-y border-y sm:border-x">
       <FileTree />
+      <NextjsInterop />
       <ArchitectureDiagram />
       <FeatureGrid />
       <CTA />
