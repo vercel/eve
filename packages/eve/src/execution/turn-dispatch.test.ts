@@ -1,0 +1,186 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { DeliverHookPayload } from "#channel/types.js";
+import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
+import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
+import type { TurnCompletionPayload } from "#execution/turn-workflow.js";
+
+const createHookMock = vi.fn();
+
+vi.mock("#compiled/@workflow/core/index.js", () => ({
+  createHook: (...args: unknown[]) => createHookMock(...args),
+}));
+
+vi.mock("./workflow-steps.js", () => ({
+  dispatchTurnStep: vi.fn(async () => ({ runId: "turn-run" })),
+}));
+
+vi.mock("./forward-turn-delivery-step.js", () => ({
+  forwardTurnDeliveryStep: vi.fn(),
+}));
+
+describe("dispatchAndAwaitTurn", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    createHookMock.mockReset();
+  });
+
+  it("rekeys the public hook when the active turn changes its continuation token", async () => {
+    const state = createState("slack:C1:T1");
+    installCompletionHook([
+      { continuationToken: "slack:C1:T1", kind: "turn-continuation-token" },
+      {
+        action: { kind: "park", serializedContext: {}, sessionState: state },
+        kind: "turn-result",
+      },
+    ]);
+    const rekeyHook = vi.fn();
+
+    await dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      completionToken: "turn-completion",
+      consumeNext: vi.fn(),
+      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
+      getNextPromise: vi.fn(),
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      rekeyHook,
+      serializedContext: {},
+      sessionState: createState("slack:C1:"),
+    });
+
+    expect(rekeyHook).toHaveBeenCalledWith("slack:C1:T1");
+  });
+
+  it("rekeys while a turn delivery request is already waiting", async () => {
+    const state = createState("slack:C1:T1");
+    installCompletionHook([
+      {
+        continuationToken: "slack:C1:",
+        inboxToken: "turn-inbox",
+        kind: "turn-delivery-request",
+        requestId: "request-1",
+      },
+      { continuationToken: "slack:C1:T1", kind: "turn-continuation-token" },
+      { kind: "turn-delivery-cancelled", requestId: "request-1" },
+      {
+        action: { kind: "park", serializedContext: {}, sessionState: state },
+        kind: "turn-result",
+      },
+    ]);
+    const rekeyHook = vi.fn();
+
+    await dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      completionToken: "turn-completion",
+      consumeNext: vi.fn(),
+      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
+      getNextPromise: () => new Promise(() => {}),
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      rekeyHook,
+      serializedContext: {},
+      sessionState: createState("slack:C1:"),
+    });
+
+    expect(rekeyHook).toHaveBeenCalledWith("slack:C1:T1");
+  });
+
+  it("keeps earlier turn remainders ahead of later cancelled deliveries", async () => {
+    const state = createState("http:test");
+    let releaseCancellation: (() => void) | undefined;
+    const forwarded = new Promise<void>((resolve) => {
+      releaseCancellation = resolve;
+    });
+    vi.mocked(forwardTurnDeliveryStep).mockImplementation(async () => releaseCancellation?.());
+
+    let controlIndex = 0;
+    createHookMock.mockReturnValue(
+      createMockHook(async () => {
+        controlIndex += 1;
+        if (controlIndex === 1) {
+          return {
+            done: false,
+            value: {
+              continuationToken: "http:test",
+              inboxToken: "turn-inbox",
+              kind: "turn-delivery-request",
+              requestId: "request-1",
+            },
+          };
+        }
+        if (controlIndex === 2) {
+          await forwarded;
+          return {
+            done: false,
+            value: { kind: "turn-delivery-cancelled", requestId: "request-1" },
+          };
+        }
+        return {
+          done: false,
+          value: {
+            action: { kind: "park", serializedContext: {}, sessionState: state },
+            bufferedDeliveries: [{ kind: "deliver", payloads: [{ message: "earlier remainder" }] }],
+            kind: "turn-result",
+          },
+        };
+      }),
+    );
+
+    const bufferedDeliveries: DeliverHookPayload[] = [];
+    await dispatchAndAwaitTurn({
+      bufferedDeliveries,
+      completionToken: "turn-completion",
+      consumeNext: vi.fn(),
+      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
+      getNextPromise: async () => ({
+        done: false,
+        value: { kind: "deliver", payloads: [{ message: "later delivery" }] },
+      }),
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      rekeyHook: vi.fn(),
+      serializedContext: {},
+      sessionState: state,
+    });
+
+    expect(bufferedDeliveries.map((item) => item.payloads[0]?.message)).toEqual([
+      "earlier remainder",
+      "later delivery",
+    ]);
+  });
+});
+
+function installCompletionHook(values: readonly TurnCompletionPayload[]): void {
+  const queue = [...values];
+  createHookMock.mockReturnValue(
+    createMockHook(async () => {
+      const value = queue.shift();
+      return value === undefined ? { done: true, value: undefined } : { done: false, value };
+    }),
+  );
+}
+
+function createMockHook(next: () => Promise<IteratorResult<TurnCompletionPayload>>): unknown {
+  return {
+    token: "turn-completion",
+    dispose: vi.fn(),
+    [Symbol.asyncIterator]() {
+      return {
+        next,
+        return: vi.fn(async () => ({ done: true, value: undefined })),
+      };
+    },
+  };
+}
+
+function createState(continuationToken: string): DurableSessionState {
+  return {
+    continuationToken,
+    emissionState: { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "" },
+    hasProxyInputRequests: false,
+    sessionId: "session",
+    version: 1,
+  };
+}

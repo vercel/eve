@@ -44,6 +44,7 @@ export type TurnCompletionPayload =
       readonly kind: "turn-result";
     }
   | { readonly kind: "turn-error"; readonly error: unknown }
+  | { readonly continuationToken: string; readonly kind: "turn-continuation-token" }
   | {
       readonly continuationToken: string;
       readonly inboxToken: string;
@@ -99,6 +100,11 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       }
 
       if (result.action === "dispatch-workflow-runtime-actions") {
+        await notifyDriverContinuationToken({
+          completionToken: input.completionToken,
+          nextToken: result.sessionState.continuationToken,
+          previousToken: currentStepInput.sessionState.continuationToken,
+        });
         const resumed = await dispatchAndWaitForRuntimeActions({
           completionToken: input.completionToken,
           inbox,
@@ -123,6 +129,11 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
         const pendingActionKeys = result.pendingRuntimeActionKeys;
 
         if (pendingActionKeys !== undefined) {
+          await notifyDriverContinuationToken({
+            completionToken: input.completionToken,
+            nextToken: result.sessionState.continuationToken,
+            previousToken: currentStepInput.sessionState.continuationToken,
+          });
           const resumed = await dispatchAndWaitForRuntimeActions({
             completionToken: input.completionToken,
             inbox,
@@ -166,6 +177,11 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
         return;
       }
 
+      await notifyDriverContinuationToken({
+        completionToken: input.completionToken,
+        nextToken: result.sessionState.continuationToken,
+        previousToken: currentStepInput.sessionState.continuationToken,
+      });
       currentStepInput = {
         input: undefined,
         parentWritable: currentStepInput.parentWritable,
@@ -206,6 +222,11 @@ async function dispatchAndWaitForRuntimeActions(input: {
     serializedContext: input.serializedContext,
     sessionState: input.sessionState,
     workflowInterrupt: input.workflowInterrupt,
+  });
+  await notifyDriverContinuationToken({
+    completionToken: input.completionToken,
+    nextToken: dispatchResult.sessionState.continuationToken,
+    previousToken: input.sessionState.continuationToken,
   });
 
   return waitForRuntimeActionResults({
@@ -280,6 +301,7 @@ async function waitForRuntimeActionResults(input: {
     }
 
     if (value.kind === "subagent-input-request") {
+      const previousContinuationToken = currentSessionState.continuationToken;
       const proxyResult = await runProxyInputRequestStep({
         hookPayload: value,
         parentWritable: input.parentWritable,
@@ -288,6 +310,11 @@ async function waitForRuntimeActionResults(input: {
       });
       currentSerializedContext = proxyResult.serializedContext;
       currentSessionState = proxyResult.sessionState;
+      await notifyDriverContinuationToken({
+        completionToken: input.completionToken,
+        nextToken: currentSessionState.continuationToken,
+        previousToken: previousContinuationToken,
+      });
       continue;
     }
 
@@ -345,6 +372,21 @@ function optionalBufferedDeliveries(
   deliveries: readonly DeliverHookPayload[],
 ): readonly DeliverHookPayload[] | undefined {
   return deliveries.length === 0 ? undefined : [...deliveries];
+}
+
+async function notifyDriverContinuationToken(input: {
+  readonly completionToken: string;
+  readonly nextToken: string;
+  readonly previousToken: string;
+}): Promise<void> {
+  if (input.nextToken === "" || input.nextToken === input.previousToken) return;
+  await notifyDriverStep({
+    completionToken: input.completionToken,
+    payload: {
+      continuationToken: input.nextToken,
+      kind: "turn-continuation-token",
+    },
+  });
 }
 
 async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {

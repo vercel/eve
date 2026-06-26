@@ -240,8 +240,9 @@ describe("turnWorkflow", () => {
   });
 
   it("keeps a local subagent result inside one turn workflow", async () => {
-    const pendingState = createSessionState();
-    const completedState = createSessionState();
+    const initialState = createSessionState({ continuationToken: "slack:C1:" });
+    const pendingState = createSessionState({ continuationToken: "slack:C1:T1" });
+    const completedState = createSessionState({ continuationToken: "slack:C1:T1" });
     installInbox([
       {
         kind: "runtime-action-result",
@@ -278,10 +279,18 @@ describe("turnWorkflow", () => {
     const { input, parentWritable } = createInput({
       driverCapabilities: { turnInbox: true },
       mode: "task",
-      sessionState: pendingState,
+      sessionState: initialState,
     });
     await turnWorkflow(input);
 
+    expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
+      continuationToken: "slack:C1:T1",
+      kind: "turn-continuation-token",
+    });
+    expect(resumeHookMock.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(dispatchTurnRuntimeActionsStep).mock.invocationCallOrder[0] ??
+        Number.POSITIVE_INFINITY,
+    );
     expect(dispatchTurnRuntimeActionsStep).toHaveBeenCalledWith({
       parentContinuationToken: "turn-token:inbox",
       parentWritable,

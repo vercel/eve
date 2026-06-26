@@ -54,9 +54,14 @@ export async function dispatchAndAwaitTurn(input: {
       const payload = next.value;
       if (payload.kind === "turn-error") throw rebuildSerializableError(payload.error);
 
+      if (payload.kind === "turn-continuation-token") {
+        await input.rekeyHook(payload.continuationToken);
+        continue;
+      }
+
       if (payload.kind === "turn-result") {
         if (payload.bufferedDeliveries !== undefined) {
-          input.bufferedDeliveries.push(...payload.bufferedDeliveries);
+          input.bufferedDeliveries.unshift(...payload.bufferedDeliveries);
         }
         return payload.action;
       }

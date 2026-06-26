@@ -30,6 +30,10 @@ export async function serviceTurnDeliveryRequest(input: {
       if (winner.value.done) {
         throw new Error("Turn completion hook closed during a delivery request.");
       }
+      if (winner.value.value.kind === "turn-continuation-token") {
+        await input.rekeyHook(winner.value.value.continuationToken);
+        continue;
+      }
       const terminal = readTerminalTurnControl(winner.value.value, input.bufferedDeliveries);
       if (terminal !== undefined) return terminal;
       if (
@@ -68,6 +72,7 @@ export async function serviceTurnDeliveryRequest(input: {
       bufferedDeliveries: input.bufferedDeliveries,
       consumeCompletion: input.consumeCompletion,
       getCompletionPromise: input.getCompletionPromise,
+      rekeyHook: input.rekeyHook,
       requestId: input.request.requestId,
     });
   }
@@ -82,6 +87,11 @@ export async function serviceTurnDeliveryRequest(input: {
       continue;
     }
 
+    if (next.value.kind === "turn-continuation-token") {
+      await input.rekeyHook(next.value.continuationToken);
+      continue;
+    }
+
     if (
       next.value.kind === "turn-delivery-cancelled" &&
       next.value.requestId === input.request.requestId
@@ -90,9 +100,11 @@ export async function serviceTurnDeliveryRequest(input: {
       return undefined;
     }
 
+    if (next.value.kind === "turn-result") {
+      input.bufferedDeliveries.unshift(delivery);
+    }
     const terminal = readTerminalTurnControl(next.value, input.bufferedDeliveries);
     if (terminal !== undefined) {
-      input.bufferedDeliveries.unshift(delivery);
       return terminal;
     }
   }
@@ -102,12 +114,17 @@ async function waitForTerminalTurnControl(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly consumeCompletion: () => void;
   readonly getCompletionPromise: () => Promise<IteratorResult<TurnCompletionPayload>>;
+  readonly rekeyHook: (nextToken: string) => Promise<void>;
   readonly requestId: string;
 }): Promise<NextDriverAction | undefined> {
   while (true) {
     const next = await input.getCompletionPromise();
     input.consumeCompletion();
     if (next.done) throw new Error("Turn completion hook closed after delivery forwarding failed.");
+    if (next.value.kind === "turn-continuation-token") {
+      await input.rekeyHook(next.value.continuationToken);
+      continue;
+    }
     if (next.value.kind === "turn-delivery-cancelled" && next.value.requestId === input.requestId) {
       return undefined;
     }
@@ -123,7 +140,7 @@ function readTerminalTurnControl(
   if (payload.kind === "turn-error") throw rebuildSerializableError(payload.error);
   if (payload.kind !== "turn-result") return undefined;
   if (payload.bufferedDeliveries !== undefined) {
-    bufferedDeliveries.push(...payload.bufferedDeliveries);
+    bufferedDeliveries.unshift(...payload.bufferedDeliveries);
   }
   return payload.action;
 }
