@@ -1,5 +1,12 @@
 # eve
 
+## 0.15.2
+
+### Patch Changes
+
+- f1abdfd: Deduplicate repeated durable turn dispatches through turn-inbox ownership so a duplicate child workflow no longer fails the active session.
+- f1abdfd: Keep each logical turn active while local or remote subagents run, including while proxying child input requests, so child completion resumes the same turn instead of starting a replacement turn.
+
 ## 0.15.1
 
 ### Patch Changes
