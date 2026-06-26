@@ -53,14 +53,9 @@ export class TurnExecutionCursor {
   }
 
   /** Adopts a state transition and reports any continuation-token change once. */
-  async adopt(
-    transition: TurnTransition,
-    options: { readonly syncContinuationToken?: boolean } = {},
-  ): Promise<void> {
-    this.currentSerializedContext = transition.serializedContext ?? this.currentSerializedContext;
-    this.currentSessionState = transition.sessionState;
+  async adopt(transition: TurnTransition): Promise<void> {
+    this.setState(transition);
 
-    if (options.syncContinuationToken === false) return;
     const nextToken = transition.sessionState.continuationToken;
     if (nextToken === "" || nextToken === this.lastReportedContinuationToken) return;
 
@@ -78,13 +73,17 @@ export class TurnExecutionCursor {
     };
   }
 
-  /** Adopts and publishes a terminal turn transition without a redundant token update. */
+  /**
+   * Adopts a terminal turn transition and publishes it as the turn result.
+   * The result already carries the final session state, so no separate
+   * continuation-token update is sent.
+   */
   async finish(
     transition: TurnTransition,
     action: TurnTerminalAction,
     bufferedDeliveries: readonly DeliverHookPayload[],
   ): Promise<void> {
-    await this.adopt(transition, { syncContinuationToken: false });
+    this.setState(transition);
     await this.send({
       action: {
         ...action,
@@ -99,5 +98,10 @@ export class TurnExecutionCursor {
   /** Sends one control payload to the session driver. */
   async send(payload: TurnControlPayload): Promise<void> {
     await sendTurnControlStep({ controlToken: this.controlToken, payload });
+  }
+
+  private setState(transition: TurnTransition): void {
+    this.currentSerializedContext = transition.serializedContext ?? this.currentSerializedContext;
+    this.currentSessionState = transition.sessionState;
   }
 }

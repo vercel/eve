@@ -1,4 +1,4 @@
-import { createHook, getWorkflowMetadata, type Hook } from "#compiled/@workflow/core/index.js";
+import { createHook, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import { sendTurnControlStep, type TurnInboxPayload } from "#execution/turn-control-protocol.js";
@@ -39,6 +39,12 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
 async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
   const inbox = createHook<TurnInboxPayload>({ token: `${input.completionToken}:inbox` });
   const iterator = inbox[Symbol.asyncIterator]();
+  // Delivery request ids stay unique across every wait in this turn. A forwarded
+  // delivery left unconsumed when one wait resolves would otherwise reuse a later
+  // wait's id and be mis-accepted as that wait's response.
+  let deliveryRequestSeq = 0;
+  const nextDeliveryRequestId = (): string =>
+    `${inbox.token}:delivery:${String(deliveryRequestSeq++)}`;
   const bufferedDeliveries: DeliverHookPayload[] = [];
   const cursor = new TurnExecutionCursor({
     controlToken: input.completionToken,
@@ -89,9 +95,10 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
         const results = await waitForRuntimeActionResults({
           bufferedDeliveries,
           cursor,
-          inbox,
+          inboxToken: inbox.token,
           initialResults: dispatchResult.results,
           iterator,
+          nextDeliveryRequestId,
           pendingActionKeys,
         });
         nextStepInput = { kind: "runtime-action-result", results };
@@ -132,13 +139,13 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
 async function waitForRuntimeActionResults(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly cursor: TurnExecutionCursor;
-  readonly inbox: Hook<TurnInboxPayload>;
+  readonly inboxToken: string;
   readonly initialResults: readonly RuntimeActionResult[];
   readonly iterator: AsyncIterator<TurnInboxPayload>;
+  readonly nextDeliveryRequestId: () => string;
   readonly pendingActionKeys: readonly string[];
 }): Promise<readonly RuntimeActionResult[]> {
   let pendingDeliveryRequest: string | undefined;
-  let deliveryRequestIndex = 0;
   const results: RuntimeActionResult[] = [...input.initialResults];
 
   while (true) {
@@ -159,10 +166,10 @@ async function waitForRuntimeActionResults(input: {
     }
 
     if (input.cursor.sessionState.hasProxyInputRequests && pendingDeliveryRequest === undefined) {
-      pendingDeliveryRequest = `${input.inbox.token}:delivery:${String(deliveryRequestIndex++)}`;
+      pendingDeliveryRequest = input.nextDeliveryRequestId();
       await input.cursor.send({
         continuationToken: input.cursor.sessionState.continuationToken,
-        inboxToken: input.inbox.token,
+        inboxToken: input.inboxToken,
         kind: "turn-delivery-request",
         requestId: pendingDeliveryRequest,
       });

@@ -465,6 +465,89 @@ describe("turnWorkflow", () => {
       }),
     );
   });
+
+  it("mints a unique delivery request id per wait so a stale forward is not re-accepted", async () => {
+    const pendingState = createSessionState({ hasProxyInputRequests: true });
+    const completedState = createSessionState();
+    // The first wait resolves on its child result while a delivery forwarded for
+    // request `:delivery:0` is still queued behind it. The second wait must mint
+    // a fresh id so that stale forward is dropped, not mistaken for its response.
+    installInbox([
+      {
+        kind: "runtime-action-result",
+        results: [
+          { callId: "call-1", kind: "subagent-result", output: "first", subagentName: "delegate" },
+        ],
+      },
+      {
+        delivery: {
+          kind: "deliver",
+          payloads: [{ inputResponses: [{ optionId: "approve", requestId: "approval-1" }] }],
+        },
+        kind: "driver-delivery",
+        requestId: "turn-token:inbox:delivery:0",
+      },
+      {
+        kind: "runtime-action-result",
+        results: [
+          {
+            callId: "call-2",
+            kind: "subagent-result",
+            output: "second",
+            subagentName: "delegate",
+          },
+        ],
+      },
+    ]);
+    vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
+      results: [],
+      sessionState: pendingState,
+    });
+    vi.mocked(routeDeliverToChildren).mockResolvedValue(undefined);
+    vi.mocked(turnStep)
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
+        serializedContext: { state: "batch-1" },
+        sessionState: pendingState,
+      })
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingRuntimeActionKeys: ["subagent-call:delegate:call-2"],
+        serializedContext: { state: "batch-2" },
+        sessionState: pendingState,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "done",
+        serializedContext: { state: "done" },
+        sessionState: completedState,
+      });
+
+    const { input } = createInput({
+      driverCapabilities: { turnInbox: true },
+      mode: "task",
+      sessionState: pendingState,
+    });
+    await turnWorkflow(input);
+
+    const deliveryRequestIds = resumeHookMock.mock.calls
+      .filter((call) => call[1]?.kind === "turn-delivery-request")
+      .map((call) => call[1]?.requestId);
+    expect(deliveryRequestIds).toEqual([
+      "turn-token:inbox:delivery:0",
+      "turn-token:inbox:delivery:1",
+    ]);
+    expect(resumeHookMock).not.toHaveBeenCalledWith(
+      "turn-token",
+      expect.objectContaining({ kind: "turn-delivery-accepted" }),
+    );
+    expect(routeDeliverToChildren).not.toHaveBeenCalled();
+  });
 });
 
 function installInbox(values: readonly unknown[]): void {
