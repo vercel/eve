@@ -8,6 +8,12 @@ html {
   scroll-padding-top: 5rem;
 }
 
+/* Tint the global footer to match the landing background, but only on the
+   home routes (`/` and `/home`), which render the [data-home-route] marker. */
+body:has([data-home-route]) footer {
+  @apply bg-background-200;
+}
+
 /* Align docs content with navbar on mobile. */
 #nd-page {
   @apply max-md:px-6;
