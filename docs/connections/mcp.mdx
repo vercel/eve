@@ -54,6 +54,24 @@ MCP connections support the shared connection options:
 
 See [Connections](/docs/connections) for the shared auth, headers, and approval shapes.
 
+## Stateful sessions
+
+By default, each eve step opens a new MCP session (`session: "stateless"`). If the MCP server is session-aware — it returns an `Mcp-Session-Id` header on `initialize` and maintains per-session state — set `session: "stateful"` to persist that id across steps:
+
+```ts title="agent/connections/my-stateful-server.ts"
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.example.com/mcp",
+  description: "My stateful MCP server.",
+  session: "stateful",
+});
+```
+
+eve stores the `Mcp-Session-Id` scoped to the eve session and the authenticated principal (`"anonymous"` for unauthenticated callers), so two different users each get their own server-side session. If the server returns `404` for a stored id (expired or unknown), eve re-initializes the MCP session transparently and continues.
+
+Leave `session` unset (or `"stateless"`) for servers that do not maintain per-session state. Stateless is the safe default and imposes no storage overhead.
+
 ## What to read next
 
 - [OpenAPI connections](./openapi): generate tools from OpenAPI operations.

@@ -36,21 +36,25 @@ function makeStatefulMcpConnection(name: string): ResolvedConnectionDefinition {
   return {
     connectionName: name,
     description: "test connection",
+    logicalPath: `connections/${name}.ts`,
     protocol: "mcp",
     session: "stateful",
+    sourceId: `connections/${name}`,
+    sourceKind: "module",
     url: `https://example.com/${name}`,
-    modulePath: `agent/connections/${name}.ts`,
-  } as unknown as ResolvedConnectionDefinition;
+  };
 }
 
 function makeStatelessMcpConnection(name: string): ResolvedConnectionDefinition {
   return {
     connectionName: name,
     description: "test connection",
+    logicalPath: `connections/${name}.ts`,
     protocol: "mcp",
+    sourceId: `connections/${name}`,
+    sourceKind: "module",
     url: `https://example.com/${name}`,
-    modulePath: `agent/connections/${name}.ts`,
-  } as unknown as ResolvedConnectionDefinition;
+  };
 }
 
 function createBundle(connections: readonly ResolvedConnectionDefinition[]): CompiledBundle {
