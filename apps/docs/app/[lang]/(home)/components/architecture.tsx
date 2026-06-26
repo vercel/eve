@@ -9,6 +9,7 @@ import {
   IconWorkflow,
   IconWrench,
 } from "@/components/geistcn-icons";
+import { GradientBorder } from "./gradient-border";
 
 // Runtime primitives shown in a row (desktop) / stacked (mobile) below the
 // full-width Durable Workflow card.
@@ -102,24 +103,6 @@ function PrimitiveCard({
         size={14}
       />
     </Link>
-  );
-}
-
-// Subtle gradient hairline border around the outer Runtime / Channel cards.
-function GradientBorder(): JSX.Element {
-  return (
-    <div
-      aria-hidden
-      className="pointer-events-none absolute inset-0 rounded-[inherit]"
-      style={{
-        padding: "1px",
-        background: "linear-gradient(to bottom, var(--ds-gray-alpha-400), transparent)",
-        WebkitMask: "linear-gradient(white, white) content-box, linear-gradient(white, white)",
-        WebkitMaskComposite: "xor",
-        mask: "linear-gradient(white, white) content-box, linear-gradient(white, white)",
-        maskComposite: "exclude",
-      }}
-    />
   );
 }
 

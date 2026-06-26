@@ -5,6 +5,7 @@ import { highlight } from "fumadocs-core/highlight";
 import type { ComponentProps } from "react";
 import { IconAcronymTs } from "@/components/geistcn-icons";
 import { cn } from "@/lib/utils";
+import { GradientBorder } from "./gradient-border";
 
 interface InteropFile {
   fileName: string;
@@ -71,19 +72,23 @@ export async function NextjsInterop() {
           mounted routes on its own — no CORS to configure and no URL env vars to keep in sync.
         </p>
 
-        <div className="mt-16 grid gap-4 md:grid-cols-2">
-          {FILES.map((file, i) => (
-            <div
-              key={file.fileName}
-              className="overflow-hidden rounded-xl border bg-background-100 shadow-sm"
-            >
-              <div className="flex h-12 items-center gap-2 border-b px-4">
-                <IconAcronymTs aria-hidden className="shrink-0" color="gray-900" size={16} />
-                <span className="text-sm text-gray-1000">{file.fileName}</span>
+        {/* A single gradient-bordered frame around both code blocks. */}
+        <div className="relative mt-16 rounded-xl p-5">
+          <GradientBorder />
+          <div className="grid gap-4 md:grid-cols-2">
+            {FILES.map((file, i) => (
+              <div
+                key={file.fileName}
+                className="overflow-hidden rounded-lg border bg-background-100"
+              >
+                <div className="flex h-12 items-center gap-2 border-b px-4">
+                  <IconAcronymTs aria-hidden className="shrink-0" color="gray-900" size={16} />
+                  <span className="text-sm text-gray-1000">{file.fileName}</span>
+                </div>
+                <div className="overflow-x-auto text-[13px] [&>div]:mb-0">{rendered[i]}</div>
               </div>
-              <div className="overflow-x-auto text-[13px] [&>div]:mb-0">{rendered[i]}</div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
 
         <div className="mt-8 flex flex-wrap items-center justify-center gap-2">
