@@ -2809,10 +2809,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     return rows;
   }
 
-  /**
-   * Appends the persistent bottom status line (port · model · tokens · Vercel link ·
-   * pending deploy) when any segment has content.
-   */
+  /** Appends the persistent bottom status line below the prompt when it has content. */
   #pushStatusLine(rows: string[], width: number): void {
     const padding = this.#remoteConnection === undefined ? "" : STATUS_LINE_LEFT_PADDING;
     const contentWidth = Math.max(1, width - padding.length);

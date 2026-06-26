@@ -61,9 +61,10 @@ function renderEndpoint(
 }
 
 /**
- * Builds `↗ project (environment) · :port · model · tokens · /deploy pending`.
- * Remote sessions omit endpoint state and keep their badge as the final
- * narrow-width fallback. Returns undefined when every segment is empty.
+ * Builds a leading local `:port` or remote badge followed by model, token, and
+ * deploy status segments. Both badges are the final narrow-width fallback.
+ * Remote sessions omit endpoint state. Returns undefined when every segment is
+ * empty.
  */
 export function buildStatusLine(input: StatusLineInput): string | undefined {
   const { theme, width } = input;
@@ -76,22 +77,29 @@ export function buildStatusLine(input: StatusLineInput): string | undefined {
   const pending = input.vercel?.pendingDeploy ? c.yellow("/deploy pending") : undefined;
   const remote = input.remote === undefined ? undefined : formatRemoteStatus(input.remote, theme);
   const endpoint = renderEndpoint(input);
+  const leading = remote?.full ?? serverPort;
+  const badge = remote?.badge ?? serverPort;
 
-  const separator = `  ${c.dim(theme.glyph.dot)}  `;
-  const compose = (segments: ReadonlyArray<string | undefined>): string =>
-    segments.filter((segment) => segment !== undefined).join(separator);
+  const separator = ` ${c.dim(theme.glyph.dot)} `;
+  const compose = (
+    target: string | undefined,
+    segments: ReadonlyArray<string | undefined>,
+  ): string => {
+    const body = segments.filter((segment) => segment !== undefined).join(separator);
+    if (target === undefined || body.length === 0) return target ?? body;
+    return `${target} ${body}`;
+  };
 
-  // Descending fidelity; the first variant that fits wins. The remote target
-  // leads every variant and gets the final stand-alone fallback. Without a
-  // remote, the logs hint retains its previous priority.
+  // Descending fidelity; the first variant that fits wins. The server badge
+  // leads every variant and gets the final stand-alone fallback. Without one,
+  // the logs hint retains its previous priority.
   const variants = [
-    compose([remote?.full, logLevel, serverPort, model, tokens, endpoint, pending]),
-    compose([remote?.full, logLevel, serverPort, model, tokens, pending]),
-    compose([remote?.full, logLevel, serverPort, tokens, pending]),
-    compose([remote?.full, logLevel, serverPort]),
-    compose([remote?.full, logLevel]),
-    compose([remote?.badge, logLevel]),
-    compose([remote?.badge]),
+    compose(leading, [logLevel, model, tokens, endpoint, pending]),
+    compose(leading, [logLevel, model, tokens, pending]),
+    compose(leading, [logLevel, tokens, pending]),
+    compose(leading, [logLevel]),
+    compose(badge, [logLevel]),
+    compose(badge, []),
   ];
 
   if (variants[0]!.length === 0) return undefined;
@@ -114,7 +122,7 @@ function formatRemoteStatus(
       : `${snapshot.deployment.projectName} (${snapshot.deployment.environment})`;
   const arrow = theme.unicode ? "↗" : "->";
   const badge = formatRemoteBadge(` ${arrow} ${label} `, snapshot.connection.state, theme);
-  const separator = ` ${c.dim(theme.glyph.dot)} `;
+  const separator = `${c.dim(theme.glyph.dot)} `;
   let suffix: string | undefined;
 
   switch (snapshot.connection.state) {

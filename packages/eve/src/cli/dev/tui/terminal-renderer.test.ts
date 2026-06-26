@@ -2706,7 +2706,7 @@ describe("TerminalRenderer status line", () => {
     pendingDeploy: false,
   };
 
-  it("renders model and Vercel link under the prompt row", async () => {
+  it("renders the local server, model, and Vercel link under the prompt row", async () => {
     const { screen, input, renderer } = makeRenderer();
     renderer.renderAgentHeader({
       name: "Weather Agent",
@@ -2819,7 +2819,7 @@ describe("TerminalRenderer status line", () => {
       "",
       "   Select your team",
     ]);
-    const status = lines.indexOf("   ↗ vpoke.playground-vercel.tools  · Authenticating via OIDC…");
+    const status = lines.indexOf("   ↗ vpoke.playground-vercel.tools · Authenticating via OIDC…");
     expect(status).toBeGreaterThan(title);
     expect(lines[status - 1]).toBe("");
 
