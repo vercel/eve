@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHook } from "#compiled/@workflow/core/index.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
 
 import type { HookPayload } from "#channel/types.js";
 import { ChannelRequestIdKey } from "#context/keys.js";
@@ -366,6 +367,136 @@ describe("workflowEntry", () => {
       kind: "deliver",
       payloads: [{ message: "follow up while child runs" }],
     });
+  });
+
+  it("supplies a requested public delivery to the active turn inbox", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+
+    let acceptForward: (() => void) | undefined;
+    const forwarded = new Promise<void>((resolve) => {
+      acceptForward = resolve;
+    });
+    vi.mocked(resumeHook).mockImplementation(async (token) => {
+      if (token === "turn-inbox") acceptForward?.();
+      return { runId: "turn-run" } as never;
+    });
+
+    let completionIndex = 0;
+    vi.mocked(createHook).mockImplementation((options?: { readonly token?: string }) => {
+      const token = options?.token ?? "";
+      if (isTurnCompletionToken(token)) {
+        return createMockHook<TurnCompletionPayload>({
+          next: async () => {
+            completionIndex += 1;
+            if (completionIndex === 1) {
+              return {
+                done: false,
+                value: {
+                  continuationToken: "http:test",
+                  inboxToken: "turn-inbox",
+                  kind: "turn-delivery-request",
+                  requestId: "delivery-1",
+                },
+              };
+            }
+            if (completionIndex === 2) {
+              await forwarded;
+              return {
+                done: false,
+                value: { kind: "turn-delivery-accepted", requestId: "delivery-1" },
+              };
+            }
+            return {
+              done: false,
+              value: turnResult({ action: "done", output: "finished", sessionState }),
+            };
+          },
+          token,
+          values: [],
+        }) as never;
+      }
+      if (token.endsWith(":auth")) {
+        return createMockHook({ token, values: [] }) as never;
+      }
+      return createMockHook({
+        token,
+        values: [
+          {
+            kind: "deliver",
+            payloads: [{ inputResponses: [{ optionId: "approve", requestId: "req-1" }] }],
+          },
+        ],
+      }) as never;
+    });
+
+    const result = await workflowEntry({
+      input: { message: "delegate" },
+      serializedContext: createSerializedContext(),
+    });
+
+    expect(result).toEqual({ output: "finished" });
+    expect(dispatchTurnStep).toHaveBeenCalledTimes(1);
+    expect(resumeHook).toHaveBeenCalledWith("turn-inbox", {
+      delivery: {
+        kind: "deliver",
+        payloads: [{ inputResponses: [{ optionId: "approve", requestId: "req-1" }] }],
+      },
+      kind: "driver-delivery",
+      requestId: "delivery-1",
+    });
+  });
+
+  it("preserves a public delivery when the active turn cancels its request", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+
+    vi.mocked(createHook).mockImplementation((options?: { readonly token?: string }) => {
+      const token = options?.token ?? "";
+      if (token.endsWith(":turn-completion:0")) {
+        return createMockHook({
+          token,
+          values: [
+            {
+              continuationToken: "http:test",
+              inboxToken: "turn-inbox",
+              kind: "turn-delivery-request",
+              requestId: "delivery-1",
+            },
+            { kind: "turn-delivery-cancelled", requestId: "delivery-1" },
+            turnResult({ action: "park", sessionState }),
+          ],
+        }) as never;
+      }
+      if (token.endsWith(":turn-completion:1")) {
+        return createMockHook({
+          token,
+          values: [turnResult({ action: "done", output: "after delivery", sessionState })],
+        }) as never;
+      }
+      if (token.endsWith(":auth")) {
+        return createMockHook({ token, values: [] }) as never;
+      }
+      return createMockHook({
+        token,
+        values: [{ kind: "deliver", payloads: [{ message: "not for the child" }] }],
+      }) as never;
+    });
+
+    const result = await workflowEntry({
+      input: { message: "delegate" },
+      serializedContext: createSerializedContext(),
+    });
+
+    expect(result).toEqual({ output: "after delivery" });
+    expect(dispatchTurnStep).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
+      auth: undefined,
+      kind: "deliver",
+      payloads: [{ message: "not for the child" }],
+      requestId: undefined,
+    });
+    expect(resumeHook).not.toHaveBeenCalled();
   });
 
   it("feeds immediate remote dispatch failures back into the parent turn", async () => {

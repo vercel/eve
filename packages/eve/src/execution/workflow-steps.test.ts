@@ -333,6 +333,7 @@ describe("dispatchRuntimeActionsStep", () => {
     });
 
     const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
       parentWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState,
@@ -347,7 +348,10 @@ describe("dispatchRuntimeActionsStep", () => {
             message: expect.stringContaining("investigate latest routing"),
           },
           serializedContext: expect.objectContaining({
-            "eve.channel": expect.objectContaining({ kind: "subagent" }),
+            "eve.channel": expect.objectContaining({
+              kind: "subagent",
+              state: expect.objectContaining({ parentContinuationToken: "turn-inbox" }),
+            }),
           }),
         }),
       ],
@@ -394,7 +398,8 @@ describe("dispatchRuntimeActionsStep", () => {
       turnAgent: TestTurnAgent,
     } as never;
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 503 })));
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
 
     const session = setPendingRuntimeActionBatch({
       actions: [
@@ -425,6 +430,7 @@ describe("dispatchRuntimeActionsStep", () => {
     await expect(
       dispatchRuntimeActionsStep({
         callbackBaseUrl: "https://caller.example.com",
+        parentContinuationToken: "turn-inbox",
         parentWritable: createTestWritable(),
         serializedContext: createSerializedContext(),
         sessionState,
@@ -446,6 +452,9 @@ describe("dispatchRuntimeActionsStep", () => {
       // so the step returns the input sessionState unchanged.
       sessionState,
     });
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).callback.token).toBe(
+      "turn-inbox",
+    );
     expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE)).toBeUndefined();
   });
 });

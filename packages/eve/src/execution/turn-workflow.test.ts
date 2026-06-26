@@ -1,28 +1,46 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { HookPayload } from "#channel/types.js";
+import { dispatchTurnRuntimeActionsStep } from "#execution/dispatch-turn-runtime-actions-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { turnWorkflow } from "#execution/turn-workflow.js";
 import {
   TURN_WORKFLOW_INPUT_VERSION,
   type TurnWorkflowInput,
 } from "#execution/durable-session-migrations/turn-workflow.js";
-import { turnStep } from "#execution/workflow-steps.js";
+import {
+  routeProxiedDeliverStep,
+  runProxyInputRequestStep,
+  turnStep,
+} from "#execution/workflow-steps.js";
 
 const resumeHookMock = vi.fn();
+const createHookMock = vi.fn();
+
+vi.mock("#compiled/@workflow/core/index.js", () => ({
+  createHook: (...args: unknown[]) => createHookMock(...args),
+  getWorkflowMetadata: vi.fn(() => ({ url: "https://eve.example.com" })),
+}));
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
 }));
 
 vi.mock("./workflow-steps.js", () => ({
+  routeProxiedDeliverStep: vi.fn(),
+  runProxyInputRequestStep: vi.fn(),
   turnStep: vi.fn(),
+}));
+
+vi.mock("./dispatch-turn-runtime-actions-step.js", () => ({
+  dispatchTurnRuntimeActionsStep: vi.fn(),
 }));
 
 describe("turnWorkflow", () => {
   afterEach(() => {
     vi.clearAllMocks();
     resumeHookMock.mockReset();
+    createHookMock.mockReset();
   });
 
   it("notifies the driver when a turn completes", async () => {
@@ -220,7 +238,237 @@ describe("turnWorkflow", () => {
       kind: "turn-error",
     });
   });
+
+  it("keeps a local subagent result inside one turn workflow", async () => {
+    const pendingState = createSessionState();
+    const completedState = createSessionState();
+    installInbox([
+      {
+        kind: "runtime-action-result",
+        results: [
+          {
+            callId: "call-1",
+            kind: "subagent-result",
+            output: "child output",
+            subagentName: "delegate",
+          },
+        ],
+      },
+    ]);
+    vi.mocked(dispatchTurnRuntimeActionsStep).mockResolvedValue({
+      results: [],
+      sessionState: pendingState,
+    });
+    vi.mocked(turnStep)
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
+        serializedContext: { state: "pending" },
+        sessionState: pendingState,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "parent output",
+        serializedContext: { state: "done" },
+        sessionState: completedState,
+      });
+
+    const { input, parentWritable } = createInput({
+      driverCapabilities: { turnInbox: true },
+      mode: "task",
+      sessionState: pendingState,
+    });
+    await turnWorkflow(input);
+
+    expect(dispatchTurnRuntimeActionsStep).toHaveBeenCalledWith({
+      parentContinuationToken: "turn-token:inbox",
+      parentWritable,
+      serializedContext: { state: "pending" },
+      sessionState: pendingState,
+      workflowInterrupt: false,
+    });
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0]).toMatchObject({
+      input: {
+        kind: "runtime-action-result",
+        results: [expect.objectContaining({ callId: "call-1", output: "child output" })],
+      },
+    });
+    expect(resumeHookMock.mock.calls.filter((call) => call[1]?.kind === "turn-result")).toEqual([
+      [
+        "turn-token",
+        expect.objectContaining({
+          action: expect.objectContaining({ kind: "done", output: "parent output" }),
+        }),
+      ],
+    ]);
+    expect(resumeHookMock).not.toHaveBeenCalledWith(
+      "turn-token",
+      expect.objectContaining({
+        action: expect.objectContaining({ kind: "dispatch-runtime-actions" }),
+      }),
+    );
+  });
+
+  it("keeps dynamic-workflow child dispatch and immediate remote failures in the same turn", async () => {
+    const pendingState = createSessionState();
+    const completedState = createSessionState();
+    installInbox([]);
+    vi.mocked(dispatchTurnRuntimeActionsStep).mockResolvedValue({
+      results: [
+        {
+          callId: "call-1",
+          isError: true,
+          kind: "subagent-result",
+          output: { code: "REMOTE_AGENT_START_FAILED", message: "remote unavailable" },
+          subagentName: "research",
+        },
+      ],
+      sessionState: pendingState,
+    });
+    vi.mocked(turnStep)
+      .mockResolvedValueOnce({
+        action: "dispatch-workflow-runtime-actions",
+        pendingRuntimeActionKeys: ["subagent-call:research:call-1"],
+        serializedContext: { state: "pending" },
+        sessionState: pendingState,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "handled failure",
+        serializedContext: { state: "done" },
+        sessionState: completedState,
+      });
+
+    const { input, parentWritable } = createInput({
+      driverCapabilities: { turnInbox: true },
+      mode: "task",
+      sessionState: pendingState,
+    });
+    await turnWorkflow(input);
+
+    expect(dispatchTurnRuntimeActionsStep).toHaveBeenCalledWith({
+      parentContinuationToken: "turn-token:inbox",
+      parentWritable,
+      serializedContext: { state: "pending" },
+      sessionState: pendingState,
+      workflowInterrupt: true,
+    });
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toEqual({
+      kind: "runtime-action-result",
+      results: [expect.objectContaining({ callId: "call-1", isError: true })],
+    });
+    expect(
+      resumeHookMock.mock.calls.filter((call) => call[1]?.kind === "turn-result"),
+    ).toHaveLength(1);
+  });
+
+  it("proxies child HITL and pulls the response through the active turn", async () => {
+    const pendingState = createSessionState();
+    const proxyState = createSessionState({ hasProxyInputRequests: true });
+    const completedState = createSessionState();
+    const requestId = "turn-token:inbox:delivery:0";
+    installInbox([
+      {
+        callId: "call-1",
+        childContinuationToken: "subagent:parent:call-1",
+        childSessionId: "child-session",
+        event: { requests: [], sequence: 0, stepIndex: 0, turnId: "turn_0" },
+        kind: "subagent-input-request",
+        subagentName: "delegate",
+      },
+      {
+        delivery: {
+          kind: "deliver",
+          payloads: [{ inputResponses: [{ optionId: "approve", requestId: "approval-1" }] }],
+        },
+        kind: "driver-delivery",
+        requestId,
+      },
+      {
+        kind: "runtime-action-result",
+        results: [
+          {
+            callId: "call-1",
+            kind: "subagent-result",
+            output: "approved child output",
+            subagentName: "delegate",
+          },
+        ],
+      },
+    ]);
+    vi.mocked(dispatchTurnRuntimeActionsStep).mockResolvedValue({
+      results: [],
+      sessionState: pendingState,
+    });
+    vi.mocked(runProxyInputRequestStep).mockResolvedValue({
+      serializedContext: { state: "proxied" },
+      sessionState: proxyState,
+    });
+    vi.mocked(routeProxiedDeliverStep).mockResolvedValue({ remainder: undefined });
+    vi.mocked(turnStep)
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
+        serializedContext: { state: "pending" },
+        sessionState: pendingState,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "done",
+        serializedContext: { state: "done" },
+        sessionState: completedState,
+      });
+
+    const { input } = createInput({
+      driverCapabilities: { turnInbox: true },
+      mode: "task",
+      sessionState: pendingState,
+    });
+    await turnWorkflow(input);
+
+    expect(runProxyInputRequestStep).toHaveBeenCalledOnce();
+    expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
+      continuationToken: "http:test",
+      inboxToken: "turn-token:inbox",
+      kind: "turn-delivery-request",
+      requestId,
+    });
+    expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
+      kind: "turn-delivery-accepted",
+      requestId,
+    });
+    expect(routeProxiedDeliverStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: {
+          inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+        },
+        sessionState: proxyState,
+      }),
+    );
+  });
 });
+
+function installInbox(values: readonly unknown[]): void {
+  const queue = [...values];
+  createHookMock.mockReturnValue({
+    token: "turn-token:inbox",
+    getConflict: vi.fn(async () => null),
+    dispose: vi.fn(),
+    [Symbol.asyncIterator]() {
+      return {
+        next: vi.fn(async () => {
+          const value = queue.shift();
+          return value === undefined ? { done: true, value: undefined } : { done: false, value };
+        }),
+        return: vi.fn(async () => ({ done: true, value: undefined })),
+      };
+    },
+  });
+}
 
 function createInput(
   overrides: Partial<Omit<TurnWorkflowInput, "stepInput" | "version">> & {

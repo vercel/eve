@@ -233,7 +233,8 @@ function resolveRuntimeActionResultsForBatch(input: {
   });
 }
 
-function resolveRuntimeActionResultsForKeys(input: {
+/** Returns results in pending-key order once every requested action has completed. */
+export function resolveRuntimeActionResultsForKeys(input: {
   readonly pendingKeys: readonly string[];
   readonly results: readonly RuntimeActionResult[];
 }): RuntimeActionResult[] | undefined {

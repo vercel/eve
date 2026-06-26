@@ -13,12 +13,12 @@ import type {
   SessionCapabilities,
 } from "#channel/types.js";
 import { coalesceDeliveries } from "#harness/messages.js";
+import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import { accumulateRuntimeActionResults } from "#harness/runtime-actions.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeSubagentResultActionResult } from "#runtime/actions/types.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import type { InputResponse } from "#runtime/input/types.js";
 import { notifyDelegatedParentStep } from "#execution/delegated-parent-notification.js";
 import {
   createDelegatedSubagentErrorResult,
@@ -26,17 +26,13 @@ import {
 } from "#execution/delegated-parent-result.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
-import type { TurnCompletionPayload } from "#execution/turn-workflow.js";
-import {
-  normalizeSerializableError,
-  rebuildSerializableError,
-} from "#execution/workflow-errors.js";
+import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
+import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { resolveVercelProductionCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import {
-  dispatchTurnStep,
   emitTerminalSessionFailureStep,
   routeProxiedDeliverStep,
   runProxyInputRequestStep,
@@ -253,11 +249,15 @@ async function runDriverLoop(input: {
     }
 
     let action: NextDriverAction = await dispatchAndAwaitTurn({
+      bufferedDeliveries,
       capabilities: input.capabilities,
       completionToken: nextTurnCompletionToken(),
+      consumeNext,
       delivery: input.initialInput,
+      getNextPromise,
       mode: input.mode,
       parentWritable: input.driverWritable,
+      rekeyHook,
       serializedContext: input.serializedContext,
       sessionState: input.sessionState,
     });
@@ -320,14 +320,18 @@ async function runDriverLoop(input: {
           }
 
           action = await dispatchAndAwaitTurn({
+            bufferedDeliveries,
             capabilities: input.capabilities,
             completionToken: nextTurnCompletionToken(),
+            consumeNext,
             delivery: {
               kind: "runtime-action-result",
               results: runtimeResults.results,
             },
+            getNextPromise,
             mode: input.mode,
             parentWritable: input.driverWritable,
+            rekeyHook,
             serializedContext: runtimeResults.serializedContext,
             sessionState: runtimeResults.sessionState,
           });
@@ -350,14 +354,18 @@ async function runDriverLoop(input: {
             }
 
             action = await dispatchAndAwaitTurn({
+              bufferedDeliveries,
               capabilities: input.capabilities,
               completionToken: nextTurnCompletionToken(),
+              consumeNext,
               delivery: {
                 kind: "deliver",
                 payloads: allPayloads,
               },
+              getNextPromise,
               mode: input.mode,
               parentWritable: input.driverWritable,
+              rekeyHook,
               serializedContext: action.serializedContext,
               sessionState: action.sessionState,
             });
@@ -389,16 +397,20 @@ async function runDriverLoop(input: {
           }
 
           action = await dispatchAndAwaitTurn({
+            bufferedDeliveries,
             capabilities: input.capabilities,
             completionToken: nextTurnCompletionToken(),
+            consumeNext,
             delivery: {
               auth: nextDeliver.auth,
               kind: "deliver",
               payloads: [remainder],
               requestId: nextDeliver.requestId,
             },
+            getNextPromise,
             mode: input.mode,
             parentWritable: input.driverWritable,
+            rekeyHook,
             serializedContext: action.serializedContext,
             sessionState: action.sessionState,
           });
@@ -435,48 +447,6 @@ async function finalizeDone(input: {
     serializedContext,
   });
   return { output };
-}
-
-async function dispatchAndAwaitTurn(input: {
-  readonly capabilities?: SessionCapabilities;
-  readonly completionToken: string;
-  readonly delivery: HookPayload;
-  readonly mode: RunMode;
-  readonly parentWritable: WritableStream<Uint8Array>;
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}): Promise<NextDriverAction> {
-  const completion = createHook<TurnCompletionPayload>({ token: input.completionToken });
-  const completionToken = completion.token;
-
-  try {
-    await dispatchTurnStep({
-      capabilities: input.capabilities,
-      completionToken,
-      delivery: input.delivery,
-      mode: input.mode,
-      parentWritable: input.parentWritable,
-      serializedContext: input.serializedContext,
-      sessionState: input.sessionState,
-    });
-
-    const payload = await awaitHookPayload(completion);
-
-    if (payload.kind === "turn-error") {
-      throw rebuildSerializableError(payload.error);
-    }
-
-    return payload.action;
-  } finally {
-    await disposeHook(completion);
-  }
-}
-
-async function awaitHookPayload<T>(hook: Hook<T>): Promise<T> {
-  for await (const value of hook) {
-    return value;
-  }
-  throw new Error("Turn completion hook closed before delivering a result.");
 }
 
 interface PendingRuntimeActionResultsOutcome {
@@ -584,7 +554,7 @@ async function routeDeliverForChildren(input: {
   readonly payloads: readonly DeliverPayload[];
   readonly sessionState: DurableSessionState;
 }): Promise<DeliverPayload | undefined> {
-  const coalesced = coalescePayloads(input.payloads);
+  const coalesced = coalesceDeliverPayloads(input.payloads);
 
   if (!input.sessionState.hasProxyInputRequests) {
     return coalesced;
@@ -645,41 +615,6 @@ async function waitForNextDeliver(input: {
 
     return coalesced;
   }
-}
-
-function coalescePayloads(payloads: readonly DeliverPayload[]): DeliverPayload {
-  if (payloads.length === 0) {
-    return {};
-  }
-
-  if (payloads.length === 1) {
-    return payloads[0] ?? {};
-  }
-
-  const merged: Record<string, unknown> = {};
-  const inputResponses: InputResponse[] = [];
-
-  for (const payload of payloads) {
-    for (const [key, value] of Object.entries(payload)) {
-      if (key === "inputResponses") {
-        continue;
-      }
-
-      if (value !== undefined) {
-        merged[key] = value;
-      }
-    }
-
-    if (payload.inputResponses !== undefined) {
-      inputResponses.push(...payload.inputResponses);
-    }
-  }
-
-  if (inputResponses.length > 0) {
-    merged.inputResponses = inputResponses;
-  }
-
-  return merged as DeliverPayload;
 }
 
 const NO_READY_MESSAGE = Symbol("no-ready-message");
