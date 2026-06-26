@@ -35,8 +35,8 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
         className="pointer-events-none absolute top-12 -left-4 -right-4 border-t sm:-left-12 sm:-right-12"
       />
       <div className="mx-auto max-w-5xl">
-        <div className="relative overflow-hidden rounded-xl border bg-background-100 shadow-sm">
-          <div className="grid md:grid-cols-[240px_1fr]">
+        <div className="relative overflow-hidden rounded-t-xl border bg-background-100">
+          <div className="grid md:grid-cols-[240px_1fr] mb-4">
             {/* Sidebar */}
             <div className="border-b md:border-r md:border-b-0">
               <div className="flex h-12 items-center gap-2 border-b px-4">
@@ -59,7 +59,10 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
                       )}
                     >
                       <span
-                        className={cn("ml-2 text-sm", added ? "text-gray-1000" : "text-gray-700")}
+                        className={cn(
+                          "ml-2 text-sm transition-colors",
+                          added ? "text-gray-1000" : "text-gray-700 group-hover:text-gray-1000",
+                        )}
                       >
                         {item.name}
                       </span>
@@ -67,7 +70,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
                         <IconPlusCircle
                           aria-hidden
                           className="ml-auto opacity-0 transition-opacity group-hover:opacity-100"
-                          color="gray-700"
+                          color="gray-900"
                           size={16}
                         />
                       ) : null}
@@ -97,13 +100,12 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
               </div>
             </div>
           </div>
-          {/* Dissolve the lower edge of the card into its background. */}
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-x-0 bottom-0 h-32 bg-linear-to-t from-background-100 to-transparent"
-          />
         </div>
       </div>
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 -bottom-1 -mx-2 h-12 bg-linear-to-t from-background-200 to-transparent"
+      />
     </div>
   );
 }

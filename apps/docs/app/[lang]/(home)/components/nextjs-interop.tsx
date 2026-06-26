@@ -1,3 +1,4 @@
+import { Badge } from "@vercel/geistdocs/components/badge";
 import { CodeBlock } from "@vercel/geistdocs/components/code-block";
 import { geistShikiTheme } from "@vercel/geistdocs/shiki-theme";
 import { highlight } from "fumadocs-core/highlight";
@@ -85,14 +86,15 @@ export async function NextjsInterop() {
           ))}
         </div>
 
-        <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-2">
           {BENEFITS.map((benefit) => (
-            <span
+            <Badge
               key={benefit}
-              className="font-mono uppercase tracking-[0.1em] text-gray-900 text-label-13"
+              variant="secondary"
+              className="font-mono uppercase tracking-[0.1em] text-gray-900"
             >
               {benefit}
-            </span>
+            </Badge>
           ))}
         </div>
       </div>
