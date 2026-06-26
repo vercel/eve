@@ -1,5 +1,14 @@
 # eve
 
+## 0.15.4
+
+### Patch Changes
+
+- da83b03: Slack assistant-thread status text now strips lightweight Markdown before calling Slack, so model progress updates like `**Considering turbo tasks**` display without literal formatting markers.
+- 5b31627: Add a deterministic `mockModel` eval helper with static, prompt-aware, and tool-calling responses.
+- 2e00da7: Scope workflow queue prefixes to each eve agent so multiple uniquely named agents can deploy in the same project without consuming one another's workflow messages.
+- 86ae773: Clarify Vercel build failures when an agent pins the Docker or microsandbox sandbox backend. The error now explains those local backends are unavailable on Vercel and directs users to `defaultBackend()` or an explicit Vercel-compatible backend.
+
 ## 0.15.3
 
 ### Patch Changes
