@@ -303,6 +303,39 @@ describe("EveTUIRunner agent header", () => {
     expect(headers[0]?.name).toBe("Weather Agent");
   });
 
+  it("retries a transient info failure before rendering the startup header", async () => {
+    vi.useFakeTimers();
+    const headers: AgentTUIAgentHeader[] = [];
+    const renderer = fakeRenderer({
+      renderAgentHeader: (header) => headers.push(header),
+    });
+    const client = stubClient();
+    vi.spyOn(client, "info")
+      .mockRejectedValueOnce(new ClientError(500, "Runner did not become ready in time"))
+      .mockResolvedValueOnce(AGENT_INFO);
+    const runner = new EveTUIRunner({
+      session: stubSession(),
+      client,
+      renderer,
+      serverUrl: "http://localhost:3000",
+      name: "Weather Agent",
+    });
+
+    const running = runner.run();
+    await settleAsyncWork();
+    await vi.advanceTimersByTimeAsync(100);
+    await running;
+
+    expect(client.info).toHaveBeenCalledTimes(2);
+    expect(headers).toEqual([
+      {
+        name: "Weather Agent",
+        serverUrl: "http://localhost:3000",
+        info: AGENT_INFO,
+      },
+    ]);
+  });
+
   it("refreshes the agent header when a dev artifact refresh changes the model", async () => {
     const headers: AgentTUIAgentHeader[] = [];
     const prompts: Array<string | undefined> = ["first", "second", undefined];

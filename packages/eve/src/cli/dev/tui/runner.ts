@@ -41,6 +41,7 @@ import {
 } from "./errors.js";
 
 import { pickAgentHeaderTip } from "./agent-header.js";
+import { probeAgentInfo } from "./agent-info-probe.js";
 import { parseLogDisplayMode } from "./log-display-mode.js";
 import {
   formatPromptCommandHelp,
@@ -550,14 +551,18 @@ export class EveTUIRunner {
       const connection = await this.#remoteConnection.check();
       if (connection.state === "ready") info = connection.info;
     } else {
-      try {
-        info = await devBootPhase(
-          "connecting to agent",
-          () => (this.#client ? this.#client.info() : Promise.resolve(undefined)),
-          this.#onBootProgress,
-        );
-      } catch {
-        info = undefined;
+      const client = this.#client;
+      if (client !== undefined) {
+        try {
+          const probe = await devBootPhase(
+            "connecting to agent",
+            () => probeAgentInfo({ client }),
+            this.#onBootProgress,
+          );
+          if (probe.kind === "ready") info = probe.info;
+        } catch {
+          info = undefined;
+        }
       }
     }
     this.#reportBeforeFirstPaint();

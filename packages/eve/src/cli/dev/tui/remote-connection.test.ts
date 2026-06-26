@@ -197,6 +197,28 @@ describe("createRemoteConnectionController", () => {
     await expect(checkFailure(error)).resolves.toMatchObject(expected);
   });
 
+  it("retries a transient info failure before declaring the remote unavailable", async () => {
+    vi.useFakeTimers();
+    try {
+      const { controller, info } = createHarness({
+        info: vi
+          .fn<() => Promise<AgentInfoResult>>()
+          .mockRejectedValueOnce(new ClientError(500, "Runner did not become ready in time"))
+          .mockResolvedValueOnce(INFO),
+      });
+
+      const check = controller.check();
+      await Promise.resolve();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(100);
+
+      await expect(check).resolves.toEqual({ state: "ready", info: INFO });
+      expect(info).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("stays ready after an unusable info payload when health confirms Eve", async () => {
     const harness = createHarness({
       info: async () => {
