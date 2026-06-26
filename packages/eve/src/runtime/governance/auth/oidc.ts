@@ -85,23 +85,35 @@ export async function authenticateOidcStrategy(input: {
         typeof verified.payload.user_id !== "string" ||
         verified.payload.user_id.length === 0 ||
         verified.payload.environment !== "development" ||
-        !currentVercelProjectMatches({ payload: verified.payload, strategy: input.strategy }) ||
-        !currentVercelEnvironmentMatches({ payload: verified.payload, strategy: input.strategy })
+        !currentVercelProjectMatches({ payload: verified.payload, strategy: input.strategy })
       ) {
         return {
           kind: "caller-not-allowed",
         };
       }
 
-      return {
-        kind: "authenticated",
-        principal: createJwtAuthenticatedCallerPrincipal({
-          authenticator: "oidc",
-          payload: verified.payload,
-          principalType: "user",
-          subjectClaim: "user_id",
-        }),
-      };
+      if (
+        currentVercelEnvironmentMatches({ payload: verified.payload, strategy: input.strategy })
+      ) {
+        return {
+          kind: "authenticated",
+          principal: createJwtAuthenticatedCallerPrincipal({
+            authenticator: "oidc",
+            payload: verified.payload,
+            principalType: "user",
+            subjectClaim: "user_id",
+          }),
+        };
+      }
+
+      if (input.strategy.currentVercelProject?.environment !== "preview") {
+        return {
+          kind: "caller-not-allowed",
+        };
+      }
+
+      // Preview may use a same-project development credential only through the
+      // generic service path below, never as the user embedded in the token.
     }
 
     if (typeof verified.payload.sub !== "string" || verified.payload.sub.length === 0) {

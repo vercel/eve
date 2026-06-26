@@ -759,6 +759,52 @@ describe("verifyVercelOidc", () => {
     }
   });
 
+  it("authenticates a development user token as a service principal on preview", async () => {
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_current");
+    vi.stubEnv("VERCEL_TARGET_ENV", "preview");
+
+    const issuer = await installMockedVercelIssuer("development-user-preview-service");
+    try {
+      const token = await issuer.signToken({
+        environment: "development",
+        project_id: "prj_current",
+        sub: "owner:acme:project:weather-agent:environment:development",
+        user_id: "user_ada",
+      });
+
+      const result = await verifyVercelOidc(token);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.sessionAuth).toMatchObject({
+          principalType: "service",
+          subject: "owner:acme:project:weather-agent:environment:development",
+        });
+      }
+    } finally {
+      issuer.restore();
+    }
+  });
+
+  it("rejects a development user token on production", async () => {
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_current");
+    vi.stubEnv("VERCEL_TARGET_ENV", "production");
+
+    const issuer = await installMockedVercelIssuer("development-user-production-reject");
+    try {
+      const token = await issuer.signToken({
+        environment: "development",
+        project_id: "prj_current",
+        sub: "owner:acme:project:weather-agent:environment:development",
+        user_id: "user_ada",
+      });
+
+      await expect(verifyVercelOidc(token)).resolves.toEqual({ ok: false });
+    } finally {
+      issuer.restore();
+    }
+  });
+
   it("rejects a user_id claim outside development", async () => {
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_current");
     vi.stubEnv("VERCEL_TARGET_ENV", "preview");

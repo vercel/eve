@@ -713,10 +713,9 @@ export interface VerifyVercelOidcOptions {
  *
  * Acceptance rule:
  *
- * - Tokens whose `project_id` matches the configured current project are **always**
- *   accepted regardless of `subjects`, so the deployment's own runtime
- *   callers (subagent, internal fetches) authenticate without being
- *   enumerated.
+ * - Current-project tokens that reach the service/runtime path are accepted
+ *   regardless of `subjects`, so the deployment's own runtime callers
+ *   (subagent, internal fetches) authenticate without being enumerated.
  * - Tokens with an `external_sub` claim authenticate as
  *   `principalType: "user"` when they match the configured current project
  *   and environment. `external_sub`
@@ -725,14 +724,14 @@ export interface VerifyVercelOidcOptions {
  *   `email`) are exposed as auth attributes.
  * - Development tokens with a `user_id` claim authenticate as
  *   `principalType: "user"` only when both the token and configured current
- *   project environment are `development`.
+ *   project environment are `development`. A same-project preview target may
+ *   use one as a `"service"` principal; other target environments reject it.
  * - Tokens from other Vercel projects are accepted **only** when their `sub`
  *   matches one of {@link VerifyVercelOidcOptions.subjects}.
  *
- * The `environment` claim is not constrained: production, preview, and
- * development tokens for the current project all authenticate. Non-user
- * principals are tagged `"runtime"` when the token's `environment` matches
- * the current deployment, otherwise `"service"`.
+ * Tokens without a `user_id` claim are accepted for the current project in
+ * production, preview, and development. They are tagged `"runtime"` when the
+ * token's `environment` matches the current deployment, otherwise `"service"`.
  */
 export async function verifyVercelOidc(
   token: string | null,
