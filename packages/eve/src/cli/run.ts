@@ -379,10 +379,22 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .command("init [target]")
     .description("Create a new eve agent, or add one to an existing project directory.")
     .option("--channel-web-nextjs", "Add the Web Chat application (Next.js)")
-    .action(async (target: string | undefined, options: { channelWebNextjs?: boolean }) => {
-      const { runInitCommand } = await import("#cli/commands/init.js");
-      await runInitCommand(logger, appRoot, target, options);
-    });
+    .option("-y, --yes", "Accepted for compatibility; has no effect")
+    .action(
+      async (
+        target: string | undefined,
+        options: { channelWebNextjs?: boolean; yes?: boolean },
+      ) => {
+        if (options.yes) {
+          logger.error("warning: --yes has no effect for eve init.");
+        }
+
+        const { runInitCommand } = await import("#cli/commands/init.js");
+        await runInitCommand(logger, appRoot, target, {
+          channelWebNextjs: options.channelWebNextjs,
+        });
+      },
+    );
 
   registerProjectCommands({ program, logger, appRoot });
 
@@ -652,12 +664,11 @@ export async function runCli(
         return;
       }
 
-      // A coding agent that fumbles `eve init` (e.g. an unknown flag) trips
-      // commander before the init action runs, so the action's own agent
-      // detection never fires. Commander has already written its usage error to
-      // stderr; add the setup guide on stdout so the agent gets actionable next
-      // steps — but still fall through to throw, so the malformed invocation
-      // keeps its nonzero exit instead of silently succeeding.
+      // A coding agent that fumbles `eve init` can trip commander before the
+      // init action runs, so the action's own agent detection never fires.
+      // Commander has already written its usage error to stderr; add the setup
+      // guide on stdout so the agent gets actionable next steps, but still fall
+      // through to throw so the malformed invocation keeps its nonzero exit.
       const detectCodingAgentLaunch = runtime.isCodingAgentLaunch ?? isCodingAgentLaunch;
       const agentLaunched = await detectCodingAgentLaunch();
       if (input[0] === "init" && agentLaunched) {
