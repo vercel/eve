@@ -4,6 +4,7 @@ import { defineEval } from "eve/evals";
 import { FANOUT_DELAY_SERVER_URL } from "./shared.js";
 
 const BASH_TOOL = "bash";
+const MINIMUM_CURL_CALLS = 10;
 const REQUESTS = [
   { label: "curl-01", query: "Vercel AI Gateway documentation" },
   { label: "curl-02", query: "Anthropic Claude API documentation" },
@@ -27,12 +28,13 @@ interface CurlMeasurement {
 }
 
 export default defineEval({
-  description: "Sandbox Bash: each curl starts before the previous curl finishes.",
+  description: "Sandbox Bash: at least ten curls each start before the preceding curl finishes.",
   async test(t) {
     const turn = await t.send(
       [
-        `Call the \`${BASH_TOOL}\` tool exactly ${REQUESTS.length} separate times in one tool-use step.`,
-        "Run each command below exactly once. Do not combine commands, use a loop, or background a process.",
+        `Call the \`${BASH_TOOL}\` tool at least ${MINIMUM_CURL_CALLS} separate times in one tool-use step.`,
+        "Run every command below at least once. If you make extra calls, repeat a command below.",
+        "Do not combine commands, use a loop, or background a process.",
         ...REQUESTS.map((request) => `${request.label}: \`${commandFor(request)}\``),
         "After all commands return, reply with exactly: curl fanout complete",
       ].join("\n"),
@@ -40,10 +42,16 @@ export default defineEval({
     turn.expectOk();
 
     t.log(formatCurlFanoutTrace(turn.events));
-    turn.calledTool(BASH_TOOL, { count: REQUESTS.length });
+    turn.calledTool(BASH_TOOL);
     turn.noFailedActions();
-    turn.eventsSatisfy("each Bash curl starts before the previous curl finishes", (events) =>
-      consecutiveCurlStartsOverlap({ events, expectedRequests: REQUESTS }),
+    turn.eventsSatisfy(
+      "at least ten Bash curls each start before the preceding curl finishes",
+      (events) =>
+        consecutiveCurlStartsOverlap({
+          events,
+          expectedRequests: REQUESTS,
+          minimumCalls: MINIMUM_CURL_CALLS,
+        }),
     );
   },
 });
@@ -64,6 +72,7 @@ function commandFor(request: (typeof REQUESTS)[number]): string {
 function consecutiveCurlStartsOverlap(input: {
   readonly events: readonly HandleMessageStreamEvent[];
   readonly expectedRequests: readonly { readonly label: string; readonly query: string }[];
+  readonly minimumCalls: number;
 }): boolean {
   const measurements = curlMeasurements(input.events);
   const expectedQueryByLabel = new Map(
@@ -71,10 +80,13 @@ function consecutiveCurlStartsOverlap(input: {
   );
 
   return (
-    measurements.length === input.expectedRequests.length &&
+    measurements.length >= input.minimumCalls &&
     expectedQueryByLabel.size === input.expectedRequests.length &&
-    new Set(measurements.map((measurement) => measurement.label)).size ===
-      input.expectedRequests.length &&
+    input.expectedRequests.every((request) =>
+      measurements.some(
+        (measurement) => measurement.label === request.label && measurement.query === request.query,
+      ),
+    ) &&
     measurements.every(
       (measurement) =>
         expectedQueryByLabel.get(measurement.label) === measurement.query &&
