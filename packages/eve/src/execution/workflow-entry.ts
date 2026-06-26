@@ -13,11 +13,8 @@ import type {
   SessionCapabilities,
 } from "#channel/types.js";
 import { coalesceDeliveries } from "#harness/messages.js";
-import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
-import { accumulateRuntimeActionResults } from "#harness/runtime-actions.js";
 import type { RunMode } from "#shared/run-mode.js";
-import type { RuntimeSubagentResultActionResult } from "#runtime/actions/types.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { notifyDelegatedParentStep } from "#execution/delegated-parent-notification.js";
 import {
@@ -26,17 +23,11 @@ import {
 } from "#execution/delegated-parent-result.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
+import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
-import { resolveVercelProductionCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { createSessionStep } from "#execution/create-session-step.js";
-import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
-import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
-import {
-  emitTerminalSessionFailureStep,
-  routeProxiedDeliverStep,
-  runProxyInputRequestStep,
-} from "#execution/workflow-steps.js";
+import { emitTerminalSessionFailureStep } from "#execution/workflow-steps.js";
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
 import { claimHookOwnership, closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
 
@@ -65,10 +56,12 @@ export interface WorkflowEntryResult {
  * on a child stream and resume the parked parent with a
  * `subagent-result` on completion.
  *
- * Dispatches on the closed-contract {@link NextDriverAction} returned
- * by each step. The only session-shape flag the driver reads (besides
- * identity) is `hasProxyInputRequests`, the documented short-circuit
- * for hook-payload routing.
+ * Owns the public park hook and the session lifecycle; each turn-owned
+ * turn resolves its own runtime actions in-line and reports back only
+ * `done`/`park` via the closed-contract {@link NextDriverAction}. The
+ * only session-shape flag the driver reads (besides identity) is
+ * `hasProxyInputRequests`, the documented short-circuit for hook-payload
+ * routing to any descendant still active when the parent parks.
  */
 export async function workflowEntry(input: WorkflowEntryInput): Promise<WorkflowEntryResult> {
   "use workflow";
@@ -289,57 +282,6 @@ async function runDriverLoop(input: {
             driverWritable: input.driverWritable,
           });
 
-        case "dispatch-workflow-runtime-actions":
-        case "dispatch-runtime-actions": {
-          const dispatchStep =
-            action.kind === "dispatch-workflow-runtime-actions"
-              ? dispatchWorkflowRuntimeActionsStep
-              : dispatchRuntimeActionsStep;
-
-          const dispatchResult = await dispatchStep({
-            callbackBaseUrl: resolveVercelProductionCallbackBaseUrl() ?? getWorkflowMetadata().url,
-            parentWritable: input.driverWritable,
-            serializedContext: action.serializedContext,
-            sessionState: action.sessionState,
-          });
-
-          const runtimeResults = await waitForPendingRuntimeActionResults({
-            bufferedDeliveries,
-            consumeNext,
-            getNextPromise,
-            initialResults: dispatchResult.results,
-            parentWritable: input.driverWritable,
-            pendingActionKeys: action.pendingActionKeys,
-            rekeyHook,
-            serializedContext: action.serializedContext,
-            sessionState: dispatchResult.sessionState,
-          });
-
-          if (runtimeResults === null) {
-            return { output: "" };
-          }
-
-          action = await dispatchAndAwaitTurn({
-            bufferedDeliveries,
-            capabilities: input.capabilities,
-            completionToken: nextTurnCompletionToken(),
-            consumeNext,
-            delivery: {
-              kind: "runtime-action-result",
-              results: runtimeResults.results,
-            },
-            getNextPromise,
-            mode: input.mode,
-            parentWritable: input.driverWritable,
-            rekeyHook,
-            serializedContext: runtimeResults.serializedContext,
-            sessionState: runtimeResults.sessionState,
-          });
-
-          await rekeyHook(action.sessionState.continuationToken);
-          break;
-        }
-
         case "park": {
           if (action.authorizationNames && action.authorizationNames.length > 0) {
             const expected = action.authorizationNames.length;
@@ -384,7 +326,7 @@ async function runDriverLoop(input: {
             return { output: "" };
           }
 
-          const remainder = await routeDeliverForChildren({
+          const remainder = await routeDeliverToChildren({
             auth: nextDeliver.auth,
             parentWritable: input.driverWritable,
             payloads: nextDeliver.payloads,
@@ -418,6 +360,12 @@ async function runDriverLoop(input: {
           await rekeyHook(action.sessionState.continuationToken);
           break;
         }
+
+        default:
+          // Turn-owned turns resolve runtime actions in-line and only ever
+          // report `done`/`park`. The driver-owned `dispatch-*` arms exist
+          // solely for pre-change pinned drivers, which run their own code.
+          throw new Error(`Driver received unexpected turn action "${action.kind}".`);
       }
     }
   } finally {
@@ -447,127 +395,6 @@ async function finalizeDone(input: {
     serializedContext,
   });
   return { output };
-}
-
-interface PendingRuntimeActionResultsOutcome {
-  readonly results: readonly RuntimeSubagentResultActionResult[];
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}
-
-async function waitForPendingRuntimeActionResults(input: {
-  readonly bufferedDeliveries: DeliverHookPayload[];
-  readonly consumeNext: () => void;
-  readonly getNextPromise: () => Promise<IteratorResult<HookPayload>>;
-  readonly initialResults?: readonly RuntimeSubagentResultActionResult[];
-  readonly parentWritable: WritableStream<Uint8Array>;
-  readonly pendingActionKeys: readonly string[];
-  readonly rekeyHook: (nextToken: string) => Promise<void>;
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}): Promise<PendingRuntimeActionResultsOutcome | null> {
-  let currentSessionState = input.sessionState;
-  // Thread the post-proxy serialized context forward so subsequent
-  // deliveries and the post-wait `turnStep` observe adapter-state
-  // mutations (e.g. Slack's `pendingRequests` cache).
-  let currentSerializedContext = input.serializedContext;
-
-  const results = await accumulateRuntimeActionResults({
-    bufferedDeliveries: input.bufferedDeliveries,
-    async getNext() {
-      while (true) {
-        const next = await input.getNextPromise();
-        input.consumeNext();
-
-        if (next.done) {
-          return null;
-        }
-
-        const value = next.value;
-
-        if (value.kind === "deliver") {
-          // Route descendant-bound `inputResponses` down to the owning
-          // child before buffering — otherwise the response would sit
-          // in the buffer until the child completes, which it cannot
-          // do without the response (parent↔child deadlock).
-          const remainder = await routeDeliverForChildren({
-            auth: value.auth,
-            parentWritable: input.parentWritable,
-            payloads: value.payloads,
-            sessionState: currentSessionState,
-          });
-
-          if (remainder === undefined) {
-            // Fully proxied; keep waiting.
-            continue;
-          }
-
-          return {
-            kind: "deliver",
-            value: { ...value, payloads: [remainder] },
-          };
-        }
-
-        if (value.kind === "runtime-action-result") {
-          return { kind: "runtime-action-result", results: value.results };
-        }
-
-        // subagent-input-request: proxy the child's HITL through the
-        // parent's adapter, record the routing entry, keep waiting.
-        const proxyResult = await runProxyInputRequestStep({
-          hookPayload: value,
-          parentWritable: input.parentWritable,
-          serializedContext: currentSerializedContext,
-          sessionState: currentSessionState,
-        });
-        currentSessionState = proxyResult.sessionState;
-        currentSerializedContext = proxyResult.serializedContext;
-        await input.rekeyHook(currentSessionState.continuationToken);
-      }
-    },
-    initialResults: input.initialResults,
-    pendingActionKeys: input.pendingActionKeys,
-  });
-
-  if (results === null) {
-    return null;
-  }
-
-  return {
-    results: results as readonly RuntimeSubagentResultActionResult[],
-    serializedContext: currentSerializedContext,
-    sessionState: currentSessionState,
-  };
-}
-
-/**
- * Routes one inbound deliver down to descendant subagents with
- * matching proxied HITL requests. Returns the parent-local remainder
- * (or `undefined` when the entire payload was routed away).
- *
- * Short-circuits via `hasProxyInputRequests` so the common
- * no-active-descendant path skips a durable step boundary.
- */
-async function routeDeliverForChildren(input: {
-  readonly auth: DeliverHookPayload["auth"];
-  readonly parentWritable: WritableStream<Uint8Array>;
-  readonly payloads: readonly DeliverPayload[];
-  readonly sessionState: DurableSessionState;
-}): Promise<DeliverPayload | undefined> {
-  const coalesced = coalesceDeliverPayloads(input.payloads);
-
-  if (!input.sessionState.hasProxyInputRequests) {
-    return coalesced;
-  }
-
-  const routed = await routeProxiedDeliverStep({
-    auth: input.auth,
-    parentWritable: input.parentWritable,
-    payload: coalesced,
-    sessionState: input.sessionState,
-  });
-
-  return routed.remainder;
 }
 
 async function waitForNextDeliver(input: {

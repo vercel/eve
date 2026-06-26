@@ -4,9 +4,8 @@ import type { DeliverHookPayload, HookPayload, SessionCapabilities } from "#chan
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
-import { serviceTurnDeliveryRequest } from "#execution/turn-delivery-relay.js";
+import { nextTurnControl, serviceTurnDeliveryRequest } from "#execution/turn-delivery-relay.js";
 import type { TurnCompletionPayload } from "#execution/turn-workflow.js";
-import { rebuildSerializableError } from "#execution/workflow-errors.js";
 import { dispatchTurnStep } from "#execution/workflow-steps.js";
 import type { RunMode } from "#shared/run-mode.js";
 
@@ -47,17 +46,12 @@ export async function dispatchAndAwaitTurn(input: {
     });
 
     while (true) {
-      const next = await getCompletionPromise();
-      consumeCompletion();
-      if (next.done) throw new Error("Turn completion hook closed before delivering a result.");
-
-      const payload = next.value;
-      if (payload.kind === "turn-error") throw rebuildSerializableError(payload.error);
-
-      if (payload.kind === "turn-continuation-token") {
-        await input.rekeyHook(payload.continuationToken);
-        continue;
-      }
+      const payload = await nextTurnControl({
+        consumeCompletion,
+        getCompletionPromise,
+        onClosed: "Turn completion hook closed before delivering a result.",
+        rekeyHook: input.rekeyHook,
+      });
 
       if (payload.kind === "turn-result") {
         if (payload.bufferedDeliveries !== undefined) {

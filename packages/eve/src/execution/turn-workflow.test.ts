@@ -8,11 +8,8 @@ import {
   TURN_WORKFLOW_INPUT_VERSION,
   type TurnWorkflowInput,
 } from "#execution/durable-session-migrations/turn-workflow.js";
-import {
-  routeProxiedDeliverStep,
-  runProxyInputRequestStep,
-  turnStep,
-} from "#execution/workflow-steps.js";
+import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
+import { runProxyInputRequestStep, turnStep } from "#execution/workflow-steps.js";
 
 const resumeHookMock = vi.fn();
 const createHookMock = vi.fn();
@@ -26,8 +23,11 @@ vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
 }));
 
+vi.mock("./route-child-delivery.js", () => ({
+  routeDeliverToChildren: vi.fn(),
+}));
+
 vi.mock("./workflow-steps.js", () => ({
-  routeProxiedDeliverStep: vi.fn(),
   runProxyInputRequestStep: vi.fn(),
   turnStep: vi.fn(),
 }));
@@ -415,7 +415,7 @@ describe("turnWorkflow", () => {
       serializedContext: { state: "proxied" },
       sessionState: proxyState,
     });
-    vi.mocked(routeProxiedDeliverStep).mockResolvedValue({ remainder: undefined });
+    vi.mocked(routeDeliverToChildren).mockResolvedValue(undefined);
     vi.mocked(turnStep)
       .mockResolvedValueOnce({
         action: "park",
@@ -450,11 +450,9 @@ describe("turnWorkflow", () => {
       kind: "turn-delivery-accepted",
       requestId,
     });
-    expect(routeProxiedDeliverStep).toHaveBeenCalledWith(
+    expect(routeDeliverToChildren).toHaveBeenCalledWith(
       expect.objectContaining({
-        payload: {
-          inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
-        },
+        payloads: [{ inputResponses: [{ optionId: "approve", requestId: "approval-1" }] }],
         sessionState: proxyState,
       }),
     );

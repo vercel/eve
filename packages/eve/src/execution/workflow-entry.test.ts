@@ -4,18 +4,12 @@ import { resumeHook } from "#internal/workflow/runtime.js";
 
 import type { HookPayload } from "#channel/types.js";
 import { ChannelRequestIdKey } from "#context/keys.js";
-import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
-import type { RuntimeSubagentResultActionResult } from "#runtime/actions/types.js";
 import { createSessionStep } from "#execution/create-session-step.js";
-import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { TurnCompletionPayload } from "#execution/turn-workflow.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
-import {
-  dispatchTurnStep,
-  routeProxiedDeliverStep,
-  runProxyInputRequestStep,
-} from "#execution/workflow-steps.js";
+import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
+import { dispatchTurnStep } from "#execution/workflow-steps.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: vi.fn(),
@@ -46,27 +40,13 @@ vi.mock("./create-session-step.js", () => ({
   ),
 }));
 
-vi.mock("./dispatch-runtime-actions-step.js", () => ({
-  dispatchRuntimeActionsStep: vi
-    .fn()
-    .mockImplementation(async ({ sessionState }: { sessionState: DurableSessionState }) => ({
-      results: [],
-      sessionState,
-    })),
+vi.mock("./route-child-delivery.js", () => ({
+  routeDeliverToChildren: vi.fn().mockImplementation(async ({ payloads }) => payloads[0]),
 }));
 
 vi.mock("./workflow-steps.js", () => ({
   dispatchTurnStep: vi.fn().mockImplementation(async () => ({ runId: "turn-run" })),
   emitTerminalSessionFailureStep: vi.fn().mockResolvedValue(undefined),
-  routeProxiedDeliverStep: vi
-    .fn()
-    .mockImplementation(async ({ payload }) => ({ remainder: payload })),
-  runProxyInputRequestStep: vi
-    .fn()
-    .mockImplementation(async ({ serializedContext, sessionState }) => ({
-      serializedContext,
-      sessionState,
-    })),
 }));
 
 function createSessionStateForMock(
@@ -284,91 +264,6 @@ describe("workflowEntry", () => {
     });
   });
 
-  it("buffers follow-up user input until a pending subagent batch resolves", async () => {
-    const baseSessionState = createBaseSessionState();
-    const pendingSessionState = createPendingSubagentSessionState("forecast_delegate");
-    const resumedSessionState: DurableSessionState = {
-      ...baseSessionState,
-    };
-
-    vi.mocked(createSessionStep).mockResolvedValue(
-      createSessionStepResultForMock(baseSessionState),
-    );
-    installHookMocks({
-      parkHooks: [
-        {
-          token: "http:test",
-          values: [
-            {
-              kind: "deliver",
-              payloads: [{ message: "follow up while child runs" }],
-            },
-            {
-              kind: "runtime-action-result",
-              results: [
-                {
-                  callId: "call-1",
-                  kind: "subagent-result",
-                  output: "delegated output",
-                  subagentName: "forecast_delegate",
-                },
-              ],
-            },
-          ],
-        },
-      ],
-      turnCompletions: [
-        turnResult({
-          action: "dispatch-runtime-actions",
-          pendingActionKeys: subagentPendingActionKeys("forecast_delegate"),
-          sessionState: pendingSessionState,
-        }),
-        turnResult({ action: "park", sessionState: resumedSessionState }),
-        turnResult({
-          action: "done",
-          output: "after follow-up",
-          sessionState: resumedSessionState,
-        }),
-      ],
-    });
-
-    const result = await workflowEntry({
-      input: { message: "hello there" },
-      serializedContext: createSerializedContext(),
-    });
-
-    expect(result).toEqual({ output: "after follow-up" });
-    expect(turnCompletionTokens()).toEqual([
-      "wrun_test_123:turn-completion:0",
-      "wrun_test_123:turn-completion:1",
-      "wrun_test_123:turn-completion:2",
-    ]);
-    const parentWritable = vi.mocked(dispatchTurnStep).mock.calls[0]?.[0].parentWritable;
-    expect(dispatchRuntimeActionsStep).toHaveBeenCalledWith({
-      callbackBaseUrl: "https://eve.example.com",
-      parentWritable,
-      serializedContext: expect.objectContaining({
-        "eve.sessionId": "wrun_test_123",
-      }),
-      sessionState: pendingSessionState,
-    });
-    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
-      kind: "runtime-action-result",
-      results: [
-        {
-          callId: "call-1",
-          kind: "subagent-result",
-          output: "delegated output",
-          subagentName: "forecast_delegate",
-        },
-      ],
-    });
-    expect(vi.mocked(dispatchTurnStep).mock.calls[2]?.[0].delivery).toEqual({
-      kind: "deliver",
-      payloads: [{ message: "follow up while child runs" }],
-    });
-  });
-
   it("supplies a requested public delivery to the active turn inbox", async () => {
     const sessionState = createBaseSessionState();
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
@@ -499,317 +394,7 @@ describe("workflowEntry", () => {
     expect(resumeHook).not.toHaveBeenCalled();
   });
 
-  it("feeds immediate remote dispatch failures back into the parent turn", async () => {
-    const baseSessionState = createBaseSessionState();
-    const pendingSessionState = createPendingRemoteAgentSessionState("research");
-    const resumedSessionState: DurableSessionState = {
-      ...baseSessionState,
-    };
-    const failedResult = {
-      callId: "call-1",
-      isError: true,
-      kind: "subagent-result",
-      output: {
-        code: "REMOTE_AGENT_START_FAILED",
-        message: "remote unavailable",
-      },
-      subagentName: "research",
-    } satisfies RuntimeSubagentResultActionResult;
-
-    vi.mocked(createSessionStep).mockResolvedValue(
-      createSessionStepResultForMock(baseSessionState),
-    );
-    vi.mocked(dispatchRuntimeActionsStep).mockResolvedValueOnce({
-      results: [failedResult],
-      sessionState: pendingSessionState,
-    });
-    installHookMocks({
-      parkHooks: [
-        {
-          token: "http:test",
-          values: [],
-        },
-      ],
-      turnCompletions: [
-        turnResult({
-          action: "dispatch-runtime-actions",
-          pendingActionKeys: remoteAgentPendingActionKeys("research"),
-          sessionState: pendingSessionState,
-        }),
-        turnResult({
-          action: "done",
-          output: "handled failure",
-          sessionState: resumedSessionState,
-        }),
-      ],
-    });
-
-    const result = await workflowEntry({
-      input: { message: "hello there" },
-      serializedContext: createSerializedContext(),
-    });
-
-    expect(result).toEqual({ output: "handled failure" });
-    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
-      kind: "runtime-action-result",
-      results: [failedResult],
-    });
-  });
-
-  it("proxies a subagent input request through the parent writable while waiting for subagent results", async () => {
-    const baseSessionState = createBaseSessionState();
-    const pendingSessionState = createPendingSubagentSessionState("linear");
-    const resumedSessionState: DurableSessionState = {
-      ...baseSessionState,
-    };
-
-    vi.mocked(createSessionStep).mockResolvedValue(
-      createSessionStepResultForMock(baseSessionState),
-    );
-    installHookMocks({
-      parkHooks: [
-        {
-          token: "http:test",
-          values: [
-            createSubagentInputRequest(),
-            {
-              kind: "runtime-action-result",
-              results: [
-                {
-                  callId: "call-1",
-                  kind: "subagent-result",
-                  output: "child done",
-                  subagentName: "linear",
-                },
-              ],
-            },
-          ],
-        },
-      ],
-      turnCompletions: [
-        turnResult({
-          action: "dispatch-runtime-actions",
-          pendingActionKeys: subagentPendingActionKeys("linear"),
-          sessionState: pendingSessionState,
-        }),
-        turnResult({ action: "done", output: "all done", sessionState: resumedSessionState }),
-      ],
-    });
-
-    const result = await workflowEntry({
-      input: { message: "hi" },
-      serializedContext: createSerializedContext({
-        "eve.capabilities": { requestInput: true },
-      }),
-    });
-
-    expect(result).toEqual({ output: "all done" });
-    expect(runProxyInputRequestStep).toHaveBeenCalledTimes(1);
-    const parentWritable = vi.mocked(dispatchTurnStep).mock.calls[0]?.[0].parentWritable;
-    const proxyCall = vi.mocked(runProxyInputRequestStep).mock.calls[0]?.[0];
-    expect(proxyCall?.parentWritable).toBe(parentWritable);
-    expect(proxyCall?.hookPayload.callId).toBe("call-1");
-    expect(proxyCall?.hookPayload.childContinuationToken).toBe("subagent:wrun_test_123:call-1");
-    expect(proxyCall?.hookPayload.event.requests[0]?.requestId).toBe("req-1");
-    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
-      kind: "runtime-action-result",
-      results: [
-        {
-          callId: "call-1",
-          kind: "subagent-result",
-          output: "child done",
-          subagentName: "linear",
-        },
-      ],
-    });
-    expect(routeProxiedDeliverStep).not.toHaveBeenCalled();
-  });
-
-  it("rekeys the active hook when proxied subagent input anchors the parent session", async () => {
-    const baseSessionState = createBaseSessionState({ continuationToken: "slack:C01:" });
-    const pendingSessionState = createPendingSubagentSessionState("linear", {
-      continuationToken: "slack:C01:",
-    });
-    const anchoredSessionState: DurableSessionState = {
-      ...pendingSessionState,
-      continuationToken: "slack:C01:1800000000.123456",
-    };
-    const resumedSessionState: DurableSessionState = {
-      ...baseSessionState,
-      continuationToken: "slack:C01:1800000000.123456",
-    };
-
-    vi.mocked(createSessionStep).mockResolvedValue(
-      createSessionStepResultForMock(baseSessionState),
-    );
-    vi.mocked(runProxyInputRequestStep).mockResolvedValueOnce({
-      serializedContext: {
-        "eve.continuationToken": "slack:C01:1800000000.123456",
-        "eve.sessionId": "wrun_test_123",
-      },
-      sessionState: anchoredSessionState,
-    });
-
-    const oldReturn = createIteratorReturn();
-    const oldDispose = vi.fn();
-    const newReturn = createIteratorReturn();
-    const newDispose = vi.fn();
-
-    installHookMocks({
-      parkHooks: [
-        {
-          dispose: oldDispose,
-          return: oldReturn,
-          token: "slack:C01:",
-          values: [createSubagentInputRequest()],
-        },
-        {
-          dispose: newDispose,
-          return: newReturn,
-          token: "slack:C01:1800000000.123456",
-          values: [
-            {
-              kind: "runtime-action-result",
-              results: [
-                {
-                  callId: "call-1",
-                  kind: "subagent-result",
-                  output: "child done",
-                  subagentName: "linear",
-                },
-              ],
-            },
-          ],
-        },
-      ],
-      turnCompletions: [
-        turnResult({
-          action: "dispatch-runtime-actions",
-          pendingActionKeys: subagentPendingActionKeys("linear"),
-          sessionState: pendingSessionState,
-        }),
-        turnResult({
-          action: "done",
-          output: "done after rekey",
-          sessionState: resumedSessionState,
-        }),
-      ],
-    });
-
-    const result = await workflowEntry({
-      input: { message: "hi" },
-      serializedContext: createSerializedContext({
-        "eve.capabilities": { requestInput: true },
-        "eve.channel": { kind: "slack", state: {} },
-        "eve.continuationToken": "slack:C01:",
-      }),
-    });
-
-    expect(result).toEqual({ output: "done after rekey" });
-    expect(nonTurnHookTokens()).toEqual(["slack:C01:", "slack:C01:1800000000.123456"]);
-    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
-      kind: "runtime-action-result",
-      results: [
-        {
-          callId: "call-1",
-          kind: "subagent-result",
-          output: "child done",
-          subagentName: "linear",
-        },
-      ],
-    });
-    expect(oldReturn).toHaveBeenCalledTimes(1);
-    expect(oldDispose).toHaveBeenCalledTimes(1);
-    expect(newReturn).toHaveBeenCalledTimes(1);
-    expect(newDispose).toHaveBeenCalledTimes(1);
-  });
-
-  it("routes mid-wait HITL responses down to the child instead of buffering them", async () => {
-    const baseSessionState = createBaseSessionState();
-    const pendingSessionState = createPendingSubagentSessionState("linear");
-    const resumedSessionState: DurableSessionState = {
-      ...baseSessionState,
-    };
-    const userResponse = [{ optionId: "approve", requestId: "req-1", text: undefined }];
-
-    vi.mocked(createSessionStep).mockResolvedValue(
-      createSessionStepResultForMock(baseSessionState),
-    );
-    vi.mocked(runProxyInputRequestStep).mockImplementation(
-      async ({ serializedContext, sessionState }) => ({
-        serializedContext,
-        sessionState: {
-          ...sessionState,
-          hasProxyInputRequests: true,
-        },
-      }),
-    );
-    vi.mocked(routeProxiedDeliverStep).mockResolvedValueOnce({ remainder: undefined });
-
-    installHookMocks({
-      parkHooks: [
-        {
-          token: "http:test",
-          values: [
-            createSubagentInputRequest(),
-            {
-              auth: null,
-              kind: "deliver",
-              payloads: [{ inputResponses: userResponse }],
-            },
-            {
-              kind: "runtime-action-result",
-              results: [
-                {
-                  callId: "call-1",
-                  kind: "subagent-result",
-                  output: "child done",
-                  subagentName: "linear",
-                },
-              ],
-            },
-          ],
-        },
-      ],
-      turnCompletions: [
-        turnResult({
-          action: "dispatch-runtime-actions",
-          pendingActionKeys: subagentPendingActionKeys("linear"),
-          sessionState: pendingSessionState,
-        }),
-        turnResult({
-          action: "done",
-          output: "finished after hitl",
-          sessionState: resumedSessionState,
-        }),
-      ],
-    });
-
-    const result = await workflowEntry({
-      input: { message: "hi" },
-      serializedContext: createSerializedContext({
-        "eve.capabilities": { requestInput: true },
-      }),
-    });
-
-    expect(result).toEqual({ output: "finished after hitl" });
-    expect(routeProxiedDeliverStep).toHaveBeenCalledTimes(1);
-    const routedCall = vi.mocked(routeProxiedDeliverStep).mock.calls[0]?.[0];
-    expect(routedCall?.payload).toEqual({ inputResponses: userResponse });
-    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
-      kind: "runtime-action-result",
-      results: [
-        {
-          callId: "call-1",
-          kind: "subagent-result",
-          output: "child done",
-          subagentName: "linear",
-        },
-      ],
-    });
-  });
-
-  it("skips the routing step when there are no proxy input requests on the session", async () => {
+  it("skips child routing when a turn completes without yielding to a delivery", async () => {
     const sessionState = createBaseSessionState();
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
     installHookMocks({
@@ -829,7 +414,7 @@ describe("workflowEntry", () => {
     });
 
     expect(result).toEqual({ output: "ok" });
-    expect(routeProxiedDeliverStep).not.toHaveBeenCalled();
+    expect(routeDeliverToChildren).not.toHaveBeenCalled();
   });
 
   it("parks the first hook under the re-keyed continuation token", async () => {
@@ -1184,83 +769,9 @@ function createBaseSessionState(overrides: Partial<DurableSessionState> = {}): D
   };
 }
 
-function createPendingSubagentSessionState(
-  _subagentName: string,
-  overrides: Partial<DurableSessionState> = {},
-): DurableSessionState {
-  return createBaseSessionState(overrides);
-}
-
-function createPendingRemoteAgentSessionState(
-  _remoteAgentName: string,
-  overrides: Partial<DurableSessionState> = {},
-): DurableSessionState {
-  return createBaseSessionState(overrides);
-}
-
-function subagentPendingActionKeys(subagentName: string): readonly string[] {
-  return [
-    getRuntimeActionRequestKey({
-      callId: "call-1",
-      description: "Delegate the work.",
-      input: { topic: subagentName },
-      kind: "subagent-call",
-      name: subagentName,
-      nodeId: `subagents/${subagentName}`,
-      subagentName,
-    }),
-  ];
-}
-
-function remoteAgentPendingActionKeys(remoteAgentName: string): readonly string[] {
-  return [
-    getRuntimeActionRequestKey({
-      callId: "call-1",
-      description: "Delegate the work.",
-      input: { topic: remoteAgentName },
-      kind: "remote-agent-call",
-      name: remoteAgentName,
-      nodeId: `remote/${remoteAgentName}`,
-      remoteAgentName,
-    }),
-  ];
-}
-
-function createSubagentInputRequest(): HookPayload {
-  return {
-    callId: "call-1",
-    childContinuationToken: "subagent:wrun_test_123:call-1",
-    childSessionId: "child-session",
-    event: {
-      requests: [
-        {
-          action: {
-            callId: "tool-call-1",
-            input: {},
-            kind: "tool-call",
-            toolName: "dangerous_tool",
-          },
-          options: [
-            { id: "approve", label: "Approve" },
-            { id: "deny", label: "Deny" },
-          ],
-          prompt: "Approve?",
-          requestId: "req-1",
-        },
-      ],
-      sequence: 0,
-      stepIndex: 0,
-      turnId: "child-turn",
-    },
-    kind: "subagent-input-request",
-    subagentName: "linear",
-  };
-}
-
 function turnResult(input: {
-  readonly action: "done" | "park" | "dispatch-runtime-actions";
+  readonly action: "done" | "park";
   readonly output?: string;
-  readonly pendingActionKeys?: readonly string[];
   readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): TurnCompletionPayload {
@@ -1270,17 +781,6 @@ function turnResult(input: {
       action: {
         kind: "done",
         output: input.output ?? "",
-        serializedContext,
-        sessionState: input.sessionState,
-      },
-      kind: "turn-result",
-    };
-  }
-  if (input.action === "dispatch-runtime-actions") {
-    return {
-      action: {
-        kind: "dispatch-runtime-actions",
-        pendingActionKeys: input.pendingActionKeys ?? [],
         serializedContext,
         sessionState: input.sessionState,
       },
@@ -1390,13 +890,6 @@ function nonTurnHookTokens(): string[] {
       (token): token is string =>
         token !== undefined && !token.endsWith(":auth") && !isTurnCompletionToken(token),
     );
-}
-
-function turnCompletionTokens(): string[] {
-  return vi
-    .mocked(createHook)
-    .mock.calls.map((call) => call[0]?.token)
-    .filter((token): token is string => token !== undefined && isTurnCompletionToken(token));
 }
 
 function isTurnCompletionToken(token: string): boolean {
