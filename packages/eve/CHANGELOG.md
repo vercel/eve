@@ -1,5 +1,14 @@
 # eve
 
+## 0.15.1
+
+### Patch Changes
+
+- b049756: Use the active eve development server URL for connection authorization callbacks. Local Vercel Connect flows now return to eve's actual port instead of Workflow's port 3000 fallback.
+- 2933ab2: The local `eve dev` status bar now shows a gray `:port` badge and retains it as terminal width narrows. Status segments now use tighter spacing.
+- 2e4e15d: `eve init` now accepts `--yes` as a no-op compatibility flag and warns before continuing.
+- 2933ab2: Running `eve dev` interactively now reconnects to the healthy loopback dev server recorded for the same app root, with a fresh session for each attached terminal UI. Eve replaces stale or malformed state when it starts a new server. `--host`, `--port`, or `PORT` skips reconnection and reports a healthy recorded server instead.
+
 ## 0.15.0
 
 ### Minor Changes
