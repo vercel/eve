@@ -37,7 +37,7 @@ export function Chat() {
   },
 ];
 
-const BENEFITS = ["One dev server", "Same-origin, no CORS", "One deploy"];
+const BENEFITS = ["One Dev Server", "Same-Origin, No CORS", "One Deploy"];
 
 async function renderCode(file: InteropFile) {
   return highlight(file.code, {
@@ -88,11 +88,7 @@ export async function NextjsInterop() {
 
         <div className="mt-8 flex flex-wrap items-center justify-center gap-2">
           {BENEFITS.map((benefit) => (
-            <Badge
-              key={benefit}
-              variant="secondary"
-              className="font-mono uppercase tracking-[0.1em] text-gray-900"
-            >
+            <Badge key={benefit} variant="secondary">
               {benefit}
             </Badge>
           ))}
