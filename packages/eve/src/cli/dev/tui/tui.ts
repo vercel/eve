@@ -23,9 +23,8 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
   /** The local server or remote URL used by this TUI session. */
   readonly target: DevelopmentTuiTarget;
   /**
-   * Text to seed the prompt input with after the UI launches. The buffer is
-   * editable and is not auto-submitted — the user presses Enter to send it.
-   * Applies to the first prompt only.
+   * Text to seed the prompt input with after the UI launches. A bare local
+   * `/model` starts fresh-agent onboarding. Applies to the first prompt only.
    */
   readonly initialInput?: string;
   /** Reports local CLI boot phases. Omitted for remote and programmatic TUI runs. */

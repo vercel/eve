@@ -4,21 +4,14 @@ import type { AgentInfoResult } from "#client/index.js";
 import { pathExists } from "#setup/path-exists.js";
 
 /** One boot-time setup problem the TUI can point at a fixing command. */
-export type SetupIssue =
-  | {
-      /** Diagnostics never authorize a command by themselves. */
-      kind: "attention";
-      /** Short category label, e.g. "AI Gateway credentials". */
-      label: string;
-      /** The slash command that fixes it, e.g. "/model". */
-      command: string;
-    }
-  | {
-      /** Positive runtime evidence that no model provider is configured. */
-      kind: "model-provider-unconfigured";
-      label: string;
-      command: "/model";
-    };
+export interface SetupIssue {
+  /** Diagnostics never authorize a command by themselves. */
+  kind: "attention";
+  /** Short category label, e.g. "AI Gateway credentials". */
+  label: string;
+  /** The slash command that fixes it, e.g. "/model". */
+  command: string;
+}
 
 /** What a boot detection may inspect. */
 export interface BootDetectionContext {
@@ -124,9 +117,8 @@ function modelProviderAccess(
  * gateway model it reports only the most-root cause; an unlinked directory
  * implies missing OIDC, so listing both would double-count what /model's
  * provider step fixes in one pass. The header and detection receive the same
- * local-credential-normalized endpoint snapshot. Their absence remains
- * unknown and cannot launch setup. A hint, not an error: the model call stays
- * the source of truth.
+ * local-credential-normalized endpoint snapshot. A hint, not an error: the
+ * model call stays the source of truth.
  */
 const modelProvider: BootDetection = {
   id: "model-provider",
@@ -140,7 +132,7 @@ const modelProvider: BootDetection = {
         const linked = await pathExists(join(appRoot, ".vercel", "project.json"));
         return [
           {
-            kind: "model-provider-unconfigured",
+            kind: "attention",
             label: linked ? "AI Gateway credentials missing" : "model provider not linked",
             command: "/model",
           },
@@ -211,21 +203,6 @@ export function orderedSetupIssues(
   authIssue: SetupIssue | undefined,
 ): SetupIssue[] {
   return authIssue === undefined ? [...bootIssues] : [authIssue, ...bootIssues];
-}
-
-/** The command and entry step authorized by positive setup evidence. */
-export interface AutomaticSetupCommand {
-  prompt: "/model";
-  initialModelStep: "provider";
-}
-
-/** Returns the only command authorized to run from positive setup evidence. */
-export function automaticSetupCommand(
-  issues: readonly SetupIssue[],
-): AutomaticSetupCommand | undefined {
-  return issues.some((issue) => issue.kind === "model-provider-unconfigured")
-    ? { prompt: "/model", initialModelStep: "provider" }
-    : undefined;
 }
 
 /**

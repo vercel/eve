@@ -16,7 +16,7 @@ On startup the TUI prints a brand line with your agent's name, plus a rotating t
  Use /channels to add more ways to reach your agent.
 ```
 
-If agent discovery reported problems, an error and warning count renders between the two lines. Instructions, tools, skills, and subagents are one `eve info` away, and `/help` lists every command. The TUI also runs a startup check. When the runtime confirms that no model provider is configured, it opens the `/model` provider picker before the first prompt. Unknown or linked-but-incomplete credential states remain visible as an attention line, with each command's outcome hanging under it on a `⎿` connector.
+If agent discovery reported problems, an error and warning count renders between the two lines. Instructions, tools, skills, and subagents are one `eve info` away, and `/help` lists every command. The TUI also runs a startup check. A fresh `eve init` starts local `eve dev` with `/model` prefilled. That input starts onboarding: the flow installs the Vercel CLI if needed, asks you to log in if needed, then opens `/model` before the first prompt. Other `eve dev` sessions show missing setup as an attention line, with each command's outcome hanging under it on a `⎿` connector.
 
 ## Reading the transcript
 

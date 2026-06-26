@@ -59,7 +59,6 @@ import type { DevelopmentCredentialGate } from "#services/dev-client/credential-
 import {
   BOOT_DETECTIONS,
   CLI_MISSING_SETUP_ISSUE,
-  automaticSetupCommand,
   detectSetupIssues,
   formatSetupIssuesLine,
   LOGIN_SETUP_ISSUE,
@@ -297,6 +296,11 @@ export interface PromptCommandHandlerContext {
   readonly title: string;
   /** Provider entry authorized by confirmed boot-time model-access evidence. */
   readonly initialModelStep?: "provider";
+  /**
+   * Leaves the current setup panel mounted for the next automatic onboarding
+   * command. The runner closes it if no next command can proceed.
+   */
+  readonly keepSetupFlowOpen?: true;
   readonly remoteConnection?: RemoteConnectionController;
 }
 
@@ -346,8 +350,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   /** Absolute local application root; omitted for remote `--url` sessions. */
   appRoot?: string;
   /**
-   * Seeds the editable prompt buffer for the first prompt only. The text is
-   * not auto-submitted — the user can edit it and presses Enter to send.
+   * Seeds the editable prompt buffer for the first prompt. A bare local
+   * `/model` starts initial model onboarding.
    */
   initialInput?: string;
   /** Handles non-core slash commands without adding feature branches to the runner. */
@@ -393,7 +397,10 @@ export class EveTUIRunner {
   readonly #runtimeArtifacts?: DevelopmentRuntimeArtifactSessionRefresher;
   readonly #serverUrl?: string;
   readonly #appRoot?: string;
-  /** Seeds the first prompt's editable buffer; consumed once in {@link #run}. */
+  /**
+   * Seeds the first prompt's editable buffer. A bare local `/model` starts
+   * fresh-agent onboarding.
+   */
   readonly #initialInput?: string;
   readonly #promptCommandHandler?: PromptCommandHandler;
   readonly #availablePromptCommands: readonly PromptCommandSpec[];
@@ -602,7 +609,6 @@ export class EveTUIRunner {
   async #run() {
     const title = this.#name;
     let prompt: string | undefined;
-    let automaticSetup: ReturnType<typeof automaticSetupCommand> = undefined;
     let pendingInputResponses: readonly InputResponse[] | undefined;
     let hasRunTurn = false;
     let streamWithoutPrompt = false;
@@ -615,7 +621,7 @@ export class EveTUIRunner {
       await this.#executeExtensionCommand(
         { type: "extension", name: "vc:login", argument: "" },
         title,
-        "startup",
+        { trigger: "startup" },
       );
     }
     this.#subscribeDevelopmentSandboxLogs();
@@ -623,9 +629,18 @@ export class EveTUIRunner {
     // first prompt must not wait on it. The segment appears when it lands.
     this.#vercelStatus?.refreshIdentity();
 
-    if (this.#promptCommandHandler !== undefined && this.#renderer.setupFlow !== undefined) {
-      automaticSetup = automaticSetupCommand(this.#bootIssues);
-      prompt = automaticSetup?.prompt;
+    const initialCommand =
+      this.#initialInput === undefined ? undefined : parsePromptCommand(this.#initialInput);
+    const initialModelOnboarding =
+      initialCommand?.type === "extension" &&
+      initialCommand.name === "model" &&
+      initialCommand.argument === "" &&
+      this.#appRoot !== undefined &&
+      this.#promptCommandHandler !== undefined &&
+      this.#renderer.setupFlow !== undefined;
+    if (initialModelOnboarding) {
+      initialDraft = undefined;
+      await this.#runInitialModelOnboarding(title);
     }
 
     while (true) {
@@ -699,10 +714,7 @@ export class EveTUIRunner {
 
         if (command?.type === "extension") {
           try {
-            const initialModelStep =
-              command.name === "model" ? automaticSetup?.initialModelStep : undefined;
-            automaticSetup = undefined;
-            await this.#executeExtensionCommand(command, title, "command", initialModelStep);
+            await this.#executeExtensionCommand(command, title, { trigger: "command" });
           } catch (error) {
             if (isInterruptedError(error)) return;
             throw error;
@@ -1069,18 +1081,22 @@ export class EveTUIRunner {
 
   async #handleExtensionCommand(
     command: Extract<PromptCommand, { type: "extension" }>,
-    input: Pick<PromptCommandHandlerContext, "initialModelStep" | "title">,
+    input: Pick<PromptCommandHandlerContext, "initialModelStep" | "keepSetupFlowOpen" | "title">,
   ): Promise<PromptCommandOutcome | undefined> {
     const handler = this.#promptCommandHandler;
     if (handler === undefined)
       return { message: `/${command.name} is not available in this session.` };
 
-    return await handler.handle(command, {
+    const context: PromptCommandHandlerContext = {
       renderer: this.#renderer,
       title: input.title,
       initialModelStep: input.initialModelStep,
       remoteConnection: this.#remoteConnection,
-    });
+    };
+    if (input.keepSetupFlowOpen === true) {
+      return await handler.handle(command, { ...context, keepSetupFlowOpen: true });
+    }
+    return await handler.handle(command, context);
   }
 
   #renderStartupCommandInvocation(
@@ -1112,14 +1128,73 @@ export class EveTUIRunner {
   async #executeExtensionCommand(
     command: Extract<PromptCommand, { type: "extension" }>,
     title: string,
-    trigger: "startup" | "command",
-    initialModelStep?: "provider",
+    input: {
+      readonly trigger: "startup" | "command";
+      readonly initialModelStep?: "provider";
+      readonly keepSetupFlowOpen?: true;
+    },
   ): Promise<void> {
-    const outcome = await this.#handleExtensionCommand(command, { initialModelStep, title });
-    this.#renderStartupCommandInvocation(command, trigger);
+    const outcome = await this.#handleExtensionCommand(command, {
+      initialModelStep: input.initialModelStep,
+      keepSetupFlowOpen: input.keepSetupFlowOpen,
+      title,
+    });
+    this.#renderStartupCommandInvocation(command, input.trigger);
     this.#renderCommandOutcome(outcome?.message);
     await this.#applyCommandEffect(outcome?.effect);
     this.#refreshHeaderFromRemoteConnection();
+  }
+
+  /**
+   * Fresh `eve init` launches the TUI with `/model` prefilled. Project-backed
+   * model access depends on the Vercel CLI and a Vercel session, so resolve
+   * only those missing prerequisites before entering the model picker. A probe
+   * failure still opens `/model`: its own-key and external-provider paths do
+   * not require Vercel.
+   */
+  async #runInitialModelOnboarding(title: string): Promise<void> {
+    const appRoot = this.#appRoot;
+    if (appRoot === undefined) return;
+
+    const authStatus = async (): Promise<VercelAuthStatus | undefined> => {
+      try {
+        return await this.#getVercelAuthStatus(appRoot, { signal: this.#authProbeAbort.signal });
+      } catch {
+        return undefined;
+      }
+    };
+
+    let status = await authStatus();
+    if (status === "cli-missing") {
+      await this.#executeExtensionCommand(
+        { type: "extension", name: "vc:install", argument: "" },
+        title,
+        { trigger: "startup", keepSetupFlowOpen: true },
+      );
+      status = await authStatus();
+      if (status === "cli-missing") {
+        this.#renderer.setupFlow?.end();
+        return;
+      }
+    }
+
+    if (status === "logged-out") {
+      await this.#executeExtensionCommand(
+        { type: "extension", name: "vc:login", argument: "" },
+        title,
+        { trigger: "startup", keepSetupFlowOpen: true },
+      );
+      status = await authStatus();
+      if (status === "cli-missing" || status === "logged-out") {
+        this.#renderer.setupFlow?.end();
+        return;
+      }
+    }
+
+    await this.#executeExtensionCommand({ type: "extension", name: "model", argument: "" }, title, {
+      trigger: "startup",
+      initialModelStep: "provider",
+    });
   }
 
   #refreshHeaderFromRemoteConnection(): void {

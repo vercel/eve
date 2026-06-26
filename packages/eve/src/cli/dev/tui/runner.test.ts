@@ -1818,12 +1818,13 @@ describe("EveTUIRunner boot setup detection", () => {
       serverUrl: "http://localhost:3000",
       name: "Weather Agent",
       appRoot: "/tmp/weather-agent",
+      initialInput: "/model",
       bootDetections: input.bootDetections ?? [
         {
           id: "test",
           detect: () => [
             {
-              kind: "model-provider-unconfigured",
+              kind: "attention",
               label: "model provider not linked",
               command: "/model",
             },
@@ -1853,16 +1854,21 @@ describe("EveTUIRunner boot setup detection", () => {
     expect(warnings).toEqual(["1 setup issue: AI Gateway credentials · /model"]);
   });
 
-  it("opens /model before the first prompt when the provider is unset", async () => {
+  it("runs the initial model onboarding prerequisites before opening /model", async () => {
     const order: string[] = [];
-    const handle = vi.fn(async () => {
-      order.push("model");
+    const authStatuses: Array<"cli-missing" | "logged-out" | "authenticated"> = [
+      "cli-missing",
+      "logged-out",
+      "authenticated",
+    ];
+    const handle = vi.fn(async (command: { name: string }) => {
+      order.push(command.name);
       return { message: "/model cancelled." };
     });
     const renderer = fakeRenderer({
       readPrompt: vi.fn(async (options?: AgentTUISessionOptions) => {
         order.push("prompt");
-        expect(options?.initialDraft).toBe("draft me");
+        expect(options?.initialDraft).toBeUndefined();
         return undefined;
       }),
       setupFlow: createFakeSetupFlowRenderer(),
@@ -1872,13 +1878,93 @@ describe("EveTUIRunner boot setup detection", () => {
       renderer,
       name: "Weather Agent",
       appRoot: "/tmp/weather-agent",
-      initialInput: "draft me",
+      initialInput: "/model",
       bootDetections: [
         {
           id: "test",
           detect: () => [
             {
-              kind: "model-provider-unconfigured",
+              kind: "attention",
+              label: "model provider not linked",
+              command: "/model",
+            },
+          ],
+        },
+      ],
+      getVercelAuthStatus: vi.fn(async () => authStatuses.shift() ?? "authenticated"),
+      promptCommandHandler: { handle },
+    });
+
+    await runner.run();
+
+    expect(order).toEqual(["vc:install", "vc:login", "model", "prompt"]);
+    expect(handle).toHaveBeenNthCalledWith(
+      1,
+      { type: "extension", name: "vc:install", argument: "" },
+      expect.objectContaining({ keepSetupFlowOpen: true }),
+    );
+    expect(handle).toHaveBeenNthCalledWith(
+      2,
+      { type: "extension", name: "vc:login", argument: "" },
+      expect.objectContaining({ keepSetupFlowOpen: true }),
+    );
+    expect(handle).toHaveBeenCalledWith(
+      { type: "extension", name: "model", argument: "" },
+      { renderer, title: "Weather Agent", initialModelStep: "provider" },
+    );
+  });
+
+  it("stops onboarding when Vercel CLI installation leaves the CLI unavailable", async () => {
+    const order: string[] = [];
+    const authStatuses: Array<"cli-missing"> = ["cli-missing", "cli-missing"];
+    const end = vi.fn();
+    const setupFlow = createFakeSetupFlowRenderer({ end });
+    const runner = new EveTUIRunner({
+      session: sessionYielding([]),
+      renderer: fakeRenderer({ setupFlow }),
+      name: "Weather Agent",
+      appRoot: "/tmp/weather-agent",
+      initialInput: "/model",
+      bootDetections: [
+        {
+          id: "test",
+          detect: () => [
+            {
+              kind: "attention",
+              label: "model provider not linked",
+              command: "/model",
+            },
+          ],
+        },
+      ],
+      getVercelAuthStatus: vi.fn(async () => authStatuses.shift() ?? "cli-missing"),
+      promptCommandHandler: {
+        handle: async (command) => {
+          order.push(command.name);
+          return { message: "/vc:install cancelled." };
+        },
+      },
+    });
+
+    await runner.run();
+
+    expect(order).toEqual(["vc:install"]);
+    expect(end).toHaveBeenCalledOnce();
+  });
+
+  it("does not auto-open /model outside the prefilled onboarding launch", async () => {
+    const handle = vi.fn(async () => ({ message: "/model cancelled." }));
+    const runner = new EveTUIRunner({
+      session: sessionYielding([]),
+      renderer: fakeRenderer({ setupFlow: createFakeSetupFlowRenderer() }),
+      name: "Weather Agent",
+      appRoot: "/tmp/weather-agent",
+      bootDetections: [
+        {
+          id: "test",
+          detect: () => [
+            {
+              kind: "attention",
               label: "model provider not linked",
               command: "/model",
             },
@@ -1890,11 +1976,26 @@ describe("EveTUIRunner boot setup detection", () => {
 
     await runner.run();
 
-    expect(order).toEqual(["model", "prompt"]);
-    expect(handle).toHaveBeenCalledWith(
-      { type: "extension", name: "model", argument: "" },
-      { renderer, title: "Weather Agent", initialModelStep: "provider" },
-    );
+    expect(handle).not.toHaveBeenCalled();
+  });
+
+  it("keeps a prefilled /model editable without a local app root", async () => {
+    const handle = vi.fn(async () => ({ message: "/model cancelled." }));
+    const readPrompt = vi.fn(async (options?: AgentTUISessionOptions) => {
+      expect(options?.initialDraft).toBe("/model");
+      return undefined;
+    });
+    const runner = new EveTUIRunner({
+      session: sessionYielding([]),
+      renderer: fakeRenderer({ readPrompt, setupFlow: createFakeSetupFlowRenderer() }),
+      name: "Weather Agent",
+      initialInput: "/model",
+      promptCommandHandler: { handle },
+    });
+
+    await runner.run();
+
+    expect(handle).not.toHaveBeenCalled();
   });
 
   it("normalizes a committed local key after automatic provider setup", async () => {
@@ -1904,7 +2005,7 @@ describe("EveTUIRunner boot setup detection", () => {
       info?.agent.model.endpoint?.kind === "gateway" && !info.agent.model.endpoint.connected
         ? [
             {
-              kind: "model-provider-unconfigured" as const,
+              kind: "attention" as const,
               label: "model provider not linked",
               command: "/model" as const,
             },
@@ -1945,7 +2046,7 @@ describe("EveTUIRunner boot setup detection", () => {
       info?.agent.model.endpoint?.kind === "gateway" && !info.agent.model.endpoint.connected
         ? [
             {
-              kind: "model-provider-unconfigured" as const,
+              kind: "attention" as const,
               label: "model provider not linked",
               command: "/model" as const,
             },

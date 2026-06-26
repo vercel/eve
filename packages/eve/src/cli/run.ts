@@ -452,7 +452,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .option("-u, --url <url>", "Connect to an existing server URL", parseDevelopmentServerUrl)
     .option("--no-ui", "Start the server without an interactive UI")
     .option("--name <name>", "Title shown in the terminal UI (defaults to the app folder name)")
-    .option("--input <text>", "Pre-fill the prompt input after launching the UI")
+    .option("--input <text>", "Pre-fill the prompt input, or start onboarding with /model")
     .option(
       "--tools <mode>",
       "How tool calls render: full | collapsed | auto-collapsed | hidden",

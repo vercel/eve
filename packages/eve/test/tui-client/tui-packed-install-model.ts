@@ -7,15 +7,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { theme } from "./lib/theme.ts";
 
 /**
- * End-to-end proof that the *packed* eve artifact can auto-open `/model` after
- * a consumer-shaped install.
+ * End-to-end proof that the *packed* eve artifact can open onboarding `/model`
+ * after a consumer-shaped install.
  *
  * Every other smoke test resolves eve's modules inside the workspace, where
  * devDependencies are installed — so a runtime import of an undeclared
  * dependency still resolves and the bug ships. This test packs the built
  * package (`pnpm pack`), installs the tarball into an empty project with npm
  * (which installs only declared dependencies, exactly like a user install),
- * and drives the installed TUI through automatic provider setup.
+ * and drives the installed TUI through the prefilled onboarding provider setup.
  *
  * Regression: eve 0.6.x–0.7.0 imported `oxc-parser` from the `/model` flow
  * while declaring it only as a devDependency. In a scaffolded project the
@@ -107,6 +107,8 @@ void (async () => {
       userInput: input,
       name: "Packed install model command",
       appRoot: consumerRoot,
+      initialInput: "/model",
+      getVercelAuthStatus: async () => "authenticated",
       promptCommandHandler: createPromptCommandHandler({
         target: {
           kind: "local",
@@ -116,10 +118,10 @@ void (async () => {
       }),
       bootDetections: [
         {
-          id: "test-unconfigured-provider",
+          id: "test-model-setup-attention",
           detect: () => [
             {
-              kind: "model-provider-unconfigured",
+              kind: "attention",
               label: "model provider not linked",
               command: "/model",
             },
@@ -130,12 +132,12 @@ void (async () => {
     const runPromise = runner.run();
 
     try {
-      // The provider picker paints before the first prompt only when boot
-      // detection launched the installed `/model` flow and its module graph
-      // loaded — the exact surface the oxc-parser regression crashed.
+      // The provider picker paints before the first prompt only when the
+      // prefilled onboarding `/model` flow and its module graph load — the
+      // exact surface the oxc-parser regression crashed.
       await screen.waitForText("Configure the agent model", 15_000);
       await screen.waitForText("Which model provider do you want to use?", 15_000);
-      console.log(theme.muted("[tui-packed-install] /model auto-opened provider setup"));
+      console.log(theme.muted("[tui-packed-install] /model opened provider setup"));
 
       input.send("\x1b");
       await screen.waitForText("Change model", 5_000);

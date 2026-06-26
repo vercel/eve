@@ -129,7 +129,9 @@ export function createPromptCommandHandler(
         if (result.effect !== undefined) outcome.effect = result.effect;
         return outcome;
       } finally {
-        flow.end({ preserveDiagnostics: preserveFlowDiagnostics });
+        if (context.keepSetupFlowOpen !== true) {
+          flow.end({ preserveDiagnostics: preserveFlowDiagnostics });
+        }
       }
     },
   };
