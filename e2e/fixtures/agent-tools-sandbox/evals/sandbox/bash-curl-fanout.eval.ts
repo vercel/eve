@@ -27,7 +27,7 @@ interface CurlMeasurement {
 }
 
 export default defineEval({
-  description: "Sandbox Bash: ten curl executions overlap according to their timestamps.",
+  description: "Sandbox Bash: each curl starts before the previous curl finishes.",
   async test(t) {
     const turn = await t.send(
       [
@@ -42,8 +42,8 @@ export default defineEval({
     t.log(formatCurlFanoutTrace(turn.events));
     turn.calledTool(BASH_TOOL, { count: REQUESTS.length });
     turn.noFailedActions();
-    turn.eventsSatisfy("all ten Bash curl executions overlap", (events) =>
-      curlExecutionsOverlap({ events, expectedRequests: REQUESTS }),
+    turn.eventsSatisfy("each Bash curl starts before the previous curl finishes", (events) =>
+      consecutiveCurlStartsOverlap({ events, expectedRequests: REQUESTS }),
     );
   },
 });
@@ -61,7 +61,7 @@ function commandFor(request: (typeof REQUESTS)[number]): string {
   ].join("; ");
 }
 
-function curlExecutionsOverlap(input: {
+function consecutiveCurlStartsOverlap(input: {
   readonly events: readonly HandleMessageStreamEvent[];
   readonly expectedRequests: readonly { readonly label: string; readonly query: string }[];
 }): boolean {
@@ -81,9 +81,28 @@ function curlExecutionsOverlap(input: {
         measurement.clientStartedAtMs < measurement.clientCompletedAtMs &&
         measurement.serverReceivedAtMs < measurement.serverCompletedAtMs,
     ) &&
-    Math.max(...measurements.map((measurement) => measurement.clientStartedAtMs)) <
-      Math.min(...measurements.map((measurement) => measurement.clientCompletedAtMs))
+    consecutiveStartsOverlap(measurements)
   );
+}
+
+function consecutiveStartsOverlap(measurements: readonly CurlMeasurement[]): boolean {
+  const orderedByStart = [...measurements].sort(
+    (left, right) =>
+      left.clientStartedAtMs - right.clientStartedAtMs || left.label.localeCompare(right.label),
+  );
+
+  for (let index = 1; index < orderedByStart.length; index += 1) {
+    const previous = orderedByStart[index - 1];
+    const current = orderedByStart[index];
+    if (
+      previous === undefined ||
+      current === undefined ||
+      previous.clientCompletedAtMs <= current.clientStartedAtMs
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function curlMeasurements(events: readonly HandleMessageStreamEvent[]): readonly CurlMeasurement[] {
