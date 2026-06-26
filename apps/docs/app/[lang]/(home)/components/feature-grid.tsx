@@ -1,78 +1,75 @@
-import { Bot, Database, FlaskConical, MessageSquare, Shield, Terminal } from "lucide-react";
-import { FeatureCard } from "./feature-card";
-import { ChannelsVisual } from "./visuals/channels";
-import { DurabilityVisual } from "./visuals/durability";
-import { EvalsVisual } from "./visuals/evals";
-import { HITLVisual } from "./visuals/hitl";
-import { SandboxVisual } from "./visuals/sandbox";
-import { SubagentsVisual } from "./visuals/subagents";
+import type { JSX, ReactNode } from "react";
+import {
+  IconLogs,
+  IconMessage,
+  IconRobot,
+  IconSandbox,
+  IconUser,
+  IconWorkflow,
+} from "@/components/geistcn-icons";
 
-const features = [
+const FEATURES: { icon: ReactNode; label: string; description: string }[] = [
   {
-    title: "Durable Execution",
+    icon: <IconWorkflow aria-hidden color="gray-1000" size={16} />,
+    label: "Durable execution",
     description:
       "Workflows survive crashes and restarts. Every step is checkpointed. Agents park when waiting, resume on the next message.",
-    icon: <Database className="h-4 w-4 text-green-600" />,
-    visual: <DurabilityVisual />,
-    href: "/docs/concepts/sessions-runs-and-streaming",
   },
   {
-    title: "Sandboxed Compute",
+    icon: <IconSandbox aria-hidden color="gray-1000" size={16} />,
+    label: "Sandboxed compute",
     description:
-      "Agents spin up isolated VMs on demand. File system access, bash execution, and code runs, all completely isolated.",
-    icon: <Terminal className="h-4 w-4 text-orange-600" />,
-    visual: <SandboxVisual />,
-    href: "/docs/sandbox",
+      "Agents run code in isolated sandboxes. File system access, bash execution, and code, all fully isolated.",
   },
   {
-    title: "Multi-Channel Delivery",
+    icon: <IconMessage aria-hidden color="gray-1000" size={16} />,
+    label: "Multi-channel delivery",
     description: "One agent codebase deploys to web chat, Slack, API, cron, CLI, and custom apps.",
-    icon: <MessageSquare className="h-4 w-4 text-cyan-600" />,
-    visual: <ChannelsVisual />,
-    href: "/docs/channels/overview",
   },
   {
-    title: "Human-in-the-Loop",
+    icon: <IconUser aria-hidden color="gray-1000" size={16} />,
+    label: "Human-in-the-loop",
     description:
       "Tools that need confirmation trigger approval gates. Sessions park until resolved, then resume seamlessly.",
-    icon: <Shield className="h-4 w-4 text-amber-600" />,
-    visual: <HITLVisual />,
-    href: "/docs/tools",
   },
   {
-    title: "Subagents",
+    icon: <IconRobot aria-hidden color="gray-1000" size={16} />,
+    label: "Subagents",
     description:
       "Delegate specialized work to child agents with their own prompts, tools, and sandbox.",
-    icon: <Bot className="h-4 w-4 text-indigo-600" />,
-    visual: <SubagentsVisual />,
-    href: "/docs/subagents",
   },
   {
-    title: "Evaluations",
+    icon: <IconLogs aria-hidden color="gray-1000" size={16} />,
+    label: "Evaluations",
     description:
       "Define test suites with scoring rubrics. Run evals on every deployment and on a schedule.",
-    icon: <FlaskConical className="h-4 w-4 text-pink-600" />,
-    visual: <EvalsVisual />,
-    href: "/docs/evals/overview",
   },
 ];
 
-export function FeatureGrid() {
+export function FeatureGrid(): JSX.Element {
   return (
     <section className="px-4 py-24 sm:px-12">
       <div className="mx-auto max-w-5xl">
-        <h2 className="text-center text-3xl font-bold tracking-tighter text-gray-1000 sm:text-4xl">
+        <h2 className="text-center text-3xl font-semibold tracking-tighter text-gray-1000 sm:text-4xl">
           Everything you need for production agents
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">
-          Enterprise governance, observability, and sandboxed compute come standard. Focus on
-          building, not infrastructure.
+          Durability, sandboxing, human-in-the-loop, and evals are built into the framework. Focus
+          on building your agent.
         </p>
-        <div className="mt-16 grid gap-6 md:grid-cols-2">
-          {features.map((feature) => (
-            <FeatureCard key={feature.title} {...feature} />
+        <ul className="mt-16 grid list-none gap-8 sm:grid-cols-2 lg:grid-cols-3">
+          {FEATURES.map((feature) => (
+            <li key={feature.label} className="flex flex-col gap-3">
+              <div className="flex items-center gap-2">
+                {feature.icon}
+                <span className="font-mono font-medium uppercase tracking-[0.1em] text-gray-1000 text-label-14">
+                  {feature.label}
+                </span>
+              </div>
+              <p className="text-gray-900 text-copy-16">{feature.description}</p>
+            </li>
           ))}
-        </div>
+        </ul>
       </div>
     </section>
   );

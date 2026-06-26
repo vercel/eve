@@ -1,136 +1,209 @@
-"use client";
+import Link from "next/link";
+import type { JSX, ReactNode } from "react";
+import {
+  IconArrowUpRight,
+  IconLinked,
+  IconMessage,
+  IconSandbox,
+  IconSparkles,
+  IconWorkflow,
+  IconWrench,
+} from "@/components/geistcn-icons";
 
-import { motion, useInView } from "motion/react";
-import { useRef } from "react";
+// Runtime primitives shown in a row (desktop) / stacked (mobile) below the
+// full-width Durable Workflow card.
+const RUNTIME_ITEMS: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+  href?: string;
+}[] = [
+  {
+    icon: <IconSparkles className="mt-0.5 shrink-0" color="gray-1000" size={18} />,
+    title: "AI SDK",
+    description: "Model calls, streaming",
+    href: "https://ai-sdk.dev/",
+  },
+  {
+    icon: <IconSandbox className="mt-0.5 shrink-0" color="gray-1000" size={18} />,
+    title: "Sandbox SDK",
+    description: "Isolated execution",
+    href: "https://vercel.com/docs/sandbox/sdk-reference",
+  },
+  {
+    icon: <IconLinked className="mt-0.5 shrink-0" color="gray-1000" size={18} />,
+    title: "Connection SDK",
+    description: "MCP/HTTP endpoints",
+    href: "/docs/connections/overview",
+  },
+  {
+    icon: <IconWrench className="mt-0.5 shrink-0" color="gray-1000" size={18} />,
+    title: "Tools & Subagents",
+    description: "Functions, child agents",
+  },
+];
 
-export function ArchitectureDiagram() {
-  const ref = useRef<HTMLDivElement>(null);
-  const isInView = useInView(ref, { once: true, amount: 0.2 });
+const CHANNELS = [
+  "Slack",
+  "Discord",
+  "Web Chat",
+  "Google Chat",
+  "Microsoft Teams",
+  "WhatsApp",
+  "API",
+  "Cron",
+  "Twilio",
+  "Linear",
+];
+
+function SectionLabel({ children }: { children: string }): JSX.Element {
+  return (
+    <span className="font-mono font-medium uppercase tracking-[0.1em] text-gray-1000 text-label-14">
+      {children}
+    </span>
+  );
+}
+
+function PrimitiveCard({
+  icon,
+  title,
+  description,
+  href,
+}: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+  href?: string;
+}): JSX.Element {
+  const body = (
+    <>
+      {icon}
+      <div className="flex flex-col gap-1">
+        <span className="font-medium text-gray-1000 text-copy-14">{title}</span>
+        <span className="text-gray-900 text-copy-14">{description}</span>
+      </div>
+    </>
+  );
+
+  if (!href) {
+    return <div className="flex items-start gap-2.5 rounded-lg p-4 material-small">{body}</div>;
+  }
 
   return (
-    <section className="px-4 py-24 sm:px-12" ref={ref}>
+    <Link
+      href={href}
+      className="group relative flex items-start gap-2.5 rounded-lg p-4 transition-colors material-small hover:bg-background-200"
+    >
+      {body}
+      <IconArrowUpRight
+        aria-hidden
+        className="absolute top-3 right-3 opacity-0 transition-opacity group-hover:opacity-100"
+        color="gray-900"
+        size={14}
+      />
+    </Link>
+  );
+}
+
+// Subtle gradient hairline border around the outer Runtime / Channel cards.
+function GradientBorder(): JSX.Element {
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute inset-0 rounded-[inherit]"
+      style={{
+        padding: "1px",
+        background: "linear-gradient(to bottom, var(--ds-gray-alpha-400), transparent)",
+        WebkitMask: "linear-gradient(white, white) content-box, linear-gradient(white, white)",
+        WebkitMaskComposite: "xor",
+        mask: "linear-gradient(white, white) content-box, linear-gradient(white, white)",
+        maskComposite: "exclude",
+      }}
+    />
+  );
+}
+
+export function ArchitectureDiagram() {
+  return (
+    <section className="px-4 py-24 sm:px-12">
       <div className="mx-auto max-w-5xl">
-        <h2 className="text-center text-3xl font-bold tracking-tighter text-gray-1000 sm:text-4xl">
+        <h2 className="text-center text-3xl font-semibold tracking-tighter text-gray-1000 sm:text-4xl">
           Three layers, cleanly separated
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">
-          The <span className="font-semibold text-gray-1000">runtime</span> owns durability and
-          state. The <span className="font-semibold text-gray-1000">harness</span> executes AI work.
-          The <span className="font-semibold text-gray-1000">channel</span> is where your agent gets
-          surfaced.
+          The runtime owns durability and state. The channel is where your agent gets surfaced.
         </p>
 
-        <motion.div
-          initial={{ opacity: 0, y: 24 }}
-          animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-          className="mt-16 flex flex-col gap-4 md:flex-row"
-        >
-          {/* Left column: Harness above Runtime */}
-          <div className="flex flex-1 flex-col gap-4">
-            {/* Harness */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={isInView ? { opacity: 1 } : {}}
-              transition={{ delay: 0.1, duration: 0.4 }}
-              className="rounded-md border-2 border-dashed border-purple-800 dark:border-purple-600 bg-background px-5 py-4"
-            >
-              <div className="flex items-center gap-2">
-                <div className="h-2.5 w-2.5 rounded-full bg-purple-700 dark:bg-purple-500" />
-                <div className="text-sm font-bold uppercase tracking-widest text-purple-800 dark:text-purple-500">
-                  Harness
-                </div>
-              </div>
-              <div className="mt-1 text-sm text-gray-900">
-                Executes one unit of AI work per workflow step
-              </div>
-            </motion.div>
-
-            {/* Runtime (contains workflow + primitives) */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={isInView ? { opacity: 1 } : {}}
-              transition={{ delay: 0.2, duration: 0.4 }}
-              className="flex flex-1 flex-col rounded-md border-2 border-dashed border-green-800 dark:border-green-600 bg-background p-5"
-            >
-              <div className="mb-1 flex items-center gap-2">
-                <div className="h-2.5 w-2.5 rounded-full bg-green-700 dark:bg-green-500" />
-                <div className="text-sm font-bold uppercase tracking-widest text-green-800 dark:text-green-500">
-                  Runtime
-                </div>
-              </div>
-              <div className="mb-5 text-sm text-gray-900">
+        <div className="mt-16 flex flex-col gap-4 lg:flex-row">
+          {/* Runtime */}
+          <div className="relative flex flex-1 flex-col gap-4 rounded-xl p-5">
+            <GradientBorder />
+            <div className="flex flex-col gap-1">
+              <SectionLabel>Runtime</SectionLabel>
+              <span className="text-gray-900 text-copy-14">
                 Durable execution, state persistence, event streaming
-              </div>
+              </span>
+            </div>
 
-              {/* Durable Workflow */}
-              <div className="mb-4 flex items-center gap-3 rounded-md border bg-gray-100 px-4 py-3">
-                <span className="text-xl text-green-700 dark:text-green-500">&#x21bb;</span>
-                <div>
-                  <div className="text-sm font-semibold text-gray-1000">Durable Workflow</div>
-                  <div className="text-sm text-gray-900">
-                    Checkpointed steps, park between messages, resume on delivery
-                  </div>
-                </div>
-              </div>
+            <PrimitiveCard
+              icon={<IconWorkflow className="mt-0.5 shrink-0" color="gray-1000" size={18} />}
+              title="Durable Workflow"
+              description="Checkpointed steps, park between messages, resume on delivery"
+              href="https://workflow-sdk.dev/worlds"
+            />
 
-              {/* Primitives (inside runtime) */}
-              <div className="grid flex-1 grid-cols-2 gap-3 md:grid-cols-4">
-                <div className="rounded-md border bg-gray-100 px-4 py-3">
-                  <div className="text-sm font-semibold text-blue-800 dark:text-blue-500">
-                    AI SDK
-                  </div>
-                  <div className="text-sm text-gray-900">Model calls, streaming</div>
-                </div>
-                <div className="rounded-md border bg-gray-100 px-4 py-3">
-                  <div className="text-sm font-semibold text-amber-800 dark:text-amber-500">
-                    Sandbox SDK
-                  </div>
-                  <div className="text-sm text-gray-900">Isolated execution</div>
-                </div>
-                <div className="rounded-md border bg-gray-100 px-4 py-3">
-                  <div className="text-sm font-semibold text-pink-800 dark:text-pink-600">
-                    Connection SDK
-                  </div>
-                  <div className="text-sm text-gray-900">MCP/HTTP endpoints</div>
-                </div>
-                <div className="rounded-md border bg-gray-100 px-4 py-3">
-                  <div className="text-sm font-semibold text-gray-1000">Tools & Subagents</div>
-                  <div className="text-sm text-gray-900">Functions, child agents</div>
-                </div>
-              </div>
-            </motion.div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {RUNTIME_ITEMS.map((item) => (
+                <PrimitiveCard
+                  key={item.title}
+                  icon={item.icon}
+                  title={item.title}
+                  description={item.description}
+                  href={item.href}
+                />
+              ))}
+            </div>
           </div>
 
-          {/* Channel (right side, stretches full height) */}
-          <motion.div
-            initial={{ opacity: 0, x: 16 }}
-            animate={isInView ? { opacity: 1, x: 0 } : {}}
-            transition={{ delay: 0.5, duration: 0.5 }}
-            className="flex w-full flex-col rounded-md border-2 border-dashed border-cyan-800 dark:border-cyan-600 bg-background p-5 md:w-[180px]"
-          >
-            <div className="mb-1 flex items-center gap-2">
-              <div className="h-2.5 w-2.5 rounded-full bg-cyan-700 dark:bg-cyan-500" />
-              <div className="text-sm font-bold uppercase tracking-widest text-cyan-800 dark:text-cyan-500">
-                Channel
-              </div>
+          {/* Channel */}
+          <div className="relative flex flex-col gap-4 rounded-xl p-5 lg:w-[200px] lg:shrink-0">
+            <GradientBorder />
+            <div className="flex flex-col gap-1">
+              <SectionLabel>Channel</SectionLabel>
+              <span className="text-gray-900 text-copy-14">Where your agent gets surfaced</span>
             </div>
-            <div className="mb-5 text-sm text-gray-900">Where your agent gets surfaced</div>
-            <div className="space-y-2">
-              {["Slack", "Web Chat", "API", "Cron"].map((ch) => (
-                <div
-                  key={ch}
-                  className="rounded-md border bg-gray-100 px-4 py-2 text-sm text-gray-1000"
-                >
-                  {ch}
+
+            {/* lg:h-0 + lg:grow lets the card fill the runtime-driven column
+                height and clip overflowing channels instead of dictating it. */}
+            <Link
+              href="https://chat-sdk.dev/"
+              className="group relative flex items-start gap-2.5 overflow-hidden rounded-lg p-4 transition-colors material-small hover:bg-background-200 lg:h-0 lg:min-h-0 lg:grow"
+            >
+              <IconMessage className="mt-0.5 shrink-0" color="gray-1000" size={18} />
+              <div className="flex flex-col gap-2">
+                <span className="font-medium text-gray-1000 text-copy-14">Chat SDK</span>
+                <div className="flex flex-col gap-0.5">
+                  {CHANNELS.map((channel) => (
+                    <span key={channel} className="text-gray-1000 text-copy-14">
+                      {channel}
+                    </span>
+                  ))}
                 </div>
-              ))}
-              <div className="rounded-md border border-dashed px-4 py-2 text-sm text-gray-500">
-                other channels
               </div>
-            </div>
-          </motion.div>
-        </motion.div>
+              <IconArrowUpRight
+                aria-hidden
+                className="absolute top-3 right-3 z-10 opacity-0 transition-opacity group-hover:opacity-100"
+                color="gray-900"
+                size={14}
+              />
+              {/* Fade the clipped channels out toward the bottom of the card. */}
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-x-0 bottom-0 hidden h-20 bg-linear-to-t from-background-100 to-transparent lg:block"
+              />
+            </Link>
+          </div>
+        </div>
       </div>
     </section>
   );

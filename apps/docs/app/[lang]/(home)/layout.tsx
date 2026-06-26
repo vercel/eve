@@ -7,7 +7,7 @@ const Layout = async ({ children, params }: LayoutProps<"/[lang]">) => {
 
   return (
     <GeistdocsHomeLayout config={config} tree={source.pageTree[lang]}>
-      <div className="pt-0 pb-32">{children}</div>
+      <div className="bg-background-200 pt-0 pb-32">{children}</div>
     </GeistdocsHomeLayout>
   );
 };
