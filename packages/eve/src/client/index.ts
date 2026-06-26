@@ -64,6 +64,9 @@ export type {
 } from "#client/reducer.js";
 
 export type {
+  EveAuthorizationChallenge,
+  EveAuthorizationOutcome,
+  EveAuthorizationPart,
   EveMessageData,
   EveDynamicToolPart,
   EveMessageInputRequest,
@@ -82,6 +85,7 @@ export type {
   ActionResultStreamEvent,
   ActionsRequestedStreamEvent,
   AssistantStepFinishReason,
+  AuthorizationOutcome,
   CompactionCompletedStreamEvent,
   CompactionRequestedStreamEvent,
   AuthorizationCompletedStreamEvent,
