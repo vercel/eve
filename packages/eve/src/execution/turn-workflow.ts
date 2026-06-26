@@ -9,7 +9,12 @@ import {
   type TurnStepInput,
   type TurnWorkflowInput,
 } from "#execution/durable-session-migrations/turn-workflow.js";
-import { claimHookOwnership, closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
+import {
+  claimHookOwnership,
+  closeHookIterator,
+  disposeHook,
+  isHookConflictError,
+} from "#execution/hook-ownership.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { TurnExecutionCursor } from "#execution/turn-execution-cursor.js";
@@ -38,7 +43,15 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
 
 async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
   const inbox = createHook<TurnInboxPayload>({ token: `${input.completionToken}:inbox` });
+  // Hook promises and iterators share one durable cursor. Create the iterator before
+  // claiming so conflict replay is consumed by getConflict(), not a later iterator read.
   const iterator = inbox[Symbol.asyncIterator]();
+  const cursor = new TurnExecutionCursor({
+    controlToken: input.completionToken,
+    parentWritable: input.stepInput.parentWritable,
+    serializedContext: input.stepInput.serializedContext,
+    sessionState: input.stepInput.sessionState,
+  });
   // Delivery request ids stay unique across every wait in this turn. A forwarded
   // delivery left unconsumed when one wait resolves would otherwise reuse a later
   // wait's id and be mis-accepted as that wait's response.
@@ -46,16 +59,17 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
   const nextDeliveryRequestId = (): string =>
     `${inbox.token}:delivery:${String(deliveryRequestSeq++)}`;
   const bufferedDeliveries: DeliverHookPayload[] = [];
-  const cursor = new TurnExecutionCursor({
-    controlToken: input.completionToken,
-    parentWritable: input.stepInput.parentWritable,
-    serializedContext: input.stepInput.serializedContext,
-    sessionState: input.stepInput.sessionState,
-  });
   let nextStepInput = input.stepInput.input;
+  let ownsInbox = false;
 
   try {
-    await claimHookOwnership(inbox);
+    try {
+      await claimHookOwnership(inbox);
+      ownsInbox = true;
+    } catch (error) {
+      if (isHookConflictError(error)) return;
+      throw error;
+    }
 
     while (true) {
       const result = await turnStep(cursor.createStepInput(nextStepInput));
@@ -132,7 +146,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
     throw error;
   } finally {
     await closeHookIterator(iterator);
-    await disposeHook(inbox);
+    if (ownsInbox) await disposeHook(inbox);
   }
 }
 

@@ -248,6 +248,70 @@ describe("turnWorkflow", () => {
     });
   });
 
+  it("deduplicates concurrent turn workflows through inbox ownership", async () => {
+    const sessionState = createSessionState();
+    const ownerInbox = createInboxMock([]);
+    const duplicateInbox = createInboxMock([], {
+      conflict: { runId: "wrun_owner" },
+    });
+    createHookMock.mockReturnValueOnce(ownerInbox.hook).mockReturnValueOnce(duplicateInbox.hook);
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "done",
+      output: "ok",
+      serializedContext: { state: "done" },
+      sessionState,
+    });
+
+    const { input } = createInput({
+      driverCapabilities: { turnInbox: true },
+      sessionState,
+    });
+    await Promise.all([turnWorkflow(input), turnWorkflow(input)]);
+
+    expect(turnStep).toHaveBeenCalledOnce();
+    expect(
+      resumeHookMock.mock.calls.filter((call) => call[1]?.kind === "turn-result"),
+    ).toHaveLength(1);
+    expect(resumeHookMock.mock.calls.filter((call) => call[1]?.kind === "turn-error")).toEqual([]);
+    expect(ownerInbox.dispose).toHaveBeenCalledOnce();
+    expect(duplicateInbox.dispose).toHaveBeenCalledOnce();
+    expect(ownerInbox.createIterator).toHaveBeenCalledOnce();
+    expect(duplicateInbox.createIterator).toHaveBeenCalledOnce();
+  });
+
+  it("deduplicates a cross-realm inbox conflict rejection", async () => {
+    const inbox = installInbox([], {
+      claimError: {
+        conflictingRunId: "wrun_owner",
+        name: "HookConflictError",
+        token: "turn-token:inbox",
+      },
+    });
+    const { input } = createInput({ driverCapabilities: { turnInbox: true } });
+
+    await turnWorkflow(input);
+
+    expect(turnStep).not.toHaveBeenCalled();
+    expect(resumeHookMock).not.toHaveBeenCalled();
+    expect(inbox.dispose).toHaveBeenCalledOnce();
+    expect(inbox.createIterator).toHaveBeenCalledOnce();
+  });
+
+  it("reports non-conflict inbox claim failures to the driver", async () => {
+    const failure = new Error("hook storage unavailable");
+    const inbox = installInbox([], { claimError: failure });
+    const { input } = createInput({ driverCapabilities: { turnInbox: true } });
+
+    await expect(turnWorkflow(input)).rejects.toBe(failure);
+
+    expect(turnStep).not.toHaveBeenCalled();
+    expect(resumeHookMock).toHaveBeenCalledTimes(1);
+    expect(resumeHookMock.mock.calls[0]?.[0]).toBe("turn-token");
+    expect(resumeHookMock.mock.calls[0]?.[1]).toMatchObject({ kind: "turn-error" });
+    expect(inbox.dispose).toHaveBeenCalledOnce();
+    expect(inbox.createIterator).toHaveBeenCalledOnce();
+  });
+
   it("keeps a local subagent result inside one turn workflow", async () => {
     const initialState = createSessionState({ continuationToken: "slack:C1:" });
     const pendingState = createSessionState({ continuationToken: "slack:C1:T1" });
@@ -550,22 +614,52 @@ describe("turnWorkflow", () => {
   });
 });
 
-function installInbox(values: readonly unknown[]): void {
+interface InboxMock {
+  readonly createIterator: ReturnType<typeof vi.fn>;
+  readonly dispose: ReturnType<typeof vi.fn>;
+  readonly hook: unknown;
+}
+
+function installInbox(
+  values: readonly unknown[],
+  options: {
+    readonly claimError?: unknown;
+    readonly conflict?: { readonly runId: string } | null;
+  } = {},
+): InboxMock {
+  const inbox = createInboxMock(values, options);
+  createHookMock.mockReturnValue(inbox.hook);
+  return inbox;
+}
+
+function createInboxMock(
+  values: readonly unknown[],
+  options: {
+    readonly claimError?: unknown;
+    readonly conflict?: { readonly runId: string } | null;
+  } = {},
+): InboxMock {
   const queue = [...values];
-  createHookMock.mockReturnValue({
+  const dispose = vi.fn();
+  const createIterator = vi.fn(() => ({
+    next: vi.fn(async () => {
+      const value = queue.shift();
+      return value === undefined ? { done: true, value: undefined } : { done: false, value };
+    }),
+    return: vi.fn(async () => ({ done: true, value: undefined })),
+  }));
+  const hook = {
     token: "turn-token:inbox",
-    getConflict: vi.fn(async () => null),
-    dispose: vi.fn(),
-    [Symbol.asyncIterator]() {
-      return {
-        next: vi.fn(async () => {
-          const value = queue.shift();
-          return value === undefined ? { done: true, value: undefined } : { done: false, value };
-        }),
-        return: vi.fn(async () => ({ done: true, value: undefined })),
-      };
+    getConflict: vi.fn(async () => {
+      if (options.claimError !== undefined) throw options.claimError;
+      return options.conflict ?? null;
+    }),
+    dispose,
+    [Symbol.asyncIterator](): AsyncIterator<unknown> {
+      return createIterator();
     },
-  });
+  };
+  return { createIterator, dispose, hook };
 }
 
 function createInput(

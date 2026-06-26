@@ -56,10 +56,18 @@ function normalizeHookClaimError(error: unknown, token: string): unknown {
   );
 }
 
-function isHookConflictError(
-  error: unknown,
-): error is Error & { readonly conflictingRunId?: unknown; readonly token?: unknown } {
-  return error instanceof Error && error.name === "HookConflictError";
+/** Recognizes hook conflicts across current and legacy Workflow World implementations. */
+export function isHookConflictError(error: unknown): error is {
+  readonly conflictingRunId?: unknown;
+  readonly name: "HookConflictError";
+  readonly token?: unknown;
+} {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    error.name === "HookConflictError"
+  );
 }
 
 function createHookConflictError(
