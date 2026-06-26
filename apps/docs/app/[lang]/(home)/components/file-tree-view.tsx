@@ -58,7 +58,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
                   className={cn(
                     "transition-colors",
                     visited.size > 1
-                      ? "cursor-pointer text-gray-600 hover:text-gray-1000"
+                      ? "cursor-pointer text-gray-900 hover:text-gray-1000"
                       : "cursor-not-allowed text-gray-400",
                   )}
                 >
