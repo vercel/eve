@@ -117,17 +117,26 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
 
       if (pendingActionKeys !== undefined) {
         await syncToken(result.sessionState.continuationToken);
-        const resumed = await dispatchAndWaitForRuntimeActions({
+        const dispatchResult = await dispatchTurnRuntimeActionsStep({
+          parentContinuationToken: inbox.token,
+          parentWritable: currentStepInput.parentWritable,
+          serializedContext: result.serializedContext,
+          sessionState: result.sessionState,
+          workflowInterrupt: result.action === "dispatch-workflow-runtime-actions",
+        });
+        await syncToken(dispatchResult.sessionState.continuationToken);
+
+        const resumed = await waitForRuntimeActionResults({
           bufferedDeliveries,
           completionToken: input.completionToken,
           inbox,
+          initialResults: dispatchResult.results,
           iterator,
           parentWritable: currentStepInput.parentWritable,
           pendingActionKeys,
           serializedContext: result.serializedContext,
-          sessionState: result.sessionState,
+          sessionState: dispatchResult.sessionState,
           syncToken,
-          workflowInterrupt: result.action === "dispatch-workflow-runtime-actions",
         });
         currentStepInput = {
           input: { kind: "runtime-action-result", results: resumed.results },
@@ -180,38 +189,6 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
     await closeHookIterator(iterator);
     await disposeHook(inbox);
   }
-}
-
-async function dispatchAndWaitForRuntimeActions(input: {
-  readonly bufferedDeliveries: DeliverHookPayload[];
-  readonly completionToken: string;
-  readonly inbox: Hook<TurnInboxPayload>;
-  readonly iterator: AsyncIterator<TurnInboxPayload>;
-  readonly parentWritable: WritableStream<Uint8Array>;
-  readonly pendingActionKeys: readonly string[];
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-  readonly syncToken: (nextToken: string) => Promise<void>;
-  readonly workflowInterrupt: boolean;
-}): Promise<{
-  readonly results: readonly RuntimeActionResult[];
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}> {
-  const dispatchResult = await dispatchTurnRuntimeActionsStep({
-    parentContinuationToken: input.inbox.token,
-    parentWritable: input.parentWritable,
-    serializedContext: input.serializedContext,
-    sessionState: input.sessionState,
-    workflowInterrupt: input.workflowInterrupt,
-  });
-  await input.syncToken(dispatchResult.sessionState.continuationToken);
-
-  return waitForRuntimeActionResults({
-    ...input,
-    initialResults: dispatchResult.results,
-    sessionState: dispatchResult.sessionState,
-  });
 }
 
 async function waitForRuntimeActionResults(input: {
