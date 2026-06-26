@@ -77,10 +77,7 @@ export async function NextjsInterop() {
           <GradientBorder />
           <div className="grid gap-4 md:grid-cols-2">
             {FILES.map((file, i) => (
-              <div
-                key={file.fileName}
-                className="overflow-hidden rounded-lg border bg-background-100"
-              >
+              <div key={file.fileName} className="overflow-hidden rounded-lg material-small">
                 <div className="flex h-12 items-center gap-2 border-b px-4">
                   <IconAcronymTs aria-hidden className="shrink-0" color="gray-900" size={16} />
                   <span className="text-sm text-gray-1000">{file.fileName}</span>
