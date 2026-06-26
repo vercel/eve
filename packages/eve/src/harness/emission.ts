@@ -412,6 +412,10 @@ export async function emitStreamContent(
       return;
     }
     providerToolCallIdsSeen.add(toolCall.toolCallId);
+    if (emittedActionCallIds.has(toolCall.toolCallId)) {
+      return;
+    }
+    emittedActionCallIds.add(toolCall.toolCallId);
 
     if (currentMessage.trim().length > 0) {
       await flushCurrentMessage();

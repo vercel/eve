@@ -3959,7 +3959,7 @@ describe("createToolLoopHarness", () => {
     );
   });
 
-  it("emits provider-executed web_search through normal tool action events", async () => {
+  it("does not re-emit a provider web_search when its stream call lacks the provider marker", async () => {
     const toolCallId = "srvtoolu_01HhTt9QAEancMSj7jE8CXN7";
     const webSearchOutput = [
       {
@@ -3993,7 +3993,6 @@ describe("createToolLoopHarness", () => {
       fullStreamParts: [
         {
           input: { query: "eve release note current" },
-          providerExecuted: true,
           toolCallId,
           toolName: "web_search",
           type: "tool-call",
@@ -4035,7 +4034,6 @@ describe("createToolLoopHarness", () => {
       toolCalls: [
         {
           input: { query: "eve release note current" },
-          providerExecuted: true,
           toolCallId,
           toolName: "web_search",
           type: "tool-call",

@@ -284,8 +284,10 @@ describe("emitStreamContent action requests", () => {
       expect(events.some((event) => event.type === "action.result")).toBe(false);
     } finally {
       releaseResults();
-      await run;
     }
+
+    const streamResult = await run;
+    expect([...streamResult.emittedActionCallIds]).toEqual(searches.map((call) => call.toolCallId));
   });
 
   it("completes pre-tool text before emitting a streamed action request", async () => {
