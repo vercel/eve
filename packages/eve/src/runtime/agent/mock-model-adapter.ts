@@ -35,6 +35,7 @@ import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 
 const MOCK_RUNTIME_MODEL_PROVIDER = "eve-runtime-mock";
 const LOAD_SKILL_TOOL_CALL_ID = "call_load_skill";
+const MOCK_AUTHORED_MODELS_ENV = "EVE_MOCK_AUTHORED_MODELS";
 type BootstrapGenerateOptions = Parameters<MockLanguageModelV3["doGenerate"]>[0];
 
 interface BootstrapToolResult {
@@ -57,11 +58,12 @@ const bootstrapWeatherPayloadSchema = z
 /**
  * Returns true when authored runtime models should resolve through the
  * dedicated deterministic mock adapter. The adapter is internal to the test
- * tiers: it activates only under `NODE_ENV=test`, keeping the unit,
- * integration, and scenario suites deterministic and credential-free.
+ * tiers: unit, integration, and scenario tests activate it through
+ * `NODE_ENV=test`; spawned smoke servers use the explicit opt-in environment
+ * variable so their package-manager build keeps its normal environment.
  */
 export function shouldMockAuthoredRuntimeModels(): boolean {
-  return process.env.NODE_ENV === "test";
+  return process.env.NODE_ENV === "test" || process.env[MOCK_AUTHORED_MODELS_ENV] === "1";
 }
 
 /**
