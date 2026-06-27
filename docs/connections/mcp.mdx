@@ -141,8 +141,6 @@ export default defineMcpClientConnection({
 
 `once()` asks the first time in a session, `always()` asks on every tool call, and `never()` allows calls without approval. Authorization and approval work together: eve records approval before an OAuth park, then resumes without asking again for the same approved call.
 
-## Troubleshooting
-
 The `once()`, `always()`, and `never()` helpers from `eve/tools/approval` gate every tool the connection serves the same way. See [Connections](/docs/connections#per-connection-approval) for those, and [Human-in-the-loop](/docs/human-in-the-loop) for the full pause-and-resume contract.
 
 ### Gate specific tools by name or input
@@ -187,6 +185,9 @@ Two details are specific to connection tools:
 Return `"user-approval"` (or `true`) to pause for a person and `"not-applicable"` (or `false`) to run without a prompt; return `"approved"` or `"denied"` to decide automatically without involving anyone.
 
 [Human-in-the-loop](/docs/human-in-the-loop#approvals) covers the full set of statuses, how `approvedTools` and `session.auth` factor in, and how a gated call pauses and resumes durably.
+
+## Troubleshooting
+
 | Symptom                                    | Check                                                                                                                                     |
 | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `principal_required`                       | A user-scoped `connect("...")` ran without an authenticated user. Return `principalType: "user"` from route auth, or use app-scoped auth. |
