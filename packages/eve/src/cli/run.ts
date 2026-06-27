@@ -2,6 +2,7 @@ import { Command, CommanderError, InvalidArgumentError } from "#compiled/command
 import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { encodeBasicCredentials } from "#internal/http/basic-auth.js";
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
 import { eveCliBanner } from "#cli/banner.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
@@ -31,10 +32,13 @@ interface CliLogger {
   log(message: string): void;
 }
 
+type DevelopmentRequestHeaders = Readonly<Record<string, string>>;
+
 interface DevelopmentCliOptions {
   assistantResponseStats?: AssistantResponseStatsMode;
   connectionAuth?: TerminalPartDisplayMode;
   contextSize?: number;
+  header?: DevelopmentRequestHeaders;
   host?: string;
   input?: string;
   logs?: LogDisplayMode;
@@ -250,39 +254,101 @@ function hasInteractiveTerminal(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
-function rewriteDevelopmentUrlShorthand(argv: readonly string[]): string[] {
-  const shorthandUrl = argv[1];
-
-  if (
-    argv[0] !== "dev" ||
-    argv.length !== 2 ||
-    shorthandUrl === undefined ||
-    shorthandUrl.startsWith("-")
-  ) {
-    return [...argv];
+function parseDevelopmentHeaderOption(
+  value: string,
+  previous: DevelopmentRequestHeaders = {},
+): DevelopmentRequestHeaders {
+  const separatorIndex = value.indexOf(":");
+  if (separatorIndex < 1) {
+    throw new InvalidArgumentError(`Expected header in "Name: value" format, received "${value}".`);
   }
 
-  return ["dev", "--url", shorthandUrl];
+  const name = value.slice(0, separatorIndex).trim();
+  const headerValue = value.slice(separatorIndex + 1).trim();
+  try {
+    new Headers([[name, headerValue]]);
+  } catch {
+    throw new InvalidArgumentError(`Expected a valid HTTP header, received "${value}".`);
+  }
+  return mergeDevelopmentHeaders(previous, { [name]: headerValue }) ?? {};
 }
 
-function resolveRemoteDevelopmentServerUrl(options: DevelopmentCliOptions): string | undefined {
-  if (!options.url) {
+function resolveDevelopmentUrlTarget(
+  options: DevelopmentCliOptions,
+  positionalUrl: string | undefined,
+): { readonly headers?: DevelopmentRequestHeaders; readonly serverUrl: string } | undefined {
+  if (options.url !== undefined && positionalUrl !== undefined) {
+    throw new InvalidArgumentError("Pass either --url or a bare URL, not both.");
+  }
+
+  const url = options.url ?? positionalUrl;
+  if (url === undefined) {
+    if (options.header !== undefined) {
+      throw new InvalidArgumentError(
+        "The --header option can only be used with --url or a bare URL.",
+      );
+    }
     return undefined;
   }
 
   if (options.host !== undefined) {
     throw new InvalidArgumentError("The --host option cannot be used with --url.");
   }
-
   if (options.port !== undefined) {
     throw new InvalidArgumentError("The --port option cannot be used with --url.");
   }
-
   if (options.ui === false) {
     throw new InvalidArgumentError("The --no-ui option cannot be used with --url.");
   }
 
-  return options.url;
+  const parsedUrl = URL.parse(url);
+  if (parsedUrl === null) {
+    throw new InvalidArgumentError(`Expected an absolute http(s) URL, received "${url}".`);
+  }
+
+  const headers = mergeDevelopmentHeaders(extractDevelopmentUrlHeaders(parsedUrl), options.header);
+  const serverUrl = parsedUrl.toString();
+  return headers === undefined ? { serverUrl } : { headers, serverUrl };
+}
+
+function mergeDevelopmentHeaders(
+  base: DevelopmentRequestHeaders | undefined,
+  override: DevelopmentRequestHeaders | undefined,
+): DevelopmentRequestHeaders | undefined {
+  if (base === undefined) return override;
+  if (override === undefined) return base;
+
+  const headers: Record<string, string> = {};
+  const overrideNames = new Set(Object.keys(override).map((name) => name.toLowerCase()));
+  for (const [name, value] of Object.entries(base)) {
+    if (!overrideNames.has(name.toLowerCase())) {
+      headers[name] = value;
+    }
+  }
+  for (const [name, value] of Object.entries(override)) {
+    headers[name] = value;
+  }
+  return headers;
+}
+
+function extractDevelopmentUrlHeaders(url: URL): DevelopmentRequestHeaders | undefined {
+  if (url.username === "" && url.password === "") return undefined;
+
+  const username = decodeUrlUserInfo(url.username, "username");
+  const password = decodeUrlUserInfo(url.password, "password");
+  url.username = "";
+  url.password = "";
+  return {
+    Authorization: `Basic ${encodeBasicCredentials(username, password)}`,
+  };
+}
+
+function decodeUrlUserInfo(value: string, label: "username" | "password"): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new InvalidArgumentError(`Expected a valid URL-encoded ${label} in URL userinfo.`);
+  }
 }
 
 function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Command {
@@ -408,9 +474,15 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
   program
     .command("dev")
     .description("Start the eve development server or connect to an existing URL.")
+    .argument("[url]", "Connect to an existing server URL", parseDevelopmentServerUrl)
     .option("--host <host>", "Host interface to bind")
     .option("--port <port>", "Port to listen on (defaults to $PORT, then 2000)", parsePortOption)
     .option("-u, --url <url>", "Connect to an existing server URL", parseDevelopmentServerUrl)
+    .option(
+      "-H, --header <header>",
+      'Request header for a URL target, in "Name: value" form (repeatable)',
+      parseDevelopmentHeaderOption,
+    )
     .option("--no-ui", "Start the server without an interactive UI")
     .option("--name <name>", "Title shown in the terminal UI (defaults to the app folder name)")
     .option("--input <text>", "Pre-fill the prompt input, or start onboarding with /model")
@@ -451,10 +523,11 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     )
     .addHelpText(
       "after",
-      "\nYou can also pass a bare URL as the only argument, for example: eve dev https://example.com\n",
+      "\nYou can also pass a bare URL, for example: eve dev https://example.com\n",
     )
-    .action(async (options: DevelopmentCliOptions) => {
-      const remoteServerUrl = resolveRemoteDevelopmentServerUrl(options);
+    .action(async (positionalUrl: string | undefined, options: DevelopmentCliOptions) => {
+      const remoteTarget = resolveDevelopmentUrlTarget(options, positionalUrl);
+      const remoteServerUrl = remoteTarget?.serverUrl;
       const interactive = hasInteractiveTerminal();
       const mode = resolveDevUiMode({ options, interactive });
       if (options.input !== undefined && mode === "headless") {
@@ -489,13 +562,17 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
             : { kind: "remote", serverUrl: input.serverUrl, workspaceRoot: appRoot };
         const title = resolveTuiTitle({ name: options.name, target });
         if (title !== undefined) display.name = title;
-        const tuiInput: RunDevelopmentTuiInput = {
+        const tuiInput = {
           target,
           initialInput: options.input,
           onBootProgress: report,
           ...display,
-        };
-        await runDevelopmentTui(tuiInput);
+        } satisfies RunDevelopmentTuiInput;
+        if (remoteTarget?.headers !== undefined) {
+          await runDevelopmentTui({ ...tuiInput, headers: remoteTarget.headers });
+        } else {
+          await runDevelopmentTui(tuiInput);
+        }
       };
 
       if (remoteServerUrl) {
@@ -632,7 +709,7 @@ export async function runCli(
   runtime: CliRuntimeOverrides = {},
 ): Promise<void> {
   const program = createCliProgram(logger, runtime);
-  const input = argv.length === 0 ? ["dev"] : rewriteDevelopmentUrlShorthand(argv);
+  const input = argv.length === 0 ? ["dev"] : argv;
 
   try {
     await program.parseAsync(input, {

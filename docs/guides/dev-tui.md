@@ -128,7 +128,13 @@ Pass a URL and the TUI talks to a running deployment instead of starting a local
 eve dev https://<your-app>
 ```
 
-The bare URL is shorthand for `--url`; it cannot be combined with `--host`, `--port`, or `--no-ui`.
+The bare URL is shorthand for `--url`; it cannot be combined with `--host`, `--port`, or `--no-ui`. For HTTP Basic auth, put credentials in the URL; eve sends them as a Basic `Authorization` header and strips them from the server URL before connecting:
+
+```bash
+eve dev https://user:pass@<your-app>
+```
+
+For bearer tokens or custom schemes, repeat `-H, --header` to attach request headers.
 
 At startup the TUI asks Vercel to resolve the remote origin under the active scope. A resolved response is the authority for a project-scoped OIDC token—refreshing an expired development token when refresh credentials exist—or an automation-bypass secret. An unresolved host is probed anonymously. The TUI then requests `/eve/v1/info`, with a ten-second timeout. A successful response marks the remote ready. An eve OIDC challenge, Vercel Deployment Protection challenge, or `TRUSTED_SOURCES_ENVIRONMENT_MISMATCH` opens `/vc:login` automatically; ordinary network failures and server errors remain remote-availability errors and do not start an authentication flow. Esc or Ctrl-C cancels the authentication flow.
 
