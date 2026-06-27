@@ -3,7 +3,6 @@ import { CodeBlock } from "@vercel/geistdocs/components/code-block";
 import { geistShikiTheme } from "@vercel/geistdocs/shiki-theme";
 import { highlight } from "fumadocs-core/highlight";
 import type { ComponentProps } from "react";
-import { IconAcronymTs } from "@/components/geistcn-icons";
 import { cn } from "@/lib/utils";
 import { GradientBorder } from "./gradient-border";
 
@@ -79,7 +78,6 @@ export async function NextjsInterop() {
             {FILES.map((file, i) => (
               <div key={file.fileName} className="overflow-hidden rounded-lg material-small">
                 <div className="flex h-12 items-center gap-2 border-b px-4">
-                  <IconAcronymTs aria-hidden className="shrink-0" color="gray-900" size={16} />
                   <span className="text-sm text-gray-1000">{file.fileName}</span>
                 </div>
                 <div className="overflow-x-auto text-[13px] [&>div]:mb-0">{rendered[i]}</div>
@@ -88,7 +86,7 @@ export async function NextjsInterop() {
           </div>
         </div>
 
-        <div className="mt-8 flex flex-wrap items-center justify-center gap-2">
+        <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
           {BENEFITS.map((benefit) => (
             <Badge key={benefit} variant="secondary">
               {benefit}
