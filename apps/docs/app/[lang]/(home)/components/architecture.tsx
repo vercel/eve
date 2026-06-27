@@ -111,12 +111,13 @@ export function ArchitectureDiagram() {
     <section className="px-4 py-24 sm:px-12">
       <div className="mx-auto max-w-5xl">
         <h2 className="text-center text-3xl font-semibold tracking-tighter text-gray-1000 sm:text-4xl">
-          Three layers, cleanly separated
+          Built on open-source SDKs, yours to self-host
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">
-          The runtime owns durability and state. The channel is where your agent gets surfaced.
+          Each capability is its own open-source SDK — workflows, AI, sandbox, connections, and
+          channels. Swap any backend and self-host the whole runtime, with zero
+          managed-infrastructure dependencies.
         </p>
-
         <div className="mt-16 flex flex-col gap-4 lg:flex-row">
           {/* Runtime */}
           <div className="relative flex flex-1 flex-col gap-4 rounded-xl p-5">
@@ -163,9 +164,11 @@ export function ArchitectureDiagram() {
               className="group relative flex items-start gap-2.5 overflow-hidden rounded-lg p-4 transition-colors material-small hover:bg-background-200 lg:h-0 lg:min-h-0 lg:grow"
             >
               <IconMessage className="mt-0.5 shrink-0" color="gray-1000" size={18} />
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-1 flex-col gap-2">
                 <span className="font-medium text-gray-1000 text-copy-14">Chat SDK</span>
-                <div className="flex flex-col gap-0.5">
+                {/* Two columns while the cards are stacked (one-column layout);
+                    a single column once they sit side by side at lg. */}
+                <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 lg:grid-cols-1">
                   {CHANNELS.map((channel) => (
                     <span key={channel} className="text-gray-1000 text-copy-14">
                       {channel}

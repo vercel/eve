@@ -97,7 +97,7 @@ export default defineTool({
     lang: "typescript",
     Icon: IconSandbox,
     description:
-      "Every agent includes an isolated sandbox. Add sandbox/sandbox.ts to choose a backend or customize its setup.",
+      "Every agent includes an isolated sandbox. Add sandbox/sandbox.ts to swap in any backend or customize its setup.",
     code: `import { defineSandbox } from
   "eve/sandbox";
 
@@ -210,8 +210,8 @@ export async function FileTree() {
           An agent is a directory
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">
-          Define instructions and skills in markdown, tools in TypeScript, and deploy. The framework
-          compiles the directory, wires up durable workflows, and connects channels.
+          Define instructions and skills in markdown, tools in TypeScript, and deploy anywhere. The
+          framework compiles the directory, wires up durable workflows, and connects channels.
         </p>
       </div>
 
