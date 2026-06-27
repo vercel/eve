@@ -427,6 +427,20 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       stepInput: stepInput.input,
     });
     if (pending.outcome === "unresolved") {
+      if (emit && pending.deferredMessage === true && hasStepInput(input)) {
+        emissionState = await emitTurnPreamble(
+          emit,
+          input ?? {},
+          emissionState,
+          config.runtimeIdentity,
+        );
+        emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
+        return {
+          next: null,
+          session: setHarnessEmissionState(pending.session, emissionState),
+        };
+      }
+
       return { next: null, session: pending.session };
     }
 
@@ -476,7 +490,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       }
     }
 
-    if (stepInput.input?.message !== undefined && !pending.deferredMessage) {
+    if (
+      stepInput.input?.message !== undefined &&
+      !pending.deferredMessage &&
+      !pending.consumedMessage
+    ) {
       // Staging writes FilePart bytes into the sandbox and replaces
       // each part's `data` with a compact `eve-sandbox:` URL. The
       // `messages` array — and everything that flows into
