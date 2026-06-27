@@ -23,6 +23,16 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
   const selected = items[selectedIndex];
 
   function select(index: number) {
+    // Clicking the active, already-added file deselects it again. The default
+    // file (instructions.md) is always present and can't be removed.
+    if (index !== 0 && index === selectedIndex && visited.has(index)) {
+      const next = new Set(visited);
+      next.delete(index);
+      setVisited(next);
+      const remaining = [...next];
+      setSelectedIndex(remaining.length > 0 ? Math.max(...remaining) : 0);
+      return;
+    }
     setSelectedIndex(index);
     setVisited((prev) => new Set(prev).add(index));
   }
@@ -108,15 +118,13 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
             <div className="flex min-w-0 flex-col">
               <div className="flex h-12 items-center gap-2 border-b px-4">
                 {/* {selected.icon} */}
-                <span className="text-sm text-gray-1000">{selected.fileName}</span>
+                <span className="text-sm font-medium text-gray-1000">{selected.fileName}</span>
                 {selectedIndex > 0 ? (
                   <span className="ml-auto font-mono uppercase tracking-[0.1em] text-gray-900 text-label-12-mono">
                     Optional
                   </span>
                 ) : null}
               </div>
-              {/* Persists across files: only its height transitions as the
-                  description length changes. */}
               <p className="overflow-hidden border-b px-4 py-3 text-gray-900 text-copy-14 transition-[height] duration-300 [interpolate-size:allow-keywords]">
                 {selected.description}
               </p>
