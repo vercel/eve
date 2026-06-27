@@ -58,24 +58,28 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
             <div className="border-b md:border-r md:border-b-0">
               <div className="flex h-12 items-center gap-2 border-b px-4">
                 <span className="text-sm font-medium text-gray-1000">agent/</span>
-                <span className="ml-auto text-gray-900 text-label-13">
-                  {visited.size} {visited.size === 1 ? "file" : "files"}
-                </span>
-                <button
-                  type="button"
-                  onClick={reset}
-                  disabled={visited.size <= 1}
-                  aria-label="Reset selection"
-                  title="Reset"
-                  className={cn(
-                    "transition-colors",
-                    visited.size > 1
-                      ? "cursor-pointer text-gray-900 hover:text-gray-1000"
-                      : "cursor-not-allowed text-gray-600",
-                  )}
-                >
-                  <IconRefreshCounterClockwise aria-hidden size={14} />
-                </button>
+                {/* Counter slides left as the reset button reveals once more
+                    than the default file is selected. */}
+                <div className="ml-auto flex items-center">
+                  <span className="whitespace-nowrap text-gray-900 text-label-13">
+                    {visited.size} {visited.size === 1 ? "file" : "files"} selected
+                  </span>
+                  <button
+                    type="button"
+                    onClick={reset}
+                    disabled={visited.size <= 1}
+                    aria-label="Reset selection"
+                    title="Reset"
+                    className={cn(
+                      "flex shrink-0 cursor-pointer items-center overflow-hidden text-gray-900 transition-all duration-300 ease-out hover:text-gray-1000",
+                      visited.size > 1
+                        ? "ml-2 w-4 opacity-100"
+                        : "pointer-events-none ml-0 w-0 opacity-0",
+                    )}
+                  >
+                    <IconRefreshCounterClockwise aria-hidden size={16} />
+                  </button>
+                </div>
               </div>
               <div className="space-y-0.5 p-2">
                 {items.map((item, i) => {
@@ -99,13 +103,18 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
                         {item.name}
                       </span>
                       {i > 0 && added ? (
-                        <IconCheck aria-hidden className="ml-auto" color="gray-900" size={16} />
+                        <IconCheck
+                          aria-hidden
+                          className="ml-auto -mr-1"
+                          color="gray-1000"
+                          size={14}
+                        />
                       ) : i > 0 ? (
                         <IconPlusCircle
                           aria-hidden
-                          className="ml-auto opacity-0 transition-opacity group-hover:opacity-100"
-                          color="gray-900"
-                          size={16}
+                          className="ml-auto opacity-0 transition-opacity group-hover:opacity-100 –mr-1"
+                          color="gray-1000"
+                          size={14}
                         />
                       ) : null}
                     </button>
