@@ -11,24 +11,24 @@ import {
 const FEATURES: { icon: ReactNode; label: string; description: string }[] = [
   {
     icon: <IconWorkflow aria-hidden color="gray-1000" size={16} />,
-    label: "Durable execution",
+    label: "Durable Execution",
     description:
       "Workflows survive crashes and restarts. Every step is checkpointed. Agents park when waiting, resume on the next message.",
   },
   {
     icon: <IconSandbox aria-hidden color="gray-1000" size={16} />,
-    label: "Sandboxed compute",
+    label: "Sandboxed Compute",
     description:
       "Agents run code in isolated sandboxes. File system access, bash execution, and code, all fully isolated.",
   },
   {
     icon: <IconMessage aria-hidden color="gray-1000" size={16} />,
-    label: "Multi-channel delivery",
+    label: "Multi-Channel Delivery",
     description: "One agent codebase deploys to web chat, Slack, API, cron, CLI, and custom apps.",
   },
   {
     icon: <IconUser aria-hidden color="gray-1000" size={16} />,
-    label: "Human-in-the-loop",
+    label: "Human-in-the-Loop",
     description:
       "Tools that need confirmation trigger approval gates. Sessions park until resolved, then resume seamlessly.",
   },
@@ -62,9 +62,7 @@ export function FeatureGrid(): JSX.Element {
             <li key={feature.label} className="flex flex-col gap-3">
               <div className="flex items-center gap-2">
                 {feature.icon}
-                <span className="font-mono font-medium uppercase tracking-[0.1em] text-gray-1000 text-label-14">
-                  {feature.label}
-                </span>
+                <span className="font-medium! text-gray-1000 text-heading-16">{feature.label}</span>
               </div>
               <p className="text-gray-900 text-copy-16">{feature.description}</p>
             </li>
