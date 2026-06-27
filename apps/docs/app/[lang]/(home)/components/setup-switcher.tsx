@@ -38,19 +38,19 @@ const STACKS: Record<Mode, StackEntry[]> = {
       category: "Models",
       name: "AI Gateway",
       Logo: SiVercel,
-      href: "https://vercel.com/docs/ai-gateway",
+      href: "https://vercel.com/ai-gateway",
     },
     {
       category: "Sandbox",
       name: "Vercel Sandbox",
       Logo: SiVercel,
-      href: "https://vercel.com/docs/vercel-sandbox",
+      href: "https://vercel.com/sandbox",
     },
     {
       category: "Runtime",
       name: "Vercel Workflows",
       Logo: SiVercel,
-      href: "https://vercel.com/docs/workflows",
+      href: "https://vercel.com/workflow",
     },
     {
       category: "Deploy",
