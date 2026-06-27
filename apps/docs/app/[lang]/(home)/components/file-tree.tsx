@@ -21,6 +21,7 @@ interface Snippet {
   fileName: string;
   lang: string;
   Icon: (props: IconProps) => JSX.Element;
+  description: string;
   code: string;
 }
 
@@ -30,6 +31,8 @@ const snippets: Snippet[] = [
     fileName: "instructions.md",
     lang: "markdown",
     Icon: IconFileText,
+    description:
+      "An instructions.md file is a complete agent — describe its role in Markdown, then run eve.",
     code: `# Identity
 
 You are an expert weather assistant.
@@ -41,6 +44,8 @@ city in the world.`,
     fileName: "agent.ts",
     lang: "typescript",
     Icon: IconAcronymTs,
+    description:
+      "eve uses a default model. Add agent.ts when you want to choose a model or configure the runtime.",
     code: `import { defineAgent } from "eve";
 
 export default defineAgent({
@@ -52,6 +57,8 @@ export default defineAgent({
     fileName: "skills/research.md",
     lang: "markdown",
     Icon: IconFileText,
+    description:
+      "Skills are Markdown playbooks loaded only when relevant, so the agent gets focused guidance without carrying it in every prompt.",
     code: `---
 name: research
 description: Research unfamiliar topics
@@ -65,6 +72,8 @@ gather evidence first, then answer.`,
     fileName: "tools/get_weather.ts",
     lang: "typescript",
     Icon: IconWrench,
+    description:
+      "Drop a TypeScript file in tools/ and the model can call it — the filename becomes the tool name, no registration required.",
     code: `import { defineTool } from "eve/tools";
 import z from "zod";
 
@@ -87,6 +96,8 @@ export default defineTool({
     fileName: "sandbox/sandbox.ts",
     lang: "typescript",
     Icon: IconSandbox,
+    description:
+      "Every agent includes an isolated sandbox. Add sandbox/sandbox.ts to choose a backend or customize its setup.",
     code: `import { defineSandbox } from
   "eve/sandbox";
 
@@ -103,6 +114,7 @@ export default defineSandbox({
     fileName: "channels/slack.ts",
     lang: "typescript",
     Icon: IconMessage,
+    description: "Add channel files to use the same agent in Slack, Discord, Teams, or the web.",
     code: `import { slackChannel } from
   "eve/channels/slack";
 
@@ -115,6 +127,8 @@ export default slackChannel({
     fileName: "connections/linear.ts",
     lang: "typescript",
     Icon: IconLinked,
+    description:
+      "Connections handle auth for services like GitHub, Stripe, and Linear, so tools can call them without managing tokens.",
     code: `import { defineMcpClientConnection }
   from "eve/connections";
 
@@ -127,6 +141,8 @@ export default defineMcpClientConnection({
     fileName: "subagents/researcher/agent.ts",
     lang: "typescript",
     Icon: IconAgents,
+    description:
+      "Add subagents for specialized work — the main agent delegates tasks and combines the results.",
     code: `import { defineAgent } from
   "eve";
 
@@ -140,6 +156,8 @@ export default defineAgent({
     fileName: "schedules/daily-report.md",
     lang: "markdown",
     Icon: IconClock,
+    description:
+      "Schedules run agents automatically for jobs like daily reports and weekly digests, continuing durably without an active session.",
     code: `---
 cron: "0 8 * * *"
 ---
@@ -180,6 +198,7 @@ export async function FileTree() {
   const items = snippets.map((snippet, i) => ({
     name: snippet.name,
     fileName: snippet.fileName,
+    description: snippet.description,
     icon: <snippet.Icon aria-hidden className="shrink-0" color="gray-900" size={16} />,
     code: rendered[i],
   }));

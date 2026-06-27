@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils";
 export interface FileTreeItem {
   name: string;
   fileName: string;
+  /** Short, what-this-file-does line shown under the code panel header. */
+  description: string;
   /** File-type icon shown beside the file name in the code panel header. */
   icon: ReactNode;
   /** Pre-highlighted code, rendered on the server through the geistdocs CodeBlock. */
@@ -113,11 +115,14 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
                   </span>
                 ) : null}
               </div>
-              {/* Re-keyed per file so the code subtly flies in on selection. */}
+              {/* Re-keyed per file so the description + code fly in on selection. */}
               <div
                 key={selected.fileName}
                 className="min-h-[360px] motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300 motion-safe:ease-out [&>div]:mb-0"
               >
+                <p className="border-b px-4 py-3 text-gray-900 text-copy-13">
+                  {selected.description}
+                </p>
                 {selected.code}
               </div>
             </div>
