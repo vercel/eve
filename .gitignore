@@ -43,6 +43,7 @@ bun-error.log*
 Thumbs.db
 
 # IDE/editor
+.codex/
 .vscode/
 .idea/
 
