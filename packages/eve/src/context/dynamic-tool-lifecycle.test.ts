@@ -289,6 +289,48 @@ describe("replayDynamicSessionTools", () => {
     }
   });
 
+  it("exposes the AI SDK tool call id to replayed dynamic tool context", async () => {
+    const stepId = "eve:dynamic-tool//__eve_dynamic_exec_tool_call_id";
+    const stepFn = vi.fn(
+      (_vars: unknown, _input: unknown, ctx: { readonly toolCallId?: string }) => ({
+        toolCallId: ctx.toolCallId,
+      }),
+    );
+    Object.assign(stepFn, { stepId });
+
+    const registrySym = Symbol.for("@workflow/core//registeredSteps");
+    const registry = getOrCreateStepRegistry(registrySym);
+    registry.set(stepId, stepFn);
+
+    try {
+      const metadata: DurableDynamicToolMetadata[] = [
+        {
+          name: "replay-tool-call-id",
+          description: "Replayed tool call id",
+          inputSchema: { type: "object" },
+          resolverSlug: "test",
+          entryKey: "tool",
+          executeStepFnName: stepId,
+          closureVars: {},
+        },
+      ];
+
+      const tools = replayDynamicSessionTools(metadata, []);
+      expect(tools[0]!.execute!({}, { messages: [], toolCallId: "call_replayed_dynamic" })).toEqual(
+        {
+          toolCallId: "call_replayed_dynamic",
+        },
+      );
+      expect(stepFn).toHaveBeenCalledWith(
+        {},
+        {},
+        expect.objectContaining({ toolCallId: "call_replayed_dynamic" }),
+      );
+    } finally {
+      registry.delete(stepId);
+    }
+  });
+
   it("replayed tool passes stored closure vars, not live values", async () => {
     const stepId = "eve:dynamic-tool//__eve_dynamic_exec_snapshot";
     const calls: unknown[] = [];
@@ -514,6 +556,34 @@ describe("dispatchDynamicToolEvent", () => {
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(1);
     expect(tools[0]!.name).toBe("forecast");
+  });
+
+  it("exposes the AI SDK tool call id to live step-scoped dynamic tools", async () => {
+    const ctx = createCtx();
+    const entry = defineTool({
+      description: "call id probe",
+      inputSchema: { type: "object" },
+      execute: async (_input: Record<string, unknown>, toolCtx) => ({
+        toolCallId: toolCtx.toolCallId,
+      }),
+    });
+    const resolver = createResolver("call_id_probe", ["step.started"], () => ({
+      probe: entry,
+    }));
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("step.started"),
+    });
+
+    const tools = buildDynamicTools(ctx);
+    await expect(
+      tools[0]!.execute!({}, { messages: [], toolCallId: "call_live_dynamic" }),
+    ).resolves.toEqual({
+      toolCallId: "call_live_dynamic",
+    });
   });
 
   it("skips resolvers that do not match the event type", async () => {

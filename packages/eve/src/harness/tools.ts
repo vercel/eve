@@ -18,6 +18,7 @@ import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/
 import type { HarnessToolMap } from "#harness/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { loadContext } from "#context/container.js";
+import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 import {
   authorizationPendingModelText,
   isAuthorizationPendingModelOutput,
@@ -170,11 +171,11 @@ export function buildToolSetFromDefinitions(input: {
  */
 export function wrapToolExecute(
   definition: HarnessToolDefinition,
-): ((input: any, options: { readonly toolCallId: string }) => Promise<any>) | undefined {
+): ((input: any, options: ToolExecuteOptions) => Promise<any>) | undefined {
   const execute = definition.execute;
   if (execute === undefined) return undefined;
   return async (input, options) => {
-    const output = await execute(input);
+    const output = await execute(input, options);
     if (isAuthorizationSignal(output)) {
       stashToolInterrupt(loadContext(), options.toolCallId, output);
       return modelFacingAuthorizationOutput(output);

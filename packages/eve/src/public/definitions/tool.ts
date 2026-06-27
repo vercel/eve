@@ -72,6 +72,8 @@ export interface ToolAuthOptions {
  * resolves that provider inline, which lets one tool use multiple credentials.
  */
 export type ToolContext = SessionContext & {
+  /** Stable AI SDK tool-call id for the currently executing tool. */
+  readonly toolCallId?: string;
   /**
    * Resolves the bearer token for an inline provider. This accepts the same
    * auth shapes as a connection's `auth` field, including `connect("...")`

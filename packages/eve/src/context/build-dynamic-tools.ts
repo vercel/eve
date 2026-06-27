@@ -11,6 +11,7 @@ import type { DurableDynamicToolMetadata } from "#context/keys.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { createLogger } from "#internal/logging.js";
 import type { ApprovalContext, ApprovalStatus } from "#public/definitions/approval.js";
+import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 
 const log = createLogger("dynamic-tools");
 
@@ -50,7 +51,11 @@ function replayTools(metadata: readonly DurableDynamicToolMetadata[]): HarnessTo
 
     tools.push({
       description: m.description,
-      execute: (input: unknown) => stepFn(m.closureVars, input, buildCallbackContext()),
+      execute: (input: unknown, options?: ToolExecuteOptions) =>
+        stepFn(m.closureVars, input, {
+          ...buildCallbackContext(),
+          toolCallId: options?.toolCallId,
+        }),
       inputSchema: jsonSchema(m.inputSchema),
       name: m.name,
       approval: buildReplayedApproval(m),

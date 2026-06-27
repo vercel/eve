@@ -22,6 +22,7 @@ import {
 } from "#context/keys.js";
 import type { DurableDynamicToolMetadata } from "#context/keys.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
+import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 
 const log = createLogger("dynamic-tools");
 
@@ -32,8 +33,11 @@ const log = createLogger("dynamic-tools");
 function toHarnessToolDefinition(name: string, entry: DynamicToolEntry): HarnessToolDefinition {
   return {
     description: entry.description,
-    execute: (input: unknown) =>
-      entry.execute(input as Record<string, unknown>, buildCallbackContext()),
+    execute: (input: unknown, options?: ToolExecuteOptions) =>
+      entry.execute(input as Record<string, unknown>, {
+        ...buildCallbackContext(),
+        toolCallId: options?.toolCallId,
+      }),
     inputSchema: convertInputSchema(entry.inputSchema),
     name,
     approval: entry.approval,
@@ -118,7 +122,11 @@ export function replayDynamicSessionTools(
 
     tools.push({
       description: m.description,
-      execute: (input: unknown) => stepFn(m.closureVars, input, buildCallbackContext()),
+      execute: (input: unknown, options?: ToolExecuteOptions) =>
+        stepFn(m.closureVars, input, {
+          ...buildCallbackContext(),
+          toolCallId: options?.toolCallId,
+        }),
       inputSchema: jsonSchema(m.inputSchema),
       name: m.name,
       outputSchema: m.outputSchema === undefined ? undefined : jsonSchema(m.outputSchema),

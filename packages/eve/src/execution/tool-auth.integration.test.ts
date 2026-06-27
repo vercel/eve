@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
-import { loadContext } from "#context/container.js";
-import { AuthKey, SessionIdKey } from "#context/keys.js";
+import { ContextContainer, contextStorage, loadContext } from "#context/container.js";
+import { AuthKey, SessionIdKey, SessionKey } from "#context/keys.js";
 import {
   CallbackBaseUrlKey,
   PendingAuthorizationResultKey,
@@ -72,6 +72,25 @@ function authoredTool(input: {
 }
 
 describe("tool-hosted authorization", () => {
+  it("exposes the AI SDK tool call id on authored ToolContext", async () => {
+    const execute = createToolExecuteWithAuth({
+      scope: "create_record",
+      execute: (_input, ctx) => (ctx as ToolContext).toolCallId,
+    });
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: "session_tool_call_id",
+      turn: { id: "turn_tool_call_id", sequence: 0 },
+    });
+
+    await expect(
+      contextStorage.run(ctx, () =>
+        execute({}, { messages: [], toolCallId: "call_create_record" }),
+      ),
+    ).resolves.toBe("call_create_record");
+  });
+
   it("resolves and caches the bearer through ctx.getToken(provider)", async () => {
     let calls = 0;
     const auth: AuthorizationDefinition = {
