@@ -66,10 +66,10 @@ export interface EveChannelCorsOptions {
 }
 
 /**
- * Higher-level CORS policy for the default eve HTTP channel. Omit or pass `"*"`
- * / `true` for fully permissive browser access; pass `false` to disable CORS.
+ * Higher-level CORS policy for the default eve HTTP channel. Pass `true` for
+ * fully permissive browser access, or pass an options object to narrow it.
  */
-export type EveChannelCors = "*" | boolean | EveChannelCorsOptions;
+export type EveChannelCors = boolean | EveChannelCorsOptions;
 
 /** Low-level eve HTTP handle exposed to `eveChannel({ onMessage })`. */
 export interface EveHandle {
@@ -122,8 +122,9 @@ export interface EveChannelInput {
    */
   readonly uploadPolicy?: UploadPolicyInput;
   /**
-   * Browser CORS policy for the eve HTTP routes. Omit for fully permissive
-   * CORS (`"*"`). Pass `false` only when another layer owns CORS.
+   * Browser CORS policy for the eve HTTP routes. Omit or pass `false` to leave
+   * CORS untouched, pass `true` for fully permissive CORS, or pass an options
+   * object to narrow the policy.
    */
   readonly cors?: EveChannelCors;
   /**
@@ -335,11 +336,11 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 }
 
 function normalizeEveCors(cors: EveChannelCors | undefined): ChannelCors {
-  if (cors === undefined || cors === "*" || cors === true) {
-    return true;
-  }
-  if (cors === false) {
+  if (cors === undefined || cors === false) {
     return false;
+  }
+  if (cors === true) {
+    return true;
   }
 
   const result: {

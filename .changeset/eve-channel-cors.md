@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-The eve HTTP channel now enables permissive browser CORS by default, including preflight handling for session routes. Custom channels can opt into CORS with `defineChannel({ cors })`, and `eveChannel({ cors })` can disable or narrow the default policy.
+HTTP channels can now opt into browser CORS with preflight handling. Use `defineChannel({ cors })` for custom channels or `eveChannel({ cors: true | options })` for the eve channel; omitted CORS remains disabled.

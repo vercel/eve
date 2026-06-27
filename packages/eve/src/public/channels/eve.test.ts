@@ -162,8 +162,17 @@ function contextAccessorFor(ctx: ContextContainer): ContextAccessor {
 }
 
 describe("eveChannel — events", () => {
-  it("defaults to permissive CORS", () => {
+  it("leaves CORS disabled by default", () => {
     const channel = eveChannel({ auth: none() });
+    if (!isCompiledChannel(channel)) {
+      throw new Error("Expected eveChannel() to return a compiled channel.");
+    }
+
+    expect(channel.cors).toBeUndefined();
+  });
+
+  it("accepts true for explicit permissive CORS", () => {
+    const channel = eveChannel({ auth: none(), cors: true });
     if (!isCompiledChannel(channel)) {
       throw new Error("Expected eveChannel() to return a compiled channel.");
     }
@@ -205,6 +214,28 @@ describe("eveChannel — events", () => {
       methods: ["POST", "GET"],
       origin: ["https://app.example.com"],
       preflight: { statusCode: 200 },
+    });
+  });
+
+  it("passes wildcard values through inside CORS options", () => {
+    const channel = eveChannel({
+      auth: none(),
+      cors: {
+        allowedHeaders: "*",
+        exposedHeaders: "*",
+        methods: "*",
+        origin: "*",
+      },
+    });
+    if (!isCompiledChannel(channel)) {
+      throw new Error("Expected eveChannel() to return a compiled channel.");
+    }
+
+    expect(channel.cors).toEqual({
+      allowHeaders: "*",
+      exposeHeaders: "*",
+      methods: "*",
+      origin: "*",
     });
   });
 

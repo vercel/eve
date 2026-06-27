@@ -47,12 +47,12 @@ See [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming) for th
 
 ## CORS
 
-The eve channel enables permissive browser CORS by default. Its session routes
-respond to preflight requests and emit wildcard CORS headers, so browser
-frontends can call the channel without extra deployment configuration. Route
-auth still runs on the actual session requests.
+The eve channel leaves CORS untouched by default. Pass `cors: true` to enable
+permissive browser CORS with preflight handling, or pass an options object to
+narrow origins, methods, and headers. Route auth still runs on the actual
+session requests.
 
-Disable or narrow CORS only when another layer owns it:
+Enable or narrow CORS only when browser clients call the channel directly:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
