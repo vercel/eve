@@ -115,14 +115,16 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
                   </span>
                 ) : null}
               </div>
-              {/* Re-keyed per file so the description + code fly in on selection. */}
+              {/* Persists across files: only its height transitions as the
+                  description length changes. */}
+              <p className="overflow-hidden border-b px-4 py-3 text-gray-900 text-copy-14 transition-[height] duration-300 [interpolate-size:allow-keywords]">
+                {selected.description}
+              </p>
+              {/* Re-keyed per file so the code subtly flies in on selection. */}
               <div
                 key={selected.fileName}
                 className="min-h-[360px] motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300 motion-safe:ease-out [&>div]:mb-0"
               >
-                <p className="border-b px-4 py-3 text-gray-900 text-copy-13">
-                  {selected.description}
-                </p>
                 {selected.code}
               </div>
             </div>
