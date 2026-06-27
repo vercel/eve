@@ -43,7 +43,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
         <div className="relative overflow-hidden rounded-t-xl border bg-background-100">
           <div className="grid md:grid-cols-[240px_1fr] pb-4">
             {/* Sidebar */}
-            <div className="border-b md:border-r md:border-b-0  bg-background-200">
+            <div className="border-b md:border-r md:border-b-0">
               <div className="flex h-12 items-center gap-2 border-b px-4">
                 <span className="text-sm font-medium text-gray-1000">agent/</span>
                 <span className="ml-auto text-gray-900 text-label-13">
