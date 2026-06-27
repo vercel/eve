@@ -112,7 +112,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
                       ) : i > 0 ? (
                         <IconPlusCircle
                           aria-hidden
-                          className="ml-auto opacity-0 transition-opacity group-hover:opacity-100 –mr-1"
+                          className="ml-auto -mr-1 opacity-0 transition-opacity group-hover:opacity-100"
                           color="gray-1000"
                           size={14}
                         />
