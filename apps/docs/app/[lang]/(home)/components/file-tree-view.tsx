@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useState } from "react";
-import { IconCheck, IconPlusCircle, IconRefreshCounterClockwise } from "@/components/geistcn-icons";
+import { IconCheck, IconPlusCircle, IconTrash } from "@/components/geistcn-icons";
 import { cn } from "@/lib/utils";
 
 export interface FileTreeItem {
@@ -77,7 +77,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
                         : "pointer-events-none ml-0 w-0 opacity-0",
                     )}
                   >
-                    <IconRefreshCounterClockwise aria-hidden size={16} />
+                    <IconTrash aria-hidden size={15} />
                   </button>
                 </div>
               </div>
