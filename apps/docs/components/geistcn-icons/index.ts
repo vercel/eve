@@ -4,6 +4,7 @@ export type { IconColor, IconProps, IconSize } from "./base-icon";
 export { IconAcronymTs } from "./icon-acronym-ts";
 export { IconAgents } from "./icon-agents";
 export { IconArrowUpRight } from "./icon-arrow-up-right";
+export { IconCheck } from "./icon-check";
 export { IconClock } from "./icon-clock";
 export { IconFileText } from "./icon-file-text";
 export { IconFolderOpen } from "./icon-folder-open";

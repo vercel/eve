@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useState } from "react";
-import { IconPlusCircle, IconTrash } from "@/components/geistcn-icons";
+import { IconCheck, IconPlusCircle, IconTrash } from "@/components/geistcn-icons";
 import { cn } from "@/lib/utils";
 
 export interface FileTreeItem {
@@ -41,9 +41,9 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
       />
       <div className="mx-auto max-w-5xl">
         <div className="relative overflow-hidden rounded-t-xl border bg-background-100">
-          <div className="grid md:grid-cols-[240px_1fr] mb-4">
+          <div className="grid md:grid-cols-[240px_1fr] pb-4">
             {/* Sidebar */}
-            <div className="border-b md:border-r md:border-b-0">
+            <div className="border-b md:border-r md:border-b-0  bg-background-200">
               <div className="flex h-12 items-center gap-2 border-b px-4">
                 <span className="text-sm font-medium text-gray-1000">agent/</span>
                 <span className="ml-auto text-gray-900 text-label-13">
@@ -86,7 +86,9 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
                       >
                         {item.name}
                       </span>
-                      {i > 0 && !added ? (
+                      {i > 0 && added ? (
+                        <IconCheck aria-hidden className="ml-auto" color="gray-900" size={16} />
+                      ) : i > 0 ? (
                         <IconPlusCircle
                           aria-hidden
                           className="ml-auto opacity-0 transition-opacity group-hover:opacity-100"
@@ -103,7 +105,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
             {/* Code panel */}
             <div className="flex min-w-0 flex-col">
               <div className="flex h-12 items-center gap-2 border-b px-4">
-                {selected.icon}
+                {/* {selected.icon} */}
                 <span className="text-sm text-gray-1000">{selected.fileName}</span>
                 {selectedIndex > 0 ? (
                   <span className="ml-auto font-mono uppercase tracking-[0.1em] text-gray-900 text-label-12-mono">

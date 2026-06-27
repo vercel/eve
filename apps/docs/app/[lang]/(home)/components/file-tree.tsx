@@ -165,13 +165,7 @@ export async function FileTree() {
               data-line-numbers="true"
               className={cn(
                 props.className,
-                // No pre padding: each `.line` already carries a 16px inset
-                // (geistdocs), which matches the header's px-4 so the gutter
-                // aligns with the header icon.
                 "rounded-none border-0 bg-transparent px-0 py-4",
-                // Left-align the line-number gutter so the numbers sit flush
-                // under the header icon instead of floating right-aligned.
-                // `!` overrides the more specific geistdocs `.line::before` rule.
                 "[&_.line]:before:!mr-4 [&_.line]:before:!w-5 [&_.line]:before:!text-left",
               )}
             >
