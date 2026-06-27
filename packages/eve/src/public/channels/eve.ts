@@ -26,9 +26,11 @@ import {
   POST,
   GET,
   type Channel,
+  type ChannelCors,
   type ChannelEvents,
   type ChannelSessionOps,
 } from "#public/definitions/defineChannel.js";
+import type { ChannelMethod } from "#public/definitions/channel.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
@@ -42,6 +44,32 @@ export type EveEventContext = ChannelSessionOps;
 
 /** Runtime stream-event handlers supported by `eveChannel({ events })`. */
 export type EveChannelEvents = ChannelEvents<EveEventContext>;
+
+export interface EveChannelCorsOptions {
+  /**
+   * Allowed request origin. Pass a single origin string, an exact-origin list,
+   * `"null"`, or `"*"`. Omit for `"*"`.
+   */
+  readonly origin?: "*" | "null" | string | readonly string[];
+  /** Methods emitted on preflight responses. Omit for `"*"`. */
+  readonly methods?: "*" | readonly ChannelMethod[];
+  /** Request headers emitted on preflight responses. Omit for `"*"`. */
+  readonly allowedHeaders?: "*" | readonly string[];
+  /** Response headers exposed to browser callers. Omit for `"*"`. */
+  readonly exposedHeaders?: "*" | readonly string[];
+  /** Whether to emit `access-control-allow-credentials: true`. */
+  readonly credentials?: boolean;
+  /** Max age, in seconds, emitted on preflight responses. */
+  readonly maxAge?: number | false;
+  /** Preflight response status code. Defaults to 204. */
+  readonly preflightStatus?: number;
+}
+
+/**
+ * Higher-level CORS policy for the default eve HTTP channel. Omit or pass `"*"`
+ * / `true` for fully permissive browser access; pass `false` to disable CORS.
+ */
+export type EveChannelCors = "*" | boolean | EveChannelCorsOptions;
 
 /** Low-level eve HTTP handle exposed to `eveChannel({ onMessage })`. */
 export interface EveHandle {
@@ -94,6 +122,11 @@ export interface EveChannelInput {
    */
   readonly uploadPolicy?: UploadPolicyInput;
   /**
+   * Browser CORS policy for the eve HTTP routes. Omit for fully permissive
+   * CORS (`"*"`). Pass `false` only when another layer owns CORS.
+   */
+  readonly cors?: EveChannelCors;
+  /**
    * Pre-dispatch hook for inbound eve HTTP messages. Runs after route auth and body
    * parsing, before runtime dispatch.
    */
@@ -126,6 +159,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
   const uploadPolicy = mergeUploadPolicy(input.uploadPolicy);
 
   return defineChannel<undefined, EveEventContext>({
+    cors: normalizeEveCors(input.cors),
     routes: [
       POST("/eve/v1/session", async (req, { send }) => {
         const authResult = await routeAuth(req, input.auth);
@@ -298,6 +332,63 @@ export function eveChannel(input: EveChannelInput): EveChannel {
     ],
     events: input.events,
   });
+}
+
+function normalizeEveCors(cors: EveChannelCors | undefined): ChannelCors {
+  if (cors === undefined || cors === "*" || cors === true) {
+    return true;
+  }
+  if (cors === false) {
+    return false;
+  }
+
+  const result: {
+    origin?: "*" | "null" | readonly string[];
+    methods?: "*" | readonly string[];
+    allowHeaders?: "*" | readonly string[];
+    exposeHeaders?: "*" | readonly string[];
+    credentials?: boolean;
+    maxAge?: number | false;
+    preflight?: {
+      statusCode?: number;
+    };
+  } = {};
+
+  if (cors.origin !== undefined) {
+    result.origin = normalizeEveCorsOrigin(cors.origin);
+  }
+  if (cors.methods !== undefined) {
+    result.methods = cors.methods;
+  }
+  if (cors.allowedHeaders !== undefined) {
+    result.allowHeaders = cors.allowedHeaders;
+  }
+  if (cors.exposedHeaders !== undefined) {
+    result.exposeHeaders = cors.exposedHeaders;
+  }
+  if (cors.credentials !== undefined) {
+    result.credentials = cors.credentials;
+  }
+  if (cors.maxAge !== undefined) {
+    result.maxAge = cors.maxAge;
+  }
+  if (cors.preflightStatus !== undefined) {
+    result.preflight = { statusCode: cors.preflightStatus };
+  }
+
+  return result;
+}
+
+function normalizeEveCorsOrigin(
+  origin: NonNullable<EveChannelCorsOptions["origin"]>,
+): "*" | "null" | readonly string[] {
+  if (origin === "*" || origin === "null") {
+    return origin;
+  }
+  if (typeof origin === "string") {
+    return [origin];
+  }
+  return origin;
 }
 
 type OnMessageOutcome =

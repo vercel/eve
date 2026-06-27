@@ -2,6 +2,7 @@ import type { FlexibleSchema } from "ai";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { CompiledChannel } from "#channel/compiled-channel.js";
+import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { HeadersValue } from "#client/types.js";
 import type { DiscoverDiagnosticsSummary } from "#discover/diagnostics.js";
 import type { ChannelRouteMethod, RouteContext } from "#public/definitions/channel.js";
@@ -221,6 +222,7 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
   readonly name: string;
   readonly method: ChannelRouteMethod;
   readonly adapter?: ChannelAdapter;
+  readonly cors?: NormalizedChannelCorsOptions;
   readonly urlPath: string;
   readonly fetch: (req: Request, ctx: RouteContext) => Promise<Response>;
   /**

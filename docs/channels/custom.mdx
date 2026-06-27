@@ -55,6 +55,25 @@ Declare routes with the `POST()` and `GET()` helpers. Each route handler receive
 
 Event handlers like `"message.completed"` are declared under the `events` key. They receive `(eventData, channel, ctx)`, where `eventData` is the event payload, `channel` carries platform handles and session continuation operations, and `ctx` is the eve `SessionContext`. Every channel kind shares this signature. The one exception is `session.failed`, which receives only `(eventData, channel)` with no `ctx`.
 
+## CORS
+
+Custom HTTP channels leave CORS untouched unless you opt in. Pass `cors: true`
+for permissive browser access with preflight handling, or pass a serializable
+CORS options object to narrow origins, methods, and headers:
+
+```ts
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  cors: {
+    origin: ["https://app.example.com"],
+    methods: ["POST"],
+    allowHeaders: ["authorization", "content-type"],
+  },
+  routes: [POST("/message", async () => new Response("ok"))],
+});
+```
+
 ## WebSocket routes
 
 Use `WS()` when a custom channel needs a WebSocket endpoint. The route handler runs once per upgrade request and returns lifecycle hooks for that connection:

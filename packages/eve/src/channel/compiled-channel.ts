@@ -1,4 +1,5 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
+import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { RouteDefinition, SendFn } from "#channel/routes.js";
 import type { Session } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
@@ -25,6 +26,7 @@ export interface CompiledChannel<
   readonly __kind: typeof CHANNEL_SENTINEL;
   readonly routes: readonly RouteDefinition<TState>[];
   readonly adapter: ChannelAdapter<any>;
+  readonly cors?: NormalizedChannelCorsOptions;
   readonly __metadata?: TMetadata;
   readonly receive?: (
     input: {

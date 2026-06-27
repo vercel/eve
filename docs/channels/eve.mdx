@@ -45,6 +45,29 @@ curl -N https://<deployment>/eve/v1/session/ses_01h.../stream
 
 See [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming) for the full request and stream flow, including the complete event set.
 
+## CORS
+
+The eve channel enables permissive browser CORS by default. Its session routes
+respond to preflight requests and emit wildcard CORS headers, so browser
+frontends can call the channel without extra deployment configuration. Route
+auth still runs on the actual session requests.
+
+Disable or narrow CORS only when another layer owns it:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel } from "eve/channels/eve";
+import { localDev, vercelOidc } from "eve/channels/auth";
+
+export default eveChannel({
+  auth: [vercelOidc(), localDev()],
+  cors: {
+    origin: "https://app.example.com",
+    methods: ["GET", "POST"],
+    allowedHeaders: ["authorization", "content-type"],
+  },
+});
+```
+
 ## Authentication
 
 The `auth` option decides who can call these routes. The built-in helpers cover development and trusted infrastructure:

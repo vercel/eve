@@ -9,6 +9,7 @@ import {
   type CompiledRemoteAgentNode,
 } from "#compiler/remote-agent-node.js";
 import type { ChannelRouteMethod } from "#public/definitions/channel.js";
+import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import { jsonObjectSchema } from "#shared/json-schemas.js";
 import type { Node } from "#shared/node.js";
 import type {
@@ -39,7 +40,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 30;
+export const COMPILED_AGENT_MANIFEST_VERSION = 31;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -68,6 +69,11 @@ export interface CompiledChannelDefinition {
    * Omitted when the route does not register an adapter.
    */
   readonly adapterKind?: string;
+  /**
+   * Serializable CORS options to apply to this channel route. Omitted when the
+   * channel leaves CORS untouched.
+   */
+  readonly cors?: NormalizedChannelCorsOptions;
 }
 
 /**
@@ -259,6 +265,23 @@ const channelMethodSchema = z.union([
   z.literal("WEBSOCKET"),
 ]);
 
+const compiledChannelCorsSchema = z
+  .object({
+    origin: z.union([z.literal("*"), z.literal("null"), z.array(z.string())]).optional(),
+    methods: z.union([z.literal("*"), z.array(z.string())]).optional(),
+    allowHeaders: z.union([z.literal("*"), z.array(z.string())]).optional(),
+    exposeHeaders: z.union([z.literal("*"), z.array(z.string())]).optional(),
+    credentials: z.boolean().optional(),
+    maxAge: z.union([z.string(), z.literal(false)]).optional(),
+    preflight: z
+      .object({
+        statusCode: z.number().int().min(100).max(599).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict() satisfies z.ZodType<NormalizedChannelCorsOptions>;
+
 const compiledChannelDefinitionSchema = z
   .object({
     kind: z.literal("channel"),
@@ -270,6 +293,7 @@ const compiledChannelDefinitionSchema = z
     sourceKind: z.literal("module"),
     exportName: z.string().optional(),
     adapterKind: z.string().optional(),
+    cors: compiledChannelCorsSchema.optional(),
   })
   .strict();
 

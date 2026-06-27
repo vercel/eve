@@ -32,6 +32,7 @@ export function getFrameworkChannelDefinitions(): readonly ResolvedChannelDefini
       name: EVE_CHANNEL_NAME,
       method: route.method.toUpperCase() as "GET" | "POST",
       urlPath: route.path,
+      cors: compiled.cors,
       fetch: async (req: Request, ctx: any) => route.handler(req, ctx),
       handler: route.handler,
       adapter: compiled.adapter,

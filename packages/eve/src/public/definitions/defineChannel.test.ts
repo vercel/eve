@@ -46,6 +46,41 @@ describe("defineChannel", () => {
     const adapter = getAdapter(channel);
     expect(adapter.kind).toBe("http");
     expect(adapter.fetchFile).toBeUndefined();
+    expect(channel.cors).toBeUndefined();
+  });
+
+  it("normalizes channel CORS options", () => {
+    const channel = defineChannel({
+      cors: {
+        allowHeaders: ["authorization", "content-type"],
+        credentials: true,
+        exposeHeaders: ["x-eve-session-id"],
+        maxAge: 600,
+        methods: ["POST"],
+        origin: ["https://app.example.com"],
+        preflight: { statusCode: 200 },
+      },
+      routes: [POST("/x", async () => new Response("ok"))],
+    });
+
+    expect(channel.cors).toEqual({
+      allowHeaders: ["authorization", "content-type"],
+      credentials: true,
+      exposeHeaders: ["x-eve-session-id"],
+      maxAge: "600",
+      methods: ["POST"],
+      origin: ["https://app.example.com"],
+      preflight: { statusCode: 200 },
+    });
+  });
+
+  it("uses an empty options object for permissive CORS", () => {
+    const channel = defineChannel({
+      cors: true,
+      routes: [POST("/x", async () => new Response("ok"))],
+    });
+
+    expect(channel.cors).toEqual({});
   });
 
   it("declares websocket routes with an eve-owned route discriminator", () => {

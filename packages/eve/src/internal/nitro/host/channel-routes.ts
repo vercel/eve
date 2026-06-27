@@ -1,5 +1,6 @@
 import type { Nitro, NitroEventHandler } from "nitro/types";
 
+import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { ChannelRouteMethod } from "#public/definitions/channel.js";
 import {
   getAllFrameworkChannelNames,
@@ -33,6 +34,7 @@ interface ChannelRouteNitro {
 export interface NitroChannelRouteRegistration {
   readonly method: ChannelRouteMethod;
   readonly route: string;
+  readonly cors?: NormalizedChannelCorsOptions;
 }
 
 /**
@@ -61,7 +63,7 @@ export function computeChannelRouteRegistrations(
       continue;
     }
     authoredNames.add(entry.name);
-    authoredRoutes.push({ method: entry.method, route: entry.urlPath });
+    authoredRoutes.push({ method: entry.method, route: entry.urlPath, cors: entry.cors });
   }
 
   const activeFrameworkRoutes = getFrameworkChannelDefinitions()
@@ -70,6 +72,7 @@ export function computeChannelRouteRegistrations(
       (channel): NitroChannelRouteRegistration => ({
         method: channel.method,
         route: channel.urlPath,
+        cors: channel.cors,
       }),
     );
 
@@ -99,10 +102,13 @@ export function registerChannelVirtualHandlers(
     readonly registrations: readonly NitroChannelRouteRegistration[];
   },
 ): void {
+  const preflightRoutes = new Set<string>();
   for (const registration of input.registrations) {
     addChannelVirtualHandler(nitro, {
       artifactsConfig: input.artifactsConfig,
+      cors: registration.cors,
       method: registration.method,
+      preflightRoutes,
       route: registration.route,
     });
   }
@@ -158,7 +164,9 @@ function addChannelVirtualHandler(
   nitro: Pick<ChannelRouteNitro, "options">,
   input: {
     artifactsConfig: NitroArtifactsConfigInput;
+    cors?: NormalizedChannelCorsOptions;
     method: ChannelRouteMethod;
+    preflightRoutes: Set<string>;
     route: string;
   },
 ): void {
@@ -168,6 +176,7 @@ function addChannelVirtualHandler(
     resolvePackageSourceFilePath("src/internal/nitro/routes/channel-dispatch.ts"),
   );
   const nitroModulePath = stringifyEsmImportSpecifier(resolvePackageDependencyPath("nitro"));
+  const nitroH3ModulePath = stringifyEsmImportSpecifier(resolvePackageDependencyPath("nitro/h3"));
 
   if (input.method === "WEBSOCKET") {
     nitro.options.handlers.push({
@@ -188,10 +197,65 @@ function addChannelVirtualHandler(
     method: input.method,
     route: input.route,
   });
+  if (input.cors !== undefined) {
+    addChannelCorsPreflightHandler(nitro, {
+      cors: input.cors,
+      nitroH3ModulePath,
+      preflightRoutes: input.preflightRoutes,
+      route: input.route,
+    });
+  }
   nitro.options.virtual[virtualId] = [
+    ...(input.cors === undefined
+      ? []
+      : [
+          `import { handleCors } from ${nitroH3ModulePath};`,
+          `const cors = ${JSON.stringify(input.cors)};`,
+        ]),
     `import { dispatchChannelRequest } from ${dispatchModulePath};`,
     `const config = ${JSON.stringify(input.artifactsConfig)};`,
-    `export default (event) => dispatchChannelRequest(event, ${JSON.stringify(routeKey)}, config);`,
+    input.cors === undefined
+      ? `export default (event) => dispatchChannelRequest(event, ${JSON.stringify(routeKey)}, config);`
+      : [
+          `export default (event) => {`,
+          `  const corsResponse = handleCors(event, cors);`,
+          `  if (corsResponse !== false) return corsResponse;`,
+          `  return dispatchChannelRequest(event, ${JSON.stringify(routeKey)}, config);`,
+          `};`,
+        ].join("\n"),
+  ].join("\n");
+}
+
+function addChannelCorsPreflightHandler(
+  nitro: Pick<ChannelRouteNitro, "options">,
+  input: {
+    cors: NormalizedChannelCorsOptions;
+    nitroH3ModulePath: string;
+    preflightRoutes: Set<string>;
+    route: string;
+  },
+): void {
+  if (input.preflightRoutes.has(input.route)) {
+    return;
+  }
+  input.preflightRoutes.add(input.route);
+
+  const routeKey = `OPTIONS ${input.route}`;
+  const virtualId = `${EVE_CHANNEL_VIRTUAL_ID_PREFIX}${routeKey}`;
+
+  nitro.options.handlers.push({
+    handler: virtualId,
+    method: "OPTIONS",
+    route: input.route,
+  });
+  nitro.options.virtual[virtualId] = [
+    `import { handleCors } from ${input.nitroH3ModulePath};`,
+    `const cors = ${JSON.stringify(input.cors)};`,
+    `export default (event) => {`,
+    `  const corsResponse = handleCors(event, cors);`,
+    `  if (corsResponse !== false) return corsResponse;`,
+    `  return new Response(null, { status: 204 });`,
+    `};`,
   ].join("\n");
 }
 
@@ -232,11 +296,19 @@ function areChannelRouteRegistrationsEqual(
 
     if (
       leftRegistration.method !== rightRegistration.method ||
-      leftRegistration.route !== rightRegistration.route
+      leftRegistration.route !== rightRegistration.route ||
+      !areChannelCorsOptionsEqual(leftRegistration.cors, rightRegistration.cors)
     ) {
       return false;
     }
   }
 
   return true;
+}
+
+function areChannelCorsOptionsEqual(
+  left: NormalizedChannelCorsOptions | undefined,
+  right: NormalizedChannelCorsOptions | undefined,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
