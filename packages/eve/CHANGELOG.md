@@ -1,5 +1,16 @@
 # eve
 
+## 0.16.1
+
+### Patch Changes
+
+- 8470695: HTTP channels can now opt into browser CORS with preflight handling. Use `defineChannel({ cors })` for custom channels or `eveChannel({ cors: true | options })` for the eve channel; omitted CORS remains disabled.
+- aa3aca4: The GitHub channel now accepts Vercel Connect-forwarded webhook payloads that omit `x-github-event` and `x-github-delivery` by inferring the supported event type from the payload shape. Headerless forwarded payloads now emit a warning with the inferred metadata instead of being silently acknowledged and ignored.
+- 8713a71: Fix human-in-the-loop approval resume behavior so text replies like `approve` resolve pending tool approvals and unrelated follow-up messages no longer synthesize a denial. Rejected approval results now include explicit approval and not-run metadata for clients.
+- 7fd53f7: Update the curated Linear MCP connection to use Linear's Streamable HTTP endpoint at `https://mcp.linear.app/mcp`. The MCP and OpenAPI connection docs now include fuller setup guidance for Vercel Connect, static credentials, filters, and approvals.
+- c0f9749: Fix Vercel Connect local interactive connection authorization when the dev server uses an IPv4 or IPv6 loopback address. OAuth callbacks now retain the active port while using the `localhost` hostname accepted by Connect, and local `/connect` refreshes the dev runtime before the next prompt can use the new connection.
+- c14b022: The `eve dev` TUI retries one transient agent-inspection failure before treating a local or remote agent as unavailable.
+
 ## 0.16.0
 
 ### Minor Changes
