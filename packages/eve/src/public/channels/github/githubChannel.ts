@@ -240,6 +240,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
         async (req, { send, waitUntil }) => {
           const body = await verifyInbound(req, config.credentials);
           if (body === null) return new Response("unauthorized", { status: 401 });
+          const missingHeaders = missingGitHubWebhookHeaders(req.headers);
 
           let event: GitHubInboundEvent | null;
           try {
@@ -253,7 +254,22 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
             return jsonOk({ ignored: true, ok: true });
           }
 
-          if (event === null) return jsonOk({ ignored: true, ok: true });
+          if (event === null) {
+            if (missingHeaders.length > 0) {
+              log.warn("GitHub webhook ignored because standard headers were missing", {
+                missingHeaders,
+              });
+            }
+            return jsonOk({ ignored: true, ok: true });
+          }
+          if (missingHeaders.length > 0) {
+            log.warn("GitHub webhook missing standard headers; inferred metadata from payload", {
+              deliveryId: event.delivery.id,
+              event: event.delivery.event,
+              missingHeaders,
+              repository: event.repository.fullName,
+            });
+          }
           if (event.kind === "ping") return jsonOk({ ok: true });
 
           if (event.kind === "issue_comment" && event.action === "created") {
@@ -438,6 +454,13 @@ async function verifyInbound(
 
 function readNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function missingGitHubWebhookHeaders(headers: Headers): readonly string[] {
+  return ["x-github-event", "x-github-delivery"].filter((name) => {
+    const value = headers.get(name);
+    return value === null || value.trim().length === 0;
+  });
 }
 
 function jsonOk(body: Record<string, unknown>): Response {
