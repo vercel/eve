@@ -10,6 +10,7 @@ import {
   IconWrench,
 } from "@/components/geistcn-icons";
 import { GradientBorder } from "./gradient-border";
+import { SetupSwitcher } from "./setup-switcher";
 
 // Runtime primitives shown in a row (desktop) / stacked (mobile) below the
 // full-width Durable Workflow card.
@@ -190,6 +191,8 @@ export function ArchitectureDiagram() {
             </Link>
           </div>
         </div>
+
+        <SetupSwitcher />
       </div>
     </section>
   );
