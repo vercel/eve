@@ -59,7 +59,6 @@ import type { DevelopmentCredentialGate } from "#services/dev-client/credential-
 import {
   BOOT_DETECTIONS,
   CLI_MISSING_SETUP_ISSUE,
-  automaticSetupCommand,
   detectSetupIssues,
   formatSetupIssuesLine,
   LOGIN_SETUP_ISSUE,
@@ -297,6 +296,11 @@ export interface PromptCommandHandlerContext {
   readonly title: string;
   /** Provider entry authorized by confirmed boot-time model-access evidence. */
   readonly initialModelStep?: "provider";
+  /**
+   * Leaves the current setup panel mounted for the next automatic onboarding
+   * command. The runner closes it if no next command can proceed.
+   */
+  readonly keepSetupFlowOpen?: true;
   readonly remoteConnection?: RemoteConnectionController;
 }
 
@@ -304,8 +308,8 @@ export interface PromptCommandHandlerContext {
 export interface PromptCommandOutcome {
   /** Outcome line rendered under the echoed command; absent renders nothing. */
   message?: string;
-  /** Post-command work; model access also re-probes the Vercel identity. */
-  effect?: VercelStatusEffect | { kind: "model-access-changed" };
+  /** Post-command work after setup settles. */
+  effect?: VercelStatusEffect | { kind: "connection-added" } | { kind: "model-access-changed" };
 }
 
 export interface PromptCommandHandler {
@@ -346,8 +350,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   /** Absolute local application root; omitted for remote `--url` sessions. */
   appRoot?: string;
   /**
-   * Seeds the editable prompt buffer for the first prompt only. The text is
-   * not auto-submitted — the user can edit it and presses Enter to send.
+   * Seeds the editable prompt buffer for the first prompt. A bare local
+   * `/model` starts initial model onboarding.
    */
   initialInput?: string;
   /** Handles non-core slash commands without adding feature branches to the runner. */
@@ -393,7 +397,10 @@ export class EveTUIRunner {
   readonly #runtimeArtifacts?: DevelopmentRuntimeArtifactSessionRefresher;
   readonly #serverUrl?: string;
   readonly #appRoot?: string;
-  /** Seeds the first prompt's editable buffer; consumed once in {@link #run}. */
+  /**
+   * Seeds the first prompt's editable buffer. A bare local `/model` starts
+   * fresh-agent onboarding.
+   */
   readonly #initialInput?: string;
   readonly #promptCommandHandler?: PromptCommandHandler;
   readonly #availablePromptCommands: readonly PromptCommandSpec[];
@@ -602,7 +609,6 @@ export class EveTUIRunner {
   async #run() {
     const title = this.#name;
     let prompt: string | undefined;
-    let automaticSetup: ReturnType<typeof automaticSetupCommand> = undefined;
     let pendingInputResponses: readonly InputResponse[] | undefined;
     let hasRunTurn = false;
     let streamWithoutPrompt = false;
@@ -615,7 +621,7 @@ export class EveTUIRunner {
       await this.#executeExtensionCommand(
         { type: "extension", name: "vc:login", argument: "" },
         title,
-        "startup",
+        { trigger: "startup" },
       );
     }
     this.#subscribeDevelopmentSandboxLogs();
@@ -623,9 +629,18 @@ export class EveTUIRunner {
     // first prompt must not wait on it. The segment appears when it lands.
     this.#vercelStatus?.refreshIdentity();
 
-    if (this.#promptCommandHandler !== undefined && this.#renderer.setupFlow !== undefined) {
-      automaticSetup = automaticSetupCommand(this.#bootIssues);
-      prompt = automaticSetup?.prompt;
+    const initialCommand =
+      this.#initialInput === undefined ? undefined : parsePromptCommand(this.#initialInput);
+    const initialModelOnboarding =
+      initialCommand?.type === "extension" &&
+      initialCommand.name === "model" &&
+      initialCommand.argument === "" &&
+      this.#appRoot !== undefined &&
+      this.#promptCommandHandler !== undefined &&
+      this.#renderer.setupFlow !== undefined;
+    if (initialModelOnboarding) {
+      initialDraft = undefined;
+      await this.#runInitialModelOnboarding(title);
     }
 
     while (true) {
@@ -699,10 +714,7 @@ export class EveTUIRunner {
 
         if (command?.type === "extension") {
           try {
-            const initialModelStep =
-              command.name === "model" ? automaticSetup?.initialModelStep : undefined;
-            automaticSetup = undefined;
-            await this.#executeExtensionCommand(command, title, "command", initialModelStep);
+            await this.#executeExtensionCommand(command, title, { trigger: "command" });
           } catch (error) {
             if (isInterruptedError(error)) return;
             throw error;
@@ -716,76 +728,88 @@ export class EveTUIRunner {
         hasRunTurn = true;
       }
 
-      const result = await this.#streamTurn({
+      let result = await this.#streamTurn({
         prompt: streamWithoutPrompt ? undefined : prompt,
         inputResponses: pendingInputResponses,
       });
+      let submittedPrompt = prompt;
+      let respondedToInputRequest = false;
 
       try {
-        await this.#renderer.renderStream(result, {
-          title,
-          submittedPrompt: prompt,
-          continueSession: Boolean(this.#renderer.readPrompt),
-          tools: this.#tools,
-          reasoning: this.#reasoning,
-          subagents: this.#subagents,
-          connectionAuth: this.#connectionAuth,
-          assistantResponseStats: this.#assistantResponseStats,
-          contextSize: this.#contextSize,
-        });
+        while (true) {
+          await this.#renderer.renderStream(result, {
+            title,
+            submittedPrompt,
+            continueSession: Boolean(this.#renderer.readPrompt),
+            tools: this.#tools,
+            reasoning: this.#reasoning,
+            subagents: this.#subagents,
+            connectionAuth: this.#connectionAuth,
+            assistantResponseStats: this.#assistantResponseStats,
+            contextSize: this.#contextSize,
+          });
 
-        const approvalRequests = result.turnState?.pendingApprovals ?? [];
-        const questionRequests = result.turnState?.pendingQuestions ?? [];
+          const approvalRequests = result.turnState?.pendingApprovals ?? [];
+          const questionRequests = result.turnState?.pendingQuestions ?? [];
 
-        if (approvalRequests.length > 0 || questionRequests.length > 0) {
-          const responses: InputResponse[] = [];
+          if (approvalRequests.length > 0 || questionRequests.length > 0) {
+            const responses: InputResponse[] = [];
 
-          if (approvalRequests.length > 0) {
-            if (!this.#renderer.readToolApproval) {
-              throw new Error(
-                "Tool approval was requested, but the renderer does not support tool approval input.",
-              );
-            }
-
-            for (const request of approvalRequests) {
-              const response = await this.#renderer.readToolApproval(request, { title });
-              responses.push({
-                requestId: request.approvalId,
-                optionId: response.approved ? "approve" : "deny",
-              });
-              this.#pendingInputRequests.delete(request.approvalId);
-            }
-          }
-
-          if (questionRequests.length > 0) {
-            if (!this.#renderer.readInputQuestion) {
-              throw new Error(
-                "An interactive question was requested, but the renderer does not support input questions.",
-              );
-            }
-
-            for (const inputRequest of questionRequests) {
-              const question = toAgentTUIInputQuestion(inputRequest);
-              const response = await this.#renderer.readInputQuestion(question, { title });
-              if (response === undefined) {
-                continue;
+            if (approvalRequests.length > 0) {
+              if (!this.#renderer.readToolApproval) {
+                throw new Error(
+                  "Tool approval was requested, but the renderer does not support tool approval input.",
+                );
               }
-              const inputResponse: InputResponse = { requestId: inputRequest.requestId };
-              if (response.optionId !== undefined) inputResponse.optionId = response.optionId;
-              if (response.text !== undefined) inputResponse.text = response.text;
-              responses.push(inputResponse);
-              this.#pendingInputRequests.delete(inputRequest.requestId);
+
+              for (const request of approvalRequests) {
+                const response = await this.#renderer.readToolApproval(request, { title });
+                responses.push({
+                  requestId: request.approvalId,
+                  optionId: response.approved ? "approve" : "deny",
+                });
+                this.#pendingInputRequests.delete(request.approvalId);
+              }
             }
+
+            if (questionRequests.length > 0) {
+              if (!this.#renderer.readInputQuestion) {
+                throw new Error(
+                  "An interactive question was requested, but the renderer does not support input questions.",
+                );
+              }
+
+              for (const inputRequest of questionRequests) {
+                const question = toAgentTUIInputQuestion(inputRequest);
+                const response = await this.#renderer.readInputQuestion(question, { title });
+                if (response === undefined) {
+                  continue;
+                }
+                const inputResponse: InputResponse = { requestId: inputRequest.requestId };
+                if (response.optionId !== undefined) inputResponse.optionId = response.optionId;
+                if (response.text !== undefined) inputResponse.text = response.text;
+                responses.push(inputResponse);
+                this.#pendingInputRequests.delete(inputRequest.requestId);
+              }
+            }
+
+            streamWithoutPrompt = true;
+            pendingInputResponses = responses;
+            prompt = undefined;
+            respondedToInputRequest = true;
+            break;
           }
 
-          streamWithoutPrompt = true;
-          pendingInputResponses = responses;
-          prompt = undefined;
-          continue;
-        }
+          if (this.#enterPendingConnectionAuthorization(result)) {
+            result = this.#streamConnectionAuthorization();
+            submittedPrompt = undefined;
+            continue;
+          }
 
-        if (result.turnState && result.turnState.boundaryEvent === undefined) {
-          this.#sessionFailed = true;
+          if (result.turnState && result.turnState.boundaryEvent === undefined) {
+            this.#sessionFailed = true;
+          }
+          break;
         }
       } catch (error) {
         if (isInterruptedError(error)) {
@@ -793,6 +817,10 @@ export class EveTUIRunner {
         }
 
         throw error;
+      }
+
+      if (respondedToInputRequest) {
+        continue;
       }
 
       streamWithoutPrompt = false;
@@ -825,6 +853,7 @@ export class EveTUIRunner {
     this.#pendingInputRequests.clear();
     this.#connectionAuthRuns.clear();
     this.#pendingConnectionAuths.clear();
+    this.#renderer.setConnectionAuthPendingCount?.(0);
 
     if (this.#client) {
       this.#session = this.#client.session();
@@ -952,12 +981,31 @@ export class EveTUIRunner {
       };
     }
 
-    const turnState = createTurnState();
+    return this.#createTUIStreamResult(response, () => abortController.abort());
+  }
 
+  /**
+   * Follows the same session after an interactive authorization callback.
+   * `send()` stops at the parked `session.waiting` boundary; the callback's
+   * completion events arrive in the next durable turn on `session.stream()`.
+   */
+  #streamConnectionAuthorization(): AgentTUIStreamResult {
+    const abortController = new AbortController();
+    return this.#createTUIStreamResult(
+      this.#session.stream({ signal: abortController.signal }),
+      () => abortController.abort(),
+    );
+  }
+
+  #createTUIStreamResult(
+    events: AsyncIterable<HandleMessageStreamEvent>,
+    abort: () => void,
+  ): AgentTUIStreamResult {
+    const turnState = createTurnState();
     return {
-      abort: () => abortController.abort(),
+      abort,
       events: eveEventsToTUIStream({
-        events: response,
+        events,
         pendingInputRequests: this.#pendingInputRequests,
         subagentRuns: this.#subagentRuns,
         turnState,
@@ -1069,18 +1117,22 @@ export class EveTUIRunner {
 
   async #handleExtensionCommand(
     command: Extract<PromptCommand, { type: "extension" }>,
-    input: Pick<PromptCommandHandlerContext, "initialModelStep" | "title">,
+    input: Pick<PromptCommandHandlerContext, "initialModelStep" | "keepSetupFlowOpen" | "title">,
   ): Promise<PromptCommandOutcome | undefined> {
     const handler = this.#promptCommandHandler;
     if (handler === undefined)
       return { message: `/${command.name} is not available in this session.` };
 
-    return await handler.handle(command, {
+    const context: PromptCommandHandlerContext = {
       renderer: this.#renderer,
       title: input.title,
       initialModelStep: input.initialModelStep,
       remoteConnection: this.#remoteConnection,
-    });
+    };
+    if (input.keepSetupFlowOpen === true) {
+      return await handler.handle(command, { ...context, keepSetupFlowOpen: true });
+    }
+    return await handler.handle(command, context);
   }
 
   #renderStartupCommandInvocation(
@@ -1096,6 +1148,13 @@ export class EveTUIRunner {
   }
 
   async #applyCommandEffect(effect: PromptCommandOutcome["effect"]): Promise<void> {
+    if (effect?.kind === "connection-added") {
+      this.#vercelStatus?.applyEffect({ kind: "refresh-identity" });
+      this.#authHintStale = true;
+      await this.#refreshConnectionRuntime();
+      await this.#refreshModelAccess();
+      return;
+    }
     if (effect?.kind === "model-access-changed") {
       this.#vercelStatus?.applyEffect({ kind: "refresh-identity" });
       this.#authHintStale = true;
@@ -1109,17 +1168,88 @@ export class EveTUIRunner {
     void this.#refreshSetupAttention(this.#agentInfo);
   }
 
+  async #refreshConnectionRuntime(): Promise<void> {
+    const client = this.#client;
+    const runtimeArtifacts = this.#runtimeArtifacts;
+    if (client === undefined || runtimeArtifacts === undefined) return;
+
+    this.#session = await runtimeArtifacts.refreshAfterSourceChange({
+      createSession: () => client.session(),
+      onRuntimeArtifactsChanged: () => this.#handleRuntimeArtifactsChanged(),
+      session: this.#session,
+    });
+  }
+
   async #executeExtensionCommand(
     command: Extract<PromptCommand, { type: "extension" }>,
     title: string,
-    trigger: "startup" | "command",
-    initialModelStep?: "provider",
+    input: {
+      readonly trigger: "startup" | "command";
+      readonly initialModelStep?: "provider";
+      readonly keepSetupFlowOpen?: true;
+    },
   ): Promise<void> {
-    const outcome = await this.#handleExtensionCommand(command, { initialModelStep, title });
-    this.#renderStartupCommandInvocation(command, trigger);
+    const outcome = await this.#handleExtensionCommand(command, {
+      initialModelStep: input.initialModelStep,
+      keepSetupFlowOpen: input.keepSetupFlowOpen,
+      title,
+    });
+    this.#renderStartupCommandInvocation(command, input.trigger);
     this.#renderCommandOutcome(outcome?.message);
     await this.#applyCommandEffect(outcome?.effect);
     this.#refreshHeaderFromRemoteConnection();
+  }
+
+  /**
+   * Fresh `eve init` launches the TUI with `/model` prefilled. Project-backed
+   * model access depends on the Vercel CLI and a Vercel session, so resolve
+   * only those missing prerequisites before entering the model picker. A probe
+   * failure still opens `/model`: its own-key and external-provider paths do
+   * not require Vercel.
+   */
+  async #runInitialModelOnboarding(title: string): Promise<void> {
+    const appRoot = this.#appRoot;
+    if (appRoot === undefined) return;
+
+    const authStatus = async (): Promise<VercelAuthStatus | undefined> => {
+      try {
+        return await this.#getVercelAuthStatus(appRoot, { signal: this.#authProbeAbort.signal });
+      } catch {
+        return undefined;
+      }
+    };
+
+    let status = await authStatus();
+    if (status === "cli-missing") {
+      await this.#executeExtensionCommand(
+        { type: "extension", name: "vc:install", argument: "" },
+        title,
+        { trigger: "startup", keepSetupFlowOpen: true },
+      );
+      status = await authStatus();
+      if (status === "cli-missing") {
+        this.#renderer.setupFlow?.end();
+        return;
+      }
+    }
+
+    if (status === "logged-out") {
+      await this.#executeExtensionCommand(
+        { type: "extension", name: "vc:login", argument: "" },
+        title,
+        { trigger: "startup", keepSetupFlowOpen: true },
+      );
+      status = await authStatus();
+      if (status === "cli-missing" || status === "logged-out") {
+        this.#renderer.setupFlow?.end();
+        return;
+      }
+    }
+
+    await this.#executeExtensionCommand({ type: "extension", name: "model", argument: "" }, title, {
+      trigger: "startup",
+      initialModelStep: "provider",
+    });
   }
 
   #refreshHeaderFromRemoteConnection(): void {
@@ -1214,6 +1344,31 @@ export class EveTUIRunner {
     }
     this.#connectionAuthRuns.set(event.data.name, run);
     this.#emitConnectionAuthUpdate(run);
+  }
+
+  /**
+   * Marks framework-owned OAuth challenges as parked only after the current
+   * turn has reached its `session.waiting` boundary. A `webhookUrl` is the
+   * runtime's proof that a later callback turn can complete the challenge.
+   */
+  #enterPendingConnectionAuthorization(result: AgentTUIStreamResult): boolean {
+    if (result.turnState?.boundaryEvent !== "session.waiting") {
+      return false;
+    }
+
+    let added = false;
+    for (const run of this.#connectionAuthRuns.values()) {
+      if (run.state !== "required" || run.webhookUrl === undefined) continue;
+      run.state = "pending";
+      this.#pendingConnectionAuths.add(run.name);
+      this.#emitConnectionAuthUpdate(run);
+      added = true;
+    }
+
+    if (added) {
+      this.#renderer.setConnectionAuthPendingCount?.(this.#pendingConnectionAuths.size);
+    }
+    return this.#pendingConnectionAuths.size > 0;
   }
 
   #handleConnectionAuthCompleted(event: AuthorizationCompletedStreamEvent): void {

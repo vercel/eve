@@ -72,9 +72,9 @@ export function Chat() {
 | `stop`    | Abort the active request.                                                      |
 | `reset`   | Clear local events, data, errors, and the local session cursor.                |
 
-Most chat UIs only need `data.messages` and `status`. Drop down to `events` to render lower-level activity such as tool calls and reasoning deltas that the default reducer doesn't surface.
+Most chat UIs only need `data.messages` and `status`. Drop down to `events` when you need the authoritative wire events directly, for example to persist an audit log or build a custom projection.
 
-`data.messages` are `EveMessage[]` following the AI SDK `UIMessage` convention, so they drop straight into any AI SDK UI primitive that accepts a `UIMessage[]`. Parts include user text, assistant text, reasoning, tool calls, tool results, and input requests.
+`data.messages` are `EveMessage[]` following the AI SDK `UIMessage` convention, so they drop straight into any AI SDK UI primitive that accepts a `UIMessage[]`. Parts include user text, assistant text, reasoning, tool calls, tool results, input requests, and connection authorization prompts.
 
 ## Sending and streaming
 
@@ -116,6 +116,38 @@ if (request) {
 ```
 
 `request.prompt` and `request.options` give you what you need to render the approve and deny UI. The default reducer marks the part as responded immediately, then updates it again once eve streams the resumed result.
+
+## Authorization prompts
+
+Connections and tools that need OAuth or another grant emit `authorization.required`. The default reducer projects that into an `authorization` message part with the display name, instructions, device code, and user-facing sign-in URL. Render that part as a normal chat message, then keep the session cursor; eve resumes the parked turn when the callback completes and updates the part after `authorization.completed`:
+
+```tsx
+import type { EveMessagePart } from "eve/react";
+
+function AuthorizationPrompt({ part }: { part: EveMessagePart }) {
+  if (part.type !== "authorization") return null;
+
+  if (part.state === "completed") {
+    return (
+      <p>
+        {part.outcome === "authorized"
+          ? `${part.displayName} connected.`
+          : `${part.displayName} authorization ${part.outcome}.`}
+      </p>
+    );
+  }
+
+  return (
+    <section>
+      <p>{part.description}</p>
+      {part.authorization?.userCode ? <code>{part.authorization.userCode}</code> : null}
+      {part.authorization?.url ? <a href={part.authorization.url}>Sign in</a> : null}
+    </section>
+  );
+}
+```
+
+For fully custom state machines, `authorization.required` and `authorization.completed` are still available on `events` and `onEvent`.
 
 ## Attach page context per turn
 
@@ -221,8 +253,6 @@ Store the full `session` object (`sessionId`, `continuationToken`, `streamIndex`
 For multiple chat threads, keep one saved event log and session cursor per thread. `host`, `reducer`, `session`, `initialEvents`, `initialSession`, `auth`, `headers`, `maxReconnectAttempts`, and `optimistic` are read when the hook creates its store, so remount the chat component when switching threads, for example with `key={chat.id}`.
 
 If the user can refresh or navigate immediately after pressing send, create your app-level chat row and store the pending user message before calling `send()`. After the request starts, persist the session state as soon as it contains a `sessionId`, then reconnect an interrupted in-flight turn with `session.stream({ startIndex: savedEvents.length })` from the lower-level client.
-
-Connection authorization prompts need one extra bit of UI state. eve emits `authorization.required` when a tool needs OAuth or another connection grant. Treat that as a parked chat turn for rendering and persistence: show the authorization prompt, disable ordinary text input for that thread, and keep the session cursor so the callback or a structured decline can continue the same session.
 
 ## Custom hosts and headers
 

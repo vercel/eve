@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EVE_CREATE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import type { SessionAuthContext } from "#channel/types.js";
+import { withVercelOidcProjectResolver } from "#runtime/governance/auth/vercel-oidc-project.js";
 import {
   type AuthFn,
   createIpAllowList,
@@ -694,6 +695,135 @@ describe("verifyVercelOidc", () => {
     }
   });
 
+  it("authenticates a development Vercel user token as a user principal", async () => {
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_current");
+    vi.stubEnv("VERCEL_TARGET_ENV", "development");
+
+    const issuer = await installMockedVercelIssuer("development-user-accept");
+    try {
+      const token = await issuer.signToken({
+        environment: "development",
+        owner: "acme",
+        owner_id: "team_acme",
+        project: "weather-agent",
+        project_id: "prj_current",
+        sub: "owner:acme:project:weather-agent:environment:development",
+        user_id: "user_ada",
+      });
+
+      const result = await verifyVercelOidc(token);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.sessionAuth).toMatchObject({
+          authenticator: "oidc",
+          principalType: "user",
+          subject: "user_ada",
+        });
+      }
+    } finally {
+      issuer.restore();
+    }
+  });
+
+  it("uses an explicit current-project binding for a development user token", async () => {
+    vi.stubEnv("VERCEL_PROJECT_ID", "");
+    vi.stubEnv("VERCEL_TARGET_ENV", "");
+    vi.stubEnv("VERCEL_ENV", "");
+
+    const issuer = await installMockedVercelIssuer("development-user-explicit-project");
+    try {
+      const token = await issuer.signToken({
+        environment: "development",
+        project_id: "prj_current",
+        sub: "owner:acme:project:weather-agent:environment:development",
+        user_id: "user_ada",
+      });
+
+      const result = await verifyVercelOidc(token, {
+        currentVercelProject: {
+          environment: "development",
+          projectId: "prj_current",
+        },
+      });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.sessionAuth).toMatchObject({
+          principalType: "user",
+          subject: "user_ada",
+        });
+      }
+    } finally {
+      issuer.restore();
+    }
+  });
+
+  it("authenticates a development user token as a service principal on preview", async () => {
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_current");
+    vi.stubEnv("VERCEL_TARGET_ENV", "preview");
+
+    const issuer = await installMockedVercelIssuer("development-user-preview-service");
+    try {
+      const token = await issuer.signToken({
+        environment: "development",
+        project_id: "prj_current",
+        sub: "owner:acme:project:weather-agent:environment:development",
+        user_id: "user_ada",
+      });
+
+      const result = await verifyVercelOidc(token);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.sessionAuth).toMatchObject({
+          principalType: "service",
+          subject: "owner:acme:project:weather-agent:environment:development",
+        });
+      }
+    } finally {
+      issuer.restore();
+    }
+  });
+
+  it("rejects a development user token on production", async () => {
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_current");
+    vi.stubEnv("VERCEL_TARGET_ENV", "production");
+
+    const issuer = await installMockedVercelIssuer("development-user-production-reject");
+    try {
+      const token = await issuer.signToken({
+        environment: "development",
+        project_id: "prj_current",
+        sub: "owner:acme:project:weather-agent:environment:development",
+        user_id: "user_ada",
+      });
+
+      await expect(verifyVercelOidc(token)).resolves.toEqual({ ok: false });
+    } finally {
+      issuer.restore();
+    }
+  });
+
+  it("rejects a user_id claim outside development", async () => {
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_current");
+    vi.stubEnv("VERCEL_TARGET_ENV", "preview");
+
+    const issuer = await installMockedVercelIssuer("non-development-user-id");
+    try {
+      const token = await issuer.signToken({
+        environment: "preview",
+        project_id: "prj_current",
+        sub: "owner:acme:project:weather-agent:environment:preview",
+        user_id: "user_ada",
+      });
+
+      await expect(verifyVercelOidc(token)).resolves.toEqual({ ok: false });
+    } finally {
+      issuer.restore();
+    }
+  });
+
   it("rejects a Vercel-issued token whose project_id does not match VERCEL_PROJECT_ID", async () => {
     // Demonstrates the security fix: a token minted for an unrelated
     // Vercel project (with a fully valid signature, audience, and issuer
@@ -1153,6 +1283,52 @@ describe("vercelOidc strategy helper", () => {
       headers: { authorization: `Bearer ${token}` },
     });
     await expect(Promise.resolve(authFn(request))).resolves.toBeNull();
+  });
+
+  it("uses the local host's linked project binding only for bearer requests", async () => {
+    vi.stubEnv("VERCEL_PROJECT_ID", "");
+    vi.stubEnv("VERCEL_TARGET_ENV", "");
+    vi.stubEnv("VERCEL_ENV", "");
+    const issuer = await installMockedVercelIssuer("local-host-binding");
+
+    try {
+      const resolveCurrentProject = vi.fn(() => ({
+        environment: "development" as const,
+        projectId: "prj_linked",
+      }));
+      const authFn = vercelOidc();
+      const unauthenticatedRequest = new Request("http://localhost/eve/v1/session");
+      await expect(
+        withVercelOidcProjectResolver(
+          { request: unauthenticatedRequest, resolveCurrentProject },
+          async () => await authFn(unauthenticatedRequest),
+        ),
+      ).resolves.toBeNull();
+      expect(resolveCurrentProject).not.toHaveBeenCalled();
+
+      const token = await issuer.signToken({
+        environment: "development",
+        project_id: "prj_linked",
+        sub: "owner:acme:project:weather-agent:environment:development",
+        user_id: "user_ada",
+      });
+      const request = new Request("http://localhost/eve/v1/session", {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      const result = await withVercelOidcProjectResolver(
+        {
+          request,
+          resolveCurrentProject,
+        },
+        async () => await authFn(request),
+      );
+
+      expect(result).toMatchObject({ principalType: "user", subject: "user_ada" });
+      expect(resolveCurrentProject).toHaveBeenCalledTimes(1);
+    } finally {
+      issuer.restore();
+      vi.unstubAllEnvs();
+    }
   });
 });
 

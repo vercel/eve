@@ -32,11 +32,11 @@ eve resolves and caches connection tokens per step; they never land in conversat
 
 A connection credential can belong to the agent or to the person using it. This choice is separate from route auth, but user-scoped connection auth depends on route auth: eve can only resolve a user token when the active session has `ctx.session.auth.current?.principalType === "user"`.
 
-| Credential owner | Use when                                                                                                  | Auth shape                                                                                                                                                   |
-| ---------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| App              | The agent should use one shared service, bot, installation, or app credential.                             | `auth: { getToken }` defaults to `principalType: "app"`, or use `connect({ connector: "linear/myagent", principalType: "app" })` with Vercel Connect.       |
-| User             | Each end-user should authorize and use their own third-party account.                                      | `connect("linear/myagent")`, `connect({ connector: "linear/myagent", principalType: "user" })`, or `auth: { principalType: "user", getToken }`.             |
-| User from a job  | Background work should use the same user's OAuth grant that started the work.                              | Start or resume the session through a channel whose route auth resolved that user, or pass an explicit user auth context when dispatching through a channel. |
+| Credential owner | Use when                                                                       | Auth shape                                                                                                                                                   |
+| ---------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| App              | The agent should use one shared service, bot, installation, or app credential. | `auth: { getToken }` defaults to `principalType: "app"`, or use `connect({ connector: "linear/myagent", principalType: "app" })` with Vercel Connect.        |
+| User             | Each end-user should authorize and use their own third-party account.          | `connect("linear/myagent")`, `connect({ connector: "linear/myagent", principalType: "user" })`, or `auth: { principalType: "user", getToken }`.              |
+| User from a job  | Background work should use the same user's OAuth grant that started the work.  | Start or resume the session through a channel whose route auth resolved that user, or pass an explicit user auth context when dispatching through a channel. |
 
 `principalType: "user"` does not mean "ask any human later." It means "key this credential to the authenticated user already attached to the eve session." If the run was started by a schedule, a same-project runtime token, `localDev()`, or another internal runtime path without an end-user principal, a user-scoped connection fails with `reason: "principal_required"` instead of starting OAuth. In that case, either authenticate the inbound channel as a user or configure the connection as app-scoped.
 
@@ -110,7 +110,7 @@ import { defineMcpClientConnection } from "eve/connections";
 import { once } from "eve/tools/approval";
 
 export default defineMcpClientConnection({
-  url: "https://mcp.linear.app/sse",
+  url: "https://mcp.linear.app/mcp",
   description: "Linear workspace.",
   auth: { getToken: async () => ({ token: process.env.LINEAR_API_TOKEN! }) },
   approval: once(),
@@ -130,7 +130,7 @@ import { connect } from "@vercel/connect/eve";
 import { defineMcpClientConnection } from "eve/connections";
 
 export default defineMcpClientConnection({
-  url: "https://mcp.linear.app/sse",
+  url: "https://mcp.linear.app/mcp",
   description: "Linear workspace: issues, projects, cycles, and comments.",
   auth: connect("linear/myagent"),
 });
@@ -147,7 +147,7 @@ import { connect } from "@vercel/connect/eve";
 import { defineMcpClientConnection } from "eve/connections";
 
 export default defineMcpClientConnection({
-  url: "https://mcp.linear.app/sse",
+  url: "https://mcp.linear.app/mcp",
   description: "Linear workspace: issues, projects, cycles, and comments.",
   auth: connect({ connector: "linear/myagent", principalType: "app" }),
 });
@@ -157,12 +157,12 @@ App-scoped Connect auth is non-interactive. eve asks Vercel Connect for an app t
 
 ### Troubleshooting Vercel Connect auth
 
-| Symptom                                      | What it means                                                                                                                    | Fix                                                                                                                                          |
-| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `reason: "principal_required"`               | A user-scoped connection ran without an authenticated user on the active session.                                                 | Return `principalType: "user"` from the channel's route auth, or change the connection to `principalType: "app"` if it should be shared.     |
-| `authorization.required` appears but no UI   | eve parked the turn for OAuth, but the channel or frontend is not rendering the challenge.                                        | Render the challenge from the stream event and continue the same session after the callback.                                                  |
-| OAuth works locally but fails after deploy   | The project may not be linked to the Connect client, or the deployed runtime may not have the expected Vercel OIDC/project scope. | Run Connect setup from the consuming project directory, link the project, deploy again, and verify the connector UID in `connect("...")`.     |
-| A scheduled or internal run needs user OAuth | Schedules and runtime callers do not automatically carry an end-user principal.                                                   | Dispatch through a user-authenticated channel when work is user-owned, or use app-scoped auth for agent-owned background work.                |
+| Symptom                                      | What it means                                                                                                                     | Fix                                                                                                                                       |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `reason: "principal_required"`               | A user-scoped connection ran without an authenticated user on the active session.                                                 | Return `principalType: "user"` from the channel's route auth, or change the connection to `principalType: "app"` if it should be shared.  |
+| `authorization.required` appears but no UI   | eve parked the turn for OAuth, but the channel or frontend is not rendering the challenge.                                        | Render the challenge from the stream event and continue the same session after the callback.                                              |
+| OAuth works locally but fails after deploy   | The project may not be linked to the Connect client, or the deployed runtime may not have the expected Vercel OIDC/project scope. | Run Connect setup from the consuming project directory, link the project, deploy again, and verify the connector UID in `connect("...")`. |
+| A scheduled or internal run needs user OAuth | Schedules and runtime callers do not automatically carry an end-user principal.                                                   | Dispatch through a user-authenticated channel when work is user-owned, or use app-scoped auth for agent-owned background work.            |
 
 ## Self-hosted interactive OAuth
 
@@ -176,7 +176,7 @@ import {
 } from "eve/connections";
 
 export default defineMcpClientConnection({
-  url: "https://mcp.linear.app/sse",
+  url: "https://mcp.linear.app/mcp",
   description: "Linear workspace.",
   auth: defineInteractiveAuthorization<{ verifier: string }>({
     // Probed before every tool call. Return a token to run the tool;

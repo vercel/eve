@@ -75,6 +75,34 @@ export function normalizeDevelopmentServerClientUrl(serverUrl: string): string {
   return serverUrl;
 }
 
+/**
+ * Returns whether a supplied URL identifies this app's healthy local development
+ * server. Only that server receives the local TUI credential path.
+ */
+export async function isActiveDevelopmentServerForApp(input: {
+  readonly appRoot: string;
+  readonly serverUrl: string;
+}): Promise<boolean> {
+  try {
+    const project = await resolveDiscoveryProject(input.appRoot);
+    const recordedServerUrl = await new DevelopmentServerState(project).read();
+    if (
+      recordedServerUrl === undefined ||
+      !isLoopbackServerUrl(recordedServerUrl) ||
+      !(await isEveServerHealthy(recordedServerUrl))
+    ) {
+      return false;
+    }
+
+    return (
+      new URL(recordedServerUrl).origin ===
+      new URL(normalizeDevelopmentServerClientUrl(input.serverUrl)).origin
+    );
+  } catch {
+    return false;
+  }
+}
+
 function isAddressInUseError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error && error.code === "EADDRINUSE";
 }

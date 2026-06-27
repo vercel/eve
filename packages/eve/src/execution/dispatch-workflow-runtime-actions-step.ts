@@ -15,6 +15,7 @@ import type { RuntimeSubagentResultActionResult } from "#runtime/actions/types.j
 /** Dispatches the child-agent action currently blocking a dynamic workflow. */
 export async function dispatchWorkflowRuntimeActionsStep(input: {
   readonly callbackBaseUrl?: string;
+  readonly parentContinuationToken?: string;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -50,6 +51,7 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
 
   return dispatchRuntimeActionsStep({
     callbackBaseUrl: input.callbackBaseUrl,
+    parentContinuationToken: input.parentContinuationToken,
     parentWritable: input.parentWritable,
     serializedContext: input.serializedContext,
     sessionState: createDurableSessionState({ session: sessionWithBatch }),

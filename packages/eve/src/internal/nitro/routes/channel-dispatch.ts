@@ -9,8 +9,10 @@ import type { RouteHandlerArgs, WebSocketRouteHooks } from "#channel/routes.js";
 import { createSendFn } from "#channel/send.js";
 import { createGetSessionFn } from "#channel/session.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
+import { withVercelOidcProjectResolver } from "#runtime/governance/auth/vercel-oidc-project.js";
 
 const log = createLogger("channel.dispatch");
 
@@ -60,10 +62,12 @@ export async function dispatchChannelRequest(
   let response: Response;
 
   try {
-    if (matchedChannel.handler) {
-      // Authored CompiledChannel route — build RouteHandlerArgs.
-      response = await matchedChannel.handler(event.req, routeArgs.args);
-    } else {
+    response = await withDevelopmentVercelOidcContext(config, event.req, async () => {
+      if (matchedChannel.handler) {
+        // Authored CompiledChannel route — build RouteHandlerArgs.
+        return await matchedChannel.handler(event.req, routeArgs.args);
+      }
+
       // Framework-internal fetch-only channel (e.g. the connection
       // callback route). Build a RouteContext with the agent handle.
       const ctx: RouteContext = {
@@ -73,8 +77,8 @@ export async function dispatchChannelRequest(
         requestIp: routeArgs.args.requestIp,
       };
 
-      response = await matchedChannel.fetch(event.req, ctx);
-    }
+      return await matchedChannel.fetch(event.req, ctx);
+    });
   } catch (error) {
     // Without this a handler throw is only Nitro's default 5xx, with no eve log.
     const errorId = logError(log, "channel handler threw", error, {
@@ -108,10 +112,15 @@ export async function dispatchChannelWebSocketRequest(
     );
   }
 
+  const websocket = matchedChannel.websocket;
   const routeArgs = buildRouteArgs(event, bundle, matchedChannel.name);
 
   try {
-    const hooks = await matchedChannel.websocket(event.req, routeArgs.args);
+    const hooks = await withDevelopmentVercelOidcContext(
+      config,
+      event.req,
+      async () => await websocket(event.req, routeArgs.args),
+    );
     flushBackgroundTasks(event, routeArgs.backgroundTasks, routeKey, matchedChannel.name);
     return hooks;
   } catch (error) {
@@ -125,6 +134,30 @@ export async function dispatchChannelWebSocketRequest(
       500,
     );
   }
+}
+
+async function withDevelopmentVercelOidcContext<T>(
+  config: NitroArtifactsConfig,
+  request: Request,
+  callback: () => Promise<T>,
+): Promise<T> {
+  const appRoot = config.appRoot;
+  if (config.dev !== true || appRoot === undefined) {
+    return await callback();
+  }
+
+  return await withVercelOidcProjectResolver(
+    {
+      request,
+      resolveCurrentProject: async () => {
+        const link = await readVercelProjectLink(appRoot);
+        return link === undefined
+          ? undefined
+          : { environment: "development", projectId: link.projectId };
+      },
+    },
+    callback,
+  );
 }
 
 function buildRouteArgs(

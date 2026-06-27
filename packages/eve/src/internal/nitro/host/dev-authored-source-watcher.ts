@@ -14,7 +14,6 @@ import {
 } from "#internal/nitro/host/channel-routes.js";
 import { prepareApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
-import { registerDevelopmentRebuildHandle } from "#internal/nitro/host/dev-rebuild-registry.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 import {
   getDevelopmentEnvironmentFilePaths,
@@ -72,6 +71,7 @@ interface DevelopmentWatcherNitro {
 export interface AuthoredSourceWatcherHandle {
   close(): Promise<void>;
   flush(): Promise<void>;
+  rebuild(): Promise<void>;
 }
 
 /**
@@ -104,14 +104,9 @@ export async function startAuthoredSourceWatcher(input: {
   });
   const watcherReady = waitForWatcherReady(watcher);
 
-  const flush = async () => {
+  const rebuild = async (force: boolean) => {
     if (closed) {
       return;
-    }
-
-    if (debounceTimer !== undefined) {
-      clearTimeout(debounceTimer);
-      debounceTimer = undefined;
     }
 
     queue = queue
@@ -121,7 +116,7 @@ export async function startAuthoredSourceWatcher(input: {
         }
 
         const changeEvents = [...pendingEvents.values()];
-        if (changeEvents.length === 0) {
+        if (!force && changeEvents.length === 0) {
           return;
         }
 
@@ -137,7 +132,9 @@ export async function startAuthoredSourceWatcher(input: {
           previousHost.appRoot,
           changedPaths,
         );
-        console.log(formatChangeDetectedLogLine(previousHost.appRoot, changeEvents));
+        if (changeEvents.length > 0) {
+          console.log(formatChangeDetectedLogLine(previousHost.appRoot, changeEvents));
+        }
 
         try {
           if (hasEnvironmentChange) {
@@ -196,8 +193,20 @@ export async function startAuthoredSourceWatcher(input: {
       });
     await queue;
   };
-  const unregisterRebuildHandle = registerDevelopmentRebuildHandle(currentHost.appRoot, { flush });
-
+  const flush = async () => {
+    if (debounceTimer !== undefined) {
+      clearTimeout(debounceTimer);
+      debounceTimer = undefined;
+    }
+    await rebuild(false);
+  };
+  const forceRebuild = async () => {
+    if (debounceTimer !== undefined) {
+      clearTimeout(debounceTimer);
+      debounceTimer = undefined;
+    }
+    await rebuild(true);
+  };
   watcher.on("all", (event, changedPath) => {
     if (closed || !isWatcherReady) {
       return;
@@ -220,7 +229,6 @@ export async function startAuthoredSourceWatcher(input: {
   return {
     async close() {
       closed = true;
-      unregisterRebuildHandle();
 
       if (debounceTimer !== undefined) {
         clearTimeout(debounceTimer);
@@ -231,6 +239,7 @@ export async function startAuthoredSourceWatcher(input: {
       await queue;
     },
     flush,
+    rebuild: forceRebuild,
   };
 }
 

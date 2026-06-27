@@ -237,6 +237,59 @@ describe("emitStreamContent empty delivery", () => {
 });
 
 describe("emitStreamContent action requests", () => {
+  it("emits a provider action batch before any provider result arrives", async () => {
+    const events: Parameters<HarnessEmitFn>[0][] = [];
+    const emit: HarnessEmitFn = async (event) => {
+      events.push(event);
+    };
+    let releaseResults!: () => void;
+    const resultsPending = new Promise<void>((resolve) => {
+      releaseResults = resolve;
+    });
+    const searches = Array.from({ length: 10 }, (_, index) => ({
+      input: { query: `tri-state-${index + 1}` },
+      providerExecuted: true,
+      toolCallId: `search-${index + 1}`,
+      toolName: "web_search",
+      type: "tool-call" as const,
+    }));
+
+    async function* controlledStream(): AsyncIterable<TextStreamPart<ToolSet>> {
+      for (const call of searches) {
+        yield call as TextStreamPart<ToolSet>;
+      }
+      await resultsPending;
+      for (const call of searches) {
+        yield {
+          input: call.input,
+          output: { results: [] },
+          providerExecuted: true,
+          toolCallId: call.toolCallId,
+          toolName: call.toolName,
+          type: "tool-result",
+        } as TextStreamPart<ToolSet>;
+      }
+      yield { finishReason: "stop", type: "finish-step" } as TextStreamPart<ToolSet>;
+    }
+
+    const run = emitStreamContent(emit, EMISSION_STATE, controlledStream());
+    try {
+      await vi.waitFor(() => {
+        const actionRequests = events.filter((event) => event.type === "actions.requested");
+        expect(actionRequests).toHaveLength(1);
+        expect(actionRequests[0]?.data.actions.map((action) => action.callId)).toEqual(
+          searches.map((call) => call.toolCallId),
+        );
+      });
+      expect(events.some((event) => event.type === "action.result")).toBe(false);
+    } finally {
+      releaseResults();
+    }
+
+    const streamResult = await run;
+    expect([...streamResult.emittedActionCallIds]).toEqual(searches.map((call) => call.toolCallId));
+  });
+
   it("completes pre-tool text before emitting a streamed action request", async () => {
     const emit = createEmitStub();
     const tools = new Map<string, HarnessToolDefinition>([

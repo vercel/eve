@@ -49,6 +49,8 @@ const log = createLogger("execution.dispatch-runtime-actions");
 
 export async function dispatchRuntimeActionsStep(input: {
   readonly callbackBaseUrl?: string;
+  /** Internal hook that receives child completion and HITL payloads. */
+  readonly parentContinuationToken?: string;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -106,6 +108,7 @@ export async function dispatchRuntimeActionsStep(input: {
             capabilities,
             channelMetadata,
             initiatorAuth,
+            parentContinuationToken: input.parentContinuationToken,
             session,
           });
           const handle = await childRuntime.run(runInput);
@@ -131,6 +134,7 @@ export async function dispatchRuntimeActionsStep(input: {
             childSessionId = await startRemoteAgentSession({
               action,
               callbackBaseUrl: input.callbackBaseUrl,
+              callbackToken: input.parentContinuationToken,
               remote: resolvedRemote,
               session,
             });

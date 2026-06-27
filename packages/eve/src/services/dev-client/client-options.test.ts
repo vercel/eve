@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   resolveDevelopmentClientOptions,
+  resolveLocalDevelopmentClientOptions,
   resolveRemoteDevelopmentClientOptions,
 } from "./client-options.js";
 import { createDevelopmentCredentialGate } from "./credential-gate.js";
@@ -30,6 +31,21 @@ describe("resolveDevelopmentClientOptions", () => {
       expect(isLocalDevelopmentServerUrl(url)).toBe(true);
       expect(resolveDevelopmentClientOptions(url).auth).toBeUndefined();
     }
+  });
+
+  it("uses an explicit per-request bearer for the local TUI server", () => {
+    const token = vi.fn(async () => "user-oidc-token");
+
+    const options = resolveLocalDevelopmentClientOptions({
+      serverUrl: "http://127.0.0.1:3000",
+      token,
+    });
+
+    expect(options).toMatchObject({
+      auth: { bearer: token },
+      host: "http://127.0.0.1:3000",
+      redirect: "manual",
+    });
   });
 
   it("binds an authorized credential gate to a non-redirecting client", () => {

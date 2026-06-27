@@ -4,7 +4,9 @@ import { describe, expect, it, vi } from "vitest";
 import { CHANNEL_SENTINEL, type CompiledChannel } from "#channel/compiled-channel.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { DeliverInput, RunInput, Runtime } from "#channel/types.js";
+import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import type { RouteContext } from "#public/definitions/channel.js";
+import { resolveVercelOidcCurrentProject } from "#runtime/governance/auth/vercel-oidc-project.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import {
   dispatchChannelRequest,
@@ -16,7 +18,12 @@ vi.mock("#internal/nitro/routes/runtime-stack.js", () => ({
   resolveNitroChannelRuntimeBundle: vi.fn(),
 }));
 
+vi.mock("#internal/vercel/project-link.js", () => ({
+  readVercelProjectLink: vi.fn(),
+}));
+
 const mockedResolveNitroChannelRuntimeBundle = vi.mocked(resolveNitroChannelRuntimeBundle);
+const mockedReadVercelProjectLink = vi.mocked(readVercelProjectLink);
 const runtime = {} as Runtime;
 
 function createDeferred<T>() {
@@ -54,6 +61,49 @@ function createEvent(input?: {
 }
 
 describe("dispatchChannelRequest", () => {
+  it("supplies the current linked project to Vercel OIDC during local development", async () => {
+    mockedReadVercelProjectLink
+      .mockResolvedValueOnce({ orgId: "team_1", projectId: "prj_first" })
+      .mockResolvedValueOnce({ orgId: "team_1", projectId: "prj_second" });
+    const currentProjects: Array<Awaited<ReturnType<typeof resolveVercelOidcCurrentProject>>> = [];
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      channels: [
+        {
+          handler: async (request) => {
+            currentProjects.push(await resolveVercelOidcCurrentProject(request));
+            return new Response("ok");
+          },
+          fetch: async () => new Response("not used"),
+          logicalPath: "agent/channels/eve.ts",
+          method: "POST",
+          name: "eve",
+          sourceId: "channel-eve",
+          sourceKind: "module",
+          urlPath: "/eve/v1/session",
+        } satisfies ResolvedChannelDefinition,
+      ],
+      runtime,
+    });
+
+    const response = await dispatchChannelRequest(
+      createEvent({ waitUntil: vi.fn() }),
+      "POST /eve/v1/session",
+      { appRoot: "/app/agent", dev: true },
+    );
+    const nextResponse = await dispatchChannelRequest(
+      createEvent({ waitUntil: vi.fn() }),
+      "POST /eve/v1/session",
+      { appRoot: "/app/agent", dev: true },
+    );
+
+    expect(response.status).toBe(200);
+    expect(nextResponse.status).toBe(200);
+    expect(currentProjects).toEqual([
+      { environment: "development", projectId: "prj_first" },
+      { environment: "development", projectId: "prj_second" },
+    ]);
+  });
+
   it("returns the response before background work settles when Nitro provides waitUntil", async () => {
     const deferred = createDeferred<void>();
     const waitUntil = vi.fn<(task: Promise<unknown>) => void>();

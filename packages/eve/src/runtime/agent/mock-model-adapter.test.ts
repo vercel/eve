@@ -1,7 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BootstrapGenerateResult } from "#runtime/agent/bootstrap-model-utils.js";
-import { createMockAuthoredRuntimeModel } from "#runtime/agent/mock-model-adapter.js";
+import {
+  createMockAuthoredRuntimeModel,
+  shouldMockAuthoredRuntimeModels,
+} from "#runtime/agent/mock-model-adapter.js";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 async function generateWithPrompt(
   prompt: unknown,
@@ -23,6 +30,13 @@ async function generateWithPrompt(
 }
 
 describe("createMockAuthoredRuntimeModel", () => {
+  it("activates for the explicit spawned-server test seam", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EVE_MOCK_AUTHORED_MODELS", "1");
+
+    expect(shouldMockAuthoredRuntimeModels()).toBe(true);
+  });
+
   it("activates a matching skill when the available skill line includes a workspace path", async () => {
     const result = await generateWithPrompt([
       {

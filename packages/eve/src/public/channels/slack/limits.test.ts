@@ -22,6 +22,13 @@ describe("truncateTypingStatus", () => {
     expect(truncateTypingStatus("   Running   foo,   bar  ")).toBe("Running foo, bar");
   });
 
+  it("strips Markdown formatting that assistant status renders literally", () => {
+    expect(truncateTypingStatus("**Considering turbo tasks**")).toBe("Considering turbo tasks");
+    expect(truncateTypingStatus("Running `turbo` for [eve](https://github.com/vercel/eve)")).toBe(
+      "Running turbo for eve",
+    );
+  });
+
   it("caps at the typing-status limit with a trailing ellipsis", () => {
     const long = "a".repeat(SLACK_TYPING_STATUS_MAX_LENGTH + 20);
     const result = truncateTypingStatus(long);

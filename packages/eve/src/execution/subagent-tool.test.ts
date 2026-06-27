@@ -83,6 +83,21 @@ describe("buildSubagentRunInput", () => {
     expect(childContinuationToken).toMatch(/^subagent:parent-session:call-1$/);
   });
 
+  it("routes parent notifications to an active turn inbox when supplied", () => {
+    const { runInput } = buildSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      parentContinuationToken: "turn-inbox",
+      session: makeSession(),
+    });
+
+    expect(runInput.adapter.state).toMatchObject({
+      parentContinuationToken: "turn-inbox",
+    });
+  });
+
   it("forwards channelMetadata to the child run input", () => {
     const projection = {
       kind: "channel:slack",

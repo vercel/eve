@@ -113,7 +113,7 @@ const appAuth: AuthFn<Request> = async (request) => {
 };
 
 export default eveChannel({
-  auth: [appAuth, localDev(), vercelOidc()],
+  auth: [appAuth, vercelOidc(), localDev()],
 });
 ```
 
