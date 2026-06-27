@@ -1,5 +1,11 @@
 # eve
 
+## 0.16.2
+
+### Patch Changes
+
+- 9580a88: Disable the Workflow SDK turbo first-delivery path for eve. Workflow runs now stay on the fully ordered runtime path instead of the beta turbo mode.
+
 ## 0.16.1
 
 ### Patch Changes
