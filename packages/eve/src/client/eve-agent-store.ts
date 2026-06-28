@@ -173,6 +173,14 @@ export class EveAgentStore<TData> {
         signal: createAbortSignal(preparedInput.signal, abortController.signal),
       });
 
+      if (!this.#isCurrentOperation(operationId)) {
+        return;
+      }
+
+      // Eagerly notify listeners of the session ID before streaming begins.
+      this.#callbacks.onSessionChange?.(this.#session.state);
+      this.#publish();
+
       let sawEvent = false;
       for await (const event of response) {
         if (!this.#isCurrentOperation(operationId)) {

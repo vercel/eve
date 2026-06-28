@@ -72,6 +72,12 @@ export class ClientSession {
     const postResult = await this.#postTurn(payload, state);
     const { continuationToken, sessionId } = postResult;
 
+    // Eagerly surface the session ID so callers can read it from
+    // `session.state` before the event stream is consumed.
+    if (sessionId !== state.sessionId) {
+      this.#state = { ...state, sessionId };
+    }
+
     return new MessageResponse<TOutput>({
       continuationToken,
       createStream: () => this.#createEventStream(sessionId, continuationToken, state, payload),
