@@ -2,11 +2,15 @@ import { Command, CommanderError, InvalidArgumentError } from "#compiled/command
 import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import { encodeBasicCredentials } from "#internal/http/basic-auth.js";
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
 import { eveCliBanner } from "#cli/banner.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "#cli/dev/ui-options.js";
+import {
+  parseDevelopmentHeaderOption,
+  resolveDevelopmentUrlTarget,
+  type DevelopmentRequestHeaders,
+} from "#cli/dev/url-target.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import { LOG_DISPLAY_MODES, parseLogDisplayMode } from "#cli/dev/tui/log-display-mode.js";
 import { resolveTuiTitle, type DevelopmentTuiTarget } from "#cli/dev/tui/target.js";
@@ -31,8 +35,6 @@ interface CliLogger {
   error(message: string): void;
   log(message: string): void;
 }
-
-type DevelopmentRequestHeaders = Readonly<Record<string, string>>;
 
 interface DevelopmentCliOptions {
   assistantResponseStats?: AssistantResponseStatsMode;
@@ -252,103 +254,6 @@ function parseContextSizeOption(value: string): number {
 
 function hasInteractiveTerminal(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
-}
-
-function parseDevelopmentHeaderOption(
-  value: string,
-  previous: DevelopmentRequestHeaders = {},
-): DevelopmentRequestHeaders {
-  const separatorIndex = value.indexOf(":");
-  if (separatorIndex < 1) {
-    throw new InvalidArgumentError(`Expected header in "Name: value" format, received "${value}".`);
-  }
-
-  const name = value.slice(0, separatorIndex).trim();
-  const headerValue = value.slice(separatorIndex + 1).trim();
-  try {
-    new Headers([[name, headerValue]]);
-  } catch {
-    throw new InvalidArgumentError(`Expected a valid HTTP header, received "${value}".`);
-  }
-  return mergeDevelopmentHeaders(previous, { [name]: headerValue }) ?? {};
-}
-
-function resolveDevelopmentUrlTarget(
-  options: DevelopmentCliOptions,
-  positionalUrl: string | undefined,
-): { readonly headers?: DevelopmentRequestHeaders; readonly serverUrl: string } | undefined {
-  if (options.url !== undefined && positionalUrl !== undefined) {
-    throw new InvalidArgumentError("Pass either --url or a bare URL, not both.");
-  }
-
-  const url = options.url ?? positionalUrl;
-  if (url === undefined) {
-    if (options.header !== undefined) {
-      throw new InvalidArgumentError(
-        "The --header option can only be used with --url or a bare URL.",
-      );
-    }
-    return undefined;
-  }
-
-  if (options.host !== undefined) {
-    throw new InvalidArgumentError("The --host option cannot be used with --url.");
-  }
-  if (options.port !== undefined) {
-    throw new InvalidArgumentError("The --port option cannot be used with --url.");
-  }
-  if (options.ui === false) {
-    throw new InvalidArgumentError("The --no-ui option cannot be used with --url.");
-  }
-
-  const parsedUrl = URL.parse(url);
-  if (parsedUrl === null) {
-    throw new InvalidArgumentError(`Expected an absolute http(s) URL, received "${url}".`);
-  }
-
-  const headers = mergeDevelopmentHeaders(extractDevelopmentUrlHeaders(parsedUrl), options.header);
-  const serverUrl = parsedUrl.toString();
-  return headers === undefined ? { serverUrl } : { headers, serverUrl };
-}
-
-function mergeDevelopmentHeaders(
-  base: DevelopmentRequestHeaders | undefined,
-  override: DevelopmentRequestHeaders | undefined,
-): DevelopmentRequestHeaders | undefined {
-  if (base === undefined) return override;
-  if (override === undefined) return base;
-
-  const headers: Record<string, string> = {};
-  const overrideNames = new Set(Object.keys(override).map((name) => name.toLowerCase()));
-  for (const [name, value] of Object.entries(base)) {
-    if (!overrideNames.has(name.toLowerCase())) {
-      headers[name] = value;
-    }
-  }
-  for (const [name, value] of Object.entries(override)) {
-    headers[name] = value;
-  }
-  return headers;
-}
-
-function extractDevelopmentUrlHeaders(url: URL): DevelopmentRequestHeaders | undefined {
-  if (url.username === "" && url.password === "") return undefined;
-
-  const username = decodeUrlUserInfo(url.username, "username");
-  const password = decodeUrlUserInfo(url.password, "password");
-  url.username = "";
-  url.password = "";
-  return {
-    Authorization: `Basic ${encodeBasicCredentials(username, password)}`,
-  };
-}
-
-function decodeUrlUserInfo(value: string, label: "username" | "password"): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    throw new InvalidArgumentError(`Expected a valid URL-encoded ${label} in URL userinfo.`);
-  }
 }
 
 function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Command {
