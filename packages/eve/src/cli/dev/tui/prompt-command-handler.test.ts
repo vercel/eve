@@ -74,7 +74,7 @@ describe("createPromptCommandHandler", () => {
     });
   });
 
-  it("refuses an explicit model slug when the model is an external provider", async () => {
+  it("refuses an explicit model slug when the model uses an external provider", async () => {
     const applyModel = vi.fn(
       async ({ slug }: { appRoot: string; slug: string }) =>
         ({ kind: "changed", to: slug }) as const,
@@ -82,13 +82,13 @@ describe("createPromptCommandHandler", () => {
     const handler = createPromptCommandHandler({
       target: LOCAL_TARGET,
       applyModel,
-      modelChangeRefusal: async () => "Model is pinned to the external provider `anthropic`.",
+      modelChangeRefusal: async () => "Model is pinned to the external model provider `anthropic`.",
     });
 
     await expect(
       handler.handle({ type: "extension", name: "model", argument: "openai/gpt-5.4" }, context()),
     ).resolves.toEqual({
-      message: "Model is pinned to the external provider `anthropic`.",
+      message: "Model is pinned to the external model provider `anthropic`.",
     });
     expect(applyModel).not.toHaveBeenCalled();
   });

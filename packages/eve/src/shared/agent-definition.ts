@@ -27,9 +27,10 @@ export type AgentReasoningDefinition = NonNullable<CallSettings["reasoning"]>;
  *   provider slug carried in the model id (e.g. `"anthropic"`), best-effort.
  *   `byok` is set to that provider slug when a `providerOptions.gateway.byok`
  *   block is present.
- * - `external`: a direct provider instance (e.g. `anthropic(...)`) that bypasses
- *   the gateway and talks to the provider's own endpoint. `provider` is the AI
- *   SDK provider name (e.g. `"anthropic"`).
+ * - `external`: an AI SDK model instance whose provider is not `gateway`. It
+ *   can represent a provider or a router such as OpenRouter. eve does not route
+ *   it through AI Gateway. `provider` is the AI SDK provider name (e.g.
+ *   `"anthropic"`).
  *
  * This is a routing fact, not a model-existence check; it does not assert the
  * model id names a real model.

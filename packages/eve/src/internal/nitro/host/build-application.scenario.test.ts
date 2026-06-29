@@ -5,6 +5,7 @@ import type { Nitro } from "nitro/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createCompiledAgentManifest } from "#compiler/manifest.js";
+import type { CompiledRuntimeModelReference } from "#compiler/manifest.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
@@ -94,13 +95,24 @@ vi.mock("../../workflow-bundle/builder.js", () => ({
 
 const createScratchDirectory = useTemporaryDirectories();
 
-function createPreparedHost(appRoot: string): PreparedApplicationHost {
+function createPreparedHost(
+  appRoot: string,
+  options: {
+    readonly compactionModel?: CompiledRuntimeModelReference;
+    readonly model?: CompiledRuntimeModelReference;
+  } = {},
+): PreparedApplicationHost {
   const agentRoot = join(appRoot, "agent");
   const manifest = createCompiledAgentManifest({
     agentRoot,
     appRoot,
     config: {
-      model: { id: "openai/gpt-5.4", routing: { kind: "gateway", target: "openai" } },
+      compaction:
+        options.compactionModel === undefined ? undefined : { model: options.compactionModel },
+      model: options.model ?? {
+        id: "openai/gpt-5.4",
+        routing: { kind: "gateway", target: "openai" },
+      },
       name: "scenario-test-agent",
     },
   });
@@ -187,6 +199,60 @@ describe("buildApplication", () => {
     expect(summary.kind).toBe(VERCEL_EVE_AGENT_SUMMARY_KIND);
     expect(summary.schemaVersion).toBe(VERCEL_EVE_AGENT_SUMMARY_VERSION);
     expect((summary.agent as { name: string }).name).toBe("scenario-test-agent");
+  });
+
+  it("does not warn for AI Gateway models during production builds", async () => {
+    vi.stubEnv("VERCEL", "");
+    const appRoot = await createScratchDirectory("eve-build-application-gateway-model-");
+    const outputDir = join(appRoot, ".output");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      prepareApplicationHostMock.mockResolvedValueOnce(createPreparedHost(appRoot));
+      createApplicationNitroMock.mockResolvedValueOnce(createNitroStub(outputDir));
+
+      const { buildApplication } = await import("#internal/nitro/host/build-application.js");
+      await buildApplication(appRoot);
+
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("warns when a production build includes Codex subscription models", async () => {
+    vi.stubEnv("VERCEL", "");
+    const appRoot = await createScratchDirectory("eve-build-application-codex-model-");
+    const outputDir = join(appRoot, ".output");
+    const model: CompiledRuntimeModelReference = {
+      id: "codex/gpt-5.5",
+      routing: { kind: "external", provider: "codex" },
+    };
+    const compactionModel: CompiledRuntimeModelReference = {
+      id: "codex/gpt-5.4-mini",
+      routing: { kind: "external", provider: "codex" },
+    };
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      prepareApplicationHostMock.mockResolvedValueOnce(
+        createPreparedHost(appRoot, {
+          compactionModel,
+          model,
+        }),
+      );
+      createApplicationNitroMock.mockResolvedValueOnce(createNitroStub(outputDir));
+
+      const { buildApplication } = await import("#internal/nitro/host/build-application.js");
+      await buildApplication(appRoot);
+
+      expect(warnSpy).toHaveBeenCalledOnce();
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Warning [codex-model-in-production-build]: Codex subscription model usage detected in production build (primary model: codex/gpt-5.5, compaction model: codex/gpt-5.4-mini). Confirm the subscription terms allow the deployed use case, or switch production to AI Gateway/provider-owned credentials.",
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("builds isolated Vercel Nitro surfaces and stitches workflow functions", async () => {

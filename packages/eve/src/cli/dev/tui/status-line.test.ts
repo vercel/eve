@@ -173,7 +173,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(external).toBe("anthropic/claude-sonnet-4-6 · External endpoint");
+    expect(external).toBe("anthropic/claude-sonnet-4-6 · External model provider");
 
     const linked = buildStatusLine({
       model: "m",

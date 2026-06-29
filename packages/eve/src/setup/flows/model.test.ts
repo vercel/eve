@@ -2,6 +2,7 @@ import pc from "picocolors";
 import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import type { CodexModelCatalogEntry } from "#internal/codex-model-catalog.js";
 import type { GatewayCatalogModel } from "#setup/boxes/select-model.js";
 import type {
   PrompterValue,
@@ -32,6 +33,11 @@ const CATALOG: GatewayCatalogModel[] = [
   },
 ];
 
+const CODEX_CATALOG: CodexModelCatalogEntry[] = [
+  { slug: "gpt-5.4", displayName: "GPT-5.4", contextWindowTokens: 272_000 },
+  { slug: "gpt-5.5", displayName: "GPT-5.5", contextWindowTokens: 272_000 },
+];
+
 function flowDeps(overrides: Partial<ModelFlowDeps> = {}): Partial<ModelFlowDeps> {
   return {
     readCurrentModel: vi.fn(async () => ({
@@ -44,6 +50,7 @@ function flowDeps(overrides: Partial<ModelFlowDeps> = {}): Partial<ModelFlowDeps
         ({ kind: "changed", to: slug }) as const,
     ),
     selectModel: { fetchModels: async () => CATALOG },
+    fetchCodexModels: vi.fn(async () => CODEX_CATALOG),
     detectProviderStatus: vi.fn(
       async () => ({ kind: "gateway-project", projectName: "my-agent" }) as const,
     ),
@@ -66,7 +73,11 @@ interface MenuPaint {
  * "esc"), records every painted menu, and answers each catalog picker
  * prompt from the `picker` queue ("esc" cancels that picker).
  */
-function scriptedPrompter(input: { menu: (PrompterValue | "esc")[]; picker?: string[] }) {
+function scriptedPrompter(input: {
+  menu: (PrompterValue | "esc")[];
+  onPicker?: (opts: SingleSelectOptions<PrompterValue>) => void;
+  picker?: string[];
+}) {
   const menuPaints: MenuPaint[] = [];
   const menuScript = [...input.menu];
   const pickerScript = [...(input.picker ?? [])];
@@ -84,6 +95,7 @@ function scriptedPrompter(input: { menu: (PrompterValue | "esc")[]; picker?: str
         if (next === "esc") throw new WizardCancelledError();
         return next;
       }
+      input.onPicker?.(opts);
       const answer = pickerScript.shift();
       if (answer === undefined) {
         throw new Error(`Unexpected picker prompt: "${opts.message}"`);
@@ -127,7 +139,7 @@ describe("runModelFlow", () => {
     ]);
   });
 
-  it("disables both rows for an external-provider model and never asks to configure a provider", async () => {
+  it("shows an external model provider as an immutable status", async () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
     const deps = flowDeps({
       readCurrentModel: vi.fn(async () => ({
@@ -135,7 +147,7 @@ describe("runModelFlow", () => {
         routing: { kind: "external", provider: "anthropic" } as const,
         editable: false,
       })),
-      // Even though detection finds nothing, external routing must NOT surface
+      // Even though detection finds nothing, external routing must not surface
       // the "Configure model access" gateway UX.
       detectProviderStatus: vi.fn(async () => ({ kind: "unset" }) as const),
     });
@@ -148,29 +160,91 @@ describe("runModelFlow", () => {
       {
         options: [
           {
-            value: "model",
-            label: "Change model",
-            disabled: true,
-            description: "Set via an SDK model call in agent.ts; edit the source to change it",
-          },
-          {
             value: "provider",
-            label: "Change provider",
+            label: "Model provider",
             disabled: true,
-            description: "Disabled in external endpoint mode",
+            hint: pc.bold("Direct"),
+            description: "⚠ Cannot be modified programmatically",
           },
           { value: "done", label: "Done", description: "Return to the prompt" },
         ],
-        notices: [
-          {
-            tone: "warning",
-            text: "`agent.ts` specifies a model provider directly. In-TUI configuration is restricted to AI Gateway endpoints.",
-          },
-        ],
+        notices: [],
         hintLayout: "stacked",
         initialValue: "done",
       },
     ]);
+  });
+
+  it("lists Codex models while keeping its provider status immutable", async () => {
+    const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
+    const deps = flowDeps({
+      readCurrentModel: vi.fn(async () => ({
+        id: "codex/gpt-5.5",
+        routing: { kind: "external", provider: "codex" } as const,
+        editable: false,
+      })),
+      detectProviderStatus: vi.fn(async () => ({ kind: "unset" }) as const),
+    });
+
+    await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
+      kind: "cancelled",
+    });
+
+    expect(menuPaints[0]?.options).toEqual([
+      {
+        value: "model",
+        label: "Change model",
+        description: "The Codex model your agent uses",
+        hint: "codex/gpt-5.5",
+      },
+      {
+        value: "provider",
+        label: "Model provider",
+        disabled: true,
+        hint: `${pc.bold("Direct")} ${pc.blue("❉ OpenAI Codex")}`,
+        description: "⚠ Cannot be modified programmatically",
+      },
+      { value: "done", label: "Done", description: "Return to the prompt" },
+    ]);
+    expect(menuPaints[0]?.notices).toEqual([]);
+    expect(menuPaints[0]?.initialValue).toBe("model");
+  });
+
+  it("applies a Codex model selected from the Codex catalog", async () => {
+    const pickerPaints: SingleSelectOptions<PrompterValue>[] = [];
+    const { prompter, menuPaints } = scriptedPrompter({
+      menu: ["model"],
+      picker: ["codex/gpt-5.4"],
+      onPicker: (opts) => pickerPaints.push(opts),
+    });
+    const deps = flowDeps({
+      readCurrentModel: vi.fn(async () => ({
+        id: "codex/gpt-5.5",
+        routing: { kind: "external", provider: "codex" } as const,
+        editable: false,
+      })),
+      detectProviderStatus: vi.fn(async () => ({ kind: "unset" }) as const),
+    });
+
+    await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
+      kind: "done",
+      modelMessage: `Model changed to ${pc.bold("codex/gpt-5.4")}. Live on your next prompt.`,
+    });
+
+    expect(menuPaints).toHaveLength(1);
+    expect(pickerPaints[0]).toEqual(
+      expect.objectContaining({
+        message: "Which Codex model should your agent use?",
+        initialValue: "codex/gpt-5.5",
+        search: true,
+        options: [
+          { value: "codex/gpt-5.4", label: "GPT-5.4", hint: "OpenAI Codex" },
+          { value: "codex/gpt-5.5", label: "GPT-5.5", hint: "OpenAI Codex" },
+        ],
+      }),
+    );
+    expect(deps.fetchCodexModels).toHaveBeenCalledTimes(1);
+    expect(deps.applyModel).toHaveBeenCalledWith({ appRoot: APP_ROOT, slug: "codex/gpt-5.4" });
   });
 
   it("disables only Change model for a gateway-routed SDK model call, keeping the provider row", async () => {
@@ -205,7 +279,7 @@ describe("runModelFlow", () => {
       },
       { value: "done", label: "Done", description: "Return to the prompt" },
     ]);
-    // Gateway routing gets no external-restriction notice.
+    // Gateway routing gets no external-provider restriction notice.
     expect(menuPaints[0]?.notices).toEqual([]);
   });
 

@@ -2,9 +2,17 @@ import { join } from "node:path";
 
 import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
 import { discoverAgent } from "#discover/discover-agent.js";
+import {
+  type CodexModelCatalogEntry,
+  fetchCodexModelCatalog,
+  formatCodexModelId,
+  parseCodexModelId,
+  selectableCodexModels,
+} from "#internal/codex-model-catalog.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { inspectApplication } from "#services/inspect-application.js";
 import { createStaticSourceChange } from "#source-change/static-source-change.js";
+import { toErrorMessage } from "#shared/errors.js";
 
 import pc from "picocolors";
 
@@ -22,7 +30,7 @@ import {
   type VercelProjectOperationOptions,
 } from "../project-resolution.js";
 import type { ModelRouting } from "#shared/agent-definition.js";
-import type { Prompter, SelectNotice, SelectOption } from "../prompter.js";
+import type { Prompter, SelectOption } from "../prompter.js";
 import { runInteractive } from "../runner.js";
 import { snapshotSetupState } from "../state.js";
 import { WizardCancelledError } from "../step.js";
@@ -54,6 +62,8 @@ export interface ModelFlowDeps {
   applyModel: (input: { appRoot: string; slug: string }) => Promise<ApplyModelOutcome>;
   /** Catalog fetch behind the shared model picker. */
   selectModel?: SelectModelDeps;
+  /** Codex catalog fetch behind the Codex direct-model picker. */
+  fetchCodexModels: (signal?: AbortSignal) => Promise<readonly CodexModelCatalogEntry[]>;
   /** Reads how the model is backed right now, for the menu's provider row. */
   detectProviderStatus: typeof detectModelProviderStatus;
   /** The provider sub-flow behind the menu's provider row. */
@@ -63,8 +73,8 @@ export interface ModelFlowDeps {
 /**
  * How the agent's model is backed right now, as far as the local directory
  * shows: a linked Vercel project, a gateway credential in an env file, or
- * nothing detectable. An external provider (own ANTHROPIC_API_KEY etc.)
- * leaves no marker eve owns, so it reads as `unset`.
+ * nothing detectable. An external model configuration has no AI Gateway marker
+ * eve owns, so this status reads as `unset`.
  */
 export type ModelProviderStatus =
   | { kind: "unset" }
@@ -101,6 +111,7 @@ export type ModelFlowResult =
 // The bordered panel's title ("Configure the agent model") is the menu's header,
 // so the select itself carries no message — avoiding a redundant second title.
 export const MODEL_MENU_MESSAGE = "";
+const CODEX_MODEL_PROMPT_MESSAGE = "Which Codex model should your agent use?";
 
 type ModelMenuRow = "model" | "provider" | "done";
 
@@ -124,15 +135,14 @@ function providerStatusHint(
 }
 
 /**
- * The two-row configure menu. The two rows answer independent questions.
+ * The configure menu. An external model has one fixed provider-status row;
+ * gateway-routed models retain independent model and provider actions.
  *
  * The model row keys off `editable`: eve can rewrite `model` only when it is a
  * string literal, so an SDK model call (`gateway(...)` / `anthropic(...)`) is
- * disabled regardless of how it routes. The provider row keys off routing: an
- * external endpoint disables it (gateway credentials don't apply); a gateway
- * endpoint gates it bold-yellow "Configure model access" until a link or credential
- * is detectable (the genuine "no provider connected" state), then "Change
- * provider" naming it.
+ * disabled regardless of how it routes. A gateway endpoint gates its provider
+ * row bold-yellow "Configure model access" until a link or credential is
+ * detectable, then calls it "Change provider".
  */
 function modelMenuRows(
   current: string | null,
@@ -140,6 +150,48 @@ function modelMenuRows(
   routing: ModelRouting | null,
   editable: boolean,
 ): SelectOption<ModelMenuRow>[] {
+  const doneRow: SelectOption<ModelMenuRow> = {
+    value: "done",
+    label: "Done",
+    description: "Return to the prompt",
+  };
+
+  if (isCodexRouting(routing)) {
+    return [
+      {
+        value: "model",
+        label: "Change model",
+        description: "The Codex model your agent uses",
+        ...(current !== null && { hint: current }),
+      },
+      {
+        disabled: true,
+        value: "provider",
+        label: "Model provider",
+        hint: `${pc.bold("Direct")} ${pc.blue("❉ OpenAI Codex")}`,
+        description: "⚠ Cannot be modified programmatically",
+      },
+      doneRow,
+    ];
+  }
+
+  if (routing?.kind === "external") {
+    const hint =
+      routing.provider === "codex"
+        ? `${pc.bold("Direct")} ${pc.blue("❉ OpenAI Codex")}`
+        : pc.bold("Direct");
+    return [
+      {
+        disabled: true,
+        value: "provider",
+        label: "Model provider",
+        hint,
+        description: "⚠ Cannot be modified programmatically",
+      },
+      doneRow,
+    ];
+  }
+
   let modelRow: SelectOption<ModelMenuRow>;
   if (editable) {
     modelRow = {
@@ -158,14 +210,7 @@ function modelMenuRows(
   }
 
   let providerRow: SelectOption<ModelMenuRow>;
-  if (routing?.kind === "external") {
-    providerRow = {
-      disabled: true,
-      value: "provider",
-      label: "Change provider",
-      description: "Disabled in external endpoint mode",
-    };
-  } else if (provider.kind === "unset") {
+  if (provider.kind === "unset") {
     providerRow = {
       value: "provider",
       label: pc.bold("Configure model access"),
@@ -182,13 +227,9 @@ function modelMenuRows(
     };
   }
 
-  // An explicit exit row, like the channels list — Esc works too, but the menu
-  // must not make Esc the only way out.
-  return [
-    modelRow,
-    providerRow,
-    { value: "done", label: "Done", description: "Return to the prompt" },
-  ];
+  // An explicit exit row, like the channels list. Esc works too, but it must
+  // not be the only way out.
+  return [modelRow, providerRow, doneRow];
 }
 
 /**
@@ -231,7 +272,7 @@ export async function detectModelProviderStatus(
  * runtime currently serves, then the static source edit that bakes the
  * choice into `agent.ts` (activation is the dev server's HMR watcher).
  * The provider row runs {@link runProviderFlow}, whose single menu chooses a
- * project-backed gateway, an inline gateway key, or an external provider.
+ * project-backed gateway, an inline gateway key, or an external model provider.
  * A completed model or provider change returns to the prompt with its result.
  * Cancelled flows and external-provider instructions return to the menu.
  */
@@ -247,6 +288,7 @@ export async function runModelFlow(input: {
   const deps: ModelFlowDeps = {
     readCurrentModel: readCurrentAgentModel,
     applyModel: changeAgentModel,
+    fetchCodexModels: (requestSignal) => fetchCodexModelCatalog({ signal: requestSignal }),
     detectProviderStatus: detectModelProviderStatus,
     runProviderFlow,
     ...input.deps,
@@ -266,20 +308,11 @@ export async function runModelFlow(input: {
 
   let lastApply: ApplyModelOutcome | undefined;
   let providerOutcome: ModelProviderOutcome | undefined;
-  // Explains, once, why every row is inert for an external-provider model.
-  const externalNotice: SelectNotice | undefined =
-    routing?.kind === "external"
-      ? {
-          tone: "warning",
-          text: "`agent.ts` specifies a model provider directly. In-TUI configuration is restricted to AI Gateway endpoints.",
-        }
-      : undefined;
-
   // Start at the first useful row. Cancellation keeps the current row.
   let nextSelection: ModelMenuRow =
     provider.kind === "unset" && routing?.kind !== "external"
       ? "provider"
-      : editable
+      : editable || isCodexRouting(routing)
         ? "model"
         : routing?.kind === "external"
           ? "done"
@@ -301,7 +334,6 @@ export async function runModelFlow(input: {
           options: modelMenuRows(current, provider, routing, editable),
           hintLayout: "stacked",
           initialValue: nextSelection,
-          notices: externalNotice === undefined ? [] : [externalNotice],
         });
       } catch (error) {
         if (!(error instanceof WizardCancelledError)) throw error;
@@ -312,13 +344,20 @@ export async function runModelFlow(input: {
     if (pick === "done") break;
 
     if (pick === "model") {
-      const slug = await pickModelFromCatalog({
-        appRoot,
-        prompter,
-        current,
-        signal,
-        deps: deps.selectModel,
-      });
+      const slug = isCodexRouting(routing)
+        ? await pickCodexModelFromCatalog({
+            current,
+            fetchModels: deps.fetchCodexModels,
+            prompter,
+            signal,
+          })
+        : await pickModelFromCatalog({
+            appRoot,
+            prompter,
+            current,
+            signal,
+            deps: deps.selectModel,
+          });
       if (slug === undefined) {
         nextSelection = "model";
         continue;
@@ -396,6 +435,41 @@ async function pickModelFromCatalog(input: {
   return result.kind === "cancelled" ? undefined : result.state.modelId;
 }
 
+async function pickCodexModelFromCatalog(input: {
+  current: string | null;
+  fetchModels: (signal?: AbortSignal) => Promise<readonly CodexModelCatalogEntry[]>;
+  prompter: Prompter;
+  signal?: AbortSignal;
+}): Promise<string | undefined> {
+  const models = await withSpinner(input.prompter, "Loading the Codex model catalog...", () =>
+    input.fetchModels(input.signal),
+  );
+  input.signal?.throwIfAborted();
+
+  const options = selectableCodexModels(models).map((model) => ({
+    value: formatCodexModelId(model.slug),
+    label: model.displayName,
+    hint: "OpenAI Codex",
+  }));
+
+  const firstOption = options[0];
+  if (firstOption === undefined) {
+    input.prompter.log.warning("The Codex model catalog did not list any selectable models.");
+    return undefined;
+  }
+
+  return await input.prompter.select<string>({
+    message: CODEX_MODEL_PROMPT_MESSAGE,
+    options,
+    initialValue:
+      input.current !== null && options.some((option) => option.value === input.current)
+        ? input.current
+        : firstOption.value,
+    search: true,
+    placeholder: "type to search",
+  });
+}
+
 /** The outcome of applying a model slug to the agent's authored source. */
 export type ApplyModelOutcome =
   | { kind: "changed"; to: string }
@@ -464,6 +538,19 @@ async function validateModelSlug(appRoot: string, slug: string): Promise<string 
     return `\`${slug}\` isn't a provider/model id (e.g. anthropic/claude-sonnet-4.6).`;
   }
 
+  const codexSlug = parseCodexModelId(slug);
+  if (codexSlug !== null) {
+    try {
+      const models = await fetchCodexModelCatalog();
+      if (!models.some((model) => model.slug === codexSlug)) {
+        return `I couldn't confirm \`${slug}\` in the Codex model catalog, so I didn't change agent.ts.`;
+      }
+      return null;
+    } catch (error) {
+      return `I couldn't load the Codex model catalog (${toErrorMessage(error)}), so I didn't change agent.ts.`;
+    }
+  }
+
   const catalog = createCompiledRuntimeModelCatalogLoader(appRoot);
   try {
     const limits = await catalog.getModelLimits(formatLanguageModelGatewayId(slug));
@@ -508,12 +595,16 @@ export async function modelChangeRefusalForUneditableModel(
   appRoot: string,
 ): Promise<string | null> {
   const { editable, routing } = await readCurrentAgentModel(appRoot);
-  if (editable) {
+  if (editable || isCodexRouting(routing)) {
     return null;
   }
   const detail =
     routing?.kind === "external"
-      ? `the external provider \`${routing.provider}\``
+      ? `the external model provider \`${routing.provider}\``
       : "an SDK model call";
   return `Model is set via ${detail} in agent.ts, not a string literal; /model can't rewrite it. Edit \`model\` in agent.ts.`;
+}
+
+function isCodexRouting(routing: ModelRouting | null): boolean {
+  return routing?.kind === "external" && routing.provider === "codex";
 }

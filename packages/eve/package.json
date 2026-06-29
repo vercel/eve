@@ -116,6 +116,11 @@
       "import": "./dist/src/public/connections/index.js",
       "default": "./dist/src/public/connections/index.js"
     },
+    "./codex": {
+      "types": "./dist/src/public/codex/index.d.ts",
+      "import": "./dist/src/public/codex/index.js",
+      "default": "./dist/src/public/codex/index.js"
+    },
     "./agents/auth": {
       "types": "./dist/src/public/agents/auth.d.ts",
       "import": "./dist/src/public/agents/auth.js",

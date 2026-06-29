@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { build as buildNitro, copyPublicAssets, prepare, prerender } from "nitro/builder";
 import type { Nitro } from "nitro/types";
 
+import type { CompiledAgentManifest, CompiledRuntimeModelReference } from "#compiler/manifest.js";
 import { resolvePackageRoot } from "#internal/application/package.js";
 import {
   prepareEveVersionedCacheDirectory,
@@ -19,8 +20,50 @@ import { runVercelBuildPrewarm } from "#internal/nitro/host/vercel-build-prewarm
 import type { NitroBuildSurface, PreparedApplicationHost } from "#internal/nitro/host/types.js";
 import { findClosestVercelOutputDirectory } from "#shared/vercel-output-directory.js";
 
+const CODEX_MODEL_PRODUCTION_BUILD_WARNING_CODE = "codex-model-in-production-build";
+
 function trimTrailingSlash(path: string): string {
   return path.replace(/[\\/]+$/, "");
+}
+
+function warnForCodexSubscriptionModelsInProductionBuild(manifest: CompiledAgentManifest): void {
+  const modelLabels = collectCodexSubscriptionModelLabels(manifest);
+
+  if (modelLabels.length === 0) {
+    return;
+  }
+
+  console.warn(
+    `Warning [${CODEX_MODEL_PRODUCTION_BUILD_WARNING_CODE}]: Codex subscription model usage detected in production build (${modelLabels.join(
+      ", ",
+    )}). Confirm the subscription terms allow the deployed use case, or switch production to AI Gateway/provider-owned credentials.`,
+  );
+}
+
+function collectCodexSubscriptionModelLabels(manifest: CompiledAgentManifest): readonly string[] {
+  const labels: string[] = [];
+
+  if (isCodexSubscriptionModel(manifest.config.model)) {
+    labels.push(formatCodexSubscriptionModelLabel("primary", manifest.config.model));
+  }
+
+  const compactionModel = manifest.config.compaction?.model;
+  if (compactionModel !== undefined && isCodexSubscriptionModel(compactionModel)) {
+    labels.push(formatCodexSubscriptionModelLabel("compaction", compactionModel));
+  }
+
+  return labels;
+}
+
+function formatCodexSubscriptionModelLabel(
+  role: "compaction" | "primary",
+  model: CompiledRuntimeModelReference,
+): string {
+  return `${role} model: ${model.id}`;
+}
+
+function isCodexSubscriptionModel(model: CompiledRuntimeModelReference): boolean {
+  return model.routing.kind === "external" && model.routing.provider === "codex";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -231,6 +274,7 @@ async function buildVercelNitroSurface(
  */
 export async function buildApplication(rootDir: string): Promise<string> {
   const preparedHost = await prepareApplicationHost(rootDir);
+  warnForCodexSubscriptionModelsInProductionBuild(preparedHost.compileResult.manifest);
 
   if (!process.env.VERCEL) {
     const nitro = await createApplicationNitro(preparedHost, false);

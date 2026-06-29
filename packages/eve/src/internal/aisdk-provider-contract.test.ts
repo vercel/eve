@@ -27,7 +27,7 @@ describe("ai-sdk provider identity contract (canary)", () => {
     expect(gateway.languageModel("anthropic/claude-sonnet-4.6").provider).toBe("gateway");
   });
 
-  it("direct provider instances do not report 'gateway'", () => {
+  it("non-gateway provider instances do not report 'gateway'", () => {
     const providers = [
       anthropic("claude-sonnet-4.6").provider,
       openai("gpt-5.4").provider,

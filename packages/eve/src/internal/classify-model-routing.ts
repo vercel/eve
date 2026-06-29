@@ -7,7 +7,8 @@ const GATEWAY_PROVIDER = "gateway";
 
 /**
  * Classifies how an authored model value will be routed at runtime, through the
- * Vercel AI Gateway or directly to a provider.
+ * Vercel AI Gateway or an external model configuration. An external model can
+ * still use a router such as OpenRouter.
  *
  * A bare string id is *defined* as gateway-routed: that is the AI SDK's default
  * (`globalThis.AI_SDK_DEFAULT_PROVIDER ?? gateway`), and the runtime hands the

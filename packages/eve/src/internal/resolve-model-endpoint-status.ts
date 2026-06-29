@@ -17,7 +17,7 @@ export interface GatewayCredentialPresence {
  * Composes the build-time {@link ModelRouting} with runtime credential presence
  * into the consumer-facing {@link ModelEndpointStatus}.
  *
- * Credentials matter only for gateway routing; an external endpoint makes no
+ * Credentials matter only for gateway routing; an external model configuration makes no
  * connectedness claim. `api-key` outranks `oidc` to match the AI SDK gateway
  * provider, which uses `AI_GATEWAY_API_KEY` when present and otherwise the OIDC
  * token.

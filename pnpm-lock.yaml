@@ -281,6 +281,15 @@ importers:
         specifier: 'catalog:'
         version: 7.0.1-rc
 
+  apps/fixtures/codex-subscription-agent:
+    dependencies:
+      eve:
+        specifier: workspace:*
+        version: link:../../../packages/eve
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
+
   apps/fixtures/weather-agent:
     dependencies:
       eve:
