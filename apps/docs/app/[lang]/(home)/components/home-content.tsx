@@ -56,8 +56,8 @@ export const HomeContent = () => (
       </div>
     </section>
     <FileTree />
-    <ArchitectureDiagram />
     <NextjsInterop />
+    <ArchitectureDiagram />
     <FeatureGrid />
     <CTA />
   </div>

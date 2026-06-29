@@ -64,7 +64,7 @@ export async function NextjsInterop() {
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">
           Wrap your config with <span className="text-gray-1000">withEve()</span> and the agent
-          mounts into your existing app — same dev server, same deploy.{" "}
+          mounts into your existing app. Same dev server, same deploy.{" "}
           <span className="text-gray-1000">useEveAgent()</span> finds its routes on its own, so
           there's no CORS to configure and no URL env vars to keep in sync.
         </p>
