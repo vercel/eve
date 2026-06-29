@@ -223,10 +223,10 @@ export async function FileTree() {
   return (
     <section className="pb-24 pt-16 font-sans px-4">
       <div className="mx-auto max-w-5xl">
-        <h2 className="text-center text-heading-32 font-semibold tracking-tighter text-gray-1000 sm:text-heading-40">
-          An{" "}
-          <span className="rounded-xl bg-gray-100 px-3 py-0.5">
-            <IconFolderOpen className="mr-2 inline align-middle text-gray-900" size={28} />
+        <h2 className="text-center font-medium! text-heading-32 tracking-tighter text-gray-1000 sm:text-heading-40">
+          Your{" "}
+          <span className="relative -top-[0.08em] ml-1 inline-flex items-center gap-[0.16em] rounded-lg bg-gray-200 px-3 py-[0.04em] pr-4 align-baseline font-[450]!">
+            <IconFolderOpen aria-hidden className="size-[0.58em] text-gray-900" />
             agent
           </span>{" "}
           is a directory
