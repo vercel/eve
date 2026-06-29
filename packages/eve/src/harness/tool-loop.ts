@@ -49,10 +49,10 @@ import {
   hydrateSandboxAttachments,
   stageAttachmentsToSandbox,
 } from "#harness/attachment-staging.js";
-import { applyWorkflowTool, buildWorkflowHostTools } from "#harness/workflow-sandbox.js";
+import { buildWorkflowHostTools } from "#harness/workflow-sandbox.js";
 import {
-  ensureWorkflowContinuationSecurity,
   getWorkflowContinuationSecurity,
+  readWorkflowContinuationSecurity,
 } from "#harness/workflow-continuation-security.js";
 import { createWorkflowLifecycle } from "#harness/workflow-lifecycle.js";
 import {
@@ -480,9 +480,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
 
     session = pending.session;
-    if (config.workflow === true) {
-      session = ensureWorkflowContinuationSecurity(session);
-    }
     let messages: ModelMessage[] = pending.messages;
 
     if (stepInput.input?.context !== undefined) {
@@ -674,24 +671,26 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         flatTools[FINAL_OUTPUT_TOOL_NAME] = buildFinalOutputTool(session.outputSchema);
       }
 
-      const modelTools =
-        config.workflow === true
-          ? (
-              await applyWorkflowTool({
-                continuationSecurity: getWorkflowContinuationSecurity(session),
-                harnessTools: advertisedHarnessTools,
-                lifecycle:
-                  emit !== undefined
-                    ? createWorkflowLifecycle({
-                        emit,
-                        emissionState,
-                        tools: advertisedHarnessTools,
-                      })
-                    : undefined,
-                tools: flatTools,
+      const workflowLifecycle =
+        emit !== undefined
+          ? ({ tools }: { readonly tools: HarnessToolMap }) =>
+              createWorkflowLifecycle({
+                emit,
+                emissionState,
+                tools,
               })
-            ).modelTools
-          : flatTools;
+          : undefined;
+      const workflowConfig =
+        config.workflow === true ? { lifecycle: workflowLifecycle } : undefined;
+
+      const advertisedModelTools = await getAdvertisedTools({
+        modelTools: flatTools,
+        session,
+        tools: advertisedHarnessTools,
+        workflow: workflowConfig,
+      });
+      session = advertisedModelTools.session;
+      const modelTools = advertisedModelTools.modelTools;
 
       const effectiveTools = marker ? applyLastToolCacheBreakpoint(modelTools, marker) : modelTools;
 
@@ -1457,9 +1456,14 @@ async function handleStepResult(input: {
     compaction: createNextCompactionConfig(session.compaction, promptMessages, result),
   };
 
-  if (config.workflow === true) {
-    const continuationSecurity = getWorkflowContinuationSecurity(baseSession);
-    const workflowInterrupt = await getWorkflowSandboxInterrupt(result, continuationSecurity);
+  const workflowContinuationSecurity =
+    config.workflow === true ? readWorkflowContinuationSecurity(baseSession) : undefined;
+
+  if (workflowContinuationSecurity !== undefined) {
+    const workflowInterrupt = await getWorkflowSandboxInterrupt(
+      result,
+      workflowContinuationSecurity,
+    );
     if (workflowInterrupt !== undefined) {
       if (!isWorkflowRuntimeActionInterrupt(workflowInterrupt)) {
         throw new Error(`Unsupported Workflow interrupt kind "${workflowInterrupt.payload.kind}".`);

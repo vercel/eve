@@ -94,6 +94,8 @@ at depths 1 through 4; a session already at depth 4 cannot delegate again.
 
 At the configured depth, eve stops advertising subagent tools, including declared local subagents, remote-agent tools, the built-in `agent` tool, and the `Workflow` orchestration tool when it would only expose subagents. If a stale or forced subagent call still reaches execution, eve blocks it and returns an error tool result instead of starting another child session.
 
+`Workflow` is root-only. Delegated subagent sessions can still call their own visible subagent tools until the depth cap, but they do not receive the `Workflow` orchestration wrapper.
+
 A declared subagent's tool name is the bare path-derived name, with no prefix. `agent/subagents/researcher/` registers as the tool `researcher`. Unlike connection tools (`<connection>__<tool>`), it carries no namespace, so the model, approvals, logs, and evals all reference it by that name. Its input schema is:
 
 ```ts
