@@ -57,7 +57,7 @@ export async function NextjsInterop() {
   const rendered = await Promise.all(FILES.map(renderCode));
 
   return (
-    <section className="px-4 py-24 sm:px-12">
+    <section className="px-4 py-24">
       <div className="mx-auto max-w-5xl">
         <h2 className="text-center text-heading-32 font-semibold tracking-tighter text-gray-1000 sm:text-heading-40">
           Runs inside your Next.js app

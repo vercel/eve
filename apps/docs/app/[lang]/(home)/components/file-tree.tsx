@@ -3,34 +3,43 @@ import { geistShikiTheme } from "@vercel/geistdocs/shiki-theme";
 import { highlight } from "fumadocs-core/highlight";
 import type { ComponentProps, JSX } from "react";
 import {
-  IconAcronymTs,
   IconAgents,
   IconClock,
   IconFileText,
+  IconFolderOpen,
   IconLinked,
   IconMessage,
   type IconProps,
   IconSandbox,
+  IconSparkles,
+  IconWorkflow,
   IconWrench,
 } from "@/components/geistcn-icons";
 import { cn } from "@/lib/utils";
 import { FileTreeView } from "./file-tree-view";
 
 interface Snippet {
+  /** Category name shown in the left "Configure your agent" column. */
+  label: string;
+  /** File/folder name shown in the IDE file tree. */
   name: string;
+  /** Full path shown in the code panel header. */
   fileName: string;
   lang: string;
-  Icon: (props: IconProps) => JSX.Element;
+  /** Category icon for the left column. */
+  NavIcon: (props: IconProps) => JSX.Element;
+  /** Short, what-this-file-does line shown above the code. */
   description: string;
   code: string;
 }
 
 const snippets: Snippet[] = [
   {
+    label: "Instructions",
     name: "instructions.md",
     fileName: "instructions.md",
     lang: "markdown",
-    Icon: IconFileText,
+    NavIcon: IconFileText,
     description:
       "An instructions.md file is a complete agent — describe its role in Markdown, then run eve.",
     code: `# Identity
@@ -40,10 +49,11 @@ You can fetch the weather for any
 city in the world.`,
   },
   {
+    label: "Agent",
     name: "agent.ts",
     fileName: "agent.ts",
     lang: "typescript",
-    Icon: IconAcronymTs,
+    NavIcon: IconSparkles,
     description:
       "eve uses a default model. Add agent.ts when you want to choose a model or configure the runtime.",
     code: `import { defineAgent } from "eve";
@@ -53,10 +63,11 @@ export default defineAgent({
 });`,
   },
   {
+    label: "Skills",
     name: "skills/",
     fileName: "skills/research.md",
     lang: "markdown",
-    Icon: IconFileText,
+    NavIcon: IconWrench,
     description:
       "Skills are Markdown playbooks loaded only when relevant, so the agent gets focused guidance without carrying it in every prompt.",
     code: `---
@@ -68,10 +79,11 @@ When the task is novel or ambiguous,
 gather evidence first, then answer.`,
   },
   {
+    label: "Tools",
     name: "tools/",
     fileName: "tools/get_weather.ts",
     lang: "typescript",
-    Icon: IconWrench,
+    NavIcon: IconWorkflow,
     description:
       "Drop a TypeScript file in tools/ and the model can call it — the filename becomes the tool name, no registration required.",
     code: `import { defineTool } from "eve/tools";
@@ -92,10 +104,11 @@ export default defineTool({
 });`,
   },
   {
+    label: "Sandbox",
     name: "sandbox/",
     fileName: "sandbox/sandbox.ts",
     lang: "typescript",
-    Icon: IconSandbox,
+    NavIcon: IconSandbox,
     description:
       "Every agent includes an isolated sandbox. Add sandbox/sandbox.ts to swap in any backend or customize its setup.",
     code: `import { defineSandbox } from
@@ -110,10 +123,11 @@ export default defineSandbox({
 });`,
   },
   {
+    label: "Channels",
     name: "channels/",
     fileName: "channels/slack.ts",
     lang: "typescript",
-    Icon: IconMessage,
+    NavIcon: IconMessage,
     description: "Add channel files to use the same agent in Slack, Discord, Teams, or the web.",
     code: `import { slackChannel } from
   "eve/channels/slack";
@@ -123,10 +137,11 @@ export default slackChannel({
 });`,
   },
   {
+    label: "Connections",
     name: "connections/",
     fileName: "connections/linear.ts",
     lang: "typescript",
-    Icon: IconLinked,
+    NavIcon: IconLinked,
     description:
       "Connections handle auth for services like GitHub, Stripe, and Linear, so tools can call them without managing tokens.",
     code: `import { defineMcpClientConnection }
@@ -137,10 +152,11 @@ export default defineMcpClientConnection({
 });`,
   },
   {
+    label: "Sub Agents",
     name: "subagents/",
     fileName: "subagents/researcher/agent.ts",
     lang: "typescript",
-    Icon: IconAgents,
+    NavIcon: IconAgents,
     description:
       "Add subagents for specialized work — the main agent delegates tasks and combines the results.",
     code: `import { defineAgent } from
@@ -152,10 +168,11 @@ export default defineAgent({
 });`,
   },
   {
+    label: "Schedules",
     name: "schedules/",
     fileName: "schedules/daily-report.md",
     lang: "markdown",
-    Icon: IconClock,
+    NavIcon: IconClock,
     description:
       "Schedules run agents automatically for jobs like daily reports and weekly digests, continuing durably without an active session.",
     code: `---
@@ -182,6 +199,9 @@ export async function FileTree() {
                 props.className,
                 "rounded-none border-0 bg-transparent px-0 py-4",
                 "[&_.line]:before:!mr-4 [&_.line]:before:!w-5 [&_.line]:before:!text-left",
+                // Wrap long lines instead of scrolling horizontally (keep the
+                // line-number grid, just constrain its column so lines wrap).
+                "[&_pre]:overflow-x-hidden! [&_code]:w-full! [&_code]:min-w-0! [&_code]:[grid-template-columns:minmax(0,1fr)]! [&_.line]:whitespace-pre-wrap [&_.line]:[overflow-wrap:anywhere]",
               )}
             >
               {children}
@@ -193,18 +213,28 @@ export async function FileTree() {
   );
 
   const items = snippets.map((snippet, i) => ({
+    label: snippet.label,
     name: snippet.name,
     fileName: snippet.fileName,
     description: snippet.description,
-    icon: <snippet.Icon aria-hidden className="shrink-0" color="gray-900" size={16} />,
+    navIcon: <snippet.NavIcon aria-hidden className="shrink-0" color="currentColor" size={16} />,
     code: rendered[i],
   }));
 
   return (
-    <section className="px-4 pb-24 pt-16 font-sans sm:px-12">
+    <section className="pb-24 pt-16 font-sans px-4">
       <div className="mx-auto max-w-5xl">
         <h2 className="text-center text-heading-32 font-semibold tracking-tighter text-gray-1000 sm:text-heading-40">
-          An agent is a directory
+          An agent is a{" "}
+          <span className="rounded-xl bg-gray-100 px-3 py-0.5">
+            <IconFolderOpen
+              aria-hidden
+              className="mr-2 inline align-middle"
+              color="gray-900"
+              size={28}
+            />
+            directory
+          </span>
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">
           Define instructions and skills in markdown, tools in TypeScript, and deploy anywhere. The

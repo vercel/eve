@@ -14,6 +14,16 @@ body:has([data-home-route]) footer {
   @apply bg-background-200;
 }
 
+/* On home routes the navbar starts borderless and fades its bottom border in
+   only once the page is scrolled (ScrollState toggles [data-scrolled]). */
+body:has([data-home-route]) header {
+  border-bottom-color: transparent;
+  transition: border-color 200ms ease;
+}
+html[data-scrolled] body:has([data-home-route]) header {
+  border-bottom-color: var(--ds-gray-alpha-400);
+}
+
 /* Align docs content with navbar on mobile. */
 #nd-page {
   @apply max-md:px-6;

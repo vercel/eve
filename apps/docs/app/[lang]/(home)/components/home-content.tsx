@@ -43,12 +43,10 @@ export const HomeContent = () => (
         <InstallSwitcher className="items-center" />
       </div>
     </section>
-    <div className="grid divide-y border-y sm:border-x">
-      <FileTree />
-      <ArchitectureDiagram />
-      <NextjsInterop />
-      <FeatureGrid />
-      <CTA />
-    </div>
+    <FileTree />
+    <ArchitectureDiagram />
+    <NextjsInterop />
+    <FeatureGrid />
+    <CTA />
   </div>
 );
