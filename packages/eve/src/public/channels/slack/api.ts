@@ -114,7 +114,11 @@ export async function resolveBotUserId(
   if (!cached) {
     cached = callSlackApi({ botToken: token, operation: "auth.test", body: {} })
       .then((r) => (r.ok && typeof r.user_id === "string" ? r.user_id : undefined))
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .then((userId) => {
+        if (userId === undefined) botUserIdCache.delete(token);
+        return userId;
+      });
     botUserIdCache.set(token, cached);
   }
   return cached;
