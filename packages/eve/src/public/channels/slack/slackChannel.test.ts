@@ -1900,3 +1900,151 @@ describe("constrainAuthorizationRequired", () => {
     expect(handler.mock.calls[0]?.[2]).toBe(sessionCtx);
   });
 });
+
+describe("slackChannel() followUps", () => {
+  const BOT = "UBOT";
+
+  // Routes outbound Slack calls a follow-up makes: auth.test (bot identity) and
+  // conversations.replies (the thread membership gate).
+  function routeFetch(threadMessages: Record<string, unknown>[]): ReturnType<typeof vi.fn> {
+    return vi.fn().mockImplementation((url: string | URL) => {
+      const u = String(url);
+      const payload = u.endsWith("/auth.test")
+        ? { ok: true, user_id: BOT }
+        : u.endsWith("/conversations.replies")
+          ? { ok: true, messages: threadMessages }
+          : { ok: true, ts: "1700000001.000001" };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), {
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    });
+  }
+
+  function threadReplyBody(overrides?: { text?: string }): string {
+    return JSON.stringify({
+      type: "event_callback",
+      team_id: "T01",
+      event_id: `EvFU${Math.random()}`,
+      event: {
+        type: "message",
+        channel_type: "channel",
+        user: "U01",
+        text: overrides?.text ?? "now do bachelorette content",
+        channel: "C01",
+        ts: "1700000000.000200",
+        thread_ts: "1700000000.000100",
+      },
+    });
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("dispatches a non-mention thread reply when the bot is in the thread", async () => {
+    vi.stubGlobal("fetch", routeFetch([{ user: BOT, bot_id: "B01", text: "earlier reply" }]));
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-followups-in", signingSecret: SIGNING_SECRET },
+      followUps: true,
+    });
+    const { send } = await firePost(channel, buildSignedRequest({ body: threadReplyBody() }));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[1]?.continuationToken).toBe("C01:1700000000.000100");
+  });
+
+  it("ignores a non-mention thread reply when the bot is not in the thread", async () => {
+    vi.stubGlobal("fetch", routeFetch([{ user: "U01", text: "hi" }, { user: "U02", text: "yo" }]));
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-followups-out", signingSecret: SIGNING_SECRET },
+      followUps: true,
+    });
+    const { send } = await firePost(channel, buildSignedRequest({ body: threadReplyBody() }));
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("defers follow-ups that mention the bot to the app_mention path", async () => {
+    vi.stubGlobal("fetch", routeFetch([{ user: BOT, bot_id: "B01", text: "earlier reply" }]));
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-followups-mention", signingSecret: SIGNING_SECRET },
+      followUps: true,
+    });
+    const { send } = await firePost(
+      channel,
+      buildSignedRequest({ body: threadReplyBody({ text: `<@${BOT}> keep going` }) }),
+    );
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("defers follow-ups that mention the bot in the labeled `<@U|name>` form", async () => {
+    vi.stubGlobal("fetch", routeFetch([{ user: BOT, bot_id: "B01", text: "earlier reply" }]));
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-followups-label", signingSecret: SIGNING_SECRET },
+      followUps: true,
+    });
+    const { send } = await firePost(
+      channel,
+      buildSignedRequest({ body: threadReplyBody({ text: `<@${BOT}|outpost> keep going` }) }),
+    );
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("does nothing for thread replies when followUps is disabled (default)", async () => {
+    vi.stubGlobal("fetch", routeFetch([{ user: BOT, bot_id: "B01", text: "earlier reply" }]));
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-followups-off", signingSecret: SIGNING_SECRET },
+    });
+    const { send } = await firePost(channel, buildSignedRequest({ body: threadReplyBody() }));
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("ignores a thread touched only by a different (foreign) bot", async () => {
+    // A thread where an unrelated bot (e.g. CI) posted, but this bot never did
+    // and was never mentioned. `isMe` is true for any bot, so the gate must
+    // match this bot's user id specifically — otherwise it barges in.
+    vi.stubGlobal(
+      "fetch",
+      routeFetch([{ user: "UFOREIGN", bot_id: "B99", text: "build passed ✅" }]),
+    );
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-followups-foreign", signingSecret: SIGNING_SECRET },
+      followUps: true,
+    });
+    const { send } = await firePost(channel, buildSignedRequest({ body: threadReplyBody() }));
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("runs the decide hook and stays silent when it returns false", async () => {
+    vi.stubGlobal("fetch", routeFetch([{ user: BOT, bot_id: "B01", text: "earlier reply" }]));
+    const decide = vi.fn().mockResolvedValue(false);
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-followups-decide-no", signingSecret: SIGNING_SECRET },
+      followUps: { decide },
+    });
+    const { send } = await firePost(channel, buildSignedRequest({ body: threadReplyBody() }));
+
+    expect(decide).toHaveBeenCalledTimes(1);
+    expect(decide.mock.calls[0]?.[0]?.text).toContain("bachelorette");
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("runs the decide hook and dispatches when it returns true", async () => {
+    vi.stubGlobal("fetch", routeFetch([{ user: BOT, bot_id: "B01", text: "earlier reply" }]));
+    const decide = vi.fn().mockReturnValue(true);
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-followups-decide-yes", signingSecret: SIGNING_SECRET },
+      followUps: { decide },
+    });
+    const { send } = await firePost(channel, buildSignedRequest({ body: threadReplyBody() }));
+
+    expect(decide).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+});

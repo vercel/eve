@@ -165,6 +165,48 @@ export function parseDirectMessageEvent(envelope: SlackEventCallback): SlackMess
   return buildSlackMessage(message, envelope.team_id);
 }
 
+/**
+ * Parses a Slack `message` event that is a non-mention reply inside a
+ * channel/group thread into a {@link SlackMessage}. Powers
+ * `SlackChannelConfig.followUps`: continuing a conversation in a thread the bot
+ * is already part of without a re-mention.
+ *
+ * Returns `null` when:
+ * - the envelope is not a `message` event,
+ * - it is a DM (`channel_type: "im"`) — handled by {@link parseDirectMessageEvent},
+ * - it is not a threaded reply (no `thread_ts`, or `thread_ts === ts`, i.e. a
+ *   top-level message — the bot only follows up inside threads),
+ * - the message carries a system `subtype` (edits, deletes, joins, etc.) other
+ *   than `file_share`, or
+ * - the message was posted by a bot (`bot_id` set) — prevents the bot's own
+ *   thread replies from re-triggering the handler.
+ *
+ * Messages that mention the bot also arrive as `app_mention`; the channel skips
+ * follow-ups that mention the bot so the mention path owns them (no double reply).
+ */
+export function parseThreadFollowUpEvent(envelope: SlackEventCallback): SlackMessage | null {
+  if (envelope.type !== "event_callback") return null;
+  const event = envelope.event;
+  if (!event || event.type !== "message") return null;
+
+  const message = event as SlackMessageEvent;
+  if (message.channel_type === "im") return null;
+  if (
+    typeof message.subtype === "string" &&
+    message.subtype.length > 0 &&
+    message.subtype !== "file_share"
+  ) {
+    return null;
+  }
+  if (typeof message.bot_id === "string" && message.bot_id.length > 0) return null;
+
+  const threadTs = typeof message.thread_ts === "string" ? message.thread_ts : "";
+  const ts = typeof message.ts === "string" ? message.ts : "";
+  if (!threadTs || threadTs === ts) return null;
+
+  return buildSlackMessage(message, envelope.team_id);
+}
+
 function buildSlackMessage(
   event: SlackAppMentionEvent | SlackMessageEvent,
   envelopeTeamId: string | undefined,

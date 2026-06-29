@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { parseAppMentionEvent, parseDirectMessageEvent } from "#public/channels/slack/inbound.js";
+import {
+  parseAppMentionEvent,
+  parseDirectMessageEvent,
+  parseThreadFollowUpEvent,
+} from "#public/channels/slack/inbound.js";
 
 describe("parseAppMentionEvent", () => {
   it("returns a SlackMessage with mrkdwn re-rendered as GFM", () => {
@@ -260,5 +264,62 @@ describe("parseDirectMessageEvent", () => {
       event: { type: "message", channel_type: "im", user: "U01" },
     });
     expect(result).toBeNull();
+  });
+});
+
+describe("parseThreadFollowUpEvent", () => {
+  const reply = (overrides: Record<string, unknown> = {}) => ({
+    type: "event_callback" as const,
+    team_id: "T01",
+    event: {
+      type: "message",
+      channel_type: "channel",
+      user: "U01",
+      text: "now do bachelorette content",
+      channel: "C01",
+      ts: "1700000000.000200",
+      thread_ts: "1700000000.000100",
+      ...overrides,
+    },
+  });
+
+  it("parses a non-mention reply inside a channel thread", () => {
+    const message = parseThreadFollowUpEvent(reply());
+    expect(message).not.toBeNull();
+    expect(message?.channelId).toBe("C01");
+    expect(message?.threadTs).toBe("1700000000.000100");
+    expect(message?.author?.userId).toBe("U01");
+  });
+
+  it("returns null for a top-level message (no thread_ts)", () => {
+    expect(parseThreadFollowUpEvent(reply({ thread_ts: undefined }))).toBeNull();
+  });
+
+  it("returns null for a thread root (thread_ts === ts)", () => {
+    expect(
+      parseThreadFollowUpEvent(reply({ thread_ts: "1700000000.000200" })),
+    ).toBeNull();
+  });
+
+  it("returns null for DMs (handled by parseDirectMessageEvent)", () => {
+    expect(parseThreadFollowUpEvent(reply({ channel_type: "im" }))).toBeNull();
+  });
+
+  it("returns null for bot messages (avoids self-trigger loops)", () => {
+    expect(parseThreadFollowUpEvent(reply({ bot_id: "B01" }))).toBeNull();
+  });
+
+  it("returns null for system subtypes but allows file_share", () => {
+    expect(parseThreadFollowUpEvent(reply({ subtype: "channel_join" }))).toBeNull();
+    expect(parseThreadFollowUpEvent(reply({ subtype: "file_share" }))).not.toBeNull();
+  });
+
+  it("returns null for non-message events", () => {
+    expect(
+      parseThreadFollowUpEvent({
+        type: "event_callback",
+        event: { type: "app_mention", channel: "C01", ts: "1.0", thread_ts: "0.9" },
+      }),
+    ).toBeNull();
   });
 });

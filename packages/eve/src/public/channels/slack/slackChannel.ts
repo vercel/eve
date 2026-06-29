@@ -8,6 +8,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import {
   buildSlackBinding,
+  resolveBotUserId,
   slackContinuationToken,
   type SlackBotToken,
   type SlackHandle,
@@ -27,6 +28,7 @@ import {
 import {
   parseAppMentionEvent,
   parseDirectMessageEvent,
+  parseThreadFollowUpEvent,
   type SlackEventCallback,
   type SlackInboundContext,
   type SlackMessage,
@@ -365,6 +367,30 @@ export interface SlackChannelInternalEvents extends Omit<
   readonly "authorization.required"?: SlackEventHandler<"authorization.required">;
 }
 
+/**
+ * Options form of {@link SlackChannelConfig.followUps}. Use it to layer an
+ * agent-specific decision on top of the built-in "answer in threads I'm part
+ * of" rule.
+ */
+export interface SlackFollowUpsOptions {
+  /**
+   * Decide whether a candidate follow-up should be answered. Runs only after
+   * the built-in checks pass (the message is a non-mention reply in a thread
+   * this bot is already part of), so it sees just the messages that are
+   * plausibly for the bot. Return `false` to stay silent — the message is still
+   * readable as thread context on the next turn.
+   *
+   * This is the place for intent checks a deterministic rule can't make, such
+   * as a fast model classification of whether a message in a busy multi-user
+   * thread is actually addressed to the bot. `ctx` exposes the thread and raw
+   * Slack handles. A throw is treated as `false`.
+   */
+  readonly decide?: (
+    message: SlackMessage,
+    ctx: SlackContext,
+  ) => boolean | Promise<boolean>;
+}
+
 export interface SlackChannelConfig {
   readonly credentials?: SlackChannelCredentials;
   readonly botName?: string;
@@ -388,6 +414,27 @@ export interface SlackChannelConfig {
    * option to avoid fetching thread history.
    */
   readonly threadContext?: LoadThreadContextMessagesOptions;
+
+  /**
+   * Keep answering messages in a thread the bot is already in, without a
+   * re-`@mention`. Once the bot has been mentioned in a thread (or has replied
+   * there), it picks up follow-up messages in that thread automatically.
+   *
+   * The bot only follows up in threads it's part of, it stays out of every
+   * other thread, so it never jumps into conversations that aren't for it. DMs
+   * are already mention-free and don't need this.
+   *
+   * `true` uses the built-in rule above. Pass `{ decide }` to add an
+   * agent-specific check — e.g. a quick model classification of whether a
+   * message in a shared thread is actually addressed to the bot — on top of it.
+   *
+   * Requires the Slack app to subscribe to `message.channels` (and
+   * `message.groups` for private channels) with the `channels:history` /
+   * `groups:history` scope, alongside the usual `app_mention` setup.
+   *
+   * Default: `false`.
+   */
+  readonly followUps?: boolean | SlackFollowUpsOptions;
 
   /**
    * Invoked when a Slack `app_mention` event arrives (only `app_mention`;
@@ -490,6 +537,9 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const uploadPolicy = mergeUploadPolicy(config.uploadPolicy);
   const slackFetchFile = createSlackFetchFile({ botToken: config.credentials?.botToken });
   const onAppMention = config.onAppMention ?? defaultOnAppMention;
+  const followUpsEnabled = config.followUps !== undefined && config.followUps !== false;
+  const followUpsDecide =
+    typeof config.followUps === "object" ? config.followUps.decide : undefined;
   const onDirectMessage = config.onDirectMessage ?? defaultOnDirectMessage;
   const authorizationRequiredOverride = config.events?.["authorization.required"];
   const turnStartedHandler = config.events?.["turn.started"] ?? defaultEvents["turn.started"]!;
@@ -568,6 +618,8 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
             onDirectMessage,
             uploadPolicy,
             threadContext: config.threadContext,
+            followUps: followUpsEnabled,
+            followUpsDecide,
             handledEvents,
             headers: req.headers,
             credentials: config.credentials,
@@ -674,6 +726,8 @@ async function handleEventPost(input: {
   readonly onDirectMessage: NonNullable<SlackChannelConfig["onDirectMessage"]>;
   readonly uploadPolicy: UploadPolicy;
   readonly threadContext: LoadThreadContextMessagesOptions | undefined;
+  readonly followUps: boolean;
+  readonly followUpsDecide: SlackFollowUpsOptions["decide"] | undefined;
   readonly credentials: SlackChannelCredentials | undefined;
   readonly handledEvents: Set<string>;
 }): Promise<Response> {
@@ -737,6 +791,25 @@ async function handleEventPost(input: {
     return new Response("ok");
   }
 
+  if (input.followUps) {
+    const followUp = parseThreadFollowUpEvent(envelope);
+    if (followUp) {
+      input.waitUntil(
+        dispatchInboundMessage({
+          kind: "thread_follow_up",
+          message: followUp,
+          handler: input.onAppMention,
+          send: input.send,
+          uploadPolicy: input.uploadPolicy,
+          threadContext: input.threadContext,
+          credentials: input.credentials,
+          decide: input.followUpsDecide,
+        }),
+      );
+      return new Response("ok");
+    }
+  }
+
   return new Response("ok");
 }
 
@@ -769,7 +842,7 @@ async function verifyInbound(
  * handler never crashes the webhook ACK.
  */
 async function dispatchInboundMessage(input: {
-  readonly kind: "app_mention" | "direct_message";
+  readonly kind: "app_mention" | "direct_message" | "thread_follow_up";
   readonly message: SlackMessage;
   readonly handler:
     | NonNullable<SlackChannelConfig["onAppMention"]>
@@ -778,6 +851,7 @@ async function dispatchInboundMessage(input: {
   readonly uploadPolicy: UploadPolicy;
   readonly threadContext: LoadThreadContextMessagesOptions | undefined;
   readonly credentials: SlackChannelCredentials | undefined;
+  readonly decide?: SlackFollowUpsOptions["decide"];
 }): Promise<void> {
   const { message, kind } = input;
   const { thread, slack } = buildSlackBinding({
@@ -787,6 +861,52 @@ async function dispatchInboundMessage(input: {
     teamId: message.teamId,
   });
   const slackCtx: SlackContext = { thread, slack };
+
+  // A mention-free thread reply only continues a conversation the bot is
+  // already part of. Resolve the bot's user id to (a) defer messages that
+  // mention it to the `app_mention` path, and (b) detect its presence in the
+  // thread (it posted, or was mentioned). A thread with neither is left alone.
+  if (kind === "thread_follow_up") {
+    const botUserId = await resolveBotUserId(input.credentials?.botToken);
+    const mention = botUserId ? `<@${botUserId}` : null;
+    if (mention !== null && message.text.includes(mention)) return;
+    try {
+      await thread.refresh();
+    } catch (error) {
+      logError(log, "thread_follow_up refresh failed", error, {
+        channelId: message.channelId,
+      });
+      return;
+    }
+
+    // Match this bot specifically by user id — not `isMe`, which is true for any
+    // bot-authored message and would treat a thread touched only by an unrelated
+    // bot (CI, another app) as one we belong to. Fall back to `isMe` only when the
+    // bot's id can't be resolved.
+    const botInThread = thread.recentMessages.some((m) =>
+      botUserId
+        ? m.user === botUserId || (mention !== null && m.text.includes(mention))
+        : m.isMe,
+    );
+    if (!botInThread) return;
+
+    // Optional agent-specific decision: only this bot's threads reach here, so a
+    // `decide` hook can apply intent checks (e.g. "is this message for me?")
+    // before committing to a full turn. Returning false stays silent; the
+    // message is still readable as thread context next turn.
+    if (input.decide) {
+      let proceed: boolean;
+      try {
+        proceed = await input.decide(message, slackCtx);
+      } catch (error) {
+        logError(log, "thread_follow_up decide threw — dropping", error, {
+          channelId: message.channelId,
+        });
+        return;
+      }
+      if (!proceed) return;
+    }
+  }
 
   let result;
   try {
