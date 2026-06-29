@@ -224,11 +224,12 @@ export async function FileTree() {
     <section className="pb-24 pt-16 font-sans px-4">
       <div className="mx-auto max-w-5xl">
         <h2 className="text-center text-heading-32 font-semibold tracking-tighter text-gray-1000 sm:text-heading-40">
-          An agent is a{" "}
+          An{" "}
           <span className="rounded-xl bg-gray-100 px-3 py-0.5">
             <IconFolderOpen className="mr-2 inline align-middle text-gray-900" size={28} />
-            directory
-          </span>
+            agent
+          </span>{" "}
+          is a directory
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">
           Define instructions and skills in markdown, tools in TypeScript, and deploy anywhere. The

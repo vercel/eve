@@ -1,6 +1,6 @@
 "use client";
 
-import { SiDocker, SiPostgresql } from "@icons-pack/react-simple-icons";
+import { SiDocker, SiPostgresql, SiSnowflake } from "@icons-pack/react-simple-icons";
 import {
   IconArrowUpRightSmall,
   IconLinked,
@@ -17,7 +17,6 @@ import { LogoIconVercel } from "@vercel/geistdocs/assets/logos/logo-icon-vercel"
 import { Switch } from "@vercel/geistdocs/components/switch";
 import Link from "next/link";
 import { type ComponentType, type JSX, type ReactNode, useState } from "react";
-import { IconSlack } from "@/components/geistcn-icons/icon-slack";
 import { cn } from "@/lib/utils";
 import { GradientBorder } from "./gradient-border";
 
@@ -82,7 +81,7 @@ const RUNTIME_ITEMS: Primitive[] = [
     managedOnlyHref: true,
     backend: {
       managed: { label: "Vercel Connect", Logo: LogoIconVercel },
-      "self-hosted": { label: "Slack API", Logo: IconSlack },
+      "self-hosted": { label: "Snowflake API", Logo: SiSnowflake },
     },
   },
   {
@@ -313,7 +312,7 @@ export function ArchitectureDiagram() {
               {" "}
               <Link
                 href="https://github.com/vercel-labs/steve"
-                className="inline-flex items-center gap-0 text-gray-1000 underline decoration-gray-400 underline-offset-2 transition-colors hover:decoration-gray-700"
+                className="inline-flex items-center gap-0 text-gray-1000 underline decoration-gray-400 underline-offset-2"
               >
                 See the example
                 <IconArrowUpRightSmall className="text-gray-900" size={16} />
