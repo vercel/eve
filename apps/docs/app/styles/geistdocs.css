@@ -16,7 +16,7 @@ body {
 }
 
 /* Tint the global footer to match the landing background, but only on the
-   home routes (`/` and `/home`), which render the [data-home-route] marker. */
+   home route (`/`), which renders the [data-home-route] marker. */
 body:has([data-home-route]) footer {
   @apply bg-background-200;
 }
