@@ -1,5 +1,6 @@
 import {
   getGitHubPullRequest,
+  listGitHubCompareFiles,
   listGitHubPullRequestFiles,
   type GitHubApiOptions,
   type GitHubPullRequestDetails,
@@ -52,8 +53,18 @@ export interface GitHubPullRequestContextConfig {
 /** Input for building one-shot model context for a pull request. */
 export interface GitHubPullRequestContextInput {
   readonly api?: GitHubApiOptions;
+  /**
+   * When set with {@link headSha}, file patches load via the compare API for
+   * this exact base/head pair instead of `/pulls/{number}/files` (current head).
+   */
+  readonly baseSha?: string | null;
   readonly config?: GitHubPullRequestContextConfig;
   readonly credentials?: GitHubChannelCredentials;
+  /**
+   * Webhook-resolved head SHA for this turn. When set, metadata and diffs pin to
+   * this commit so injected context matches sandbox checkout.
+   */
+  readonly headSha?: string | null;
   readonly installationId?: number;
   readonly owner: string;
   readonly pullRequestNumber: number | null;
@@ -72,25 +83,45 @@ export async function buildGitHubPullRequestContext(
 ): Promise<readonly string[] | undefined> {
   if (input.pullRequestNumber === null) return undefined;
 
-  const details = await getGitHubPullRequest({
-    api: input.api,
-    credentials: input.credentials,
-    installationId: input.installationId,
-    owner: input.owner,
-    pullRequestNumber: input.pullRequestNumber,
-    repo: input.repo,
-  });
+  const details = withPinnedPullRequestShas(
+    await getGitHubPullRequest({
+      api: input.api,
+      credentials: input.credentials,
+      installationId: input.installationId,
+      owner: input.owner,
+      pullRequestNumber: input.pullRequestNumber,
+      repo: input.repo,
+    }),
+    input,
+  );
   const lines = renderPullRequestMetadata(details);
 
-  const files = await listGitHubPullRequestFiles({
-    api: input.api,
-    credentials: input.credentials,
-    installationId: input.installationId,
-    owner: input.owner,
-    perPage: MAX_FILES,
-    pullRequestNumber: input.pullRequestNumber,
-    repo: input.repo,
-  });
+  const pinnedBaseSha = readNonEmptySha(input.baseSha) ?? readNonEmptySha(details.base.sha);
+  const pinnedHeadSha = readNonEmptySha(input.headSha) ?? readNonEmptySha(details.head.sha);
+  const files =
+    readNonEmptySha(input.headSha) !== undefined &&
+    pinnedHeadSha !== undefined &&
+    pinnedBaseSha !== undefined
+      ? (
+          await listGitHubCompareFiles({
+            api: input.api,
+            baseSha: pinnedBaseSha,
+            credentials: input.credentials,
+            headSha: pinnedHeadSha,
+            installationId: input.installationId,
+            owner: input.owner,
+            repo: input.repo,
+          })
+        ).slice(0, MAX_FILES)
+      : await listGitHubPullRequestFiles({
+          api: input.api,
+          credentials: input.credentials,
+          installationId: input.installationId,
+          owner: input.owner,
+          perPage: MAX_FILES,
+          pullRequestNumber: input.pullRequestNumber,
+          repo: input.repo,
+        });
   const excluded = [...GITHUB_DEFAULT_EXCLUDED_DIFF_FILES, ...(input.config?.excludedFiles ?? [])];
   lines.push("", ...renderPullRequestFiles(files, excluded));
 
@@ -113,6 +144,24 @@ export function mergeGitHubContext(input: {
   const hook = input.hook ?? [];
   if (github.length === 0 && hook.length === 0) return undefined;
   return [...github, ...hook];
+}
+
+function withPinnedPullRequestShas(
+  details: GitHubPullRequestDetails,
+  input: Pick<GitHubPullRequestContextInput, "baseSha" | "headSha">,
+): GitHubPullRequestDetails {
+  const headSha = readNonEmptySha(input.headSha);
+  const baseSha = readNonEmptySha(input.baseSha);
+  if (headSha === undefined && baseSha === undefined) return details;
+  return {
+    ...details,
+    base: { ...details.base, sha: baseSha ?? details.base.sha },
+    head: { ...details.head, sha: headSha ?? details.head.sha },
+  };
+}
+
+function readNonEmptySha(value: string | null | undefined): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
 function renderPullRequestMetadata(details: GitHubPullRequestDetails): string[] {

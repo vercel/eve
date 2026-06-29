@@ -50,8 +50,9 @@ async function runPendingDeployCycle(): Promise<void> {
     userInput: input,
     name: "TUI status line",
     appRoot,
+    serverUrl: UNREACHABLE_HOST,
     promptCommandHandler: createPromptCommandHandler({
-      appRoot,
+      target: { kind: "local", serverUrl: UNREACHABLE_HOST, workspaceRoot: appRoot },
       flows: {
         runChannelsFlow: async () => ({ kind: "done", addedChannels: ["slack"] }),
         runDeployFlow: async () => ({ kind: "deployed" }),
@@ -62,6 +63,8 @@ async function runPendingDeployCycle(): Promise<void> {
 
   try {
     await screen.waitForText("❯", 5_000);
+    await screen.waitForText(` :${new URL(UNREACHABLE_HOST).port} `, 5_000);
+    console.log(theme.muted("[tui-status-line] local loopback badge rendered"));
 
     input.type("/channels");
     input.enter();
@@ -109,7 +112,10 @@ async function runUnlinkedShowsNoVercelSegment(): Promise<void> {
     userInput: input,
     name: "TUI status line unlinked",
     appRoot,
-    promptCommandHandler: createPromptCommandHandler({ appRoot }),
+    serverUrl: UNREACHABLE_HOST,
+    promptCommandHandler: createPromptCommandHandler({
+      target: { kind: "local", serverUrl: UNREACHABLE_HOST, workspaceRoot: appRoot },
+    }),
   });
   const runPromise = runner.run();
 

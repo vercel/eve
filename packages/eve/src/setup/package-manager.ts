@@ -13,9 +13,10 @@ export interface DetectedPackageManager {
   source: PackageManagerSource;
 }
 
-/** Lockfiles in detection precedence order. */
+/** Package-manager marker files in detection precedence order. */
 const LOCKFILE_MANAGERS: ReadonlyArray<readonly [string, PackageManagerKind]> = [
   ["pnpm-lock.yaml", "pnpm"],
+  ["pnpm-workspace.yaml", "pnpm"],
   ["package-lock.json", "npm"],
   ["yarn.lock", "yarn"],
   ["bun.lock", "bun"],
@@ -28,7 +29,8 @@ function isPackageManagerKind(value: string): value is PackageManagerKind {
 
 /**
  * Resolves a project's package manager from gathered facts: an explicit
- * `packageManager` field wins, then the first known lockfile, then pnpm.
+ * `packageManager` field wins, then the first known package-manager marker,
+ * then pnpm.
  */
 export function resolvePackageManager(input: {
   packageManagerField?: string;

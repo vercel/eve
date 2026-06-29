@@ -147,6 +147,7 @@ class BraintrustReporter implements EvalReporter {
       eveSessionId: result.result.sessionId,
       eveStatus: result.result.status,
       eveVerdict: result.verdict,
+      eveSkipReason: result.skipReason,
       eveToolCalls: result.result.derived.toolCalls.map((call) => call.name),
       eveSubagentCalls: result.result.derived.subagentCalls.map((call) => call.name),
       eveParked: result.result.derived.parked,

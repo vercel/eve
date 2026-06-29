@@ -3,18 +3,17 @@ import { jsonSchema, type JSONSchema7, type ToolSet } from "ai";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import {
   WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA,
-  WEB_SEARCH_GATEWAY_OUTPUT_SCHEMA,
   WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA,
   WEB_SEARCH_OPENAI_OUTPUT_SCHEMA,
+  WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA,
   WEB_SEARCH_TOOL_DEFINITION,
 } from "#runtime/framework-tools/web-search.js";
-import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
 
 /**
  * The provider backend resolved for one web search tool invocation.
  */
-export type WebSearchBackend = "anthropic" | "gateway" | "google" | "openai";
+export type WebSearchBackend = "anthropic" | "google" | "openai" | "parallel";
 
 /**
  * Maps an upstream provider tool type (the literal `type` string the AI SDK
@@ -49,26 +48,6 @@ export function resolveFrameworkToolFromUpstreamType(type: string): string | nul
 }
 
 /**
- * Maps a {@link WebSearchBackend} to the gateway provider slug used in
- * `providerOptions.gateway.only` to pin routing to that provider.
- *
- * Returns `null` for the `"gateway"` backend (Perplexity via AI Gateway),
- * which is served by the gateway directly and does not need pinning.
- */
-export function resolveGatewayPinForWebSearchBackend(backend: WebSearchBackend): string | null {
-  switch (backend) {
-    case "anthropic":
-      return "anthropic";
-    case "openai":
-      return "openai";
-    case "google":
-      return "google";
-    case "gateway":
-      return null;
-  }
-}
-
-/**
  * Returns the output schema for the provider-managed web search tool that
  * will be injected for `backend`.
  */
@@ -76,62 +55,29 @@ export function resolveWebSearchOutputSchema(backend: WebSearchBackend): JsonObj
   switch (backend) {
     case "anthropic":
       return WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA;
-    case "gateway":
-      return WEB_SEARCH_GATEWAY_OUTPUT_SCHEMA;
     case "google":
       return WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA;
     case "openai":
       return WEB_SEARCH_OPENAI_OUTPUT_SCHEMA;
+    case "parallel":
+      return WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA;
   }
-}
-
-/**
- * Returns a new `providerOptions` object with
- * `gateway.only = [provider]` merged into the existing `gateway`
- * sub-object so the AI Gateway only attempts the given provider.
- *
- * Used by the harness to pin routing when a provider-specific tool
- * (e.g. Anthropic's `web_search_20250305`) is in the per-step toolset,
- * so a transient primary outage produces a clean retryable 503 instead
- * of a fallback-to-incompatible-provider 400.
- *
- * Author overrides win — if `base.gateway.only` or `base.gateway.order`
- * is already set, the input is returned unchanged so explicit routing
- * preferences are never silently overwritten.
- */
-export function mergeGatewayProviderPin(
-  base: Readonly<Record<string, unknown>> | undefined,
-  provider: string,
-): Record<string, unknown> {
-  const baseGateway = isObject(base?.gateway)
-    ? (base.gateway as Record<string, unknown>)
-    : undefined;
-
-  if (baseGateway?.only !== undefined || baseGateway?.order !== undefined) {
-    return { ...base };
-  }
-
-  const mergedGateway: Record<string, unknown> = {
-    ...baseGateway,
-    only: [provider],
-  };
-
-  return {
-    ...base,
-    gateway: mergedGateway,
-  };
 }
 
 /**
  * Determines the web search backend for a model reference.
  *
- * - OpenAI models (gateway or BYO): native OpenAI search
- * - Anthropic models (gateway or BYO): native Anthropic search
+ * - All AI Gateway models: Parallel search via gateway
+ * - Direct/BYO OpenAI models: native OpenAI search
+ * - Direct/BYO Anthropic models: native Anthropic search
  * - Direct/BYO Google models: native Google search grounding
- * - Other models on AI Gateway (including `google/...`): Perplexity search via gateway
  * - Other BYO models: not available (returns `null`)
  */
 export function resolveWebSearchBackend(modelRef: RuntimeModelReference): WebSearchBackend | null {
+  if (modelRef.source === undefined) {
+    return "parallel";
+  }
+
   const providerId = modelRef.id.split("/")[0] ?? "";
 
   if (providerId === "openai" || providerId.startsWith("openai.")) {
@@ -144,10 +90,6 @@ export function resolveWebSearchBackend(modelRef: RuntimeModelReference): WebSea
 
   if (providerId.startsWith("google.")) {
     return "google";
-  }
-
-  if (modelRef.source === undefined) {
-    return "gateway";
   }
 
   return null;
@@ -183,10 +125,10 @@ export async function resolveWebSearchProviderTool(
       const { google } = await import("#compiled/@ai-sdk/google/index.js");
       return attachWebSearchOutputSchema(google.tools.googleSearch({}) as ToolSet[string], backend);
     }
-    case "gateway": {
+    case "parallel": {
       const { gateway } = await import("ai");
       return attachWebSearchOutputSchema(
-        gateway.tools.perplexitySearch() as ToolSet[string],
+        gateway.tools.parallelSearch() as ToolSet[string],
         backend,
       );
     }

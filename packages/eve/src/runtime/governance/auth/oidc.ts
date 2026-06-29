@@ -56,8 +56,8 @@ export async function authenticateOidcStrategy(input: {
       if (
         typeof verified.payload.external_sub !== "string" ||
         verified.payload.external_sub.length === 0 ||
-        !currentVercelProjectMatches({ payload: verified.payload }) ||
-        !currentVercelEnvironmentMatches({ payload: verified.payload })
+        !currentVercelProjectMatches({ payload: verified.payload, strategy: input.strategy }) ||
+        !currentVercelEnvironmentMatches({ payload: verified.payload, strategy: input.strategy })
       ) {
         return {
           kind: "caller-not-allowed",
@@ -76,6 +76,46 @@ export async function authenticateOidcStrategy(input: {
       };
     }
 
+    const hasDevelopmentUserSubject =
+      input.strategy.acceptCurrentVercelProject &&
+      input.strategy.issuer.startsWith("https://oidc.vercel.com/") &&
+      verified.payload.user_id !== undefined;
+    if (hasDevelopmentUserSubject) {
+      if (
+        typeof verified.payload.user_id !== "string" ||
+        verified.payload.user_id.length === 0 ||
+        verified.payload.environment !== "development" ||
+        !currentVercelProjectMatches({ payload: verified.payload, strategy: input.strategy })
+      ) {
+        return {
+          kind: "caller-not-allowed",
+        };
+      }
+
+      if (
+        currentVercelEnvironmentMatches({ payload: verified.payload, strategy: input.strategy })
+      ) {
+        return {
+          kind: "authenticated",
+          principal: createJwtAuthenticatedCallerPrincipal({
+            authenticator: "oidc",
+            payload: verified.payload,
+            principalType: "user",
+            subjectClaim: "user_id",
+          }),
+        };
+      }
+
+      if (input.strategy.currentVercelProject?.environment !== "preview") {
+        return {
+          kind: "caller-not-allowed",
+        };
+      }
+
+      // Preview may use a same-project development credential only through the
+      // generic service path below, never as the user embedded in the token.
+    }
+
     if (typeof verified.payload.sub !== "string" || verified.payload.sub.length === 0) {
       return {
         kind: "not-authenticated",
@@ -87,9 +127,11 @@ export async function authenticateOidcStrategy(input: {
       isCurrentVercelProjectToken({
         issuer: input.strategy.issuer,
         payload: verified.payload,
+        strategy: input.strategy,
       });
     const isCurrentVercelRuntimeToken =
-      isCurrentProjectToken && isCurrentVercelEnvironmentToken({ payload: verified.payload });
+      isCurrentProjectToken &&
+      isCurrentVercelEnvironmentToken({ payload: verified.payload, strategy: input.strategy });
 
     if (
       !isCurrentProjectToken &&
@@ -171,47 +213,56 @@ async function getOidcDiscoveryDocument(
 function isCurrentVercelProjectToken(input: {
   readonly issuer: string;
   readonly payload: JWTPayload;
+  readonly strategy: ResolvedOidcAuthStrategy;
 }): boolean {
   if (!input.issuer.startsWith("https://oidc.vercel.com")) {
     return false;
   }
 
-  const currentProjectId = process.env.VERCEL_PROJECT_ID?.trim();
-  if (currentProjectId === undefined || currentProjectId.length === 0) {
+  const currentProject = input.strategy.currentVercelProject;
+  if (currentProject === undefined) {
     return false;
   }
 
   return (
-    typeof input.payload.project_id === "string" && input.payload.project_id === currentProjectId
+    typeof input.payload.project_id === "string" &&
+    input.payload.project_id === currentProject.projectId
   );
 }
 
 /**
- * Returns whether the token's `project_id` claim matches the deployment's
- * `VERCEL_PROJECT_ID`. Fails closed: when `VERCEL_PROJECT_ID` is unset this
- * returns `false`, so an external-subject ("user") token cannot authenticate
- * on a deployment that has not pinned its project. Mirrors the fail-closed
- * {@link isCurrentVercelProjectToken} used by the service/runtime branch.
+ * Returns whether the token's `project_id` claim matches the configured
+ * current project. Fails closed when that project is absent, so a user token
+ * cannot authenticate without an explicit project bind. Mirrors the
+ * fail-closed {@link isCurrentVercelProjectToken} used by the
+ * service/runtime branch.
  */
-function currentVercelProjectMatches(input: { readonly payload: JWTPayload }): boolean {
-  const currentProjectId = process.env.VERCEL_PROJECT_ID?.trim();
-  if (currentProjectId === undefined || currentProjectId.length === 0) {
+function currentVercelProjectMatches(input: {
+  readonly payload: JWTPayload;
+  readonly strategy: ResolvedOidcAuthStrategy;
+}): boolean {
+  const currentProject = input.strategy.currentVercelProject;
+  if (currentProject === undefined) {
     return false;
   }
 
   return (
-    typeof input.payload.project_id === "string" && input.payload.project_id === currentProjectId
+    typeof input.payload.project_id === "string" &&
+    input.payload.project_id === currentProject.projectId
   );
 }
 
 /**
- * Returns whether a verified JWT's `environment` claim matches the
- * current Vercel deployment environment. Combined with
+ * Returns whether a verified JWT's `environment` claim matches the configured
+ * current Vercel environment. Combined with
  * {@link isCurrentVercelProjectToken} to upgrade `principalType` from
  * `"service"` to `"runtime"` when the caller is the deployment itself.
  */
-function isCurrentVercelEnvironmentToken(input: { readonly payload: JWTPayload }): boolean {
-  const currentEnvironment = getCurrentVercelEnvironment();
+function isCurrentVercelEnvironmentToken(input: {
+  readonly payload: JWTPayload;
+  readonly strategy: ResolvedOidcAuthStrategy;
+}): boolean {
+  const currentEnvironment = input.strategy.currentVercelProject?.environment;
   if (currentEnvironment === undefined || currentEnvironment.length === 0) {
     return false;
   }
@@ -223,13 +274,15 @@ function isCurrentVercelEnvironmentToken(input: { readonly payload: JWTPayload }
 }
 
 /**
- * Returns whether the token's `environment` claim matches the current Vercel
- * deployment environment. Fails closed: when the environment cannot be
- * resolved this returns `false`, so an external-subject ("user") token cannot
- * authenticate on a deployment with no resolvable environment.
+ * Returns whether the token's `environment` claim matches the configured
+ * current Vercel environment. Fails closed when that environment is absent,
+ * so a user token cannot authenticate without an explicit environment bind.
  */
-function currentVercelEnvironmentMatches(input: { readonly payload: JWTPayload }): boolean {
-  const currentEnvironment = getCurrentVercelEnvironment();
+function currentVercelEnvironmentMatches(input: {
+  readonly payload: JWTPayload;
+  readonly strategy: ResolvedOidcAuthStrategy;
+}): boolean {
+  const currentEnvironment = input.strategy.currentVercelProject?.environment;
   if (currentEnvironment === undefined || currentEnvironment.length === 0) {
     return false;
   }
@@ -238,8 +291,4 @@ function currentVercelEnvironmentMatches(input: { readonly payload: JWTPayload }
     typeof input.payload.environment === "string" &&
     input.payload.environment === currentEnvironment
   );
-}
-
-function getCurrentVercelEnvironment(): string | undefined {
-  return process.env.VERCEL_TARGET_ENV?.trim() || process.env.VERCEL_ENV?.trim() || undefined;
 }

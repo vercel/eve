@@ -43,7 +43,7 @@ Notes:
 
 - **`agent`** runs a copy of the current agent on a focused task. It inherits the same tools, connections, and instructions, but starts with fresh conversation history and fresh [state](../guides/state). The child shares the parent's sandbox filesystem, so anything it writes is visible to the parent. See [Subagents](../subagents).
 - **`load_skill`** only pulls instructions into context. It adds no new execution surface, because behavior still comes from the tools the agent already has.
-- **`connection_search`** is the model-facing `connection__search` tool. A search surfaces a connection's tools by their qualified name (e.g. `connection__linear__list_issues`), and the model can then call them directly. It's registered only when the agent has connections.
+- **`connection_search`** surfaces a connection's tools by their qualified name (e.g. `linear__list_issues`), which the model can then call directly. It's registered only when the agent has connections.
 - **`web_search`** has no local executor; the provider runs it. To supply your own implementation, override it with `defineTool()`.
 
 Review these built-in tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.
@@ -86,16 +86,6 @@ Three moves shape the harness. The right one depends on whether the model should
 - **Override** when you want the same capability with different behavior. Spread the default from `eve/tools/defaults` and wrap it (logging, an extra guard, a different backend), and the model still sees a tool by that name. Spreading keeps the default's description, schema, and any framework state, such as the `todo` tool's durable state key. Drop the spread and your replacement owns its own context, losing that wiring.
 - **Disable** when the model should not have the capability at all. A `disableTool()` sentinel removes the built-in, and the model never sees it. Reach for this to lock down `bash` or `web_fetch` in an agent that should not run shell commands or fetch arbitrary URLs.
 - **Author a new tool** when you want a capability the harness does not ship. Give it a fresh slug under `agent/tools/` and it joins the built-ins instead of replacing one. See [Tools](../tools) for the authoring model.
-
-## The opt-in `Workflow` tool
-
-An experimental `Workflow` tool ships but stays off by default. To turn it on, re-export the opt-in marker from `agent/tools/workflow.ts`:
-
-```ts
-export { ExperimentalWorkflow as default } from "eve/tools";
-```
-
-With it on, the model can orchestrate the agent's own subagents from model-authored JavaScript, all as one durable step. See [Dynamic workflows](../guides/dynamic-workflows).
 
 ## What to read next
 

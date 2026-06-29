@@ -959,7 +959,7 @@ describe("compileAgent", () => {
     );
   });
 
-  it("compiles the authored experimental.codeMode flag into the manifest config", async () => {
+  it("rejects the removed experimental.codeMode field", async () => {
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-compile-experimental-code-mode-",
       APP_ROOT_OPTIONS,
@@ -977,11 +977,7 @@ describe("compileAgent", () => {
       ].join("\n"),
     );
 
-    const result = await compileAgent({
-      startPath: appRoot,
-    });
-
-    expect(result.manifest.config.experimental).toEqual({ codeMode: true });
+    await expect(compileAgent({ startPath: appRoot })).rejects.toThrow("codeMode");
   });
 
   it("uses the authored local subagent id as the canonical compiled runtime id", async () => {

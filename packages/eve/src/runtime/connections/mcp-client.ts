@@ -1,11 +1,15 @@
 import { createMCPClient, type MCPClient } from "#compiled/@ai-sdk/mcp/index.js";
 import type { ToolSet } from "ai";
 
+import { buildCallbackContext } from "#context/build-callback-context.js";
 import { ConnectionAuthorizationRequiredError } from "#public/connections/errors.js";
+import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
+import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
 import { isObject } from "#shared/guards.js";
 import type {
+  AuthorizationDefinition,
   ConnectionClient,
   ConnectionToolMetadata,
   HeadersDefinition,
@@ -227,7 +231,7 @@ export class McpConnectionClient implements ConnectionClient {
    * the connection declares no authorization.
    */
   async #evictCachedToken(): Promise<void> {
-    const authorization = this.#connection.authorization;
+    const authorization = await resolveConnectionAuthorization(this.#connection);
     if (authorization === undefined) return;
     await evictScopedToken({
       authorization,
@@ -342,9 +346,9 @@ export function passesToolFilter(
  * Merges `authorization` (Bearer token) and `headers` into one
  * flat `Record<string, string>` for the transport layer.
  *
- * Resolves the {@link ConnectionPrincipal} from the active session
- * and invokes
- * `authorization.getToken({ principal })` to produce the bearer.
+ * Resolves dynamic `auth` and `headers` callbacks with the active
+ * {@link SessionContext}, then resolves the {@link ConnectionPrincipal}
+ * and invokes `authorization.getToken({ principal })` to produce the bearer.
  * `getToken` may throw {@link ConnectionAuthorizationRequiredError};
  * callers (`connection_search`, wrapped connection tools) catch it
  * and it propagates as-is from here.
@@ -353,16 +357,23 @@ export async function resolveHeaders(
   connection: ResolvedConnectionDefinition,
 ): Promise<Record<string, string>> {
   const merged: Record<string, string> = {};
+  let callbackContext: SessionContext | undefined;
+  const getCallbackContext = (): SessionContext => (callbackContext ??= buildCallbackContext());
 
-  if (connection.authorization !== undefined) {
-    const result = await resolveToken(connection);
+  const authorization = await resolveConnectionAuthorization(
+    connection,
+    typeof connection.authorization === "function" ? getCallbackContext() : undefined,
+  );
+
+  if (authorization !== undefined) {
+    const result = await resolveToken(connection, authorization);
     merged.Authorization = `Bearer ${result.token}`;
   }
 
   if (connection.headers !== undefined) {
-    const resolved = await resolveHeadersDefinition(connection.headers);
+    const resolved = await resolveHeadersDefinition(connection.headers, getCallbackContext);
     for (const [key, value] of Object.entries(resolved)) {
-      if (connection.authorization !== undefined && key.toLowerCase() === "authorization") {
+      if (authorization !== undefined && key.toLowerCase() === "authorization") {
         throw new Error(
           `Connection "${connection.connectionName}" headers must not include an "Authorization" key when "authorization" is also provided.`,
         );
@@ -379,13 +390,12 @@ export async function resolveHeaders(
  * keyed by the connection name. See
  * {@link resolveScopedToken} for the cache and principal semantics.
  */
-async function resolveToken(connection: ResolvedConnectionDefinition) {
-  if (connection.authorization === undefined) {
-    throw new Error(`Connection "${connection.connectionName}" does not define authorization.`);
-  }
-
+async function resolveToken(
+  connection: ResolvedConnectionDefinition,
+  authorization: Readonly<AuthorizationDefinition>,
+) {
   return await resolveScopedToken({
-    authorization: connection.authorization,
+    authorization,
     connection: { url: connection.url },
     scope: connection.connectionName,
   });
@@ -393,24 +403,28 @@ async function resolveToken(connection: ResolvedConnectionDefinition) {
 
 async function resolveHeadersDefinition(
   headers: Readonly<HeadersDefinition>,
+  getContext: () => SessionContext,
 ): Promise<Record<string, string>> {
   if (typeof headers === "function") {
-    return await headers();
+    return { ...(await headers(getContext())) };
   }
 
   const result: Record<string, string> = {};
   const entries = Object.entries(headers);
 
   for (const [key, value] of entries) {
-    result[key] = await resolveHeaderValue(value);
+    result[key] = await resolveHeaderValue(value, getContext);
   }
 
   return result;
 }
 
-async function resolveHeaderValue(value: HeaderValue): Promise<string> {
+async function resolveHeaderValue(
+  value: HeaderValue,
+  getContext: () => SessionContext,
+): Promise<string> {
   if (typeof value === "function") {
-    return await value();
+    return await value(getContext());
   }
   return await value;
 }

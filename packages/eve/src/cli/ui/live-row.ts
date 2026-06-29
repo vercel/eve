@@ -2,6 +2,11 @@ import pc from "picocolors";
 
 import { sliceVisible, visibleLength } from "#cli/dev/tui/terminal-text.js";
 import { sanitizeForTerminal } from "#cli/ui/output.js";
+import {
+  PROGRESS_PULSE_DURATION_MS,
+  PROGRESS_PULSE_GLYPH,
+  PROGRESS_PULSE_SEQUENCE,
+} from "#cli/ui/progress-pulse.js";
 import { isLogLevelEnabled } from "#internal/logging.js";
 
 interface CliLiveRow {
@@ -25,9 +30,6 @@ interface CliLiveRowOptions {
 }
 
 const REDRAW_PROGRESS_ROW = "\r\u001B[K";
-const PULSE_GLYPH = "▪";
-const PULSE_SEQUENCE_DURATION_MS = 1000;
-const DEFAULT_PULSE_SEQUENCE = "1111110000111111";
 
 function validatePulseSequence(sequence: string): void {
   if (sequence.length !== 8 && sequence.length !== 16) {
@@ -39,8 +41,8 @@ function validatePulseSequence(sequence: string): void {
 }
 
 function pulseStepDurationMs(index: number, stepCount: number): number {
-  const start = Math.round((index * PULSE_SEQUENCE_DURATION_MS) / stepCount);
-  const end = Math.round(((index + 1) * PULSE_SEQUENCE_DURATION_MS) / stepCount);
+  const start = Math.round((index * PROGRESS_PULSE_DURATION_MS) / stepCount);
+  const end = Math.round(((index + 1) * PROGRESS_PULSE_DURATION_MS) / stepCount);
   return end - start;
 }
 
@@ -81,7 +83,7 @@ export function startCliLiveRow(
   options: CliLiveRowOptions = {},
 ): CliLiveRow {
   const output = options.output ?? process.stdout;
-  const pulseSequence = options.pulseSequence ?? DEFAULT_PULSE_SEQUENCE;
+  const pulseSequence = options.pulseSequence ?? PROGRESS_PULSE_SEQUENCE;
   validatePulseSequence(pulseSequence);
   const animate = output.isTTY === true && !isLogLevelEnabled("debug");
 
@@ -96,7 +98,7 @@ export function startCliLiveRow(
   const paint = (): void => {
     if (current === undefined) return;
     const row = renderProgressRow(
-      pulseVisible ? PULSE_GLYPH : " ",
+      pulseVisible ? PROGRESS_PULSE_GLYPH : " ",
       current.message,
       current.detail,
       output.columns,

@@ -9,16 +9,17 @@ export class RetryableError extends Error {}
 
 export class FatalError extends Error {}
 
+interface WorkflowHook<T> extends AsyncIterable<T> {
+  readonly token: string;
+  getConflict(): Promise<{ readonly runId: string } | null>;
+}
+
 /**
  * Creates a Workflow hook from inside a durable workflow body.
  */
-export function createHook<T = unknown>(
-  options?: unknown,
-): AsyncIterable<T> & {
-  readonly token: string;
-} {
+export function createHook<T = unknown>(options?: unknown): WorkflowHook<T> {
   const createHookFn = workflowGlobal[WORKFLOW_CREATE_HOOK] as
-    | ((hookOptions?: unknown) => AsyncIterable<T> & { readonly token: string })
+    | ((hookOptions?: unknown) => WorkflowHook<T>)
     | undefined;
 
   if (createHookFn === undefined) {
@@ -68,16 +69,8 @@ export function getWritable<T = unknown>(options: { namespace?: string } = {}): 
 /**
  * Creates a Workflow webhook from inside a durable workflow body.
  */
-export function createWebhook<T = unknown>(
-  options?: unknown,
-): AsyncIterable<T> & {
-  readonly token: string;
-  url?: string;
-} {
-  const hook = createHook<T>(options) as AsyncIterable<T> & {
-    readonly token: string;
-    url?: string;
-  };
+export function createWebhook<T = unknown>(options?: unknown): WorkflowHook<T> & { url?: string } {
+  const hook = createHook<T>(options) as WorkflowHook<T> & { url?: string };
   const metadata = getWorkflowMetadata();
   const baseUrl = typeof metadata.url === "string" ? metadata.url : "";
 
@@ -89,7 +82,7 @@ export function createWebhook<T = unknown>(
  * Defines a Workflow hook factory for workflow-body code.
  */
 export function defineHook<T = unknown>(): {
-  readonly create: (options?: unknown) => AsyncIterable<T> & { readonly token: string };
+  readonly create: (options?: unknown) => WorkflowHook<T>;
   readonly resume: () => never;
 } {
   return {

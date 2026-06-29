@@ -1,5 +1,7 @@
 import {
   githubContinuationToken,
+  type GitHubCiEvent,
+  type GitHubCiWebhookEvent,
   type GitHubConversationKind,
   type GitHubConversationRef,
   type GitHubIssueCommentEvent,
@@ -152,6 +154,24 @@ export function stateFromPullRequestEvent(
   };
 }
 
+/** Builds pull-request state for a CI event hook dispatch. */
+export function stateFromCiEvent(event: GitHubCiWebhookEvent): GitHubChannelState {
+  const ci = ciPayload(event);
+  const pullRequestNumber = ci.pullRequests[0] ?? null;
+  return {
+    ...initialGitHubState(),
+    conversationKind: "pull_request",
+    headSha: ci.headSha,
+    installationId: event.installationId ?? null,
+    issueNumber: pullRequestNumber,
+    owner: event.repository.owner,
+    pullRequestNumber,
+    repo: event.repository.name,
+    repositoryId: event.repository.id,
+    triggeringUserLogin: event.sender.login,
+  };
+}
+
 /** Builds state for proactive `receive()` calls. */
 export function stateFromReceiveTarget(input: {
   readonly target: GitHubReceiveStateTarget;
@@ -195,4 +215,10 @@ export function continuationTokenFromState(state: GitHubChannelState): string {
     repositoryId: state.repositoryId,
     reviewThreadRootCommentId: state.reviewThreadRootCommentId,
   });
+}
+
+function ciPayload(event: GitHubCiWebhookEvent): GitHubCiEvent {
+  if (event.kind === "check_suite") return event.checkSuite;
+  if (event.kind === "check_run") return event.checkRun;
+  return event.workflowRun;
 }

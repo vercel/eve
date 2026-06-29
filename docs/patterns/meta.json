@@ -1,0 +1,9 @@
+{
+  "title": "Patterns",
+  "pages": [
+    "multi-tenant-memory",
+    "dynamic-scheduling",
+    "multi-tenant-auth",
+    "multi-tenant-approvals"
+  ]
+}

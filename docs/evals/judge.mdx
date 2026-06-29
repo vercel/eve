@@ -11,7 +11,7 @@ import { defineEval } from "eve/evals";
 export default defineEval({
   async test(t) {
     await t.send("Explain quantum tunneling to a 10-year-old.");
-    t.completed();
+    t.succeeded();
     t.judge.autoevals.closedQA("uses no math beyond arithmetic").atLeast(0.8);
   },
 });
@@ -52,7 +52,7 @@ t.judge.autoevals.closedQA("cites a source").atLeast(0.6); // soft, fails under 
 t.judge.autoevals.factuality(reference).gate(0.8); // hard gate at 0.8
 ```
 
-A judge runs once per assertion and burns tokens, so reach for one only when nothing deterministic will do. Several slow judge calls in one eval can fan out with `await Promise.all([...])`.
+A judge runs once per assertion and burns tokens, so reach for one only when nothing deterministic will do. Judge calls start when recorded, and the runner waits for all of them during finalization; assertion handles themselves are intentionally not awaitable.
 
 ## Configuring the judge model
 

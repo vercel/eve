@@ -104,7 +104,10 @@ function isAbortError(error: NodeJS.ErrnoException, signal: AbortSignal | undefi
 interface VercelCliInvocation {
   command: string;
   commandArgs: string[];
+  shell?: boolean;
 }
+
+type Platform = NodeJS.Platform;
 
 function ancestorDirectories(dir: string): string[] {
   const directories: string[] = [];
@@ -127,19 +130,32 @@ function findExecutable(filePath: string): string | undefined {
   return undefined;
 }
 
-function findLocalVercel(cwd: string): string | undefined {
+function vercelExecutableNames(platform: Platform): string[] {
+  return platform === "win32" ? ["vercel.cmd", "vercel.exe"] : ["vercel"];
+}
+
+function findLocalVercel(cwd: string, platform: Platform): string | undefined {
   for (const dir of ancestorDirectories(cwd)) {
-    const binary = findExecutable(join(dir, "node_modules", ".bin", "vercel"));
-    if (binary !== undefined) return binary;
+    for (const executable of vercelExecutableNames(platform)) {
+      const binary = findExecutable(join(dir, "node_modules", ".bin", executable));
+      if (binary !== undefined) return binary;
+    }
   }
   return undefined;
 }
 
-function resolveVercelInvocation(cwd: string): VercelCliInvocation {
-  const localBinary = findLocalVercel(cwd);
+export function resolveVercelInvocation(
+  cwd: string,
+  args: string[] = [],
+  platform: Platform = process.platform,
+): VercelCliInvocation {
+  const localBinary = findLocalVercel(cwd, platform);
+  if (platform === "win32") {
+    return { command: localBinary ?? "vercel", commandArgs: args, shell: true };
+  }
   return localBinary === undefined
-    ? { command: "vercel", commandArgs: [] }
-    : { command: localBinary, commandArgs: [] };
+    ? { command: "vercel", commandArgs: args }
+    : { command: localBinary, commandArgs: args };
 }
 
 function stdioForRun(
@@ -161,18 +177,15 @@ export async function runVercel(args: string[], options: RunVercelOptions): Prom
   if (options.signal?.aborted === true) return false;
   return new Promise<boolean>((resolvePromise) => {
     const cwd = existingDir(options.cwd);
-    const invocation = resolveVercelInvocation(cwd);
+    const invocation = resolveVercelInvocation(cwd, commandArgs(args, options.nonInteractive));
     const outputBuffer = options.onOutput && createProcessOutputBuffer(options.onOutput);
-    const child = spawn(
-      invocation.command,
-      [...invocation.commandArgs, ...commandArgs(args, options.nonInteractive)],
-      {
-        cwd,
-        stdio: stdioForRun(options),
-        env: buildSpawnEnv(options.extraEnv ?? {}),
-        signal: options.signal,
-      },
-    );
+    const child = spawn(invocation.command, invocation.commandArgs, {
+      cwd,
+      stdio: stdioForRun(options),
+      env: buildSpawnEnv(options.extraEnv ?? {}),
+      shell: invocation.shell,
+      signal: options.signal,
+    });
     const disarmAbort = armProcessAbort(child, options.signal);
     child.stdout?.on("data", (chunk: Buffer) => outputBuffer?.write("stdout", chunk));
     child.stderr?.on("data", (chunk: Buffer) => outputBuffer?.write("stderr", chunk));
@@ -252,22 +265,19 @@ export async function runVercelCaptureStdout(
   if (options.signal?.aborted === true) return { ok: false, stdout: "" };
   return new Promise<RunVercelCaptureResult>((resolvePromise) => {
     const cwd = existingDir(options.cwd);
-    const invocation = resolveVercelInvocation(cwd);
+    const invocation = resolveVercelInvocation(cwd, commandArgs(args, options.nonInteractive));
     const outputBuffer = options.onOutput && createProcessOutputBuffer(options.onOutput);
-    const child = spawn(
-      invocation.command,
-      [...invocation.commandArgs, ...commandArgs(args, options.nonInteractive)],
-      {
-        cwd,
-        stdio: [
-          options.nonInteractive ? "ignore" : "inherit",
-          "pipe",
-          options.onOutput ? "pipe" : "inherit",
-        ],
-        env: buildSpawnEnv(options.extraEnv ?? {}),
-        signal: options.signal,
-      },
-    );
+    const child = spawn(invocation.command, invocation.commandArgs, {
+      cwd,
+      stdio: [
+        options.nonInteractive ? "ignore" : "inherit",
+        "pipe",
+        options.onOutput ? "pipe" : "inherit",
+      ],
+      env: buildSpawnEnv(options.extraEnv ?? {}),
+      shell: invocation.shell,
+      signal: options.signal,
+    });
     const disarmAbort = armProcessAbort(child, options.signal);
     const chunks: string[] = [];
     child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk.toString("utf8")));
@@ -371,18 +381,15 @@ export async function captureVercel(
   }
   return new Promise<VercelCaptureResult>((resolvePromise) => {
     const cwd = existingDir(options.cwd);
-    const invocation = resolveVercelInvocation(cwd);
+    const invocation = resolveVercelInvocation(cwd, commandArgs(args, options.nonInteractive));
     const outputBuffer = options.onOutput && createProcessOutputBuffer(options.onOutput);
-    const child = spawn(
-      invocation.command,
-      [...invocation.commandArgs, ...commandArgs(args, options.nonInteractive)],
-      {
-        cwd,
-        stdio: ["ignore", "pipe", "pipe"],
-        env: buildSpawnEnv(options.extraEnv ?? {}),
-        signal: options.signal,
-      },
-    );
+    const child = spawn(invocation.command, invocation.commandArgs, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: buildSpawnEnv(options.extraEnv ?? {}),
+      shell: invocation.shell,
+      signal: options.signal,
+    });
     const disarmAbort = armProcessAbort(child, options.signal);
     const stdoutChunks: string[] = [];
     const stderrChunks: string[] = [];

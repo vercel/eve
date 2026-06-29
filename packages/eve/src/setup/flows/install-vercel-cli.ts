@@ -4,6 +4,7 @@ import { spawnPackageManager } from "#setup/primitives/index.js";
 import { getVercelAuthStatus } from "#setup/vercel-project.js";
 
 import type { Prompter } from "../prompter.js";
+import { withSpinner } from "../with-spinner.js";
 
 export type InstallVercelCliResult =
   /** The CLI is already resolvable; nothing to do. */
@@ -41,21 +42,8 @@ function globalInstallArguments(kind: PackageManagerKind): string[] {
   }
 }
 
-async function withSpinner<T>(
-  prompter: Prompter,
-  message: string,
-  task: () => Promise<T>,
-): Promise<T> {
-  const spinner = prompter.log.spinner?.(message);
-  try {
-    return await task();
-  } finally {
-    spinner?.stop();
-  }
-}
-
 /**
- * THE INSTALL FLOW for the dev TUI's `/vc`: the fix command for the
+ * THE INSTALL FLOW for the dev TUI's `/vc:install`: the fix command for the
  * "Vercel CLI not found" diagnostic, so every diagnostic has a matching
  * command. Short-circuits when the CLI already resolves; otherwise runs a
  * global install with the project's package manager, streaming output to the

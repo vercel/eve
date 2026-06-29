@@ -64,7 +64,7 @@ describe("composeRuntimeBasePrompt", () => {
     ]);
   });
 
-  it("does not inject sandbox routing guidance — sandboxes are no longer auto-exposed", () => {
+  it("does not inject runtime-owned delivery or sandbox guidance", () => {
     expect(composeRuntimeBasePrompt({})).toEqual([]);
   });
 

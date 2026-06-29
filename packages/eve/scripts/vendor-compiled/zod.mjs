@@ -3,6 +3,7 @@ import { loadDeclaration } from "./_shared.mjs";
 export default {
   packageName: "zod",
   compiledPath: "zod",
-  chunkGroup: "workflow",
+  chunkGroup: "client",
   declaration: await loadDeclaration("zod.d.ts"),
+  platform: "neutral",
 };

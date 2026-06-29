@@ -10,10 +10,11 @@ import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 export async function startRemoteAgentSession(input: {
   readonly action: RuntimeRemoteAgentCallActionRequest;
   readonly callbackBaseUrl: string | undefined;
+  readonly callbackToken?: string;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
   readonly session: HarnessSession;
 }): Promise<string> {
-  const callbackToken = input.session.continuationToken;
+  const callbackToken = input.callbackToken ?? input.session.continuationToken;
   if (!callbackToken) {
     throw new Error("Cannot dispatch remote agent without a parent continuation token.");
   }

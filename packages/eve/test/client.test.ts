@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { Client, ClientError, type HandleMessageStreamEvent } from "../src/client/index.js";
+import {
+  Client,
+  ClientError,
+  type AgentInfoResult,
+  type HandleMessageStreamEvent,
+} from "../src/client/index.js";
 import {
   EVE_SESSION_ID_HEADER,
   createMessageCompletedEvent,
@@ -227,6 +232,7 @@ describe("Client.info", () => {
         },
         name: "Weather Agent",
       },
+      capabilities: { devRoutes: true },
       channels: {
         authored: [],
         available: [],
@@ -293,7 +299,7 @@ describe("Client.info", () => {
         resourceRoot: null,
         rootEntries: [],
       },
-    };
+    } satisfies AgentInfoResult;
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(Response.json(payload));
 
     const client = new Client({ host: "http://localhost:3000" });

@@ -7,15 +7,12 @@ import { DYNAMIC_ECHO_TOKEN, ECHO_TOOL } from "./shared.js";
 export default defineEval({
   description: "Dynamic tools smoke: resolver registers the echo tool and it returns the token.",
   async test(t) {
-    const turn = await t.send(
+    await t.send(
       `Please call the \`${ECHO_TOOL}\` tool with message 'hello from smoke test' and tell me what it returned.`,
     );
-    turn.expectOk();
 
-    t.didNotFail();
-    t.completed();
+    t.succeeded();
     t.calledTool(ECHO_TOOL, {
-      isError: false,
       output: { echoed: "hello from smoke test", token: DYNAMIC_ECHO_TOKEN },
     });
   },

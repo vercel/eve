@@ -176,6 +176,27 @@ afterEach(async () => {
 });
 
 describe("startAuthoredSourceWatcher", () => {
+  it("rebuilds when a local setup action knows authored source changed", async () => {
+    const previousHost = createPreparedHost();
+    const nextHost = createPreparedHost();
+    const nitroStub = createNitroStub();
+    prepareApplicationHostMock.mockResolvedValueOnce(nextHost);
+
+    const watcher = await startAuthoredSourceWatcher({
+      nitro: nitroStub.nitro,
+      preparedHost: previousHost,
+    });
+
+    try {
+      await watcher.rebuild();
+
+      expect(prepareApplicationHostMock).toHaveBeenCalledWith(previousHost.appRoot, { dev: true });
+      expect(clearCompiledRuntimeAgentBundleCacheMock).toHaveBeenCalledTimes(1);
+    } finally {
+      await watcher.close();
+    }
+  });
+
   it("ignores generated output directories while watching authored source roots", async () => {
     const watcher = await startAuthoredSourceWatcher({
       nitro: createNitroStub().nitro,

@@ -17,6 +17,9 @@ import {
   type WorkflowBundleDiscoveredEntries,
 } from "#internal/workflow-bundle/builder-support.js";
 import { detectWorkflowPatterns } from "#internal/workflow-bundle/workflow-builders.js";
+import { installEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
+
+export const WORKFLOW_TEST_AGENT_NAME = "eve-test";
 
 export default async function setupWorkflowTests(): Promise<void> {
   const packageRoot = resolvePackageRoot();
@@ -24,8 +27,10 @@ export default async function setupWorkflowTests(): Promise<void> {
   const compiledArtifactsBootstrapPath = resolvePackageSourceFilePath(
     "test/setup/compiled-artifacts-bootstrap.mjs",
   );
+  installEveWorkflowQueueNamespace(WORKFLOW_TEST_AGENT_NAME);
 
   const builder = new WorkflowBundleBuilder({
+    agentName: WORKFLOW_TEST_AGENT_NAME,
     appRoot: packageRoot,
     compiledArtifactsBootstrapPath,
     includeTestFixtures: true,

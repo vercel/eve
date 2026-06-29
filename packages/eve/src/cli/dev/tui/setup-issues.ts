@@ -5,6 +5,8 @@ import { pathExists } from "#setup/path-exists.js";
 
 /** One boot-time setup problem the TUI can point at a fixing command. */
 export interface SetupIssue {
+  /** Diagnostics never authorize a command by themselves. */
+  kind: "attention";
   /** Short category label, e.g. "AI Gateway credentials". */
   label: string;
   /** The slash command that fixes it, e.g. "/model". */
@@ -31,39 +33,118 @@ export interface BootDetection {
   detect(context: BootDetectionContext): SetupIssue[] | Promise<SetupIssue[]>;
 }
 
+type ModelProviderAccess =
+  | { kind: "unknown" }
+  | { kind: "external" }
+  | {
+      kind: "gateway";
+      runtime:
+        | { status: "connected"; credential: "api-key" | "oidc" }
+        | { status: "disconnected" }
+        | { status: "unknown" };
+    };
+
+function hasEnvValue(env: Record<string, string | undefined>, key: string): boolean {
+  const value = env[key];
+  return value !== undefined && value.trim().length > 0;
+}
+
+/**
+ * Resolves the local TUI's current model-provider state into the agent-info
+ * snapshot it caches. The local TUI and dev server share `process.env`, so a
+ * loaded credential is usable even when an earlier `/info` response says
+ * disconnected.
+ */
+export function resolveModelProviderState(
+  info: AgentInfoResult | undefined,
+  env: Record<string, string | undefined>,
+): AgentInfoResult | undefined {
+  const access = modelProviderAccess({ env, info });
+  if (info === undefined || access.kind !== "gateway" || access.runtime.status !== "connected") {
+    return info;
+  }
+  const { credential } = access.runtime;
+
+  const model = info.agent.model;
+  const endpoint = model.endpoint;
+  if (endpoint?.kind === "gateway" && endpoint.connected && endpoint.credential === credential) {
+    return info;
+  }
+
+  return {
+    ...info,
+    agent: {
+      ...info.agent,
+      model: {
+        ...model,
+        endpoint: { kind: "gateway", connected: true, credential },
+      },
+    },
+  };
+}
+
+/** Classifies only evidence the boot path can actually observe. */
+function modelProviderAccess(
+  context: Pick<BootDetectionContext, "env" | "info">,
+): ModelProviderAccess {
+  const model = context.info?.agent.model;
+  if (model?.routing?.kind === "external") return { kind: "external" };
+  if (model?.routing?.kind !== "gateway") return { kind: "unknown" };
+
+  // The compiled routing decides whether gateway credentials apply. A freshly
+  // loaded API key outranks a stale OIDC endpoint, matching gateway resolution.
+  if (hasEnvValue(context.env, "AI_GATEWAY_API_KEY")) {
+    return { kind: "gateway", runtime: { status: "connected", credential: "api-key" } };
+  }
+  const endpoint = model.endpoint;
+  if (endpoint?.kind === "gateway" && endpoint.connected) {
+    return {
+      kind: "gateway",
+      runtime: { status: "connected", credential: endpoint.credential },
+    };
+  }
+  if (hasEnvValue(context.env, "VERCEL_OIDC_TOKEN")) {
+    return { kind: "gateway", runtime: { status: "connected", credential: "oidc" } };
+  }
+  if (endpoint?.kind === "gateway") return { kind: "gateway", runtime: { status: "disconnected" } };
+  return { kind: "gateway", runtime: { status: "unknown" } };
+}
+
 /**
  * One diagnosis for the model-provider path. An external-provider model is
  * skipped entirely: it reaches the model with its own provider key, so gateway
  * linking and credentials don't apply (and /model can't reconfigure it). For a
  * gateway model it reports only the most-root cause; an unlinked directory
  * implies missing OIDC, so listing both would double-count what /model's
- * provider step fixes in one pass. With either gateway credential present the
- * provider is satisfied and an unlinked directory is not flagged (linking only
- * matters for deploy). A hint, not an error: the model call stays the source of
- * truth.
+ * provider step fixes in one pass. The header and detection receive the same
+ * local-credential-normalized endpoint snapshot. A hint, not an error: the
+ * model call stays the source of truth.
  */
 const modelProvider: BootDetection = {
   id: "model-provider",
   async detect({ appRoot, env, info }) {
-    const endpoint = info?.agent.model.endpoint;
-    const isEndpointExternal =
-      endpoint?.kind === "external" ||
-      (endpoint === undefined && info?.agent.model.routing?.kind === "external");
-    const isAIGatewayConnected = endpoint?.kind === "gateway" && endpoint.connected;
+    const access = modelProviderAccess({ env, info });
 
-    // The running server owns endpoint readiness. Fall back to routing and
-    // local credential checks only when talking to a legacy server that did
-    // not return the composed endpoint state.
-    if (isEndpointExternal || isAIGatewayConnected) {
-      return [];
+    if (access.kind === "external") return [];
+    if (access.kind === "gateway") {
+      if (access.runtime.status === "connected") return [];
+      if (access.runtime.status === "disconnected") {
+        const linked = await pathExists(join(appRoot, ".vercel", "project.json"));
+        return [
+          {
+            kind: "attention",
+            label: linked ? "AI Gateway credentials missing" : "model provider not linked",
+            command: "/model",
+          },
+        ];
+      }
     }
-    if (env.AI_GATEWAY_API_KEY || env.VERCEL_OIDC_TOKEN) {
-      return [];
+
+    const linked = await pathExists(join(appRoot, ".vercel", "project.json"));
+    if (linked) {
+      return [{ kind: "attention", label: "AI Gateway credentials missing", command: "/model" }];
     }
-    if (!(await pathExists(join(appRoot, ".vercel", "project.json")))) {
-      return [{ label: "model provider not linked", command: "/model" }];
-    }
-    return [{ label: "AI Gateway credentials missing", command: "/model" }];
+    return [{ kind: "attention", label: "model provider not linked", command: "/model" }];
   },
 };
 
@@ -77,17 +158,22 @@ export const BOOT_DETECTIONS: readonly BootDetection[] = [modelProvider];
  * runner probes it off the critical path and renders this issue only when the
  * probe resolves logged-out.
  */
-export const LOGIN_SETUP_ISSUE: SetupIssue = { label: "not logged in", command: "/login" };
+export const LOGIN_SETUP_ISSUE: SetupIssue = {
+  kind: "attention",
+  label: "not logged in",
+  command: "/vc:login",
+};
 
 /**
  * The CLI-missing hint, surfaced by the same off-critical-path probe as
  * {@link LOGIN_SETUP_ISSUE}. When the `vercel` binary is absent the probe
  * reports this instead of the login hint, so the diagnostic points at its fix
- * command (`/vc`) rather than a logged-out state the probe can't determine.
+ * command (`/vc:install`) rather than a logged-out state the probe can't determine.
  */
 export const CLI_MISSING_SETUP_ISSUE: SetupIssue = {
+  kind: "attention",
   label: "Vercel CLI not found",
-  command: "/vc",
+  command: "/vc:install",
 };
 
 /**

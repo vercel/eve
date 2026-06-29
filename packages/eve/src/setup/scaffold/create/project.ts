@@ -3,10 +3,15 @@ import { basename, join, resolve } from "node:path";
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor } from "../../node-engine.js";
-import { getPackageManagerStrategy } from "../../primitives/pm/index.js";
 import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "../update/module-files.js";
 import { pathExists, writeTextFile } from "../files.js";
 import { resolveVersionToken } from "../version-tokens.js";
+import {
+  applyPackageManagerWorkspaceConfiguration,
+  isPackageManagerWorkspaceMember,
+  patchWorkspaceRootPackageJson,
+  type WorkspaceRootMutation,
+} from "../workspace-root.js";
 import { WEB_APP_TEMPLATE_FILES } from "./web-template.js";
 
 export const CURRENT_DIRECTORY_PROJECT_NAME = ".";
@@ -148,11 +153,37 @@ export default defineAgent({
 `;
 
 // `@vercel/connect`'s optional `ai` peer (`^6 || ^7`) excludes prereleases, so
-// npm and yarn refuse to fill it from the prerelease `ai` the eve runtime pins
-// and abort the install (ERESOLVE). Forcing `ai` through `overrides` (npm/bun)
-// and `resolutions` (yarn) keeps the whole tree on that exact version; pnpm
-// already tolerates the unmet optional peer and ignores both fields.
-function packageJsonTemplate(): string {
+// npm, Bun, and Yarn need a manager-specific pin for the runtime's prerelease
+// `ai` version. pnpm tolerates the unmet optional peer without either field.
+function packageManagerAiPinTemplateSuffix(packageManager: PackageManagerKind): string {
+  switch (packageManager) {
+    case "bun":
+    case "npm":
+      return `,
+  "overrides": {
+    "ai": "__EVE_INIT_AI_SDK_VERSION__"
+  }`;
+    case "yarn":
+      return `,
+  "resolutions": {
+    "ai": "__EVE_INIT_AI_SDK_VERSION__"
+  }`;
+    case "pnpm":
+      return "";
+    default: {
+      const exhaustive: never = packageManager;
+      return exhaustive;
+    }
+  }
+}
+
+function packageJsonTemplate(input: {
+  includeRootOnlyFields: boolean;
+  packageManager: PackageManagerKind;
+}): string {
+  const rootOnlyFields = input.includeRootOnlyFields
+    ? `${packageManagerAiPinTemplateSuffix(input.packageManager)}${ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX}`
+    : "";
   return `{
   "name": "__EVE_INIT_APP_NAME__",
   "version": "0.0.0",
@@ -176,19 +207,16 @@ function packageJsonTemplate(): string {
   "devDependencies": {
     "@types/node": "__EVE_INIT_TYPES_NODE_VERSION__",
     "typescript": "__EVE_INIT_TYPESCRIPT_VERSION__"
-  },
-  "overrides": {
-    "ai": "__EVE_INIT_AI_SDK_VERSION__"
-  },
-  "resolutions": {
-    "ai": "__EVE_INIT_AI_SDK_VERSION__"
-  },
-  "engines": {
-    "node": "__EVE_INIT_NODE_ENGINE__"
-  }
+  }${rootOnlyFields}
 }
 `;
 }
+
+const ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX = `,
+  "engines": {
+    "node": "__EVE_INIT_NODE_ENGINE__"
+  }
+`;
 
 const AGENT_INSTRUCTIONS_TEMPLATE = `# Identity
 
@@ -237,21 +265,28 @@ dist
 `,
   "AGENTS.md": `# eve Agent App
 
-This project uses the eve framework. Before writing code, always read the relevant guide in \`node_modules/eve/docs/\`.
+This project uses the eve framework. Before writing code, read the relevant guide
+from the installed eve package docs. In most installs, those docs are at
+\`node_modules/eve/docs/\`. In workspaces or local package installs, resolve the
+installed \`eve\` package location first and read its \`docs/\` directory. If
+package docs are unavailable, use https://eve.dev/docs as a fallback.
 `,
   "CLAUDE.md": `@AGENTS.md
 `,
 };
 
-function templateFiles(
-  byokProvider: boolean,
-  packageManager: PackageManagerKind,
-): Record<string, string> {
+function templateFiles(input: {
+  byokProvider: boolean;
+  includeRootOnlyPackageJsonFields: boolean;
+  packageManager: PackageManagerKind;
+}): Record<string, string> {
   return {
-    "agent/agent.ts": byokProvider ? BYOK_AGENT_TEMPLATE : BASE_AGENT_TEMPLATE,
+    "agent/agent.ts": input.byokProvider ? BYOK_AGENT_TEMPLATE : BASE_AGENT_TEMPLATE,
     ...SHARED_TEMPLATE_FILES,
-    "package.json": packageJsonTemplate(),
-    ...getPackageManagerStrategy(packageManager).scaffoldFiles,
+    "package.json": packageJsonTemplate({
+      includeRootOnlyFields: input.includeRootOnlyPackageJsonFields,
+      packageManager: input.packageManager,
+    }),
   };
 }
 
@@ -292,6 +327,13 @@ export interface ScaffoldBaseProjectOptions {
   zodPackageVersion?: string;
   typescriptPackageVersion?: string;
   /**
+   * Final project path used to discover ancestor workspaces. This differs from
+   * the write target only when the CLI stages a scaffold before moving it into
+   * place.
+   */
+  workspaceProbeDirectory?: string;
+  onWorkspaceRootMutation?: (mutation: WorkspaceRootMutation) => void | Promise<void>;
+  /**
    * Scaffold an inline provider `byok` block in `agent.ts` that reads the
    * provider key from `process.env` instead of relying on the managed Vercel
    * AI Gateway. `process` is typed by the `@types/node` every scaffold ships.
@@ -307,6 +349,8 @@ export async function scaffoldBaseProject(options: ScaffoldBaseProjectOptions): 
   const packageManager = options.packageManager ?? "pnpm";
   const evePackage = resolveEvePackageContract(options.evePackage);
   const nodeEngine = pinnedNodeEngineMajor(evePackage.nodeEngine);
+  const workspaceProbeRoot = resolve(options.workspaceProbeDirectory ?? targetRoot);
+  const workspaceMember = isPackageManagerWorkspaceMember(packageManager, workspaceProbeRoot);
 
   if (createInPlace) {
     await assertCanCreateInPlace(targetRoot, overwriteExisting);
@@ -343,7 +387,13 @@ export async function scaffoldBaseProject(options: ScaffoldBaseProjectOptions): 
 
   await mkdir(targetRoot, { recursive: true });
 
-  for (const [relPath, content] of Object.entries(templateFiles(byokProvider, packageManager))) {
+  for (const [relPath, content] of Object.entries(
+    templateFiles({
+      byokProvider,
+      includeRootOnlyPackageJsonFields: !workspaceMember,
+      packageManager,
+    }),
+  )) {
     const filePath = `${targetRoot}/${relPath}`;
     const existed = await pathExists(filePath);
     await writeTextFile(filePath, renderTemplate(content, ctx), {
@@ -353,6 +403,19 @@ export async function scaffoldBaseProject(options: ScaffoldBaseProjectOptions): 
       await options.onOverwriteFile?.(filePath);
     }
   }
+
+  await applyPackageManagerWorkspaceConfiguration({
+    packageManager,
+    projectRoot: targetRoot,
+    workspaceProbeRoot,
+    onWorkspaceRootMutation: options.onWorkspaceRootMutation,
+  });
+
+  await patchWorkspaceRootPackageJson(packageManager, workspaceProbeRoot, {
+    aiPackageVersion: ctx.aiPackageVersion,
+    nodeEngineRequirement: evePackage.nodeEngine,
+    onWorkspaceRootMutation: options.onWorkspaceRootMutation,
+  });
 
   return targetRoot;
 }

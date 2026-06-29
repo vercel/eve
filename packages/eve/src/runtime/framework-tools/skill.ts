@@ -1,5 +1,6 @@
 import { loadContext } from "#context/container.js";
 import { DynamicSkillManifestKey, SandboxKey } from "#context/keys.js";
+import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { loadSkillFromSandbox } from "#runtime/skills/sandbox-access.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import type { JsonObject } from "#shared/json.js";
@@ -29,7 +30,23 @@ async function executeLoadSkillTool(args: LoadSkillInput): Promise<unknown> {
   }
 
   const { skill } = args;
-  return await loadSkillFromSandbox(sandbox, skill, availableSkillNames(ctx));
+  const availableSkills = availableSkillNames(ctx);
+  try {
+    return await loadSkillFromSandbox(sandbox, skill, availableSkills);
+  } catch (error) {
+    const connectionName = ctx
+      .get(ConnectionRegistryKey)
+      ?.getConnectionNames()
+      .find((name) => name.toLowerCase() === skill.toLowerCase());
+    if (connectionName === undefined || availableSkills.includes(skill)) throw error;
+
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `${message} "${connectionName}" is an installed connection, not a skill. ` +
+        `Use connection_search with connection "${connectionName}" to find its tools.`,
+      { cause: error },
+    );
+  }
 }
 
 // Dynamic skill names for load_skill's not-found hint. Dynamic-only on purpose:
@@ -52,6 +69,7 @@ export const SKILL_TOOL_DEFINITION: ResolvedToolDefinition = {
   description: [
     "Load the full instructions for one available skill by name or id.",
     "Use this tool when the request clearly matches a listed skill description or when the user explicitly asks for that skill.",
+    "This is not for MCP connections; use connection_search to access an installed connection.",
     "Loading adds the skill instructions to the current turn.",
     'Choose the "skill" value from the Available skills block.',
   ].join(" "),

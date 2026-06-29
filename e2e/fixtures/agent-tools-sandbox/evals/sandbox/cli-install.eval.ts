@@ -9,15 +9,12 @@ import { SANDBOX_CLI_NAME, SANDBOX_CLI_TOKEN } from "./shared.js";
 export default defineEval({
   description: "Sandbox: a custom CLI installed in `bootstrap` is on the PATH for later sessions.",
   async test(t) {
-    const turn = await t.send(
+    await t.send(
       `Run the bash command \`${SANDBOX_CLI_NAME} sandbox\` and reply with its output verbatim.`,
     );
-    turn.expectOk();
 
-    t.didNotFail();
-    t.completed();
+    t.succeeded();
     t.calledTool("bash", {
-      isError: false,
       output: new RegExp(`${SANDBOX_CLI_TOKEN}:sandbox`),
     });
     t.messageIncludes(`${SANDBOX_CLI_TOKEN}:sandbox`);

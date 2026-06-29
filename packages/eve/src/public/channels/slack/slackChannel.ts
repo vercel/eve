@@ -25,13 +25,21 @@ import {
   defaultOnDirectMessage,
 } from "#public/channels/slack/defaults.js";
 import {
-  formatSlackContextBlock,
   parseAppMentionEvent,
   parseDirectMessageEvent,
   type SlackEventCallback,
   type SlackInboundContext,
   type SlackMessage,
 } from "#public/channels/slack/inbound.js";
+import {
+  formatSlackInboundMessage,
+  formatSlackThreadContext,
+} from "#public/channels/slack/model-context.js";
+import {
+  loadThreadContextMessages,
+  type LoadThreadContextMessagesOptions,
+} from "#public/channels/slack/thread.js";
+import { slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
 import { SLACK_CHANNEL_DEFAULT_ROUTE } from "#public/channels/slack/constants.js";
 import { handleInteractionPost } from "#public/channels/slack/interactions.js";
 import {
@@ -179,11 +187,10 @@ export interface SlackChannelState {
   lastReasoningTypingStatus?: string | null;
   /**
    * Connection name to Slack message ts. Each entry is the public
-   * link-free fallback status post created by the default
-   * `authorization.required` handler when the challenge could not be
-   * delivered ephemerally; the matching `authorization.completed`
-   * handler edits it in place to surface the resolution outcome. The
-   * normal ephemeral path stores nothing here.
+   * link-free status post created by the default
+   * `authorization.required` handler; the matching
+   * `authorization.completed` handler edits it in place to surface the
+   * resolution outcome.
    */
   pendingAuthMessageTs?: Record<string, string>;
 }
@@ -347,8 +354,8 @@ export interface SlackChannelEvents {
  * Full-context variant of {@link SlackChannelEvents} consumed by the
  * channel internals. The framework's default `authorization.required`
  * handler keeps the full {@link SlackEventContext} because it owns the
- * public link-free fallback for sessions with no user to target
- * privately. The factory adapts user overrides into this shape with
+ * public link-free status while user overrides remain private-only. The
+ * factory adapts user overrides into this shape with
  * {@link constrainAuthorizationRequired}.
  */
 export interface SlackChannelInternalEvents extends Omit<
@@ -373,6 +380,14 @@ export interface SlackChannelConfig {
    * unrestricted media types.
    */
   readonly uploadPolicy?: UploadPolicyInput;
+
+  /**
+   * Adds earlier replies from the current Slack thread to each triggering
+   * turn. Messages are rendered with their Slack sender ids attached so a
+   * multi-user transcript retains unambiguous speaker attribution. Omit this
+   * option to avoid fetching thread history.
+   */
+  readonly threadContext?: LoadThreadContextMessagesOptions;
 
   /**
    * Invoked when a Slack `app_mention` event arrives (only `app_mention`;
@@ -477,9 +492,17 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const onAppMention = config.onAppMention ?? defaultOnAppMention;
   const onDirectMessage = config.onDirectMessage ?? defaultOnDirectMessage;
   const authorizationRequiredOverride = config.events?.["authorization.required"];
+  const turnStartedHandler = config.events?.["turn.started"] ?? defaultEvents["turn.started"]!;
   const mergedEvents: SlackChannelInternalEvents = {
     ...defaultEvents,
     ...config.events,
+    async "turn.started"(data, channel, ctx) {
+      const triggeringUserId = slackUserIdFromAuthContext(ctx.session.auth.current);
+      if (triggeringUserId !== undefined) {
+        channel.state.triggeringUserId = triggeringUserId;
+      }
+      await turnStartedHandler(data, channel, ctx);
+    },
     "input.requested": config.events?.["input.requested"] ?? defaultInputRequestedHandler(),
     "authorization.required":
       authorizationRequiredOverride === undefined
@@ -544,6 +567,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
             onAppMention,
             onDirectMessage,
             uploadPolicy,
+            threadContext: config.threadContext,
             handledEvents,
             headers: req.headers,
             credentials: config.credentials,
@@ -585,9 +609,13 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
         threadTs = posted.id;
       }
 
+      // Threadless proactive runs need distinct identities until their first
+      // Slack post supplies the real thread timestamp and re-keys the session.
+      const continuationThreadTs = threadTs || crypto.randomUUID();
+
       return send(input.message, {
         auth: input.auth,
-        continuationToken: slackContinuationToken(channelId, threadTs),
+        continuationToken: slackContinuationToken(channelId, continuationThreadTs),
         state: {
           channelId,
           threadTs: threadTs || null,
@@ -645,6 +673,7 @@ async function handleEventPost(input: {
   readonly onAppMention: NonNullable<SlackChannelConfig["onAppMention"]>;
   readonly onDirectMessage: NonNullable<SlackChannelConfig["onDirectMessage"]>;
   readonly uploadPolicy: UploadPolicy;
+  readonly threadContext: LoadThreadContextMessagesOptions | undefined;
   readonly credentials: SlackChannelCredentials | undefined;
   readonly handledEvents: Set<string>;
 }): Promise<Response> {
@@ -685,6 +714,7 @@ async function handleEventPost(input: {
         handler: input.onAppMention,
         send: input.send,
         uploadPolicy: input.uploadPolicy,
+        threadContext: input.threadContext,
         credentials: input.credentials,
       }),
     );
@@ -700,6 +730,7 @@ async function handleEventPost(input: {
         handler: input.onDirectMessage,
         send: input.send,
         uploadPolicy: input.uploadPolicy,
+        threadContext: input.threadContext,
         credentials: input.credentials,
       }),
     );
@@ -745,6 +776,7 @@ async function dispatchInboundMessage(input: {
     | NonNullable<SlackChannelConfig["onDirectMessage"]>;
   readonly send: SendFn<SlackChannelState>;
   readonly uploadPolicy: UploadPolicy;
+  readonly threadContext: LoadThreadContextMessagesOptions | undefined;
   readonly credentials: SlackChannelCredentials | undefined;
 }): Promise<void> {
   const { message, kind } = input;
@@ -768,12 +800,16 @@ async function dispatchInboundMessage(input: {
   // This runs in the webhook's `waitUntil` task; an unguarded throw would
   // reject silently into the dispatch `allSettled` ("no response, no logs").
   try {
+    const priorMessages =
+      input.threadContext === undefined
+        ? []
+        : await loadThreadContextMessages(thread, message, input.threadContext);
+    const threadContext = formatSlackThreadContext(priorMessages);
     const fileParts = await collectInboundFileParts({
       mention: message,
       thread,
       policy: input.uploadPolicy,
     });
-    const turnMessage = buildSlackTurnMessage(message.markdown, fileParts);
     const inboundContext: SlackInboundContext = {
       channelId: message.channelId,
       fullName: message.author?.fullName,
@@ -782,14 +818,18 @@ async function dispatchInboundMessage(input: {
       userId: message.author?.userId ?? "",
       userName: message.author?.userName,
     };
+    const attributedMessage = formatSlackInboundMessage(inboundContext, message);
+    const turnMessage = buildSlackTurnMessage(
+      threadContext === undefined ? attributedMessage : `${threadContext}\n\n${attributedMessage}`,
+      fileParts,
+    );
 
     const channelContext = result.context ?? [];
 
     await input.send(
-      {
-        message: turnMessage,
-        context: [formatSlackContextBlock(inboundContext), ...channelContext],
-      },
+      channelContext.length === 0
+        ? { message: turnMessage }
+        : { message: turnMessage, context: channelContext },
       {
         auth: result.auth,
         continuationToken: slackContinuationToken(message.channelId, message.threadTs),
@@ -799,6 +839,7 @@ async function dispatchInboundMessage(input: {
           teamId: message.teamId ?? null,
           triggeringUserId: inboundContext.userId || null,
         },
+        title: message.markdown,
       },
     );
   } catch (error) {

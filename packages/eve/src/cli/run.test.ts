@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { resolveDevUiMode, resolveTuiDisplayOptions, resolveTuiTitle, runCli } from "#cli/run.js";
+import { resolveDevUiMode, resolveTuiDisplayOptions, runCli } from "#cli/run.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import type { DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 
@@ -42,6 +42,47 @@ describe("CLI command registration", () => {
   });
 });
 
+describe("eve init compatibility flags", () => {
+  it("lists --yes as an accepted compatibility flag", async () => {
+    const output: string[] = [];
+
+    await runCli(["init", "--help"], {
+      error: (message) => output.push(message),
+      log: (message) => output.push(message),
+    });
+
+    expect(output.join("\n")).toContain("-y, --yes");
+  });
+
+  it("still rejects unknown init options", async () => {
+    await expect(
+      runCli(["init", "my-agent", "--template"], { error: () => {}, log: () => {} }),
+    ).rejects.toThrow();
+  });
+});
+
+describe("eve CLI malformed argument handling", () => {
+  it("prints the setup guide for a coding agent when init has too many targets", async () => {
+    const output: string[] = [];
+
+    await expect(
+      runCli(
+        ["init", "first", "second"],
+        { error: (message) => output.push(message), log: (message) => output.push(message) },
+        { isCodingAgentLaunch: async () => true },
+      ),
+    ).rejects.toThrow();
+
+    expect(output.join("\n")).toContain("Set up an eve agent");
+  });
+
+  it("still surfaces the usage error for commands other than init", async () => {
+    await expect(
+      runCli(["dev", "--unknown-flag"], { error: () => {}, log: () => {} }),
+    ).rejects.toThrow();
+  });
+});
+
 describe("eve dev --input", () => {
   it("forwards the initial draft to the interactive TUI", async () => {
     const runDevelopmentTui = vi.fn(async () => {});
@@ -57,7 +98,11 @@ describe("eve dev --input", () => {
     expect(runDevelopmentTui).toHaveBeenCalledWith(
       expect.objectContaining({
         initialInput: "/model",
-        serverUrl: "https://example.com/",
+        target: {
+          kind: "remote",
+          serverUrl: "https://example.com/",
+          workspaceRoot: process.cwd(),
+        },
       }),
     );
   });
@@ -82,6 +127,72 @@ describe("eve dev --input", () => {
   });
 });
 
+describe("eve dev --url protocol", () => {
+  it("uses the local TUI credential path only for this app's running dev server", async () => {
+    const runDevelopmentTui = vi.fn(async () => {});
+
+    await withInteractiveTerminal(() =>
+      runCli(
+        ["dev", "--url", "http://127.0.0.1:2000"],
+        { error: () => {}, log: () => {} },
+        {
+          isActiveDevelopmentServerForApp: async () => true,
+          runDevelopmentTui,
+        },
+      ),
+    );
+
+    expect(runDevelopmentTui).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: {
+          kind: "local",
+          serverUrl: "http://127.0.0.1:2000/",
+          workspaceRoot: process.cwd(),
+        },
+      }),
+    );
+  });
+
+  it("keeps an unverified loopback URL on the remote credential path", async () => {
+    const runDevelopmentTui = vi.fn(async () => {});
+
+    await withInteractiveTerminal(() =>
+      runCli(
+        ["dev", "--url", "http://127.0.0.1:2000"],
+        { error: () => {}, log: () => {} },
+        {
+          isActiveDevelopmentServerForApp: async () => false,
+          runDevelopmentTui,
+        },
+      ),
+    );
+
+    expect(runDevelopmentTui).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: {
+          kind: "remote",
+          serverUrl: "http://127.0.0.1:2000/",
+          workspaceRoot: process.cwd(),
+        },
+      }),
+    );
+  });
+
+  it("rejects an http:// remote URL up front instead of crashing during connect", async () => {
+    await expect(
+      runCli(["dev", "--url", "http://my-app.vercel.app"], { error: () => {}, log: () => {} }),
+    ).rejects.toThrow(/https/);
+  });
+});
+
+describe("eve eval --url protocol", () => {
+  it("rejects an http:// remote URL up front", async () => {
+    await expect(
+      runCli(["eval", "--url", "http://my-app.vercel.app"], { error: () => {}, log: () => {} }),
+    ).rejects.toThrow(/https/);
+  });
+});
+
 describe("eve dev --logs", () => {
   it("accepts sandbox as the initial TUI log mode", async () => {
     const runDevelopmentTui = vi.fn(async () => {});
@@ -97,7 +208,11 @@ describe("eve dev --logs", () => {
     expect(runDevelopmentTui).toHaveBeenCalledWith(
       expect.objectContaining({
         logs: "sandbox",
-        serverUrl: "https://example.com/",
+        target: {
+          kind: "remote",
+          serverUrl: "https://example.com/",
+          workspaceRoot: process.cwd(),
+        },
       }),
     );
   });
@@ -109,12 +224,19 @@ describe("eve dev boot progress", () => {
     const close = vi.fn(async () => {});
     let hostReporter: DevelopmentServerOptions["onBootProgress"] = undefined;
     let tuiReporter: RunDevelopmentTuiInput["onBootProgress"] = undefined;
-    const startHost = vi.fn(async (_appRoot: string, options?: DevelopmentServerOptions) => {
-      hostReporter = options?.onBootProgress;
-      hostReporter?.({ phase: "compiling agent", type: "phase-started" });
-      hostReporter?.({ elapsedMs: 1, phase: "compiling agent", type: "phase-finished" });
-      return { close, url: "http://127.0.0.1:2000" };
-    });
+    const startHost = vi.fn((_appRoot: string, options?: DevelopmentServerOptions) => ({
+      start: async () => {
+        hostReporter = options?.onBootProgress;
+        hostReporter?.({ phase: "compiling agent", type: "phase-started" });
+        hostReporter?.({ elapsedMs: 1, phase: "compiling agent", type: "phase-finished" });
+        return {
+          kind: "started" as const,
+          appRoot: "/canonical/app",
+          url: "http://127.0.0.1:2000",
+        };
+      },
+      close,
+    }));
     const runDevelopmentTui = vi.fn(async (input: RunDevelopmentTuiInput) => {
       tuiReporter = input.onBootProgress;
       throw new Error("TUI startup failed");
@@ -137,6 +259,62 @@ describe("eve dev boot progress", () => {
     expect(hostReporter).toBeTypeOf("function");
     expect(tuiReporter).toBe(hostReporter);
     expect(writes.at(-1)).toBe("\r\u001B[K");
+    expect(close).toHaveBeenCalledOnce();
+  });
+});
+
+describe("eve dev local server ownership", () => {
+  it("uses the host's canonical root and leaves an attached server running", async () => {
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "existing" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close: async () => {},
+    }));
+    const runDevelopmentTui = vi.fn(async () => {});
+
+    await withInteractiveTerminal(() =>
+      runCli(["dev"], { error: () => {}, log: () => {} }, { runDevelopmentTui, startHost }),
+    );
+
+    expect(startHost).toHaveBeenCalledWith(expect.any(String), {
+      existing: "attach-if-unconfigured",
+      host: undefined,
+      onBootProgress: expect.any(Function),
+      port: undefined,
+    });
+    expect(runDevelopmentTui).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "App",
+        target: {
+          kind: "local",
+          serverUrl: "http://127.0.0.1:4321/",
+          workspaceRoot: "/canonical/app",
+        },
+      }),
+    );
+  });
+
+  it("closes a server started for the interactive TUI", async () => {
+    const close = vi.fn(async () => {});
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "started" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close,
+    }));
+
+    await withInteractiveTerminal(() =>
+      runCli(
+        ["dev"],
+        { error: () => {}, log: () => {} },
+        { runDevelopmentTui: vi.fn(async () => {}), startHost },
+      ),
+    );
     expect(close).toHaveBeenCalledOnce();
   });
 });
@@ -191,37 +369,5 @@ describe("resolveTuiDisplayOptions", () => {
     expect(resolved).not.toHaveProperty("subagents");
     expect(resolved).not.toHaveProperty("contextSize");
     expect(resolved.logs).toBe("stderr");
-  });
-});
-
-describe("resolveTuiTitle", () => {
-  it("humanizes the app folder name for a local server", () => {
-    expect(
-      resolveTuiTitle({
-        name: undefined,
-        remoteServerUrl: undefined,
-        appRoot: "/x/apps/fixtures/weather-agent",
-      }),
-    ).toBe("Weather Agent");
-  });
-
-  it("uses the remote host when connecting to a URL", () => {
-    expect(
-      resolveTuiTitle({
-        name: undefined,
-        remoteServerUrl: "https://example.com:8080",
-        appRoot: "/x",
-      }),
-    ).toBe("example.com:8080");
-  });
-
-  it("prefers an explicit --name over both", () => {
-    expect(
-      resolveTuiTitle({
-        name: "Custom",
-        remoteServerUrl: "https://example.com",
-        appRoot: "/x/weather-agent",
-      }),
-    ).toBe("Custom");
   });
 });

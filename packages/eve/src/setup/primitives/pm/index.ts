@@ -28,6 +28,7 @@ export { bunPackageManager, npmPackageManager, pnpmPackageManager, yarnPackageMa
 export { PNPM_WORKSPACE_CONTENT, PNPM_WORKSPACE_PATH } from "./pnpm.js";
 export type {
   PackageManagerConfigurationResult,
+  PackageManagerConfigurationOptions,
   PackageManagerInstallOptions,
   PackageManagerInvocation,
   PackageManagerStrategy,

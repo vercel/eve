@@ -7,6 +7,8 @@ export {
   DELETE,
   WS,
   type Channel,
+  type ChannelCors,
+  type ChannelCorsOptions,
   type ChannelDefinition,
   type ChannelSessionOps,
   type ChannelEvents,

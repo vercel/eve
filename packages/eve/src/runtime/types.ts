@@ -2,15 +2,18 @@ import type { FlexibleSchema } from "ai";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { CompiledChannel } from "#channel/compiled-channel.js";
+import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { HeadersValue } from "#client/types.js";
 import type { DiscoverDiagnosticsSummary } from "#discover/diagnostics.js";
 import type { ChannelRouteMethod, RouteContext } from "#public/definitions/channel.js";
 import type { RouteHandler, WebSocketRouteHandler } from "#channel/routes.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import type { StreamEventHook } from "#public/definitions/hook.js";
-import type { NeedsApprovalContext, ToolModelOutput } from "#public/definitions/tool.js";
+import type { Approval } from "#public/definitions/approval.js";
+import type { ToolModelOutput } from "#public/definitions/tool.js";
 import type {
   AuthorizationDefinition,
+  ConnectionAuthResolver,
   ConnectionProtocol,
   HeadersDefinition,
   ToolFilterDefinition,
@@ -91,8 +94,8 @@ export type ResolvedSchedule = Readonly<
  * server that requires no authentication (e.g. localhost) may omit both.
  */
 export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
-  readonly approval?: (ctx: NeedsApprovalContext) => boolean;
-  readonly authorization?: Readonly<AuthorizationDefinition>;
+  readonly approval?: Approval;
+  readonly authorization?: Readonly<AuthorizationDefinition> | ConnectionAuthResolver;
   readonly connectionName: string;
   readonly description: string;
   readonly headers?: Readonly<HeadersDefinition>;
@@ -162,9 +165,9 @@ export type ResolvedToolDefinition = Readonly<
     /**
      * Optional per-tool approval gate. When set, determines whether user
      * approval is required before executing this tool. See
-     * {@link NeedsApprovalContext} for the available context.
+     * {@link Approval} for the shared callback contract.
      */
-    readonly needsApproval?: (ctx: NeedsApprovalContext) => boolean;
+    readonly approval?: Approval;
     /**
      * Optional function that derives a compound approval key from the tool
      * input. When present, the runtime records this key (instead of just
@@ -182,16 +185,6 @@ export type ResolvedToolDefinition = Readonly<
      * handlers and the stream. See {@link ToolModelOutput}.
      */
     readonly toModelOutput?: (output: unknown) => ToolModelOutput | Promise<ToolModelOutput>;
-    /**
-     * Optional authorization strategy reattached from the authored
-     * module at resolve time. Carries live `getToken` /
-     * `startAuthorization` / `completeAuthorization` callbacks, so it
-     * cannot survive compilation and must be read off the resolved
-     * module like {@link execute}. When present, the execution layer
-     * builds token accessors onto the tool context and drives the
-     * interactive consent flow scoped to this tool's {@link name}.
-     */
-    readonly auth?: AuthorizationDefinition;
   };
 
 /**
@@ -229,6 +222,7 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
   readonly name: string;
   readonly method: ChannelRouteMethod;
   readonly adapter?: ChannelAdapter;
+  readonly cors?: NormalizedChannelCorsOptions;
   readonly urlPath: string;
   readonly fetch: (req: Request, ctx: RouteContext) => Promise<Response>;
   /**
@@ -382,7 +376,7 @@ export interface ResolvedAgent {
   /**
    * Whether the author opted into the framework `Workflow` orchestration tool
    * by re-exporting the `Workflow` marker as the default export of a file in
-   * `agent/tools/`. When true, the harness exposes a code-mode-style sandbox
+   * `agent/tools/`. When true, the harness exposes an isolated JavaScript sandbox
    * whose only callable operations are this agent's subagents and remote
    * agents.
    */

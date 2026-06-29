@@ -55,11 +55,7 @@ export interface CreateSessionInput {
   readonly outputSchema?: HarnessSession["outputSchema"];
 }
 
-/**
- * Creates a fresh {@link HarnessSession}. The only site that derives
- * `session.agent.system` from a `turnAgent` — every subsequent turn
- * preserves the prompt via {@link refreshSessionFromTurnAgent}.
- */
+/** Creates a fresh {@link HarnessSession} from the current `turnAgent`. */
 export function createSession(input: CreateSessionInput): HarnessSession {
   const { turnAgent } = input;
   const tools = createSessionToolDefinitions(turnAgent);
@@ -70,6 +66,7 @@ export function createSession(input: CreateSessionInput): HarnessSession {
     agent: {
       compactionModelReference: turnAgent.compactionModel,
       modelReference: turnAgent.model,
+      reasoning: turnAgent.reasoning,
       system: turnAgent.instructions.join("\n\n"),
       tools,
     },
@@ -93,15 +90,13 @@ export function createSession(input: CreateSessionInput): HarnessSession {
 }
 
 /**
- * Refreshes a session with the latest `turnAgent` — replaces model/tool
- * metadata and recalculates compaction thresholds; preserves history and
- * state. Production callers keep the session-start `agent.system` prompt,
- * while dev HMR callers can opt into refreshing it from authored source.
+ * Refreshes a session with the latest `turnAgent` — replaces the system
+ * prompt, model/tool metadata, and compaction thresholds while preserving
+ * conversation history and state.
  */
 export function refreshSessionFromTurnAgent(input: {
   readonly session: HarnessSession;
   readonly turnAgent: RuntimeTurnAgent;
-  readonly refreshSystemPrompt?: boolean;
   readonly compactionOverrides?: {
     readonly thresholdPercent?: number;
   };
@@ -111,10 +106,8 @@ export function refreshSessionFromTurnAgent(input: {
     agent: {
       compactionModelReference: input.turnAgent.compactionModel,
       modelReference: input.turnAgent.model,
-      system:
-        input.refreshSystemPrompt === true
-          ? input.turnAgent.instructions.join("\n\n")
-          : input.session.agent.system,
+      reasoning: input.turnAgent.reasoning,
+      system: input.turnAgent.instructions.join("\n\n"),
       tools: createSessionToolDefinitions(input.turnAgent),
     },
     compaction: createCompactionConfig({
@@ -209,6 +202,7 @@ export function hydrateDurableSession(input: {
     agent: {
       compactionModelReference: turnAgent.compactionModel,
       modelReference: turnAgent.model,
+      reasoning: turnAgent.reasoning,
       system: durable.agent.system,
       tools,
     },

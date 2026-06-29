@@ -1,13 +1,13 @@
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#runtime/input/types.js";
-import type { JsonObject } from "#shared/json.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { EveEvalDerivedFacts, EveEvalSubagentCall, EveEvalToolCall } from "#evals/types.js";
 
 interface MutableToolCall {
   name: string;
   input: JsonObject;
-  output: unknown;
-  isError: boolean;
+  output: JsonValue | undefined;
+  status: EveEvalToolCall["status"];
   turnIndex: number;
   sessionId?: string;
 }
@@ -15,8 +15,8 @@ interface MutableToolCall {
 interface MutableSubagentCall {
   name: string;
   remoteUrl?: string;
-  output?: unknown;
-  isError: boolean;
+  output?: JsonValue;
+  status: EveEvalSubagentCall["status"];
   turnIndex: number;
   sessionId?: string;
 }
@@ -63,13 +63,30 @@ export function deriveRunFacts(
   let reasoningBlockCount = 0;
   let failureCode: string | undefined;
 
+  const ensureToolCall = (callId: string, name: string, input: JsonObject): MutableToolCall => {
+    const existing = toolCallsByCallId.get(callId);
+    if (existing !== undefined) return existing;
+
+    const call: MutableToolCall = {
+      name,
+      input,
+      output: undefined,
+      status: "pending",
+      turnIndex: Math.max(turnIndex, 0),
+      sessionId,
+    };
+    toolCalls.push(call);
+    toolCallsByCallId.set(callId, call);
+    return call;
+  };
+
   const ensureSubagentCall = (callId: string, name: string): MutableSubagentCall => {
     const existing = subagentCallsByCallId.get(callId);
     if (existing !== undefined) return existing;
 
     const call: MutableSubagentCall = {
       name,
-      isError: false,
+      status: "pending",
       turnIndex: Math.max(turnIndex, 0),
       sessionId,
     };
@@ -88,36 +105,21 @@ export function deriveRunFacts(
       case "actions.requested": {
         for (const action of event.data.actions) {
           if (action.kind !== "tool-call") continue;
-          const call: MutableToolCall = {
-            name: action.toolName,
-            input: action.input,
-            output: undefined,
-            isError: false,
-            turnIndex: Math.max(turnIndex, 0),
-            sessionId,
-          };
-          toolCalls.push(call);
-          toolCallsByCallId.set(action.callId, call);
+          ensureToolCall(action.callId, action.toolName, action.input);
         }
         break;
       }
 
       case "action.result": {
         const { result, status } = event.data;
-        const failed = status === "failed" || result.isError === true;
-
         if (result.kind === "tool-result") {
-          const call = toolCallsByCallId.get(result.callId);
-          if (call !== undefined) {
-            call.output = result.output;
-            call.isError = failed;
-          }
+          const call = ensureToolCall(result.callId, result.toolName, {});
+          call.output = result.output;
+          call.status = status;
         } else if (result.kind === "subagent-result") {
-          const call = subagentCallsByCallId.get(result.callId);
-          if (call !== undefined) {
-            call.output = call.output ?? result.output;
-            call.isError = failed;
-          }
+          const call = ensureSubagentCall(result.callId, result.subagentName);
+          call.output = call.output ?? result.output;
+          call.status = status;
         }
         break;
       }
@@ -138,11 +140,15 @@ export function deriveRunFacts(
       case "subagent.completed": {
         const call = ensureSubagentCall(event.data.callId, event.data.subagentName);
         call.output = event.data.output;
+        if (call.status === "pending") call.status = "completed";
         break;
       }
 
       case "input.requested": {
         inputRequests.push(...event.data.requests);
+        for (const request of event.data.requests) {
+          ensureToolCall(request.action.callId, request.action.toolName, request.action.input);
+        }
         break;
       }
 

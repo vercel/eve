@@ -32,6 +32,23 @@ describe("runLoginFlow", () => {
     expect(runVercelLogin).not.toHaveBeenCalled();
   });
 
+  it("opens vercel login when a caller explicitly forces re-authentication", async () => {
+    const { prompter } = createFakePrompter({});
+    const runVercelLogin = vi.fn<LoginFlowDeps["runVercelLogin"]>(async () => true);
+    const input = {
+      appRoot: APP_ROOT,
+      prompter,
+      force: true,
+      deps: {
+        getVercelAuthStatus: authProbe("authenticated", "authenticated"),
+        runVercelLogin,
+      },
+    };
+
+    await expect(runLoginFlow(input)).resolves.toEqual({ kind: "logged-in" });
+    expect(runVercelLogin).toHaveBeenCalledWith(expect.objectContaining({ cwd: APP_ROOT }));
+  });
+
   it("runs vercel login and confirms with a re-probe on success", async () => {
     const runVercelLogin = vi.fn<LoginFlowDeps["runVercelLogin"]>(async () => true);
     // First probe: logged out; second probe (after login): logged in.

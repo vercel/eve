@@ -32,6 +32,15 @@ console.log(health.status, health.workflowId);
 
 Non-2xx responses throw `ClientError`, which carries the HTTP `status` and response `body`.
 
+## Inspect an agent
+
+Use `info()` to inspect a development agent. The client parses and validates the complete response before returning it:
+
+```ts
+const info = await client.info();
+console.log(info.agent.name, info.agent.model.id);
+```
+
 ## Authentication
 
 Pass `auth` when the [eve channel](../../channels/eve) route requires credentials:
@@ -59,6 +68,21 @@ const client = new Client({
 });
 ```
 
+For a Vercel OIDC-protected deployment, use `vercelOidc`. The client resolves the token once per request and sends it as both the bearer credential and Vercel's trusted-OIDC header:
+
+```ts
+import { getVercelOidcToken } from "@vercel/oidc";
+
+const client = new Client({
+  host: "https://agent.example.com",
+  auth: {
+    vercelOidc: {
+      token: async () => await getVercelOidcToken(),
+    },
+  },
+});
+```
+
 Use `headers` for route-specific credentials such as bypass tokens or tenant hints. Like `auth`, it can be static or dynamic:
 
 ```ts
@@ -67,8 +91,11 @@ const client = new Client({
   headers: async () => ({
     "x-vercel-protection-bypass": await getBypassToken(),
   }),
+  redirect: "manual",
 });
 ```
+
+Set `redirect` to `"manual"` or `"error"` on credential-bearing clients so fetch cannot forward custom authorization headers to another origin. The policy applies to inspection requests, custom fetches, session creation, and event streams.
 
 Per-request headers can be attached to an individual turn:
 

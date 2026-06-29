@@ -46,7 +46,7 @@ export default defineChannel({
 
 Declare routes with the `POST()` and `GET()` helpers. Each route handler receives the raw `Request` and a helpers object:
 
-- `send(message, { auth, continuationToken, state? })` starts or resumes a session. Returns a `Session`.
+- `send(message, { auth, continuationToken, state?, title? })` starts or resumes a session. `title` overrides the new workflow session's display title without changing the model message. Returns a `Session`.
 - `getSession(sessionId)` looks up an existing session. The returned `Session` exposes `getEventStream({ startIndex? })` for streaming.
 - `receive(channel, ...)` hands inbound work to a different channel for cross-channel hand-off.
 - `params` holds route parameters extracted from the path pattern.
@@ -54,6 +54,25 @@ Declare routes with the `POST()` and `GET()` helpers. Each route handler receive
 - `requestIp` is the client IP, or `null` when the host cannot provide it.
 
 Event handlers like `"message.completed"` are declared under the `events` key. They receive `(eventData, channel, ctx)`, where `eventData` is the event payload, `channel` carries platform handles and session continuation operations, and `ctx` is the eve `SessionContext`. Every channel kind shares this signature. The one exception is `session.failed`, which receives only `(eventData, channel)` with no `ctx`.
+
+## CORS
+
+Custom HTTP channels leave CORS untouched unless you opt in. Pass `cors: true`
+for permissive browser access with preflight handling, or pass a serializable
+CORS options object to narrow origins, methods, and headers:
+
+```ts
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  cors: {
+    origin: ["https://app.example.com"],
+    methods: ["POST"],
+    allowHeaders: ["authorization", "content-type"],
+  },
+  routes: [POST("/message", async () => new Response("ok"))],
+});
+```
 
 ## WebSocket routes
 
@@ -182,7 +201,7 @@ When a parent agent dispatches a subagent, the framework forwards the parent's c
 
 ## Continuation tokens
 
-Each call to `send(message, { auth, continuationToken, state? })` from a channel route addresses a session by its channel-local raw token. The framework prepends the channel name, derived from the file stem under `agent/channels/`, before handing the token to the runtime.
+Each call to `send(message, { auth, continuationToken, state?, title? })` from a channel route addresses a session by its channel-local raw token. The framework prepends the channel name, derived from the file stem under `agent/channels/`, before handing the token to the runtime.
 
 ```ts
 import { slackContinuationToken } from "eve/channels/slack";
@@ -225,7 +244,7 @@ defineChannel<{ ref: string | null }>({
 });
 ```
 
-The workflow runtime disposes the current park hook at the next step boundary and registers a new one at the new token. Inbound deliveries already addressed to the old token are dropped, so coordinate with your senders to use the new token.
+At the next workflow boundary, the runtime claims the new park hook before releasing the old token. If another active session already owns the new token, the re-keying session fails instead of taking it over. After a successful re-key, inbound deliveries still addressed to the old token are dropped, so coordinate with your senders to use the new token.
 
 ## File uploads
 

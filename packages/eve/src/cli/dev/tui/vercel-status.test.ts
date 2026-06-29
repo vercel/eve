@@ -149,4 +149,22 @@ describe("createVercelStatusTracker", () => {
 
     expect(snapshots).toEqual([]);
   });
+
+  it("aborts an in-flight identity probe when disposed", () => {
+    let probeSignal: AbortSignal | undefined;
+    const tracker = createVercelStatusTracker({
+      appRoot: "/app",
+      onChange: () => {},
+      detectIdentity: (_appRoot, options) => {
+        probeSignal = options?.signal;
+        return new Promise<undefined>(() => {});
+      },
+    });
+
+    tracker.refreshIdentity();
+
+    expect(probeSignal).toBeDefined();
+    tracker.dispose();
+    expect(probeSignal?.aborted).toBe(true);
+  });
 });

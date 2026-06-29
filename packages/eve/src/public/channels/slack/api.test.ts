@@ -560,6 +560,25 @@ describe("auto-anchor on first post", () => {
     expect((setStatus!.body as { thread_ts: string }).thread_ts).toBe("1700000001.000001");
   });
 
+  it("sends assistant status as plain text", async () => {
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+
+    await thread.startTyping("**Considering turbo tasks**");
+
+    const setStatus = mock.calls.find(
+      (c) => c.url === "https://slack.com/api/assistant.threads.setStatus",
+    );
+    expect(setStatus?.body).toMatchObject({
+      status: "Considering turbo tasks",
+      loading_messages: ["Considering turbo tasks"],
+    });
+  });
+
   it("invokes onThreadTsChanged exactly once even on concurrent first-posts", async () => {
     const anchors: string[] = [];
     const { thread } = buildSlackBinding({

@@ -69,6 +69,7 @@ export async function compileAgentConfig(
     model: CompiledRuntimeModelReference;
     name: string;
     outputSchema?: JsonObject;
+    reasoning?: CompiledAgentDefinition["reasoning"];
     source?: ModuleSourceRef;
   } = {
     compaction,
@@ -96,6 +97,10 @@ export async function compileAgentConfig(
 
   if (definition.outputSchema !== undefined) {
     compiledConfig.outputSchema = normalizeJsonSchemaDefinition(definition.outputSchema, "output");
+  }
+
+  if (definition.reasoning !== undefined) {
+    compiledConfig.reasoning = definition.reasoning;
   }
 
   if (configModule !== undefined) {
@@ -134,10 +139,6 @@ function normalizeExperimentalDefinition(
   }
 
   const compiledExperimental: Mutable<NonNullable<CompiledAgentDefinition["experimental"]>> = {};
-
-  if (experimental.codeMode !== undefined) {
-    compiledExperimental.codeMode = experimental.codeMode;
-  }
 
   if (experimental.workflow !== undefined) {
     compiledExperimental.workflow = {

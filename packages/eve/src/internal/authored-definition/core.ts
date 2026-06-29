@@ -7,7 +7,6 @@ import type { ScheduleDefinition, ScheduleRunHandler } from "#public/definitions
 import type { SkillDefinition, SkillFileContent } from "#public/definitions/skill.js";
 import type { InstructionsDefinition } from "#public/definitions/instructions.js";
 import {
-  expectBoolean,
   expectFunction,
   expectObjectRecord,
   expectOnlyKnownKeys,
@@ -46,6 +45,7 @@ export function normalizeAgentDefinition(
       "modelContextWindowTokens",
       "modelOptions",
       "outputSchema",
+      "reasoning",
     ],
     message,
   );
@@ -88,7 +88,31 @@ export function normalizeAgentDefinition(
     definition.outputSchema = record.outputSchema as NormalizedAgentDefinition["outputSchema"];
   }
 
+  if (record.reasoning !== undefined) {
+    definition.reasoning = normalizeAgentReasoningDefinition(record.reasoning, message);
+  }
+
   return definition as Readonly<NormalizedAgentDefinition>;
+}
+
+function normalizeAgentReasoningDefinition(
+  value: unknown,
+  message: string,
+): NonNullable<NormalizedAgentDefinition["reasoning"]> {
+  const reasoning = expectString(value, message);
+
+  switch (reasoning) {
+    case "provider-default":
+    case "none":
+    case "minimal":
+    case "low":
+    case "medium":
+    case "high":
+    case "xhigh":
+      return reasoning;
+    default:
+      throw new Error(message);
+  }
 }
 
 function expectPositiveInteger(value: unknown, message: string): number {
@@ -152,12 +176,8 @@ function normalizeAgentExperimentalDefinition(
   message: string,
 ): NonNullable<NormalizedAgentDefinition["experimental"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["codeMode", "workflow"], message);
+  expectOnlyKnownKeys(record, ["workflow"], message);
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["experimental"]>> = {};
-
-  if (record.codeMode !== undefined) {
-    normalizedDefinition.codeMode = expectBoolean(record.codeMode, message);
-  }
 
   if (record.workflow !== undefined) {
     normalizedDefinition.workflow = normalizeAgentWorkflowDefinition(record.workflow, message);

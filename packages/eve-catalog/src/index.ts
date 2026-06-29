@@ -151,7 +151,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: true, gallery: true },
     connection: {
       description: "Linear workspace: issues, projects, cycles, and comments.",
-      mcp: { url: "https://mcp.linear.app/sse" },
+      mcp: { url: "https://mcp.linear.app/mcp" },
     },
   },
   {

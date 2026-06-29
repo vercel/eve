@@ -88,6 +88,25 @@ export function renderInputText(input: string): string {
   return input.replaceAll("\t", "    ");
 }
 
+interface BlockCursorInput {
+  readonly before: string;
+  readonly under: string;
+  readonly after: string;
+  readonly visible: boolean;
+  readonly inverse: (text: string) => string;
+  readonly render?: (text: string) => string;
+}
+
+/** Renders a blinking block cursor without inserting or removing a terminal cell. */
+export function renderInputWithBlockCursor(input: BlockCursorInput): string {
+  const render = input.render ?? renderInputText;
+  const cursorText = input.under.length > 0 ? input.under : " ";
+  const cursorCell = input.visible
+    ? input.inverse(renderInputText(cursorText))
+    : render(cursorText);
+  return `${render(input.before)}${cursorCell}${render(input.after)}`;
+}
+
 /**
  * Returns the UTF-16 offset at or immediately before a terminal column.
  * Graphemes stay intact even when the requested column falls inside a wide one.

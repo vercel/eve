@@ -9,6 +9,7 @@ import {
   resolveInstalledPackageInfo,
   resolvePackageRoot,
   resolvePackageSourceDirectoryPath,
+  resolvePackageSourceFilePath,
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
 
@@ -92,6 +93,7 @@ describe("WorkflowBundleBuilder", () => {
     const appRoot = "/tmp/eve-app";
     const rootDir = resolvePackageRoot();
     const builder = new InspectableWorkflowBundleBuilder({
+      agentName: "test-agent",
       appRoot,
       compiledArtifactsBootstrapPath: "/tmp/compiled-artifacts-bootstrap.js",
       outDir: "/tmp/eve-workflows",
@@ -133,6 +135,7 @@ describe("WorkflowBundleBuilder", () => {
 
       const builder = new StepEntryOnlyWorkflowBundleBuilder(
         {
+          agentName: "test-agent",
           appRoot: tempRoot,
           compiledArtifactsBootstrapPath,
           outDir,
@@ -200,6 +203,7 @@ describe("WorkflowBundleBuilder", () => {
 
       const builder = new StepEntryOnlyWorkflowBundleBuilder(
         {
+          agentName: "test-agent",
           appRoot: tempRoot,
           compiledArtifactsBootstrapPath,
           outDir,
@@ -250,7 +254,7 @@ describe("WorkflowBundleBuilder", () => {
             "",
             `const workflowCode = \`${workflowBundleCode.replace(/[\\`$]/g, "\\$&")}\`;`,
             "",
-            'export const POST = workflowEntrypoint(workflowCode, { namespace: "eve" });',
+            'export const POST = workflowEntrypoint(workflowCode, { namespace: "eve746573742d6167656e74" });',
             "",
           ].join("\n"),
         );
@@ -282,6 +286,7 @@ describe("WorkflowBundleBuilder", () => {
 
       const builder = new TemplateLiteralWorkflowBundleBuilder(
         {
+          agentName: "test-agent",
           appRoot: tempRoot,
           compiledArtifactsBootstrapPath,
           outDir,
@@ -404,6 +409,7 @@ describe("WorkflowBundleBuilder", () => {
       ]);
 
       const builder = new BuildTrackingWorkflowBundleBuilder({
+        agentName: "test-agent",
         appRoot: "/tmp/eve-app",
         compiledArtifactsBootstrapPath: "/tmp/compiled-artifacts-bootstrap.js",
         outDir,
@@ -433,14 +439,12 @@ describe("WorkflowBundleBuilder", () => {
       expect(flowConfig.environment).toEqual({
         EVE_EXISTING_FLAG: "kept",
         NODE_OPTIONS: "--experimental-require-module",
-        WORKFLOW_QUEUE_NAMESPACE: "eve",
       });
-      expect(
-        await readFile(
-          join(outputDir, "functions", ".well-known", "workflow", "v1", "flow.func", "index.js"),
-          "utf8",
-        ),
-      ).toContain("/.well-known/workflow/v1/flow");
+      const generatedFlowFunctionSource = await readFile(
+        join(outputDir, "functions", ".well-known", "workflow", "v1", "flow.func", "index.js"),
+        "utf8",
+      );
+      expect(generatedFlowFunctionSource).toContain("/.well-known/workflow/v1/flow");
       expect(
         await readFile(
           join(
@@ -474,7 +478,7 @@ describe("WorkflowBundleBuilder", () => {
           ),
           "utf8",
         ),
-      ).resolves.toContain('"__eve_wkf_workflow_*"');
+      ).resolves.toContain('"__eve746573742d6167656e74_wkf_workflow_*"');
       await expect(
         readFile(
           join(
@@ -571,6 +575,7 @@ describe("WorkflowBundleBuilder", () => {
 
       const builder = new FixtureWorkflowBundleBuilder(
         {
+          agentName: "test-agent",
           appRoot: tempRoot,
           compiledArtifactsBootstrapPath,
           outDir,
@@ -583,6 +588,73 @@ describe("WorkflowBundleBuilder", () => {
       await expect(builder.build()).rejects.toThrow(
         /Workflow bundle cannot import Node\.js builtin "node:util".*use step/s,
       );
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("bundles hook ownership checks through the workflow core shim", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-hook-conflict-"));
+    const outDir = join(tempRoot, "workflow-build");
+    const flowFilePath = join(tempRoot, "flow.ts");
+    const compiledArtifactsBootstrapPath = join(tempRoot, "compiled-artifacts-bootstrap.mjs");
+    const workflowCoreShimPath = resolvePackageSourceFilePath(
+      "src/internal/workflow-bundle/workflow-core-shim.ts",
+    ).replaceAll("\\", "/");
+
+    try {
+      await Promise.all([
+        writeFile(
+          compiledArtifactsBootstrapPath,
+          [
+            "export async function __eveInstallCompiledArtifactsStep() {",
+            '  "use step";',
+            "  return null;",
+            "}",
+            "",
+          ].join("\n"),
+        ),
+        writeFile(
+          flowFilePath,
+          [
+            `import { createHook } from ${JSON.stringify(workflowCoreShimPath)};`,
+            "export async function claimHook() {",
+            '  "use workflow";',
+            '  const hook = createHook({ token: "shared-token" });',
+            "  const conflict = await hook.getConflict();",
+            "  return conflict?.runId ?? null;",
+            "}",
+            "",
+          ].join("\n"),
+        ),
+      ]);
+
+      const builder = new FixtureWorkflowBundleBuilder(
+        {
+          agentName: "test-agent",
+          appRoot: tempRoot,
+          compiledArtifactsBootstrapPath,
+          outDir,
+          rootDir: resolvePackageRoot(),
+          watch: false,
+        },
+        [flowFilePath],
+      );
+
+      await builder.build();
+
+      const workflowsSource = await readFile(join(outDir, "workflows.mjs"), "utf8");
+      const encodedChunksMatch = workflowsSource.match(
+        /Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)\.toString\("utf8"\)/,
+      );
+      expect(encodedChunksMatch).not.toBeNull();
+
+      const encodedChunks = JSON.parse(encodedChunksMatch?.[1] ?? "[]") as string[];
+      const decodedWorkflowCode = Buffer.from(encodedChunks.join(""), "base64").toString("utf8");
+
+      expect(decodedWorkflowCode).toContain("getConflict");
+      expect(decodedWorkflowCode).toContain("WORKFLOW_CREATE_HOOK");
+      expect(decodedWorkflowCode).not.toContain("runtime/run.js");
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
     }
@@ -627,6 +699,7 @@ describe("WorkflowBundleBuilder", () => {
 
       const builder = new FixtureWorkflowBundleBuilder(
         {
+          agentName: "test-agent",
           appRoot: tempRoot,
           compiledArtifactsBootstrapPath,
           outDir,

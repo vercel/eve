@@ -1,4 +1,4 @@
-import type { NeedsApprovalContext } from "#public/definitions/tool.js";
+import type { Approval } from "#public/definitions/approval.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { McpConnectionClient } from "#runtime/connections/mcp-client.js";
 import { OpenApiConnectionClient } from "#runtime/connections/openapi-client.js";
@@ -46,9 +46,7 @@ export class ConnectionRegistryImpl implements ConnectionRegistry {
    * Returns the authored approval function for the named connection,
    * or `undefined` if the connection did not specify one.
    */
-  getConnectionApproval(
-    connectionName: string,
-  ): ((ctx: NeedsApprovalContext) => boolean) | undefined {
+  getConnectionApproval(connectionName: string): Approval | undefined {
     const connection = this.#connections.find((c) => c.connectionName === connectionName);
     return connection?.approval;
   }

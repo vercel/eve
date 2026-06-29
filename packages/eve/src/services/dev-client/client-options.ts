@@ -1,26 +1,43 @@
 import type { ClientOptions } from "#client/index.js";
 
-import {
-  isLocalDevelopmentServerUrl,
-  resolveDevelopmentClientHeaders,
-  resolveDevelopmentOidcToken,
-} from "./request-headers.js";
+import type { DevelopmentCredentialGate } from "./credential-gate.js";
 
 /**
- * Builds the {@link ClientOptions} every development client connects with:
- * local hosts skip the Vercel OIDC bearer (the framework's `localDev()`
- * channel auth accepts unauthenticated calls); remote hosts attach it
- * alongside any protection-bypass headers resolved per request.
+ * Builds anonymous {@link ClientOptions} for a development target. Locality is
+ * not an authorization decision, so remote URLs receive no ambient Vercel
+ * credentials through this default path.
  */
 export function resolveDevelopmentClientOptions(serverUrl: string): ClientOptions {
-  const base = {
-    headers: () => resolveDevelopmentClientHeaders({ serverUrl }),
-    host: serverUrl,
+  return { host: serverUrl };
+}
+
+/** Builds a non-redirecting local client with an explicit per-request bearer source. */
+export function resolveLocalDevelopmentClientOptions(input: {
+  readonly serverUrl: string;
+  readonly token: () => Promise<string>;
+}): ClientOptions {
+  return {
+    auth: { bearer: input.token },
+    host: input.serverUrl,
+    redirect: "manual",
   };
+}
 
-  if (isLocalDevelopmentServerUrl(serverUrl)) {
-    return base;
+/** Builds non-redirecting client options backed by one verified credential gate. */
+export function resolveRemoteDevelopmentClientOptions(input: {
+  readonly credentials: DevelopmentCredentialGate;
+  readonly serverUrl: string;
+}): ClientOptions {
+  const serverOrigin = new URL(input.serverUrl).origin;
+  if (input.credentials.serverOrigin !== serverOrigin) {
+    throw new Error(
+      `Credential gate origin ${input.credentials.serverOrigin} does not match client origin ${serverOrigin}.`,
+    );
   }
-
-  return { ...base, auth: { bearer: resolveDevelopmentOidcToken } };
+  return {
+    auth: { vercelOidc: { token: () => input.credentials.resolveToken() } },
+    headers: input.credentials.resolveBypassHeaders,
+    host: input.serverUrl,
+    redirect: "manual",
+  };
 }

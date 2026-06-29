@@ -141,71 +141,6 @@ export function recordPendingSubagentChildToken(input: {
 }
 
 /**
- * Discriminated item consumed by {@link accumulateRuntimeActionResults}
- * so the loop can process interleaved deliveries and results without
- * coupling to a concrete `HookPayload` shape.
- */
-type RuntimeActionAccumulatorItem<TDeliver> =
-  | { readonly kind: "deliver"; readonly value: TDeliver }
-  | { readonly kind: "runtime-action-result"; readonly results: readonly RuntimeActionResult[] };
-
-/**
- * Accumulates runtime-action results until every pending key has a
- * matching result. The caller passes the ordered key list so the
- * workflow runtime can drive the loop without hydrating a session.
- */
-export async function accumulateRuntimeActionResults<TDeliver>(input: {
-  readonly bufferedDeliveries: TDeliver[];
-  readonly getNext: () => Promise<RuntimeActionAccumulatorItem<TDeliver> | null>;
-  readonly initialResults?: readonly RuntimeActionResult[];
-  readonly pendingActionKeys: readonly string[] | undefined;
-}): Promise<RuntimeActionResult[] | null> {
-  const pendingKeys = input.pendingActionKeys;
-  const buffered: RuntimeActionResult[] = [...(input.initialResults ?? [])];
-
-  if (pendingKeys !== undefined && buffered.length > 0) {
-    const ready = resolveRuntimeActionResultsForKeys({
-      pendingKeys,
-      results: buffered,
-    });
-
-    if (ready !== undefined) {
-      return ready;
-    }
-  }
-
-  while (true) {
-    const item = await input.getNext();
-
-    if (item === null) {
-      return null;
-    }
-
-    if (item.kind === "deliver") {
-      input.bufferedDeliveries.push(item.value);
-      continue;
-    }
-
-    buffered.push(...item.results);
-
-    if (pendingKeys === undefined) {
-      // No pending batch; nothing to resolve. Keep draining so the
-      // stream state stays consistent.
-      continue;
-    }
-
-    const ready = resolveRuntimeActionResultsForKeys({
-      pendingKeys,
-      results: buffered,
-    });
-
-    if (ready !== undefined) {
-      return ready;
-    }
-  }
-}
-
-/**
  * Returns the stable ordered runtime-action results for the current pending
  * batch when every action has a matching result. Unknown and duplicate results
  * are ignored.
@@ -233,7 +168,8 @@ function resolveRuntimeActionResultsForBatch(input: {
   });
 }
 
-function resolveRuntimeActionResultsForKeys(input: {
+/** Returns results in pending-key order once every requested action has completed. */
+export function resolveRuntimeActionResultsForKeys(input: {
   readonly pendingKeys: readonly string[];
   readonly results: readonly RuntimeActionResult[];
 }): RuntimeActionResult[] | undefined {

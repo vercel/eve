@@ -14,7 +14,6 @@ import {
   resolveMockFixtureToken,
   resolveWeatherCity,
 } from "#runtime/agent/mock-model-fixtures.js";
-import { CODE_MODE_TOOL_NAME } from "#shared/code-mode.js";
 import {
   type BootstrapGenerateResult,
   type BootstrapPrompt,
@@ -36,6 +35,7 @@ import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 
 const MOCK_RUNTIME_MODEL_PROVIDER = "eve-runtime-mock";
 const LOAD_SKILL_TOOL_CALL_ID = "call_load_skill";
+const MOCK_AUTHORED_MODELS_ENV = "EVE_MOCK_AUTHORED_MODELS";
 type BootstrapGenerateOptions = Parameters<MockLanguageModelV3["doGenerate"]>[0];
 
 interface BootstrapToolResult {
@@ -58,11 +58,12 @@ const bootstrapWeatherPayloadSchema = z
 /**
  * Returns true when authored runtime models should resolve through the
  * dedicated deterministic mock adapter. The adapter is internal to the test
- * tiers: it activates only under `NODE_ENV=test`, keeping the unit,
- * integration, and scenario suites deterministic and credential-free.
+ * tiers: unit, integration, and scenario tests activate it through
+ * `NODE_ENV=test`; spawned smoke servers use the explicit opt-in environment
+ * variable so their package-manager build keeps its normal environment.
  */
 export function shouldMockAuthoredRuntimeModels(): boolean {
-  return process.env.NODE_ENV === "test";
+  return process.env.NODE_ENV === "test" || process.env[MOCK_AUTHORED_MODELS_ENV] === "1";
 }
 
 /**
@@ -220,29 +221,6 @@ function createAuthoredToolCallResult(
 
   const city = resolveWeatherCity(lastUserMessage);
   const toolInput = createMockAuthoredToolInput(tool, lastUserMessage, city);
-
-  if (tool.name === CODE_MODE_TOOL_NAME) {
-    const nestedToolName = findRelevantCodeModeHostTool(tool.description, lastUserMessage);
-
-    if (nestedToolName === null) {
-      return null;
-    }
-
-    const js = `return await tools${formatCodeModeToolAccess(nestedToolName)}({ city: ${JSON.stringify(
-      city,
-    )} });`;
-
-    return createToolCallGenerateResult({
-      input: {
-        js,
-      },
-      inputTokens: estimateTokenCount(getPromptText(options.prompt)),
-      modelId,
-      outputTokens: estimateTokenCount(js),
-      toolCallId: createToolCallId(tool.name),
-      toolName: tool.name,
-    });
-  }
 
   return createToolCallGenerateResult({
     input: toolInput,
@@ -552,50 +530,6 @@ function findRelevantTool(
       ),
     ) ?? null
   );
-}
-
-function findRelevantCodeModeHostTool(
-  description: string | undefined,
-  message: string,
-): string | null {
-  if (description === undefined) {
-    return null;
-  }
-
-  return findRelevantTool(parseCodeModeHostTools(description), message)?.name ?? null;
-}
-
-function parseCodeModeHostTools(description: string): AvailableBootstrapTool[] {
-  const tools: AvailableBootstrapTool[] = [];
-  let pendingDescription: string | undefined;
-
-  for (const line of description.split("\n")) {
-    const comment = /^\s*\/\*\*\s*(.*?)\s*\*\/\s*$/u.exec(line);
-
-    if (comment?.[1] !== undefined) {
-      pendingDescription = comment[1];
-      continue;
-    }
-
-    const declaration = /^\s*(?:([$A-Z_a-z][$\w]*)|(["'])(.*?)\2)\s*:\s*\(input:/u.exec(line);
-    const name = declaration?.[1] ?? declaration?.[3];
-
-    if (name === undefined) {
-      continue;
-    }
-
-    tools.push({
-      description: pendingDescription,
-      name,
-    });
-    pendingDescription = undefined;
-  }
-
-  return tools;
-}
-
-function formatCodeModeToolAccess(toolName: string): string {
-  return /^[$A-Z_a-z][$\w]*$/u.test(toolName) ? `.${toolName}` : `[${JSON.stringify(toolName)}]`;
 }
 
 function normalizeText(value: string): string {

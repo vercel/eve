@@ -29,10 +29,11 @@ import {
   pickProject,
   pickTeam,
   requireAuth,
+  resolveProjectByNameOrId,
   resolveTeam,
   validateTeam,
-  withNetworkSpinner,
 } from "../vercel-project.js";
+import { withSpinner } from "../with-spinner.js";
 
 /** Injected for tests; defaults to the real Vercel project and fs helpers. */
 export interface ResolveProvisioningDeps {
@@ -46,6 +47,7 @@ export interface ResolveProvisioningDeps {
   pickProject: typeof pickProject;
   pickNewProjectName: typeof pickNewProjectName;
   assertNewProjectNameAvailable: typeof assertNewProjectNameAvailable;
+  resolveProjectByNameOrId: typeof resolveProjectByNameOrId;
 }
 
 export interface ResolveProvisioningOptions {
@@ -75,6 +77,7 @@ export interface ResolveProvisioningOptions {
    * team selection to the existing-project picker.
    */
   projectSelection?: "create-or-link" | "existing-only";
+  teamSelectMessage?: (currentTeam: string) => string;
   deps?: ResolveProvisioningDeps;
 }
 
@@ -154,6 +157,7 @@ export function resolveProvisioning(
     pickProject,
     pickNewProjectName,
     assertNewProjectNameAvailable,
+    resolveProjectByNameOrId,
   };
   const parent = (): string => resolve(options.targetDirectory ?? process.cwd());
 
@@ -174,7 +178,7 @@ export function resolveProvisioning(
     if (state.projectPath.kind !== "resolved") return undefined;
     const path = state.projectPath.path;
     if (!(await deps.pathExists(join(path, ".vercel", "project.json")))) return undefined;
-    return withNetworkSpinner(options.prompter, whimsyFor("project-detect"), async () => {
+    return withSpinner(options.prompter, whimsyFor("project-detect"), async () => {
       const detected = await deps.detectProjectResolution(path, { signal });
       if (!isProjectResolved(detected)) return undefined;
       const authenticated = await deps.isVercelAuthenticated(path, { signal });
@@ -212,10 +216,18 @@ export function resolveProvisioning(
       aiGatewayArgs.apiKey !== undefined
         ? { kind: "byok", apiGatewayKey: aiGatewayArgs.apiKey }
         : { kind: "inherit" };
-    const vercelProject: ResolvedVercelProject =
-      projectArgs.project !== undefined
-        ? { kind: "existing", project: projectArgs.project, team }
-        : { kind: "new", project: agentName, team };
+    let vercelProject: ResolvedVercelProject;
+    if (projectArgs.project === undefined) {
+      vercelProject = { kind: "new", project: agentName, team };
+    } else {
+      const project = await deps.resolveProjectByNameOrId(parent(), team, projectArgs.project, {
+        signal,
+      });
+      if (project === null) {
+        throw new Error(`Vercel project "${projectArgs.project}" was not found in ${team}.`);
+      }
+      vercelProject = { kind: "existing", project, team };
+    }
     if (vercelProject.kind === "new") {
       await deps.assertNewProjectNameAvailable(parent(), team, vercelProject.project, { signal });
     }
@@ -281,12 +293,13 @@ export function resolveProvisioning(
 
     if (deployVercel) {
       await deps.requireAuth(parent(), prompter, { signal });
-      const team = await deps.pickTeam(prompter, parent(), undefined, { signal });
+      const teamOptions = { signal, selectMessage: options.teamSelectMessage };
+      const team = await deps.pickTeam(prompter, parent(), undefined, teamOptions);
       const projectOptions = [
         {
           value: "new" as const,
           label: "Create a new project",
-          hint: `Named ${agentName}`,
+          hint: `Name: ${agentName}`,
         },
         { value: "link" as const, label: "Link an existing project" },
       ];
@@ -299,7 +312,7 @@ export function resolveProvisioning(
               editable: {
                 value: "new",
                 defaultValue: agentName,
-                formatHint: (value) => `Named ${value}`,
+                formatHint: (value) => `Name: ${value}`,
                 validate: (value) =>
                   value.trim().length === 0 ? "Project name cannot be empty." : undefined,
               },
@@ -318,7 +331,7 @@ export function resolveProvisioning(
                     id: "new",
                     value: "new",
                     label: "Create a new project",
-                    hint: `Named ${agentName}`,
+                    hint: `Name: ${agentName}`,
                   },
                   { id: "link", value: "link", label: "Link an existing project" },
                 ],
@@ -342,11 +355,7 @@ export function resolveProvisioning(
         signal,
       });
       return {
-        vercelProject: {
-          kind: pickedProject.exists ? "existing" : "new",
-          project: pickedProject.project,
-          team,
-        },
+        vercelProject: pickedProject,
         aiGateway: { kind: "inherit" },
         modelWiring: "gateway",
       };

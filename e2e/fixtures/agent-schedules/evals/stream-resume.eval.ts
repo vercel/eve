@@ -1,5 +1,5 @@
-import type { HandleMessageStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
+import { equals, satisfies } from "eve/evals/expect";
 
 /**
  * Proof that `GET /eve/v1/session/:id/stream?startIndex=N` replays missed
@@ -22,22 +22,17 @@ export default defineEval({
         "3. Reply with the final `value` from `lookup-step-b` verbatim, with no extra commentary.",
       ].join("\n"),
     );
-    turn.expectOk();
 
-    const sessionId = t.sessionId;
-    if (sessionId === undefined) {
-      throw new Error("Session did not produce a session id after the first turn.");
-    }
+    const sessionId = turn.sessionId;
 
     const fullLog = turn.events;
     // Split at the first actions.requested so the replay tail spans tool
     // execution and the final assistant message.
     const cutoff = fullLog.findIndex((event) => event.type === "actions.requested");
-    if (cutoff <= 0) {
-      throw new Error(
-        `Expected an actions.requested event after index 0. Event types: ${formatTypes(fullLog)}`,
-      );
-    }
+    await t.require(
+      cutoff,
+      satisfies((value: number) => value > 0, "actions.requested appears after index 0"),
+    );
     t.log(`full turn produced ${fullLog.length} events; replaying from index ${cutoff}`);
 
     // Reconnect at startIndex=cutoff through the authenticated client and
@@ -46,25 +41,11 @@ export default defineEval({
     const replayed = resumed.events;
     const expected = fullLog.slice(cutoff);
 
-    if (replayed.length !== expected.length) {
-      throw new Error(
-        `Replayed tail length (${replayed.length}) does not match expected (${expected.length}). ` +
-          `replayed: ${formatTypes(replayed)} expected: ${formatTypes(expected)}`,
-      );
-    }
-    for (let i = 0; i < expected.length; i += 1) {
-      if (replayed[i]!.type !== expected[i]!.type) {
-        throw new Error(
-          `Event order divergence at tail index ${i}: replayed=${replayed[i]!.type} expected=${expected[i]!.type}`,
-        );
-      }
-    }
+    t.check(
+      replayed.map((event) => event.type),
+      equals(expected.map((event) => event.type)),
+    );
     t.log(`replayed ${replayed.length} events from index ${cutoff}; matches the durable log`);
-
-    t.didNotFail();
+    t.succeeded();
   },
 });
-
-function formatTypes(events: readonly HandleMessageStreamEvent[]): string {
-  return JSON.stringify(events.map((event) => event.type));
-}

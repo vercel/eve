@@ -3,7 +3,7 @@ title: "Session Context"
 description: "Runtime helpers: ctx.session, ctx.getSandbox, ctx.getSkill, and defineState."
 ---
 
-eve exposes runtime state through the `ctx` parameter passed to tool `execute`, hook handlers, and channel event handlers:
+eve exposes runtime state through the `ctx` parameter passed to tool `execute`, hook handlers, channel event handlers, and connection auth/header resolvers:
 
 - `ctx.session`: session metadata, turn, auth, and parent lineage
 - `ctx.getSandbox()`: live sandbox handle for the current agent
@@ -119,6 +119,7 @@ export const budget = defineState<BudgetState>("myapp.budget", () => ({
 Safe places:
 
 - inside `defineTool(...).execute(input, ctx)`
+- inside connection `auth: (ctx) => provider` and `headers: (ctx) => values` resolvers
 - inside authored callbacks eve runs inside the runtime
 - after asynchronous boundaries inside the same authored execution chain
 

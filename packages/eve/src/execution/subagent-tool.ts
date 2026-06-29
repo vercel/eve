@@ -46,6 +46,8 @@ export function buildSubagentRunInput(input: {
   readonly capabilities?: SessionCapabilities;
   readonly channelMetadata?: ChannelInstrumentationProjection;
   readonly initiatorAuth: SessionAuthContext | null;
+  /** Hook token owned by the workflow currently waiting for this child. */
+  readonly parentContinuationToken?: string;
   readonly session: HarnessSession;
 }): SubagentRunInputBuild {
   const { action, auth, batchEvent, capabilities, channelMetadata, initiatorAuth, session } = input;
@@ -68,7 +70,7 @@ export function buildSubagentRunInput(input: {
       kind: SUBAGENT_ADAPTER_KIND,
       state: {
         callId: action.callId,
-        parentContinuationToken: session.continuationToken,
+        parentContinuationToken: input.parentContinuationToken ?? session.continuationToken,
         parentSessionId: session.sessionId,
         subagentName: action.subagentName,
         ...(action.subagentName === "agent" && session.sandboxState

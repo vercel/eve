@@ -27,7 +27,7 @@ import { eveChannel } from "eve/channels/eve";
 import { localDev, vercelOidc } from "eve/channels/auth";
 
 export default eveChannel({
-  auth: [localDev(), vercelOidc()],
+  auth: [vercelOidc(), localDev()],
 });
 ```
 
@@ -62,11 +62,11 @@ function appSession(): AuthFn<Request> {
 }
 
 export default eveChannel({
-  auth: [appSession(), localDev(), vercelOidc()],
+  auth: [appSession(), vercelOidc(), localDev()],
 });
 ```
 
-Put your own providers ahead of the catch-all helpers. Any entry that doesn't recognize the caller returns `null`, and the walk moves on. On non-Vercel hosts, omit `vercelOidc()` unless you specifically want to accept Vercel-issued tokens.
+Put your own providers ahead of the catch-all helpers. `localDev()` is the final fallback: put `vercelOidc()` before it so a local Vercel OIDC bearer can resolve a user instead of being shadowed by the synthetic local principal. Any entry that doesn't recognize the caller returns `null`, and the walk moves on. On non-Vercel hosts, omit `vercelOidc()` unless you specifically want to accept Vercel-issued tokens.
 
 To reject with a precise status instead of skipping, throw:
 
@@ -197,11 +197,11 @@ import { eveChannel } from "eve/channels/eve";
 import { localDev, placeholderAuth, vercelOidc } from "eve/channels/auth";
 
 export default eveChannel({
-  auth: [localDev(), vercelOidc(), placeholderAuth()],
+  auth: [vercelOidc(), localDev(), placeholderAuth()],
 });
 ```
 
-In production, `placeholderAuth()` returns a structured `401` so a generated web chat app can say "auth isn't configured yet" instead of throwing an internal error. Replace it before a browser caller submits a production request: swap in your app's `AuthFn` or one of the shipped helpers. Delete the authored channel file entirely and eve falls back to the framework default `[localDev(), vercelOidc()]`, which also rejects production browser traffic.
+In production, `placeholderAuth()` returns a structured `401` so a generated web chat app can say "auth isn't configured yet" instead of throwing an internal error. Replace it before a browser caller submits a production request: swap in your app's `AuthFn` or one of the shipped helpers. Delete the authored channel file entirely and eve falls back to the framework default `[vercelOidc(), localDev()]`, which also rejects production browser traffic.
 
 You do not have to keep `vercelOidc()` in the final policy. For a self-hosted app, an app-embedded frontend, or any deployment that uses a non-Vercel identity system, use `httpBasic()`, `jwtHmac()`, `jwtEcdsa()`, generic `oidc()`, or a custom `AuthFn` that maps your verified user/session/API key into a `SessionAuthContext`.
 
@@ -222,7 +222,54 @@ Route auth does not enforce session ownership. If multiple users or tenants can 
 
 ## Tool and connection auth
 
-Tool and connection auth is how your agent reaches an external service that wants an interactive sign-in, like an OAuth MCP server. Both a connection and an individual tool can declare an `auth` strategy; eve drives the sign-in, caches the token per step, and re-runs the call once the caller authorizes.
+Tool and connection auth is how your agent reaches an external service that wants an interactive sign-in, like an OAuth MCP server. Connections declare `auth` on the connection definition. Tools should resolve providers inline with `ctx.getToken(provider)` and call `ctx.requireAuth(provider)` only when a downstream service rejects a token; eve drives the sign-in, caches the token per step, and re-runs the call once the caller authorizes.
+
+The principal for user-scoped tool and connection auth comes from route auth. `connect("...")` from `@vercel/connect/eve` defaults to `principalType: "user"`, so the active session must have `ctx.session.auth.current.principalType === "user"` before the first token lookup can start OAuth. If the session is anonymous, local-dev-only, runtime-scoped, or service-scoped, eve fails fast with `reason: "principal_required"` because there is no end-user identity to bind the OAuth grant to.
+
+Use app-scoped auth when the external service should act as the agent itself:
+
+```ts
+auth: connect({ connector: "linear/myagent", principalType: "app" });
+```
+
+Use user-scoped auth when the external service should act as the signed-in person:
+
+```ts
+auth: connect("linear/myagent");
+```
+
+For user-scoped auth in a browser app, the route-auth entry for the eve channel should verify your app session and return a user principal:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel } from "eve/channels/eve";
+import { localDev, type AuthFn } from "eve/channels/auth";
+import { getSession } from "@/lib/auth";
+
+function appSession(): AuthFn<Request> {
+  return async (request) => {
+    const session = await getSession(request);
+    if (!session) return null;
+
+    return {
+      authenticator: "app",
+      principalId: session.userId,
+      principalType: "user",
+      attributes: {
+        email: session.email,
+        teamId: session.teamId,
+      },
+    };
+  };
+}
+
+export default eveChannel({
+  auth: [appSession(), localDev()],
+});
+```
+
+Keep `principalId` stable for the same person, and include an `issuer` when the same app may accept users from multiple identity providers. The connection token cache keys user credentials by issuer and principal id so two providers cannot accidentally share a grant.
+
+Built-in platform channels that identify a human sender, such as Slack, Discord, Teams, Telegram, Twilio, Linear, and GitHub, attach a user principal for that sender by default. A Slack mention, DM, or button click can therefore authorize a user-scoped connection for the Slack user who sent it without adding a separate browser-session auth function.
 
 ### On a connection
 
@@ -236,28 +283,29 @@ import { once } from "eve/tools/approval";
 export default defineMcpClientConnection({
   url: "https://mcp.linear.app/mcp",
   description: "Linear: project management, issue tracking, and team workflows.",
-  auth: connect("oauth/linear"),
+  auth: connect("linear/myagent"),
   approval: once(),
 });
 ```
 
-The first call that needs the connection kicks off an OAuth sign-in, surfaced as an authorization challenge (a URL the caller visits). [Vercel Connect](https://vercel.com/docs/connect) brokers the flow and holds the credentials, which are resolved and cached per workflow step, never serialized into history, and never shown to the model. For non-interactive connections, pass a static token in place of `connect()`. [Connections](../connections) covers both shapes.
+The first call that needs a user-scoped connection kicks off an OAuth sign-in, surfaced as an authorization challenge (a URL the caller visits). [Vercel Connect](https://vercel.com/docs/connect) brokers the flow and holds the credentials, which are resolved and cached per workflow step, never serialized into history, and never shown to the model. For non-interactive connections, pass a static token or `connect({ connector, principalType: "app" })` in place of user-scoped `connect()`. [Connections](../connections) covers both shapes.
 
 ### On a single tool
 
-When one tool calls a service behind OAuth, it can declare its own `auth` and skip the separate connection. `auth` takes the same shapes: `connect("...")` for Vercel Connect-backed OAuth, a custom interactive definition, or a plain `{ getToken }` for static credentials.
+When one tool calls a service behind OAuth, keep the auth provider at the call site and skip the separate connection. Providers take the same shapes as connection `auth`: `connect("...")` for Vercel Connect-backed OAuth, a custom interactive definition, or a plain `{ getToken }` for static credentials.
 
 ```ts title="agent/tools/list_okta_groups.ts"
 import { defineTool } from "eve/tools";
 import { connect } from "@vercel/connect/eve";
 import { z } from "zod";
 
+const oktaAuth = connect("okta/myagent");
+
 export default defineTool({
   description: "List the caller's Okta groups.",
   inputSchema: z.object({}),
-  auth: connect("okta"),
   async execute(_input, ctx) {
-    const { token } = await ctx.getToken();
+    const { token } = await ctx.getToken(oktaAuth);
     const res = await fetch("https://api.okta-proxy.internal/groups", {
       headers: { authorization: `Bearer ${token}` },
     });
@@ -266,14 +314,60 @@ export default defineTool({
 });
 ```
 
-Declaring `auth` adds two accessors to the tool's `ctx`:
+This same inline shape naturally handles tools that need more than one credential:
 
-- `ctx.getToken()` resolves the bearer for the declared strategy, checking the per-step token cache first. With an interactive strategy, a cache miss suspends the turn on a framework-owned callback URL, shows a "Sign in" affordance, and re-runs the tool once the OAuth callback completes.
-- `ctx.requireAuth()` throws `ConnectionAuthorizationRequiredError` to gate the tool on authorization before any token resolves. The runtime turns that into the same consent prompt.
+```ts title="agent/tools/sync_ticket.ts"
+import { connect } from "@vercel/connect/eve";
+import { defineTool } from "eve/tools";
+import { z } from "zod";
 
-Throw `ConnectionAuthorizationRequiredError` anywhere in `execute` (directly, via `requireAuth()`, or implicitly from `getToken()`) and you trigger the consent flow, keyed by the tool's name. Calling either accessor on a tool that does not declare `auth` throws.
+const githubAuth = connect("github/myagent");
+const linearAuth = connect("linear/myagent");
 
-By default the sign-in affordance title-cases the tool's path-derived name, so a tool file named `sfdc_lookup.ts` renders "Sign in with Sfdc_lookup". Set `displayName` on the `auth` definition to control what users see instead, for example `auth: { ...connect("sfdc"), displayName: "Salesforce" }`. It is presentation-only. The tool's name still keys the authorization scope, token cache, and callback URL, and a definition-level `displayName` wins over one the strategy stamps on the challenge.
+export default defineTool({
+  description: "Sync GitHub context into Linear.",
+  inputSchema: z.object({ issueId: z.string() }),
+  async execute({ issueId }, ctx) {
+    const { token: githubToken } = await ctx.getToken(githubAuth);
+    const { token: linearToken } = await ctx.getToken(linearAuth);
+
+    const repo = await fetch("https://api.github.com/user/repos", {
+      headers: { authorization: `Bearer ${githubToken}` },
+    });
+    if (repo.status === 401) ctx.requireAuth(githubAuth);
+
+    return updateLinearIssue(issueId, linearToken, await repo.json());
+  },
+});
+```
+
+Configure provider-specific OAuth targeting on the provider itself. For Vercel Connect, pass `tokenParams` to `connect(...)` when you need explicit OAuth scopes, resource indicators, or rich authorization requests:
+
+```ts
+const githubAuth = connect({
+  connector: "github/myagent",
+  tokenParams: {
+    authorizationDetails: [
+      {
+        type: "github_app_installation",
+        org: "acme",
+        repositories: ["agent-runtime"],
+      },
+    ],
+  },
+});
+```
+
+The tool's `ctx` exposes provider-scoped auth accessors:
+
+- `ctx.getToken(provider, options?)` resolves an inline provider such as `connect("github/myagent")`. It uses the same cache, callback, and sign-in machinery as connection auth, scoped to that provider's tool-qualified auth key.
+- `ctx.requireAuth(provider, options?)` evicts the cached token for that inline provider and starts a fresh authorization challenge. Use it after a downstream `401` rejects a token returned by `ctx.getToken(provider)`.
+
+Throw `ConnectionAuthorizationRequiredError` from an inline provider's `getToken` to trigger the consent flow for that provider. If a downstream request later rejects an already-resolved token, call `ctx.requireAuth(provider)` to evict and re-authorize it.
+
+Vercel Connect providers usually supply their own display name in the authorization challenge. Set `displayName` in the inline options only when you need to override what users see, for example `ctx.getToken(customAuth, { displayName: "Salesforce" })`. It is presentation-only.
+
+Inline providers derive a stable tool-qualified auth key from Vercel Connect metadata when available. If you pass multiple custom providers that do not carry provider metadata, give each one an explicit auth key, for example `ctx.getToken(auth, { authKey: "github" })`. This `authKey` controls eve's cache and callback keys; it is not an OAuth scope.
 
 ## What to read next
 

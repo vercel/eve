@@ -6,24 +6,16 @@ import { defineEval } from "eve/evals";
 export default defineEval({
   description: "Dynamic tools smoke: turn-scoped resolver tools win merges over session-scoped.",
   async test(t) {
-    const first = await t.send(
-      "Call the `dynamic-overwrite__shared` tool and report the source and turn values.",
-    );
+    const first = await t.send("Call the `shared` tool and report the source and turn values.");
     first.expectOk();
 
-    const second = await t.send(
-      "Call the `dynamic-overwrite__session_only` tool and report the source value.",
-    );
-    second.expectOk();
+    await t.send("Call the `session_only` tool and report the source value.");
 
-    t.didNotFail();
-    t.completed();
-    t.calledTool("dynamic-overwrite__shared", {
-      isError: false,
+    t.succeeded();
+    t.calledTool("shared", {
       output: { source: "turn" },
     });
-    t.calledTool("dynamic-overwrite__session_only", {
-      isError: false,
+    t.calledTool("session_only", {
       output: { source: "session" },
     });
   },

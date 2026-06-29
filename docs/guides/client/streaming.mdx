@@ -66,7 +66,7 @@ The most common UI events are:
 | `message.received`   | Confirm the user message landed.                                 |
 | `reasoning.appended` | Render reasoning deltas when the model provides them.            |
 | `message.appended`   | Render assistant text deltas.                                    |
-| `actions.requested`  | Show tool calls requested by the model.                          |
+| `actions.requested`  | Show tool calls as the model requests them, before execution.    |
 | `action.result`      | Show tool call results.                                          |
 | `input.requested`    | Pause the UI for approval or a question answer.                  |
 | `result.completed`   | Read structured output from an [output schema](./output-schema). |
@@ -75,6 +75,12 @@ The most common UI events are:
 | `session.failed`     | Mark the conversation failed.                                    |
 
 For the complete event table, see [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming).
+
+## Authorization pauses
+
+`authorization.required` is different from the normal `session.waiting` boundary. It means a connection needs OAuth or another authorization challenge before the parked turn can continue. Chat UIs should render the authorization prompt, disable ordinary text input for that session, and persist the event with the rest of the chat history.
+
+If you support refresh while an authorization prompt is pending, keep the session cursor from the started session and rehydrate the saved events on load. Do not treat a missing `session.waiting` after `authorization.required` as a finished conversation; the callback or a structured decline should resume the same eve session.
 
 ## Reconnection
 

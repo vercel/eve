@@ -10,10 +10,8 @@ let cachedPackageInfo: InstalledPackageInfo | undefined;
 // deployments can still report package metadata without resolving package.json.
 const BUNDLED_FALLBACK_PACKAGE_VERSION: string = "__EVE_PACKAGE_VERSION__";
 const WORKFLOW_MODULE_ALIASES = {
-  "workflow/api": "src/compiled/@workflow/core/runtime.js",
   "workflow/errors": "src/compiled/@workflow/errors/index.js",
   "workflow/internal/private": "src/compiled/@workflow/core/private.js",
-  "workflow/runtime": "src/compiled/@workflow/core/runtime.js",
 } as const;
 
 function resolveFallbackPackageVersion(): string {
@@ -251,6 +249,63 @@ export function resolveInstalledPackageInfo(): InstalledPackageInfo {
   return cachedPackageInfo;
 }
 
+const EXPECTED_WORKFLOW_VERSION_PACKAGE = "@workflow/core";
+
+function readWorkflowVersionFromManifest(value: unknown): string | undefined {
+  const manifest = value as {
+    dependencies?: Record<string, unknown>;
+    devDependencies?: Record<string, unknown>;
+    peerDependencies?: Record<string, unknown>;
+  };
+
+  for (const section of [
+    manifest.devDependencies,
+    manifest.dependencies,
+    manifest.peerDependencies,
+  ]) {
+    const declared = section?.[EXPECTED_WORKFLOW_VERSION_PACKAGE];
+
+    if (typeof declared === "string" && declared.trim().length > 0) {
+      return declared;
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Resolves the `@workflow/core` version this eve release bundles, read from
+ * eve's own `package.json`.
+ *
+ * This is the single source of truth for the `@workflow/*` line eve targets, so
+ * compatibility checks (see `assertWorkflowWorldCompatibility`) never hardcode a
+ * version. eve's `package.json` is published with its `devDependencies` intact
+ * even though those packages are vendored, so the entry is readable from an
+ * installed eve as well as a source checkout. Returns `undefined` when the
+ * entry cannot be read so callers can no-op rather than fail.
+ */
+export function resolveExpectedWorkflowVersion(): string | undefined {
+  const packageRoot = tryResolvePackageRoot();
+
+  if (packageRoot !== undefined) {
+    try {
+      return readWorkflowVersionFromManifest(
+        JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")),
+      );
+    } catch {
+      // Fall through to module-resolution lookup below.
+    }
+  }
+
+  try {
+    return readWorkflowVersionFromManifest(
+      JSON.parse(readFileSync(require.resolve(`${EVE_PACKAGE_NAME}/package.json`), "utf8")),
+    );
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Resolves a Workflow runtime module from eve's narrowed Workflow dependencies.
  *
@@ -261,6 +316,10 @@ export function resolveInstalledPackageInfo(): InstalledPackageInfo {
 export function resolveWorkflowModulePath(specifier: string): string {
   if (specifier === "workflow") {
     return resolvePackageSourceFilePath("src/internal/workflow/index.ts");
+  }
+
+  if (specifier === "workflow/api" || specifier === "workflow/runtime") {
+    return resolvePackageSourceFilePath("src/internal/workflow/runtime.ts");
   }
 
   if (specifier === "workflow/internal/builtins") {

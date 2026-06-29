@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "#compiled/zod/index.js";
 
-import {
-  defineTool,
-  defineDynamic,
-  disableTool,
-  ExperimentalWorkflow,
-} from "#public/definitions/tool.js";
+import { defineTool, defineDynamic, disableTool } from "#public/definitions/tool.js";
 import { once } from "#public/tools/approval/approval-helpers.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
 
@@ -40,8 +35,11 @@ describe("normalizeToolDefinition", () => {
     expect(entry).toEqual({ kind: "disabled" });
   });
 
-  it("returns an enable-workflow entry for the ExperimentalWorkflow marker", () => {
-    const entry = normalizeToolDefinition(ExperimentalWorkflow, FAILURE_MESSAGE);
+  it("returns an enable-workflow entry for the internal workflow marker shape", () => {
+    const entry = normalizeToolDefinition(
+      Object.freeze({ kind: "eve:enable-workflow-tool" }),
+      FAILURE_MESSAGE,
+    );
 
     expect(entry).toEqual({ kind: "enable-workflow" });
   });
@@ -116,12 +114,16 @@ describe("normalizeToolDefinition", () => {
       execute(input) {
         return input.city;
       },
-      needsApproval(ctx) {
+      approval(ctx) {
         const city: string | undefined = ctx.toolInput?.city;
+        const callerId: string | undefined = ctx.session.auth.current?.principalId;
+        const turnId: string = ctx.session.turn.id;
         // @ts-expect-error approval input is schema-typed, not an open record.
         const missing = ctx.toolInput?.missing;
+        void callerId;
+        void turnId;
         void missing;
-        return city !== undefined;
+        return city !== undefined ? "user-approval" : "not-applicable";
       },
     });
 
@@ -135,10 +137,26 @@ describe("normalizeToolDefinition", () => {
       execute(input) {
         return input.city;
       },
-      needsApproval: once(),
+      approval: once(),
     });
 
     expect(normalizeToolDefinition(tool, FAILURE_MESSAGE).kind).toBe("tool");
+  });
+
+  it("rejects the removed needsApproval field", () => {
+    expect(() =>
+      normalizeToolDefinition(
+        {
+          description: "Uses the removed approval key.",
+          execute() {
+            return null;
+          },
+          inputSchema: { type: "object" },
+          needsApproval: () => true,
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('Unknown key "needsApproval"');
   });
 
   it("rejects authored tools whose `toModelOutput` is not a function", () => {

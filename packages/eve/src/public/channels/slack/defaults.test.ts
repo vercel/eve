@@ -4,7 +4,21 @@ import type { SessionContext } from "#public/definitions/callback-context.js";
 import { defaultEvents } from "#public/channels/slack/defaults.js";
 import type { SlackChannelState, SlackEventContext } from "#public/channels/slack/slackChannel.js";
 
-const sessionCtx = {} as SessionContext;
+function sessionContext(
+  current: SessionContext["session"]["auth"]["current"] = null,
+): SessionContext {
+  return {
+    getSandbox: vi.fn(),
+    getSkill: vi.fn(),
+    session: {
+      auth: { current, initiator: null },
+      id: "test-session",
+      turn: { id: "test-turn", sequence: 0 },
+    },
+  };
+}
+
+const sessionCtx = sessionContext();
 
 function buildChannelStub(state: Partial<SlackChannelState> = {}) {
   const postEphemeral = vi.fn().mockResolvedValue({ id: "eph1" });
@@ -37,17 +51,34 @@ function authRequiredEvent(
 }
 
 describe("defaultEvents authorization.required", () => {
-  it("delivers the challenge ephemerally to the triggering user and posts nothing publicly", async () => {
+  it("posts a public status and delivers the challenge ephemerally to the triggering user", async () => {
     const { channel, post, postEphemeral } = buildChannelStub({ triggeringUserId: "U777" });
 
     await defaultEvents["authorization.required"]!(authRequiredEvent(), channel, sessionCtx);
 
+    expect(post).toHaveBeenCalledTimes(1);
+    const publicText = post.mock.calls[0]?.[0] as string;
+    expect(publicText).toBe("Connect with Notion to continue");
+    expect(publicText).not.toContain("https://");
     expect(postEphemeral).toHaveBeenCalledTimes(1);
     expect(postEphemeral.mock.calls[0]?.[0]).toBe("U777");
     const message = postEphemeral.mock.calls[0]?.[1] as { text: string; blocks: unknown[] };
     expect(message.text).toContain("https://connect.example.com/a/sca_1");
-    expect(post).not.toHaveBeenCalled();
-    expect(channel.state.pendingAuthMessageTs).toBeUndefined();
+    expect(channel.state.pendingAuthMessageTs).toEqual({ notion: "ts1" });
+  });
+
+  it("targets the current Slack caller instead of stale channel state", async () => {
+    const { channel, postEphemeral } = buildChannelStub({ triggeringUserId: "U_FIRST" });
+    const currentCaller = sessionContext({
+      attributes: { user_id: "U_CURRENT" },
+      authenticator: "slack-webhook",
+      principalId: "slack:T01:U_CURRENT",
+      principalType: "user",
+    });
+
+    await defaultEvents["authorization.required"]!(authRequiredEvent(), channel, currentCaller);
+
+    expect(postEphemeral.mock.calls[0]?.[0]).toBe("U_CURRENT");
   });
 
   it("renders the device user code in the ephemeral blocks and fallback text", async () => {
@@ -65,7 +96,7 @@ describe("defaultEvents authorization.required", () => {
   });
 
   it("renders the challenge displayName instead of the title-cased connection name", async () => {
-    const { channel, postEphemeral } = buildChannelStub({ triggeringUserId: "U777" });
+    const { channel, post, postEphemeral } = buildChannelStub({ triggeringUserId: "U777" });
 
     await defaultEvents["authorization.required"]!(
       authRequiredEvent({ displayName: "Notion Workspace" }),
@@ -73,11 +104,12 @@ describe("defaultEvents authorization.required", () => {
       sessionCtx,
     );
 
+    expect(post.mock.calls[0]?.[0]).toBe("Connect with Notion Workspace to continue");
     const message = postEphemeral.mock.calls[0]?.[1] as { text: string };
     expect(message.text).toContain("Sign in with Notion Workspace");
   });
 
-  it("falls back to a link-free public status when there is no triggering user", async () => {
+  it("posts a link-free public status when there is no triggering user", async () => {
     const { channel, post, postEphemeral } = buildChannelStub({ triggeringUserId: null });
 
     await defaultEvents["authorization.required"]!(authRequiredEvent(), channel, sessionCtx);
@@ -90,7 +122,7 @@ describe("defaultEvents authorization.required", () => {
     expect(channel.state.pendingAuthMessageTs).toEqual({ notion: "ts1" });
   });
 
-  it("falls back to a link-free public status when the ephemeral delivery fails", async () => {
+  it("keeps the link-free public status when the ephemeral delivery fails", async () => {
     const { channel, post, postEphemeral } = buildChannelStub({ triggeringUserId: "U777" });
     postEphemeral.mockRejectedValueOnce(new Error("ephemeral rejected"));
 
@@ -102,10 +134,23 @@ describe("defaultEvents authorization.required", () => {
     expect(publicText).not.toContain("https://");
     expect(channel.state.pendingAuthMessageTs).toEqual({ notion: "ts1" });
   });
+
+  it("reuses an existing public status when authorization is already pending", async () => {
+    const { channel, post, postEphemeral } = buildChannelStub({
+      triggeringUserId: "U777",
+      pendingAuthMessageTs: { notion: "ts0" },
+    });
+
+    await defaultEvents["authorization.required"]!(authRequiredEvent(), channel, sessionCtx);
+
+    expect(post).not.toHaveBeenCalled();
+    expect(postEphemeral).toHaveBeenCalledTimes(1);
+    expect(channel.state.pendingAuthMessageTs).toEqual({ notion: "ts0" });
+  });
 });
 
 describe("defaultEvents authorization.completed", () => {
-  it("edits the public fallback status in place when one was posted", async () => {
+  it("edits the public status in place when one was posted", async () => {
     const { channel, postEphemeral, request } = buildChannelStub({
       triggeringUserId: "U777",
       pendingAuthMessageTs: { notion: "ts1" },
@@ -152,7 +197,7 @@ describe("defaultEvents authorization.completed", () => {
     });
   });
 
-  it("stays silent when no fallback status was posted", async () => {
+  it("stays silent when no public status was recorded", async () => {
     const { channel, post, postEphemeral, request } = buildChannelStub({
       triggeringUserId: "U777",
     });

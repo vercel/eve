@@ -141,6 +141,36 @@ describe("ClientSession", () => {
     });
   });
 
+  it("cancels a parked stream after collecting its result", async () => {
+    const encoder = new TextEncoder();
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            `${JSON.stringify({ type: "session.waiting", data: { wait: "next-user-message" } })}\n`,
+          ),
+        );
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if ((init?.method ?? "GET") === "POST") {
+        return createAcceptedResponse();
+      }
+
+      return new Response(stream);
+    });
+    const session = createSession();
+
+    const result = await (await session.send("first")).result();
+
+    expect(result.status).toBe("waiting");
+    expect(cancelled).toBe(true);
+  });
+
   it("resets the session by default after consuming through session.completed", async () => {
     const requests: Array<{ body?: unknown; method: string; url: string }> = [];
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {

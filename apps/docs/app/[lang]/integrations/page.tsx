@@ -5,7 +5,7 @@ import { Gallery } from "./components/gallery";
 
 const title = "Integrations";
 const description =
-  "Browse every third-party service eve connects to: messaging channels and MCP connections, each with install, quick start, and configuration steps.";
+  "Browse every third-party service eve connects to: messaging channels, MCP connections, and OpenAPI connections, each with install, quick start, and configuration steps.";
 
 export const metadata: Metadata = {
   title,

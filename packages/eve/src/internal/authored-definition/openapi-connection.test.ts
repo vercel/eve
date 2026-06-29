@@ -45,6 +45,18 @@ describe("normalizeOpenApiConnectionDefinition", () => {
 
       expect(result.auth).toMatchObject({ principalType: "app" });
     });
+
+    it("preserves a context-aware auth resolver without invoking it at build time", () => {
+      let calls = 0;
+      const auth = () => {
+        calls += 1;
+        return { getToken: async () => ({ token: "x" }) };
+      };
+      const result = normalizeOpenApiConnectionDefinition(validInput({ auth }), MSG);
+
+      expect(result.auth).toBe(auth);
+      expect(calls).toBe(0);
+    });
   });
 
   describe("validation", () => {

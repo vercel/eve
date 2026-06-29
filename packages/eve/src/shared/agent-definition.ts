@@ -1,4 +1,4 @@
-import type { LanguageModel } from "ai";
+import type { CallSettings, LanguageModel } from "ai";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
@@ -10,6 +10,11 @@ import type { ModuleSourceRef } from "#shared/source-ref.js";
 export interface AgentModelOptionsDefinition {
   readonly providerOptions?: Record<string, JsonObject>;
 }
+
+/**
+ * Provider-agnostic reasoning effort forwarded to the AI SDK model call.
+ */
+export type AgentReasoningDefinition = NonNullable<CallSettings["reasoning"]>;
 
 /**
  * How an agent's model is reached at runtime, decided at compile time from the
@@ -95,20 +100,8 @@ export interface PublicAgentCompactionDefinition {
  * Experimental, opt-in agent capabilities authored in `agent.ts`.
  *
  * These options are unstable and may change or be removed in any release.
- * Each agent (the root agent and every subagent) carries its own flags, so
- * code mode can be enabled for the whole graph, only a subagent, or only
- * the parent.
  */
 export interface AgentExperimentalDefinition {
-  /**
-   * Routes executable tools through a sandboxed code-execution wrapper
-   * instead of exposing them directly to the model. The model writes
-   * JavaScript that calls the tools inside the sandbox.
-   *
-   * When unset, eve falls back to the `EVE_EXPERIMENTAL_CODE_MODE`
-   * environment variable (`"1"` enables it) for backwards compatibility.
-   */
-  readonly codeMode?: boolean;
   /**
    * Durable Workflow runtime configuration. Root agents may use this to select
    * the Workflow world backing sessions and runs.
@@ -167,6 +160,7 @@ export type InternalAgentDefinition = {
   experimental?: AgentExperimentalDefinition;
   model: InternalAgentModelDefinition;
   outputSchema?: JsonObject;
+  reasoning?: AgentReasoningDefinition;
   source?: ModuleSourceRef;
 };
 
@@ -206,6 +200,11 @@ export type PublicAgentDefinition = {
    */
   readonly modelContextWindowTokens?: number;
   readonly modelOptions?: AgentModelOptionsDefinition;
+  /**
+   * Provider-agnostic reasoning effort for the agent's turn model calls.
+   * Support for individual levels depends on the selected model and provider.
+   */
+  readonly reasoning?: AgentReasoningDefinition;
   /**
    * Optional structured return type used when this agent runs in task mode
    * (for example as a subagent, schedule, or remote job). Interactive
