@@ -8,22 +8,22 @@ import { InstallSwitcher } from "./install-switcher";
 import { NextjsInterop } from "./nextjs-interop";
 
 const title = "eve";
-const tagline = "Like Next.js for web apps, but for agents.";
-const description =
-  "Markdown for instructions and skills, TypeScript for tools. Durable by default.";
+const tagline = "Like Next.js for agents. Build durable agents with one folder.";
+// const description =
+//   "Markdown for instructions and skills, TypeScript for tools. Durable by default.";
 
 export const homeMetadata: Metadata = {
   title,
-  description: `${tagline} ${description}`,
+  description: `${tagline}`,
   openGraph: {
     title,
-    description: `${tagline} ${description}`,
+    description: `${tagline}`,
     images: [staticOgImage],
   },
   twitter: {
     card: "summary_large_image",
     title,
-    description: `${tagline} ${description}`,
+    description: `${tagline}`,
     images: [staticOgImage],
   },
 };
@@ -37,7 +37,7 @@ export const HomeContent = () => (
         for Building Agents
       </h1>
       <p className="w-full text-center text-copy-16 text-gray-900 md:max-w-2xl md:text-copy-18 lg:text-copy-20">
-        {tagline} {description}
+        {tagline}
       </p>
       <div className="mt-2 flex w-full max-w-2xl flex-col items-center gap-4">
         <InstallSwitcher className="items-center" />
