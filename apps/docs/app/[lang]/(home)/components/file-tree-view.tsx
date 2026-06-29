@@ -43,7 +43,14 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
   }
 
   return (
+    // Full-width container so the header divider can bleed to the page frame's
+    // vertical borders, forming a cross with the layout grid.
     <div className="relative mt-16">
+      {/* Grid line aligned exactly with the card header's border-b. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute top-12 -left-4 -right-4 border-t sm:-left-12 sm:-right-12"
+      />
       <div className="mx-auto max-w-5xl">
         <div className="relative overflow-hidden rounded-t-xl border bg-background-100">
           <div className="grid md:grid-cols-[240px_1fr]">

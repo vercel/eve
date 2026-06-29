@@ -7,7 +7,6 @@ import {
   IconAgents,
   IconClock,
   IconFileText,
-  IconFolderOpen,
   IconLinked,
   IconMessage,
   type IconProps,
@@ -205,12 +204,7 @@ export async function FileTree() {
     <section className="px-4 pb-24 pt-16 font-sans sm:px-12">
       <div className="mx-auto max-w-5xl">
         <h2 className="text-center text-heading-32 font-semibold tracking-tighter text-gray-1000 sm:text-heading-40">
-          Your{" "}
-          <span className="relative -top-[0.08em] ml-1 inline-flex items-center gap-[0.16em] rounded-lg bg-gray-200 px-3 py-[0.04em] pr-4 align-baseline font-medium">
-            <IconFolderOpen aria-hidden className="size-[0.58em]" color="gray-900" />
-            agent
-          </span>{" "}
-          is a folder
+          An agent is a directory
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">
           Define instructions and skills in markdown, tools in TypeScript, and deploy anywhere. The

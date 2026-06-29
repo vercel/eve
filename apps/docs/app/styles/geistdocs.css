@@ -14,18 +14,6 @@ body:has([data-home-route]) footer {
   @apply bg-background-200;
 }
 
-body:has([data-home-route]) header.sticky.top-0 {
-  @apply transition-colors;
-}
-
-body:has([data-home-route]):not([data-home-scrolled="true"]) header.sticky.top-0 {
-  @apply border-transparent;
-}
-
-.dark body:has([data-home-route]) {
-  --eve-hero-metal-placeholder-opacity: 0.2;
-}
-
 /* Align docs content with navbar on mobile. */
 #nd-page {
   @apply max-md:px-6;
