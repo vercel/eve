@@ -157,7 +157,7 @@ export default defineMcpClientConnection({
     lang: "typescript",
     NavIcon: IconAgents,
     description:
-      "Add subagents for specialized work — the main agent delegates tasks and combines the results.",
+      "Add subagents for specialized work. The main agent delegates tasks and combines the results.",
     code: `import { defineAgent } from
   "eve";
 
