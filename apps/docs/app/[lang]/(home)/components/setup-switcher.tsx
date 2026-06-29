@@ -105,17 +105,25 @@ export function SetupSwitcher() {
           aria-label="Toggle deployment target"
           className="cursor-pointer"
         />
-        <button
-          type="button"
-          onClick={() => setMode("self-hosted")}
-          aria-pressed={selfHosted}
-          className={cn(
-            "cursor-pointer text-copy-14! transition-colors",
-            selfHosted ? "text-gray-1000" : "text-gray-900 hover:text-gray-1000",
-          )}
-        >
-          Self-hosted (example)
-        </button>
+        <span className="text-copy-14!">
+          <button
+            type="button"
+            onClick={() => setMode("self-hosted")}
+            aria-pressed={selfHosted}
+            className={cn(
+              "cursor-pointer transition-colors",
+              selfHosted ? "text-gray-1000" : "text-gray-900 hover:text-gray-1000",
+            )}
+          >
+            Self-hosted
+          </button>{" "}
+          <Link
+            href="https://github.com/vercel-labs/steve"
+            className="text-gray-900 underline decoration-gray-400 underline-offset-2 transition-colors hover:text-gray-1000"
+          >
+            (example)
+          </Link>
+        </span>
       </div>
 
       <div
