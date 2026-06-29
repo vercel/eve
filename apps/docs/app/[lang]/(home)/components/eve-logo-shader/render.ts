@@ -6,6 +6,7 @@ import glassFrontWgsl from "./shaders/glass/front.wgsl";
 import glassBackDepthWgsl from "./shaders/glass/back-depth.wgsl";
 import eveBloomBlurWgsl from "./shaders/bloom/blur.wgsl";
 import eveBloomCompositeWgsl from "./shaders/bloom/composite.wgsl";
+import eveLightCompositeWgsl from "./shaders/postprocess/light-composite.wgsl";
 import eveCubemapWgsl from "./shaders/cubemap/render.wgsl";
 import eveEnvBgWgsl from "./shaders/env/background.wgsl";
 import renderTargetPreviewWgsl from "./shaders/debug/render-target-preview.wgsl";
@@ -86,11 +87,17 @@ const PREVIEW_BACK_DEPTH = 1;
 type Mat4 = Float32Array;
 type Vec3 = [number, number, number];
 
-export function createEve5Renderer(device: Device, format: GPUTextureFormat, mesh: MeshData, options: { thicknessScale?: number } = {}) {
+export function createEve5Renderer(
+  device: Device,
+  format: GPUTextureFormat,
+  mesh: MeshData,
+  options: { thicknessScale?: number; theme?: "light" | "dark" } = {},
+) {
   const studioCubemap = createStudioCubemap(device);
   renderStudioCubemap(device, studioCubemap);
   const orbitTarget = meshOrbitTarget(mesh);
   const thicknessScale = options.thicknessScale ?? meshThicknessScale(mesh.bounds);
+  const isLight = options.theme === "light";
 
   const glassBackShader = device.createShader(compile(glassBackWgsl));
   const glassFrontShader = device.createShader(compile(glassFrontWgsl));
@@ -208,6 +215,14 @@ export function createEve5Renderer(device: Device, format: GPUTextureFormat, mes
   const compositePipeline = createRenderPipeline(device, {
     label: "eve-5-bloom-composite-pipeline",
     shader: device.createShader(compile(eveBloomCompositeWgsl)),
+    vertex: { entry: "vs_main" },
+    fragment: { entry: "fs_main", targets: [{ format }] },
+    primitive: { topology: "triangle-list" },
+  });
+
+  const lightCompositePipeline = createRenderPipeline(device, {
+    label: "eve-5-light-composite-pipeline",
+    shader: device.createShader(compile(eveLightCompositeWgsl)),
     vertex: { entry: "vs_main" },
     fragment: { entry: "fs_main", targets: [{ format }] },
     primitive: { topology: "triangle-list" },
@@ -385,7 +400,7 @@ export function createEve5Renderer(device: Device, format: GPUTextureFormat, mes
 
     const pass = new RenderPass(device, {
       label: "eve-5-scene-hdr-pass",
-      colorAttachments: [{ view, loadOp: "clear", storeOp: "store", clearValue: [0, 0, 0, 1] }],
+      colorAttachments: [{ view, loadOp: "clear", storeOp: "store", clearValue: [0, 0, 0, isLight ? 0 : 1] }],
     });
 
     // Optional environment background: draw the studio cubemap behind the logo so the lighting
@@ -526,6 +541,25 @@ export function createEve5Renderer(device: Device, format: GPUTextureFormat, mes
     pass.end();
   };
 
+  const renderLightComposite = (view: GPUTextureView, targets: BloomTargets) => {
+    const bindGroup = device.gpu.createBindGroup({
+      label: "eve-5-light-composite-bind-group",
+      layout: lightCompositePipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: targets.scene.createView() },
+        { binding: 1, resource: blurSampler },
+      ],
+    });
+    const pass = new RenderPass(device, {
+      label: "eve-5-light-composite-premultiplied-pass",
+      colorAttachments: [{ view, loadOp: "clear", storeOp: "store", clearValue: [0, 0, 0, 0] }],
+    });
+    pass.setPipeline(lightCompositePipeline);
+    pass.setBindGroup(0, bindGroup);
+    pass.draw(3);
+    pass.end();
+  };
+
   return {
     render(target: GPUTextureView, controls: RenderControls, logicalWidth: number, logicalHeight: number) {
       const safeWidth = Math.max(1, Math.round(logicalWidth));
@@ -543,6 +577,10 @@ export function createEve5Renderer(device: Device, format: GPUTextureFormat, mes
         return;
       }
       renderScene(targets.scene.createView(), targets.backMaterial, targets.backDepth, controls, safeWidth, safeHeight);
+      if (isLight) {
+        renderLightComposite(target, targets);
+        return;
+      }
       renderBlur(targets.scene, targets.horizontal, [1, 0], true);
       renderBlur(targets.horizontal, targets.vertical, [0, 1], false);
       renderComposite(target, targets);

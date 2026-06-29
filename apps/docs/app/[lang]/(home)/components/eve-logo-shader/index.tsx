@@ -32,7 +32,40 @@ const MAX_DEVICE_PIXEL_RATIO = 2;
 const MAX_ENV_YAW = 0.45;
 const ENV_YAW_LERP_SPEED = 3;
 
+function getCurrentTheme(): "light" | "dark" {
+  if (typeof document === "undefined") return "light";
+  const root = document.documentElement;
+  if (root.classList.contains("dark") || root.dataset.theme === "dark") return "dark";
+  if (root.classList.contains("light") || root.dataset.theme === "light") return "light";
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function useResolvedTheme() {
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+
+  useEffect(() => {
+    const syncTheme = () => setTheme(getCurrentTheme());
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const observer = new MutationObserver(syncTheme);
+
+    syncTheme();
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "data-theme"],
+    });
+    media.addEventListener("change", syncTheme);
+
+    return () => {
+      observer.disconnect();
+      media.removeEventListener("change", syncTheme);
+    };
+  }, []);
+
+  return theme;
+}
+
 export function EveLogoShader() {
+  const theme = useResolvedTheme();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const controlsRef = useRef<RenderControls>({ ...DEFAULT_CONTROLS });
   const [logoAspect, setLogoAspect] = useState(DEFAULT_LOGO_ASPECT);
@@ -52,6 +85,7 @@ export function EveLogoShader() {
     window.addEventListener("pointermove", onPointerMove, { passive: true });
 
     async function start() {
+      const renderTheme = theme;
       const canvas = canvasRef.current;
       const context = canvas?.getContext("webgpu");
       if (!canvas || !context || !navigator.gpu) return;
@@ -69,8 +103,9 @@ export function EveLogoShader() {
       }
 
       const format = navigator.gpu.getPreferredCanvasFormat();
-      context.configure({ device: app.device.gpu, format, alphaMode: "opaque" });
-      const renderer = createEve5Renderer(app.device, format, mesh);
+      const alphaMode = renderTheme === "light" ? "premultiplied" : "opaque";
+      context.configure({ device: app.device.gpu, format, alphaMode });
+      const renderer = createEve5Renderer(app.device, format, mesh, { theme: renderTheme });
       previousFrameTime = performance.now();
 
       const draw = (frameTime = performance.now()) => {
@@ -114,7 +149,7 @@ export function EveLogoShader() {
       window.removeEventListener("pointermove", onPointerMove);
       cleanup?.();
     };
-  }, []);
+  }, [theme]);
 
   const logicalSize = getLogicalRenderSize(logoAspect);
   const paddedWidth = logicalSize.width + BLOOM_RADIUS * 2;
