@@ -177,7 +177,7 @@ describe("startRemoteAgentSession", () => {
 function createAction(): RuntimeRemoteAgentCallActionRequest {
   return {
     callId: "call-remote",
-    description: "Performs research.",
+    description: "Runtime action event description.",
     input: { message: "find the marker" },
     kind: "remote-agent-call",
     name: "research",

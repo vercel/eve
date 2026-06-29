@@ -299,7 +299,19 @@ describe("dispatchRuntimeActionsStep", () => {
       },
       hookRegistry: createEmptyHookRegistry(),
       resolvedAgent: { config: {} },
-      subagentRegistry: {},
+      subagentRegistry: {
+        subagentsByNodeId: new Map([
+          [
+            "subagents/delegate",
+            {
+              definition: {
+                description: "Local delegate child description.",
+                kind: "subagent",
+              },
+            },
+          ],
+        ]),
+      },
       toolRegistry: {},
       turnAgent: TestTurnAgent,
     } as never;
@@ -318,7 +330,7 @@ describe("dispatchRuntimeActionsStep", () => {
       actions: [
         {
           callId: "call-1",
-          description: "Delegate the work.",
+          description: "Runtime action event description.",
           input: { message: "investigate latest routing" },
           kind: "subagent-call",
           name: "delegate",
@@ -353,7 +365,7 @@ describe("dispatchRuntimeActionsStep", () => {
       [
         expect.objectContaining({
           input: {
-            message: expect.stringContaining("investigate latest routing"),
+            message: expect.stringContaining("Description: Local delegate child description."),
           },
           serializedContext: expect.objectContaining({
             "eve.channel": expect.objectContaining({
@@ -372,6 +384,28 @@ describe("dispatchRuntimeActionsStep", () => {
         }),
         deploymentId: "latest",
       },
+    );
+    expect(startMock).toHaveBeenCalledWith(
+      workflowEntryReference,
+      [
+        expect.objectContaining({
+          input: {
+            message: expect.stringContaining("investigate latest routing"),
+          },
+        }),
+      ],
+      expect.any(Object),
+    );
+    expect(startMock).toHaveBeenCalledWith(
+      workflowEntryReference,
+      [
+        expect.objectContaining({
+          input: {
+            message: expect.not.stringContaining("Runtime action event description."),
+          },
+        }),
+      ],
+      expect.any(Object),
     );
   });
 
