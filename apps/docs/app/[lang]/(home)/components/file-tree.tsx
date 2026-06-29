@@ -9,12 +9,11 @@ import {
   IconFolderOpen,
   IconLinked,
   IconMessage,
-  type IconProps,
   IconSandbox,
   IconSparkles,
   IconWorkflow,
   IconWrench,
-} from "@/components/geistcn-icons";
+} from "@vercel/geistdocs/assets/icons";
 import { cn } from "@/lib/utils";
 import { FileTreeView } from "./file-tree-view";
 
@@ -27,7 +26,7 @@ interface Snippet {
   fileName: string;
   lang: string;
   /** Category icon for the left column. */
-  NavIcon: (props: IconProps) => JSX.Element;
+  NavIcon: (props: { size?: number; className?: string }) => JSX.Element;
   /** Short, what-this-file-does line shown above the code. */
   description: string;
   code: string;
@@ -217,7 +216,7 @@ export async function FileTree() {
     name: snippet.name,
     fileName: snippet.fileName,
     description: snippet.description,
-    navIcon: <snippet.NavIcon aria-hidden className="shrink-0" color="currentColor" size={16} />,
+    navIcon: <snippet.NavIcon className="shrink-0" size={16} />,
     code: rendered[i],
   }));
 
@@ -227,12 +226,7 @@ export async function FileTree() {
         <h2 className="text-center text-heading-32 font-semibold tracking-tighter text-gray-1000 sm:text-heading-40">
           An agent is a{" "}
           <span className="rounded-xl bg-gray-100 px-3 py-0.5">
-            <IconFolderOpen
-              aria-hidden
-              className="mr-2 inline align-middle"
-              color="gray-900"
-              size={28}
-            />
+            <IconFolderOpen className="mr-2 inline align-middle text-gray-900" size={28} />
             directory
           </span>
         </h2>

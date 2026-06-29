@@ -1,7 +1,11 @@
 "use client";
 
 import { type ReactNode, useState } from "react";
-import { IconCheck, IconPlusCircle, IconRefreshCounterClockwise } from "@/components/geistcn-icons";
+import {
+  IconCheck,
+  IconPlusCircle,
+  IconRefreshCounterClockwise,
+} from "@vercel/geistdocs/assets/icons";
 import { cn } from "@/lib/utils";
 import { GradientBorder } from "./gradient-border";
 
@@ -69,7 +73,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
               order.length > 1 ? "ml-auto opacity-100" : "pointer-events-none ml-auto opacity-0",
             )}
           >
-            <IconRefreshCounterClockwise aria-hidden size={16} />
+            <IconRefreshCounterClockwise size={16} />
           </button>
         </div>
         <div className="space-y-0.5 p-2">
@@ -88,12 +92,10 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
                 {/* {item.navIcon} */}
                 <span>{item.label}</span>
                 {isAdded ? (
-                  <IconCheck aria-hidden className="ml-auto" color="gray-1000" size={16} />
+                  <IconCheck className="ml-auto text-gray-1000" size={16} />
                 ) : (
                   <IconPlusCircle
-                    aria-hidden
-                    className="ml-auto opacity-60 transition-opacity group-hover:opacity-100"
-                    color="gray-900"
+                    className="ml-auto text-gray-900 opacity-60 transition-opacity group-hover:opacity-100"
                     size={16}
                   />
                 )}

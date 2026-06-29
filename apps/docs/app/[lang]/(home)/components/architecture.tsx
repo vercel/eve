@@ -1,23 +1,23 @@
 "use client";
 
 import { SiDocker, SiPostgresql } from "@icons-pack/react-simple-icons";
-import { LogoEve } from "@vercel/geistdocs/assets/logos/logo-eve";
-import Link from "next/link";
-import { type ComponentType, type JSX, type ReactNode, useState } from "react";
 import {
-  IconArrowUpRight,
   IconArrowUpRightSmall,
   IconLinked,
   IconMessage,
   IconOpenai,
   IconSandbox,
-  IconSlack,
   IconSparkles,
-  IconVercel,
   IconWorkflow,
   IconWrench,
-} from "@/components/geistcn-icons";
-import { Switch } from "@/components/ui/switch";
+} from "@vercel/geistdocs/assets/icons";
+import { IconArrowUpRight } from "@vercel/geistdocs/assets/icons/icon-arrow-up-right";
+import { LogoEve } from "@vercel/geistdocs/assets/logos/logo-eve";
+import { LogoIconVercel } from "@vercel/geistdocs/assets/logos/logo-icon-vercel";
+import { Switch } from "@vercel/geistdocs/components/switch";
+import Link from "next/link";
+import { type ComponentType, type JSX, type ReactNode, useState } from "react";
+import { IconSlack } from "@/components/geistcn-icons/icon-slack";
 import { cn } from "@/lib/utils";
 import { GradientBorder } from "./gradient-border";
 
@@ -49,29 +49,29 @@ interface Primitive {
 
 const RUNTIME_ITEMS: Primitive[] = [
   {
-    icon: <IconSparkles className="mt-0.5 shrink-0" color="gray-1000" size={18} />,
+    icon: <IconSparkles className="mt-0.5 shrink-0 text-gray-1000" size={18} />,
     title: "AI SDK",
     description: "Model calls, streaming",
     href: "https://ai-sdk.dev/",
     backend: {
-      managed: { label: "AI Gateway", Logo: IconVercel },
+      managed: { label: "AI Gateway", Logo: LogoIconVercel },
       "self-hosted": { label: "GPT-5.4 API", Logo: IconOpenai },
     },
   },
   {
-    icon: <IconSandbox className="mt-0.5 shrink-0" color="gray-1000" size={18} />,
+    icon: <IconSandbox className="mt-0.5 shrink-0 text-gray-1000" size={18} />,
     title: "Sandbox SDK",
     titleByMode: { managed: "Vercel Sandbox SDK", "self-hosted": "Sandbox" },
     description: "Isolated execution",
     href: "https://vercel.com/docs/sandbox/sdk-reference",
     managedOnlyHref: true,
     backend: {
-      managed: { label: "Vercel Sandbox", Logo: IconVercel },
+      managed: { label: "Vercel Sandbox", Logo: LogoIconVercel },
       "self-hosted": { label: "Docker", Logo: SiDocker },
     },
   },
   {
-    icon: <IconLinked className="mt-0.5 shrink-0" color="gray-1000" size={18} />,
+    icon: <IconLinked className="mt-0.5 shrink-0 text-gray-1000" size={18} />,
     title: "Connection SDK",
     titleByMode: {
       managed: "Vercel Connection SDK",
@@ -81,19 +81,19 @@ const RUNTIME_ITEMS: Primitive[] = [
     href: "https://vercel.com/docs/connect",
     managedOnlyHref: true,
     backend: {
-      managed: { label: "Vercel Connect", Logo: IconVercel },
+      managed: { label: "Vercel Connect", Logo: LogoIconVercel },
       "self-hosted": { label: "Slack API", Logo: IconSlack },
     },
   },
   {
-    icon: <IconWrench className="mt-0.5 shrink-0" color="gray-1000" size={18} />,
+    icon: <IconWrench className="mt-0.5 shrink-0 text-gray-1000" size={18} />,
     title: "Tools & Subagents",
     description: "Functions, child agents",
   },
 ];
 
 const WORKFLOW_BACKEND: Record<Mode, Backend> = {
-  managed: { label: "Vercel Workflows", Logo: IconVercel },
+  managed: { label: "Vercel Workflows", Logo: LogoIconVercel },
   "self-hosted": {
     label: "Postgres (@workflow/world-postgres)",
     Logo: SiPostgresql,
@@ -111,6 +111,8 @@ const CHANNELS = [
   "Cron",
   "Twilio",
   "Linear",
+  "GitHub",
+  "Telegram",
 ];
 
 const CAPTIONS: Record<Mode, string> = {
@@ -130,7 +132,7 @@ function SectionLabel({ children }: { children: string }): JSX.Element {
 
 function BackendChip({ backend }: { backend: Backend }): JSX.Element {
   return (
-    <div className="mt-2 inline-flex w-fit items-center gap-1.5 rounded-md border px-2 py-1">
+    <div className="mt-2 inline-flex w-fit items-center gap-1.5 rounded-md border px-2 py-1 text-gray-1000">
       <backend.Logo className="shrink-0" color="default" size={13} />
       <span className="text-gray-1000 text-copy-13">{backend.label}</span>
     </div>
@@ -172,9 +174,7 @@ function PrimitiveCard({
     >
       {body}
       <IconArrowUpRight
-        aria-hidden
-        className="absolute top-3 right-3 opacity-0 transition-opacity group-hover:opacity-100"
-        color="gray-900"
+        className="absolute top-3 right-3 text-gray-900 opacity-0 transition-opacity group-hover:opacity-100"
         size={14}
       />
     </Link>
@@ -250,7 +250,7 @@ export function ArchitectureDiagram() {
             </div>
 
             <PrimitiveCard
-              icon={<IconWorkflow className="mt-0.5 shrink-0" color="gray-1000" size={18} />}
+              icon={<IconWorkflow className="mt-0.5 shrink-0 text-gray-1000" size={18} />}
               title="Durable Workflow"
               description="Checkpointed steps, park between messages, resume on delivery"
               href="https://workflow-sdk.dev/worlds"
@@ -283,7 +283,7 @@ export function ArchitectureDiagram() {
               href="https://chat-sdk.dev/"
               className="group relative flex items-start gap-2.5 overflow-hidden rounded-lg p-4 transition-colors material-small hover:bg-background-200 lg:h-0 lg:min-h-0 lg:grow"
             >
-              <IconMessage className="mt-0.5 shrink-0" color="gray-1000" size={18} />
+              <IconMessage className="mt-0.5 shrink-0 text-gray-1000" size={18} />
               <div className="flex flex-1 flex-col gap-2">
                 <span className="font-medium text-gray-1000 text-copy-14">Chat SDK</span>
                 <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 lg:grid-cols-1">
@@ -295,9 +295,7 @@ export function ArchitectureDiagram() {
                 </div>
               </div>
               <IconArrowUpRight
-                aria-hidden
-                className="absolute top-3 right-3 z-10 opacity-0 transition-opacity group-hover:opacity-100"
-                color="gray-900"
+                className="absolute top-3 right-3 z-10 text-gray-900 opacity-0 transition-opacity group-hover:opacity-100"
                 size={14}
               />
               <div
@@ -318,7 +316,7 @@ export function ArchitectureDiagram() {
                 className="inline-flex items-center gap-0 text-gray-1000 underline decoration-gray-400 underline-offset-2 transition-colors hover:decoration-gray-700"
               >
                 See the example
-                <IconArrowUpRightSmall aria-hidden color="gray-900" size={16} />
+                <IconArrowUpRightSmall className="text-gray-900" size={16} />
               </Link>
             </>
           ) : null}

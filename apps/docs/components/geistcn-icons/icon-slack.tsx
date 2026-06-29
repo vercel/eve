@@ -1,9 +1,14 @@
 import type { JSX } from "react";
-import type { IconProps } from "./base-icon";
 
-// Official multicolor Slack mark. Rendered directly (not via BaseIcon) since the
-// brand logo uses four fixed colors; `color` is accepted but ignored.
-export function IconSlack({ size = 16, className }: IconProps): JSX.Element {
+// Official multicolor Slack mark. geistdocs has no Slack logo and the brand mark
+// uses four fixed colors, so it's vendored here as a standalone component.
+export function IconSlack({
+  size = 16,
+  className,
+}: {
+  size?: number;
+  className?: string;
+}): JSX.Element {
   return (
     <svg
       aria-hidden="true"
