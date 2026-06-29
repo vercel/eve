@@ -104,8 +104,8 @@ export function FileTreeView({ items, heading }: { items: FileTreeItem[]; headin
                   >
                     {item.name}
                     {i > 0 ? (
-                      <span className="ml-auto font-mono uppercase tracking-[0.08em] text-gray-500 text-label-12-mono">
-                        Optional
+                      <span className="ml-auto font-mono text-gray-500 text-label-12-mono">
+                        optional
                       </span>
                     ) : null}
                   </button>
