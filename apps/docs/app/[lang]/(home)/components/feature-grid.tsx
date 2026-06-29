@@ -53,7 +53,7 @@ export function FeatureGrid(): JSX.Element {
         <h2 className="text-center font-medium! text-heading-32 tracking-tighter text-gray-1000 sm:text-heading-40">
           Everything you need for production agents
         </h2>
-        <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">
+        <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900 text-balance">
           Durability, sandboxing, human-in-the-loop, and evals are built into the framework. Focus
           on building your agent.
         </p>
