@@ -1,7 +1,13 @@
 "use client";
 
 // TODO: clean up icons, via geistcn-assets once available
-import { SiAnsible, SiDigitalocean, SiDocker, SiVercel } from "@icons-pack/react-simple-icons";
+import {
+  SiDigitalocean,
+  SiDocker,
+  SiJaeger,
+  SiPostgresql,
+  SiVercel,
+} from "@icons-pack/react-simple-icons";
 import Link from "next/link";
 import { type ComponentType, useState } from "react";
 import { IconArrowUpRight, IconOpenai } from "@/components/geistcn-icons";
@@ -43,6 +49,12 @@ const STACKS: Record<Mode, StackEntry[]> = {
       href: "https://vercel.com/workflow",
     },
     {
+      category: "Observability",
+      name: "Observability",
+      Logo: SiVercel,
+      href: "https://vercel.com/docs/observability",
+    },
+    {
       category: "Deploy",
       name: "Vercel",
       Logo: SiVercel,
@@ -52,15 +64,21 @@ const STACKS: Record<Mode, StackEntry[]> = {
   "self-hosted": [
     { category: "Models", name: "GPT-5.4 API", Logo: IconOpenai },
     { category: "Sandbox", name: "Docker", Logo: SiDocker },
-    { category: "Runtime", name: "DigitalOcean", Logo: SiDigitalocean },
-    { category: "Deploy", name: "Ansible", Logo: SiAnsible },
+    {
+      category: "Runtime",
+      name: "Postgres",
+      Logo: SiPostgresql,
+      href: "https://workflow-sdk.dev/worlds/postgres",
+    },
+    { category: "Observability", name: "Jaeger", Logo: SiJaeger },
+    { category: "Deploy", name: "DigitalOcean", Logo: SiDigitalocean },
   ],
 };
 
 const CAPTIONS: Record<Mode, string> = {
   managed: "Deploy to Vercel — sandboxes, durable workflows, and model routing handled for you.",
   "self-hosted":
-    "Runs on a single 4 GB server with Docker and Ansible — no managed-service dependencies.",
+    "Runs on a single 4 GB DigitalOcean box — Postgres-backed durability, Docker sandbox, Ansible deploy, zero managed services.",
 };
 
 export function SetupSwitcher() {
@@ -102,7 +120,7 @@ export function SetupSwitcher() {
 
       <div
         key={mode}
-        className="mt-8 grid grid-cols-2 gap-3 px-5 sm:grid-cols-4 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300 motion-safe:ease-out"
+        className="mt-8 grid grid-cols-2 gap-3 px-5 sm:grid-cols-3 lg:grid-cols-5 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300 motion-safe:ease-out"
       >
         {STACKS[mode].map((entry) => {
           const body = (
