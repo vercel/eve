@@ -116,9 +116,9 @@ const CHANNELS = [
 
 const CAPTIONS: Record<Mode, string> = {
   managed:
-    "Fully managed via Vercel — sandboxes, durable workflows, model routing, and observability handled for you.",
+    "Fully managed via Vercel. Sandboxes, durable workflows, model routing, and observability handled for you.",
   "self-hosted":
-    "Runs on a single 4 GB DigitalOcean box — Postgres-backed durability, Docker sandbox, Ansible deploy, zero managed services.",
+    "Runs on a single DigitalOcean box. Postgres-backed durability, Docker sandbox, Ansible deploy, zero managed services.",
 };
 
 function SectionLabel({ children }: { children: string }): JSX.Element {
@@ -131,7 +131,7 @@ function SectionLabel({ children }: { children: string }): JSX.Element {
 
 function BackendChip({ backend }: { backend: Backend }): JSX.Element {
   return (
-    <div className="mt-2 inline-flex w-fit items-center gap-1.5 rounded-md border px-2 py-1 text-gray-1000">
+    <div className="mt-2 inline-flex w-fit items-center gap-1.5 rounded-md border px-2 py-1 text-gray-1000 motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-200 motion-safe:ease-out">
       <backend.Logo className="shrink-0" color="default" size={13} />
       <span className="text-gray-1000 text-copy-13">{backend.label}</span>
     </div>
@@ -157,7 +157,7 @@ function PrimitiveCard({
       <div className="flex flex-col gap-1">
         <span className="font-medium text-gray-1000 text-copy-14">{title}</span>
         <span className="text-gray-900 text-copy-14">{description}</span>
-        {backend ? <BackendChip backend={backend} /> : null}
+        {backend ? <BackendChip key={backend.label} backend={backend} /> : null}
       </div>
     </>
   );
@@ -187,10 +187,10 @@ export function ArchitectureDiagram() {
   return (
     <section className="py-24 px-4">
       <div className="mx-auto max-w-5xl">
-        <h2 className="text-center font-medium! text-heading-32 tracking-tighter text-gray-1000 sm:text-heading-40">
+        <h2 className="text-center font-medium! text-heading-32 tracking-tighter text-gray-1000 sm:text-heading-40 text-balance">
           Built on open-source SDKs, yours to self-host
         </h2>
-        <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">
+        <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900 text-balance">
           Swap any backend and self-host the whole runtime, with zero managed-infrastructure
           dependencies.
         </p>
@@ -199,7 +199,7 @@ export function ArchitectureDiagram() {
         <div className="mt-12 flex items-center justify-center gap-4 text-copy-14">
           <button
             type="button"
-            onClick={() => setMode("managed")}
+            onClick={() => setMode(selfHosted ? "managed" : "self-hosted")}
             aria-pressed={!selfHosted}
             className={cn(
               "cursor-pointer transition-colors",
@@ -217,7 +217,7 @@ export function ArchitectureDiagram() {
           <span className="text-copy-14">
             <button
               type="button"
-              onClick={() => setMode("self-hosted")}
+              onClick={() => setMode(selfHosted ? "managed" : "self-hosted")}
               aria-pressed={selfHosted}
               className={cn(
                 "cursor-pointer transition-colors",
@@ -270,7 +270,7 @@ export function ArchitectureDiagram() {
           </div>
 
           {/* Channel */}
-          <div className="relative flex flex-col gap-4 rounded-xl p-5 lg:w-[200px] lg:shrink-0">
+          <div className="relative flex flex-col gap-4 rounded-xl p-5 lg:w-[240px] lg:shrink-0">
             <GradientBorder />
             <div className="flex flex-col gap-1">
               <SectionLabel>Channel</SectionLabel>
@@ -304,7 +304,7 @@ export function ArchitectureDiagram() {
           </div>
         </div>
 
-        <p className="mx-auto mt-6 max-w-2xl text-center text-gray-900 text-copy-14">
+        <p className="mx-auto mt-6 max-w-2xl text-center text-gray-900 text-copy-14 text-balance">
           {CAPTIONS[mode]}
           {selfHosted ? (
             <>
