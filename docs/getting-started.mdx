@@ -137,7 +137,7 @@ The same CLI can point at a deployment. `npx eve dev https://your-app.vercel.app
 Every eve app exposes the same stable HTTP API. Start a durable session:
 
 ```bash
-curl -X POST http://127.0.0.1:3000/eve/v1/session \
+curl -X POST http://127.0.0.1:2000/eve/v1/session \
   -H 'content-type: application/json' \
   -d '{"message":"What is the weather in Brooklyn?"}'
 ```
@@ -152,7 +152,7 @@ The response comes back with two things you'll reuse:
 Attach to the session stream:
 
 ```bash
-curl http://127.0.0.1:3000/eve/v1/session/<sessionId>/stream
+curl http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream
 ```
 
 The stream is NDJSON, served as `application/x-ndjson; charset=utf-8`. For this run you'll see a handful of lifecycle events:
@@ -174,7 +174,7 @@ The full set covers more lifecycle, human-in-the-loop, and authorization events,
 When the session is waiting for the next user message, post a follow-up with the token:
 
 ```bash
-curl -X POST http://127.0.0.1:3000/eve/v1/session/<sessionId> \
+curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId> \
   -H 'content-type: application/json' \
   -d '{"continuationToken":"<token>","message":"Now do Queens."}'
 ```

@@ -19,7 +19,7 @@ React, Vue, and Svelte apps reach for [`useEveAgent()`](../guides/frontend/overv
 ## Start a session
 
 ```bash
-curl -X POST http://127.0.0.1:3000/eve/v1/session \
+curl -X POST http://127.0.0.1:2000/eve/v1/session \
   -H 'content-type: application/json' \
   -d '{"message":"Summarize the latest forecast."}'
 ```
@@ -29,7 +29,7 @@ eve responds right away. The JSON body carries a `sessionId` and a `continuation
 ## Stream a session
 
 ```bash
-curl http://127.0.0.1:3000/eve/v1/session/<sessionId>/stream
+curl http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream
 ```
 
 The stream is newline-delimited JSON (NDJSON), one event per line:
@@ -77,7 +77,7 @@ A delegated subagent publishes progress on its own child-session stream. The par
 Once the session is waiting (you'll see `session.waiting`), POST your follow-up to the session endpoint with the stored continuation token:
 
 ```bash
-curl -X POST http://127.0.0.1:3000/eve/v1/session/<sessionId> \
+curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId> \
   -H 'content-type: application/json' \
   -d '{"continuationToken":"<token>","message":"Now send the short version."}'
 ```
@@ -93,7 +93,7 @@ For deterministic ordering, send one follow-up at a time and wait for the next `
 The stream is durable. Every event is recorded before a step completes, so the whole stream is replayable. Pass `startIndex` to reconnect by event count and pick up where you dropped off, or rewind to the start:
 
 ```bash
-curl "http://127.0.0.1:3000/eve/v1/session/<sessionId>/stream?startIndex=<count>"
+curl "http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream?startIndex=<count>"
 ```
 
 ## Use the client from TypeScript
@@ -107,7 +107,7 @@ Start with the [TypeScript SDK](../guides/client/overview) guide. It covers basi
 `GET /eve/v1/info` returns a JSON inspection snapshot for the running agent: model, instructions, authored and framework tools, skills, channels, schedules, subagents, sandbox, connections, hooks, workflow, and workspace metadata. Local development accepts loopback requests; deployed Vercel targets require the route's OIDC auth.
 
 ```bash
-curl http://127.0.0.1:3000/eve/v1/info
+curl http://127.0.0.1:2000/eve/v1/info
 ```
 
 The route uses the same default auth chain as the eve channel (`[vercelOidc(), localDev()]`). A local Vercel OIDC bearer takes precedence; other local requests fall back to development access. A deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection).

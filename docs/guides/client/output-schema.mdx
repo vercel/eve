@@ -26,7 +26,7 @@ const outputSchema = {
   required: ["title", "count"],
 } as const;
 
-const client = new Client({ host: "http://127.0.0.1:3000" });
+const client = new Client({ host: "http://127.0.0.1:2000" });
 const session = client.session();
 
 const response = await session.send<Summary>({
