@@ -65,7 +65,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
                 <span className="font-medium text-gray-1000 text-sm">agent/</span>
                 <div className="ml-auto flex items-center">
                   <span className="whitespace-nowrap text-gray-900 text-label-13">
-                    {visited.size} {visited.size === 1 ? "file" : "files"} selected
+                    {visited.size} {visited.size === 1 ? "file" : "files"}
                   </span>
                   <button
                     type="button"
@@ -135,7 +135,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
               {/* Re-keyed per file so the code subtly flies in on selection. */}
               <div
                 key={selected.fileName}
-                className="grow pb-6 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300 motion-safe:ease-out [&>div]:mb-0"
+                className="grow pb-6 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300 motion-safe:ease-out [&>div]:mb-0 [&_button]:opacity-0 [&_button]:transition-opacity [&:hover_button]:opacity-100 [&:focus-within_button]:opacity-100"
               >
                 {selected.code}
               </div>

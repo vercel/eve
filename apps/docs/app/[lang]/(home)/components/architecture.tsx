@@ -116,9 +116,9 @@ const CHANNELS = [
 
 const CAPTIONS: Record<Mode, string> = {
   managed:
-    "Fully managed via Vercel — sandboxes, durable workflows, model routing, and observability handled for you.",
+    "Fully managed via Vercel. Sandboxes, durable workflows, model routing, and observability handled for you.",
   "self-hosted":
-    "Runs on a single DigitalOcean box — Postgres-backed durability, Docker sandbox, Ansible deploy, zero managed services.",
+    "Runs on a single DigitalOcean box. Postgres-backed durability, Docker sandbox, Ansible deploy, zero managed services.",
 };
 
 function SectionLabel({ children }: { children: string }): JSX.Element {
@@ -304,7 +304,7 @@ export function ArchitectureDiagram() {
           </div>
         </div>
 
-        <p className="mx-auto mt-6 max-w-2xl text-center text-gray-900 text-copy-14">
+        <p className="mx-auto mt-6 max-w-2xl text-center text-gray-900 text-copy-14 text-balance">
           {CAPTIONS[mode]}
           {selfHosted ? (
             <>

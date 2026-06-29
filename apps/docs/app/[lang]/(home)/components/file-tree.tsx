@@ -227,7 +227,7 @@ export async function FileTree() {
           Your{" "}
           <span className="relative -top-[0.08em] ml-1 inline-flex items-center gap-[0.16em] rounded-lg bg-gray-200 px-3 py-[0.04em] pr-4 align-baseline font-[450]!">
             <IconFolderOpen aria-hidden className="size-[0.58em] text-gray-900" />
-            agent
+            agent/
           </span>{" "}
           is a directory
         </h2>
