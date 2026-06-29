@@ -19,6 +19,7 @@ export {
   type SlackChannelState,
   type SlackContext,
   type SlackEventContext,
+  type SlackFollowUpsOptions,
   type SlackHandle,
   type SlackInboundResult,
   type SlackInboundResultOrPromise,

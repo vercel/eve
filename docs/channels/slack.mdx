@@ -70,6 +70,55 @@ export default slackChannel({
 
 `threadContext` performs one `conversations.replies` request for each triggering thread reply and requires the matching Slack history scope. Omit it when the agent should see only direct mentions. `loadThreadContextMessages` remains available when you need custom filtering or non-model processing of the raw thread messages.
 
+### Mention-free follow-ups
+
+By default, agents only respond to messages that `@mention` them. Set `followUps: true` to continue responding to new messages in threads the agent is already participating in, without requiring additional mentions.
+
+```ts
+import { slackChannel } from "eve/channels/slack";
+import { connectSlackCredentials } from "@vercel/connect/eve";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  followUps: true,
+});
+```
+
+Follow-ups are only enabled for threads the agent is already part of, either because it was mentioned or has previously replied. The agent never joins unrelated threads automatically.
+
+To enable follow-ups, configure your Slack app to receive channel messages in addition to mentions:
+
+- Subscribe to the `message.channels` event (`message.groups` for private channels).
+- Add the `channels:history` scope (`groups:history` for private channels).
+
+#### Filtering follow-ups
+
+Set `followUps` to an object with a `decide` callback to determine whether the agent should respond to each follow-up message.
+
+The callback runs after Eve's built-in checks and receives the incoming message. Return `true` to reply or `false` to skip it. Messages are always added to the conversation context, regardless of the return value.
+
+```ts
+import { generateText } from "ai";
+import { slackChannel } from "eve/channels/slack";
+import { connectSlackCredentials } from "@vercel/connect/eve";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  followUps: {
+    async decide(message) {
+      const { text } = await generateText({
+        model: "openai/gpt-5.5",
+        prompt: `In a Slack thread an assistant is part of, decide if this message is addressed to the assistant (vs. talk between other people). Answer "yes" or "no".\n\nMessage: ${message.text}`,
+      });
+
+      return text.trim().toLowerCase().startsWith("y");
+    },
+  },
+});
+```
+
+`decide` is optional. If provided, Eve calls it for every follow-up message after its built-in checks. Implement it using a model, keyword matching, custom routing logic, or any other approach appropriate for your application.
+
 ### Delivery
 
 The default handlers reply in-thread and show progress. Typing indicators post automatically: `Thinking…` on inbound, `Working…` on `turn.started`, a truncated reasoning snippet on `reasoning.appended`, and tool status on `actions.requested`. Reasoning snippets build progressively: extensions of at least four characters appear immediately, while smaller streamed deltas use the five-second refresh interval to avoid one Slack request per token. Override `events["reasoning.appended"]` if you prefer generic wording. Override `onAppMention` or the `events` handlers to customize.

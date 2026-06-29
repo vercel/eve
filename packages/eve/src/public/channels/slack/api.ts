@@ -92,6 +92,38 @@ export async function callSlackApi(input: {
   return response.json() as Promise<SlackApiResponse>;
 }
 
+const botUserIdCache = new Map<string, Promise<string | undefined>>();
+
+/**
+ * Resolves the bot's own Slack user id via `auth.test`, cached per resolved bot
+ * token for the lifetime of the process. Used by the `followUps` dispatch path
+ * to (a) skip follow-ups that @mention the bot — those also arrive as
+ * `app_mention` — and (b) recognise the bot's presence in a thread. Returns
+ * `undefined` when the call fails so callers can degrade gracefully.
+ */
+export async function resolveBotUserId(
+  botToken: SlackBotToken | undefined,
+): Promise<string | undefined> {
+  let token: string;
+  try {
+    token = await resolveSlackBotToken(botToken);
+  } catch {
+    return undefined;
+  }
+  let cached = botUserIdCache.get(token);
+  if (!cached) {
+    cached = callSlackApi({ botToken: token, operation: "auth.test", body: {} })
+      .then((r) => (r.ok && typeof r.user_id === "string" ? r.user_id : undefined))
+      .catch(() => undefined)
+      .then((userId) => {
+        if (userId === undefined) botUserIdCache.delete(token);
+        return userId;
+      });
+    botUserIdCache.set(token, cached);
+  }
+  return cached;
+}
+
 /**
  * Builds the `request(op, body)` Slack API caller installed on every
  * {@link SlackHandle}. Resolves the bot token at call time so rotated
