@@ -74,12 +74,19 @@ export default {
       input: "@chat-adapter/slack/blocks",
       outputPath: "blocks",
     },
+    {
+      input: "@chat-adapter/slack/webhook",
+      outputPath: "webhook",
+    },
   ],
   plugins: [createOptionalNativeStubPlugin(["bufferutil", "utf-8-validate"])],
   copyDeclarations: createDeclarationCopier({
+    discoverExtraFiles: (distEntries) =>
+      distEntries.filter((entry) => /^types-.*\.d\.ts$/u.test(entry)),
     files: [
       { source: "index.d.ts", output: "index.d.ts" },
       { source: "blocks.d.ts", output: "blocks.d.ts" },
+      { source: "webhook.d.ts", output: "webhook.d.ts" },
     ],
     rewrites: {
       chat: { kind: "vendored", compiledPath: "chat" },
