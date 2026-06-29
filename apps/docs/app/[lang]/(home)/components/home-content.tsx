@@ -4,6 +4,7 @@ import { ArchitectureDiagram } from "./architecture";
 import { CTA } from "./cta";
 import { FeatureGrid } from "./feature-grid";
 import { FileTree } from "./file-tree";
+import { EveLogoShader } from "./eve-logo-shader";
 import { InstallSwitcher } from "./install-switcher";
 import { NextjsInterop } from "./nextjs-interop";
 
@@ -30,16 +31,19 @@ export const homeMetadata: Metadata = {
 
 export const HomeContent = () => (
   <div className="mx-auto w-full max-w-[1080px] pb-32">
-    <section className="relative flex flex-col items-center gap-y-5 px-4 pb-32 pt-32 text-center sm:px-12">
-      <h1 className="max-w-5xl text-center text-heading-40 md:text-heading-48 lg:text-heading-64">
-        The Framework
-        <br />
-        for Building Agents
-      </h1>
-      <p className="w-full text-center text-copy-16 text-gray-900 md:max-w-2xl md:text-copy-18 lg:text-copy-20">
+    <section className="relative isolate flex flex-col items-center gap-y-5 px-4 pb-32 pt-[30svh] text-center sm:px-12">
+      <div className="relative z-10 max-w-5xl text-center text-heading-40 md:text-heading-48 lg:text-heading-64">
+        <EveLogoShader />
+        <h1 className="relative">
+          The Framework
+          <br />
+          for Building Agents
+        </h1>
+      </div>
+      <p className="relative z-10 w-full text-center text-copy-16 text-gray-900 md:max-w-2xl md:text-copy-18 lg:text-copy-20">
         {tagline} {description}
       </p>
-      <div className="mt-2 flex w-full max-w-2xl flex-col items-center gap-4">
+      <div className="relative z-10 mt-2 flex w-full max-w-2xl flex-col items-center gap-4">
         <InstallSwitcher className="items-center" />
       </div>
     </section>
