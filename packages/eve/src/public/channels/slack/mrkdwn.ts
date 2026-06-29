@@ -52,12 +52,24 @@ function markdownToSlack(input: string): string {
   let output = markdownBoldToSlackMrkdwn(input);
   output = output.replace(/__([^_\n]+)__/gu, "*$1*");
   output = output.replace(/~~([^~\n]+)~~/gu, "~$1~");
-  output = output.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/gu, (_, label: string, url: string) =>
-    formatSlackLink(url, label),
+  output = output.replace(
+    /\[([^\]\n]+)\]\(([^)\s]+)\)/gu,
+    (match: string, label: string, url: string) => formatMarkdownLink(match, label, url),
   );
   return output;
 }
 
 function slackToMarkdown(input: string): string {
   return slackMrkdwnToMarkdown(input.replace(/<!(channel|here|everyone)>/gu, "@$1"));
+}
+
+function formatMarkdownLink(match: string, label: string, url: string): string {
+  try {
+    return formatSlackLink(url, label);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      return match;
+    }
+    throw error;
+  }
 }
