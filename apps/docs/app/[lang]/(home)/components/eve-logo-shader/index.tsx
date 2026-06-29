@@ -165,7 +165,7 @@ export function EveLogoShader() {
     >
       <canvas ref={canvasRef} className="block size-full" />
       <div
-        className={`pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent ${theme === "light" ? "to-white" : "to-black"}`}
+        className={`pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent ${theme === "light" ? "to-background-200" : "to-black"}`}
       />
     </div>
   );
