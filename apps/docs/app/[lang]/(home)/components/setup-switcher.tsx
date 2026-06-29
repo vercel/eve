@@ -50,7 +50,7 @@ const STACKS: Record<Mode, StackEntry[]> = {
     },
   ],
   "self-hosted": [
-    { category: "Models", name: "GPT-5.4", Logo: IconOpenai },
+    { category: "Models", name: "GPT-5.4 API", Logo: IconOpenai },
     { category: "Sandbox", name: "Docker", Logo: SiDocker },
     { category: "Runtime", name: "DigitalOcean", Logo: SiDigitalocean },
     { category: "Deploy", name: "Ansible", Logo: SiAnsible },
