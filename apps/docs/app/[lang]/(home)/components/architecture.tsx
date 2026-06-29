@@ -131,7 +131,7 @@ function SectionLabel({ children }: { children: string }): JSX.Element {
 
 function BackendChip({ backend }: { backend: Backend }): JSX.Element {
   return (
-    <div className="mt-2 inline-flex w-fit items-center gap-1.5 rounded-md border px-2 py-1 text-gray-1000">
+    <div className="mt-2 inline-flex w-fit items-center gap-1.5 rounded-md border px-2 py-1 text-gray-1000 motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-200 motion-safe:ease-out">
       <backend.Logo className="shrink-0" color="default" size={13} />
       <span className="text-gray-1000 text-copy-13">{backend.label}</span>
     </div>
@@ -157,7 +157,7 @@ function PrimitiveCard({
       <div className="flex flex-col gap-1">
         <span className="font-medium text-gray-1000 text-copy-14">{title}</span>
         <span className="text-gray-900 text-copy-14">{description}</span>
-        {backend ? <BackendChip backend={backend} /> : null}
+        {backend ? <BackendChip key={backend.label} backend={backend} /> : null}
       </div>
     </>
   );
