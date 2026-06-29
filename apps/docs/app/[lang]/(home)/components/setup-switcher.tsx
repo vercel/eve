@@ -1,16 +1,10 @@
 "use client";
 
 // TODO: clean up icons, via geistcn-assets once available
-import {
-  SiAnsible,
-  SiDigitalocean,
-  SiDocker,
-  SiOllama,
-  SiVercel,
-} from "@icons-pack/react-simple-icons";
+import { SiAnsible, SiDigitalocean, SiDocker, SiVercel } from "@icons-pack/react-simple-icons";
 import Link from "next/link";
 import { type ComponentType, useState } from "react";
-import { IconArrowUpRight } from "@/components/geistcn-icons";
+import { IconArrowUpRight, IconOpenai } from "@/components/geistcn-icons";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
@@ -56,7 +50,7 @@ const STACKS: Record<Mode, StackEntry[]> = {
     },
   ],
   "self-hosted": [
-    { category: "Models", name: "Ollama", Logo: SiOllama },
+    { category: "Models", name: "GPT-5.4", Logo: IconOpenai },
     { category: "Sandbox", name: "Docker", Logo: SiDocker },
     { category: "Runtime", name: "DigitalOcean", Logo: SiDigitalocean },
     { category: "Deploy", name: "Ansible", Logo: SiAnsible },

@@ -12,6 +12,7 @@ export { IconFolderOpen } from "./icon-folder-open";
 export { IconLinked } from "./icon-linked";
 export { IconLogs } from "./icon-logs";
 export { IconMessage } from "./icon-message";
+export { IconOpenai } from "./icon-openai";
 export { IconPlusCircle } from "./icon-plus-circle";
 export { IconRefreshCounterClockwise } from "./icon-refresh-counter-clockwise";
 export { IconRobot } from "./icon-robot";
