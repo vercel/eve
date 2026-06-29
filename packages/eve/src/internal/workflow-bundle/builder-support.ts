@@ -13,10 +13,20 @@ import {
   getImportPath,
   type WorkflowManifest,
 } from "#internal/workflow-bundle/workflow-builders.js";
-import { EVE_WORKFLOW_QUEUE_NAMESPACE } from "#internal/workflow/queue-namespace.js";
 import { WORKFLOW_STEP_EXTERNAL_PACKAGES } from "#internal/workflow-bundle/vercel-workflow-output.js";
 
 export const WORKFLOW_VIRTUAL_ENTRY_ID = "\0eve-workflow-entry";
+
+export interface WorkflowBundleBuilderOptions {
+  agentName: string;
+  appRoot: string;
+  compiledArtifactsBootstrapPath: string;
+  outDir: string;
+  rootDir: string;
+  watch: boolean;
+  /** Test-harness-only: also scans `src/internal/testing/`. */
+  includeTestFixtures?: boolean;
+}
 const PSEUDO_PACKAGES = new Set([
   "server-only",
   "client-only",
@@ -384,6 +394,7 @@ export async function bundleFinalWorkflowOutput(input: {
   code: string;
   format: "cjs" | "esm";
   outfile: string;
+  queueNamespace: string;
   workingDir: string;
 }): Promise<void> {
   const workflowBundleCode = input.code.endsWith("\n") ? input.code : `${input.code}\n`;
@@ -394,7 +405,7 @@ import { workflowEntrypoint } from ${JSON.stringify(workflowRuntimePath)};
 
 const workflowCode = \`${workflowBundleCode.replace(/[\\`$]/g, "\\$&")}\`;
 
-export const POST = workflowEntrypoint(workflowCode, { namespace: ${JSON.stringify(EVE_WORKFLOW_QUEUE_NAMESPACE)} });`;
+export const POST = workflowEntrypoint(workflowCode, { namespace: ${JSON.stringify(input.queueNamespace)} });`;
 
   if (!input.bundleFinalOutput) {
     await writeWorkflowBundleAtomically(input.outfile, workflowFunctionCode);

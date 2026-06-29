@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentInfoResult, AgentInfoToolEntry } from "#client/index.js";
 
 import { AGENT_HEADER_TIPS, buildAgentHeader, pickAgentHeaderTip } from "./agent-header.js";
+import { stripAnsi } from "./terminal-text.js";
 import { createTheme } from "./theme.js";
 
 const FRAMEWORK_TOOL: AgentInfoToolEntry = {
@@ -131,6 +132,25 @@ describe("buildAgentHeader", () => {
 
     const remote = buildAgentHeader({ name: "weather-agent", info: INFO, theme, width: 120 });
     expect(remote.join("\n")).not.toContain("/channels");
+  });
+
+  it("renders the /connect tip with a blue command", () => {
+    const colorTheme = createTheme({ color: true, unicode: false });
+    const tip = AGENT_HEADER_TIPS.find((candidate) => candidate.includes("/connect"));
+
+    expect(tip).toBe("Tip: /connect to seamlessly add MCP Connections to your agent");
+    if (tip === undefined) return;
+
+    const line = buildAgentHeader({
+      name: "weather-agent",
+      info: INFO,
+      theme: colorTheme,
+      width: 120,
+      tip,
+    }).at(-1);
+
+    expect(stripAnsi(line ?? "")).toBe(` ${tip}`);
+    expect(line).toContain(colorTheme.colors.blue("/connect"));
   });
 
   it("keeps the discovery-diagnostics line when the compiler reported problems", () => {

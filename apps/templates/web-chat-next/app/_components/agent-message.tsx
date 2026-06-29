@@ -1,6 +1,12 @@
 "use client";
 
-import type { EveDynamicToolPart, EveMessage, EveMessagePart } from "eve/react";
+import type {
+  EveAuthorizationPart,
+  EveDynamicToolPart,
+  EveMessage,
+  EveMessagePart,
+} from "eve/react";
+import { CheckCircleIcon, ExternalLinkIcon, KeyRoundIcon, XCircleIcon } from "lucide-react";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
 import {
@@ -11,6 +17,7 @@ import {
   ToolOutput,
 } from "@/components/ai-elements/tool";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 export type AgentInputResponse = {
   readonly optionId?: string;
@@ -81,6 +88,8 @@ function AgentMessagePart({
           <ReasoningContent>{part.text}</ReasoningContent>
         </Reasoning>
       );
+    case "authorization":
+      return <AuthorizationPrompt part={part} />;
     case "dynamic-tool":
       return (
         <Tool
@@ -103,6 +112,99 @@ function AgentMessagePart({
           </ToolContent>
         </Tool>
       );
+  }
+}
+
+function AuthorizationPrompt({ part }: { readonly part: EveAuthorizationPart }) {
+  const isAuthorized = part.state === "completed" && part.outcome === "authorized";
+  const isCompleted = part.state === "completed";
+  const Icon = isAuthorized ? CheckCircleIcon : isCompleted ? XCircleIcon : KeyRoundIcon;
+  const instructions = part.authorization?.instructions;
+  const shouldShowInstructions = instructions !== undefined && instructions !== part.description;
+
+  return (
+    <div
+      className={cn(
+        "space-y-3 rounded-md border p-3",
+        isAuthorized
+          ? "border-emerald-500/30 bg-emerald-500/5"
+          : isCompleted
+            ? "border-destructive/30 bg-destructive/5"
+            : "border-blue-500/30 bg-blue-500/5",
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <span
+          className={cn(
+            "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full",
+            isAuthorized
+              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+              : isCompleted
+                ? "bg-destructive/10 text-destructive"
+                : "bg-blue-500/10 text-blue-700 dark:text-blue-300",
+          )}
+        >
+          <Icon className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1 space-y-2">
+          <p className="font-medium text-sm">{authorizationTitle(part)}</p>
+          <p className="text-muted-foreground text-sm">{authorizationDescription(part)}</p>
+          {shouldShowInstructions ? (
+            <p className="text-muted-foreground text-sm">{instructions}</p>
+          ) : null}
+          {part.state === "required" && part.authorization?.userCode ? (
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-muted-foreground">Code</span>
+              <code className="rounded-md bg-background px-2 py-1 font-mono">
+                {part.authorization.userCode}
+              </code>
+            </div>
+          ) : null}
+          {part.state === "required" && part.authorization?.url ? (
+            <Button asChild size="sm">
+              <a href={part.authorization.url} rel="noreferrer" target="_blank">
+                <ExternalLinkIcon className="size-4" />
+                Sign in with {part.displayName}
+              </a>
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function authorizationTitle(part: EveAuthorizationPart): string {
+  if (part.state === "required") {
+    return `Connect ${part.displayName}`;
+  }
+  if (part.outcome === "authorized") {
+    return `${part.displayName} connected`;
+  }
+  return `${part.displayName} authorization ${formatAuthorizationOutcome(part.outcome)}`;
+}
+
+function authorizationDescription(part: EveAuthorizationPart): string {
+  if (part.state === "required") {
+    return part.description;
+  }
+  if (part.outcome === "authorized") {
+    return `${part.displayName} connected.`;
+  }
+  const tail = part.reason !== undefined ? ` (${part.reason})` : "";
+  return `${part.displayName} authorization ${formatAuthorizationOutcome(part.outcome)}${tail}.`;
+}
+
+function formatAuthorizationOutcome(outcome: NonNullable<EveAuthorizationPart["outcome"]>): string {
+  switch (outcome) {
+    case "authorized":
+      return "authorized";
+    case "declined":
+      return "declined";
+    case "failed":
+      return "failed";
+    case "timed-out":
+      return "timed out";
   }
 }
 
@@ -161,6 +263,8 @@ function InputRequestActions({
 
 function partKey(part: EveMessagePart, index: number): string {
   switch (part.type) {
+    case "authorization":
+      return `authorization:${part.turnId}:${part.stepIndex}:${part.name}`;
     case "dynamic-tool":
       return part.toolCallId;
     default:

@@ -1,7 +1,12 @@
-import { readFile, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 
+import {
+  readVercelProjectLink,
+  type VercelProjectLink,
+  VercelProjectLinkSchema,
+} from "#internal/vercel/project-link.js";
 import { captureVercel } from "./primitives/run-vercel.js";
 
 /** Link and production-deployment status for a Vercel project directory. */
@@ -15,18 +20,13 @@ export interface DeploymentInfo {
   productionUrl?: string;
 }
 
-const VercelProjectReferenceSchema = z.object({
-  projectId: z.string().min(1),
-  orgId: z.string().min(1),
-  projectName: z.string().min(1).optional(),
-});
 const VercelProjectEnvironmentSchema = z.object({
-  VERCEL_ORG_ID: VercelProjectReferenceSchema.shape.orgId,
-  VERCEL_PROJECT_ID: VercelProjectReferenceSchema.shape.projectId,
+  VERCEL_ORG_ID: VercelProjectLinkSchema.shape.orgId,
+  VERCEL_PROJECT_ID: VercelProjectLinkSchema.shape.projectId,
 });
 
 /** Validated Vercel owner and project identifiers. */
-export type VercelProjectReference = z.infer<typeof VercelProjectReferenceSchema>;
+export type VercelProjectReference = VercelProjectLink;
 
 /** Parses the complete Vercel owner and project environment pair. */
 export function projectReferenceFromEnvironment(
@@ -59,13 +59,7 @@ export async function readProjectLink(
   projectPath: string,
 ): Promise<VercelProjectReference | undefined> {
   await assertNoLegacyProjectLinkDirectory(projectPath);
-  try {
-    const raw = await readFile(join(projectPath, ".vercel", "project.json"), "utf8");
-    const parsed = VercelProjectReferenceSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : undefined;
-  } catch {
-    return undefined;
-  }
+  return await readVercelProjectLink(projectPath);
 }
 
 interface VercelApiProject {

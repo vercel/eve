@@ -93,6 +93,7 @@ describe("WorkflowBundleBuilder", () => {
     const appRoot = "/tmp/eve-app";
     const rootDir = resolvePackageRoot();
     const builder = new InspectableWorkflowBundleBuilder({
+      agentName: "test-agent",
       appRoot,
       compiledArtifactsBootstrapPath: "/tmp/compiled-artifacts-bootstrap.js",
       outDir: "/tmp/eve-workflows",
@@ -134,6 +135,7 @@ describe("WorkflowBundleBuilder", () => {
 
       const builder = new StepEntryOnlyWorkflowBundleBuilder(
         {
+          agentName: "test-agent",
           appRoot: tempRoot,
           compiledArtifactsBootstrapPath,
           outDir,
@@ -201,6 +203,7 @@ describe("WorkflowBundleBuilder", () => {
 
       const builder = new StepEntryOnlyWorkflowBundleBuilder(
         {
+          agentName: "test-agent",
           appRoot: tempRoot,
           compiledArtifactsBootstrapPath,
           outDir,
@@ -251,7 +254,7 @@ describe("WorkflowBundleBuilder", () => {
             "",
             `const workflowCode = \`${workflowBundleCode.replace(/[\\`$]/g, "\\$&")}\`;`,
             "",
-            'export const POST = workflowEntrypoint(workflowCode, { namespace: "eve" });',
+            'export const POST = workflowEntrypoint(workflowCode, { namespace: "eve746573742d6167656e74" });',
             "",
           ].join("\n"),
         );
@@ -283,6 +286,7 @@ describe("WorkflowBundleBuilder", () => {
 
       const builder = new TemplateLiteralWorkflowBundleBuilder(
         {
+          agentName: "test-agent",
           appRoot: tempRoot,
           compiledArtifactsBootstrapPath,
           outDir,
@@ -405,6 +409,7 @@ describe("WorkflowBundleBuilder", () => {
       ]);
 
       const builder = new BuildTrackingWorkflowBundleBuilder({
+        agentName: "test-agent",
         appRoot: "/tmp/eve-app",
         compiledArtifactsBootstrapPath: "/tmp/compiled-artifacts-bootstrap.js",
         outDir,
@@ -473,7 +478,7 @@ describe("WorkflowBundleBuilder", () => {
           ),
           "utf8",
         ),
-      ).resolves.toContain('"__eve_wkf_workflow_*"');
+      ).resolves.toContain('"__eve746573742d6167656e74_wkf_workflow_*"');
       await expect(
         readFile(
           join(
@@ -570,6 +575,7 @@ describe("WorkflowBundleBuilder", () => {
 
       const builder = new FixtureWorkflowBundleBuilder(
         {
+          agentName: "test-agent",
           appRoot: tempRoot,
           compiledArtifactsBootstrapPath,
           outDir,
@@ -625,6 +631,7 @@ describe("WorkflowBundleBuilder", () => {
 
       const builder = new FixtureWorkflowBundleBuilder(
         {
+          agentName: "test-agent",
           appRoot: tempRoot,
           compiledArtifactsBootstrapPath,
           outDir,
@@ -692,6 +699,7 @@ describe("WorkflowBundleBuilder", () => {
 
       const builder = new FixtureWorkflowBundleBuilder(
         {
+          agentName: "test-agent",
           appRoot: tempRoot,
           compiledArtifactsBootstrapPath,
           outDir,

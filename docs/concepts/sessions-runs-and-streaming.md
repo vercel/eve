@@ -84,6 +84,8 @@ curl -X POST http://127.0.0.1:3000/eve/v1/session/<sessionId> \
 
 The follow-up reuses the same durable session: same history, same state.
 
+If the session is waiting on a human-in-the-loop approval, a matching text reply such as `approve` or `deny` answers the approval. Other follow-up text is held until the approval is answered, so an unrelated message does not implicitly deny the pending tool call.
+
 For deterministic ordering, send one follow-up at a time and wait for the next `session.waiting` event before sending another message to the same session. See [message delivery and queueing](./execution-model-and-durability#message-delivery-and-queueing) for the current runtime contract.
 
 ## Reconnect and rewind
@@ -108,7 +110,7 @@ Start with the [TypeScript SDK](../guides/client/overview) guide. It covers basi
 curl http://127.0.0.1:3000/eve/v1/info
 ```
 
-The route uses the same default auth chain as the eve channel (`[localDev(), vercelOidc()]`). Locally it answers anonymously; a deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection).
+The route uses the same default auth chain as the eve channel (`[vercelOidc(), localDev()]`). A local Vercel OIDC bearer takes precedence; other local requests fall back to development access. A deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection).
 
 ## Dispatch order
 

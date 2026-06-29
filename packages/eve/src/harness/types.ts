@@ -192,7 +192,7 @@ export interface ToolLoopHarnessConfig {
    * Exposes the `Workflow` orchestration tool — an isolated JavaScript sandbox
    * whose only callable operations are this agent's subagents and remote
    * agents. Resolved by the runtime from the agent's `workflowEnabled` flag
-   * (set when `agent/tools/workflow.ts` re-exports the `Workflow` marker).
+   * in the compiled manifest.
    * Defaults to `false`.
    */
   readonly workflow?: boolean;

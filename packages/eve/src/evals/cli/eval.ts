@@ -3,7 +3,7 @@ import { basename, join } from "node:path";
 
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
-import { type DevelopmentServerHandle, startDevelopmentServer } from "#internal/nitro/host.js";
+import { createDevelopmentServer, type DevelopmentServer } from "#internal/nitro/host.js";
 import { createEvalClient } from "#evals/cli/eval-client.js";
 import { discoverAndImportEvals, discoverEvalConfig } from "#evals/runner/discover.js";
 import { runEvals } from "#evals/runner/run-evals.js";
@@ -90,7 +90,7 @@ export async function runEvalCommand(
   }
 
   // Resolve target
-  let server: DevelopmentServerHandle | undefined;
+  let devServer: DevelopmentServer | undefined;
   let target: EveEvalTargetHandle;
   let client: Awaited<ReturnType<typeof createEvalClient>>;
 
@@ -107,13 +107,14 @@ export async function runEvalCommand(
         url: options.url,
       });
     } else {
-      server = await startDevelopmentServer(appRoot, { host: "127.0.0.1", port: 0 });
-      client = await createEvalClient({ kind: "local", url: server.url });
+      devServer = createDevelopmentServer(appRoot, { host: "127.0.0.1", port: 0 });
+      const started = await devServer.start();
+      client = await createEvalClient({ kind: "local", url: started.url });
       target = await resolveEvalTargetHandle({
         client,
         expectedAgentName: await readExpectedAgentName(appRoot),
         kind: "local",
-        url: server.url,
+        url: started.url,
       });
     }
 
@@ -151,8 +152,8 @@ export async function runEvalCommand(
       process.exitCode = 1;
     }
   } finally {
-    if (server) {
-      await server.close();
+    if (devServer) {
+      await devServer.close();
     }
   }
 

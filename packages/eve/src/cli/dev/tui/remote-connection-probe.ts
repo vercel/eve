@@ -7,6 +7,7 @@ import {
 import { toErrorMessage } from "#shared/errors.js";
 import { isObject } from "#shared/guards.js";
 
+import { probeAgentInfo } from "./agent-info-probe.js";
 import type { RemoteConnectionState } from "./remote-connection-types.js";
 
 export type RemoteProbeResult = Extract<
@@ -88,20 +89,20 @@ export async function probeRemoteInfo(input: {
   readonly client: Client;
   readonly phase: RemoteProbePhase;
 }): Promise<RemoteProbeResult> {
-  try {
-    return { state: "ready", info: await input.client.info() };
-  } catch (error) {
-    // Inspection is best-effort: an authorized response we cannot use must not
-    // block the connection, since the conversation transport does not depend on
-    // `/eve/v1/info`.
-    if (
-      error instanceof AgentInfoResponseError ||
-      (error instanceof ClientError && error.status === 404)
-    ) {
-      // The info route can be missing or use an older payload shape. Only call
-      // the target ready once the public health route confirms a live Eve server.
-      if (await probeDeploymentHealth(input.client)) return { state: "ready" };
-    }
-    return classifyRemoteError(error, input.phase);
+  const probe = await probeAgentInfo({ client: input.client });
+  if (probe.kind === "ready") return { state: "ready", info: probe.info };
+
+  const { error } = probe;
+  // Inspection is best-effort: an authorized response we cannot use must not
+  // block the connection, since the conversation transport does not depend on
+  // `/eve/v1/info`.
+  if (
+    error instanceof AgentInfoResponseError ||
+    (error instanceof ClientError && error.status === 404)
+  ) {
+    // The info route can be missing or use an older payload shape. Only call
+    // the target ready once the public health route confirms a live Eve server.
+    if (await probeDeploymentHealth(input.client)) return { state: "ready" };
   }
+  return classifyRemoteError(error, input.phase);
 }

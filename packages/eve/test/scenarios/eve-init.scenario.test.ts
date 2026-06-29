@@ -189,7 +189,7 @@ describe("eve init smoke", () => {
         cwd: canonicalProjectDir,
       },
       {
-        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev"],
+        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev", "--input", "/model"],
         cwd: canonicalProjectDir,
       },
     ]);
@@ -232,7 +232,7 @@ describe("eve init smoke", () => {
       "--no-frozen-lockfile",
       "--config.minimum-release-age=0",
     ]);
-    expect(devCall?.args.slice(-3)).toEqual(["exec", "eve", "dev"]);
+    expect(devCall?.args.slice(-5)).toEqual(["exec", "eve", "dev", "--input", "/model"]);
   });
 
   it("adds Web Chat through npm without writing pnpm configuration", async () => {
@@ -257,7 +257,7 @@ describe("eve init smoke", () => {
         cwd: canonicalProjectDir,
       },
       {
-        args: ["exec", "--", "eve", "dev"],
+        args: ["exec", "--", "eve", "dev", "--input", "/model"],
         cwd: canonicalProjectDir,
       },
     ]);
@@ -358,7 +358,7 @@ describe("eve init smoke", () => {
         cwd: canonicalProjectDir,
       },
       {
-        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev"],
+        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev", "--input", "/model"],
         cwd: canonicalProjectDir,
       },
     ]);

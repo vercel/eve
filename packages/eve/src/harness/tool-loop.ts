@@ -10,7 +10,6 @@ import {
   type ModelMessage,
   type SystemModelMessage,
   type TelemetryOptions,
-  type ToolModelMessage,
   ToolLoopAgent,
   type ToolSet,
   type TypedToolCall,
@@ -99,6 +98,7 @@ import {
 } from "#harness/input-requests.js";
 import { getInstrumentationConfig } from "#harness/instrumentation-config.js";
 import { resolveAssistantStepText } from "#harness/messages.js";
+import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import {
   type AuthorizationSignal,
   isAuthorizationSignal,
@@ -427,6 +427,20 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       stepInput: stepInput.input,
     });
     if (pending.outcome === "unresolved") {
+      if (emit && pending.deferredMessage === true && hasStepInput(input)) {
+        emissionState = await emitTurnPreamble(
+          emit,
+          input ?? {},
+          emissionState,
+          config.runtimeIdentity,
+        );
+        emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
+        return {
+          next: null,
+          session: setHarnessEmissionState(pending.session, emissionState),
+        };
+      }
+
       return { next: null, session: pending.session };
     }
 
@@ -476,7 +490,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       }
     }
 
-    if (stepInput.input?.message !== undefined && !pending.deferredMessage) {
+    if (
+      stepInput.input?.message !== undefined &&
+      !pending.deferredMessage &&
+      !pending.consumedMessage
+    ) {
       // Staging writes FilePart bytes into the sandbox and replaces
       // each part's `data` with a compact `eve-sandbox:` URL. The
       // `messages` array — and everything that flows into
@@ -1398,8 +1416,23 @@ async function handleStepResult(input: {
     result.finishReason !== "tool-calls" &&
     result.toolCalls.length === 0 &&
     hasEmptyDeliverySentinel(resolvedStepOutput);
-  const responseMessages = emptyDelivery ? [] : result.response.messages;
+  const rawResponseMessages = emptyDelivery ? [] : result.response.messages;
   const stepOutput = emptyDelivery ? null : resolvedStepOutput;
+
+  const providerExecutedOutcomeIds = new Set<string>();
+  for (const part of [...(result.content ?? []), ...(result.toolResults ?? [])]) {
+    if (
+      (part.type === "tool-result" || part.type === "tool-error") &&
+      part.providerExecuted === true
+    ) {
+      providerExecutedOutcomeIds.add(part.toolCallId);
+    }
+  }
+  const normalizedProviderHistory = normalizeProviderToolHistory({
+    messages: rawResponseMessages,
+    providerExecutedOutcomeIds,
+  });
+  const responseMessages = normalizedProviderHistory.messages;
 
   const baseSession: HarnessSession = {
     ...session,
@@ -1539,33 +1572,7 @@ async function handleStepResult(input: {
   // so the prompt prefix stays stable and the provider's prompt cache keeps
   // hitting across steps. Compaction is the sole mechanism that ever rewrites
   // history, and it runs before the model call (see `maybeCompact`).
-  const providerExecutedToolCallIds = new Set(
-    (stepOutput === null ? (result.toolResults ?? []) : [])
-      .filter((toolResult) => toolResult.providerExecuted === true)
-      .map((toolResult) => toolResult.toolCallId),
-  );
-  const providerExecutedToolResults: ToolModelMessage["content"] = [];
-  const continuationMessages: ModelMessage[] = responseMessages.map((message) =>
-    message.role === "assistant" && Array.isArray(message.content)
-      ? {
-          ...message,
-          content: message.content.flatMap((part) => {
-            if (part.type === "tool-result" && providerExecutedToolCallIds.has(part.toolCallId)) {
-              providerExecutedToolResults.push(part);
-              return [];
-            }
-            return [
-              part.type === "tool-call" && providerExecutedToolCallIds.has(part.toolCallId)
-                ? { ...part, providerExecuted: false }
-                : part,
-            ];
-          }),
-        }
-      : message,
-  );
-  if (providerExecutedToolResults.length > 0) {
-    continuationMessages.push({ role: "tool", content: providerExecutedToolResults });
-  }
+  const continuationMessages = responseMessages;
   const updatedHistory: ModelMessage[] = [...promptMessages, ...continuationMessages];
   let nextSession: HarnessSession = { ...baseSession, history: updatedHistory };
 
@@ -1577,7 +1584,9 @@ async function handleStepResult(input: {
 
   const continueLoop =
     !calledFinalOutput &&
-    (continuationMessages.at(-1)?.role === "tool" || hasDeferredStepInput(nextSession));
+    (continuationMessages.at(-1)?.role === "tool" ||
+      normalizedProviderHistory.outcomeEndsResponse ||
+      hasDeferredStepInput(nextSession));
   if (continueLoop) {
     if (emit) {
       emissionState = advanceStep(emissionState);

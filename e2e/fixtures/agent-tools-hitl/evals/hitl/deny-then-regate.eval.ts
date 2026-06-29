@@ -9,12 +9,23 @@ export default defineEval({
   description: "HITL smoke: a denied once() call does not execute and re-gates the next call.",
   async test(t) {
     await t.send('Call the guarded-echo tool with note "denied-call".');
-    t.requireInputRequest({ toolName: "guarded-echo" });
+    const request = t.requireInputRequest({ toolName: "guarded-echo" });
 
     const denied = await t.respondAll("deny");
     denied.expectOk();
     denied.event("action.result", {
-      data: { result: { kind: "tool-result", toolName: "guarded-echo" }, status: "rejected" },
+      data: {
+        result: {
+          kind: "tool-result",
+          output: {
+            approval: { requestId: request.requestId, status: "denied" },
+            code: "TOOL_EXECUTION_DENIED",
+            tool: { result: "not_run" },
+          },
+          toolName: "guarded-echo",
+        },
+        status: "rejected",
+      },
       count: 1,
     });
     // The denial returns to the model as context; real models paraphrase it,

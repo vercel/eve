@@ -73,7 +73,11 @@ describe("renderFlowPanel", () => {
         lines: [],
         content: {
           kind: "status",
-          status: { text: "Loading teams…", indicator: { glyph: "⠼", color: "yellow" } },
+          status: {
+            kind: "progress",
+            text: "Loading teams…",
+            indicator: { glyph: "⠼", color: "yellow" },
+          },
         },
       },
       theme,
@@ -91,6 +95,7 @@ describe("renderFlowPanel", () => {
         content: {
           kind: "status",
           status: {
+            kind: "progress",
             text: "Checking the project…",
             indicator: { glyph: "▪", color: "green" },
           },
@@ -112,6 +117,7 @@ describe("renderFlowPanel", () => {
         content: {
           kind: "question",
           status: {
+            kind: "progress",
             text: "Creating a Slackbot through Vercel Connect…",
             indicator: { glyph: "▪", color: "green" },
           },
@@ -241,11 +247,12 @@ describe("renderSelectQuestion", () => {
         focusHint: "Already installed",
       },
       { value: "slack", label: "Slack", hint: "Creates slackbot and deploys to Vercel" },
-      { value: "done", label: "Done" },
+      { value: "done", label: "Done", trailingAction: true },
     ];
     const rows = renderSelectQuestion(
       {
-        kind: "task-list",
+        kind: "search",
+        layout: "task-list",
         message: "Where will you chat with your agent?",
         options,
         notices: [
@@ -263,16 +270,19 @@ describe("renderSelectQuestion", () => {
     expect(rows).not.toContain("   ✓ Terminal UI");
     // An unfocused completed row keeps its check.
     expect(rows).toContain("   ✓ Web Chat");
-    expect(rows).toContain("   ◦ Slack       · Creates slackbot and deploys to Vercel");
     expect(rows).toContain("     Done");
-    expect(rows).toContain("  ⚠ Overwrote /tmp/weather-agent");
-    expect(rows).toContain("  ✓ Scaffolded channel: web");
-    expect(rows.indexOf("     Done")).toBeLessThan(
-      rows.indexOf("  ⚠ Overwrote /tmp/weather-agent"),
+    const warning = rows.indexOf("  ⚠ Overwrote /tmp/weather-agent");
+    const success = rows.indexOf("  ✓ Scaffolded channel: web");
+    const done = rows.indexOf("     Done");
+    expect(rows.indexOf("   ◦ Slack       · Creates slackbot and deploys to Vercel")).toBeLessThan(
+      warning,
     );
+    expect(warning).toBeLessThan(success);
+    expect(success).toBeLessThan(done);
+    expect([rows[warning - 1], rows[done - 1]]).toEqual(["", ""]);
     expect(rows.at(-1)).toContain("↑/↓ move · enter to select · esc to cancel");
 
-    const coloredRow = renderSelectQuestion(
+    const coloredRows = renderSelectQuestion(
       {
         kind: "task-list",
         message: "Where will you chat with your agent?",
@@ -281,7 +291,8 @@ describe("renderSelectQuestion", () => {
       },
       colorTheme,
       80,
-    ).find((row) => row.includes("Terminal UI"));
+    );
+    const coloredRow = coloredRows.find((row) => row.includes("Terminal UI"));
     // Focused completed row: dim pointer matching the dim label, never green or cyan.
     expect(coloredRow).toContain("\x1b[2m▷\x1b[22m");
     expect(coloredRow).toContain("\x1b[2mTerminal UI\x1b[22m");
@@ -335,7 +346,7 @@ describe("renderSelectQuestion", () => {
     expect(clipped?.endsWith("\x1b[0m")).toBe(true);
   });
 
-  it("renders a warning-toned disabled row with a dim label and yellow reason", () => {
+  it("renders a warning-toned disabled row with a dim label and yellow alert annotation", () => {
     const colored = createTheme({ color: true, unicode: true });
     const options = [
       { value: "web", label: "Web Chat" },
@@ -358,9 +369,9 @@ describe("renderSelectQuestion", () => {
       80,
     ).join("\n");
 
-    // Dim label (SGR 2), un-struck, followed by the reason in yellow (SGR 33).
+    // Dim label (SGR 2), un-struck, followed by the alert annotation in yellow (SGR 33).
     expect(text).toContain(
-      "\x1b[2mSlack\x1b[22m\x1b[33m (Requires Vercel account, see /model)\x1b[39m",
+      "\x1b[2mSlack\x1b[22m\x1b[33m ⚠ Requires Vercel account, see /model\x1b[39m",
     );
   });
 

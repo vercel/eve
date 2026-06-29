@@ -22,7 +22,6 @@ import {
 import { createTurnWorkflowInput } from "#execution/durable-session-migrations/turn-workflow.js";
 import { projectToDurableSession } from "#execution/session.js";
 import { createExecutionNodeStep } from "#execution/node-step.js";
-import { turnWorkflow } from "#execution/turn-workflow.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import {
   dispatchTurnStep,
@@ -33,6 +32,7 @@ import {
 } from "#execution/workflow-steps.js";
 import {
   LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE,
+  turnWorkflowReference,
   workflowEntryReference,
 } from "#execution/workflow-runtime.js";
 
@@ -190,7 +190,7 @@ describe("dispatchTurnStep", () => {
 
     return {
       capabilities: undefined,
-      completionToken: "turn-complete",
+      completionToken: "turn-control",
       delivery: {
         kind: "deliver",
         payloads: [{ message: "hello" }],
@@ -210,16 +210,20 @@ describe("dispatchTurnStep", () => {
 
     await expect(dispatchTurnStep(input)).resolves.toEqual({ runId: "turn-run" });
 
-    expect(startMock).toHaveBeenCalledWith(turnWorkflow, [createTurnWorkflowInput(input)], {
-      allowReservedAttributes: true,
-      attributes: {
-        "$eve.channel_request_id": "req_turn",
-        "$eve.parent": "sess-test",
-        "$eve.root": "sess-test",
-        "$eve.type": "turn",
+    expect(startMock).toHaveBeenCalledWith(
+      turnWorkflowReference,
+      [createTurnWorkflowInput(input)],
+      {
+        allowReservedAttributes: true,
+        attributes: {
+          "$eve.channel_request_id": "req_turn",
+          "$eve.parent": "sess-test",
+          "$eve.root": "sess-test",
+          "$eve.type": "turn",
+        },
+        deploymentId: "latest",
       },
-      deploymentId: "latest",
-    });
+    );
   });
 
   it("pins turn workflows to the current deployment off production", async () => {
@@ -230,15 +234,19 @@ describe("dispatchTurnStep", () => {
     await expect(dispatchTurnStep(input)).resolves.toEqual({ runId: "turn-run" });
 
     expect(startMock).toHaveBeenCalledTimes(1);
-    expect(startMock).toHaveBeenCalledWith(turnWorkflow, [createTurnWorkflowInput(input)], {
-      allowReservedAttributes: true,
-      attributes: {
-        "$eve.channel_request_id": "req_turn",
-        "$eve.parent": "sess-test",
-        "$eve.root": "sess-test",
-        "$eve.type": "turn",
+    expect(startMock).toHaveBeenCalledWith(
+      turnWorkflowReference,
+      [createTurnWorkflowInput(input)],
+      {
+        allowReservedAttributes: true,
+        attributes: {
+          "$eve.channel_request_id": "req_turn",
+          "$eve.parent": "sess-test",
+          "$eve.root": "sess-test",
+          "$eve.type": "turn",
+        },
       },
-    });
+    );
   });
 
   it("falls back to the current deployment when latest is unsupported", async () => {
@@ -251,7 +259,7 @@ describe("dispatchTurnStep", () => {
     await expect(dispatchTurnStep(input)).resolves.toEqual({ runId: "turn-run" });
 
     const wireInput = createTurnWorkflowInput(input);
-    expect(startMock).toHaveBeenNthCalledWith(1, turnWorkflow, [wireInput], {
+    expect(startMock).toHaveBeenNthCalledWith(1, turnWorkflowReference, [wireInput], {
       allowReservedAttributes: true,
       attributes: {
         "$eve.channel_request_id": "req_turn",
@@ -261,7 +269,7 @@ describe("dispatchTurnStep", () => {
       },
       deploymentId: "latest",
     });
-    expect(startMock).toHaveBeenNthCalledWith(2, turnWorkflow, [wireInput], {
+    expect(startMock).toHaveBeenNthCalledWith(2, turnWorkflowReference, [wireInput], {
       allowReservedAttributes: true,
       attributes: {
         "$eve.channel_request_id": "req_turn",
@@ -333,6 +341,7 @@ describe("dispatchRuntimeActionsStep", () => {
     });
 
     const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
       parentWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState,
@@ -347,7 +356,10 @@ describe("dispatchRuntimeActionsStep", () => {
             message: expect.stringContaining("investigate latest routing"),
           },
           serializedContext: expect.objectContaining({
-            "eve.channel": expect.objectContaining({ kind: "subagent" }),
+            "eve.channel": expect.objectContaining({
+              kind: "subagent",
+              state: expect.objectContaining({ parentContinuationToken: "turn-inbox" }),
+            }),
           }),
         }),
       ],
@@ -394,7 +406,8 @@ describe("dispatchRuntimeActionsStep", () => {
       turnAgent: TestTurnAgent,
     } as never;
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 503 })));
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
 
     const session = setPendingRuntimeActionBatch({
       actions: [
@@ -425,6 +438,7 @@ describe("dispatchRuntimeActionsStep", () => {
     await expect(
       dispatchRuntimeActionsStep({
         callbackBaseUrl: "https://caller.example.com",
+        parentContinuationToken: "turn-inbox",
         parentWritable: createTestWritable(),
         serializedContext: createSerializedContext(),
         sessionState,
@@ -446,6 +460,9 @@ describe("dispatchRuntimeActionsStep", () => {
       // so the step returns the input sessionState unchanged.
       sessionState,
     });
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).callback.token).toBe(
+      "turn-inbox",
+    );
     expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE)).toBeUndefined();
   });
 });

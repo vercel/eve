@@ -72,7 +72,7 @@ jobs:
         run: |
           mkdir -p "$EVE_EVAL_JUNIT_DIR"
           cd "${{ matrix.dir }}"
-          pnpm exec eve eval --strict --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}.xml"
+          pnpm exec eve eval --strict --verbose --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}.xml"
 
       - name: Upload eval artifacts
         if: failure()

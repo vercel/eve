@@ -17,7 +17,10 @@ import type { JsonObject } from "#shared/json.js";
 import { writeCachedToken } from "#runtime/connections/authorization-tokens.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
-import { stampChallengeDisplayName } from "#runtime/connections/scoped-authorization.js";
+import {
+  resolveAuthorizationCallbackUrl,
+  stampChallengeDisplayName,
+} from "#runtime/connections/scoped-authorization.js";
 import {
   type ConnectionRegistry,
   type ConnectionToolMetadata,
@@ -29,7 +32,7 @@ import { createLogger } from "#internal/logging.js";
 import type { DynamicToolEvents, DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
 import type { ModelMessage } from "ai";
 
-import { ConnectionRegistryKey } from "#context/providers/connection.js";
+import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 
 const logger = createLogger("framework.connection-search-dynamic");
 
@@ -210,16 +213,20 @@ async function executeConnectionSearch(
           const hookUrl = getHookUrl(conn.connectionName);
           if (hookUrl) {
             const principal = resolveConnectionPrincipal(conn.connectionName, auth);
+            const callbackUrl = resolveAuthorizationCallbackUrl({
+              authorization: auth,
+              callbackUrl: hookUrl,
+            });
             try {
               const { challenge, resume } = await auth.startAuthorization({
-                callbackUrl: hookUrl,
+                callbackUrl,
                 connection: { url: conn.url ?? "" },
                 principal,
               });
               authChallenges.push({
                 name: conn.connectionName,
                 challenge: stampChallengeDisplayName(challenge, auth),
-                hookUrl,
+                hookUrl: callbackUrl,
                 resume,
               });
             } catch (startErr) {
@@ -474,8 +481,12 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
               if (!hookUrl) throw err;
 
               const principal = resolveConnectionPrincipal(connectionName, interactiveAuth);
-              const { challenge, resume } = await interactiveAuth.startAuthorization({
+              const callbackUrl = resolveAuthorizationCallbackUrl({
+                authorization: interactiveAuth,
                 callbackUrl: hookUrl,
+              });
+              const { challenge, resume } = await interactiveAuth.startAuthorization({
+                callbackUrl,
                 connection: { url: conn?.url ?? "" },
                 principal,
               });
@@ -484,7 +495,7 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
                 {
                   name: connectionName,
                   challenge: stampChallengeDisplayName(challenge, interactiveAuth),
-                  hookUrl,
+                  hookUrl: callbackUrl,
                   resume,
                 },
               ]);

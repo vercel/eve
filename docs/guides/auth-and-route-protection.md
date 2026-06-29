@@ -27,7 +27,7 @@ import { eveChannel } from "eve/channels/eve";
 import { localDev, vercelOidc } from "eve/channels/auth";
 
 export default eveChannel({
-  auth: [localDev(), vercelOidc()],
+  auth: [vercelOidc(), localDev()],
 });
 ```
 
@@ -62,11 +62,11 @@ function appSession(): AuthFn<Request> {
 }
 
 export default eveChannel({
-  auth: [appSession(), localDev(), vercelOidc()],
+  auth: [appSession(), vercelOidc(), localDev()],
 });
 ```
 
-Put your own providers ahead of the catch-all helpers. Any entry that doesn't recognize the caller returns `null`, and the walk moves on. On non-Vercel hosts, omit `vercelOidc()` unless you specifically want to accept Vercel-issued tokens.
+Put your own providers ahead of the catch-all helpers. `localDev()` is the final fallback: put `vercelOidc()` before it so a local Vercel OIDC bearer can resolve a user instead of being shadowed by the synthetic local principal. Any entry that doesn't recognize the caller returns `null`, and the walk moves on. On non-Vercel hosts, omit `vercelOidc()` unless you specifically want to accept Vercel-issued tokens.
 
 To reject with a precise status instead of skipping, throw:
 
@@ -197,11 +197,11 @@ import { eveChannel } from "eve/channels/eve";
 import { localDev, placeholderAuth, vercelOidc } from "eve/channels/auth";
 
 export default eveChannel({
-  auth: [localDev(), vercelOidc(), placeholderAuth()],
+  auth: [vercelOidc(), localDev(), placeholderAuth()],
 });
 ```
 
-In production, `placeholderAuth()` returns a structured `401` so a generated web chat app can say "auth isn't configured yet" instead of throwing an internal error. Replace it before a browser caller submits a production request: swap in your app's `AuthFn` or one of the shipped helpers. Delete the authored channel file entirely and eve falls back to the framework default `[localDev(), vercelOidc()]`, which also rejects production browser traffic.
+In production, `placeholderAuth()` returns a structured `401` so a generated web chat app can say "auth isn't configured yet" instead of throwing an internal error. Replace it before a browser caller submits a production request: swap in your app's `AuthFn` or one of the shipped helpers. Delete the authored channel file entirely and eve falls back to the framework default `[vercelOidc(), localDev()]`, which also rejects production browser traffic.
 
 You do not have to keep `vercelOidc()` in the final policy. For a self-hosted app, an app-embedded frontend, or any deployment that uses a non-Vercel identity system, use `httpBasic()`, `jwtHmac()`, `jwtEcdsa()`, generic `oidc()`, or a custom `AuthFn` that maps your verified user/session/API key into a `SessionAuthContext`.
 

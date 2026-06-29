@@ -1,1 +1,1 @@
-export { ExperimentalWorkflow as default } from "eve/tools";
+export default Object.freeze({ kind: "eve:enable-workflow-tool" });

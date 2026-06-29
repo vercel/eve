@@ -1,5 +1,4 @@
 import { readDevelopmentRuntimeArtifactsRevision } from "#internal/nitro/dev-runtime-artifacts.js";
-import { flushDevelopmentRebuild } from "#internal/nitro/host/dev-rebuild-registry.js";
 
 /**
  * Builds the dev-only runtime artifact revision response.
@@ -14,11 +13,4 @@ export function handleDevRuntimeArtifactsRequest(input: { appRoot: string }): Re
       "cache-control": "no-store",
     },
   });
-}
-
-export async function handleDevRuntimeArtifactsRebuildRequest(input: {
-  appRoot: string;
-}): Promise<Response> {
-  await flushDevelopmentRebuild(input.appRoot);
-  return handleDevRuntimeArtifactsRequest(input);
 }

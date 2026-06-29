@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  flushDevelopmentRebuild: vi.fn(),
   readDevelopmentRuntimeArtifactsRevision: vi.fn(),
 }));
 
@@ -15,12 +14,7 @@ vi.mock("#internal/nitro/dev-runtime-artifacts.js", async () => {
   };
 });
 
-vi.mock("#internal/nitro/host/dev-rebuild-registry.js", () => ({
-  flushDevelopmentRebuild: mocks.flushDevelopmentRebuild,
-}));
-
 beforeEach(() => {
-  mocks.flushDevelopmentRebuild.mockReset();
   mocks.readDevelopmentRuntimeArtifactsRevision.mockReset();
 });
 
@@ -40,21 +34,5 @@ describe("handleDevRuntimeArtifactsRequest", () => {
       revision: "/tmp/app/.eve/dev-runtime/snapshots/current",
     });
     expect(mocks.readDevelopmentRuntimeArtifactsRevision).toHaveBeenCalledWith("/tmp/app");
-  });
-
-  it("flushes queued rebuilds before returning the current revision", async () => {
-    const { handleDevRuntimeArtifactsRebuildRequest } =
-      await import("#internal/nitro/routes/dev-runtime-artifacts.js");
-    mocks.readDevelopmentRuntimeArtifactsRevision.mockReturnValueOnce({
-      revision: "/tmp/app/.eve/dev-runtime/snapshots/next",
-    });
-
-    const response = await handleDevRuntimeArtifactsRebuildRequest({ appRoot: "/tmp/app" });
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      revision: "/tmp/app/.eve/dev-runtime/snapshots/next",
-    });
-    expect(mocks.flushDevelopmentRebuild).toHaveBeenCalledWith("/tmp/app");
   });
 });

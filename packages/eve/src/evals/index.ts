@@ -5,6 +5,7 @@
 export { defineEval } from "#evals/define-eval.js";
 export { defineEvalConfig } from "#evals/define-eval-config.js";
 export { EveEvalTurnFailedError } from "#evals/session.js";
+export { mockModel } from "#evals/mock-model.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -54,3 +55,15 @@ export type {
   JudgeContext,
   JudgeOpts,
 } from "#evals/types.js";
+
+export type {
+  MockModelMessage,
+  MockModelOptions,
+  MockModelRequest,
+  MockModelResponder,
+  MockModelResponse,
+  MockModelTool,
+  MockModelToolCall,
+  MockModelToolResult,
+  MockModelUsage,
+} from "#evals/mock-model.js";

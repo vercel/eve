@@ -71,10 +71,10 @@ describe("handleAgentInfoRequest", () => {
   });
 
   it("returns 401 without a Vercel OIDC bearer token when the request is addressed to a public hostname", async () => {
-    // The default chain `[localDev(), vercelOidc()]` must reject public
+    // The default chain `[vercelOidc(), localDev()]` must reject public
     // traffic that arrives without a token, regardless of `process.env`.
-    // `localDev()` skips because the request URL is not loopback;
-    // `vercelOidc()` rejects because there is no bearer token.
+    // `vercelOidc()` skips because there is no bearer token; `localDev()`
+    // skips because the request URL is not loopback.
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-agent-info-route-deployed-",
       APP_ROOT_OPTIONS,

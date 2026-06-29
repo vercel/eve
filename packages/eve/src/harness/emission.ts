@@ -49,6 +49,7 @@ import type {
 import { isAuthorizationSignal, isPendingAuthorizationToolOutput } from "#harness/authorization.js";
 import { contextStorage } from "#context/container.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
+import { createProviderStreamActionBatch } from "#harness/stream-actions.js";
 import type {
   HarnessEmitFn,
   HarnessSession,
@@ -343,9 +344,9 @@ interface StreamActionEmissionOptions {
  * Consumes the AI SDK `fullStream` and emits real-time text and reasoning
  * events.
  *
- * Emits local and provider tool results in source order. A result without a
- * streamed call resumes a call from an earlier step. `emitStepActions` emits
- * the remaining events.
+ * Emits local tool events in source order. Provider calls that arrive in one
+ * stream batch into one request event before their first result. A result
+ * without a streamed call resumes a call from an earlier step.
  */
 export async function emitStreamContent(
   emitFn: HarnessEmitFn,
@@ -360,6 +361,8 @@ export async function emitStreamContent(
   const toolCallIdsSeenInStream = new Set<string>();
   const emittedActionCallIds = new Set<string>();
   const emittedActionResultCallIds = new Set<string>();
+  const providerToolCallIdsSeen = new Set<string>();
+  const providerActionBatch = createProviderStreamActionBatch({ emitFn, state });
   const handledInlineToolResultCallIds = new Set<string>();
   const inlineAuthorizationResults: TypedToolResult<ToolSet>[] = [];
   const inlineToolResultParts: InlineToolResultPart[] = [];
@@ -400,12 +403,25 @@ export async function emitStreamContent(
     );
   };
 
-  const emitProviderToolCall = async (toolCall: {
+  const collectProviderToolCall = async (toolCall: {
     readonly input?: unknown;
     readonly toolCallId: string;
     readonly toolName: string;
   }): Promise<void> => {
-    await emitActionRequest({
+    if (providerToolCallIdsSeen.has(toolCall.toolCallId)) {
+      return;
+    }
+    providerToolCallIdsSeen.add(toolCall.toolCallId);
+    if (emittedActionCallIds.has(toolCall.toolCallId)) {
+      return;
+    }
+    emittedActionCallIds.add(toolCall.toolCallId);
+
+    if (currentMessage.trim().length > 0) {
+      await flushCurrentMessage();
+    }
+
+    providerActionBatch.observe({
       callId: toolCall.toolCallId,
       input: resolveToolCallInputObject(toolCall.input, {
         callId: toolCall.toolCallId,
@@ -465,6 +481,7 @@ export async function emitStreamContent(
 
     switch (part.type) {
       case "reasoning-delta":
+        await providerActionBatch.flush();
         currentReasoning += part.text;
         await emitFn(
           createReasoningAppendedEvent({
@@ -477,6 +494,7 @@ export async function emitStreamContent(
         );
         break;
       case "text-delta":
+        await providerActionBatch.flush();
         // Flush accumulated reasoning before text begins.
         if (currentReasoning.trim().length > 0) {
           await emitFn(
@@ -504,8 +522,9 @@ export async function emitStreamContent(
         const toolCall = part as TypedToolCall<ToolSet>;
         toolCallIdsSeenInStream.add(toolCall.toolCallId);
         if (toolCall.providerExecuted === true) {
-          await emitProviderToolCall(toolCall);
+          await collectProviderToolCall(toolCall);
         } else {
+          await providerActionBatch.flush();
           await emitToolCall(toolCall);
         }
         break;
@@ -517,11 +536,12 @@ export async function emitStreamContent(
           break;
         }
         if (inlineToolResult.providerExecuted === true) {
-          await emitProviderToolCall({
+          await collectProviderToolCall({
             input: "input" in inlineToolResult ? inlineToolResult.input : undefined,
             toolCallId: inlineToolResult.toolCallId,
             toolName: inlineToolResult.toolName,
           });
+          await providerActionBatch.flush();
           await emitActionResult(createRuntimeToolResultFromStepResult(inlineToolResult));
           // Provider results already live in the assistant response. Do not
           // add a local tool message.
@@ -541,6 +561,7 @@ export async function emitStreamContent(
 
         // An approved tool can resume with its result but no matching call in
         // this step. Emit it before the message that consumes it.
+        await providerActionBatch.flush();
         await flushCurrentMessage();
         if (isInlineAuthorizationToolResult(inlineToolResult)) {
           // Keep authorization output for the park detector instead of
@@ -567,7 +588,8 @@ export async function emitStreamContent(
       case "tool-error": {
         const toolError = part as TypedToolError<ToolSet>;
         if (toolError.providerExecuted === true) {
-          await emitProviderToolCall(toolError);
+          await collectProviderToolCall(toolError);
+          await providerActionBatch.flush();
           await emitActionResult(
             createRuntimeToolResultFromValue({
               callId: toolError.toolCallId,
@@ -591,6 +613,7 @@ export async function emitStreamContent(
       }
       case "finish-step":
         finishReason = normalizeAssistantStepFinishReason(part.finishReason);
+        await providerActionBatch.flush();
         break;
       case "error":
         // `part.error` is typed as `unknown` — AI SDK providers emit
@@ -604,6 +627,8 @@ export async function emitStreamContent(
         break;
     }
   }
+
+  await providerActionBatch.flush();
 
   if (streamError !== undefined) {
     throw streamError;

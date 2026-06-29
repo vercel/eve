@@ -58,6 +58,7 @@ export async function compileChannelDefinition(
     sourceKind: "module" as const,
     exportName: source.exportName,
     adapterKind: extractAdapterKind(definition.adapter),
+    cors: definition.cors,
   }));
 }
 

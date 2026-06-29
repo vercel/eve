@@ -128,6 +128,56 @@ describe("eve dev --input", () => {
 });
 
 describe("eve dev --url protocol", () => {
+  it("uses the local TUI credential path only for this app's running dev server", async () => {
+    const runDevelopmentTui = vi.fn(async () => {});
+
+    await withInteractiveTerminal(() =>
+      runCli(
+        ["dev", "--url", "http://127.0.0.1:2000"],
+        { error: () => {}, log: () => {} },
+        {
+          isActiveDevelopmentServerForApp: async () => true,
+          runDevelopmentTui,
+        },
+      ),
+    );
+
+    expect(runDevelopmentTui).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: {
+          kind: "local",
+          serverUrl: "http://127.0.0.1:2000/",
+          workspaceRoot: process.cwd(),
+        },
+      }),
+    );
+  });
+
+  it("keeps an unverified loopback URL on the remote credential path", async () => {
+    const runDevelopmentTui = vi.fn(async () => {});
+
+    await withInteractiveTerminal(() =>
+      runCli(
+        ["dev", "--url", "http://127.0.0.1:2000"],
+        { error: () => {}, log: () => {} },
+        {
+          isActiveDevelopmentServerForApp: async () => false,
+          runDevelopmentTui,
+        },
+      ),
+    );
+
+    expect(runDevelopmentTui).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: {
+          kind: "remote",
+          serverUrl: "http://127.0.0.1:2000/",
+          workspaceRoot: process.cwd(),
+        },
+      }),
+    );
+  });
+
   it("rejects an http:// remote URL up front instead of crashing during connect", async () => {
     await expect(
       runCli(["dev", "--url", "http://my-app.vercel.app"], { error: () => {}, log: () => {} }),
@@ -174,12 +224,19 @@ describe("eve dev boot progress", () => {
     const close = vi.fn(async () => {});
     let hostReporter: DevelopmentServerOptions["onBootProgress"] = undefined;
     let tuiReporter: RunDevelopmentTuiInput["onBootProgress"] = undefined;
-    const startHost = vi.fn(async (_appRoot: string, options?: DevelopmentServerOptions) => {
-      hostReporter = options?.onBootProgress;
-      hostReporter?.({ phase: "compiling agent", type: "phase-started" });
-      hostReporter?.({ elapsedMs: 1, phase: "compiling agent", type: "phase-finished" });
-      return { close, url: "http://127.0.0.1:2000" };
-    });
+    const startHost = vi.fn((_appRoot: string, options?: DevelopmentServerOptions) => ({
+      start: async () => {
+        hostReporter = options?.onBootProgress;
+        hostReporter?.({ phase: "compiling agent", type: "phase-started" });
+        hostReporter?.({ elapsedMs: 1, phase: "compiling agent", type: "phase-finished" });
+        return {
+          kind: "started" as const,
+          appRoot: "/canonical/app",
+          url: "http://127.0.0.1:2000",
+        };
+      },
+      close,
+    }));
     const runDevelopmentTui = vi.fn(async (input: RunDevelopmentTuiInput) => {
       tuiReporter = input.onBootProgress;
       throw new Error("TUI startup failed");
@@ -202,6 +259,62 @@ describe("eve dev boot progress", () => {
     expect(hostReporter).toBeTypeOf("function");
     expect(tuiReporter).toBe(hostReporter);
     expect(writes.at(-1)).toBe("\r\u001B[K");
+    expect(close).toHaveBeenCalledOnce();
+  });
+});
+
+describe("eve dev local server ownership", () => {
+  it("uses the host's canonical root and leaves an attached server running", async () => {
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "existing" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close: async () => {},
+    }));
+    const runDevelopmentTui = vi.fn(async () => {});
+
+    await withInteractiveTerminal(() =>
+      runCli(["dev"], { error: () => {}, log: () => {} }, { runDevelopmentTui, startHost }),
+    );
+
+    expect(startHost).toHaveBeenCalledWith(expect.any(String), {
+      existing: "attach-if-unconfigured",
+      host: undefined,
+      onBootProgress: expect.any(Function),
+      port: undefined,
+    });
+    expect(runDevelopmentTui).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "App",
+        target: {
+          kind: "local",
+          serverUrl: "http://127.0.0.1:4321/",
+          workspaceRoot: "/canonical/app",
+        },
+      }),
+    );
+  });
+
+  it("closes a server started for the interactive TUI", async () => {
+    const close = vi.fn(async () => {});
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "started" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close,
+    }));
+
+    await withInteractiveTerminal(() =>
+      runCli(
+        ["dev"],
+        { error: () => {}, log: () => {} },
+        { runDevelopmentTui: vi.fn(async () => {}), startHost },
+      ),
+    );
     expect(close).toHaveBeenCalledOnce();
   });
 });

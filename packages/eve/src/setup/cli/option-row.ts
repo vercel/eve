@@ -32,6 +32,8 @@ export interface RowGlyphs {
   placeholder: string;
   /** Separator before an inline hint. */
   dot: string;
+  /** Attention marker for an unavailable option with actionable guidance. */
+  warning: string;
 }
 
 /** Canonical unicode glyphs; the CLI prompts render with these. */
@@ -41,6 +43,7 @@ export const UNICODE_ROW_GLYPHS: RowGlyphs = {
   success: "✓",
   placeholder: "◦",
   dot: "·",
+  warning: "⚠",
 };
 
 export type OptionRowState =
@@ -126,11 +129,13 @@ function disabledLabel(
   label: string,
   state: Extract<OptionRowState, { kind: "disabled" }>,
   colors: RowColors,
+  glyphs: RowGlyphs,
 ): string {
-  const reason = parenthetical(state.reason);
   if (state.reasonTone === "warning") {
-    return `${colors.dim(label)}${colors.yellow(reason)}`;
+    const warning = state.reason === undefined ? "" : ` ${glyphs.warning} ${state.reason}`;
+    return `${colors.dim(label)}${colors.yellow(warning)}`;
   }
+  const reason = parenthetical(state.reason);
   return colors.dim(`${label}${reason}`);
 }
 
@@ -157,7 +162,7 @@ function optionRowPresentation(input: OptionRowInput): OptionRowPresentation {
     case "disabled":
       return {
         glyph: input.isCursor ? c.dim(glyphs.pointer) : unfocusedGlyph(input),
-        label: disabledLabel(input.label, state, c),
+        label: disabledLabel(input.label, state, c, glyphs),
       };
     case "locked":
       return {

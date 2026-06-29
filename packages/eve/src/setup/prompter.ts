@@ -33,6 +33,8 @@ export type PrompterValue = string | number | boolean;
 export interface SelectOption<T extends PrompterValue> {
   value: T;
   label: string;
+  /** Completion action kept after searchable results instead of being filtered. */
+  trailingAction?: boolean;
   hint?: string;
   /** Short inline annotation shown dimmed only while the cursor is on this row. */
   focusHint?: string;

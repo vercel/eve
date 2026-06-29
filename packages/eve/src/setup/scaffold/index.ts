@@ -27,11 +27,13 @@ export { SCAFFOLDABLE_CHANNELS, type ScaffoldableChannel } from "./channels-cata
 
 export {
   ensureConnection,
+  ensureConnectionDependencies,
   listAuthoredConnections,
   type ConnectionInput,
   type ConnectionMutationAction,
   type ConnectionMutationResult,
   type EnsureConnectionOptions,
+  type EnsureConnectionDependenciesOptions,
 } from "./update/connections.js";
 
 export {

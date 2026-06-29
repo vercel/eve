@@ -1,17 +1,14 @@
-import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ChannelSetupLog } from "#setup/cli/index.js";
+import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { captureVercel, runVercel, runVercelCaptureStdout } from "#setup/primitives/run-vercel.js";
+import type { PrompterValue, SingleSelectOptions } from "#setup/prompter.js";
 
-import {
-  parseCreatedConnector,
-  pickConnectConnector,
-  setupConnectionConnector,
-} from "./connection-connector.js";
+import { parseCreatedConnector, setupConnectionConnector } from "./connection-connector.js";
 
 vi.mock("#setup/primitives/run-vercel.js", () => ({
   captureVercel: vi.fn(),
@@ -19,374 +16,222 @@ vi.mock("#setup/primitives/run-vercel.js", () => ({
   runVercelCaptureStdout: vi.fn(),
 }));
 
-const mockedCaptureVercel = vi.mocked(captureVercel);
-const mockedRunVercel = vi.mocked(runVercel);
-const mockedRunVercelCaptureStdout = vi.mocked(runVercelCaptureStdout);
-
+const capture = vi.mocked(captureVercel);
+const run = vi.mocked(runVercel);
+const create = vi.mocked(runVercelCaptureStdout);
 const SERVICE = "mcp.linear.app";
+const CANONICAL_UID = "mcp.linear.app/linear";
+const CANONICAL_NAME = "linear";
 
-/** `vercel connect create … -F json` stdout payload on CLI 54.x. */
-function createConnectorJson(uid: string, id = "scl_linear"): string {
-  return JSON.stringify({ uid, id, type: "oauth", name: "linear" });
+function jsonResult(value: unknown) {
+  return { ok: true as const, stdout: JSON.stringify(value) };
 }
 
-describe("parseCreatedConnector", () => {
-  test("reads uid and id from `vercel connect create -F json` stdout", () => {
-    expect(parseCreatedConnector(createConnectorJson("linear/my-agent", "scl_1"))).toEqual({
-      uid: "linear/my-agent",
+function connectorResult(uid: string, id: string, subject: "app" | "user") {
+  return jsonResult({ uid, id, service: SERVICE, supportedSubjectTypes: [subject] });
+}
+
+describe("connector response parsing", () => {
+  it("rejects created connectors without user support", () => {
+    const response = { uid: "linear/acme", id: "scl_1", supportedSubjectTypes: ["user"] };
+    expect(parseCreatedConnector(JSON.stringify(response))).toEqual({
+      uid: "linear/acme",
       id: "scl_1",
     });
-  });
-
-  test("tolerates surrounding whitespace", () => {
-    expect(parseCreatedConnector(`\n  ${createConnectorJson("linear/x")}  \n`)?.uid).toBe(
-      "linear/x",
-    );
-  });
-
-  test("returns undefined for empty, non-JSON, or shape-mismatched stdout", () => {
-    expect(parseCreatedConnector("")).toBeUndefined();
-    expect(parseCreatedConnector("   ")).toBeUndefined();
-    expect(parseCreatedConnector("Vercel CLI 54.9.1")).toBeUndefined();
-    expect(parseCreatedConnector(JSON.stringify({ uid: "linear/x" }))).toBeUndefined();
-    expect(parseCreatedConnector(JSON.stringify({ id: "scl_1" }))).toBeUndefined();
-    expect(parseCreatedConnector(JSON.stringify([1, 2, 3]))).toBeUndefined();
+    expect(
+      parseCreatedConnector(JSON.stringify({ ...response, supportedSubjectTypes: ["app"] })),
+    ).toBeUndefined();
   });
 });
 
-describe("pickConnectConnector", () => {
-  test("reads the `connectors` key emitted by `vercel connect list -F json`", () => {
-    const list = {
-      connectors: [{ uid: "linear/my-agent", id: "scl_1", type: "oauth", createdAt: 1 }],
-    };
-    expect(pickConnectConnector(list, SERVICE, undefined)?.uid).toBe("linear/my-agent");
-  });
-
-  test("prefers a connector attached to the project", () => {
-    const list = {
-      connectors: [
-        { uid: "linear/a", id: "1", type: "oauth", createdAt: 1, projects: [] },
-        { uid: "linear/b", id: "2", type: "oauth", createdAt: 2, projects: [{ id: "prj_1" }] },
-      ],
-    };
-    expect(pickConnectConnector(list, SERVICE, "prj_1")?.uid).toBe("linear/b");
-  });
-
-  test("falls back to the newest connector when none are attached", () => {
-    const list = {
-      connectors: [
-        { uid: "linear/a", id: "1", type: "oauth", createdAt: 1 },
-        { uid: "linear/b", id: "2", type: "oauth", createdAt: 5 },
-      ],
-    };
-    expect(pickConnectConnector(list, SERVICE, undefined)?.uid).toBe("linear/b");
-  });
-
-  test("accepts connectors whose type is not `oauth` (managed MCP connectors)", () => {
-    const list = { connectors: [{ uid: "linear/mcp", id: "1", type: "mcp", createdAt: 1 }] };
-    expect(pickConnectConnector(list, SERVICE, undefined)?.uid).toBe("linear/mcp");
-  });
-
-  test("defensively skips connectors whose reported service differs", () => {
-    const list = {
-      connectors: [
-        { uid: "notion/x", id: "1", type: "oauth", service: "mcp.notion.com", createdAt: 8 },
-        { uid: "linear/x", id: "2", type: "oauth", service: SERVICE, createdAt: 1 },
-      ],
-    };
-    expect(pickConnectConnector(list, SERVICE, undefined)?.uid).toBe("linear/x");
-  });
-
-  test("falls back to the legacy `clients` key for older CLI builds", () => {
-    const list = { clients: [{ uid: "linear/legacy", id: "1", type: "oauth", createdAt: 1 }] };
-    expect(pickConnectConnector(list, SERVICE, undefined)?.uid).toBe("linear/legacy");
-  });
-
-  test("returns undefined for malformed input", () => {
-    expect(pickConnectConnector(null, SERVICE, undefined)).toBeUndefined();
-    expect(pickConnectConnector({}, SERVICE, undefined)).toBeUndefined();
-    expect(pickConnectConnector({ connectors: "nope" }, SERVICE, undefined)).toBeUndefined();
-  });
-});
-
-function createTestLog(): ChannelSetupLog {
-  return {
-    message: vi.fn(),
-    info: vi.fn(),
-    success: vi.fn(),
-    warning: vi.fn(),
-    error: vi.fn(),
-    commandOutput: vi.fn(),
-  };
-}
-
-/** Connector list payload as emitted by `vercel connect list -F json` on CLI 54.x. */
-function connectListV54(connectorUid: string, projectId: string) {
-  return JSON.stringify({
-    connectors: [
-      {
-        uid: connectorUid,
-        id: "scl_linear",
-        name: "linear",
-        type: "oauth",
-        typeName: "Linear",
-        createdAt: 2,
-        icon: null,
-        backgroundColor: null,
-        accentColor: null,
-        projects: [{ id: projectId, name: "my-agent" }],
-        hasMoreProjects: false,
-      },
-    ],
-    cursor: undefined,
-  });
-}
-
-describe("setupConnectionConnector (end-to-end)", () => {
+describe("setupConnectionConnector", () => {
   let projectRoot: string;
-  let connectionFilePath: string;
-  const PROJECT_ID = "prj_ExampleProjectId0000000000";
 
   beforeEach(async () => {
-    vi.clearAllMocks();
-    // The connector attach succeeds by default; failure is exercised separately.
-    mockedRunVercel.mockResolvedValue(true);
-    projectRoot = await mkdtemp(join(tmpdir(), "eve-setup-connection-"));
-    await mkdir(join(projectRoot, ".vercel"), { recursive: true });
-    await writeFile(
-      join(projectRoot, ".vercel", "project.json"),
-      JSON.stringify({ projectId: PROJECT_ID, orgId: "team_x" }),
-      "utf8",
-    );
-    await mkdir(join(projectRoot, "agent", "connections"), { recursive: true });
-    connectionFilePath = join(projectRoot, "agent", "connections", "linear.ts");
-    // Mirrors the scaffolder's emitted `auth: connect("<slug>")` placeholder.
-    await writeFile(
-      connectionFilePath,
-      [
-        'import { defineMcpClientConnection } from "eve/connections";',
-        'import { connect } from "@vercel/connect";',
-        "",
-        "export default defineMcpClientConnection({",
-        '  url: "https://mcp.linear.app/sse",',
-        '  auth: connect("linear"),',
-        "});",
-        "",
-      ].join("\n"),
-      "utf8",
-    );
+    capture.mockReset();
+    run.mockReset();
+    create.mockReset();
+    projectRoot = await mkdtemp(join(tmpdir(), "eve-connect-"));
   });
 
   afterEach(async () => {
     await rm(projectRoot, { recursive: true, force: true });
   });
 
-  test("resolves the UID from `connect create -F json` without a follow-up list", async () => {
-    mockedRunVercelCaptureStdout.mockResolvedValue({
-      ok: true,
-      stdout: createConnectorJson("linear/my-agent"),
-    });
-
-    const result = await setupConnectionConnector({
-      log: createTestLog(),
+  function options(prompter = createFakePrompter().prompter) {
+    return {
+      log: prompter.log,
+      prompter,
       projectRoot,
       slug: "linear",
       service: SERVICE,
-      connectionFilePath,
+      canonicalConnectorName: CANONICAL_NAME,
+      project: { projectId: "prj_1", orgId: "org_1" },
+    };
+  }
+
+  it("attaches the canonical connector only after confirming user authorization", async () => {
+    capture
+      .mockResolvedValueOnce(
+        jsonResult({ connectors: [{ uid: CANONICAL_UID, id: "scl_canonical" }] }),
+      )
+      .mockResolvedValueOnce(connectorResult(CANONICAL_UID, "scl_canonical", "user"));
+    run.mockResolvedValue(true);
+
+    await expect(setupConnectionConnector(options())).resolves.toEqual({
+      kind: "existing",
+      connectorUid: CANONICAL_UID,
     });
-
-    expect(result).toEqual({ kind: "patched", created: true, connectorUid: "linear/my-agent" });
-
-    // Created with the catalog service identifier, slug name, and JSON output.
-    expect(mockedRunVercelCaptureStdout).toHaveBeenCalledWith(
-      ["connect", "create", SERVICE, "--name", "linear", "-F", "json"],
-      expect.objectContaining({ cwd: projectRoot }),
+    expect(capture).toHaveBeenCalledWith(
+      expect.arrayContaining(["connect", "list", "--service", SERVICE]),
+      expect.any(Object),
     );
-    // The authoritative create payload makes the flaky list lookup unnecessary.
-    expect(mockedCaptureVercel).not.toHaveBeenCalled();
-    // The connector is attached to the linked project so the agent can call it.
-    expect(mockedRunVercel).toHaveBeenCalledWith(
-      ["connect", "attach", "linear/my-agent", "--yes"],
-      expect.objectContaining({ cwd: projectRoot }),
+    expect(capture).toHaveBeenCalledWith(
+      ["api", "/v1/connect/connectors/scl_canonical", "--scope", "org_1", "--raw"],
+      expect.any(Object),
     );
-    // The generated connect("…") UID was rewritten on disk.
-    const patched = await readFile(connectionFilePath, "utf8");
-    expect(patched).toContain('connect("linear/my-agent")');
-    expect(patched).not.toContain('connect("linear")');
+    expect(create).not.toHaveBeenCalled();
+    expect(run).toHaveBeenCalledWith(
+      ["connect", "attach", CANONICAL_UID, "--yes", "--scope", "org_1"],
+      expect.any(Object),
+    );
   });
 
-  test("warns but still patches when attaching the connector to the project fails", async () => {
-    mockedRunVercelCaptureStdout.mockResolvedValue({
-      ok: true,
-      stdout: createConnectorJson("linear/my-agent"),
-    });
-    mockedRunVercel.mockResolvedValue(false);
-    const log = createTestLog();
+  it("finds a canonical connector by name instead of assuming its UID namespace", async () => {
+    const canonicalName = "linear";
+    const actualUid = "linear/default";
+    capture
+      .mockResolvedValueOnce(
+        jsonResult({ connectors: [{ uid: actualUid, id: "scl_canonical", name: canonicalName }] }),
+      )
+      .mockResolvedValueOnce(connectorResult(actualUid, "scl_canonical", "user"));
+    run.mockResolvedValue(true);
 
-    const result = await setupConnectionConnector({
-      log,
-      projectRoot,
-      slug: "linear",
-      service: SERVICE,
-      connectionFilePath,
+    await expect(
+      setupConnectionConnector({ ...options(), canonicalConnectorName: canonicalName }),
+    ).resolves.toEqual({
+      kind: "existing",
+      connectorUid: actualUid,
     });
-
-    // Attach failure is non-fatal: the connector exists and the file is patched.
-    expect(result).toEqual({ kind: "patched", created: true, connectorUid: "linear/my-agent" });
-    expect(log.warning).toHaveBeenCalledWith(
-      expect.stringContaining("could not attach it to this project"),
+    expect(run).toHaveBeenCalledWith(
+      ["connect", "attach", actualUid, "--yes", "--scope", "org_1"],
+      expect.any(Object),
     );
-    expect(await readFile(connectionFilePath, "utf8")).toContain('connect("linear/my-agent")');
   });
 
-  test("falls back to a service-scoped list when create emits no parseable JSON", async () => {
-    mockedRunVercelCaptureStdout.mockResolvedValue({ ok: true, stdout: "Vercel CLI 54.9.1\n" });
-    mockedCaptureVercel.mockResolvedValue({
-      ok: true,
-      stdout: connectListV54("linear/my-agent", PROJECT_ID),
+  it("does not attach an app-only canonical connector", async () => {
+    capture
+      .mockResolvedValueOnce(
+        jsonResult({ connectors: [{ uid: CANONICAL_UID, id: "scl_canonical" }] }),
+      )
+      .mockResolvedValueOnce(connectorResult(CANONICAL_UID, "scl_canonical", "app"));
+    create.mockResolvedValue(connectorResult("linear/linear-2", "scl_created", "user"));
+    run.mockResolvedValue(true);
+    const fake = createFakePrompter({
+      single: () => "create",
+      text: (input) => input.defaultValue!,
     });
 
-    const result = await setupConnectionConnector({
-      log: createTestLog(),
-      projectRoot,
-      slug: "linear",
-      service: SERVICE,
-      connectionFilePath,
+    await expect(setupConnectionConnector(options(fake.prompter))).resolves.toEqual({
+      kind: "created",
+      connectorId: "scl_created",
+      connectorUid: "linear/linear-2",
     });
-
-    expect(result).toEqual({ kind: "patched", created: true, connectorUid: "linear/my-agent" });
-    expect(mockedCaptureVercel).toHaveBeenCalledWith(
-      ["connect", "list", "-F", "json", "--all-projects", "--service", SERVICE],
-      expect.objectContaining({ cwd: projectRoot }),
+    expect(run).not.toHaveBeenCalledWith(
+      ["connect", "attach", CANONICAL_UID, "--yes", "--scope", "org_1"],
+      expect.any(Object),
     );
-    expect(await readFile(connectionFilePath, "utf8")).toContain('connect("linear/my-agent")');
   });
 
-  test("fallback still resolves the legacy `clients` key from older CLI builds", async () => {
-    mockedRunVercelCaptureStdout.mockResolvedValue({ ok: true, stdout: "" });
-    mockedCaptureVercel.mockResolvedValue({
-      ok: true,
-      stdout: JSON.stringify({
-        clients: [
-          { uid: "linear/legacy", id: "scl_legacy", type: "oauth", createdAt: 1, projects: [] },
-        ],
-      }),
+  it("paginates and offers only existing connectors that support user authorization", async () => {
+    run.mockResolvedValue(true);
+    capture
+      .mockResolvedValueOnce(
+        jsonResult({
+          connectors: [{ uid: "linear/app", id: "scl_app" }],
+          cursor: "next_page",
+        }),
+      )
+      .mockResolvedValueOnce(jsonResult({ connectors: [{ uid: "linear/user", id: "scl_user" }] }))
+      .mockResolvedValueOnce(connectorResult("linear/app", "scl_app", "app"))
+      .mockResolvedValueOnce(connectorResult("linear/user", "scl_user", "user"));
+    const answers = ["find", "linear/user"];
+    const selectOptions: SingleSelectOptions<PrompterValue>[] = [];
+    const fake = createFakePrompter({
+      single: (input) => {
+        selectOptions.push(input);
+        return answers.shift()!;
+      },
     });
 
-    const result = await setupConnectionConnector({
-      log: createTestLog(),
-      projectRoot,
-      slug: "linear",
-      service: SERVICE,
-      connectionFilePath,
+    await expect(setupConnectionConnector(options(fake.prompter))).resolves.toEqual({
+      kind: "existing",
+      connectorUid: "linear/user",
     });
-
-    expect(result).toEqual({ kind: "patched", created: true, connectorUid: "linear/legacy" });
-    expect(await readFile(connectionFilePath, "utf8")).toContain('connect("linear/legacy")');
+    expect(capture).toHaveBeenCalledWith(
+      expect.arrayContaining(["--next", "next_page"]),
+      expect.any(Object),
+    );
+    expect(capture).toHaveBeenCalledWith(
+      expect.arrayContaining(["--scope", "org_1"]),
+      expect.any(Object),
+    );
+    expect(fake.selectMessages).toEqual([
+      "Which connector should linear use?",
+      "Select a connector for linear",
+    ]);
+    expect(selectOptions[0]).toMatchObject({
+      hintLayout: "inline",
+      notices: [{ tone: "warning", text: `Could not find a connector named ${CANONICAL_NAME}.` }],
+    });
+    expect(selectOptions[1]).toMatchObject({
+      hintLayout: "inline",
+      placeholder: "type to search connectors",
+      search: true,
+    });
   });
 
-  test("reports create-failed and leaves the file untouched when create fails", async () => {
-    mockedRunVercelCaptureStdout.mockResolvedValue({ ok: false, stdout: "" });
-
-    const result = await setupConnectionConnector({
-      log: createTestLog(),
-      projectRoot,
-      slug: "linear",
-      service: SERVICE,
-      connectionFilePath,
+  it("removes a created connector when attach fails", async () => {
+    run.mockResolvedValueOnce(false).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    capture
+      .mockResolvedValueOnce(
+        jsonResult({ connectors: [{ uid: CANONICAL_UID, id: "scl_existing", name: "Linear" }] }),
+      )
+      .mockResolvedValueOnce(connectorResult(CANONICAL_UID, "scl_existing", "user"));
+    create.mockResolvedValue(connectorResult("linear/linear-2", "scl_created", "user"));
+    const fake = createFakePrompter({
+      single: () => "create",
+      text: (input) => input.defaultValue!,
     });
 
-    expect(result).toEqual({ kind: "create-failed", created: false });
-    expect(mockedCaptureVercel).not.toHaveBeenCalled();
-    expect(await readFile(connectionFilePath, "utf8")).toContain('connect("linear")');
+    await expect(setupConnectionConnector(options(fake.prompter))).rejects.toThrow(
+      "Could not attach linear/linear-2",
+    );
+    expect(create).toHaveBeenCalledWith(
+      ["connect", "create", SERVICE, "--name", "linear-2", "-F", "json", "--scope", "org_1"],
+      expect.any(Object),
+    );
+    expect(run).toHaveBeenLastCalledWith(
+      ["connect", "remove", "scl_created", "--disconnect-all", "--yes", "--scope", "org_1"],
+      expect.any(Object),
+    );
   });
 
-  test("links a Vercel project when none is linked yet, then attaches", async () => {
-    // Start unlinked: the gateway step used an API key/local provider, or this
-    // is a fresh `eve connections add` checkout.
-    await rm(join(projectRoot, ".vercel", "project.json"), { force: true });
-    mockedRunVercelCaptureStdout.mockResolvedValue({
-      ok: true,
-      stdout: createConnectorJson("linear/my-agent"),
+  it("recovers a partially created connector id from CLI progress and removes it", async () => {
+    run.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    capture.mockResolvedValue(jsonResult({ connectors: [] }));
+    create.mockImplementation(async (_args, createOptions) => {
+      createOptions.onOutput?.({ stream: "stderr", text: "Connector created: scl_partial" });
+      return { ok: false, stdout: "" };
     });
-    // `vercel link` writes `.vercel/project.json`; everything else succeeds.
-    mockedRunVercel.mockImplementation(async (args) => {
-      if (args[0] === "link") {
-        await writeFile(
-          join(projectRoot, ".vercel", "project.json"),
-          JSON.stringify({ projectId: PROJECT_ID, orgId: "team_x" }),
-          "utf8",
-        );
-      }
-      return true;
-    });
-    const log = createTestLog();
+    const fake = createFakePrompter({ single: () => "create", text: () => "acme" });
 
-    const result = await setupConnectionConnector({
-      log,
-      projectRoot,
-      slug: "linear",
-      service: SERVICE,
-      connectionFilePath,
-    });
-
-    expect(result).toEqual({ kind: "patched", created: true, connectorUid: "linear/my-agent" });
-    // Linked first, then attached to the now-linked project.
-    expect(mockedRunVercel).toHaveBeenCalledWith(
-      ["link"],
-      expect.objectContaining({ cwd: projectRoot }),
+    await expect(setupConnectionConnector(options(fake.prompter))).rejects.toThrow(
+      `Could not create the ${SERVICE} connector`,
     );
-    expect(mockedRunVercel).toHaveBeenCalledWith(
-      ["connect", "attach", "linear/my-agent", "--yes"],
-      expect.objectContaining({ cwd: projectRoot }),
+    expect(run).toHaveBeenLastCalledWith(
+      ["connect", "remove", "scl_partial", "--disconnect-all", "--yes", "--scope", "org_1"],
+      expect.any(Object),
     );
-    expect(await readFile(connectionFilePath, "utf8")).toContain('connect("linear/my-agent")');
-  });
-
-  test("creates the connector but skips attach when linking does not complete", async () => {
-    await rm(join(projectRoot, ".vercel", "project.json"), { force: true });
-    mockedRunVercelCaptureStdout.mockResolvedValue({
-      ok: true,
-      stdout: createConnectorJson("linear/my-agent"),
-    });
-    // `vercel link` is declined/fails, so no project.json is written.
-    mockedRunVercel.mockResolvedValue(false);
-    mockedCaptureVercel.mockResolvedValue({ ok: true, stdout: JSON.stringify({ connectors: [] }) });
-    const log = createTestLog();
-
-    const result = await setupConnectionConnector({
-      log,
-      projectRoot,
-      slug: "linear",
-      service: SERVICE,
-      connectionFilePath,
-    });
-
-    // The connector still exists and the file is patched; attach is skipped.
-    expect(result).toEqual({ kind: "patched", created: true, connectorUid: "linear/my-agent" });
-    expect(mockedRunVercel).not.toHaveBeenCalledWith(
-      ["connect", "attach", "linear/my-agent", "--yes"],
-      expect.anything(),
-    );
-    expect(log.warning).toHaveBeenCalledWith(
-      expect.stringContaining("no Vercel project is linked"),
-    );
-    expect(await readFile(connectionFilePath, "utf8")).toContain('connect("linear/my-agent")');
-  });
-
-  test("reports connector-unresolved when neither create nor the list yield a UID", async () => {
-    mockedRunVercelCaptureStdout.mockResolvedValue({ ok: true, stdout: "" });
-    mockedCaptureVercel.mockResolvedValue({ ok: true, stdout: JSON.stringify({ connectors: [] }) });
-
-    const result = await setupConnectionConnector({
-      log: createTestLog(),
-      projectRoot,
-      slug: "linear",
-      service: SERVICE,
-      connectionFilePath,
-    });
-
-    expect(result).toEqual({ kind: "connector-unresolved", created: true });
-    expect(await readFile(connectionFilePath, "utf8")).toContain('connect("linear")');
   });
 });

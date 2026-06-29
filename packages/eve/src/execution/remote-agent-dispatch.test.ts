@@ -104,6 +104,36 @@ describe("startRemoteAgentSession", () => {
     expect(body.mode).toBe("task");
   });
 
+  it("targets an active turn inbox when a callback token is supplied", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ sessionId: "remote-session" }), { status: 202 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startRemoteAgentSession({
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      callbackToken: "turn-inbox",
+      remote: createRemoteAgent(),
+      session: {
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100000 },
+        continuationToken: "eve:parent-token",
+        history: [],
+        sessionId: "parent-session",
+      },
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).callback).toEqual({
+      callId: "call-remote",
+      subagentName: "research",
+      token: "turn-inbox",
+      url: "https://caller.example.com/eve/v1/callback/turn-inbox",
+    });
+  });
+
   it("adds the Vercel automation bypass secret to callback URLs", async () => {
     vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "remote callback secret");
     const fetchMock = vi

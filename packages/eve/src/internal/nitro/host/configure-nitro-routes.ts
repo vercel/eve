@@ -4,7 +4,6 @@ import { dirname, join, relative } from "node:path";
 import type { Nitro } from "nitro/types";
 import {
   EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN,
-  EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH,
   EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH,
   EVE_HEALTH_ROUTE_PATH,
   EVE_INFO_ROUTE_PATH,
@@ -24,7 +23,7 @@ import {
   createNitroArtifactsConfig,
   type NitroArtifactsConfigInput,
 } from "#internal/nitro/host/artifacts-config.js";
-import { EVE_WORKFLOW_QUEUE_PREFIX } from "#internal/workflow/queue-namespace.js";
+import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
 import {
   computeChannelRouteRegistrations,
   registerChannelVirtualHandlers,
@@ -269,6 +268,7 @@ export async function configureNitroRoutes(
   if (includesWorkflowBundles(input.surface)) {
     const packageRoot = resolvePackageRoot();
     const builder = new WorkflowBundleBuilder({
+      agentName: preparedHost.compileResult.manifest.config.name,
       appRoot: preparedHost.appRoot,
       compiledArtifactsBootstrapPath: preparedHost.compiledArtifacts.bootstrapPath,
       outDir: preparedHost.workflowBuildDir,
@@ -378,15 +378,6 @@ export async function configureNitroRoutes(
       });
       addFrameworkVirtualHandler(nitro, {
         args: JSON.stringify({ appRoot: artifactsConfig.appRoot }),
-        handlerExport: "handleDevRuntimeArtifactsRebuildRequest",
-        method: "POST",
-        modulePath: resolvePackageSourceFilePath(
-          "src/internal/nitro/routes/dev-runtime-artifacts.ts",
-        ),
-        route: EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH,
-      });
-      addFrameworkVirtualHandler(nitro, {
-        args: JSON.stringify({ appRoot: artifactsConfig.appRoot }),
         handlerExport: "handleDevScheduleDispatchRequest",
         method: "POST",
         modulePath: resolvePackageSourceFilePath(
@@ -421,7 +412,14 @@ export async function configureNitroRoutes(
     nitro.options.dev || (!isVercelBuildEnvironment() && hasConfiguredWorkflowWorld);
   const directHandlerEntries: WorkflowDirectHandlerEntry[] =
     localWorldDrivesQueue && workflowBundlePath !== undefined
-      ? [{ bundlePath: workflowBundlePath, queuePrefix: EVE_WORKFLOW_QUEUE_PREFIX }]
+      ? [
+          {
+            bundlePath: workflowBundlePath,
+            queuePrefix: deriveEveWorkflowQueuePrefix(
+              preparedHost.compileResult.manifest.config.name,
+            ),
+          },
+        ]
       : [];
   // Generated handlers will JSON-stringify this at write-time, so we hand them
   // an ESM-safe specifier (Windows drive paths get converted to file://) but

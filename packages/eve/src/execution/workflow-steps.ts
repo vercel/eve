@@ -43,6 +43,7 @@ import {
   PendingAuthorizationResultKey,
   type AuthorizationResult,
 } from "#harness/authorization.js";
+import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
 import type { AuthorizationCallback } from "#runtime/connections/types.js";
 import {
@@ -60,8 +61,11 @@ import { emitProxiedInputRequest, routeDeliverPayload } from "#execution/subagen
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
-import { turnWorkflow } from "#execution/turn-workflow.js";
-import { createWorkflowRuntime, startWorkflowPreferLatest } from "#execution/workflow-runtime.js";
+import {
+  createWorkflowRuntime,
+  startWorkflowPreferLatest,
+  turnWorkflowReference,
+} from "#execution/workflow-runtime.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 
 /**
@@ -111,13 +115,13 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
 
-  // Populate the callback base URL so getHookUrl() works during
-  // tool execution. Reads from workflow metadata (available in steps).
+  // Populate the callback base URL so getHookUrl() works during tool
+  // execution, preferring eve's active local origin over metadata fallback.
   try {
     const { getWorkflowMetadata } = await import("#compiled/@workflow/core/index.js");
     const metadata = getWorkflowMetadata();
     if (typeof metadata.url === "string") {
-      ctx.set(CallbackBaseUrlKey, metadata.url.replace(/\/$/, ""));
+      ctx.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl(metadata.url));
     }
   } catch {
     // Outside a workflow context (e.g. tests) — getHookUrl will return undefined.
@@ -639,16 +643,20 @@ export async function dispatchTurnStep(
 ): Promise<{ readonly runId: string }> {
   "use step";
 
-  const run = await startWorkflowPreferLatest(turnWorkflow, [createTurnWorkflowInput(input)], {
-    allowReservedAttributes: true,
-    attributes: normalizeEveAttributes(
-      buildTurnAttributes({
-        parentSessionId: input.sessionState.sessionId,
-        requestId: input.delivery.kind === "deliver" ? input.delivery.requestId : undefined,
-        rootSessionId: readRootSessionId(input.serializedContext) ?? input.sessionState.sessionId,
-      }),
-    ),
-  });
+  const run = await startWorkflowPreferLatest(
+    turnWorkflowReference,
+    [createTurnWorkflowInput(input)],
+    {
+      allowReservedAttributes: true,
+      attributes: normalizeEveAttributes(
+        buildTurnAttributes({
+          parentSessionId: input.sessionState.sessionId,
+          requestId: input.delivery.kind === "deliver" ? input.delivery.requestId : undefined,
+          rootSessionId: readRootSessionId(input.serializedContext) ?? input.sessionState.sessionId,
+        }),
+      ),
+    },
+  );
 
   return { runId: run.runId };
 }

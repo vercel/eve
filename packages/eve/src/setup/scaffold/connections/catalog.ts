@@ -42,8 +42,9 @@ export type ConnectionAuthSpec =
    * It starts as a placeholder and is rewritten to the real connector UID once
    * the connector is provisioned (see {@link service}). `service` is the
    * managed-connector identifier passed to `vercel connect create <service>`
-   * (e.g. the MCP host `mcp.linear.app`); when omitted, the connector must be
-   * created out of band and its UID set by hand.
+   * (e.g. `mcp.linear.app`); when omitted, eve falls back to the MCP endpoint
+   * host. It is distinct from the connector UID, which Vercel assigns when the
+   * connector is created or listed.
    */
   | { kind: "connect"; connector: string; service?: string }
   /** Static bearer token read from a single environment variable. */
@@ -102,6 +103,9 @@ export const CUSTOM_CONNECTION_SLUG = "custom";
  * when the scaffolder emits its template. Every connection in the catalog must
  * have an entry here — {@link buildCatalogEntry} throws otherwise.
  */
+// The service is Vercel's managed provider identifier, not the MCP endpoint
+// URL. Keep these provider-owned keys explicit instead of deriving them from
+// the endpoint path.
 const CONNECTION_AUTH: Readonly<Record<string, ConnectionAuthSpec>> = {
   linear: { kind: "connect", connector: "linear", service: "mcp.linear.app" },
   notion: { kind: "connect", connector: "notion", service: "mcp.notion.com" },
@@ -182,9 +186,9 @@ export function isValidConnectionSlug(slug: string): boolean {
 
 /**
  * The `vercel connect create <service>` identifier for a Connect-backed
- * connection: the explicit `auth.service` when set, otherwise the host of the
- * MCP endpoint (e.g. `mcp.linear.app`). Returns `undefined` when neither is
- * available, in which case the connector must be provisioned out of band.
+ * connection: the explicit `auth.service` when set, otherwise the MCP host.
+ * Returns `undefined` when neither is available, in which case the connector
+ * must be provisioned out of band.
  */
 export function connectorServiceForEntry(
   entry: Pick<ConnectionCatalogEntry, "mcp" | "auth">,
@@ -192,6 +196,15 @@ export function connectorServiceForEntry(
   if (entry.auth.kind !== "connect") return undefined;
   if (entry.auth.service) return entry.auth.service;
   return mcpServiceHost(entry.mcp?.url);
+}
+
+/** Canonical connector name attempted before offering discovery or creation. */
+export function canonicalConnectorNameForEntry(entry: {
+  auth?: ConnectionAuthSpec;
+}): string | undefined {
+  if (entry.auth?.kind !== "connect") return undefined;
+  const name = entry.auth.connector.trim();
+  return name.length > 0 ? name : undefined;
 }
 
 /** Extracts the bare host from an MCP URL, or `undefined` when unparseable. */

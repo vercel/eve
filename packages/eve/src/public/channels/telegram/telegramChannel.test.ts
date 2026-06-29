@@ -408,6 +408,142 @@ describe("telegramChannel() default event handlers", () => {
     expect(ctx.state.pendingFreeformReplies).toEqual({ "51": "call_1" });
   });
 
+  it("hydrates unknown private message posts without re-keying the session", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          result: { message_id: 77, chat: { id: 42, type: "private" } },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = withState(
+      getAdapter(telegramChannel({ credentials: { botToken: "bot-token" } })),
+      { chatId: "42", chatType: null, conversationId: null },
+    );
+    const { accessor, writes } = captureAccessor("telegram:42::");
+    const ctx = buildAdapterContext(adapter, accessor);
+
+    await callEvent(
+      adapter,
+      makeEvent("message.completed", {
+        finishReason: "stop",
+        message: "hello",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(writes.filter(([key]) => key === "eve.continuationToken")).toEqual([]);
+    expect(ctx.state.chatType).toBe("private");
+    expect(ctx.state.conversationId).toBeNull();
+  });
+
+  it("keeps proactive private topic posts topic-wide without a message-id anchor", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          result: { message_id: 77, chat: { id: 42, type: "private" } },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = withState(
+      getAdapter(telegramChannel({ credentials: { botToken: "bot-token" } })),
+      { chatId: "42", chatType: null, conversationId: null, messageThreadId: 7 },
+    );
+    const { accessor, writes } = captureAccessor("telegram:42:7:");
+    const ctx = buildAdapterContext(adapter, accessor);
+
+    await callEvent(
+      adapter,
+      makeEvent("message.completed", {
+        finishReason: "stop",
+        message: "hello",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(writes.filter(([key]) => key === "eve.continuationToken")).toEqual([]);
+    expect(ctx.state.chatType).toBe("private");
+    expect(ctx.state.conversationId).toBeNull();
+  });
+
+  it("hydrates unknown group message posts and re-keys to the posted message id", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          result: { message_id: 77, chat: { id: -1001, type: "supergroup" } },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = withState(
+      getAdapter(telegramChannel({ credentials: { botToken: "bot-token" } })),
+      { chatId: "-1001", chatType: null, conversationId: null },
+    );
+    const { accessor, writes } = captureAccessor("telegram:-1001::");
+    const ctx = buildAdapterContext(adapter, accessor);
+
+    await callEvent(
+      adapter,
+      makeEvent("message.completed", {
+        finishReason: "stop",
+        message: "hello",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(writes).toContainEqual(["eve.continuationToken", "telegram:-1001::77"]);
+    expect(ctx.state.chatType).toBe("supergroup");
+    expect(ctx.state.conversationId).toBe("77");
+  });
+
+  it("preserves explicit conversation ids after Telegram identifies a private chat", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          result: { message_id: 77, chat: { id: 42, type: "private" } },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = withState(
+      getAdapter(telegramChannel({ credentials: { botToken: "bot-token" } })),
+      { chatId: "42", chatType: null, conversationId: "caller-selected" },
+    );
+    const { accessor, writes } = captureAccessor("telegram:42::caller-selected");
+    const ctx = buildAdapterContext(adapter, accessor);
+
+    await callEvent(
+      adapter,
+      makeEvent("message.completed", {
+        finishReason: "stop",
+        message: "hello",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(writes.filter(([key]) => key === "eve.continuationToken")).toEqual([]);
+    expect(ctx.state.chatType).toBe("private");
+    expect(ctx.state.conversationId).toBe("caller-selected");
+  });
+
   it("group message posts re-key the session to the posted message id", async () => {
     const fetchMock = vi
       .fn()
@@ -440,7 +576,127 @@ describe("telegramChannel() default event handlers", () => {
 });
 
 describe("telegramChannel().receive", () => {
-  it("starts a proactive session and anchors initialMessage under Telegram's message id", async () => {
+  it("keeps private initialMessage sessions chat-wide", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          result: { message_id: 88, chat: { id: 42, type: "private" } },
+        }),
+      ),
+    );
+    const channel = asCompiled<TelegramChannelState>(
+      telegramChannel({
+        api: { apiBaseUrl: "https://telegram.example", fetch: fetchMock },
+        credentials: { botToken: "bot-token" },
+      }),
+    );
+    const send = vi.fn().mockResolvedValue({ continuationToken: "ct", id: "s1" });
+
+    await channel.receive!(
+      {
+        target: { chatId: 42, initialMessage: "Starting" },
+        auth: null,
+        message: "run",
+      },
+      { send },
+    );
+
+    expect(send).toHaveBeenCalledWith(
+      "run",
+      expect.objectContaining({
+        continuationToken: "42::",
+        state: expect.objectContaining({
+          chatId: "42",
+          chatType: "private",
+          conversationId: null,
+        }),
+      }),
+    );
+  });
+
+  it("keeps private topic initialMessage sessions topic-wide", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          result: { message_id: 88, chat: { id: 42, type: "private" } },
+        }),
+      ),
+    );
+    const channel = asCompiled<TelegramChannelState>(
+      telegramChannel({
+        api: { apiBaseUrl: "https://telegram.example", fetch: fetchMock },
+        credentials: { botToken: "bot-token" },
+      }),
+    );
+    const send = vi.fn().mockResolvedValue({ continuationToken: "ct", id: "s1" });
+
+    await channel.receive!(
+      {
+        target: { chatId: 42, initialMessage: "Starting", messageThreadId: 7 },
+        auth: null,
+        message: "run",
+      },
+      { send },
+    );
+
+    expect(send).toHaveBeenCalledWith(
+      "run",
+      expect.objectContaining({
+        continuationToken: "42:7:",
+        state: expect.objectContaining({
+          chatId: "42",
+          chatType: "private",
+          conversationId: null,
+          messageThreadId: 7,
+        }),
+      }),
+    );
+  });
+
+  it("anchors group initialMessage sessions under Telegram's message id", async () => {
+    for (const chatType of ["group", "supergroup"] as const) {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            result: { message_id: 88, chat: { id: -1001, type: chatType } },
+          }),
+        ),
+      );
+      const channel = asCompiled<TelegramChannelState>(
+        telegramChannel({
+          api: { apiBaseUrl: "https://telegram.example", fetch: fetchMock },
+          credentials: { botToken: "bot-token" },
+        }),
+      );
+      const send = vi.fn().mockResolvedValue({ continuationToken: "ct", id: "s1" });
+
+      await channel.receive!(
+        {
+          target: { chatId: -1001, initialMessage: "Starting" },
+          auth: null,
+          message: "run",
+        },
+        { send },
+      );
+
+      expect(send).toHaveBeenCalledWith(
+        "run",
+        expect.objectContaining({
+          continuationToken: "-1001::88",
+          state: expect.objectContaining({
+            chatId: "-1001",
+            chatType,
+            conversationId: "88",
+          }),
+        }),
+      );
+    }
+  });
+
+  it("leaves initialMessage sessions unanchored when Telegram omits the chat type", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(
@@ -466,8 +722,51 @@ describe("telegramChannel().receive", () => {
     expect(send).toHaveBeenCalledWith(
       "run",
       expect.objectContaining({
-        continuationToken: "42::88",
-        state: expect.objectContaining({ chatId: "42", conversationId: "88" }),
+        continuationToken: "42::",
+        state: expect.objectContaining({
+          chatId: "42",
+          chatType: null,
+          conversationId: null,
+        }),
+      }),
+    );
+  });
+
+  it("leaves initialMessage sessions unanchored for unsupported returned chat types", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          result: { message_id: 88, chat: { id: 42, type: "bot" } },
+        }),
+      ),
+    );
+    const channel = asCompiled<TelegramChannelState>(
+      telegramChannel({
+        api: { apiBaseUrl: "https://telegram.example", fetch: fetchMock },
+        credentials: { botToken: "bot-token" },
+      }),
+    );
+    const send = vi.fn().mockResolvedValue({ continuationToken: "ct", id: "s1" });
+
+    await channel.receive!(
+      {
+        target: { chatId: 42, initialMessage: "Starting" },
+        auth: null,
+        message: "run",
+      },
+      { send },
+    );
+
+    expect(send).toHaveBeenCalledWith(
+      "run",
+      expect.objectContaining({
+        continuationToken: "42::",
+        state: expect.objectContaining({
+          chatId: "42",
+          chatType: null,
+          conversationId: null,
+        }),
       }),
     );
   });
