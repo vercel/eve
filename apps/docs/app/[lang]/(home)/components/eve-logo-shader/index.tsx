@@ -103,7 +103,7 @@ export function EveLogoShader() {
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none absolute left-1/2 top-1/2 z-0 h-[6em] max-w-none -translate-x-1/2 translate-y-[calc(-50%-0.4em)]"
+      className="pointer-events-none absolute left-1/2 top-1/2 z-0 h-[6.5em] max-w-none -translate-x-1/2 translate-y-[calc(-50%-0.4em)]"
       style={{
         aspectRatio: `${paddedWidth} / ${paddedHeight}`,
       }}

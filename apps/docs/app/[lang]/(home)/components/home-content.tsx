@@ -32,12 +32,14 @@ export const homeMetadata: Metadata = {
 
 export const HomeContent = () => (
   <div className="mx-auto w-full max-w-[1080px] pb-32">
-    <section className="relative isolate flex min-h-[80vh] flex-col items-center justify-center gap-y-5 px-4 py-24 text-center sm:px-12 sm:py-28">
-      <div className="relative z-10 max-w-5xl text-center font-normal! text-heading-40 md:whitespace-nowrap md:text-heading-48 lg:text-heading-56">
+    <section className="relative isolate flex min-h-[80vh] flex-col items-center justify-center gap-y-5 px-4 py-24 text-center sm:px-12 sm:pb-28 sm:pt-42">
+      <div className="relative z-10 max-w-5xl text-center font-normal! text-heading-40 md:text-heading-48 lg:text-heading-56">
         <EveLogoShader />
-        <h1 className="relative">The Framework for Building Agents</h1>
+        <h1 className="relative text-balance w-full max-w-[10em]">
+          The Framework for Building Agents
+        </h1>
       </div>
-      <p className="relative z-10 w-full text-center text-copy-16 text-gray-900 md:max-w-2xl md:text-copy-18 lg:text-copy-20">
+      <p className="text-balance relative z-10 w-full text-center text-copy-16 text-gray-900 md:max-w-2xl md:text-copy-18 lg:text-copy-20">
         {tagline}
       </p>
       <div className="relative z-10 mt-2 flex w-full max-w-3xl flex-col items-center gap-4 sm:flex-row sm:items-end sm:justify-center">
