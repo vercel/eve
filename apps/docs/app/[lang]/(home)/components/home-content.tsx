@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { Button } from "@vercel/geistdocs/components/button";
+// TODO
+// import Link from "next/link";
+// import { Button } from "@vercel/geistdocs/components/button";
 import { staticOgImage } from "@/lib/geistdocs/og";
 import { ArchitectureDiagram } from "./architecture";
 import { CTA } from "./cta";
@@ -43,7 +44,7 @@ export const HomeContent = () => (
       </p>
       <div className="mt-2 flex w-full max-w-3xl flex-col items-center gap-4 sm:flex-row sm:items-end sm:justify-center">
         <InstallSwitcher className="items-center" />
-        <Button
+        {/* <Button
           asChild
           className="h-[52px] rounded-full bg-gray-1000 px-6 hover:bg-gray-900"
           size="lg"
@@ -51,7 +52,7 @@ export const HomeContent = () => (
           <Link href="/docs/introduction">
             <span className="text-background-100 text-label-16">Read docs</span>
           </Link>
-        </Button>
+        </Button> */}
       </div>
     </section>
     <FileTree />
