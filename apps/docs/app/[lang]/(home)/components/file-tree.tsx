@@ -9,12 +9,11 @@ import {
   IconFolderOpen,
   IconLinked,
   IconMessage,
-  type IconProps,
   IconSandbox,
   IconSparkles,
   IconWorkflow,
   IconWrench,
-} from "@/components/geistcn-icons";
+} from "@vercel/geistdocs/assets/icons";
 import { cn } from "@/lib/utils";
 import { FileTreeView } from "./file-tree-view";
 
@@ -27,7 +26,7 @@ interface Snippet {
   fileName: string;
   lang: string;
   /** Category icon for the left column. */
-  NavIcon: (props: IconProps) => JSX.Element;
+  NavIcon: (props: { size?: number; className?: string }) => JSX.Element;
   /** Short, what-this-file-does line shown above the code. */
   description: string;
   code: string;
@@ -217,7 +216,7 @@ export async function FileTree() {
     name: snippet.name,
     fileName: snippet.fileName,
     description: snippet.description,
-    navIcon: <snippet.NavIcon aria-hidden className="shrink-0" color="currentColor" size={16} />,
+    navIcon: <snippet.NavIcon className="shrink-0" size={16} />,
     code: rendered[i],
   }));
 
@@ -230,7 +229,7 @@ export async function FileTree() {
             <IconFolderOpen aria-hidden className="size-[0.58em]" color="gray-900" />
             agent
           </span>{" "}
-          is a folder
+          is a directory
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">
           Define instructions and skills in markdown, tools in TypeScript, and deploy anywhere. The

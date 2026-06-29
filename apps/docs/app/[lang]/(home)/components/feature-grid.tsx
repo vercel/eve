@@ -1,4 +1,3 @@
-import type { JSX, ReactNode } from "react";
 import {
   IconLogs,
   IconMessage,
@@ -6,40 +5,41 @@ import {
   IconSandbox,
   IconUser,
   IconWorkflow,
-} from "@/components/geistcn-icons";
+} from "@vercel/geistdocs/assets/icons";
+import type { JSX, ReactNode } from "react";
 
 const FEATURES: { icon: ReactNode; label: string; description: string }[] = [
   {
-    icon: <IconWorkflow aria-hidden color="gray-1000" size={16} />,
+    icon: <IconWorkflow className="text-gray-1000" size={16} />,
     label: "Durable Execution",
     description:
       "Workflows survive crashes and restarts. Every step is checkpointed. Agents park when waiting, resume on the next message.",
   },
   {
-    icon: <IconSandbox aria-hidden color="gray-1000" size={16} />,
+    icon: <IconSandbox className="text-gray-1000" size={16} />,
     label: "Sandboxed Compute",
     description:
       "Agents run code in isolated sandboxes. File system access, bash execution, and code, all fully isolated.",
   },
   {
-    icon: <IconMessage aria-hidden color="gray-1000" size={16} />,
+    icon: <IconMessage className="text-gray-1000" size={16} />,
     label: "Multi-Channel Delivery",
     description: "One agent codebase deploys to web chat, Slack, API, cron, CLI, and custom apps.",
   },
   {
-    icon: <IconUser aria-hidden color="gray-1000" size={16} />,
+    icon: <IconUser className="text-gray-1000" size={16} />,
     label: "Human-in-the-Loop",
     description:
       "Tools that need confirmation trigger approval gates. Sessions park until resolved, then resume seamlessly.",
   },
   {
-    icon: <IconRobot aria-hidden color="gray-1000" size={16} />,
+    icon: <IconRobot className="text-gray-1000" size={16} />,
     label: "Subagents",
     description:
       "Delegate specialized work to child agents with their own prompts, tools, and sandbox.",
   },
   {
-    icon: <IconLogs aria-hidden color="gray-1000" size={16} />,
+    icon: <IconLogs className="text-gray-1000" size={16} />,
     label: "Evaluations",
     description:
       "Define test suites with scoring rubrics. Run evals on every deployment and on a schedule.",
