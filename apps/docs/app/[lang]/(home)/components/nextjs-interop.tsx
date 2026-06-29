@@ -78,9 +78,7 @@ export async function NextjsInterop() {
                 <div className="flex h-12 items-center gap-2 border-b px-4">
                   <span className="text-sm text-gray-1000">{file.fileName}</span>
                 </div>
-                <div className="overflow-x-auto text-[13px] [&>div]:mb-0 [&_button]:opacity-0 [&_button]:transition-opacity [&:hover_button]:opacity-100 [&:focus-within_button]:opacity-100">
-                  {rendered[i]}
-                </div>
+                <div className="overflow-x-auto text-[13px] [&>div]:mb-0">{rendered[i]}</div>
               </div>
             ))}
           </div>

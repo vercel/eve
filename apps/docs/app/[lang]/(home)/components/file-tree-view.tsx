@@ -1,15 +1,10 @@
 "use client";
 
-import {
-  IconCheck,
-  IconPlusCircle,
-  IconRefreshCounterClockwise,
-} from "@vercel/geistdocs/assets/icons";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 export interface FileTreeItem {
-  /** Category name shown in the left "Configure your agent" column. */
+  /** Category name (unused by this layout). */
   label: string;
   /** File/folder name shown in the IDE file tree. */
   name: string;
@@ -23,35 +18,61 @@ export interface FileTreeItem {
   code: ReactNode;
 }
 
-export function FileTreeView({ items }: { items: FileTreeItem[] }) {
+export function FileTreeView({ items, heading }: { items: FileTreeItem[]; heading?: ReactNode }) {
   const [selectedIndex, setSelectedIndex] = useState(0);
-  // The first file is "added" by default; every other file is optional and
-  // only counts as added once the user clicks it.
-  const [visited, setVisited] = useState<ReadonlySet<number>>(() => new Set([0]));
   const selected = items[selectedIndex];
 
-  function select(index: number) {
-    // Clicking the active, already-added optional file deselects it again. The
-    // default file (instructions.md) is always present and can't be removed.
-    if (index !== 0 && index === selectedIndex && visited.has(index)) {
-      const next = new Set(visited);
-      next.delete(index);
-      setVisited(next);
-      const remaining = [...next];
-      setSelectedIndex(remaining.length > 0 ? Math.max(...remaining) : 0);
+  // The viz pins while you scroll through it, stepping the open file by scroll
+  // progress (scrollytelling). Disabled for reduced motion — then it's a plain
+  // click-to-view browser.
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [scrolly, setScrolly] = useState(false);
+
+  useEffect(() => {
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    setScrolly(true);
+  }, []);
+
+  useEffect(() => {
+    if (!scrolly) return;
+    const track = trackRef.current;
+    if (!track) return;
+    let raf = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const distance = track.offsetHeight - window.innerHeight;
+        if (distance <= 0) return;
+        const progress = Math.min(Math.max(-track.getBoundingClientRect().top / distance, 0), 1);
+        setSelectedIndex(Math.min(items.length - 1, Math.floor(progress * items.length)));
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      cancelAnimationFrame(raf);
+    };
+  }, [scrolly, items.length]);
+
+  function handleSelect(index: number) {
+    if (!scrolly || !trackRef.current) {
+      setSelectedIndex(index);
       return;
     }
-    setSelectedIndex(index);
-    setVisited((prev) => new Set(prev).add(index));
+    // Scroll to the segment that maps to this file so the sticky view follows.
+    const track = trackRef.current;
+    const distance = track.offsetHeight - window.innerHeight;
+    const targetProgress = (index + 0.5) / items.length;
+    const top = window.scrollY + track.getBoundingClientRect().top + targetProgress * distance;
+    // Jump straight to the file's segment — no smooth scroll, so the view
+    // doesn't flip through the files in between on the way there.
+    window.scrollTo({ top, behavior: "auto" });
   }
 
-  function reset() {
-    setSelectedIndex(0);
-    setVisited(new Set([0]));
-  }
-
-  return (
-    <div className="relative mt-16">
+  const board = (
+    <div className="relative mt-12">
+      {/* Grid line aligned with the card header's border-b, fading out at the edges. */}
       <div
         aria-hidden
         className="pointer-events-none absolute top-12 -left-4 -right-4 h-px sm:-left-14 sm:-right-14"
@@ -63,86 +84,47 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
       <div className="mx-auto max-w-5xl">
         <div className="relative overflow-hidden rounded-t-xl border bg-background-100">
           <div className="grid md:grid-cols-[240px_1fr]">
-            {/* Sidebar */}
+            {/* Sidebar — the building blocks; click any to view it. */}
             <div className="border-b md:border-r md:border-b-0">
-              <div className="flex h-12 items-center gap-2 border-b px-4">
+              <div className="flex h-12 items-center border-b px-4">
                 <span className="font-medium text-gray-1000 text-sm">agent/</span>
-                <div className="ml-auto flex items-center">
-                  <span className="whitespace-nowrap text-gray-900 text-label-13">
-                    {visited.size} {visited.size === 1 ? "file" : "files"}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={reset}
-                    aria-label="Reset selection"
-                    title="Reset"
-                    className={cn(
-                      "flex shrink-0 cursor-pointer items-center overflow-hidden text-gray-900 transition-all duration-300 ease-out hover:text-gray-1000",
-                      visited.size > 1
-                        ? "ml-2 w-4 opacity-100"
-                        : "pointer-events-none ml-0 w-0 opacity-0",
-                    )}
-                  >
-                    <IconRefreshCounterClockwise size={15} />
-                  </button>
-                </div>
               </div>
               <div className="space-y-0.5 p-2">
-                {items.map((item, i) => {
-                  const added = visited.has(i);
-                  return (
-                    <button
-                      key={item.name}
-                      type="button"
-                      onClick={() => select(i)}
-                      className={cn(
-                        "group flex w-full cursor-pointer items-center rounded-md px-3 py-2 text-left transition-colors",
-                        selectedIndex === i ? "bg-gray-100" : "hover:bg-gray-100/60",
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "ml-2 text-sm transition-colors",
-                          added ? "text-gray-1000" : "text-gray-700 group-hover:text-gray-1000",
-                        )}
-                      >
-                        {item.name}
+                {items.map((item, i) => (
+                  <button
+                    key={item.name}
+                    type="button"
+                    onClick={() => handleSelect(i)}
+                    className={cn(
+                      "flex w-full cursor-pointer items-center rounded-md px-3 py-2 text-left text-sm transition-colors",
+                      selectedIndex === i
+                        ? "bg-gray-100 text-gray-1000"
+                        : "text-gray-700 hover:bg-gray-100/60 hover:text-gray-1000",
+                    )}
+                  >
+                    {item.name}
+                    {i > 0 ? (
+                      <span className="ml-auto font-mono text-gray-500 text-label-12-mono">
+                        optional
                       </span>
-                      {i > 0 && added ? (
-                        <IconCheck className="-mr-1 ml-auto text-gray-1000" size={14} />
-                      ) : i > 0 ? (
-                        <IconPlusCircle
-                          className="-mr-1 ml-auto text-gray-1000 opacity-0 transition-opacity group-hover:opacity-100"
-                          size={14}
-                        />
-                      ) : null}
-                    </button>
-                  );
-                })}
+                    ) : null}
+                  </button>
+                ))}
               </div>
             </div>
 
             {/* Code panel — fixed height so the card never reflows; the code
                 area flexes to fill whatever the (content-hugging) description leaves. */}
             <div className="flex min-h-[492px] min-w-0 flex-col">
-              <div className="flex h-12 items-center gap-2 border-b px-4">
+              <div className="flex h-12 items-center border-b px-4">
                 <span className="font-medium text-gray-1000 text-sm">{selected.fileName}</span>
-                {selectedIndex > 0 ? (
-                  <span className="ml-auto font-mono uppercase tracking-[0.1em] text-gray-900 text-label-12-mono">
-                    Optional
-                  </span>
-                ) : null}
               </div>
               <p className="border-b px-4 py-3 text-gray-900 text-copy-14">
                 {selected.description}
               </p>
-              {/* Re-keyed per file so the code subtly flies in on selection. */}
-              <div
-                key={selected.fileName}
-                className="grow pb-6 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300 motion-safe:ease-out [&>div]:mb-0 [&_button]:opacity-0 [&_button]:transition-opacity [&:hover_button]:opacity-100 [&:focus-within_button]:opacity-100"
-              >
-                {selected.code}
-              </div>
+              {/* Content swaps in place (no keyed remount) so the previous file
+                  never lingers as a ghost layer mid-transition. */}
+              <div className="grow pb-6 [&>div]:mb-0">{selected.code}</div>
             </div>
           </div>
         </div>
@@ -151,6 +133,23 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
         aria-hidden
         className="pointer-events-none absolute inset-x-0 -bottom-1 -mx-2 h-12 bg-linear-to-t from-background-200 to-transparent"
       />
+    </div>
+  );
+
+  const block = (
+    <>
+      {heading}
+      {board}
+    </>
+  );
+
+  if (!scrolly) {
+    return <div className="mt-16">{block}</div>;
+  }
+
+  return (
+    <div ref={trackRef} className="relative mt-16" style={{ height: `${items.length * 42}vh` }}>
+      <div className="sticky top-[max(4rem,calc(50vh-20.5rem))]">{block}</div>
     </div>
   );
 }
