@@ -82,6 +82,10 @@ export default {
       input: "@chat-adapter/slack/format",
       outputPath: "format",
     },
+    {
+      input: "@chat-adapter/slack/api",
+      outputPath: "api",
+    },
   ],
   plugins: [createOptionalNativeStubPlugin(["bufferutil", "utf-8-validate"])],
   copyDeclarations: createDeclarationCopier({
@@ -92,6 +96,7 @@ export default {
       { source: "blocks.d.ts", output: "blocks.d.ts" },
       { source: "webhook.d.ts", output: "webhook.d.ts" },
       { source: "format.d.ts", output: "format.d.ts" },
+      { source: "api.d.ts", output: "api.d.ts" },
     ],
     rewrites: {
       chat: { kind: "vendored", compiledPath: "chat" },
