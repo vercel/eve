@@ -16,6 +16,7 @@ describe("definition helper exact inputs", () => {
   it("preserves literal inference for valid definitions", () => {
     const agent = defineAgent({
       description: "type-test",
+      limits: { maxSubagentDepth: 4 },
       model: "anthropic/claude-sonnet-4.6",
     });
 
@@ -25,6 +26,7 @@ describe("definition helper exact inputs", () => {
     });
 
     expect(agent.description).toBe("type-test");
+    expect(agent.limits.maxSubagentDepth).toBe(4);
     expect(schedule.cron).toBe("0 9 * * *");
   });
 });

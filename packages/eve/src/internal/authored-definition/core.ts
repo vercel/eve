@@ -41,6 +41,7 @@ export function normalizeAgentDefinition(
       "compaction",
       "description",
       "experimental",
+      "limits",
       "model",
       "modelContextWindowTokens",
       "modelOptions",
@@ -92,6 +93,10 @@ export function normalizeAgentDefinition(
     definition.reasoning = normalizeAgentReasoningDefinition(record.reasoning, message);
   }
 
+  if (record.limits !== undefined) {
+    definition.limits = normalizeAgentLimitsDefinition(record.limits, message);
+  }
+
   return definition as Readonly<NormalizedAgentDefinition>;
 }
 
@@ -121,6 +126,21 @@ function expectPositiveInteger(value: unknown, message: string): number {
   }
 
   return value;
+}
+
+function normalizeAgentLimitsDefinition(
+  value: unknown,
+  message: string,
+): NonNullable<NormalizedAgentDefinition["limits"]> {
+  const record = expectObjectRecord(value, message);
+  expectOnlyKnownKeys(record, ["maxSubagentDepth"], message);
+  const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["limits"]>> = {};
+
+  if (record.maxSubagentDepth !== undefined) {
+    normalizedDefinition.maxSubagentDepth = expectPositiveInteger(record.maxSubagentDepth, message);
+  }
+
+  return normalizedDefinition;
 }
 
 function normalizeAgentBuildDefinition(

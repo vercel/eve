@@ -77,6 +77,23 @@ The built-in `agent` tool is the exception. Its children share the parent's sand
 
 eve lowers every subagent (built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, outputSchema? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. Set `outputSchema` to run the child in task mode, returning structured output as the tool result.
 
+Subagent delegation is capped by default at three child-session levels. Increase
+or lower that limit with `limits.maxSubagentDepth`:
+
+```ts title="agent/agent.ts"
+export default defineAgent({
+  model: "anthropic/claude-sonnet-4.6",
+  limits: {
+    maxSubagentDepth: 4,
+  },
+});
+```
+
+The root session is depth 0. With `maxSubagentDepth: 4`, eve may create child sessions
+at depths 1 through 4; a session already at depth 4 cannot delegate again.
+
+At the configured depth, eve stops advertising subagent tools, including declared local subagents, remote-agent tools, the built-in `agent` tool, and the `Workflow` orchestration tool when it would only expose subagents. If a stale or forced subagent call still reaches execution, eve blocks it and returns an error tool result instead of starting another child session.
+
 A declared subagent's tool name is the bare path-derived name, with no prefix. `agent/subagents/researcher/` registers as the tool `researcher`. Unlike connection tools (`<connection>__<tool>`), it carries no namespace, so the model, approvals, logs, and evals all reference it by that name. Its input schema is:
 
 ```ts

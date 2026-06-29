@@ -40,7 +40,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 31;
+export const COMPILED_AGENT_MANIFEST_VERSION = 32;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -357,6 +357,12 @@ const compiledAgentCompactionDefinitionSchema: z.ZodType<CompiledAgentCompaction
   })
   .strict();
 
+const compiledAgentLimitsDefinitionSchema = z
+  .object({
+    maxSubagentDepth: z.number().int().positive().optional(),
+  })
+  .strict();
+
 const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
   .object({
     build: compiledAgentBuildDefinitionSchema.optional(),
@@ -375,6 +381,7 @@ const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
       .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
       .optional(),
     source: moduleSourceRefSchema.optional(),
+    limits: compiledAgentLimitsDefinitionSchema.optional(),
   })
   .strict();
 

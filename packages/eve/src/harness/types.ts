@@ -73,6 +73,17 @@ export interface HarnessSession {
   readonly sessionId: string;
   readonly sandboxState?: SandboxState;
   readonly state?: SessionStateMap;
+  /**
+   * Number of local delegated subagent hops from the root session to this
+   * session. Root sessions are depth 0. Used by the harness to cap recursive
+   * subagent delegation.
+   */
+  readonly subagentDepth?: number;
+  /**
+   * Maximum delegated child-session depth for this session. When omitted, the
+   * harness uses the framework default.
+   */
+  readonly subagentMaxDepth?: number;
 }
 
 /**

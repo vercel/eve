@@ -124,6 +124,7 @@ import {
 } from "#shared/empty-delivery.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
 import { ensureOtelIntegration } from "#harness/otel-integration.js";
+import { getAdvertisedTools } from "#harness/advertised-tools.js";
 import {
   applyLastToolCacheBreakpoint,
   applySystemCacheBreakpoint,
@@ -639,17 +640,24 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       const callMessages = opts.trailingUserNote
         ? [...modelMessages, { role: "user" as const, content: opts.trailingUserNote }]
         : modelMessages;
+      const advertisedHarnessTools = getAdvertisedTools({
+        session,
+        tools: config.tools,
+      });
 
       const flatTools = await buildToolSetWithProviderTools({
         approvedTools,
         capabilities: config.capabilities,
         disabledProviderTools: opts.disabledProviderTools,
         modelReference: session.agent.modelReference,
-        tools: config.tools,
+        tools: advertisedHarnessTools,
       });
 
       if (ctx !== undefined) {
-        const dynamicTools = buildDynamicTools(ctx);
+        const dynamicTools = getAdvertisedTools({
+          session,
+          tools: buildDynamicTools(ctx),
+        });
         const dynamicToolSet = buildToolSetFromDefinitions({
           approvedTools,
           capabilities: config.capabilities,
@@ -671,13 +679,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           ? (
               await applyWorkflowTool({
                 continuationSecurity: getWorkflowContinuationSecurity(session),
-                harnessTools: config.tools,
+                harnessTools: advertisedHarnessTools,
                 lifecycle:
                   emit !== undefined
                     ? createWorkflowLifecycle({
                         emit,
                         emissionState,
-                        tools: config.tools,
+                        tools: advertisedHarnessTools,
                       })
                     : undefined,
                 tools: flatTools,
@@ -725,7 +733,17 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       const executeModelCall = async (): Promise<HarnessStepResult> => {
         if (emit) {
-          const excludedActionToolNames = new Set([ASK_QUESTION_TOOL_NAME, FINAL_OUTPUT_TOOL_NAME]);
+          const hiddenRuntimeActionToolNames = [...config.tools]
+            .filter(
+              ([name, tool]) =>
+                tool.runtimeAction !== undefined && advertisedHarnessTools.get(name) === undefined,
+            )
+            .map(([name]) => name);
+          const excludedActionToolNames = new Set([
+            ASK_QUESTION_TOOL_NAME,
+            FINAL_OUTPUT_TOOL_NAME,
+            ...hiddenRuntimeActionToolNames,
+          ]);
           const streamResult = await agent.stream({ messages: callMessages });
           const {
             emittedActionCallIds,
@@ -748,7 +766,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             emittedActionCallIds,
             excludedActionToolNames,
             handledInlineToolResultCallIds,
-            tools: config.tools,
+            tools: advertisedHarnessTools,
           });
           if (inlineToolResultParts.length > 0 || inlineAuthorizationResults.length > 0) {
             const existingToolResults = stepResult.toolResults as TypedToolResult<ToolSet>[];
@@ -1463,13 +1481,28 @@ async function handleStepResult(input: {
     excludedCallIds: approvalRequestCallIds,
   });
   const inputRequests: InputRequest[] = [...approvalRequests, ...questionRequests];
+  const advertisedRuntimeActionTools = getAdvertisedTools({
+    session: baseSession,
+    tools: config.tools,
+  });
   const pendingRuntimeActions = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
     .filter((toolCall) => !isInvalidToolCall(toolCall))
     .filter((toolCall) => config.tools.get(toolCall.toolName)?.runtimeAction !== undefined)
+    .filter((toolCall) => {
+      if (advertisedRuntimeActionTools.get(toolCall.toolName)?.runtimeAction !== undefined) {
+        return true;
+      }
+      log.warn("runtime action tool call blocked because tool is not advertised", {
+        callId: toolCall.toolCallId,
+        sessionId: baseSession.sessionId,
+        toolName: toolCall.toolName,
+      });
+      return false;
+    })
     .map((toolCall) =>
       createRuntimeActionRequestFromToolCall({
         toolCall,
-        tools: config.tools,
+        tools: advertisedRuntimeActionTools,
       }),
     );
 

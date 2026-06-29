@@ -34,8 +34,10 @@ import {
   requestAuthorization,
 } from "#harness/authorization.js";
 import { hasDeferredStepInput, setPendingInputBatch } from "#harness/input-requests.js";
+import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { DEFAULT_SUBAGENT_MAX_DEPTH } from "#harness/subagent-depth.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 import {
   CONDITIONAL_DELIVERY_INSTRUCTION,
@@ -130,6 +132,33 @@ function createTestConfig(
     ]),
     ...overrides,
   };
+}
+
+function createDelegationToolMap(): ToolLoopHarnessConfig["tools"] {
+  return new Map([
+    [
+      "add",
+      {
+        description: "Adds numbers",
+        execute: vi.fn().mockResolvedValue("42"),
+        inputSchema: jsonSchema({ type: "object" }),
+        name: "add",
+      },
+    ],
+    [
+      "delegate",
+      {
+        description: "Delegate to a subagent.",
+        inputSchema: jsonSchema({ type: "object" }),
+        name: "delegate",
+        runtimeAction: {
+          kind: "subagent-call",
+          nodeId: "workers",
+          subagentName: "worker",
+        },
+      },
+    ],
+  ]);
 }
 
 function createScheduleContext(): ContextContainer {
@@ -590,6 +619,187 @@ describe("createToolLoopHarness", () => {
     const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
     expect(agentCall).toBeDefined();
     expect(agentCall!.tools).toHaveProperty("add");
+    expect(agentCall!.tools).not.toHaveProperty("Workflow");
+  });
+
+  it("hides subagent tools from the model after the subagent depth limit", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const config = createTestConfig("conversation", undefined, {
+      tools: createDelegationToolMap(),
+    });
+    const runStep = createToolLoopHarness(config);
+
+    await runStep(createTestSession({ subagentDepth: DEFAULT_SUBAGENT_MAX_DEPTH }), {
+      message: "Hi",
+    });
+
+    const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+    expect(agentCall).toBeDefined();
+    expect(agentCall!.tools).toHaveProperty("add");
+    expect(agentCall!.tools).not.toHaveProperty("delegate");
+  });
+
+  it("publishes subagent calls from the current run immediately before the depth limit", async () => {
+    setupMockAgent({
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          {
+            content: [
+              {
+                input: { message: "delegate at depth 2" },
+                toolCallId: "call-1",
+                toolName: "delegate",
+                type: "tool-call",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [
+        {
+          input: { message: "delegate at depth 2" },
+          toolCallId: "call-1",
+          toolName: "delegate",
+          type: "tool-call",
+        },
+      ],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, { tools: createDelegationToolMap() }),
+    );
+
+    const result = await runStep(
+      createTestSession({ subagentDepth: DEFAULT_SUBAGENT_MAX_DEPTH - 1 }),
+      {
+        message: "Hi",
+      },
+    );
+
+    expect(events.find((event) => event.type === "actions.requested")?.data.actions).toEqual([
+      {
+        callId: "call-1",
+        description: "Delegate to a subagent.",
+        input: { message: "delegate at depth 2" },
+        kind: "subagent-call",
+        name: "delegate",
+        nodeId: "workers",
+        subagentName: "worker",
+      },
+    ]);
+    expect(getPendingRuntimeActionBatch(result.session.state)?.actions).toEqual([
+      {
+        callId: "call-1",
+        description: "Delegate to a subagent.",
+        input: { message: "delegate at depth 2" },
+        kind: "subagent-call",
+        name: "delegate",
+        nodeId: "workers",
+        subagentName: "worker",
+      },
+    ]);
+  });
+
+  it("does not publish subagent calls from the current run at the depth limit", async () => {
+    setupMockAgent({
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          {
+            content: [
+              {
+                input: { message: "delegate at depth 3" },
+                toolCallId: "call-1",
+                toolName: "delegate",
+                type: "tool-call",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [
+        {
+          input: { message: "delegate at depth 3" },
+          toolCallId: "call-1",
+          toolName: "delegate",
+          type: "tool-call",
+        },
+      ],
+      toolResults: [],
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, { tools: createDelegationToolMap() }),
+    );
+
+    const result = await runStep(createTestSession({ subagentDepth: DEFAULT_SUBAGENT_MAX_DEPTH }), {
+      message: "Hi",
+    });
+
+    expect(events.some((event) => event.type === "actions.requested")).toBe(false);
+    expect(getPendingRuntimeActionBatch(result.session.state)).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      "[eve:harness.tool-loop] runtime action tool call blocked because tool is not advertised",
+      expect.objectContaining({
+        callId: "call-1",
+        sessionId: "test-session",
+        toolName: "delegate",
+      }),
+    );
+  });
+
+  it("omits Workflow when subagent host tools are hidden by the depth limit", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const config = createTestConfig("conversation", undefined, {
+      workflow: true,
+      tools: new Map([
+        [
+          "delegate",
+          {
+            description: "Delegate to a subagent.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "delegate",
+            runtimeAction: {
+              kind: "subagent-call",
+              nodeId: "workers",
+              subagentName: "worker",
+            },
+          },
+        ],
+      ]),
+    });
+    const runStep = createToolLoopHarness(config);
+
+    await runStep(createTestSession({ subagentDepth: DEFAULT_SUBAGENT_MAX_DEPTH }), {
+      message: "Hi",
+    });
+
+    const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+    expect(agentCall).toBeDefined();
+    expect(agentCall!.tools).not.toHaveProperty("delegate");
     expect(agentCall!.tools).not.toHaveProperty("Workflow");
   });
 
