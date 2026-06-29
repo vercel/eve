@@ -222,22 +222,25 @@ export async function FileTree() {
 
   return (
     <section className="pb-24 pt-16 font-sans px-4">
-      <div className="mx-auto max-w-5xl">
-        <h2 className="text-center font-medium! text-heading-32 tracking-tighter text-gray-1000 sm:text-heading-40">
-          Your{" "}
-          <span className="relative -top-[0.08em] ml-1 inline-flex items-center gap-[0.16em] rounded-lg bg-gray-200 px-3 py-[0.04em] pr-4 align-baseline font-[450]!">
-            <IconFolderOpen aria-hidden className="size-[0.58em] text-gray-900" />
-            agent/
-          </span>{" "}
-          is a directory
-        </h2>
-        <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">
-          An instructions.md file is all you need to run an agent. Skills, tools, channels, and the
-          rest are optional building blocks you add as it grows.
-        </p>
-      </div>
-
-      <FileTreeView items={items} />
+      <FileTreeView
+        items={items}
+        heading={
+          <div className="mx-auto max-w-5xl">
+            <h2 className="text-center font-medium! text-heading-32 tracking-tighter text-gray-1000 sm:text-heading-40">
+              Your{" "}
+              <span className="relative -top-[0.08em] ml-1 inline-flex items-center gap-[0.16em] rounded-lg bg-gray-200 px-3 py-[0.04em] pr-4 align-baseline font-[450]!">
+                <IconFolderOpen aria-hidden className="size-[0.58em] text-gray-900" />
+                agent/
+              </span>{" "}
+              is a directory
+            </h2>
+            <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">
+              An instructions.md file is all you need to run an agent. Skills, tools, channels, and
+              the rest are optional building blocks you add as it grows.
+            </p>
+          </div>
+        }
+      />
     </section>
   );
 }

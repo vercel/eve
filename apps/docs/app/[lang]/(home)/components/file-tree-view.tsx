@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 export interface FileTreeItem {
@@ -18,15 +18,61 @@ export interface FileTreeItem {
   code: ReactNode;
 }
 
-export function FileTreeView({ items }: { items: FileTreeItem[] }) {
-  // A plain file browser: every building block is listed; clicking one opens
-  // its contents on the right. instructions.md (index 0) is the only required
-  // file — everything else is optional, flagged in the code header.
+export function FileTreeView({ items, heading }: { items: FileTreeItem[]; heading?: ReactNode }) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const selected = items[selectedIndex];
 
-  return (
-    <div className="relative mt-16">
+  // The viz pins while you scroll through it, stepping the open file by scroll
+  // progress (scrollytelling). Disabled for reduced motion — then it's a plain
+  // click-to-view browser.
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [scrolly, setScrolly] = useState(false);
+
+  useEffect(() => {
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    setScrolly(true);
+  }, []);
+
+  useEffect(() => {
+    if (!scrolly) return;
+    const track = trackRef.current;
+    if (!track) return;
+    let raf = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const distance = track.offsetHeight - window.innerHeight;
+        if (distance <= 0) return;
+        const progress = Math.min(Math.max(-track.getBoundingClientRect().top / distance, 0), 1);
+        setSelectedIndex(Math.min(items.length - 1, Math.floor(progress * items.length)));
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      cancelAnimationFrame(raf);
+    };
+  }, [scrolly, items.length]);
+
+  function handleSelect(index: number) {
+    if (!scrolly || !trackRef.current) {
+      setSelectedIndex(index);
+      return;
+    }
+    // Scroll to the segment that maps to this file so the sticky view follows.
+    const track = trackRef.current;
+    const distance = track.offsetHeight - window.innerHeight;
+    const targetProgress = (index + 0.5) / items.length;
+    const top = window.scrollY + track.getBoundingClientRect().top + targetProgress * distance;
+    // Jump straight to the file's segment — no smooth scroll, so the view
+    // doesn't flip through the files in between on the way there.
+    window.scrollTo({ top, behavior: "auto" });
+  }
+
+  const board = (
+    <div className="relative mt-12">
+      {/* Grid line aligned with the card header's border-b, fading out at the edges. */}
       <div
         aria-hidden
         className="pointer-events-none absolute top-12 -left-4 -right-4 h-px sm:-left-14 sm:-right-14"
@@ -48,7 +94,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
                   <button
                     key={item.name}
                     type="button"
-                    onClick={() => setSelectedIndex(i)}
+                    onClick={() => handleSelect(i)}
                     className={cn(
                       "flex w-full cursor-pointer items-center rounded-md px-3 py-2 text-left text-sm transition-colors",
                       selectedIndex === i
@@ -91,6 +137,23 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
         aria-hidden
         className="pointer-events-none absolute inset-x-0 -bottom-1 -mx-2 h-12 bg-linear-to-t from-background-200 to-transparent"
       />
+    </div>
+  );
+
+  const block = (
+    <>
+      {heading}
+      {board}
+    </>
+  );
+
+  if (!scrolly) {
+    return <div className="mt-16">{block}</div>;
+  }
+
+  return (
+    <div ref={trackRef} className="relative mt-16" style={{ height: `${items.length * 42}vh` }}>
+      <div className="sticky top-[max(4rem,calc(50vh-20.5rem))]">{block}</div>
     </div>
   );
 }
