@@ -50,7 +50,7 @@ export function FeatureGrid(): JSX.Element {
   return (
     <section className="px-6 py-24">
       <div className="mx-auto max-w-5xl">
-        <h2 className="text-center text-heading-32 font-semibold tracking-tighter text-gray-1000 sm:text-heading-40">
+        <h2 className="text-center font-medium! text-heading-32 tracking-tighter text-gray-1000 sm:text-heading-40">
           Everything you need for production agents
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">

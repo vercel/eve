@@ -8,6 +8,13 @@ html {
   scroll-padding-top: 5rem;
 }
 
+/* Tint the root + body so overscroll and any gaps match the page background
+   instead of showing white. */
+html,
+body {
+  background-color: var(--ds-background-200);
+}
+
 /* Tint the global footer to match the landing background, but only on the
    home routes (`/` and `/home`), which render the [data-home-route] marker. */
 body:has([data-home-route]) footer {

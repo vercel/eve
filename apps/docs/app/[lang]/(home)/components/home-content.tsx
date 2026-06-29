@@ -1,4 +1,7 @@
 import type { Metadata } from "next";
+// TODO
+// import Link from "next/link";
+// import { Button } from "@vercel/geistdocs/components/button";
 import { staticOgImage } from "@/lib/geistdocs/og";
 import { ArchitectureDiagram } from "./architecture";
 import { CTA } from "./cta";
@@ -9,47 +12,50 @@ import { InstallSwitcher } from "./install-switcher";
 import { NextjsInterop } from "./nextjs-interop";
 
 const title = "eve";
-const tagline = "Like Next.js for web apps, but for agents.";
-const description =
-  "Markdown for instructions and skills, TypeScript for tools. Durable by default.";
+const tagline = "Like Next.js for agents. Build durable agents with one folder.";
 
 export const homeMetadata: Metadata = {
   title,
-  description: `${tagline} ${description}`,
+  description: tagline,
   openGraph: {
     title,
-    description: `${tagline} ${description}`,
+    description: tagline,
     images: [staticOgImage],
   },
   twitter: {
     card: "summary_large_image",
     title,
-    description: `${tagline} ${description}`,
+    description: tagline,
     images: [staticOgImage],
   },
 };
 
 export const HomeContent = () => (
   <div className="mx-auto w-full max-w-[1080px] pb-32">
-    <section className="relative isolate flex flex-col items-center gap-y-5 px-4 pb-32 pt-[30svh] text-center sm:px-12">
-      <div className="relative z-10 max-w-5xl text-center text-heading-40 md:text-heading-48 lg:text-heading-64">
+    <section className="relative isolate flex min-h-[80vh] flex-col items-center justify-center gap-y-5 px-4 py-24 text-center sm:px-12 sm:py-28">
+      <div className="relative z-10 max-w-5xl text-center font-normal! text-heading-40 md:whitespace-nowrap md:text-heading-48 lg:text-heading-56">
         <EveLogoShader />
-        <h1 className="relative">
-          The Framework
-          <br />
-          for Building Agents
-        </h1>
+        <h1 className="relative">The Framework for Building Agents</h1>
       </div>
       <p className="relative z-10 w-full text-center text-copy-16 text-gray-900 md:max-w-2xl md:text-copy-18 lg:text-copy-20">
-        {tagline} {description}
+        {tagline}
       </p>
-      <div className="relative z-10 mt-2 flex w-full max-w-2xl flex-col items-center gap-4">
+      <div className="relative z-10 mt-2 flex w-full max-w-3xl flex-col items-center gap-4 sm:flex-row sm:items-end sm:justify-center">
         <InstallSwitcher className="items-center" />
+        {/* <Button
+          asChild
+          className="h-[52px] rounded-full bg-gray-1000 px-6 hover:bg-gray-900"
+          size="lg"
+        >
+          <Link href="/docs/introduction">
+            <span className="text-background-100 text-label-16">Read docs</span>
+          </Link>
+        </Button> */}
       </div>
     </section>
     <FileTree />
-    <ArchitectureDiagram />
     <NextjsInterop />
+    <ArchitectureDiagram />
     <FeatureGrid />
     <CTA />
   </div>

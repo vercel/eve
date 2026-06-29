@@ -59,13 +59,14 @@ export async function NextjsInterop() {
   return (
     <section className="px-4 py-24">
       <div className="mx-auto max-w-5xl">
-        <h2 className="text-center text-heading-32 font-semibold tracking-tighter text-gray-1000 sm:text-heading-40">
-          Runs inside your Next.js app
+        <h2 className="text-center font-medium! text-heading-32 tracking-tighter text-gray-1000 sm:text-heading-40">
+          Works natively with Next.js
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">
-          Wrap your config with <span className="text-gray-1000">withEve()</span> and the agent runs
-          alongside your app. <span className="text-gray-1000">useEveAgent()</span> finds the
-          mounted routes on its own — no CORS to configure and no URL env vars to keep in sync.
+          Wrap your config with <span className="text-gray-1000">withEve()</span> and the agent
+          mounts into your existing app. Same dev server, same deploy.{" "}
+          <span className="text-gray-1000">useEveAgent()</span> finds its routes on its own, so
+          there's no CORS to configure and no URL env vars to keep in sync.
         </p>
 
         {/* A single gradient-bordered frame around both code blocks. */}
