@@ -1,5 +1,13 @@
 # eve
 
+## 0.17.1
+
+### Patch Changes
+
+- 97aa99b: Add HTTP Basic userinfo and repeatable `-H, --header` support to `eve dev` URL targets so the terminal UI can send credentials or routing headers to protected remote deployments.
+- c7827fb: Stop injecting subagent tool descriptions into delegated child prompts. Child runs now receive only the caller's delegated message plus the stable subagent invocation wrapper.
+- 739af96: Update eve's bundled Workflow SDK dependency set to the latest 5.0.0 beta releases, keeping the core package and local workflow world aligned.
+
 ## 0.17.0
 
 ### Minor Changes
