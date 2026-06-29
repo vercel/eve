@@ -47,17 +47,13 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
   }
 
   return (
-    // Full-width container so the header divider can bleed to the page frame's
-    // vertical borders, forming a cross with the layout grid.
     <div className="relative mt-16">
-      {/* Grid line aligned with the card header's border-b, fading out toward
-          the page frame on both sides. */}
       <div
         aria-hidden
-        className="pointer-events-none absolute top-12 -left-4 -right-4 h-px sm:-left-12 sm:-right-12"
+        className="pointer-events-none absolute top-12 -left-4 -right-4 h-px sm:-left-14 sm:-right-14"
         style={{
           background:
-            "linear-gradient(to right, transparent, var(--ds-gray-alpha-400) 18%, var(--ds-gray-alpha-400) 82%, transparent)",
+            "linear-gradient(to right, transparent, var(--ds-gray-400) 7.5%, var(--ds-gray-400) 92.5%, transparent)",
         }}
       />
       <div className="mx-auto max-w-5xl">
@@ -67,8 +63,6 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
             <div className="border-b md:border-r md:border-b-0">
               <div className="flex h-12 items-center gap-2 border-b px-4">
                 <span className="font-medium text-gray-1000 text-sm">agent/</span>
-                {/* Counter slides left as the reset button reveals once more
-                    than the default file is selected. */}
                 <div className="ml-auto flex items-center">
                   <span className="whitespace-nowrap text-gray-900 text-label-13">
                     {visited.size} {visited.size === 1 ? "file" : "files"} selected
