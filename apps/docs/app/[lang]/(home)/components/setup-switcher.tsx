@@ -119,10 +119,9 @@ export function SetupSwitcher() {
           </button>{" "}
           <Link
             href="https://github.com/vercel-labs/steve"
-            className="group inline-flex items-center gap-0.5 text-gray-900 underline decoration-gray-400 underline-offset-2 transition-colors hover:text-gray-1000"
+            className="text-gray-900 underline decoration-gray-400 underline-offset-2 transition-colors hover:text-gray-1000"
           >
-            (example
-            <IconArrowUpRight aria-hidden color="gray-900" size={13} />)
+            (example)
           </Link>
         </span>
       </div>
