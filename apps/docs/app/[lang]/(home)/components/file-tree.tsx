@@ -40,7 +40,7 @@ const snippets: Snippet[] = [
     lang: "markdown",
     NavIcon: IconFileText,
     description:
-      "An instructions.md file is a complete agent — describe its role in Markdown, then run eve.",
+      "An instructions.md file is a complete agent. Describe its role in Markdown, then run eve.",
     code: `# Identity
 
 You are an expert weather assistant.
