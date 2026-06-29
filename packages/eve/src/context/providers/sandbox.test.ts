@@ -56,10 +56,13 @@ function createBundle(input: {
 }
 
 describe("sandboxProvider", () => {
+  const dispose = vi.fn();
+
   beforeEach(() => {
+    dispose.mockReset();
     vi.mocked(ensureSandboxAccess).mockResolvedValue({
       captureState: vi.fn().mockResolvedValue({ initialized: false, session: null }),
-      dispose: vi.fn(),
+      dispose,
       get: vi.fn().mockResolvedValue(null),
     });
   });
@@ -83,5 +86,19 @@ describe("sandboxProvider", () => {
         },
       }),
     );
+  });
+
+  it("releases the step-local sandbox access", async () => {
+    const ctx = new ContextContainer();
+    const registry: RuntimeSandboxRegistry = createStubSandboxRegistry();
+
+    ctx.set(BundleKey, createBundle({ agentName: "weather-agent", registry }));
+    ctx.set(ChannelKey, { kind: "slack" });
+    ctx.set(SessionIdKey, "session_1");
+
+    const result = await sandboxProvider.create(ctx, createHarnessSession());
+    await sandboxProvider.dispose?.(result!.value);
+
+    expect(dispose).toHaveBeenCalledOnce();
   });
 });

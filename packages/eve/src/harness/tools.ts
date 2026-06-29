@@ -7,17 +7,18 @@ import {
 } from "ai";
 
 import type { SessionCapabilities } from "#channel/types.js";
+import { loadContext } from "#context/container.js";
+import { isSandboxAuthorizationInterrupt } from "#execution/sandbox/authorization-interrupt.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
 import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.js";
 import { isObject } from "#shared/guards.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
-import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ApprovalStatus } from "#public/definitions/approval.js";
 import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/provider-tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
-import { loadContext } from "#context/container.js";
 import {
   authorizationPendingModelText,
   isAuthorizationPendingModelOutput,
@@ -174,7 +175,13 @@ export function wrapToolExecute(
   const execute = definition.execute;
   if (execute === undefined) return undefined;
   return async (input, options) => {
-    const output = await execute(input);
+    let output: unknown;
+    try {
+      output = await execute(input);
+    } catch (error) {
+      if (!isSandboxAuthorizationInterrupt(error)) throw error;
+      output = error.signal;
+    }
     if (isAuthorizationSignal(output)) {
       stashToolInterrupt(loadContext(), options.toolCallId, output);
       return modelFacingAuthorizationOutput(output);

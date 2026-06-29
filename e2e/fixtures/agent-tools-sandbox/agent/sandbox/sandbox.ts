@@ -1,5 +1,8 @@
 import { defaultBackend, defineSandbox } from "eve/sandbox";
 import { vercel } from "eve/sandbox/vercel";
+import { getVercelOidcToken } from "@vercel/oidc";
+
+import { CREDENTIAL_PROBE_PATH, CREDENTIAL_PROBE_TOKEN } from "../credential-probe.js";
 
 /**
  * Sandbox lifecycle fixture exercising the surfaces an agent author relies
@@ -108,16 +111,40 @@ const FANOUT_SERVER_SCRIPT = [
 ].join("\n");
 
 const authorSnapshotId = process.env.EVE_TEST_AUTHOR_SNAPSHOT_ID;
+const credentialProbeHost = process.env.VERCEL_URL;
 const backend =
   authorSnapshotId !== undefined
     ? vercel({ source: { snapshotId: authorSnapshotId, type: "snapshot" } })
-    : defaultBackend();
+    : process.env.VERCEL === "1" && credentialProbeHost !== undefined
+      ? vercel({
+          networkPolicy: {
+            allow: {
+              [credentialProbeHost]: [
+                {
+                  auth: {
+                    getToken: async () => ({ token: await getVercelOidcToken() }),
+                  },
+                  match: { path: { exact: CREDENTIAL_PROBE_PATH } },
+                  transform: ({ token }) => [
+                    {
+                      headers: {
+                        authorization: `Bearer ${CREDENTIAL_PROBE_TOKEN}`,
+                        "x-vercel-trusted-oidc-idp-token": token,
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        })
+      : defaultBackend();
 
 export default defineSandbox({
   backend,
   // Bump when the bootstrap output changes so the reusable template snapshot
   // is rebuilt rather than served stale.
-  revalidationKey: () => "agent-tools-sandbox-bootstrap-v2",
+  revalidationKey: () => "agent-tools-sandbox-bootstrap-v3",
   async bootstrap({ use }) {
     const sandbox = await use();
     await sandbox.writeTextFile({

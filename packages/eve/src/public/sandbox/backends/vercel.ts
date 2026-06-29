@@ -28,9 +28,13 @@ import type {
  *
  * `bootstrap({ use })` applies its options to the template via
  * `sandbox.update(...)`; those settings persist into the snapshot.
- * `onSession({ use })` applies its options to the live session via the
- * SDK's `update` under the hood, overriding any overlapping field
- * from `opts`.
+ * `onSession({ use })` applies its options to the live session via the SDK's
+ * `update` under the hood. `onSession` network-policy replacement is rejected
+ * when the factory policy contains eve-managed authenticated rules.
+ *
+ * Route-level `auth` rules resolve credentials for the active principal and
+ * inject them through the Vercel Sandbox firewall before the sandbox is
+ * returned to authored code. Credentials are removed after each step.
  */
 export function vercel(
   opts?: VercelSandboxCreateOptions,

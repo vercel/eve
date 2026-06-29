@@ -35,34 +35,75 @@ export async function withContextScope<T>(
   harnessSession: HarnessSession,
   callback: (session: HarnessSession) => Promise<ContextScopeResult<T>>,
 ): Promise<ContextScopeResult<T>> {
-  let session = harnessSession;
+  const createdProviders: Array<{
+    readonly provider: FrameworkContextProvider<any>;
+    readonly value: unknown;
+  }> = [];
+  let output: ContextScopeResult<T> | undefined;
+  let failure: unknown;
+  let failed = false;
 
-  ctx.clearVirtualContext();
+  try {
+    let session = harnessSession;
 
-  for (const provider of frameworkProviders) {
-    const result = await provider.create(ctx, session);
-    if (result !== undefined) {
-      ctx.setVirtualContext(provider.key, result.value);
-      if (result.session !== undefined) {
-        session = result.session;
+    ctx.clearVirtualContext();
+
+    for (const provider of frameworkProviders) {
+      const result = await provider.create(ctx, session);
+      if (result !== undefined) {
+        ctx.setVirtualContext(provider.key, result.value);
+        createdProviders.push({ provider, value: result.value });
+        if (result.session !== undefined) {
+          session = result.session;
+        }
+      }
+    }
+
+    const scopeResult = await contextStorage.run(ctx, () => callback(session));
+
+    let committed = scopeResult.session;
+    for (const provider of frameworkProviders) {
+      if (provider.commit && ctx.has(provider.key)) {
+        committed = await provider.commit(ctx.require(provider.key), committed);
+      }
+    }
+
+    output =
+      committed === scopeResult.session
+        ? scopeResult
+        : { result: scopeResult.result, session: committed };
+  } catch (error) {
+    failed = true;
+    failure = error;
+  }
+
+  const disposalErrors: unknown[] = [];
+  for (const { provider, value } of createdProviders.reverse()) {
+    if (provider.dispose) {
+      try {
+        await provider.dispose(value);
+      } catch (error) {
+        disposalErrors.push(error);
       }
     }
   }
 
-  const scopeResult = await contextStorage.run(ctx, () => callback(session));
-
-  let committed = scopeResult.session;
-  for (const provider of frameworkProviders) {
-    if (provider.commit && ctx.has(provider.key)) {
-      committed = await provider.commit(ctx.require(provider.key), committed);
+  if (failed) {
+    if (disposalErrors.length > 0) {
+      throw new AggregateError(
+        [failure, ...disposalErrors],
+        "The step failed and context cleanup also failed.",
+      );
     }
+    throw failure;
   }
-
-  if (committed === scopeResult.session) {
-    return scopeResult;
+  if (disposalErrors.length > 0) {
+    throw new AggregateError(disposalErrors, "Context cleanup failed.");
   }
-
-  return { result: scopeResult.result, session: committed };
+  if (output === undefined) {
+    throw new Error("Context scope completed without a result.");
+  }
+  return output;
 }
 
 /**

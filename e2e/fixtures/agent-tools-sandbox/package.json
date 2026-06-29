@@ -13,6 +13,7 @@
   "dependencies": {
     "@opentelemetry/core": "2.6.1",
     "@opentelemetry/sdk-trace-base": "2.6.1",
+    "@vercel/oidc": "3.5.0",
     "@vercel/otel": "2.1.2",
     "eve": "workspace:*",
     "zod": "catalog:"

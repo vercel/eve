@@ -32,4 +32,9 @@ export interface FrameworkContextProvider<T> {
   ): ProviderResult<T> | undefined | Promise<ProviderResult<T> | undefined>;
 
   commit?(value: T, session: HarnessSession): HarnessSession | Promise<HarnessSession>;
+
+  /**
+   * Releases step-local resources after commit, or after the step fails.
+   */
+  dispose?(value: T): void | Promise<void>;
 }

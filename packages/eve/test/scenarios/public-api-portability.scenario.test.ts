@@ -59,8 +59,22 @@ void docker;
 void justbash;
 void microsandbox;
 
+const hosted = vercel({
+  networkPolicy: {
+    allow: {
+      "api.example.com": [{
+        auth: { getToken: async () => ({ token: "secret" }) },
+        match: { method: ["POST"] },
+        transform: ({ token }) => [{
+          headers: { authorization: \`Bearer \${token}\` },
+        }],
+      }],
+    },
+  },
+});
+
 export default defineSandbox({
-  backend: process.env.VERCEL === "1" ? vercel() : fallback,
+  backend: process.env.VERCEL === "1" ? hosted : fallback,
 });
 `,
       },

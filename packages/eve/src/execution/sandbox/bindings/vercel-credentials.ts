@@ -2,8 +2,7 @@ import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
 import type { VercelCreateOptions } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 
 export function getVercelSandboxFetch(createOptions: VercelCreateOptions): typeof globalThis.fetch {
-  const fetchOverride = (createOptions as { readonly fetch?: typeof globalThis.fetch }).fetch;
-  return fetchOverride ?? globalThis.fetch;
+  return createOptions.fetch ?? globalThis.fetch;
 }
 
 export async function getVercelSandboxCredentials(
@@ -33,7 +32,7 @@ export async function getVercelSandboxCredentials(
 }
 
 function readNonEmptyString(object: object, key: string): string | undefined {
-  const value = (object as Record<string, unknown>)[key];
+  const value = Reflect.get(object, key);
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
@@ -48,11 +47,15 @@ function getVercelSandboxCredentialsFromOidcToken(token: string): VercelSandboxC
     throw new Error("Invalid Vercel OIDC token: missing payload.");
   }
 
-  const payload = JSON.parse(
+  const payload: unknown = JSON.parse(
     Buffer.from(base64UrlToBase64(payloadSegment), "base64").toString("utf8"),
-  ) as { owner_id?: unknown; project_id?: unknown };
-  const teamId = typeof payload.owner_id === "string" ? payload.owner_id : undefined;
-  const projectId = typeof payload.project_id === "string" ? payload.project_id : undefined;
+  );
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    throw new Error("Invalid Vercel OIDC token: payload must be an object.");
+  }
+  const claims = payload as Record<string, unknown>;
+  const teamId = typeof claims.owner_id === "string" ? claims.owner_id : undefined;
+  const projectId = typeof claims.project_id === "string" ? claims.project_id : undefined;
 
   if (teamId === undefined || projectId === undefined) {
     throw new Error("Invalid Vercel OIDC token: missing owner_id or project_id.");

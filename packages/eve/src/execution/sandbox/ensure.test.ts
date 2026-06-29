@@ -60,9 +60,10 @@ function createTestRegistry(
   };
 }
 
-function createBackend(): SandboxBackend {
+function createBackend(onCreate?: () => void, onDispose?: () => void): SandboxBackend {
   const sandbox = mockSandbox({ id: "sbx_session_auth" });
   const create = vi.fn(async (input: SandboxBackendCreateInput) => {
+    onCreate?.();
     return {
       captureState: async () => ({
         backendName: "test",
@@ -70,7 +71,9 @@ function createBackend(): SandboxBackend {
         sessionKey: input.sessionKey,
       }),
       useSessionFn: async () => sandbox.session,
-      dispose: async () => {},
+      dispose: async () => {
+        onDispose?.();
+      },
       session: sandbox.session,
     };
   });
@@ -80,7 +83,7 @@ function createBackend(): SandboxBackend {
 
 async function ensure(input: {
   readonly compiledArtifactsSource?: RuntimeCompiledArtifactsSource;
-  readonly runOnSession?: (callback: () => Promise<void>) => Promise<void>;
+  readonly runOnSession?: <T>(callback: () => Promise<T>) => Promise<T>;
   readonly registry: RuntimeSandboxRegistry;
   readonly tags?: Record<string, string>;
 }) {
@@ -247,7 +250,10 @@ describe("ensureSandboxAccess", () => {
       observedSession = loadContext().require(SessionKey);
       observedSessionId = input.ctx.session.id;
     });
-    const backend = createBackend();
+    let observedCreateSession: Session | undefined;
+    const backend = createBackend(() => {
+      observedCreateSession = loadContext().require(SessionKey);
+    });
     const registry = createTestRegistry({ onSession }, backend);
 
     const access = await ensure({
@@ -256,6 +262,7 @@ describe("ensureSandboxAccess", () => {
     });
     await access.get();
 
+    expect(observedCreateSession).toBe(session);
     expect(observedSession).toBe(session);
     expect(observedSessionId).toBe("session_1");
     expect(onSession).toHaveBeenCalledWith({
@@ -264,6 +271,29 @@ describe("ensureSandboxAccess", () => {
       }),
       use: expect.any(Function),
     });
+  });
+
+  it("disposes the backend handle when onSession fails", async () => {
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, createSession());
+    const dispose = vi.fn();
+    const backend = createBackend(undefined, dispose);
+    const registry = createTestRegistry(
+      {
+        onSession: async () => {
+          throw new Error("onSession failed");
+        },
+      },
+      backend,
+    );
+
+    const access = await ensure({
+      registry,
+      runOnSession: async (callback) => await contextStorage.run(ctx, callback),
+    });
+
+    await expect(access.get()).rejects.toThrow("onSession failed");
+    expect(dispose).toHaveBeenCalledOnce();
   });
 
   it("does not pass bootstrap or seed files to runtime create", async () => {

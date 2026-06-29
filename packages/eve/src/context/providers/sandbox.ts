@@ -48,6 +48,10 @@ export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
     const state = await access.captureState();
     return { ...session, sandboxState: state };
   },
+
+  async dispose(access) {
+    await access.dispose();
+  },
 };
 
 function resolveTagAgentName(input: {

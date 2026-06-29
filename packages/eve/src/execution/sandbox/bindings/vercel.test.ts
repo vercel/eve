@@ -123,6 +123,62 @@ afterEach(() => {
 });
 
 describe("createVercelSandbox", () => {
+  it("activates eager route credentials and clears them on dispose", async () => {
+    const sessionSandbox = createMockSandbox({ name: "session-key" });
+    const sandboxModule = {
+      Sandbox: {
+        create: vi.fn(),
+        get: vi.fn().mockResolvedValue(sessionSandbox),
+      },
+    };
+    const backend = createTestVercelSandbox({
+      createOptions: {
+        networkPolicy: {
+          allow: {
+            "api.example.com": [
+              {
+                auth: { getToken: async () => ({ token: "step-token" }) },
+                transform: ({ token }) => [
+                  {
+                    headers: { authorization: `Bearer ${token}` },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+
+    const handle = await backend.create({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      sessionKey: "session-key",
+      templateKey: null,
+    });
+
+    expect(sessionSandbox.update).toHaveBeenNthCalledWith(1, {
+      networkPolicy: { allow: {}, subnets: undefined },
+    });
+    expect(sessionSandbox.update).toHaveBeenNthCalledWith(2, {
+      networkPolicy: {
+        allow: {
+          "api.example.com": [
+            {
+              transform: [{ headers: { authorization: "Bearer step-token" } }],
+            },
+          ],
+        },
+        subnets: undefined,
+      },
+    });
+
+    await handle.dispose();
+    expect(sessionSandbox.update).toHaveBeenLastCalledWith({
+      networkPolicy: { allow: {}, subnets: undefined },
+    });
+  });
+
   it("creates fresh Vercel sandboxes through the SDK with the eve image", async () => {
     const templateSandbox = createMockSandbox({ name: "template-key" });
     const fetch = vi.fn();
@@ -1687,5 +1743,22 @@ describe("vercel (public factory)", () => {
     expect(backend.name).toBe("vercel");
     expect(typeof backend.create).toBe("function");
     expect(typeof backend.prewarm).toBe("function");
+  });
+
+  it("accepts route-level authenticated rules", () => {
+    vercel({
+      networkPolicy: {
+        allow: {
+          "api.example.com": [
+            {
+              auth: { getToken: async () => ({ token: "secret" }) },
+              transform: ({ token }: { token: string }) => [
+                { headers: { authorization: `Bearer ${token}` } },
+              ],
+            },
+          ],
+        },
+      },
+    });
   });
 });

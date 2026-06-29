@@ -23,9 +23,16 @@ function isBlocked(value: unknown): boolean {
 export default defineEval({
   description: "Sandbox: setNetworkPolicy('deny-all') blocks sandbox egress mid-turn.",
   async test(t) {
-    await t.send(
+    let turn = await t.send(
       "Use the `network-probe` tool and tell me whether sandbox network egress was blocked.",
     );
+    turn.expectOk();
+    if (!turn.toolCalls.some((call) => call.name === "network-probe")) {
+      turn = await t.send(
+        "You did not run the required check. Call `network-probe` now; do not answer without its result.",
+      );
+      turn.expectOk();
+    }
 
     t.succeeded();
     t.calledTool("network-probe", {

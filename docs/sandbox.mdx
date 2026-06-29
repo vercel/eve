@@ -207,22 +207,77 @@ Domain-level allow-lists and credential brokering are supported by `vercel()` an
 
 ## Credential brokering
 
-Secrets never enter the sandbox. Instead, the network policy's per-domain `transform` injects credentials at the firewall, so a header can authenticate egress to a host while the secret stays out of the sandbox process entirely:
+Credential brokering is an optional backend capability, not part of the portable sandbox contract. `vercel()` and `microsandbox()` can inject headers at the network boundary, so secrets stay out of the sandbox process. Docker and just-bash do not support these transforms.
+
+The two supported backends expose different levels of integration:
+
+- `vercel()` supports eve-managed authorization rules and direct transforms.
+- `microsandbox()` supports direct transforms, but not eve-managed authorization rules.
+
+### Managed authorization on Vercel Sandbox
+
+With `vercel()`, attach authorization directly to each route that needs it:
+
+```ts title="agent/sandbox.ts"
+import { connect } from "@vercel/connect/eve";
+import { defineSandbox } from "eve/sandbox";
+import { vercel } from "eve/sandbox/vercel";
+
+export default defineSandbox({
+  backend: vercel({
+    networkPolicy: {
+      allow: {
+        "api.github.com": [
+          {
+            auth: connect("github"),
+            transform: ({ token }) => [
+              {
+                headers: { authorization: `Bearer ${token}` },
+              },
+            ],
+          },
+        ],
+      },
+    },
+  }),
+});
+```
+
+`auth` accepts a static authorization provider using the same `getToken` and interactive strategy shapes as connections and authored tools. Dynamic resolver functions are not supported on sandbox rules; provide the provider object directly. eve resolves every authenticated rule before returning the sandbox to authored code. When the sandbox is first opened from an authored tool's `execute`, interactive credentials park and resume through eve's normal callback lifecycle. Hooks and channel events may use an already-authorized provider, but cannot initiate interactive sandbox authorization. Native Vercel `match` filters remain available on both authenticated and unauthenticated rules. This managed `auth` form is specific to the Vercel backend.
+
+On Vercel, firewall transformations require Pro or Enterprise and are unavailable on Hobby.
+
+eve removes resolved tokens after every step. Rules whose credentials are unavailable receive no credential transform. If another rule allows the same domain, Vercel still permits unmatched traffic to that domain without the credential.
+
+Managed policies reject replacement through `onSession({ use })`, where eve owns the startup policy. `sandbox.setNetworkPolicy()` remains available mid-step, but replaces the complete active policy, including eve's credential transforms. eve clears the replacement after the step; a later step resolves and installs the managed policy again. Brokered credentials are unavailable during template bootstrap.
+
+### Direct transforms
+
+Both `vercel()` and `microsandbox()` accept transforms whose credentials are already available to the app runtime:
 
 ```ts
 async onSession({ use }) {
   await use({
     networkPolicy: {
       allow: {
-        "github.com": [{ transform: [{ headers: { authorization: "Basic your_base64_credentials_here" } }] }],
-        "*": [],
+        "api.example.com": [
+          {
+            transform: [
+              {
+                headers: {
+                  authorization: "Bearer your_token_here",
+                },
+              },
+            ],
+          },
+        ],
       },
     },
   });
 }
 ```
 
-The `"*": []` catch-all keeps general egress open while the `transform` applies only to `github.com`. For mid-turn brokering, call `setNetworkPolicy` with the same shape. The [Vercel Sandbox docs](https://vercel.com/docs/sandbox) cover the brokering mechanism itself.
+For mid-turn brokering on either backend, call `setNetworkPolicy` with the same shape. The [Vercel Sandbox docs](https://vercel.com/docs/sandbox) cover the hosted firewall mechanism itself.
 
 ## What to read next
 
