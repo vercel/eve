@@ -37,6 +37,12 @@ describe("gfmToSlackMrkdwn", () => {
     expect(gfmToSlackMrkdwn("see [docs](https://x.dev)")).toBe("see <https://x.dev|docs>");
   });
 
+  it("escapes Slack control characters in link labels", () => {
+    expect(gfmToSlackMrkdwn("see [a < b](https://x.dev?a=1&b=2)")).toBe(
+      "see <https://x.dev?a=1&b=2|a &lt; b>",
+    );
+  });
+
   it("leaves fenced code blocks untouched", () => {
     const fenced = "before\n```\n**not bold**\n```\nafter";
     expect(gfmToSlackMrkdwn(fenced)).toBe(fenced);
@@ -68,6 +74,11 @@ describe("slackMrkdwnToGfm", () => {
 
   it("upgrades paired *bold* and ~strike~ to GFM", () => {
     expect(slackMrkdwnToGfm("a *b* c ~d~")).toBe("a **b** c ~~d~~");
+  });
+
+  it("unescapes Slack control entities outside code", () => {
+    expect(slackMrkdwnToGfm("a &lt; b &amp; c")).toBe("a < b & c");
+    expect(slackMrkdwnToGfm("call `a &lt; b` here")).toBe("call `a &lt; b` here");
   });
 
   it("leaves fenced and inline code untouched", () => {
