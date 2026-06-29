@@ -1,4 +1,3 @@
-import { Badge } from "@vercel/geistdocs/components/badge";
 import { CodeBlock } from "@vercel/geistdocs/components/code-block";
 import { geistShikiTheme } from "@vercel/geistdocs/shiki-theme";
 import { highlight } from "fumadocs-core/highlight";
@@ -36,8 +35,6 @@ export function Chat() {
 }`,
   },
 ];
-
-const BENEFITS = ["One Dev Server", "Same-Origin, No CORS", "One Deploy"];
 
 async function renderCode(file: InteropFile) {
   return highlight(file.code, {
@@ -84,14 +81,6 @@ export async function NextjsInterop() {
               </div>
             ))}
           </div>
-        </div>
-
-        <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
-          {BENEFITS.map((benefit) => (
-            <Badge key={benefit} variant="secondary">
-              {benefit}
-            </Badge>
-          ))}
         </div>
       </div>
     </section>

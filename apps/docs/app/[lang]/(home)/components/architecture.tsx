@@ -1,41 +1,89 @@
+"use client";
+
+import { SiDocker, SiPostgresql } from "@icons-pack/react-simple-icons";
 import { LogoEve } from "@vercel/geistdocs/assets/logos/logo-eve";
 import Link from "next/link";
-import type { JSX, ReactNode } from "react";
+import { type ComponentType, type JSX, type ReactNode, useState } from "react";
 import {
   IconArrowUpRight,
+  IconArrowUpRightSmall,
   IconLinked,
   IconMessage,
+  IconOpenai,
   IconSandbox,
+  IconSlack,
   IconSparkles,
+  IconVercel,
   IconWorkflow,
   IconWrench,
 } from "@/components/geistcn-icons";
+import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
 import { GradientBorder } from "./gradient-border";
-import { SetupSwitcher } from "./setup-switcher";
 
-const RUNTIME_ITEMS: {
+type Mode = "managed" | "self-hosted";
+
+type LogoComponent = ComponentType<{
+  size?: number;
+  color?: string;
+  className?: string;
+}>;
+
+interface Backend {
+  label: string;
+  Logo: LogoComponent;
+}
+
+interface Primitive {
   icon: ReactNode;
   title: string;
+  /** Overrides `title` per mode (e.g. the SDK only exists on managed infra). */
+  titleByMode?: Record<Mode, string>;
   description: string;
   href?: string;
-}[] = [
+  /** Drop the link in self-hosted mode (the linked product is Vercel-only). */
+  managedOnlyHref?: boolean;
+  /** Concrete backend shown inside the card, swapped by the managed/self-hosted toggle. */
+  backend?: Record<Mode, Backend>;
+}
+
+const RUNTIME_ITEMS: Primitive[] = [
   {
     icon: <IconSparkles className="mt-0.5 shrink-0" color="gray-1000" size={18} />,
     title: "AI SDK",
     description: "Model calls, streaming",
     href: "https://ai-sdk.dev/",
+    backend: {
+      managed: { label: "AI Gateway", Logo: IconVercel },
+      "self-hosted": { label: "GPT-5.4 API", Logo: IconOpenai },
+    },
   },
   {
     icon: <IconSandbox className="mt-0.5 shrink-0" color="gray-1000" size={18} />,
     title: "Sandbox SDK",
+    titleByMode: { managed: "Vercel Sandbox SDK", "self-hosted": "Sandbox" },
     description: "Isolated execution",
     href: "https://vercel.com/docs/sandbox/sdk-reference",
+    managedOnlyHref: true,
+    backend: {
+      managed: { label: "Vercel Sandbox", Logo: IconVercel },
+      "self-hosted": { label: "Docker", Logo: SiDocker },
+    },
   },
   {
     icon: <IconLinked className="mt-0.5 shrink-0" color="gray-1000" size={18} />,
     title: "Connection SDK",
+    titleByMode: {
+      managed: "Vercel Connection SDK",
+      "self-hosted": "Connection",
+    },
     description: "MCP/HTTP endpoints",
-    href: "/docs/connections/overview",
+    href: "https://vercel.com/docs/connect",
+    managedOnlyHref: true,
+    backend: {
+      managed: { label: "Vercel Connect", Logo: IconVercel },
+      "self-hosted": { label: "Slack API", Logo: IconSlack },
+    },
   },
   {
     icon: <IconWrench className="mt-0.5 shrink-0" color="gray-1000" size={18} />,
@@ -43,6 +91,14 @@ const RUNTIME_ITEMS: {
     description: "Functions, child agents",
   },
 ];
+
+const WORKFLOW_BACKEND: Record<Mode, Backend> = {
+  managed: { label: "Vercel Workflows", Logo: IconVercel },
+  "self-hosted": {
+    label: "Postgres (@workflow/world-postgres)",
+    Logo: SiPostgresql,
+  },
+};
 
 const CHANNELS = [
   "Slack",
@@ -57,6 +113,13 @@ const CHANNELS = [
   "Linear",
 ];
 
+const CAPTIONS: Record<Mode, string> = {
+  managed:
+    "Fully managed via Vercel — sandboxes, durable workflows, model routing, and observability handled for you.",
+  "self-hosted":
+    "Runs on a single 4 GB DigitalOcean box — Postgres-backed durability, Docker sandbox, Ansible deploy, zero managed services.",
+};
+
 function SectionLabel({ children }: { children: string }): JSX.Element {
   return (
     <span className="font-mono font-medium uppercase tracking-[0.1em] text-gray-1000 text-label-14">
@@ -65,16 +128,27 @@ function SectionLabel({ children }: { children: string }): JSX.Element {
   );
 }
 
+function BackendChip({ backend }: { backend: Backend }): JSX.Element {
+  return (
+    <div className="mt-2 inline-flex w-fit items-center gap-1.5 rounded-md border px-2 py-1">
+      <backend.Logo className="shrink-0" color="default" size={13} />
+      <span className="text-gray-1000 text-copy-13">{backend.label}</span>
+    </div>
+  );
+}
+
 function PrimitiveCard({
   icon,
   title,
   description,
   href,
+  backend,
 }: {
   icon: ReactNode;
   title: string;
   description: string;
   href?: string;
+  backend?: Backend;
 }): JSX.Element {
   const body = (
     <>
@@ -82,6 +156,7 @@ function PrimitiveCard({
       <div className="flex flex-col gap-1">
         <span className="font-medium text-gray-1000 text-copy-14">{title}</span>
         <span className="text-gray-900 text-copy-14">{description}</span>
+        {backend ? <BackendChip backend={backend} /> : null}
       </div>
     </>
   );
@@ -107,6 +182,9 @@ function PrimitiveCard({
 }
 
 export function ArchitectureDiagram() {
+  const [mode, setMode] = useState<Mode>("self-hosted");
+  const selfHosted = mode === "self-hosted";
+
   return (
     <section className="px-4 py-24 sm:px-12">
       <div className="mx-auto max-w-5xl">
@@ -118,7 +196,48 @@ export function ArchitectureDiagram() {
           channels. Swap any backend and self-host the whole runtime, with zero
           managed-infrastructure dependencies.
         </p>
-        <LogoEve className="text-gray-1000 mt-16 flex items-center gap-2 ml-5" height={13} />
+
+        {/* Managed vs. self-hosted toggle drives the backend shown inside each card. */}
+        <div className="mt-12 flex items-center justify-center gap-4">
+          <button
+            type="button"
+            onClick={() => setMode("managed")}
+            aria-pressed={!selfHosted}
+            className={cn(
+              "cursor-pointer text-copy-14 transition-colors",
+              selfHosted ? "text-gray-900 hover:text-gray-1000" : "text-gray-1000",
+            )}
+          >
+            Managed
+          </button>
+          <Switch
+            checked={selfHosted}
+            onCheckedChange={(checked) => setMode(checked ? "self-hosted" : "managed")}
+            aria-label="Toggle deployment target"
+            className="cursor-pointer"
+          />
+          <span className="text-copy-14">
+            <button
+              type="button"
+              onClick={() => setMode("self-hosted")}
+              aria-pressed={selfHosted}
+              className={cn(
+                "cursor-pointer transition-colors",
+                selfHosted ? "text-gray-1000" : "text-gray-900 hover:text-gray-1000",
+              )}
+            >
+              Self-hosted
+            </button>{" "}
+            <Link
+              href="https://github.com/vercel-labs/steve"
+              className="text-gray-900 underline decoration-gray-400 underline-offset-2 transition-colors hover:text-gray-1000"
+            >
+              (example)
+            </Link>
+          </span>
+        </div>
+
+        <LogoEve className="mt-10 ml-5 text-gray-1000" height={13} />
         <div className="mt-3 flex flex-col gap-4 lg:flex-row">
           {/* Runtime */}
           <div className="relative flex flex-1 flex-col gap-4 rounded-xl p-5">
@@ -135,6 +254,7 @@ export function ArchitectureDiagram() {
               title="Durable Workflow"
               description="Checkpointed steps, park between messages, resume on delivery"
               href="https://workflow-sdk.dev/worlds"
+              backend={WORKFLOW_BACKEND[mode]}
             />
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -142,9 +262,10 @@ export function ArchitectureDiagram() {
                 <PrimitiveCard
                   key={item.title}
                   icon={item.icon}
-                  title={item.title}
+                  title={item.titleByMode?.[mode] ?? item.title}
                   description={item.description}
-                  href={item.href}
+                  href={item.managedOnlyHref && selfHosted ? undefined : item.href}
+                  backend={item.backend?.[mode]}
                 />
               ))}
             </div>
@@ -187,7 +308,21 @@ export function ArchitectureDiagram() {
           </div>
         </div>
 
-        <SetupSwitcher />
+        <p className="mx-auto mt-6 max-w-2xl text-center text-gray-900 text-copy-14">
+          {CAPTIONS[mode]}
+          {selfHosted ? (
+            <>
+              {" "}
+              <Link
+                href="https://github.com/vercel-labs/steve"
+                className="inline-flex items-center gap-0 text-gray-1000 underline decoration-gray-400 underline-offset-2 transition-colors hover:decoration-gray-700"
+              >
+                See the example
+                <IconArrowUpRightSmall aria-hidden color="gray-900" size={16} />
+              </Link>
+            </>
+          ) : null}
+        </p>
       </div>
     </section>
   );

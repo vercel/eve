@@ -18,6 +18,7 @@ export { IconPlusCircle } from "./icon-plus-circle";
 export { IconRefreshCounterClockwise } from "./icon-refresh-counter-clockwise";
 export { IconRobot } from "./icon-robot";
 export { IconSandbox } from "./icon-sandbox";
+export { IconSlack } from "./icon-slack";
 export { IconSparkles } from "./icon-sparkles";
 export { IconTrash } from "./icon-trash";
 export { IconUser } from "./icon-user";
