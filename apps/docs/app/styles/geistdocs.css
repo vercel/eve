@@ -24,10 +24,6 @@ html[data-scrolled] body:has([data-home-route]) header {
   border-bottom-color: var(--ds-gray-alpha-400) !important;
 }
 
-.dark body:has([data-home-route]) {
-  --eve-hero-metal-placeholder-opacity: 0.2;
-}
-
 /* Align docs content with navbar on mobile. */
 #nd-page {
   @apply max-md:px-6;

@@ -11,7 +11,7 @@ import { HeroMetalShader } from "./metal-shader";
 import { NextjsInterop } from "./nextjs-interop";
 
 const title = "eve";
-const description = "Build durable agents from one folder of Markdown and TypeScript.";
+const description = "Like Next.js for agents. Build durable agents with one folder.";
 
 export const homeMetadata: Metadata = {
   title,

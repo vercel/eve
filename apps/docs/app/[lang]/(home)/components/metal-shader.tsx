@@ -1,6 +1,5 @@
 "use client";
 
-import type { CSSProperties } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
@@ -42,9 +41,6 @@ const HERO_CONFIG: MetalConfig = {
   tonemap: 0.72,
 };
 const HERO_MARK_SCALE = 0.97;
-const HERO_STYLE = {
-  "--eve-hero-metal-placeholder-opacity": "0.12",
-} as CSSProperties;
 
 type MetalShaderProps = {
   className?: string;
@@ -525,15 +521,14 @@ export function HeroMetalShader({ className }: { className?: string }) {
   const scaleOffsetY = (EVE_MARK_HEIGHT * (1 - HERO_MARK_SCALE)) / 2;
 
   return (
-    <div className={cn("relative size-full", className)} style={HERO_STYLE}>
+    <div className={cn("relative size-full", className)}>
       <svg
         aria-hidden
-        className="absolute inset-0 size-full text-gray-1000 [mask-image:linear-gradient(90deg,transparent_0%,black_14%,black_78%,transparent_100%)]"
+        className="absolute inset-0 size-full text-gray-1000 opacity-[0.12] [mask-image:linear-gradient(90deg,transparent_0%,black_14%,black_78%,transparent_100%)] dark:opacity-20"
         fill="none"
         stroke="currentColor"
         strokeLinejoin="round"
         strokeWidth="1"
-        style={{ opacity: "var(--eve-hero-metal-placeholder-opacity)" }}
         viewBox={`0 0 ${EVE_MARK_WIDTH} ${EVE_MARK_HEIGHT}`}
       >
         <path
