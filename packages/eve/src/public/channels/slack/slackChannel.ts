@@ -1,3 +1,5 @@
+import { parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js";
+
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { CardElement } from "#compiled/chat/index.js";
@@ -25,11 +27,9 @@ import {
   defaultOnDirectMessage,
 } from "#public/channels/slack/defaults.js";
 import {
-  parseAppMentionEvent,
-  parseDirectMessageEvent,
-  type SlackEventCallback,
   type SlackInboundContext,
   type SlackMessage,
+  slackMessageFromWebhookPayload,
 } from "#public/channels/slack/inbound.js";
 import {
   formatSlackInboundMessage,
@@ -677,40 +677,48 @@ async function handleEventPost(input: {
   readonly credentials: SlackChannelCredentials | undefined;
   readonly handledEvents: Set<string>;
 }): Promise<Response> {
-  let envelope: SlackEventCallback & { challenge?: string };
+  let payload;
   try {
-    envelope = JSON.parse(input.body) as SlackEventCallback & { challenge?: string };
+    payload = parseSlackWebhookBody(input.body, { headers: input.headers });
   } catch (error) {
     log.warn("inbound webhook body is not valid JSON", { error });
     return new Response("ok");
   }
 
-  if (typeof envelope.challenge === "string") {
-    return new Response(envelope.challenge, {
+  if (payload.kind === "url_verification") {
+    return new Response(payload.challenge, {
       status: 200,
       headers: { "content-type": "text/plain" },
     });
   }
 
-  if (envelope.event_id) {
-    if (input.handledEvents.has(envelope.event_id)) {
+  if (payload.kind === "unsupported") return new Response("ok");
+
+  if (payload.kind !== "app_mention" && payload.kind !== "direct_message") {
+    return new Response("ok");
+  }
+
+  if (payload.eventId) {
+    if (input.handledEvents.has(payload.eventId)) {
       log.warn("received a duplicate event", {
-        event_id: envelope.event_id,
-        event_time: envelope.event_time,
-        retry_num: input.headers.get("x-slack-retry-num") || "(null)",
-        retry_reason: input.headers.get("x-slack-retry-reason") || "(null)",
+        event_id: payload.eventId,
+        event_time: payload.eventTime,
+        retry_num: payload.retry?.num ?? "(null)",
+        retry_reason: payload.retry?.reason ?? "(null)",
       });
       return new Response("ok");
     }
-    markEventHandled(envelope.event_id, input.handledEvents);
+    markEventHandled(payload.eventId, input.handledEvents);
   }
 
-  const mention = parseAppMentionEvent(envelope);
-  if (mention) {
+  const message = slackMessageFromWebhookPayload(payload);
+  if (!message) return new Response("ok");
+
+  if (payload.kind === "app_mention") {
     input.waitUntil(
       dispatchInboundMessage({
         kind: "app_mention",
-        message: mention,
+        message,
         handler: input.onAppMention,
         send: input.send,
         uploadPolicy: input.uploadPolicy,
@@ -721,12 +729,11 @@ async function handleEventPost(input: {
     return new Response("ok");
   }
 
-  const dm = parseDirectMessageEvent(envelope);
-  if (dm) {
+  if (payload.kind === "direct_message") {
     input.waitUntil(
       dispatchInboundMessage({
         kind: "direct_message",
-        message: dm,
+        message,
         handler: input.onDirectMessage,
         send: input.send,
         uploadPolicy: input.uploadPolicy,
