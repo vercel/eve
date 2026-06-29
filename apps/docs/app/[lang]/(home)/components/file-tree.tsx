@@ -204,9 +204,9 @@ export async function FileTree() {
   return (
     <section className="px-4 pb-24 pt-16 font-sans sm:px-12">
       <div className="mx-auto max-w-5xl">
-        <h2 className="text-center text-heading-32 font-semibold tracking-tighter text-gray-1000 sm:text-heading-40">
+        <h2 className="text-center font-medium! text-heading-32 tracking-tighter text-gray-1000 sm:text-heading-40">
           Your{" "}
-          <span className="relative -top-[0.08em] ml-1 inline-flex items-center gap-[0.16em] rounded-lg bg-gray-200 px-3 py-[0.04em] pr-4 align-baseline font-medium">
+          <span className="relative -top-[0.08em] ml-1 inline-flex items-center gap-[0.16em] rounded-lg bg-gray-200 px-3 py-[0.04em] pr-4 align-baseline font-[450]!">
             <IconFolderOpen aria-hidden className="size-[0.58em]" color="gray-900" />
             agent
           </span>{" "}
