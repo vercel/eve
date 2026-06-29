@@ -11,20 +11,20 @@ import { HeroMetalShader } from "./metal-shader";
 import { NextjsInterop } from "./nextjs-interop";
 
 const title = "eve";
-const description = "Like Next.js for agents. Build durable agents with one folder.";
+const tagline = "Like Next.js for agents. Build durable agents with one folder.";
 
 export const homeMetadata: Metadata = {
   title,
-  description,
+  description: tagline,
   openGraph: {
     title,
-    description,
+    description: tagline,
     images: [staticOgImage],
   },
   twitter: {
     card: "summary_large_image",
     title,
-    description,
+    description: tagline,
     images: [staticOgImage],
   },
 };
@@ -39,7 +39,7 @@ export const HomeContent = () => (
         The Framework for Building Agents
       </h1>
       <p className="w-full text-center text-copy-16 text-gray-900 md:max-w-2xl md:text-copy-18 lg:text-copy-20">
-        {description}
+        {tagline}
       </p>
       <div className="mt-2 flex w-full max-w-3xl flex-col items-center gap-4 sm:flex-row sm:items-end sm:justify-center">
         <InstallSwitcher className="items-center" />

@@ -191,9 +191,8 @@ export function ArchitectureDiagram() {
           Built on open-source SDKs, yours to self-host
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">
-          Each capability is its own open-source SDK — workflows, AI, sandbox, connections, and
-          channels. Swap any backend and self-host the whole runtime, with zero
-          managed-infrastructure dependencies.
+          Swap any backend and self-host the whole runtime, with zero managed-infrastructure
+          dependencies.
         </p>
 
         {/* Managed vs. self-hosted toggle drives the backend shown inside each card. */}
