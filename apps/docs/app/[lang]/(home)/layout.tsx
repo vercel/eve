@@ -7,6 +7,7 @@ const Layout = async ({ children, params }: LayoutProps<"/[lang]">) => {
 
   return (
     <GeistdocsHomeLayout config={config} tree={source.pageTree[lang]}>
+      {/* TODO: check logic here */}
       {/* Marker so the global footer can be tinted on home routes only,
           via the `body:has([data-home-route]) footer` rule in geistdocs.css. */}
       <div data-home-route hidden />

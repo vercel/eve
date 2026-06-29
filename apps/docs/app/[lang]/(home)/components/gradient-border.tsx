@@ -1,10 +1,7 @@
 import type { JSX } from "react";
 
-/**
- * Subtle gradient hairline border — strongest at the top, fading to transparent
- * toward the bottom. Render inside a `relative rounded-*` element; it inherits
- * the parent's corner radius and paints a 1px masked ring at the edge.
- */
+// TODO: check for Safari's (OS 27) new webkit where this gradient approach causes problems
+
 export function GradientBorder(): JSX.Element {
   return (
     <div

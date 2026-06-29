@@ -1,3 +1,6 @@
+// TODO: make LLM provider icons dark mode capable
+// TODO: bring over to geistdocs package, and import from there
+
 import { type CSSProperties, memo, type ReactNode, type SVGProps } from "react";
 
 /** Flexible size format: a number, or a numeric string with optional "px" suffix. */

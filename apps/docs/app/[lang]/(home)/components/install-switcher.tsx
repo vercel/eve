@@ -1,5 +1,6 @@
 "use client";
 
+// TODO: check whether other pages actually use VA
 import { track } from "@vercel/analytics";
 import {
   CommandPromptContent,

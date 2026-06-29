@@ -1,5 +1,6 @@
+// TODO: add icons to geistdocs package, and import from there
+
 // Hard copies of the geistcn icons used by the home page sections,
-// vendored from @vercel/geistcn-assets so the docs app has no dependency on it.
 export type { IconColor, IconProps, IconSize } from "./base-icon";
 export { IconAcronymTs } from "./icon-acronym-ts";
 export { IconAgents } from "./icon-agents";

@@ -174,9 +174,6 @@ export async function FileTree() {
         lang: snippet.lang,
         theme: geistShikiTheme,
         components: {
-          // Render the highlighted output through the geistdocs CodeBlock so the
-          // snippets match the docs (line numbers, copy button, geist theme),
-          // with its default border/background stripped to sit flush in the panel.
           pre: ({ children, ...props }: ComponentProps<"pre">) => (
             <CodeBlock
               {...props}
@@ -206,7 +203,7 @@ export async function FileTree() {
   return (
     <section className="px-4 pb-24 pt-16 font-sans sm:px-12">
       <div className="mx-auto max-w-5xl">
-        <h2 className="text-center text-3xl font-semibold tracking-tighter text-gray-1000 sm:text-4xl">
+        <h2 className="text-center text-heading-32 font-semibold tracking-tighter text-gray-1000 sm:text-heading-40">
           An agent is a directory
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">

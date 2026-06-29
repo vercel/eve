@@ -1,5 +1,6 @@
 "use client";
 
+// TODO: clean up icons, via geistcn-assets once available
 import {
   SiAnsible,
   SiDigitalocean,
@@ -18,20 +19,15 @@ type Mode = "managed" | "self-hosted";
 interface StackEntry {
   category: string;
   name: string;
-  /** Brand mark, rendered in its original color for recognizability. */
   Logo: ComponentType<{
     size?: number;
     color?: string;
     className?: string;
     title?: string;
   }>;
-  /** When set, the card links to the backend's docs/site. */
   href?: string;
 }
 
-// Same agent, two real-world deployment targets: managed (Vercel-native) and a
-// fully self-hosted box. The self-hosted column mirrors a real setup — Docker
-// sandbox, a single DigitalOcean server, Ansible deploys, zero managed services.
 const STACKS: Record<Mode, StackEntry[]> = {
   managed: [
     {
@@ -73,10 +69,6 @@ const CAPTIONS: Record<Mode, string> = {
     "Runs on a single 4 GB server with Docker and Ansible — no managed-service dependencies.",
 };
 
-/**
- * Toggle that shows the concrete backends behind each capability for a managed
- * (Vercel) vs. fully self-hosted deployment, illustrating a real-world setup.
- */
 export function SetupSwitcher() {
   const [mode, setMode] = useState<Mode>("self-hosted");
   const selfHosted = mode === "self-hosted";
@@ -114,9 +106,6 @@ export function SetupSwitcher() {
         </button>
       </div>
 
-      {/* Re-keyed per mode so the stack cross-fades on toggle. px-5 insets the
-          grid by the gradient cards' padding so these cards line up with the
-          inner cards (AI SDK, Connection SDK, …) in the section above. */}
       <div
         key={mode}
         className="mt-8 grid grid-cols-2 gap-3 px-5 sm:grid-cols-4 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300 motion-safe:ease-out"

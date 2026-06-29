@@ -12,8 +12,6 @@ import {
 import { GradientBorder } from "./gradient-border";
 import { SetupSwitcher } from "./setup-switcher";
 
-// Runtime primitives shown in a row (desktop) / stacked (mobile) below the
-// full-width Durable Workflow card.
 const RUNTIME_ITEMS: {
   icon: ReactNode;
   title: string;
@@ -111,7 +109,7 @@ export function ArchitectureDiagram() {
   return (
     <section className="px-4 py-24 sm:px-12">
       <div className="mx-auto max-w-5xl">
-        <h2 className="text-center text-3xl font-semibold tracking-tighter text-gray-1000 sm:text-4xl">
+        <h2 className="text-center text-heading-32 font-semibold tracking-tighter text-gray-1000 sm:text-heading-40">
           Built on open-source SDKs, yours to self-host
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">
@@ -158,8 +156,6 @@ export function ArchitectureDiagram() {
               <span className="text-gray-900 text-copy-14">Where your agent gets surfaced</span>
             </div>
 
-            {/* lg:h-0 + lg:grow lets the card fill the runtime-driven column
-                height and clip overflowing channels instead of dictating it. */}
             <Link
               href="https://chat-sdk.dev/"
               className="group relative flex items-start gap-2.5 overflow-hidden rounded-lg p-4 transition-colors material-small hover:bg-background-200 lg:h-0 lg:min-h-0 lg:grow"
@@ -167,8 +163,6 @@ export function ArchitectureDiagram() {
               <IconMessage className="mt-0.5 shrink-0" color="gray-1000" size={18} />
               <div className="flex flex-1 flex-col gap-2">
                 <span className="font-medium text-gray-1000 text-copy-14">Chat SDK</span>
-                {/* Two columns while the cards are stacked (one-column layout);
-                    a single column once they sit side by side at lg. */}
                 <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 lg:grid-cols-1">
                   {CHANNELS.map((channel) => (
                     <span key={channel} className="text-gray-1000 text-copy-14">
@@ -183,7 +177,6 @@ export function ArchitectureDiagram() {
                 color="gray-900"
                 size={14}
               />
-              {/* Fade the clipped channels out toward the bottom of the card. */}
               <div
                 aria-hidden
                 className="pointer-events-none absolute inset-x-0 bottom-0 hidden h-20 bg-linear-to-t from-background-100 to-transparent lg:block"
