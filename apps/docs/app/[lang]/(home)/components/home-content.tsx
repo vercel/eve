@@ -35,7 +35,7 @@ export const HomeContent = () => (
       <div className="mb-8 aspect-[601/189] w-full max-w-[820px] sm:mb-10 sm:max-w-[900px]">
         <HeroMetalShader />
       </div>
-      <h1 className="max-w-5xl text-center font-normal! text-heading-36 md:whitespace-nowrap md:text-heading-44 lg:text-heading-56">
+      <h1 className="max-w-5xl text-center font-normal! text-heading-40 md:whitespace-nowrap md:text-heading-48 lg:text-heading-56">
         The Framework for Building Agents
       </h1>
       <p className="w-full text-center text-copy-16 text-gray-900 md:max-w-2xl md:text-copy-18 lg:text-copy-20">
