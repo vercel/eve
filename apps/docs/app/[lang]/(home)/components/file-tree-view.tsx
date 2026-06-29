@@ -122,13 +122,9 @@ export function FileTreeView({ items, heading }: { items: FileTreeItem[]; headin
               <p className="border-b px-4 py-3 text-gray-900 text-copy-14">
                 {selected.description}
               </p>
-              {/* Re-keyed per file so the code subtly flies in on selection. */}
-              <div
-                key={selected.fileName}
-                className="grow pb-6 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300 motion-safe:ease-out [&>div]:mb-0"
-              >
-                {selected.code}
-              </div>
+              {/* Content swaps in place (no keyed remount) so the previous file
+                  never lingers as a ghost layer mid-transition. */}
+              <div className="grow pb-6 [&>div]:mb-0">{selected.code}</div>
             </div>
           </div>
         </div>
