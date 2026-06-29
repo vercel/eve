@@ -199,7 +199,7 @@ export function ArchitectureDiagram() {
         <div className="mt-12 flex items-center justify-center gap-4 text-copy-14">
           <button
             type="button"
-            onClick={() => setMode("managed")}
+            onClick={() => setMode(selfHosted ? "managed" : "self-hosted")}
             aria-pressed={!selfHosted}
             className={cn(
               "cursor-pointer transition-colors",
@@ -217,7 +217,7 @@ export function ArchitectureDiagram() {
           <span className="text-copy-14">
             <button
               type="button"
-              onClick={() => setMode("self-hosted")}
+              onClick={() => setMode(selfHosted ? "managed" : "self-hosted")}
               aria-pressed={selfHosted}
               className={cn(
                 "cursor-pointer transition-colors",
