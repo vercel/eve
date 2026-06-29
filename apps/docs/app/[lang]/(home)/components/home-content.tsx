@@ -29,7 +29,7 @@ export const homeMetadata: Metadata = {
 
 export const HomeContent = () => (
   <div className="mx-auto w-full max-w-[1080px] pb-32">
-    <section className="relative isolate flex min-h-[80vh] flex-col items-center justify-center gap-y-5 px-4 py-24 text-center sm:px-12 sm:pb-28 sm:pt-42">
+    <section className="relative isolate flex min-h-[80vh] flex-col items-center justify-center gap-y-5 px-4 pt-24 pb-12 text-center sm:px-12 sm:pb-16 sm:pt-42">
       <div className="relative z-10 max-w-5xl text-center font-normal! text-heading-40 md:text-heading-48 lg:text-heading-56">
         <EveLogoShader />
         <h1 className="relative text-balance w-full max-w-[10em]">
@@ -39,7 +39,7 @@ export const HomeContent = () => (
       <p className="text-balance relative z-10 w-full text-center text-copy-16 text-gray-900 md:max-w-2xl md:text-copy-18 lg:text-copy-20">
         {tagline}
       </p>
-      <InstallSwitcher className="items-center mt-2" />
+      <InstallSwitcher className="items-center mt-2 z-10" />
     </section>
     <FileTree />
     <NextjsInterop />

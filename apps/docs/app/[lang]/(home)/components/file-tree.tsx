@@ -221,7 +221,7 @@ export async function FileTree() {
   }));
 
   return (
-    <section className="pb-24 pt-16 font-sans px-4">
+    <section className="pb-24 pt-8 font-sans px-4">
       <FileTreeView
         items={items}
         heading={
