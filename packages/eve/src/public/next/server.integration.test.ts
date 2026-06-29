@@ -40,6 +40,8 @@ describe("resolveEveDestinationPrefix", () => {
   afterEach(async () => {
     spawnMock.mockReset();
     vi.unstubAllEnvs();
+    delete process.env.EVE_BASE_URL;
+    Reflect.deleteProperty(globalThis, "Bun");
     await Promise.all(
       tempRoots.splice(0).map((root) =>
         rm(root, {
@@ -74,6 +76,32 @@ describe("resolveEveDestinationPrefix", () => {
 
     await expect(destination).resolves.toBe("http://127.0.0.1:33449");
     await expect(readRegisteredOrigin(appRoot)).resolves.toBe("http://127.0.0.1:33449");
+  });
+
+  it("starts the dev server with node when Next.js is running under Bun", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    Reflect.set(globalThis, "Bun", {});
+    const appRoot = await createTempAppRoot();
+    const child = createMockChildProcess();
+    spawnMock.mockReturnValue(child);
+
+    const destination = resolveEveDestinationPrefix({
+      appRoot,
+      phase: "phase-development-server",
+      productionDestinationPrefix: "/internal/eve",
+    });
+
+    await vi.waitFor(() => {
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+    });
+    expect(spawnMock).toHaveBeenCalledWith(
+      "node",
+      expect.arrayContaining(["dev", "--no-ui", "--port", "0"]),
+      expect.objectContaining({ cwd: appRoot }),
+    );
+
+    child.stdout.emit("data", Buffer.from("dev server listening at http://127.0.0.1:33449\n"));
+    await expect(destination).resolves.toBe("http://127.0.0.1:33449");
   });
 });
 

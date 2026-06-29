@@ -246,6 +246,17 @@ function createEveBinaryPath(): string {
   return join(resolvePackageRoot(), "bin", "eve.js");
 }
 
+function isBunRuntime(): boolean {
+  return (
+    typeof (process.versions as Record<string, string | undefined>).bun === "string" ||
+    "Bun" in globalThis
+  );
+}
+
+function resolveNodeCommand(): string {
+  return isBunRuntime() ? "node" : process.execPath;
+}
+
 function isLoopbackHostname(hostname: string): boolean {
   return (
     hostname === "localhost" ||
@@ -377,7 +388,7 @@ function installProcessShutdown(handle: EveProcessHandle): EveProcessHandle {
 function startEveDevServer(appRoot: string, timeoutMs: number): Promise<EveProcessHandle> {
   return startServerProcess({
     args: [createEveBinaryPath(), "dev", "--no-ui", "--port", "0"],
-    command: process.execPath,
+    command: resolveNodeCommand(),
     cwd: appRoot,
     timeoutMs,
   }).then((handle) => {
