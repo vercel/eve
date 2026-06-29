@@ -30,7 +30,7 @@ const DEFAULT_CONTROLS: RenderControls = {
 const LOGO_RENDER_HEIGHT = 500;
 const MAX_DEVICE_PIXEL_RATIO = 2;
 const MAX_ENV_YAW = 0.45;
-const ENV_YAW_LERP_SPEED = 8;
+const ENV_YAW_LERP_SPEED = 3;
 
 export function EveLogoShader() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
