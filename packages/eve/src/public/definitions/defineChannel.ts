@@ -4,6 +4,7 @@ import type {
   FetchFileResult,
 } from "#channel/adapter.js";
 import { CHANNEL_SENTINEL, type CompiledChannel } from "#channel/compiled-channel.js";
+import { normalizeChannelCors, type ChannelCors, type ChannelCorsOptions } from "#channel/cors.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import { HTTP_ADAPTER_KIND } from "#channel/http.js";
 import type { TypedReceiveTarget } from "#channel/receive-target.js";
@@ -17,6 +18,7 @@ import type { Session, SessionHandle } from "#channel/session.js";
 declare const CHANNEL_METADATA_TYPE: unique symbol;
 
 export type { Session, SessionHandle } from "#channel/session.js";
+export type { ChannelCors, ChannelCorsOptions } from "#channel/cors.js";
 export { GET, POST, PUT, PATCH, DELETE, WS } from "#channel/routes.js";
 export type {
   HttpRouteDefinition,
@@ -116,6 +118,13 @@ export interface ChannelDefinition<
 > {
   readonly state?: TState;
   /**
+   * CORS policy for this channel's HTTP routes. `true` enables H3/Nitro's
+   * permissive defaults (`origin`, methods, request headers, and exposed
+   * headers all `"*"`); `false` or omission leaves CORS untouched. Pass an
+   * object for a serializable subset of H3/Nitro CORS options.
+   */
+  readonly cors?: ChannelCors;
+  /**
    * Builds the per-step channel context handed to `events` and `deliver`.
    * Receives the live {@link SessionHandle}, so a factory can close over it to
    * register late-bound callbacks. eve writes state mutations made inside the
@@ -178,6 +187,7 @@ export interface Channel<
   readonly __kind: typeof CHANNEL_SENTINEL;
   readonly [CHANNEL_METADATA_TYPE]?: TMetadata;
   readonly routes: readonly RouteDefinition<TState>[];
+  readonly cors?: ChannelCorsOptions;
   readonly receive?: (
     input: ReceiveInput<TReceiveTarget>,
     args: { send: SendFn<TState> },
@@ -206,11 +216,13 @@ export function defineChannel<
   definition: ChannelDefinition<TState, TCtx, TReceiveTarget, TMetadata>,
 ): Channel<TState, TReceiveTarget, TMetadata> {
   const adapter = buildAdapter(definition);
+  const cors = normalizeChannelCors(definition.cors);
 
   const compiled: CompiledChannel<TState, TReceiveTarget, TMetadata> = {
     __kind: CHANNEL_SENTINEL,
     routes: definition.routes,
     adapter,
+    cors,
     receive: definition.receive,
   };
 

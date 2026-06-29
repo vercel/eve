@@ -9,6 +9,7 @@ import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
 import type { RuntimeSubagentResultActionResult } from "#runtime/actions/types.js";
 import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
 
 /**
  * Resumes the parent driver's hook with a delegated subagent result.
@@ -36,8 +37,6 @@ export async function notifyDelegatedParentStep(input: {
     return;
   }
 
-  process.env.WORKFLOW_QUEUE_NAMESPACE = "eve";
-  const { resumeHook } = await import("#compiled/@workflow/core/runtime.js");
   await resumeHook(parentContinuationToken, {
     kind: "runtime-action-result",
     results: [input.result],

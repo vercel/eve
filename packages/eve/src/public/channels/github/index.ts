@@ -17,6 +17,11 @@ export {
 } from "#public/channels/github/auth.js";
 export { defaultGitHubAuth } from "#public/channels/github/defaults.js";
 export {
+  type GitHubAppRef,
+  type GitHubCheckRunEvent,
+  type GitHubCheckSuiteEvent,
+  type GitHubCiEvent,
+  type GitHubCiPayload,
   type GitHubComment,
   type GitHubConversationKind,
   type GitHubConversationRef,
@@ -27,6 +32,7 @@ export {
   type GitHubPullRequestEvent,
   type GitHubRepositoryRef,
   type GitHubUser,
+  type GitHubWorkflowRunEvent,
 } from "#public/channels/github/inbound.js";
 export {
   githubChannel,

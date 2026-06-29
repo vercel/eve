@@ -5,6 +5,8 @@ import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import { executeTask } from "#evals/runner/execute-task.js";
 import type { EveEval, EveEvalContext } from "#evals/types.js";
 import { createEvalTargetHandle } from "#evals/target.js";
+import { satisfies } from "#evals/expect/index.js";
+import { z } from "zod";
 
 const target = createEvalTargetHandle({
   capabilities: { devRoutes: true },
@@ -61,6 +63,7 @@ describe("executeTask", () => {
         sessionId: "session_1",
         events: [
           turnStarted("turn_2"),
+          actionResult("turn_2", "bash", "approved"),
           messageCompleted("approved", "turn_2"),
           turnCompleted("turn_2"),
           sessionCompleted(),
@@ -73,10 +76,19 @@ describe("executeTask", () => {
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
-        await t.send("run pwd");
-        const [request] = t.expectInputRequests({ toolName: "bash" });
-        expect(request?.requestId).toBe("approval_1");
-        await t.respondAll("approve");
+        const parked = await t.send("run pwd");
+        parked.calledTool("bash", { status: "pending", count: 1 });
+        const request = t.requireInputRequest({
+          display: "confirmation",
+          input: { command: "pwd" },
+          optionIds: ["approve", "deny"],
+          prompt: /Approve/,
+          toolName: "bash",
+        });
+        expect(request.requestId).toBe("approval_1");
+        const approved = await t.respondAll("approve");
+        approved.calledTool("bash", { status: "completed", count: 1 });
+        t.calledTool("bash", { status: "completed", count: 1 });
       }, "approve"),
     });
 
@@ -160,6 +172,161 @@ describe("executeTask", () => {
     expect(result.derived.toolCalls.map((call) => call.sessionId)).toEqual(["secondary"]);
   });
 
+  it("records assertions against individual turns without leaking other turns", async () => {
+    const server = createScriptedServer([
+      {
+        sessionId: "session_1",
+        events: [
+          turnStarted("turn_1"),
+          actionsRequested("turn_1", "alpha"),
+          turnCompleted("turn_1"),
+          sessionWaiting(),
+        ],
+      },
+      {
+        sessionId: "session_1",
+        events: [
+          turnStarted("turn_2"),
+          messageCompleted("done", "turn_2"),
+          turnCompleted("turn_2"),
+          sessionCompleted(),
+        ],
+      },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        const first = await t.send("first");
+        const second = await t.send("second");
+        expect(first.requireToolCall("alpha", { status: "pending" }).name).toBe("alpha");
+        first.calledTool("alpha", { status: "pending", count: 1 });
+        second.notCalledTool("alpha");
+        t.calledTool("alpha", { status: "pending", count: 1 });
+      }, "turn-scopes"),
+    });
+
+    expect(outcome.assertions).toHaveLength(4);
+    expect(outcome.assertions.every((assertion) => assertion.passed)).toBe(true);
+  });
+
+  it("snapshots session assertions when they are recorded", async () => {
+    const server = createScriptedServer([
+      {
+        sessionId: "session_1",
+        events: [
+          turnStarted("turn_1"),
+          actionsRequested("turn_1", "alpha", "call_1"),
+          turnCompleted("turn_1"),
+          sessionWaiting(),
+        ],
+      },
+      {
+        sessionId: "session_1",
+        events: [
+          turnStarted("turn_2"),
+          actionsRequested("turn_2", "alpha", "call_2"),
+          turnCompleted("turn_2"),
+          sessionWaiting(),
+        ],
+      },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        const session = t.newSession();
+        await session.send("first");
+        session.calledTool("alpha", { status: "pending", count: 1 });
+        session.event("turn.started", { count: 1 });
+        await session.send("second");
+      }, "session-snapshot"),
+    });
+
+    expect(outcome.assertions).toHaveLength(2);
+    expect(outcome.assertions.every((assertion) => assertion.passed)).toBe(true);
+  });
+
+  it("records a required assertion and stops dependent control flow", async () => {
+    let continued = false;
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        await t.require(
+          1,
+          satisfies<number>((value) => value > 2, "greater than two"),
+        );
+        continued = true;
+      }, "require"),
+    });
+
+    expect(continued).toBe(false);
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.assertions[0]).toMatchObject({ passed: false, severity: "gate" });
+  });
+
+  it("records a failed required tool lookup without an execution error", async () => {
+    const server = createScriptedServer([
+      {
+        sessionId: "session_1",
+        events: [
+          turnStarted("turn_1"),
+          messageCompleted("done", "turn_1"),
+          turnCompleted("turn_1"),
+          sessionCompleted(),
+        ],
+      },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        const turn = await t.send("run");
+        turn.requireToolCall("missing");
+      }, "required-tool"),
+    });
+
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.assertions).toEqual([
+      expect.objectContaining({ name: "requireToolCall", passed: false, severity: "gate" }),
+    ]);
+  });
+
+  it("captures an explicit skip without an execution error", async () => {
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval((t) => t.skip("dev routes unavailable"), "skip"),
+    });
+
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.skipReason).toBe("dev routes unavailable");
+  });
+
+  it("rejects a skip after an assertion has already been recorded", async () => {
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval((t) => {
+        t.check(
+          1,
+          satisfies((value: number) => value === 1, "equals one"),
+        );
+        t.skip("too late");
+      }, "late-skip"),
+    });
+
+    expect(outcome.skipReason).toBeUndefined();
+    expect(outcome.error).toContain("skip() must be called before");
+  });
+
   it("attaches to a target-created session and captures its stream", async () => {
     const server = createScriptedServer([], {
       streams: [
@@ -176,17 +343,57 @@ describe("executeTask", () => {
     });
     vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
 
-    const { result } = await executeTask({
+    const outcome = await executeTask({
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
-        await t.target.attachSession("channel-session");
+        const session = await t.target.attachSession("channel-session");
+        session.succeeded();
+        session.messageIncludes("channel done");
       }, "attach"),
     });
 
+    const { result } = outcome;
     expect(result.output).toBe("channel done");
     expect(result.sessions?.map((session) => session.sessionId)).toEqual(["channel-session"]);
     expect(result.events.map((event) => event.type)).toContain("message.completed");
+    expect(outcome.assertions.every((assertion) => assertion.passed)).toBe(true);
+  });
+
+  it("uses structured turn data as the scoped and aggregate output", async () => {
+    const server = createScriptedServer([
+      {
+        sessionId: "structured",
+        events: [
+          turnStarted("turn_1"),
+          {
+            type: "result.completed",
+            data: {
+              result: { count: 2, title: "Done" },
+              sequence: 1,
+              stepIndex: 0,
+              turnId: "turn_1",
+            },
+          },
+          turnCompleted("turn_1"),
+          sessionCompleted(),
+        ],
+      },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        const turn = await t.send({ message: "structured", outputSchema: { type: "object" } });
+        turn.outputMatches(z.object({ count: z.number(), title: z.string() }));
+        turn.outputEquals({ count: 2, title: "Done" });
+      }, "structured-output"),
+    });
+
+    expect(outcome.result.output).toEqual({ count: 2, title: "Done" });
+    expect(outcome.assertions.every((assertion) => assertion.passed)).toBe(true);
   });
 
   it("captures a schedule-dispatch capability failure as the task error", async () => {
@@ -334,10 +541,27 @@ function inputRequested(
   };
 }
 
-function actionsRequested(turnId: string, toolName: string): HandleMessageStreamEvent {
+function actionResult(turnId: string, toolName: string, output: string): HandleMessageStreamEvent {
   return {
     data: {
-      actions: [{ callId: "call_weather", input: { city: "Lisbon" }, kind: "tool-call", toolName }],
+      result: { callId: "call_1", kind: "tool-result", output, toolName },
+      sequence: 1,
+      status: "completed",
+      stepIndex: 0,
+      turnId,
+    },
+    type: "action.result",
+  };
+}
+
+function actionsRequested(
+  turnId: string,
+  toolName: string,
+  callId = "call_weather",
+): HandleMessageStreamEvent {
+  return {
+    data: {
+      actions: [{ callId, input: { city: "Lisbon" }, kind: "tool-call", toolName }],
       sequence: 2,
       stepIndex: 0,
       turnId,

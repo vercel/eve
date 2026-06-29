@@ -37,11 +37,11 @@ export interface VercelStatusTrackerOptions {
  * which hides the segment.
  */
 export interface VercelStatusTracker {
-  /** Fire-and-forget identity re-probe; stale resolutions are discarded. */
+  /** Fire-and-forget identity re-probe; superseded probes are aborted. */
   refreshIdentity(): void;
   applyEffect(effect: VercelStatusEffect): void;
   current(): VercelStatusSnapshot;
-  /** Stops future onChange emissions; in-flight probe results are dropped. */
+  /** Stops future changes and aborts the in-flight identity probe. */
   dispose(): void;
 }
 
@@ -57,6 +57,7 @@ export function createVercelStatusTracker(
   // overwrite the newer result.
   let epoch = 0;
   let disposed = false;
+  let identityProbeAbort: AbortController | undefined;
 
   const snapshot = (): VercelStatusSnapshot => {
     const current: VercelStatusSnapshot = { pendingDeploy };
@@ -70,16 +71,24 @@ export function createVercelStatusTracker(
   };
 
   const refreshIdentity = (): void => {
+    if (disposed) return;
+    identityProbeAbort?.abort();
+    const probeAbort = new AbortController();
+    identityProbeAbort = probeAbort;
     epoch += 1;
     const probeEpoch = epoch;
     void (async () => {
       let resolved: ProjectIdentity | undefined;
       try {
-        resolved = await detectIdentity(options.appRoot);
+        resolved = await detectIdentity(options.appRoot, { signal: probeAbort.signal });
       } catch {
         // detectProjectIdentity never throws today; if a future change does,
         // keep the last known identity rather than killing the prompt loop.
         return;
+      } finally {
+        if (identityProbeAbort === probeAbort) {
+          identityProbeAbort = undefined;
+        }
       }
       if (disposed || probeEpoch !== epoch) return;
       identity = resolved;
@@ -90,6 +99,7 @@ export function createVercelStatusTracker(
   return {
     refreshIdentity,
     applyEffect(effect) {
+      if (disposed) return;
       switch (effect.kind) {
         case "channels-added":
           pendingDeploy = true;
@@ -109,8 +119,11 @@ export function createVercelStatusTracker(
     },
     current: snapshot,
     dispose() {
+      if (disposed) return;
       disposed = true;
       epoch += 1;
+      identityProbeAbort?.abort();
+      identityProbeAbort = undefined;
     },
   };
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { equals, includes, similarity } from "#evals/expect/index.js";
+import { equals, includes, satisfies, similarity } from "#evals/expect/index.js";
 
 describe("expect builders", () => {
   it("includes scores 1 on substring, 0 otherwise, gate by default", () => {
@@ -9,6 +9,18 @@ describe("expect builders", () => {
     expect(assertion.score("a foo b")).toBe(1);
     expect(assertion.score("bar")).toBe(0);
     expect(assertion.score(undefined)).toBe(0);
+  });
+
+  it("includes accepts regular expressions", () => {
+    expect(includes(/hello/iu).score("Hello there")).toBe(1);
+    expect(includes(/missing/iu).score("Hello there")).toBe(0);
+  });
+
+  it("satisfies names and evaluates a custom predicate", () => {
+    const assertion = satisfies<number>((value) => value > 2, "greater than two");
+    expect(assertion.name).toBe("satisfies(greater than two)");
+    expect(assertion.score(3)).toBe(1);
+    expect(assertion.score(2)).toBe(0);
   });
 
   it("equals deep-compares structurally, gate by default", () => {

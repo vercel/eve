@@ -1,5 +1,10 @@
 import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
+import {
+  createAuthorizationCompletedPart,
+  createAuthorizationRequiredPart,
+} from "#client/authorization-message-parts.js";
 import type {
+  EveAuthorizationPart,
   EveMessageData,
   EveDynamicToolPart,
   EveMessageInputRequest,
@@ -10,8 +15,12 @@ import type {
 } from "#client/message-reducer-types.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { AuthorizationCompletedStreamEvent } from "#protocol/message.js";
 
 export type {
+  EveAuthorizationChallenge,
+  EveAuthorizationOutcome,
+  EveAuthorizationPart,
   EveMessageData,
   EveDynamicToolPart,
   EveMessageInputRequest,
@@ -34,10 +43,8 @@ interface ActionDescriptor {
  *
  * The returned projection keeps eve-owned types while following the AI SDK
  * `messages[].parts[]` rendering convention used by AI Elements. It projects
- * text, reasoning, tool calls, tool results, tool approvals, and submitted
- * HITL responses. Connection authorization stream events remain available to
- * custom reducers through the reducer event contract until eve has a dedicated
- * message-part shape for authorization UI.
+ * text, reasoning, tool calls, tool results, tool approvals, submitted HITL
+ * responses, and authorization prompts.
  */
 export function defaultMessageReducer(): EveAgentReducer<EveMessageData> {
   return {
@@ -218,6 +225,17 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       );
     }
 
+    case "authorization.required":
+      return updateAssistantMessage(data, event.data.turnId, (message) =>
+        upsertPart(
+          ensureStepStartPart(message, event.data.stepIndex),
+          createAuthorizationRequiredPart(event),
+        ),
+      );
+
+    case "authorization.completed":
+      return completeAuthorization(data, event);
+
     case "message.appended":
       return updateAssistantMessage(data, event.data.turnId, (message) =>
         upsertPart(ensureStepStartPart(message, event.data.stepIndex), {
@@ -231,7 +249,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
     case "message.completed":
       return updateAssistantMessage(data, event.data.turnId, (message) => {
         if (event.data.message === null) {
-          return completeExistingTextPart(message);
+          return removeTextPart(message, event.data.stepIndex);
         }
 
         return upsertPart(ensureStepStartPart(message, event.data.stepIndex), {
@@ -361,14 +379,11 @@ function upsertPart(message: EveAssistantMessage, next: EveMessagePart): EveAssi
   };
 }
 
-function completeExistingTextPart(message: EveAssistantMessage): EveAssistantMessage {
-  const index = findLastIndex(message.parts, (part) => part.type === "text");
-  if (index === -1) {
-    return message;
-  }
-
-  const existing = message.parts[index];
-  if (existing?.type !== "text") {
+function removeTextPart(message: EveAssistantMessage, stepIndex: number): EveAssistantMessage {
+  const parts = message.parts.filter(
+    (part) => part.type !== "text" || part.stepIndex !== stepIndex,
+  );
+  if (parts.length === message.parts.length) {
     return message;
   }
 
@@ -378,11 +393,7 @@ function completeExistingTextPart(message: EveAssistantMessage): EveAssistantMes
       ...message.metadata,
       status: "complete",
     },
-    parts: [
-      ...message.parts.slice(0, index),
-      { ...existing, state: "done" },
-      ...message.parts.slice(index + 1),
-    ],
+    parts,
   };
 }
 
@@ -406,6 +417,39 @@ function updateToolPart(
   return upsertMessage(data, upsertPart(message, next));
 }
 
+function completeAuthorization(
+  data: EveMessageData,
+  event: AuthorizationCompletedStreamEvent,
+): EveMessageData {
+  const existing = findLatestPendingAuthorizationPart(data, event.data.name);
+  const next = createAuthorizationCompletedPart(event, existing);
+
+  if (existing !== undefined) {
+    return updateAuthorizationPart(data, existing, next);
+  }
+
+  return updateAssistantMessage(data, event.data.turnId, (message) =>
+    upsertPart(ensureStepStartPart(message, event.data.stepIndex), next),
+  );
+}
+
+function updateAuthorizationPart(
+  data: EveMessageData,
+  existing: EveAuthorizationPart,
+  next: EveAuthorizationPart,
+): EveMessageData {
+  const message = data.messages.find(
+    (candidate): candidate is EveAssistantMessage =>
+      candidate.role === "assistant" && candidate.parts.some((part) => part === existing),
+  );
+
+  if (!message) {
+    return data;
+  }
+
+  return upsertMessage(data, upsertPart(message, next));
+}
+
 function findToolPart(data: EveMessageData, toolCallId: string): EveDynamicToolPart | undefined {
   for (const message of data.messages) {
     for (const part of message.parts) {
@@ -414,6 +458,27 @@ function findToolPart(data: EveMessageData, toolCallId: string): EveDynamicToolP
       }
     }
   }
+  return undefined;
+}
+
+function findLatestPendingAuthorizationPart(
+  data: EveMessageData,
+  name: string,
+): EveAuthorizationPart | undefined {
+  for (let messageIndex = data.messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const message = data.messages[messageIndex];
+    if (message?.role !== "assistant") {
+      continue;
+    }
+
+    for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
+      const part = message.parts[partIndex];
+      if (part?.type === "authorization" && part.state === "required" && part.name === name) {
+        return part;
+      }
+    }
+  }
+
   return undefined;
 }
 
@@ -439,6 +504,8 @@ function partKey(part: EveMessagePart): string {
       return `reasoning:${part.stepIndex ?? 0}`;
     case "step-start":
       return "step-start";
+    case "authorization":
+      return `authorization:${part.turnId}:${part.stepIndex}:${part.name}`;
     case "dynamic-tool":
       return `dynamic-tool:${part.toolCallId}`;
   }
@@ -579,13 +646,4 @@ function stringifyUnknown(value: unknown): string {
   } catch {
     return "Action failed.";
   }
-}
-
-function findLastIndex<T>(items: readonly T[], predicate: (item: T) => boolean): number {
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    if (predicate(items[index] as T)) {
-      return index;
-    }
-  }
-  return -1;
 }

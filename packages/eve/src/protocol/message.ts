@@ -158,11 +158,12 @@ export interface MessageReceivedStreamEvent {
 }
 
 /**
- * Stream event emitted when the harness requests one stable runtime action
- * batch.
+ * Stream event emitted when the model requests one or more actions.
  *
- * `data.actions.length === 1` is the serial case. `data.actions.length > 1`
- * is the parallel case for that assistant batch.
+ * A `tool-call` is one action kind, alongside `load-skill` and subagent calls.
+ * Calls may arrive incrementally before execution, so consumers must correlate
+ * action lifecycles by call ID rather than assume one event contains every call
+ * from an assistant step.
  */
 export interface ActionsRequestedStreamEvent {
   data: {
@@ -439,8 +440,8 @@ export interface CompactionCompletedStreamEvent {
 }
 
 /**
- * Stream event emitted when a connection needs user authorization before
- * its tools can be used.
+ * Stream event emitted when a connection or tool needs user authorization
+ * before it can continue.
  */
 export interface AuthorizationRequiredStreamEvent {
   data: {
@@ -459,11 +460,16 @@ export interface AuthorizationRequiredStreamEvent {
  * Outcome of one completed authorization attempt, emitted on
  * {@link AuthorizationCompletedStreamEvent}.
  */
-export type ConnectionAuthorizationOutcome = "authorized" | "declined" | "failed" | "timed-out";
+export type AuthorizationOutcome = "authorized" | "declined" | "failed" | "timed-out";
+
+/**
+ * @deprecated Use {@link AuthorizationOutcome}.
+ */
+export type ConnectionAuthorizationOutcome = AuthorizationOutcome;
 
 /**
  * Stream event emitted once `completeAuthorization` has resolved
- * (successfully or otherwise) for one pending connection. Carries a
+ * (successfully or otherwise) for one pending authorization. Carries a
  * stable `outcome` plus an optional human-readable `reason`.
  *
  * Emitted when the tool completes authorization on resume, before the
@@ -478,7 +484,7 @@ export interface AuthorizationCompletedStreamEvent {
      */
     authorization?: ConnectionAuthorizationChallenge;
     name: string;
-    outcome: ConnectionAuthorizationOutcome;
+    outcome: AuthorizationOutcome;
     reason?: string;
     sequence: number;
     stepIndex: number;
@@ -679,7 +685,8 @@ function summarizeUserContent(message: string | UserContent): string {
 }
 
 /**
- * Creates the `actions.requested` event for one stable execution batch.
+ * Creates the `actions.requested` event for one observed group of model action
+ * requests.
  */
 export function createActionsRequestedEvent(input: {
   readonly actions: readonly RuntimeActionRequest[];
@@ -699,12 +706,12 @@ export function createActionsRequestedEvent(input: {
 }
 
 /**
- * Creates the `authorization.required` event for one connection
- * that needs user authorization before its tools can be used.
+ * Creates the `authorization.required` event for one authorization source
+ * that needs user authorization before it can continue.
  *
  * `authorization` and `webhookUrl` are present together when the runtime
  * has suspended the turn on a framework-owned webhook; both are absent
- * for `getToken`-only connections that authorize out of band.
+ * for `getToken`-only authorization sources that authorize out of band.
  */
 export function createAuthorizationRequiredEvent(input: {
   readonly authorization?: ConnectionAuthorizationChallenge;
@@ -736,13 +743,13 @@ export function createAuthorizationRequiredEvent(input: {
 
 /**
  * Creates the `authorization.completed` event emitted once per
- * connection after `completeAuthorization` has resolved or the
+ * authorization source after `completeAuthorization` has resolved or the
  * authorization deadline has expired.
  */
 export function createAuthorizationCompletedEvent(input: {
   readonly authorization?: ConnectionAuthorizationChallenge;
   readonly name: string;
-  readonly outcome: ConnectionAuthorizationOutcome;
+  readonly outcome: AuthorizationOutcome;
   readonly reason?: string;
   readonly sequence: number;
   readonly stepIndex: number;

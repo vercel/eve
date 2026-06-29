@@ -32,7 +32,7 @@ GITHUB_APP_SLUG=...          # supplies botName when it is not set in config
 
 `appId`/`privateKey`/`webhookSecret` also take a lazy resolver function if you'd rather fetch them on demand.
 
-Point the GitHub App webhook URL at `https://<deployment>/eve/v1/github`. For mention-driven turns, subscribe to `issue_comment` and `pull_request_review_comment`; add `issues` / `pull_request` if you wire up their opt-in hooks. A comment that `@mention`s `botName` starts a turn.
+Point the GitHub App webhook URL at `https://<deployment>/eve/v1/github`. For mention-driven turns, subscribe to `issue_comment` and `pull_request_review_comment`; add `issues`, `pull_request`, `check_suite`, `check_run`, or `workflow_run` if you wire up their opt-in hooks. A comment that `@mention`s `botName` starts a turn.
 
 ## How the channel handles messages
 
@@ -50,8 +50,20 @@ export default githubChannel({
   // Opt in; no default dispatch on these events.
   onIssue: (ctx, issue) => (issue.action === "opened" ? { auth: defaultGitHubAuth(ctx) } : null),
   onPullRequest: (ctx, pr) => (pr.action === "opened" ? { auth: defaultGitHubAuth(ctx) } : null),
+  onCheckSuite: (ctx, suite) =>
+    suite.action === "completed" &&
+    suite.conclusion === "failure" &&
+    suite.app.slug === "github-actions" &&
+    suite.pullRequests.length > 0
+      ? {
+          auth: defaultGitHubAuth(ctx),
+          context: [`Triage failed check suite ${suite.checkSuiteId} at ${suite.headSha}.`],
+        }
+      : null,
 });
 ```
+
+The CI hooks expose normalized `action`, `status`, `conclusion`, `app.slug`, `headSha`, and `pullRequests` fields, plus `checkSuiteId`, `checkRunId`, or `workflowRunId`. `workflow_run` is a GitHub Actions-only event, so its normalized `app.slug` is `"github-actions"`. A dispatched CI turn is anchored to the first number in `pullRequests`; the hook still runs when the array is empty, but it must return `null` because there is no issue or PR thread for the session.
 
 ### Delivery
 

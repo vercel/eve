@@ -42,7 +42,10 @@ function makeBoxes(
       asker: headless ? headlessAsker() : interactiveAsker(options.prompter),
       headless,
     }),
-    addConnections({ prompter: options.prompter, deps: options.deps }),
+    addConnections({
+      prompter: options.prompter,
+      deps: options.deps,
+    }),
   ];
 }
 
@@ -59,12 +62,38 @@ function createDeps() {
       envKeysAdded: [],
       envKeysRequired: [],
     })),
+    listAuthoredConnections: vi.fn<AddConnectionsDeps["listAuthoredConnections"]>(async () => []),
+    readProjectLink: vi.fn<AddConnectionsDeps["readProjectLink"]>(async () => ({
+      orgId: "org_1",
+      projectId: "prj_demo",
+    })),
     setupConnectionConnector: vi.fn<AddConnectionsDeps["setupConnectionConnector"]>(async () => ({
-      kind: "patched",
-      created: true,
+      kind: "existing",
       connectorUid: "oauth/connector-1",
     })),
+    cleanupCreatedConnectionConnector: vi.fn<
+      AddConnectionsDeps["cleanupCreatedConnectionConnector"]
+    >(async () => {}),
   };
+}
+
+function createdConnectorDeps() {
+  const deps = createDeps();
+  deps.setupConnectionConnector.mockResolvedValueOnce({
+    kind: "created",
+    connectorUid: "linear/new",
+    connectorId: "scl_new",
+  });
+  return deps;
+}
+
+function runCreatedConnector(deps: ReturnType<typeof createDeps>) {
+  return runInteractive(
+    makeBoxes({ prompter: createPrompter(), presetConnections: ["linear"], deps }),
+    resolvedState(),
+    silentSink,
+    snapshot,
+  );
 }
 
 function resolvedState(): SetupState {
@@ -118,8 +147,14 @@ describe("selectConnections + addConnections boxes", () => {
       expect.objectContaining({
         slug: "linear",
         service: "mcp.linear.app",
-        connectionFilePath: "/tmp/project/agent/connections/linear.ts",
         projectRoot: "/tmp/project",
+      }),
+    );
+    expect(deps.ensureConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entry: expect.objectContaining({
+          auth: expect.objectContaining({ connector: "oauth/connector-1" }),
+        }),
       }),
     );
   });
@@ -186,11 +221,12 @@ describe("selectConnections + addConnections boxes", () => {
         entry: expect.objectContaining({
           slug: "mycorp",
           mcp: { url: "https://mcp.mycorp.dev/sse" },
-          auth: { kind: "connect", connector: "mycorp" },
+          auth: { kind: "connect", connector: "oauth/connector-1" },
         }),
       }),
     );
-    // The custom MCP host becomes the Connect service.
+    // Custom MCP URLs retain the host fallback because only curated providers
+    // declare a verified Vercel Connect service identifier.
     expect(deps.setupConnectionConnector).toHaveBeenCalledWith(
       expect.objectContaining({ slug: "mycorp", service: "mcp.mycorp.dev" }),
     );
@@ -272,6 +308,7 @@ describe("selectConnections + addConnections boxes", () => {
 
   test("skips provisioning when the connection file already exists", async () => {
     const deps = createDeps();
+    deps.listAuthoredConnections.mockResolvedValueOnce(["linear"]);
     deps.ensureConnection.mockResolvedValueOnce({
       slug: "linear",
       protocol: "mcp",
@@ -292,6 +329,25 @@ describe("selectConnections + addConnections boxes", () => {
     expect(prompter.log.warning).toHaveBeenCalledWith(
       "Skipped linear (already exists; pass --force to overwrite).",
     );
+  });
+
+  test("removes a connector created before a scaffold failure", async () => {
+    const deps = createdConnectorDeps();
+    deps.ensureConnection.mockRejectedValueOnce(new Error("write failed"));
+
+    await expect(runCreatedConnector(deps)).rejects.toThrow("write failed");
+    expect(deps.cleanupCreatedConnectionConnector).toHaveBeenCalledWith(
+      expect.objectContaining({ connectorId: "scl_new" }),
+    );
+  });
+
+  test("reports both scaffold and connector cleanup failures", async () => {
+    const deps = createdConnectorDeps();
+    deps.ensureConnection.mockRejectedValueOnce(new Error("write failed"));
+    deps.cleanupCreatedConnectionConnector.mockRejectedValueOnce(
+      new Error("remove scl_new manually"),
+    );
+    await expect(runCreatedConnector(deps)).rejects.toThrow("write failed remove scl_new manually");
   });
 
   test("is skipped in headless mode when no connections are requested", async () => {
@@ -330,10 +386,6 @@ describe("selectConnections + addConnections boxes", () => {
     // project stays unresolved: the link box did not record a resolution.
     state.project = { kind: "unresolved" };
     const deps = createDeps();
-    deps.setupConnectionConnector.mockImplementation(async (opts) => {
-      await opts.linkProject?.();
-      return { kind: "patched", created: true, connectorUid: "oauth/linear-1" };
-    });
     const boxes = makeBoxes({
       prompter: createPrompter(),
       presetConnections: ["linear"],
@@ -343,23 +395,5 @@ describe("selectConnections + addConnections boxes", () => {
     await expect(runInteractive(boxes, state, silentSink, snapshot)).rejects.toThrow(
       /none was resolved/,
     );
-  });
-
-  test("hands the linked project id to the connector provisioning step", async () => {
-    const deps = createDeps();
-    let linkedProjectId: string | undefined;
-    deps.setupConnectionConnector.mockImplementation(async (opts) => {
-      linkedProjectId = await opts.linkProject?.();
-      return { kind: "patched", created: true, connectorUid: "oauth/linear-1" };
-    });
-    const boxes = makeBoxes({
-      prompter: createPrompter(),
-      presetConnections: ["linear"],
-      deps,
-    });
-
-    await runInteractive(boxes, resolvedState(), silentSink, snapshot);
-
-    expect(linkedProjectId).toBe("prj_demo");
   });
 });

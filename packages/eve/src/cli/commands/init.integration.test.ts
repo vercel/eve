@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { MockScreen } from "#cli/dev/tui/test/mock-terminal.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { detectPackageManager } from "#setup/package-manager.js";
 import {
@@ -17,17 +18,27 @@ import {
   type ScaffoldBaseProjectOptions,
 } from "#setup/scaffold/index.js";
 import { pathExists } from "#setup/path-exists.js";
+import { WizardCancelledError } from "#setup/step.js";
 
 import type { GitInitResult } from "./init-git.js";
-import { runInitCommand, type InitCliLogger, type InitCommandDependencies } from "./init.js";
+import { initAgentReplPrompt } from "./agent-instructions.js";
+import {
+  EVE_INIT_PACKAGE_SPEC_ENV,
+  runInitCommand,
+  type InitCliLogger,
+  type InitCommandDependencies,
+} from "./init.js";
 
 const BASE_VERSIONS = {
   aiPackageVersion: "7.0.0",
   connectPackageVersion: "0.2.2",
   evePackage: { version: "0.6.0", nodeEngine: ">=24" },
-  tsgoPackageVersion: "7.0.0",
+  typescriptPackageVersion: "7.0.1-rc",
   zodPackageVersion: "4.0.0",
 } as const;
+
+const RELEASE_AGE_POLICY =
+  'minimumReleaseAgeExclude:\n  - "@ai-sdk/*"\n  - "@rolldown/*"\n  - "@vercel/*"\n  - "@workflow/*"\n  - ai\n  - experimental-ai-sdk-code-mode\n  - eve\n  - nitro\n  - rolldown\n  - workflow\n';
 
 const WEB_VERSIONS = {
   ...BASE_VERSIONS,
@@ -57,32 +68,48 @@ function dependencies(
     typeof vi.fn<InitCommandDependencies["detectInvokingPackageManager"]>
   >;
   isCodingAgentLaunch: ReturnType<typeof vi.fn<InitCommandDependencies["isCodingAgentLaunch"]>>;
+  now: ReturnType<typeof vi.fn<InitCommandDependencies["now"]>>;
   runPackageManagerInstall: ReturnType<
     typeof vi.fn<InitCommandDependencies["runPackageManagerInstall"]>
   >;
+  selectInitHandoff: ReturnType<typeof vi.fn<InitCommandDependencies["selectInitHandoff"]>>;
+  spawnCodingAgentRepl: ReturnType<typeof vi.fn<InitCommandDependencies["spawnCodingAgentRepl"]>>;
   spawnPackageManager: ReturnType<typeof vi.fn<InitCommandDependencies["spawnPackageManager"]>>;
   tryInitializeGit: ReturnType<typeof vi.fn<InitCommandDependencies["tryInitializeGit"]>>;
 } {
   return {
-    addAgentToProject: (options: AddAgentToProjectOptions) =>
-      addAgentToProject({ ...BASE_VERSIONS, ...options }),
+    addAgentToProject: (options: AddAgentToProjectOptions) => {
+      const merged = { ...BASE_VERSIONS, ...options };
+      if (options.evePackage === undefined) {
+        merged.evePackage = BASE_VERSIONS.evePackage;
+      }
+      return addAgentToProject(merged);
+    },
     // Stubbed to "no visible manager" so assertions do not depend on which
     // manager launched the test runner itself.
     detectInvokingPackageManager: vi.fn(() => undefined),
     // Stubbed to "human launch" for the same reason: the runner is often
     // launched by a coding agent, and these tests assert the human path.
     isCodingAgentLaunch: vi.fn(async () => false),
+    now: vi.fn(() => 0),
     detectPackageManager,
-    scaffoldBaseProject: (options: ScaffoldBaseProjectOptions) =>
-      scaffoldBaseProject({ ...BASE_VERSIONS, ...options }),
+    scaffoldBaseProject: (options: ScaffoldBaseProjectOptions) => {
+      const merged = { ...BASE_VERSIONS, ...options };
+      if (options.evePackage === undefined) {
+        merged.evePackage = BASE_VERSIONS.evePackage;
+      }
+      return scaffoldBaseProject(merged);
+    },
     ensureChannel: (options: EnsureChannelOptions) =>
       ensureChannel({
         ...options,
         webPackageVersions: { ...WEB_VERSIONS, ...options.webPackageVersions },
       }),
     runPackageManagerInstall: vi.fn(async () => true),
+    selectInitHandoff: vi.fn(async () => "eve-dev"),
+    spawnCodingAgentRepl: vi.fn(async () => true),
     spawnPackageManager: vi.fn(async () => true),
-    tryInitializeGit: vi.fn(() => gitResult),
+    tryInitializeGit: vi.fn(async () => gitResult),
   };
 }
 
@@ -104,6 +131,7 @@ async function createHostProject(
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe("runInitCommand", () => {
@@ -111,6 +139,11 @@ describe("runInitCommand", () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-base-"));
     const output = logger();
     const deps = dependencies();
+    deps.now
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(467)
+      .mockReturnValueOnce(467)
+      .mockReturnValueOnce(13_667);
 
     await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
 
@@ -120,15 +153,10 @@ describe("runInitCommand", () => {
     );
     const manifest = await readFile(join(projectPath, "package.json"), "utf8");
     expect(manifest).toContain('"eve": "^0.6.0"');
-    // `@vercel/connect`'s optional `ai` peer rejects prereleases, so npm/yarn
-    // need `ai` forced to the pinned prerelease or the install fails (ERESOLVE).
-    const packageJson = JSON.parse(manifest) as {
-      dependencies: Record<string, string>;
-      overrides: Record<string, string>;
-      resolutions: Record<string, string>;
-    };
-    expect(packageJson.overrides.ai).toBe(packageJson.dependencies.ai);
-    expect(packageJson.resolutions.ai).toBe(packageJson.dependencies.ai);
+    // pnpm accepts the optional prerelease peer without a manager-specific pin.
+    const packageJson: unknown = JSON.parse(manifest);
+    expect(packageJson).not.toHaveProperty("overrides");
+    expect(packageJson).not.toHaveProperty("resolutions");
     await expect(pathExists(join(projectPath, "app"))).resolves.toBe(false);
     await expect(pathExists(join(projectPath, ".vercel"))).resolves.toBe(false);
     await expect(pathExists(join(projectPath, "vercel.json"))).resolves.toBe(false);
@@ -151,12 +179,90 @@ describe("runInitCommand", () => {
     // decides at import time whether the strings carry escape codes. The boot
     // banner is the CLI program's pre-action hook, not the command's output.
     expect(output.messages).toHaveLength(4);
-    expect(output.messages[0]).toContain("✓");
-    expect(output.messages[0]).toContain("Created an eve agent in ");
-    expect(output.messages[0]).toContain(projectPath);
-    expect(output.messages[1]).toContain("Installing dependencies...");
+    expect(output.messages[0]).toContain("Preparing project...");
+    expect(output.messages[1]).toContain("✓");
+    expect(output.messages[1]).toContain("Created an eve agent in ");
+    expect(output.messages[1]).toContain(projectPath);
+    expect(output.messages[1]).toContain("in 467ms");
     expect(output.messages[2]).toContain("Installed dependencies");
-    expect(output.messages[3]).toContain("$ eve dev --input /model");
+    expect(output.messages[2]).toContain("in 13.2s");
+    expect(output.messages[3]).toContain("$ eve dev");
+  });
+
+  it("opens the selected coding-agent REPL instead of starting eve dev", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-repl-handoff-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.selectInitHandoff.mockResolvedValue("codex");
+
+    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+
+    const projectPath = join(parentDirectory, "my-agent");
+    expect(deps.spawnCodingAgentRepl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: "codex",
+        cwd: projectPath,
+        prompt: expect.stringContaining("pnpm exec eve dev --no-ui"),
+      }),
+    );
+    const prompt = deps.spawnCodingAgentRepl.mock.calls[0]?.[0].prompt;
+    expect(prompt).toBe(
+      initAgentReplPrompt({
+        devCommand: "pnpm exec eve dev",
+      }),
+    );
+    expect(prompt).toContain("What should the agent do?");
+    expect(prompt).toContain("HMR development server");
+    expect(prompt).not.toContain(projectPath);
+    expect(prompt).not.toContain("{{");
+    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+    expect(output.messages.at(-1)).toContain("$ codex");
+  });
+
+  it("keeps a completed init successful when its optional handoff is cancelled", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-repl-cancelled-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.selectInitHandoff.mockRejectedValue(new WizardCancelledError());
+
+    await expect(
+      runInitCommand(output, parentDirectory, "my-agent", {}, deps),
+    ).resolves.toBeUndefined();
+
+    const projectPath = join(parentDirectory, "my-agent");
+    await expect(pathExists(join(projectPath, "agent/agent.ts"))).resolves.toBe(true);
+    expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
+    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+    expect(output.errors).toEqual([]);
+  });
+
+  it("uses an explicit init package spec for fresh project scaffolds", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-package-spec-"));
+    const output = logger();
+    const deps = dependencies();
+    vi.stubEnv(EVE_INIT_PACKAGE_SPEC_ENV, "file:/tmp/eve-0.11.5.tgz");
+
+    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+
+    const packageJson = JSON.parse(
+      await readFile(join(parentDirectory, "my-agent", "package.json"), "utf8"),
+    ) as { dependencies: Record<string, string> };
+    expect(packageJson.dependencies.eve).toBe("file:/tmp/eve-0.11.5.tgz");
+  });
+
+  it("uses an explicit init package spec when adding to an existing project", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-existing-package-spec-"));
+    const projectRoot = await createHostProject(parentDirectory);
+    const output = logger();
+    const deps = dependencies();
+    vi.stubEnv(EVE_INIT_PACKAGE_SPEC_ENV, "file:/tmp/eve-0.11.5.tgz");
+
+    await runInitCommand(output, parentDirectory, "host-app", {}, deps);
+
+    const packageJson = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8")) as {
+      dependencies: Record<string, string>;
+    };
+    expect(packageJson.dependencies.eve).toBe("file:/tmp/eve-0.11.5.tgz");
   });
 
   it.each([undefined, ".", "./"] as const)(
@@ -188,18 +294,18 @@ describe("runInitCommand", () => {
         "--input",
         "/model",
       ]);
-      expect(output.messages[0]).toContain("Created an eve agent in ");
-      expect(output.messages[0]).toContain(projectPath);
+      expect(output.messages[1]).toContain("Created an eve agent in ");
+      expect(output.messages[1]).toContain(projectPath);
     },
   );
 
   it.each([
-    ["npm", ["exec", "--", "eve", "dev", "--input", "/model"]],
-    ["yarn", ["eve", "dev", "--input", "/model"]],
-    ["bun", ["x", "eve", "dev", "--input", "/model"]],
+    ["npm", "overrides", ["exec", "--", "eve", "dev", "--input", "/model"]],
+    ["yarn", "resolutions", ["eve", "dev", "--input", "/model"]],
+    ["bun", "overrides", ["x", "eve", "dev", "--input", "/model"]],
   ] as const)(
     "scaffolds a fresh project owned by the invoking manager %s without pnpm policy",
-    async (kind, devArguments) => {
+    async (kind, aiPinField, devArguments) => {
       const parentDirectory = await mkdtemp(join(tmpdir(), `eve-init-agent-${kind}-`));
       const output = logger();
       const deps = dependencies();
@@ -214,6 +320,13 @@ describe("runInitCommand", () => {
       // The workspace policy is pnpm configuration; a scaffold owned by
       // another manager must not receive it.
       await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
+      const packageJson: unknown = JSON.parse(
+        await readFile(join(projectPath, "package.json"), "utf8"),
+      );
+      expect(packageJson).toHaveProperty(aiPinField);
+      expect(packageJson).not.toHaveProperty(
+        aiPinField === "overrides" ? "resolutions" : "overrides",
+      );
       expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
         kind,
         projectPath,
@@ -290,6 +403,199 @@ describe("runInitCommand", () => {
       await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(
         kind === "pnpm",
       );
+    },
+  );
+
+  it("scaffolds a fresh pnpm workspace member without nested workspace policy", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-init-pnpm-workspace-"));
+    const appsDirectory = join(workspaceRoot, "apps");
+    await mkdir(appsDirectory, { recursive: true });
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      `${JSON.stringify({ private: true, engines: { node: "22.x" } }, null, 2)}\n`,
+      "utf8",
+    );
+    await writeFile(join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n", "utf8");
+    const output = logger();
+    const deps = dependencies();
+    deps.detectInvokingPackageManager.mockReturnValue("npm");
+
+    await runInitCommand(output, appsDirectory, "my-agent", {}, deps);
+
+    const projectPath = join(appsDirectory, "my-agent");
+    await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
+    await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
+      `packages:\n  - apps/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
+    );
+    const projectPackageJson = JSON.parse(
+      await readFile(join(projectPath, "package.json"), "utf8"),
+    ) as {
+      dependencies: Record<string, string>;
+      engines?: unknown;
+      overrides?: unknown;
+      resolutions?: unknown;
+    };
+    expect(projectPackageJson.dependencies.eve).toBe("^0.6.0");
+    expect(projectPackageJson.engines).toBeUndefined();
+    expect(projectPackageJson.overrides).toBeUndefined();
+    expect(projectPackageJson.resolutions).toBeUndefined();
+    expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
+      engines: { node: "24.x" },
+    });
+    expect(output.messages.join("\n")).toContain(
+      `⚠ Updated workspace root configuration at ${join(workspaceRoot, "pnpm-workspace.yaml")}`,
+    );
+    expect(output.messages.join("\n")).toContain(
+      `⚠ Updated workspace root package.json at ${join(workspaceRoot, "package.json")} (Overrode package.json engines.node from "22.x" to "24.x"`,
+    );
+    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+      "pnpm",
+      projectPath,
+      expect.anything(),
+    );
+  });
+
+  it("scaffolds under an unclaimed pnpm workspace directory by adding a package pattern", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-init-pnpm-unclaimed-workspace-"));
+    const agentsDirectory = join(workspaceRoot, "agents");
+    await mkdir(agentsDirectory, { recursive: true });
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      `${JSON.stringify({ private: true, engines: { node: "22.x" } }, null, 2)}\n`,
+      "utf8",
+    );
+    await writeFile(join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n", "utf8");
+    const output = logger();
+    const deps = dependencies();
+    deps.detectInvokingPackageManager.mockReturnValue("npm");
+
+    await runInitCommand(output, agentsDirectory, "my-agent", {}, deps);
+
+    const projectPath = join(agentsDirectory, "my-agent");
+    await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
+    await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
+      `packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
+    );
+    const projectPackageJson = JSON.parse(
+      await readFile(join(projectPath, "package.json"), "utf8"),
+    ) as {
+      engines?: unknown;
+      overrides?: unknown;
+      resolutions?: unknown;
+    };
+    expect(projectPackageJson.engines).toBeUndefined();
+    expect(projectPackageJson.overrides).toBeUndefined();
+    expect(projectPackageJson.resolutions).toBeUndefined();
+    expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
+      engines: { node: "24.x" },
+    });
+    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+      "pnpm",
+      projectPath,
+      expect.anything(),
+    );
+  });
+
+  it("adds Web Chat under an unclaimed pnpm workspace directory without nested workspace policy", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-init-web-pnpm-workspace-"));
+    const agentsDirectory = join(workspaceRoot, "agents");
+    await mkdir(agentsDirectory, { recursive: true });
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      `${JSON.stringify({ private: true, engines: { node: "22.x" } }, null, 2)}\n`,
+      "utf8",
+    );
+    await writeFile(join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n", "utf8");
+    const output = logger();
+    const deps = dependencies();
+    deps.detectInvokingPackageManager.mockReturnValue("npm");
+
+    await runInitCommand(output, agentsDirectory, "web-agent", { channelWebNextjs: true }, deps);
+
+    const projectPath = join(agentsDirectory, "web-agent");
+    await expect(pathExists(join(projectPath, "app/page.tsx"))).resolves.toBe(true);
+    await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
+    await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
+      `packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
+    );
+    const projectPackageJson = JSON.parse(
+      await readFile(join(projectPath, "package.json"), "utf8"),
+    ) as {
+      dependencies: Record<string, string>;
+      engines?: unknown;
+      overrides?: unknown;
+      resolutions?: unknown;
+    };
+    expect(projectPackageJson.dependencies.eve).toBe("^0.6.0");
+    expect(projectPackageJson.dependencies.next).toBe("16.0.0");
+    expect(projectPackageJson.engines).toBeUndefined();
+    expect(projectPackageJson.overrides).toBeUndefined();
+    expect(projectPackageJson.resolutions).toBeUndefined();
+    expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
+      engines: { node: "24.x" },
+    });
+    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+      "pnpm",
+      projectPath,
+      expect.anything(),
+    );
+  });
+
+  it.each([
+    ["yarn", "yarn.lock", "resolutions", ["eve", "dev", "--input", "/model"]],
+    ["bun", "bun.lock", "overrides", ["x", "eve", "dev", "--input", "/model"]],
+  ] as const)(
+    "scaffolds a fresh %s workspace member without nested root-only package fields",
+    async (kind, lockfile, rootAiPinField, devArguments) => {
+      const workspaceRoot = await mkdtemp(join(tmpdir(), `eve-init-${kind}-workspace-member-`));
+      const appsDirectory = join(workspaceRoot, "apps");
+      await mkdir(appsDirectory, { recursive: true });
+      await writeFile(
+        join(workspaceRoot, "package.json"),
+        `${JSON.stringify(
+          {
+            private: true,
+            engines: { node: "22.x" },
+            workspaces: ["apps/*"],
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+      await writeFile(join(workspaceRoot, lockfile), "", "utf8");
+      const output = logger();
+      const deps = dependencies();
+      deps.detectInvokingPackageManager.mockReturnValue("npm");
+
+      await runInitCommand(output, appsDirectory, "my-agent", {}, deps);
+
+      const projectPath = join(appsDirectory, "my-agent");
+      const projectPackageJson = JSON.parse(
+        await readFile(join(projectPath, "package.json"), "utf8"),
+      ) as {
+        engines?: unknown;
+        overrides?: unknown;
+        resolutions?: unknown;
+      };
+      expect(projectPackageJson.engines).toBeUndefined();
+      expect(projectPackageJson.overrides).toBeUndefined();
+      expect(projectPackageJson.resolutions).toBeUndefined();
+      const rootPackageJson = JSON.parse(
+        await readFile(join(workspaceRoot, "package.json"), "utf8"),
+      ) as {
+        engines?: { node?: string };
+        overrides?: { ai?: string };
+        resolutions?: { ai?: string };
+      };
+      expect(rootPackageJson.engines?.node).toBe("24.x");
+      expect(rootPackageJson[rootAiPinField]?.ai).toBe("7.0.0");
+      expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+        kind,
+        projectPath,
+        expect.anything(),
+      );
+      expect(deps.spawnPackageManager).toHaveBeenCalledWith(kind, projectPath, [...devArguments]);
     },
   );
 
@@ -560,6 +866,44 @@ describe("runInitCommand", () => {
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("bun", projectRoot, ["x", "eve", "dev"]);
   });
 
+  it("adds an agent to an existing pnpm workspace member without nested root-only policy", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-init-existing-pnpm-workspace-"));
+    const appsDirectory = join(workspaceRoot, "apps");
+    const projectRoot = join(appsDirectory, "host-app");
+    await mkdir(projectRoot, { recursive: true });
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      `${JSON.stringify({ private: true, engines: { node: "22.x" } }, null, 2)}\n`,
+      "utf8",
+    );
+    await writeFile(join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n", "utf8");
+    await writeFile(join(projectRoot, "package.json"), '{ "name": "host-app" }\n', "utf8");
+    const output = logger();
+    const deps = dependencies();
+    deps.detectInvokingPackageManager.mockReturnValue("npm");
+
+    await runInitCommand(output, appsDirectory, "host-app", {}, deps);
+
+    expect(await readFile(join(projectRoot, "agent/agent.ts"), "utf8")).toContain(
+      DEFAULT_AGENT_MODEL_ID,
+    );
+    await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
+    const projectPackageJson = JSON.parse(
+      await readFile(join(projectRoot, "package.json"), "utf8"),
+    ) as { dependencies: Record<string, string>; engines?: unknown };
+    expect(projectPackageJson.dependencies.eve).toBe("^0.6.0");
+    expect(projectPackageJson.engines).toBeUndefined();
+    expect(JSON.parse(await readFile(join(workspaceRoot, "package.json"), "utf8"))).toMatchObject({
+      engines: { node: "24.x" },
+    });
+    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+      "pnpm",
+      projectRoot,
+      expect.anything(),
+    );
+    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+  });
+
   it("reports agent file conflicts before writing anything", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-conflict-"));
     const projectRoot = await createHostProject(parentDirectory);
@@ -568,9 +912,11 @@ describe("runInitCommand", () => {
     const output = logger();
     const deps = dependencies();
 
-    await expect(runInitCommand(output, parentDirectory, "host-app", {}, deps)).rejects.toThrow(
-      "agent/instructions.md",
-    );
+    await expect(
+      runInitCommand(output, parentDirectory, "host-app", {}, deps),
+    ).rejects.toMatchObject({
+      message: `Cannot add an eve agent to "${projectRoot}" because it already has: agent/instructions.md.`,
+    });
 
     await expect(pathExists(join(projectRoot, "agent/agent.ts"))).resolves.toBe(false);
     expect(await readFile(join(projectRoot, "agent/instructions.md"), "utf8")).toBe("existing\n");
@@ -591,26 +937,23 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
   });
 
-  it("scaffolds the current directory for a coding agent that omits the target", async () => {
+  it("hands a coding agent the setup guide when it omits the target", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-agent-bare-"));
     const output = logger();
     const deps = dependencies();
     deps.isCodingAgentLaunch.mockResolvedValue(true);
-    deps.detectInvokingPackageManager.mockReturnValue("pnpm");
 
     await runInitCommand(output, parentDirectory, undefined, {}, deps);
 
-    expect(await readFile(join(parentDirectory, "agent/agent.ts"), "utf8")).toContain(
-      DEFAULT_AGENT_MODEL_ID,
-    );
-    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
-      "pnpm",
-      parentDirectory,
-      expect.anything(),
-    );
-    expect(deps.tryInitializeGit).toHaveBeenCalledWith(parentDirectory);
+    // A bare `eve init` from an agent means it has not chosen what to build, so
+    // we print the guide and touch nothing — no scaffold, install, Git, or dev.
+    await expect(pathExists(join(parentDirectory, "agent"))).resolves.toBe(false);
+    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
+    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
-    expect(output.messages.join("\n")).toContain("Do not start `eve dev`");
+    const printed = output.messages.join("\n");
+    expect(printed).toContain("Set up an eve agent");
+    expect(printed).toContain("npx eve@latest init <name>");
   });
 
   it("scaffolds and initializes Git for a coding agent but does not spawn the dev server", async () => {
@@ -633,6 +976,8 @@ describe("runInitCommand", () => {
     expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
     // The dev server is handed off as text, never spawned — the dev TUI would
     // wedge the launching agent. The handoff's content is the unit test's job.
+    expect(deps.selectInitHandoff).not.toHaveBeenCalled();
+    expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
   });
 
@@ -657,6 +1002,7 @@ describe("runInitCommand", () => {
     const output = logger();
     const deps = dependencies();
     deps.runPackageManagerInstall.mockImplementation(async (_kind, _projectPath, options) => {
+      options?.onOutput?.({ stream: "stdout", text: "Packages: +12" });
       options?.onOutput?.({ stream: "stderr", text: "ERR_PNPM_FETCH_404 not found" });
       return false;
     });
@@ -666,8 +1012,190 @@ describe("runInitCommand", () => {
     );
 
     await expect(pathExists(join(parentDirectory, "my-agent"))).resolves.toBe(true);
-    expect(output.errors.join("\n")).toContain("ERR_PNPM_FETCH_404 not found");
+    expect(output.errors).toEqual(["Packages: +12", "ERR_PNPM_FETCH_404 not found"]);
     expect(deps.tryInitializeGit).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+  });
+
+  it("replays only the actionable npm error, dropping silly/verbose/http/timing noise", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-npm-noise-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.runPackageManagerInstall.mockImplementation(async (_kind, _projectPath, options) => {
+      options?.onOutput?.({ stream: "stderr", text: "npm silly logfile start cleaning logs" });
+      options?.onOutput?.({ stream: "stderr", text: "npm verbose cli /usr/local/bin/node" });
+      options?.onOutput?.({
+        stream: "stderr",
+        text: "npm http fetch GET 200 https://registry.npmjs.org/eve 41ms",
+      });
+      options?.onOutput?.({ stream: "stderr", text: "npm timing idealTree Completed in 42ms" });
+      options?.onOutput?.({ stream: "stderr", text: "npm error code ERESOLVE" });
+      options?.onOutput?.({
+        stream: "stderr",
+        text: "npm error ERESOLVE unable to resolve dependency tree",
+      });
+      return false;
+    });
+
+    await expect(runInitCommand(output, parentDirectory, "my-agent", {}, deps)).rejects.toThrow(
+      "Failed to install dependencies",
+    );
+
+    expect(output.errors).toEqual([
+      "npm error code ERESOLVE",
+      "npm error ERESOLVE unable to resolve dependency tree",
+    ]);
+    expect(output.errors.join("\n")).not.toMatch(/npm (?:silly|verbose|http|timing)/u);
+  });
+
+  it("replays only the final npm detail lines when filtering leaves no error", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-npm-fallback-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.runPackageManagerInstall.mockImplementation(async (_kind, _projectPath, options) => {
+      for (let index = 0; index < 25; index += 1) {
+        options?.onOutput?.({ stream: "stderr", text: `npm silly step ${index}` });
+      }
+      options?.onOutput?.({ stream: "stderr", text: "" });
+      return false;
+    });
+
+    await expect(runInitCommand(output, parentDirectory, "my-agent", {}, deps)).rejects.toThrow(
+      "Failed to install dependencies",
+    );
+
+    expect(output.errors).toHaveLength(20);
+    expect(output.errors.at(0)).toBe("npm silly step 5");
+    expect(output.errors.at(-1)).toBe("npm silly step 24");
+  });
+
+  it("streams init phases and package-manager output as debug logs", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-debug-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.runPackageManagerInstall.mockImplementation(async (_kind, _projectPath, options) => {
+      options?.onOutput?.({ stream: "stdout", text: "Progress: resolved 62, reused 62, done" });
+      return true;
+    });
+
+    const previous = process.env.EVE_LOG_LEVEL;
+    process.env.EVE_LOG_LEVEL = "debug";
+    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+      const debugLines = consoleLog.mock.calls.map((call) => String(call[0]));
+      expect(debugLines).toContain("[eve:init] creating agent");
+      expect(
+        debugLines.some((line) => line.startsWith("[eve:init] installing dependencies with")),
+      ).toBe(true);
+      expect(debugLines).toContain("[eve:init] Progress: resolved 62, reused 62, done");
+      expect(debugLines).toContain("[eve:init] initializing git repository");
+      expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({ progressDetails: false }),
+      );
+    } finally {
+      consoleLog.mockRestore();
+      if (previous === undefined) {
+        delete process.env.EVE_LOG_LEVEL;
+      } else {
+        process.env.EVE_LOG_LEVEL = previous;
+      }
+    }
+  });
+
+  it("reports a failed install as failed under debug", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-debug-failure-"));
+    const output = logger();
+    const deps = dependencies();
+    deps.runPackageManagerInstall.mockResolvedValue(false);
+
+    const previous = process.env.EVE_LOG_LEVEL;
+    process.env.EVE_LOG_LEVEL = "debug";
+    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(runInitCommand(output, parentDirectory, "my-agent", {}, deps)).rejects.toThrow(
+        "Failed to install dependencies",
+      );
+      const debugLines = consoleLog.mock.calls.map((call) => String(call[0]));
+      expect(debugLines.some((line) => line.includes("dependency installation failed"))).toBe(true);
+      expect(debugLines.some((line) => line.includes("dependencies installed"))).toBe(false);
+    } finally {
+      consoleLog.mockRestore();
+      if (previous === undefined) {
+        delete process.env.EVE_LOG_LEVEL;
+      } else {
+        process.env.EVE_LOG_LEVEL = previous;
+      }
+    }
+  });
+
+  it("keeps interactive progress on one physical row", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-progress-"));
+    const output = logger();
+    const deps = dependencies();
+    const screen = new MockScreen({ columns: 80, rows: 10 });
+    const snapshots: string[] = [];
+    const isTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+    const columnsDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "columns");
+
+    Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
+    Object.defineProperty(process.stdout, "columns", { configurable: true, value: screen.columns });
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
+      screen.write(chunk);
+      snapshots.push(screen.snapshot());
+      return true;
+    });
+    deps.isCodingAgentLaunch.mockResolvedValue(true);
+    deps.detectInvokingPackageManager.mockReturnValue("npm");
+    deps.runPackageManagerInstall.mockImplementation(async (_kind, _projectPath, options) => {
+      options?.onOutput?.({ stream: "stderr", text: "npm silly config load:file:/tmp/.npmrc" });
+      options?.onOutput?.({
+        stream: "stderr",
+        text: "npm silly fetch manifest @vercel/connect@0.2.2",
+      });
+      options?.onOutput?.({ stream: "stderr", text: "npm silly fetch manifest zod@4.4.3" });
+      options?.onOutput?.({
+        stream: "stderr",
+        text: "npm http fetch GET https://registry.npmjs.org/@vercel%2fconnect attempt 1 failed with ENOTFOUND",
+      });
+      options?.onOutput?.({ stream: "stdout", text: `Downloading ${"package".repeat(20)}` });
+      return true;
+    });
+
+    try {
+      await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+    } finally {
+      if (isTtyDescriptor === undefined) {
+        Reflect.deleteProperty(process.stdout, "isTTY");
+      } else {
+        Object.defineProperty(process.stdout, "isTTY", isTtyDescriptor);
+      }
+      if (columnsDescriptor === undefined) {
+        Reflect.deleteProperty(process.stdout, "columns");
+      } else {
+        Object.defineProperty(process.stdout, "columns", columnsDescriptor);
+      }
+    }
+
+    const rendered = snapshots.join("\n");
+    expect(rendered).toContain("Preparing project");
+    expect(rendered).toContain("Creating agent");
+    expect(rendered).toContain("Installing dependencies");
+    expect(rendered).toContain("npm install");
+    expect(rendered).toContain("Resolving @vercel/connect@0.2.2");
+    expect(rendered).toContain("npm registry · attempt 1 failed: ENOTFOUND");
+    expect(rendered).not.toContain("config load:file");
+    expect(rendered).toContain("Initializing Git repository");
+    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+      "npm",
+      join(parentDirectory, "my-agent"),
+      expect.objectContaining({ progressDetails: true }),
+    );
+    for (const snapshot of snapshots.filter(Boolean)) {
+      expect(snapshot.split("\n")).toHaveLength(1);
+      expect([...snapshot].length).toBeLessThan(screen.columns);
+    }
   });
 });

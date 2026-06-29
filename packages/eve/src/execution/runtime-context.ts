@@ -5,6 +5,7 @@ import {
   AuthKey,
   CapabilitiesKey,
   ChannelInstrumentationKey,
+  ChannelRequestIdKey,
   ContinuationTokenKey,
   InitiatorAuthKey,
   ModeKey,
@@ -42,6 +43,10 @@ export function buildRunContext(input: {
 
   if (run.capabilities !== undefined) {
     ctx.set(CapabilitiesKey, run.capabilities);
+  }
+
+  if (run.requestId !== undefined) {
+    ctx.set(ChannelRequestIdKey, run.requestId);
   }
 
   if (run.callback !== undefined) {

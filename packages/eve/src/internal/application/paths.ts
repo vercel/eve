@@ -29,7 +29,12 @@ function getWorkflowBuildCacheKey(appRoot: string): string {
   return createHash("sha256").update(appRoot).digest("hex").slice(0, 12);
 }
 
-function isVercelBuildEnvironment(): boolean {
+/**
+ * Reports whether the current process is running inside a Vercel build or
+ * deployment. Vercel sets `VERCEL` in both build and runtime environments, so
+ * this is the canonical signal for "managed by Vercel" versus self-hosted.
+ */
+export function isVercelBuildEnvironment(): boolean {
   return Boolean(process.env.VERCEL);
 }
 

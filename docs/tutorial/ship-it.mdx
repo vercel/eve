@@ -113,7 +113,7 @@ const appAuth: AuthFn<Request> = async (request) => {
 };
 
 export default eveChannel({
-  auth: [appAuth, localDev(), vercelOidc()],
+  auth: [appAuth, vercelOidc(), localDev()],
 });
 ```
 
@@ -142,13 +142,13 @@ Across the nine steps you built and shipped one agent, and along the way you use
 - **The sandbox** to compute and chart beyond SQL in an isolated `/workspace`.
 - **State** (`defineState`) to remember the team's glossary across turns.
 - **Dynamic skills** (`defineDynamic`) to load the right team playbook per caller.
-- **Human-in-the-loop** approval (`needsApproval`) to gate expensive queries.
+- **Human-in-the-loop** approval (`approval`) to gate expensive queries.
 - **Channel auth** to turn a request into an authenticated principal.
 - **Deployment** to Vercel, with the runtime behind your web app.
 
 ## Next steps
 
-- [Connections](../connections) for tool allowlists and per-connection approval.
+- [MCP connections](../connections/mcp) for tool allowlists and per-connection approval.
 - [Sandbox](../sandbox) for backends, lifecycle, and network policy.
 - [Dynamic capabilities](../guides/dynamic-capabilities) for schema-derived dynamic tools, a read-only analyst subagent, and model-authored report workflows on this same example.
 - [Auth and route protection](../guides/auth-and-route-protection) for production auth patterns.

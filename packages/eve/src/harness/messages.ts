@@ -71,12 +71,12 @@ export function resolveAssistantStepText(
     }
 
     const text = extractMessageText(message);
-    if (text.length > 0) {
+    if (text.trim().length > 0) {
       return text;
     }
   }
 
-  if (fallback !== undefined && fallback.length > 0) {
+  if (fallback !== undefined && fallback.trim().length > 0) {
     return fallback;
   }
 

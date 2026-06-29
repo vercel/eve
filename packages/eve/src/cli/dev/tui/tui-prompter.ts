@@ -4,9 +4,12 @@ import type {
   MultiSelectOptions,
   Prompter,
   PrompterValue,
+  SelectOption,
   SingleSelectOptions,
 } from "#setup/prompter.js";
 import { createSelectOptionCodec } from "#setup/cli/select-option-codec.js";
+import { searchActionQuery } from "#setup/cli/select-state.js";
+import type { SetupSpinnerIntent } from "#setup/cli/index.js";
 import { WizardCancelledError } from "#setup/step.js";
 
 import type { SetupFlowPrompterRenderer, SetupSelectRequest } from "./setup-flow.js";
@@ -23,6 +26,7 @@ function setupSelectRequest<T extends PrompterValue>(
   opts: SingleSelectOptions<T> | MultiSelectOptions<T>,
   options: SetupSelectRequest["options"],
   encode: (value: T) => string,
+  encodeOptions: (options: readonly SelectOption<T>[]) => SetupSelectRequest["options"],
 ): SetupSelectRequest {
   const base = { message: opts.message, options };
   const withNotices = <Request extends SetupSelectRequest>(request: Request): Request => {
@@ -56,14 +60,22 @@ function setupSelectRequest<T extends PrompterValue>(
     return withNotices(request);
   }
 
-  if (opts.search === true && opts.hintLayout !== undefined) {
-    throw new Error("Searchable setup questions do not support a hint layout.");
+  if (opts.search === true && opts.hintLayout === "stacked") {
+    throw new Error("Searchable setup questions do not support a stacked hint layout.");
   }
 
   let request: SetupSelectRequest;
   if (opts.search === true) {
     request = { ...base, kind: "search" };
+    if (opts.hintLayout === "inline") request.layout = "task-list";
     if (opts.placeholder !== undefined) request.placeholder = opts.placeholder;
+    if (opts.searchAction !== undefined) {
+      request.searchAction = { label: opts.searchAction.label };
+      const load = opts.searchAction.load;
+      if (load !== undefined) {
+        request.searchAction.load = async (query) => encodeOptions(await load(query));
+      }
+    }
   } else {
     // The public "inline" hint layout is the panel's "task-list" presentation.
     const kind = opts.hintLayout === "inline" ? "task-list" : (opts.hintLayout ?? "single");
@@ -95,10 +107,16 @@ export function createTuiPrompter(renderer: TuiPrompterRenderer): Prompter {
     opts: SingleSelectOptions<T> | MultiSelectOptions<T>,
   ): Promise<T | T[]> {
     const codec = createSelectOptionCodec(opts.options);
-    const request = setupSelectRequest(opts, codec.options, codec.encode);
+    const request = setupSelectRequest(opts, codec.options, codec.encode, codec.encodeOptions);
 
     const keys = guardCancel(await renderer.readSelect(request));
-    const values = keys.map((key) => codec.decode(key));
+    const values = keys.map((key) => {
+      const query = searchActionQuery(key);
+      if (query !== undefined && opts.multiple !== true && opts.searchAction !== undefined) {
+        return opts.searchAction.value(query);
+      }
+      return codec.decode(key);
+    });
     if (opts.multiple === true) return values;
     const value = values[0];
     if (value === undefined) {
@@ -189,8 +207,12 @@ export function createTuiPrompter(renderer: TuiPrompterRenderer): Prompter {
         renderer.renderLine(title, "info");
         for (const entry of lines) renderer.renderLine(`  ${entry}`, "info");
       },
-      spinner(message) {
-        renderer.setStatus(message);
+      spinner(message, intent?: SetupSpinnerIntent) {
+        renderer.setStatus(
+          intent?.kind === "external-action"
+            ? { kind: "external-action", text: message, emphasis: intent.emphasis }
+            : message,
+        );
         let stopped = false;
         return {
           stop() {

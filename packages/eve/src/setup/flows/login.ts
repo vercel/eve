@@ -3,6 +3,7 @@ import { runVercel } from "#setup/primitives/run-vercel.js";
 import { getVercelAuthStatus, type VercelAuthStatus } from "#setup/vercel-project.js";
 
 import type { Prompter } from "../prompter.js";
+import { withSpinner } from "../with-spinner.js";
 
 export type LoginFlowResult =
   /** A `vercel whoami` already succeeds; nothing to do. */
@@ -51,19 +52,6 @@ const defaultDeps: LoginFlowDeps = {
     }),
 };
 
-async function withSpinner<T>(
-  prompter: Prompter,
-  message: string,
-  task: () => Promise<T>,
-): Promise<T> {
-  const spinner = prompter.log.spinner?.(message);
-  try {
-    return await task();
-  } finally {
-    spinner?.stop();
-  }
-}
-
 /**
  * Runs `vercel login` while the dev TUI stays live, mirroring the Slack Connect
  * browser wait: an interactive prompter races the login subprocess against a
@@ -111,7 +99,7 @@ async function runVercelLoginWithControls(
 }
 
 /**
- * THE LOGIN FLOW for the dev TUI's `/login`. Short-circuits when already
+ * THE LOGIN FLOW for the dev TUI's `/vc:login`. Short-circuits when already
  * authenticated; otherwise runs `vercel login` as a browser flow the TUI waits
  * on (see {@link runVercelLoginWithControls}) and re-probes after, so a
  * half-finished or abandoned login reports `failed`, never a false success.
@@ -119,6 +107,8 @@ async function runVercelLoginWithControls(
 export async function runLoginFlow(input: {
   appRoot: string;
   prompter: Prompter;
+  /** Run the browser login even when the account-level Vercel session is valid. */
+  force?: boolean;
   signal?: AbortSignal;
   deps?: Partial<LoginFlowDeps>;
 }): Promise<LoginFlowResult> {
@@ -132,7 +122,8 @@ export async function runLoginFlow(input: {
   signal?.throwIfAborted();
   switch (initialStatus) {
     case "authenticated":
-      return { kind: "already" };
+      if (input.force !== true) return { kind: "already" };
+      break;
     case "cli-missing":
       return { kind: "cli-missing" };
     case "unavailable":

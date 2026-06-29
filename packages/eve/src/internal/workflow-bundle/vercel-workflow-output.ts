@@ -23,10 +23,6 @@ import {
   isEveVercelFunctionPath,
   normalizeEveVercelRoutes,
 } from "#internal/workflow-bundle/eve-service-route-output.js";
-import {
-  EVE_WORKFLOW_QUEUE_NAMESPACE,
-  WORKFLOW_QUEUE_NAMESPACE_ENV,
-} from "#internal/workflow/queue-namespace.js";
 
 // just-bash and microsandbox are optional peer dependencies (the
 // opt-in local sandbox engines) loaded lazily from the application's
@@ -61,7 +57,6 @@ export function createWorkflowFunctionEnvironment(environment?: unknown): Record
   }
 
   nextEnvironment.NODE_OPTIONS = WORKFLOW_FUNCTION_NODE_OPTIONS;
-  nextEnvironment[WORKFLOW_QUEUE_NAMESPACE_ENV] = EVE_WORKFLOW_QUEUE_NAMESPACE;
   return nextEnvironment;
 }
 

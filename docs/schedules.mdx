@@ -58,17 +58,17 @@ Sweep stale workflow state.
 
 Use a handler when the schedule needs to deliver to a channel, branch on conditions, or compute its arguments at fire time. The handler is in full control. It has no channel of its own, so it passes the work to one with `receive`.
 
-```ts title="agent/schedules/daily-digest.ts"
+```ts title="agent/schedules/critical-alerts.ts"
 import { defineSchedule } from "eve/schedules";
 
 import slack from "../channels/slack.js";
 
 export default defineSchedule({
-  cron: "0 9 * * 1-5",
+  cron: "* * * * *",
   async run({ receive, waitUntil, appAuth }) {
     waitUntil(
       receive(slack, {
-        message: "Summarize yesterday's activity and post the digest.",
+        message: "Check for new critical alerts. Report only when there are any.",
         target: { channelId: "C0123ABC" },
         auth: appAuth,
       }),
@@ -76,6 +76,8 @@ export default defineSchedule({
   },
 });
 ```
+
+The agent does not have to deliver a message on every run. When a prompt makes delivery conditional, as in the alert check above, eve tells the agent how to finish successfully without sending anything to the channel. Frequent polling schedules do not need a separate filter or delivery setting.
 
 - `receive(channel, { message, target, auth })`: starts a session on another channel. Same contract as a route handler's `args.receive`.
 - `waitUntil(promise)`: extends the cron task's lifetime so the parked session and any in-flight fetches settle before the task ends. Wrap the `receive` call in it.

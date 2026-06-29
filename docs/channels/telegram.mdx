@@ -53,6 +53,8 @@ Human-in-the-loop (HITL) turns option requests into inline-keyboard buttons and 
 
 Start a session without an inbound message through `receive(telegram, { message, target, auth })` from a schedule `run` handler, or `args.receive(telegram, ...)` from another channel. `target.chatId` is required. Add `messageThreadId` to land in a specific forum topic.
 
+Private proactive chats stay keyed to the chat, or to the chat plus `messageThreadId` when you target a topic. Group and supergroup proactive sends anchor to the bot message id returned by Telegram, so replies to different bot messages can resume different sessions in the same chat. If Telegram does not return a recognized chat type for an outbound send, eve keeps the session unanchored instead of guessing.
+
 ### Attachments
 
 Inbound photos and documents are supported. eve fetches them on demand via `getFile`, only when an upload policy allows the type:

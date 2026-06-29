@@ -18,6 +18,8 @@ import {
   type ManifestCompileContext,
 } from "#compiler/normalize-helpers.js";
 
+type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+
 /**
  * Compiles the agent-level configuration (model, compaction, build,
  * workspace) for one authored agent node.
@@ -67,6 +69,7 @@ export async function compileAgentConfig(
     model: CompiledRuntimeModelReference;
     name: string;
     outputSchema?: JsonObject;
+    reasoning?: CompiledAgentDefinition["reasoning"];
     source?: ModuleSourceRef;
   } = {
     compaction,
@@ -78,8 +81,9 @@ export async function compileAgentConfig(
     compiledConfig.description = definition.description;
   }
 
-  if (definition.experimental?.codeMode !== undefined) {
-    compiledConfig.experimental = { codeMode: definition.experimental.codeMode };
+  const experimental = normalizeExperimentalDefinition(definition.experimental);
+  if (experimental !== undefined) {
+    compiledConfig.experimental = experimental;
   }
 
   if (definition.build !== undefined) {
@@ -93,6 +97,10 @@ export async function compileAgentConfig(
 
   if (definition.outputSchema !== undefined) {
     compiledConfig.outputSchema = normalizeJsonSchemaDefinition(definition.outputSchema, "output");
+  }
+
+  if (definition.reasoning !== undefined) {
+    compiledConfig.reasoning = definition.reasoning;
   }
 
   if (configModule !== undefined) {
@@ -121,6 +129,24 @@ export async function compileAgentConfig(
   }
 
   return compiledConfig;
+}
+
+function normalizeExperimentalDefinition(
+  experimental: CompiledAgentDefinition["experimental"] | undefined,
+): CompiledAgentDefinition["experimental"] | undefined {
+  if (experimental === undefined) {
+    return undefined;
+  }
+
+  const compiledExperimental: Mutable<NonNullable<CompiledAgentDefinition["experimental"]>> = {};
+
+  if (experimental.workflow !== undefined) {
+    compiledExperimental.workflow = {
+      world: experimental.workflow.world,
+    };
+  }
+
+  return compiledExperimental;
 }
 
 async function normalizeAuthoredModelReference(input: {

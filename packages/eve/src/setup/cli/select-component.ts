@@ -15,8 +15,10 @@ import {
   initialSelectState,
   orderedSelection,
   reduceSelect,
+  searchActionQuery,
   selectValueAtCursor,
   submitRowIndex,
+  type SearchActionOption,
   type SelectEvent,
   type SelectState,
 } from "./select-state.js";
@@ -45,6 +47,7 @@ export class SelectComponent extends Prompt<string | string[]> {
   readonly options: PromptOption<string>[];
   readonly multiple: boolean;
   readonly search: boolean;
+  readonly searchAction: SearchActionOption | undefined;
   readonly required: boolean;
   filter = "";
   optionCursor = 0;
@@ -54,6 +57,7 @@ export class SelectComponent extends Prompt<string | string[]> {
     options: PromptOption<string>[];
     multiple: boolean;
     search: boolean;
+    searchAction?: SearchActionOption;
     required: boolean;
     initial: SelectState;
     render: (this: Omit<SelectComponent, "prompt">) => string | undefined;
@@ -62,6 +66,7 @@ export class SelectComponent extends Prompt<string | string[]> {
     this.options = input.options;
     this.multiple = input.multiple;
     this.search = input.search;
+    this.searchAction = input.searchAction;
     this.required = input.required;
     this.filter = input.initial.filter;
     this.optionCursor = input.initial.cursor;
@@ -92,7 +97,7 @@ export class SelectComponent extends Prompt<string | string[]> {
   }
 
   visibleOptions(): PromptOption<string>[] {
-    return filterOptions(this.options, this.filter);
+    return filterOptions(this.options, this.filter, this.searchAction);
   }
 
   /** True when the multi-select cursor sits on the trailing Submit row. */
@@ -151,6 +156,10 @@ export class SelectComponent extends Prompt<string | string[]> {
   }
 
   labelForValue(value: string): string {
+    const query = searchActionQuery(value);
+    if (query !== undefined && this.searchAction !== undefined) {
+      return this.searchAction.label(query);
+    }
     return this.options.find((option) => option.value === value)?.label ?? value;
   }
 
@@ -169,7 +178,7 @@ export class SelectComponent extends Prompt<string | string[]> {
     const next = reduceSelect(
       { filter: this.filter, cursor: this.optionCursor, selected: this.selectedSet },
       event,
-      { options: this.options, submitRow: this.multiple },
+      { options: this.options, searchAction: this.searchAction, submitRow: this.multiple },
     );
     this.filter = next.filter;
     this.optionCursor = next.cursor;
@@ -254,6 +263,7 @@ export async function runSelectComponent<T extends PromptValue>(input: {
   options: readonly PromptOption<T>[];
   multiple: boolean;
   search: boolean;
+  searchAction?: { label(query: string): string; value(query: string): T };
   required: boolean;
   placeholder?: string;
   defaultValue?: T;
@@ -277,6 +287,8 @@ export async function runSelectComponent<T extends PromptValue>(input: {
     options: codec.options,
     multiple: input.multiple,
     search: input.search,
+    searchAction:
+      input.searchAction === undefined ? undefined : { label: input.searchAction.label },
     required: input.required,
     initial,
     render() {
@@ -298,5 +310,10 @@ export async function runSelectComponent<T extends PromptValue>(input: {
   if (result === undefined) {
     throw new Error("Select prompt returned no value.");
   }
-  return Array.isArray(result) ? result.map((key) => codec.decode(key)) : codec.decode(result);
+  if (Array.isArray(result)) return result.map((key) => codec.decode(key));
+  const query = searchActionQuery(result);
+  if (query !== undefined && input.searchAction !== undefined) {
+    return input.searchAction.value(query);
+  }
+  return codec.decode(result);
 }

@@ -8,6 +8,9 @@ export {
   type AgentExperimentalDefinition,
   type AgentModelDefinition,
   type AgentModelOptionsDefinition,
+  type AgentReasoningDefinition,
+  type AgentWorkflowDefinition,
+  type AgentWorkflowWorldDefinition,
   defineAgent,
 } from "#public/definitions/agent.js";
 export {

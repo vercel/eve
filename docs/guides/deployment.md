@@ -21,7 +21,22 @@ Nitro is the HTTP host layer. It gives eve a build artifact that can serve the h
 
 On Vercel, eve emits Vercel Build Output, the Workflow SDK runs on Vercel Workflow, and `defaultBackend()` selects Vercel Sandbox. Outside Vercel, `eve start` serves the standard Nitro Node output, the Workflow SDK uses its local world by default, and `defaultBackend()` selects a local sandbox backend in availability order. That local workflow world persists run state on disk and has no direct coupling to Vercel; Vercel-only behavior such as latest-deployment routing and dashboard run attributes is additive.
 
-Eve does not expose Workflow world selection as a public app API today. Future releases will let advanced deployments provide a different Workflow world, the SDK abstraction for workflow state, queues, auth, and streaming; see [Workflow Worlds](https://workflow-sdk.dev/worlds) for the underlying concept.
+Advanced self-hosted deployments can select a different installed Workflow world package in the root `agent.ts`:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  experimental: {
+    workflow: {
+      world: "@acme/eve-workflow-world",
+    },
+  },
+});
+```
+
+The world package should read credentials and host-specific options from runtime environment variables. It should export a default factory or `createWorld()` function. See [Workflow Worlds](https://workflow-sdk.dev/worlds) for the underlying SDK abstraction.
 
 ## 2. Environment variables and secrets
 
@@ -59,11 +74,11 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: anthropic("claude-opus-4.8"),
+  model: anthropic("claude-opus-4-8"),
 });
 ```
 
-With that shape, the model call goes directly to Anthropic and the runtime reads `ANTHROPIC_API_KEY`. The same pattern works for OpenAI after installing `@ai-sdk/openai`, using `openai("...")`, and setting `OPENAI_API_KEY`. This is the usual choice when self-deploying without any Vercel-managed services.
+With that shape, the model call goes directly to Anthropic and the runtime reads `ANTHROPIC_API_KEY`. Direct Anthropic model ids use hyphens (`claude-opus-4-8`), unlike the dotted Gateway id (`anthropic/claude-opus-4.8`). The same pattern works for OpenAI after installing `@ai-sdk/openai`, using `openai("...")`, and setting `OPENAI_API_KEY`. This is the usual choice when self-deploying without any Vercel-managed services.
 
 ## 4. Sandbox backend
 
@@ -125,7 +140,8 @@ Eve writes the standard Nitro output under `.output/` instead of Vercel Build Ou
 
 Self-deployed agents should make the Vercel-specific choices explicit:
 
-- Let the Workflow SDK use its default local world, which stores workflow state under `.workflow-data`, or configure your host so that directory is on persistent storage.
+- Let the Workflow SDK use its default local world, which stores workflow state under `.workflow-data`, configure your host so that directory is on persistent storage, or select another world with `experimental.workflow.world` in the root `agent.ts`. When you select a custom world, install a world package built against the same `@workflow/*` line as your eve release (currently the `5.0.0-beta` line). The npm `latest` tag may lag, so pin the version explicitly, for example `pnpm add @workflow/world-postgres@5.0.0-beta.x`. A mismatched world (such as a `4.x` package against a `5.x` core) fails with a `ZodError: invalid_union` during run replay.
+- If you put a reverse proxy or ingress in front of eve, forward **both** `/eve/` and `/.well-known/workflow/`. The workflow world delivers run callbacks to `/.well-known/workflow/v1/flow`; a proxy restricted to `/eve/` lets sessions start but silently stalls runs forever, because the callbacks never reach eve.
 - Install the AI SDK package for your provider, then use a direct provider model object and `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` when you want no Gateway dependency.
 - Use `AI_GATEWAY_API_KEY` if you still want Gateway routing from a non-Vercel host.
 - Replace `vercelOidc()` with auth that your host can verify.
@@ -133,7 +149,7 @@ Self-deployed agents should make the Vercel-specific choices explicit:
 - If the agent defines schedules, the default `eve build && eve start` path starts Nitro's schedule runner, and Vercel wires schedules to Vercel Cron automatically. If you adapt the output to a custom HTTP-only host or preset, make sure it also runs Nitro scheduled tasks, or trigger the same work from your own scheduler.
 - Treat Vercel Cron, Vercel Sandbox prewarm, Vercel Deployment Protection bypass, and the Agent Runs dashboard as Vercel-only conveniences.
 
-The HTTP contract is unchanged: health, session creation, streaming, channels, tools, and subagents use the same routes. Any client that can reach and authenticate to those routes can talk to the agent.
+The HTTP contract is unchanged: health, session creation, streaming, channels, tools, and subagents use the same routes under `/eve/`, and the workflow dispatch route lives under `/.well-known/workflow/`. A reverse proxy must preserve both prefixes. Any client that can reach and authenticate to those routes can talk to the agent.
 
 ## 9. Verify the deployment
 

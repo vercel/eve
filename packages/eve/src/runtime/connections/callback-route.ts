@@ -22,9 +22,7 @@
  * internet.
  */
 
-import { resumeHook } from "#compiled/@workflow/core/runtime.js";
-
-import { applyEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
 import { EVE_CONNECTION_CALLBACK_ROUTE_PATTERN } from "#protocol/routes.js";
 import type { ChannelMethod, RouteContext } from "#public/definitions/channel.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
@@ -114,7 +112,6 @@ export async function handleConnectionCallbackRequest(
   // this hook upfront (before any turns run) so it always exists
   // when the callback arrives.
   try {
-    applyEveWorkflowQueueNamespace();
     await resumeHook(token, {
       kind: "deliver" as const,
       payloads: [{ authorizationCallback: { connectionName: name, callback } }],

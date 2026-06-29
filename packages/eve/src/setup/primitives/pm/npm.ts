@@ -9,6 +9,7 @@ export const npmPackageManager = {
   installArguments: (options) => [
     "install",
     ...(options.bypassMinimumReleaseAge === true ? ["--min-release-age=0"] : []),
+    ...(options.progressDetails === true ? ["--loglevel=silly"] : []),
   ],
   prepareArguments: (_projectRoot, args) => args,
   resolveInvocation: (args) => resolveStandardInvocation("npm", args),

@@ -3,6 +3,7 @@ import type { PromptOption, PromptValue } from "./prompt-ui.js";
 export interface SelectOptionCodec<T extends PromptValue> {
   readonly options: PromptOption<string>[];
   encode(value: T): string;
+  encodeOptions(options: readonly PromptOption<T>[]): PromptOption<string>[];
   decode(key: string): T;
 }
 
@@ -16,16 +17,28 @@ export function createSelectOptionCodec<T extends PromptValue>(
 ): SelectOptionCodec<T> {
   const valuesByKey = new Map<string, T>();
   const keysByValue = new Map<T, string>();
-  const encoded = options.map((option, index) => {
-    if (keysByValue.has(option.value)) {
-      throw new Error(`Select option values must be unique; duplicate at index ${index}.`);
-    }
+  let nextKey = 0;
 
-    const key = `option-${index}`;
-    keysByValue.set(option.value, key);
-    valuesByKey.set(key, option.value);
-    return { ...option, value: key };
-  });
+  const encodeOptions = (values: readonly PromptOption<T>[]): PromptOption<string>[] => {
+    const seen = new Set<T>();
+    return values.map((option, index) => {
+      if (seen.has(option.value)) {
+        throw new Error(`Select option values must be unique; duplicate at index ${index}.`);
+      }
+      seen.add(option.value);
+
+      let key = keysByValue.get(option.value);
+      if (key === undefined) {
+        key = `option-${nextKey}`;
+        nextKey += 1;
+        keysByValue.set(option.value, key);
+        valuesByKey.set(key, option.value);
+      }
+      return { ...option, value: key };
+    });
+  };
+
+  const encoded = encodeOptions(options);
 
   return {
     options: encoded,
@@ -36,6 +49,7 @@ export function createSelectOptionCodec<T extends PromptValue>(
       }
       return key;
     },
+    encodeOptions,
     decode(key) {
       const value = valuesByKey.get(key);
       if (value === undefined) {

@@ -28,6 +28,7 @@ jobs:
           # in-flight packfiles crash the github-api commit (isomorphic-git
           # "Could not read packfile .tmp-*-pack-*").
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup pnpm
         uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6

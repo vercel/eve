@@ -25,6 +25,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
       - name: Discover eval fixtures
         id: discover
@@ -49,6 +51,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
       - name: Setup pnpm
         uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
@@ -95,7 +99,7 @@ jobs:
             pnpm exec eve build
           DEPLOYMENT_URL="$(pnpm exec vc deploy --prebuilt --yes --target=preview "${token_args[@]}" | tail -n 1)"
 
-          npx eve eval --strict --url "$DEPLOYMENT_URL" --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}.xml"
+          npx eve eval --strict --verbose --url "$DEPLOYMENT_URL" --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}.xml"
 
       - name: Upload eval artifacts
         if: failure()
@@ -106,5 +110,6 @@ jobs:
             .junit
             e2e/fixtures/*/.eve/evals
             apps/fixtures/*/.eve/evals
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7

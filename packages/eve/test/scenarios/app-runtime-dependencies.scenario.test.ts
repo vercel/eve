@@ -290,11 +290,11 @@ describe("app runtime dependency tracing", () => {
     await import(pathToFileURL(bundledDependencyModule.modulePath).href);
   }, 30_000);
 
-  it("bundles code-mode inline worker assets only when an agent enables code mode", async () => {
-    async function createCodeModeAssetsApp(label: string, codeMode: boolean): Promise<string> {
-      const appRoot = await createScratchDirectory(`eve-app-code-mode-assets-${label}-build-`);
+  it("bundles Workflow sandbox worker assets only when an agent enables Workflow", async () => {
+    async function createWorkflowAssetsApp(label: string, workflow: boolean): Promise<string> {
+      const appRoot = await createScratchDirectory(`eve-app-workflow-assets-${label}-build-`);
 
-      await mkdir(join(appRoot, "agent"), {
+      await mkdir(join(appRoot, "agent", "subagents", "researcher"), {
         recursive: true,
       });
 
@@ -302,7 +302,7 @@ describe("app runtime dependency tracing", () => {
         join(appRoot, "package.json"),
         `${JSON.stringify(
           {
-            name: `code-mode-assets-${label}-test`,
+            name: `workflow-assets-${label}-test`,
             private: true,
             type: "module",
           },
@@ -310,20 +310,32 @@ describe("app runtime dependency tracing", () => {
           2,
         )}\n`,
       );
-      const agentLines = ["export default {", '  model: "openai/gpt-5.4-mini",'];
-      if (codeMode) {
-        agentLines.push("  experimental: { codeMode: true },");
+      await writeFile(
+        join(appRoot, "agent", "agent.ts"),
+        'export default { model: "openai/gpt-5.4-mini" };\n',
+      );
+      await writeFile(join(appRoot, "agent", "instructions.md"), "Trace Workflow assets.\n");
+      await writeFile(
+        join(appRoot, "agent", "subagents", "researcher", "agent.ts"),
+        'export default { description: "Research.", model: "openai/gpt-5.4-mini" };\n',
+      );
+      await writeFile(
+        join(appRoot, "agent", "subagents", "researcher", "instructions.md"),
+        "Research the request.\n",
+      );
+      if (workflow) {
+        await mkdir(join(appRoot, "agent", "tools"), { recursive: true });
+        await writeFile(
+          join(appRoot, "agent", "tools", "workflow.ts"),
+          'export default { kind: "eve:enable-workflow-tool" };\n',
+        );
       }
-      agentLines.push("};", "");
-      await writeFile(join(appRoot, "agent", "agent.ts"), agentLines.join("\n"));
-      await writeFile(join(appRoot, "agent", "instructions.md"), "Trace code-mode assets.\n");
 
       return appRoot;
     }
 
-    vi.stubEnv("EVE_EXPERIMENTAL_CODE_MODE", undefined);
     const disabledOutputDir = await buildApplication(
-      await createCodeModeAssetsApp("disabled", false),
+      await createWorkflowAssetsApp("disabled", false),
     );
     const disabledTracedPackageJson = await readTracedServerPackageJson(disabledOutputDir);
     const disabledServerSource = await readJavaScriptModulesRecursively(
@@ -332,14 +344,14 @@ describe("app runtime dependency tracing", () => {
 
     expect(disabledServerSource).not.toContain("[Unprintable QuickJS value]");
 
-    const enabledOutputDir = await buildApplication(await createCodeModeAssetsApp("enabled", true));
+    const enabledOutputDir = await buildApplication(await createWorkflowAssetsApp("enabled", true));
     const tracedServerPackageJson = await readTracedServerPackageJson(enabledOutputDir);
     const enabledServerSource = await readJavaScriptModulesRecursively(
       join(enabledOutputDir, "server"),
     );
 
     expect(enabledServerSource).toContain("[Unprintable QuickJS value]");
-    // The code-mode runtime ships bundled inline, never traced — and
+    // The Workflow sandbox runtime ships bundled inline, never traced — and
     // these apps do not declare the optional just-bash engine, so its
     // quickjs dependency must not sneak into the trace either.
     expect(disabledTracedPackageJson.dependencies).not.toHaveProperty("quickjs-emscripten");

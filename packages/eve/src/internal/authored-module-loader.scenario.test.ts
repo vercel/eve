@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -11,6 +11,176 @@ import { useScenarioApp } from "#internal/testing/scenario-app.js";
 
 describe("loadAuthoredModuleNamespace", () => {
   const scenarioApp = useScenarioApp();
+
+  it("preserves cached channel identity for relative channel imports", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/channels/support.ts": [
+          'export default { marker: "source-channel-instance" };',
+          "",
+        ].join("\n"),
+        "agent/tools/use_support_channel.ts": [
+          'import supportChannel from "../channels/support";',
+          "",
+          "export const result = supportChannel.marker;",
+          "",
+        ].join("\n"),
+      },
+      name: "cached-relative-channel-import",
+    });
+    const cache = new Map<string, unknown>();
+    const cacheKey = "__eveChannelModuleCache__";
+    const globals = globalThis as Record<string, unknown>;
+    const previousCache = globals[cacheKey];
+
+    try {
+      const supportChannelPath = await realpath(
+        join(app.appRoot, "agent", "channels", "support.ts"),
+      );
+      cache.set(supportChannelPath, { marker: "cached-channel-instance" });
+      globals[cacheKey] = cache;
+
+      const moduleNamespace = await loadAuthoredModuleNamespace(
+        join(app.appRoot, "agent", "tools", "use_support_channel.ts"),
+      );
+
+      expect(moduleNamespace.result).toBe("cached-channel-instance");
+    } finally {
+      if (previousCache === undefined) {
+        delete globals[cacheKey];
+      } else {
+        globals[cacheKey] = previousCache;
+      }
+    }
+  });
+
+  it("resolves extensionless relative imports with dotted TypeScript basenames", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/tools/use_schema.ts": [
+          'import { schemaValue } from "./mock-registry.schemas";',
+          "",
+          "export const result = schemaValue;",
+          "",
+        ].join("\n"),
+        "agent/tools/mock-registry.schemas.ts": [
+          'export const schemaValue = "local-dotted-basename";',
+          "",
+        ].join("\n"),
+      },
+      name: "local-dotted-basename-import",
+    });
+
+    const moduleNamespace = await loadAuthoredModuleNamespace(
+      join(app.appRoot, "agent", "tools", "use_schema.ts"),
+    );
+
+    expect(moduleNamespace.result).toBe("local-dotted-basename");
+  });
+
+  it("resolves extensionless relative directory imports to index modules", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/tools/use_helpers.ts": [
+          'import { helperValue } from "./helpers";',
+          "",
+          "export const result = helperValue;",
+          "",
+        ].join("\n"),
+        "agent/tools/helpers/index.ts": ['export const helperValue = "directory-index";', ""].join(
+          "\n",
+        ),
+      },
+      name: "directory-index-import",
+    });
+
+    const moduleNamespace = await loadAuthoredModuleNamespace(
+      join(app.appRoot, "agent", "tools", "use_helpers.ts"),
+    );
+
+    expect(moduleNamespace.result).toBe("directory-index");
+  });
+
+  it("resolves extensionless CommonJS requires with dotted JavaScript basenames", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/channels/api/contact-sales/webhook.ts": [
+          'import { readDottedValue } from "@repo/enrichment/dotted";',
+          "",
+          "export const result = readDottedValue();",
+          "",
+        ].join("\n"),
+      },
+      name: "dependency-dotted-basename-require",
+    });
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-dependency-dotted-basename-"));
+
+    try {
+      const packageRoot = join(workspaceRoot, "packages", "enrichment");
+      const packageNodeModules = join(packageRoot, "node_modules", "fixture-dotted-cjs-dep");
+      await mkdir(join(packageRoot, "src"), { recursive: true });
+      await mkdir(packageNodeModules, { recursive: true });
+      await writeFile(
+        join(packageRoot, "package.json"),
+        JSON.stringify(
+          {
+            exports: {
+              "./dotted": "./src/dotted.ts",
+            },
+            name: "@repo/enrichment",
+            type: "module",
+          },
+          null,
+          2,
+        ),
+      );
+      await writeFile(
+        join(packageRoot, "src", "dotted.ts"),
+        [
+          'import dottedDependency from "fixture-dotted-cjs-dep";',
+          "",
+          "export function readDottedValue() {",
+          "  return dottedDependency.value;",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      await writeFile(
+        join(packageNodeModules, "package.json"),
+        JSON.stringify(
+          {
+            main: "index.cjs",
+            name: "fixture-dotted-cjs-dep",
+          },
+          null,
+          2,
+        ),
+      );
+      await writeFile(
+        join(packageNodeModules, "index.cjs"),
+        'module.exports = require("./Reflect.getPrototypeOf");\n',
+      );
+      await writeFile(
+        join(packageNodeModules, "Reflect.getPrototypeOf.js"),
+        'module.exports = { value: "cjs-dotted-basename" };\n',
+      );
+
+      await mkdir(join(app.appRoot, "node_modules", "@repo"), { recursive: true });
+      await symlink(
+        packageRoot,
+        join(app.appRoot, "node_modules", "@repo", "enrichment"),
+        "junction",
+      );
+
+      const moduleNamespace = await loadAuthoredModuleNamespace(
+        join(app.appRoot, "agent", "channels", "api", "contact-sales", "webhook.ts"),
+      );
+
+      expect(moduleNamespace.result).toBe("cjs-dotted-basename");
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
 
   it("bundles symlinked workspace packages that export TypeScript source", async () => {
     const app = await scenarioApp({
@@ -727,15 +897,18 @@ describe("loadAuthoredModuleNamespace", () => {
     const app = await scenarioApp({
       files: {
         "agent/assets/logo.bin": "logo-bytes",
+        "agent/assets/logo.png": "png-bytes",
         "agent/assets/message.txt": "asset text",
         "agent/tools/use_assets.ts": [
           'import logoUrl from "../assets/logo.bin";',
+          'import imageUrl from "../assets/logo.png";',
           'import rawText from "../assets/message.txt?raw";',
           "",
           "export default {",
           '  description: "Use asset imports.",',
           "  async execute() {",
           "    return {",
+          "      imageUrl,",
           "      logoUrl,",
           "      rawText,",
           "    };",
@@ -752,12 +925,14 @@ describe("loadAuthoredModuleNamespace", () => {
     );
     const tool = moduleNamespace.default as {
       execute(): Promise<{
+        imageUrl: string;
         logoUrl: string;
         rawText: string;
       }>;
     };
 
     await expect(tool.execute()).resolves.toEqual({
+      imageUrl: "data:image/png;base64,cG5nLWJ5dGVz",
       logoUrl: "data:application/octet-stream;base64,bG9nby1ieXRlcw==",
       rawText: "asset text",
     });

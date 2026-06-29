@@ -113,10 +113,14 @@ export async function prewarmSandboxes(input: PrewarmSandboxesInput): Promise<vo
           },
         );
       } catch (error) {
+        const prewarmError = formatPrewarmFailureForEnvironment({
+          backendName: backend.name,
+          error,
+        });
         input.log?.(
-          `eve: failed to initialize sandbox template "${label}" on backend "${backend.name}": ${toErrorMessage(error)}`,
+          `eve: failed to initialize sandbox template "${label}" on backend "${backend.name}": ${toErrorMessage(prewarmError)}`,
         );
-        throw error;
+        throw prewarmError;
       }
       return result;
     }),
@@ -343,4 +347,30 @@ function shouldLogSandboxPrewarmProgress(message: string): boolean {
     message !== "loading microsandbox runtime" &&
     message !== "microsandbox runtime ready"
   );
+}
+
+function formatPrewarmFailureForEnvironment(input: {
+  readonly backendName: string;
+  readonly error: unknown;
+}): unknown {
+  if (!isVercelEnvironment() || !isLocalSandboxBackend(input.backendName)) {
+    return input.error;
+  }
+
+  return new Error(
+    `The ${input.backendName} sandbox backend is not available when deploying on Vercel. ` +
+      "Vercel build containers cannot run local Docker containers or microsandbox VMs. " +
+      "Use defaultBackend() so eve selects Vercel Sandbox on Vercel, or configure a " +
+      "Vercel-compatible backend explicitly, such as vercel(). " +
+      `Original ${input.backendName} error: ${toErrorMessage(input.error)}`,
+    { cause: input.error },
+  );
+}
+
+function isVercelEnvironment(): boolean {
+  return Boolean(process.env.VERCEL?.trim());
+}
+
+function isLocalSandboxBackend(backendName: string): boolean {
+  return backendName === "docker" || backendName === "microsandbox";
 }

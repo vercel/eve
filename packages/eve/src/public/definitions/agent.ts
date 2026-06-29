@@ -3,8 +3,11 @@ import type { ExactDefinition } from "#public/definitions/exact.js";
 
 export type {
   AgentModelOptionsDefinition,
+  AgentReasoningDefinition,
   AgentBuildDefinition,
   AgentExperimentalDefinition,
+  AgentWorkflowDefinition,
+  AgentWorkflowWorldDefinition,
   PublicAgentModelDefinition as AgentModelDefinition,
   PublicAgentCompactionDefinition as AgentCompactionDefinition,
 } from "#shared/agent-definition.js";

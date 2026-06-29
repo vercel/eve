@@ -9,7 +9,7 @@ import { WEB_FETCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-fetch.js
 import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.js";
 import { WRITE_FILE_TOOL_DEFINITION } from "#runtime/framework-tools/write-file.js";
 
-export { ConnectionRegistryKey } from "#context/providers/connection.js";
+export { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 export type { ReadFileStamp, ReadFileState } from "#runtime/framework-tools/file-state.js";
 export { ReadFileStateKey } from "#runtime/framework-tools/file-state.js";
 export type { TodoItem, TodoState } from "#runtime/framework-tools/todo.js";

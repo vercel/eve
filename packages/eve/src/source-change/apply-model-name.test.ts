@@ -38,7 +38,7 @@ describe("applyModelNameToSource", () => {
     const source = `export default defineAgent({
   // primary model
   model: "a/b",
-  experimental: { codeMode: true },
+  experimental: { workflow: { world: "@acme/workflow-world" } },
 });
 `;
     const result = await applyModelNameToSource(source, "c/d");
@@ -46,7 +46,9 @@ describe("applyModelNameToSource", () => {
     expect(result.kind).toBe("applied");
     if (result.kind !== "applied") return;
     expect(result.nextSource).toContain("// primary model");
-    expect(result.nextSource).toContain("experimental: { codeMode: true }");
+    expect(result.nextSource).toContain(
+      'experimental: { workflow: { world: "@acme/workflow-world" } }',
+    );
     expect(result.nextSource).toContain(`model: "c/d"`);
   });
 
@@ -95,7 +97,7 @@ describe("applyModelNameToSource", () => {
 
   it("bails when model is absent", async () => {
     const result = await applyModelNameToSource(
-      `export default defineAgent({ experimental: { codeMode: true } });\n`,
+      `export default defineAgent({ experimental: { workflow: {} } });\n`,
       "c/d",
     );
 

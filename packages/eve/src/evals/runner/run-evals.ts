@@ -212,6 +212,7 @@ function buildSummary(
     passed: countVerdicts(results, "passed"),
     failed: countVerdicts(results, "failed"),
     scored: countVerdicts(results, "scored"),
+    skipped: countVerdicts(results, "skipped"),
     errored: results.filter((r) => r.error !== undefined).length,
   };
 }
@@ -229,6 +230,7 @@ function scopeSummary(summary: EveEvalRunSummary, evalIds: ReadonlySet<string>):
     passed: countVerdicts(results, "passed"),
     failed: countVerdicts(results, "failed"),
     scored: countVerdicts(results, "scored"),
+    skipped: countVerdicts(results, "skipped"),
     errored: results.filter((r) => r.error !== undefined).length,
   };
 }

@@ -49,9 +49,17 @@ function fakeDeps(): ResolveProvisioningDeps {
     validateTeam: vi.fn(async () => {}),
     resolveTeam: vi.fn(async () => "team"),
     pickTeam: vi.fn(async () => "team"),
-    pickProject: vi.fn(async () => ({ project: "existing-project", exists: true })),
+    pickProject: vi.fn(async () => ({
+      kind: "existing" as const,
+      project: { projectId: "prj_existing", projectName: "existing-project" },
+      team: "team",
+    })),
     pickNewProjectName: vi.fn(async (_prompter, _parent, _team, project: string) => project),
     assertNewProjectNameAvailable: vi.fn(async () => {}),
+    resolveProjectByNameOrId: vi.fn(async () => ({
+      projectId: "prj_existing",
+      projectName: "existing-project",
+    })),
   };
 }
 
@@ -149,6 +157,53 @@ describe("resolveProvisioning box", () => {
     expect(deps.requireAuth).not.toHaveBeenCalled();
   });
 
+  it("resolves a headless project name before recording the plan", async () => {
+    const deps = fakeDeps();
+    const box = makeBox({
+      prompter: createPrompter(),
+      targetDirectory: "/tmp/parent",
+      mode: {
+        headless: true,
+        project: { team: "team", project: "existing-project" },
+        aiGateway: {},
+      },
+      deps,
+    });
+
+    const next = await runHeadless([box], stateWithAgentName("my-agent"), silentSink);
+
+    expect(next.vercelProject).toEqual({
+      kind: "existing",
+      project: { projectId: "prj_existing", projectName: "existing-project" },
+      team: "team",
+    });
+    expect(deps.resolveProjectByNameOrId).toHaveBeenCalledWith(
+      "/tmp/parent",
+      "team",
+      "existing-project",
+      { signal: undefined },
+    );
+  });
+
+  it("rejects a missing headless project before recording the plan", async () => {
+    const deps = fakeDeps();
+    deps.resolveProjectByNameOrId = vi.fn(async () => null);
+    const box = makeBox({
+      prompter: createPrompter(),
+      targetDirectory: "/tmp/parent",
+      mode: {
+        headless: true,
+        project: { team: "team", project: "missing" },
+        aiGateway: {},
+      },
+      deps,
+    });
+
+    await expect(runHeadless([box], stateWithAgentName("my-agent"), silentSink)).rejects.toThrow(
+      'Vercel project "missing" was not found in team.',
+    );
+  });
+
   it("rejects headless Vercel provisioning without an explicit team", async () => {
     const deps = fakeDeps();
     const box = makeBox({
@@ -234,7 +289,11 @@ describe("resolveProvisioning box", () => {
 
   it("plans a new project when the Q3 link branch returns a typed-in name", async () => {
     const deps = fakeDeps();
-    deps.pickProject = vi.fn(async () => ({ project: "typed-agent", exists: false }));
+    deps.pickProject = vi.fn(async () => ({
+      kind: "new" as const,
+      project: "typed-agent",
+      team: "team",
+    }));
     const box = makeBox({
       prompter: createPrompter({ selectValues: ["vercel", "link"] }),
       targetDirectory: "/tmp/parent",

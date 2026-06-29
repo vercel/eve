@@ -2,6 +2,7 @@ import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import { createEveMessageStreamRoutePath } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
 import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
+import type { ClientRedirectPolicy } from "#client/types.js";
 import { createClientUrl } from "#client/url.js";
 
 const STREAM_OPEN_RETRY_ATTEMPTS = 12;
@@ -15,6 +16,7 @@ interface OpenStreamInput {
   readonly host: string;
   readonly maxReconnectAttempts: number;
   readonly resolveHeaders: () => Promise<Headers>;
+  readonly redirect?: ClientRedirectPolicy;
   readonly sessionId: string;
   readonly signal?: AbortSignal;
   readonly startIndex: number;
@@ -79,6 +81,7 @@ export async function openStreamBody(
     const headers = await input.resolveHeaders();
     const response = await fetch(url, {
       headers,
+      redirect: input.redirect,
       signal: input.signal ?? null,
     });
 

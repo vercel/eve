@@ -2,6 +2,7 @@ import { Levenshtein as AutoevalsLevenshtein } from "autoevals";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import { deepEquals } from "#evals/match.js";
+import { testRegExp } from "#evals/match.js";
 import type { Assertion, AssertionSeverity } from "#evals/types.js";
 
 export type { Assertion, AssertionHandle, AssertionSeverity } from "#evals/types.js";
@@ -32,14 +33,31 @@ function makeAssertion(spec: AssertionSpec): Assertion {
 }
 
 /**
- * Passes when the value (coerced to a string) contains `substring`. A hard
- * gate by default. Apply with `t.check(value, includes("..."))`.
+ * Passes when the value (coerced to a string) contains a substring or matches
+ * a RegExp. A hard gate by default.
  */
-export function includes(substring: string): Assertion {
+export function includes(substring: string | RegExp): Assertion {
   return makeAssertion({
     name: `includes(${substring})`,
     severity: "gate",
-    score: (value) => (String(value ?? "").includes(substring) ? 1 : 0),
+    score: (value) => {
+      const text = String(value ?? "");
+      return (
+        typeof substring === "string" ? text.includes(substring) : testRegExp(substring, text)
+      )
+        ? 1
+        : 0;
+    },
+  });
+}
+
+/** Passes when `predicate` returns true for the supplied value. */
+export function satisfies<T = unknown>(predicate: (value: T) => boolean, label: string): Assertion {
+  if (label.trim().length === 0) throw new Error("satisfies() requires a non-empty label.");
+  return makeAssertion({
+    name: `satisfies(${label})`,
+    severity: "gate",
+    score: (value) => (predicate(value as T) ? 1 : 0),
   });
 }
 

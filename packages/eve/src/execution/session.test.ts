@@ -75,11 +75,12 @@ describe("createSession", () => {
       continuationToken: "root-token",
       outputSchema,
       sessionId: "sess-root",
-      turnAgent: createTestTurnAgent({ outputSchema }),
+      turnAgent: createTestTurnAgent({ outputSchema, reasoning: "high" }),
     });
 
     expect(session.agent.compactionModelReference).toEqual({ id: "summary-model" });
     expect(session.agent.modelReference).toEqual({ id: "test-model" });
+    expect(session.agent.reasoning).toBe("high");
     expect(session.outputSchema).toEqual(outputSchema);
     expect(session.agent.system).toBe("You are a helpful assistant.\n\nBe concise.");
     expect(session.agent.tools).toEqual([
@@ -207,6 +208,23 @@ describe("createSession", () => {
     expect(durable.outputSchema).toEqual(runOutputSchema);
     expect(hydrated.outputSchema).toEqual(runOutputSchema);
   });
+
+  it("restores current reasoning configuration when hydrating a durable session", () => {
+    const session = createSession({
+      continuationToken: "root-token",
+      sessionId: "sess-root",
+      turnAgent: createTestTurnAgent({ reasoning: "low" }),
+    });
+
+    const durable = projectToDurableSession(session);
+    const hydrated = hydrateDurableSession({
+      durable,
+      turnAgent: createTestTurnAgent({ reasoning: "high" }),
+    });
+
+    expect(durable.agent).toEqual({ system: session.agent.system });
+    expect(hydrated.agent.reasoning).toBe("high");
+  });
 });
 
 describe("mintSubagentContinuationToken", () => {
@@ -222,7 +240,7 @@ describe("mintSubagentContinuationToken", () => {
 });
 
 describe("refreshSessionFromTurnAgent", () => {
-  it("refreshes model/tool metadata while preserving history and system prompt", () => {
+  it("refreshes the current agent configuration while preserving history", () => {
     const session = createSession({
       continuationToken: "root-token",
       sessionId: "sess-root",
@@ -260,7 +278,7 @@ describe("refreshSessionFromTurnAgent", () => {
       contextWindowTokens: 200_000,
       id: "updated-model",
     });
-    expect(refreshed.agent.system).toBe("You are a helpful assistant.\n\nBe concise.");
+    expect(refreshed.agent.system).toBe("Completely different system prompt.");
     expect(refreshed.agent.tools).toEqual([
       {
         description: "Echoes text",
@@ -311,7 +329,7 @@ describe("refreshSessionFromTurnAgent", () => {
     });
   });
 
-  it("never changes the system prompt even when turnAgent instructions differ", () => {
+  it("refreshes the system prompt when turnAgent instructions differ", () => {
     const session = createSession({
       continuationToken: "root-token",
       sessionId: "sess-root",
@@ -322,7 +340,7 @@ describe("refreshSessionFromTurnAgent", () => {
     const refreshed = refreshSessionFromTurnAgent({
       session,
       turnAgent: createTestTurnAgent({
-        instructions: ["Updated prompt that should be ignored."],
+        instructions: ["Updated prompt from the current deployment."],
         model: { contextWindowTokens: 200_000, id: "updated-model" },
       }),
     });
@@ -331,27 +349,6 @@ describe("refreshSessionFromTurnAgent", () => {
       contextWindowTokens: 200_000,
       id: "updated-model",
     });
-    expect(refreshed.agent.system).toBe("Original session-start prompt.");
-  });
-
-  it("refreshes the system prompt when explicitly requested", () => {
-    const session = createSession({
-      continuationToken: "root-token",
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent({
-        instructions: ["Original session-start prompt."],
-      }),
-    });
-    const refreshed = refreshSessionFromTurnAgent({
-      refreshSystemPrompt: true,
-      session,
-      turnAgent: createTestTurnAgent({
-        instructions: ["Updated prompt from authored source.", "Updated tool context."],
-      }),
-    });
-
-    expect(refreshed.agent.system).toBe(
-      "Updated prompt from authored source.\n\nUpdated tool context.",
-    );
+    expect(refreshed.agent.system).toBe("Updated prompt from the current deployment.");
   });
 });

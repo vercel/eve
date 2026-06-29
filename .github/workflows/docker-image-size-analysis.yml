@@ -1,0 +1,158 @@
+name: Docker Image Size Analysis
+
+on:
+  pull_request:
+    branches: [main]
+    types:
+      - opened
+      - reopened
+      - synchronize
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - .github/workflows/docker-image-size-analysis.yml
+      - scripts/docker-image-size-budget.mjs
+      - scripts/docker-image-size-report.mjs
+
+concurrency:
+  group: docker-image-size-analysis-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    if: ${{ github.event.pull_request.head.repo.fork == false }}
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Prepare main baseline worktree
+        id: baseline
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          BASELINE_ROOT="$RUNNER_TEMP/eve-docker-image-baseline"
+          rm -rf "$BASELINE_ROOT"
+          git worktree add --detach "$BASELINE_ROOT" "$BASE_SHA"
+          echo "root=$BASELINE_ROOT" >> "$GITHUB_OUTPUT"
+          echo "label=main (${BASE_SHA:0:7})" >> "$GITHUB_OUTPUT"
+
+      - name: Build main baseline Docker image
+        id: baseline_image
+        working-directory: ${{ steps.baseline.outputs.root }}
+        run: |
+          docker buildx build \
+            --cache-from type=gha,scope=eve-docker-image-size \
+            --load \
+            --platform linux/amd64 \
+            --tag eve-docker-size:baseline \
+            .
+
+          size_bytes="$(docker image inspect eve-docker-size:baseline --format '{{.Size}}')"
+          echo "size_bytes=$size_bytes" >> "$GITHUB_OUTPUT"
+
+      - name: Build current Docker image
+        id: current_image
+        run: |
+          docker buildx build \
+            --cache-from type=gha,scope=eve-docker-image-size \
+            --cache-to type=gha,mode=max,scope=eve-docker-image-size \
+            --load \
+            --platform linux/amd64 \
+            --tag eve-docker-size:current \
+            .
+
+          size_bytes="$(docker image inspect eve-docker-size:current --format '{{.Size}}')"
+          echo "size_bytes=$size_bytes" >> "$GITHUB_OUTPUT"
+
+      - name: Generate Docker image size report
+        env:
+          BASELINE_LABEL: ${{ steps.baseline.outputs.label }}
+          BASELINE_SIZE_BYTES: ${{ steps.baseline_image.outputs.size_bytes }}
+          CURRENT_SIZE_BYTES: ${{ steps.current_image.outputs.size_bytes }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPORT_JSON: ${{ runner.temp }}/docker-image-size-report.json
+          REPORT_MARKDOWN: ${{ runner.temp }}/docker-image-size-report.md
+        run: |
+          node ./scripts/docker-image-size-report.mjs \
+            --baseline-label "$BASELINE_LABEL" \
+            --baseline-size-bytes "$BASELINE_SIZE_BYTES" \
+            --current-label "pull request (${HEAD_SHA:0:7})" \
+            --current-size-bytes "$CURRENT_SIZE_BYTES" \
+            --image-label Dockerfile \
+            --output-json "$REPORT_JSON" \
+            --output-markdown "$REPORT_MARKDOWN"
+
+      - name: Publish job summary
+        env:
+          REPORT_MARKDOWN: ${{ runner.temp }}/docker-image-size-report.md
+        run: cat "$REPORT_MARKDOWN" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Docker image size report artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: docker-image-size-report
+          path: |
+            ${{ runner.temp }}/docker-image-size-report.json
+            ${{ runner.temp }}/docker-image-size-report.md
+
+      - name: Update pull request comment
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          REPORT_MARKDOWN: ${{ runner.temp }}/docker-image-size-report.md
+        with:
+          script: |
+            const fs = require("node:fs");
+
+            const marker = "<!-- eve-docker-image-size-analysis -->";
+            const reportBody = fs.readFileSync(process.env.REPORT_MARKDOWN, "utf8").trim();
+            const body = `${marker}\n${reportBody}`;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              per_page: 100,
+              repo: context.repo.repo,
+            });
+
+            const existingComment = comments.find(
+              (comment) => comment.user?.type === "Bot" && comment.body?.includes(marker),
+            );
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                body,
+                comment_id: existingComment.id,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+              });
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              body,
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+
+      - name: Enforce Docker image size budget
+        env:
+          REPORT_JSON: ${{ runner.temp }}/docker-image-size-report.json
+        run: node ./scripts/docker-image-size-budget.mjs --report-json "$REPORT_JSON"

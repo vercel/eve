@@ -127,7 +127,7 @@ describe("extractToolApprovalInputRequests", () => {
     ]);
   });
 
-  it("extracts a code-mode approval request from a sibling tool call", () => {
+  it("extracts an approval request from a sibling tool call", () => {
     const result = extractToolApprovalInputRequests({
       content: [
         {
@@ -162,6 +162,26 @@ describe("extractToolApprovalInputRequests", () => {
         requestId: "approval-1",
       },
     ]);
+  });
+
+  it("skips automatic approval decisions", () => {
+    const result = extractToolApprovalInputRequests({
+      content: [
+        {
+          approvalId: "approval-1",
+          isAutomatic: true,
+          toolCall: {
+            input: { command: "rm -rf /tmp" },
+            toolCallId: "call-1",
+            toolName: "bash",
+            type: "tool-call",
+          },
+          type: "tool-approval-request",
+        },
+      ],
+    });
+
+    expect(result).toEqual([]);
   });
 
   it("skips approval requests without matching tool-call data", () => {

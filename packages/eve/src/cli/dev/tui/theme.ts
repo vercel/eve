@@ -39,6 +39,8 @@ export interface ThemeColors {
   reset: Style;
   bold: Style;
   dim: Style;
+  /** Reverse video (SGR 7), used to draw the block caret over the character under it. */
+  inverse: Style;
   italic: Style;
   white: Style;
   gray: Style;
@@ -79,8 +81,10 @@ export interface ThemeGlyphs {
   connection: string;
   /** `→` — separates a tool call from its summarized result. */
   arrow: string;
-  /** `▷` — selected-option marker in question lists. */
+  /** `▷` — cursor marker for an inert option. */
   pointer: string;
+  /** `▶` — cursor marker for an actionable option. */
+  selectedPointer: string;
   /** `◦` — available, unselected option marker. */
   option: string;
   /** `❯` — the input prompt mark. */
@@ -114,6 +118,7 @@ const UNICODE_GLYPHS: ThemeGlyphs = {
   connection: "●",
   arrow: "→",
   pointer: "▷",
+  selectedPointer: "▶",
   option: "◦",
   prompt: "❯",
   elbow: "⎿",
@@ -138,6 +143,7 @@ const ASCII_GLYPHS: ThemeGlyphs = {
   connection: "*",
   arrow: "->",
   pointer: ">",
+  selectedPointer: ">",
   option: ".",
   prompt: ">",
   elbow: "`-",
@@ -183,6 +189,7 @@ export function createTheme(options: CreateThemeOptions = {}): Theme {
       reset: ansi(0, 0, color),
       bold: ansi(1, 22, color),
       dim: ansi(2, 22, color),
+      inverse: ansi(7, 27, color),
       italic: ansi(3, 23, color),
       white: ansi(97, 39, color),
       gray: ansi(90, 39, color),

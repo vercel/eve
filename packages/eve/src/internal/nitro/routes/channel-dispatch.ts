@@ -1,17 +1,26 @@
 import type { H3Event } from "nitro";
-import type { RouteContext } from "#public/definitions/channel.js";
+import type { Agent, RouteContext } from "#public/definitions/channel.js";
 import {
   createCrossChannelReceiveFn,
   toCrossChannelTargets,
 } from "#channel/cross-channel-receive.js";
+import type { DeliverInput, RunInput, Runtime } from "#channel/types.js";
 import type { RouteHandlerArgs, WebSocketRouteHooks } from "#channel/routes.js";
 import { createSendFn } from "#channel/send.js";
 import { createGetSessionFn } from "#channel/session.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
+import { withVercelOidcProjectResolver } from "#runtime/governance/auth/vercel-oidc-project.js";
 
 const log = createLogger("channel.dispatch");
+
+interface BuiltRouteArgs {
+  readonly agent: Agent;
+  readonly args: RouteHandlerArgs;
+  readonly backgroundTasks: Promise<unknown>[];
+}
 
 /**
  * Dispatches one channel request identified by `routeKey`.
@@ -53,21 +62,23 @@ export async function dispatchChannelRequest(
   let response: Response;
 
   try {
-    if (matchedChannel.handler) {
-      // Authored CompiledChannel route — build RouteHandlerArgs.
-      response = await matchedChannel.handler(event.req, routeArgs.args);
-    } else {
+    response = await withDevelopmentVercelOidcContext(config, event.req, async () => {
+      if (matchedChannel.handler) {
+        // Authored CompiledChannel route — build RouteHandlerArgs.
+        return await matchedChannel.handler(event.req, routeArgs.args);
+      }
+
       // Framework-internal fetch-only channel (e.g. the connection
       // callback route). Build a RouteContext with the agent handle.
       const ctx: RouteContext = {
-        agent: bundle.runtime,
+        agent: routeArgs.agent,
         waitUntil: routeArgs.args.waitUntil,
         params: routeArgs.args.params,
         requestIp: routeArgs.args.requestIp,
       };
 
-      response = await matchedChannel.fetch(event.req, ctx);
-    }
+      return await matchedChannel.fetch(event.req, ctx);
+    });
   } catch (error) {
     // Without this a handler throw is only Nitro's default 5xx, with no eve log.
     const errorId = logError(log, "channel handler threw", error, {
@@ -101,10 +112,15 @@ export async function dispatchChannelWebSocketRequest(
     );
   }
 
+  const websocket = matchedChannel.websocket;
   const routeArgs = buildRouteArgs(event, bundle, matchedChannel.name);
 
   try {
-    const hooks = await matchedChannel.websocket(event.req, routeArgs.args);
+    const hooks = await withDevelopmentVercelOidcContext(
+      config,
+      event.req,
+      async () => await websocket(event.req, routeArgs.args),
+    );
     flushBackgroundTasks(event, routeArgs.backgroundTasks, routeKey, matchedChannel.name);
     return hooks;
   } catch (error) {
@@ -120,11 +136,36 @@ export async function dispatchChannelWebSocketRequest(
   }
 }
 
+async function withDevelopmentVercelOidcContext<T>(
+  config: NitroArtifactsConfig,
+  request: Request,
+  callback: () => Promise<T>,
+): Promise<T> {
+  const appRoot = config.appRoot;
+  if (config.dev !== true || appRoot === undefined) {
+    return await callback();
+  }
+
+  return await withVercelOidcProjectResolver(
+    {
+      request,
+      resolveCurrentProject: async () => {
+        const link = await readVercelProjectLink(appRoot);
+        return link === undefined
+          ? undefined
+          : { environment: "development", projectId: link.projectId };
+      },
+    },
+    callback,
+  );
+}
+
 function buildRouteArgs(
   event: H3Event,
   bundle: Awaited<ReturnType<typeof resolveNitroChannelRuntimeBundle>>,
   channelName: string,
-): { args: RouteHandlerArgs; backgroundTasks: Promise<unknown>[] } {
+): BuiltRouteArgs {
+  const requestId = readVercelRequestId(event.req.headers);
   const requestIp = extractSocketIp(event);
   const backgroundTasks: Promise<unknown>[] = [];
   const rawParams = (event.context.params as Record<string, string>) ?? {};
@@ -138,7 +179,8 @@ function buildRouteArgs(
   };
   const channel = bundle.channels.find((candidate) => candidate.name === channelName);
   const adapter = channel?.adapter ?? { kind: "channel" };
-  const send = createSendFn(bundle.runtime, adapter, channelName);
+  const agent = createRouteAgent(bundle.runtime, requestId);
+  const send = createSendFn(bundle.runtime, adapter, channelName, { requestId });
   const getSession = createGetSessionFn(bundle.runtime);
   const receive = createCrossChannelReceiveFn(
     bundle.runtime,
@@ -146,6 +188,7 @@ function buildRouteArgs(
   );
 
   return {
+    agent,
     args: {
       send,
       getSession,
@@ -156,6 +199,27 @@ function buildRouteArgs(
     },
     backgroundTasks,
   };
+}
+
+function createRouteAgent(runtime: Runtime, requestId: string | undefined): Agent {
+  return {
+    async deliver(input) {
+      const deliverInput: DeliverInput = { ...input, requestId }; // Avoid mutating a frozen caller input.
+      return await runtime.deliver(deliverInput);
+    },
+    async getEventStream(sessionId, options) {
+      return await runtime.getEventStream(sessionId, options);
+    },
+    async run(input) {
+      const runInput: RunInput = { ...input, requestId }; // Avoid mutating a frozen caller input.
+      return await runtime.run(runInput);
+    },
+  };
+}
+
+function readVercelRequestId(headers: Headers): string | undefined {
+  const requestId = headers.get("x-vercel-id")?.trim();
+  return requestId === "" ? undefined : requestId;
 }
 
 function rejectWebSocketUpgrade(

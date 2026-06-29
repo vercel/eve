@@ -40,7 +40,7 @@ import {
   startRemoteAgentSession,
 } from "#execution/remote-agent-dispatch.js";
 import { hydrateDurableSession } from "#execution/session.js";
-import { buildSubagentRunInput } from "#execution/subagent-tool.js";
+import { buildSubagentRunInput, type SubagentInputSource } from "#execution/subagent-tool.js";
 import { createWorkflowRuntime, workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -49,6 +49,8 @@ const log = createLogger("execution.dispatch-runtime-actions");
 
 export async function dispatchRuntimeActionsStep(input: {
   readonly callbackBaseUrl?: string;
+  /** Internal hook that receives child completion and HITL payloads. */
+  readonly parentContinuationToken?: string;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -95,6 +97,11 @@ export async function dispatchRuntimeActionsStep(input: {
 
       switch (action.kind) {
         case "subagent-call": {
+          const registered = bundle.subagentRegistry.subagentsByNodeId.get(action.nodeId);
+          const source: SubagentInputSource =
+            registered?.definition.kind === "subagent"
+              ? { description: registered.definition.description, type: "local" }
+              : { type: "runtime" };
           const childRuntime = createWorkflowRuntime({
             compiledArtifactsSource: bundle.compiledArtifactsSource,
             nodeId: action.nodeId,
@@ -106,7 +113,9 @@ export async function dispatchRuntimeActionsStep(input: {
             capabilities,
             channelMetadata,
             initiatorAuth,
+            parentContinuationToken: input.parentContinuationToken,
             session,
+            source,
           });
           const handle = await childRuntime.run(runInput);
 
@@ -131,6 +140,7 @@ export async function dispatchRuntimeActionsStep(input: {
             childSessionId = await startRemoteAgentSession({
               action,
               callbackBaseUrl: input.callbackBaseUrl,
+              callbackToken: input.parentContinuationToken,
               remote: resolvedRemote,
               session,
             });

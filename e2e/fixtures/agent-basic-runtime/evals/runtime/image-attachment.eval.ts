@@ -16,15 +16,13 @@ export default defineEval({
     // Eval modules execute from a build cache, so assets resolve against
     // the app root (`eve eval` runs with the app as cwd), not import.meta.
     const filePath = join(process.cwd(), "evals/assets/cat-image.png");
-    const turn = await t.sendFile(
+    await t.sendFile(
       "What animal is in this image? Answer in one short sentence.",
       filePath,
       "image/png",
     );
-    turn.expectOk();
 
-    t.didNotFail();
-    t.completed();
+    t.succeeded();
     t.messageIncludes(/cat/i);
   },
 });

@@ -85,6 +85,8 @@ export function normalizeAuthorizationSpec(
   const auth = authorization as Record<string, unknown>;
   const vercelConnect = extractVercelConnectMarker(auth.vercelConnect);
   const displayName = auth.displayName as string | undefined;
+  const evict =
+    typeof auth.evict === "function" ? (auth.evict as AuthorizationDefinition["evict"]) : undefined;
   if (auth.startAuthorization !== undefined && auth.completeAuthorization !== undefined) {
     let interactive: InteractiveAuthorizationDefinition = {
       completeAuthorization:
@@ -96,6 +98,7 @@ export function normalizeAuthorizationSpec(
     };
     if (vercelConnect !== undefined) interactive = { ...interactive, vercelConnect };
     if (displayName !== undefined) interactive = { ...interactive, displayName };
+    if (evict !== undefined) interactive = { ...interactive, evict };
     return interactive;
   }
 
@@ -106,6 +109,7 @@ export function normalizeAuthorizationSpec(
   };
   if (vercelConnect !== undefined) nonInteractive = { ...nonInteractive, vercelConnect };
   if (displayName !== undefined) nonInteractive = { ...nonInteractive, displayName };
+  if (evict !== undefined) nonInteractive = { ...nonInteractive, evict };
   return nonInteractive;
 }
 
@@ -114,12 +118,11 @@ export function normalizeAuthorizationSpec(
  * attached by `@vercel/connect/eve`'s `connect()` helper. Returns the
  * parsed marker when present and well-formed, otherwise `undefined`.
  *
- * The marker is opaque to the runtime — it exists so downstream tooling
- * (eg. the eve compiler / Vercel dashboard) can attribute the auth
- * back to a Vercel Connect connector without inspecting `getToken`'s
- * closure state. Validation is lenient (a malformed marker is dropped,
- * not thrown) so a misbehaving auth provider can't fail an otherwise-
- * valid connection.
+ * The runtime uses the marker for Connect-specific authorization behavior,
+ * while downstream tooling can attribute the auth back to a Vercel Connect
+ * connector without inspecting `getToken`'s closure state. Validation is
+ * lenient (a malformed marker is dropped, not thrown) so a misbehaving auth
+ * provider can't fail an otherwise-valid connection.
  */
 function extractVercelConnectMarker(value: unknown): { readonly connector: string } | undefined {
   if (value === null || typeof value !== "object") {

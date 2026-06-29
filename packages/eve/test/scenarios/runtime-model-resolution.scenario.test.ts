@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,7 +9,7 @@ import { TEST_DEFAULT_MODEL_ID } from "../../src/internal/testing/app-harness.js
 import { resolveBootstrapRuntimeModel } from "../../src/runtime/agent/bootstrap-model.js";
 import { createMockAuthoredRuntimeModel } from "../../src/runtime/agent/mock-model-adapter.js";
 import { resolveRuntimeModelReference } from "../../src/runtime/agent/resolve-model.js";
-import { createDiskRuntimeCompiledArtifactsSource } from "../../src/runtime/compiled-artifacts-source.js";
+import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "../../src/internal/application/runtime-compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "../../src/runtime/sessions/compiled-agent-cache.js";
 import { useTemporaryAppRoots } from "../../src/internal/testing/use-temporary-app-roots.js";
 
@@ -55,7 +55,7 @@ describe("runtime model resolution", () => {
     );
   });
 
-  it("rehydrates source-backed AI SDK model instances from the compiled agent config", async () => {
+  it("rehydrates a source-backed model whose module uses a NodeNext TypeScript import", async () => {
     vi.stubEnv("NODE_ENV", "development");
 
     const { agentRoot, appRoot } = await createAppRoot(
@@ -63,21 +63,12 @@ describe("runtime model resolution", () => {
       APP_ROOT_OPTIONS,
     );
 
+    await mkdir(join(agentRoot, "lib"), { recursive: true });
+    await writeFile(join(agentRoot, "lib", "model.ts"), createModelModuleSource("root"));
     await writeFile(
-      join(agentRoot, "agent.mjs"),
+      join(agentRoot, "agent.ts"),
       [
-        "const weatherModel = {",
-        '  specificationVersion: "v3",',
-        '  provider: "openai",',
-        '  modelId: "gpt-4o-mini",',
-        "  supportedUrls: {},",
-        "  async doGenerate() {",
-        '    throw new Error("not implemented");',
-        "  },",
-        "  async doStream() {",
-        '    throw new Error("not implemented");',
-        "  },",
-        "};",
+        'import { weatherModel } from "./lib/model.js";',
         "",
         "export default {",
         "  model: weatherModel,",
@@ -99,7 +90,7 @@ describe("runtime model resolution", () => {
       startPath: appRoot,
     });
 
-    const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(appRoot);
+    const compiledArtifactsSource = createAuthoredSourceRuntimeCompiledArtifactsSource(appRoot);
     const bundle = await getCompiledRuntimeAgentBundle({
       compiledArtifactsSource,
     });
@@ -114,13 +105,14 @@ describe("runtime model resolution", () => {
       },
       source: {
         sourceKind: "module",
-        logicalPath: "agent.mjs",
-        sourceId: "agent.mjs",
+        logicalPath: "agent.ts",
+        sourceId: "agent.ts",
       },
     });
 
     const resolvedModel = await resolveRuntimeModelReference(bundle.turnAgent.model, {
-      compiledArtifactsSource,
+      moduleMap: bundle.moduleMap,
+      nodeId: bundle.nodeId,
     });
 
     expect(typeof resolvedModel).not.toBe("string");
@@ -133,6 +125,83 @@ describe("runtime model resolution", () => {
       modelId: "gpt-4o-mini",
       provider: "openai",
       specificationVersion: "v3",
+      testMarker: "root",
+    });
+  });
+
+  it("resolves a child model from the active child module-map scope", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+
+    const { agentRoot, appRoot } = await createAppRoot(
+      "eve-runtime-child-model-resolution-",
+      APP_ROOT_OPTIONS,
+    );
+    const childRoot = join(agentRoot, "subagents", "researcher");
+
+    await mkdir(join(agentRoot, "lib"), { recursive: true });
+    await mkdir(join(childRoot, "lib"), { recursive: true });
+    await writeFile(join(agentRoot, "lib", "model.ts"), createModelModuleSource("root"));
+    await writeFile(join(childRoot, "lib", "model.ts"), createModelModuleSource("child"));
+    await writeFile(
+      join(agentRoot, "agent.ts"),
+      [
+        'import { weatherModel } from "./lib/model.js";',
+        "",
+        "export default { model: weatherModel };",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(join(agentRoot, "instructions.md"), "You are the root agent.\n");
+    await writeFile(
+      join(childRoot, "agent.ts"),
+      [
+        'import { weatherModel } from "./lib/model.js";',
+        "",
+        "export default {",
+        '  description: "Research one topic.",',
+        "  model: weatherModel,",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(join(childRoot, "instructions.md"), "You are the research agent.\n");
+
+    await compileAgent({ startPath: appRoot });
+
+    const compiledArtifactsSource = createAuthoredSourceRuntimeCompiledArtifactsSource(appRoot);
+    const childBundle = await getCompiledRuntimeAgentBundle({
+      compiledArtifactsSource,
+      nodeId: "subagents/researcher",
+    });
+    const resolvedModel = await resolveRuntimeModelReference(childBundle.turnAgent.model, {
+      moduleMap: childBundle.moduleMap,
+      nodeId: childBundle.nodeId,
+    });
+
+    expect(resolvedModel).toMatchObject({
+      modelId: "gpt-4o-mini",
+      provider: "openai",
+      specificationVersion: "v3",
+      testMarker: "child",
     });
   });
 });
+
+function createModelModuleSource(testMarker: string): string {
+  return [
+    "export const weatherModel = {",
+    '  specificationVersion: "v3",',
+    '  provider: "openai",',
+    '  modelId: "gpt-4o-mini",',
+    `  testMarker: ${JSON.stringify(testMarker)},`,
+    "  supportedUrls: {},",
+    "  async doGenerate() {",
+    '    throw new Error("not implemented");',
+    "  },",
+    "  async doStream() {",
+    '    throw new Error("not implemented");',
+    "  },",
+    "};",
+    "",
+  ].join("\n");
+}

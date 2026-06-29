@@ -32,6 +32,11 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 1,
       url: url("/"),
     },
+    {
+      changeFrequency: "weekly",
+      priority: 0.5,
+      url: url("/resources"),
+    },
     ...pages,
   ];
 }

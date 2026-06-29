@@ -27,6 +27,7 @@ RUN set -eux; \
     jq \
     python-is-python3 \
     python3 \
+    python3-pip \
     ripgrep \
     sudo \
     unzip \
@@ -57,6 +58,8 @@ RUN set -eux; \
   pnpm --version; \
   python --version; \
   python3 --version; \
+  pip --version; \
+  pip3 --version; \
   dig -v; \
   gpgv --version | head -1; \
   git --version; \

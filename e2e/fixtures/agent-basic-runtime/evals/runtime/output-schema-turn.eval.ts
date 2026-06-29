@@ -1,5 +1,4 @@
 import { defineEval } from "eve/evals";
-import { matches } from "eve/evals/expect";
 import { z } from "zod";
 
 const StructuredOutput = z.object({ count: z.number().int(), title: z.string() });
@@ -26,14 +25,11 @@ export default defineEval({
 
     const plain = await t.send("Reply normally without structured output.");
     plain.expectOk();
-    if (plain.events.some((event) => event.type === "result.completed")) {
-      throw new Error("outputSchema leaked into the following turn: saw result.completed.");
-    }
+    plain.notEvent("result.completed");
 
-    t.didNotFail();
-    t.completed();
+    t.succeeded();
     // Real models choose their own field values; assert schema conformance
     // rather than an exact payload.
-    t.check(structured.data, matches(StructuredOutput));
+    structured.outputMatches(StructuredOutput);
   },
 });

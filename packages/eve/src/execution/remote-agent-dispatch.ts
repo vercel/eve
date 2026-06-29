@@ -1,7 +1,7 @@
 import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
 import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
-import { formatSubagentInvocation } from "#execution/subagent-invocation.js";
+import { formatSubagentInput } from "#execution/subagent-invocation.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeRemoteAgentCallActionRequest } from "#runtime/actions/types.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
@@ -10,10 +10,11 @@ import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 export async function startRemoteAgentSession(input: {
   readonly action: RuntimeRemoteAgentCallActionRequest;
   readonly callbackBaseUrl: string | undefined;
+  readonly callbackToken?: string;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
   readonly session: HarnessSession;
 }): Promise<string> {
-  const callbackToken = input.session.continuationToken;
+  const callbackToken = input.callbackToken ?? input.session.continuationToken;
   if (!callbackToken) {
     throw new Error("Cannot dispatch remote agent without a parent continuation token.");
   }
@@ -33,7 +34,7 @@ export async function startRemoteAgentSession(input: {
           createEveCallbackRoutePath(callbackToken),
         ),
       },
-      message: formatRemoteAgentCallInputMessage(input.action),
+      message: formatRemoteAgentCallInputMessage({ action: input.action, remote: input.remote }),
       mode: "task",
       outputSchema:
         (input.action.input.outputSchema as object | undefined) ?? input.remote.outputSchema,
@@ -103,12 +104,16 @@ async function resolveRemoteAgentRequestHeaders(
   return headers;
 }
 
-function formatRemoteAgentCallInputMessage(input: RuntimeRemoteAgentCallActionRequest): string {
-  const message = typeof input.input.message === "string" ? input.input.message : "";
-  return formatSubagentInvocation({
-    description: input.description,
+function formatRemoteAgentCallInputMessage(input: {
+  readonly action: RuntimeRemoteAgentCallActionRequest;
+  readonly remote: ResolvedRuntimeRemoteAgentNode;
+}): string {
+  const message = typeof input.action.input.message === "string" ? input.action.input.message : "";
+  return formatSubagentInput({
+    description: input.remote.description,
     message,
-    name: input.remoteAgentName,
+    name: input.action.remoteAgentName,
+    type: "remote",
   }).message;
 }
 

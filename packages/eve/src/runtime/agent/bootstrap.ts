@@ -30,6 +30,7 @@ export interface RuntimeTurnAgent {
   readonly model: RuntimeModelReference;
   readonly nodeId?: string;
   readonly outputSchema?: ResolvedAgent["config"]["outputSchema"];
+  readonly reasoning?: ResolvedAgent["config"]["reasoning"];
   readonly tools: readonly PreparedRuntimeTool[];
   readonly workspaceSpec: WorkspaceRuntimeSpec;
 }
@@ -63,6 +64,7 @@ export function createResolvedRuntimeTurnAgent(input: {
     model: agent.config.model,
     nodeId: input.nodeId,
     outputSchema: agent.config.outputSchema,
+    reasoning: agent.config.reasoning,
     tools: [...input.tools],
     workspaceSpec: agent.workspaceSpec,
   };

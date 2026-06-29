@@ -11,7 +11,7 @@
  */
 
 import { type AlsContext, contextStorage } from "#context/container.js";
-import { AuthKey } from "#context/keys.js";
+import { AuthKey, type SessionAuthContext } from "#context/keys.js";
 import { ConnectionAuthorizationFailedError } from "#public/connections/errors.js";
 import type { AuthorizationDefinition, ConnectionPrincipal } from "#runtime/connections/types.js";
 
@@ -24,10 +24,15 @@ import type { AuthorizationDefinition, ConnectionPrincipal } from "#runtime/conn
  *   issuer prefix prevents collisions when the same `id` across
  *   identity providers (for example Slack `U123` vs Google `U123`)
  *   would otherwise alias to the same cache slot.
+ * - `{ type: "user", id }` → `"user:${id}"`. This is the native
+ *   Vercel Connect user projection.
  */
 export function principalKey(principal: ConnectionPrincipal): string {
   if (principal.type === "app") {
     return "app";
+  }
+  if (principal.issuer === undefined) {
+    return `user:${principal.id}`;
   }
   return `user:${principal.issuer}:${principal.id}`;
 }
@@ -85,15 +90,18 @@ export function resolveConnectionPrincipal(
   const current = ctx?.get(AuthKey);
   if (current === null || current === undefined || current.principalType !== "user") {
     throw new ConnectionAuthorizationFailedError(connectionName, {
-      message:
-        ctx === undefined
-          ? `Connection "${connectionName}" declares principalType "user" ` +
-            `but was invoked outside an eve context, so no user principal can be resolved.`
-          : `Connection "${connectionName}" declares principalType "user" ` +
-            `but the active session has no authenticated user principal.`,
+      message: buildUserPrincipalRequiredMessage(connectionName, authorization, ctx, current),
       reason: "principal_required",
       retryable: false,
     });
+  }
+
+  if (authorization.vercelConnect !== undefined && isVercelDevelopmentUser(current)) {
+    return {
+      attributes: current.attributes,
+      id: current.subject ?? current.principalId,
+      type: "user",
+    };
   }
 
   return {
@@ -102,4 +110,39 @@ export function resolveConnectionPrincipal(
     issuer: current.issuer ?? current.authenticator,
     type: "user",
   };
+}
+
+function isVercelDevelopmentUser(current: SessionAuthContext): boolean {
+  return (
+    current.authenticator === "oidc" &&
+    current.issuer?.startsWith("https://oidc.vercel.com/") === true &&
+    current.attributes.environment === "development" &&
+    current.subject === current.attributes.user_id
+  );
+}
+
+function buildUserPrincipalRequiredMessage(
+  connectionName: string,
+  authorization: AuthorizationDefinition,
+  ctx: AlsContext | undefined,
+  current: SessionAuthContext | null | undefined,
+): string {
+  let detail: string;
+  if (ctx === undefined) {
+    detail = "it was invoked outside an eve context, so no authenticated user can be resolved.";
+  } else if (current === undefined || current === null) {
+    detail = "the active session has no authenticated user.";
+  } else if (authorization.vercelConnect !== undefined && current.authenticator === "local-dev") {
+    detail =
+      "the local request fell back to local development access instead of authenticating a Vercel user. " +
+      "Ensure this directory is linked and the Vercel CLI can mint a Vercel OIDC token, then retry.";
+  } else {
+    detail = `the active session is scoped to "${current.principalType}", not an authenticated user.`;
+  }
+
+  return (
+    `Connection "${connectionName}" is user-scoped, but ${detail} ` +
+    `User-scoped connections require route auth that resolves an authenticated user. ` +
+    `If this connection should use credentials shared by the agent instead, configure it as an app-scoped connection.`
+  );
 }

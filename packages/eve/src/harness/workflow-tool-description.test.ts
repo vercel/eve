@@ -3,14 +3,26 @@ import { describe, expect, it } from "vitest";
 import { workflowToolDescription } from "#harness/workflow-tool-description.js";
 
 describe("workflowToolDescription", () => {
-  it("names every callable agent and shows a subagent example when a subagent exists", () => {
-    const description = workflowToolDescription(["agent", "researcher", "stock_price"]);
+  it("explains when orchestration is and is not appropriate", () => {
+    const description = workflowToolDescription(["agent", "researcher"]);
+
+    expect(description).toContain("Use `Workflow` for:");
+    expect(description).toContain("Do not use `Workflow` when:");
+    expect(description).toContain("map-reduce");
+    expect(description).toContain("dependent pipelines");
+    expect(description).toContain("one delegation");
+    expect(description).toContain("small fixed set");
+    expect(description).toContain("ordinary tools");
+  });
+
+  it("names every callable agent and safely formats a hyphenated subagent example", () => {
+    const description = workflowToolDescription(["agent", "echo-marker", "stock_price"]);
 
     expect(description).toContain("`agent`");
-    expect(description).toContain("`researcher`");
+    expect(description).toContain("`echo-marker`");
     expect(description).toContain("`stock_price`");
-    // The example calls a declared subagent, not the built-in `agent`.
-    expect(description).toContain("researcher({");
+    expect(description).toContain('tools["echo-marker"]({');
+    expect(description).not.toContain("tools.echo-marker");
   });
 
   it("omits the subagent example and demonstrates agent() when only the built-in agent is callable", () => {

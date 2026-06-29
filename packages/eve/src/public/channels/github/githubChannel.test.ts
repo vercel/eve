@@ -112,6 +112,18 @@ function signedRequest(event: string, payload: Record<string, unknown>): Request
   });
 }
 
+function signedRequestWithoutGitHubHeaders(payload: Record<string, unknown>): Request {
+  const body = JSON.stringify(payload);
+  return new Request("https://example.com/eve/v1/github", {
+    body,
+    headers: {
+      "content-type": "application/json",
+      "x-hub-signature-256": signGitHubWebhookBody(body, SECRET),
+    },
+    method: "POST",
+  });
+}
+
 /** Builds a webhook request carrying a deliberately invalid HMAC signature. */
 function badlySignedRequest(event: string, payload: Record<string, unknown>): Request {
   const body = JSON.stringify(payload);
@@ -242,6 +254,51 @@ describe("githubChannel", () => {
         triggeringCommentId: 10,
       },
     });
+  });
+
+  it("dispatches Connect-forwarded issue comments without GitHub event headers", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const channel = githubChannel({
+      botName: "testbot",
+      credentials: { webhookSecret: SECRET },
+    });
+    const { send } = await firePost(
+      channel,
+      signedRequestWithoutGitHubHeaders(
+        basePayload({
+          action: "created",
+          comment: {
+            body: "@testbot help me",
+            html_url: "https://github.test/vercel/eve/issues/5#issuecomment-10",
+            id: 10,
+            user: { id: 1, login: "octocat", type: "User" },
+          },
+          issue: { number: 5 },
+        }),
+      ),
+    );
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const [payload, options] = send.mock.calls[0]!;
+    expect(payload.message).toContain("delivery_id: inferred:issue_comment:10:created");
+    expect(payload.message).toContain("help me");
+    expect(options).toMatchObject({
+      auth: {
+        attributes: {
+          delivery_id: "inferred:issue_comment:10:created",
+        },
+      },
+      continuationToken: "repo:123:issue:5",
+    });
+    expect(warn).toHaveBeenCalledWith(
+      "[eve:github.channel] GitHub webhook missing standard headers; inferred metadata from payload",
+      expect.objectContaining({
+        deliveryId: "inferred:issue_comment:10:created",
+        event: "issue_comment",
+        missingHeaders: ["x-github-event", "x-github-delivery"],
+        repository: "vercel/eve",
+      }),
+    );
   });
 
   it("verifies inbound webhooks via webhookVerifier instead of HMAC when supplied", async () => {
@@ -504,7 +561,124 @@ describe("githubChannel", () => {
     });
   });
 
-  it("ignores issue and pull request webhooks without opt-in hooks", async () => {
+  it.each([
+    { event: "check_suite", label: "Check suite", object: "check_suite" },
+    { event: "check_run", label: "Check run", object: "check_run" },
+    { event: "workflow_run", label: "Workflow run", object: "workflow_run" },
+  ])("dispatches opt-in $event webhook hooks on the first associated PR", async (testCase) => {
+    const hook = vi.fn();
+    const commonConfig = {
+      api: { apiBaseUrl: "https://github.test", fetch: prContextFetch() },
+      credentials: { appId: "test-app", webhookSecret: SECRET },
+    };
+    const channel =
+      testCase.event === "check_suite"
+        ? githubChannel({
+            ...commonConfig,
+            onCheckSuite(ctx, checkSuite) {
+              hook(ctx.conversation, checkSuite);
+              return { auth: defaultGitHubAuth(ctx) };
+            },
+          })
+        : testCase.event === "check_run"
+          ? githubChannel({
+              ...commonConfig,
+              onCheckRun(ctx, checkRun) {
+                hook(ctx.conversation, checkRun);
+                return { auth: defaultGitHubAuth(ctx) };
+              },
+            })
+          : githubChannel({
+              ...commonConfig,
+              onWorkflowRun(ctx, workflowRun) {
+                hook(ctx.conversation, workflowRun);
+                return { auth: defaultGitHubAuth(ctx) };
+              },
+            });
+    const headSha = "c".repeat(40);
+    const ciPayload: Record<string, unknown> = {
+      conclusion: "failure",
+      head_sha: headSha,
+      id: 9001,
+      pull_requests: [{ number: 7 }, { number: 9 }],
+      status: "completed",
+    };
+    if (testCase.event !== "workflow_run") {
+      ciPayload.app = { slug: "github-actions" };
+    }
+
+    const { send } = await firePost(
+      channel,
+      signedRequest(
+        testCase.event,
+        basePayload({
+          action: "completed",
+          [testCase.object]: ciPayload,
+        }),
+      ),
+    );
+
+    expect(hook).toHaveBeenCalledWith(
+      { issueNumber: null, kind: "pull_request", pullRequestNumber: 7 },
+      expect.objectContaining({
+        action: "completed",
+        app: { slug: "github-actions" },
+        conclusion: "failure",
+        headSha,
+        pullRequests: [7, 9],
+        status: "completed",
+      }),
+    );
+    expect(send).toHaveBeenCalledTimes(1);
+    const [payload, options] = send.mock.calls[0]!;
+    expect(payload.message).toContain(`${testCase.label} completed: 9001 (failure)`);
+    expect(options).toMatchObject({
+      continuationToken: "repo:123:pull:7",
+      state: {
+        conversationKind: "pull_request",
+        headSha,
+        issueNumber: 7,
+        pullRequestNumber: 7,
+      },
+    });
+  });
+
+  it("invokes CI hooks without dispatching when no pull request is associated", async () => {
+    const hook = vi.fn();
+    const channel = githubChannel({
+      credentials: { webhookSecret: SECRET },
+      onCheckSuite(ctx, checkSuite) {
+        hook(ctx.conversation, checkSuite.pullRequests);
+        return { auth: defaultGitHubAuth(ctx) };
+      },
+    });
+
+    const { send } = await firePost(
+      channel,
+      signedRequest(
+        "check_suite",
+        basePayload({
+          action: "completed",
+          check_suite: {
+            app: { slug: "github-actions" },
+            conclusion: "failure",
+            head_sha: "abc123",
+            id: 9001,
+            pull_requests: [],
+            status: "completed",
+          },
+        }),
+      ),
+    );
+
+    expect(hook).toHaveBeenCalledWith(
+      { issueNumber: null, kind: "pull_request", pullRequestNumber: null },
+      [],
+    );
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("ignores issue, pull request, and CI webhooks without opt-in hooks", async () => {
     const channel = githubChannel({
       credentials: { webhookSecret: SECRET },
     });
@@ -529,9 +703,31 @@ describe("githubChannel", () => {
         }),
       ),
     );
+    const ciEvents = await Promise.all(
+      ["check_suite", "check_run", "workflow_run"].map((event) =>
+        firePost(
+          channel,
+          signedRequest(
+            event,
+            basePayload({
+              action: "completed",
+              [event]: {
+                app: { slug: "github-actions" },
+                conclusion: "failure",
+                head_sha: "abc123",
+                id: 9001,
+                pull_requests: [{ number: 7 }],
+                status: "completed",
+              },
+            }),
+          ),
+        ),
+      ),
+    );
 
     expect(issue.send).not.toHaveBeenCalled();
     expect(pullRequest.send).not.toHaveBeenCalled();
+    for (const ciEvent of ciEvents) expect(ciEvent.send).not.toHaveBeenCalled();
   });
 
   it("posts final messages through the issue comments API", async () => {
