@@ -144,11 +144,11 @@ export function FileTreeView({ items, heading }: { items: FileTreeItem[]; headin
   );
 
   if (!scrolly) {
-    return <div className="mt-16">{block}</div>;
+    return <div className="mt-4">{block}</div>;
   }
 
   return (
-    <div ref={trackRef} className="relative mt-16" style={{ height: `${items.length * 42}vh` }}>
+    <div ref={trackRef} className="relative mt-4" style={{ height: `${items.length * 42}vh` }}>
       <div className="sticky top-[max(4rem,calc(50vh-20.5rem))]">{block}</div>
     </div>
   );
