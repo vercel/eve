@@ -1,6 +1,10 @@
 "use client";
 
-import { IconCheck, IconPlusCircle, IconTrash } from "@vercel/geistdocs/assets/icons";
+import {
+  IconCheck,
+  IconPlusCircle,
+  IconRefreshCounterClockwise,
+} from "@vercel/geistdocs/assets/icons";
 import { type ReactNode, useState } from "react";
 import { cn } from "@/lib/utils";
 
@@ -79,7 +83,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
                         : "pointer-events-none ml-0 w-0 opacity-0",
                     )}
                   >
-                    <IconTrash size={15} />
+                    <IconRefreshCounterClockwise size={15} />
                   </button>
                 </div>
               </div>

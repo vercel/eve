@@ -270,7 +270,7 @@ export function ArchitectureDiagram() {
           </div>
 
           {/* Channel */}
-          <div className="relative flex flex-col gap-4 rounded-xl p-5 lg:w-[200px] lg:shrink-0">
+          <div className="relative flex flex-col gap-4 rounded-xl p-5 lg:w-[240px] lg:shrink-0">
             <GradientBorder />
             <div className="flex flex-col gap-1">
               <SectionLabel>Channel</SectionLabel>
