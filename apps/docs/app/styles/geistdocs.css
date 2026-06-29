@@ -17,11 +17,11 @@ body:has([data-home-route]) footer {
 /* On home routes the navbar starts borderless and fades its bottom border in
    only once the page is scrolled (ScrollState toggles [data-scrolled]). */
 body:has([data-home-route]) header {
-  border-bottom-color: transparent;
+  border-bottom-color: transparent !important;
   transition: border-color 200ms ease;
 }
 html[data-scrolled] body:has([data-home-route]) header {
-  border-bottom-color: var(--ds-gray-alpha-400);
+  border-bottom-color: var(--ds-gray-alpha-400) !important;
 }
 
 /* Align docs content with navbar on mobile. */
