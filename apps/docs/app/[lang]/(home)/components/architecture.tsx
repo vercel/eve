@@ -198,13 +198,13 @@ export function ArchitectureDiagram() {
         </p>
 
         {/* Managed vs. self-hosted toggle drives the backend shown inside each card. */}
-        <div className="mt-12 flex items-center justify-center gap-4">
+        <div className="mt-12 flex items-center justify-center gap-4 text-copy-14">
           <button
             type="button"
             onClick={() => setMode("managed")}
             aria-pressed={!selfHosted}
             className={cn(
-              "cursor-pointer text-copy-14 transition-colors",
+              "cursor-pointer transition-colors",
               selfHosted ? "text-gray-900 hover:text-gray-1000" : "text-gray-1000",
             )}
           >
