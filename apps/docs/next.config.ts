@@ -1,7 +1,10 @@
+import { createRequire } from "node:module";
 import { createMDX } from "fumadocs-mdx/next";
 import type { NextConfig } from "next";
 
 const withMDX = createMDX();
+const require = createRequire(import.meta.url);
+const wgslLoader = require.resolve("@vgpu/wgsl/loader-webpack");
 
 const localSiteHost = "localhost:3000";
 
@@ -18,6 +21,15 @@ const config: NextConfig = {
 
   experimental: {
     turbopackFileSystemCacheForDev: true,
+  },
+
+  turbopack: {
+    rules: {
+      "*.wgsl": {
+        loaders: [wgslLoader],
+        as: "*.js",
+      },
+    },
   },
 
   images: {

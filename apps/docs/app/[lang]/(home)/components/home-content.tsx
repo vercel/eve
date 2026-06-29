@@ -4,8 +4,8 @@ import { ArchitectureDiagram } from "./architecture";
 import { CTA } from "./cta";
 import { FeatureGrid } from "./feature-grid";
 import { FileTree } from "./file-tree";
+import { EveLogoShader } from "./eve-logo-shader";
 import { InstallSwitcher } from "./install-switcher";
-import { HeroMetalShader } from "./metal-shader";
 import { NextjsInterop } from "./nextjs-interop";
 
 const title = "eve";
@@ -29,17 +29,17 @@ export const homeMetadata: Metadata = {
 
 export const HomeContent = () => (
   <div className="mx-auto w-full max-w-[1080px] pb-32">
-    <section className="relative flex min-h-[80vh] flex-col items-center justify-center gap-y-5 px-4 py-24 text-center sm:px-12 sm:py-28">
-      <div className="mb-8 aspect-[601/189] w-full max-w-[820px] sm:mb-10 sm:max-w-[900px]">
-        <HeroMetalShader />
+    <section className="relative isolate flex min-h-[80vh] flex-col items-center justify-center gap-y-5 px-4 pt-24 pb-12 text-center sm:px-12 sm:pb-16 sm:pt-42">
+      <div className="relative z-10 max-w-5xl text-center font-normal! text-heading-40 md:text-heading-48 lg:text-heading-56">
+        <EveLogoShader />
+        <h1 className="relative text-balance w-full max-w-[10em]">
+          The Framework for Building Agents
+        </h1>
       </div>
-      <h1 className="max-w-5xl text-center font-normal! text-heading-40 md:whitespace-nowrap md:text-heading-48 lg:text-heading-56">
-        The Framework for Building Agents
-      </h1>
-      <p className="w-full text-center text-copy-16 text-gray-900 md:max-w-2xl md:text-copy-18 lg:text-copy-20">
+      <p className="text-balance relative z-10 w-full text-center text-copy-16 text-gray-900 md:max-w-2xl md:text-copy-18 lg:text-copy-20">
         {tagline}
       </p>
-      <InstallSwitcher className="items-center mt-2" />
+      <InstallSwitcher className="items-center mt-2 z-10" />
     </section>
     <FileTree />
     <NextjsInterop />
