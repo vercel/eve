@@ -1,7 +1,5 @@
 import type { JSX } from "react";
 
-// TODO: check for Safari's (OS 27) new webkit where this gradient approach causes problems
-
 export function GradientBorder(): JSX.Element {
   return (
     <div

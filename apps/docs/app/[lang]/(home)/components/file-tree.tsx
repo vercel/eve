@@ -232,8 +232,8 @@ export async function FileTree() {
           is a directory
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">
-          Define instructions and skills in markdown, tools in TypeScript, and deploy anywhere. The
-          framework compiles the directory, wires up durable workflows, and connects channels.
+          An instructions.md file is all you need to run an agent. Skills, tools, channels, and the
+          rest are optional building blocks you add as it grows.
         </p>
       </div>
 
