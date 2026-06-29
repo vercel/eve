@@ -1,3 +1,4 @@
+import { LogoEve } from "@vercel/geistdocs/assets/logos/logo-eve";
 import Link from "next/link";
 import type { JSX, ReactNode } from "react";
 import {
@@ -117,7 +118,8 @@ export function ArchitectureDiagram() {
           channels. Swap any backend and self-host the whole runtime, with zero
           managed-infrastructure dependencies.
         </p>
-        <div className="mt-16 flex flex-col gap-4 lg:flex-row">
+        <LogoEve className="text-gray-1000 mt-16 flex items-center gap-2 ml-5" height={13} />
+        <div className="mt-3 flex flex-col gap-4 lg:flex-row">
           {/* Runtime */}
           <div className="relative flex flex-1 flex-col gap-4 rounded-xl p-5">
             <GradientBorder />

@@ -1,16 +1,10 @@
 "use client";
 
 // TODO: clean up icons, via geistcn-assets once available
-import {
-  SiDigitalocean,
-  SiDocker,
-  SiJaeger,
-  SiPostgresql,
-  SiVercel,
-} from "@icons-pack/react-simple-icons";
+import { SiDigitalocean, SiDocker, SiJaeger, SiPostgresql } from "@icons-pack/react-simple-icons";
 import Link from "next/link";
 import { type ComponentType, useState } from "react";
-import { IconArrowUpRight, IconOpenai } from "@/components/geistcn-icons";
+import { IconArrowUpRight, IconOpenai, IconVercel } from "@/components/geistcn-icons";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
@@ -33,31 +27,31 @@ const STACKS: Record<Mode, StackEntry[]> = {
     {
       category: "Models",
       name: "AI Gateway",
-      Logo: SiVercel,
+      Logo: IconVercel,
       href: "https://vercel.com/ai-gateway",
     },
     {
       category: "Sandbox",
       name: "Vercel Sandbox",
-      Logo: SiVercel,
+      Logo: IconVercel,
       href: "https://vercel.com/sandbox",
     },
     {
       category: "Runtime",
       name: "Vercel Workflows",
-      Logo: SiVercel,
+      Logo: IconVercel,
       href: "https://vercel.com/workflow",
     },
     {
       category: "Observability",
       name: "Observability",
-      Logo: SiVercel,
+      Logo: IconVercel,
       href: "https://vercel.com/docs/observability",
     },
     {
       category: "Deploy",
       name: "Vercel",
-      Logo: SiVercel,
+      Logo: IconVercel,
       href: "https://vercel.com/docs/deployments",
     },
   ],
@@ -66,7 +60,7 @@ const STACKS: Record<Mode, StackEntry[]> = {
     { category: "Sandbox", name: "Docker", Logo: SiDocker },
     {
       category: "Runtime",
-      name: "Postgres",
+      name: "@workflow/world-postgres",
       Logo: SiPostgresql,
       href: "https://workflow-sdk.dev/worlds/postgres",
     },
@@ -76,7 +70,8 @@ const STACKS: Record<Mode, StackEntry[]> = {
 };
 
 const CAPTIONS: Record<Mode, string> = {
-  managed: "Deploy to Vercel — sandboxes, durable workflows, and model routing handled for you.",
+  managed:
+    "Fully managed via Vercel — sandboxes, durable workflows, model routing, and observability handled for you.",
   "self-hosted":
     "Runs on a single 4 GB DigitalOcean box — Postgres-backed durability, Docker sandbox, Ansible deploy, zero managed services.",
 };
@@ -133,12 +128,12 @@ export function SetupSwitcher() {
         {STACKS[mode].map((entry) => {
           const body = (
             <>
-              <entry.Logo className="shrink-0" color="default" size={22} title={entry.name} />
+              <entry.Logo className="shrink-0" color="default" size={20} title={entry.name} />
               <div className="flex min-w-0 flex-col">
-                <span className="font-mono uppercase tracking-[0.08em] text-gray-900 text-label-12-mono">
+                <span className="font-mono uppercase tracking-[0.08em] text-gray-900 text-[11px] leading-4">
                   {entry.category}
                 </span>
-                <span className="truncate font-medium text-gray-1000 text-copy-14">
+                <span className="truncate font-medium text-gray-1000 text-copy-13">
                   {entry.name}
                 </span>
               </div>

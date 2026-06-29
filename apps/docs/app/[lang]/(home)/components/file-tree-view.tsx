@@ -53,7 +53,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
       />
       <div className="mx-auto max-w-5xl">
         <div className="relative overflow-hidden rounded-t-xl border bg-background-100">
-          <div className="grid pb-12 md:grid-cols-[240px_1fr]">
+          <div className="grid md:grid-cols-[240px_1fr]">
             {/* Sidebar */}
             <div className="border-b md:border-r md:border-b-0">
               <div className="flex h-12 items-center gap-2 border-b px-4">
@@ -134,13 +134,13 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
                   </span>
                 ) : null}
               </div>
-              <p className="overflow-hidden border-b px-4 py-3 text-gray-900 text-copy-14 transition-[height] duration-300 [interpolate-size:allow-keywords]">
+              <p className="min-h-[5rem] overflow-hidden border-b px-4 py-3 text-gray-900 text-copy-14">
                 {selected.description}
               </p>
               {/* Re-keyed per file so the code subtly flies in on selection. */}
               <div
                 key={selected.fileName}
-                className="md:min-h-[360px] motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300 motion-safe:ease-out [&>div]:mb-0"
+                className="min-h-[440px] pb-12 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300 motion-safe:ease-out [&>div]:mb-0"
               >
                 {selected.code}
               </div>
