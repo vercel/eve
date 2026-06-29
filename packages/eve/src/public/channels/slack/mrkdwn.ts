@@ -1,56 +1,30 @@
-/**
- * Slack mrkdwn ↔ GitHub-flavored markdown converters and the bare
- * `@mention` rewriter used by the outbound post pipeline. These are
- * pure string utilities — no Slack API I/O, no I/O at all — so they
- * live separately from the binding constructor and request shape code
- * in {@link ./api.ts}.
- */
+import {
+  formatSlackLink,
+  linkBareSlackMentions,
+  markdownBoldToSlackMrkdwn,
+  slackMrkdwnToMarkdown,
+} from "#compiled/@chat-adapter/slack/format.js";
 
 const BARE_MENTION_RE = /(?<![<\w])@(\w+)/gu;
 
-/**
- * Rewrites bare `@USER_ID` tokens (the form Slack apps and humans tend
- * to type) into the `<@USER_ID>` mention syntax Slack actually renders.
- * Anything already wrapped in `<...>` is left untouched.
- */
+/** Rewrites bare Slack mention tokens into Slack's linked mention syntax. */
 export function rewriteBareMentions(text: string): string {
-  return text.replace(BARE_MENTION_RE, "<@$1>");
+  return linkBareSlackMentions(text).replace(BARE_MENTION_RE, "<@$1>");
 }
 
-/**
- * Best-effort GFM → Slack mrkdwn converter used only in contexts that
- * do not support `markdown_text` (e.g. `files.completeUploadExternal`'s
- * `initial_comment` field).
- *
- * The main `{ markdown }` post path sends `markdown_text` directly
- * to `chat.postMessage` and does not go through this converter.
- */
+/** Converts markdown into Slack mrkdwn for legacy Slack text surfaces. */
 export function gfmToSlackMrkdwn(input: string): string {
   const segments = splitCodeFences(input);
   return segments
-    .map((segment) => (segment.kind === "code" ? segment.text : convertInline(segment.text)))
+    .map((segment) => (segment.kind === "code" ? segment.text : markdownToSlack(segment.text)))
     .join("");
 }
 
-/**
- * Best-effort Slack mrkdwn → GFM converter applied to the text of
- * every inbound Slack message before the harness sees it.
- *
- * - `<@U123>`              → `@U123`
- * - `<#C123|name>`         → `#name` (or `#C123` when no name)
- * - `<!channel>` etc.      → `@channel`
- * - `<https://x|label>`    → `[label](https://x)`
- * - `<https://x>`          → `https://x`
- * - `*bold*` (paired)      → `**bold**`
- * - `~strike~` (paired)    → `~~strike~~`
- *
- * Inline `_italic_` and code spans pass through unchanged because both
- * formats render them identically.
- */
+/** Converts inbound Slack mrkdwn into markdown while preserving code spans and fences. */
 export function slackMrkdwnToGfm(input: string): string {
   const segments = splitCodeFences(input);
   return segments
-    .map((segment) => (segment.kind === "code" ? segment.text : decodeInline(segment.text)))
+    .map((segment) => (segment.kind === "code" ? segment.text : slackToMarkdown(segment.text)))
     .join("");
 }
 
@@ -74,25 +48,28 @@ function splitCodeFences(input: string): Segment[] {
   return segments;
 }
 
-function convertInline(input: string): string {
-  let out = input;
-  out = out.replace(/\*\*([^*\n]+)\*\*/gu, "*$1*");
-  out = out.replace(/__([^_\n]+)__/gu, "*$1*");
-  out = out.replace(/~~([^~\n]+)~~/gu, "~$1~");
-  out = out.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/gu, "<$2|$1>");
-  return out;
+function markdownToSlack(input: string): string {
+  let output = markdownBoldToSlackMrkdwn(input);
+  output = output.replace(/__([^_\n]+)__/gu, "*$1*");
+  output = output.replace(/~~([^~\n]+)~~/gu, "~$1~");
+  output = output.replace(
+    /\[([^\]\n]+)\]\(([^)\s]+)\)/gu,
+    (match: string, label: string, url: string) => formatMarkdownLink(match, label, url),
+  );
+  return output;
 }
 
-function decodeInline(input: string): string {
-  let out = input;
-  out = out.replace(/<!(channel|here|everyone)>/gu, "@$1");
-  out = out.replace(/<@([A-Z0-9]+)\|([^>]+)>/gu, "@$2");
-  out = out.replace(/<@([A-Z0-9]+)>/gu, "@$1");
-  out = out.replace(/<#([A-Z0-9]+)\|([^>]+)>/gu, "#$2");
-  out = out.replace(/<#([A-Z0-9]+)>/gu, "#$1");
-  out = out.replace(/<(https?:\/\/[^|>\s]+)\|([^>]+)>/gu, "[$2]($1)");
-  out = out.replace(/<(https?:\/\/[^>\s]+)>/gu, "$1");
-  out = out.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/gu, "$1**$2**");
-  out = out.replace(/(^|[^~])~([^~\n]+)~(?!~)/gu, "$1~~$2~~");
-  return out;
+function slackToMarkdown(input: string): string {
+  return slackMrkdwnToMarkdown(input.replace(/<!(channel|here|everyone)>/gu, "@$1"));
+}
+
+function formatMarkdownLink(match: string, label: string, url: string): string {
+  try {
+    return formatSlackLink(url, label);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      return match;
+    }
+    throw error;
+  }
 }

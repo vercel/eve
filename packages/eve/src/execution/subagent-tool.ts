@@ -1,5 +1,5 @@
 import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter.js";
-import { formatSubagentInvocation } from "#execution/subagent-invocation.js";
+import { formatSubagentInput } from "#execution/subagent-invocation.js";
 import type {
   ChannelInstrumentationProjection,
   RunInput,
@@ -18,6 +18,15 @@ interface BatchEventMetadata {
   readonly sequence: number;
   readonly turnId: string;
 }
+
+export type SubagentInputSource =
+  | {
+      readonly description: string;
+      readonly type: "local";
+    }
+  | {
+      readonly type: "runtime";
+    };
 
 /**
  * Result of {@link buildSubagentRunInput}.
@@ -49,8 +58,18 @@ export function buildSubagentRunInput(input: {
   /** Hook token owned by the workflow currently waiting for this child. */
   readonly parentContinuationToken?: string;
   readonly session: HarnessSession;
+  readonly source: SubagentInputSource;
 }): SubagentRunInputBuild {
-  const { action, auth, batchEvent, capabilities, channelMetadata, initiatorAuth, session } = input;
+  const {
+    action,
+    auth,
+    batchEvent,
+    capabilities,
+    channelMetadata,
+    initiatorAuth,
+    session,
+    source,
+  } = input;
 
   const childContinuationToken = mintSubagentContinuationToken(
     `${session.sessionId}:${action.callId}`,
@@ -84,7 +103,7 @@ export function buildSubagentRunInput(input: {
     continuationToken: childContinuationToken,
     initiatorAuth,
     input: {
-      message: formatSubagentCallInputMessage(action),
+      message: formatSubagentCallInputMessage({ action, source }),
       outputSchema: action.input.outputSchema as JsonObject | undefined,
     },
     mode: "task",
@@ -105,14 +124,29 @@ export function buildSubagentRunInput(input: {
 /**
  * Formats the synthesized child input message for one delegated subagent call.
  */
-function formatSubagentCallInputMessage(
-  action: Pick<RuntimeSubagentCallActionRequest, "description" | "input" | "subagentName">,
-): string {
-  const { message } = action.input as { message: string };
+function formatSubagentCallInputMessage(input: {
+  readonly action: Pick<RuntimeSubagentCallActionRequest, "input" | "subagentName">;
+  readonly source: SubagentInputSource;
+}): string {
+  const { message } = input.action.input as { message: string };
 
-  return formatSubagentInvocation({
-    description: action.description,
-    message,
-    name: action.subagentName,
-  }).message;
+  switch (input.source.type) {
+    case "local":
+      return formatSubagentInput({
+        description: input.source.description,
+        message,
+        name: input.action.subagentName,
+        type: "local",
+      }).message;
+    case "runtime":
+      return formatSubagentInput({
+        message,
+        name: input.action.subagentName,
+        type: "runtime",
+      }).message;
+    default: {
+      const _exhaustive: never = input.source;
+      return _exhaustive;
+    }
+  }
 }
