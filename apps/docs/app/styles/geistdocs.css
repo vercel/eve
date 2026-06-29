@@ -14,12 +14,14 @@ body:has([data-home-route]) footer {
   @apply bg-background-200;
 }
 
-body:has([data-home-route]) header.sticky.top-0 {
-  @apply transition-colors;
+/* On home routes the navbar starts borderless and fades its bottom border in
+   only once the page is scrolled (ScrollState toggles [data-scrolled]). */
+body:has([data-home-route]) header {
+  border-bottom-color: transparent !important;
+  transition: border-color 200ms ease;
 }
-
-body:has([data-home-route]):not([data-home-scrolled="true"]) header.sticky.top-0 {
-  @apply border-transparent;
+html[data-scrolled] body:has([data-home-route]) header {
+  border-bottom-color: var(--ds-gray-alpha-400) !important;
 }
 
 .dark body:has([data-home-route]) {

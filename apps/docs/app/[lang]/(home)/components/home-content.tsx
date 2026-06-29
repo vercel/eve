@@ -54,12 +54,10 @@ export const HomeContent = () => (
         </Button>
       </div>
     </section>
-    <div className="grid">
-      <FileTree />
-      <ArchitectureDiagram />
-      <NextjsInterop />
-      <FeatureGrid />
-      <CTA />
-    </div>
+    <FileTree />
+    <ArchitectureDiagram />
+    <NextjsInterop />
+    <FeatureGrid />
+    <CTA />
   </div>
 );
