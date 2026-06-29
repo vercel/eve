@@ -124,7 +124,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
             </div>
 
             {/* Code panel */}
-            <div className="flex min-w-0 flex-col">
+            <div className="flex min-h-[500px] min-w-0 flex-col">
               <div className="flex h-12 items-center gap-2 border-b px-4">
                 {/* {selected.icon} */}
                 <span className="text-sm font-medium text-gray-1000">{selected.fileName}</span>
@@ -134,13 +134,13 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
                   </span>
                 ) : null}
               </div>
-              <p className="min-h-[5rem] overflow-hidden border-b px-4 py-3 text-gray-900 text-copy-14">
+              <p className="border-b px-4 py-3 text-gray-900 text-copy-14">
                 {selected.description}
               </p>
               {/* Re-keyed per file so the code subtly flies in on selection. */}
               <div
                 key={selected.fileName}
-                className="min-h-[440px] pb-12 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300 motion-safe:ease-out [&>div]:mb-0"
+                className="grow pb-6 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300 motion-safe:ease-out [&>div]:mb-0"
               >
                 {selected.code}
               </div>
