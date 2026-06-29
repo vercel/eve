@@ -9,6 +9,7 @@ export struct Params {
   cameraForward: vec3f,
   materialKind: f32,
   thicknessScale: f32,
+  envYaw: f32,
 };
 
 export struct VertexInput {

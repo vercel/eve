@@ -1,4 +1,4 @@
-import { sample_cubemap_array } from "../shared/cube-sample.wgsl";
+import { sample_cubemap_array_yaw } from "../shared/cube-sample.wgsl";
 
 // Environment background pass for eve-5.
 // Draws the fixed-world studio HDR cubemap from the same true orbit camera as the logo.
@@ -12,7 +12,9 @@ struct Params {
   cameraUp: vec3f,
   aspect: f32,
   cameraForward: vec3f,
-  _pad0: f32,
+  materialKind: f32,
+  thicknessScale: f32,
+  envYaw: f32,
 };
 
 struct VertexOutput {
@@ -46,7 +48,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
       params.cameraRight * (input.ndc.x * params.aspect / focalY) +
       params.cameraUp * (input.ndc.y / focalY)
   );
-  let hdr = sample_cubemap_array(studioCube, studioSampler, dir);
+  let hdr = sample_cubemap_array_yaw(studioCube, studioSampler, dir, params.envYaw);
   // Scene target is linear HDR (ACES/gamma applied later in the composite pass).
   return vec4f(hdr, 1.0);
 }

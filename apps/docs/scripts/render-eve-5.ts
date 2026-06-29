@@ -28,6 +28,7 @@ const DEFAULT_CONTROLS: RenderControls = {
   pitch: 0,
   radius: 1.9,
   fov: 35,
+  envYaw: 0,
   insideRendering: true,
   outsideRendering: true,
   material: "glass",

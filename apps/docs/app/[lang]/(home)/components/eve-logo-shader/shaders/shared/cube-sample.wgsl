@@ -59,9 +59,19 @@ export fn cube_lookup_uv_face(direction: vec3f) -> vec3f {
   return vec3f(uv, face);
 }
 
+export fn rotate_y(direction: vec3f, yaw: f32) -> vec3f {
+  let s = sin(yaw);
+  let c = cos(yaw);
+  return normalize(vec3f(direction.x * c - direction.z * s, direction.y, direction.x * s + direction.z * c));
+}
+
 export fn sample_cubemap_array(envCube: texture_2d_array<f32>, envSampler: sampler, direction: vec3f) -> vec3f {
   let lookup = cube_lookup_uv_face(direction);
   return textureSample(envCube, envSampler, lookup.xy, i32(lookup.z)).rgb;
+}
+
+export fn sample_cubemap_array_yaw(envCube: texture_2d_array<f32>, envSampler: sampler, direction: vec3f, yaw: f32) -> vec3f {
+  return sample_cubemap_array(envCube, envSampler, rotate_y(direction, yaw));
 }
 
 export fn sample_cubemap_array_level(envCube: texture_2d_array<f32>, envSampler: sampler, direction: vec3f) -> vec3f {

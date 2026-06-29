@@ -20,6 +20,7 @@ const DEFAULT_CONTROLS: RenderControls = {
   pitch: 0,
   radius: 1.9,
   fov: 35,
+  envYaw: 0,
   insideRendering: true,
   outsideRendering: true,
   material: "glass",
@@ -28,6 +29,8 @@ const DEFAULT_CONTROLS: RenderControls = {
 };
 const LOGO_RENDER_HEIGHT = 500;
 const MAX_DEVICE_PIXEL_RATIO = 2;
+const MAX_ENV_YAW = 0.45;
+const ENV_YAW_LERP_SPEED = 8;
 
 export function EveLogoShader() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -37,6 +40,16 @@ export function EveLogoShader() {
   useEffect(() => {
     let cancelled = false;
     let animationFrame = 0;
+    let targetEnvYaw = controlsRef.current.envYaw;
+    let previousFrameTime = performance.now();
+
+    const updateEnvYaw = (clientX: number) => {
+      const viewportWidth = Math.max(1, window.innerWidth || 1);
+      const normalizedX = Math.max(-1, Math.min(1, (clientX / viewportWidth) * 2 - 1));
+      targetEnvYaw = normalizedX * MAX_ENV_YAW;
+    };
+    const onPointerMove = (event: PointerEvent) => updateEnvYaw(event.clientX);
+    window.addEventListener("pointermove", onPointerMove, { passive: true });
 
     async function start() {
       const canvas = canvasRef.current;
@@ -58,9 +71,15 @@ export function EveLogoShader() {
       const format = navigator.gpu.getPreferredCanvasFormat();
       context.configure({ device: app.device.gpu, format, alphaMode: "opaque" });
       const renderer = createEve5Renderer(app.device, format, mesh);
+      previousFrameTime = performance.now();
 
-      const draw = () => {
+      const draw = (frameTime = performance.now()) => {
         if (cancelled) return;
+
+        const deltaSeconds = Math.max(0, (frameTime - previousFrameTime) / 1000);
+        previousFrameTime = frameTime;
+        controlsRef.current.envYaw = safeLerp(controlsRef.current.envYaw, targetEnvYaw, deltaSeconds * ENV_YAW_LERP_SPEED);
+
         resizeCanvas(canvas);
         // The renderer pads the logical scene size by BLOOM_RADIUS on each side before allocating
         // its offscreen back/depth targets. The canvas itself is that padded physical render target,
@@ -92,6 +111,7 @@ export function EveLogoShader() {
     return () => {
       cancelled = true;
       cancelAnimationFrame(animationFrame);
+      window.removeEventListener("pointermove", onPointerMove);
       cleanup?.();
     };
   }, []);
@@ -103,7 +123,7 @@ export function EveLogoShader() {
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none absolute left-1/2 top-1/2 z-0 h-[6.5em] max-w-none -translate-x-1/2 translate-y-[calc(-50%-0.4em)]"
+      className="pointer-events-none absolute left-1/2 top-1/2 z-0 h-[6.5em] max-w-none -translate-x-1/2 translate-y-[calc(-50%-0.42em)]"
       style={{
         aspectRatio: `${paddedWidth} / ${paddedHeight}`,
       }}
@@ -147,6 +167,11 @@ function resizeCanvas(canvas: HTMLCanvasElement | null) {
     canvas.width = width;
     canvas.height = height;
   }
+}
+
+function safeLerp(from: number, to: number, amount: number) {
+  const safeAmount = Math.max(0, Math.min(1, amount));
+  return from + (to - from) * safeAmount;
 }
 
 function nextFrame() {

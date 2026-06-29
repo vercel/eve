@@ -29,6 +29,7 @@ export type RenderControls = {
   pitch: number;
   radius: number;
   fov: number;
+  envYaw: number;
   insideRendering: boolean;
   outsideRendering: boolean;
   material: EveMaterial;
@@ -297,6 +298,7 @@ export function createEve5Renderer(device: Device, format: GPUTextureFormat, mes
     data[30] = basis.forward[2];
     data[31] = MATERIAL_KIND[controls.material];
     data[32] = thicknessScale;
+    data[33] = controls.envYaw;
     target.buffer.write(data);
   };
 

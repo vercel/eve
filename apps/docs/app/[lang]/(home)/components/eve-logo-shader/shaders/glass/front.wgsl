@@ -8,11 +8,11 @@ import { shade_glass } from "../shared/glass-material.wgsl";
 @group(0) @binding(3) var backMaterial: texture_2d<f32>;
 @group(0) @binding(4) var backDepth: texture_2d<f32>;
 
-const VOGEL_SAMPLE_COUNT = 16u;
+const VOGEL_SAMPLE_COUNT = 8u;
 const GOLDEN_ANGLE = 2.399963229728653;
-const MAX_BACK_BLUR_RADIUS_UV = 0.03;
+const MAX_BACK_BLUR_RADIUS_UV = 0.01;
 const BACK_MIN_TRANSMISSION = 0.38;
-const BACK_ABSORPTION_TINT = vec3f(0.5);
+const BACK_ABSORPTION_TINT = vec3f(0.9);
 const TAU = 6.28318530718;
 
 fn hash12(p: vec2f) -> f32 {
@@ -87,10 +87,10 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
       return vec4f(encode_normal(reflected), 1.0);
     }
     case 3u: {
-      return vec4f(env_reflection_from_dir(studioCube, studioSampler, reflected), 1.0);
+      return vec4f(env_reflection_from_dir(studioCube, studioSampler, reflected, params.envYaw), 1.0);
     }
     default: {
-      var glass = shade_glass(studioCube, studioSampler, n, v, reflected, false);
+      var glass = shade_glass(studioCube, studioSampler, n, v, reflected, params.envYaw, false);
       let backSize = vec2i(textureDimensions(backMaterial));
       let pixel = vec2i(input.clipPosition.xy);
       if (all(pixel >= vec2i(0)) && all(pixel < backSize)) {
