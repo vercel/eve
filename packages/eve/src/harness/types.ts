@@ -60,6 +60,7 @@ export interface HarnessSession {
   readonly compaction: CompactionConfig;
   readonly continuationToken: string;
   readonly history: ModelMessage[];
+  readonly limits?: SessionLimits;
   readonly outputSchema?: JsonObject;
   /**
    * Stable identifier of the top user-facing session in the dispatch
@@ -84,6 +85,23 @@ export interface HarnessSession {
    * harness uses the framework default.
    */
   readonly subagentMaxDepth?: number;
+}
+
+/**
+ * Token limits stored on one durable session.
+ */
+export interface SessionLimits {
+  /**
+   * Maximum provider-reported input tokens this durable session may spend before
+   * eve refuses to start another model call. Defaults to 40M for root sessions
+   * and 5M for delegated subagent sessions.
+   */
+  readonly maxInputTokensPerSession?: number;
+  /**
+   * Maximum provider-reported output tokens this durable session may spend before
+   * eve refuses to start another model call.
+   */
+  readonly maxOutputTokensPerSession?: number;
 }
 
 /**

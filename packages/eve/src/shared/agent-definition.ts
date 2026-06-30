@@ -109,6 +109,24 @@ export interface AgentLimitsDefinition {
    * @default 3
    */
   readonly maxSubagentDepth?: number;
+  /**
+   * Maximum provider-reported input tokens accumulated by one durable session.
+   *
+   * eve checks this before starting each model call. The model call that crosses
+   * the limit is allowed to finish because providers only report exact usage
+   * after the call completes; later model calls in the same session are blocked.
+   *
+   * @default 40_000_000 for root sessions; 5_000_000 for delegated subagent sessions
+   */
+  readonly maxInputTokensPerSession?: number;
+  /**
+   * Maximum provider-reported output tokens accumulated by one durable session.
+   *
+   * eve checks this before starting each model call. The model call that crosses
+   * the limit is allowed to finish because providers only report exact usage
+   * after the call completes; later model calls in the same session are blocked.
+   */
+  readonly maxOutputTokensPerSession?: number;
 }
 
 /**

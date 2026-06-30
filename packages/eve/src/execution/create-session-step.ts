@@ -45,6 +45,10 @@ export async function createSessionStep(input: {
       thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
     },
     continuationToken: input.continuationToken,
+    limits: {
+      maxInputTokensPerSession: bundle.resolvedAgent.config.limits?.maxInputTokensPerSession,
+      maxOutputTokensPerSession: bundle.resolvedAgent.config.limits?.maxOutputTokensPerSession,
+    },
     outputSchema: input.outputSchema,
     rootSessionId: input.rootSessionId,
     sessionId: input.sessionId,

@@ -68,8 +68,12 @@ import {
 } from "#harness/compaction.js";
 import {
   accumulateTurnUsage,
+  getSessionTokenLimitViolation,
+  getSessionTokenUsage,
   getTurnUsageState,
   setTurnUsageState,
+  type SessionTokenLimitViolation,
+  type TokenUsageDelta,
 } from "#harness/turn-tag-state.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import {
@@ -847,6 +851,17 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       return pendingWorkflowInterrupt;
     }
 
+    const tokenLimitViolation = getSessionTokenLimitViolation(session);
+    if (tokenLimitViolation !== null) {
+      return failSessionTokenLimit({
+        config,
+        emit,
+        emissionState,
+        session,
+        violation: tokenLimitViolation,
+      });
+    }
+
     let result: HarnessStepResult;
     try {
       result = await runOneModelCall({
@@ -1028,7 +1043,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const nextTurnUsage = accumulateTurnUsage({
       previous: getTurnUsageState(session.state),
       turnId: emissionState.turnId,
-      usage: result.usage ?? {},
+      usage: extractTokenUsageDelta(result.usage),
     });
     session = setTurnUsageState(session, nextTurnUsage);
     // `formatLanguageModelGatewayId` requires `model.provider` to be a string;
@@ -1064,6 +1079,63 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
   }
 
   return runStep;
+}
+
+const SESSION_TOKEN_LIMIT_REACHED_CODE = "SESSION_TOKEN_LIMIT_REACHED";
+
+function extractTokenUsageDelta(
+  usage: HarnessStepResult["usage"] | undefined,
+): TokenUsageDelta | undefined {
+  if (usage === undefined) {
+    return undefined;
+  }
+
+  return {
+    cacheReadTokens: usage.inputTokenDetails?.cacheReadTokens,
+    cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+  };
+}
+
+function formatSessionTokenLimitMessage(kind: SessionTokenLimitViolation["kind"]): string {
+  return `The session reached its configured ${kind} token limit.`;
+}
+
+async function failSessionTokenLimit(input: {
+  readonly config: ToolLoopHarnessConfig;
+  readonly emit?: ToolLoopHarnessConfig["handleEvent"];
+  readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
+  readonly session: HarnessSession;
+  readonly violation: SessionTokenLimitViolation;
+}): Promise<StepResult> {
+  const usage = getSessionTokenUsage(input.session);
+  const message = formatSessionTokenLimitMessage(input.violation.kind);
+  const details = {
+    inputTokens: usage.inputTokens,
+    kind: input.violation.kind,
+    limit: input.violation.limit,
+    outputTokens: usage.outputTokens,
+    usedTokens: input.violation.usedTokens,
+  };
+
+  if (input.emit) {
+    await emitFailedStep(input.emit, input.emissionState, {
+      code: SESSION_TOKEN_LIMIT_REACHED_CODE,
+      details,
+      message,
+      sessionId: input.session.sessionId,
+    });
+  }
+
+  return {
+    next: {
+      done: true,
+      isError: input.config.mode === "task" ? true : undefined,
+      output: input.config.mode === "task" ? message : "",
+    },
+    session: input.session,
+  };
 }
 
 // ---------------------------------------------------------------------------
