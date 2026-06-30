@@ -8,8 +8,8 @@
 //     -e VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
 //     -e LIBGL_ALWAYS_SOFTWARE=1 \
 //     -e EVE_LOGO_RENDER_THEME=dark \
-//     -e EVE_LOGO_RENDER_WIDTH=1111 \
-//     -e EVE_LOGO_RENDER_HEIGHT=364 \
+//     -e EVE_LOGO_RENDER_WIDTH=2222 \
+//     -e EVE_LOGO_RENDER_HEIGHT=728 \
 //     browser-webgpu-lab:native-vgpu-node \
 //     bash -lc 'xvfb-run -a bash -lc "NODE_OPTIONS=--loader=./scripts/wgsl-node-loader.mjs ./node_modules/.bin/tsx scripts/render-eve-5.ts"'
 //
@@ -17,7 +17,9 @@
 // Convert the generated tmp/eve-5-renders/<run>/output.png to the desired
 // public/eve-5/fallback-<theme>.webp with ImageMagick from the same container.
 // Set EVE_LOGO_RENDER_THEME=light|dark and EVE_LOGO_RENDER_WIDTH/HEIGHT when
-// baking production fallbacks.
+// baking production fallbacks. For a 1111x364 CSS canvas on DPR 2 screens,
+// render at 2222x728 and downsample the WebP to 1111x364 so the fixed 16px
+// bloom padding matches the live canvas in CSS pixels.
 
 import { createHash } from "node:crypto";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
