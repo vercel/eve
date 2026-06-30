@@ -2,6 +2,8 @@
 
 import { App, Device, type VGPUAdapter } from "@vgpu/core";
 import { getImageProps } from "next/image";
+import fallbackDarkImage from "../../../../../public/eve-5/fallback-dark-content.webp";
+import fallbackLightImage from "../../../../../public/eve-5/fallback-light-content.webp";
 import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { decodeGltfMesh, meshAspect } from "./mesh";
 import { BLOOM_RADIUS, createEve5Renderer, type RenderControls } from "./render";
@@ -15,8 +17,6 @@ class BrowserAdapter implements VGPUAdapter {
 }
 
 const MODEL_URL = "/eve-5/eve-logo.gltf";
-const FALLBACK_DARK_IMAGE_URL = "/eve-5/fallback-dark-content.webp";
-const FALLBACK_LIGHT_IMAGE_URL = "/eve-5/fallback-light-content.webp";
 const FALLBACK_IMAGE_WIDTH = 1095;
 const FALLBACK_IMAGE_HEIGHT = 348;
 const FALLBACK_IMAGE_ASPECT_RATIO = `${FALLBACK_IMAGE_WIDTH} / ${FALLBACK_IMAGE_HEIGHT}`;
@@ -237,11 +237,11 @@ export function EveLogoShader() {
   } as const;
   const { props: fallbackLightImageProps } = getImageProps({
     ...fallbackImageOptions,
-    src: FALLBACK_LIGHT_IMAGE_URL,
+    src: fallbackLightImage,
   });
   const { props: fallbackDarkImageProps } = getImageProps({
     ...fallbackImageOptions,
-    src: FALLBACK_DARK_IMAGE_URL,
+    src: fallbackDarkImage,
   });
 
   return (
