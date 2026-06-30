@@ -107,7 +107,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
 
     case "reasoning.appended":
       return updateAssistantMessage(data, event.data.turnId, (message) =>
-        upsertPart(ensureStepStartPart(message, event.data.stepIndex), {
+        upsertStreamingPart(ensureStepStartPart(message, event.data.stepIndex), {
           state: "streaming",
           stepIndex: event.data.stepIndex,
           text: event.data.reasoningSoFar,
@@ -117,7 +117,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
 
     case "reasoning.completed":
       return updateAssistantMessage(data, event.data.turnId, (message) =>
-        upsertPart(ensureStepStartPart(message, event.data.stepIndex), {
+        upsertStreamingPart(ensureStepStartPart(message, event.data.stepIndex), {
           state: "done",
           stepIndex: event.data.stepIndex,
           text: event.data.reasoning,
@@ -238,7 +238,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
 
     case "message.appended":
       return updateAssistantMessage(data, event.data.turnId, (message) =>
-        upsertPart(ensureStepStartPart(message, event.data.stepIndex), {
+        upsertStreamingPart(ensureStepStartPart(message, event.data.stepIndex), {
           state: "streaming",
           stepIndex: event.data.stepIndex,
           text: event.data.messageSoFar,
@@ -252,7 +252,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
           return removeTextPart(message, event.data.stepIndex);
         }
 
-        return upsertPart(ensureStepStartPart(message, event.data.stepIndex), {
+        return upsertStreamingPart(ensureStepStartPart(message, event.data.stepIndex), {
           state: "done",
           stepIndex: event.data.stepIndex,
           text: event.data.message,
@@ -379,11 +379,61 @@ function upsertPart(message: EveAssistantMessage, next: EveMessagePart): EveAssi
   };
 }
 
+type EveStreamingPart = Extract<EveMessagePart, { readonly type: "reasoning" | "text" }>;
+
+// Text and reasoning can recur within one step: an authorization (OAuth)
+// interrupt resumes the same stepIndex and emits a fresh block. Update the
+// current block while it is still streaming, but once it is done a new event of
+// the same kind starts a new block instead of overwriting the finished one.
+function upsertStreamingPart(
+  message: EveAssistantMessage,
+  next: EveStreamingPart,
+): EveAssistantMessage {
+  let index = -1;
+  for (let i = message.parts.length - 1; i >= 0; i -= 1) {
+    const part = message.parts[i];
+    if (
+      (part?.type === "text" || part?.type === "reasoning") &&
+      part.type === next.type &&
+      part.stepIndex === next.stepIndex
+    ) {
+      index = i;
+      break;
+    }
+  }
+
+  const current = index === -1 ? undefined : message.parts[index];
+  const reuse =
+    (current?.type === "text" || current?.type === "reasoning") && current.state === "streaming";
+
+  const parts = reuse
+    ? [...message.parts.slice(0, index), next, ...message.parts.slice(index + 1)]
+    : [...message.parts, next];
+
+  return {
+    ...message,
+    metadata: {
+      ...message.metadata,
+      status: next.type === "text" && next.state === "done" ? "complete" : "streaming",
+    },
+    parts,
+  };
+}
+
 function removeTextPart(message: EveAssistantMessage, stepIndex: number): EveAssistantMessage {
-  const parts = message.parts.filter(
-    (part) => part.type !== "text" || part.stepIndex !== stepIndex,
-  );
-  if (parts.length === message.parts.length) {
+  // Drop only the trailing in-progress text block for this step so an empty
+  // completion cannot wipe an earlier block kept from before a resume.
+  let index = -1;
+  for (let i = message.parts.length - 1; i >= 0; i -= 1) {
+    const part = message.parts[i];
+    if (part?.type === "text" && part.stepIndex === stepIndex) {
+      index = i;
+      break;
+    }
+  }
+
+  const current = index === -1 ? undefined : message.parts[index];
+  if (current?.type !== "text" || current.state !== "streaming") {
     return message;
   }
 
@@ -393,7 +443,7 @@ function removeTextPart(message: EveAssistantMessage, stepIndex: number): EveAss
       ...message.metadata,
       status: "complete",
     },
-    parts,
+    parts: [...message.parts.slice(0, index), ...message.parts.slice(index + 1)],
   };
 }
 
