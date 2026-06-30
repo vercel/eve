@@ -13,6 +13,7 @@ import { resolveNitroSurfaceOutputDirectory } from "#internal/application/paths.
 import { WorkflowBundleBuilder } from "#internal/workflow-bundle/builder.js";
 import { normalizeEveVercelFunctionOutput } from "#internal/workflow-bundle/vercel-workflow-output.js";
 import { createApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
+import { mergeAuthoredVercelGitConfigIntoBuildOutput } from "#internal/nitro/host/authored-vercel-config.js";
 import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-summary.js";
 import { prepareApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
 import { runVercelBuildPrewarm } from "#internal/nitro/host/vercel-build-prewarm.js";
@@ -256,6 +257,10 @@ export async function buildApplication(rootDir: string): Promise<string> {
 
   try {
     const outputDirectory = await buildNitroOutput(nitro);
+    await mergeAuthoredVercelGitConfigIntoBuildOutput({
+      appRoot: preparedHost.appRoot,
+      outputDir: outputDirectory,
+    });
     // Run sandbox prewarm before emitting the workflow functions so a
     // prewarm failure aborts the build before we spend time bundling
     // function output that we would never deploy.
