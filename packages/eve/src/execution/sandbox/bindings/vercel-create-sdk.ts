@@ -26,7 +26,7 @@ export async function createVercelEveImageSandbox(input: {
 }): Promise<VercelSandbox> {
   const createOptions: VercelSandboxCreateParams = {
     ...input.createOptions,
-    __image: VERCEL_EVE_SANDBOX_IMAGE,
+    image: VERCEL_EVE_SANDBOX_IMAGE,
   };
   return await input.sandboxModule.Sandbox.create(createOptions);
 }

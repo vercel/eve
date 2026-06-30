@@ -156,7 +156,7 @@ describe("createVercelSandbox", () => {
     expect(sandboxModule.Sandbox.create).toHaveBeenCalledTimes(1);
     expect(sandboxModule.Sandbox.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        __image: "vercel/eve:latest",
+        image: "vercel/eve:latest",
         name: "template-key",
         networkPolicy: "allow-all",
         persistent: false,
@@ -193,7 +193,7 @@ describe("createVercelSandbox", () => {
     expect(sandboxModule.Sandbox.create).toHaveBeenCalledWith(
       expect.objectContaining({
         __experimentalFlag: "enabled",
-        __image: "vercel/eve:latest",
+        image: "vercel/eve:latest",
       }),
     );
   });
