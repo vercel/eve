@@ -216,6 +216,11 @@
       "import": "./dist/src/public/channels/slack/index.js",
       "default": "./dist/src/public/channels/slack/index.js"
     },
+    "./channels/chat-sdk": {
+      "types": "./dist/src/public/channels/chat-sdk/index.d.ts",
+      "import": "./dist/src/public/channels/chat-sdk/index.js",
+      "default": "./dist/src/public/channels/chat-sdk/index.js"
+    },
     "./channels/github": {
       "types": "./dist/src/public/channels/github/index.d.ts",
       "import": "./dist/src/public/channels/github/index.js",
