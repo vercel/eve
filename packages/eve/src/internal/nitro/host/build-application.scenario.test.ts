@@ -202,6 +202,43 @@ describe("buildApplication", () => {
     expect((summary.agent as { name: string }).name).toBe("scenario-test-agent");
   });
 
+  it("warns when a production build includes Codex models", async () => {
+    vi.stubEnv("VERCEL", "");
+    const appRoot = await createScratchDirectory("eve-build-application-codex-model-");
+    const outputDir = join(appRoot, ".output");
+    const model: CompiledRuntimeModelReference = {
+      auth: { kind: "codex" },
+      id: "codex/gpt-5.5",
+      routing: { kind: "external", provider: "codex" },
+    };
+    const compactionModel: CompiledRuntimeModelReference = {
+      auth: { kind: "codex" },
+      id: "codex/gpt-5.4-mini",
+      routing: { kind: "external", provider: "codex" },
+    };
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      prepareApplicationHostMock.mockResolvedValueOnce(
+        createPreparedHost(appRoot, {
+          compactionModel,
+          model,
+        }),
+      );
+      createApplicationNitroMock.mockResolvedValueOnce(createNitroStub(outputDir));
+
+      const { buildApplication } = await import("#internal/nitro/host/build-application.js");
+      await buildApplication(appRoot);
+
+      expect(warnSpy).toHaveBeenCalledOnce();
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Warning [codex-model-in-production-build]: Codex model usage detected in production build (primary model: codex/gpt-5.5, compaction model: codex/gpt-5.4-mini). Codex auth is local login state from ~/.codex; confirm this deployment is a trusted runner for that account, or switch production to AI Gateway/provider-owned credentials.",
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it("builds isolated Vercel Nitro surfaces and stitches workflow functions", async () => {
     vi.stubEnv("VERCEL", "1");
     const appRoot = await createScratchDirectory("eve-build-application-vercel-");
