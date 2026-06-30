@@ -15,8 +15,8 @@ class BrowserAdapter implements VGPUAdapter {
 }
 
 const MODEL_URL = "/eve-5/eve-logo.gltf";
-const FALLBACK_DARK_IMAGE_URL = "/eve-5/fallback-dark.webp";
-const FALLBACK_LIGHT_IMAGE_URL = "/eve-5/fallback-light.webp";
+const FALLBACK_DARK_IMAGE_URL = "/eve-5/fallback-dark-content.webp";
+const FALLBACK_LIGHT_IMAGE_URL = "/eve-5/fallback-light-content.webp";
 const FALLBACK_IMAGE_WIDTH = 1095;
 const FALLBACK_IMAGE_HEIGHT = 348;
 const FALLBACK_IMAGE_ASPECT_RATIO = `${FALLBACK_IMAGE_WIDTH} / ${FALLBACK_IMAGE_HEIGHT}`;
