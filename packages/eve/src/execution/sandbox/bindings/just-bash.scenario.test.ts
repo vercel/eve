@@ -411,6 +411,58 @@ describe("createLocalSandboxBackend with the just-bash engine", () => {
     expect(existsSync(staleTemporaryRoot)).toBe(false);
   });
 
+  it("runs python3 only when the python capability is enabled", async () => {
+    const disabledAppRoot = await createTemporaryCacheDirectory("python-disabled");
+    const disabledBackend = createJustBashSandboxBackend();
+    const disabledHandle = await disabledBackend.create({
+      runtimeContext: { appRoot: disabledAppRoot },
+      sessionKey: "session-python-disabled",
+      templateKey: null,
+    });
+    const disabled = await disabledHandle.session.run({ command: "python3 -c 'print(1 + 1)'" });
+    // Command-not-found: the interpreter is absent by default.
+    expect(disabled.exitCode).toBe(127);
+
+    const enabledAppRoot = await createTemporaryCacheDirectory("python-enabled");
+    const enabledBackend = createJustBashSandboxBackend({ createOptions: { python: true } });
+    const enabledHandle = await enabledBackend.create({
+      runtimeContext: { appRoot: enabledAppRoot },
+      sessionKey: "session-python-enabled",
+      templateKey: null,
+    });
+    const enabled = await enabledHandle.session.run({ command: "python3 -c 'print(1 + 1)'" });
+    expect(enabled.exitCode).toBe(0);
+    expect(enabled.stdout.trim()).toBe("2");
+  }, 60_000);
+
+  it("runs js-exec only when the javascript capability is enabled", async () => {
+    const disabledAppRoot = await createTemporaryCacheDirectory("js-disabled");
+    const disabledBackend = createJustBashSandboxBackend();
+    const disabledHandle = await disabledBackend.create({
+      runtimeContext: { appRoot: disabledAppRoot },
+      sessionKey: "session-js-disabled",
+      templateKey: null,
+    });
+    const disabled = await disabledHandle.session.run({
+      command: "js-exec -c 'console.log(1 + 1)'",
+    });
+    // Command-not-found: js-exec is absent by default.
+    expect(disabled.exitCode).toBe(127);
+
+    const enabledAppRoot = await createTemporaryCacheDirectory("js-enabled");
+    const enabledBackend = createJustBashSandboxBackend({ createOptions: { javascript: true } });
+    const enabledHandle = await enabledBackend.create({
+      runtimeContext: { appRoot: enabledAppRoot },
+      sessionKey: "session-js-enabled",
+      templateKey: null,
+    });
+    const enabled = await enabledHandle.session.run({
+      command: "js-exec -c 'console.log(1 + 1)'",
+    });
+    expect(enabled.exitCode).toBe(0);
+    expect(enabled.stdout.trim()).toBe("2");
+  }, 60_000);
+
   it("touches a reused template so cleanup keeps the active template", async () => {
     const appRoot = await createTemporaryCacheDirectory("template-touch");
     const backend = createJustBashBackend();
