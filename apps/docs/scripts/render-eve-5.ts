@@ -8,8 +8,10 @@
 //     -e VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
 //     -e LIBGL_ALWAYS_SOFTWARE=1 \
 //     -e EVE_LOGO_RENDER_THEME=dark \
-//     -e EVE_LOGO_RENDER_WIDTH=2222 \
-//     -e EVE_LOGO_RENDER_HEIGHT=728 \
+//     -e EVE_LOGO_RENDER_WIDTH=1095 \
+//     -e EVE_LOGO_RENDER_HEIGHT=348 \
+//     -e EVE_LOGO_RENDER_PADDING=0 \
+//     -e EVE_LOGO_RENDER_BLOOM=0 \
 //     browser-webgpu-lab:native-vgpu-node \
 //     bash -lc 'xvfb-run -a bash -lc "NODE_OPTIONS=--loader=./scripts/wgsl-node-loader.mjs ./node_modules/.bin/tsx scripts/render-eve-5.ts"'
 //
@@ -17,9 +19,9 @@
 // Convert the generated tmp/eve-5-renders/<run>/output.png to the desired
 // public/eve-5/fallback-<theme>.webp with ImageMagick from the same container.
 // Set EVE_LOGO_RENDER_THEME=light|dark and EVE_LOGO_RENDER_WIDTH/HEIGHT when
-// baking production fallbacks. For a 1111x364 CSS canvas on DPR 2 screens,
-// render at 2222x728 and downsample the WebP to 1111x364 so the fixed 16px
-// bloom padding matches the live canvas in CSS pixels.
+// baking production fallbacks. Fallback images are content-only: render without
+// bloom or padding, then place them inside the padded canvas box in CSS so the
+// animated shader appears to "turn on" around the same logo geometry.
 
 import { createHash } from "node:crypto";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
@@ -40,11 +42,13 @@ import {
 const RUN_ID = new Date().toISOString().replaceAll(":", "-").replace(".", "-");
 const OUT_DIR = resolve(process.cwd(), "tmp/eve-5-renders", RUN_ID);
 const FORMAT: GPUTextureFormat = "rgba8unorm";
-const OUTPUT_WIDTH = readPositiveIntegerEnv("EVE_LOGO_RENDER_WIDTH", 1111);
-const OUTPUT_HEIGHT = readPositiveIntegerEnv("EVE_LOGO_RENDER_HEIGHT", 364);
-const LOGICAL_WIDTH = Math.max(1, OUTPUT_WIDTH - BLOOM_RADIUS * 2);
-const LOGICAL_HEIGHT = Math.max(1, OUTPUT_HEIGHT - BLOOM_RADIUS * 2);
-const PADDED_SIZE = getPaddedRenderSize(LOGICAL_WIDTH, LOGICAL_HEIGHT);
+const PADDING_RADIUS = readNonNegativeIntegerEnv("EVE_LOGO_RENDER_PADDING", 0);
+const BLOOM_ENABLED = readBooleanEnv("EVE_LOGO_RENDER_BLOOM", false);
+const OUTPUT_WIDTH = readPositiveIntegerEnv("EVE_LOGO_RENDER_WIDTH", 1095, PADDING_RADIUS * 2);
+const OUTPUT_HEIGHT = readPositiveIntegerEnv("EVE_LOGO_RENDER_HEIGHT", 348, PADDING_RADIUS * 2);
+const LOGICAL_WIDTH = Math.max(1, OUTPUT_WIDTH - PADDING_RADIUS * 2);
+const LOGICAL_HEIGHT = Math.max(1, OUTPUT_HEIGHT - PADDING_RADIUS * 2);
+const PADDED_SIZE = getPaddedRenderSize(LOGICAL_WIDTH, LOGICAL_HEIGHT, PADDING_RADIUS);
 const WIDTH = PADDED_SIZE.width;
 const HEIGHT = PADDED_SIZE.height;
 const THEME = readThemeEnv();
@@ -69,7 +73,7 @@ async function main() {
   let renderer: ReturnType<typeof createEve5Renderer> | undefined;
 
   try {
-    renderer = createEve5Renderer(app.device, FORMAT, mesh, { theme: THEME });
+    renderer = createEve5Renderer(app.device, FORMAT, mesh, { theme: THEME, paddingRadius: PADDING_RADIUS, bloom: BLOOM_ENABLED });
     const output = await renderView(renderer, app.device, DEFAULT_CONTROLS, "output.png");
     await renderView(renderer, app.device, { ...DEFAULT_CONTROLS, yaw: -0.49, pitch: 0.31 }, "rotated.png");
     await renderView(renderer, app.device, { ...DEFAULT_CONTROLS, wireframe: true }, "wireframe.png");
@@ -79,8 +83,10 @@ async function main() {
       outDir: OUT_DIR,
       dimensions: { width: WIDTH, height: HEIGHT, format: FORMAT, theme: THEME },
       bloom: {
-        radius: BLOOM_RADIUS,
-        strength: BLOOM_STRENGTH,
+        enabled: BLOOM_ENABLED,
+        runtimeRadius: BLOOM_RADIUS,
+        radius: PADDING_RADIUS,
+        strength: BLOOM_ENABLED ? BLOOM_STRENGTH : 0,
         threshold: BLOOM_THRESHOLD,
         logical: { width: LOGICAL_WIDTH, height: LOGICAL_HEIGHT },
         padded: { width: WIDTH, height: HEIGHT },
@@ -144,14 +150,33 @@ async function loadMeshFromDisk(path: string) {
   });
 }
 
-function readPositiveIntegerEnv(name: string, fallback: number) {
+function readPositiveIntegerEnv(name: string, fallback: number, minimumExclusive = 0) {
   const value = process.env[name];
   if (!value) return fallback;
   const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed <= BLOOM_RADIUS * 2) {
-    throw new Error(`${name} must be an integer greater than ${BLOOM_RADIUS * 2}.`);
+  if (!Number.isFinite(parsed) || parsed <= minimumExclusive) {
+    throw new Error(`${name} must be an integer greater than ${minimumExclusive}.`);
   }
   return parsed;
+}
+
+function readNonNegativeIntegerEnv(name: string, fallback: number) {
+  const value = process.env[name];
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`${name} must be a non-negative integer.`);
+  }
+  return parsed;
+}
+
+function readBooleanEnv(name: string, fallback: boolean) {
+  const value = process.env[name];
+  if (!value) return fallback;
+  const normalized = value.toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  throw new Error(`${name} must be a boolean value.`);
 }
 
 function readThemeEnv(): "light" | "dark" {

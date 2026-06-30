@@ -17,10 +17,10 @@ class BrowserAdapter implements VGPUAdapter {
 const MODEL_URL = "/eve-5/eve-logo.gltf";
 const FALLBACK_DARK_IMAGE_URL = "/eve-5/fallback-dark.webp";
 const FALLBACK_LIGHT_IMAGE_URL = "/eve-5/fallback-light.webp";
-const FALLBACK_IMAGE_WIDTH = 1111;
-const FALLBACK_IMAGE_HEIGHT = 364;
+const FALLBACK_IMAGE_WIDTH = 1095;
+const FALLBACK_IMAGE_HEIGHT = 348;
 const FALLBACK_IMAGE_ASPECT_RATIO = `${FALLBACK_IMAGE_WIDTH} / ${FALLBACK_IMAGE_HEIGHT}`;
-const FALLBACK_IMAGE_SIZES = "(min-width: 768px) 1111px, 100vw";
+const FALLBACK_IMAGE_SIZES = "(min-width: 768px) 1095px, calc(100vw - 16px)";
 const DEFAULT_LOGO_ASPECT = 78 / 25;
 const DEFAULT_CONTROLS: RenderControls = {
   yaw: 0,
@@ -36,6 +36,7 @@ const DEFAULT_CONTROLS: RenderControls = {
 };
 const LOGO_RENDER_HEIGHT = 500;
 const MAX_DEVICE_PIXEL_RATIO = 2;
+const FALLBACK_IMAGE_PADDING = BLOOM_RADIUS / MAX_DEVICE_PIXEL_RATIO;
 const MAX_ENV_YAW = 0.45;
 const ENV_YAW_LERP_SPEED = 3;
 const CANVAS_FADE_FALLBACK_MS = 800;
@@ -279,16 +280,19 @@ function FallbackImage({
   className: string;
 }) {
   return (
-    <img
-      {...imageProps}
-      aria-hidden="true"
-      role="presentation"
-      decoding="async"
-      className={`${className} absolute left-1/2 top-0 h-full w-auto max-w-none -translate-x-1/2 transition-opacity duration-700 ease-linear ${
-        revealed ? "opacity-0" : "opacity-100"
-      }`}
-      style={{ aspectRatio: FALLBACK_IMAGE_ASPECT_RATIO }}
-    />
+    <div
+      className={`${className} absolute inset-0 transition-opacity duration-700 ease-linear ${revealed ? "opacity-0" : "opacity-100"}`}
+      style={{ padding: FALLBACK_IMAGE_PADDING }}
+    >
+      <img
+        {...imageProps}
+        aria-hidden="true"
+        role="presentation"
+        decoding="async"
+        className="mx-auto block h-full w-auto max-w-none"
+        style={{ aspectRatio: FALLBACK_IMAGE_ASPECT_RATIO }}
+      />
+    </div>
   );
 }
 
