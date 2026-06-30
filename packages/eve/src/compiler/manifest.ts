@@ -23,10 +23,10 @@ import type {
   InternalAgentModelDefinition,
   InternalAgentCompactionDefinition,
   AgentBuildDefinition,
-  ModelAuth,
   ModelRouting,
 } from "#shared/agent-definition.js";
-import { cloneModelAuth, modelAuthAdapterForRouting } from "#internal/model-auth/adapters.js";
+import { modelAuthSchema, modelRoutingSchema } from "#shared/agent-model-schemas.js";
+import { cloneModelAuth, modelAuthForRouting } from "#internal/model-auth/classify.js";
 import type { InternalToolDefinition } from "#shared/tool-definition.js";
 
 /**
@@ -311,28 +311,6 @@ const compiledChannelEntrySchema = z.union([
   compiledChannelDefinitionSchema,
   disabledCompiledChannelEntrySchema,
 ]) as unknown as z.ZodType<CompiledChannelEntry>;
-
-const modelRoutingSchema = z.union([
-  z
-    .object({
-      kind: z.literal("gateway"),
-      target: z.string(),
-      byok: z.string().optional(),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("external"),
-      provider: z.string(),
-    })
-    .strict(),
-]) satisfies z.ZodType<ModelRouting>;
-
-const modelAuthSchema = z.union([
-  z.object({ kind: z.literal("ai-gateway") }).strict(),
-  z.object({ kind: z.literal("codex") }).strict(),
-  z.object({ kind: z.literal("external"), provider: z.string() }).strict(),
-]) satisfies z.ZodType<ModelAuth>;
 
 const compiledRuntimeModelReferenceSchema: z.ZodType<CompiledRuntimeModelReference> = z
   .object({
@@ -842,7 +820,7 @@ function cloneCompiledRuntimeModelReference(
   model: CompiledRuntimeModelReference,
 ): CompiledRuntimeModelReference {
   const clone: CompiledRuntimeModelReference = {
-    auth: cloneModelAuth(model.auth ?? modelAuthAdapterForRouting(model.routing).auth),
+    auth: cloneModelAuth(model.auth ?? modelAuthForRouting(model.routing)),
     id: model.id,
     routing: cloneModelRouting(model.routing),
   };

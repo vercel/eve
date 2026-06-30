@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   buildAgentInfoResponseFromManifest: vi.fn(() => ({ kind: "eve-agent-info", version: 1 })),
-  getVercelOidcToken: vi.fn(),
   loadAgentInfoManifestData: vi.fn(async () => ({
     manifest: {
       config: {
@@ -20,10 +19,6 @@ const mocks = vi.hoisted(() => ({
   })),
   routeAuth: vi.fn(async () => ({ principal: "local-dev" })),
   vercelOidc: vi.fn(() => "vercel-oidc-auth"),
-}));
-
-vi.mock("#compiled/@vercel/oidc/index.js", () => ({
-  getVercelOidcToken: mocks.getVercelOidcToken,
 }));
 
 vi.mock("#internal/nitro/routes/agent-info/build-agent-info-response-from-manifest.js", () => ({
@@ -71,8 +66,6 @@ describe("handleAgentInfoRequest", () => {
     vi.stubEnv("AI_GATEWAY_API_KEY", "");
     vi.stubEnv("VERCEL_OIDC_TOKEN", "");
     mocks.buildAgentInfoResponseFromManifest.mockClear();
-    mocks.getVercelOidcToken.mockReset();
-    mocks.getVercelOidcToken.mockRejectedValue(new Error("not linked"));
     mocks.loadAgentInfoManifestData.mockReset();
     mocks.loadAgentInfoManifestData.mockResolvedValue(GATEWAY_MANIFEST_DATA);
     mocks.resolveAgentInfoCompiledArtifactsSource.mockClear();
@@ -95,34 +88,6 @@ describe("handleAgentInfoRequest", () => {
     });
     expect(mocks.buildAgentInfoResponseFromManifest).toHaveBeenCalledWith(GATEWAY_MANIFEST_DATA, {
       mode: "development",
-      gatewayCredentials: { apiKey: false, oidc: false },
     });
-    expect(mocks.getVercelOidcToken).toHaveBeenCalledOnce();
-  });
-
-  it("reports linked-project OIDC resolved by the Vercel SDK", async () => {
-    mocks.getVercelOidcToken.mockResolvedValue("linked-project-token");
-
-    const response = await requestAgentInfo();
-
-    expect(response.status).toBe(200);
-    expect(mocks.buildAgentInfoResponseFromManifest).toHaveBeenCalledWith(GATEWAY_MANIFEST_DATA, {
-      mode: "development",
-      gatewayCredentials: { apiKey: false, oidc: true },
-    });
-    expect(mocks.getVercelOidcToken).toHaveBeenCalledOnce();
-  });
-
-  it("does not resolve OIDC when an AI Gateway API key is present", async () => {
-    vi.stubEnv("AI_GATEWAY_API_KEY", "gateway-key");
-
-    const response = await requestAgentInfo();
-
-    expect(response.status).toBe(200);
-    expect(mocks.buildAgentInfoResponseFromManifest).toHaveBeenCalledWith(GATEWAY_MANIFEST_DATA, {
-      mode: "development",
-      gatewayCredentials: { apiKey: true, oidc: false },
-    });
-    expect(mocks.getVercelOidcToken).not.toHaveBeenCalled();
   });
 });

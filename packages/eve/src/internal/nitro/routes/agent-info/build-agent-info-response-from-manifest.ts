@@ -24,22 +24,18 @@ import {
   renderTool,
   toSource,
 } from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
-import {
-  type GatewayCredentialPresence,
-  resolveModelEndpointStatus,
-} from "#internal/resolve-model-endpoint-status.js";
-import { modelAuthAdapterForRouting } from "#internal/model-auth/adapters.js";
+import { modelAuthForRouting } from "#internal/model-auth/classify.js";
+import { resolveModelEndpointStatus } from "#internal/resolve-model-endpoint-status.js";
 
-export function buildAgentInfoResponseFromManifest(
+export async function buildAgentInfoResponseFromManifest(
   data: AgentInfoManifestData,
   input: {
     readonly mode: AgentInfoResponse["mode"];
-    readonly gatewayCredentials: GatewayCredentialPresence;
   },
-): AgentInfoResponse {
+): Promise<AgentInfoResponse> {
   const manifest = data.manifest;
   const modelAuth =
-    manifest.config.model.auth ?? modelAuthAdapterForRouting(manifest.config.model.routing).auth;
+    manifest.config.model.auth ?? modelAuthForRouting(manifest.config.model.routing);
   const authoredChannels = manifest.channels.filter((channel) => channel.kind === "channel");
   const disabledFrameworkChannels = manifest.channels
     .filter((channel) => channel.kind === "disabled")
@@ -98,11 +94,7 @@ export function buildAgentInfoResponseFromManifest(
         source: manifest.config.model.source ? toSource(manifest.config.model.source) : undefined,
         auth: modelAuth,
         routing: manifest.config.model.routing,
-        endpoint: resolveModelEndpointStatus(
-          modelAuth,
-          manifest.config.model.routing,
-          input.gatewayCredentials,
-        ),
+        endpoint: await resolveModelEndpointStatus(modelAuth),
       },
       name: manifest.config.name,
       outputSchema: manifest.config.outputSchema,

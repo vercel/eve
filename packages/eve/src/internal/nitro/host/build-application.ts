@@ -18,7 +18,7 @@ import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-
 import { prepareApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
 import { runVercelBuildPrewarm } from "#internal/nitro/host/vercel-build-prewarm.js";
 import type { NitroBuildSurface, PreparedApplicationHost } from "#internal/nitro/host/types.js";
-import { modelAuthAdapterForRouting } from "#internal/model-auth/adapters.js";
+import { modelAuthForRouting } from "#internal/model-auth/classify.js";
 import { findClosestVercelOutputDirectory } from "#shared/vercel-output-directory.js";
 
 const CODEX_MODEL_PRODUCTION_BUILD_WARNING_CODE = "codex-model-in-production-build";
@@ -64,7 +64,7 @@ function formatCodexModelLabel(
 }
 
 function isCodexModel(model: CompiledRuntimeModelReference): boolean {
-  return (model.auth ?? modelAuthAdapterForRouting(model.routing).auth).kind === "codex";
+  return (model.auth ?? modelAuthForRouting(model.routing)).kind === "codex";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -1,6 +1,6 @@
 import type { JsonObject } from "#shared/json.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
-import { classifyModelAuth } from "#internal/model-auth/adapters.js";
+import { classifyModelAuth } from "#internal/model-auth/classify.js";
 import {
   type CompiledAgentDefinition,
   type CompiledAgentManifest,

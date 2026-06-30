@@ -6,7 +6,7 @@ import { normalizeAgentDefinition } from "#internal/authored-definition/core.js"
 import { normalizeJsonSchemaDefinition } from "#shared/json-schema.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
-import { classifyModelAuth } from "#internal/model-auth/adapters.js";
+import { classifyModelAuth } from "#internal/model-auth/classify.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";

@@ -43,38 +43,6 @@ version uses hyphens (`claude-opus-4-8`), while the Gateway id above uses a dot
 
 Model use is subject to the terms, data-processing commitments, retention behavior, and available controls of the selected provider and routing path. Review the [AI Gateway model catalog](https://vercel.com/ai-gateway/models) for gateway-routed models, and review the provider's terms when you configure a `LanguageModel` outside AI Gateway.
 
-## Use a local Codex login as the agent model
-
-`experimentalCodex` selects a Codex model backed by the local Codex login state.
-It is not a delegated tool or an MCP connection.
-
-Sign in with the Codex CLI first:
-
-```bash
-codex login
-```
-
-```ts title="agent/agent.ts"
-import { defineAgent } from "eve";
-import { experimentalCodex } from "eve/codex";
-
-export default defineAgent({
-  model: experimentalCodex({
-    model: "gpt-5.2-codex",
-  }),
-});
-```
-
-eve reads Codex login state from `~/.codex/auth.json` before starting a Codex
-model turn. It uses that file as a presence check and does not accept, expose,
-or forward token values through the eve config surface. If the Codex model
-catalog cannot provide context-window metadata for the selected model, set
-`modelContextWindowTokens` to the model's documented context window.
-
-The adapter bridges eve's AI SDK function tools into Codex dynamic tools. eve
-keeps execution, approval, connections, and durable history in charge for the
-tools it bridges. Provider-specific AI SDK tools are not bridged.
-
 ## Reasoning effort
 
 Set `reasoning` to control the model's reasoning effort through AI SDK's

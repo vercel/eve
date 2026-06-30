@@ -53,7 +53,11 @@ function renderEndpoint(
   if (input.remote !== undefined || input.endpoint === undefined) return undefined;
 
   const c = input.theme.colors;
-  if (input.endpoint.kind === "codex") return c.dim("Codex");
+  if (input.endpoint.kind === "codex") {
+    return input.endpoint.connected
+      ? c.dim("Codex")
+      : c.yellow(`${input.theme.glyph.warning} Codex`);
+  }
   if (input.endpoint.kind === "external") return c.dim("External model provider");
   if (!input.endpoint.connected) return c.yellow(`${input.theme.glyph.warning} AI Gateway`);
 

@@ -1,29 +1,5 @@
-import { execFile as execFileWithCallback } from "node:child_process";
-import { promisify } from "node:util";
-
-import { z } from "#compiled/zod/index.js";
-import { toErrorMessage } from "#shared/errors.js";
-
 const CODEX_PROVIDER = "codex";
-const CODEX_CATALOG_MAX_BUFFER_BYTES = 80 * 1024 * 1024;
-
-const execFile = promisify(execFileWithCallback);
-
-const codexCatalogModelSchema = z
-  .object({
-    context_window: z.number().int().positive().optional(),
-    display_name: z.string().min(1).optional(),
-    slug: z.string().min(1),
-    supported_in_api: z.boolean().optional(),
-    visibility: z.string().optional(),
-  })
-  .passthrough();
-
-const codexCatalogSchema = z
-  .object({
-    models: z.array(codexCatalogModelSchema),
-  })
-  .passthrough();
+const OPENAI_GATEWAY_PREFIX = "openai/";
 
 export interface CodexModelCatalogEntry {
   readonly contextWindowTokens?: number;
@@ -32,11 +8,10 @@ export interface CodexModelCatalogEntry {
   readonly visibility?: string;
 }
 
-export interface CodexModelCatalogCommand {
-  (
-    args: readonly string[],
-    options: { readonly signal?: AbortSignal },
-  ): Promise<{ readonly stdout: string }>;
+export interface CodexGatewayCatalogModel {
+  readonly id: string;
+  readonly name?: string;
+  readonly type?: string;
 }
 
 export function formatCodexModelId(slug: string): string {
@@ -54,49 +29,30 @@ export function isCodexProvider(provider: string): boolean {
   return provider.split(".")[0] === CODEX_PROVIDER;
 }
 
-export function parseCodexModelCatalog(rawOutput: string): readonly CodexModelCatalogEntry[] {
-  const jsonStart = rawOutput.indexOf("{");
-  if (jsonStart === -1) {
-    throw new Error("Codex model catalog output did not contain JSON.");
-  }
-
-  const parsedJson = JSON.parse(rawOutput.slice(jsonStart)) as unknown;
-  const parsed = codexCatalogSchema.safeParse(parsedJson);
-  if (!parsed.success) {
-    throw new Error("Codex model catalog output did not match the expected schema.");
-  }
-
-  return parsed.data.models.map((model) => ({
-    slug: model.slug,
-    displayName: model.display_name ?? model.slug,
-    ...(model.context_window !== undefined && { contextWindowTokens: model.context_window }),
-    ...(model.visibility !== undefined && { visibility: model.visibility }),
-  }));
+export function codexModelSlugFromGatewayId(modelId: string): string | null {
+  if (!modelId.startsWith(OPENAI_GATEWAY_PREFIX)) return null;
+  const slug = modelId.slice(OPENAI_GATEWAY_PREFIX.length).trim();
+  return slug.length === 0 ? null : slug;
 }
 
-export async function fetchCodexModelCatalog(
-  input: {
-    readonly command?: CodexModelCatalogCommand;
-    readonly signal?: AbortSignal;
-  } = {},
-): Promise<readonly CodexModelCatalogEntry[]> {
-  const command = input.command ?? runCodexCatalogCommand;
+export function codexModelsFromGatewayCatalog(
+  models: readonly CodexGatewayCatalogModel[],
+): readonly CodexModelCatalogEntry[] {
+  const bySlug = new Map<string, CodexModelCatalogEntry>();
 
-  try {
-    const result = await command(["debug", "models"], { signal: input.signal });
-    return parseCodexModelCatalog(result.stdout);
-  } catch (error) {
-    if (input.signal?.aborted) throw error;
-    try {
-      const result = await command(["debug", "models", "--bundled"], { signal: input.signal });
-      return parseCodexModelCatalog(result.stdout);
-    } catch (fallbackError) {
-      if (input.signal?.aborted) throw fallbackError;
-      throw new Error(
-        `Failed to load the Codex model catalog from the local Codex CLI. ${toErrorMessage(fallbackError)}`,
-      );
-    }
+  for (const model of models) {
+    if (model.type !== undefined && model.type !== "language") continue;
+
+    const slug = codexModelSlugFromGatewayId(model.id);
+    if (slug === null || bySlug.has(slug)) continue;
+
+    bySlug.set(slug, {
+      slug,
+      displayName: model.name?.trim() || slug,
+    });
   }
+
+  return [...bySlug.values()];
 }
 
 export function selectableCodexModels(
@@ -106,16 +62,4 @@ export function selectableCodexModels(
     (model) => model.visibility === undefined || model.visibility === "list",
   );
   return [...listed].sort((a, b) => a.displayName.localeCompare(b.displayName));
-}
-
-async function runCodexCatalogCommand(
-  args: readonly string[],
-  options: { readonly signal?: AbortSignal },
-): Promise<{ readonly stdout: string }> {
-  const { stdout } = await execFile("codex", [...args], {
-    encoding: "utf8",
-    maxBuffer: CODEX_CATALOG_MAX_BUFFER_BYTES,
-    signal: options.signal,
-  });
-  return { stdout };
 }

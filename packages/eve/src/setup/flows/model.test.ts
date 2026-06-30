@@ -210,7 +210,7 @@ describe("runModelFlow", () => {
     expect(menuPaints[0]?.initialValue).toBe("model");
   });
 
-  it("applies a Codex model selected from the Codex catalog", async () => {
+  it("applies a Codex model selected from OpenAI catalog entries", async () => {
     const pickerPaints: SingleSelectOptions<PrompterValue>[] = [];
     const { prompter, menuPaints } = scriptedPrompter({
       menu: ["model"],

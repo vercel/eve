@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   assertCodexAuthStateAuthenticated,
+  parseCodexAuthCredentialsJson,
   parseCodexAuthJson,
-} from "#internal/model-auth/codex/auth.js";
+  readCodexJwtExpirationMs,
+} from "#internal/model-endpoint-auth/codex/auth.js";
 
 const PATHS = { authPath: "/home/user/.codex/auth.json", codexHome: "/home/user/.codex" };
 
@@ -50,6 +52,54 @@ describe("Codex auth state", () => {
     });
   });
 
+  it("parses internal OAuth credentials from auth.json", () => {
+    expect(
+      parseCodexAuthCredentialsJson(
+        JSON.stringify({
+          auth_mode: "chatgpt",
+          tokens: {
+            access_token: "access-token",
+            account_id: "acct_123",
+            id_token: "id-token",
+            refresh_token: "refresh-token",
+          },
+          last_refresh: "2026-06-29T20:00:00.000Z",
+        }),
+        PATHS,
+      ),
+    ).toEqual({
+      kind: "chatgpt",
+      accessToken: "access-token",
+      accountId: "acct_123",
+      authPath: PATHS.authPath,
+      codexHome: PATHS.codexHome,
+      idToken: "id-token",
+      lastRefresh: "2026-06-29T20:00:00.000Z",
+      refreshToken: "refresh-token",
+    });
+  });
+
+  it("parses internal API-key credentials from auth.json", () => {
+    expect(
+      parseCodexAuthCredentialsJson(
+        JSON.stringify({ auth_mode: "api-key", OPENAI_API_KEY: "sk-test" }),
+        PATHS,
+      ),
+    ).toEqual({
+      kind: "api-key",
+      apiKey: "sk-test",
+      authPath: PATHS.authPath,
+      codexHome: PATHS.codexHome,
+    });
+  });
+
+  it("reads JWT expiry without exposing token contents", () => {
+    const token = createJwt({ exp: 1_783_405_980 });
+
+    expect(readCodexJwtExpirationMs(token)).toBe(1_783_405_980_000);
+    expect(readCodexJwtExpirationMs("not.jwt")).toBeUndefined();
+  });
+
   it("treats auth.json with no usable credential as missing login state", () => {
     expect(parseCodexAuthJson(JSON.stringify({ tokens: {} }), PATHS)).toEqual({
       kind: "missing",
@@ -77,3 +127,9 @@ describe("Codex auth state", () => {
     ).toThrow("could not be read");
   });
 });
+
+function createJwt(payload: object): string {
+  const header = Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url");
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  return `${header}.${body}.sig`;
+}

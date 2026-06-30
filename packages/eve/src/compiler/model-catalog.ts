@@ -3,8 +3,7 @@ import { join } from "node:path";
 
 import { z } from "#compiled/zod/index.js";
 import {
-  type CodexModelCatalogEntry,
-  fetchCodexModelCatalog,
+  codexModelSlugFromGatewayId,
   formatCodexModelId,
   isCodexProvider,
   parseCodexModelId,
@@ -100,10 +99,6 @@ export interface CompiledRuntimeModelCatalogLoader {
   ): Promise<{ slug: string; limits: CompiledRuntimeModelLimits } | null>;
 }
 
-export interface CompiledRuntimeModelCatalogLoaderOptions {
-  readonly fetchCodexModels?: () => Promise<readonly CodexModelCatalogEntry[]>;
-}
-
 /**
  * Resolves the app-local cache path used for AI Gateway model metadata during
  * compilation.
@@ -118,9 +113,7 @@ export function resolveCompiledRuntimeModelCatalogCachePath(appRoot: string): st
  */
 export function createCompiledRuntimeModelCatalogLoader(
   appRoot: string,
-  options: CompiledRuntimeModelCatalogLoaderOptions = {},
 ): CompiledRuntimeModelCatalogLoader {
-  let codexCatalogPromise: Promise<readonly CodexModelCatalogEntry[]> | null = null;
   let cachedCatalogPromise: Promise<CompiledRuntimeModelCatalogCache | null> | null = null;
   let fetchedCatalogError: unknown = null;
   let fetchedCatalogPromise: Promise<CompiledRuntimeModelCatalogCache> | null = null;
@@ -177,12 +170,21 @@ export function createCompiledRuntimeModelCatalogLoader(
   ): Promise<CompiledRuntimeModelLimits | null> => {
     const normalizedId = normalizeModelId(modelId);
     const slug = parseCodexModelId(normalizedId) ?? normalizedId;
-    codexCatalogPromise ??= (options.fetchCodexModels ?? fetchCodexModelCatalog)();
-    const model = (await codexCatalogPromise).find((entry) => entry.slug === slug);
-    if (model?.contextWindowTokens === undefined) {
-      return null;
+
+    const resolved = await resolveModelsFromCacheOrFetch();
+    if (resolved !== null) {
+      for (const model of resolved.models) {
+        for (const provider of model.providers) {
+          if (
+            codexModelSlugFromGatewayId(`${provider.provider}/${provider.providerModelId}`) === slug
+          ) {
+            return limitsFromProvider(provider);
+          }
+        }
+      }
     }
-    return { contextWindowTokens: model.contextWindowTokens };
+
+    return builtInCompiledRuntimeModelLimitsById.get(`openai/${slug}`) ?? null;
   };
 
   return {

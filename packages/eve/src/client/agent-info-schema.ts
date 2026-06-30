@@ -1,4 +1,6 @@
 import { z } from "#compiled/zod/index.js";
+import { modelAuthSchema, modelRoutingSchema } from "#shared/agent-model-schemas.js";
+import { modelEndpointStatusSchema } from "#shared/model-endpoint-status.js";
 
 const source = z.object({
   exportName: z.string().optional(),
@@ -8,28 +10,6 @@ const source = z.object({
 });
 
 const entry = source.extend({ name: z.string() });
-
-const modelRouting = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("gateway"), target: z.string(), byok: z.string().optional() }),
-  z.object({ kind: z.literal("external"), provider: z.string() }),
-]);
-
-const modelAuth = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("ai-gateway") }),
-  z.object({ kind: z.literal("codex") }),
-  z.object({ kind: z.literal("external"), provider: z.string() }),
-]);
-
-const modelEndpoint = z.union([
-  z.object({ kind: z.literal("codex") }),
-  z.object({ kind: z.literal("external"), provider: z.string() }),
-  z.object({
-    kind: z.literal("gateway"),
-    connected: z.literal(true),
-    credential: z.enum(["api-key", "oidc"]),
-  }),
-  z.object({ kind: z.literal("gateway"), connected: z.literal(false) }),
-]);
 
 const tool = entry.extend({
   description: z.string(),
@@ -137,9 +117,9 @@ export const AgentInfoResultSchema = z.object({
       id: z.string(),
       providerOptions: z.unknown().optional(),
       source: source.optional(),
-      auth: modelAuth.optional(),
-      routing: modelRouting.optional(),
-      endpoint: modelEndpoint.optional(),
+      auth: modelAuthSchema.optional(),
+      routing: modelRoutingSchema.optional(),
+      endpoint: modelEndpointStatusSchema.optional(),
     }),
     name: z.string(),
     outputSchema: z.unknown().optional(),

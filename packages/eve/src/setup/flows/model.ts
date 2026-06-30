@@ -4,7 +4,7 @@ import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog
 import { discoverAgent } from "#discover/discover-agent.js";
 import {
   type CodexModelCatalogEntry,
-  fetchCodexModelCatalog,
+  codexModelsFromGatewayCatalog,
   formatCodexModelId,
   parseCodexModelId,
   selectableCodexModels,
@@ -62,7 +62,7 @@ export interface ModelFlowDeps {
   applyModel: (input: { appRoot: string; slug: string }) => Promise<ApplyModelOutcome>;
   /** Catalog fetch behind the shared model picker. */
   selectModel?: SelectModelDeps;
-  /** Codex catalog fetch behind the Codex direct-model picker. */
+  /** OpenAI model entries behind the Codex direct-model picker. */
   fetchCodexModels: (signal?: AbortSignal) => Promise<readonly CodexModelCatalogEntry[]>;
   /** Reads how the model is backed right now, for the menu's provider row. */
   detectProviderStatus: typeof detectModelProviderStatus;
@@ -284,7 +284,8 @@ export async function runModelFlow(input: {
   const deps: ModelFlowDeps = {
     readCurrentModel: readCurrentAgentModel,
     applyModel: changeAgentModel,
-    fetchCodexModels: (requestSignal) => fetchCodexModelCatalog({ signal: requestSignal }),
+    fetchCodexModels: async (requestSignal) =>
+      codexModelsFromGatewayCatalog(await fetchGatewayCatalog(requestSignal)),
     detectProviderStatus: detectModelProviderStatus,
     runProviderFlow,
     ...input.deps,
@@ -437,7 +438,7 @@ async function pickCodexModelFromCatalog(input: {
   prompter: Prompter;
   signal?: AbortSignal;
 }): Promise<string | undefined> {
-  const models = await withSpinner(input.prompter, "Loading the Codex model catalog...", () =>
+  const models = await withSpinner(input.prompter, "Loading OpenAI models...", () =>
     input.fetchModels(input.signal),
   );
   input.signal?.throwIfAborted();
@@ -450,7 +451,9 @@ async function pickCodexModelFromCatalog(input: {
 
   const firstOption = options[0];
   if (firstOption === undefined) {
-    input.prompter.log.warning("The Codex model catalog did not list any selectable models.");
+    input.prompter.log.warning(
+      "The model catalog did not list any selectable OpenAI models for Codex.",
+    );
     return undefined;
   }
 
@@ -537,13 +540,13 @@ async function validateModelSlug(appRoot: string, slug: string): Promise<string 
   const codexSlug = parseCodexModelId(slug);
   if (codexSlug !== null) {
     try {
-      const models = await fetchCodexModelCatalog();
+      const models = codexModelsFromGatewayCatalog(await fetchGatewayCatalog());
       if (!models.some((model) => model.slug === codexSlug)) {
-        return `I couldn't confirm \`${slug}\` in the Codex model catalog, so I didn't change agent.ts.`;
+        return `I couldn't confirm \`${slug}\` as an OpenAI model, so I didn't change agent.ts.`;
       }
       return null;
     } catch (error) {
-      return `I couldn't load the Codex model catalog (${toErrorMessage(error)}), so I didn't change agent.ts.`;
+      return `I couldn't load OpenAI models (${toErrorMessage(error)}), so I didn't change agent.ts.`;
     }
   }
 

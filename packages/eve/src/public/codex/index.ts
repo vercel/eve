@@ -4,4 +4,4 @@ export {
   readCodexAuthState,
   type CodexAuthState,
   type CodexModelOptions,
-} from "#internal/model-auth/codex/model.js";
+} from "#internal/model-endpoint-auth/codex/model.js";
