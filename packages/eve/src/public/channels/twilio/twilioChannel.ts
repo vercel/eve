@@ -1,5 +1,6 @@
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
+import type { RouteHandler } from "#channel/routes.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelSessionOps } from "#public/definitions/defineChannel.js";
 
@@ -41,6 +42,7 @@ import {
 } from "#public/channels/twilio/verify.js";
 import {
   defineChannel,
+  GET,
   POST,
   type Channel,
   type SendFn,
@@ -283,6 +285,9 @@ export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
   const onVoice = config.onVoice ?? defaultOnVoice;
   const onVoiceTranscription = config.onVoiceTranscription ?? defaultOnVoiceTranscription;
   const mergedEvents: TwilioChannelEvents = { ...defaultEvents, ...config.events };
+  const messages = handleTwilioMessages({ config, onText });
+  const voice = handleTwilioVoice({ config, onVoice, routes });
+  const transcription = handleTwilioTranscription({ config, onVoiceTranscription, routes });
 
   return defineChannel<
     TwilioChannelState,
@@ -311,77 +316,12 @@ export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
     },
 
     routes: [
-      POST<TwilioChannelState>(routes.messages, async (req, { send, waitUntil }) => {
-        const verified = await verifyInbound(req, config);
-        if (verified === null) return new Response("unauthorized", { status: 401 });
-
-        const message = parseTwilioTextMessage(verified.params);
-        if (!message) return emptyTwilioResponse();
-        if (!(await isAllowed(message.from, config.allowFrom)))
-          return new Response("forbidden", { status: 403 });
-
-        waitUntil(dispatchText({ config, message, onText, send }));
-        return emptyTwilioResponse();
-      }),
-
-      POST<TwilioChannelState>(routes.voice, async (req) => {
-        const verified = await verifyInbound(req, config);
-        if (verified === null) return new Response("unauthorized", { status: 401 });
-
-        const call = parseTwilioVoiceCall(verified.params);
-        if (!call) return sayTwilioResponse("Missing caller information.");
-        if (!(await isAllowed(call.from, config.allowFrom)))
-          return new Response("forbidden", { status: 403 });
-
-        const voiceResult = await acceptVoiceCall({
-          call,
-          config,
-          onVoice,
-        });
-        if (voiceResult === null) return new Response("forbidden", { status: 403 });
-        const voiceOptions = voiceResult ?? {};
-
-        return gatherSpeechTwilioResponse({
-          actionUrl: await buildActionUrl(req, config, routes.transcription),
-          hints: voiceOptions.hints ?? config.voice?.hints,
-          language: voiceOptions.language ?? config.voice?.language,
-          profanityFilter: voiceOptions.profanityFilter ?? config.voice?.profanityFilter,
-          prompt:
-            voiceOptions.prompt ??
-            config.voice?.prompt ??
-            "Please say your message after the tone.",
-          speechModel: voiceOptions.speechModel ?? config.voice?.speechModel,
-          speechTimeout: voiceOptions.speechTimeout ?? config.voice?.speechTimeout ?? "auto",
-          timeoutSeconds: voiceOptions.timeoutSeconds ?? config.voice?.timeoutSeconds,
-          voice: voiceOptions.voice ?? config.voice?.voice,
-        });
-      }),
-
-      POST<TwilioChannelState>(routes.transcription, async (req, { send, waitUntil }) => {
-        const verified = await verifyInbound(req, config);
-        if (verified === null) return new Response("unauthorized", { status: 401 });
-
-        const transcription = parseTwilioVoiceTranscription(verified.params);
-        if (!transcription) {
-          return gatherSpeechTwilioResponse({
-            actionUrl: await buildActionUrl(req, config, routes.transcription),
-            language: config.voice?.language,
-            prompt: config.voice?.prompt ?? "Please say your message after the tone.",
-            speechTimeout: config.voice?.speechTimeout ?? "auto",
-            timeoutSeconds: config.voice?.timeoutSeconds,
-          });
-        }
-        if (!(await isAllowed(transcription.from, config.allowFrom))) {
-          return new Response("forbidden", { status: 403 });
-        }
-
-        waitUntil(
-          dispatchVoiceTranscription({ config, onVoiceTranscription, send, transcription }),
-        );
-        return sayTwilioResponse(
-          config.voice?.acknowledgement ?? "Thanks. I'll follow up by text.",
-        );
-      }),
+      GET<TwilioChannelState>(routes.messages, messages),
+      POST<TwilioChannelState>(routes.messages, messages),
+      GET<TwilioChannelState>(routes.voice, voice),
+      POST<TwilioChannelState>(routes.voice, voice),
+      GET<TwilioChannelState>(routes.transcription, transcription),
+      POST<TwilioChannelState>(routes.transcription, transcription),
     ],
 
     async receive(input, { send }) {
@@ -404,6 +344,109 @@ export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
 
     events: mergedEvents,
   });
+}
+
+function handleTwilioMessages(input: {
+  readonly config: TwilioChannelConfig;
+  readonly onText: NonNullable<TwilioChannelConfig["onText"]>;
+}): RouteHandler<TwilioChannelState> {
+  return async (req, { send, waitUntil }) => {
+    const verified = await verifyInbound(req, input.config);
+    if (verified === null) return new Response("unauthorized", { status: 401 });
+
+    const message = parseTwilioTextMessage(verified.params);
+    if (!message) return emptyTwilioResponse();
+    if (!(await isAllowed(message.from, input.config.allowFrom))) {
+      return new Response("forbidden", { status: 403 });
+    }
+
+    waitUntil(
+      dispatchText({
+        config: input.config,
+        message,
+        onText: input.onText,
+        send,
+      }),
+    );
+    return emptyTwilioResponse();
+  };
+}
+
+function handleTwilioVoice(input: {
+  readonly config: TwilioChannelConfig;
+  readonly onVoice: NonNullable<TwilioChannelConfig["onVoice"]>;
+  readonly routes: ReturnType<typeof buildRoutes>;
+}): RouteHandler<TwilioChannelState> {
+  return async (req) => {
+    const verified = await verifyInbound(req, input.config);
+    if (verified === null) return new Response("unauthorized", { status: 401 });
+
+    const call = parseTwilioVoiceCall(verified.params);
+    if (!call) return sayTwilioResponse("Missing caller information.");
+    if (!(await isAllowed(call.from, input.config.allowFrom))) {
+      return new Response("forbidden", { status: 403 });
+    }
+
+    const voiceResult = await acceptVoiceCall({
+      call,
+      config: input.config,
+      onVoice: input.onVoice,
+    });
+    if (voiceResult === null) return new Response("forbidden", { status: 403 });
+    const voiceOptions = voiceResult ?? {};
+
+    return gatherSpeechTwilioResponse({
+      actionUrl: await buildActionUrl(req, input.config, input.routes.transcription),
+      hints: voiceOptions.hints ?? input.config.voice?.hints,
+      language: voiceOptions.language ?? input.config.voice?.language,
+      profanityFilter: voiceOptions.profanityFilter ?? input.config.voice?.profanityFilter,
+      prompt:
+        voiceOptions.prompt ??
+        input.config.voice?.prompt ??
+        "Please say your message after the tone.",
+      speechModel: voiceOptions.speechModel ?? input.config.voice?.speechModel,
+      speechTimeout: voiceOptions.speechTimeout ?? input.config.voice?.speechTimeout ?? "auto",
+      timeoutSeconds: voiceOptions.timeoutSeconds ?? input.config.voice?.timeoutSeconds,
+      voice: voiceOptions.voice ?? input.config.voice?.voice,
+    });
+  };
+}
+
+function handleTwilioTranscription(input: {
+  readonly config: TwilioChannelConfig;
+  readonly onVoiceTranscription: NonNullable<TwilioChannelConfig["onVoiceTranscription"]>;
+  readonly routes: ReturnType<typeof buildRoutes>;
+}): RouteHandler<TwilioChannelState> {
+  return async (req, { send, waitUntil }) => {
+    const verified = await verifyInbound(req, input.config);
+    if (verified === null) return new Response("unauthorized", { status: 401 });
+
+    const transcription = parseTwilioVoiceTranscription(verified.params);
+    if (!transcription) {
+      return gatherSpeechTwilioResponse({
+        actionUrl: await buildActionUrl(req, input.config, input.routes.transcription),
+        language: input.config.voice?.language,
+        prompt: input.config.voice?.prompt ?? "Please say your message after the tone.",
+        speechTimeout: input.config.voice?.speechTimeout ?? "auto",
+        timeoutSeconds: input.config.voice?.timeoutSeconds,
+      });
+    }
+    if (!(await isAllowed(transcription.from, input.config.allowFrom))) {
+      return new Response("forbidden", { status: 403 });
+    }
+
+    waitUntil(
+      dispatchVoiceTranscription({
+        config: input.config,
+        onVoiceTranscription: input.onVoiceTranscription,
+        send,
+        transcription,
+      }),
+    );
+    return sayTwilioResponse(
+      input.config.voice?.acknowledgement ?? "Thanks. I'll follow up by text.",
+    );
+  };
 }
 
 function rebuildTwilioContext(
