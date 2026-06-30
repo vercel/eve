@@ -96,6 +96,7 @@ export function EveLogoShader() {
   const controlsRef = useRef<RenderControls>({ ...DEFAULT_CONTROLS });
   const [logoAspect, setLogoAspect] = useState(DEFAULT_LOGO_ASPECT);
   const [revealed, setRevealed] = useState(false);
+  const [showLightFallback, setShowLightFallback] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,6 +108,7 @@ export function EveLogoShader() {
     const canvas = canvasRef.current;
     resetCanvasVisibility(canvas);
     setRevealed(false);
+    setShowLightFallback(false);
 
     if (prefersReducedMotion !== false) return;
 
@@ -122,7 +124,10 @@ export function EveLogoShader() {
       const renderTheme = theme;
       const canvas = canvasRef.current;
       const context = canvas?.getContext("webgpu");
-      if (!canvas || !context || !navigator.gpu) return;
+      if (!canvas || !context || !navigator.gpu) {
+        setShowLightFallback(true);
+        return;
+      }
 
       const mesh = await loadMesh();
       if (cancelled) return;
@@ -160,6 +165,7 @@ export function EveLogoShader() {
         .then(() => {
           if (cancelled) return;
           setRevealed(false);
+          setShowLightFallback(true);
           cancelled = true;
           dispose();
         })
@@ -187,6 +193,7 @@ export function EveLogoShader() {
         } catch {
           cancelled = true;
           setRevealed(false);
+          setShowLightFallback(true);
           dispose();
           return;
         }
@@ -212,6 +219,7 @@ export function EveLogoShader() {
         cleanup = dispose;
       })
       .catch(() => {
+        setShowLightFallback(true);
         // The landing page must degrade silently when WebGPU or the GPU process is unavailable.
       });
 
@@ -254,12 +262,12 @@ export function EveLogoShader() {
     >
       <FallbackImage
         imageProps={fallbackLightImageProps}
-        revealed={revealed}
+        visible={showLightFallback && !revealed}
         className="dark:hidden"
       />
       <FallbackImage
         imageProps={fallbackDarkImageProps}
-        revealed={revealed}
+        visible={!revealed}
         className="hidden dark:block"
       />
       <canvas ref={canvasRef} className="absolute inset-0 size-full opacity-0 transition-opacity duration-700 ease-linear" />
@@ -272,16 +280,16 @@ export function EveLogoShader() {
 
 function FallbackImage({
   imageProps,
-  revealed,
+  visible,
   className,
 }: {
   imageProps: ComponentProps<"img">;
-  revealed: boolean;
+  visible: boolean;
   className: string;
 }) {
   return (
     <div
-      className={`${className} absolute transition-opacity duration-700 ease-linear ${revealed ? "opacity-0" : "opacity-100"}`}
+      className={`${className} absolute transition-opacity duration-700 ease-linear ${visible ? "opacity-100" : "opacity-0"}`}
       style={{ inset: FALLBACK_IMAGE_PADDING }}
     >
       <img
