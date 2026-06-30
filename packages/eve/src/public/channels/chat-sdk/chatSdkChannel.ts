@@ -1,6 +1,6 @@
-import { AsyncLocalStorage } from "node:async_hooks";
-
 import type { SessionAuthContext } from "#channel/types.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { ContextKey } from "#context/key.js";
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#runtime/input/types.js";
@@ -46,7 +46,7 @@ interface ActiveWebhookContext {
   readonly send: SendFn<ChatSdkChannelState>;
 }
 
-const activeWebhook = new AsyncLocalStorage<ActiveWebhookContext>();
+const ActiveWebhookKey = new ContextKey<ActiveWebhookContext>("chat-sdk.active-webhook");
 
 /**
  * Durable channel state used by `chatSdkChannel`. Stores the last Chat SDK
@@ -246,7 +246,9 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     routes: adapterNames(config.adapters).map((adapterName) =>
       POST<ChatSdkChannelState>(routeForAdapter(adapterName, config), async (request, args) => {
         const webhook = bot.webhooks[adapterName];
-        return activeWebhook.run({ send: args.send }, () =>
+        const ctx = new ContextContainer();
+        ctx.setVirtualContext(ActiveWebhookKey, { send: args.send });
+        return contextStorage.run(ctx, () =>
           webhook(request, {
             ...config.webhook,
             waitUntil(task: Promise<unknown>) {
@@ -351,21 +353,28 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
   input: ChatSdkSendInput,
   options: ChatSdkSendOptions,
 ): Promise<Session> {
-  const active = activeWebhook.getStore();
+  const active = contextStorage.getStore()?.get(ActiveWebhookKey);
   if (!active) {
     throw new Error(
       "chatSdkChannel().send can only run during a Chat SDK webhook handler for this bridge.",
     );
   }
   const thread = serializeThread(bot, options.thread, options.adapterName);
-  return active.send(input, {
+  const sendOptions: SendOptions<ChatSdkChannelState> = {
     auth: options.auth ?? null,
-    ...(options.callback ? { callback: options.callback } : {}),
     continuationToken: thread.id,
-    ...(options.mode ? { mode: options.mode } : {}),
     state: { thread },
-    ...(options.title ? { title: options.title } : {}),
-  });
+  };
+  if (options.callback) {
+    sendOptions.callback = options.callback;
+  }
+  if (options.mode) {
+    sendOptions.mode = options.mode;
+  }
+  if (options.title) {
+    sendOptions.title = options.title;
+  }
+  return active.send(input, sendOptions);
 }
 
 function initialState(): ChatSdkChannelState {

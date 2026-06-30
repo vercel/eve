@@ -370,10 +370,11 @@ class TestAdapter {
       value?: string;
     };
     if (body.kind === "action") {
+      const adapter = this as Adapter;
       await this.chat?.processAction(
         {
           actionId: body.actionId ?? "",
-          adapter: this as unknown as Adapter,
+          adapter,
           messageId: "message-1",
           raw: body,
           threadId: THREAD_ID,
@@ -385,8 +386,9 @@ class TestAdapter {
       return new Response("ok");
     }
 
+    const adapter = this as Adapter;
     await this.chat?.processMessage(
-      this as unknown as Adapter,
+      adapter,
       THREAD_ID,
       message(body.text ?? "@bot hello"),
       options,
