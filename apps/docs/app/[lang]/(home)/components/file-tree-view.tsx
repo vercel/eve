@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { cn } from "@/lib/utils";
 
 export interface FileTreeItem {
@@ -21,62 +21,6 @@ export interface FileTreeItem {
 export function FileTreeView({ items, heading }: { items: FileTreeItem[]; heading?: ReactNode }) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const selected = items[selectedIndex];
-
-  // On desktop the viz pins while you scroll through it, stepping the open file
-  // by scroll progress (scrollytelling). Disabled for reduced motion and on
-  // mobile, where the layout instead stacks each file above its own code block.
-  const trackRef = useRef<HTMLDivElement>(null);
-  const [scrolly, setScrolly] = useState(false);
-
-  useEffect(() => {
-    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)");
-    const desktop = window.matchMedia?.("(min-width: 768px)");
-    const update = () => setScrolly(!reduce?.matches && !!desktop?.matches);
-    update();
-    desktop?.addEventListener("change", update);
-    reduce?.addEventListener("change", update);
-    return () => {
-      desktop?.removeEventListener("change", update);
-      reduce?.removeEventListener("change", update);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!scrolly) return;
-    const track = trackRef.current;
-    if (!track) return;
-    let raf = 0;
-    const onScroll = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        const distance = track.offsetHeight - window.innerHeight;
-        if (distance <= 0) return;
-        const progress = Math.min(Math.max(-track.getBoundingClientRect().top / distance, 0), 1);
-        setSelectedIndex(Math.min(items.length - 1, Math.floor(progress * items.length)));
-      });
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    onScroll();
-    return () => {
-      window.removeEventListener("scroll", onScroll);
-      cancelAnimationFrame(raf);
-    };
-  }, [scrolly, items.length]);
-
-  function handleSelect(index: number) {
-    if (!scrolly || !trackRef.current) {
-      setSelectedIndex(index);
-      return;
-    }
-    // Scroll to the segment that maps to this file so the sticky view follows.
-    const track = trackRef.current;
-    const distance = track.offsetHeight - window.innerHeight;
-    const targetProgress = (index + 0.5) / items.length;
-    const top = window.scrollY + track.getBoundingClientRect().top + targetProgress * distance;
-    // Jump straight to the file's segment — no smooth scroll, so the view
-    // doesn't flip through the files in between on the way there.
-    window.scrollTo({ top, behavior: "auto" });
-  }
 
   const board = (
     <div className="relative mt-12">
@@ -102,10 +46,9 @@ export function FileTreeView({ items, heading }: { items: FileTreeItem[]; headin
                   <button
                     key={item.name}
                     type="button"
-                    onClick={() => handleSelect(i)}
+                    onClick={() => setSelectedIndex(i)}
                     className={cn(
-                      "group flex w-full cursor-pointer items-center rounded-md px-3 py-2 text-left text-sm",
-                      !scrolly && "transition-colors",
+                      "group flex w-full cursor-pointer items-center rounded-md px-3 py-2 text-left text-sm transition-colors",
                       selectedIndex === i
                         ? "bg-gray-100 text-gray-1000"
                         : "text-gray-700 hover:bg-gray-100/60 hover:text-gray-1000",
@@ -148,22 +91,8 @@ export function FileTreeView({ items, heading }: { items: FileTreeItem[]; headin
     </div>
   );
 
-  const desktop = scrolly ? (
-    <div ref={trackRef} className="relative mt-4" style={{ height: `${items.length * 42}vh` }}>
-      <div className="sticky top-[max(4rem,calc(50vh-20.5rem))]">
-        {heading}
-        {board}
-      </div>
-    </div>
-  ) : (
-    <div className="mt-4">
-      {heading}
-      {board}
-    </div>
-  );
-
-  // Mobile: the pinned sidebar/code-panel split is cramped on a phone, so each
-  // file simply shows its code block right beneath it in a stacked list.
+  // Mobile: the sidebar/code-panel split is cramped on a phone, so each file
+  // simply shows its code block right beneath it in a stacked list.
   const mobile = (
     <div>
       {heading}
@@ -187,7 +116,10 @@ export function FileTreeView({ items, heading }: { items: FileTreeItem[]; headin
   return (
     <>
       <div className="md:hidden">{mobile}</div>
-      <div className="hidden md:block">{desktop}</div>
+      <div className="mt-4 hidden md:block">
+        {heading}
+        {board}
+      </div>
     </>
   );
 }
