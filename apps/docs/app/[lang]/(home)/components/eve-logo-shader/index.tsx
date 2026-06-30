@@ -1,7 +1,8 @@
 "use client";
 
 import { App, Device, type VGPUAdapter } from "@vgpu/core";
-import { useEffect, useRef, useState } from "react";
+import { getImageProps } from "next/image";
+import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { decodeGltfMesh, meshAspect } from "./mesh";
 import { BLOOM_RADIUS, createEve5Renderer, type RenderControls } from "./render";
 
@@ -14,6 +15,11 @@ class BrowserAdapter implements VGPUAdapter {
 }
 
 const MODEL_URL = "/eve-5/eve-logo.gltf";
+const FALLBACK_DARK_IMAGE_URL = "/eve-5/fallback-dark.webp";
+const FALLBACK_LIGHT_IMAGE_URL = "/eve-5/fallback-light.webp";
+const FALLBACK_IMAGE_WIDTH = 1111;
+const FALLBACK_IMAGE_HEIGHT = 364;
+const FALLBACK_IMAGE_SIZES = "(min-width: 768px) 1111px, 100vw";
 const DEFAULT_LOGO_ASPECT = 78 / 25;
 const DEFAULT_CONTROLS: RenderControls = {
   yaw: 0,
@@ -31,6 +37,7 @@ const LOGO_RENDER_HEIGHT = 500;
 const MAX_DEVICE_PIXEL_RATIO = 2;
 const MAX_ENV_YAW = 0.45;
 const ENV_YAW_LERP_SPEED = 3;
+const CANVAS_FADE_FALLBACK_MS = 800;
 
 function getCurrentTheme(): "light" | "dark" {
   if (typeof document === "undefined") return "light";
@@ -64,17 +71,42 @@ function useResolvedTheme() {
   return theme;
 }
 
+function usePrefersReducedMotion() {
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const syncPreference = () => setPrefersReducedMotion(media.matches);
+
+    syncPreference();
+    media.addEventListener("change", syncPreference);
+
+    return () => media.removeEventListener("change", syncPreference);
+  }, []);
+
+  return prefersReducedMotion;
+}
+
 export function EveLogoShader() {
   const theme = useResolvedTheme();
+  const prefersReducedMotion = usePrefersReducedMotion();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const controlsRef = useRef<RenderControls>({ ...DEFAULT_CONTROLS });
   const [logoAspect, setLogoAspect] = useState(DEFAULT_LOGO_ASPECT);
+  const [revealed, setRevealed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     let animationFrame = 0;
+    let cleanup: (() => void) | undefined;
     let targetEnvYaw = controlsRef.current.envYaw;
     let previousFrameTime = performance.now();
+
+    const canvas = canvasRef.current;
+    resetCanvasVisibility(canvas);
+    setRevealed(false);
+
+    if (prefersReducedMotion !== false) return;
 
     const updateEnvYaw = (clientX: number) => {
       const viewportWidth = Math.max(1, window.innerWidth || 1);
@@ -108,8 +140,33 @@ export function EveLogoShader() {
       const renderer = createEve5Renderer(app.device, format, mesh, { theme: renderTheme });
       previousFrameTime = performance.now();
 
+      let disposed = false;
+      let firstFrameShown = false;
+      let finishCanvasFade: (() => void) | undefined;
+      const dispose = () => {
+        if (disposed) return;
+        disposed = true;
+        cancelAnimationFrame(animationFrame);
+        finishCanvasFade?.();
+        resetCanvasVisibility(canvas);
+        if (!cancelled) setRevealed(false);
+        renderer.dispose();
+        app.device.destroy();
+      };
+
+      app.device.gpu.lost
+        .then(() => {
+          if (cancelled) return;
+          setRevealed(false);
+          cancelled = true;
+          dispose();
+        })
+        .catch(() => {
+          // The landing page must degrade silently when the GPU process is unavailable.
+        });
+
       const draw = (frameTime = performance.now()) => {
-        if (cancelled) return;
+        if (cancelled || disposed) return;
 
         const deltaSeconds = Math.max(0, (frameTime - previousFrameTime) / 1000);
         previousFrameTime = frameTime;
@@ -122,19 +179,32 @@ export function EveLogoShader() {
         // shader's @builtin(position) sample different pixels from the back-side targets on DPR > 1.
         const logicalWidth = Math.max(1, canvas.width - BLOOM_RADIUS * 2);
         const logicalHeight = Math.max(1, canvas.height - BLOOM_RADIUS * 2);
-        renderer.render(context.getCurrentTexture().createView(), controlsRef.current, logicalWidth, logicalHeight);
+
+        try {
+          renderer.render(context.getCurrentTexture().createView(), controlsRef.current, logicalWidth, logicalHeight);
+        } catch {
+          cancelled = true;
+          setRevealed(false);
+          dispose();
+          return;
+        }
+
+        if (!firstFrameShown) {
+          firstFrameShown = true;
+          canvas.style.opacity = "1";
+          finishCanvasFade = onCanvasFullyOpaque(canvas, () => {
+            if (!cancelled) setRevealed(true);
+          });
+        }
+
         animationFrame = requestAnimationFrame(draw);
       };
 
       draw();
 
-      return () => {
-        renderer.dispose();
-        app.device.destroy();
-      };
+      return dispose;
     }
 
-    let cleanup: (() => void) | undefined;
     start()
       .then((dispose) => {
         cleanup = dispose;
@@ -148,12 +218,29 @@ export function EveLogoShader() {
       cancelAnimationFrame(animationFrame);
       window.removeEventListener("pointermove", onPointerMove);
       cleanup?.();
+      resetCanvasVisibility(canvasRef.current);
     };
-  }, [theme]);
+  }, [theme, prefersReducedMotion]);
 
   const logicalSize = getLogicalRenderSize(logoAspect);
   const paddedWidth = logicalSize.width + BLOOM_RADIUS * 2;
   const paddedHeight = logicalSize.height + BLOOM_RADIUS * 2;
+  const fallbackImageOptions = {
+    alt: "",
+    width: FALLBACK_IMAGE_WIDTH,
+    height: FALLBACK_IMAGE_HEIGHT,
+    sizes: FALLBACK_IMAGE_SIZES,
+    priority: true,
+    quality: 95,
+  } as const;
+  const { props: fallbackLightImageProps } = getImageProps({
+    ...fallbackImageOptions,
+    src: FALLBACK_LIGHT_IMAGE_URL,
+  });
+  const { props: fallbackDarkImageProps } = getImageProps({
+    ...fallbackImageOptions,
+    src: FALLBACK_DARK_IMAGE_URL,
+  });
 
   return (
     <div
@@ -163,11 +250,43 @@ export function EveLogoShader() {
         aspectRatio: `${paddedWidth} / ${paddedHeight}`,
       }}
     >
-      <canvas ref={canvasRef} className="block size-full" />
+      <FallbackImage
+        imageProps={fallbackLightImageProps}
+        revealed={revealed}
+        className="dark:hidden"
+      />
+      <FallbackImage
+        imageProps={fallbackDarkImageProps}
+        revealed={revealed}
+        className="hidden dark:block"
+      />
+      <canvas ref={canvasRef} className="absolute inset-0 size-full opacity-0 transition-opacity duration-700 ease-linear" />
       <div
         className={`pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent ${theme === "light" ? "to-background-200" : "to-black"}`}
       />
     </div>
+  );
+}
+
+function FallbackImage({
+  imageProps,
+  revealed,
+  className,
+}: {
+  imageProps: ComponentProps<"img">;
+  revealed: boolean;
+  className: string;
+}) {
+  return (
+    <img
+      {...imageProps}
+      aria-hidden="true"
+      role="presentation"
+      decoding="async"
+      className={`${className} absolute inset-0 size-full object-cover transition-opacity duration-700 ease-linear ${
+        revealed ? "opacity-0" : "opacity-100"
+      }`}
+    />
   );
 }
 
@@ -209,6 +328,30 @@ function resizeCanvas(canvas: HTMLCanvasElement | null) {
 function safeLerp(from: number, to: number, amount: number) {
   const safeAmount = Math.max(0, Math.min(1, amount));
   return from + (to - from) * safeAmount;
+}
+
+function resetCanvasVisibility(canvas: HTMLCanvasElement | null) {
+  if (!canvas) return;
+  canvas.style.opacity = "";
+}
+
+function onCanvasFullyOpaque(canvas: HTMLCanvasElement, callback: () => void) {
+  let done = false;
+  let timeout = 0;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    canvas.removeEventListener("transitionend", onTransitionEnd);
+    window.clearTimeout(timeout);
+    if (canvas.isConnected) callback();
+  };
+  const onTransitionEnd = (event: TransitionEvent) => {
+    if (event.propertyName === "opacity") finish();
+  };
+
+  canvas.addEventListener("transitionend", onTransitionEnd);
+  timeout = window.setTimeout(finish, CANVAS_FADE_FALLBACK_MS);
+  return finish;
 }
 
 function nextFrame() {
