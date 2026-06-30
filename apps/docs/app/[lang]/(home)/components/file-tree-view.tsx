@@ -120,9 +120,7 @@ export function FileTreeView({ items, heading }: { items: FileTreeItem[]; headin
                       <span
                         className={cn(
                           "ml-auto font-mono text-label-12-mono!",
-                          selectedIndex === i
-                            ? "text-gray-900"
-                            : "text-gray-500 group-hover:text-gray-900",
+                          selectedIndex === i ? "text-gray-900" : "text-gray-500",
                         )}
                       >
                         optional
