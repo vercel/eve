@@ -19,6 +19,7 @@ const FALLBACK_DARK_IMAGE_URL = "/eve-5/fallback-dark.webp";
 const FALLBACK_LIGHT_IMAGE_URL = "/eve-5/fallback-light.webp";
 const FALLBACK_IMAGE_WIDTH = 1111;
 const FALLBACK_IMAGE_HEIGHT = 364;
+const FALLBACK_IMAGE_ASPECT_RATIO = `${FALLBACK_IMAGE_WIDTH} / ${FALLBACK_IMAGE_HEIGHT}`;
 const FALLBACK_IMAGE_SIZES = "(min-width: 768px) 1111px, 100vw";
 const DEFAULT_LOGO_ASPECT = 78 / 25;
 const DEFAULT_CONTROLS: RenderControls = {
@@ -286,6 +287,7 @@ function FallbackImage({
       className={`${className} absolute left-1/2 top-0 h-full w-auto max-w-none -translate-x-1/2 transition-opacity duration-700 ease-linear ${
         revealed ? "opacity-0" : "opacity-100"
       }`}
+      style={{ aspectRatio: FALLBACK_IMAGE_ASPECT_RATIO }}
     />
   );
 }
