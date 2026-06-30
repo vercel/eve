@@ -31,6 +31,28 @@ interface LocalSandboxMetadata {
   readonly version: typeof LOCAL_SANDBOX_METADATA_VERSION;
 }
 
+/**
+ * Capability options forwarded into just-bash's
+ * `Sandbox.create(SandboxOptions)`. Defined locally (rather than imported
+ * from `just-bash`) because the package is an optional peer dependency —
+ * eve must type-check without it installed. The shape is a structural
+ * subset of just-bash's `SandboxOptions`, so the object assigns directly
+ * into the `Sandbox.create` call.
+ *
+ * Only the fields just-bash's `Sandbox.create` actually forwards into its
+ * internal `Bash` are surfaced. The bundled interpreter flags
+ * (`python`, `javascript`, `commands`, …) live on `BashOptions` and are
+ * dropped by `Sandbox.create`, so they are intentionally absent here —
+ * see issue #431.
+ */
+export interface JustBashSandboxOptions {
+  readonly defenseInDepth?: boolean;
+  readonly maxCallDepth?: number;
+  readonly maxCommandCount?: number;
+  readonly maxLoopIterations?: number;
+  readonly timeoutMs?: number;
+}
+
 export interface BashSandbox {
   captureState(): Promise<Record<string, unknown> | null>;
   dispose(): Promise<void>;
@@ -75,6 +97,7 @@ export async function createBashSandbox(input: {
   readonly appRoot: string;
   readonly autoInstall: boolean;
   readonly rootPath: string;
+  readonly sandboxOptions?: JustBashSandboxOptions;
   readonly sessionKey: string;
 }): Promise<BashSandbox> {
   const { ReadWriteFs, Sandbox } = await loadJustBashModule({
@@ -97,11 +120,18 @@ export async function createBashSandbox(input: {
 
   const sandbox = await Sandbox.create({
     cwd: WORKSPACE_ROOT,
+    // Author-supplied capability options (undefined entries fall back to
+    // just-bash's own defaults, keeping behavior unchanged when omitted).
+    defenseInDepth: input.sandboxOptions?.defenseInDepth,
     env: metadata?.env as Record<string, string> | undefined,
     fs: filesystem,
+    maxCallDepth: input.sandboxOptions?.maxCallDepth,
+    maxCommandCount: input.sandboxOptions?.maxCommandCount,
+    maxLoopIterations: input.sandboxOptions?.maxLoopIterations,
     network: {
       dangerouslyAllowFullInternetAccess: true,
     },
+    timeoutMs: input.sandboxOptions?.timeoutMs,
   });
 
   return {
