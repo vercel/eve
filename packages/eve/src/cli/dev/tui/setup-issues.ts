@@ -35,6 +35,7 @@ export interface BootDetection {
 
 type ModelProviderAccess =
   | { kind: "unknown" }
+  | { kind: "codex" }
   | { kind: "external" }
   | {
       kind: "gateway";
@@ -88,6 +89,10 @@ function modelProviderAccess(
   context: Pick<BootDetectionContext, "env" | "info">,
 ): ModelProviderAccess {
   const model = context.info?.agent.model;
+  if (model?.auth?.kind === "codex" || model?.endpoint?.kind === "codex") {
+    return { kind: "codex" };
+  }
+  if (model?.auth?.kind === "external") return { kind: "external" };
   if (model?.routing?.kind === "external") return { kind: "external" };
   if (model?.routing?.kind !== "gateway") return { kind: "unknown" };
 
@@ -125,7 +130,7 @@ const modelProvider: BootDetection = {
   async detect({ appRoot, env, info }) {
     const access = modelProviderAccess({ env, info });
 
-    if (access.kind === "external") return [];
+    if (access.kind === "external" || access.kind === "codex") return [];
     if (access.kind === "gateway") {
       if (access.runtime.status === "connected") return [];
       if (access.runtime.status === "disconnected") {

@@ -39,8 +39,20 @@ export type ModelRouting =
   | { kind: "gateway"; target: string; byok?: string }
   | { kind: "external"; provider: string };
 
+/**
+ * The credential/access contract used for a model reference.
+ *
+ * This is separate from {@link ModelRouting}: routing answers where the request
+ * goes, while auth answers which credential owner makes that route usable.
+ */
+export type ModelAuth =
+  | { kind: "ai-gateway" }
+  | { kind: "codex" }
+  | { kind: "external"; provider: string };
+
 export type InternalAgentModelDefinition = {
   id: string;
+  auth?: ModelAuth;
   contextWindowTokens?: number;
   source?: ModuleSourceRef;
   providerOptions?: Record<string, JsonObject>;

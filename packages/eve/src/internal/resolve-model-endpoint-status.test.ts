@@ -7,14 +7,26 @@ describe("resolveModelEndpointStatus", () => {
     expect(
       resolveModelEndpointStatus(
         { kind: "external", provider: "anthropic" },
+        { kind: "external", provider: "anthropic" },
         { apiKey: false, oidc: false },
       ),
     ).toEqual({ kind: "external", provider: "anthropic" });
   });
 
+  it("reports Codex auth without a gateway credential claim", () => {
+    expect(
+      resolveModelEndpointStatus(
+        { kind: "codex" },
+        { kind: "external", provider: "codex" },
+        { apiKey: true, oidc: true },
+      ),
+    ).toEqual({ kind: "codex" });
+  });
+
   it("reports gateway connected via api-key, which outranks oidc", () => {
     expect(
       resolveModelEndpointStatus(
+        { kind: "ai-gateway" },
         { kind: "gateway", target: "openai" },
         { apiKey: true, oidc: true },
       ),
@@ -24,6 +36,7 @@ describe("resolveModelEndpointStatus", () => {
   it("reports gateway connected via oidc when only the token is present", () => {
     expect(
       resolveModelEndpointStatus(
+        { kind: "ai-gateway" },
         { kind: "gateway", target: "openai" },
         { apiKey: false, oidc: true },
       ),
@@ -33,6 +46,7 @@ describe("resolveModelEndpointStatus", () => {
   it("reports gateway not connected when neither credential is present", () => {
     expect(
       resolveModelEndpointStatus(
+        { kind: "ai-gateway" },
         { kind: "gateway", target: "openai" },
         { apiKey: false, oidc: false },
       ),

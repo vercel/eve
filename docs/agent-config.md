@@ -43,65 +43,6 @@ version uses hyphens (`claude-opus-4-8`), while the Gateway id above uses a dot
 
 Model use is subject to the terms, data-processing commitments, retention behavior, and available controls of the selected provider and routing path. Review the [AI Gateway model catalog](https://vercel.com/ai-gateway/models) for gateway-routed models, and review the provider's terms when you configure a `LanguageModel` outside AI Gateway.
 
-## Use a Codex subscription as the agent model
-
-`experimental_codex` makes Codex the agent's `model`.
-It is not a delegated tool or an MCP connection.
-
-Install the Codex CLI, then sign it into the ChatGPT account that owns the
-subscription:
-
-```bash
-codex login
-```
-
-```ts title="agent/agent.ts"
-import { defineAgent } from "eve";
-import { experimental_codex } from "eve/codex";
-
-export default defineAgent({
-  model: experimental_codex({
-    model: "gpt-5.2-codex",
-  }),
-  // Models configured outside AI Gateway are not in the AI Gateway catalog.
-  modelContextWindowTokens: 400_000,
-});
-```
-
-The model needs the context-window override because it is configured outside AI
-Gateway. `gpt-5.2-codex` has a
-[400,000-token context window](https://developers.openai.com/api/docs/models/gpt-5.2-codex);
-set the value documented for the Codex model you choose.
-
-The adapter launches a short-lived local `codex app-server` process for each
-eve step. It registers eve's AI SDK function tools as Codex dynamic tools, then
-turns a request for one of those tools into an ordinary eve tool call. eve keeps
-execution, approval, connections, and durable history in charge for the tools it
-bridges. Each turn disables Codex's execution environments and web search. After
-a tool result or approval resume, the next Codex step receives eve's durable
-transcript rather than a paused in-memory Codex process. Provider-specific AI SDK
-tools are not bridged.
-
-Codex CLI sign-in supports ChatGPT subscription access and API-key access. The
-CLI defaults to ChatGPT sign-in when no session exists; API-key sign-in is a
-separate usage-based billing path. See OpenAI's
-[Codex authentication guide](https://developers.openai.com/codex/auth).
-
-### Where this can run
-
-Use this on a local machine or a private runner controlled by the subscribed
-account. It requires both the `codex` executable and its local login state.
-OpenAI describes ChatGPT-managed CI/CD authentication as an advanced option for
-trusted runners, and says to treat `~/.codex/auth.json` like a password. See
-[non-interactive Codex authentication](https://developers.openai.com/codex/noninteractive).
-
-Do not use one subscription login to serve a public or multi-user eve
-deployment. The subscription account is not a service credential: OpenAI's
-[Terms of Use](https://openai.com/policies/terms-of-use/) prohibit sharing
-account credentials or making an account available to someone else. For a
-deployed service, use an API-backed AI SDK model with credentials and billing
-owned by that service.
-
 ## Reasoning effort
 
 Set `reasoning` to control the model's reasoning effort through AI SDK's

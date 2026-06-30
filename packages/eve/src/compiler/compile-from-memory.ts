@@ -1,5 +1,6 @@
 import type { JsonObject } from "#shared/json.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
+import { classifyModelAuth } from "#internal/model-auth/adapters.js";
 import {
   type CompiledAgentDefinition,
   type CompiledAgentManifest,
@@ -91,8 +92,9 @@ export function compileFromMemory(input: CompileFromMemoryInput): CompileFromMem
   const agentRoot = input.agentRoot ?? `${appRoot}/agent`;
   const agentName = input.name ?? "memory-agent";
 
+  const routing = classifyModelRouting(input.model);
   const config: CompiledAgentDefinition = {
-    model: { id: input.model, routing: classifyModelRouting(input.model) },
+    model: { auth: classifyModelAuth(routing), id: input.model, routing },
     name: agentName,
   };
   if (input.outputSchema !== undefined) {

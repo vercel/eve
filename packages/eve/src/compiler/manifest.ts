@@ -23,8 +23,10 @@ import type {
   InternalAgentModelDefinition,
   InternalAgentCompactionDefinition,
   AgentBuildDefinition,
+  ModelAuth,
   ModelRouting,
 } from "#shared/agent-definition.js";
+import { cloneModelAuth, modelAuthAdapterForRouting } from "#internal/model-auth/adapters.js";
 import type { InternalToolDefinition } from "#shared/tool-definition.js";
 
 /**
@@ -40,7 +42,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 31;
+export const COMPILED_AGENT_MANIFEST_VERSION = 32;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -326,8 +328,15 @@ const modelRoutingSchema = z.union([
     .strict(),
 ]) satisfies z.ZodType<ModelRouting>;
 
+const modelAuthSchema = z.union([
+  z.object({ kind: z.literal("ai-gateway") }).strict(),
+  z.object({ kind: z.literal("codex") }).strict(),
+  z.object({ kind: z.literal("external"), provider: z.string() }).strict(),
+]) satisfies z.ZodType<ModelAuth>;
+
 const compiledRuntimeModelReferenceSchema: z.ZodType<CompiledRuntimeModelReference> = z
   .object({
+    auth: modelAuthSchema,
     contextWindowTokens: z.number().int().positive().optional(),
     id: z.string(),
     source: moduleSourceRefSchema.optional(),
@@ -833,6 +842,7 @@ function cloneCompiledRuntimeModelReference(
   model: CompiledRuntimeModelReference,
 ): CompiledRuntimeModelReference {
   const clone: CompiledRuntimeModelReference = {
+    auth: cloneModelAuth(model.auth ?? modelAuthAdapterForRouting(model.routing).auth),
     id: model.id,
     routing: cloneModelRouting(model.routing),
   };

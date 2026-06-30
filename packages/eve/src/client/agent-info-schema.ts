@@ -14,7 +14,14 @@ const modelRouting = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("external"), provider: z.string() }),
 ]);
 
+const modelAuth = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("ai-gateway") }),
+  z.object({ kind: z.literal("codex") }),
+  z.object({ kind: z.literal("external"), provider: z.string() }),
+]);
+
 const modelEndpoint = z.union([
+  z.object({ kind: z.literal("codex") }),
   z.object({ kind: z.literal("external"), provider: z.string() }),
   z.object({
     kind: z.literal("gateway"),
@@ -130,6 +137,7 @@ export const AgentInfoResultSchema = z.object({
       id: z.string(),
       providerOptions: z.unknown().optional(),
       source: source.optional(),
+      auth: modelAuth.optional(),
       routing: modelRouting.optional(),
       endpoint: modelEndpoint.optional(),
     }),

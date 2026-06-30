@@ -6,6 +6,7 @@ import { normalizeAgentDefinition } from "#internal/authored-definition/core.js"
 import { normalizeJsonSchemaDefinition } from "#shared/json-schema.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
+import { classifyModelAuth } from "#internal/model-auth/adapters.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
@@ -159,11 +160,13 @@ async function normalizeAuthoredModelReference(input: {
   readonly value: PublicAgentModelDefinition;
 }): Promise<CompiledRuntimeModelReference> {
   if (typeof input.value === "string") {
+    const routing = classifyModelRouting(input.value, input.providerOptions);
     return await withCompiledRuntimeModelLimits(
       {
+        auth: classifyModelAuth(routing),
         id: formatLanguageModelGatewayId(input.value),
         providerOptions: parseProviderOptionsRecord(input.providerOptions),
-        routing: classifyModelRouting(input.value, input.providerOptions),
+        routing,
       },
       input,
     );
@@ -202,7 +205,9 @@ async function normalizeAuthoredModelReference(input: {
     );
   }
 
+  const routing = classifyModelRouting(languageModel, input.providerOptions);
   const sourceBackedModel = {
+    auth: classifyModelAuth(routing),
     id: formatLanguageModelGatewayId(languageModel),
     source: {
       exportName: source.exportName,
@@ -211,7 +216,7 @@ async function normalizeAuthoredModelReference(input: {
       sourceId: source.sourceId,
     },
     providerOptions: parseProviderOptionsRecord(input.providerOptions),
-    routing: classifyModelRouting(languageModel, input.providerOptions),
+    routing,
   };
 
   if (input.contextWindowTokens === undefined) {

@@ -1,9 +1,11 @@
 /**
- * How the agent reaches its model and whether it's ready: the build-time
- * {@link ModelRouting} composed with runtime credential presence. A client (the
+ * How the agent reaches its model and whether it's ready: the build-time model
+ * auth/routing facts composed with runtime credential presence. A client (the
  * dev TUI status bar, or any other consumer of `/eve/v1/info`) shows and gates
- * on three states:
+ * on these states:
  *
+ * - `codex`: authenticated through a Codex model adapter. eve does not inspect
+ *   provider credentials; the model call remains the readiness source of truth.
  * - `external`: a model configuration outside AI Gateway. It can use a
  *   provider or a router such as OpenRouter. eve makes no connectedness claim
  *   because it does not inspect credentials outside the gateway contract. Model
@@ -15,6 +17,7 @@
  *   that gates the "provider required" setup prompt.
  */
 export type ModelEndpointStatus =
+  | { kind: "codex" }
   | { kind: "external"; provider: string }
   | { kind: "gateway"; connected: true; credential: "api-key" | "oidc" }
   | { kind: "gateway"; connected: false };

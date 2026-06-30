@@ -166,7 +166,15 @@ describe("buildStatusLine", () => {
     expect(noModel).toBe("12,300 tokens · /deploy pending");
   });
 
-  it("renders the three model-endpoint states", () => {
+  it("renders the model-endpoint states", () => {
+    const codex = buildStatusLine({
+      model: "codex/gpt-5.5",
+      endpoint: { kind: "codex" },
+      theme: plain,
+      width: 120,
+    });
+    expect(codex).toBe("codex/gpt-5.5 · Codex");
+
     const external = buildStatusLine({
       model: "anthropic/claude-sonnet-4-6",
       endpoint: { kind: "external", provider: "anthropic" },

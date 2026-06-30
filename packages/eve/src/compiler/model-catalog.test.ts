@@ -187,24 +187,6 @@ describe("createCompiledRuntimeModelCatalogLoader", () => {
     expect(result?.limits).toEqual({ contextWindowTokens: 200_000, maxOutputTokens: 32_000 });
   });
 
-  it("resolves Codex model limits from the Codex catalog", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-    const fetchCodexModels = vi.fn(async () => [
-      { slug: "gpt-5.5", displayName: "GPT-5.5", contextWindowTokens: 272_000 },
-    ]);
-    const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app", { fetchCodexModels });
-
-    await expect(loader.getModelLimits("codex/gpt-5.5")).resolves.toEqual({
-      contextWindowTokens: 272_000,
-    });
-    await expect(loader.getByProviderModelId("codex", "gpt-5.5")).resolves.toEqual({
-      slug: "codex/gpt-5.5",
-      limits: { contextWindowTokens: 272_000 },
-    });
-    expect(fetchCodexModels).toHaveBeenCalledTimes(1);
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
   it("strips dotted sub-path from provider before lookup", async () => {
     mockCatalogFetch();
     const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");

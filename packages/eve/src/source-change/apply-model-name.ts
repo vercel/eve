@@ -1,5 +1,4 @@
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
-import { formatCodexModelId, parseCodexModelId } from "#internal/codex-model-catalog.js";
 
 /**
  * Outcome of a source-to-source edit attempt. Pure data. On success it carries
@@ -19,7 +18,6 @@ export type SourceEdit =
     };
 
 const AGENT_FACTORY = "defineAgent";
-const CODEX_FACTORY = "experimental_codex";
 
 type Program = {
   readonly body?: readonly AstNode[];
@@ -70,10 +68,9 @@ type StringLiteral = AstNode & {
  *
  * Pure transform: parses with Rolldown, finds the literal's byte span, and splices
  * only those bytes, so comments, formatting, and quote style everywhere else
- * are preserved by construction. The editable shapes are a plain `model`
- * string literal and the Codex helper's inner `experimental_codex({ model:
- * "..." })` literal. An env reference, a template, another SDK model call, or
- * a spread all opt out into the manual path instead.
+ * are preserved by construction. The editable shape is a plain `model` string
+ * literal. An env reference, a template, another SDK model call, or a spread
+ * all opt out into the manual path instead.
  */
 export async function applyModelNameToSource(
   sourceText: string,
@@ -107,51 +104,21 @@ export async function applyModelNameToSource(
   if (modelProperty === undefined) {
     return {
       kind: "bail",
-      reason:
-        "`model` is absent or is not an editable literal (string model or experimental_codex model option)",
+      reason: "`model` is absent or is not an editable string literal",
       line: lineAt(sourceText, object.start ?? 0),
     };
   }
 
   const literal = stringLiteralFromProperty(modelProperty);
-  if (literal !== undefined) {
-    if (parseCodexModelId(modelName) !== null) {
-      return {
-        kind: "bail",
-        reason:
-          "`model` is a string literal routed through AI Gateway; Codex model ids require `experimental_codex({ model: ... })`",
-        line: lineAt(sourceText, literal.start),
-      };
-    }
-    return applyStringLiteralChange(sourceText, literal, modelName, literal.value, modelName);
-  }
-
-  const codexLiteral = findCodexModelLiteral(modelProperty);
-  if (codexLiteral === undefined) {
+  if (literal === undefined) {
     return {
       kind: "bail",
-      reason:
-        "`model` is absent or is not an editable literal (string model or experimental_codex model option)",
+      reason: "`model` is absent or is not an editable string literal",
       line: lineAt(sourceText, object.start ?? 0),
     };
   }
 
-  const codexSlug = parseCodexModelId(modelName);
-  if (codexSlug === null) {
-    return {
-      kind: "bail",
-      reason: "`model` uses experimental_codex, so /model can only apply `codex/<model>` ids",
-      line: lineAt(sourceText, codexLiteral.start),
-    };
-  }
-
-  return applyStringLiteralChange(
-    sourceText,
-    codexLiteral,
-    codexSlug,
-    formatCodexModelId(codexLiteral.value),
-    modelName,
-  );
+  return applyStringLiteralChange(sourceText, literal, modelName, literal.value, modelName);
 }
 
 function applyStringLiteralChange(
@@ -253,14 +220,6 @@ function findProperty(object: ObjectExpression, key: string): AstNode | undefine
   return undefined;
 }
 
-function findStringLiteralProperty(
-  object: ObjectExpression,
-  key: string,
-): StringLiteral | undefined {
-  const property = findProperty(object, key);
-  return property === undefined ? undefined : stringLiteralFromProperty(property);
-}
-
 function stringLiteralFromProperty(property: AstNode): StringLiteral | undefined {
   const rawValue = property.value;
   if (!isAstNode(rawValue)) {
@@ -277,26 +236,6 @@ function stringLiteralFromProperty(property: AstNode): StringLiteral | undefined
     return value as StringLiteral;
   }
   return undefined;
-}
-
-function findCodexModelLiteral(property: AstNode): StringLiteral | undefined {
-  const rawValue = property.value;
-  if (!isAstNode(rawValue)) {
-    return undefined;
-  }
-  const value = unwrapExpression(rawValue);
-  if (value.type !== "CallExpression" || !isFactoryCallee(value.callee, CODEX_FACTORY)) {
-    return undefined;
-  }
-  const firstArgument = value.arguments?.[0];
-  if (firstArgument === undefined || firstArgument.type === "SpreadElement") {
-    return undefined;
-  }
-  const argument = unwrapExpression(firstArgument);
-  if (argument.type !== "ObjectExpression") {
-    return undefined;
-  }
-  return findStringLiteralProperty(argument as ObjectExpression, "model");
 }
 
 function keyMatches(key: AstNode | undefined, name: string): boolean {

@@ -2,17 +2,9 @@ import { join } from "node:path";
 
 import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
 import { discoverAgent } from "#discover/discover-agent.js";
-import {
-  type CodexModelCatalogEntry,
-  fetchCodexModelCatalog,
-  formatCodexModelId,
-  parseCodexModelId,
-  selectableCodexModels,
-} from "#internal/codex-model-catalog.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { inspectApplication } from "#services/inspect-application.js";
 import { createStaticSourceChange } from "#source-change/static-source-change.js";
-import { toErrorMessage } from "#shared/errors.js";
 
 import pc from "picocolors";
 
@@ -62,8 +54,6 @@ export interface ModelFlowDeps {
   applyModel: (input: { appRoot: string; slug: string }) => Promise<ApplyModelOutcome>;
   /** Catalog fetch behind the shared model picker. */
   selectModel?: SelectModelDeps;
-  /** Codex catalog fetch behind the Codex direct-model picker. */
-  fetchCodexModels: (signal?: AbortSignal) => Promise<readonly CodexModelCatalogEntry[]>;
   /** Reads how the model is backed right now, for the menu's provider row. */
   detectProviderStatus: typeof detectModelProviderStatus;
   /** The provider sub-flow behind the menu's provider row. */
@@ -111,7 +101,6 @@ export type ModelFlowResult =
 // The bordered panel's title ("Configure the agent model") is the menu's header,
 // so the select itself carries no message — avoiding a redundant second title.
 export const MODEL_MENU_MESSAGE = "";
-const CODEX_MODEL_PROMPT_MESSAGE = "Which Codex model should your agent use?";
 
 type ModelMenuRow = "model" | "provider" | "done";
 
@@ -156,36 +145,13 @@ function modelMenuRows(
     description: "Return to the prompt",
   };
 
-  if (isCodexRouting(routing)) {
-    return [
-      {
-        value: "model",
-        label: "Change model",
-        description: "The Codex model your agent uses",
-        ...(current !== null && { hint: current }),
-      },
-      {
-        disabled: true,
-        value: "provider",
-        label: "Model provider",
-        hint: `${pc.bold("Direct")} ${pc.blue("❉ OpenAI Codex")}`,
-        description: "⚠ Cannot be modified programmatically",
-      },
-      doneRow,
-    ];
-  }
-
   if (routing?.kind === "external") {
-    const hint =
-      routing.provider === "codex"
-        ? `${pc.bold("Direct")} ${pc.blue("❉ OpenAI Codex")}`
-        : pc.bold("Direct");
     return [
       {
         disabled: true,
         value: "provider",
         label: "Model provider",
-        hint,
+        hint: pc.bold("Direct"),
         description: "⚠ Cannot be modified programmatically",
       },
       doneRow,
@@ -288,7 +254,6 @@ export async function runModelFlow(input: {
   const deps: ModelFlowDeps = {
     readCurrentModel: readCurrentAgentModel,
     applyModel: changeAgentModel,
-    fetchCodexModels: (requestSignal) => fetchCodexModelCatalog({ signal: requestSignal }),
     detectProviderStatus: detectModelProviderStatus,
     runProviderFlow,
     ...input.deps,
@@ -312,7 +277,7 @@ export async function runModelFlow(input: {
   let nextSelection: ModelMenuRow =
     provider.kind === "unset" && routing?.kind !== "external"
       ? "provider"
-      : editable || isCodexRouting(routing)
+      : editable
         ? "model"
         : routing?.kind === "external"
           ? "done"
@@ -344,20 +309,13 @@ export async function runModelFlow(input: {
     if (pick === "done") break;
 
     if (pick === "model") {
-      const slug = isCodexRouting(routing)
-        ? await pickCodexModelFromCatalog({
-            current,
-            fetchModels: deps.fetchCodexModels,
-            prompter,
-            signal,
-          })
-        : await pickModelFromCatalog({
-            appRoot,
-            prompter,
-            current,
-            signal,
-            deps: deps.selectModel,
-          });
+      const slug = await pickModelFromCatalog({
+        appRoot,
+        prompter,
+        current,
+        signal,
+        deps: deps.selectModel,
+      });
       if (slug === undefined) {
         nextSelection = "model";
         continue;
@@ -435,41 +393,6 @@ async function pickModelFromCatalog(input: {
   return result.kind === "cancelled" ? undefined : result.state.modelId;
 }
 
-async function pickCodexModelFromCatalog(input: {
-  current: string | null;
-  fetchModels: (signal?: AbortSignal) => Promise<readonly CodexModelCatalogEntry[]>;
-  prompter: Prompter;
-  signal?: AbortSignal;
-}): Promise<string | undefined> {
-  const models = await withSpinner(input.prompter, "Loading the Codex model catalog...", () =>
-    input.fetchModels(input.signal),
-  );
-  input.signal?.throwIfAborted();
-
-  const options = selectableCodexModels(models).map((model) => ({
-    value: formatCodexModelId(model.slug),
-    label: model.displayName,
-    hint: "OpenAI Codex",
-  }));
-
-  const firstOption = options[0];
-  if (firstOption === undefined) {
-    input.prompter.log.warning("The Codex model catalog did not list any selectable models.");
-    return undefined;
-  }
-
-  return await input.prompter.select<string>({
-    message: CODEX_MODEL_PROMPT_MESSAGE,
-    options,
-    initialValue:
-      input.current !== null && options.some((option) => option.value === input.current)
-        ? input.current
-        : firstOption.value,
-    search: true,
-    placeholder: "type to search",
-  });
-}
-
 /** The outcome of applying a model slug to the agent's authored source. */
 export type ApplyModelOutcome =
   | { kind: "changed"; to: string }
@@ -538,19 +461,6 @@ async function validateModelSlug(appRoot: string, slug: string): Promise<string 
     return `\`${slug}\` isn't a provider/model id (e.g. anthropic/claude-sonnet-4.6).`;
   }
 
-  const codexSlug = parseCodexModelId(slug);
-  if (codexSlug !== null) {
-    try {
-      const models = await fetchCodexModelCatalog();
-      if (!models.some((model) => model.slug === codexSlug)) {
-        return `I couldn't confirm \`${slug}\` in the Codex model catalog, so I didn't change agent.ts.`;
-      }
-      return null;
-    } catch (error) {
-      return `I couldn't load the Codex model catalog (${toErrorMessage(error)}), so I didn't change agent.ts.`;
-    }
-  }
-
   const catalog = createCompiledRuntimeModelCatalogLoader(appRoot);
   try {
     const limits = await catalog.getModelLimits(formatLanguageModelGatewayId(slug));
@@ -595,7 +505,7 @@ export async function modelChangeRefusalForUneditableModel(
   appRoot: string,
 ): Promise<string | null> {
   const { editable, routing } = await readCurrentAgentModel(appRoot);
-  if (editable || isCodexRouting(routing)) {
+  if (editable) {
     return null;
   }
   const detail =
@@ -603,8 +513,4 @@ export async function modelChangeRefusalForUneditableModel(
       ? `the external model provider \`${routing.provider}\``
       : "an SDK model call";
   return `Model is set via ${detail} in agent.ts, not a string literal; /model can't rewrite it. Edit \`model\` in agent.ts.`;
-}
-
-function isCodexRouting(routing: ModelRouting | null): boolean {
-  return routing?.kind === "external" && routing.provider === "codex";
 }

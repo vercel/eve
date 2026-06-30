@@ -71,44 +71,6 @@ describe("applyModelNameToSource", () => {
     expect(result.nextSource).toBe(SCAFFOLD);
   });
 
-  it("rewrites the inner model literal for experimental_codex", async () => {
-    const source = `import { experimental_codex } from "eve/codex";
-import { defineAgent } from "eve";
-
-export default defineAgent({
-  model: experimental_codex({ model: "gpt-5.5" }),
-  modelContextWindowTokens: 272_000,
-});
-`;
-    const result = await applyModelNameToSource(source, "codex/gpt-5.4");
-
-    expect(result.kind).toBe("applied");
-    if (result.kind !== "applied") return;
-    expect(result.from).toBe("codex/gpt-5.5");
-    expect(result.to).toBe("codex/gpt-5.4");
-    expect(result.nextSource).toContain(`experimental_codex({ model: "gpt-5.4" })`);
-    expect(result.nextSource).toContain("modelContextWindowTokens: 272_000");
-  });
-
-  it("refuses to write a Codex model id into an AI Gateway string model", async () => {
-    const result = await applyModelNameToSource(SCAFFOLD, "codex/gpt-5.5");
-
-    expect(result.kind).toBe("bail");
-    if (result.kind !== "bail") return;
-    expect(result.reason).toContain("Codex model ids require");
-  });
-
-  it("refuses to write a Gateway model id into experimental_codex", async () => {
-    const result = await applyModelNameToSource(
-      `export default defineAgent({ model: experimental_codex({ model: "gpt-5.5" }) });\n`,
-      "openai/gpt-5.5",
-    );
-
-    expect(result.kind).toBe("bail");
-    if (result.kind !== "bail") return;
-    expect(result.reason).toContain("experimental_codex");
-  });
-
   it("bails when model is an env reference, not a literal", async () => {
     const result = await applyModelNameToSource(
       `export default defineAgent({ model: process.env.MODEL ?? "a/b" });\n`,

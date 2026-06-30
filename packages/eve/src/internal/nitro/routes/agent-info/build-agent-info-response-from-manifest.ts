@@ -28,6 +28,7 @@ import {
   type GatewayCredentialPresence,
   resolveModelEndpointStatus,
 } from "#internal/resolve-model-endpoint-status.js";
+import { modelAuthAdapterForRouting } from "#internal/model-auth/adapters.js";
 
 export function buildAgentInfoResponseFromManifest(
   data: AgentInfoManifestData,
@@ -37,6 +38,8 @@ export function buildAgentInfoResponseFromManifest(
   },
 ): AgentInfoResponse {
   const manifest = data.manifest;
+  const modelAuth =
+    manifest.config.model.auth ?? modelAuthAdapterForRouting(manifest.config.model.routing).auth;
   const authoredChannels = manifest.channels.filter((channel) => channel.kind === "channel");
   const disabledFrameworkChannels = manifest.channels
     .filter((channel) => channel.kind === "disabled")
@@ -93,8 +96,10 @@ export function buildAgentInfoResponseFromManifest(
         id: manifest.config.model.id,
         providerOptions: manifest.config.model.providerOptions,
         source: manifest.config.model.source ? toSource(manifest.config.model.source) : undefined,
+        auth: modelAuth,
         routing: manifest.config.model.routing,
         endpoint: resolveModelEndpointStatus(
+          modelAuth,
           manifest.config.model.routing,
           input.gatewayCredentials,
         ),

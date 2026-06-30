@@ -1,4 +1,4 @@
-import type { ModelRouting } from "#shared/agent-definition.js";
+import type { ModelAuth, ModelRouting } from "#shared/agent-definition.js";
 import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 
 /**
@@ -23,9 +23,13 @@ export interface GatewayCredentialPresence {
  * token.
  */
 export function resolveModelEndpointStatus(
+  auth: ModelAuth,
   routing: ModelRouting,
   credentials: GatewayCredentialPresence,
 ): ModelEndpointStatus {
+  if (auth.kind === "codex") {
+    return { kind: "codex" };
+  }
   if (routing.kind === "external") {
     return { kind: "external", provider: routing.provider };
   }

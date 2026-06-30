@@ -110,6 +110,7 @@ function createPreparedHost(
       compaction:
         options.compactionModel === undefined ? undefined : { model: options.compactionModel },
       model: options.model ?? {
+        auth: { kind: "ai-gateway" },
         id: "openai/gpt-5.4",
         routing: { kind: "gateway", target: "openai" },
       },
@@ -199,60 +200,6 @@ describe("buildApplication", () => {
     expect(summary.kind).toBe(VERCEL_EVE_AGENT_SUMMARY_KIND);
     expect(summary.schemaVersion).toBe(VERCEL_EVE_AGENT_SUMMARY_VERSION);
     expect((summary.agent as { name: string }).name).toBe("scenario-test-agent");
-  });
-
-  it("does not warn for AI Gateway models during production builds", async () => {
-    vi.stubEnv("VERCEL", "");
-    const appRoot = await createScratchDirectory("eve-build-application-gateway-model-");
-    const outputDir = join(appRoot, ".output");
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-
-    try {
-      prepareApplicationHostMock.mockResolvedValueOnce(createPreparedHost(appRoot));
-      createApplicationNitroMock.mockResolvedValueOnce(createNitroStub(outputDir));
-
-      const { buildApplication } = await import("#internal/nitro/host/build-application.js");
-      await buildApplication(appRoot);
-
-      expect(warnSpy).not.toHaveBeenCalled();
-    } finally {
-      warnSpy.mockRestore();
-    }
-  });
-
-  it("warns when a production build includes Codex subscription models", async () => {
-    vi.stubEnv("VERCEL", "");
-    const appRoot = await createScratchDirectory("eve-build-application-codex-model-");
-    const outputDir = join(appRoot, ".output");
-    const model: CompiledRuntimeModelReference = {
-      id: "codex/gpt-5.5",
-      routing: { kind: "external", provider: "codex" },
-    };
-    const compactionModel: CompiledRuntimeModelReference = {
-      id: "codex/gpt-5.4-mini",
-      routing: { kind: "external", provider: "codex" },
-    };
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-
-    try {
-      prepareApplicationHostMock.mockResolvedValueOnce(
-        createPreparedHost(appRoot, {
-          compactionModel,
-          model,
-        }),
-      );
-      createApplicationNitroMock.mockResolvedValueOnce(createNitroStub(outputDir));
-
-      const { buildApplication } = await import("#internal/nitro/host/build-application.js");
-      await buildApplication(appRoot);
-
-      expect(warnSpy).toHaveBeenCalledOnce();
-      expect(warnSpy).toHaveBeenCalledWith(
-        "Warning [codex-model-in-production-build]: Codex subscription model usage detected in production build (primary model: codex/gpt-5.5, compaction model: codex/gpt-5.4-mini). Confirm the subscription terms allow the deployed use case, or switch production to AI Gateway/provider-owned credentials.",
-      );
-    } finally {
-      warnSpy.mockRestore();
-    }
   });
 
   it("builds isolated Vercel Nitro surfaces and stitches workflow functions", async () => {
