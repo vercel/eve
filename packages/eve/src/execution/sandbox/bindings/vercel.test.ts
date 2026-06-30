@@ -581,7 +581,7 @@ describe("createVercelSandbox", () => {
 
     const backend = createTestVercelSandbox({
       createOptions: {
-        runtime: "node22",
+        ports: [3000],
         source: { snapshotId: "author-snap", type: "snapshot" },
       },
       loadSandboxModule: async () => sandboxModule as never,
@@ -596,7 +596,7 @@ describe("createVercelSandbox", () => {
     expect(create.mock.calls[0]?.[0]).toMatchObject({
       name: "session-key",
       persistent: true,
-      runtime: "node22",
+      ports: [3000],
       source: { snapshotId: "author-snap", type: "snapshot" },
     });
     expect(sessionSandbox.snapshot).not.toHaveBeenCalled();
@@ -658,43 +658,6 @@ describe("createVercelSandbox", () => {
       timeout: 600_000,
     });
     expect(templateSandbox.update).toHaveBeenCalledWith({ networkPolicy: "deny-all" });
-  });
-
-  it("forwards runtime to template create but strips it from session create", async () => {
-    const templateSandbox = createMockSandbox({ name: "template" });
-    const sessionSandbox = createMockSandbox({ name: "session" });
-    const create = vi
-      .fn()
-      .mockResolvedValueOnce(templateSandbox)
-      .mockResolvedValueOnce(sessionSandbox);
-    const sandboxModule = {
-      Sandbox: {
-        create,
-        get: vi.fn().mockResolvedValue(null),
-      },
-    };
-
-    const backend = createTestVercelSandbox({
-      createOptions: { runtime: "node22" },
-      loadSandboxModule: async () => sandboxModule as never,
-    });
-
-    await backend.prewarm({
-      runtimeContext: { appRoot: "/tmp/test-app-root" },
-      seedFiles: [],
-      templateKey: "template-key",
-    });
-
-    await backend.create({
-      runtimeContext: { appRoot: "/tmp/test-app-root" },
-      sessionKey: "session-key",
-      templateKey: "template-key",
-    });
-
-    expect(create).toHaveBeenCalledTimes(2);
-    const [templateArgs, sessionArgs] = create.mock.calls;
-    expect(templateArgs?.[0]).toMatchObject({ runtime: "node22" });
-    expect(sessionArgs?.[0]).not.toHaveProperty("runtime");
   });
 
   it("forwards author source to template create as the base layer", async () => {
