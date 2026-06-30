@@ -371,6 +371,17 @@ describe("createExecutionNodeStep", () => {
           subagentName: "child-agent",
         },
       ],
+      dispatchActions: [
+        {
+          callId: "call-subagent-1",
+          description: "Delegate work to the child agent.",
+          input: { task: "Delegate this." },
+          kind: "subagent-call",
+          name: "child-agent",
+          nodeId: "child-node",
+          subagentName: "child-agent",
+        },
+      ],
       event: {
         sequence: 0,
         stepIndex: 0,

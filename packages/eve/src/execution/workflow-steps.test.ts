@@ -9,6 +9,7 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import { serializeContext } from "#context/serialize.js";
 import { setPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
+import { DEFAULT_MAX_SUBAGENT_DEPTH, setSubagentDepth } from "#harness/subagent-limits.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -282,6 +283,85 @@ describe("dispatchTurnStep", () => {
 });
 
 describe("dispatchRuntimeActionsStep", () => {
+  it("rejects subagent calls at the default maximum depth", async () => {
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {
+        subagentsByNodeId: new Map(),
+      },
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+
+    const session = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "call-1",
+          description: "Launch another copy.",
+          input: { message: "keep going" },
+          kind: "subagent-call",
+          name: "agent",
+          nodeId: "__root__",
+          subagentName: "agent",
+        },
+      ],
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: setSubagentDepth({
+        depth: DEFAULT_MAX_SUBAGENT_DEPTH,
+        session: createStubSession({
+          continuationToken: "http:parent",
+          sessionId: "parent-session",
+        }),
+      }),
+    });
+    installSessionStoreMocks([session]);
+
+    const sessionState = createStubSessionState({
+      continuationToken: "http:parent",
+      sessionId: "parent-session",
+    });
+
+    await expect(
+      dispatchRuntimeActionsStep({
+        parentContinuationToken: "turn-inbox",
+        parentWritable: createTestWritable(),
+        serializedContext: createSerializedContext(),
+        sessionState,
+      }),
+    ).resolves.toEqual({
+      results: [
+        {
+          callId: "call-1",
+          isError: true,
+          kind: "subagent-result",
+          output: {
+            code: "EVE_SUBAGENT_DEPTH_LIMIT_EXCEEDED",
+            message:
+              "Maximum subagent depth reached. Do not retry this subagent call; complete the work in this session or return a partial result.",
+          },
+          subagentName: "agent",
+        },
+      ],
+      sessionState,
+    });
+    expect(startMock).not.toHaveBeenCalled();
+    expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE)).toBeUndefined();
+  });
+
   it("starts subagent child drivers on the latest deployment", async () => {
     vi.stubEnv("VERCEL_ENV", "production");
     const compiledArtifactsSource = {} as never;
@@ -371,6 +451,9 @@ describe("dispatchRuntimeActionsStep", () => {
             "eve.channel": expect.objectContaining({
               kind: "subagent",
               state: expect.objectContaining({ parentContinuationToken: "turn-inbox" }),
+            }),
+            "eve.parentSession": expect.objectContaining({
+              subagentDepth: 1,
             }),
           }),
         }),
@@ -469,31 +552,32 @@ describe("dispatchRuntimeActionsStep", () => {
       sessionId: "parent-session",
     });
 
-    await expect(
-      dispatchRuntimeActionsStep({
-        callbackBaseUrl: "https://caller.example.com",
-        parentContinuationToken: "turn-inbox",
-        parentWritable: createTestWritable(),
-        serializedContext: createSerializedContext(),
-        sessionState,
-      }),
-    ).resolves.toEqual({
-      results: [
-        {
-          callId: "call-1",
-          isError: true,
-          kind: "subagent-result",
-          output: {
-            code: "REMOTE_AGENT_START_FAILED",
-            message: 'Remote agent "research" create-session request failed with HTTP 503.',
-          },
-          subagentName: "research",
-        },
-      ],
-      // A remote-agent dispatch failure does not mutate the session,
-      // so the step returns the input sessionState unchanged.
+    const result = await dispatchRuntimeActionsStep({
+      callbackBaseUrl: "https://caller.example.com",
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
       sessionState,
     });
+
+    expect(result.results).toEqual([
+      {
+        callId: "call-1",
+        isError: true,
+        kind: "subagent-result",
+        output: {
+          code: "REMOTE_AGENT_START_FAILED",
+          message: 'Remote agent "research" create-session request failed with HTTP 503.',
+        },
+        subagentName: "research",
+      },
+    ]);
+    expect(result.sessionState).toEqual(
+      expect.objectContaining({
+        hasProxyInputRequests: false,
+        sessionId: "parent-session",
+      }),
+    );
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).callback.token).toBe(
       "turn-inbox",
     );

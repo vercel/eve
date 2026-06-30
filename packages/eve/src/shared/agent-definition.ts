@@ -97,6 +97,25 @@ export interface PublicAgentCompactionDefinition {
 }
 
 /**
+ * Limits for agent-to-agent delegation. These apply to the built-in `agent`
+ * tool, authored subagents, remote agents, and subagent calls launched by
+ * Workflow.
+ */
+export interface AgentSubagentLimitsDefinition {
+  /**
+   * Maximum depth for nested subagent calls. Root sessions are depth 0.
+   */
+  readonly maxDepth?: number;
+}
+
+/**
+ * Runtime safety limits authored in `agent.ts`.
+ */
+export interface AgentLimitsDefinition {
+  readonly subagents?: AgentSubagentLimitsDefinition;
+}
+
+/**
  * Experimental, opt-in agent capabilities authored in `agent.ts`.
  *
  * These options are unstable and may change or be removed in any release.
@@ -158,6 +177,7 @@ export type InternalAgentDefinition = {
   build?: AgentBuildDefinition;
   compaction?: InternalAgentCompactionDefinition;
   experimental?: AgentExperimentalDefinition;
+  limits?: AgentLimitsDefinition;
   model: InternalAgentModelDefinition;
   outputSchema?: JsonObject;
   reasoning?: AgentReasoningDefinition;
@@ -190,6 +210,10 @@ export type PublicAgentDefinition = {
    * AI SDK-compatible language model.
    */
   readonly model: PublicAgentModelDefinition;
+  /**
+   * Runtime safety limits. Omit to use eve's default guardrails.
+   */
+  readonly limits?: AgentLimitsDefinition;
   /**
    * Optional override for the primary model's context window size, in tokens.
    *

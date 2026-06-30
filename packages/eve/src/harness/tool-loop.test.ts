@@ -35,6 +35,7 @@ import {
 } from "#harness/authorization.js";
 import { hasDeferredStepInput, setPendingInputBatch } from "#harness/input-requests.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
+import { setSubagentLimitState } from "#harness/subagent-limits.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 import {
@@ -590,6 +591,74 @@ describe("createToolLoopHarness", () => {
     const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
     expect(agentCall).toBeDefined();
     expect(agentCall!.tools).toHaveProperty("add");
+    expect(agentCall!.tools).not.toHaveProperty("Workflow");
+  });
+
+  it("hides subagent tools from the model once the depth cap is reached", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Done.", role: "assistant" }] },
+      text: "Done.",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const config = createTestConfig("conversation", undefined, {
+      tools: new Map([
+        [
+          "add",
+          {
+            description: "Adds numbers",
+            execute: vi.fn().mockResolvedValue("42"),
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "add",
+          },
+        ],
+        [
+          "delegate",
+          {
+            description: "Delegate to a local subagent.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "delegate",
+            runtimeAction: {
+              kind: "subagent-call",
+              nodeId: "workers",
+              subagentName: "worker",
+            },
+          },
+        ],
+        [
+          "remote_reviewer",
+          {
+            description: "Delegate to a remote subagent.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "remote_reviewer",
+            runtimeAction: {
+              kind: "remote-agent-call",
+              nodeId: "remote-reviewer",
+              remoteAgentName: "reviewer",
+              subagentName: "reviewer",
+            },
+          },
+        ],
+      ]),
+      workflow: true,
+    });
+    const session = setSubagentLimitState({
+      depth: 1,
+      limits: {
+        maxDepth: 1,
+      },
+      session: createTestSession(),
+    });
+
+    await createToolLoopHarness(config)(session, { message: "Hi" });
+
+    const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+    expect(agentCall).toBeDefined();
+    expect(agentCall!.tools).toHaveProperty("add");
+    expect(agentCall!.tools).not.toHaveProperty("delegate");
+    expect(agentCall!.tools).not.toHaveProperty("remote_reviewer");
     expect(agentCall!.tools).not.toHaveProperty("Workflow");
   });
 

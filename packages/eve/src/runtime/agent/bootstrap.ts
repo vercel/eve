@@ -2,7 +2,10 @@ import { composeRuntimeBasePrompt } from "#runtime/prompt/compose.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import type { ResolvedAgent } from "#runtime/types.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
-import type { InternalAgentModelDefinition } from "#shared/agent-definition.js";
+import type {
+  AgentLimitsDefinition,
+  InternalAgentModelDefinition,
+} from "#shared/agent-definition.js";
 
 /**
  * Fixed internal model reference used only by the framework-owned bootstrap
@@ -21,6 +24,7 @@ export type RuntimeModelReference = Readonly<InternalAgentModelDefinition>;
 export interface RuntimeTurnAgent {
   readonly id: string;
   readonly instructions: readonly string[];
+  readonly limits?: AgentLimitsDefinition;
   /**
    * Optional model used only for compaction summaries.
    *
@@ -60,6 +64,7 @@ export function createResolvedRuntimeTurnAgent(input: {
       toolsAvailable: input.tools.length > 0,
       workspaceSpec: agent.workspaceSpec,
     }),
+    limits: cloneAgentLimits(agent.config.limits),
     compactionModel: agent.config.compaction?.model,
     model: agent.config.model,
     nodeId: input.nodeId,
@@ -67,5 +72,22 @@ export function createResolvedRuntimeTurnAgent(input: {
     reasoning: agent.config.reasoning,
     tools: [...input.tools],
     workspaceSpec: agent.workspaceSpec,
+  };
+}
+
+function cloneAgentLimits(
+  limits: AgentLimitsDefinition | undefined,
+): AgentLimitsDefinition | undefined {
+  if (limits === undefined) {
+    return undefined;
+  }
+
+  return {
+    subagents:
+      limits.subagents === undefined
+        ? undefined
+        : {
+            maxDepth: limits.subagents.maxDepth,
+          },
   };
 }

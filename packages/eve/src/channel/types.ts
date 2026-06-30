@@ -6,6 +6,7 @@ import type { RuntimeActionResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { JsonObject } from "#shared/json.js";
+import type { AgentSubagentLimitsDefinition } from "#shared/agent-definition.js";
 
 export type { ContextAccessor } from "#context/key.js";
 export type { ChannelInstrumentationProjection } from "#channel/instrumentation.js";
@@ -44,6 +45,12 @@ export interface SessionParent {
   readonly callId: string;
   readonly rootSessionId: string;
   readonly sessionId: string;
+  /**
+   * Depth of this child in the delegated subagent tree. Root sessions have
+   * depth 0 and omit this field; first-level children set it to 1.
+   */
+  readonly subagentDepth?: number;
+  readonly subagentLimits?: AgentSubagentLimitsDefinition;
   readonly turn: SessionTurn;
 }
 

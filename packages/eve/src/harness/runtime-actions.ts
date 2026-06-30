@@ -40,9 +40,15 @@ interface PendingRuntimeActionEventMetadata {
 interface PendingRuntimeActionBatch {
   readonly actions: readonly RuntimeActionRequest[];
   readonly childContinuationTokens?: Readonly<Record<string, string>>;
+  readonly dispatchActions?: readonly RuntimeActionRequest[];
   readonly event: PendingRuntimeActionEventMetadata;
+  readonly prefilledResults?: readonly RuntimeActionResult[];
   readonly responseMessages: readonly ModelMessage[];
 }
+
+type MutablePendingRuntimeActionBatch = {
+  -readonly [Key in keyof PendingRuntimeActionBatch]: PendingRuntimeActionBatch[Key];
+};
 
 /**
  * Outcome of resolving a pending runtime-action batch.
@@ -67,6 +73,8 @@ export function getPendingRuntimeActionBatch(
 
   if (
     !Array.isArray(batch.actions) ||
+    (batch.dispatchActions !== undefined && !Array.isArray(batch.dispatchActions)) ||
+    (batch.prefilledResults !== undefined && !Array.isArray(batch.prefilledResults)) ||
     !Array.isArray(batch.responseMessages) ||
     typeof batch.event !== "object" ||
     batch.event === null
@@ -98,16 +106,28 @@ export function clearPendingRuntimeActionBatch(session: HarnessSession): Harness
  */
 export function setPendingRuntimeActionBatch(input: {
   readonly actions: readonly RuntimeActionRequest[];
+  readonly dispatchActions?: readonly RuntimeActionRequest[];
   readonly event: PendingRuntimeActionEventMetadata;
+  readonly prefilledResults?: readonly RuntimeActionResult[];
   readonly responseMessages: readonly ModelMessage[];
   readonly session: HarnessSession;
 }): HarnessSession {
   const state = { ...input.session.state };
-  state[PENDING_RUNTIME_ACTION_BATCH_KEY] = {
+  const batch: MutablePendingRuntimeActionBatch = {
     actions: [...input.actions],
     event: input.event,
     responseMessages: [...input.responseMessages],
   } satisfies PendingRuntimeActionBatch;
+
+  if (input.dispatchActions !== undefined) {
+    batch.dispatchActions = [...input.dispatchActions];
+  }
+
+  if (input.prefilledResults !== undefined && input.prefilledResults.length > 0) {
+    batch.prefilledResults = [...input.prefilledResults];
+  }
+
+  state[PENDING_RUNTIME_ACTION_BATCH_KEY] = batch satisfies PendingRuntimeActionBatch;
 
   return { ...input.session, state };
 }

@@ -1,6 +1,8 @@
 import type { DurableSession } from "#execution/durable-session-store.js";
 import type { HarnessSession, SessionToolDefinition } from "#harness/types.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
+import { resolveEffectiveSubagentLimits, setSubagentLimitState } from "#harness/subagent-limits.js";
+import type { AgentSubagentLimitsDefinition } from "#shared/agent-definition.js";
 
 const DEFAULT_COMPACTION_RECENT_WINDOW_SIZE = 10;
 const DEFAULT_COMPACTION_THRESHOLD_PERCENT = 0.9;
@@ -51,6 +53,8 @@ export interface CreateSessionInput {
    */
   readonly rootSessionId?: string;
   readonly sessionId: string;
+  readonly subagentDepth?: number;
+  readonly subagentLimits?: AgentSubagentLimitsDefinition;
   readonly turnAgent: RuntimeTurnAgent;
   readonly outputSchema?: HarnessSession["outputSchema"];
 }
@@ -86,7 +90,14 @@ export function createSession(input: CreateSessionInput): HarnessSession {
     session.outputSchema = input.outputSchema;
   }
 
-  return session;
+  return setSubagentLimitState({
+    depth: input.subagentDepth,
+    limits: resolveEffectiveSubagentLimits({
+      authored: turnAgent.limits?.subagents,
+      inherited: input.subagentLimits,
+    }),
+    session,
+  });
 }
 
 /**

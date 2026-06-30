@@ -66,6 +66,7 @@ export async function compileAgentConfig(
     };
     description?: string;
     experimental?: CompiledAgentDefinition["experimental"];
+    limits?: CompiledAgentDefinition["limits"];
     model: CompiledRuntimeModelReference;
     name: string;
     outputSchema?: JsonObject;
@@ -93,6 +94,10 @@ export async function compileAgentConfig(
           ? undefined
           : [...definition.build.externalDependencies],
     };
+  }
+
+  if (definition.limits !== undefined) {
+    compiledConfig.limits = normalizeLimitsDefinition(definition.limits);
   }
 
   if (definition.outputSchema !== undefined) {
@@ -129,6 +134,23 @@ export async function compileAgentConfig(
   }
 
   return compiledConfig;
+}
+
+function normalizeLimitsDefinition(
+  limits: CompiledAgentDefinition["limits"],
+): CompiledAgentDefinition["limits"] {
+  if (limits === undefined) {
+    return undefined;
+  }
+
+  return {
+    subagents:
+      limits.subagents === undefined
+        ? undefined
+        : {
+            maxDepth: limits.subagents.maxDepth,
+          },
+  };
 }
 
 function normalizeExperimentalDefinition(

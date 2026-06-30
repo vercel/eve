@@ -42,6 +42,7 @@ import {
 import { hydrateDurableSession } from "#execution/session.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#execution/subagent-tool.js";
 import { createWorkflowRuntime, workflowEntryReference } from "#execution/workflow-runtime.js";
+import { applySubagentLimits } from "#harness/subagent-limits.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 
@@ -63,7 +64,7 @@ export async function dispatchRuntimeActionsStep(input: {
   const durableSession = await readDurableSession(input.sessionState);
   const batch = getPendingRuntimeActionBatch(durableSession.state);
 
-  if (batch === undefined || batch.actions.length === 0) {
+  if (batch === undefined) {
     return { results: [], sessionState: input.sessionState };
   }
 
@@ -85,11 +86,29 @@ export async function dispatchRuntimeActionsStep(input: {
 
   const adapterCtx = buildAdapterContext(adapter, ctx);
 
-  let nextSession = session;
-  const results: RuntimeSubagentResultActionResult[] = [];
+  const prefiltered = batch.dispatchActions !== undefined;
+  const dispatchActions = batch.dispatchActions ?? batch.actions;
+  const results: RuntimeSubagentResultActionResult[] = [
+    ...(batch.prefilledResults ?? []).filter(
+      (result): result is RuntimeSubagentResultActionResult => result.kind === "subagent-result",
+    ),
+  ];
+  const limitedBatch = prefiltered
+    ? { actions: dispatchActions, rejectedResults: [], session }
+    : applySubagentLimits({
+        actions: dispatchActions,
+        session,
+        step: {
+          stepIndex: batch.event.stepIndex,
+          turnId: batch.event.turnId,
+        },
+      });
+  let nextSession = limitedBatch.session;
+
+  results.push(...limitedBatch.rejectedResults);
 
   try {
-    for (const action of batch.actions) {
+    for (const action of limitedBatch.actions) {
       let childSessionId: string;
       let name: string;
       let remote: { readonly url: string } | undefined;

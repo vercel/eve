@@ -8,7 +8,7 @@ import type {
   SessionCapabilities,
 } from "#channel/types.js";
 import { coalesceDeliveries } from "#harness/messages.js";
-import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
+import { readChannelRequestId, readParentLineage } from "#execution/eve-workflow-attributes.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { notifyDelegatedParentStep } from "#execution/delegated-parent-notification.js";
@@ -85,15 +85,17 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
   try {
     // Derived once and reused for createSession + tag emission so the
     // chain-root id can never drift between persisted session and tags.
-    const rootSessionIdFromParent = readRootSessionId(input.serializedContext);
+    const parentLineage = readParentLineage(input.serializedContext);
 
     const { state: sessionState } = await createSessionStep({
       compiledArtifactsSource: serializedBundle.source,
       continuationToken,
       nodeId: serializedBundle.nodeId,
       outputSchema: input.input.outputSchema,
-      rootSessionId: rootSessionIdFromParent,
+      rootSessionId: parentLineage.rootSessionId,
       sessionId,
+      subagentDepth: parentLineage.subagentDepth,
+      subagentLimits: parentLineage.subagentLimits,
     });
 
     return await runDriverLoop({

@@ -85,6 +85,10 @@ describe("buildSubagentRunInput", () => {
       callId: "call-1",
       rootSessionId: "parent-session",
       sessionId: "parent-session",
+      subagentDepth: 1,
+      subagentLimits: {
+        maxDepth: 4,
+      },
       turn: { id: "turn-17", sequence: 5 },
     });
     expect(runInput.continuationToken).toBe(childContinuationToken);
@@ -153,6 +157,10 @@ describe("buildSubagentRunInput", () => {
       callId: "call-1",
       rootSessionId: "root-session-from-top",
       sessionId: "intermediate-session",
+      subagentDepth: 1,
+      subagentLimits: {
+        maxDepth: 4,
+      },
       turn: { id: "turn-99", sequence: 1 },
     });
   });

@@ -27,6 +27,7 @@
 
 import { ChannelRequestIdKey } from "#context/keys.js";
 import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
+import type { AgentSubagentLimitsDefinition } from "#shared/agent-definition.js";
 import { isNonEmptyString } from "#shared/guards.js";
 
 /**
@@ -51,6 +52,8 @@ interface SerializedSessionParent {
   readonly callId?: unknown;
   readonly sessionId?: unknown;
   readonly rootSessionId?: unknown;
+  readonly subagentDepth?: unknown;
+  readonly subagentLimits?: unknown;
   readonly turn?: {
     readonly id?: unknown;
   };
@@ -63,6 +66,8 @@ export interface SessionParentLineage {
   readonly callId?: string;
   readonly rootSessionId?: string;
   readonly sessionId?: string;
+  readonly subagentDepth?: number;
+  readonly subagentLimits?: AgentSubagentLimitsDefinition;
   readonly turnId?: string;
 }
 
@@ -88,13 +93,39 @@ export function readParentLineage(
   const callId = parent?.callId;
   const rootSessionId = parent?.rootSessionId;
   const sessionId = parent?.sessionId;
+  const subagentDepth = parent?.subagentDepth;
+  const subagentLimits = parent?.subagentLimits;
   const turnId = parent?.turn?.id;
   return {
     callId: isNonEmptyString(callId) ? callId : undefined,
     rootSessionId: isNonEmptyString(rootSessionId) ? rootSessionId : undefined,
     sessionId: isNonEmptyString(sessionId) ? sessionId : undefined,
+    subagentDepth:
+      typeof subagentDepth === "number" && Number.isInteger(subagentDepth) && subagentDepth >= 0
+        ? subagentDepth
+        : undefined,
+    subagentLimits: parseSubagentLimits(subagentLimits),
     turnId: isNonEmptyString(turnId) ? turnId : undefined,
   };
+}
+
+function parseSubagentLimits(value: unknown): AgentSubagentLimitsDefinition | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as { readonly maxDepth?: unknown };
+  const maxDepth = parsePositiveInteger(record.maxDepth);
+
+  if (maxDepth === undefined) {
+    return undefined;
+  }
+
+  return { maxDepth };
+}
+
+function parsePositiveInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
 /**

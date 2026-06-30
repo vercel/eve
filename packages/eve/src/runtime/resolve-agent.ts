@@ -148,6 +148,7 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
   const config: {
     compaction?: ResolvedAgent["config"]["compaction"];
     experimental?: ResolvedAgent["config"]["experimental"];
+    limits?: ResolvedAgent["config"]["limits"];
     model: ResolvedAgent["config"]["model"];
     name: string;
     outputSchema?: ResolvedAgent["config"]["outputSchema"];
@@ -215,6 +216,17 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
         manifest.config.experimental.workflow === undefined
           ? undefined
           : { world: manifest.config.experimental.workflow.world },
+    };
+  }
+
+  if (manifest.config.limits !== undefined) {
+    config.limits = {
+      subagents:
+        manifest.config.limits.subagents === undefined
+          ? undefined
+          : {
+              maxDepth: manifest.config.limits.subagents.maxDepth,
+            },
     };
   }
 

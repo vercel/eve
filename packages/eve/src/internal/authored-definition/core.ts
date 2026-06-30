@@ -41,6 +41,7 @@ export function normalizeAgentDefinition(
       "compaction",
       "description",
       "experimental",
+      "limits",
       "model",
       "modelContextWindowTokens",
       "modelOptions",
@@ -71,6 +72,10 @@ export function normalizeAgentDefinition(
 
   if (record.experimental !== undefined) {
     definition.experimental = normalizeAgentExperimentalDefinition(record.experimental, message);
+  }
+
+  if (record.limits !== undefined) {
+    definition.limits = normalizeAgentLimitsDefinition(record.limits, message);
   }
 
   if (record.modelOptions !== undefined) {
@@ -121,6 +126,41 @@ function expectPositiveInteger(value: unknown, message: string): number {
   }
 
   return value;
+}
+
+function normalizeAgentLimitsDefinition(
+  value: unknown,
+  message: string,
+): NonNullable<NormalizedAgentDefinition["limits"]> {
+  const record = expectObjectRecord(value, message);
+  expectOnlyKnownKeys(record, ["subagents"], message);
+  const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["limits"]>> = {};
+
+  if (record.subagents !== undefined) {
+    normalizedDefinition.subagents = normalizeAgentSubagentLimitsDefinition(
+      record.subagents,
+      message,
+    );
+  }
+
+  return normalizedDefinition;
+}
+
+function normalizeAgentSubagentLimitsDefinition(
+  value: unknown,
+  message: string,
+): NonNullable<NonNullable<NormalizedAgentDefinition["limits"]>["subagents"]> {
+  const record = expectObjectRecord(value, message);
+  expectOnlyKnownKeys(record, ["maxDepth"], message);
+  const normalizedDefinition: Mutable<
+    NonNullable<NonNullable<NormalizedAgentDefinition["limits"]>["subagents"]>
+  > = {};
+
+  if (record.maxDepth !== undefined) {
+    normalizedDefinition.maxDepth = expectPositiveInteger(record.maxDepth, message);
+  }
+
+  return normalizedDefinition;
 }
 
 function normalizeAgentBuildDefinition(

@@ -5,6 +5,7 @@ import {
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
 import { createSession } from "#execution/session.js";
+import type { AgentSubagentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 
 /**
@@ -30,6 +31,8 @@ export async function createSessionStep(input: {
   readonly nodeId?: string;
   readonly rootSessionId?: string;
   readonly sessionId: string;
+  readonly subagentDepth?: number;
+  readonly subagentLimits?: AgentSubagentLimitsDefinition;
 }): Promise<CreateSessionStepResult> {
   "use step";
 
@@ -46,6 +49,8 @@ export async function createSessionStep(input: {
     outputSchema: input.outputSchema,
     rootSessionId: input.rootSessionId,
     sessionId: input.sessionId,
+    subagentDepth: input.subagentDepth,
+    subagentLimits: input.subagentLimits,
     turnAgent: bundle.turnAgent,
   });
 

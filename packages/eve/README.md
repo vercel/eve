@@ -116,6 +116,21 @@ export default defineAgent({
 });
 ```
 
+eve applies default subagent guardrails to the built-in `agent` tool, authored
+subagents, remote agents, and Workflow-launched subagent calls. Raise the
+maximum depth explicitly when an agent needs broader delegation:
+
+```ts
+export default defineAgent({
+  model: "openai/gpt-5.4-mini",
+  limits: {
+    subagents: {
+      maxDepth: 6,
+    },
+  },
+});
+```
+
 ## Quick Start
 
 ```bash

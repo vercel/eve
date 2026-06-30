@@ -9,6 +9,7 @@ import {
   projectToDurableSession,
   refreshSessionFromTurnAgent,
 } from "#execution/session.js";
+import { getEffectiveSubagentLimits } from "#harness/subagent-limits.js";
 
 function createTestTurnAgent(overrides?: Partial<RuntimeTurnAgent>): RuntimeTurnAgent {
   return {
@@ -224,6 +225,45 @@ describe("createSession", () => {
 
     expect(durable.agent).toEqual({ system: session.agent.system });
     expect(hydrated.agent.reasoning).toBe("high");
+  });
+
+  it("stores authored subagent limit overrides on new sessions", () => {
+    const session = createSession({
+      continuationToken: "root-token",
+      sessionId: "sess-root",
+      turnAgent: createTestTurnAgent({
+        limits: {
+          subagents: {
+            maxDepth: 6,
+          },
+        },
+      }),
+    });
+
+    expect(getEffectiveSubagentLimits(session.state)).toEqual({
+      maxDepth: 6,
+    });
+  });
+
+  it("inherits parent subagent limits unless the child tightens them", () => {
+    const session = createSession({
+      continuationToken: "child-token",
+      sessionId: "sess-child",
+      subagentLimits: {
+        maxDepth: 6,
+      },
+      turnAgent: createTestTurnAgent({
+        limits: {
+          subagents: {
+            maxDepth: 10,
+          },
+        },
+      }),
+    });
+
+    expect(getEffectiveSubagentLimits(session.state)).toEqual({
+      maxDepth: 6,
+    });
   });
 });
 

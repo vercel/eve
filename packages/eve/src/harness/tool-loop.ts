@@ -33,6 +33,7 @@ import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js
 import { toErrorMessage } from "#shared/errors.js";
 import {
   createActionResultEvent,
+  createActionsRequestedEvent,
   createCompactionCompletedEvent,
   createCompactionRequestedEvent,
   createInputRequestedEvent,
@@ -136,6 +137,7 @@ import {
   resolvePendingRuntimeActions,
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
+import { applySubagentLimits, filterAdvertisedSubagentTools } from "#harness/subagent-limits.js";
 import {
   buildStepHooks,
   emitStepActions,
@@ -640,12 +642,16 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         ? [...modelMessages, { role: "user" as const, content: opts.trailingUserNote }]
         : modelMessages;
 
+      const advertisedTools = filterAdvertisedSubagentTools({
+        session,
+        tools: config.tools,
+      });
       const flatTools = await buildToolSetWithProviderTools({
         approvedTools,
         capabilities: config.capabilities,
         disabledProviderTools: opts.disabledProviderTools,
         modelReference: session.agent.modelReference,
-        tools: config.tools,
+        tools: advertisedTools,
       });
 
       if (ctx !== undefined) {
@@ -671,13 +677,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           ? (
               await applyWorkflowTool({
                 continuationSecurity: getWorkflowContinuationSecurity(session),
-                harnessTools: config.tools,
+                harnessTools: advertisedTools,
                 lifecycle:
                   emit !== undefined
                     ? createWorkflowLifecycle({
                         emit,
                         emissionState,
-                        tools: config.tools,
+                        tools: advertisedTools,
                       })
                     : undefined,
                 tools: flatTools,
@@ -725,7 +731,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       const executeModelCall = async (): Promise<HarnessStepResult> => {
         if (emit) {
-          const excludedActionToolNames = new Set([ASK_QUESTION_TOOL_NAME, FINAL_OUTPUT_TOOL_NAME]);
+          const excludedActionToolNames = getHarnessOnlyToolNames(config.tools);
           const streamResult = await agent.stream({ messages: callMessages });
           const {
             emittedActionCallIds,
@@ -1345,6 +1351,18 @@ function buildEmptyResponseNudge(emptyDeliveryEnabled: boolean): string {
   return `${EMPTY_RESPONSE_NUDGE} If the current task explicitly requires conditional delivery and there is nothing to report, reply with exactly ${EMPTY_DELIVERY_SENTINEL}.`;
 }
 
+function getHarnessOnlyToolNames(tools: HarnessToolMap): ReadonlySet<string> {
+  const excluded = new Set<string>([ASK_QUESTION_TOOL_NAME, FINAL_OUTPUT_TOOL_NAME]);
+
+  for (const [toolName, definition] of tools) {
+    if (definition.runtimeAction !== undefined) {
+      excluded.add(toolName);
+    }
+  }
+
+  return excluded;
+}
+
 /**
  * Recovers a model call that completed without content (see
  * {@link EmptyModelResponseError}) by reissuing the same call once, with
@@ -1474,6 +1492,27 @@ async function handleStepResult(input: {
     );
 
   if (pendingRuntimeActions.length > 0) {
+    const pendingSession: HarnessSession = { ...baseSession, history: [...promptMessages] };
+    const limitedRuntimeActions = applySubagentLimits({
+      actions: pendingRuntimeActions,
+      session: pendingSession,
+      step: {
+        stepIndex: emissionState.stepIndex,
+        turnId: emissionState.turnId,
+      },
+    });
+
+    if (emit !== undefined && limitedRuntimeActions.actions.length > 0) {
+      await emit(
+        createActionsRequestedEvent({
+          actions: limitedRuntimeActions.actions,
+          sequence: emissionState.sequence,
+          stepIndex: emissionState.stepIndex,
+          turnId: emissionState.turnId,
+        }),
+      );
+    }
+
     // Stamp the live emission state onto the parked session so the
     // resume turn is classified as a continuation (turnId set), not a
     // fresh turn. Every other park path does this; without it the
@@ -1485,13 +1524,15 @@ async function handleStepResult(input: {
       session: setHarnessEmissionState(
         setPendingRuntimeActionBatch({
           actions: pendingRuntimeActions,
+          dispatchActions: limitedRuntimeActions.actions,
           event: {
             sequence: emissionState.sequence,
             stepIndex: emissionState.stepIndex,
             turnId: emissionState.turnId,
           },
+          prefilledResults: limitedRuntimeActions.rejectedResults,
           responseMessages,
-          session: { ...baseSession, history: [...promptMessages] },
+          session: limitedRuntimeActions.session,
         }),
         emissionState,
       ),
