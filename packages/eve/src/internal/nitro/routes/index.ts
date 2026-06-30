@@ -17,8 +17,8 @@ const DEPLOYMENT_URL_PLACEHOLDER = "{{DEPLOYMENT_URL}}";
  * This is intentional: the root URL of a deployment is reachable by
  * anyone on the public internet, and the deployment must not advertise
  * its agent's configuration to unauthenticated callers. Inspection JSON
- * (model id, instructions, tools, skills, etc.) lives behind the default
- * local-dev / Vercel OIDC auth chain at `/eve/v1/info`.
+ * (model id, instructions, tools, skills, etc.) lives behind the resolved
+ * eve channel auth policy at `/eve/v1/info`.
  *
  * The page also loads zero external assets — no fonts, no scripts, no
  * images, no analytics beacons — so it cannot leak the deployment's

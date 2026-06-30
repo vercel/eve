@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { HandleMessageStreamEvent } from "../src/protocol/message.js";
 import type { RouteHandlerArgs, GetSessionFn } from "../src/channel/routes.js";
 import type { Session } from "../src/channel/session.js";
+import { EVE_MESSAGE_STREAM_ROUTE_PATTERN } from "../src/protocol/routes.js";
 import { none } from "../src/public/channels/auth.js";
 import { eveChannel } from "../src/public/channels/eve.js";
 
@@ -19,8 +20,10 @@ import { eveChannel } from "../src/public/channels/eve.js";
 
 function createGetHandler() {
   const channel = eveChannel({ auth: none() });
-  const getRoute = channel.routes.find((r) => r.method === "GET");
-  if (!getRoute) throw new Error("No GET route found");
+  const getRoute = channel.routes.find(
+    (r) => r.method === "GET" && r.path === EVE_MESSAGE_STREAM_ROUTE_PATTERN,
+  );
+  if (!getRoute) throw new Error("No stream GET route found");
   return getRoute;
 }
 
