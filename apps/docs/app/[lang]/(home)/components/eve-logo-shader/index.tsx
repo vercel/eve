@@ -4,7 +4,7 @@ import { App, Device, type VGPUAdapter } from "@vgpu/core";
 import { getImageProps } from "next/image";
 import fallbackDarkImage from "../../../../../public/eve-5/fallback-dark-content.webp";
 import fallbackLightImage from "../../../../../public/eve-5/fallback-light-content.webp";
-import { useEffect, useRef, useState, type ComponentProps } from "react";
+import { useEffect, useRef, useState, type ComponentProps, type CSSProperties } from "react";
 import { decodeGltfMesh, meshAspect } from "./mesh";
 import { BLOOM_RADIUS, createEve5Renderer, type RenderControls } from "./render";
 
@@ -20,6 +20,7 @@ const MODEL_URL = "/eve-5/eve-logo.gltf";
 const FALLBACK_IMAGE_WIDTH = 1095;
 const FALLBACK_IMAGE_HEIGHT = 348;
 const FALLBACK_IMAGE_ASPECT_RATIO = `${FALLBACK_IMAGE_WIDTH} / ${FALLBACK_IMAGE_HEIGHT}`;
+const FALLBACK_CONTAINER_ASPECT_RATIO = `${FALLBACK_IMAGE_WIDTH + BLOOM_RADIUS} / ${FALLBACK_IMAGE_HEIGHT + BLOOM_RADIUS}`;
 const FALLBACK_IMAGE_SIZES = "(min-width: 768px) 1095px, calc(100vw - 16px)";
 const DEFAULT_LOGO_ASPECT = 78 / 25;
 const DEFAULT_CONTROLS: RenderControls = {
@@ -263,10 +264,13 @@ export function EveLogoShader() {
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none absolute left-1/2 top-1/2 z-0 h-[6.5em] max-w-none -translate-x-1/2 translate-y-[calc(-50%-0.42em)]"
-      style={{
-        aspectRatio: `${paddedWidth} / ${paddedHeight}`,
-      }}
+      className="pointer-events-none relative z-0 mb-8 aspect-[var(--eve-logo-mobile-aspect-ratio)] w-full md:absolute md:left-1/2 md:top-1/2 md:mb-0 md:h-[6.5em] md:w-auto md:max-w-none md:-translate-x-1/2 md:translate-y-[calc(-50%-0.42em)] md:aspect-[var(--eve-logo-desktop-aspect-ratio)]"
+      style={
+        {
+          "--eve-logo-mobile-aspect-ratio": FALLBACK_CONTAINER_ASPECT_RATIO,
+          "--eve-logo-desktop-aspect-ratio": `${paddedWidth} / ${paddedHeight}`,
+        } as CSSProperties
+      }
     >
       <FallbackImage
         imageProps={fallbackLightImageProps}
@@ -280,7 +284,7 @@ export function EveLogoShader() {
       />
       <canvas ref={canvasRef} className="absolute inset-0 size-full opacity-0 transition-opacity duration-700 ease-linear" />
       <div
-        className={`pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent ${theme === "light" ? "to-background-200" : "to-black"}`}
+        className={`pointer-events-none absolute inset-0 hidden bg-gradient-to-b from-transparent md:block ${theme === "light" ? "to-background-200" : "to-black"}`}
       />
     </div>
   );
