@@ -104,7 +104,7 @@ export function FileTreeView({ items, heading }: { items: FileTreeItem[]; headin
                     type="button"
                     onClick={() => handleSelect(i)}
                     className={cn(
-                      "flex w-full cursor-pointer items-center rounded-md px-3 py-2 text-left text-sm",
+                      "group flex w-full cursor-pointer items-center rounded-md px-3 py-2 text-left text-sm",
                       // In scroll mode the active row is driven by scroll, so a
                       // color transition smears the highlight across rows on
                       // fast scroll — keep the switch instant. Hover stays
@@ -120,7 +120,9 @@ export function FileTreeView({ items, heading }: { items: FileTreeItem[]; headin
                       <span
                         className={cn(
                           "ml-auto font-mono text-label-12-mono!",
-                          selectedIndex === i ? "text-gray-900" : "text-gray-500",
+                          selectedIndex === i
+                            ? "text-gray-900"
+                            : "text-gray-500 group-hover:text-gray-900",
                         )}
                       >
                         optional
