@@ -67,7 +67,7 @@ function createRuntimeDependencyChecks(packageComparison) {
 }
 
 function createInitInstallSizeBudgetChecks(initInstallComparison) {
-  if (initInstallComparison === null) {
+  if (initInstallComparison === null || initInstallComparison.status !== "present") {
     return [];
   }
 

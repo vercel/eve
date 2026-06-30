@@ -589,12 +589,6 @@ function summarizePackageTakeaways(publishedPackage) {
   ];
 }
 
-function summarizeInitInstallTakeaways(initInstall) {
-  return [
-    `- \`eve init ${initInstall.projectName}\`: installed footprint ${formatBytes(initInstall.installedSizeBytes)} across ${initInstall.installedPackageCount} package${initInstall.installedPackageCount === 1 ? "" : "s"} (${initInstall.dependencyCount} dependencies, ${initInstall.devDependencyCount} devDependencies).`,
-  ];
-}
-
 function summarizeFunctionTakeaways(report) {
   if (report.functions.length === 0) {
     return [];
@@ -762,32 +756,6 @@ function summarizeComparisonTakeaways(comparison) {
     }
   }
 
-  if (comparison.initInstall !== null) {
-    const initParts = [];
-
-    if (comparison.initInstall.status === "added") {
-      initParts.push("init install tracking added");
-    } else if (comparison.initInstall.status === "removed") {
-      initParts.push("init install tracking removed");
-    }
-
-    if (isNotableByteDelta(comparison.initInstall.installedSizeBytes)) {
-      initParts.push(
-        `install footprint ${formatByteMetricTransition(comparison.initInstall.installedSizeBytes)}`,
-      );
-    }
-
-    if (comparison.initInstall.installedPackageCount.delta !== 0) {
-      initParts.push(
-        `installed packages ${formatCountMetricTransition(comparison.initInstall.installedPackageCount)}`,
-      );
-    }
-
-    if (initParts.length > 0) {
-      lines.push(`- \`eve init\` delta: ${initParts.join("; ")}.`);
-    }
-  }
-
   const runtimeParts = [];
 
   if (isNotableByteDelta(comparison.app.uniqueFunctionBytes)) {
@@ -838,15 +806,6 @@ function renderSummaryTable(report) {
     lines.push(
       `| Package | Installed footprint | ${formatBytes(report.publishedPackage.installedSizeBytes)} |`,
     );
-  }
-
-  if (report.initInstall) {
-    lines.push(
-      `| Init | Installed footprint | ${formatBytes(report.initInstall.installedSizeBytes)} |`,
-    );
-    lines.push(`| Init | Installed packages | ${report.initInstall.installedPackageCount} |`);
-    lines.push(`| Init | dependencies | ${report.initInstall.dependencyCount} |`);
-    lines.push(`| Init | devDependencies | ${report.initInstall.devDependencyCount} |`);
   }
 
   lines.push(`| Runtime | Unique function payloads | ${report.uniqueFunctionCount} |`);
@@ -1096,27 +1055,6 @@ function renderComparisonSection(comparison) {
     );
   }
 
-  if (comparison.initInstall !== null) {
-    lines.push(
-      `| Init | Installed footprint | ${formatBytes(comparison.initInstall.installedSizeBytes.baseline)} | ${formatBytes(comparison.initInstall.installedSizeBytes.current)} | ${formatSizeDelta(comparison.initInstall.installedSizeBytes.delta)} |`,
-    );
-    lines.push(
-      `| Init | Installed packages | ${comparison.initInstall.installedPackageCount.baseline} | ${comparison.initInstall.installedPackageCount.current} | ${formatSignedCount(comparison.initInstall.installedPackageCount.delta)} |`,
-    );
-    lines.push(
-      `| Init | dependencies | ${comparison.initInstall.dependencyCount.baseline} | ${comparison.initInstall.dependencyCount.current} | ${formatSignedCount(comparison.initInstall.dependencyCount.delta)} |`,
-    );
-    lines.push(
-      `| Init | devDependencies | ${comparison.initInstall.devDependencyCount.baseline} | ${comparison.initInstall.devDependencyCount.current} | ${formatSignedCount(comparison.initInstall.devDependencyCount.delta)} |`,
-    );
-    lines.push(
-      `| Init | Dependency package bytes | ${formatBytes(comparison.initInstall.dependencyPackageBytes.baseline)} | ${formatBytes(comparison.initInstall.dependencyPackageBytes.current)} | ${formatSizeDelta(comparison.initInstall.dependencyPackageBytes.delta)} |`,
-    );
-    lines.push(
-      `| Init | devDependency package bytes | ${formatBytes(comparison.initInstall.devDependencyPackageBytes.baseline)} | ${formatBytes(comparison.initInstall.devDependencyPackageBytes.current)} | ${formatSizeDelta(comparison.initInstall.devDependencyPackageBytes.delta)} |`,
-    );
-  }
-
   lines.push(
     `| Runtime | Unique function payloads | ${comparison.app.uniqueFunctionCount.baseline} | ${comparison.app.uniqueFunctionCount.current} | ${formatSignedCount(comparison.app.uniqueFunctionCount.delta)} |`,
   );
@@ -1129,9 +1067,6 @@ function renderComparisonSection(comparison) {
   lines.push("");
 
   lines.push(...renderDependencyManifestDelta(comparison.package, comparison.baselineLabel));
-  lines.push(
-    ...renderInitDependencyManifestDelta(comparison.initInstall, comparison.baselineLabel),
-  );
   lines.push(...renderFunctionDeltaSection(comparison));
 
   return lines;
@@ -1257,6 +1192,76 @@ function renderPublishedPackageSection(publishedPackage) {
   return lines;
 }
 
+function renderInitInstallSummarySection(report) {
+  if (report.comparison?.initInstall) {
+    const comparison = report.comparison.initInstall;
+    const lines = ["### `eve init` install", ""];
+
+    if (comparison.status !== "present") {
+      lines.push(
+        "_This metric is shown for visibility only until both the baseline and current report include it._",
+        "",
+      );
+    }
+
+    const baselineValue = (metric, formatter = (value) => String(value)) =>
+      comparison.status === "added" ? "not tracked" : formatter(metric.baseline);
+    const currentValue = (metric, formatter = (value) => String(value)) =>
+      comparison.status === "removed" ? "not tracked" : formatter(metric.current);
+    const deltaValue = (metric, formatter) =>
+      comparison.status === "present"
+        ? formatter(metric.delta)
+        : comparison.status === "added"
+          ? "new metric"
+          : "removed metric";
+
+    lines.push("| Metric | Baseline | Current | Delta |");
+    lines.push("| --- | --- | --- | --- |");
+    lines.push(
+      `| Installed footprint | ${baselineValue(comparison.installedSizeBytes, formatBytes)} | ${currentValue(comparison.installedSizeBytes, formatBytes)} | ${deltaValue(comparison.installedSizeBytes, formatSizeDelta)} |`,
+    );
+    lines.push(
+      `| Installed packages | ${baselineValue(comparison.installedPackageCount)} | ${currentValue(comparison.installedPackageCount)} | ${deltaValue(comparison.installedPackageCount, formatSignedCount)} |`,
+    );
+    lines.push(
+      `| dependencies | ${baselineValue(comparison.dependencyCount)} | ${currentValue(comparison.dependencyCount)} | ${deltaValue(comparison.dependencyCount, formatSignedCount)} |`,
+    );
+    lines.push(
+      `| devDependencies | ${baselineValue(comparison.devDependencyCount)} | ${currentValue(comparison.devDependencyCount)} | ${deltaValue(comparison.devDependencyCount, formatSignedCount)} |`,
+    );
+    lines.push(
+      `| Dependency package bytes | ${baselineValue(comparison.dependencyPackageBytes, formatBytes)} | ${currentValue(comparison.dependencyPackageBytes, formatBytes)} | ${deltaValue(comparison.dependencyPackageBytes, formatSizeDelta)} |`,
+    );
+    lines.push(
+      `| devDependency package bytes | ${baselineValue(comparison.devDependencyPackageBytes, formatBytes)} | ${currentValue(comparison.devDependencyPackageBytes, formatBytes)} | ${deltaValue(comparison.devDependencyPackageBytes, formatSizeDelta)} |`,
+    );
+    lines.push("");
+    lines.push(...renderInitDependencyManifestDelta(comparison, report.comparison.baselineLabel));
+
+    return lines;
+  }
+
+  if (!report.initInstall) {
+    return [];
+  }
+
+  const lines = ["### `eve init` install", ""];
+  lines.push("| Metric | Value |");
+  lines.push("| --- | --- |");
+  lines.push(`| Installed footprint | ${formatBytes(report.initInstall.installedSizeBytes)} |`);
+  lines.push(`| Installed packages | ${report.initInstall.installedPackageCount} |`);
+  lines.push(`| dependencies | ${report.initInstall.dependencyCount} |`);
+  lines.push(`| devDependencies | ${report.initInstall.devDependencyCount} |`);
+  lines.push(
+    `| Dependency package bytes | ${formatBytes(report.initInstall.dependencyPackageBytes)} |`,
+  );
+  lines.push(
+    `| devDependency package bytes | ${formatBytes(report.initInstall.devDependencyPackageBytes)} |`,
+  );
+  lines.push("");
+  return lines;
+}
+
 function renderInitDependencyTable(title, dependencies, totalBytes) {
   const lines = ["<details>", `<summary>${title} (${dependencies.length})</summary>`, ""];
 
@@ -1279,8 +1284,8 @@ function renderInitDependencyTable(title, dependencies, totalBytes) {
 }
 
 function renderInitInstallSection(initInstall) {
-  const lines = ["<details>", "<summary>eve init Install Drill-Down</summary>", ""];
-  lines.push("### Init Install Details", "");
+  const lines = ["<details>", "<summary><code>eve init</code> install drill-down</summary>", ""];
+  lines.push("### `eve init` install details", "");
   lines.push(`- Command: \`eve init ${initInstall.projectName}\``);
   lines.push(`- Package manager: \`${initInstall.packageManager}\``);
   lines.push(
@@ -1736,7 +1741,6 @@ export function renderNitroBundleReportMarkdown(report) {
     ? summarizeComparisonTakeaways(report.comparison)
     : [
         ...(report.publishedPackage ? summarizePackageTakeaways(report.publishedPackage) : []),
-        ...(report.initInstall ? summarizeInitInstallTakeaways(report.initInstall) : []),
         ...summarizeFunctionTakeaways(report),
       ];
   const lines = [
@@ -1756,6 +1760,8 @@ export function renderNitroBundleReportMarkdown(report) {
   if (!report.comparison) {
     lines.push(...renderSummaryTable(report));
   }
+
+  lines.push(...renderInitInstallSummarySection(report));
 
   lines.push(...renderMetadataSection(report));
 

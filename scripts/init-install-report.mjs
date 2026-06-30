@@ -168,6 +168,10 @@ async function runInitCommand(input) {
   const packageRoot = resolve(input.packageRoot);
   const cliPath = join(packageRoot, "bin", "eve.js");
 
+  if (!(await pathExists(cliPath))) {
+    return null;
+  }
+
   await execFile(process.execPath, [cliPath, "init", INIT_PROJECT_NAME], {
     cwd: input.parentDirectory,
     env: {
@@ -179,6 +183,8 @@ async function runInitCommand(input) {
     maxBuffer: 32 * 1024 * 1024,
     timeout: INIT_INSTALL_TIMEOUT_MS,
   });
+
+  return true;
 }
 
 export async function collectInitInstallReportFromTarball(options) {
@@ -186,11 +192,14 @@ export async function collectInitInstallReportFromTarball(options) {
   const initDirectory = await mkdtemp(join(tmpdir(), "eve-init-install-"));
 
   try {
-    await runInitCommand({
+    const initialized = await runInitCommand({
       evePackageSpec: `file:${options.tarballPath}`,
       packageRoot,
       parentDirectory: initDirectory,
     });
+    if (initialized !== true) {
+      return null;
+    }
 
     const projectRoot = join(initDirectory, INIT_PROJECT_NAME);
     const packageJson = await readJson(join(projectRoot, "package.json"));
