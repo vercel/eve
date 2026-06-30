@@ -105,10 +105,6 @@ export function FileTreeView({ items, heading }: { items: FileTreeItem[]; headin
                     onClick={() => handleSelect(i)}
                     className={cn(
                       "group flex w-full cursor-pointer items-center rounded-md px-3 py-2 text-left text-sm",
-                      // In scroll mode the active row is driven by scroll, so a
-                      // color transition smears the highlight across rows on
-                      // fast scroll — keep the switch instant. Hover stays
-                      // crisp too; the smooth transition is for click mode.
                       !scrolly && "transition-colors",
                       selectedIndex === i
                         ? "bg-gray-100 text-gray-1000"
@@ -140,8 +136,6 @@ export function FileTreeView({ items, heading }: { items: FileTreeItem[]; headin
               <p className="border-b px-4 py-3 text-gray-900 text-copy-14">
                 {selected.description}
               </p>
-              {/* Content swaps in place (no keyed remount) so the previous file
-                  never lingers as a ghost layer mid-transition. */}
               <div className="grow pb-6 [&>div]:mb-0">{selected.code}</div>
             </div>
           </div>

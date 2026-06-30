@@ -118,7 +118,7 @@ const CAPTIONS: Record<Mode, string> = {
   managed:
     "Fully managed via Vercel. Sandboxes, durable workflows, model routing, and observability handled for you.",
   "self-hosted":
-    "Runs on a single DigitalOcean box. Postgres-backed durability, Docker sandbox, Ansible deploy, zero managed services.",
+    "You can deploy anywhere. Postgres-backed durability, Docker sandbox, Ansible deploy, zero managed services.",
 };
 
 function SectionLabel({ children }: { children: string }): JSX.Element {
