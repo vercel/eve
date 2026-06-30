@@ -36,10 +36,12 @@ import {
   sayTwilioResponse,
 } from "#public/channels/twilio/twiml.js";
 import {
-  verifyTwilioRequest,
-  type TwilioAuthToken,
-  type TwilioWebhookUrl,
-} from "#public/channels/twilio/verify.js";
+  buildTwilioActionUrl,
+  buildTwilioRoutes,
+  verifyTwilioInbound,
+  type TwilioRoutes,
+} from "#public/channels/twilio/routing.js";
+import { type TwilioAuthToken, type TwilioWebhookUrl } from "#public/channels/twilio/verify.js";
 import {
   defineChannel,
   GET,
@@ -280,7 +282,7 @@ export interface TwilioChannel extends Channel<
 /** Twilio channel factory for SMS and speech-transcribed inbound calls. */
 export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
   assertAllowFromConfigured(config);
-  const routes = buildRoutes(config.route ?? "/eve/v1/twilio");
+  const routes = buildTwilioRoutes(config.route ?? "/eve/v1/twilio");
   const onText = config.onText ?? defaultOnText;
   const onVoice = config.onVoice ?? defaultOnVoice;
   const onVoiceTranscription = config.onVoiceTranscription ?? defaultOnVoiceTranscription;
@@ -351,7 +353,7 @@ function handleTwilioMessages(input: {
   readonly onText: NonNullable<TwilioChannelConfig["onText"]>;
 }): RouteHandler<TwilioChannelState> {
   return async (req, { send, waitUntil }) => {
-    const verified = await verifyInbound(req, input.config);
+    const verified = await verifyTwilioInbound(req, input.config);
     if (verified === null) return new Response("unauthorized", { status: 401 });
 
     const message = parseTwilioTextMessage(verified.params);
@@ -375,10 +377,10 @@ function handleTwilioMessages(input: {
 function handleTwilioVoice(input: {
   readonly config: TwilioChannelConfig;
   readonly onVoice: NonNullable<TwilioChannelConfig["onVoice"]>;
-  readonly routes: ReturnType<typeof buildRoutes>;
+  readonly routes: TwilioRoutes;
 }): RouteHandler<TwilioChannelState> {
   return async (req) => {
-    const verified = await verifyInbound(req, input.config);
+    const verified = await verifyTwilioInbound(req, input.config);
     if (verified === null) return new Response("unauthorized", { status: 401 });
 
     const call = parseTwilioVoiceCall(verified.params);
@@ -396,7 +398,7 @@ function handleTwilioVoice(input: {
     const voiceOptions = voiceResult ?? {};
 
     return gatherSpeechTwilioResponse({
-      actionUrl: await buildActionUrl(req, input.config, input.routes.transcription),
+      actionUrl: await buildTwilioActionUrl(req, input.config, input.routes.transcription),
       hints: voiceOptions.hints ?? input.config.voice?.hints,
       language: voiceOptions.language ?? input.config.voice?.language,
       profanityFilter: voiceOptions.profanityFilter ?? input.config.voice?.profanityFilter,
@@ -415,16 +417,16 @@ function handleTwilioVoice(input: {
 function handleTwilioTranscription(input: {
   readonly config: TwilioChannelConfig;
   readonly onVoiceTranscription: NonNullable<TwilioChannelConfig["onVoiceTranscription"]>;
-  readonly routes: ReturnType<typeof buildRoutes>;
+  readonly routes: TwilioRoutes;
 }): RouteHandler<TwilioChannelState> {
   return async (req, { send, waitUntil }) => {
-    const verified = await verifyInbound(req, input.config);
+    const verified = await verifyTwilioInbound(req, input.config);
     if (verified === null) return new Response("unauthorized", { status: 401 });
 
     const transcription = parseTwilioVoiceTranscription(verified.params);
     if (!transcription) {
       return gatherSpeechTwilioResponse({
-        actionUrl: await buildActionUrl(req, input.config, input.routes.transcription),
+        actionUrl: await buildTwilioActionUrl(req, input.config, input.routes.transcription),
         language: input.config.voice?.language,
         prompt: input.config.voice?.prompt ?? "Please say your message after the tone.",
         speechTimeout: input.config.voice?.speechTimeout ?? "auto",
@@ -514,39 +516,11 @@ function buildTwilioHandle(input: {
   };
 }
 
-function buildRoutes(baseRoute: string): {
-  messages: string;
-  voice: string;
-  transcription: string;
-} {
-  const base = baseRoute.endsWith("/") ? baseRoute.slice(0, -1) : baseRoute;
-  return {
-    messages: `${base}/messages`,
-    transcription: `${base}/voice/transcription`,
-    voice: `${base}/voice`,
-  };
-}
-
 function assertAllowFromConfigured(
   config: TwilioChannelConfig | undefined,
 ): asserts config is TwilioChannelConfig {
   if (config?.allowFrom === undefined) {
     throw new Error('twilioChannel requires allowFrom. Use allowFrom: "*" to allow all numbers.');
-  }
-}
-
-async function verifyInbound(
-  req: Request,
-  config: TwilioChannelConfig,
-): Promise<{ body: string; params: URLSearchParams } | null> {
-  try {
-    return await verifyTwilioRequest(req, {
-      authToken: config.credentials?.authToken,
-      webhookUrl: config.webhookUrl,
-    });
-  } catch (error) {
-    log.warn("twilio inbound verification failed", { error });
-    return null;
   }
 }
 
@@ -685,27 +659,6 @@ async function isAllowed(from: string, allowFrom: TwilioAllowFrom): Promise<bool
   const resolved = typeof allowFrom === "function" ? await allowFrom() : allowFrom;
   if (resolved === "*") return true;
   return typeof resolved === "string" ? resolved === from : resolved.includes(from);
-}
-
-async function buildActionUrl(
-  request: Request,
-  config: TwilioChannelConfig,
-  route: string,
-): Promise<string> {
-  const base =
-    typeof config.publicBaseUrl === "function"
-      ? await config.publicBaseUrl(request)
-      : config.publicBaseUrl;
-  if (base) return new URL(route, ensureTrailingSlash(base)).toString();
-
-  const url = new URL(request.url);
-  url.pathname = route;
-  url.search = "";
-  return url.toString();
-}
-
-function ensureTrailingSlash(value: string): string {
-  return value.endsWith("/") ? value : `${value}/`;
 }
 
 function readString(value: unknown): string | undefined {
