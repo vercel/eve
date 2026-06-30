@@ -283,7 +283,7 @@ function FallbackImage({
       aria-hidden="true"
       role="presentation"
       decoding="async"
-      className={`${className} absolute inset-0 size-full object-fill transition-opacity duration-700 ease-linear ${
+      className={`${className} absolute left-1/2 top-0 h-full w-auto max-w-none -translate-x-1/2 transition-opacity duration-700 ease-linear ${
         revealed ? "opacity-0" : "opacity-100"
       }`}
     />
