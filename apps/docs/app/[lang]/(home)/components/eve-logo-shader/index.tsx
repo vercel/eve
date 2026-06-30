@@ -40,6 +40,7 @@ const FALLBACK_IMAGE_PADDING = BLOOM_RADIUS / MAX_DEVICE_PIXEL_RATIO;
 const MAX_ENV_YAW = 0.45;
 const ENV_YAW_LERP_SPEED = 3;
 const CANVAS_FADE_FALLBACK_MS = 800;
+const CANVAS_REVEAL_RENDER_COUNT = 3;
 
 function getCurrentTheme(): "light" | "dark" {
   if (typeof document === "undefined") return "light";
@@ -155,7 +156,7 @@ export function EveLogoShader() {
       previousFrameTime = performance.now();
 
       let disposed = false;
-      let firstFrameShown = false;
+      let successfulRenderCount = 0;
       let finishCanvasFade: (() => void) | undefined;
       const dispose = () => {
         if (disposed) return;
@@ -205,8 +206,8 @@ export function EveLogoShader() {
           return;
         }
 
-        if (!firstFrameShown) {
-          firstFrameShown = true;
+        successfulRenderCount += 1;
+        if (successfulRenderCount === CANVAS_REVEAL_RENDER_COUNT) {
           canvas.style.opacity = "1";
           finishCanvasFade = onCanvasFullyOpaque(canvas, () => {
             if (!cancelled) setRevealed(true);
