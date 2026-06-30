@@ -691,4 +691,115 @@ describe("defaultMessageReducer", () => {
       { type: "step-start" },
     ]);
   });
+
+  it("keeps both text and reasoning blocks when a step resumes after authorization", () => {
+    const reducer = defaultMessageReducer();
+    let data = reducer.reduce(
+      reducer.initial(),
+      createStepStartedEvent({ sequence: 0, stepIndex: 0, turnId: "turn_0" }),
+    );
+    data = reducer.reduce(
+      data,
+      createReasoningCompletedEvent({
+        reasoning: "Let me list today's messages.",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_0",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createMessageCompletedEvent({
+        message: "I'll use outlook to fetch today's emails.",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn_0",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createActionsRequestedEvent({
+        actions: [
+          { callId: "call_1", input: { top: 50 }, kind: "tool-call", toolName: "outlook__list" },
+        ],
+        sequence: 3,
+        stepIndex: 0,
+        turnId: "turn_0",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createAuthorizationRequiredEvent({
+        description: "Authorization required for outlook",
+        name: "outlook",
+        sequence: 4,
+        stepIndex: 0,
+        turnId: "turn_0",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createAuthorizationCompletedEvent({
+        name: "outlook",
+        outcome: "authorized",
+        sequence: 5,
+        stepIndex: 0,
+        turnId: "turn_0",
+      }),
+    );
+
+    // The runtime resumes the same step after the OAuth flow completes.
+    data = reducer.reduce(
+      data,
+      createStepStartedEvent({ sequence: 6, stepIndex: 0, turnId: "turn_0" }),
+    );
+    data = reducer.reduce(
+      data,
+      createReasoningCompletedEvent({
+        reasoning: "Now I'll fetch today's messages.",
+        sequence: 7,
+        stepIndex: 0,
+        turnId: "turn_0",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createMessageCompletedEvent({
+        message: "Got it. Fetching today's messages now.",
+        sequence: 8,
+        stepIndex: 0,
+        turnId: "turn_0",
+      }),
+    );
+
+    const parts = data.messages[0]?.parts ?? [];
+    expect(parts.filter((part) => part.type === "text")).toEqual([
+      {
+        state: "done",
+        stepIndex: 0,
+        text: "I'll use outlook to fetch today's emails.",
+        type: "text",
+      },
+      {
+        state: "done",
+        stepIndex: 0,
+        text: "Got it. Fetching today's messages now.",
+        type: "text",
+      },
+    ]);
+    expect(parts.filter((part) => part.type === "reasoning")).toEqual([
+      {
+        state: "done",
+        stepIndex: 0,
+        text: "Let me list today's messages.",
+        type: "reasoning",
+      },
+      {
+        state: "done",
+        stepIndex: 0,
+        text: "Now I'll fetch today's messages.",
+        type: "reasoning",
+      },
+    ]);
+  });
 });
