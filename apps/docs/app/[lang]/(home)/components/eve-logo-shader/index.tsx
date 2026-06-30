@@ -281,15 +281,15 @@ function FallbackImage({
 }) {
   return (
     <div
-      className={`${className} absolute inset-0 transition-opacity duration-700 ease-linear ${revealed ? "opacity-0" : "opacity-100"}`}
-      style={{ padding: FALLBACK_IMAGE_PADDING }}
+      className={`${className} absolute transition-opacity duration-700 ease-linear ${revealed ? "opacity-0" : "opacity-100"}`}
+      style={{ inset: FALLBACK_IMAGE_PADDING }}
     >
       <img
         {...imageProps}
         aria-hidden="true"
         role="presentation"
         decoding="async"
-        className="mx-auto block h-full w-auto max-w-none"
+        className="absolute left-1/2 top-1/2 h-full w-auto max-w-none -translate-x-1/2 -translate-y-1/2"
         style={{ aspectRatio: FALLBACK_IMAGE_ASPECT_RATIO }}
       />
     </div>
