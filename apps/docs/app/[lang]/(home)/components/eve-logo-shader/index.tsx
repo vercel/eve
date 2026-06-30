@@ -108,9 +108,16 @@ export function EveLogoShader() {
     const canvas = canvasRef.current;
     resetCanvasVisibility(canvas);
     setRevealed(false);
-    setShowLightFallback(false);
 
-    if (prefersReducedMotion !== false) return;
+    if (prefersReducedMotion !== false) {
+      // No WebGPU animation will run (reduced motion or the preference hasn't
+      // resolved yet), so the canvas stays hidden. Show the static light
+      // fallback to mirror the dark fallback, which is always visible until
+      // the animation reveals. Otherwise light-theme users would see a blank hero.
+      setShowLightFallback(true);
+      return;
+    }
+    setShowLightFallback(false);
 
     const updateEnvYaw = (clientX: number) => {
       const viewportWidth = Math.max(1, window.innerWidth || 1);
