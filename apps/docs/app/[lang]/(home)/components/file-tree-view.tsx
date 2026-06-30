@@ -22,15 +22,23 @@ export function FileTreeView({ items, heading }: { items: FileTreeItem[]; headin
   const [selectedIndex, setSelectedIndex] = useState(0);
   const selected = items[selectedIndex];
 
-  // The viz pins while you scroll through it, stepping the open file by scroll
-  // progress (scrollytelling). Disabled for reduced motion — then it's a plain
-  // click-to-view browser.
+  // On desktop the viz pins while you scroll through it, stepping the open file
+  // by scroll progress (scrollytelling). Disabled for reduced motion and on
+  // mobile, where the layout instead stacks each file above its own code block.
   const trackRef = useRef<HTMLDivElement>(null);
   const [scrolly, setScrolly] = useState(false);
 
   useEffect(() => {
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
-    setScrolly(true);
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    const desktop = window.matchMedia?.("(min-width: 768px)");
+    const update = () => setScrolly(!reduce?.matches && !!desktop?.matches);
+    update();
+    desktop?.addEventListener("change", update);
+    reduce?.addEventListener("change", update);
+    return () => {
+      desktop?.removeEventListener("change", update);
+      reduce?.removeEventListener("change", update);
+    };
   }, []);
 
   useEffect(() => {
@@ -83,9 +91,9 @@ export function FileTreeView({ items, heading }: { items: FileTreeItem[]; headin
       />
       <div className="mx-auto max-w-5xl">
         <div className="relative overflow-hidden rounded-t-xl border bg-background-100">
-          <div className="grid md:grid-cols-[240px_1fr]">
+          <div className="grid grid-cols-[240px_1fr]">
             {/* Sidebar — the building blocks; click any to view it. */}
-            <div className="border-b md:border-r md:border-b-0">
+            <div className="border-r">
               <div className="flex h-12 items-center border-b px-4">
                 <span className="font-medium text-gray-1000 text-sm">agent/</span>
               </div>
@@ -109,7 +117,12 @@ export function FileTreeView({ items, heading }: { items: FileTreeItem[]; headin
                   >
                     {item.name}
                     {i > 0 ? (
-                      <span className="ml-auto font-mono text-gray-500 text-label-12-mono">
+                      <span
+                        className={cn(
+                          "ml-auto font-mono text-label-12-mono!",
+                          selectedIndex === i ? "text-gray-900" : "text-gray-500",
+                        )}
+                      >
                         optional
                       </span>
                     ) : null}
@@ -141,20 +154,46 @@ export function FileTreeView({ items, heading }: { items: FileTreeItem[]; headin
     </div>
   );
 
-  const block = (
-    <>
+  const desktop = scrolly ? (
+    <div ref={trackRef} className="relative mt-4" style={{ height: `${items.length * 42}vh` }}>
+      <div className="sticky top-[max(4rem,calc(50vh-20.5rem))]">
+        {heading}
+        {board}
+      </div>
+    </div>
+  ) : (
+    <div className="mt-4">
       {heading}
       {board}
-    </>
+    </div>
   );
 
-  if (!scrolly) {
-    return <div className="mt-4">{block}</div>;
-  }
+  // Mobile: the pinned sidebar/code-panel split is cramped on a phone, so each
+  // file simply shows its code block right beneath it in a stacked list.
+  const mobile = (
+    <div>
+      {heading}
+      <div className="mt-8 space-y-4">
+        {items.map((item, i) => (
+          <div key={item.name} className="overflow-hidden rounded-xl border bg-background-100">
+            <div className="flex h-12 items-center border-b px-4">
+              <span className="font-medium text-gray-1000 text-sm">{item.fileName}</span>
+              {i > 0 ? (
+                <span className="ml-auto font-mono text-gray-500 text-label-12-mono">optional</span>
+              ) : null}
+            </div>
+            <p className="border-b px-4 py-3 text-gray-900 text-copy-14">{item.description}</p>
+            <div className="pb-2 [&>div]:mb-0">{item.code}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
-    <div ref={trackRef} className="relative mt-4" style={{ height: `${items.length * 42}vh` }}>
-      <div className="sticky top-[max(4rem,calc(50vh-20.5rem))]">{block}</div>
-    </div>
+    <>
+      <div className="md:hidden">{mobile}</div>
+      <div className="hidden md:block">{desktop}</div>
+    </>
   );
 }
