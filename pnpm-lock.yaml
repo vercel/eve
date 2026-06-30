@@ -40,8 +40,8 @@ catalogs:
       specifier: 0.2.2
       version: 0.2.2
     '@vercel/sandbox':
-      specifier: 2.2.1
-      version: 2.2.1
+      specifier: 2.3.0
+      version: 2.3.0
     ai:
       specifier: ^7.0.0
       version: 7.0.0
@@ -859,7 +859,7 @@ importers:
         version: 3.5.0
       '@vercel/sandbox':
         specifier: 'catalog:'
-        version: 2.2.1
+        version: 2.3.0
       '@vercel/sdk':
         specifier: 1.28.1
         version: 1.28.1
@@ -6736,8 +6736,8 @@ packages:
   '@vercel/sandbox@2.1.1':
     resolution: {integrity: sha512-gKhW+YlvU15Qxya7jQKByB+sqA1dWat5zx/rvxT52E3Ryg9MAIXgqD5wd1d+CoJDbdHL26gIOcksTZY5sFpplA==}
 
-  '@vercel/sandbox@2.2.1':
-    resolution: {integrity: sha512-IqFYVEsPilXb28VbpTtrP5UkMgVAyQlp77zcLJUgCUo1yEbjJiClGS6sEqGjkAukhbLGS+T2vG3ZOgzSzUTyZg==}
+  '@vercel/sandbox@2.3.0':
+    resolution: {integrity: sha512-KLhc/sj2JuftgWEivPmmDq3iFLIoYU0XIv+44paTyhk5eGGaqNl6dQdxXSqOf+N31jh55m4UWY7i8oJy8oJRrQ==}
 
   '@vercel/sdk@1.28.1':
     resolution: {integrity: sha512-QYAX0QStBQak4c9PXunGVERL68cp8r1JcVuQd+SwXGThuZkEHRMpSStnvrO1Ny2nWg9wOeRnS0GEp+md42IVfg==}
@@ -18677,7 +18677,7 @@ snapshots:
       - bare-abort-controller
       - react-native-b4a
 
-  '@vercel/sandbox@2.2.1':
+  '@vercel/sandbox@2.3.0':
     dependencies:
       '@vercel/oidc': 3.2.0
       '@workflow/serde': 4.1.0-beta.2
