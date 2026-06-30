@@ -5,7 +5,7 @@ import { applyModelNameToSource } from "#source-change/apply-model-name.js";
 const SCAFFOLD = `import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "anthropic/claude-sonnet-4.6",
+  model: "anthropic/claude-sonnet-5",
 });
 `;
 
@@ -15,11 +15,11 @@ describe("applyModelNameToSource", () => {
 
     expect(result.kind).toBe("applied");
     if (result.kind !== "applied") return;
-    expect(result.from).toBe("anthropic/claude-sonnet-4.6");
+    expect(result.from).toBe("anthropic/claude-sonnet-5");
     expect(result.to).toBe("anthropic/claude-opus-4.6");
     // Only the literal changed; the rest of the file is byte-identical.
     expect(result.nextSource).toBe(
-      SCAFFOLD.replace("anthropic/claude-sonnet-4.6", "anthropic/claude-opus-4.6"),
+      SCAFFOLD.replace("anthropic/claude-sonnet-5", "anthropic/claude-opus-4.6"),
     );
   });
 
@@ -64,7 +64,7 @@ describe("applyModelNameToSource", () => {
   });
 
   it("is a no-op when the value is unchanged", async () => {
-    const result = await applyModelNameToSource(SCAFFOLD, "anthropic/claude-sonnet-4.6");
+    const result = await applyModelNameToSource(SCAFFOLD, "anthropic/claude-sonnet-5");
 
     expect(result.kind).toBe("applied");
     if (result.kind !== "applied") return;

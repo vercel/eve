@@ -502,7 +502,7 @@ describe("createApplicationNitro", () => {
             externalDependencies: ["subagent-external", "sharp"],
           },
           model: {
-            id: "anthropic/claude-sonnet-4.6",
+            id: "anthropic/claude-sonnet-5",
             routing: { kind: "gateway", target: "anthropic" },
           },
           name: "investigator",

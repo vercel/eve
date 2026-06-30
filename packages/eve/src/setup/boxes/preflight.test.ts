@@ -23,7 +23,7 @@ describe("preflight box", () => {
     const box = preflight({
       cwd: "/x",
       headless: true,
-      deps: depsWithCatalog(new Set(["anthropic/claude-sonnet-4.6"])),
+      deps: depsWithCatalog(new Set(["anthropic/claude-sonnet-5"])),
     });
 
     await expect(runHeadless([box], stateWithModel("anthropic/bogus"), silentSink)).rejects.toThrow(
@@ -35,12 +35,12 @@ describe("preflight box", () => {
     const box = preflight({
       cwd: "/x",
       headless: true,
-      deps: depsWithCatalog(new Set(["anthropic/claude-sonnet-4.6"])),
+      deps: depsWithCatalog(new Set(["anthropic/claude-sonnet-5"])),
     });
 
     await expect(
-      runHeadless([box], stateWithModel("anthropic/claude-sonnet-4.6"), silentSink),
-    ).resolves.toMatchObject({ modelId: "anthropic/claude-sonnet-4.6" });
+      runHeadless([box], stateWithModel("anthropic/claude-sonnet-5"), silentSink),
+    ).resolves.toMatchObject({ modelId: "anthropic/claude-sonnet-5" });
   });
 
   it("does not block when the catalog is unreachable", async () => {
@@ -54,7 +54,7 @@ describe("preflight box", () => {
   });
 
   it("skips the gateway model fetch in interactive runs", async () => {
-    const deps = depsWithCatalog(new Set(["anthropic/claude-sonnet-4.6"]));
+    const deps = depsWithCatalog(new Set(["anthropic/claude-sonnet-5"]));
     const box = preflight({ cwd: "/x", deps });
 
     const result = await runInteractive([box], stateWithModel("anthropic/bogus"), silentSink);
@@ -66,7 +66,7 @@ describe("preflight box", () => {
   it("validates the model for self-managed provider wiring too", async () => {
     // The byok scaffold bakes a gateway-format model id just like the gateway
     // wiring does, so a headless --model is checked on every wiring.
-    const deps = depsWithCatalog(new Set(["anthropic/claude-sonnet-4.6"]));
+    const deps = depsWithCatalog(new Set(["anthropic/claude-sonnet-5"]));
     const box = preflight({ cwd: "/x", headless: true, deps });
 
     await expect(
@@ -80,7 +80,7 @@ describe("preflight box", () => {
     const box = preflight({
       cwd: "/x",
       headless: true,
-      deps: depsWithCatalog(new Set(["anthropic/claude-sonnet-4.6"])),
+      deps: depsWithCatalog(new Set(["anthropic/claude-sonnet-5"])),
     });
     const state: SetupState = {
       ...stateWithModel("anthropic/bogus", "gateway"),

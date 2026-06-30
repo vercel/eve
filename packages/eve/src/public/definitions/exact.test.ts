@@ -17,7 +17,7 @@ describe("definition helper exact inputs", () => {
     const agent = defineAgent({
       description: "type-test",
       limits: { maxSubagentDepth: 4 },
-      model: "anthropic/claude-sonnet-4.6",
+      model: "anthropic/claude-sonnet-5",
     });
 
     const schedule = defineSchedule({
@@ -33,7 +33,7 @@ describe("definition helper exact inputs", () => {
 
 function typeOnlyFixtures(): void {
   const agentWithName = {
-    model: "anthropic/claude-sonnet-4.6",
+    model: "anthropic/claude-sonnet-5",
     name: "agent-name",
   };
   // @ts-expect-error Agent identity is path-derived.
