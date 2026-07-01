@@ -28,28 +28,25 @@ export type ModelEndpointStatus =
   | { kind: "gateway"; connected: true; credential: "api-key" | "oidc" }
   | { kind: "gateway"; connected: false };
 
+// Strip-mode on purpose: this schema is parsed by clients (`eve/client`, the
+// dev TUI) against servers that may be newer and carry fields this build does
+// not know. Unknown keys are dropped instead of failing the parse.
 export const modelEndpointStatusSchema = z.union([
-  z
-    .object({
-      kind: z.literal("codex"),
-      connected: z.literal(true),
-      credential: z.enum(["api-key", "chatgpt"]),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("codex"),
-      connected: z.literal(false),
-      reason: z.enum(["missing", "invalid", "refresh-token-missing"]),
-    })
-    .strict(),
-  z.object({ kind: z.literal("external"), provider: z.string() }).strict(),
-  z
-    .object({
-      kind: z.literal("gateway"),
-      connected: z.literal(true),
-      credential: z.enum(["api-key", "oidc"]),
-    })
-    .strict(),
-  z.object({ kind: z.literal("gateway"), connected: z.literal(false) }).strict(),
+  z.object({
+    kind: z.literal("codex"),
+    connected: z.literal(true),
+    credential: z.enum(["api-key", "chatgpt"]),
+  }),
+  z.object({
+    kind: z.literal("codex"),
+    connected: z.literal(false),
+    reason: z.enum(["missing", "invalid", "refresh-token-missing"]),
+  }),
+  z.object({ kind: z.literal("external"), provider: z.string() }),
+  z.object({
+    kind: z.literal("gateway"),
+    connected: z.literal(true),
+    credential: z.enum(["api-key", "oidc"]),
+  }),
+  z.object({ kind: z.literal("gateway"), connected: z.literal(false) }),
 ]) satisfies z.ZodType<ModelEndpointStatus>;
