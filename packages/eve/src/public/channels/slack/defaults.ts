@@ -9,7 +9,10 @@ import {
   formatConnectionDisplayName,
   type ConnectionAuthorizationOutcome,
 } from "#public/channels/slack/connections.js";
-import { renderInputRequestBlocks } from "#public/channels/slack/hitl.js";
+import {
+  formatInputRequestFallbackText,
+  renderInputRequestBlocks,
+} from "#public/channels/slack/hitl.js";
 import type { SlackMessage } from "#public/channels/slack/inbound.js";
 import { truncateMessageText, truncateTypingStatus } from "#public/channels/slack/limits.js";
 import type {
@@ -96,7 +99,9 @@ function firstNonEmptyLine(text: string): string | undefined {
 export function defaultInputRequestedHandler(): NonNullable<SlackChannelEvents["input.requested"]> {
   return async (data, channel, _ctx) => {
     if (data.requests.length === 0) return;
-    const promptText = truncateMessageText(data.requests.map((r) => r.prompt).join("\n"));
+    const promptText = truncateMessageText(
+      data.requests.map(formatInputRequestFallbackText).join("\n"),
+    );
     await channel.thread.post({
       blocks: data.requests.flatMap(renderInputRequestBlocks),
       text: promptText,
