@@ -1,8 +1,7 @@
 import { defineAgent } from "eve";
-import { DEFAULT_EVAL_MODEL } from "eve/evals";
 
 export default defineAgent({
-  model: DEFAULT_EVAL_MODEL,
+  model: process.env.EVE_EVAL_MODEL ?? "anthropic/claude-sonnet-5",
   modelOptions: {
     providerOptions: {
       openai: {

@@ -1,5 +1,4 @@
 import { defineAgent } from "eve";
-import { DEFAULT_EVAL_MODEL } from "eve/evals";
 
 /**
  * Smoke-test fixture: a leaf subagent whose only purpose is to emit a
@@ -13,6 +12,6 @@ import { DEFAULT_EVAL_MODEL } from "eve/evals";
 export default defineAgent({
   description:
     "Smoke-test echo subagent. Call this whenever the user mentions the phrase 'echo marker subagent'. Pass any short text as the input; the subagent replies with a fixed marker token.",
-  model: DEFAULT_EVAL_MODEL,
+  model: process.env.EVE_EVAL_MODEL ?? "anthropic/claude-sonnet-5",
   reasoning: "high",
 });

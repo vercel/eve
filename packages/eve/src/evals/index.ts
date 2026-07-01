@@ -6,7 +6,6 @@ export { defineEval } from "#evals/define-eval.js";
 export { defineEvalConfig } from "#evals/define-eval-config.js";
 export { EveEvalTurnFailedError } from "#evals/session.js";
 export { mockModel } from "#evals/mock-model.js";
-export { DEFAULT_EVAL_MODEL } from "#evals/default-eval-model.js";
 
 // ---------------------------------------------------------------------------
 // Types
