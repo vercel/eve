@@ -24,7 +24,7 @@ declare module "#public/channels/index.js" {
 
 const session: HarnessSession = {
   agent: {
-    modelReference: { auth: { kind: "ai-gateway" }, id: "test-model" },
+    modelReference: { id: "test-model" },
     system: "You are a test assistant.",
     tools: [],
   },

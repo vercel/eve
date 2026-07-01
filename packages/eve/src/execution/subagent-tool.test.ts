@@ -10,7 +10,7 @@ type BuildSubagentRunInput = Parameters<typeof buildSubagentRunInput>[0];
 function makeSession(): HarnessSession {
   return {
     agent: {
-      modelReference: { auth: { kind: "ai-gateway" }, id: "test-model" },
+      modelReference: { id: "test-model" },
       system: "",
       tools: [],
     },

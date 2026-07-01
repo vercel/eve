@@ -157,13 +157,13 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
     model:
       manifest.config.model.source === undefined
         ? {
-            auth: manifest.config.model.auth,
+            transport: manifest.config.model.transport,
             id: manifest.config.model.id,
             contextWindowTokens: manifest.config.model.contextWindowTokens,
             providerOptions: manifest.config.model.providerOptions,
           }
         : {
-            auth: manifest.config.model.auth,
+            transport: manifest.config.model.transport,
             contextWindowTokens: manifest.config.model.contextWindowTokens,
             id: manifest.config.model.id,
             providerOptions: manifest.config.model.providerOptions,
@@ -187,13 +187,13 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
       compaction.model =
         manifest.config.compaction.model.source === undefined
           ? {
-              auth: manifest.config.compaction.model.auth,
+              transport: manifest.config.compaction.model.transport,
               contextWindowTokens: manifest.config.compaction.model.contextWindowTokens,
               id: manifest.config.compaction.model.id,
               providerOptions: manifest.config.compaction.model.providerOptions,
             }
           : {
-              auth: manifest.config.compaction.model.auth,
+              transport: manifest.config.compaction.model.transport,
               contextWindowTokens: manifest.config.compaction.model.contextWindowTokens,
               id: manifest.config.compaction.model.id,
               providerOptions: manifest.config.compaction.model.providerOptions,

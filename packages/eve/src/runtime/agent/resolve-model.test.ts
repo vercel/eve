@@ -12,8 +12,8 @@ describe("resolveRuntimeModelReference", () => {
     vi.stubEnv("NODE_ENV", "development");
 
     const model = (await resolveRuntimeModelReference({
-      auth: { kind: "codex" },
       id: "openai/gpt-5.4",
+      transport: "codex",
     })) as LanguageModel;
 
     expect(model).toMatchObject({
@@ -28,19 +28,18 @@ describe("resolveRuntimeModelReference", () => {
 
     await expect(
       resolveRuntimeModelReference({
-        auth: { kind: "codex" },
         id: "anthropic/claude-sonnet-4.6",
+        transport: "codex",
       }),
     ).rejects.toThrow("Codex model auth requires an OpenAI model id");
   });
 
-  it("does not intercept an external provider named codex", async () => {
+  it("does not intercept a model without the codex transport marker", async () => {
     vi.stubEnv("NODE_ENV", "development");
 
-    // Codex transport is opted into via experimental.useCodexSubscription
-    // (auth kind), never inferred from a provider or id named "codex".
+    // The codex transport is opted into via experimental.useCodexSubscription,
+    // never inferred from a provider or id named "codex".
     const model = await resolveRuntimeModelReference({
-      auth: { kind: "external", provider: "codex" },
       id: "codex/gpt-5.4",
     });
 

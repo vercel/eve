@@ -27,12 +27,8 @@ function buildSyntheticSession(input: {
 
   return {
     agent: {
-      compactionModelReference: {
-        auth: { kind: "ai-gateway" },
-        id: "test",
-        contextWindowTokens: 1_000_000,
-      },
-      modelReference: { auth: { kind: "ai-gateway" }, id: "test", contextWindowTokens: 1_000_000 },
+      compactionModelReference: { id: "test", contextWindowTokens: 1_000_000 },
+      modelReference: { id: "test", contextWindowTokens: 1_000_000 },
       system: input.marker,
       tools: [],
     },

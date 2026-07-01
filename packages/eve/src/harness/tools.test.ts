@@ -193,14 +193,10 @@ describe("buildToolSet", () => {
   });
 
   it.each([
-    [{ auth: { kind: "ai-gateway" }, id: "openai/gpt-5.4" }, WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA],
-    [
-      { auth: { kind: "ai-gateway" }, id: "anthropic/claude-opus-4.6" },
-      WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA,
-    ],
+    [{ id: "openai/gpt-5.4" }, WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA],
+    [{ id: "anthropic/claude-opus-4.6" }, WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA],
     [
       {
-        auth: { kind: "ai-gateway" },
         id: "openai.chat/gpt-5.4",
         source: {
           exportName: "model",
@@ -213,7 +209,6 @@ describe("buildToolSet", () => {
     ],
     [
       {
-        auth: { kind: "ai-gateway" },
         id: "anthropic.messages/claude-opus-4.6",
         source: {
           exportName: "model",
@@ -226,7 +221,6 @@ describe("buildToolSet", () => {
     ],
     [
       {
-        auth: { kind: "ai-gateway" },
         id: "google.generative-ai/gemini-3.1-pro",
         source: {
           exportName: "model",
@@ -237,10 +231,7 @@ describe("buildToolSet", () => {
       },
       WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA,
     ],
-    [
-      { auth: { kind: "ai-gateway" }, id: "mistral/mistral-large" },
-      WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA,
-    ],
+    [{ id: "mistral/mistral-large" }, WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA],
   ] satisfies Array<readonly [RuntimeModelReference, JsonObject]>)(
     "injects the selected web_search provider output schema",
     async (modelReference, expectedOutputSchema) => {
@@ -278,7 +269,6 @@ describe("buildToolSet", () => {
 
     const result = await buildToolSetWithProviderTools({
       modelReference: {
-        auth: { kind: "ai-gateway" },
         id: "some-provider/some-model",
         source: {
           exportName: "model",

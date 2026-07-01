@@ -25,8 +25,7 @@ import type {
   AgentBuildDefinition,
   ModelRouting,
 } from "#shared/agent-definition.js";
-import { modelAuthSchema, modelRoutingSchema } from "#shared/agent-model-schemas.js";
-import { cloneModelAuth } from "#internal/model-auth/classify.js";
+import { modelRoutingSchema } from "#shared/agent-model-schemas.js";
 import type { InternalToolDefinition } from "#shared/tool-definition.js";
 
 /**
@@ -314,12 +313,12 @@ const compiledChannelEntrySchema = z.union([
 
 const compiledRuntimeModelReferenceSchema: z.ZodType<CompiledRuntimeModelReference> = z
   .object({
-    auth: modelAuthSchema,
     contextWindowTokens: z.number().int().positive().optional(),
     id: z.string(),
     source: moduleSourceRefSchema.optional(),
     providerOptions: z.record(z.string(), jsonObjectSchema).optional(),
     routing: modelRoutingSchema,
+    transport: z.literal("codex").optional(),
   })
   .strict();
 
@@ -822,10 +821,12 @@ function cloneCompiledRuntimeModelReference(
   model: CompiledRuntimeModelReference,
 ): CompiledRuntimeModelReference {
   const clone: CompiledRuntimeModelReference = {
-    auth: cloneModelAuth(model.auth),
     id: model.id,
     routing: cloneModelRouting(model.routing),
   };
+  if (model.transport !== undefined) {
+    clone.transport = model.transport;
+  }
   if (model.contextWindowTokens !== undefined) {
     clone.contextWindowTokens = model.contextWindowTokens;
   }

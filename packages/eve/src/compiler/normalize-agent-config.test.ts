@@ -37,16 +37,16 @@ describe("compileAgentConfig", () => {
     const result = await compileAgentConfig(createConfigManifest(), createContext("development"));
 
     expect(result.model).toMatchObject({
-      auth: { kind: "codex" },
       contextWindowTokens: 400_000,
       id: "openai/gpt-5.2-codex",
       routing: { kind: "gateway", target: "openai" },
+      transport: "codex",
     });
     expect(result.compaction?.model).toMatchObject({
-      auth: { kind: "codex" },
       contextWindowTokens: 400_000,
       id: "openai/gpt-5.4-mini",
       routing: { kind: "gateway", target: "openai" },
+      transport: "codex",
     });
     expect(result.experimental).toEqual({ useCodexSubscription: true });
     expect(mocks.getByProviderModelId).not.toHaveBeenCalled();
@@ -64,9 +64,9 @@ describe("compileAgentConfig", () => {
     const result = await compileAgentConfig(createConfigManifest(), createContext("development"));
 
     expect(result.model).toMatchObject({
-      auth: { kind: "codex" },
       id: "openai/gpt-5.5-pro",
       routing: { kind: "gateway", target: "openai" },
+      transport: "codex",
     });
     expect(result.model.contextWindowTokens).toBeUndefined();
     expect(mocks.getModelLimits).not.toHaveBeenCalled();
@@ -90,17 +90,17 @@ describe("compileAgentConfig", () => {
     const result = await compileAgentConfig(createConfigManifest(), createContext("production"));
 
     expect(result.model).toMatchObject({
-      auth: { kind: "ai-gateway" },
       contextWindowTokens: 400_000,
       id: "openai/gpt-5.2-codex",
       routing: { kind: "gateway", target: "openai" },
     });
+    expect(result.model.transport).toBeUndefined();
     expect(result.compaction?.model).toMatchObject({
-      auth: { kind: "ai-gateway" },
       contextWindowTokens: 400_000,
       id: "openai/gpt-5.4-mini",
       routing: { kind: "gateway", target: "openai" },
     });
+    expect(result.compaction?.model?.transport).toBeUndefined();
     expect(result.experimental).toEqual({ useCodexSubscription: true });
     expect(mocks.getModelLimits).toHaveBeenCalledWith("openai/gpt-5.2-codex");
     expect(mocks.getModelLimits).toHaveBeenCalledWith("openai/gpt-5.4-mini");
@@ -121,9 +121,9 @@ describe("compileAgentConfig", () => {
     const result = await compileAgentConfig(createConfigManifest(), createContext("development"));
 
     expect(result.model).toMatchObject({
-      auth: { kind: "external", provider: "codex" },
       routing: { kind: "external", provider: "codex" },
     });
+    expect(result.model.transport).toBeUndefined();
   });
 
   it("rejects useCodexSubscription for non-OpenAI string models in development", async () => {

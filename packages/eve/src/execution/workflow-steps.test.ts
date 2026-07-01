@@ -137,7 +137,7 @@ const threadContextAdapter: ChannelAdapter = {
 
 function createStubSession(overrides: Partial<HarnessSession> = {}): HarnessSession {
   return {
-    agent: { modelReference: { auth: { kind: "ai-gateway" }, id: "test" }, system: "", tools: [] },
+    agent: { modelReference: { id: "test" }, system: "", tools: [] },
     compaction: { recentWindowSize: 10, threshold: 100_000 },
     continuationToken: "test-token",
     history: [],
@@ -617,7 +617,7 @@ describe("turnStep", () => {
   it("refreshes the system prompt from the current bundled deployment", async () => {
     const session = createStubSession({
       agent: {
-        modelReference: { auth: { kind: "ai-gateway" }, id: "test" },
+        modelReference: { id: "test" },
         system: "Original instructions.",
         tools: [],
       },

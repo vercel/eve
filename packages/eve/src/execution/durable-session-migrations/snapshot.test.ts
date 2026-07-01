@@ -75,11 +75,7 @@ describe("migrateDurableSessionSnapshot", () => {
 function buildSession(): HarnessSession {
   return {
     agent: {
-      modelReference: {
-        auth: { kind: "ai-gateway" },
-        id: "test-model",
-        contextWindowTokens: 200_000,
-      },
+      modelReference: { id: "test-model", contextWindowTokens: 200_000 },
       system: "test system",
       tools: [],
     },

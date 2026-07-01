@@ -36,7 +36,7 @@ const CATALOG: GatewayCatalogModel[] = [
 function flowDeps(overrides: Partial<ModelFlowDeps> = {}): Partial<ModelFlowDeps> {
   return {
     readCurrentModel: vi.fn(async () => ({
-      auth: { kind: "ai-gateway" } as const,
+      codex: false,
       id: "anthropic/claude-sonnet-4.6",
       routing: { kind: "gateway", target: "anthropic" } as const,
       editable: true,
@@ -150,7 +150,7 @@ describe("runModelFlow", () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
     const deps = flowDeps({
       readCurrentModel: vi.fn(async () => ({
-        auth: { kind: "external", provider: "anthropic" } as const,
+        codex: false,
         id: "anthropic/claude-sonnet-4.6",
         routing: { kind: "external", provider: "anthropic" } as const,
         editable: false,
@@ -187,7 +187,7 @@ describe("runModelFlow", () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
     const deps = flowDeps({
       readCurrentModel: vi.fn(async () => ({
-        auth: { kind: "codex" } as const,
+        codex: true,
         id: "openai/gpt-5.5",
         routing: { kind: "gateway", target: "openai" } as const,
         editable: true,
@@ -228,7 +228,7 @@ describe("runModelFlow", () => {
     });
     const deps = flowDeps({
       readCurrentModel: vi.fn(async () => ({
-        auth: { kind: "codex" } as const,
+        codex: true,
         id: "openai/gpt-5.5",
         routing: { kind: "gateway", target: "openai" } as const,
         editable: true,
@@ -264,7 +264,7 @@ describe("runModelFlow", () => {
     const deps = flowDeps({
       // `gateway("…")` instance: gateway-routed, but not a string literal eve can rewrite.
       readCurrentModel: vi.fn(async () => ({
-        auth: { kind: "ai-gateway" } as const,
+        codex: false,
         id: "anthropic/claude-sonnet-4.6",
         routing: { kind: "gateway", target: "anthropic" } as const,
         editable: false,

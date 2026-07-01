@@ -44,7 +44,6 @@ function makeCompiledState(): CompileAgentResult {
     appRoot: APP_ROOT,
     config: {
       model: {
-        auth: { kind: "ai-gateway" },
         id: "anthropic/claude-sonnet-4.6",
         routing: { kind: "gateway", target: "anthropic" },
       },

@@ -33,7 +33,6 @@ export async function buildAgentInfoResponseFromManifest(
   },
 ): Promise<AgentInfoResponse> {
   const manifest = data.manifest;
-  const modelAuth = manifest.config.model.auth;
   const authoredChannels = manifest.channels.filter((channel) => channel.kind === "channel");
   const disabledFrameworkChannels = manifest.channels
     .filter((channel) => channel.kind === "disabled")
@@ -91,7 +90,7 @@ export async function buildAgentInfoResponseFromManifest(
         providerOptions: manifest.config.model.providerOptions,
         source: manifest.config.model.source ? toSource(manifest.config.model.source) : undefined,
         routing: manifest.config.model.routing,
-        endpoint: await resolveModelEndpointStatus(modelAuth),
+        endpoint: await resolveModelEndpointStatus(manifest.config.model),
       },
       name: manifest.config.name,
       outputSchema: manifest.config.outputSchema,

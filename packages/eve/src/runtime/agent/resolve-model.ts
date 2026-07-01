@@ -84,7 +84,7 @@ async function loadSourceBackedRuntimeModelReference(
 }
 
 function resolveCodexRuntimeModel(reference: RuntimeModelReference): LanguageModel | null {
-  if (reference.auth.kind !== "codex") {
+  if (reference.transport !== "codex") {
     return null;
   }
 

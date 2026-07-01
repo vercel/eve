@@ -15,10 +15,9 @@ function createTestTurnAgent(overrides?: Partial<RuntimeTurnAgent>): RuntimeTurn
     id: "test-agent",
     instructions: ["You are a helpful assistant.", "Be concise."],
     compactionModel: {
-      auth: { kind: "ai-gateway" },
       id: "summary-model",
     },
-    model: { auth: { kind: "ai-gateway" }, id: "test-model" },
+    model: { id: "test-model" },
     tools: [
       {
         description: "Adds two numbers",
@@ -79,14 +78,8 @@ describe("createSession", () => {
       turnAgent: createTestTurnAgent({ outputSchema, reasoning: "high" }),
     });
 
-    expect(session.agent.compactionModelReference).toEqual({
-      auth: { kind: "ai-gateway" },
-      id: "summary-model",
-    });
-    expect(session.agent.modelReference).toEqual({
-      auth: { kind: "ai-gateway" },
-      id: "test-model",
-    });
+    expect(session.agent.compactionModelReference).toEqual({ id: "summary-model" });
+    expect(session.agent.modelReference).toEqual({ id: "test-model" });
     expect(session.agent.reasoning).toBe("high");
     expect(session.outputSchema).toEqual(outputSchema);
     expect(session.agent.system).toBe("You are a helpful assistant.\n\nBe concise.");
@@ -157,7 +150,7 @@ describe("createSession", () => {
       continuationToken: "root-token",
       sessionId: "sess-root",
       turnAgent: createTestTurnAgent({
-        model: { auth: { kind: "ai-gateway" }, id: "test-model", contextWindowTokens: 200_000 },
+        model: { id: "test-model", contextWindowTokens: 200_000 },
       }),
     });
 
@@ -178,14 +171,12 @@ describe("createSession", () => {
       session,
       turnAgent: createTestTurnAgent({
         compactionModel: {
-          auth: { kind: "ai-gateway" },
           id: "updated-summary-model",
         },
       }),
     });
 
     expect(refreshed.agent.compactionModelReference).toEqual({
-      auth: { kind: "ai-gateway" },
       id: "updated-summary-model",
     });
   });
@@ -262,7 +253,7 @@ describe("refreshSessionFromTurnAgent", () => {
       },
       turnAgent: createTestTurnAgent({
         instructions: ["Completely different system prompt."],
-        model: { auth: { kind: "ai-gateway" }, contextWindowTokens: 200_000, id: "updated-model" },
+        model: { contextWindowTokens: 200_000, id: "updated-model" },
         tools: [
           {
             description: "Echoes text",
@@ -281,11 +272,9 @@ describe("refreshSessionFromTurnAgent", () => {
 
     expect(refreshed.history).toEqual([{ content: "previous message", role: "user" }]);
     expect(refreshed.agent.compactionModelReference).toEqual({
-      auth: { kind: "ai-gateway" },
       id: "summary-model",
     });
     expect(refreshed.agent.modelReference).toEqual({
-      auth: { kind: "ai-gateway" },
       contextWindowTokens: 200_000,
       id: "updated-model",
     });
@@ -312,7 +301,7 @@ describe("refreshSessionFromTurnAgent", () => {
       continuationToken: "root-token",
       sessionId: "sess-root",
       turnAgent: createTestTurnAgent({
-        model: { auth: { kind: "ai-gateway" }, contextWindowTokens: 100_000, id: "initial-model" },
+        model: { contextWindowTokens: 100_000, id: "initial-model" },
       }),
     });
     const refreshed = refreshSessionFromTurnAgent({
@@ -328,7 +317,7 @@ describe("refreshSessionFromTurnAgent", () => {
         },
       },
       turnAgent: createTestTurnAgent({
-        model: { auth: { kind: "ai-gateway" }, contextWindowTokens: 200_000, id: "updated-model" },
+        model: { contextWindowTokens: 200_000, id: "updated-model" },
       }),
     });
 
@@ -352,12 +341,11 @@ describe("refreshSessionFromTurnAgent", () => {
       session,
       turnAgent: createTestTurnAgent({
         instructions: ["Updated prompt from the current deployment."],
-        model: { auth: { kind: "ai-gateway" }, contextWindowTokens: 200_000, id: "updated-model" },
+        model: { contextWindowTokens: 200_000, id: "updated-model" },
       }),
     });
 
     expect(refreshed.agent.modelReference).toEqual({
-      auth: { kind: "ai-gateway" },
       contextWindowTokens: 200_000,
       id: "updated-model",
     });

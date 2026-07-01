@@ -18,7 +18,6 @@ describe("withBundledCompiledArtifacts", () => {
       appRoot: "/tmp/app",
       config: {
         model: {
-          auth: { kind: "ai-gateway" },
           id: "openai/gpt-5-mini",
           routing: { kind: "gateway", target: "openai" },
         },

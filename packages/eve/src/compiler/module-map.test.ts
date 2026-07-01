@@ -11,7 +11,6 @@ function createManifestWithTool(agentRoot: string): CompiledAgentManifest {
     config: {
       compaction: {},
       model: {
-        auth: { kind: "ai-gateway" },
         contextWindowTokens: 128_000,
         id: "openai/gpt-5.4-mini",
         routing: { kind: "gateway", target: "openai" },

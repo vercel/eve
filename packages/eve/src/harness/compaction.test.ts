@@ -173,11 +173,7 @@ describe("resolveCompactionModel", () => {
 
     const result = await resolveCompactionModel({
       model,
-      modelReference: {
-        auth: { kind: "ai-gateway" },
-        id: "main",
-        providerOptions: { openai: { reasoning: { effort: "low" } } },
-      },
+      modelReference: { id: "main", providerOptions: { openai: { reasoning: { effort: "low" } } } },
       resolveModel,
     });
 
@@ -194,7 +190,6 @@ describe("resolveCompactionModel", () => {
     const resolveModel = vi.fn().mockResolvedValue(summaryModel);
 
     const compactionModelReference = {
-      auth: { kind: "ai-gateway" },
       id: "summary",
       providerOptions: {
         anthropic: {
@@ -208,7 +203,7 @@ describe("resolveCompactionModel", () => {
     const result = await resolveCompactionModel({
       compactionModelReference,
       model,
-      modelReference: { auth: { kind: "ai-gateway" }, id: "main" },
+      modelReference: { id: "main" },
       resolveModel,
     });
 

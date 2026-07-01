@@ -21,7 +21,7 @@ vi.mock("../../execution/sandbox/ensure.js", () => ({
 function createHarnessSession(): HarnessSession {
   return {
     agent: {
-      modelReference: { auth: { kind: "ai-gateway" }, id: "openai/gpt-5.4" },
+      modelReference: { id: "openai/gpt-5.4" },
       system: "",
       tools: [],
     },

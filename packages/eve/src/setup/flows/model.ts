@@ -26,7 +26,7 @@ import {
   detectProjectIdentity,
   type VercelProjectOperationOptions,
 } from "../project-resolution.js";
-import type { ModelAuth, ModelRouting } from "#shared/agent-definition.js";
+import type { ModelRouting } from "#shared/agent-definition.js";
 import type { Prompter, SelectOption } from "../prompter.js";
 import { runInteractive } from "../runner.js";
 import { snapshotSetupState } from "../state.js";
@@ -38,7 +38,8 @@ import { runProviderFlow } from "./provider.js";
 
 /** The current model id, its routing, and whether `/model` can rewrite it. */
 export interface CurrentAgentModel {
-  auth: ModelAuth | null;
+  /** The model is served through the local Codex login transport. */
+  codex: boolean;
   id: string | null;
   routing: ModelRouting | null;
   /**
@@ -144,7 +145,7 @@ function modelMenuRows(
   current: string | null,
   provider: ModelProviderStatus,
   routing: ModelRouting | null,
-  auth: ModelAuth | null,
+  codex: boolean,
   editable: boolean,
 ): SelectOption<ModelMenuRow>[] {
   const doneRow: SelectOption<ModelMenuRow> = {
@@ -153,7 +154,7 @@ function modelMenuRows(
     description: "Return to the prompt",
   };
 
-  if (isCodexAuth(auth)) {
+  if (codex) {
     return [
       {
         value: "model",
@@ -293,7 +294,7 @@ export async function runModelFlow(input: {
   // loading lines.
   const detectProvider = (useFlowSignal = true): Promise<ModelProviderStatus> =>
     deps.detectProviderStatus(appRoot, useFlowSignal && signal !== undefined ? { signal } : {});
-  let [{ id: current, routing, auth, editable }, provider] = await withSpinner(
+  let [{ id: current, routing, codex, editable }, provider] = await withSpinner(
     prompter,
     "Checking the project…",
     () => Promise.all([deps.readCurrentModel(appRoot), detectProvider()]),
@@ -302,12 +303,11 @@ export async function runModelFlow(input: {
 
   let lastApply: ApplyModelOutcome | undefined;
   let providerOutcome: ModelProviderOutcome | undefined;
-  const usesCodex = isCodexAuth(auth);
   // Start at the first useful row. Cancellation keeps the current row.
   let nextSelection: ModelMenuRow =
-    provider.kind === "unset" && routing?.kind !== "external" && !usesCodex
+    provider.kind === "unset" && routing?.kind !== "external" && !codex
       ? "provider"
-      : usesCodex || editable
+      : codex || editable
         ? "model"
         : routing?.kind === "external"
           ? "done"
@@ -315,7 +315,7 @@ export async function runModelFlow(input: {
   // A gateway model with no provider cannot run. Skip the menu's extra Enter
   // and open provider setup as soon as that state is confirmed.
   let openProviderFirst =
-    !usesCodex &&
+    !codex &&
     routing?.kind !== "external" &&
     (input.initialStep === "provider" || provider.kind === "unset");
 
@@ -328,7 +328,7 @@ export async function runModelFlow(input: {
       try {
         pick = await prompter.select<ModelMenuRow>({
           message: MODEL_MENU_MESSAGE,
-          options: modelMenuRows(current, provider, routing, auth, editable),
+          options: modelMenuRows(current, provider, routing, codex, editable),
           hintLayout: "stacked",
           initialValue: nextSelection,
         });
@@ -341,7 +341,7 @@ export async function runModelFlow(input: {
     if (pick === "done") break;
 
     if (pick === "model") {
-      const slug = usesCodex
+      const slug = codex
         ? await promptCodexModelId({
             current,
             prompter,
@@ -492,7 +492,7 @@ export async function changeAgentModel(input: ApplyModelInput): Promise<ApplyMod
     return { kind: "rejected", message: refusal };
   }
 
-  const rejection = await validateModelSlug(appRoot, slug, isCodexAuth(current.auth));
+  const rejection = await validateModelSlug(appRoot, slug, current.codex);
   if (rejection !== null) {
     return { kind: "rejected", message: rejection };
   }
@@ -593,13 +593,13 @@ async function readCurrentAgentModel(appRoot: string): Promise<CurrentAgentModel
     // A source-backed model (an SDK model call) carries `source`; a string id
     // does not, and only a string is a literal the editor can rewrite.
     return {
-      auth: model?.auth ?? null,
+      codex: model?.transport === "codex",
       id: model?.id ?? null,
       routing: model?.routing ?? null,
       editable: model !== undefined && model.source === undefined,
     };
   } catch {
-    return { auth: null, id: null, routing: null, editable: false };
+    return { codex: false, id: null, routing: null, editable: false };
   }
 }
 
@@ -616,8 +616,4 @@ function modelChangeRefusal(current: CurrentAgentModel): string | null {
       ? `the external model provider \`${current.routing.provider}\``
       : "an SDK model call";
   return `Model is set via ${detail} in agent.ts, not a string literal; /model can't rewrite it. Edit \`model\` in agent.ts.`;
-}
-
-function isCodexAuth(auth: ModelAuth | null): boolean {
-  return auth?.kind === "codex";
 }

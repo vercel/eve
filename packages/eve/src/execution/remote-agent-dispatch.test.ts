@@ -25,7 +25,7 @@ describe("startRemoteAgentSession", () => {
       remote: createRemoteAgent(),
       session: {
         agent: {
-          modelReference: { auth: { kind: "ai-gateway" }, id: "mock/test" },
+          modelReference: { id: "mock/test" },
           system: "",
           tools: [],
         },
@@ -90,11 +90,7 @@ describe("startRemoteAgentSession", () => {
       callbackBaseUrl: "https://caller.example.com",
       remote: { ...createRemoteAgent(), outputSchema },
       session: {
-        agent: {
-          modelReference: { auth: { kind: "ai-gateway" }, id: "mock/test" },
-          system: "",
-          tools: [],
-        },
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
         compaction: { recentWindowSize: 10, threshold: 100000 },
         continuationToken: "eve:parent-token",
         history: [],
@@ -122,11 +118,7 @@ describe("startRemoteAgentSession", () => {
       callbackToken: "turn-inbox",
       remote: createRemoteAgent(),
       session: {
-        agent: {
-          modelReference: { auth: { kind: "ai-gateway" }, id: "mock/test" },
-          system: "",
-          tools: [],
-        },
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
         compaction: { recentWindowSize: 10, threshold: 100000 },
         continuationToken: "eve:parent-token",
         history: [],
@@ -157,7 +149,7 @@ describe("startRemoteAgentSession", () => {
       remote: createRemoteAgent(),
       session: {
         agent: {
-          modelReference: { auth: { kind: "ai-gateway" }, id: "mock/test" },
+          modelReference: { id: "mock/test" },
           system: "",
           tools: [],
         },

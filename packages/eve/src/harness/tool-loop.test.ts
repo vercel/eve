@@ -96,7 +96,7 @@ afterEach(() => {
 function createTestSession(overrides?: Partial<HarnessSession>): HarnessSession {
   return {
     agent: {
-      modelReference: { auth: { kind: "ai-gateway" }, id: "test-model" },
+      modelReference: { id: "test-model" },
       system: "You are a test assistant.",
       tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
     },
@@ -405,7 +405,7 @@ function createPendingBashApprovalSession(): HarnessSession {
     ],
     session: createTestSession({
       agent: {
-        modelReference: { auth: { kind: "ai-gateway" }, id: "anthropic/claude-opus-4.6" },
+        modelReference: { id: "anthropic/claude-opus-4.6" },
         system: "You are a test assistant.",
         tools: [
           { description: "Run shell commands", name: "bash", inputSchema: { type: "object" } },
@@ -455,7 +455,7 @@ function createPendingProtectedActionApprovalSession(): HarnessSession {
     ],
     session: createTestSession({
       agent: {
-        modelReference: { auth: { kind: "ai-gateway" }, id: "anthropic/claude-opus-4.6" },
+        modelReference: { id: "anthropic/claude-opus-4.6" },
         system: "You are a test assistant.",
         tools: [
           {
@@ -605,7 +605,7 @@ describe("createToolLoopHarness", () => {
     const runStep = createToolLoopHarness(createTestConfig());
     const session = createTestSession({
       agent: {
-        modelReference: { auth: { kind: "ai-gateway" }, id: "test-model" },
+        modelReference: { id: "test-model" },
         reasoning: "high",
         system: "You are a test assistant.",
         tools: [],
@@ -702,7 +702,7 @@ describe("createToolLoopHarness", () => {
     const userExecutor = vi.fn().mockResolvedValue("custom search result");
     const session = createTestSession({
       agent: {
-        modelReference: { auth: { kind: "ai-gateway" }, id: "openai/gpt-5.4" },
+        modelReference: { id: "openai/gpt-5.4" },
         system: "You are a test assistant.",
         tools: [
           { description: "Adds numbers", name: "add", inputSchema: { type: "object" } },
@@ -1033,7 +1033,7 @@ describe("createToolLoopHarness", () => {
     const runStep = createToolLoopHarness(config);
     const session = createTestSession({
       agent: {
-        modelReference: { auth: { kind: "ai-gateway" }, id: "openai/gpt-5.4" },
+        modelReference: { id: "openai/gpt-5.4" },
         system: "You are a test assistant.",
         tools: [
           { description: "Search the web", name: "web_search", inputSchema: { type: "object" } },
@@ -1155,7 +1155,7 @@ describe("createToolLoopHarness", () => {
     const runStep = createToolLoopHarness(config);
     const session = createTestSession({
       agent: {
-        modelReference: { auth: { kind: "ai-gateway" }, id: "openai/gpt-5.4" },
+        modelReference: { id: "openai/gpt-5.4" },
         system: "You are a test assistant.",
         tools: [
           { description: "Search the web", name: "web_search", inputSchema: { type: "object" } },
@@ -1258,7 +1258,7 @@ describe("createToolLoopHarness", () => {
     const runStep = createToolLoopHarness(config);
     const session = createTestSession({
       agent: {
-        modelReference: { auth: { kind: "ai-gateway" }, id: "openai/gpt-5.4" },
+        modelReference: { id: "openai/gpt-5.4" },
         system: "You are a test assistant.",
         tools: [
           { description: "Search the web", name: "web_search", inputSchema: { type: "object" } },
@@ -1504,7 +1504,7 @@ describe("createToolLoopHarness", () => {
     });
     const session = createTestSession({
       agent: {
-        modelReference: { auth: { kind: "ai-gateway" }, id: "test-model" },
+        modelReference: { id: "test-model" },
         system: "You are a test assistant.",
         tools: [
           { description: "Adds numbers", name: "add", inputSchema: { type: "object" } },
@@ -2437,7 +2437,7 @@ describe("createToolLoopHarness", () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const session = createTestSession({
         agent: {
-          modelReference: { auth: { kind: "ai-gateway" }, id: "anthropic/claude-opus-4.7" },
+          modelReference: { id: "anthropic/claude-opus-4.7" },
           system: "You are a test assistant.",
           tools: [
             { description: "Adds numbers", name: "add", inputSchema: { type: "object" } },
@@ -2522,7 +2522,7 @@ describe("createToolLoopHarness", () => {
       const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       const session = createTestSession({
         agent: {
-          modelReference: { auth: { kind: "ai-gateway" }, id: "anthropic/claude-opus-4.7" },
+          modelReference: { id: "anthropic/claude-opus-4.7" },
           system: "You are a test assistant.",
           tools: [{ description: "Web search.", name: "web_search", inputSchema: null }],
         },
@@ -2592,7 +2592,7 @@ describe("createToolLoopHarness", () => {
       const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       const session = createTestSession({
         agent: {
-          modelReference: { auth: { kind: "ai-gateway" }, id: "anthropic/claude-opus-4.7" },
+          modelReference: { id: "anthropic/claude-opus-4.7" },
           system: "You are a test assistant.",
           tools: [{ description: "Web search.", name: "web_search", inputSchema: null }],
         },
@@ -2655,7 +2655,7 @@ describe("createToolLoopHarness", () => {
 
       const session = createTestSession({
         agent: {
-          modelReference: { auth: { kind: "ai-gateway" }, id: "anthropic/claude-opus-4.7" },
+          modelReference: { id: "anthropic/claude-opus-4.7" },
           system: "You are a test assistant.",
           tools: [
             { description: "Adds numbers", name: "add", inputSchema: { type: "object" } },
@@ -2744,7 +2744,7 @@ describe("createToolLoopHarness", () => {
 
       const session = createTestSession({
         agent: {
-          modelReference: { auth: { kind: "ai-gateway" }, id: "anthropic/claude-opus-4.7" },
+          modelReference: { id: "anthropic/claude-opus-4.7" },
           system: "You are a test assistant.",
           tools: [{ description: "Web search.", name: "web_search", inputSchema: null }],
         },
@@ -3152,7 +3152,7 @@ describe("createToolLoopHarness", () => {
     });
     const session = createTestSession({
       agent: {
-        modelReference: { auth: { kind: "ai-gateway" }, id: "anthropic/claude-opus-4.7" },
+        modelReference: { id: "anthropic/claude-opus-4.7" },
         system: "",
         tools: [{ description: "Web search.", name: "web_search", inputSchema: null }],
       },
@@ -3237,7 +3237,7 @@ describe("createToolLoopHarness", () => {
     const { emit, events } = createEventCollector();
     const session = createTestSession({
       agent: {
-        modelReference: { auth: { kind: "ai-gateway" }, id: "openai/gpt-5.4" },
+        modelReference: { id: "openai/gpt-5.4" },
         system: "You are a test assistant.",
         tools: [
           { description: "Search the web", name: "web_search", inputSchema: { type: "object" } },
@@ -3394,7 +3394,7 @@ describe("createToolLoopHarness", () => {
     const { emit, events } = createEventCollector();
     const session = createTestSession({
       agent: {
-        modelReference: { auth: { kind: "ai-gateway" }, id: "anthropic/claude-opus-4.6" },
+        modelReference: { id: "anthropic/claude-opus-4.6" },
         system: "You are a test assistant.",
         tools: [
           {
@@ -3493,7 +3493,7 @@ describe("createToolLoopHarness", () => {
     const { emit, events } = createEventCollector();
     const session = createTestSession({
       agent: {
-        modelReference: { auth: { kind: "ai-gateway" }, id: "anthropic/claude-opus-4.6" },
+        modelReference: { id: "anthropic/claude-opus-4.6" },
         system: "You are a test assistant.",
         tools: [
           { description: "Search the web", name: "web_search", inputSchema: { type: "object" } },
@@ -3559,7 +3559,7 @@ describe("createToolLoopHarness", () => {
     const { emit, events } = createEventCollector();
     const session = createTestSession({
       agent: {
-        modelReference: { auth: { kind: "ai-gateway" }, id: "anthropic/claude-opus-4.6" },
+        modelReference: { id: "anthropic/claude-opus-4.6" },
         system: "You are a test assistant.",
         tools: [
           { description: "Run shell commands", name: "bash", inputSchema: { type: "object" } },
@@ -3909,7 +3909,7 @@ describe("createToolLoopHarness", () => {
     const { emit } = createEventCollector();
     const session = createTestSession({
       agent: {
-        modelReference: { auth: { kind: "ai-gateway" }, id: "anthropic/claude-opus-4.6" },
+        modelReference: { id: "anthropic/claude-opus-4.6" },
         system: "You are a test assistant.",
         tools: [{ description: "Search the web", name: "web_search", inputSchema: null }],
       },
@@ -4055,7 +4055,7 @@ describe("createToolLoopHarness", () => {
     const { emit, events } = createEventCollector();
     const session = createTestSession({
       agent: {
-        modelReference: { auth: { kind: "ai-gateway" }, id: "anthropic/claude-opus-4.6" },
+        modelReference: { id: "anthropic/claude-opus-4.6" },
         system: "You are a test assistant.",
         tools: [{ description: "Search the web", name: "web_search", inputSchema: null }],
       },
@@ -4189,7 +4189,7 @@ describe("createToolLoopHarness", () => {
     const result = await harness(
       createTestSession({
         agent: {
-          modelReference: { auth: { kind: "ai-gateway" }, id: "anthropic/claude-sonnet-4.6" },
+          modelReference: { id: "anthropic/claude-sonnet-4.6" },
           system: "You are a test assistant.",
           tools: [{ description: "Search the web", name: "web_search", inputSchema: null }],
         },
@@ -4317,7 +4317,7 @@ describe("createToolLoopHarness", () => {
     const result = await harness(
       createTestSession({
         agent: {
-          modelReference: { auth: { kind: "ai-gateway" }, id: "anthropic/claude-sonnet-4.6" },
+          modelReference: { id: "anthropic/claude-sonnet-4.6" },
           system: "You are a test assistant.",
           tools: [
             { description: "Search the web", name: "web_search", inputSchema: null },
@@ -4432,7 +4432,7 @@ describe("createToolLoopHarness", () => {
     const result = await harness(
       createTestSession({
         agent: {
-          modelReference: { auth: { kind: "ai-gateway" }, id: "openai/gpt-5.5" },
+          modelReference: { id: "openai/gpt-5.5" },
           system: "You are a test assistant.",
           tools: [{ description: "Search the web", name: "web_search", inputSchema: null }],
         },
@@ -4514,7 +4514,7 @@ describe("createToolLoopHarness", () => {
     const result = await harness(
       createTestSession({
         agent: {
-          modelReference: { auth: { kind: "ai-gateway" }, id: "openai/gpt-5.5" },
+          modelReference: { id: "openai/gpt-5.5" },
           system: "You are a test assistant.",
           tools: [{ description: "Search the web", name: "web_search", inputSchema: null }],
         },
@@ -4624,7 +4624,7 @@ describe("createToolLoopHarness", () => {
     const { emit, events } = createEventCollector();
     const session = createTestSession({
       agent: {
-        modelReference: { auth: { kind: "ai-gateway" }, id: "anthropic/claude-opus-4.6" },
+        modelReference: { id: "anthropic/claude-opus-4.6" },
         system: "You are a test assistant.",
         tools: [{ description: "Search the web", name: "web_search", inputSchema: null }],
       },
@@ -4873,7 +4873,7 @@ describe("createToolLoopHarness", () => {
     const { emit, events } = createEventCollector();
     const session = createTestSession({
       agent: {
-        modelReference: { auth: { kind: "ai-gateway" }, id: "anthropic/claude-opus-4.6" },
+        modelReference: { id: "anthropic/claude-opus-4.6" },
         system: "You are a test assistant.",
         tools: [
           {
@@ -4995,7 +4995,7 @@ describe("createToolLoopHarness", () => {
     const { emit, events } = createEventCollector();
     const session = createTestSession({
       agent: {
-        modelReference: { auth: { kind: "ai-gateway" }, id: "anthropic/claude-opus-4.6" },
+        modelReference: { id: "anthropic/claude-opus-4.6" },
         system: "You are a test assistant.",
         tools: [
           {
@@ -5103,7 +5103,7 @@ describe("createToolLoopHarness", () => {
     );
     const session = createTestSession({
       agent: {
-        modelReference: { auth: { kind: "ai-gateway" }, id: "test-model" },
+        modelReference: { id: "test-model" },
         system: "You are a test assistant.",
         tools: [
           { description: "Run shell commands", name: "bash", inputSchema: { type: "object" } },
@@ -5264,7 +5264,7 @@ describe("createToolLoopHarness", () => {
     );
     const session = createTestSession({
       agent: {
-        modelReference: { auth: { kind: "ai-gateway" }, id: "test-model" },
+        modelReference: { id: "test-model" },
         system: "You are a test assistant.",
         tools: [
           { description: "Run shell commands", name: "bash", inputSchema: { type: "object" } },
@@ -5369,7 +5369,7 @@ describe("createToolLoopHarness", () => {
       ],
       session: createTestSession({
         agent: {
-          modelReference: { auth: { kind: "ai-gateway" }, id: "test-model" },
+          modelReference: { id: "test-model" },
           system: "You are a test assistant.",
           tools: [
             { description: "Run shell commands", name: "bash", inputSchema: { type: "object" } },
@@ -5533,7 +5533,7 @@ describe("createToolLoopHarness", () => {
       ],
       session: createTestSession({
         agent: {
-          modelReference: { auth: { kind: "ai-gateway" }, id: "test-model" },
+          modelReference: { id: "test-model" },
           system: "You are a test assistant.",
           tools: [
             {
@@ -5684,7 +5684,7 @@ describe("createToolLoopHarness", () => {
       ],
       session: createTestSession({
         agent: {
-          modelReference: { auth: { kind: "ai-gateway" }, id: "test-model" },
+          modelReference: { id: "test-model" },
           system: "You are a test assistant.",
           tools: [
             { description: "Run shell commands", name: "bash", inputSchema: { type: "object" } },
@@ -5780,7 +5780,7 @@ describe("createToolLoopHarness", () => {
     const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
     const session = createTestSession({
       agent: {
-        modelReference: { auth: { kind: "ai-gateway" }, id: "test-model" },
+        modelReference: { id: "test-model" },
         system: "You are a test assistant.",
         tools: [
           {
@@ -5915,8 +5915,8 @@ describe("createToolLoopHarness", () => {
     const runStep = createToolLoopHarness(config);
     const session = createTestSession({
       agent: {
-        compactionModelReference: { auth: { kind: "ai-gateway" }, id: "summary-model" },
-        modelReference: { auth: { kind: "ai-gateway" }, id: "main-model" },
+        compactionModelReference: { id: "summary-model" },
+        modelReference: { id: "main-model" },
         system: "You are a test assistant.",
         tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
       },
@@ -6395,7 +6395,7 @@ describe("createToolLoopHarness", () => {
       });
       const session = createTestSession({
         agent: {
-          modelReference: { auth: { kind: "ai-gateway" }, id: "anthropic/claude-sonnet-4-5" },
+          modelReference: { id: "anthropic/claude-sonnet-4-5" },
           system: "You are a test assistant.",
           tools: [
             { description: "Adds numbers", inputSchema: { type: "object" }, name: "add" },
@@ -6517,7 +6517,6 @@ describe("createToolLoopHarness", () => {
       const session = createTestSession({
         agent: {
           modelReference: {
-            auth: { kind: "ai-gateway" },
             id: "anthropic/claude-sonnet-4-5",
             providerOptions: { gateway: { order: ["anthropic", "bedrock"] } },
           },
@@ -6565,7 +6564,6 @@ describe("createToolLoopHarness", () => {
       const session = createTestSession({
         agent: {
           modelReference: {
-            auth: { kind: "ai-gateway" },
             id: "anthropic/claude-sonnet-4-5",
             providerOptions: { gateway: { caching: false } },
           },

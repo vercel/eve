@@ -7,12 +7,11 @@ import { normalizeJsonSchemaDefinition } from "#shared/json-schema.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import { codexModelSlugFromGatewayId } from "#internal/model-auth/endpoint/codex/catalog.js";
-import { classifyModelAuth } from "#internal/model-auth/classify.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
-import type { ModelAuth, PublicAgentModelDefinition } from "#shared/agent-definition.js";
+import type { PublicAgentModelDefinition } from "#shared/agent-definition.js";
 import type { CompiledAgentDefinition, CompiledRuntimeModelReference } from "#compiler/manifest.js";
 import type { CompiledRuntimeModelLimits } from "#compiler/model-catalog.js";
 import {
@@ -169,21 +168,16 @@ async function normalizeAuthoredModelReference(input: {
   readonly value: PublicAgentModelDefinition;
 }): Promise<CompiledRuntimeModelReference> {
   if (typeof input.value === "string") {
-    const routing = classifyModelRouting(input.value, input.providerOptions);
-    const auth =
-      input.useCodexSubscriptionTransport === true
-        ? codexAuthForOpenAiStringModel(input.value, input.purpose)
-        : classifyModelAuth(routing);
+    const model: CompiledRuntimeModelReference = {
+      id: formatLanguageModelGatewayId(input.value),
+      providerOptions: parseProviderOptionsRecord(input.providerOptions),
+      routing: classifyModelRouting(input.value, input.providerOptions),
+    };
+    if (input.useCodexSubscriptionTransport === true) {
+      model.transport = codexTransportForOpenAiStringModel(input.value, input.purpose);
+    }
 
-    return await withCompiledRuntimeModelLimits(
-      {
-        auth,
-        id: formatLanguageModelGatewayId(input.value),
-        providerOptions: parseProviderOptionsRecord(input.providerOptions),
-        routing,
-      },
-      input,
-    );
+    return await withCompiledRuntimeModelLimits(model, input);
   }
 
   if (input.useCodexSubscriptionTransport === true) {
@@ -227,7 +221,6 @@ async function normalizeAuthoredModelReference(input: {
 
   const routing = classifyModelRouting(languageModel, input.providerOptions);
   const sourceBackedModel = {
-    auth: classifyModelAuth(routing),
     id: formatLanguageModelGatewayId(languageModel),
     source: {
       exportName: source.exportName,
@@ -264,14 +257,14 @@ function shouldUseCodexSubscriptionTransport(
   return context.mode === "development" && experimental?.useCodexSubscription === true;
 }
 
-function codexAuthForOpenAiStringModel(modelId: string, purpose: string): ModelAuth {
+function codexTransportForOpenAiStringModel(modelId: string, purpose: string): "codex" {
   if (codexModelSlugFromGatewayId(formatLanguageModelGatewayId(modelId)) === null) {
     throw new Error(
       `experimental.useCodexSubscription requires ${purpose} to be an OpenAI model id such as "openai/gpt-5.5".`,
     );
   }
 
-  return { kind: "codex" };
+  return "codex";
 }
 
 function formatAgentConfigModulePath(
@@ -318,7 +311,7 @@ async function withCompiledRuntimeModelLimits(
 
   // Codex subscription compatibility is enforced by the Codex backend, not the
   // AI Gateway catalog. Authors can still provide modelContextWindowTokens.
-  if (model.auth?.kind === "codex") {
+  if (model.transport === "codex") {
     return model;
   }
 

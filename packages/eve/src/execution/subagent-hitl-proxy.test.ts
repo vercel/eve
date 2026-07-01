@@ -7,7 +7,7 @@ import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
 function createSession(state?: Record<string, unknown>): HarnessSession {
   return {
     agent: {
-      modelReference: { auth: { kind: "ai-gateway" }, id: "test-model" },
+      modelReference: { id: "test-model" },
       system: "",
       tools: [],
     },

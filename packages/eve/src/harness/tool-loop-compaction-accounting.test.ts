@@ -20,7 +20,7 @@ afterEach(() => {
 function createTestSession(overrides?: Partial<HarnessSession>): HarnessSession {
   return {
     agent: {
-      modelReference: { auth: { kind: "ai-gateway" }, id: "test-model" },
+      modelReference: { id: "test-model" },
       system: "You are a test assistant.",
       tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
     },

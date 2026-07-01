@@ -27,7 +27,6 @@ describe("resolveAgent", () => {
       channels: [slackChannelDefinition],
       config: {
         model: {
-          auth: { kind: "ai-gateway" },
           id: "anthropic/claude-sonnet-4.5",
           routing: { kind: "gateway", target: "anthropic" },
         },
@@ -171,7 +170,6 @@ describe("resolveAgent", () => {
     expect(resolved.config).toEqual({
       compaction: {},
       model: {
-        auth: { kind: "ai-gateway" },
         id: "anthropic/claude-sonnet-4.5",
       },
       name: "weather-agent",
@@ -286,7 +284,6 @@ describe("resolveAgent", () => {
       appRoot: "/app",
       config: {
         model: {
-          auth: { kind: "ai-gateway" },
           id: TEST_DEFAULT_MODEL_ID,
           routing: { kind: "gateway", target: "openai" },
         },
@@ -361,7 +358,6 @@ describe("resolveAgent", () => {
         appRoot: "/app",
         config: {
           model: {
-            auth: { kind: "ai-gateway" },
             id: TEST_DEFAULT_MODEL_ID,
             routing: { kind: "gateway", target: "openai" },
           },
@@ -381,7 +377,6 @@ describe("resolveAgent", () => {
     expect(resolved.config).toEqual({
       compaction: {},
       model: {
-        auth: { kind: "ai-gateway" },
         id: TEST_DEFAULT_MODEL_ID,
       },
       name: "weather-agent",
@@ -401,11 +396,7 @@ describe("resolveAgent", () => {
         agentRoot: "/app/agent",
         appRoot: "/app",
         config: {
-          model: {
-            auth: { kind: "ai-gateway" },
-            id: TEST_DEFAULT_MODEL_ID,
-            routing: { kind: "gateway", target: "openai" },
-          },
+          model: { id: TEST_DEFAULT_MODEL_ID, routing: { kind: "gateway", target: "openai" } },
           name: "weather-agent",
         },
         sandboxWorkspaces: [
@@ -440,7 +431,6 @@ describe("resolveAgent", () => {
         appRoot: "/app",
         config: {
           model: {
-            auth: { kind: "external", provider: "test-provider" },
             id: "test-provider/weather-pro",
             source: {
               sourceKind: "module",
@@ -462,7 +452,6 @@ describe("resolveAgent", () => {
     });
 
     expect(resolved.config.model).toEqual({
-      auth: { kind: "external", provider: "test-provider" },
       id: "test-provider/weather-pro",
       source: {
         sourceKind: "module",
@@ -479,7 +468,6 @@ describe("resolveAgent", () => {
         appRoot: "/app",
         config: {
           model: {
-            auth: { kind: "ai-gateway" },
             id: "anthropic/claude-opus-4.5-thinking",
             providerOptions: {
               anthropic: {
@@ -503,7 +491,6 @@ describe("resolveAgent", () => {
     });
 
     expect(resolved.config.model).toEqual({
-      auth: { kind: "ai-gateway" },
       id: "anthropic/claude-opus-4.5-thinking",
       providerOptions: {
         anthropic: {
@@ -521,7 +508,6 @@ describe("resolveAgent", () => {
       appRoot: "/app",
       config: {
         model: {
-          auth: { kind: "ai-gateway" },
           id: TEST_DEFAULT_MODEL_ID,
           routing: { kind: "gateway", target: "openai" },
         },

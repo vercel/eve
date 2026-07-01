@@ -31,7 +31,7 @@ function createEmitStub(): HarnessEmitFn {
 function createSession(state?: Record<string, unknown>): HarnessSession {
   return {
     agent: {
-      modelReference: { auth: { kind: "ai-gateway" }, id: "test-model" },
+      modelReference: { id: "test-model" },
       system: "test",
       tools: [],
     },

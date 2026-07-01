@@ -7,11 +7,7 @@ import type { HarnessSession } from "#harness/types.js";
 
 function makeSession(continuationToken: string): HarnessSession {
   return {
-    agent: {
-      modelReference: { auth: { kind: "ai-gateway" }, id: "openai/gpt-5.4" },
-      system: "",
-      tools: [],
-    },
+    agent: { modelReference: { id: "openai/gpt-5.4" }, system: "", tools: [] },
     compaction: { recentWindowSize: 10, threshold: 100_000 },
     continuationToken,
     history: [],

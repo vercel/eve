@@ -15,7 +15,6 @@ describe("createCompiledArtifactsBootstrapSource", () => {
           appRoot: "/app",
           config: {
             model: {
-              auth: { kind: "ai-gateway" },
               id: "openai/gpt-5.5",
               routing: classifyModelRouting("openai/gpt-5.5"),
             },

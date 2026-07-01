@@ -65,11 +65,7 @@ function withBundledMetadata<T>(
     agentRoot: "/virtual/app/agent",
     appRoot: "/virtual/app",
     config: {
-      model: {
-        auth: { kind: "ai-gateway" },
-        id: "openai/gpt-5-mini",
-        routing: { kind: "gateway", target: "openai" },
-      },
+      model: { id: "openai/gpt-5-mini", routing: { kind: "gateway", target: "openai" } },
       name: "keys-test-agent",
     },
   });
