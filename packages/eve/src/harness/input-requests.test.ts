@@ -558,6 +558,56 @@ describe("resolvePendingInput", () => {
     });
   });
 
+  it("returns an answered action for a resolved question", () => {
+    const session = setPendingInputBatch({
+      event: { sequence: 5, stepIndex: 1, turnId: "turn_0" },
+      requests: [
+        {
+          action: {
+            callId: "question-call",
+            input: { prompt: "Proceed with this plan?" },
+            kind: "tool-call",
+            toolName: "ask_question",
+          },
+          allowFreeform: false,
+          display: "select",
+          options: [
+            { id: "go", label: "Start researching" },
+            { id: "revise", label: "Adjust the plan" },
+          ],
+          prompt: "Proceed with this plan?",
+          requestId: "question-1",
+        } satisfies InputRequest,
+      ],
+      responseMessages: [],
+      session: createHarnessSession(),
+    });
+
+    const result = resolvePendingInput({
+      stepInput: {
+        inputResponses: [{ requestId: "question-1", optionId: "go", text: "go ahead" }],
+      },
+      session,
+    });
+
+    expect(result.outcome).toBe("resolved");
+    // The answered question must surface as a successful action result so the
+    // stream settles the `ask_question` call instead of leaving it spinning.
+    expect(result.answeredActions).toEqual({
+      event: { sequence: 5, stepIndex: 1, turnId: "turn_0" },
+      results: [
+        {
+          callId: "question-call",
+          kind: "tool-result",
+          output: { optionId: "go", status: "answered", text: "go ahead" },
+          toolName: "ask_question",
+        },
+      ],
+    });
+    // A question resolution is not a denial.
+    expect(result.rejectedActions).toBeUndefined();
+  });
+
   it("does not return a rejected action when an approval is granted", () => {
     const session = setPendingInputBatch({
       event: { sequence: 5, stepIndex: 1, turnId: "turn_0" },

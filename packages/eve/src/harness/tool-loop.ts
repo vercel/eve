@@ -467,6 +467,24 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       }
     }
 
+    // Surface resolved question requests as successful `action.result` events.
+    // The answer otherwise lives only in model history, so consumers (e.g. the
+    // TUI) never see the `ask_question` call settle and it keeps spinning after
+    // the user has answered. Attributed to the requesting turn via the parked
+    // batch's emit coordinates.
+    if (emit && pending.answeredActions) {
+      for (const result of pending.answeredActions.results) {
+        await emit(
+          createActionResultEvent({
+            result,
+            sequence: pending.answeredActions.event.sequence,
+            stepIndex: pending.answeredActions.event.stepIndex,
+            turnId: pending.answeredActions.event.turnId,
+          }),
+        );
+      }
+    }
+
     // --- Turn preamble ------------------------------------------------------
 
     if (emit && hasStepInput(input)) {

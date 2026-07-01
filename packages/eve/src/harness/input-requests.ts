@@ -7,6 +7,7 @@ import type {
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import { resolveTextToResponses } from "#channel/resolve-text.js";
 import { parseJsonObject } from "#shared/json.js";
+import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
 import type { HarnessSession, SessionStateMap, StepInput } from "#harness/types.js";
 
@@ -46,6 +47,19 @@ interface PendingInputBatch {
  * emit as `rejected` `action.result` events against the originating turn.
  */
 export interface RejectedActionBatch {
+  readonly event: PendingInputBatchEvent;
+  readonly results: readonly RuntimeToolResultActionResult[];
+}
+
+/**
+ * Resolved question requests (answered or ignored) from one resolved batch,
+ * ready for the caller to emit as successful `action.result` events against the
+ * originating turn. Unlike an approved tool call -- which subsequently runs and
+ * emits its own tool result -- a question's result IS the user's response, so it
+ * otherwise lives only in model history and consumers (e.g. the TUI) never see
+ * the call settle, leaving it spinning.
+ */
+export interface AnsweredActionBatch {
   readonly event: PendingInputBatchEvent;
   readonly results: readonly RuntimeToolResultActionResult[];
 }
@@ -169,6 +183,7 @@ export function resolvePendingInput(input: {
     }
 
     const rejectedActions = buildRejectedActionBatch(pendingBatch, []);
+    const answeredActions = buildAnsweredActionBatch(pendingBatch, []);
     session = clearPendingInputBatch(session);
 
     return {
@@ -176,6 +191,7 @@ export function resolvePendingInput(input: {
       outcome: "resolved",
       messages,
       rejectedActions,
+      answeredActions,
       session,
     };
   }
@@ -197,6 +213,7 @@ export function resolvePendingInput(input: {
   }
 
   const rejectedActions = buildRejectedActionBatch(pendingBatch, responses);
+  const answeredActions = buildAnsweredActionBatch(pendingBatch, responses);
   session = clearPendingInputBatch(session);
 
   // AI SDK cannot process tool-approval responses and a new user message
@@ -216,6 +233,7 @@ export function resolvePendingInput(input: {
       outcome: "resolved",
       messages,
       rejectedActions,
+      answeredActions,
       session,
     };
   }
@@ -225,6 +243,7 @@ export function resolvePendingInput(input: {
     outcome: "resolved",
     messages,
     rejectedActions,
+    answeredActions,
     session,
   };
 }
@@ -300,6 +319,7 @@ type ResolvePendingInputResult = {
   readonly outcome: "resolved" | "continue" | "unresolved";
   readonly messages: ModelMessage[];
   readonly rejectedActions?: RejectedActionBatch;
+  readonly answeredActions?: AnsweredActionBatch;
   readonly session: HarnessSession;
 };
 
@@ -529,6 +549,46 @@ function buildRejectedActionBatch(
       },
       toolName: request.action.toolName,
     });
+  }
+
+  return results.length > 0 ? { event: batch.event, results } : undefined;
+}
+
+/**
+ * Builds one successful `action.result` payload per resolved question request
+ * (non-approval input request) so the stream records the answer that otherwise
+ * lives only in model history. Without it, consumers never see the `ask_question`
+ * tool call settle and its UI keeps spinning after the user has answered.
+ *
+ * Approval requests are excluded: an approved call runs and emits its own tool
+ * result, and a denied call is surfaced by {@link buildRejectedActionBatch}.
+ */
+function buildAnsweredActionBatch(
+  batch: PendingInputBatch,
+  responses: readonly InputResponse[],
+): AnsweredActionBatch | undefined {
+  if (batch.event === undefined) {
+    return undefined;
+  }
+
+  const responseMap = new Map(responses.map((r) => [r.requestId, r]));
+  const results: RuntimeToolResultActionResult[] = [];
+  for (const request of batch.requests) {
+    if (isApprovalRequest(request)) {
+      continue;
+    }
+
+    const response = responseMap.get(request.requestId);
+    results.push(
+      createRuntimeToolResultFromValue({
+        callId: request.action.callId,
+        output:
+          response !== undefined
+            ? { optionId: response.optionId, status: "answered", text: response.text }
+            : { status: "ignored" },
+        toolName: request.action.toolName,
+      }),
+    );
   }
 
   return results.length > 0 ? { event: batch.event, results } : undefined;
