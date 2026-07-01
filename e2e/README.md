@@ -59,11 +59,9 @@ npx eve eval --strict --url "$DEPLOYMENT_URL"
 Do not set `VERCEL_TEAM_ID` at build: sandbox template keys must derive
 identically at build and runtime, and Vercel has no team variable at runtime.
 
-Most fixture agents default to `anthropic/claude-sonnet-5`, overridable in one
-place by setting `EVE_EVAL_MODEL` for the run (e.g.
-`EVE_EVAL_MODEL=openai/gpt-5.5 pnpm test:e2e`); judges run against
-`openai/gpt-5.5`. Both are real models, so the environment must provide the
-corresponding model-provider credentials. `agent-workflow-stress` uses eve's
+Most fixture agents run against `anthropic/claude-sonnet-5` and judges run
+against `openai/gpt-5.5`. Both are real models, so the environment must provide
+the corresponding model-provider credentials. `agent-workflow-stress` uses eve's
 `mockModel` fixture helper so its 100-turn runs stay fast and deterministic. Its
 concurrent and sequential evals cover high-volume session execution and repeated
 session resumption respectively.

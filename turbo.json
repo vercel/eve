@@ -61,7 +61,6 @@
     },
     "test:e2e": {
       "cache": false,
-      "passThroughEnv": ["EVE_EVAL_MODEL"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!.eve/**",
