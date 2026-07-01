@@ -144,12 +144,10 @@ export function deployProject(
         }
       }
 
-      // `--yes` in both modes: it makes the CLI send skipAutoDetectionConfirmation,
-      // which the deployments API requires for a project that has never been
-      // configured (eve creates projects via the bare projects API, so the record
-      // has no framework settings, and the CLI has no interactive recovery for the
-      // resulting missing_project_settings error). The deploy decision itself was
-      // already made by the shouldRun gate, so there is nothing left to confirm.
+      // `--yes` in both modes: setup already made the deploy decision, and fresh
+      // Vercel projects may still need the CLI to skip deployment-setting
+      // confirmation before the deployments API accepts the first production
+      // deploy.
       const deployArgs = input.headless
         ? ["deploy", "--prod", "--yes", "--non-interactive"]
         : ["deploy", "--prod", "--yes"];
