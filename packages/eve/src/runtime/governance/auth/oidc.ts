@@ -106,14 +106,11 @@ export async function authenticateOidcStrategy(input: {
         };
       }
 
-      if (input.strategy.currentVercelProject?.environment !== "preview") {
-        return {
-          kind: "caller-not-allowed",
-        };
-      }
-
-      // Preview may use a same-project development credential only through the
-      // generic service path below, never as the user embedded in the token.
+      /*
+       * A same-project development credential for a different current
+       * environment identifies the project, not the embedded local user.
+       * Let the generic service path below authenticate it via `sub`.
+       */
     }
 
     if (typeof verified.payload.sub !== "string" || verified.payload.sub.length === 0) {
