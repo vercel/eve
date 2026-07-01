@@ -2556,6 +2556,34 @@ describe("createToolLoopHarness", () => {
     expect(types).not.toContain("session.waiting");
   });
 
+  it("fails a task run terminally on a structural 4xx model-call error instead of reporting success", async () => {
+    // Regression test for vercel/eve#412: a terminal model-call failure
+    // (e.g. invalid API key) inside a subagent run must surface as
+    // `isError: true` to the parent orchestrator, not as a silent
+    // `{ done: true, output: "" }` success.
+    const error = Object.assign(new Error("invalid api key"), {
+      name: "AI_APICallError",
+      statusCode: 401,
+    });
+    setupMockAgentError(error);
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("task", emit));
+
+    const result = await runStep(createTestSession(), { message: "Hi" });
+
+    expect(result.next).toEqual({
+      done: true,
+      isError: true,
+      output: expect.stringContaining("invalid api key"),
+    });
+
+    const types = events.map((e) => e.type);
+    expect(types).toContain("step.failed");
+    expect(types).toContain("session.failed");
+    expect(types).not.toContain("session.waiting");
+  });
+
   it("emits the full terminal failure cascade on an explicit Gateway invalid-request error", async () => {
     setupMockAgentError(
       createGatewayModelCallError({

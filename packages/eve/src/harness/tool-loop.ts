@@ -988,7 +988,15 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             sessionId: session.sessionId,
           });
           return {
-            next: { done: true, output: "" },
+            // A task run cannot park for a user retry, so a terminal
+            // failure must still surface as the task's error result
+            // instead of the conversation-mode `output: ""` placeholder —
+            // otherwise the delegating parent sees a successful
+            // subagent-result tool call with an empty output.
+            next:
+              config.mode === "task"
+                ? { done: true, isError: true, output: errorMessage }
+                : { done: true, output: "" },
             session,
           };
         }
