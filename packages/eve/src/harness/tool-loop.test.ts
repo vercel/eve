@@ -37,6 +37,7 @@ import { hasDeferredStepInput, setPendingInputBatch } from "#harness/input-reque
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { getSessionTokenUsage, setTurnUsageState } from "#harness/turn-tag-state.js";
 import { DEFAULT_SUBAGENT_MAX_DEPTH } from "#harness/subagent-depth.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 import {
@@ -855,6 +856,104 @@ describe("createToolLoopHarness", () => {
 
     expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0]).toMatchObject({ reasoning: "high" });
   });
+
+  it("accumulates provider-reported token usage across the session", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+      usage: {
+        inputTokenDetails: { cacheReadTokens: 2, cacheWriteTokens: 1 },
+        inputTokens: 7,
+        outputTokens: 3,
+      },
+    });
+
+    const runStep = createToolLoopHarness(createTestConfig());
+    const result = await runStep(createTestSession(), { message: "Hi" });
+
+    expect(getSessionTokenUsage(result.session)).toEqual({
+      cacheReadTokens: 2,
+      cacheWriteTokens: 1,
+      inputTokens: 7,
+      outputTokens: 3,
+    });
+  });
+
+  it.each([
+    {
+      details: {
+        inputTokens: 12,
+        kind: "input",
+        limit: 12,
+        outputTokens: 3,
+        usedTokens: 12,
+      },
+      message: "The session reached its configured input token limit.",
+      limits: {
+        maxInputTokensPerSession: 12,
+      },
+      usage: {
+        cacheReadTokens: 2,
+        cacheWriteTokens: 1,
+        inputTokens: 12,
+        outputTokens: 3,
+      },
+      tokenKind: "input",
+    },
+    {
+      details: {
+        inputTokens: 7,
+        kind: "output",
+        limit: 3,
+        outputTokens: 3,
+        usedTokens: 3,
+      },
+      message: "The session reached its configured output token limit.",
+      limits: {
+        maxOutputTokensPerSession: 3,
+      },
+      usage: {
+        cacheReadTokens: 2,
+        cacheWriteTokens: 1,
+        inputTokens: 7,
+        outputTokens: 3,
+      },
+      tokenKind: "output",
+    },
+  ])(
+    "blocks another model call after the session reaches its $tokenKind token limit",
+    async (testCase) => {
+      const { emit, events } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const session = setTurnUsageState(createTestSession({ limits: testCase.limits }), {
+        turnId: "turn_previous",
+        ...testCase.usage,
+        session: testCase.usage,
+      });
+
+      const result = await runStep(session, { message: "Hi again" });
+
+      expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
+      expect(result.next).toEqual({ done: true, isError: undefined, output: "" });
+      expect(events.map((event) => event.type)).toEqual([
+        "session.started",
+        "turn.started",
+        "message.received",
+        "step.started",
+        "step.failed",
+        "turn.failed",
+        "session.failed",
+      ]);
+      expect(events.find((event) => event.type === "step.failed")?.data).toMatchObject({
+        code: "SESSION_TOKEN_LIMIT_REACHED",
+        details: testCase.details,
+        message: testCase.message,
+      });
+    },
+  );
 
   it("preserves approval gates on step-scoped dynamic tools", async () => {
     setupMockAgent({

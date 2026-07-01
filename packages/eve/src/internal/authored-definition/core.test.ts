@@ -32,16 +32,24 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow(FAILURE_MESSAGE);
   });
 
-  it("accepts a positive subagent max depth", () => {
+  it("accepts positive agent limits", () => {
     const definition = normalizeAgentDefinition(
       {
         model: "openai/gpt-5.5",
-        limits: { maxSubagentDepth: 4 },
+        limits: {
+          maxInputTokensPerSession: 200_000,
+          maxOutputTokensPerSession: 20_000,
+          maxSubagentDepth: 4,
+        },
       },
       FAILURE_MESSAGE,
     );
 
-    expect(definition.limits).toEqual({ maxSubagentDepth: 4 });
+    expect(definition.limits).toEqual({
+      maxInputTokensPerSession: 200_000,
+      maxOutputTokensPerSession: 20_000,
+      maxSubagentDepth: 4,
+    });
   });
 
   it.each([0, 1.5, -1, "4"])("rejects invalid subagent max depth %j", (maxSubagentDepth) => {
@@ -50,6 +58,27 @@ describe("normalizeAgentDefinition", () => {
         {
           model: "openai/gpt-5.5",
           limits: { maxSubagentDepth },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
+  });
+
+  it.each([
+    ["maxInputTokensPerSession", 0],
+    ["maxInputTokensPerSession", 1.5],
+    ["maxInputTokensPerSession", -1],
+    ["maxInputTokensPerSession", "200000"],
+    ["maxOutputTokensPerSession", 0],
+    ["maxOutputTokensPerSession", 1.5],
+    ["maxOutputTokensPerSession", -1],
+    ["maxOutputTokensPerSession", "20000"],
+  ])("rejects invalid session token limit %s=%j", (key, value) => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          limits: { [key]: value },
         },
         FAILURE_MESSAGE,
       ),

@@ -4,6 +4,8 @@ import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import {
   createCompactionConfig,
   createSession,
+  DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
+  DEFAULT_SUBAGENT_MAX_INPUT_TOKENS_PER_SESSION,
   hydrateDurableSession,
   mintSubagentContinuationToken,
   projectToDurableSession,
@@ -181,6 +183,64 @@ describe("createSession", () => {
     });
   });
 
+  it("defaults root sessions to the root input token budget", () => {
+    const session = createSession({
+      continuationToken: "root-token",
+      sessionId: "sess-root",
+      turnAgent: createTestTurnAgent(),
+    });
+
+    expect(session.limits?.maxInputTokensPerSession).toBe(
+      DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
+    );
+  });
+
+  it("defaults delegated subagent sessions to the subagent input token budget", () => {
+    const session = createSession({
+      continuationToken: "subagent-token",
+      sessionId: "sess-child",
+      subagentDepth: 1,
+      turnAgent: createTestTurnAgent(),
+    });
+
+    expect(session.limits?.maxInputTokensPerSession).toBe(
+      DEFAULT_SUBAGENT_MAX_INPUT_TOKENS_PER_SESSION,
+    );
+  });
+
+  it("applies the root input token budget when hydrating a durable session without a stored limit", () => {
+    const hydrated = hydrateDurableSession({
+      durable: {
+        agent: { system: "You are a helpful assistant." },
+        continuationToken: "root-token",
+        history: [],
+        sessionId: "sess-root",
+      },
+      turnAgent: createTestTurnAgent(),
+    });
+
+    expect(hydrated.limits?.maxInputTokensPerSession).toBe(
+      DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
+    );
+  });
+
+  it("applies the subagent input token budget when hydrating a durable child without a stored limit", () => {
+    const hydrated = hydrateDurableSession({
+      durable: {
+        agent: { system: "You are a helpful assistant." },
+        continuationToken: "subagent-token",
+        history: [],
+        sessionId: "sess-child",
+        subagentDepth: 1,
+      },
+      turnAgent: createTestTurnAgent(),
+    });
+
+    expect(hydrated.limits?.maxInputTokensPerSession).toBe(
+      DEFAULT_SUBAGENT_MAX_INPUT_TOKENS_PER_SESSION,
+    );
+  });
+
   it("persists run outputSchema through durable session projection and hydration", () => {
     const agentOutputSchema = {
       properties: { ignored: { type: "string" } },
@@ -228,6 +288,33 @@ describe("createSession", () => {
     expect(durable.subagentMaxDepth).toBe(4);
     expect(hydrated.subagentDepth).toBe(2);
     expect(hydrated.subagentMaxDepth).toBe(4);
+  });
+
+  it("persists session token limits through durable session projection and hydration", () => {
+    const session = createSession({
+      continuationToken: "root-token",
+      limits: {
+        maxInputTokensPerSession: 200_000,
+        maxOutputTokensPerSession: 20_000,
+      },
+      sessionId: "sess-root",
+      turnAgent: createTestTurnAgent(),
+    });
+
+    const durable = projectToDurableSession(session);
+    const hydrated = hydrateDurableSession({
+      durable,
+      turnAgent: createTestTurnAgent(),
+    });
+
+    expect(durable.limits).toEqual({
+      maxInputTokensPerSession: 200_000,
+      maxOutputTokensPerSession: 20_000,
+    });
+    expect(hydrated.limits).toEqual({
+      maxInputTokensPerSession: 200_000,
+      maxOutputTokensPerSession: 20_000,
+    });
   });
 
   it("restores current reasoning configuration when hydrating a durable session", () => {

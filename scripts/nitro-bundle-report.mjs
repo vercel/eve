@@ -1,9 +1,21 @@
-import { lstat, mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createNitroBundleReportComparison } from "./nitro-bundle-report-compare.mjs";
-import { collectPublishedPackageReport } from "./package-publish-report.mjs";
+import { collectInitInstallReportFromTarball } from "./init-install-report.mjs";
+import { collectPublishedPackageReportFromPack, runPack } from "./package-publish-report.mjs";
 
 function normalizePath(path) {
   return path.replaceAll("\\", "/");
@@ -879,6 +891,82 @@ function renderDependencyManifestDelta(packageComparison, baselineLabel) {
   return lines;
 }
 
+function renderInitDependencyManifestDelta(initInstallComparison, baselineLabel) {
+  if (initInstallComparison === null) {
+    return [];
+  }
+
+  const dependencyChangeCount =
+    initInstallComparison.dependenciesAdded.length +
+    initInstallComparison.dependenciesChanged.length +
+    initInstallComparison.dependenciesRemoved.length;
+  const devDependencyChangeCount =
+    initInstallComparison.devDependenciesAdded.length +
+    initInstallComparison.devDependenciesChanged.length +
+    initInstallComparison.devDependenciesRemoved.length;
+
+  if (dependencyChangeCount === 0 && devDependencyChangeCount === 0) {
+    return [];
+  }
+
+  const lines = [
+    "<details>",
+    `<summary><code>eve init</code> dependency changes vs <code>${escapeHtml(baselineLabel)}</code></summary>`,
+    "",
+  ];
+
+  if (dependencyChangeCount > 0) {
+    lines.push("**dependencies**", "");
+
+    if (initInstallComparison.dependenciesAdded.length > 0) {
+      lines.push(
+        `- Added: ${initInstallComparison.dependenciesAdded.map((dependency) => `\`${dependency}\``).join(", ")}`,
+      );
+    }
+
+    if (initInstallComparison.dependenciesRemoved.length > 0) {
+      lines.push(
+        `- Removed: ${initInstallComparison.dependenciesRemoved.map((dependency) => `\`${dependency}\``).join(", ")}`,
+      );
+    }
+
+    if (initInstallComparison.dependenciesChanged.length > 0) {
+      lines.push(
+        `- Changed: ${initInstallComparison.dependenciesChanged.map((dependency) => `\`${dependency.baseline}\` -> \`${dependency.current}\``).join(", ")}`,
+      );
+    }
+
+    lines.push("");
+  }
+
+  if (devDependencyChangeCount > 0) {
+    lines.push("**devDependencies**", "");
+
+    if (initInstallComparison.devDependenciesAdded.length > 0) {
+      lines.push(
+        `- Added: ${initInstallComparison.devDependenciesAdded.map((dependency) => `\`${dependency}\``).join(", ")}`,
+      );
+    }
+
+    if (initInstallComparison.devDependenciesRemoved.length > 0) {
+      lines.push(
+        `- Removed: ${initInstallComparison.devDependenciesRemoved.map((dependency) => `\`${dependency}\``).join(", ")}`,
+      );
+    }
+
+    if (initInstallComparison.devDependenciesChanged.length > 0) {
+      lines.push(
+        `- Changed: ${initInstallComparison.devDependenciesChanged.map((dependency) => `\`${dependency.baseline}\` -> \`${dependency.current}\``).join(", ")}`,
+      );
+    }
+
+    lines.push("");
+  }
+
+  lines.push("</details>", "");
+  return lines;
+}
+
 function renderFunctionDeltaSection(comparison) {
   const changedFunctions = comparison.app.functions.filter(
     (functionEntry) => functionEntry.changed,
@@ -1104,6 +1192,177 @@ function renderPublishedPackageSection(publishedPackage) {
   return lines;
 }
 
+function renderInitInstallSummarySection(report) {
+  if (report.comparison?.initInstall) {
+    const comparison = report.comparison.initInstall;
+    const lines = ["### `eve init` install", ""];
+
+    if (comparison.status !== "present") {
+      lines.push(
+        "_This metric is shown for visibility only until both the baseline and current report include it._",
+        "",
+      );
+    }
+
+    const baselineValue = (metric, formatter = (value) => String(value)) =>
+      comparison.status === "added" ? "not tracked" : formatter(metric.baseline);
+    const currentValue = (metric, formatter = (value) => String(value)) =>
+      comparison.status === "removed" ? "not tracked" : formatter(metric.current);
+    const deltaValue = (metric, formatter) =>
+      comparison.status === "present"
+        ? formatter(metric.delta)
+        : comparison.status === "added"
+          ? "new metric"
+          : "removed metric";
+
+    lines.push("| Metric | Baseline | Current | Delta |");
+    lines.push("| --- | --- | --- | --- |");
+    lines.push(
+      `| Installed footprint | ${baselineValue(comparison.installedSizeBytes, formatBytes)} | ${currentValue(comparison.installedSizeBytes, formatBytes)} | ${deltaValue(comparison.installedSizeBytes, formatSizeDelta)} |`,
+    );
+    lines.push(
+      `| Installed packages | ${baselineValue(comparison.installedPackageCount)} | ${currentValue(comparison.installedPackageCount)} | ${deltaValue(comparison.installedPackageCount, formatSignedCount)} |`,
+    );
+    lines.push(
+      `| dependencies | ${baselineValue(comparison.dependencyCount)} | ${currentValue(comparison.dependencyCount)} | ${deltaValue(comparison.dependencyCount, formatSignedCount)} |`,
+    );
+    lines.push(
+      `| devDependencies | ${baselineValue(comparison.devDependencyCount)} | ${currentValue(comparison.devDependencyCount)} | ${deltaValue(comparison.devDependencyCount, formatSignedCount)} |`,
+    );
+    lines.push(
+      `| Dependency package bytes | ${baselineValue(comparison.dependencyPackageBytes, formatBytes)} | ${currentValue(comparison.dependencyPackageBytes, formatBytes)} | ${deltaValue(comparison.dependencyPackageBytes, formatSizeDelta)} |`,
+    );
+    lines.push(
+      `| devDependency package bytes | ${baselineValue(comparison.devDependencyPackageBytes, formatBytes)} | ${currentValue(comparison.devDependencyPackageBytes, formatBytes)} | ${deltaValue(comparison.devDependencyPackageBytes, formatSizeDelta)} |`,
+    );
+    lines.push("");
+    lines.push(...renderInitDependencyManifestDelta(comparison, report.comparison.baselineLabel));
+
+    return lines;
+  }
+
+  if (!report.initInstall) {
+    return [];
+  }
+
+  const lines = ["### `eve init` install", ""];
+  lines.push("| Metric | Value |");
+  lines.push("| --- | --- |");
+  lines.push(`| Installed footprint | ${formatBytes(report.initInstall.installedSizeBytes)} |`);
+  lines.push(`| Installed packages | ${report.initInstall.installedPackageCount} |`);
+  lines.push(`| dependencies | ${report.initInstall.dependencyCount} |`);
+  lines.push(`| devDependencies | ${report.initInstall.devDependencyCount} |`);
+  lines.push(
+    `| Dependency package bytes | ${formatBytes(report.initInstall.dependencyPackageBytes)} |`,
+  );
+  lines.push(
+    `| devDependency package bytes | ${formatBytes(report.initInstall.devDependencyPackageBytes)} |`,
+  );
+  lines.push("");
+  return lines;
+}
+
+function renderInitDependencyTable(title, dependencies, totalBytes) {
+  const lines = ["<details>", `<summary>${title} (${dependencies.length})</summary>`, ""];
+
+  if (dependencies.length === 0) {
+    lines.push("None.", "", "</details>", "");
+    return lines;
+  }
+
+  lines.push("| Package | Range | Installed size | Share |");
+  lines.push("| --- | --- | --- | --- |");
+
+  for (const dependency of dependencies) {
+    lines.push(
+      `| \`${dependency.name}\` | \`${dependency.range}\` | ${formatBytes(dependency.bytes)} | ${formatPercent(dependency.bytes, totalBytes)} |`,
+    );
+  }
+
+  lines.push("", "</details>", "");
+  return lines;
+}
+
+function renderInitInstallSection(initInstall) {
+  const lines = ["<details>", "<summary><code>eve init</code> install drill-down</summary>", ""];
+  lines.push("### `eve init` install details", "");
+  lines.push(`- Command: \`eve init ${initInstall.projectName}\``);
+  lines.push(`- Package manager: \`${initInstall.packageManager}\``);
+  lines.push(
+    `- Installed footprint: ${formatBytes(initInstall.installedSizeBytes)} across ${initInstall.installedFileCount} installed file${initInstall.installedFileCount === 1 ? "" : "s"}`,
+  );
+  lines.push(
+    `- Installed packages: ${initInstall.installedPackageCount} total (${initInstall.unclassifiedInstalledPackageCount} transitive-only)`,
+  );
+  lines.push(
+    `- dependencies: ${initInstall.dependencyCount} direct package${initInstall.dependencyCount === 1 ? "" : "s"} totaling ${formatBytes(initInstall.dependencyPackageBytes)}`,
+  );
+  lines.push(
+    `- devDependencies: ${initInstall.devDependencyCount} direct package${initInstall.devDependencyCount === 1 ? "" : "s"} totaling ${formatBytes(initInstall.devDependencyPackageBytes)}`,
+  );
+  lines.push(
+    `- Other transitive package files: ${formatBytes(initInstall.transitivePackageBytes)}`,
+  );
+  lines.push(
+    "",
+    "_Installed footprint is measured from an isolated temporary `eve init my-agent` using the current packed eve tarball._",
+    "",
+  );
+
+  lines.push(
+    ...renderHeavyDependencyList(
+      initInstall.topInstalledPackages,
+      initInstall.installedSizeBytes,
+      5,
+    ),
+  );
+
+  const installedPackageEntries = buildTopEntryChart(
+    initInstall.topInstalledPackages.map((pkg) => ({
+      bytes: pkg.bytes,
+      label: pkg.name,
+    })),
+    initInstall.installedSizeBytes,
+    {
+      maxEntries: INSTALLED_PACKAGE_BREAKDOWN_MAX_ENTRIES,
+      minBytes: INSTALLED_PACKAGE_BREAKDOWN_MIN_BYTES,
+      otherLabel: "Other installed packages",
+    },
+  );
+
+  if (installedPackageEntries.length > 0) {
+    lines.push("<details>");
+    lines.push("<summary>Installed footprint breakdown</summary>");
+    lines.push("");
+    lines.push(
+      ...renderAsciiBarChart(
+        "Installed package size",
+        installedPackageEntries,
+        initInstall.installedSizeBytes,
+      ),
+    );
+    lines.push("</details>", "");
+  }
+
+  lines.push(
+    ...renderInitDependencyTable(
+      "dependencies",
+      initInstall.dependencies,
+      initInstall.installedSizeBytes,
+    ),
+  );
+  lines.push(
+    ...renderInitDependencyTable(
+      "devDependencies",
+      initInstall.devDependencies,
+      initInstall.installedSizeBytes,
+    ),
+  );
+  lines.push("</details>", "");
+
+  return lines;
+}
+
 function renderBundleVisualizationSection(report) {
   const lines = ["### Payload Size Graph", ""];
   lines.push(
@@ -1239,6 +1498,58 @@ function renderFunctionDrillDown(report) {
   return lines;
 }
 
+async function collectPackageReports(options) {
+  if (!options.packageRoot) {
+    return {
+      initInstall: null,
+      publishedPackage: null,
+    };
+  }
+
+  const packageRoot = resolve(options.packageRoot);
+  const packDirectory = await mkdtemp(join(tmpdir(), "eve-package-pack-"));
+  const installDirectory = await mkdtemp(join(tmpdir(), "eve-package-install-"));
+
+  try {
+    const packResult = await runPack(packageRoot, packDirectory);
+    const tarballFilename = typeof packResult.filename === "string" ? packResult.filename : null;
+
+    if (!tarballFilename) {
+      throw new Error(`npm pack did not report a tarball filename for "${packageRoot}".`);
+    }
+
+    const tarballPath = join(packDirectory, tarballFilename);
+    const publishedPackage = await collectPublishedPackageReportFromPack({
+      installDirectory,
+      packageLabel: options.packageLabel,
+      packageRoot,
+      packResult,
+      tarballPath,
+    });
+    const initInstall = await collectInitInstallReportFromTarball({
+      packageLabel: options.packageLabel,
+      packageRoot,
+      tarballPath,
+    });
+
+    return {
+      initInstall,
+      publishedPackage,
+    };
+  } finally {
+    await Promise.all([
+      rm(packDirectory, {
+        force: true,
+        recursive: true,
+      }),
+      rm(installDirectory, {
+        force: true,
+        recursive: true,
+      }),
+    ]);
+  }
+}
+
 /**
  * Collects a bundle report from one Nitro Vercel build output tree.
  */
@@ -1259,24 +1570,18 @@ export async function collectNitroBundleReport(options) {
     );
   }
 
-  const [config, functionEntries, nitroMetadata, publishedPackage, staticFiles] = await Promise.all(
-    [
-      pathExists(join(outputDirectory, "config.json")).then((exists) =>
-        exists ? readJson(join(outputDirectory, "config.json")) : null,
-      ),
-      discoverFunctionEntries(functionsRoot),
-      pathExists(join(outputDirectory, "nitro.json")).then((exists) =>
-        exists ? readJson(join(outputDirectory, "nitro.json")) : null,
-      ),
-      options.packageRoot
-        ? collectPublishedPackageReport({
-            packageLabel: options.packageLabel,
-            packageRoot: options.packageRoot,
-          })
-        : Promise.resolve(null),
-      pathExists(staticRoot).then((exists) => (exists ? walkRegularFiles(staticRoot) : [])),
-    ],
-  );
+  const [config, functionEntries, packageReports, nitroMetadata, staticFiles] = await Promise.all([
+    pathExists(join(outputDirectory, "config.json")).then((exists) =>
+      exists ? readJson(join(outputDirectory, "config.json")) : null,
+    ),
+    discoverFunctionEntries(functionsRoot),
+    collectPackageReports(options),
+    pathExists(join(outputDirectory, "nitro.json")).then((exists) =>
+      exists ? readJson(join(outputDirectory, "nitro.json")) : null,
+    ),
+    pathExists(staticRoot).then((exists) => (exists ? walkRegularFiles(staticRoot) : [])),
+  ]);
+  const { initInstall, publishedPackage } = packageReports;
 
   /** @type {Map<string, { aliases: { isInternalRoute: boolean; relativeEntryPath: string; route: string }[]; realDirectoryPath: string }>} */
   const functionsByRealPath = new Map();
@@ -1381,6 +1686,7 @@ export async function collectNitroBundleReport(options) {
     functionAliasCount: functionEntries.length,
     functions,
     generatedAt: new Date().toISOString(),
+    initInstall,
     internalRouteCount: functions.reduce(
       (total, functionEntry) => total + functionEntry.internalRoutes.length,
       0,
@@ -1455,10 +1761,16 @@ export function renderNitroBundleReportMarkdown(report) {
     lines.push(...renderSummaryTable(report));
   }
 
+  lines.push(...renderInitInstallSummarySection(report));
+
   lines.push(...renderMetadataSection(report));
 
   if (report.publishedPackage) {
     lines.push(...renderPublishedPackageSection(report.publishedPackage));
+  }
+
+  if (report.initInstall) {
+    lines.push(...renderInitInstallSection(report.initInstall));
   }
 
   if (report.functions.length === 0) {

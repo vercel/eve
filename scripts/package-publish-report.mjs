@@ -347,7 +347,7 @@ async function rewriteCatalogReferencesInTarball(tarballPath, packageRoot) {
   }
 }
 
-async function runPack(packageRoot, packDirectory) {
+export async function runPack(packageRoot, packDirectory) {
   const packagePath = resolve(packageRoot);
   const { stderr, stdout } = await execFile(
     "npm",
@@ -437,17 +437,66 @@ async function collectInstalledPackageSnapshot(input) {
   };
 }
 
-/**
- * Collects one package publish report from the package manifest and an
- * isolated pack/install snapshot.
- */
-export async function collectPublishedPackageReport(options) {
+export async function collectPublishedPackageReportFromPack(options) {
   const packageRoot = resolve(options.packageRoot);
   const packageJson = await readJson(resolve(packageRoot, "package.json"));
   const packageName =
     typeof packageJson.name === "string" ? packageJson.name : basename(packageRoot);
   const runtimeDependencies = readRuntimeDependencies(packageJson);
   const peerDependencies = readPeerDependencies(packageJson);
+  const packResult = options.packResult;
+  const tarballFilename = typeof packResult.filename === "string" ? packResult.filename : null;
+
+  if (!tarballFilename) {
+    throw new Error(`npm pack did not report a tarball filename for "${packageRoot}".`);
+  }
+
+  const packedFiles = Array.isArray(packResult.files)
+    ? packResult.files
+        .filter(
+          (file) =>
+            file &&
+            typeof file === "object" &&
+            typeof file.path === "string" &&
+            typeof file.size === "number",
+        )
+        .map((file) => ({
+          path: file.path,
+          size: file.size,
+        }))
+    : [];
+  const installedSnapshot = await collectInstalledPackageSnapshot({
+    installRoot: options.installDirectory,
+    packageName,
+    tarballPath: options.tarballPath,
+  });
+
+  return {
+    installedDependencyBytes: installedSnapshot.installedDependencyBytes,
+    installedFileCount: installedSnapshot.installedFileCount,
+    installedPackageBytes: installedSnapshot.installedPackageBytes,
+    installedSizeBytes: installedSnapshot.installedSizeBytes,
+    packageLabel: options.packageLabel ?? basename(packageRoot),
+    packageName,
+    packageRoot,
+    packedSizeBytes: typeof packResult.size === "number" ? packResult.size : 0,
+    peerDependencies,
+    publishedFileCount: typeof packResult.entryCount === "number" ? packResult.entryCount : 0,
+    tarballFilename,
+    topInstalledPackages: installedSnapshot.topInstalledPackages,
+    topPublishedFiles: summarizeTopPublishedFiles(packedFiles, 5),
+    unpackedSizeBytes: typeof packResult.unpackedSize === "number" ? packResult.unpackedSize : 0,
+    version: typeof packageJson.version === "string" ? packageJson.version : "0.0.0",
+    runtimeDependencies,
+  };
+}
+
+/**
+ * Collects one package publish report from the package manifest and an
+ * isolated pack/install snapshot.
+ */
+export async function collectPublishedPackageReport(options) {
+  const packageRoot = resolve(options.packageRoot);
   const packDirectory = await mkdtemp(join(tmpdir(), "eve-package-pack-"));
   const installDirectory = await mkdtemp(join(tmpdir(), "eve-package-install-"));
 
@@ -459,44 +508,13 @@ export async function collectPublishedPackageReport(options) {
       throw new Error(`npm pack did not report a tarball filename for "${packageRoot}".`);
     }
 
-    const packedFiles = Array.isArray(packResult.files)
-      ? packResult.files
-          .filter(
-            (file) =>
-              file &&
-              typeof file === "object" &&
-              typeof file.path === "string" &&
-              typeof file.size === "number",
-          )
-          .map((file) => ({
-            path: file.path,
-            size: file.size,
-          }))
-      : [];
-    const installedSnapshot = await collectInstalledPackageSnapshot({
-      installRoot: installDirectory,
-      packageName,
+    return collectPublishedPackageReportFromPack({
+      installDirectory,
+      packageLabel: options.packageLabel,
+      packageRoot,
+      packResult,
       tarballPath: join(packDirectory, tarballFilename),
     });
-
-    return {
-      installedDependencyBytes: installedSnapshot.installedDependencyBytes,
-      installedFileCount: installedSnapshot.installedFileCount,
-      installedPackageBytes: installedSnapshot.installedPackageBytes,
-      installedSizeBytes: installedSnapshot.installedSizeBytes,
-      packageLabel: options.packageLabel ?? basename(packageRoot),
-      packageName,
-      packageRoot,
-      packedSizeBytes: typeof packResult.size === "number" ? packResult.size : 0,
-      peerDependencies,
-      publishedFileCount: typeof packResult.entryCount === "number" ? packResult.entryCount : 0,
-      tarballFilename,
-      topInstalledPackages: installedSnapshot.topInstalledPackages,
-      topPublishedFiles: summarizeTopPublishedFiles(packedFiles, 5),
-      unpackedSizeBytes: typeof packResult.unpackedSize === "number" ? packResult.unpackedSize : 0,
-      version: typeof packageJson.version === "string" ? packageJson.version : "0.0.0",
-      runtimeDependencies,
-    };
   } finally {
     await Promise.all([
       rm(packDirectory, {
