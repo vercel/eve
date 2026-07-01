@@ -11,6 +11,7 @@ describe("resolveSchedules", () => {
       appRoot: "/app",
       config: {
         model: {
+          auth: { kind: "ai-gateway" },
           id: TEST_DEFAULT_MODEL_ID,
           routing: { kind: "gateway", target: "openai" },
         },

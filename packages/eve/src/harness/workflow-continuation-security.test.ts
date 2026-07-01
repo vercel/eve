@@ -9,7 +9,7 @@ import {
 function makeSession(state?: HarnessSession["state"]): HarnessSession {
   return {
     agent: {
-      modelReference: { id: "test-model" },
+      modelReference: { auth: { kind: "ai-gateway" }, id: "test-model" },
       system: "",
       tools: [],
     },

@@ -114,7 +114,11 @@ function makeSubagent(name: string): CompiledSubagentNode {
       agentRoot: `${AGENT_ROOT}/subagents/${name}`,
       appRoot: APP_ROOT,
       config: {
-        model: { id: "openai/gpt-5.4", routing: { kind: "gateway", target: "openai" } },
+        model: {
+          auth: { kind: "ai-gateway" },
+          id: "openai/gpt-5.4",
+          routing: { kind: "gateway", target: "openai" },
+        },
         name,
       },
     }),
@@ -150,7 +154,11 @@ describe("buildVercelAgentSummary", () => {
       ],
       config: {
         description: "An agent for tests.",
-        model: { id: "openai/gpt-5.4", routing: { kind: "gateway", target: "openai" } },
+        model: {
+          auth: { kind: "ai-gateway" },
+          id: "openai/gpt-5.4",
+          routing: { kind: "gateway", target: "openai" },
+        },
         name: "test-agent",
       },
       connections: [
@@ -340,7 +348,11 @@ describe("buildVercelAgentSummary", () => {
       agentRoot: AGENT_ROOT,
       appRoot: APP_ROOT,
       config: {
-        model: { id: "openai/gpt-5.4", routing: { kind: "gateway", target: "openai" } },
+        model: {
+          auth: { kind: "ai-gateway" },
+          id: "openai/gpt-5.4",
+          routing: { kind: "gateway", target: "openai" },
+        },
         name: "minimal-agent",
       },
     });
@@ -360,7 +372,11 @@ describe("buildVercelAgentSummary", () => {
       agentRoot: AGENT_ROOT,
       appRoot: APP_ROOT,
       config: {
-        model: { id: "openai/gpt-5.4", routing: { kind: "gateway", target: "openai" } },
+        model: {
+          auth: { kind: "ai-gateway" },
+          id: "openai/gpt-5.4",
+          routing: { kind: "gateway", target: "openai" },
+        },
         name: "module-instructions-agent",
       },
       instructions: {

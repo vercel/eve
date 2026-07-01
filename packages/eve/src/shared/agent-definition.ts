@@ -52,7 +52,7 @@ export type ModelAuth =
 
 export type InternalAgentModelDefinition = {
   id: string;
-  auth?: ModelAuth;
+  auth: ModelAuth;
   contextWindowTokens?: number;
   source?: ModuleSourceRef;
   providerOptions?: Record<string, JsonObject>;
@@ -115,6 +115,14 @@ export interface PublicAgentCompactionDefinition {
  * These options are unstable and may change or be removed in any release.
  */
 export interface AgentExperimentalDefinition {
+  /**
+   * Uses the local Codex login in development for OpenAI string models.
+   *
+   * The `model` string still selects the model. This flag only changes the
+   * development-time credential transport; production builds ignore it and
+   * keep the model on its normal deployable route.
+   */
+  readonly useCodexSubscription?: boolean;
   /**
    * Durable Workflow runtime configuration. Root agents may use this to select
    * the Workflow world backing sessions and runs.

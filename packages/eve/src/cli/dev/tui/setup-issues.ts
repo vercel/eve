@@ -89,12 +89,14 @@ function modelProviderAccess(
   context: Pick<BootDetectionContext, "env" | "info">,
 ): ModelProviderAccess {
   const model = context.info?.agent.model;
-  if (model?.auth?.kind === "codex" || model?.endpoint?.kind === "codex") {
+  if (model?.endpoint?.kind === "codex") {
     return { kind: "codex" };
   }
-  if (model?.auth?.kind === "external") return { kind: "external" };
   if (model?.routing?.kind === "external") return { kind: "external" };
-  if (model?.routing?.kind !== "gateway") return { kind: "unknown" };
+  if (model?.routing?.kind !== "gateway") {
+    if (model?.endpoint?.kind === "external") return { kind: "external" };
+    return { kind: "unknown" };
+  }
 
   // The compiled routing decides whether gateway credentials apply. A freshly
   // loaded API key outranks a stale OIDC endpoint, matching gateway resolution.

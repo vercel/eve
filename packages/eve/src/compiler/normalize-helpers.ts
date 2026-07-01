@@ -12,6 +12,8 @@ import { toErrorMessage } from "#shared/errors.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { CompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
 
+export type ManifestCompileMode = "development" | "production";
+
 /**
  * Shared compile-time context threaded through every per-primitive
  * normalize step.
@@ -21,6 +23,7 @@ import type { CompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.
  * reuses the cache across all of its child compilations.
  */
 export interface ManifestCompileContext {
+  readonly mode: ManifestCompileMode;
   readonly modelCatalog: CompiledRuntimeModelCatalogLoader;
 }
 

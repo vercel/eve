@@ -16,7 +16,7 @@ import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog
 import { compileAgentConfig } from "#compiler/normalize-agent-config.js";
 import { compileChannelDefinition } from "#compiler/normalize-channel.js";
 import { compileConnectionDefinition } from "#compiler/normalize-connection.js";
-import type { ManifestCompileContext } from "#compiler/normalize-helpers.js";
+import type { ManifestCompileContext, ManifestCompileMode } from "#compiler/normalize-helpers.js";
 import { compileHookEntry } from "#compiler/normalize-hook.js";
 import { compileSandboxDefinition } from "#compiler/normalize-sandbox.js";
 import { compileInstructionsEntry } from "#compiler/normalize-instructions.js";
@@ -30,8 +30,12 @@ import { compileToolEntry } from "#compiler/normalize-tool.js";
  */
 export async function compileAgentManifest(
   manifest: AgentSourceManifest,
+  options: {
+    readonly mode?: ManifestCompileMode;
+  } = {},
 ): Promise<CompiledAgentManifest> {
   const context: ManifestCompileContext = {
+    mode: options.mode ?? "development",
     modelCatalog: createCompiledRuntimeModelCatalogLoader(manifest.appRoot),
   };
   const compiledNode = await compileAgentNodeManifest(manifest, context);

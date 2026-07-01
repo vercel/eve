@@ -1,18 +1,16 @@
-import { isCodexProvider } from "#internal/codex-model-catalog.js";
 import type { ModelAuth, ModelRouting } from "#shared/agent-definition.js";
 
-export function modelAuthForRouting(routing: ModelRouting): ModelAuth {
+/**
+ * Derives the credential contract for a model from its compile-time routing.
+ *
+ * Codex auth is never derived here: it is an explicit opt-in via
+ * `experimental.useCodexSubscription`, applied by the compiler.
+ */
+export function classifyModelAuth(routing: ModelRouting): ModelAuth {
   if (routing.kind === "gateway") {
     return { kind: "ai-gateway" };
   }
-  if (isCodexProvider(routing.provider)) {
-    return { kind: "codex" };
-  }
   return { kind: "external", provider: routing.provider };
-}
-
-export function classifyModelAuth(routing: ModelRouting): ModelAuth {
-  return cloneModelAuth(modelAuthForRouting(routing));
 }
 
 export function cloneModelAuth(auth: ModelAuth): ModelAuth {

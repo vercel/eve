@@ -131,6 +131,15 @@ describe("BOOT_DETECTIONS", () => {
     expect(await detectSetupIssues(context({ info }))).toEqual([]);
   });
 
+  it("stays quiet for a Codex subscription endpoint", async () => {
+    const info = infoWithRouting(
+      { kind: "gateway", target: "openai" },
+      { kind: "codex", connected: true, credential: "chatgpt" },
+    );
+
+    expect(await detectSetupIssues(context({ info }))).toEqual([]);
+  });
+
   it("stays quiet when the runtime resolved linked-project OIDC", async () => {
     const info = infoWithRouting(
       { kind: "gateway", target: "openai" },

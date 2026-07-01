@@ -85,6 +85,7 @@ function createConfig(
 ): CompiledAgentDefinition {
   const config: CompiledAgentDefinition = {
     model: {
+      auth: { kind: "ai-gateway" },
       id: "openai/gpt-5.5",
       routing: classifyModelRouting("openai/gpt-5.5"),
     },

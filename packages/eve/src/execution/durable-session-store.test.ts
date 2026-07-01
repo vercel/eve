@@ -245,9 +245,13 @@ function buildSession(input: {
   return {
     agent: {
       compactionModelReference: input.withRefreshableAgent
-        ? { id: "compaction-model", contextWindowTokens: 200_000 }
+        ? { auth: { kind: "ai-gateway" }, id: "compaction-model", contextWindowTokens: 200_000 }
         : undefined,
-      modelReference: { id: "test-model", contextWindowTokens: 200_000 },
+      modelReference: {
+        auth: { kind: "ai-gateway" },
+        id: "test-model",
+        contextWindowTokens: 200_000,
+      },
       system: "test system",
       tools: input.withRefreshableAgent
         ? [{ description: "", inputSchema: { type: "object" }, name: "test" }]

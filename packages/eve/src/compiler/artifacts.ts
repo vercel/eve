@@ -14,6 +14,7 @@ import {
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
+import type { ManifestCompileMode } from "#compiler/normalize-helpers.js";
 import { materializeWorkspaceResources } from "#compiler/workspace-resources.js";
 
 /**
@@ -98,6 +99,7 @@ interface WriteCompilerArtifactsInput {
   appRoot: string;
   diagnostics: readonly DiscoverDiagnostic[];
   manifest: AgentSourceManifest;
+  mode?: ManifestCompileMode;
 }
 
 /**
@@ -205,7 +207,7 @@ export async function writeCompilerArtifacts(
   const diagnosticsArtifact = createDiscoveryDiagnosticsArtifact(input.diagnostics);
   const compiledManifest = await materializeWorkspaceResources({
     compileDirectoryPath: paths.compileDirectoryPath,
-    manifest: await compileAgentManifest(input.manifest),
+    manifest: await compileAgentManifest(input.manifest, { mode: input.mode }),
   });
   const compiledManifestJson = serializeArtifactJson(compiledManifest);
   const discoveryManifestJson = serializeArtifactJson(input.manifest);

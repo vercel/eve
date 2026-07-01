@@ -2,12 +2,6 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { z } from "#compiled/zod/index.js";
-import {
-  codexModelSlugFromGatewayId,
-  formatCodexModelId,
-  isCodexProvider,
-  parseCodexModelId,
-} from "#internal/codex-model-catalog.js";
 
 const AI_GATEWAY_MODELS_CATALOG_URL = "https://ai-gateway.vercel.sh/v1/models/catalog";
 const COMPILED_RUNTIME_MODEL_CATALOG_CACHE_KIND = "eve-model-catalog-cache";
@@ -165,35 +159,9 @@ export function createCompiledRuntimeModelCatalogLoader(
     }
   };
 
-  const resolveCodexModelLimits = async (
-    modelId: string,
-  ): Promise<CompiledRuntimeModelLimits | null> => {
-    const normalizedId = normalizeModelId(modelId);
-    const slug = parseCodexModelId(normalizedId) ?? normalizedId;
-
-    const resolved = await resolveModelsFromCacheOrFetch();
-    if (resolved !== null) {
-      for (const model of resolved.models) {
-        for (const provider of model.providers) {
-          if (
-            codexModelSlugFromGatewayId(`${provider.provider}/${provider.providerModelId}`) === slug
-          ) {
-            return limitsFromProvider(provider);
-          }
-        }
-      }
-    }
-
-    return builtInCompiledRuntimeModelLimitsById.get(`openai/${slug}`) ?? null;
-  };
-
   return {
     async getModelLimits(modelId) {
       const normalizedId = normalizeModelId(modelId);
-
-      if (parseCodexModelId(normalizedId) !== null) {
-        return await resolveCodexModelLimits(normalizedId);
-      }
 
       const resolved = await resolveModelsFromCacheOrFetch();
 
@@ -213,13 +181,6 @@ export function createCompiledRuntimeModelCatalogLoader(
     },
 
     async getByProviderModelId(provider, providerModelId) {
-      if (isCodexProvider(provider)) {
-        const limits = await resolveCodexModelLimits(providerModelId);
-        return limits === null
-          ? null
-          : { slug: formatCodexModelId(normalizeModelId(providerModelId)), limits };
-      }
-
       const resolved = await resolveModelsFromCacheOrFetch();
       if (resolved === null) {
         return null;

@@ -21,7 +21,7 @@ import type {
 } from "#runtime/types.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
-import type { ModelAuth, ModelRouting } from "#shared/agent-definition.js";
+import type { ModelRouting } from "#shared/agent-definition.js";
 import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 
 export interface AgentInfoSource {
@@ -170,7 +170,6 @@ export interface AgentInfoResponse {
       readonly id: string;
       readonly providerOptions?: unknown;
       readonly source?: AgentInfoSource;
-      readonly auth?: ModelAuth;
       readonly routing?: ModelRouting;
       readonly endpoint?: ModelEndpointStatus;
     };

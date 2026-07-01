@@ -10,7 +10,7 @@ import type { HarnessSession } from "#harness/types.js";
 function makeSession(state?: HarnessSession["state"]): HarnessSession {
   return {
     agent: {
-      modelReference: { id: "model_x" },
+      modelReference: { auth: { kind: "ai-gateway" }, id: "model_x" },
       system: "",
       tools: [],
     },

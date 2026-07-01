@@ -180,7 +180,7 @@ function createTestTurnAgent(overrides?: Partial<RuntimeTurnAgent>): RuntimeTurn
   return {
     id: "test-agent",
     instructions: ["You are a test agent."],
-    model: { id: "test-model" },
+    model: { auth: { kind: "ai-gateway" }, id: "test-model" },
     tools: [],
     workspaceSpec: { rootEntries: [] },
     ...overrides,

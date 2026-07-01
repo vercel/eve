@@ -4,7 +4,6 @@ import { dirname, join, resolve } from "node:path";
 import { build as buildNitro, copyPublicAssets, prepare, prerender } from "nitro/builder";
 import type { Nitro } from "nitro/types";
 
-import type { CompiledAgentManifest, CompiledRuntimeModelReference } from "#compiler/manifest.js";
 import { resolvePackageRoot } from "#internal/application/package.js";
 import {
   prepareEveVersionedCacheDirectory,
@@ -18,53 +17,10 @@ import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-
 import { prepareApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
 import { runVercelBuildPrewarm } from "#internal/nitro/host/vercel-build-prewarm.js";
 import type { NitroBuildSurface, PreparedApplicationHost } from "#internal/nitro/host/types.js";
-import { modelAuthForRouting } from "#internal/model-auth/classify.js";
 import { findClosestVercelOutputDirectory } from "#shared/vercel-output-directory.js";
-
-const CODEX_MODEL_PRODUCTION_BUILD_WARNING_CODE = "codex-model-in-production-build";
 
 function trimTrailingSlash(path: string): string {
   return path.replace(/[\\/]+$/, "");
-}
-
-function warnForCodexModelsInProductionBuild(manifest: CompiledAgentManifest): void {
-  const modelLabels = collectCodexModelLabels(manifest);
-
-  if (modelLabels.length === 0) {
-    return;
-  }
-
-  console.warn(
-    `Warning [${CODEX_MODEL_PRODUCTION_BUILD_WARNING_CODE}]: Codex model usage detected in production build (${modelLabels.join(
-      ", ",
-    )}). Codex auth is local login state from ~/.codex; confirm this deployment is a trusted runner for that account, or switch production to AI Gateway/provider-owned credentials.`,
-  );
-}
-
-function collectCodexModelLabels(manifest: CompiledAgentManifest): readonly string[] {
-  const labels: string[] = [];
-
-  if (isCodexModel(manifest.config.model)) {
-    labels.push(formatCodexModelLabel("primary", manifest.config.model));
-  }
-
-  const compactionModel = manifest.config.compaction?.model;
-  if (compactionModel !== undefined && isCodexModel(compactionModel)) {
-    labels.push(formatCodexModelLabel("compaction", compactionModel));
-  }
-
-  return labels;
-}
-
-function formatCodexModelLabel(
-  role: "compaction" | "primary",
-  model: CompiledRuntimeModelReference,
-): string {
-  return `${role} model: ${model.id}`;
-}
-
-function isCodexModel(model: CompiledRuntimeModelReference): boolean {
-  return (model.auth ?? modelAuthForRouting(model.routing)).kind === "codex";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -275,7 +231,6 @@ async function buildVercelNitroSurface(
  */
 export async function buildApplication(rootDir: string): Promise<string> {
   const preparedHost = await prepareApplicationHost(rootDir);
-  warnForCodexModelsInProductionBuild(preparedHost.compileResult.manifest);
 
   if (!process.env.VERCEL) {
     const nitro = await createApplicationNitro(preparedHost, false);

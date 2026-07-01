@@ -187,22 +187,6 @@ describe("createCompiledRuntimeModelCatalogLoader", () => {
     expect(result?.limits).toEqual({ contextWindowTokens: 200_000, maxOutputTokens: 32_000 });
   });
 
-  it("resolves Codex model limits from OpenAI entries in the Gateway catalog", async () => {
-    mockCatalogFetch();
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-    const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
-
-    await expect(loader.getModelLimits("codex/gpt-5.4")).resolves.toEqual({
-      contextWindowTokens: 400_000,
-      maxOutputTokens: 128_000,
-    });
-    await expect(loader.getByProviderModelId("codex", "gpt-5.4")).resolves.toEqual({
-      slug: "codex/gpt-5.4",
-      limits: { contextWindowTokens: 400_000, maxOutputTokens: 128_000 },
-    });
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-  });
-
   it("strips dotted sub-path from provider before lookup", async () => {
     mockCatalogFetch();
     const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");

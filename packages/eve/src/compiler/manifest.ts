@@ -26,7 +26,7 @@ import type {
   ModelRouting,
 } from "#shared/agent-definition.js";
 import { modelAuthSchema, modelRoutingSchema } from "#shared/agent-model-schemas.js";
-import { cloneModelAuth, modelAuthForRouting } from "#internal/model-auth/classify.js";
+import { cloneModelAuth } from "#internal/model-auth/classify.js";
 import type { InternalToolDefinition } from "#shared/tool-definition.js";
 
 /**
@@ -42,7 +42,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 32;
+export const COMPILED_AGENT_MANIFEST_VERSION = 33;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -351,6 +351,7 @@ const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
     description: z.string().optional(),
     experimental: z
       .object({
+        useCodexSubscription: z.boolean().optional(),
         workflow: compiledAgentWorkflowDefinitionSchema.optional(),
       })
       .strict()
@@ -693,6 +694,7 @@ export function createCompiledAgentNodeManifest(input: {
         input.config.experimental === undefined
           ? undefined
           : {
+              useCodexSubscription: input.config.experimental.useCodexSubscription,
               workflow:
                 input.config.experimental.workflow === undefined
                   ? undefined
@@ -820,7 +822,7 @@ function cloneCompiledRuntimeModelReference(
   model: CompiledRuntimeModelReference,
 ): CompiledRuntimeModelReference {
   const clone: CompiledRuntimeModelReference = {
-    auth: cloneModelAuth(model.auth ?? modelAuthForRouting(model.routing)),
+    auth: cloneModelAuth(model.auth),
     id: model.id,
     routing: cloneModelRouting(model.routing),
   };

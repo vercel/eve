@@ -4,13 +4,15 @@ description: "Use a local Codex login as an eve model during development, and ke
 ---
 
 This guide covers local account-backed model access, not deployable provider API
-credentials. Today, eve exposes that path for Codex through `experimentalCodex`,
-which uses local Codex login state instead of an API key in `agent.ts`.
+credentials. Today, eve exposes that path for Codex through
+`experimental.useCodexSubscription`, which uses local Codex login state during development.
 
 ## Use a local Codex login
 
-`experimentalCodex` selects a Codex model backed by local Codex login state. It
-is not a delegated tool or an MCP connection.
+Keep `model` as the OpenAI model id you want to use, then opt into local Codex
+auth with `experimental.useCodexSubscription`. The string selects the model; the
+experimental flag changes the local development transport. It is not a
+delegated tool or an MCP connection.
 
 Sign in with the Codex CLI first:
 
@@ -18,22 +20,16 @@ Sign in with the Codex CLI first:
 codex login
 ```
 
-Then use `experimentalCodex` for local runs and a deployable model route for
-production:
+Then enable the local Codex transport in `agent.ts`:
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
-import { experimentalCodex } from "eve/codex";
-
-const model =
-  process.env.NODE_ENV === "production"
-    ? "openai/gpt-5.5"
-    : experimentalCodex({
-        model: "gpt-5.5",
-      });
 
 export default defineAgent({
-  model,
+  model: "openai/gpt-5.5",
+  experimental: {
+    useCodexSubscription: true,
+  },
 });
 ```
 
@@ -46,14 +42,18 @@ The adapter uses AI SDK's OpenAI Responses model implementation, so AI SDK
 function tools stay in the normal eve tool loop. eve keeps execution, approval,
 connections, and durable history in charge for those tools.
 
-If eve cannot resolve context-window metadata for the selected Codex model, set
-`modelContextWindowTokens` to the model's documented context window.
+Codex subscription mode does not use AI Gateway model metadata to validate model
+availability or context windows. Set `modelContextWindowTokens` when you want
+eve's compaction threshold to match the selected model's context window.
 
 ## Production boundary
 
-Production deployments should use a deployable model route such as an AI Gateway
-string model id or provider-owned API credentials, not a developer's local Codex
-login. Codex use is governed by OpenAI's current [Terms of Use](https://openai.com/policies/terms-of-use/),
+Production builds do not apply the local Codex auth transform. The same
+`model: "openai/..."` string compiles as the normal AI Gateway/provider route
+for production, so deployment uses deployable model credentials rather than a
+developer's local Codex login.
+
+Codex use is governed by OpenAI's current [Terms of Use](https://openai.com/policies/terms-of-use/),
 [Service Terms](https://openai.com/policies/service-terms/), and
 [Usage Policies](https://openai.com/policies/usage-policies/); confirm your
 deployment and account usage fit those terms before running Codex-backed models

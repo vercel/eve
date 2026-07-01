@@ -7,6 +7,7 @@ import type { ScheduleDefinition, ScheduleRunHandler } from "#public/definitions
 import type { SkillDefinition, SkillFileContent } from "#public/definitions/skill.js";
 import type { InstructionsDefinition } from "#public/definitions/instructions.js";
 import {
+  expectBoolean,
   expectFunction,
   expectObjectRecord,
   expectOnlyKnownKeys,
@@ -176,8 +177,12 @@ function normalizeAgentExperimentalDefinition(
   message: string,
 ): NonNullable<NormalizedAgentDefinition["experimental"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["workflow"], message);
+  expectOnlyKnownKeys(record, ["useCodexSubscription", "workflow"], message);
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["experimental"]>> = {};
+
+  if (record.useCodexSubscription !== undefined) {
+    normalizedDefinition.useCodexSubscription = expectBoolean(record.useCodexSubscription, message);
+  }
 
   if (record.workflow !== undefined) {
     normalizedDefinition.workflow = normalizeAgentWorkflowDefinition(record.workflow, message);

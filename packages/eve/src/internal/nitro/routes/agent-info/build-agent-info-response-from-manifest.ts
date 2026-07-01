@@ -24,7 +24,6 @@ import {
   renderTool,
   toSource,
 } from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
-import { modelAuthForRouting } from "#internal/model-auth/classify.js";
 import { resolveModelEndpointStatus } from "#internal/resolve-model-endpoint-status.js";
 
 export async function buildAgentInfoResponseFromManifest(
@@ -34,8 +33,7 @@ export async function buildAgentInfoResponseFromManifest(
   },
 ): Promise<AgentInfoResponse> {
   const manifest = data.manifest;
-  const modelAuth =
-    manifest.config.model.auth ?? modelAuthForRouting(manifest.config.model.routing);
+  const modelAuth = manifest.config.model.auth;
   const authoredChannels = manifest.channels.filter((channel) => channel.kind === "channel");
   const disabledFrameworkChannels = manifest.channels
     .filter((channel) => channel.kind === "disabled")
@@ -92,7 +90,6 @@ export async function buildAgentInfoResponseFromManifest(
         id: manifest.config.model.id,
         providerOptions: manifest.config.model.providerOptions,
         source: manifest.config.model.source ? toSource(manifest.config.model.source) : undefined,
-        auth: modelAuth,
         routing: manifest.config.model.routing,
         endpoint: await resolveModelEndpointStatus(modelAuth),
       },

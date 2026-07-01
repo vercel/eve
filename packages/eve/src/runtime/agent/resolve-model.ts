@@ -1,6 +1,8 @@
 import type { LanguageModel } from "ai";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
+import { codexModelSlugFromGatewayId } from "#internal/model-auth/endpoint/codex/catalog.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
+import { createCodexSubscriptionModel } from "#internal/model-auth/endpoint/codex/model.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { resolveBootstrapRuntimeModel } from "#runtime/agent/bootstrap-model.js";
 import {
@@ -34,6 +36,11 @@ export async function resolveRuntimeModelReference(
 
   if (mockModel !== null) {
     return mockModel;
+  }
+
+  const codexModel = resolveCodexRuntimeModel(reference);
+  if (codexModel !== null) {
+    return codexModel;
   }
 
   if (isSourceBackedRuntimeModelReference(reference)) {
@@ -74,6 +81,20 @@ async function loadSourceBackedRuntimeModelReference(
   }
 
   return model;
+}
+
+function resolveCodexRuntimeModel(reference: RuntimeModelReference): LanguageModel | null {
+  if (reference.auth.kind !== "codex") {
+    return null;
+  }
+
+  const model = codexModelSlugFromGatewayId(reference.id);
+
+  if (model === null) {
+    throw new Error(`Codex model auth requires an OpenAI model id, received "${reference.id}".`);
+  }
+
+  return createCodexSubscriptionModel({ model });
 }
 
 function isSourceBackedRuntimeModelReference(

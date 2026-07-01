@@ -26,6 +26,7 @@ describe("runtime model resolution", () => {
     expect(BOOTSTRAP_RUNTIME_MODEL_ID).not.toBe(TEST_DEFAULT_MODEL_ID);
     expect(
       resolveBootstrapRuntimeModel({
+        auth: { kind: "ai-gateway" },
         id: TEST_DEFAULT_MODEL_ID,
       }),
     ).toBeNull();
@@ -35,6 +36,7 @@ describe("runtime model resolution", () => {
     vi.stubEnv("NODE_ENV", "test");
 
     const reference = {
+      auth: { kind: "ai-gateway" },
       id: TEST_DEFAULT_MODEL_ID,
     } as const;
 
@@ -47,6 +49,7 @@ describe("runtime model resolution", () => {
     vi.stubEnv("NODE_ENV", "development");
 
     const reference = {
+      auth: { kind: "ai-gateway" },
       id: TEST_DEFAULT_MODEL_ID,
     } as const;
 

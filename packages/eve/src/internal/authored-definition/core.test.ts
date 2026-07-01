@@ -37,6 +37,7 @@ describe("normalizeAgentDefinition", () => {
       {
         model: "openai/gpt-5.5",
         experimental: {
+          useCodexSubscription: true,
           workflow: {
             world: "@workflow/world-postgres",
           },
@@ -45,7 +46,22 @@ describe("normalizeAgentDefinition", () => {
       FAILURE_MESSAGE,
     );
 
+    expect(definition.experimental?.useCodexSubscription).toBe(true);
     expect(definition.experimental?.workflow).toEqual({ world: "@workflow/world-postgres" });
+  });
+
+  it("rejects non-boolean useCodexSubscription values", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          experimental: {
+            useCodexSubscription: "true",
+          },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
   });
 
   it("rejects non-string workflow world values", () => {

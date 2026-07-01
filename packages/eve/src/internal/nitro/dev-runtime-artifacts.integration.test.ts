@@ -81,6 +81,7 @@ async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoo
     appRoot,
     config: {
       model: {
+        auth: { kind: "ai-gateway" },
         id: "openai/gpt-5.4-mini",
         routing: {
           kind: "gateway",

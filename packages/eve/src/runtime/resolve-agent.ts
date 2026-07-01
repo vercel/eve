@@ -157,11 +157,13 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
     model:
       manifest.config.model.source === undefined
         ? {
+            auth: manifest.config.model.auth,
             id: manifest.config.model.id,
             contextWindowTokens: manifest.config.model.contextWindowTokens,
             providerOptions: manifest.config.model.providerOptions,
           }
         : {
+            auth: manifest.config.model.auth,
             contextWindowTokens: manifest.config.model.contextWindowTokens,
             id: manifest.config.model.id,
             providerOptions: manifest.config.model.providerOptions,
@@ -185,11 +187,13 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
       compaction.model =
         manifest.config.compaction.model.source === undefined
           ? {
+              auth: manifest.config.compaction.model.auth,
               contextWindowTokens: manifest.config.compaction.model.contextWindowTokens,
               id: manifest.config.compaction.model.id,
               providerOptions: manifest.config.compaction.model.providerOptions,
             }
           : {
+              auth: manifest.config.compaction.model.auth,
               contextWindowTokens: manifest.config.compaction.model.contextWindowTokens,
               id: manifest.config.compaction.model.id,
               providerOptions: manifest.config.compaction.model.providerOptions,
@@ -211,6 +215,7 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
 
   if (manifest.config.experimental !== undefined) {
     config.experimental = {
+      useCodexSubscription: manifest.config.experimental.useCodexSubscription,
       workflow:
         manifest.config.experimental.workflow === undefined
           ? undefined

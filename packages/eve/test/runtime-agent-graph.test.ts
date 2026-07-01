@@ -38,6 +38,7 @@ describe("resolveRuntimeAgentGraph", () => {
       appRoot: "/app",
       config: {
         model: {
+          auth: { kind: "ai-gateway" },
           id: TEST_DEFAULT_MODEL_ID,
           routing: { kind: "gateway", target: "openai" },
         },
@@ -67,6 +68,7 @@ describe("resolveRuntimeAgentGraph", () => {
             config: {
               description: "Investigate one task in depth.",
               model: {
+                auth: { kind: "ai-gateway" },
                 id: TEST_DEFAULT_MODEL_ID,
                 routing: { kind: "gateway", target: "openai" },
               },
@@ -130,6 +132,7 @@ describe("resolveRuntimeAgentGraph", () => {
       config: {
         description: reviewerDefinition.description,
         model: {
+          auth: { kind: "ai-gateway" },
           id: TEST_DEFAULT_MODEL_ID,
           routing: { kind: "gateway", target: "openai" },
         },
@@ -153,6 +156,7 @@ describe("resolveRuntimeAgentGraph", () => {
       config: {
         description: researcherDefinition.description,
         model: {
+          auth: { kind: "ai-gateway" },
           id: TEST_DEFAULT_MODEL_ID,
           routing: { kind: "gateway", target: "openai" },
         },
@@ -181,6 +185,7 @@ describe("resolveRuntimeAgentGraph", () => {
       appRoot,
       config: {
         model: {
+          auth: { kind: "ai-gateway" },
           id: TEST_DEFAULT_MODEL_ID,
           routing: { kind: "gateway", target: "openai" },
         },
@@ -463,6 +468,7 @@ describe("resolveRuntimeAgentGraph", () => {
       config: {
         description: "Investigate one task in depth.",
         model: {
+          auth: { kind: "ai-gateway" },
           id: TEST_DEFAULT_MODEL_ID,
           routing: { kind: "gateway", target: "openai" },
         },
@@ -488,6 +494,7 @@ describe("resolveRuntimeAgentGraph", () => {
       appRoot,
       config: {
         model: {
+          auth: { kind: "ai-gateway" },
           id: TEST_DEFAULT_MODEL_ID,
           routing: { kind: "gateway", target: "openai" },
         },
@@ -595,6 +602,7 @@ describe("resolveRuntimeAgentGraph", () => {
       appRoot: "/app",
       config: {
         model: {
+          auth: { kind: "ai-gateway" },
           id: TEST_DEFAULT_MODEL_ID,
           routing: { kind: "gateway", target: "openai" },
         },
@@ -660,6 +668,7 @@ describe("resolveRuntimeAgentGraph", () => {
       appRoot: "/app",
       config: {
         model: {
+          auth: { kind: "ai-gateway" },
           id: TEST_DEFAULT_MODEL_ID,
           routing: { kind: "gateway", target: "openai" },
         },
@@ -698,6 +707,7 @@ describe("resolveRuntimeAgentGraph", () => {
       appRoot: "/app",
       config: {
         model: {
+          auth: { kind: "ai-gateway" },
           id: TEST_DEFAULT_MODEL_ID,
           routing: { kind: "gateway", target: "openai" },
         },
@@ -759,6 +769,7 @@ describe("resolveRuntimeAgentGraph", () => {
       appRoot: "/app",
       config: {
         model: {
+          auth: { kind: "ai-gateway" },
           id: TEST_DEFAULT_MODEL_ID,
           routing: { kind: "gateway", target: "openai" },
         },
@@ -786,6 +797,7 @@ describe("resolveRuntimeAgentGraph", () => {
       appRoot: "/app",
       config: {
         model: {
+          auth: { kind: "ai-gateway" },
           id: TEST_DEFAULT_MODEL_ID,
           routing: { kind: "gateway", target: "openai" },
         },
@@ -814,6 +826,7 @@ describe("resolveRuntimeAgentGraph", () => {
       appRoot: "/app",
       config: {
         model: {
+          auth: { kind: "ai-gateway" },
           id: TEST_DEFAULT_MODEL_ID,
           routing: { kind: "gateway", target: "openai" },
         },
@@ -863,6 +876,7 @@ describe("resolveRuntimeAgentGraph", () => {
       appRoot: "/app",
       config: {
         model: {
+          auth: { kind: "ai-gateway" },
           id: TEST_DEFAULT_MODEL_ID,
           routing: { kind: "gateway", target: "openai" },
         },

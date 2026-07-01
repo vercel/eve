@@ -208,13 +208,13 @@ describe("buildApplication", () => {
     const outputDir = join(appRoot, ".output");
     const model: CompiledRuntimeModelReference = {
       auth: { kind: "codex" },
-      id: "codex/gpt-5.5",
-      routing: { kind: "external", provider: "codex" },
+      id: "openai/gpt-5.5",
+      routing: { kind: "gateway", target: "openai" },
     };
     const compactionModel: CompiledRuntimeModelReference = {
       auth: { kind: "codex" },
-      id: "codex/gpt-5.4-mini",
-      routing: { kind: "external", provider: "codex" },
+      id: "openai/gpt-5.4-mini",
+      routing: { kind: "gateway", target: "openai" },
     };
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
@@ -232,7 +232,7 @@ describe("buildApplication", () => {
 
       expect(warnSpy).toHaveBeenCalledOnce();
       expect(warnSpy).toHaveBeenCalledWith(
-        "Warning [codex-model-in-production-build]: Codex model usage detected in production build (primary model: codex/gpt-5.5, compaction model: codex/gpt-5.4-mini). Codex auth is local login state from ~/.codex; confirm this deployment is a trusted runner for that account, or switch production to AI Gateway/provider-owned credentials.",
+        "Warning [codex-model-in-production-build]: Codex model usage detected in production build (primary model: openai/gpt-5.5, compaction model: openai/gpt-5.4-mini). Codex auth is local login state from ~/.codex; confirm this deployment is a trusted runner for that account, or switch production to AI Gateway/provider-owned credentials.",
       );
     } finally {
       warnSpy.mockRestore();

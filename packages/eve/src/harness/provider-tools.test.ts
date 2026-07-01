@@ -83,12 +83,13 @@ describe("resolveWebSearchBackend", () => {
   });
 
   it("returns 'parallel' for an OpenAI gateway model", () => {
-    const ref: RuntimeModelReference = { id: "openai/gpt-5.4" };
+    const ref: RuntimeModelReference = { auth: { kind: "ai-gateway" }, id: "openai/gpt-5.4" };
     expect(resolveWebSearchBackend(ref)).toBe("parallel");
   });
 
   it("returns 'openai' for a BYO OpenAI model", () => {
     const ref: RuntimeModelReference = {
+      auth: { kind: "ai-gateway" },
       id: "openai.chat/gpt-5.4",
       source: {
         exportName: "openai",
@@ -101,12 +102,16 @@ describe("resolveWebSearchBackend", () => {
   });
 
   it("returns 'parallel' for an Anthropic gateway model", () => {
-    const ref: RuntimeModelReference = { id: "anthropic/claude-opus-4.6" };
+    const ref: RuntimeModelReference = {
+      auth: { kind: "ai-gateway" },
+      id: "anthropic/claude-opus-4.6",
+    };
     expect(resolveWebSearchBackend(ref)).toBe("parallel");
   });
 
   it("returns 'anthropic' for a BYO Anthropic model", () => {
     const ref: RuntimeModelReference = {
+      auth: { kind: "ai-gateway" },
       id: "anthropic.messages/claude-opus-4.6",
       source: {
         exportName: "anthropic",
@@ -120,6 +125,7 @@ describe("resolveWebSearchBackend", () => {
 
   it("returns 'google' for a BYO Google model", () => {
     const ref: RuntimeModelReference = {
+      auth: { kind: "ai-gateway" },
       id: "google.generative-ai/gemini-3.1-pro",
       source: {
         exportName: "google",
@@ -132,17 +138,24 @@ describe("resolveWebSearchBackend", () => {
   });
 
   it("returns 'parallel' for a Google model on AI Gateway", () => {
-    const ref: RuntimeModelReference = { id: "google/gemini-3.1-pro" };
+    const ref: RuntimeModelReference = {
+      auth: { kind: "ai-gateway" },
+      id: "google/gemini-3.1-pro",
+    };
     expect(resolveWebSearchBackend(ref)).toBe("parallel");
   });
 
   it("returns 'parallel' for any other AI Gateway model", () => {
-    const ref: RuntimeModelReference = { id: "mistral/mistral-large" };
+    const ref: RuntimeModelReference = {
+      auth: { kind: "ai-gateway" },
+      id: "mistral/mistral-large",
+    };
     expect(resolveWebSearchBackend(ref)).toBe("parallel");
   });
 
   it("returns null for a BYO non-OpenAI/Anthropic/Google model", () => {
     const ref: RuntimeModelReference = {
+      auth: { kind: "ai-gateway" },
       id: "some-provider/some-model",
       source: {
         exportName: "model",

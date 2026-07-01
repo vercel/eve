@@ -152,7 +152,7 @@ function buildApprovalRequest(requestId: string): InputRequest {
 function buildEmptySession(continuationToken: string, sessionId: string): HarnessSession {
   return {
     agent: {
-      modelReference: { id: "test-model" },
+      modelReference: { auth: { kind: "ai-gateway" }, id: "test-model" },
       system: "test",
       tools: [],
     },

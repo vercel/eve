@@ -502,6 +502,7 @@ describe("createApplicationNitro", () => {
             externalDependencies: ["subagent-external", "sharp"],
           },
           model: {
+            auth: { kind: "ai-gateway" },
             id: "anthropic/claude-sonnet-4.6",
             routing: { kind: "gateway", target: "anthropic" },
           },
