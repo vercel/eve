@@ -1,11 +1,11 @@
 import {
   resolveAiGatewayEndpointStatus,
   type ResolveAiGatewayEndpointStatusOptions,
-} from "#internal/model-endpoint-auth/ai-gateway.js";
+} from "#internal/model-auth/endpoint/ai-gateway.js";
 import {
   resolveCodexEndpointStatus,
   type ResolveCodexEndpointStatusOptions,
-} from "#internal/model-endpoint-auth/codex/status.js";
+} from "#internal/model-auth/endpoint/codex/status.js";
 import type { ModelAuth } from "#shared/agent-definition.js";
 import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 

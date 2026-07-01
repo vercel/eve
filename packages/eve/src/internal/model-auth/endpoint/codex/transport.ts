@@ -1,3 +1,4 @@
+import { z } from "#compiled/zod/index.js";
 import {
   extractCodexAccountIdFromToken,
   isFreshCodexAccessToken,
@@ -6,8 +7,7 @@ import {
   type CodexAuthCredentials,
   type CodexChatGptCredentials,
   type CodexRefreshedTokens,
-} from "#internal/model-endpoint-auth/codex/auth.js";
-
+} from "#internal/model-auth/endpoint/codex/auth.js";
 const CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
 const OPENAI_AUTH_ISSUER = "https://auth.openai.com";
 const OPENAI_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
@@ -36,6 +36,14 @@ export interface CodexTransportOptions {
   readonly writeCredentials?: CodexCredentialsWriter;
 }
 
+const codexRefreshResponseSchema = z
+  .object({
+    access_token: z.string().trim().min(1),
+    id_token: z.string().trim().min(1).optional(),
+    refresh_token: z.string().trim().min(1),
+  })
+  .passthrough();
+
 /**
  * AI SDK's OpenAI client gives eve one per-request hook: `fetch`. Codex needs
  * that hook to choose credentials and endpoint per login mode, not just to swap
@@ -45,14 +53,8 @@ export interface CodexTransportOptions {
 export function createCodexFetch(options: CodexTransportOptions = {}): Fetch {
   const httpFetch = options.fetch ?? fetch;
   const readCredentials = options.readCredentials ?? readCodexAuthCredentials;
-  const writeCredentials =
-    options.writeCredentials ??
-    ((input) =>
-      writeCodexAuthCredentials({
-        ...input,
-        now: () => new Date(options.now?.() ?? Date.now()),
-      }));
   const now = options.now ?? Date.now;
+  const writeCredentials = options.writeCredentials ?? createDefaultCodexCredentialsWriter(now);
   const issuer = options.issuer ?? OPENAI_AUTH_ISSUER;
   const clientId = options.clientId ?? OPENAI_CLIENT_ID;
   const codexApiEndpoint = options.codexApiEndpoint ?? CODEX_API_ENDPOINT;
@@ -78,6 +80,9 @@ export function createCodexFetch(options: CodexTransportOptions = {}): Fetch {
       headers.set("ChatGPT-Account-Id", chatGptCredentials.accountId);
     }
 
+    // Response storage (`store: false`, which the Codex backend requires) is
+    // injected by createCodexSubscriptionModel's call-options wrapper — the
+    // transport only owns credentials and the endpoint rewrite.
     return httpFetch(
       rewriteCodexEndpoint(requestUrl(input), codexApiEndpoint),
       fetchInit(input, init, headers),
@@ -98,7 +103,7 @@ export function createCodexFetch(options: CodexTransportOptions = {}): Fetch {
       const refreshToken = credentials.refreshToken;
       if (refreshToken === undefined) {
         throw new Error(
-          `Codex ChatGPT login state at ${credentials.authPath} does not include a refresh token. Run \`codex login\` again before using experimentalCodex.`,
+          `Codex ChatGPT login state at ${credentials.authPath} does not include a refresh token. Run \`codex login\` again before using experimental.useCodexSubscription.`,
         );
       }
       if (refreshPromise === undefined) {
@@ -162,15 +167,14 @@ async function refreshChatGptCredentials(
 }
 
 function parseRefreshResponse(value: unknown): CodexRefreshedTokens {
-  if (!isRecord(value)) {
-    throw new Error("Codex token refresh returned a non-object response.");
-  }
-  const accessToken = readString(value.access_token);
-  const refreshToken = readString(value.refresh_token);
-  if (accessToken === undefined || refreshToken === undefined) {
+  const parsed = codexRefreshResponseSchema.safeParse(value);
+  if (!parsed.success) {
     throw new Error("Codex token refresh did not return access_token and refresh_token.");
   }
-  const idToken = readString(value.id_token);
+  const accessToken = parsed.data.access_token;
+  const refreshToken = parsed.data.refresh_token;
+  const idToken = parsed.data.id_token;
+
   return {
     accessToken,
     refreshToken,
@@ -178,6 +182,14 @@ function parseRefreshResponse(value: unknown): CodexRefreshedTokens {
     accountId:
       extractCodexAccountIdFromToken(idToken) ?? extractCodexAccountIdFromToken(accessToken),
   };
+}
+
+function createDefaultCodexCredentialsWriter(now: () => number): CodexCredentialsWriter {
+  return (input) =>
+    writeCodexAuthCredentials({
+      ...input,
+      now: () => new Date(now()),
+    });
 }
 
 function cloneHeaders(input: RequestInit["headers"] | undefined): Headers {
@@ -215,12 +227,4 @@ function fetchInit(
     };
   }
   return { headers };
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() !== "" ? value : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

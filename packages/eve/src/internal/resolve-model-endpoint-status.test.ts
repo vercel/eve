@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { resolveModelEndpointStatus } from "#internal/resolve-model-endpoint-status.js";
+import { createUnsignedJwt } from "#internal/testing/unsigned-jwt.js";
 
 const CODEX_AUTH_PATH = "/home/user/.codex/auth.json";
 const CODEX_HOME = "/home/user/.codex";
@@ -55,17 +56,19 @@ describe("resolveModelEndpointStatus", () => {
       resolveModelEndpointStatus(
         { kind: "codex" },
         {
-          readCodexAuthCredentials: async () => ({
-            kind: "api-key",
-            apiKey: "sk-test",
-            authPath: CODEX_AUTH_PATH,
-            codexHome: CODEX_HOME,
-          }),
-          readCodexAuthState: async () => ({
-            kind: "authenticated",
-            authMode: "api-key",
-            authPath: CODEX_AUTH_PATH,
-            codexHome: CODEX_HOME,
+          readCodexAuth: async () => ({
+            state: {
+              kind: "authenticated",
+              authMode: "api-key",
+              authPath: CODEX_AUTH_PATH,
+              codexHome: CODEX_HOME,
+            },
+            credentials: {
+              kind: "api-key",
+              apiKey: "sk-test",
+              authPath: CODEX_AUTH_PATH,
+              codexHome: CODEX_HOME,
+            },
           }),
         },
       ),
@@ -78,17 +81,19 @@ describe("resolveModelEndpointStatus", () => {
         { kind: "codex" },
         {
           now: () => 1_000,
-          readCodexAuthCredentials: async () => ({
-            kind: "chatgpt",
-            authPath: CODEX_AUTH_PATH,
-            codexHome: CODEX_HOME,
-            refreshToken: "refresh-token",
-          }),
-          readCodexAuthState: async () => ({
-            kind: "authenticated",
-            authMode: "chatgpt",
-            authPath: CODEX_AUTH_PATH,
-            codexHome: CODEX_HOME,
+          readCodexAuth: async () => ({
+            state: {
+              kind: "authenticated",
+              authMode: "chatgpt",
+              authPath: CODEX_AUTH_PATH,
+              codexHome: CODEX_HOME,
+            },
+            credentials: {
+              kind: "chatgpt",
+              authPath: CODEX_AUTH_PATH,
+              codexHome: CODEX_HOME,
+              refreshToken: "refresh-token",
+            },
           }),
         },
       ),
@@ -101,17 +106,19 @@ describe("resolveModelEndpointStatus", () => {
         { kind: "codex" },
         {
           now: () => 1_000,
-          readCodexAuthCredentials: async () => ({
-            kind: "chatgpt",
-            accessToken: expiredJwt(),
-            authPath: CODEX_AUTH_PATH,
-            codexHome: CODEX_HOME,
-          }),
-          readCodexAuthState: async () => ({
-            kind: "authenticated",
-            authMode: "chatgpt",
-            authPath: CODEX_AUTH_PATH,
-            codexHome: CODEX_HOME,
+          readCodexAuth: async () => ({
+            state: {
+              kind: "authenticated",
+              authMode: "chatgpt",
+              authPath: CODEX_AUTH_PATH,
+              codexHome: CODEX_HOME,
+            },
+            credentials: {
+              kind: "chatgpt",
+              accessToken: createUnsignedJwt({ exp: 1 }),
+              authPath: CODEX_AUTH_PATH,
+              codexHome: CODEX_HOME,
+            },
           }),
         },
       ),
@@ -123,13 +130,8 @@ describe("resolveModelEndpointStatus", () => {
       resolveModelEndpointStatus(
         { kind: "codex" },
         {
-          readCodexAuthCredentials: async () => {
-            throw new Error("must not read credentials");
-          },
-          readCodexAuthState: async () => ({
-            kind: "missing",
-            authPath: CODEX_AUTH_PATH,
-            codexHome: CODEX_HOME,
+          readCodexAuth: async () => ({
+            state: { kind: "missing", authPath: CODEX_AUTH_PATH, codexHome: CODEX_HOME },
           }),
         },
       ),
@@ -139,23 +141,16 @@ describe("resolveModelEndpointStatus", () => {
       resolveModelEndpointStatus(
         { kind: "codex" },
         {
-          readCodexAuthCredentials: async () => {
-            throw new Error("must not read credentials");
-          },
-          readCodexAuthState: async () => ({
-            kind: "invalid",
-            authPath: CODEX_AUTH_PATH,
-            codexHome: CODEX_HOME,
-            reason: "bad json",
+          readCodexAuth: async () => ({
+            state: {
+              kind: "invalid",
+              authPath: CODEX_AUTH_PATH,
+              codexHome: CODEX_HOME,
+              reason: "bad json",
+            },
           }),
         },
       ),
     ).resolves.toEqual({ kind: "codex", connected: false, reason: "invalid" });
   });
 });
-
-function expiredJwt(): string {
-  const header = Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url");
-  const body = Buffer.from(JSON.stringify({ exp: 1 })).toString("base64url");
-  return `${header}.${body}.sig`;
-}

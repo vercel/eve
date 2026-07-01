@@ -1,11 +1,13 @@
-import { Buffer } from "node:buffer";
 import { readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { decodeJwt } from "#compiled/jose/index.js";
 import { z } from "#compiled/zod/index.js";
+import { toErrorMessage } from "#shared/errors.js";
+import { isObject } from "#shared/guards.js";
 
-export type CodexAuthMode = "api-key" | "chatgpt" | "unknown";
+export type CodexAuthMode = "api-key" | "chatgpt";
 
 export type CodexAuthState =
   | {
@@ -52,6 +54,17 @@ export interface CodexChatGptCredentials {
 
 export type CodexAuthCredentials = CodexApiKeyCredentials | CodexChatGptCredentials;
 
+/**
+ * One read of the Codex login state: the reportable state view plus, when
+ * authenticated, the credentials the transport uses. Both views derive from
+ * the same parse and the same credential selection, so they cannot disagree.
+ */
+export interface CodexAuthSnapshot {
+  readonly state: CodexAuthState;
+  /** Set exactly when `state.kind` is `"authenticated"`. */
+  readonly credentials?: CodexAuthCredentials;
+}
+
 export interface CodexRefreshedTokens {
   readonly accessToken: string;
   readonly accountId?: string;
@@ -84,9 +97,9 @@ type ParsedCodexAuthFile =
   | { readonly kind: "parsed"; readonly value: CodexAuthFile }
   | { readonly kind: "invalid"; readonly reason: string };
 
-export async function readCodexAuthState(
+export async function readCodexAuth(
   options: ReadCodexAuthStateOptions = {},
-): Promise<CodexAuthState> {
+): Promise<CodexAuthSnapshot> {
   const codexHome = options.codexHome ?? resolveDefaultCodexHome();
   const authPath = join(codexHome, "auth.json");
 
@@ -95,144 +108,144 @@ export async function readCodexAuthState(
     raw = await readFile(authPath, "utf8");
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return { kind: "missing", authPath, codexHome };
+      return { state: { kind: "missing", authPath, codexHome } };
     }
     return {
-      kind: "invalid",
-      authPath,
-      codexHome,
-      reason: error instanceof Error ? error.message : String(error),
+      state: { kind: "invalid", authPath, codexHome, reason: toErrorMessage(error) },
     };
   }
 
-  return parseCodexAuthJson(raw, { authPath, codexHome });
+  return parseCodexAuth(raw, { authPath, codexHome });
 }
 
 export async function readCodexAuthCredentials(
   options: ReadCodexAuthStateOptions = {},
 ): Promise<CodexAuthCredentials> {
-  const codexHome = options.codexHome ?? resolveDefaultCodexHome();
-  const authPath = join(codexHome, "auth.json");
-
-  let raw: string;
-  try {
-    raw = await readFile(authPath, "utf8");
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      throw new Error(
-        `Codex login state was not found at ${authPath}. Run \`codex login\` before using experimentalCodex.`,
-      );
-    }
-    throw new Error(
-      `Codex login state at ${authPath} could not be read: ${error instanceof Error ? error.message : String(error)}. Run \`codex login\` again before using experimentalCodex.`,
-    );
+  const snapshot = await readCodexAuth(options);
+  if (snapshot.credentials !== undefined) {
+    return snapshot.credentials;
   }
-
-  return parseCodexAuthCredentialsJson(raw, { authPath, codexHome });
+  assertCodexAuthStateAuthenticated(snapshot.state);
+  // Unreachable: parseCodexAuth pairs every authenticated state with credentials.
+  throw new Error(
+    `Codex login state at ${snapshot.state.authPath} did not include usable credentials.`,
+  );
 }
 
-export function parseCodexAuthJson(
+export function parseCodexAuth(
   raw: string,
   input: {
     readonly authPath: string;
     readonly codexHome: string;
   },
-): CodexAuthState {
+): CodexAuthSnapshot {
   const parsed = parseCodexAuthFile(raw);
   if (parsed.kind === "invalid") {
     return {
-      kind: "invalid",
-      authPath: input.authPath,
-      codexHome: input.codexHome,
-      reason: parsed.reason,
+      state: {
+        kind: "invalid",
+        authPath: input.authPath,
+        codexHome: input.codexHome,
+        reason: parsed.reason,
+      },
     };
   }
 
-  const auth = parsed.value;
-  const authMode = parseAuthMode(auth.auth_mode);
-  const apiKey = hasNonEmptyString(auth.OPENAI_API_KEY);
-  const tokens = auth.tokens ?? undefined;
-  const hasOAuthToken =
-    tokens !== undefined &&
-    (hasNonEmptyString(tokens.access_token) || hasNonEmptyString(tokens.refresh_token));
-
-  if (!apiKey && !hasOAuthToken) {
+  const selection = selectCodexCredentials(parsed.value);
+  if (selection.kind === "none") {
     return {
-      kind: "missing",
-      authPath: input.authPath,
-      codexHome: input.codexHome,
+      state: { kind: "missing", authPath: input.authPath, codexHome: input.codexHome },
     };
   }
 
-  const accountId = readNonEmptyString(tokens?.account_id);
-  const lastRefresh = readNonEmptyString(auth.last_refresh);
+  if (selection.kind === "api-key") {
+    return {
+      state: {
+        kind: "authenticated",
+        authMode: "api-key",
+        authPath: input.authPath,
+        codexHome: input.codexHome,
+      },
+      credentials: {
+        kind: "api-key",
+        apiKey: selection.apiKey,
+        authPath: input.authPath,
+        codexHome: input.codexHome,
+      },
+    };
+  }
 
   return {
-    kind: "authenticated",
-    authMode: apiKey && !hasOAuthToken ? "api-key" : authMode,
-    authPath: input.authPath,
-    codexHome: input.codexHome,
-    ...(accountId !== undefined && { accountId }),
-    ...(lastRefresh !== undefined && { lastRefresh }),
-  };
-}
-
-export function parseCodexAuthCredentialsJson(
-  raw: string,
-  input: {
-    readonly authPath: string;
-    readonly codexHome: string;
-  },
-): CodexAuthCredentials {
-  const parsed = parseCodexAuthFile(raw);
-  if (parsed.kind === "invalid") {
-    throw new Error(
-      `Codex login state at ${input.authPath} could not be read: ${parsed.reason}. Run \`codex login\` again before using experimentalCodex.`,
-    );
-  }
-
-  const auth = parsed.value;
-  const apiKey = readNonEmptyString(auth.OPENAI_API_KEY);
-  const authMode = parseAuthMode(auth.auth_mode);
-  const tokens = auth.tokens ?? undefined;
-  const accessToken = readNonEmptyString(tokens?.access_token);
-  const refreshToken = readNonEmptyString(tokens?.refresh_token);
-
-  if (
-    (authMode === "chatgpt" || accessToken !== undefined || refreshToken !== undefined) &&
-    tokens !== undefined
-  ) {
-    const accountId =
-      readNonEmptyString(tokens.account_id) ??
-      extractCodexAccountIdFromToken(readNonEmptyString(tokens.id_token)) ??
-      extractCodexAccountIdFromToken(accessToken);
-    const lastRefresh = readNonEmptyString(auth.last_refresh);
-    return {
+    state: {
+      kind: "authenticated",
+      authMode: "chatgpt",
+      authPath: input.authPath,
+      codexHome: input.codexHome,
+      ...(selection.accountId !== undefined && { accountId: selection.accountId }),
+      ...(selection.lastRefresh !== undefined && { lastRefresh: selection.lastRefresh }),
+    },
+    credentials: {
       kind: "chatgpt",
       authPath: input.authPath,
       codexHome: input.codexHome,
+      ...(selection.accessToken !== undefined && { accessToken: selection.accessToken }),
+      ...(selection.accountId !== undefined && { accountId: selection.accountId }),
+      ...(selection.idToken !== undefined && { idToken: selection.idToken }),
+      ...(selection.lastRefresh !== undefined && { lastRefresh: selection.lastRefresh }),
+      ...(selection.refreshToken !== undefined && { refreshToken: selection.refreshToken }),
+    },
+  };
+}
+
+type CodexCredentialSelection =
+  | { readonly kind: "api-key"; readonly apiKey: string }
+  | {
+      readonly kind: "chatgpt";
+      readonly accessToken?: string;
+      readonly accountId?: string;
+      readonly idToken?: string;
+      readonly lastRefresh?: string;
+      readonly refreshToken?: string;
+    }
+  | { readonly kind: "none" };
+
+/**
+ * Picks which credential in auth.json is active. An explicit `auth_mode`
+ * wins when its credential is usable; otherwise the usable credential the
+ * file actually carries wins, ChatGPT tokens first (they are the Codex CLI's
+ * primary login). A `tokens` block with no usable token never outranks an
+ * API key, and stale tokens never outrank an explicit `auth_mode: "api-key"`.
+ */
+function selectCodexCredentials(auth: CodexAuthFile): CodexCredentialSelection {
+  const apiKey = readNonEmptyString(auth.OPENAI_API_KEY);
+  const tokens = auth.tokens ?? undefined;
+  const accessToken = readNonEmptyString(tokens?.access_token);
+  const refreshToken = readNonEmptyString(tokens?.refresh_token);
+  const hasUsableTokens = accessToken !== undefined || refreshToken !== undefined;
+  const preferApiKey = auth.auth_mode === "api-key" && apiKey !== undefined;
+
+  if (hasUsableTokens && !preferApiKey) {
+    const accountId =
+      readNonEmptyString(tokens?.account_id) ??
+      extractCodexAccountIdFromToken(readNonEmptyString(tokens?.id_token)) ??
+      extractCodexAccountIdFromToken(accessToken);
+    const idToken = readNonEmptyString(tokens?.id_token);
+    const lastRefresh = readNonEmptyString(auth.last_refresh);
+    return {
+      kind: "chatgpt",
       ...(accessToken !== undefined && { accessToken }),
       ...(accountId !== undefined && { accountId }),
-      ...(readNonEmptyString(tokens.id_token) !== undefined && {
-        idToken: readNonEmptyString(tokens.id_token),
-      }),
+      ...(idToken !== undefined && { idToken }),
       ...(lastRefresh !== undefined && { lastRefresh }),
       ...(refreshToken !== undefined && { refreshToken }),
     };
   }
 
   if (apiKey !== undefined) {
-    return {
-      kind: "api-key",
-      apiKey,
-      authPath: input.authPath,
-      codexHome: input.codexHome,
-    };
+    return { kind: "api-key", apiKey };
   }
 
-  throw new Error(
-    `Codex login state was not found at ${input.authPath}. Run \`codex login\` before using experimentalCodex.`,
-  );
+  return { kind: "none" };
 }
 
 function parseCodexAuthFile(raw: string): ParsedCodexAuthFile {
@@ -240,7 +253,7 @@ function parseCodexAuthFile(raw: string): ParsedCodexAuthFile {
   try {
     parsedJson = JSON.parse(raw);
   } catch (error) {
-    return { kind: "invalid", reason: error instanceof Error ? error.message : String(error) };
+    return { kind: "invalid", reason: toErrorMessage(error) };
   }
 
   const parsed = codexAuthFileSchema.safeParse(parsedJson);
@@ -258,13 +271,13 @@ export async function writeCodexAuthCredentials(input: {
 }): Promise<CodexChatGptCredentials> {
   const raw = await readFile(input.credentials.authPath, "utf8");
   const parsed: unknown = JSON.parse(raw);
-  if (!isRecord(parsed)) {
+  if (!isObject(parsed)) {
     throw new Error(
       `Codex login state at ${input.credentials.authPath} must contain a JSON object.`,
     );
   }
 
-  const existingTokens = isRecord(parsed.tokens) ? parsed.tokens : {};
+  const existingTokens = isObject(parsed.tokens) ? parsed.tokens : {};
   const accountId =
     input.tokens.accountId ??
     input.credentials.accountId ??
@@ -306,12 +319,12 @@ export function assertCodexAuthStateAuthenticated(state: CodexAuthState): void {
 
   if (state.kind === "missing") {
     throw new Error(
-      `Codex login state was not found at ${state.authPath}. Run \`codex login\` before using experimentalCodex.`,
+      `Codex login state was not found at ${state.authPath}. Run \`codex login\` before using experimental.useCodexSubscription.`,
     );
   }
 
   throw new Error(
-    `Codex login state at ${state.authPath} could not be read: ${state.reason}. Run \`codex login\` again before using experimentalCodex.`,
+    `Codex login state at ${state.authPath} could not be read: ${state.reason}. Run \`codex login\` again before using experimental.useCodexSubscription.`,
   );
 }
 
@@ -319,35 +332,13 @@ function resolveDefaultCodexHome(): string {
   return process.env.CODEX_HOME?.trim() || join(homedir(), ".codex");
 }
 
-function parseAuthMode(value: unknown): CodexAuthMode {
-  if (value === "chatgpt") return "chatgpt";
-  if (value === "api-key") return "api-key";
-  return "unknown";
-}
-
 function readNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
-function hasNonEmptyString(value: unknown): boolean {
-  return typeof value === "string" && value.trim() !== "";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-interface CodexJwtClaims {
-  readonly chatgpt_account_id?: string;
-  readonly organizations?: readonly { readonly id?: unknown }[];
-  readonly "https://api.openai.com/auth"?: {
-    readonly chatgpt_account_id?: string;
-  };
-}
-
 export function readCodexJwtExpirationMs(token: string | undefined): number | undefined {
   const claims = parseCodexJwtClaims(token);
-  if (!isRecord(claims) || typeof claims.exp !== "number") return undefined;
+  if (claims === undefined || typeof claims.exp !== "number") return undefined;
   return claims.exp * 1000;
 }
 
@@ -360,22 +351,21 @@ export function isFreshCodexAccessToken(accessToken: string | undefined, now: nu
 export function extractCodexAccountIdFromToken(token: string | undefined): string | undefined {
   const claims = parseCodexJwtClaims(token);
   if (claims === undefined) return undefined;
+  const authClaims = claims["https://api.openai.com/auth"];
+  const organizations = claims.organizations;
   return (
     readNonEmptyString(claims.chatgpt_account_id) ??
-    readNonEmptyString(claims["https://api.openai.com/auth"]?.chatgpt_account_id) ??
-    readNonEmptyString(claims.organizations?.[0]?.id)
+    readNonEmptyString(isObject(authClaims) ? authClaims.chatgpt_account_id : undefined) ??
+    readNonEmptyString(
+      Array.isArray(organizations) && isObject(organizations[0]) ? organizations[0].id : undefined,
+    )
   );
 }
 
-function parseCodexJwtClaims(
-  token: string | undefined,
-): (CodexJwtClaims & { readonly exp?: unknown }) | undefined {
+function parseCodexJwtClaims(token: string | undefined): Record<string, unknown> | undefined {
   if (token === undefined) return undefined;
-  const parts = token.split(".");
-  if (parts.length !== 3) return undefined;
   try {
-    const parsed: unknown = JSON.parse(Buffer.from(parts[1] ?? "", "base64url").toString("utf8"));
-    return isRecord(parsed) ? parsed : undefined;
+    return decodeJwt(token);
   } catch {
     return undefined;
   }

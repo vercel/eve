@@ -4,18 +4,19 @@ import type {
   CodexAuthCredentials,
   CodexChatGptCredentials,
   CodexRefreshedTokens,
-} from "#internal/model-endpoint-auth/codex/auth.js";
+} from "#internal/model-auth/endpoint/codex/auth.js";
 import {
   createCodexFetch,
   rewriteCodexEndpoint,
-} from "#internal/model-endpoint-auth/codex/transport.js";
+} from "#internal/model-auth/endpoint/codex/transport.js";
+import { createUnsignedJwt } from "#internal/testing/unsigned-jwt.js";
 
 const CODEX_ENDPOINT = "https://chatgpt.test/backend-api/codex/responses";
 const ISSUER = "https://auth.test";
 
 describe("Codex direct transport", () => {
   it("rewrites OAuth Responses requests to the Codex backend with refreshed ChatGPT auth", async () => {
-    const refreshedAccessToken = createJwt({
+    const refreshedAccessToken = createUnsignedJwt({
       exp: 2_000_000_000,
       "https://api.openai.com/auth": { chatgpt_account_id: "acct-new" },
     });
@@ -24,7 +25,7 @@ describe("Codex direct transport", () => {
       if (url === `${ISSUER}/oauth/token`) {
         return Response.json({
           access_token: refreshedAccessToken,
-          id_token: createJwt({ chatgpt_account_id: "acct-new" }),
+          id_token: createUnsignedJwt({ chatgpt_account_id: "acct-new" }),
           refresh_token: "refresh-new",
         });
       }
@@ -50,7 +51,7 @@ describe("Codex direct transport", () => {
       now: () => 1_800_000_000_000,
       readCredentials: async () => ({
         kind: "chatgpt",
-        accessToken: createJwt({ exp: 1 }),
+        accessToken: createUnsignedJwt({ exp: 1 }),
         authPath: "/home/user/.codex/auth.json",
         codexHome: "/home/user/.codex",
         refreshToken: "refresh-old",
@@ -80,10 +81,10 @@ describe("Codex direct transport", () => {
       }),
     });
     expect(requests[1]).toMatchObject({
-      body: '{"stream":true}',
       method: "POST",
       url: CODEX_ENDPOINT,
     });
+    expect(JSON.parse(requests[1]?.body ?? "{}")).toEqual({ stream: true });
     expect(requests[1]?.headers.get("authorization")).toBe(`Bearer ${refreshedAccessToken}`);
     expect(requests[1]?.headers.get("ChatGPT-Account-Id")).toBe("acct-new");
     expect(requests[1]?.headers.get("originator")).toBe("eve");
@@ -114,6 +115,27 @@ describe("Codex direct transport", () => {
     expect(requests[0]?.headers.get("originator")).toBe("eve");
   });
 
+  it("leaves API-key request bodies unchanged", async () => {
+    const requests: RecordedRequest[] = [];
+    const codexFetch = createCodexFetch({
+      fetch: createRecordingFetch(requests),
+      readCredentials: async (): Promise<CodexAuthCredentials> => ({
+        kind: "api-key",
+        apiKey: "sk-test",
+        authPath: "/home/user/.codex/auth.json",
+        codexHome: "/home/user/.codex",
+      }),
+    });
+
+    await codexFetch("https://api.openai.com/v1/responses", {
+      body: '{"model":"gpt-5.2-codex","input":[],"store":true}',
+      method: "POST",
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.body).toBe('{"model":"gpt-5.2-codex","input":[],"store":true}');
+  });
+
   it("deduplicates concurrent ChatGPT token refreshes", async () => {
     const requests: RecordedRequest[] = [];
     let releaseRefresh: (() => void) | undefined;
@@ -124,7 +146,7 @@ describe("Codex direct transport", () => {
       if (url === `${ISSUER}/oauth/token`) {
         await refreshGate;
         return Response.json({
-          access_token: createJwt({ exp: 2_000_000_000 }),
+          access_token: createUnsignedJwt({ exp: 2_000_000_000 }),
           refresh_token: "refresh-new",
         });
       }
@@ -200,10 +222,4 @@ function createRecordingFetch(
     });
     return responseForUrl(requests[requests.length - 1]!.url);
   };
-}
-
-function createJwt(payload: object): string {
-  const header = Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url");
-  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  return `${header}.${body}.sig`;
 }
