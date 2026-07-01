@@ -6,6 +6,13 @@ import { SandboxTemplateNotProvisionedError } from "#public/definitions/sandbox-
 import { vercel } from "#public/sandbox/backends/vercel.js";
 import { createVercelSandbox } from "#execution/sandbox/bindings/vercel.js";
 
+// Credential resolution falls back to the Vercel CLI's OIDC refresh, which
+// reads the developer's real login and hits the network. Fail it so every
+// machine exercises the deterministic credential-less path CI sees.
+vi.mock("#compiled/@vercel/oidc/index.js", () => ({
+  getVercelOidcToken: vi.fn().mockRejectedValue(new Error("no OIDC token in tests")),
+}));
+
 function createMockCommandResult() {
   return {
     exitCode: 0,
@@ -558,9 +565,7 @@ describe("createVercelSandbox", () => {
     });
 
     expect(get).toHaveBeenCalledTimes(1);
-    expect(get).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "session-key", resume: false }),
-    );
+    expect(get).toHaveBeenCalledWith({ name: "session-key", resume: false });
     expect(create).toHaveBeenCalledTimes(1);
     expect(create.mock.calls[0]?.[0]).toMatchObject({
       name: "session-key",
@@ -958,12 +963,10 @@ describe("createVercelSandbox", () => {
     });
 
     expect(sandboxModule.Sandbox.create).not.toHaveBeenCalled();
-    expect(sandboxModule.Sandbox.get).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: "persisted-sandbox-name",
-        resume: false,
-      }),
-    );
+    expect(sandboxModule.Sandbox.get).toHaveBeenCalledWith({
+      name: "persisted-sandbox-name",
+      resume: false,
+    });
     expect(handle.session).toBeDefined();
 
     const state = await handle.captureState();
@@ -1005,12 +1008,10 @@ describe("createVercelSandbox", () => {
       templateKey: "template-key",
     });
 
-    expect(sandboxModule.Sandbox.get).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: "deleted-sandbox",
-        resume: false,
-      }),
-    );
+    expect(sandboxModule.Sandbox.get).toHaveBeenCalledWith({
+      name: "deleted-sandbox",
+      resume: false,
+    });
     expect(sandboxModule.Sandbox.create).toHaveBeenCalledTimes(1);
     expect(sandboxModule.Sandbox.create).toHaveBeenCalledWith(
       expect.objectContaining({
