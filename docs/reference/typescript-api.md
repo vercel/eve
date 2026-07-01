@@ -75,6 +75,7 @@ A few non-`define*` helpers round out the set: `disableTool` from `eve/tools` (s
 | `eve/tools/defaults`                                        | the built-in tools as plain values                        |
 | `eve/tools/approval`                                        | `always`, `once`, `never`                                 |
 | `eve/connections`                                           | `defineMcpClientConnection`, `defineOpenAPIConnection`    |
+| `eve/acp`                                                   | `acp` helper for ACP-backed language models               |
 | `eve/channels`                                              | `defineChannel`, route verbs                              |
 | `eve/channels/eve`                                          | `eveChannel`                                              |
 | `eve/channels/auth`                                         | `localDev`, `vercelOidc`, `placeholderAuth`               |

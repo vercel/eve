@@ -41,6 +41,45 @@ Direct provider model ids use the provider's native format. For Anthropic, the
 version uses hyphens (`claude-opus-4-8`), while the Gateway id above uses a dot
 (`anthropic/claude-opus-4.8`).
 
+You can also route model calls through an Agent Client Protocol agent. Install
+the ACP provider bridge, then use `acp()` from `eve/acp`:
+
+```bash
+npm install @mcpc-tech/acp-ai-provider
+```
+
+```ts title="agent/agent.ts"
+import { acp } from "eve/acp";
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: acp("opencode"),
+});
+```
+
+Pass the model id understood by that ACP agent as the second argument when you
+want to pin the backing model:
+
+```ts title="agent/agent.ts"
+export default defineAgent({
+  model: acp("opencode", "opencode-go/kimi-k2.7-code"),
+});
+```
+
+The built-in presets cover common ACP agents such as OpenCode, Gemini, and the
+adapter commands for Codex and Claude. For any other ACP-compatible agent, pass
+its command directly:
+
+```ts title="agent/agent.ts"
+export default defineAgent({
+  model: acp({
+    command: "kimi",
+    args: ["acp"],
+    model: "moonshot-v1-auto",
+  }),
+});
+```
+
 Model use is subject to the terms, data-processing commitments, retention behavior, and available controls of the selected provider and routing path. Review the [AI Gateway model catalog](https://vercel.com/ai-gateway/models) for gateway-routed models, and review the provider's terms when you configure a direct `LanguageModel`.
 
 ## Reasoning effort
