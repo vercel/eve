@@ -62,6 +62,8 @@ const RADIO_SELECT_OPTION_LIMIT = 6;
 const BUTTON_ACTION_ID_RE = /^(?<requestId>.+):button:\d+$/u;
 const TOOL_INPUT_PREFIX = "*Tool input*\n```\n";
 const TOOL_INPUT_SUFFIX = "\n```";
+const ANSWERED_TEXT_PREFIX = ":white_check_mark: *";
+const ANSWERED_TEXT_SUFFIX = "*";
 
 /**
  * Subset of one Slack interactivity action the HITL decoder reads.
@@ -325,9 +327,15 @@ export function buildAnsweredBlocks(input: {
       blocks.push(promptBlock);
     }
   }
+  // Freeform answers echo user-typed text, which can exceed the section
+  // limit on its own; cap the label so `chat.update` cannot fail.
+  const answerLabel = truncateWithEllipsis(
+    input.answerLabel,
+    SLACK_SECTION_TEXT_MAX_LENGTH - ANSWERED_TEXT_PREFIX.length - ANSWERED_TEXT_SUFFIX.length,
+  );
   blocks.push({
     type: "section",
-    text: { type: "mrkdwn", text: `:white_check_mark: *${input.answerLabel}*` },
+    text: { type: "mrkdwn", text: `${ANSWERED_TEXT_PREFIX}${answerLabel}${ANSWERED_TEXT_SUFFIX}` },
   });
   if (input.userId && input.userId.length > 0) {
     blocks.push({
@@ -353,11 +361,11 @@ function formatToolInputDetails(request: InputRequest): string | undefined {
 
   const bodyBudget =
     SLACK_SECTION_TEXT_MAX_LENGTH - TOOL_INPUT_PREFIX.length - TOOL_INPUT_SUFFIX.length;
-  const body = truncateCodeBlockBody(json, bodyBudget);
+  const body = truncateWithEllipsis(json, bodyBudget);
   return `${TOOL_INPUT_PREFIX}${body}${TOOL_INPUT_SUFFIX}`;
 }
 
-function truncateCodeBlockBody(value: string, maxLength: number): string {
+function truncateWithEllipsis(value: string, maxLength: number): string {
   if (value.length <= maxLength) return value;
   const sliceLength = Math.max(0, maxLength - 3);
   return `${value.slice(0, sliceLength).trimEnd()}...`;

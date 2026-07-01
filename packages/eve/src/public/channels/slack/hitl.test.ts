@@ -469,4 +469,15 @@ describe("buildAnsweredBlocks", () => {
       text: { text: ":white_check_mark: *Deny*" },
     });
   });
+
+  it("caps long freeform answer labels at the section limit", () => {
+    const blocks = buildAnsweredBlocks({
+      promptBlock: undefined,
+      answerLabel: "x".repeat(SLACK_SECTION_TEXT_MAX_LENGTH + 500),
+    });
+
+    const answer = blocks[0] as { text: { text: string } };
+    expect(answer.text.text.length).toBeLessThanOrEqual(SLACK_SECTION_TEXT_MAX_LENGTH);
+    expect(answer.text.text).toMatch(/^:white_check_mark: \*x+\.\.\.\*$/u);
+  });
 });
