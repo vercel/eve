@@ -585,7 +585,7 @@ describe("renderSelectQuestion", () => {
 
   it("stacks hints under labels with separators and trailing notices", () => {
     const options = [
-      { value: "model", label: "Change model", hint: "anthropic/claude-sonnet-4.6" },
+      { value: "model", label: "Change model", hint: "anthropic/claude-sonnet-5" },
       { value: "provider", label: "Change provider", hint: "AI Gateway (Linked to my-agent)" },
     ];
     const rows = renderSelectQuestion(
@@ -604,7 +604,7 @@ describe("renderSelectQuestion", () => {
       "  Configure the agent's model",
       "",
       "   ▶ Change model ",
-      "     anthropic/claude-sonnet-4.6",
+      "     anthropic/claude-sonnet-5",
       "",
       "   ◦ Change provider",
       "     AI Gateway (Linked to my-agent)",

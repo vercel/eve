@@ -81,6 +81,7 @@ export interface DurableSession {
   readonly rootSessionId?: string;
   readonly continuationToken: string;
   readonly history: ModelMessage[];
+  readonly limits?: HarnessSession["limits"];
   readonly outputSchema?: JsonObject;
   readonly state?: SessionStateMap;
   readonly sandboxState?: SandboxState;

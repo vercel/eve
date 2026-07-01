@@ -2784,7 +2784,7 @@ describe("TerminalRenderer status line", () => {
     renderer.renderAgentHeader({
       name: "Weather Agent",
       serverUrl: "http://localhost:3000",
-      info: agentInfoWithModel("anthropic/claude-sonnet-4-6", {
+      info: agentInfoWithModel("anthropic/claude-sonnet-5", {
         kind: "gateway",
         connected: false,
       }),
@@ -2798,7 +2798,7 @@ describe("TerminalRenderer status line", () => {
     renderer.renderAgentHeader({
       name: "Weather Agent",
       serverUrl: "http://localhost:3000",
-      info: agentInfoWithModel("anthropic/claude-sonnet-4-6", {
+      info: agentInfoWithModel("anthropic/claude-sonnet-5", {
         kind: "gateway",
         connected: true,
         credential: "oidc",
@@ -2810,10 +2810,8 @@ describe("TerminalRenderer status line", () => {
     expect(promptRow).toBeGreaterThan(-1);
     const statusRow = lines.slice(promptRow + 1).join("\n");
     expect(statusRow).toContain(":3000");
-    expect(statusRow).toContain("anthropic/claude-sonnet-4-6");
-    expect(statusRow.indexOf(":3000")).toBeLessThan(
-      statusRow.indexOf("anthropic/claude-sonnet-4-6"),
-    );
+    expect(statusRow).toContain("anthropic/claude-sonnet-5");
+    expect(statusRow.indexOf(":3000")).toBeLessThan(statusRow.indexOf("anthropic/claude-sonnet-5"));
     // The linked project folds into the connected gateway label.
     expect(statusRow).toContain("AI Gateway (my-agent)");
     expect(statusRow).not.toContain("⚠ AI Gateway");
@@ -2842,7 +2840,7 @@ describe("TerminalRenderer status line", () => {
     renderer.renderAgentHeader({
       name: "Weather Agent",
       serverUrl: "http://localhost:3000",
-      info: agentInfoWithModel("anthropic/claude-sonnet-4-6", {
+      info: agentInfoWithModel("anthropic/claude-sonnet-5", {
         kind: "gateway",
         connected: true,
         credential: "oidc",
@@ -2928,7 +2926,7 @@ describe("TerminalRenderer status line", () => {
     renderer.renderAgentHeader({
       name: "Weather Agent",
       serverUrl: "http://localhost:3000",
-      info: agentInfoWithModel("anthropic/claude-sonnet-4-6", {
+      info: agentInfoWithModel("anthropic/claude-sonnet-5", {
         kind: "gateway",
         connected: true,
         credential: "oidc",
@@ -2949,7 +2947,7 @@ describe("TerminalRenderer status line", () => {
     renderer.reset();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("anthropic/claude-sonnet-4-6");
+    expect(snapshot).toContain("anthropic/claude-sonnet-5");
     expect(snapshot).toContain("AI Gateway (my-agent)");
     expect(snapshot).toContain("/deploy pending");
     // A fresh conversation clears the token flow entirely (↑ 0 ↓ 0 is noise).

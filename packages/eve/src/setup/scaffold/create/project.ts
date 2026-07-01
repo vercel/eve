@@ -65,7 +65,7 @@ interface TemplateContext {
 
 /**
  * Provider slug a gateway model id routes through: the segment before the
- * first "/" (e.g. `anthropic/claude-sonnet-4.6` → `anthropic`). The slug is
+ * first "/" (e.g. `anthropic/claude-sonnet-5` → `anthropic`). The slug is
  * injected into generated source, so characters outside the catalog's slug
  * alphabet are dropped; an id without a usable prefix falls back to
  * `anthropic`.

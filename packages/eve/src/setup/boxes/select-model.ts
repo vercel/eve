@@ -40,7 +40,7 @@ const FEATURED_MODEL_IDS: readonly string[] = [
 ];
 
 const FALLBACK_MODELS: SelectOption<string>[] = [
-  modelOption(DEFAULT_AGENT_MODEL_ID, "Claude Sonnet 4.6", "Anthropic"),
+  modelOption(DEFAULT_AGENT_MODEL_ID, "Claude Sonnet 5", "Anthropic"),
   modelOption("anthropic/claude-opus-4.8", "Claude Opus 4.8", "Anthropic"),
   modelOption("openai/gpt-5.5", "GPT-5.5", "OpenAI"),
   modelOption("google/gemini-3.5", "Gemini 3.5", "Google", false),

@@ -11,7 +11,7 @@ eve is a filesystem-first framework for durable agents. You write capabilities u
 - npm (bundled with Node)
 - A model credential (see below)
 
-The scaffold's default model is `anthropic/claude-sonnet-4.6`, which routes through the Vercel AI Gateway. Set one of these before you run the agent:
+The scaffold's default model is `anthropic/claude-sonnet-5`, which routes through the Vercel AI Gateway. Set one of these before you run the agent:
 
 - A gateway model id needs `AI_GATEWAY_API_KEY`, or a `VERCEL_OIDC_TOKEN` pulled with `vercel link`.
 - A direct provider model uses that provider's AI SDK package and API key. For example, `anthropic("claude-...")` from `@ai-sdk/anthropic` needs `ANTHROPIC_API_KEY`.
@@ -79,7 +79,7 @@ You are a concise assistant. Use tools when they are available.
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "anthropic/claude-sonnet-4.6",
+  model: "anthropic/claude-sonnet-5",
 });
 ```
 

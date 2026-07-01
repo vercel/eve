@@ -1,5 +1,19 @@
 # eve
 
+## 0.17.2
+
+### Patch Changes
+
+- afa22f8: Cap recursive subagent delegation at three child-session levels by default, configurable with `defineAgent({ limits: { maxSubagentDepth } })`. At the limit, eve no longer advertises subagent tools and blocks stale delegated calls before starting another child session.
+- 55e9ad5: Update the scaffold's default agent model to `anthropic/claude-sonnet-5`. New agents created with `eve init` (and the setup model picker's pre-selected default) now use Claude Sonnet 5 instead of Claude Sonnet 4.6.
+- f26d600: use Chat SDK Slack format primitives for Slack mrkdwn conversion
+- 087d6fd: use chat sdk slack api primitives for slack channel api helpers
+- 70ebe69: use Chat SDK Slack webhook primitives for Slack channel parsing and verification
+- ed8a935: Keep the `Workflow` orchestration tool root-only. Delegated subagent sessions can still call visible subagent tools directly until the configured depth cap, but eve no longer advertises `Workflow` from those child sessions.
+- 37bd2bb: Use authored `eveChannel()` auth for `GET /eve/v1/info` so remote `eve dev` can authenticate with the same policy as the session routes.
+- 2fdc561: Add `limits.maxInputTokensPerSession` and `limits.maxOutputTokensPerSession` to stop a durable session from starting more model calls after its accumulated provider-reported input or output token usage reaches the configured cap. Root sessions default to a 40M input-token budget, delegated subagent sessions default to 5M, and authored input limits override those defaults.
+- 39c90de: Add explicit `dev:eve`, `build:eve`, and `start:eve` scripts to generated Web Chat projects so users can run the embedded eve app directly when needed.
+
 ## 0.17.1
 
 ### Patch Changes

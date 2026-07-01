@@ -70,6 +70,6 @@ async function validateModel(deps: PreflightDeps, model: string, cwd: string): P
   if (ids === null || ids.has(model)) return;
   throw new Error(
     `Model "${model}" is not in the AI Gateway catalog. Pass a model id from ` +
-      "https://ai-gateway.vercel.sh/v1/models (e.g. anthropic/claude-sonnet-4.6).",
+      "https://ai-gateway.vercel.sh/v1/models (e.g. anthropic/claude-sonnet-5).",
   );
 }
