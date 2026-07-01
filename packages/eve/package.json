@@ -341,23 +341,13 @@
   },
   "peerDependencies": {
     "@opentelemetry/api": "^1.0.0",
-    "@sveltejs/kit": "^2.0.0",
     "ai": "catalog:",
     "braintrust": "^3.0.0",
     "just-bash": "^3.0.0",
-    "microsandbox": "^0.5.0",
-    "next": "^16.0.0",
-    "nuxt": "^4.0.0",
-    "react": "^19.0.0",
-    "svelte": "^5.0.0",
-    "vite": "^8.0.0",
-    "vue": "^3.5.0"
+    "microsandbox": "^0.5.0"
   },
   "peerDependenciesMeta": {
     "@opentelemetry/api": {
-      "optional": true
-    },
-    "@sveltejs/kit": {
       "optional": true
     },
     "braintrust": {
@@ -367,24 +357,6 @@
       "optional": true
     },
     "microsandbox": {
-      "optional": true
-    },
-    "next": {
-      "optional": true
-    },
-    "nuxt": {
-      "optional": true
-    },
-    "react": {
-      "optional": true
-    },
-    "svelte": {
-      "optional": true
-    },
-    "vite": {
-      "optional": true
-    },
-    "vue": {
       "optional": true
     }
   },
