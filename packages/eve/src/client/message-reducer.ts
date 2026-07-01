@@ -363,7 +363,7 @@ function ensureStepStartPart(message: EveAssistantMessage, stepIndex: number): E
 }
 
 function upsertPart(message: EveAssistantMessage, next: EveMessagePart): EveAssistantMessage {
-  const index = message.parts.findIndex((part) => partKey(part) === partKey(next));
+  const index = findUpsertPartIndex(message.parts, next);
   const parts =
     index === -1
       ? [...message.parts, next]
@@ -380,10 +380,16 @@ function upsertPart(message: EveAssistantMessage, next: EveMessagePart): EveAssi
 }
 
 function removeTextPart(message: EveAssistantMessage, stepIndex: number): EveAssistantMessage {
-  const parts = message.parts.filter(
-    (part) => part.type !== "text" || part.stepIndex !== stepIndex,
+  const index = findLastIndex(
+    message.parts,
+    (part) => part.type === "text" && part.stepIndex === stepIndex && part.state !== "done",
   );
-  if (parts.length === message.parts.length) {
+  const fallbackIndex =
+    index === -1
+      ? findLastIndex(message.parts, (part) => part.type === "text" && part.stepIndex === stepIndex)
+      : index;
+
+  if (fallbackIndex === -1) {
     return message;
   }
 
@@ -393,8 +399,38 @@ function removeTextPart(message: EveAssistantMessage, stepIndex: number): EveAss
       ...message.metadata,
       status: "complete",
     },
-    parts,
+    parts: [...message.parts.slice(0, fallbackIndex), ...message.parts.slice(fallbackIndex + 1)],
   };
+}
+
+function findUpsertPartIndex(parts: readonly EveMessagePart[], next: EveMessagePart): number {
+  if (next.type === "text" || next.type === "reasoning") {
+    const streamingIndex = findLastIndex(
+      parts,
+      (part) =>
+        part.type === next.type && part.stepIndex === next.stepIndex && part.state !== "done",
+    );
+    if (streamingIndex !== -1) {
+      return streamingIndex;
+    }
+
+    return -1;
+  }
+
+  return parts.findIndex((part) => partKey(part) === partKey(next));
+}
+
+function findLastIndex<T>(
+  items: readonly T[],
+  predicate: (item: T, index: number) => boolean,
+): number {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (predicate(items[index] as T, index)) {
+      return index;
+    }
+  }
+
+  return -1;
 }
 
 function updateToolPart(
