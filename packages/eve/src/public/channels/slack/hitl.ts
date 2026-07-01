@@ -305,24 +305,21 @@ function buildOption(opt: NonNullable<InputRequest["options"]>[number]): Record<
 
 /**
  * Renders the "answered" replacement blocks for a previously-posted
- * HITL card. Preserves the original prompt block (so context stays
- * visible), appends a confirmation line naming the chosen answer, and
- * attributes the click to the user when their id is known.
+ * HITL card. Preserves the original prompt/detail blocks (so context
+ * stays visible), appends a confirmation line naming the chosen answer,
+ * and attributes the click to the user when their id is known.
  *
  * Slack's `chat.update` replaces every block in one shot, so the caller
  * passes the full list to `blocks` and the rendered fallback text to
  * `text`.
  */
 export function buildAnsweredBlocks(input: {
-  readonly promptBlock?: unknown;
-  readonly promptBlocks?: readonly unknown[];
+  readonly promptBlocks: readonly unknown[];
   readonly answerLabel: string;
   readonly userId?: string;
 }): unknown[] {
   const blocks: unknown[] = [];
-  const promptBlocks =
-    input.promptBlocks ?? (input.promptBlock === undefined ? [] : [input.promptBlock]);
-  for (const promptBlock of promptBlocks) {
+  for (const promptBlock of input.promptBlocks) {
     if (promptBlock !== undefined && promptBlock !== null) {
       blocks.push(promptBlock);
     }

@@ -502,7 +502,7 @@ async function updateAnsweredFreeformCard(input: {
   readonly deps: InteractionHandlerDeps;
 }): Promise<void> {
   const blocks = buildAnsweredBlocks({
-    promptBlock: undefined,
+    promptBlocks: [],
     answerLabel: input.answerLabel,
     userId: input.userId,
   });

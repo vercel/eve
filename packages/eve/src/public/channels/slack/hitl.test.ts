@@ -422,7 +422,7 @@ describe("buildAnsweredBlocks", () => {
       text: { type: "mrkdwn", text: "Approve deploy?" },
     };
     const blocks = buildAnsweredBlocks({
-      promptBlock,
+      promptBlocks: [promptBlock],
       answerLabel: "Approve",
       userId: "U01",
     });
@@ -463,7 +463,7 @@ describe("buildAnsweredBlocks", () => {
   });
 
   it("omits the attribution block when no userId is supplied", () => {
-    const blocks = buildAnsweredBlocks({ promptBlock: undefined, answerLabel: "Deny" });
+    const blocks = buildAnsweredBlocks({ promptBlocks: [], answerLabel: "Deny" });
     expect(blocks).toHaveLength(1);
     expect(blocks[0]).toMatchObject({
       text: { text: ":white_check_mark: *Deny*" },
@@ -472,7 +472,7 @@ describe("buildAnsweredBlocks", () => {
 
   it("caps long freeform answer labels at the section limit", () => {
     const blocks = buildAnsweredBlocks({
-      promptBlock: undefined,
+      promptBlocks: [],
       answerLabel: "x".repeat(SLACK_SECTION_TEXT_MAX_LENGTH + 500),
     });
 
