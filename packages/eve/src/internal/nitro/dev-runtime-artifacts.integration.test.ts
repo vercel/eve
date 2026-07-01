@@ -155,6 +155,35 @@ describe("development runtime artifact snapshots", () => {
     });
   });
 
+  it("stages package-less flat markdown agents with generated runtime package metadata", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-flat-package-less-");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(join(appRoot, "instructions.md"), "You are a precise assistant.\n");
+    await writeFile(
+      join(compileDirectoryPath, "compiled-agent-manifest.json"),
+      `${JSON.stringify({ agentRoot: appRoot, appRoot }, null, 2)}\n`,
+    );
+
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+
+    await expect(readFile(join(snapshot.runtimeAppRoot, "instructions.md"), "utf8")).resolves.toBe(
+      "You are a precise assistant.\n",
+    );
+    await expect(
+      readFile(join(snapshot.runtimeAppRoot, "package.json"), "utf8").then(
+        (source) => JSON.parse(source) as Record<string, unknown>,
+      ),
+    ).resolves.toEqual({
+      private: true,
+      type: "module",
+    });
+  });
+
   it("prunes stale snapshots while preserving the active and recent snapshots", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-artifacts-prune-");
     const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
