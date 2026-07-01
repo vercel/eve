@@ -396,11 +396,12 @@ async function handleViewSubmission(
     return ack;
   }
 
-  const text = payload.values?.find(
-    (value) =>
-      value.blockId === HITL_FREEFORM_MODAL_BLOCK_ID &&
-      value.actionId === HITL_FREEFORM_MODAL_ACTION_ID,
-  )?.value ?? "";
+  const text =
+    payload.values?.find(
+      (value) =>
+        value.blockId === HITL_FREEFORM_MODAL_BLOCK_ID &&
+        value.actionId === HITL_FREEFORM_MODAL_ACTION_ID,
+    )?.value ?? "";
   if (text.length === 0) return ack;
 
   // `user` is Required on view_submission payloads; `team_id` is on the
