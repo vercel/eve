@@ -1,6 +1,8 @@
 import pc from "picocolors";
 import { describe, expect, it, vi } from "vitest";
 
+import type { ApplyModelInput } from "#setup/flows/model.js";
+
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
 import type { RemoteAuthCompletion, RemoteConnectionController } from "./remote-connection.js";
 import type { AgentTUIRenderer, PromptCommandHandlerContext } from "./runner.js";
@@ -51,13 +53,11 @@ function setupFlowRenderer() {
 describe("createPromptCommandHandler", () => {
   it("applies an explicit model slug without opening the picker", async () => {
     const applyModel = vi.fn(
-      async ({ slug }: { appRoot: string; slug: string }) =>
-        ({ kind: "changed", to: slug }) as const,
+      async ({ slug }: ApplyModelInput) => ({ kind: "changed", to: slug }) as const,
     );
     const handler = createPromptCommandHandler({
       target: LOCAL_TARGET,
       applyModel,
-      modelChangeRefusal: async () => null,
     });
 
     await expect(
@@ -74,15 +74,19 @@ describe("createPromptCommandHandler", () => {
     });
   });
 
-  it("refuses an explicit model slug when the model uses an external provider", async () => {
+  it("relays the apply-layer refusal when the model uses an external provider", async () => {
+    // The uneditable-model refusal lives in changeAgentModel itself; the
+    // handler just relays the rejected outcome.
     const applyModel = vi.fn(
-      async ({ slug }: { appRoot: string; slug: string }) =>
-        ({ kind: "changed", to: slug }) as const,
+      async (_input: ApplyModelInput) =>
+        ({
+          kind: "rejected",
+          message: "Model is pinned to the external model provider `anthropic`.",
+        }) as const,
     );
     const handler = createPromptCommandHandler({
       target: LOCAL_TARGET,
       applyModel,
-      modelChangeRefusal: async () => "Model is pinned to the external model provider `anthropic`.",
     });
 
     await expect(
@@ -90,7 +94,7 @@ describe("createPromptCommandHandler", () => {
     ).resolves.toEqual({
       message: "Model is pinned to the external model provider `anthropic`.",
     });
-    expect(applyModel).not.toHaveBeenCalled();
+    expect(applyModel).toHaveBeenCalledWith({ appRoot: APP_ROOT, slug: "openai/gpt-5.4" });
   });
 
   it("sends a bare /model down the setup-flow path, not a bespoke picker", async () => {

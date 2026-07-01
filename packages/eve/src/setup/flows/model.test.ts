@@ -2,9 +2,9 @@ import pc from "picocolors";
 import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
-import type { CodexModelCatalogEntry } from "#internal/codex-model-catalog.js";
 import type { GatewayCatalogModel } from "#setup/boxes/select-model.js";
 import type {
+  Prompter,
   PrompterValue,
   SelectNotice,
   SelectOption,
@@ -33,14 +33,10 @@ const CATALOG: GatewayCatalogModel[] = [
   },
 ];
 
-const CODEX_CATALOG: CodexModelCatalogEntry[] = [
-  { slug: "gpt-5.4", displayName: "GPT-5.4", contextWindowTokens: 272_000 },
-  { slug: "gpt-5.5", displayName: "GPT-5.5", contextWindowTokens: 272_000 },
-];
-
 function flowDeps(overrides: Partial<ModelFlowDeps> = {}): Partial<ModelFlowDeps> {
   return {
     readCurrentModel: vi.fn(async () => ({
+      auth: { kind: "ai-gateway" } as const,
       id: "anthropic/claude-sonnet-4.6",
       routing: { kind: "gateway", target: "anthropic" } as const,
       editable: true,
@@ -50,7 +46,6 @@ function flowDeps(overrides: Partial<ModelFlowDeps> = {}): Partial<ModelFlowDeps
         ({ kind: "changed", to: slug }) as const,
     ),
     selectModel: { fetchModels: async () => CATALOG },
-    fetchCodexModels: vi.fn(async () => CODEX_CATALOG),
     detectProviderStatus: vi.fn(
       async () => ({ kind: "gateway-project", projectName: "my-agent" }) as const,
     ),
@@ -70,18 +65,30 @@ interface MenuPaint {
 
 /**
  * Answers the menu prompt from a script (throwing the cancel error for
- * "esc"), records every painted menu, and answers each catalog picker
- * prompt from the `picker` queue ("esc" cancels that picker).
+ * "esc"), records every painted menu, and answers model prompts from the
+ * `picker` or `text` queue ("esc" cancels that prompt).
  */
 function scriptedPrompter(input: {
   menu: (PrompterValue | "esc")[];
   onPicker?: (opts: SingleSelectOptions<PrompterValue>) => void;
+  onText?: (opts: Parameters<Prompter["text"]>[0]) => void;
   picker?: string[];
+  text?: string[];
 }) {
   const menuPaints: MenuPaint[] = [];
   const menuScript = [...input.menu];
   const pickerScript = [...(input.picker ?? [])];
+  const textScript = [...(input.text ?? [])];
   const fake = createFakePrompter({
+    text: (opts) => {
+      input.onText?.(opts);
+      const answer = textScript.shift();
+      if (answer === undefined) {
+        throw new Error(`Unexpected text prompt: "${opts.message}"`);
+      }
+      if (answer === "esc") throw new WizardCancelledError();
+      return answer;
+    },
     single: (opts: SingleSelectOptions<PrompterValue>) => {
       if (opts.message === MODEL_MENU_MESSAGE) {
         menuPaints.push({
@@ -143,6 +150,7 @@ describe("runModelFlow", () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
     const deps = flowDeps({
       readCurrentModel: vi.fn(async () => ({
+        auth: { kind: "external", provider: "anthropic" } as const,
         id: "anthropic/claude-sonnet-4.6",
         routing: { kind: "external", provider: "anthropic" } as const,
         editable: false,
@@ -179,9 +187,10 @@ describe("runModelFlow", () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
     const deps = flowDeps({
       readCurrentModel: vi.fn(async () => ({
-        id: "codex/gpt-5.5",
-        routing: { kind: "external", provider: "codex" } as const,
-        editable: false,
+        auth: { kind: "codex" } as const,
+        id: "openai/gpt-5.5",
+        routing: { kind: "gateway", target: "openai" } as const,
+        editable: true,
       })),
       detectProviderStatus: vi.fn(async () => ({ kind: "unset" }) as const),
     });
@@ -194,8 +203,8 @@ describe("runModelFlow", () => {
       {
         value: "model",
         label: "Change model",
-        description: "The Codex model your agent uses",
-        hint: "codex/gpt-5.5",
+        description: "The OpenAI model your local Codex login uses",
+        hint: "openai/gpt-5.5",
       },
       {
         value: "provider",
@@ -210,41 +219,44 @@ describe("runModelFlow", () => {
     expect(menuPaints[0]?.initialValue).toBe("model");
   });
 
-  it("applies a Codex model selected from OpenAI catalog entries", async () => {
-    const pickerPaints: SingleSelectOptions<PrompterValue>[] = [];
+  it("applies a Codex model id without fetching OpenAI catalog entries", async () => {
+    const textPrompts: Parameters<Prompter["text"]>[0][] = [];
     const { prompter, menuPaints } = scriptedPrompter({
       menu: ["model"],
-      picker: ["codex/gpt-5.4"],
-      onPicker: (opts) => pickerPaints.push(opts),
+      text: ["openai/gpt-5.4"],
+      onText: (opts) => textPrompts.push(opts),
     });
     const deps = flowDeps({
       readCurrentModel: vi.fn(async () => ({
-        id: "codex/gpt-5.5",
-        routing: { kind: "external", provider: "codex" } as const,
-        editable: false,
+        auth: { kind: "codex" } as const,
+        id: "openai/gpt-5.5",
+        routing: { kind: "gateway", target: "openai" } as const,
+        editable: true,
       })),
       detectProviderStatus: vi.fn(async () => ({ kind: "unset" }) as const),
     });
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
       kind: "done",
-      modelMessage: `Model changed to ${pc.bold("codex/gpt-5.4")}. Live on your next prompt.`,
+      modelMessage: `Model changed to ${pc.bold("openai/gpt-5.4")}. Live on your next prompt.`,
     });
 
     expect(menuPaints).toHaveLength(1);
-    expect(pickerPaints[0]).toEqual(
+    expect(textPrompts[0]).toEqual(
       expect.objectContaining({
-        message: "Which Codex model should your agent use?",
-        initialValue: "codex/gpt-5.5",
-        search: true,
-        options: [
-          { value: "codex/gpt-5.4", label: "GPT-5.4", hint: "OpenAI Codex" },
-          { value: "codex/gpt-5.5", label: "GPT-5.5", hint: "OpenAI Codex" },
-        ],
+        message: "Which OpenAI model should your local Codex login use?",
+        defaultValue: "openai/gpt-5.5",
+        placeholder: "openai/gpt-5.5",
       }),
     );
-    expect(deps.fetchCodexModels).toHaveBeenCalledTimes(1);
-    expect(deps.applyModel).toHaveBeenCalledWith({ appRoot: APP_ROOT, slug: "codex/gpt-5.4" });
+    expect(textPrompts[0]?.validate?.("anthropic/claude-sonnet-4.6")).toBe(
+      "Codex subscription models must be OpenAI model ids such as `openai/gpt-5.5`.",
+    );
+    expect(textPrompts[0]?.validate?.("openai/gpt-5.5-pro")).toBeUndefined();
+    expect(deps.applyModel).toHaveBeenCalledWith({
+      appRoot: APP_ROOT,
+      slug: "openai/gpt-5.4",
+    });
   });
 
   it("disables only Change model for a gateway-routed SDK model call, keeping the provider row", async () => {
@@ -252,6 +264,7 @@ describe("runModelFlow", () => {
     const deps = flowDeps({
       // `gateway("…")` instance: gateway-routed, but not a string literal eve can rewrite.
       readCurrentModel: vi.fn(async () => ({
+        auth: { kind: "ai-gateway" } as const,
         id: "anthropic/claude-sonnet-4.6",
         routing: { kind: "gateway", target: "anthropic" } as const,
         editable: false,

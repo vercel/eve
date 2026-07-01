@@ -1,4 +1,4 @@
-import type { ApplyModelOutcome } from "#setup/flows/model.js";
+import type { ApplyModelInput, ApplyModelOutcome } from "#setup/flows/model.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 import type {
@@ -16,9 +16,7 @@ type ExtensionCommand = Extract<PromptCommand, { type: "extension" }>;
 export interface PromptCommandHandlerOptions {
   readonly target: DevelopmentTuiTarget;
   /** Test seam; defaults to the model flow's shared source-change apply. */
-  readonly applyModel?: (input: { appRoot: string; slug: string }) => Promise<ApplyModelOutcome>;
-  /** Test seam; defaults to the model flow's external-provider refusal check. */
-  readonly modelChangeRefusal?: (appRoot: string) => Promise<string | null>;
+  readonly applyModel?: (input: ApplyModelInput) => Promise<ApplyModelOutcome>;
   /** Test seam; forwarded to runTuiSetupCommand's injectable flows. */
   readonly flows?: Partial<TuiSetupFlows>;
   /** Test seam for remote authentication. */
@@ -55,18 +53,8 @@ export function createPromptCommandHandler(
         const appRoot = target.workspaceRoot;
         // Package-loading failures are command outcomes at this CLI boundary.
         try {
-          const {
-            changeAgentModel,
-            formatApplyModelOutcome,
-            modelChangeRefusalForUneditableModel,
-          } = await import("#setup/flows/model.js");
-          // A source-backed model (an SDK model call) isn't a string literal eve
-          // can rewrite; refuse with a clear reason rather than silently no-op.
-          const checkRefusal = options.modelChangeRefusal ?? modelChangeRefusalForUneditableModel;
-          const refusal = await checkRefusal(appRoot);
-          if (refusal !== null) {
-            return { message: refusal };
-          }
+          const { changeAgentModel, formatApplyModelOutcome } =
+            await import("#setup/flows/model.js");
           const applyModel = options.applyModel ?? changeAgentModel;
           return {
             message: formatApplyModelOutcome(await applyModel({ appRoot, slug: command.argument })),
