@@ -25,6 +25,8 @@ import {
 import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
+import { getTurnUsageState } from "#harness/turn-tag-state.js";
+import type { Usage } from "#shared/usage.js";
 import type { JsonObject } from "#shared/json.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
@@ -58,6 +60,7 @@ import {
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import { createExecutionNodeStep } from "#execution/node-step.js";
 import { emitProxiedInputRequest, routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
+import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
@@ -83,6 +86,8 @@ export type DurableStepResult =
       readonly isError?: boolean;
       readonly serializedContext: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
+      /** Session-total token usage; set on `done` when the session spent any. */
+      readonly usage?: Usage;
     }
   | {
       readonly action: "park";
@@ -210,6 +215,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     }
     resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
   } else if (input.input?.kind === "runtime-action-result") {
+    recordSubagentUsageSpans(input.input.results);
     resolved = { runtimeActionResults: input.input.results };
   }
 
@@ -354,6 +360,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       isError: stepResult.next.isError,
       serializedContext: nextSerializedContext,
       sessionState: nextState,
+      usage: getTurnUsageState(stepResult.session.state)?.session,
     };
   }
 

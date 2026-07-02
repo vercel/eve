@@ -299,12 +299,14 @@ async function finalizeDone(input: {
     output: failed ? undefined : output,
     serializedContext,
     status: failed ? "failed" : "completed",
+    usage: failed ? undefined : input.action.usage,
   });
   await notifyDelegatedParentStep({
     result: failed
       ? createDelegatedSubagentErrorResult(serializedContext, output)
       : createDelegatedSubagentSuccessResult(serializedContext, output),
     serializedContext,
+    usage: failed ? undefined : input.action.usage,
   });
   return { output };
 }

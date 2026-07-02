@@ -16,17 +16,11 @@
  * and keep accumulating until the durable session ends.
  */
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
+import type { Usage } from "#shared/usage.js";
 
 const HARNESS_TURN_USAGE_STATE_KEY = "eve.harness.turnUsage";
 
-export interface TokenUsageTotals {
-  readonly cacheReadTokens: number;
-  readonly cacheWriteTokens: number;
-  readonly inputTokens: number;
-  readonly outputTokens: number;
-}
-
-export type TokenUsageDelta = Partial<TokenUsageTotals>;
+export type TokenUsageDelta = Partial<Usage>;
 
 /**
  * Rolling token usage for the durable session and the in-flight turn.
@@ -35,12 +29,12 @@ export type TokenUsageDelta = Partial<TokenUsageTotals>;
  * runs in a different turn, the flat turn totals reset. The nested
  * `session` totals do not reset.
  */
-export interface TurnUsageState extends TokenUsageTotals {
-  readonly session: TokenUsageTotals;
+export interface TurnUsageState extends Usage {
+  readonly session: Usage;
   readonly turnId: string;
 }
 
-const ZERO_TOKEN_USAGE: TokenUsageTotals = {
+const ZERO_TOKEN_USAGE: Usage = {
   cacheReadTokens: 0,
   cacheWriteTokens: 0,
   inputTokens: 0,
@@ -64,7 +58,7 @@ export type SessionTokenLimitViolation =
       readonly usedTokens: number;
     };
 
-export function getSessionTokenUsage(session: Pick<HarnessSession, "state">): TokenUsageTotals {
+export function getSessionTokenUsage(session: Pick<HarnessSession, "state">): Usage {
   return getTurnUsageState(session.state)?.session ?? ZERO_TOKEN_USAGE;
 }
 
@@ -127,7 +121,7 @@ export function accumulateTurnUsage(input: {
   };
 }
 
-function addTokenUsage(base: TokenUsageTotals, delta: TokenUsageTotals): TokenUsageTotals {
+function addTokenUsage(base: Usage, delta: Usage): Usage {
   return {
     cacheReadTokens: base.cacheReadTokens + delta.cacheReadTokens,
     cacheWriteTokens: base.cacheWriteTokens + delta.cacheWriteTokens,
@@ -136,7 +130,7 @@ function addTokenUsage(base: TokenUsageTotals, delta: TokenUsageTotals): TokenUs
   };
 }
 
-function toTokenUsageDelta(usage: TokenUsageDelta | undefined): TokenUsageTotals {
+function toTokenUsageDelta(usage: TokenUsageDelta | undefined): Usage {
   if (usage === undefined) {
     return ZERO_TOKEN_USAGE;
   }
