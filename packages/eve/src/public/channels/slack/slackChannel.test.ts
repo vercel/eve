@@ -17,6 +17,7 @@ import {
   HITL_FREEFORM_MODAL_CALLBACK_ID,
 } from "#public/channels/slack/hitl.js";
 import {
+  SLACK_MAX_BLOCKS_PER_MESSAGE,
   SLACK_MESSAGE_TEXT_MAX_LENGTH,
   SLACK_SECTION_TEXT_MAX_LENGTH,
 } from "#public/channels/slack/limits.js";
@@ -432,7 +433,7 @@ describe("slackChannel() default event handlers", () => {
     };
     expect(body).toMatchObject({
       channel: "C01",
-      text: "Approve tool call: mongodb-mutate",
+      text: 'Approve tool call: mongodb-mutate\n*Tool input*\n```\n{\n  "operation": "deleteMany"\n}\n```',
       thread_ts: "1700000000.000001",
     });
 
@@ -486,6 +487,55 @@ describe("slackChannel() default event handlers", () => {
     expect(promptSection?.text?.text.length).toBeLessThanOrEqual(SLACK_SECTION_TEXT_MAX_LENGTH);
     expect(promptSection?.text?.text.endsWith("...")).toBe(true);
     expect(body.text.length).toBeLessThanOrEqual(SLACK_MESSAGE_TEXT_MAX_LENGTH);
+  });
+
+  it("input.requested splits large batches so no post exceeds Slack's block cap", async () => {
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    // 20 approval requests render 3 blocks each (prompt, tool input,
+    // actions) = 60 blocks, which must split across two posts.
+    const requests = Array.from({ length: 20 }, (_, index) => ({
+      action: {
+        callId: `call_${index}`,
+        input: { operation: "deleteMany" },
+        kind: "tool-call" as const,
+        toolName: "mongodb-mutate",
+      },
+      display: "confirmation" as const,
+      options: [
+        { id: "approve", label: "Yes" },
+        { id: "deny", label: "No" },
+      ],
+      prompt: `Approve tool call ${index}`,
+      requestId: `approval_${index}`,
+    }));
+
+    await callEvent(
+      adapter,
+      makeEvent("input.requested", { requests, sequence: 0, stepIndex: 0, turnId: "t1" }),
+      ctx,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const allRequestIds: string[] = [];
+    for (const [url, init] of fetchMock.mock.calls) {
+      expect(String(url)).toBe("https://slack.com/api/chat.postMessage");
+      const body = parseSlackRequestBody(init as RequestInit) as {
+        blocks: Array<{ type: string; elements?: Array<{ action_id: string }> }>;
+      };
+      expect(body.blocks.length).toBeLessThanOrEqual(SLACK_MAX_BLOCKS_PER_MESSAGE);
+      for (const block of body.blocks) {
+        for (const element of block.elements ?? []) {
+          const requestId = element.action_id.replace(/^.*:(approval_\d+):button:\d+$/u, "$1");
+          if (!allRequestIds.includes(requestId)) allRequestIds.push(requestId);
+        }
+      }
+    }
+    expect(allRequestIds).toHaveLength(20);
   });
 
   it("turn.started calls assistant.threads.setStatus", async () => {

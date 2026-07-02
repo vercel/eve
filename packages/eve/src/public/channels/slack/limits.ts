@@ -35,6 +35,12 @@ export const SLACK_SECTION_TEXT_MAX_LENGTH = 3000;
 export const SLACK_MESSAGE_TEXT_MAX_LENGTH = 40000;
 
 /**
+ * `chat.postMessage` rejects payloads with more than 50 blocks
+ * (`invalid_blocks`).
+ */
+export const SLACK_MAX_BLOCKS_PER_MESSAGE = 50;
+
+/**
  * `views.open` modal title is capped at 24 characters.
  */
 export const SLACK_MODAL_TITLE_MAX_LENGTH = 24;

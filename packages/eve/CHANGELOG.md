@@ -1,5 +1,12 @@
 # eve
 
+## 0.18.1
+
+### Patch Changes
+
+- 68365e8: Show tool call input in Slack approval prompts so operators can inspect approval-gated actions before approving.
+- 68365e8: Harden Slack HITL posting against API limits: large approval batches now split across multiple messages instead of exceeding Slack's 50-block cap, and long freeform answers are truncated so the answered-card update cannot fail.
+
 ## 0.18.0
 
 ### Minor Changes
