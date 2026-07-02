@@ -81,7 +81,6 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
             kind: "done",
             output: result.output ?? "",
             isError: result.isError,
-            usage: result.usage,
           },
           bufferedDeliveries,
         );
@@ -252,7 +251,6 @@ async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
               isError: result.isError,
               serializedContext: result.serializedContext,
               sessionState: result.sessionState,
-              usage: result.usage,
             },
             kind: "turn-result",
           },

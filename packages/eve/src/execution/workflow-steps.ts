@@ -25,8 +25,6 @@ import {
 import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
-import { getTurnUsageState } from "#harness/turn-tag-state.js";
-import type { Usage } from "#shared/usage.js";
 import type { JsonObject } from "#shared/json.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
@@ -86,8 +84,6 @@ export type DurableStepResult =
       readonly isError?: boolean;
       readonly serializedContext: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
-      /** Session-total token usage; set on `done` when the session spent any. */
-      readonly usage?: Usage;
     }
   | {
       readonly action: "park";
@@ -360,7 +356,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       isError: stepResult.next.isError,
       serializedContext: nextSerializedContext,
       sessionState: nextState,
-      usage: getTurnUsageState(stepResult.session.state)?.session,
     };
   }
 
