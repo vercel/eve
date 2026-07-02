@@ -215,7 +215,6 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
 
   if (manifest.config.experimental !== undefined) {
     config.experimental = {
-      useCodexSubscription: manifest.config.experimental.useCodexSubscription,
       workflow:
         manifest.config.experimental.workflow === undefined
           ? undefined

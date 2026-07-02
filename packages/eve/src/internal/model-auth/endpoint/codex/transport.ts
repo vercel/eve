@@ -103,7 +103,7 @@ export function createCodexFetch(options: CodexTransportOptions = {}): Fetch {
       const refreshToken = credentials.refreshToken;
       if (refreshToken === undefined) {
         throw new Error(
-          `Codex ChatGPT login state at ${credentials.authPath} does not include a refresh token. Run \`codex login\` again before using experimental.useCodexSubscription.`,
+          `Codex ChatGPT login state at ${credentials.authPath} does not include a refresh token. Run \`codex login\` again before using experimental_codex.`,
         );
       }
       if (refreshPromise === undefined) {

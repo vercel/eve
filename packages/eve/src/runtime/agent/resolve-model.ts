@@ -2,6 +2,7 @@ import type { LanguageModel } from "ai";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { codexModelSlugFromGatewayId } from "#internal/model-auth/endpoint/codex/catalog.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
+import { isExperimentalCodexModel } from "#shared/codex-subscription-model.js";
 import { createCodexSubscriptionModel } from "#internal/model-auth/endpoint/codex/model.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { resolveBootstrapRuntimeModel } from "#runtime/agent/bootstrap-model.js";
@@ -78,6 +79,17 @@ async function loadSourceBackedRuntimeModelReference(
     throw new Error(
       `Expected the authored agent config export "${reference.source.exportName ?? "default"}" from "${reference.source.logicalPath}" to provide a runtime model.`,
     );
+  }
+
+  // A source-backed reference to an experimental_codex value only compiles in
+  // production, where the compiler selected the deployable fallback route.
+  if (isExperimentalCodexModel(model)) {
+    if (model.fallback === undefined) {
+      throw new Error(
+        `Expected the authored agent config export "${reference.source.exportName ?? "default"}" from "${reference.source.logicalPath}" to provide a deployable fallback model for experimental_codex.`,
+      );
+    }
+    return model.fallback;
   }
 
   return model;

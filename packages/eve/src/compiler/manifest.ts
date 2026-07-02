@@ -350,7 +350,6 @@ const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
     description: z.string().optional(),
     experimental: z
       .object({
-        useCodexSubscription: z.boolean().optional(),
         workflow: compiledAgentWorkflowDefinitionSchema.optional(),
       })
       .strict()
@@ -693,7 +692,6 @@ export function createCompiledAgentNodeManifest(input: {
         input.config.experimental === undefined
           ? undefined
           : {
-              useCodexSubscription: input.config.experimental.useCodexSubscription,
               workflow:
                 input.config.experimental.workflow === undefined
                   ? undefined

@@ -71,12 +71,11 @@ describe("applyModelNameToSource", () => {
     expect(result.nextSource).toBe(SCAFFOLD);
   });
 
-  it("rewrites the model string while preserving experimental.useCodexSubscription", async () => {
-    const source = `import { defineAgent } from "eve";
+  it("rewrites the slug inside an experimental_codex call", async () => {
+    const source = `import { defineAgent, experimental_codex } from "eve";
 
 export default defineAgent({
-  model: "openai/gpt-5.5",
-  experimental: { useCodexSubscription: true },
+  model: experimental_codex("gpt-5.5"),
   modelContextWindowTokens: 272_000,
 });
 `;
@@ -84,11 +83,35 @@ export default defineAgent({
 
     expect(result.kind).toBe("applied");
     if (result.kind !== "applied") return;
-    expect(result.from).toBe("openai/gpt-5.5");
-    expect(result.to).toBe("openai/gpt-5.4");
-    expect(result.nextSource).toContain(`model: "openai/gpt-5.4"`);
-    expect(result.nextSource).toContain(`experimental: { useCodexSubscription: true }`);
+    expect(result.from).toBe("gpt-5.5");
+    expect(result.to).toBe("gpt-5.4");
+    expect(result.nextSource).toContain(`model: experimental_codex("gpt-5.4")`);
     expect(result.nextSource).toContain("modelContextWindowTokens: 272_000");
+  });
+
+  it("preserves the experimental_codex fallback argument", async () => {
+    const source = `export default defineAgent({
+  model: experimental_codex("gpt-5.5", anthropic("claude-sonnet-4.6")),
+});
+`;
+    const result = await applyModelNameToSource(source, "gpt-5.4");
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") return;
+    expect(result.nextSource).toContain(
+      `model: experimental_codex("gpt-5.4", anthropic("claude-sonnet-4.6"))`,
+    );
+  });
+
+  it("bails on a non-OpenAI id for an experimental_codex call", async () => {
+    const result = await applyModelNameToSource(
+      `export default defineAgent({ model: experimental_codex("gpt-5.5") });\n`,
+      "anthropic/claude-sonnet-4.6",
+    );
+
+    expect(result.kind).toBe("bail");
+    if (result.kind !== "bail") return;
+    expect(result.reason).toContain("OpenAI");
   });
 
   it("bails when model is an SDK model call", async () => {

@@ -6,7 +6,11 @@ import { normalizeAgentDefinition } from "#internal/authored-definition/core.js"
 import { normalizeJsonSchemaDefinition } from "#shared/json-schema.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
-import { codexModelSlugFromGatewayId } from "#internal/model-auth/endpoint/codex/catalog.js";
+import { formatOpenAiGatewayModelId } from "#internal/model-auth/endpoint/codex/catalog.js";
+import {
+  isExperimentalCodexModel,
+  type ExperimentalCodexModel,
+} from "#shared/codex-subscription-model.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
@@ -17,6 +21,7 @@ import type { CompiledRuntimeModelLimits } from "#compiler/model-catalog.js";
 import {
   loadModuleBackedDefinition,
   type ManifestCompileContext,
+  type ManifestCompileMode,
 } from "#compiler/normalize-helpers.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
@@ -46,15 +51,14 @@ export async function compileAgentConfig(
       : `Expected the agent config export "${configModule.exportName ?? "default"}" from "${configModulePath}" to match the public eve shape.`,
   );
   const experimental = normalizeExperimentalDefinition(definition.experimental);
-  const useCodexSubscriptionTransport = shouldUseCodexSubscriptionTransport(experimental, context);
   const model = await normalizeAuthoredModelReference({
+    mode: context.mode,
     modelCatalog: context.modelCatalog,
     purpose: "the primary compaction trigger model",
     contextWindowTokens: definition.modelContextWindowTokens,
     providerOptions: definition.modelOptions?.providerOptions,
     source: configModule,
     sourcePath: configModulePath,
-    useCodexSubscriptionTransport,
     value: definition.model,
   });
   const compaction: {
@@ -117,13 +121,13 @@ export async function compileAgentConfig(
 
   if (definition.compaction?.model !== undefined) {
     compaction.model = await normalizeAuthoredModelReference({
+      mode: context.mode,
       modelCatalog: context.modelCatalog,
       purpose: "the compaction summary model",
       contextWindowTokens: definition.compaction.modelContextWindowTokens,
       providerOptions: definition.modelOptions?.providerOptions,
       source: configModule,
       sourcePath: configModulePath,
-      useCodexSubscriptionTransport,
       value: definition.compaction.model,
     });
   }
@@ -144,10 +148,6 @@ function normalizeExperimentalDefinition(
 
   const compiledExperimental: Mutable<NonNullable<CompiledAgentDefinition["experimental"]>> = {};
 
-  if (experimental.useCodexSubscription !== undefined) {
-    compiledExperimental.useCodexSubscription = experimental.useCodexSubscription;
-  }
-
   if (experimental.workflow !== undefined) {
     compiledExperimental.workflow = {
       world: experimental.workflow.world,
@@ -157,33 +157,32 @@ function normalizeExperimentalDefinition(
   return compiledExperimental;
 }
 
-async function normalizeAuthoredModelReference(input: {
+interface AuthoredModelReferenceInput {
+  readonly mode: ManifestCompileMode;
   readonly modelCatalog: ManifestCompileContext["modelCatalog"];
   readonly purpose: string;
   readonly contextWindowTokens?: number;
   readonly providerOptions?: Record<string, JsonObject>;
   readonly source?: ModuleSourceRef;
   readonly sourcePath?: string;
-  readonly useCodexSubscriptionTransport?: boolean;
   readonly value: PublicAgentModelDefinition;
-}): Promise<CompiledRuntimeModelReference> {
+}
+
+async function normalizeAuthoredModelReference(
+  input: AuthoredModelReferenceInput,
+): Promise<CompiledRuntimeModelReference> {
   if (typeof input.value === "string") {
     const model: CompiledRuntimeModelReference = {
       id: formatLanguageModelGatewayId(input.value),
       providerOptions: parseProviderOptionsRecord(input.providerOptions),
       routing: classifyModelRouting(input.value, input.providerOptions),
     };
-    if (input.useCodexSubscriptionTransport === true) {
-      model.transport = codexTransportForOpenAiStringModel(input.value, input.purpose);
-    }
 
     return await withCompiledRuntimeModelLimits(model, input);
   }
 
-  if (input.useCodexSubscriptionTransport === true) {
-    throw new Error(
-      `experimental.useCodexSubscription requires ${input.purpose} to be configured as an OpenAI string model id such as "openai/gpt-5.5".`,
-    );
+  if (isExperimentalCodexModel(input.value)) {
+    return await normalizeExperimentalCodexModelReference(input, input.value);
   }
 
   const source = input.source;
@@ -250,21 +249,59 @@ async function normalizeAuthoredModelReference(input: {
   return await withCompiledRuntimeModelLimits(sourceBackedModel, input);
 }
 
-function shouldUseCodexSubscriptionTransport(
-  experimental: CompiledAgentDefinition["experimental"] | undefined,
-  context: ManifestCompileContext,
-): boolean {
-  return context.mode === "development" && experimental?.useCodexSubscription === true;
-}
-
-function codexTransportForOpenAiStringModel(modelId: string, purpose: string): "codex" {
-  if (codexModelSlugFromGatewayId(formatLanguageModelGatewayId(modelId)) === null) {
+/**
+ * Compiles an `experimental_codex(...)` model value. Development builds route
+ * the model through the local Codex login transport. Production builds never
+ * touch the local login: they optimistically keep the model on its normal
+ * `openai/<model>` AI Gateway route when the gateway catalog confirms the id,
+ * and otherwise compile the authored fallback — failing when there is none.
+ */
+async function normalizeExperimentalCodexModelReference(
+  input: AuthoredModelReferenceInput,
+  descriptor: ExperimentalCodexModel,
+): Promise<CompiledRuntimeModelReference> {
+  const slug = descriptor.model.trim();
+  if (slug.length === 0 || slug.includes("/")) {
     throw new Error(
-      `experimental.useCodexSubscription requires ${purpose} to be an OpenAI model id such as "openai/gpt-5.5".`,
+      `experimental_codex requires a bare OpenAI model slug such as "gpt-5.5" for ${input.purpose}, received "${descriptor.model}".`,
     );
   }
 
-  return "codex";
+  const gatewayId = formatOpenAiGatewayModelId(slug);
+  const model: CompiledRuntimeModelReference = {
+    id: gatewayId,
+    providerOptions: parseProviderOptionsRecord(input.providerOptions),
+    routing: classifyModelRouting(gatewayId, input.providerOptions),
+  };
+
+  if (input.mode === "development") {
+    return await withCompiledRuntimeModelLimits({ ...model, transport: "codex" }, input);
+  }
+
+  // An authored context window is the escape hatch that always keeps the
+  // gateway route, mirroring the plain string-model behavior.
+  if (input.contextWindowTokens !== undefined) {
+    return { ...model, contextWindowTokens: input.contextWindowTokens };
+  }
+
+  let limits: CompiledRuntimeModelLimits | null;
+  try {
+    limits = await input.modelCatalog.getModelLimits(gatewayId);
+  } catch {
+    limits = null;
+  }
+
+  if (limits !== null) {
+    return { ...model, contextWindowTokens: limits.contextWindowTokens };
+  }
+
+  if (descriptor.fallback !== undefined) {
+    return await normalizeAuthoredModelReference({ ...input, value: descriptor.fallback });
+  }
+
+  throw new Error(
+    `Production build cannot serve ${input.purpose} "${gatewayId}" because the AI Gateway model catalog does not confirm it. Pass a deployable fallback model as the second argument of experimental_codex, or set modelContextWindowTokens to force the "${gatewayId}" gateway route.`,
+  );
 }
 
 function formatAgentConfigModulePath(

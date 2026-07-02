@@ -319,12 +319,12 @@ export function assertCodexAuthStateAuthenticated(state: CodexAuthState): void {
 
   if (state.kind === "missing") {
     throw new Error(
-      `Codex login state was not found at ${state.authPath}. Run \`codex login\` before using experimental.useCodexSubscription.`,
+      `Codex login state was not found at ${state.authPath}. Run \`codex login\` before using experimental_codex.`,
     );
   }
 
   throw new Error(
-    `Codex login state at ${state.authPath} could not be read: ${state.reason}. Run \`codex login\` again before using experimental.useCodexSubscription.`,
+    `Codex login state at ${state.authPath} could not be read: ${state.reason}. Run \`codex login\` again before using experimental_codex.`,
   );
 }
 

@@ -1,6 +1,10 @@
 import type { PublicAgentDefinition } from "#shared/agent-definition.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
 
+export {
+  experimental_codex,
+  type ExperimentalCodexModel,
+} from "#shared/codex-subscription-model.js";
 export type {
   AgentModelOptionsDefinition,
   AgentReasoningDefinition,

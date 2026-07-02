@@ -4,7 +4,6 @@ import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog
 import { discoverAgent } from "#discover/discover-agent.js";
 import {
   codexModelSlugFromGatewayId,
-  formatOpenAiGatewayModelId,
   parseCodexModelId,
 } from "#internal/model-auth/endpoint/codex/catalog.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
@@ -578,7 +577,7 @@ function validateOpenAiModelId(modelId: string): string | null {
 }
 
 function codexTransportIdRejection(modelId: string, slug: string): string {
-  return `\`${modelId}\` is a Codex transport id, not a model id. Use \`${formatOpenAiGatewayModelId(slug)}\` with \`experimental.useCodexSubscription\`.`;
+  return `\`${modelId}\` is a Codex transport id, not a model id. Use \`experimental_codex("${slug}")\` as the \`model\` value.`;
 }
 
 /**

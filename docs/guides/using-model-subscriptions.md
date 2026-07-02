@@ -4,15 +4,15 @@ description: "Use a local Codex login as an eve model during development, and ke
 ---
 
 This guide covers local account-backed model access, not deployable provider API
-credentials. Today, eve exposes that path for Codex through
-`experimental.useCodexSubscription`, which uses local Codex login state during development.
+credentials. Today, eve exposes that path for Codex through the
+`experimental_codex` model value, which uses local Codex login state during
+development.
 
 ## Use a local Codex login
 
-Keep `model` as the OpenAI model id you want to use, then opt into local Codex
-auth with `experimental.useCodexSubscription`. The string selects the model; the
-experimental flag changes the local development transport. It is not a
-delegated tool or an MCP connection.
+Pass the bare OpenAI model slug to `experimental_codex` and assign the result
+to `model`. It is not a delegated tool or an MCP connection — it selects the
+model and changes the local development transport.
 
 Sign in with the Codex CLI first:
 
@@ -20,16 +20,13 @@ Sign in with the Codex CLI first:
 codex login
 ```
 
-Then enable the local Codex transport in `agent.ts`:
+Then set the model in `agent.ts`:
 
 ```ts title="agent/agent.ts"
-import { defineAgent } from "eve";
+import { defineAgent, experimental_codex } from "eve";
 
 export default defineAgent({
-  model: "openai/gpt-5.5",
-  experimental: {
-    useCodexSubscription: true,
-  },
+  model: experimental_codex("gpt-5.5"),
 });
 ```
 
@@ -48,10 +45,27 @@ eve's compaction threshold to match the selected model's context window.
 
 ## Production boundary
 
-Production builds do not apply the local Codex auth transform. The same
-`model: "openai/..."` string compiles as the normal AI Gateway/provider route
-for production, so deployment uses deployable model credentials rather than a
-developer's local Codex login.
+Production builds never use the local Codex login. eve optimistically keeps the
+model on its normal AI Gateway route — `openai/gpt-5.5` for the example above —
+when the gateway model catalog confirms that id, so deployment uses deployable
+model credentials rather than a developer's local Codex login.
+
+When the catalog does not confirm the id (for example, a Codex-only model),
+the production build uses the fallback model you pass as the second argument:
+
+```ts title="agent/agent.ts"
+import { anthropic } from "@ai-sdk/anthropic";
+import { defineAgent, experimental_codex } from "eve";
+
+export default defineAgent({
+  model: experimental_codex("gpt-5.5-codex", anthropic("claude-sonnet-4.6")),
+});
+```
+
+Without a fallback, a production build whose OpenAI id the catalog cannot
+confirm fails with a compile error. Setting `modelContextWindowTokens` skips
+the catalog lookup entirely and always keeps the `openai/<model>` gateway
+route in production.
 
 Codex use is governed by OpenAI's current [Terms of Use](https://openai.com/policies/terms-of-use/),
 [Service Terms](https://openai.com/policies/service-terms/), and

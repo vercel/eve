@@ -1,4 +1,5 @@
 import type { CallSettings, LanguageModel } from "ai";
+import type { ExperimentalCodexModel } from "#shared/codex-subscription-model.js";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
@@ -46,19 +47,19 @@ export type InternalAgentModelDefinition = {
   providerOptions?: Record<string, JsonObject>;
   /**
    * Non-default credential transport serving this model at runtime. Set by
-   * the compiler only when `experimental.useCodexSubscription` applies
-   * (development, OpenAI string model); absent means the model is served by
-   * whatever its routing implies.
+   * the compiler only when an `experimental_codex` model value applies
+   * (development builds); absent means the model is served by whatever its
+   * routing implies.
    */
   transport?: "codex";
 };
 
 /**
- * The model handle you assign to an agent's `model` field. This is the AI SDK
+ * The model handle you assign to an agent's `model` field: an AI SDK
  * `LanguageModel` value (for example, the result of a provider or gateway
- * model call), not an eve-authored definition object.
+ * model call), or the `experimental_codex(...)` local-subscription value.
  */
-export type PublicAgentModelDefinition = LanguageModel;
+export type PublicAgentModelDefinition = LanguageModel | ExperimentalCodexModel;
 
 export interface InternalAgentCompactionDefinition {
   /**
@@ -110,14 +111,6 @@ export interface PublicAgentCompactionDefinition {
  * These options are unstable and may change or be removed in any release.
  */
 export interface AgentExperimentalDefinition {
-  /**
-   * Uses the local Codex login in development for OpenAI string models.
-   *
-   * The `model` string still selects the model. This flag only changes the
-   * development-time credential transport; production builds ignore it and
-   * keep the model on its normal deployable route.
-   */
-  readonly useCodexSubscription?: boolean;
   /**
    * Durable Workflow runtime configuration. Root agents may use this to select
    * the Workflow world backing sessions and runs.
@@ -202,8 +195,8 @@ export type PublicAgentDefinition = {
    */
   readonly experimental?: AgentExperimentalDefinition;
   /**
-   * Language model used for agent turns. Accepts an AI Gateway model ID or any
-   * AI SDK-compatible language model.
+   * Language model used for agent turns. Accepts an AI Gateway model ID, any
+   * AI SDK-compatible language model, or an `experimental_codex(...)` value.
    */
   readonly model: PublicAgentModelDefinition;
   /**

@@ -11,7 +11,9 @@ export {
   type AgentReasoningDefinition,
   type AgentWorkflowDefinition,
   type AgentWorkflowWorldDefinition,
+  type ExperimentalCodexModel,
   defineAgent,
+  experimental_codex,
 } from "#public/definitions/agent.js";
 export {
   type RemoteAgentDefinition,
