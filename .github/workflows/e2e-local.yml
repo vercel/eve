@@ -47,8 +47,6 @@ jobs:
   discover-fixtures:
     name: discover-fixtures
     runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.relevant == 'true'
     outputs:
       matrix: ${{ steps.discover.outputs.matrix }}
     steps:
@@ -64,7 +62,10 @@ jobs:
   e2e:
     name: e2e-local (${{ matrix.name }})
     runs-on: ubuntu-latest
-    needs: discover-fixtures
+    needs: [changes, discover-fixtures]
+    # Gate here (not on discover-fixtures): the matrix must expand so each
+    # named check reports a skipped status that satisfies required checks.
+    if: needs.changes.outputs.relevant == 'true'
     strategy:
       fail-fast: false
       matrix:
