@@ -25,6 +25,17 @@ export interface WebFetchInput {
 }
 
 /**
+ * Per-call options accepted by {@link executeWebFetchTool}.
+ */
+export interface WebFetchExecuteOptions {
+  /**
+   * Turn cancellation signal combined with the per-request timeout so an
+   * aborted turn stops the in-flight fetch.
+   */
+  readonly abortSignal?: AbortSignal;
+}
+
+/**
  * Structured result returned from {@link executeWebFetchTool}.
  */
 export interface WebFetchResult {
@@ -48,7 +59,10 @@ export interface WebFetchResult {
  * is capped at the shared tool-output budget (50 KB / 2000 lines) so
  * large pages do not exhaust the model's context window.
  */
-export async function executeWebFetchTool(args: WebFetchInput): Promise<WebFetchResult> {
+export async function executeWebFetchTool(
+  args: WebFetchInput,
+  options?: WebFetchExecuteOptions,
+): Promise<WebFetchResult> {
   const { url, format = "markdown", timeout } = args;
 
   if (!url.startsWith("http://") && !url.startsWith("https://")) {
@@ -60,7 +74,11 @@ export async function executeWebFetchTool(args: WebFetchInput): Promise<WebFetch
     MAX_TIMEOUT_MS,
   );
 
-  const signal = AbortSignal.timeout(timeoutMs);
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signal =
+    options?.abortSignal === undefined
+      ? timeoutSignal
+      : AbortSignal.any([options.abortSignal, timeoutSignal]);
   const headers = buildHeaders(format);
 
   const initial = await fetch(url, { headers, signal });

@@ -8,7 +8,7 @@ import {
   LiveStepToolsKey,
 } from "#context/keys.js";
 import type { DurableDynamicToolMetadata } from "#context/keys.js";
-import { buildCallbackContext } from "#context/build-callback-context.js";
+import { buildBaseToolContext } from "#context/build-base-tool-context.js";
 import { createLogger } from "#internal/logging.js";
 import type { ApprovalContext, ApprovalStatus } from "#public/definitions/approval.js";
 
@@ -50,7 +50,8 @@ function replayTools(metadata: readonly DurableDynamicToolMetadata[]): HarnessTo
 
     tools.push({
       description: m.description,
-      execute: (input: unknown) => stepFn(m.closureVars, input, buildCallbackContext()),
+      execute: (input: unknown, options) =>
+        stepFn(m.closureVars, input, buildBaseToolContext(options?.abortSignal)),
       inputSchema: jsonSchema(m.inputSchema),
       name: m.name,
       approval: buildReplayedApproval(m),

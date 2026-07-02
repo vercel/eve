@@ -28,7 +28,9 @@ export function defineBashTool(input: DefineBashToolInput = {}): ToolDefinition 
   return {
     description: input.description ?? "Execute a shell command in the workspace sandbox.",
     async execute(args, ctx) {
-      return executeBashOnSandbox(await ctx.getSandbox(), args as BashInput);
+      return executeBashOnSandbox(await ctx.getSandbox(), args as BashInput, {
+        abortSignal: ctx.abortSignal,
+      });
     },
     inputSchema: BASH_INPUT_SCHEMA as unknown as StandardJSONSchemaV1<unknown>,
     outputSchema: BASH_OUTPUT_SCHEMA,

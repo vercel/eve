@@ -37,6 +37,7 @@ import { hasDeferredStepInput, setPendingInputBatch } from "#harness/input-reque
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { getSessionTokenUsage, setTurnUsageState } from "#harness/turn-tag-state.js";
 import { DEFAULT_SUBAGENT_MAX_DEPTH } from "#harness/subagent-depth.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
@@ -2457,6 +2458,104 @@ describe("createToolLoopHarness", () => {
       status: "completed",
       turnId: "turn_0",
     });
+  });
+
+  it("propagates streamed cancellation without waiting for onStepFinish or emitting failures", async () => {
+    const abortController = new AbortController();
+    const abortReason = new TurnCancelledError();
+
+    vi.mocked(ToolLoopAgent).mockImplementation(function (
+      this: ToolLoopAgent,
+      settings: MockAgentSettings,
+    ) {
+      this.stream = vi
+        .fn()
+        .mockImplementation(async (options: { abortSignal?: AbortSignal; messages: unknown[] }) => {
+          expect(options.abortSignal).toBe(abortController.signal);
+          if (settings.prepareStep) {
+            await settings.prepareStep({
+              context: undefined,
+              messages: options.messages,
+              model: {},
+              stepNumber: 0,
+              steps: [],
+            });
+          }
+
+          return {
+            fullStream: (async function* () {
+              abortController.abort(abortReason);
+              yield { reason: abortReason.message, type: "abort" };
+            })(),
+            // The SDK never resolves step results for an aborted step;
+            // the harness must settle without awaiting them.
+            steps: new Promise<never>(() => {}),
+          };
+        });
+      return this;
+    } as MockAgentConstructor);
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, { abortSignal: abortController.signal }),
+    );
+
+    await expect(runStep(createTestSession(), { message: "Hi" })).rejects.toBe(abortReason);
+
+    const eventTypes = events.map((event) => event.type);
+    expect(eventTypes).not.toContain("step.failed");
+    expect(eventTypes).not.toContain("turn.failed");
+    expect(eventTypes).not.toContain("session.failed");
+  });
+
+  it("does not retry or recover a model call once the turn signal has aborted", async () => {
+    const abortController = new AbortController();
+    const cancellation = new TurnCancelledError();
+    // Retryable transport error: without the abort check this rejection
+    // would re-enter the retry loop and back off.
+    const streamMock = vi.fn().mockImplementation(async () => {
+      abortController.abort(cancellation);
+      throw Object.assign(new Error("socket hang up"), { isRetryable: true });
+    });
+    vi.mocked(ToolLoopAgent).mockImplementation(function (this: ToolLoopAgent) {
+      this.stream = streamMock;
+      this.generate = streamMock;
+      return this;
+    } as MockAgentConstructor);
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, { abortSignal: abortController.signal }),
+    );
+
+    await expect(runStep(createTestSession(), { message: "Hi" })).rejects.toBe(cancellation);
+    expect(streamMock).toHaveBeenCalledTimes(1);
+
+    const eventTypes = events.map((event) => event.type);
+    expect(eventTypes).not.toContain("step.failed");
+    expect(eventTypes).not.toContain("turn.failed");
+    expect(eventTypes).not.toContain("session.failed");
+  });
+
+  it("does not start a model call when the turn signal is already aborted", async () => {
+    const abortController = new AbortController();
+    const cancellation = new TurnCancelledError();
+    abortController.abort(cancellation);
+
+    const streamMock = vi.fn();
+    vi.mocked(ToolLoopAgent).mockImplementation(function (this: ToolLoopAgent) {
+      this.stream = streamMock;
+      this.generate = streamMock;
+      return this;
+    } as MockAgentConstructor);
+
+    const { emit } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, { abortSignal: abortController.signal }),
+    );
+
+    await expect(runStep(createTestSession(), { message: "Hi" })).rejects.toBe(cancellation);
+    expect(streamMock).not.toHaveBeenCalled();
   });
 
   it("emits a recoverable failure cascade and parks the session on a non-terminal model-call error", async () => {

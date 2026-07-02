@@ -284,6 +284,41 @@ describe("compactMessages", () => {
     );
   });
 
+  it("forwards the turn abort signal to the compaction model call", async () => {
+    const { generateText } = await import("ai");
+
+    vi.mocked(generateText).mockResolvedValue({
+      text: "Summary of prior context",
+    } as Awaited<ReturnType<typeof generateText>>);
+
+    const messages: ModelMessage[] = [
+      { content: "old message 1", role: "user" },
+      { content: "old message 2", role: "assistant" },
+      { content: "recent 1", role: "user" },
+      { content: "recent 2", role: "assistant" },
+    ];
+
+    const model = {} as Parameters<typeof compactMessages>[1];
+    const abortController = new AbortController();
+
+    await compactMessages(
+      messages,
+      model,
+      config,
+      undefined,
+      undefined,
+      undefined,
+      abortController.signal,
+    );
+
+    expect(generateText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        abortSignal: abortController.signal,
+        model,
+      }),
+    );
+  });
+
   it("folds oversized recent tool results into the summary when the raw tail does not fit", async () => {
     const { generateText } = await import("ai");
 

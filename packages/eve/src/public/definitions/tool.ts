@@ -73,6 +73,14 @@ export interface ToolAuthOptions {
  */
 export type ToolContext = SessionContext & {
   /**
+   * Aborts when the active turn is cancelled. Pass it to
+   * cancellation-aware work the tool starts (fetches, sandbox commands,
+   * SDK calls) so cancelling the turn stops that work too. Cancellation
+   * is best effort: tools that ignore the signal run to completion, but
+   * their result is discarded.
+   */
+  readonly abortSignal: AbortSignal;
+  /**
    * Resolves the bearer token for an inline provider. This accepts the same
    * auth shapes as a connection's `auth` field, including `connect("...")`
    * from `@vercel/connect/eve`.

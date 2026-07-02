@@ -431,11 +431,24 @@ export interface ConnectionToolMetadata {
   readonly outputSchema?: Record<string, unknown>;
 }
 
+/** Per-call options for {@link ConnectionClient.executeTool}. */
+export interface ConnectionToolExecuteOptions {
+  /**
+   * Turn cancellation signal forwarded into the underlying transport
+   * (MCP request, OpenAPI fetch) so an aborted turn stops the call.
+   */
+  readonly abortSignal?: AbortSignal;
+}
+
 /** A live client for a single connection. */
 export interface ConnectionClient {
   close(): Promise<void>;
   connect(): Promise<unknown>;
-  executeTool(toolName: string, args: unknown): Promise<unknown>;
+  executeTool(
+    toolName: string,
+    args: unknown,
+    options?: ConnectionToolExecuteOptions,
+  ): Promise<unknown>;
   getToolMetadata(): Promise<readonly ConnectionToolMetadata[]>;
   getTools(): Promise<ToolSet>;
 }

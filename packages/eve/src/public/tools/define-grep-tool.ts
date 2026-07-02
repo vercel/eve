@@ -29,7 +29,9 @@ export function defineGrepTool(input: DefineGrepToolInput = {}): ToolDefinition 
   return {
     description: input.description ?? "Search file contents by pattern in the workspace sandbox.",
     async execute(args, ctx) {
-      return executeGrepOnSandbox(await ctx.getSandbox(), args as GrepInput);
+      return executeGrepOnSandbox(await ctx.getSandbox(), args as GrepInput, {
+        abortSignal: ctx.abortSignal,
+      });
     },
     inputSchema: GREP_INPUT_SCHEMA as unknown as StandardJSONSchemaV1<unknown>,
     outputSchema: GREP_OUTPUT_SCHEMA,

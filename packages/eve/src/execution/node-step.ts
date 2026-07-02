@@ -47,6 +47,11 @@ export type CreateRuntime = (config: {
  */
 export interface CreateExecutionNodeStepInput {
   /**
+   * Cooperative cancellation signal for the active turn, forwarded to
+   * the tool-loop harness. See `ToolLoopHarnessConfig.abortSignal`.
+   */
+  readonly abortSignal?: AbortSignal;
+  /**
    * Session-level capabilities propagated from the runtime. The
    * harness passes this through to `buildToolSet` so `ask_question`
    * registration and any other capability-gated behavior tracks the
@@ -72,6 +77,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
   const resolveModel = createRuntimeModelResolver(input.modelResolutionScope);
   const tools = createNodeHarnessTools({ node: input.node });
   return createToolLoopHarness({
+    abortSignal: input.abortSignal,
     capabilities: input.capabilities,
     workflow: input.node.agent.workflowEnabled === true,
     handleEvent: input.handleEvent,

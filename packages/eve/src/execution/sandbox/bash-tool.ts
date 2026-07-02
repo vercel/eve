@@ -1,4 +1,5 @@
 import type { SandboxSession } from "#shared/sandbox-session.js";
+import type { SandboxToolExecuteOptions } from "#execution/sandbox/tool-execute-options.js";
 import { truncateTail } from "#execution/sandbox/truncate-output.js";
 import { isEveDevEnvironment } from "#internal/application/optional-package-install.js";
 
@@ -49,8 +50,9 @@ export interface BashResult {
 export async function executeBashOnSandbox(
   sandbox: SandboxSession,
   args: BashInput,
+  options?: SandboxToolExecuteOptions,
 ): Promise<BashResult> {
-  const raw = await runWithDevelopmentSandboxProgress(sandbox, args.command);
+  const raw = await runWithDevelopmentSandboxProgress(sandbox, args.command, options?.abortSignal);
 
   const stdoutResult = truncateTail(raw.stdout);
   const stderrResult = truncateTail(raw.stderr);
@@ -81,10 +83,11 @@ export async function executeBashOnSandbox(
 async function runWithDevelopmentSandboxProgress(
   sandbox: SandboxSession,
   command: string,
+  abortSignal?: AbortSignal,
 ): Promise<Awaited<ReturnType<SandboxSession["run"]>>> {
   logDevelopmentSandboxCommand(`eve: starting sandbox command: ${formatCommand(command)}`);
   if (!isEveDevEnvironment()) {
-    return await sandbox.run({ command });
+    return await sandbox.run({ abortSignal, command });
   }
 
   const startedAt = Date.now();
@@ -97,7 +100,7 @@ async function runWithDevelopmentSandboxProgress(
   timer.unref?.();
 
   try {
-    const result = await sandbox.run({ command });
+    const result = await sandbox.run({ abortSignal, command });
     logDevelopmentSandboxCommand(
       `eve: sandbox command finished (exit ${result.exitCode}): ${formatCommand(command)}`,
     );

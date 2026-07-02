@@ -1,6 +1,7 @@
 import { normalizeModelPath } from "#runtime/framework-tools/file-state.js";
 import { validateAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
+import type { SandboxToolExecuteOptions } from "#execution/sandbox/tool-execute-options.js";
 import { ripgrepIsAvailable } from "#execution/sandbox/ripgrep-probe.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import { capLineLength, MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-output.js";
@@ -50,6 +51,7 @@ export interface GrepResult {
 export async function executeGrepOnSandbox(
   sandbox: SandboxSession,
   args: GrepInput,
+  options?: SandboxToolExecuteOptions,
 ): Promise<GrepResult> {
   const effectivePath = args.path ?? DEFAULT_PATH;
 
@@ -79,7 +81,7 @@ export async function executeGrepOnSandbox(
         pattern: args.pattern,
       });
 
-  const result = await sandbox.run({ command });
+  const result = await sandbox.run({ abortSignal: options?.abortSignal, command });
 
   // Both ripgrep and POSIX grep use the same conventional exit codes:
   //   0 — one or more matches were found

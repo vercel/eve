@@ -7,6 +7,7 @@ import {
 } from "#runtime/framework-tools/file-state.js";
 import { validateAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
+import type { SandboxToolExecuteOptions } from "#execution/sandbox/tool-execute-options.js";
 import { capLineLength, MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-output.js";
 
 // ---------------------------------------------------------------------------
@@ -55,6 +56,7 @@ export interface ReadFileResult {
 export async function executeReadFileOnSandbox(
   sandbox: SandboxSession,
   args: ReadFileInput,
+  options?: SandboxToolExecuteOptions,
 ): Promise<ReadFileResult> {
   const { filePath, offset, limit } = args;
 
@@ -70,7 +72,10 @@ export async function executeReadFileOnSandbox(
   }
 
   // ── Read full file for fingerprinting ───────────────────────────────
-  const rawContent = await sandbox.readTextFile({ path: filePath });
+  const rawContent = await sandbox.readTextFile({
+    abortSignal: options?.abortSignal,
+    path: filePath,
+  });
 
   if (rawContent === null) {
     throw new Error(

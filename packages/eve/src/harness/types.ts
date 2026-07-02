@@ -212,6 +212,14 @@ export type HandleEventFn = (
  */
 export interface ToolLoopHarnessConfig {
   /**
+   * Cooperative cancellation signal for the active turn. When it aborts,
+   * the harness aborts in-flight model calls, stops retries and recovery,
+   * forwards the signal to executing tools, and rethrows the canonical
+   * `TurnCancelledError` (see `harness/turn-cancellation.ts`). Behavior is
+   * unchanged when absent or never aborted.
+   */
+  readonly abortSignal?: AbortSignal;
+  /**
    * Session-level capabilities. The harness reads
    * {@link SessionCapabilities.requestInput} when assembling the
    * per-step toolset to decide whether `ask_question` is available.

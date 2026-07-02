@@ -623,6 +623,12 @@ export async function emitStreamContent(
         // `cause` instead of degrading to `new Error("[object Object]")`.
         streamError = toError(part.error);
         break;
+      case "abort":
+        // The AI SDK never calls onStepFinish for an aborted in-flight
+        // step. Throw here so callers never await the unresolved step
+        // result; the tool loop maps this onto the canonical
+        // cancellation via its signal check.
+        throw new DOMException(part.reason ?? "The model stream was aborted.", "AbortError");
       default:
         break;
     }

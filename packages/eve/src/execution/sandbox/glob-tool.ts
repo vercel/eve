@@ -1,6 +1,7 @@
 import { normalizeModelPath } from "#runtime/framework-tools/file-state.js";
 import { validateAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
+import type { SandboxToolExecuteOptions } from "#execution/sandbox/tool-execute-options.js";
 import { ripgrepIsAvailable } from "#execution/sandbox/ripgrep-probe.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import { MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-output.js";
@@ -46,6 +47,7 @@ export interface GlobResult {
 export async function executeGlobOnSandbox(
   sandbox: SandboxSession,
   args: GlobInput,
+  options?: SandboxToolExecuteOptions,
 ): Promise<GlobResult> {
   const effectivePath = args.path ?? DEFAULT_PATH;
 
@@ -58,7 +60,7 @@ export async function executeGlobOnSandbox(
     ? buildRipgrepCommand({ normalizedPath, pattern: args.pattern })
     : buildPosixFindCommand({ normalizedPath, pattern: args.pattern });
 
-  const result = await sandbox.run({ command });
+  const result = await sandbox.run({ abortSignal: options?.abortSignal, command });
 
   // Both ripgrep and POSIX find use conventional exit code semantics:
   //   0 — operation succeeded (results may be empty for find)

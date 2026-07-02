@@ -9,6 +9,7 @@ import {
 } from "#runtime/framework-tools/file-state.js";
 import { validateAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
+import type { SandboxToolExecuteOptions } from "#execution/sandbox/tool-execute-options.js";
 
 // ---------------------------------------------------------------------------
 // Input / result shapes
@@ -44,6 +45,7 @@ export interface WriteFileResult {
 export async function executeWriteFileOnSandbox(
   sandbox: SandboxSession,
   args: WriteFileInput,
+  options?: SandboxToolExecuteOptions,
 ): Promise<WriteFileResult> {
   const { filePath, content } = args;
 
@@ -58,11 +60,14 @@ export async function executeWriteFileOnSandbox(
   // cost: the entire file is read and hashed before every write. A
   // separate `exists()` primitive would avoid this for new files but
   // would require a sandbox session API change.
-  const currentContent = await sandbox.readTextFile({ path: filePath });
+  const currentContent = await sandbox.readTextFile({
+    abortSignal: options?.abortSignal,
+    path: filePath,
+  });
 
   if (currentContent === null) {
     // ── File does not exist — write immediately, no prior read needed ──
-    await sandbox.writeTextFile({ content, path: filePath });
+    await sandbox.writeTextFile({ abortSignal: options?.abortSignal, content, path: filePath });
 
     const freshStamp = createReadFileStamp({
       content,
@@ -101,7 +106,7 @@ export async function executeWriteFileOnSandbox(
   }
 
   // ── Write and refresh stamp ─────────────────────────────────────────
-  await sandbox.writeTextFile({ content, path: filePath });
+  await sandbox.writeTextFile({ abortSignal: options?.abortSignal, content, path: filePath });
 
   const freshStamp = createReadFileStamp({
     content,
