@@ -21,12 +21,7 @@ import { z } from "#compiled/zod/index.js";
  *   gateway API key nor an OIDC token. This is the "no provider connected" state
  *   that gates the "provider required" setup prompt.
  */
-export type ModelEndpointStatus =
-  | { kind: "codex"; connected: true; credential: "api-key" | "chatgpt" }
-  | { kind: "codex"; connected: false; reason: "missing" | "invalid" | "refresh-token-missing" }
-  | { kind: "external"; provider: string }
-  | { kind: "gateway"; connected: true; credential: "api-key" | "oidc" }
-  | { kind: "gateway"; connected: false };
+export type ModelEndpointStatus = z.infer<typeof modelEndpointStatusSchema>;
 
 // Strip-mode on purpose: this schema is parsed by clients (`eve/client`, the
 // dev TUI) against servers that may be newer and carry fields this build does
@@ -49,4 +44,4 @@ export const modelEndpointStatusSchema = z.union([
     credential: z.enum(["api-key", "oidc"]),
   }),
   z.object({ kind: z.literal("gateway"), connected: z.literal(false) }),
-]) satisfies z.ZodType<ModelEndpointStatus>;
+]);
