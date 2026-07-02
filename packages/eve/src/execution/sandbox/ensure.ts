@@ -11,6 +11,7 @@ import {
   getRuntimeCompiledArtifactsSandboxAppRoot,
   type RuntimeCompiledArtifactsSource,
 } from "#runtime/compiled-artifacts-source.js";
+import { trackActiveSandboxHandle } from "#execution/sandbox/active-handles.js";
 import { waitForDevelopmentSandboxPrewarm } from "#execution/sandbox/development-prewarm.js";
 import { markDevelopmentSandboxBackendInitialized } from "#execution/sandbox/development-run.js";
 import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
@@ -128,6 +129,11 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
         }),
     );
     markDevelopmentSandboxBackendInitialized(backend.name);
+    trackActiveSandboxHandle({
+      backendName: backend.name,
+      handle,
+      sessionKey: keys.sessionKey,
+    });
 
     if (!initialized) {
       await runOnSession(async () => {
@@ -160,12 +166,6 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
         initialized,
         session: persistedSession,
       };
-    },
-    async dispose() {
-      if (handlePromise !== undefined) {
-        const handle = await handlePromise;
-        await handle?.dispose();
-      }
     },
     async get(): Promise<SandboxSession | null> {
       const handle = await getHandle();

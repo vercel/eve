@@ -206,7 +206,9 @@ export function createJustBashHandle(
         sessionKey: sandbox.sessionKey,
       };
     },
-    async dispose() {
+    // The interpreter lives in this process, so stopping it is all the
+    // shutdown a just-bash sandbox needs.
+    async shutdown() {
       await sandbox.dispose();
     },
   };

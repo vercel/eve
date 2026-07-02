@@ -36,7 +36,21 @@ import type {
   SandboxRemovePathOptions,
   SandboxSpawnOptions,
 } from "#shared/sandbox-session.js";
+import {
+  isMicrosandboxNotFoundError,
+  isMicrosandboxSnapshotSourceRunningError,
+  isMicrosandboxStillRunningError,
+  removeSnapshotIfExists,
+  snapshotExists,
+} from "#execution/sandbox/bindings/microsandbox-provider-state.js";
 import type { Sandbox as MicrosandboxSandbox } from "microsandbox";
+
+export {
+  isMicrosandboxNotFoundError,
+  removeSnapshotIfExists,
+  sandboxExists,
+  snapshotExists,
+} from "#execution/sandbox/bindings/microsandbox-provider-state.js";
 
 export type MicrosandboxModule = typeof import("microsandbox");
 
@@ -125,6 +139,16 @@ export class MicrosandboxVm {
 
   async detach(): Promise<void> {
     await this.#sandbox.detach().catch(() => {});
+  }
+
+  /**
+   * Stops the VM and releases the SDK client for server shutdown. The
+   * stopped sandbox persists on disk, so a later `connect` restarts it
+   * (dev) or restores from the last captured snapshot (production).
+   */
+  async shutdown(): Promise<void> {
+    await this.#sandbox.stop().catch(() => {});
+    await this.detach();
   }
 
   async readFileBytes(path: string): Promise<Buffer | null> {
@@ -532,46 +556,6 @@ export async function stopAndSnapshotMicrosandboxSandbox(
   }
 }
 
-export async function snapshotExists(
-  module: MicrosandboxModule,
-  snapshotName: string,
-): Promise<boolean> {
-  try {
-    await module.Snapshot.get(snapshotName);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export async function sandboxExists(
-  module: MicrosandboxModule,
-  sandboxName: string,
-): Promise<boolean> {
-  try {
-    await module.Sandbox.get(sandboxName);
-    return true;
-  } catch (error) {
-    if (isMicrosandboxNotFoundError(error)) {
-      return false;
-    }
-    throw error;
-  }
-}
-
-export async function removeSnapshotIfExists(
-  module: MicrosandboxModule,
-  snapshotName: string,
-): Promise<void> {
-  try {
-    await module.Snapshot.remove(snapshotName, { force: true });
-  } catch (error) {
-    if (!isMicrosandboxNotFoundError(error)) {
-      throw error;
-    }
-  }
-}
-
 export function createProviderName(prefix: string, key: string, extra = ""): string {
   const hash = createStableHash(`${key}:${extra}`).slice(0, 32);
   return `${prefix}-${hash}`;
@@ -660,27 +644,6 @@ async function removeSandboxIfExists(
       throw error;
     }
   }
-}
-
-export function isMicrosandboxNotFoundError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-  return /not found|not exist|no such/i.test(error.message);
-}
-
-function isMicrosandboxStillRunningError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-  return /still running/i.test(error.message);
-}
-
-function isMicrosandboxSnapshotSourceRunningError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-  return /snapshot source sandbox .*not stopped|SnapshotSandboxRunning/i.test(error.message);
 }
 
 function resolveMicrosandboxLabels(tags: SandboxBackendTags | undefined): Record<string, string> {

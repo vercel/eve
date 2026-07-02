@@ -578,6 +578,29 @@ describe("createApplicationNitro", () => {
     );
   });
 
+  it("includes the sandbox shutdown plugin only for production builds", async () => {
+    const productionNitroStub = createNitroStub();
+    const devNitroStub = createNitroStub();
+    createNitroMock.mockResolvedValueOnce(productionNitroStub.nitro);
+    createNitroMock.mockResolvedValueOnce(devNitroStub.nitro);
+
+    const { createApplicationNitro } =
+      await import("#internal/nitro/host/create-application-nitro.js");
+
+    await createApplicationNitro(createPreparedHost(), false);
+    await createApplicationNitro(createPreparedHost(), true);
+
+    const productionPlugins = createNitroMock.mock.calls[0]?.[0].plugins as string[];
+    const devPlugins = createNitroMock.mock.calls[1]?.[0].plugins as string[];
+
+    expect(productionPlugins).toEqual(
+      expect.arrayContaining([expect.stringContaining("sandbox-shutdown-plugin.ts")]),
+    );
+    expect(devPlugins).not.toEqual(
+      expect.arrayContaining([expect.stringContaining("sandbox-shutdown-plugin.ts")]),
+    );
+  });
+
   it("deduplicates defaults when the app also lists them", async () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);

@@ -16,7 +16,6 @@ function createFakeAccess(files: Record<string, string>): SandboxAccess {
     async captureState() {
       return { initialized: false, session: null };
     },
-    async dispose() {},
 
     async get() {
       return {
@@ -109,7 +108,6 @@ describe("defineWriteFileTool", () => {
       async captureState() {
         return { initialized: false, session: null };
       },
-      async dispose() {},
 
       async get() {
         return null;

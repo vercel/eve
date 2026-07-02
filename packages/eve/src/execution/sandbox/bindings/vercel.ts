@@ -460,8 +460,24 @@ function createHandle(
         sessionKey,
       };
     },
-    async dispose() {},
+    // Session sandboxes are persistent, so the SDK resumes a stopped
+    // sandbox on the next command after reattach.
+    async shutdown() {
+      await stopVercelSandbox(sandbox);
+    },
   };
+}
+
+async function stopVercelSandbox(sandbox: VercelSandbox): Promise<void> {
+  if (sandbox.status !== "running" && sandbox.status !== "pending") {
+    return;
+  }
+  try {
+    await sandbox.stop();
+  } catch {
+    // Best-effort: an unreachable or already-stopped sandbox must not
+    // block server shutdown; the provider-side timeout is the backstop.
+  }
 }
 
 function createVercelNetworkPolicySetter(

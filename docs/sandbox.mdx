@@ -157,7 +157,7 @@ export default defineSandbox({
 
 `justbash()` needs no daemon or VM, but commands run in a simulated bash with a virtual filesystem under `.eve/sandbox-cache/`, with no real binaries (`git`, `node`, package managers) and no network isolation. The `just-bash` package is an optional peer dependency, so `eve dev` installs it into your application automatically when missing (disable with `autoInstall: false`); production processes fail with an actionable install error instead.
 
-You can also write your own backend. A `SandboxBackend` is an adapter object with a `name`, a `create`, and an optional `prewarm`. It can point at your own container runner, VM pool, internal sandbox service, or another isolation layer, as long as it returns the `SandboxSession` operations eve needs. See the `SandboxBackend*` types on `eve/sandbox`.
+You can also write your own backend. A `SandboxBackend` is an adapter object with a `name`, a `create`, and an optional `prewarm`. It can point at your own container runner, VM pool, internal sandbox service, or another isolation layer, as long as it returns the `SandboxSession` operations eve needs. Handles returned by `create` implement `shutdown()`, which stops the underlying compute at server shutdown. See the `SandboxBackend*` types on `eve/sandbox`.
 
 ## Lifecycle
 
@@ -184,6 +184,8 @@ export default defineSandbox({
 ```
 
 Sessions are persistent, and how the underlying runtime idles out depends on the backend. On the Vercel backend, the VM times out after a period of inactivity (default 30 minutes); eve preserves the filesystem and resumes the sandbox on the next message as if nothing happened, even days later. The Docker backend keeps a long-lived container per durable session and persists `/workspace` across turns without that timeout, and the just-bash backend stores its virtual filesystem under `.eve/sandbox-cache/`. In every case, `/workspace` survives between turns for the same session.
+
+When the eve server stops, no sandbox compute outlives it. `eve dev` stops the sandboxes it started when the dev server closes, and a self-hosted production server stops every open sandbox on shutdown (`SIGTERM`/`SIGINT`). Session state persists across the stop — the next server start reattaches each durable session from its stopped container, VM, or snapshot. Custom `SandboxBackend` adapters participate through the handle's `shutdown()` method: stop the underlying compute, keeping the session reattachable from persisted state where the backend supports it.
 
 ## Network policy
 
