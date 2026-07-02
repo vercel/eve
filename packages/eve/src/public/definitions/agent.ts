@@ -6,6 +6,7 @@ export type {
   AgentReasoningDefinition,
   AgentBuildDefinition,
   AgentExperimentalDefinition,
+  AgentLimitsDefinition,
   AgentWorkflowDefinition,
   AgentWorkflowWorldDefinition,
   PublicAgentModelDefinition as AgentModelDefinition,

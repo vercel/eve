@@ -16,6 +16,7 @@ allowBuilds:
   simple-git-hooks: true
   unrs-resolver: true
   vue-demi: false
+  webgpu: true
 
 catalog:
   "@ai-sdk/anthropic": "^4.0.0"
@@ -29,7 +30,7 @@ catalog:
   "@types/react": "19.2.15"
   "@types/react-dom": "19.2.3"
   "@vercel/connect": "0.2.2"
-  "@vercel/sandbox": "2.2.1"
+  "@vercel/sandbox": "2.3.0"
   ai: "^7.0.0"
   next: "16.2.6"
   picocolors: "1.1.1"
@@ -49,6 +50,7 @@ minimumReleaseAgeExclude:
   - "@turbo/*"
   - "@workflow/*"
   - "@vercel/*"
+  - "@vgpu/*"
   - ai
   - crossws
   - experimental-ai-sdk-code-mode

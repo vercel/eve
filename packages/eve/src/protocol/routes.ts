@@ -11,10 +11,8 @@ export const EVE_HEALTH_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/health`;
 
 /**
  * Stable framework-owned route exposing the JSON inspection payload for
- * the current agent. Nitro registers this route with the application
- * surface, and the handler uses the same default auth chain as the eve
- * channel: local development accepts loopback requests, while deployed
- * Vercel targets require OIDC.
+ * the current agent. The eve channel registers and authenticates this route
+ * with the same `auth` input as its session routes.
  */
 export const EVE_INFO_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/info`;
 

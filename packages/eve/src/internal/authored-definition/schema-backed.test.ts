@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "#compiled/zod/index.js";
 
-import {
-  defineTool,
-  defineDynamic,
-  disableTool,
-  ExperimentalWorkflow,
-} from "#public/definitions/tool.js";
+import { defineTool, defineDynamic, disableTool } from "#public/definitions/tool.js";
 import { once } from "#public/tools/approval/approval-helpers.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
 
@@ -40,8 +35,11 @@ describe("normalizeToolDefinition", () => {
     expect(entry).toEqual({ kind: "disabled" });
   });
 
-  it("returns an enable-workflow entry for the ExperimentalWorkflow marker", () => {
-    const entry = normalizeToolDefinition(ExperimentalWorkflow, FAILURE_MESSAGE);
+  it("returns an enable-workflow entry for the internal workflow marker shape", () => {
+    const entry = normalizeToolDefinition(
+      Object.freeze({ kind: "eve:enable-workflow-tool" }),
+      FAILURE_MESSAGE,
+    );
 
     expect(entry).toEqual({ kind: "enable-workflow" });
   });

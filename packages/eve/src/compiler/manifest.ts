@@ -40,7 +40,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 31;
+export const COMPILED_AGENT_MANIFEST_VERSION = 32;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -357,6 +357,14 @@ const compiledAgentCompactionDefinitionSchema: z.ZodType<CompiledAgentCompaction
   })
   .strict();
 
+const compiledAgentLimitsDefinitionSchema = z
+  .object({
+    maxSubagentDepth: z.number().int().positive().optional(),
+    maxInputTokensPerSession: z.number().int().positive().optional(),
+    maxOutputTokensPerSession: z.number().int().positive().optional(),
+  })
+  .strict();
+
 const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
   .object({
     build: compiledAgentBuildDefinitionSchema.optional(),
@@ -375,6 +383,7 @@ const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
       .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
       .optional(),
     source: moduleSourceRefSchema.optional(),
+    limits: compiledAgentLimitsDefinitionSchema.optional(),
   })
   .strict();
 
@@ -717,6 +726,14 @@ export function createCompiledAgentNodeManifest(input: {
       name: input.config.name,
       outputSchema: input.config.outputSchema,
       reasoning: input.config.reasoning,
+      limits:
+        input.config.limits === undefined
+          ? undefined
+          : {
+              maxInputTokensPerSession: input.config.limits.maxInputTokensPerSession,
+              maxOutputTokensPerSession: input.config.limits.maxOutputTokensPerSession,
+              maxSubagentDepth: input.config.limits.maxSubagentDepth,
+            },
       source:
         input.config.source === undefined
           ? undefined

@@ -6,7 +6,6 @@ import {
   EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN,
   EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH,
   EVE_HEALTH_ROUTE_PATH,
-  EVE_INFO_ROUTE_PATH,
 } from "#protocol/routes.js";
 import {
   normalizeEsmImportSpecifier,
@@ -339,20 +338,6 @@ export async function configureNitroRoutes(
         route: EVE_HEALTH_ROUTE_PATH,
       });
     }
-
-    // The agent info endpoint needs `appRoot` baked at build time (used by
-    // the disk-source fallback in dev) and runs request-time auth, so it
-    // stays a virtual handler.
-    addFrameworkVirtualHandler(nitro, {
-      args: JSON.stringify({
-        ...artifactsConfig,
-        mode: nitro.options.dev ? "development" : "production",
-      }),
-      handlerExport: "handleAgentInfoRequest",
-      method: "GET",
-      modulePath: resolvePackageSourceFilePath("src/internal/nitro/routes/info.ts"),
-      route: EVE_INFO_ROUTE_PATH,
-    });
 
     // Per-channel mounting: one virtual Nitro handler per (method, urlPath) in
     // the merged channel set. Each handler bakes in its route key and artifacts

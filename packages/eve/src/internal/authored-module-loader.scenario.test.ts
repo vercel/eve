@@ -700,7 +700,7 @@ describe("loadAuthoredModuleNamespace", () => {
       files: {
         "agent/agent.ts": [
           "export default {",
-          '  model: "anthropic/claude-sonnet-4.6",',
+          '  model: "anthropic/claude-sonnet-5",',
           '  build: { externalDependencies: ["external-only"] },',
           "};",
           "",
@@ -794,7 +794,7 @@ describe("loadAuthoredModuleNamespace", () => {
       files: {
         "agent/agent.ts": [
           "export default {",
-          '  model: "anthropic/claude-sonnet-4.6",',
+          '  model: "anthropic/claude-sonnet-5",',
           '  build: { externalDependencies: ["external-only"] },',
           "};",
           "",
@@ -802,7 +802,7 @@ describe("loadAuthoredModuleNamespace", () => {
         "agent/subagents/signal-gatherer/agent.ts": [
           "export default {",
           '  description: "Gather abuse signals.",',
-          '  model: "anthropic/claude-sonnet-4.6",',
+          '  model: "anthropic/claude-sonnet-5",',
           "};",
           "",
         ].join("\n"),

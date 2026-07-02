@@ -299,21 +299,29 @@ describe("configureNitroRoutes", () => {
     });
 
     expect(devNitro.options.handlers).toContainEqual({
-      handler: `#eve-route${EVE_INFO_ROUTE_PATH}`,
+      handler: `#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`,
       method: "GET",
       route: EVE_INFO_ROUTE_PATH,
     });
     expect(prodNitro.options.handlers).toContainEqual({
-      handler: `#eve-route${EVE_INFO_ROUTE_PATH}`,
+      handler: `#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`,
       method: "GET",
       route: EVE_INFO_ROUTE_PATH,
     });
-    expect(devNitro.options.virtual[`#eve-route${EVE_INFO_ROUTE_PATH}`]).toContain(
-      '"mode":"development"',
-    );
-    expect(prodNitro.options.virtual[`#eve-route${EVE_INFO_ROUTE_PATH}`]).toContain(
-      '"mode":"production"',
-    );
+    expect(
+      devNitro.options.virtual[`#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`],
+    ).toContain('"dev":true');
+    expect(
+      prodNitro.options.virtual[`#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`],
+    ).toContain('"dev":false');
+    expect(
+      devNitro.options.virtual[`#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`],
+    ).toContain("dispatchChannelRequest");
+    expect(
+      prodNitro.options.virtual[`#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`],
+    ).toContain("dispatchChannelRequest");
+    expect(devNitro.options.virtual[`#eve-route${EVE_INFO_ROUTE_PATH}`]).toBeUndefined();
+    expect(prodNitro.options.virtual[`#eve-route${EVE_INFO_ROUTE_PATH}`]).toBeUndefined();
   });
 
   it("does not register direct workflow queue handlers for Vercel production builds", async () => {

@@ -1,19 +1,18 @@
 import { createPromptCommandOutput, whimsyFor } from "#setup/cli/index.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
 import { captureVercel, runVercel, type VercelCaptureFailure } from "#setup/primitives/index.js";
-import { hasVercelHostFramework } from "#setup/scaffold/index.js";
 import pc from "picocolors";
 import { z } from "zod";
 
 import {
   assertNoLegacyProjectLinkDirectory,
+  readProjectLink,
   type ProjectResolution,
 } from "./project-resolution.js";
 import type { Prompter } from "./prompter.js";
 import type { ResolvedVercelProjectSpec, VercelProjectIdentity } from "./state.js";
 import { withSpinner } from "./with-spinner.js";
 import {
-  isConflictApiFailure,
   isForbiddenApiFailure,
   isNotFoundApiFailure,
   normalizeVercelApiResult,
@@ -29,13 +28,16 @@ import {
   type VercelProjectOperationOptions,
   VERCEL_PROJECT_REQUEST_TIMEOUT_MS,
 } from "./vercel-project-api.js";
+import {
+  ensureCreatedProjectFramework,
+  type CreatedProjectFrameworkOptions,
+} from "./vercel-project-framework.js";
 
 const VercelProjectReferenceSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
 });
 
-const EVE_FRAMEWORK_PRESET = "eve";
 export interface PickProjectOptions extends VercelProjectOperationOptions {
   /** Whether an empty project list may fall back to entering a name to create. */
   allowCreateWhenEmpty?: boolean;
@@ -45,6 +47,8 @@ export interface PickTeamOptions extends VercelProjectOperationOptions {
   /** Builds the team selector heading from the current team's display name. */
   selectMessage?: (currentTeam: string) => string;
 }
+
+export interface LinkProjectOperationOptions extends CreatedProjectFrameworkOptions {}
 
 export function unresolvedProject(): ProjectResolution {
   return { kind: "unresolved" };
@@ -89,49 +93,6 @@ export async function resolveProjectByNameOrId(
   if (isForbiddenApiFailure(result.failure)) requireVercelTeamAccess(result.failure);
   throw new Error(
     `Could not resolve project "${projectNameOrId}" in ${team}. ${result.failure.message}`,
-  );
-}
-
-async function createProject(
-  projectRoot: string,
-  team: string,
-  projectName: string,
-  onOutput: ReturnType<typeof createPromptCommandOutput>,
-  options: VercelProjectOperationOptions,
-): Promise<VercelProjectIdentity> {
-  const createProjectArgs = [
-    "api",
-    "/v10/projects",
-    "--scope",
-    team,
-    "--method",
-    "POST",
-    "--raw-field",
-    `name=${projectName}`,
-  ];
-  // Host framework integrations (Next.js, Nuxt, SvelteKit) own the top-level
-  // Vercel build. Leaving the preset unset lets Vercel detect that framework
-  // while vercel.json/build-output config owns the internal Eve service.
-  if (!(await hasVercelHostFramework(projectRoot))) {
-    createProjectArgs.push("--raw-field", `framework=${EVE_FRAMEWORK_PRESET}`);
-  }
-  createProjectArgs.push("--raw");
-  const result = normalizeVercelApiResult(
-    await captureVercel(createProjectArgs, {
-      cwd: projectRoot,
-      onOutput,
-      signal: options.signal,
-    }),
-  );
-  if (result.ok) {
-    return parseProjectReference(result.stdout, `created project ${projectName}`);
-  }
-  if (isConflictApiFailure(result.failure)) {
-    throw new Error(projectNameCollisionMessage(projectName, team));
-  }
-  if (isForbiddenApiFailure(result.failure)) requireVercelTeamAccess(result.failure);
-  throw new Error(
-    `Could not create Vercel project "${projectName}" in ${team}. ${result.failure.message}`,
   );
 }
 
@@ -581,31 +542,49 @@ export async function pickNewProjectName(
 /**
  * Ensures the concrete project exists (creating it for a `new` plan) and links
  * this directory to it. Acts on a fully-resolved spec — never prompts for a
- * team or project. Returns the linked project, or undefined if `vercel link`
- * did not complete.
+ * team or project. A newly created project keeps a detected host framework
+ * when the matching eve integration import is present; otherwise missing,
+ * unsupported, or rejected framework detections are switched back to eve.
+ * Returns the linked project, or undefined if `vercel link` did not complete.
  */
 export async function linkProject(
   prompter: Prompter,
   projectRoot: string,
   spec: ResolvedVercelProjectSpec,
   onOutput: ReturnType<typeof createPromptCommandOutput>,
-  options: VercelProjectOperationOptions = {},
+  options: LinkProjectOperationOptions = {},
 ): Promise<VercelProjectIdentity | undefined> {
   await assertNoLegacyProjectLinkDirectory(projectRoot);
   const scope = ["--scope", spec.team];
-  let project: VercelProjectIdentity;
   if (spec.kind === "new") {
-    project = await withSpinner(
+    const linked = await withSpinner(
       prompter,
       `Creating Vercel project "${spec.project}" in ${spec.team}...`,
       async () => {
         await assertNewProjectNameAvailable(projectRoot, spec.team, spec.project, options);
-        return createProject(projectRoot, spec.team, spec.project, onOutput, options);
+        return runVercel(["link", "--project", spec.project, ...scope, "--yes"], {
+          cwd: projectRoot,
+          onOutput,
+          nonInteractive: true,
+          signal: options.signal,
+        });
       },
     );
-  } else {
-    project = spec.project;
+    if (!linked) return undefined;
+    const link = await readProjectLink(projectRoot);
+    if (link === undefined) return undefined;
+    await ensureCreatedProjectFramework(
+      prompter,
+      projectRoot,
+      spec.team,
+      link.projectId,
+      onOutput,
+      options,
+    );
+    return { projectId: link.projectId, projectName: link.projectName ?? spec.project };
   }
+
+  const project = spec.project;
   const linked = await withSpinner(
     prompter,
     `Linking this directory to Vercel project "${project.projectName}"...`,

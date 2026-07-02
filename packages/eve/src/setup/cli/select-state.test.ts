@@ -83,7 +83,7 @@ describe("filterOptions", () => {
 
   it("matches queries containing spaces", () => {
     const options: PromptOption<string>[] = [
-      { value: "a", label: "Claude Sonnet 4.6" },
+      { value: "a", label: "Claude Sonnet 5" },
       { value: "b", label: "Claude Opus 4.8" },
     ];
     expect(filterOptions(options, "claude s").map((o) => o.value)).toEqual(["a"]);

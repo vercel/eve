@@ -97,6 +97,39 @@ export interface PublicAgentCompactionDefinition {
 }
 
 /**
+ * Configures framework-owned runtime limits for this agent's runs.
+ */
+export interface AgentLimitsDefinition {
+  /**
+   * Maximum number of delegated child-session levels from the root session.
+   *
+   * Root sessions are depth 0. A `maxSubagentDepth` of 3 allows child sessions at
+   * depths 1, 2, and 3; sessions already at depth 3 cannot delegate again.
+   *
+   * @default 3
+   */
+  readonly maxSubagentDepth?: number;
+  /**
+   * Maximum provider-reported input tokens accumulated by one durable session.
+   *
+   * eve checks this before starting each model call. The model call that crosses
+   * the limit is allowed to finish because providers only report exact usage
+   * after the call completes; later model calls in the same session are blocked.
+   *
+   * @default 40_000_000 for root sessions; 5_000_000 for delegated subagent sessions
+   */
+  readonly maxInputTokensPerSession?: number;
+  /**
+   * Maximum provider-reported output tokens accumulated by one durable session.
+   *
+   * eve checks this before starting each model call. The model call that crosses
+   * the limit is allowed to finish because providers only report exact usage
+   * after the call completes; later model calls in the same session are blocked.
+   */
+  readonly maxOutputTokensPerSession?: number;
+}
+
+/**
  * Experimental, opt-in agent capabilities authored in `agent.ts`.
  *
  * These options are unstable and may change or be removed in any release.
@@ -162,6 +195,7 @@ export type InternalAgentDefinition = {
   outputSchema?: JsonObject;
   reasoning?: AgentReasoningDefinition;
   source?: ModuleSourceRef;
+  limits?: AgentLimitsDefinition;
 };
 
 /**
@@ -205,6 +239,10 @@ export type PublicAgentDefinition = {
    * Support for individual levels depends on the selected model and provider.
    */
   readonly reasoning?: AgentReasoningDefinition;
+  /**
+   * Framework-owned runtime limits for this agent's runs.
+   */
+  readonly limits?: AgentLimitsDefinition;
   /**
    * Optional structured return type used when this agent runs in task mode
    * (for example as a subagent, schedule, or remote job). Interactive

@@ -26,6 +26,8 @@ export type { DevelopmentTuiTarget } from "./target.js";
 export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
   /** The local server or remote URL used by this TUI session. */
   readonly target: DevelopmentTuiTarget;
+  /** Additional request headers sent by this TUI client. */
+  readonly headers?: Readonly<Record<string, string>>;
   /**
    * Text to seed the prompt input with after the UI launches. A bare local
    * `/model` starts fresh-agent onboarding. Applies to the first prompt only.
@@ -77,17 +79,20 @@ function prepareDevelopmentTarget(target: DevelopmentTuiTarget): PreparedDevelop
  * the inline error region rather than crashing the command.
  */
 export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<void> {
-  const { target, initialInput, onBootProgress, ...display } = input;
+  const { target, headers, initialInput, onBootProgress, ...display } = input;
   const prepared = prepareDevelopmentTarget(target);
   const { serverUrl } = target;
+  const headerOptions = headers === undefined ? {} : { headers };
 
   const client = new Client(
     prepared.kind === "local"
       ? resolveLocalDevelopmentClientOptions({
+          ...headerOptions,
           serverUrl,
           token: () => resolveLinkedDevelopmentOidcToken(prepared.target.workspaceRoot),
         })
       : resolveRemoteDevelopmentClientOptions({
+          ...headerOptions,
           serverUrl,
           credentials: prepared.remote.credentials,
         }),

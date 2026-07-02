@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { parseAppMentionEvent, parseDirectMessageEvent } from "#public/channels/slack/inbound.js";
+import { parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js";
+import {
+  parseAppMentionEvent,
+  parseDirectMessageEvent,
+  slackMessageFromWebhookPayload,
+} from "#public/channels/slack/inbound.js";
 
 describe("parseAppMentionEvent", () => {
   it("returns a SlackMessage with mrkdwn re-rendered as GFM", () => {
@@ -260,5 +265,48 @@ describe("parseDirectMessageEvent", () => {
       event: { type: "message", channel_type: "im", user: "U01" },
     });
     expect(result).toBeNull();
+  });
+
+  it("builds the Eve message from the shared Slack webhook payload", () => {
+    const payload = parseSlackWebhookBody(
+      JSON.stringify({
+        type: "event_callback",
+        team_id: "T01",
+        event: {
+          type: "message",
+          channel_type: "im",
+          subtype: "file_share",
+          user: "U01",
+          text: "here is a file",
+          channel: "D01",
+          ts: "1700000000.000100",
+          files: [
+            {
+              id: "F01",
+              mimetype: "image/png",
+              url_private: "https://files.slack.com/F01/diagram.png",
+              name: "diagram.png",
+              size: 2048,
+            },
+          ],
+        },
+      }),
+    );
+    expect(payload.kind).toBe("direct_message");
+    if (payload.kind !== "direct_message") throw new Error("expected direct_message");
+
+    const message = slackMessageFromWebhookPayload(payload);
+
+    expect(message?.channelId).toBe("D01");
+    expect(message?.attachments).toEqual([
+      {
+        id: "F01",
+        type: "image",
+        url: "https://files.slack.com/F01/diagram.png",
+        name: "diagram.png",
+        mimeType: "image/png",
+        size: 2048,
+      },
+    ]);
   });
 });

@@ -25,6 +25,17 @@ async function withInteractiveTerminal<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+async function runInteractiveDev(
+  argv: string[],
+  runtime: NonNullable<Parameters<typeof runCli>[2]> = {},
+) {
+  const runDevelopmentTui = vi.fn(async () => {});
+  await withInteractiveTerminal(() =>
+    runCli(argv, { error: () => {}, log: () => {} }, { ...runtime, runDevelopmentTui }),
+  );
+  return runDevelopmentTui;
+}
+
 describe("CLI command registration", () => {
   it("lists the current project creation and Vercel commands", async () => {
     const output: string[] = [];
@@ -85,15 +96,13 @@ describe("eve CLI malformed argument handling", () => {
 
 describe("eve dev --input", () => {
   it("forwards the initial draft to the interactive TUI", async () => {
-    const runDevelopmentTui = vi.fn(async () => {});
-
-    await withInteractiveTerminal(() =>
-      runCli(
-        ["dev", "--url", "https://example.com", "--input", "/model"],
-        { error: () => {}, log: () => {} },
-        { runDevelopmentTui },
-      ),
-    );
+    const runDevelopmentTui = await runInteractiveDev([
+      "dev",
+      "--url",
+      "https://example.com",
+      "--input",
+      "/model",
+    ]);
 
     expect(runDevelopmentTui).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -128,19 +137,97 @@ describe("eve dev --input", () => {
 });
 
 describe("eve dev --url protocol", () => {
-  it("uses the local TUI credential path only for this app's running dev server", async () => {
-    const runDevelopmentTui = vi.fn(async () => {});
+  it("lowers URL userinfo to a Basic authorization header and strips it from the target URL", async () => {
+    const runDevelopmentTui = await runInteractiveDev([
+      "dev",
+      "https://test%40user:p%20ss@example.com",
+    ]);
 
-    await withInteractiveTerminal(() =>
-      runCli(
-        ["dev", "--url", "http://127.0.0.1:2000"],
-        { error: () => {}, log: () => {} },
-        {
-          isActiveDevelopmentServerForApp: async () => true,
-          runDevelopmentTui,
+    expect(runDevelopmentTui).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: {
+          Authorization: `Basic ${btoa("test@user:p ss")}`,
         },
-      ),
+        target: {
+          kind: "remote",
+          serverUrl: "https://example.com/",
+          workspaceRoot: process.cwd(),
+        },
+      }),
     );
+  });
+
+  it("prefers explicit authorization headers over URL userinfo", async () => {
+    const runDevelopmentTui = await runInteractiveDev([
+      "dev",
+      "https://user:pass@example.com",
+      "-H",
+      "Authorization: Bearer explicit-token",
+    ]);
+
+    expect(runDevelopmentTui).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: {
+          Authorization: "Bearer explicit-token",
+        },
+        target: {
+          kind: "remote",
+          serverUrl: "https://example.com/",
+          workspaceRoot: process.cwd(),
+        },
+      }),
+    );
+  });
+
+  it("forwards repeatable request headers to the remote TUI", async () => {
+    const runDevelopmentTui = await runInteractiveDev([
+      "dev",
+      "--url",
+      "https://example.com",
+      "-H",
+      "Authorization: Basic dGVzdDpzZWNyZXQ=",
+      "--header",
+      "X-Tenant: acme",
+    ]);
+
+    expect(runDevelopmentTui).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: {
+          Authorization: "Basic dGVzdDpzZWNyZXQ=",
+          "X-Tenant": "acme",
+        },
+        target: {
+          kind: "remote",
+          serverUrl: "https://example.com/",
+          workspaceRoot: process.cwd(),
+        },
+      }),
+    );
+  });
+
+  it("rejects malformed request headers", async () => {
+    await expect(
+      runCli(
+        ["dev", "--url", "https://example.com", "-H", "Authorization"],
+        { error: () => {}, log: () => {} },
+        { runDevelopmentTui: vi.fn(async () => {}) },
+      ),
+    ).rejects.toThrow('Expected header in "Name: value" format');
+  });
+
+  it("rejects request headers without a URL target", async () => {
+    await expect(
+      runCli(["dev", "-H", "Authorization: Bearer dev-token"], {
+        error: () => {},
+        log: () => {},
+      }),
+    ).rejects.toThrow("The --header option can only be used with --url or a bare URL.");
+  });
+
+  it("uses the local TUI credential path only for this app's running dev server", async () => {
+    const runDevelopmentTui = await runInteractiveDev(["dev", "--url", "http://127.0.0.1:2000"], {
+      isActiveDevelopmentServerForApp: async () => true,
+    });
 
     expect(runDevelopmentTui).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -154,18 +241,9 @@ describe("eve dev --url protocol", () => {
   });
 
   it("keeps an unverified loopback URL on the remote credential path", async () => {
-    const runDevelopmentTui = vi.fn(async () => {});
-
-    await withInteractiveTerminal(() =>
-      runCli(
-        ["dev", "--url", "http://127.0.0.1:2000"],
-        { error: () => {}, log: () => {} },
-        {
-          isActiveDevelopmentServerForApp: async () => false,
-          runDevelopmentTui,
-        },
-      ),
-    );
+    const runDevelopmentTui = await runInteractiveDev(["dev", "--url", "http://127.0.0.1:2000"], {
+      isActiveDevelopmentServerForApp: async () => false,
+    });
 
     expect(runDevelopmentTui).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -195,15 +273,13 @@ describe("eve eval --url protocol", () => {
 
 describe("eve dev --logs", () => {
   it("accepts sandbox as the initial TUI log mode", async () => {
-    const runDevelopmentTui = vi.fn(async () => {});
-
-    await withInteractiveTerminal(() =>
-      runCli(
-        ["dev", "--url", "https://example.com", "--logs", "sandbox"],
-        { error: () => {}, log: () => {} },
-        { runDevelopmentTui },
-      ),
-    );
+    const runDevelopmentTui = await runInteractiveDev([
+      "dev",
+      "--url",
+      "https://example.com",
+      "--logs",
+      "sandbox",
+    ]);
 
     expect(runDevelopmentTui).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -273,11 +349,7 @@ describe("eve dev local server ownership", () => {
       }),
       close: async () => {},
     }));
-    const runDevelopmentTui = vi.fn(async () => {});
-
-    await withInteractiveTerminal(() =>
-      runCli(["dev"], { error: () => {}, log: () => {} }, { runDevelopmentTui, startHost }),
-    );
+    const runDevelopmentTui = await runInteractiveDev(["dev"], { startHost });
 
     expect(startHost).toHaveBeenCalledWith(expect.any(String), {
       existing: "attach-if-unconfigured",
@@ -308,13 +380,7 @@ describe("eve dev local server ownership", () => {
       close,
     }));
 
-    await withInteractiveTerminal(() =>
-      runCli(
-        ["dev"],
-        { error: () => {}, log: () => {} },
-        { runDevelopmentTui: vi.fn(async () => {}), startHost },
-      ),
-    );
+    await runInteractiveDev(["dev"], { startHost });
     expect(close).toHaveBeenCalledOnce();
   });
 });

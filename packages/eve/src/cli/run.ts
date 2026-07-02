@@ -6,6 +6,11 @@ import { isCodingAgentLaunch } from "#cli/agent-detection.js";
 import { eveCliBanner } from "#cli/banner.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "#cli/dev/ui-options.js";
+import {
+  parseDevelopmentHeaderOption,
+  resolveDevelopmentUrlTarget,
+  type DevelopmentRequestHeaders,
+} from "#cli/dev/url-target.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import { LOG_DISPLAY_MODES, parseLogDisplayMode } from "#cli/dev/tui/log-display-mode.js";
 import { resolveTuiTitle, type DevelopmentTuiTarget } from "#cli/dev/tui/target.js";
@@ -35,6 +40,7 @@ interface DevelopmentCliOptions {
   assistantResponseStats?: AssistantResponseStatsMode;
   connectionAuth?: TerminalPartDisplayMode;
   contextSize?: number;
+  header?: DevelopmentRequestHeaders;
   host?: string;
   input?: string;
   logs?: LogDisplayMode;
@@ -250,41 +256,6 @@ function hasInteractiveTerminal(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
-function rewriteDevelopmentUrlShorthand(argv: readonly string[]): string[] {
-  const shorthandUrl = argv[1];
-
-  if (
-    argv[0] !== "dev" ||
-    argv.length !== 2 ||
-    shorthandUrl === undefined ||
-    shorthandUrl.startsWith("-")
-  ) {
-    return [...argv];
-  }
-
-  return ["dev", "--url", shorthandUrl];
-}
-
-function resolveRemoteDevelopmentServerUrl(options: DevelopmentCliOptions): string | undefined {
-  if (!options.url) {
-    return undefined;
-  }
-
-  if (options.host !== undefined) {
-    throw new InvalidArgumentError("The --host option cannot be used with --url.");
-  }
-
-  if (options.port !== undefined) {
-    throw new InvalidArgumentError("The --port option cannot be used with --url.");
-  }
-
-  if (options.ui === false) {
-    throw new InvalidArgumentError("The --no-ui option cannot be used with --url.");
-  }
-
-  return options.url;
-}
-
 function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Command {
   const appRoot = resolveApplicationRoot();
   const packageVersion = resolveInstalledPackageInfo().version;
@@ -408,9 +379,15 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
   program
     .command("dev")
     .description("Start the eve development server or connect to an existing URL.")
+    .argument("[url]", "Connect to an existing server URL", parseDevelopmentServerUrl)
     .option("--host <host>", "Host interface to bind")
     .option("--port <port>", "Port to listen on (defaults to $PORT, then 2000)", parsePortOption)
     .option("-u, --url <url>", "Connect to an existing server URL", parseDevelopmentServerUrl)
+    .option(
+      "-H, --header <header>",
+      'Request header for a URL target, in "Name: value" form (repeatable)',
+      parseDevelopmentHeaderOption,
+    )
     .option("--no-ui", "Start the server without an interactive UI")
     .option("--name <name>", "Title shown in the terminal UI (defaults to the app folder name)")
     .option("--input <text>", "Pre-fill the prompt input, or start onboarding with /model")
@@ -451,10 +428,11 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     )
     .addHelpText(
       "after",
-      "\nYou can also pass a bare URL as the only argument, for example: eve dev https://example.com\n",
+      "\nYou can also pass a bare URL, for example: eve dev https://example.com\n",
     )
-    .action(async (options: DevelopmentCliOptions) => {
-      const remoteServerUrl = resolveRemoteDevelopmentServerUrl(options);
+    .action(async (positionalUrl: string | undefined, options: DevelopmentCliOptions) => {
+      const remoteTarget = resolveDevelopmentUrlTarget(options, positionalUrl);
+      const remoteServerUrl = remoteTarget?.serverUrl;
       const interactive = hasInteractiveTerminal();
       const mode = resolveDevUiMode({ options, interactive });
       if (options.input !== undefined && mode === "headless") {
@@ -489,13 +467,17 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
             : { kind: "remote", serverUrl: input.serverUrl, workspaceRoot: appRoot };
         const title = resolveTuiTitle({ name: options.name, target });
         if (title !== undefined) display.name = title;
-        const tuiInput: RunDevelopmentTuiInput = {
+        const tuiInput = {
           target,
           initialInput: options.input,
           onBootProgress: report,
           ...display,
-        };
-        await runDevelopmentTui(tuiInput);
+        } satisfies RunDevelopmentTuiInput;
+        if (remoteTarget?.headers !== undefined) {
+          await runDevelopmentTui({ ...tuiInput, headers: remoteTarget.headers });
+        } else {
+          await runDevelopmentTui(tuiInput);
+        }
       };
 
       if (remoteServerUrl) {
@@ -632,7 +614,7 @@ export async function runCli(
   runtime: CliRuntimeOverrides = {},
 ): Promise<void> {
   const program = createCliProgram(logger, runtime);
-  const input = argv.length === 0 ? ["dev"] : rewriteDevelopmentUrlShorthand(argv);
+  const input = argv.length === 0 ? ["dev"] : argv;
 
   try {
     await program.parseAsync(input, {

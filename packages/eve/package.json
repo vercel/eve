@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.16.2",
+  "version": "0.18.1",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -308,11 +308,11 @@
     "@vercel/oidc": "3.5.0",
     "@vercel/sandbox": "catalog:",
     "@vercel/sdk": "1.28.1",
-    "@workflow/core": "5.0.0-beta.24",
+    "@workflow/core": "5.0.0-beta.26",
     "@workflow/errors": "5.0.0-beta.8",
-    "@workflow/serde": "4.1.0",
-    "@workflow/world": "5.0.0-beta.13",
-    "@workflow/world-local": "5.0.0-beta.21",
+    "@workflow/serde": "5.0.0-beta.2",
+    "@workflow/world": "5.0.0-beta.14",
+    "@workflow/world-local": "5.0.0-beta.22",
     "ai": "catalog:",
     "autoevals": "0.0.132",
     "chat": "4.31.0",
@@ -341,23 +341,13 @@
   },
   "peerDependencies": {
     "@opentelemetry/api": "^1.0.0",
-    "@sveltejs/kit": "^2.0.0",
     "ai": "catalog:",
     "braintrust": "^3.0.0",
     "just-bash": "^3.0.0",
-    "microsandbox": "^0.5.0",
-    "next": "^16.0.0",
-    "nuxt": "^4.0.0",
-    "react": "^19.0.0",
-    "svelte": "^5.0.0",
-    "vite": "^8.0.0",
-    "vue": "^3.5.0"
+    "microsandbox": "^0.5.0"
   },
   "peerDependenciesMeta": {
     "@opentelemetry/api": {
-      "optional": true
-    },
-    "@sveltejs/kit": {
       "optional": true
     },
     "braintrust": {
@@ -367,24 +357,6 @@
       "optional": true
     },
     "microsandbox": {
-      "optional": true
-    },
-    "next": {
-      "optional": true
-    },
-    "nuxt": {
-      "optional": true
-    },
-    "react": {
-      "optional": true
-    },
-    "svelte": {
-      "optional": true
-    },
-    "vite": {
-      "optional": true
-    },
-    "vue": {
       "optional": true
     }
   },

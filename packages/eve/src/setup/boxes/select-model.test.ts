@@ -28,8 +28,8 @@ const CATALOG: GatewayCatalogModel[] = [
     tags: ["web-search"],
   },
   {
-    id: "anthropic/claude-sonnet-4.6",
-    name: "Claude Sonnet 4.6",
+    id: "anthropic/claude-sonnet-5",
+    name: "Claude Sonnet 5",
     type: "language",
     owned_by: "anthropic",
     tags: ["web-search"],
@@ -94,7 +94,7 @@ describe("selectModel box", () => {
     let captured: SingleSelectOptions<PrompterValue> | undefined;
     const { prompter } = createSelectPrompter((opts) => {
       captured = opts;
-      return "anthropic/claude-sonnet-4.6";
+      return "anthropic/claude-sonnet-5";
     });
     const box = selectModel({ asker: interactiveAsker(prompter), deps: catalogDeps() });
 
@@ -102,16 +102,16 @@ describe("selectModel box", () => {
 
     expect(result.kind).toBe("done");
     if (result.kind !== "done") return;
-    expect(result.state.modelId).toBe("anthropic/claude-sonnet-4.6");
+    expect(result.state.modelId).toBe("anthropic/claude-sonnet-5");
     expect(captured?.search).toBe(true);
     // Language + web-search models only, anthropic/openai/google sorted first.
     expect(captured?.options.map((option) => option.value)).toEqual([
-      "anthropic/claude-sonnet-4.6",
+      "anthropic/claude-sonnet-5",
       "openai/gpt-5-mini",
       "zai/glm-4.6",
     ]);
     // Cursor defaults to the top catalog entry when no default is configured.
-    expect(captured?.initialValue).toBe("anthropic/claude-sonnet-4.6");
+    expect(captured?.initialValue).toBe("anthropic/claude-sonnet-5");
   });
 
   it("orders the curated shortlist first, marks it featured, and pre-selects the default", async () => {
@@ -120,7 +120,7 @@ describe("selectModel box", () => {
       captured = opts;
       return DEFAULT_AGENT_MODEL_ID;
     });
-    // "Claude Opus 4.8" sorts above "Claude Sonnet 4.6" alphabetically, but the
+    // "Claude Opus 4.8" sorts above "Claude Sonnet 5" alphabetically, but the
     // curated order (Sonnet first) wins over the alphabetical tiebreak.
     const catalog: GatewayCatalogModel[] = [
       {
@@ -139,7 +139,7 @@ describe("selectModel box", () => {
     expect(result.kind).toBe("done");
     if (result.kind !== "done") return;
     expect(captured?.options.map((option) => option.value)).toEqual([
-      "anthropic/claude-sonnet-4.6",
+      "anthropic/claude-sonnet-5",
       "anthropic/claude-opus-4.8",
       "openai/gpt-5-mini",
       "zai/glm-4.6",
@@ -147,7 +147,7 @@ describe("selectModel box", () => {
     // Only the curated entries are featured: the picker's default view shows
     // them alone, and scrolling or search surfaces the rest of the catalog.
     expect(captured?.options.filter((option) => option.featured).map((o) => o.value)).toEqual([
-      "anthropic/claude-sonnet-4.6",
+      "anthropic/claude-sonnet-5",
       "anthropic/claude-opus-4.8",
     ]);
     expect(captured?.initialValue).toBe(DEFAULT_AGENT_MODEL_ID);

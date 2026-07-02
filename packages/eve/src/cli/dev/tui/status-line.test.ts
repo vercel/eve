@@ -52,7 +52,7 @@ describe("buildStatusLine", () => {
 
   it("renders all segments in order with dot separators", () => {
     const line = buildStatusLine({
-      model: "anthropic/claude-sonnet-4-6",
+      model: "anthropic/claude-sonnet-5",
       tokens: "12,300 tokens 6%",
       endpoint: connected,
       vercel: { identity, pendingDeploy: true },
@@ -61,7 +61,7 @@ describe("buildStatusLine", () => {
     });
 
     expect(line).toBe(
-      "anthropic/claude-sonnet-4-6 · 12,300 tokens 6% · AI Gateway (my-agent) · /deploy pending",
+      "anthropic/claude-sonnet-5 · 12,300 tokens 6% · AI Gateway (my-agent) · /deploy pending",
     );
   });
 
@@ -78,14 +78,14 @@ describe("buildStatusLine", () => {
 
   it("dims every segment except the yellow pending-deploy marker", () => {
     const line = buildStatusLine({
-      model: "anthropic/claude-sonnet-4-6",
+      model: "anthropic/claude-sonnet-5",
       endpoint: connected,
       vercel: { identity, pendingDeploy: true },
       theme,
       width: 120,
     });
 
-    expect(line).toContain("\x1b[2manthropic/claude-sonnet-4-6\x1b[22m");
+    expect(line).toContain("\x1b[2manthropic/claude-sonnet-5\x1b[22m");
     expect(line).toContain("\x1b[33m/deploy pending\x1b[39m");
     expect(line).not.toContain("\x1b[2m/deploy pending");
   });
@@ -122,7 +122,7 @@ describe("buildStatusLine", () => {
   it("leads with the transient logs hint and keeps it as width narrows", () => {
     const input = {
       logLevel: "sandbox",
-      model: "anthropic/claude-sonnet-4-6",
+      model: "anthropic/claude-sonnet-5",
       tokens: "↑ 500 ↓ 300",
       endpoint: connected,
       vercel: { identity, pendingDeploy: true },
@@ -149,7 +149,7 @@ describe("buildStatusLine", () => {
 
   it("drops the endpoint, then the model, as the width narrows", () => {
     const input = {
-      model: "anthropic/claude-sonnet-4-6",
+      model: "anthropic/claude-sonnet-5",
       tokens: "12,300 tokens",
       endpoint: connected,
       vercel: { identity, pendingDeploy: true },
@@ -160,7 +160,7 @@ describe("buildStatusLine", () => {
 
     const noEndpoint = buildStatusLine({ ...input, width: visibleLength(full) - 1 })!;
     expect(noEndpoint).not.toContain("AI Gateway");
-    expect(noEndpoint).toContain("anthropic/claude-sonnet-4-6");
+    expect(noEndpoint).toContain("anthropic/claude-sonnet-5");
 
     const noModel = buildStatusLine({ ...input, width: visibleLength(noEndpoint) - 1 })!;
     expect(noModel).toBe("12,300 tokens · /deploy pending");
@@ -168,12 +168,12 @@ describe("buildStatusLine", () => {
 
   it("renders the three model-endpoint states", () => {
     const external = buildStatusLine({
-      model: "anthropic/claude-sonnet-4-6",
+      model: "anthropic/claude-sonnet-5",
       endpoint: { kind: "external", provider: "anthropic" },
       theme: plain,
       width: 120,
     });
-    expect(external).toBe("anthropic/claude-sonnet-4-6 · External endpoint");
+    expect(external).toBe("anthropic/claude-sonnet-5 · External endpoint");
 
     const linked = buildStatusLine({
       model: "m",

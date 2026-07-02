@@ -9,9 +9,10 @@ import type { RouteHandlerArgs, WebSocketRouteHooks } from "#channel/routes.js";
 import { createSendFn } from "#channel/send.js";
 import { createGetSessionFn } from "#channel/session.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { readVercelProjectLink } from "#internal/vercel/project-link.js";
+import { attachAgentInfoRouteResponse } from "#internal/nitro/routes/channel-route-context.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
+import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { withVercelOidcProjectResolver } from "#runtime/governance/auth/vercel-oidc-project.js";
 
 const log = createLogger("channel.dispatch");
@@ -57,7 +58,7 @@ export async function dispatchChannelRequest(
     );
   }
 
-  const routeArgs = buildRouteArgs(event, bundle, matchedChannel.name);
+  const routeArgs = buildRouteArgs(event, bundle, matchedChannel.name, config);
 
   let response: Response;
 
@@ -113,7 +114,7 @@ export async function dispatchChannelWebSocketRequest(
   }
 
   const websocket = matchedChannel.websocket;
-  const routeArgs = buildRouteArgs(event, bundle, matchedChannel.name);
+  const routeArgs = buildRouteArgs(event, bundle, matchedChannel.name, config);
 
   try {
     const hooks = await withDevelopmentVercelOidcContext(
@@ -164,6 +165,7 @@ function buildRouteArgs(
   event: H3Event,
   bundle: Awaited<ReturnType<typeof resolveNitroChannelRuntimeBundle>>,
   channelName: string,
+  config: NitroArtifactsConfig,
 ): BuiltRouteArgs {
   const requestId = readVercelRequestId(event.req.headers);
   const requestIp = extractSocketIp(event);
@@ -187,9 +189,8 @@ function buildRouteArgs(
     toCrossChannelTargets(bundle.channels),
   );
 
-  return {
-    agent,
-    args: {
+  const args = attachAgentInfoRouteResponse(
+    {
       send,
       getSession,
       receive,
@@ -197,6 +198,15 @@ function buildRouteArgs(
       waitUntil,
       requestIp,
     },
+    async () => {
+      const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
+      return await handleAgentInfoRequest(config);
+    },
+  );
+
+  return {
+    agent,
+    args,
     backgroundTasks,
   };
 }

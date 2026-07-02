@@ -66,7 +66,21 @@ function createRuntimeDependencyChecks(packageComparison) {
   }));
 }
 
-function createSizeBudget(appComparison, packageComparison) {
+function createInitInstallSizeBudgetChecks(initInstallComparison) {
+  if (initInstallComparison === null || initInstallComparison.status !== "present") {
+    return [];
+  }
+
+  return [
+    createSizeBudgetCheck(initInstallComparison.installedSizeBytes, {
+      area: "Init",
+      metric: "Installed footprint",
+      summary: "`eve init` install footprint",
+    }),
+  ];
+}
+
+function createSizeBudget(appComparison, packageComparison, initInstallComparison) {
   const checks = [
     createSizeBudgetCheck(appComparison.uniqueFunctionBytes, {
       area: "Runtime",
@@ -85,6 +99,7 @@ function createSizeBudget(appComparison, packageComparison) {
     );
   }
 
+  checks.push(...createInitInstallSizeBudgetChecks(initInstallComparison));
   checks.push(...createRuntimeDependencyChecks(packageComparison));
 
   return {
@@ -335,6 +350,68 @@ function comparePublishedPackages(currentPackage, baselinePackage) {
   };
 }
 
+function compareInitInstallReports(currentInitInstall, baselineInitInstall) {
+  if (currentInitInstall === null && baselineInitInstall === null) {
+    return null;
+  }
+
+  const dependencyDiff = compareDependencyEntries(
+    readDependencyEntries(currentInitInstall?.dependencies),
+    readDependencyEntries(baselineInitInstall?.dependencies),
+  );
+  const devDependencyDiff = compareDependencyEntries(
+    readDependencyEntries(currentInitInstall?.devDependencies),
+    readDependencyEntries(baselineInitInstall?.devDependencies),
+  );
+
+  return {
+    dependenciesAdded: dependencyDiff.added,
+    dependenciesChanged: dependencyDiff.changed,
+    dependenciesRemoved: dependencyDiff.removed,
+    dependencyCount: compareNumericMetric(
+      readMetricValue(currentInitInstall?.dependencyCount),
+      readMetricValue(baselineInitInstall?.dependencyCount),
+    ),
+    dependencyPackageBytes: compareNumericMetric(
+      readMetricValue(currentInitInstall?.dependencyPackageBytes),
+      readMetricValue(baselineInitInstall?.dependencyPackageBytes),
+    ),
+    devDependenciesAdded: devDependencyDiff.added,
+    devDependenciesChanged: devDependencyDiff.changed,
+    devDependenciesRemoved: devDependencyDiff.removed,
+    devDependencyCount: compareNumericMetric(
+      readMetricValue(currentInitInstall?.devDependencyCount),
+      readMetricValue(baselineInitInstall?.devDependencyCount),
+    ),
+    devDependencyPackageBytes: compareNumericMetric(
+      readMetricValue(currentInitInstall?.devDependencyPackageBytes),
+      readMetricValue(baselineInitInstall?.devDependencyPackageBytes),
+    ),
+    installedFileCount: compareNumericMetric(
+      readMetricValue(currentInitInstall?.installedFileCount),
+      readMetricValue(baselineInitInstall?.installedFileCount),
+    ),
+    installedPackageCount: compareNumericMetric(
+      readMetricValue(currentInitInstall?.installedPackageCount),
+      readMetricValue(baselineInitInstall?.installedPackageCount),
+    ),
+    installedSizeBytes: compareNumericMetric(
+      readMetricValue(currentInitInstall?.installedSizeBytes),
+      readMetricValue(baselineInitInstall?.installedSizeBytes),
+    ),
+    status:
+      baselineInitInstall === null ? "added" : currentInitInstall === null ? "removed" : "present",
+    transitivePackageBytes: compareNumericMetric(
+      readMetricValue(currentInitInstall?.transitivePackageBytes),
+      readMetricValue(baselineInitInstall?.transitivePackageBytes),
+    ),
+    unclassifiedInstalledPackageCount: compareNumericMetric(
+      readMetricValue(currentInitInstall?.unclassifiedInstalledPackageCount),
+      readMetricValue(baselineInitInstall?.unclassifiedInstalledPackageCount),
+    ),
+  };
+}
+
 /**
  * Compares one Nitro bundle report to a baseline snapshot and returns the
  * byte/count deltas needed for regression tracking.
@@ -379,13 +456,18 @@ export function createNitroBundleReportComparison(report, baselineReport, option
     report?.publishedPackage ?? null,
     baselineReport?.publishedPackage ?? null,
   );
+  const initInstallComparison = compareInitInstallReports(
+    report?.initInstall ?? null,
+    baselineReport?.initInstall ?? null,
+  );
 
   return {
     app: appComparison,
     baselineGeneratedAt:
       typeof baselineReport?.generatedAt === "string" ? baselineReport.generatedAt : null,
     baselineLabel: typeof options.baselineLabel === "string" ? options.baselineLabel : "baseline",
+    initInstall: initInstallComparison,
     package: packageComparison,
-    sizeBudget: createSizeBudget(appComparison, packageComparison),
+    sizeBudget: createSizeBudget(appComparison, packageComparison, initInstallComparison),
   };
 }

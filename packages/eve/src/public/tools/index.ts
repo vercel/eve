@@ -4,18 +4,15 @@
 
 export {
   type DisabledToolSentinel,
-  type EnableWorkflowToolSentinel,
   defineDynamic,
   defineTool,
   disableTool,
   isDisabledToolSentinel,
-  isEnableWorkflowToolSentinel,
   type ToolAuthOptions,
   type ToolAuthProvider,
   type ToolDefinition,
   type ToolContext,
   type ToolModelOutput,
-  ExperimentalWorkflow,
 } from "#public/definitions/tool.js";
 export type { Approval, ApprovalContext, ApprovalStatus } from "#public/definitions/approval.js";
 export type {

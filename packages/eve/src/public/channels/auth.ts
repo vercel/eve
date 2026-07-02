@@ -724,8 +724,8 @@ export interface VerifyVercelOidcOptions {
  *   `email`) are exposed as auth attributes.
  * - Development tokens with a `user_id` claim authenticate as
  *   `principalType: "user"` only when both the token and configured current
- *   project environment are `development`. A same-project preview target may
- *   use one as a `"service"` principal; other target environments reject it.
+ *   project environment are `development`. Other same-project target
+ *   environments may use one as a `"service"` principal.
  * - Tokens from other Vercel projects are accepted **only** when their `sub`
  *   matches one of {@link VerifyVercelOidcOptions.subjects}.
  *

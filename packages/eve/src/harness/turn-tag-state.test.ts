@@ -2,10 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import {
   accumulateTurnUsage,
+  getSessionTokenLimitViolation,
+  getSessionTokenUsage,
   getTurnUsageState,
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
+
+const ZERO_SESSION_USAGE = {
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  inputTokens: 0,
+  outputTokens: 0,
+};
 
 function makeSession(state?: HarnessSession["state"]): HarnessSession {
   return {
@@ -27,7 +36,7 @@ describe("accumulateTurnUsage", () => {
     const next = accumulateTurnUsage({
       previous: undefined,
       turnId: "turn_0",
-      usage: { inputTokens: 10, outputTokens: 3, cachedInputTokens: 2 },
+      usage: { cacheReadTokens: 2, inputTokens: 10, outputTokens: 3 },
     });
 
     expect(next).toEqual({
@@ -36,18 +45,24 @@ describe("accumulateTurnUsage", () => {
       outputTokens: 3,
       cacheReadTokens: 2,
       cacheWriteTokens: 0,
+      session: {
+        ...ZERO_SESSION_USAGE,
+        cacheReadTokens: 2,
+        inputTokens: 10,
+        outputTokens: 3,
+      },
     });
   });
 
-  it("accumulates cacheWriteTokens from inputTokenDetails", () => {
+  it("accumulates cache write tokens from normalized usage", () => {
     const next = accumulateTurnUsage({
       previous: undefined,
       turnId: "turn_0",
       usage: {
+        cacheReadTokens: 800,
+        cacheWriteTokens: 200,
         inputTokens: 1000,
         outputTokens: 50,
-        cachedInputTokens: 800,
-        inputTokenDetails: { cacheWriteTokens: 200 },
       },
     });
 
@@ -57,6 +72,12 @@ describe("accumulateTurnUsage", () => {
       outputTokens: 50,
       cacheReadTokens: 800,
       cacheWriteTokens: 200,
+      session: {
+        cacheReadTokens: 800,
+        cacheWriteTokens: 200,
+        inputTokens: 1000,
+        outputTokens: 50,
+      },
     });
   });
 
@@ -67,15 +88,21 @@ describe("accumulateTurnUsage", () => {
       outputTokens: 50,
       cacheReadTokens: 8,
       cacheWriteTokens: 5,
+      session: {
+        cacheReadTokens: 8,
+        cacheWriteTokens: 5,
+        inputTokens: 100,
+        outputTokens: 50,
+      },
     };
     const next = accumulateTurnUsage({
       previous,
       turnId: "turn_0",
       usage: {
+        cacheReadTokens: 4,
+        cacheWriteTokens: 3,
         inputTokens: 12,
         outputTokens: 7,
-        cachedInputTokens: 4,
-        inputTokenDetails: { cacheWriteTokens: 3 },
       },
     });
 
@@ -85,16 +112,28 @@ describe("accumulateTurnUsage", () => {
       outputTokens: 57,
       cacheReadTokens: 12,
       cacheWriteTokens: 8,
+      session: {
+        cacheReadTokens: 12,
+        cacheWriteTokens: 8,
+        inputTokens: 112,
+        outputTokens: 57,
+      },
     });
   });
 
-  it("discards the previous totals when the turn id changes", () => {
+  it("resets turn totals and keeps session totals when the turn id changes", () => {
     const previous = {
       turnId: "turn_0",
       inputTokens: 100,
       outputTokens: 50,
       cacheReadTokens: 8,
       cacheWriteTokens: 5,
+      session: {
+        cacheReadTokens: 80,
+        cacheWriteTokens: 50,
+        inputTokens: 1000,
+        outputTokens: 500,
+      },
     };
     const next = accumulateTurnUsage({
       previous,
@@ -108,6 +147,12 @@ describe("accumulateTurnUsage", () => {
       outputTokens: 5,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
+      session: {
+        cacheReadTokens: 80,
+        cacheWriteTokens: 50,
+        inputTokens: 1020,
+        outputTokens: 505,
+      },
     });
   });
 
@@ -124,6 +169,7 @@ describe("accumulateTurnUsage", () => {
       outputTokens: 0,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
+      session: ZERO_SESSION_USAGE,
     });
   });
 });
@@ -136,6 +182,11 @@ describe("session state round-trip", () => {
       outputTokens: 1,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
+      session: {
+        ...ZERO_SESSION_USAGE,
+        inputTokens: 5,
+        outputTokens: 1,
+      },
     });
 
     expect(getTurnUsageState(seeded.state)).toEqual({
@@ -144,6 +195,11 @@ describe("session state round-trip", () => {
       outputTokens: 1,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
+      session: {
+        ...ZERO_SESSION_USAGE,
+        inputTokens: 5,
+        outputTokens: 1,
+      },
     });
   });
 
@@ -159,8 +215,49 @@ describe("session state round-trip", () => {
       outputTokens: 1,
       cacheReadTokens: 1,
       cacheWriteTokens: 0,
+      session: {
+        ...ZERO_SESSION_USAGE,
+        cacheReadTokens: 1,
+        inputTokens: 1,
+        outputTokens: 1,
+      },
     });
 
     expect(seeded.state).toMatchObject({ other: "keep me" });
+  });
+});
+
+describe("session token limits", () => {
+  it("reads zero session usage before token state exists", () => {
+    expect(getSessionTokenUsage(makeSession())).toEqual(ZERO_SESSION_USAGE);
+  });
+
+  it.each([
+    {
+      expected: { kind: "input", limit: 10, usedTokens: 10 },
+      limits: { maxInputTokensPerSession: 10 },
+    },
+    {
+      expected: { kind: "output", limit: 3, usedTokens: 3 },
+      limits: { maxOutputTokensPerSession: 3 },
+    },
+  ])("reports the first exhausted $expected.kind limit", (testCase) => {
+    const session = setTurnUsageState(makeSession(), {
+      turnId: "turn_0",
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      inputTokens: 10,
+      outputTokens: 3,
+      session: {
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        inputTokens: 10,
+        outputTokens: 3,
+      },
+    });
+
+    expect(getSessionTokenLimitViolation({ ...session, limits: testCase.limits })).toEqual(
+      testCase.expected,
+    );
   });
 });

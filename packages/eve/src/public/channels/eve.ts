@@ -4,6 +4,7 @@ import type { SessionAuthContext, SessionCallback } from "#channel/types.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { readAgentInfoRouteResponse } from "#internal/nitro/routes/channel-route-context.js";
 import {
   EVE_MESSAGE_STREAM_CONTENT_TYPE,
   EVE_MESSAGE_STREAM_FORMAT,
@@ -12,6 +13,7 @@ import {
   EVE_STREAM_FORMAT_HEADER,
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/message.js";
+import { EVE_INFO_ROUTE_PATH } from "#protocol/routes.js";
 import { type InputResponse, isInputResponse } from "#runtime/input/types.js";
 import { type AuthFn, routeAuth } from "#public/channels/auth.js";
 import {
@@ -151,10 +153,11 @@ export interface EveChannel extends Channel {}
 
 /**
  * Builds the default eve HTTP channel: a {@link defineChannel} instance serving the
- * built-in `/eve/v1` routes (POST creates a session, POST delivers a follow-up, GET
- * streams a session's NDJSON event feed). Every route runs {@link EveChannelInput.auth}
- * via {@link routeAuth} before dispatching. Default-export the result as your
- * `agent/channels/eve.ts` channel; reach for {@link defineChannel} directly only for a custom transport.
+ * built-in `/eve/v1` routes (GET inspects the agent, POST creates a session, POST
+ * delivers a follow-up, GET streams a session's NDJSON event feed). Every route
+ * runs {@link EveChannelInput.auth} via {@link routeAuth} before dispatching.
+ * Default-export the result as your `agent/channels/eve.ts` channel; reach for
+ * {@link defineChannel} directly only for a custom transport.
  */
 export function eveChannel(input: EveChannelInput): EveChannel {
   const uploadPolicy = mergeUploadPolicy(input.uploadPolicy);
@@ -162,6 +165,21 @@ export function eveChannel(input: EveChannelInput): EveChannel {
   return defineChannel<undefined, EveEventContext>({
     cors: normalizeEveCors(input.cors),
     routes: [
+      GET(EVE_INFO_ROUTE_PATH, async (req, args) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+
+        const respond = readAgentInfoRouteResponse(args);
+        if (respond === undefined) {
+          return Response.json(
+            { error: "Agent info route requires internal channel dispatch context.", ok: false },
+            { status: 500 },
+          );
+        }
+
+        return await respond();
+      }),
+
       POST("/eve/v1/session", async (req, { send }) => {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
