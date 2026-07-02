@@ -119,7 +119,9 @@ TurnStepInput.abortSignal?                execution/durable-session-migrations/t
                   ├─ wrapToolExecute forwards options   harness/tools.ts:176 (execute(input, options))
                   ├─ HarnessToolDefinition.execute      harness/execute-tool.ts:25
                   ├─ authored ToolContext.abortSignal   execution/tool-auth.ts:53, node-step.ts
-                  ├─ sandbox tools → sandbox.run({ abortSignal })  execution/sandbox/bash-tool.ts:87,100
+                  ├─ sandbox sessions bound to the signal  execution/sandbox/abort-bound-session.ts
+                  │   (requireSandboxSession(signal) + ctx.getSandbox(); per-call signals compose
+                  │    via AbortSignal.any, so callers can never opt out of turn cancellation)
                   └─ MCP/OpenAPI executeTool(name, args, { abortSignal })
                       runtime/connections/mcp-client.ts:119, openapi-client.ts:98
 ```

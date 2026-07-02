@@ -35,9 +35,7 @@ export function defineWriteFileTool(input: DefineWriteFileToolInput = {}): ToolD
   return {
     description: input.description ?? "Write a file to the workspace sandbox.",
     async execute(args, ctx) {
-      return executeWriteFileOnSandbox(await ctx.getSandbox(), args as WriteFileInput, {
-        abortSignal: ctx.abortSignal,
-      });
+      return executeWriteFileOnSandbox(await ctx.getSandbox(), args as WriteFileInput);
     },
     inputSchema: WRITE_FILE_INPUT_SCHEMA as unknown as StandardJSONSchemaV1<unknown>,
     outputSchema: WRITE_FILE_OUTPUT_SCHEMA,

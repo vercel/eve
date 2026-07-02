@@ -29,9 +29,7 @@ export function defineGlobTool(input: DefineGlobToolInput = {}): ToolDefinition 
   return {
     description: input.description ?? "Search for files by glob pattern in the workspace sandbox.",
     async execute(args, ctx) {
-      return executeGlobOnSandbox(await ctx.getSandbox(), args as GlobInput, {
-        abortSignal: ctx.abortSignal,
-      });
+      return executeGlobOnSandbox(await ctx.getSandbox(), args as GlobInput);
     },
     inputSchema: GLOB_INPUT_SCHEMA as unknown as StandardJSONSchemaV1<unknown>,
     outputSchema: GLOB_OUTPUT_SCHEMA,

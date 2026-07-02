@@ -49,9 +49,10 @@ export const WRITE_FILE_OUTPUT_SCHEMA: JsonObject = {
  * Framework-owned executor that delegates to the default sandbox.
  */
 async function executeWriteFile(input: unknown, options?: ToolExecuteOptions): Promise<unknown> {
-  return executeWriteFileOnSandbox(await requireSandboxSession(), input as WriteFileInput, {
-    abortSignal: options?.abortSignal,
-  });
+  return executeWriteFileOnSandbox(
+    await requireSandboxSession(options?.abortSignal),
+    input as WriteFileInput,
+  );
 }
 
 export const WRITE_FILE_TOOL_DEFINITION: ResolvedToolDefinition = {

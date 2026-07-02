@@ -1,5 +1,4 @@
 import type { SandboxSession } from "#shared/sandbox-session.js";
-import type { SandboxToolExecuteOptions } from "#execution/sandbox/tool-execute-options.js";
 import { truncateTail } from "#execution/sandbox/truncate-output.js";
 import { isEveDevEnvironment } from "#internal/application/optional-package-install.js";
 
@@ -46,13 +45,16 @@ export interface BashResult {
  * Used by the framework `bash` tool and by author tools constructed via
  * `defineBashTool`. Centralizing the executor here keeps the error
  * messages and result shape identical across all bash-style tools.
+ *
+ * Turn cancellation reaches the underlying command through the session
+ * itself: callers pass a session bound via `bindSandboxAbortSignal`
+ * (`requireSandboxSession(abortSignal)` or `ctx.getSandbox()`).
  */
 export async function executeBashOnSandbox(
   sandbox: SandboxSession,
   args: BashInput,
-  options?: SandboxToolExecuteOptions,
 ): Promise<BashResult> {
-  const raw = await runWithDevelopmentSandboxProgress(sandbox, args.command, options?.abortSignal);
+  const raw = await runWithDevelopmentSandboxProgress(sandbox, args.command);
 
   const stdoutResult = truncateTail(raw.stdout);
   const stderrResult = truncateTail(raw.stderr);
@@ -83,11 +85,10 @@ export async function executeBashOnSandbox(
 async function runWithDevelopmentSandboxProgress(
   sandbox: SandboxSession,
   command: string,
-  abortSignal?: AbortSignal,
 ): Promise<Awaited<ReturnType<SandboxSession["run"]>>> {
   logDevelopmentSandboxCommand(`eve: starting sandbox command: ${formatCommand(command)}`);
   if (!isEveDevEnvironment()) {
-    return await sandbox.run({ abortSignal, command });
+    return await sandbox.run({ command });
   }
 
   const startedAt = Date.now();
@@ -100,7 +101,7 @@ async function runWithDevelopmentSandboxProgress(
   timer.unref?.();
 
   try {
-    const result = await sandbox.run({ abortSignal, command });
+    const result = await sandbox.run({ command });
     logDevelopmentSandboxCommand(
       `eve: sandbox command finished (exit ${result.exitCode}): ${formatCommand(command)}`,
     );

@@ -76,9 +76,10 @@ export const GREP_OUTPUT_SCHEMA: JsonObject = {
  * Framework-owned executor that delegates to the default sandbox.
  */
 async function executeGrep(input: unknown, options?: ToolExecuteOptions): Promise<unknown> {
-  return executeGrepOnSandbox(await requireSandboxSession(), input as GrepInput, {
-    abortSignal: options?.abortSignal,
-  });
+  return executeGrepOnSandbox(
+    await requireSandboxSession(options?.abortSignal),
+    input as GrepInput,
+  );
 }
 
 export const GREP_TOOL_DEFINITION: ResolvedToolDefinition = {

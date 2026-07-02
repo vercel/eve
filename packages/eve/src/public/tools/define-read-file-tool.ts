@@ -31,9 +31,7 @@ export function defineReadFileTool(input: DefineReadFileToolInput = {}): ToolDef
   return {
     description: input.description ?? "Read a file from the workspace sandbox.",
     async execute(args, ctx) {
-      return executeReadFileOnSandbox(await ctx.getSandbox(), args as ReadFileInput, {
-        abortSignal: ctx.abortSignal,
-      });
+      return executeReadFileOnSandbox(await ctx.getSandbox(), args as ReadFileInput);
     },
     inputSchema: READ_FILE_INPUT_SCHEMA as unknown as StandardJSONSchemaV1<unknown>,
     outputSchema: READ_FILE_OUTPUT_SCHEMA,

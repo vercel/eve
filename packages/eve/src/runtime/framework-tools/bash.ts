@@ -49,9 +49,10 @@ export const BASH_OUTPUT_SCHEMA: JsonObject = {
  * top-level import here does not force those backends to initialize eagerly.
  */
 async function executeBash(input: unknown, options?: ToolExecuteOptions): Promise<unknown> {
-  return executeBashOnSandbox(await requireSandboxSession(), input as BashInput, {
-    abortSignal: options?.abortSignal,
-  });
+  return executeBashOnSandbox(
+    await requireSandboxSession(options?.abortSignal),
+    input as BashInput,
+  );
 }
 
 export const BASH_TOOL_DEFINITION: ResolvedToolDefinition = {
