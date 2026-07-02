@@ -3,7 +3,7 @@ import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { sendTurnControlStep } from "#execution/turn-control-protocol.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { TurnStepInput } from "#execution/durable-session-migrations/turn-workflow.js";
-import type { Usage } from "#shared/usage.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 interface TurnTransition {
   readonly serializedContext?: Record<string, unknown>;
@@ -15,7 +15,7 @@ type TurnTerminalAction =
       readonly isError?: boolean;
       readonly kind: "done";
       readonly output: unknown;
-      readonly usage?: Usage;
+      readonly usage?: TokenUsage;
     }
   | {
       readonly authorizationNames?: readonly string[];

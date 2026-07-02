@@ -1,7 +1,7 @@
 import { z } from "#compiled/zod/index.js";
 
 import { jsonObjectSchema, jsonValueSchema } from "#shared/json-schemas.js";
-import { usageSchema } from "#shared/usage.js";
+import { tokenUsageSchema } from "#shared/token-usage.js";
 
 /**
  * Eve-owned `tool-call` action requested by the model.
@@ -145,7 +145,7 @@ const runtimeSubagentResultActionResultSchema = z
     kind: z.literal("subagent-result"),
     output: jsonValueSchema,
     subagentName: z.string(),
-    usage: usageSchema.optional(),
+    usage: tokenUsageSchema.optional(),
   })
   .strict();
 

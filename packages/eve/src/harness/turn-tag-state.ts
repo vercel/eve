@@ -17,13 +17,13 @@
  *
  * `TokenUsageTotals` carries `costUsd`/`sawCost` alongside the token counts
  * for the `$eve.*` dashboard tags and session limits — fields the
- * cross-cutting {@link Usage} contract (subagent results, callback bodies,
- * usage spans) does not carry. {@link toUsage} projects a total down to that
- * shared shape at the one site (the driver's `done` action) where a session
- * total crosses into it.
+ * cross-cutting {@link TokenUsage} contract (subagent results, callback
+ * bodies, usage spans) does not carry. {@link toUsage} projects a total down
+ * to that shared shape at the one site (the driver's `done` action) where a
+ * session total crosses into it.
  */
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
-import type { Usage } from "#shared/usage.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 const HARNESS_TURN_USAGE_STATE_KEY = "eve.harness.turnUsage";
 
@@ -80,8 +80,8 @@ export function getSessionTokenUsage(session: Pick<HarnessSession, "state">): To
   return getTurnUsageState(session.state)?.session ?? ZERO_TOKEN_USAGE;
 }
 
-/** Projects a {@link TokenUsageTotals} down to the cross-cutting {@link Usage} shape. */
-export function toUsage(totals: TokenUsageTotals): Usage {
+/** Projects a {@link TokenUsageTotals} down to the cross-cutting {@link TokenUsage} shape. */
+export function toUsage(totals: TokenUsageTotals): TokenUsage {
   return {
     cacheReadTokens: totals.cacheReadTokens,
     cacheWriteTokens: totals.cacheWriteTokens,

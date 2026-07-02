@@ -9,7 +9,7 @@ import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
 import type { RuntimeSubagentResultActionResult } from "#runtime/actions/types.js";
 import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter.js";
-import type { Usage } from "#shared/usage.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 
 /**
@@ -23,7 +23,7 @@ import { resumeHook } from "#internal/workflow/runtime.js";
 export async function notifyDelegatedParentStep(input: {
   readonly result: RuntimeSubagentResultActionResult | undefined;
   readonly serializedContext: Record<string, unknown>;
-  readonly usage?: Usage;
+  readonly usage?: TokenUsage;
 }): Promise<void> {
   "use step";
 

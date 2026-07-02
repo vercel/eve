@@ -4,7 +4,7 @@ import type { ChannelMethod, RouteContext } from "#public/definitions/channel.js
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import type { RuntimeSubagentResultActionResult } from "#runtime/actions/types.js";
 import type { JsonValue } from "#shared/json.js";
-import { usageSchema, type Usage } from "#shared/usage.js";
+import { tokenUsageSchema, type TokenUsage } from "#shared/token-usage.js";
 
 export const HTTP_SESSION_CALLBACK_CHANNEL_NAME_PREFIX = "eve/v1/callback";
 
@@ -17,7 +17,7 @@ type SessionTerminalCallbackPayload =
       readonly output: string;
       readonly sessionId: string;
       readonly subagentName: string;
-      readonly usage?: Usage;
+      readonly usage?: TokenUsage;
     }
   | {
       readonly callId: string;
@@ -131,14 +131,14 @@ function projectSessionCallbackResult(
 }
 
 /**
- * Usage arrives from a remote callee that may run a different eve version,
+ * TokenUsage arrives from a remote callee that may run a different eve version,
  * so it is validated independently and dropped — never rejected — when
  * malformed. The rest of the callback still resumes the parent.
  */
-function parseCallbackUsage(value: unknown): Usage | undefined {
+function parseCallbackUsage(value: unknown): TokenUsage | undefined {
   if (value === undefined) {
     return undefined;
   }
-  const parsed = usageSchema.safeParse(value);
+  const parsed = tokenUsageSchema.safeParse(value);
   return parsed.success ? parsed.data : undefined;
 }

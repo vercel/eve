@@ -3,7 +3,7 @@ import { parseSessionCallback } from "#channel/session-callback.js";
 import { SessionCallbackKey } from "#context/keys.js";
 import { createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
-import type { Usage } from "#shared/usage.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 const SESSION_CALLBACK_TIMEOUT_MS = 30_000;
 const log = createLogger("execution.session-callback");
@@ -27,7 +27,7 @@ export async function fireSessionCallbackStep(input: {
   readonly output?: unknown;
   readonly serializedContext: Record<string, unknown>;
   readonly status: "completed" | "failed";
-  readonly usage?: Usage;
+  readonly usage?: TokenUsage;
 }): Promise<void> {
   "use step";
 
@@ -87,7 +87,7 @@ function buildCompletedCallbackBody(input: {
   readonly callback: SessionCallback;
   readonly output: unknown;
   readonly sessionId: string;
-  readonly usage: Usage | undefined;
+  readonly usage: TokenUsage | undefined;
 }): Record<string, unknown> {
   const base = {
     callId: input.callback.callId,

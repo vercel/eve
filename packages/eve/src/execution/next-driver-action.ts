@@ -12,7 +12,7 @@
  * strips unknown fields.
  */
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import type { Usage } from "#shared/usage.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 /** Discriminated union the driver workflow body dispatches on. */
 export type NextDriverAction =
@@ -23,7 +23,7 @@ export type NextDriverAction =
       readonly sessionState: DurableSessionState;
       readonly serializedContext: Record<string, unknown>;
       /** Session-total token usage spent by the completed session. */
-      readonly usage?: Usage;
+      readonly usage?: TokenUsage;
     }
   | {
       readonly kind: "park";
