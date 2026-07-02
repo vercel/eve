@@ -232,13 +232,8 @@ async function hydrateMessageContent(content: unknown, sandbox: SandboxSession):
       }
       const bytes = await sandbox.readBinaryFile({ path: ref.path });
       if (bytes === null) {
-        // Resuming a durable session can outlive the sandbox that staged
-        // an earlier turn's attachment: an ephemeral backend tears the
-        // sandbox down between turns, so the bytes behind a historical
-        // ref are gone. Degrade to a text reference instead of failing
-        // the whole turn — the run continues and the model is told the
-        // attachment is no longer reachable rather than chasing a path
-        // that has nothing behind it.
+        // #325: sandbox snapshots can change during a session lifecycle
+        // as they are deployment bounded.
         log.warn(
           "sandbox-ref attachment bytes missing on hydration — degrading to text reference",
           {
@@ -247,7 +242,10 @@ async function hydrateMessageContent(content: unknown, sandbox: SandboxSession):
             size: ref.size,
           },
         );
-        return renderMissingSandboxRefAsTextPart(ref);
+        return {
+          text: `FileNotFound: Current snapshot may be newer and does not contain ${ref.path}.`,
+          type: "text",
+        } satisfies TextPart;
       }
       return { ...filePart, data: bytes, mediaType: ref.mediaType };
     }),
@@ -286,20 +284,6 @@ function shouldInlineSandboxRefAsBytes(ref: SandboxRef): boolean {
  */
 function renderSandboxRefAsTextPart(ref: SandboxRef): TextPart {
   return { text: `Attached file ${ref.path} (${ref.mediaType})`, type: "text" };
-}
-
-/**
- * Renders a sandbox-resident attachment whose staged bytes are gone (the
- * staging sandbox was torn down before the session resumed) as a
- * {@link TextPart}. Unlike {@link renderSandboxRefAsTextPart}, this states
- * the file is unreachable so the model does not try to read a path that no
- * longer resolves.
- */
-function renderMissingSandboxRefAsTextPart(ref: SandboxRef): TextPart {
-  return {
-    text: `Attached file ${ref.path} (${ref.mediaType}) is no longer available in this session.`,
-    type: "text",
-  };
 }
 
 async function stageFilePart(

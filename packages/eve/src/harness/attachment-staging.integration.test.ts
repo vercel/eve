@@ -649,7 +649,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
     // an unavailability notice — no file part reaches the model.
     expect(hydratedContent[0]).toEqual({ type: "text", text: "what's in the image?" });
     expect(hydratedContent[1]).toEqual({
-      text: "Attached file /workspace/attachments/deadbeefdeadbeef/ghost.png (image/png) is no longer available in this session.",
+      text: "FileNotFound: Current snapshot may be newer and does not contain /workspace/attachments/deadbeefdeadbeef/ghost.png.",
       type: "text",
     });
     const fileParts = hydratedContent.filter((p) => (p as FilePart).type === "file");
@@ -683,7 +683,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
     const hydratedContent = hydrated[0]?.content as Exclude<UserContent, string>;
     expect(hydratedContent[0]).toEqual({ type: "text", text: "describe the image" });
     expect(hydratedContent[1]).toEqual({
-      text: `Attached file ${stagedPath} (image/png) is no longer available in this session.`,
+      text: `FileNotFound: Current snapshot may be newer and does not contain ${stagedPath}.`,
       type: "text",
     });
     expect(hydratedContent.filter((p) => (p as FilePart).type === "file")).toHaveLength(0);
