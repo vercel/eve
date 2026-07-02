@@ -1,7 +1,7 @@
 /**
- * Per-turn rolling token-usage accumulator for `$eve.*` observability
- * tags. Lives on `session.state` so the totals survive workflow step
- * boundaries the way the rest of the harness state does.
+ * Token-usage accumulator for `$eve.*` observability tags and session limits.
+ * Lives on `session.state` so the totals survive workflow step boundaries the
+ * way the rest of the harness state does.
  *
  * The harness runs each turn as a sequence of `"use step"` invocations
  * (one per tool-loop iteration). Each step knows its own
@@ -11,30 +11,36 @@
  * `session.state`, add the new step's usage, write the running total
  * back. The most recent emit then carries the final per-turn total.
  *
- * `turnId` keys the state so a fresh turn starts at zero without
- * relying on a separate "reset" code path — when the harness moves to
- * a new turn, the stale totals are discarded automatically.
+ * `turnId` keys the turn totals so a fresh turn starts at zero without relying
+ * on a separate "reset" code path. Session totals stay in the same state record
+ * and keep accumulating until the durable session ends.
  */
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 
 const HARNESS_TURN_USAGE_STATE_KEY = "eve.harness.turnUsage";
 
-/**
- * Rolling token usage for the in-flight turn.
- *
- * `turnId` is the in-flight turn's stable id; when the harness step
- * runs in a different turn (or with the empty-string between-turns
- * sentinel), totals are reset.
- */
-export interface TurnUsageState {
+export interface TokenUsageTotals {
   readonly cacheReadTokens: number;
   readonly cacheWriteTokens: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
+}
+
+export type TokenUsageDelta = Partial<TokenUsageTotals>;
+
+/**
+ * Rolling token usage for the durable session and the in-flight turn.
+ *
+ * `turnId` is the in-flight turn's stable id; when the harness step
+ * runs in a different turn, the flat turn totals reset. The nested
+ * `session` totals do not reset.
+ */
+export interface TurnUsageState extends TokenUsageTotals {
+  readonly session: TokenUsageTotals;
   readonly turnId: string;
 }
 
-const ZERO_USAGE: Omit<TurnUsageState, "turnId"> = {
+const ZERO_TOKEN_USAGE: TokenUsageTotals = {
   cacheReadTokens: 0,
   cacheWriteTokens: 0,
   inputTokens: 0,
@@ -44,6 +50,45 @@ const ZERO_USAGE: Omit<TurnUsageState, "turnId"> = {
 /** Reads the stored per-turn token state, or `undefined` when absent. */
 export function getTurnUsageState(state: SessionStateMap | undefined): TurnUsageState | undefined {
   return state?.[HARNESS_TURN_USAGE_STATE_KEY] as TurnUsageState | undefined;
+}
+
+export type SessionTokenLimitViolation =
+  | {
+      readonly kind: "input";
+      readonly limit: number;
+      readonly usedTokens: number;
+    }
+  | {
+      readonly kind: "output";
+      readonly limit: number;
+      readonly usedTokens: number;
+    };
+
+export function getSessionTokenUsage(session: Pick<HarnessSession, "state">): TokenUsageTotals {
+  return getTurnUsageState(session.state)?.session ?? ZERO_TOKEN_USAGE;
+}
+
+export function getSessionTokenLimitViolation(
+  session: Pick<HarnessSession, "limits" | "state">,
+): SessionTokenLimitViolation | null {
+  const usage = getSessionTokenUsage(session);
+  const maxInputTokensPerSession = session.limits?.maxInputTokensPerSession;
+  const maxOutputTokensPerSession = session.limits?.maxOutputTokensPerSession;
+  if (maxInputTokensPerSession !== undefined && usage.inputTokens >= maxInputTokensPerSession) {
+    return {
+      kind: "input",
+      limit: maxInputTokensPerSession,
+      usedTokens: usage.inputTokens,
+    };
+  }
+  if (maxOutputTokensPerSession !== undefined && usage.outputTokens >= maxOutputTokensPerSession) {
+    return {
+      kind: "output",
+      limit: maxOutputTokensPerSession,
+      usedTokens: usage.outputTokens,
+    };
+  }
+  return null;
 }
 
 /** Writes per-turn token state onto a new copy of the session. */
@@ -66,26 +111,42 @@ export function setTurnUsageState(session: HarnessSession, next: TurnUsageState)
 export function accumulateTurnUsage(input: {
   readonly previous: TurnUsageState | undefined;
   readonly turnId: string;
-  readonly usage: {
-    readonly cachedInputTokens?: number;
-    readonly inputTokens?: number;
-    readonly inputTokenDetails?: {
-      readonly cacheWriteTokens?: number;
-    };
-    readonly outputTokens?: number;
-  };
+  readonly usage: TokenUsageDelta | undefined;
 }): TurnUsageState {
-  const base =
+  const delta = toTokenUsageDelta(input.usage);
+  const previousSession = input.previous?.session ?? ZERO_TOKEN_USAGE;
+  const turnBase =
     input.previous !== undefined && input.previous.turnId === input.turnId
       ? input.previous
-      : { ...ZERO_USAGE, turnId: input.turnId };
+      : ZERO_TOKEN_USAGE;
 
   return {
+    ...addTokenUsage(turnBase, delta),
     turnId: input.turnId,
-    cacheReadTokens: base.cacheReadTokens + (input.usage.cachedInputTokens ?? 0),
-    cacheWriteTokens:
-      base.cacheWriteTokens + (input.usage.inputTokenDetails?.cacheWriteTokens ?? 0),
-    inputTokens: base.inputTokens + (input.usage.inputTokens ?? 0),
-    outputTokens: base.outputTokens + (input.usage.outputTokens ?? 0),
+    session: addTokenUsage(previousSession, delta),
+  };
+}
+
+function addTokenUsage(base: TokenUsageTotals, delta: TokenUsageTotals): TokenUsageTotals {
+  return {
+    cacheReadTokens: base.cacheReadTokens + delta.cacheReadTokens,
+    cacheWriteTokens: base.cacheWriteTokens + delta.cacheWriteTokens,
+    inputTokens: base.inputTokens + delta.inputTokens,
+    outputTokens: base.outputTokens + delta.outputTokens,
+  };
+}
+
+function toTokenUsageDelta(usage: TokenUsageDelta | undefined): TokenUsageTotals {
+  if (usage === undefined) {
+    return ZERO_TOKEN_USAGE;
+  }
+
+  const inputTokens = usage.inputTokens ?? 0;
+  const outputTokens = usage.outputTokens ?? 0;
+  return {
+    cacheReadTokens: usage.cacheReadTokens ?? 0,
+    cacheWriteTokens: usage.cacheWriteTokens ?? 0,
+    inputTokens,
+    outputTokens,
   };
 }

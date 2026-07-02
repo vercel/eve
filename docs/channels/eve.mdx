@@ -18,9 +18,10 @@ export default eveChannel({
 
 ## Routes
 
-The channel exposes routes that create sessions, send follow-ups, and stream events:
+The application exposes a health route plus eve channel routes that inspect the agent, create sessions, send follow-ups, and stream events:
 
 - `GET /eve/v1/health`
+- `GET /eve/v1/info`
 - `POST /eve/v1/session` (start a session)
 - `POST /eve/v1/session/:sessionId` (send a follow-up)
 - `GET /eve/v1/session/:sessionId/stream` (stream events, NDJSON)
@@ -70,7 +71,7 @@ export default eveChannel({
 
 ## Authentication
 
-The `auth` option decides who can call these routes. The built-in helpers cover development and trusted infrastructure:
+The `auth` option decides who can call `/eve/v1/info` and the session routes. The built-in helpers cover development and trusted infrastructure:
 
 - `localDev()` accepts requests during local development.
 - `vercelOidc()` lets the local CLI reach a deployed agent, and lets other internal deployments from your team call it.

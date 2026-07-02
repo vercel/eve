@@ -344,7 +344,7 @@ describe("EveTUIRunner agent header", () => {
       agent: {
         ...AGENT_INFO.agent,
         model: {
-          id: "anthropic/claude-sonnet-4.6",
+          id: "anthropic/claude-sonnet-5",
         },
       },
     };
@@ -381,7 +381,7 @@ describe("EveTUIRunner agent header", () => {
 
     expect(headers).toHaveLength(2);
     expect(headers[0]?.info?.agent.model.id).toBe("gpt-5");
-    expect(headers[1]?.info?.agent.model.id).toBe("anthropic/claude-sonnet-4.6");
+    expect(headers[1]?.info?.agent.model.id).toBe("anthropic/claude-sonnet-5");
     expect(client.info).toHaveBeenCalledTimes(2);
     expect(session.send).toHaveBeenCalledTimes(2);
   });
@@ -395,7 +395,7 @@ describe("EveTUIRunner agent header", () => {
       agent: {
         ...AGENT_INFO.agent,
         model: {
-          id: "anthropic/claude-sonnet-4.6",
+          id: "anthropic/claude-sonnet-5",
         },
       },
     };
@@ -436,7 +436,7 @@ describe("EveTUIRunner agent header", () => {
     await settleAsyncWork();
 
     expect(headers).toHaveLength(2);
-    expect(headers[1]?.info?.agent.model.id).toBe("anthropic/claude-sonnet-4.6");
+    expect(headers[1]?.info?.agent.model.id).toBe("anthropic/claude-sonnet-5");
     expect(client.info).toHaveBeenCalledTimes(3);
     expect(session.send).not.toHaveBeenCalled();
 

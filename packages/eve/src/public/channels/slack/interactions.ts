@@ -177,16 +177,24 @@ function extractActionLabel(action: Record<string, unknown>): string | undefined
 }
 
 function findPromptBlock(blocks: readonly unknown[]): unknown {
+  return findPromptBlocks(blocks)[0];
+}
+
+function findPromptBlocks(blocks: readonly unknown[]): unknown[] {
+  const promptBlocks: unknown[] = [];
   for (const block of blocks) {
-    if (
-      typeof block === "object" &&
-      block !== null &&
-      (block as { type?: unknown }).type === "section"
-    ) {
-      return block;
+    if (typeof block !== "object" || block === null) {
+      continue;
+    }
+    const type = (block as { type?: unknown }).type;
+    if (type === "actions") {
+      break;
+    }
+    if (type === "section" || type === "context" || type === "divider" || type === "image") {
+      promptBlocks.push(block);
     }
   }
-  return undefined;
+  return promptBlocks;
 }
 
 function readPromptTextFromBlocks(blocks: readonly unknown[]): string | undefined {
@@ -396,11 +404,12 @@ async function handleViewSubmission(
     return ack;
   }
 
-  const text = payload.values?.find(
-    (value) =>
-      value.blockId === HITL_FREEFORM_MODAL_BLOCK_ID &&
-      value.actionId === HITL_FREEFORM_MODAL_ACTION_ID,
-  )?.value ?? "";
+  const text =
+    payload.values?.find(
+      (value) =>
+        value.blockId === HITL_FREEFORM_MODAL_BLOCK_ID &&
+        value.actionId === HITL_FREEFORM_MODAL_ACTION_ID,
+    )?.value ?? "";
   if (text.length === 0) return ack;
 
   // `user` is Required on view_submission payloads; `team_id` is on the
@@ -461,7 +470,7 @@ async function updateAnsweredHitlCard(
   if (!answerLabel) return;
 
   const blocks = buildAnsweredBlocks({
-    promptBlock: findPromptBlock(interaction.messageBlocks),
+    promptBlocks: findPromptBlocks(interaction.messageBlocks),
     answerLabel,
     userId: hitlAction.user.id,
   });
@@ -493,7 +502,7 @@ async function updateAnsweredFreeformCard(input: {
   readonly deps: InteractionHandlerDeps;
 }): Promise<void> {
   const blocks = buildAnsweredBlocks({
-    promptBlock: undefined,
+    promptBlocks: [],
     answerLabel: input.answerLabel,
     userId: input.userId,
   });

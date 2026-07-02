@@ -16,6 +16,7 @@ on:
       - "packages/eve/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
+      - "scripts/init-install-report.mjs"
       - "scripts/nitro-bundle-report-compare.mjs"
       - "scripts/nitro-bundle-report-budget.mjs"
       - "scripts/nitro-bundle-report.mjs"

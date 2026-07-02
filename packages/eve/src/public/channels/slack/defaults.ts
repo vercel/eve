@@ -9,15 +9,23 @@ import {
   formatConnectionDisplayName,
   type ConnectionAuthorizationOutcome,
 } from "#public/channels/slack/connections.js";
-import { renderInputRequestBlocks } from "#public/channels/slack/hitl.js";
+import {
+  formatInputRequestFallbackText,
+  renderInputRequestBlocks,
+} from "#public/channels/slack/hitl.js";
 import type { SlackMessage } from "#public/channels/slack/inbound.js";
-import { truncateMessageText, truncateTypingStatus } from "#public/channels/slack/limits.js";
+import {
+  SLACK_MAX_BLOCKS_PER_MESSAGE,
+  truncateMessageText,
+  truncateTypingStatus,
+} from "#public/channels/slack/limits.js";
 import type {
   SlackChannelEvents,
   SlackChannelInternalEvents,
   SlackContext,
   SlackMentionResult,
 } from "#public/channels/slack/slackChannel.js";
+import type { InputRequest } from "#runtime/input/types.js";
 
 const log = createLogger("slack.defaults");
 const REASONING_TYPING_REFRESH_INTERVAL_MS = 5_000;
@@ -91,17 +99,41 @@ function firstNonEmptyLine(text: string): string | undefined {
  * Default `input.requested` handler — renders each pending HITL
  * request as Slack `block_actions`. Buttons by default; radio for
  * ≤6-option select requests; static_select for >6-option select
- * requests. Override by declaring `events["input.requested"]`.
+ * requests. Batches split into multiple posts when they would exceed
+ * Slack's 50-block message cap. Override by declaring
+ * `events["input.requested"]`.
  */
 export function defaultInputRequestedHandler(): NonNullable<SlackChannelEvents["input.requested"]> {
   return async (data, channel, _ctx) => {
-    if (data.requests.length === 0) return;
-    const promptText = truncateMessageText(data.requests.map((r) => r.prompt).join("\n"));
-    await channel.thread.post({
-      blocks: data.requests.flatMap(renderInputRequestBlocks),
-      text: promptText,
-    });
+    for (const post of buildInputRequestPosts(data.requests)) {
+      await channel.thread.post(post);
+    }
   };
+}
+
+/**
+ * Groups HITL requests into `chat.postMessage` payloads that stay under
+ * Slack's block-count cap. A request's blocks never split across posts,
+ * so its buttons always land in the same message as its prompt.
+ */
+function buildInputRequestPosts(
+  requests: readonly InputRequest[],
+): Array<{ blocks: unknown[]; text: string }> {
+  const groups: Array<{ blocks: unknown[]; fallbacks: string[] }> = [];
+  for (const request of requests) {
+    const blocks = renderInputRequestBlocks(request);
+    const current = groups.at(-1);
+    if (current && current.blocks.length + blocks.length <= SLACK_MAX_BLOCKS_PER_MESSAGE) {
+      current.blocks.push(...blocks);
+      current.fallbacks.push(formatInputRequestFallbackText(request));
+    } else {
+      groups.push({ blocks, fallbacks: [formatInputRequestFallbackText(request)] });
+    }
+  }
+  return groups.map((group) => ({
+    blocks: group.blocks,
+    text: truncateMessageText(group.fallbacks.join("\n")),
+  }));
 }
 
 /**

@@ -177,6 +177,23 @@ describe("configureNitroRoutes", () => {
     expect(virtualSource).not.toContain('"G:\\');
   });
 
+  it("bakes the agent name into the home page route", async () => {
+    const nitro = createNitroStub();
+
+    await configureNitroRoutes(nitro, createPreparedHost({ agentName: "support-agent" }), {
+      surface: "app",
+    });
+
+    const homeHandler = nitro.options.handlers.find(
+      (handler) => handler.route === "/" && handler.method === "GET",
+    );
+    expect(homeHandler?.handler).toBe("#eve-route/");
+
+    const virtualSource = nitro.options.virtual[homeHandler?.handler ?? ""];
+    expect(virtualSource).toContain("handleHomePageRequest");
+    expect(virtualSource).toContain('{"agentName":"support-agent"}');
+  });
+
   it("registers the health route for HEAD so load balancers probing with HEAD see 200", async () => {
     const nitro = createNitroStub();
 
@@ -299,21 +316,29 @@ describe("configureNitroRoutes", () => {
     });
 
     expect(devNitro.options.handlers).toContainEqual({
-      handler: `#eve-route${EVE_INFO_ROUTE_PATH}`,
+      handler: `#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`,
       method: "GET",
       route: EVE_INFO_ROUTE_PATH,
     });
     expect(prodNitro.options.handlers).toContainEqual({
-      handler: `#eve-route${EVE_INFO_ROUTE_PATH}`,
+      handler: `#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`,
       method: "GET",
       route: EVE_INFO_ROUTE_PATH,
     });
-    expect(devNitro.options.virtual[`#eve-route${EVE_INFO_ROUTE_PATH}`]).toContain(
-      '"mode":"development"',
-    );
-    expect(prodNitro.options.virtual[`#eve-route${EVE_INFO_ROUTE_PATH}`]).toContain(
-      '"mode":"production"',
-    );
+    expect(
+      devNitro.options.virtual[`#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`],
+    ).toContain('"dev":true');
+    expect(
+      prodNitro.options.virtual[`#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`],
+    ).toContain('"dev":false');
+    expect(
+      devNitro.options.virtual[`#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`],
+    ).toContain("dispatchChannelRequest");
+    expect(
+      prodNitro.options.virtual[`#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`],
+    ).toContain("dispatchChannelRequest");
+    expect(devNitro.options.virtual[`#eve-route${EVE_INFO_ROUTE_PATH}`]).toBeUndefined();
+    expect(prodNitro.options.virtual[`#eve-route${EVE_INFO_ROUTE_PATH}`]).toBeUndefined();
   });
 
   it("does not register direct workflow queue handlers for Vercel production builds", async () => {

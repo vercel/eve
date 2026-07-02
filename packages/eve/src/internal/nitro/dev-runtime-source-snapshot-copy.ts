@@ -53,6 +53,7 @@ export async function copyDevelopmentSourceSnapshot(
 
   await rewriteSnapshotTsConfigAbsoluteExtends(plan);
   await createSnapshotSymlinks(plan);
+  await ensureRuntimePackageJson(plan);
   await validateDevelopmentSourceSnapshot(plan);
 }
 
@@ -264,6 +265,27 @@ async function createSnapshotSymlinks(plan: DevelopmentSourceSnapshotPlan): Prom
     await mkdir(dirname(snapshotLinkPath), { recursive: true });
     await symlink(relativeTarget, snapshotLinkPath, "junction");
   }
+}
+
+async function ensureRuntimePackageJson(plan: DevelopmentSourceSnapshotPlan): Promise<void> {
+  const runtimePackageJsonPath = join(plan.runtimeAppRoot, "package.json");
+
+  if (existsSync(runtimePackageJsonPath)) {
+    return;
+  }
+
+  await mkdir(plan.runtimeAppRoot, { recursive: true });
+  await writeFile(
+    runtimePackageJsonPath,
+    `${JSON.stringify(
+      {
+        private: true,
+        type: "module",
+      },
+      null,
+      2,
+    )}\n`,
+  );
 }
 
 async function validateDevelopmentSourceSnapshot(

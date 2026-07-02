@@ -158,7 +158,15 @@ describe("ensureChannel", () => {
         path: join(projectRoot, "package.json"),
         dependencies: expect.arrayContaining(["eve", "next", "react", "react-dom"]),
         devDependencies: expect.arrayContaining(["typescript", "@types/react"]),
-        scripts: expect.arrayContaining(["build", "dev", "start", "typecheck"]),
+        scripts: expect.arrayContaining([
+          "build",
+          "build:eve",
+          "dev",
+          "dev:eve",
+          "start",
+          "start:eve",
+          "typecheck",
+        ]),
       }),
     ]);
     await expect(readFile(join(projectRoot, "agent/channels/eve.ts"), "utf8")).resolves.toBe(
@@ -189,7 +197,10 @@ describe("ensureChannel", () => {
     );
     const packageJson = await readFile(join(projectRoot, "package.json"), "utf8");
     expect(packageJson).toContain('"next": "16.2.6"');
+    expect(packageJson).toContain('"build:eve": "eve build"');
     expect(packageJson).toContain('"dev": "next dev"');
+    expect(packageJson).toContain('"dev:eve": "eve dev"');
+    expect(packageJson).toContain('"start:eve": "eve start"');
     expect(JSON.parse(packageJson)).toMatchObject({ engines: { node: "24.x" } });
     await expect(readFile(join(projectRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
       PNPM_WORKSPACE_CONTENT,

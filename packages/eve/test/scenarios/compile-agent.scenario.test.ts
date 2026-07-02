@@ -46,7 +46,7 @@ const ROOT_TYPE_DEFINITIONS = fileURLToPath(
 const TSC_BIN_PATH = fileURLToPath(
   new URL("../../../../node_modules/typescript/bin/tsc", import.meta.url),
 );
-const DEFAULT_AGENT_MODEL_ID = "anthropic/claude-sonnet-4.6";
+const DEFAULT_AGENT_MODEL_ID = "anthropic/claude-sonnet-5";
 
 describe("compiler artifacts", () => {
   it("uses the framework default model when agent.ts is omitted", async () => {

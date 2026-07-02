@@ -76,6 +76,33 @@ function actionResult(callId: string, toolName: string): HandleMessageStreamEven
   };
 }
 
+function failedSubagentResult(input: {
+  callId: string;
+  output: unknown;
+  subagentName: string;
+}): HandleMessageStreamEvent {
+  return {
+    type: "action.result",
+    data: {
+      error: {
+        code: "SUBAGENT_DEPTH_LIMIT",
+        message: "Subagent depth limit reached",
+      },
+      result: {
+        callId: input.callId,
+        isError: true,
+        kind: "subagent-result",
+        output: input.output as never,
+        subagentName: input.subagentName,
+      },
+      sequence: 2,
+      status: "failed",
+      stepIndex: 0,
+      turnId: "t1",
+    },
+  };
+}
+
 describe("run assertions", () => {
   it("succeeded passes a clean run and fails a failed or parked run", async () => {
     expect((await Run.succeeded().evaluate(makeResult({ status: "completed" }))).score).toBe(1);
@@ -212,6 +239,27 @@ describe("run assertions", () => {
     });
 
     expect((await Run.toolOrder(["step-a"]).evaluate(result)).score).toBe(0);
+  });
+
+  it("noFailedActions includes failed action details", async () => {
+    const outcome = await Run.noFailedActions().evaluate(
+      makeResult({
+        events: [
+          failedSubagentResult({
+            callId: "call-a",
+            output: "Subagent recursion stopped before LEVEL_4_REACHED",
+            subagentName: "agent",
+          }),
+        ],
+      }),
+    );
+
+    expect(outcome.score).toBe(0);
+    expect(outcome.message).toContain("subagent-result");
+    expect(outcome.message).toContain("agent");
+    expect(outcome.message).toContain("call-a");
+    expect(outcome.message).toContain("Subagent depth limit reached");
+    expect(outcome.message).toContain("Subagent recursion stopped");
   });
 
   it("matches typed event counts and ordered event groups", async () => {

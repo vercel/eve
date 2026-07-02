@@ -104,13 +104,13 @@ Start with the [TypeScript SDK](../guides/client/overview) guide. It covers basi
 
 ## Inspect the agent over HTTP
 
-`GET /eve/v1/info` returns a JSON inspection snapshot for the running agent: model, instructions, authored and framework tools, skills, channels, schedules, subagents, sandbox, connections, hooks, workflow, and workspace metadata. Local development accepts loopback requests; deployed Vercel targets require the route's OIDC auth.
+`GET /eve/v1/info` returns a JSON inspection snapshot for the running agent: model, instructions, authored and framework tools, skills, channels, schedules, subagents, sandbox, connections, hooks, workflow, and workspace metadata. It uses the resolved `eveChannel()` route auth when `agent/channels/eve.ts` authors one; otherwise it falls back to the framework default of Vercel OIDC plus local development access.
 
 ```bash
 curl http://127.0.0.1:3000/eve/v1/info
 ```
 
-The route uses the same default auth chain as the eve channel (`[vercelOidc(), localDev()]`). A local Vercel OIDC bearer takes precedence; other local requests fall back to development access. A deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection).
+With the default auth chain (`[vercelOidc(), localDev()]`), a local Vercel OIDC bearer takes precedence and other local requests fall back to development access. A deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection).
 
 ## Dispatch order
 

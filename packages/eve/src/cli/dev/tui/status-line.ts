@@ -9,7 +9,7 @@ import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 export interface StatusLineInput {
   /** Port of the connected local development server; omitted for remote sessions. */
   serverPort?: string;
-  /** Resolved model slug, e.g. "anthropic/claude-sonnet-4-6"; absent when `/eve/v1/info` failed. */
+  /** Resolved model slug, e.g. "anthropic/claude-sonnet-5"; absent when `/eve/v1/info` failed. */
   model?: string;
   /** Preformatted token-flow segment (formatTokenFlow output), e.g. `↑ 394.4K ↓ 4.3K`. */
   tokens?: string;

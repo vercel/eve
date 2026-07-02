@@ -1,136 +1,324 @@
 "use client";
 
-import { motion, useInView } from "motion/react";
-import { useRef } from "react";
+import { SiDocker, SiPostgresql, SiSnowflake } from "@icons-pack/react-simple-icons";
+import {
+  IconArrowUpRightSmall,
+  IconLinked,
+  IconMessage,
+  IconOpenai,
+  IconSandbox,
+  IconSparkles,
+  IconWorkflow,
+  IconWrench,
+} from "@vercel/geistdocs/assets/icons";
+import { IconArrowUpRight } from "@vercel/geistdocs/assets/icons/icon-arrow-up-right";
+import { LogoEve } from "@vercel/geistdocs/assets/logos/logo-eve";
+import { LogoIconVercel } from "@vercel/geistdocs/assets/logos/logo-icon-vercel";
+import { Switch } from "@vercel/geistdocs/components/switch";
+import Link from "next/link";
+import { type ComponentType, type JSX, type ReactNode, useState } from "react";
+import { cn } from "@/lib/utils";
+import { GradientBorder } from "./gradient-border";
 
-export function ArchitectureDiagram() {
-  const ref = useRef<HTMLDivElement>(null);
-  const isInView = useInView(ref, { once: true, amount: 0.2 });
+type Mode = "managed" | "self-hosted";
+
+type LogoComponent = ComponentType<{
+  size?: number;
+  color?: string;
+  className?: string;
+}>;
+
+interface Backend {
+  label: string;
+  Logo: LogoComponent;
+}
+
+interface Primitive {
+  icon: ReactNode;
+  title: string;
+  /** Overrides `title` per mode (e.g. the SDK only exists on managed infra). */
+  titleByMode?: Record<Mode, string>;
+  description: string;
+  href?: string;
+  /** Drop the link in self-hosted mode (the linked product is Vercel-only). */
+  managedOnlyHref?: boolean;
+  /** Concrete backend shown inside the card, swapped by the managed/self-hosted toggle. */
+  backend?: Record<Mode, Backend>;
+}
+
+const RUNTIME_ITEMS: Primitive[] = [
+  {
+    icon: <IconSparkles className="mt-0.5 shrink-0 text-gray-1000" size={18} />,
+    title: "AI SDK",
+    description: "Model calls, streaming",
+    href: "https://ai-sdk.dev/",
+    backend: {
+      managed: { label: "AI Gateway", Logo: LogoIconVercel },
+      "self-hosted": { label: "GPT-5.4 API", Logo: IconOpenai },
+    },
+  },
+  {
+    icon: <IconSandbox className="mt-0.5 shrink-0 text-gray-1000" size={18} />,
+    title: "Sandbox SDK",
+    titleByMode: { managed: "Vercel Sandbox SDK", "self-hosted": "Sandbox" },
+    description: "Isolated execution",
+    href: "https://vercel.com/docs/sandbox/sdk-reference",
+    managedOnlyHref: true,
+    backend: {
+      managed: { label: "Vercel Sandbox", Logo: LogoIconVercel },
+      "self-hosted": { label: "Docker", Logo: SiDocker },
+    },
+  },
+  {
+    icon: <IconLinked className="mt-0.5 shrink-0 text-gray-1000" size={18} />,
+    title: "Connection SDK",
+    titleByMode: {
+      managed: "Vercel Connection SDK",
+      "self-hosted": "Connection",
+    },
+    description: "MCP/HTTP endpoints",
+    href: "https://vercel.com/docs/connect",
+    managedOnlyHref: true,
+    backend: {
+      managed: { label: "Vercel Connect", Logo: LogoIconVercel },
+      "self-hosted": { label: "Snowflake API", Logo: SiSnowflake },
+    },
+  },
+  {
+    icon: <IconWrench className="mt-0.5 shrink-0 text-gray-1000" size={18} />,
+    title: "Tools & Subagents",
+    description: "Functions, child agents",
+  },
+];
+
+const WORKFLOW_BACKEND: Record<Mode, Backend> = {
+  managed: { label: "Vercel Workflows", Logo: LogoIconVercel },
+  "self-hosted": {
+    label: "Postgres (@workflow/world-postgres)",
+    Logo: SiPostgresql,
+  },
+};
+
+const CHANNELS = [
+  "Slack",
+  "Discord",
+  "Web Chat",
+  "Google Chat",
+  "Microsoft Teams",
+  "WhatsApp",
+  "API",
+  "Cron",
+  "Twilio",
+  "Linear",
+  "GitHub",
+  "Telegram",
+];
+
+const CAPTIONS: Record<Mode, string> = {
+  managed:
+    "Fully managed via Vercel. Sandboxes, durable workflows, model routing, and observability handled for you.",
+  "self-hosted":
+    "You can deploy anywhere. Postgres-backed durability, Docker sandbox, Ansible deploy, zero managed services.",
+};
+
+function SectionLabel({ children }: { children: string }): JSX.Element {
+  return (
+    <span className="font-mono font-medium uppercase tracking-[0.1em] text-gray-1000 text-label-14">
+      {children}
+    </span>
+  );
+}
+
+function BackendChip({ backend }: { backend: Backend }): JSX.Element {
+  return (
+    <div className="mt-2 inline-flex w-fit items-center gap-1.5 rounded-md border px-2 py-1 text-gray-1000 motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-200 motion-safe:ease-out">
+      <backend.Logo className="shrink-0" color="default" size={13} />
+      <span className="text-gray-1000 text-copy-13">{backend.label}</span>
+    </div>
+  );
+}
+
+function PrimitiveCard({
+  icon,
+  title,
+  description,
+  href,
+  backend,
+}: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+  href?: string;
+  backend?: Backend;
+}): JSX.Element {
+  const body = (
+    <>
+      {icon}
+      <div className="flex flex-col gap-1">
+        <span className="font-medium text-gray-1000 text-copy-14">{title}</span>
+        <span className="text-gray-900 text-copy-14">{description}</span>
+        {backend ? <BackendChip key={backend.label} backend={backend} /> : null}
+      </div>
+    </>
+  );
+
+  if (!href) {
+    return <div className="flex items-start gap-2.5 rounded-lg p-4 material-small">{body}</div>;
+  }
 
   return (
-    <section className="px-4 py-24 sm:px-12" ref={ref}>
+    <Link
+      href={href}
+      className="group relative flex items-start gap-2.5 rounded-lg p-4 transition-colors material-small hover:bg-background-200"
+    >
+      {body}
+      <IconArrowUpRight
+        className="absolute top-3 right-3 text-gray-900 opacity-0 transition-opacity group-hover:opacity-100"
+        size={14}
+      />
+    </Link>
+  );
+}
+
+export function ArchitectureDiagram() {
+  const [mode, setMode] = useState<Mode>("self-hosted");
+  const selfHosted = mode === "self-hosted";
+
+  return (
+    <section className="py-24 px-4">
       <div className="mx-auto max-w-5xl">
-        <h2 className="text-center text-3xl font-bold tracking-tighter text-gray-1000 sm:text-4xl">
-          Three layers, cleanly separated
+        <h2 className="text-center font-medium! text-heading-32 tracking-tighter text-gray-1000 sm:text-heading-40 text-balance">
+          Built on open-source SDKs, yours to self-host
         </h2>
-        <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">
-          The <span className="font-semibold text-gray-1000">runtime</span> owns durability and
-          state. The <span className="font-semibold text-gray-1000">harness</span> executes AI work.
-          The <span className="font-semibold text-gray-1000">channel</span> is where your agent gets
-          surfaced.
+        <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900 text-balance">
+          Swap any backend and self-host the whole runtime, with zero managed-infrastructure
+          dependencies.
         </p>
 
-        <motion.div
-          initial={{ opacity: 0, y: 24 }}
-          animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-          className="mt-16 flex flex-col gap-4 md:flex-row"
-        >
-          {/* Left column: Harness above Runtime */}
-          <div className="flex flex-1 flex-col gap-4">
-            {/* Harness */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={isInView ? { opacity: 1 } : {}}
-              transition={{ delay: 0.1, duration: 0.4 }}
-              className="rounded-md border-2 border-dashed border-purple-800 dark:border-purple-600 bg-background px-5 py-4"
+        {/* Managed vs. self-hosted toggle drives the backend shown inside each card. */}
+        <div className="mt-12 flex items-center justify-center gap-4 text-copy-14">
+          <button
+            type="button"
+            onClick={() => setMode(selfHosted ? "managed" : "self-hosted")}
+            aria-pressed={!selfHosted}
+            className={cn(
+              "cursor-pointer transition-colors",
+              selfHosted ? "text-gray-900 hover:text-gray-1000" : "text-gray-1000",
+            )}
+          >
+            Managed
+          </button>
+          <Switch
+            checked={selfHosted}
+            onCheckedChange={(checked) => setMode(checked ? "self-hosted" : "managed")}
+            aria-label="Toggle deployment target"
+            className="cursor-pointer"
+          />
+          <span className="text-copy-14">
+            <button
+              type="button"
+              onClick={() => setMode(selfHosted ? "managed" : "self-hosted")}
+              aria-pressed={selfHosted}
+              className={cn(
+                "cursor-pointer transition-colors",
+                selfHosted ? "text-gray-1000" : "text-gray-900 hover:text-gray-1000",
+              )}
             >
-              <div className="flex items-center gap-2">
-                <div className="h-2.5 w-2.5 rounded-full bg-purple-700 dark:bg-purple-500" />
-                <div className="text-sm font-bold uppercase tracking-widest text-purple-800 dark:text-purple-500">
-                  Harness
-                </div>
-              </div>
-              <div className="mt-1 text-sm text-gray-900">
-                Executes one unit of AI work per workflow step
-              </div>
-            </motion.div>
+              Self-hosted
+            </button>{" "}
+            <Link
+              href="https://github.com/vercel-labs/steve"
+              className="text-gray-900 underline decoration-gray-400 underline-offset-2 transition-colors hover:text-gray-1000"
+            >
+              (example)
+            </Link>
+          </span>
+        </div>
 
-            {/* Runtime (contains workflow + primitives) */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={isInView ? { opacity: 1 } : {}}
-              transition={{ delay: 0.2, duration: 0.4 }}
-              className="flex flex-1 flex-col rounded-md border-2 border-dashed border-green-800 dark:border-green-600 bg-background p-5"
-            >
-              <div className="mb-1 flex items-center gap-2">
-                <div className="h-2.5 w-2.5 rounded-full bg-green-700 dark:bg-green-500" />
-                <div className="text-sm font-bold uppercase tracking-widest text-green-800 dark:text-green-500">
-                  Runtime
-                </div>
-              </div>
-              <div className="mb-5 text-sm text-gray-900">
+        <LogoEve className="mt-10 ml-5 text-gray-1000" height={13} />
+        <div className="mt-3 flex flex-col gap-4 lg:flex-row">
+          {/* Runtime */}
+          <div className="relative flex flex-1 flex-col gap-4 rounded-xl p-5">
+            <GradientBorder />
+            <div className="flex flex-col gap-1">
+              <SectionLabel>Runtime</SectionLabel>
+              <span className="text-gray-900 text-copy-14">
                 Durable execution, state persistence, event streaming
-              </div>
+              </span>
+            </div>
 
-              {/* Durable Workflow */}
-              <div className="mb-4 flex items-center gap-3 rounded-md border bg-gray-100 px-4 py-3">
-                <span className="text-xl text-green-700 dark:text-green-500">&#x21bb;</span>
-                <div>
-                  <div className="text-sm font-semibold text-gray-1000">Durable Workflow</div>
-                  <div className="text-sm text-gray-900">
-                    Checkpointed steps, park between messages, resume on delivery
-                  </div>
-                </div>
-              </div>
+            <PrimitiveCard
+              icon={<IconWorkflow className="mt-0.5 shrink-0 text-gray-1000" size={18} />}
+              title="Durable Workflow"
+              description="Checkpointed steps, park between messages, resume on delivery"
+              href="https://workflow-sdk.dev/worlds"
+              backend={WORKFLOW_BACKEND[mode]}
+            />
 
-              {/* Primitives (inside runtime) */}
-              <div className="grid flex-1 grid-cols-2 gap-3 md:grid-cols-4">
-                <div className="rounded-md border bg-gray-100 px-4 py-3">
-                  <div className="text-sm font-semibold text-blue-800 dark:text-blue-500">
-                    AI SDK
-                  </div>
-                  <div className="text-sm text-gray-900">Model calls, streaming</div>
-                </div>
-                <div className="rounded-md border bg-gray-100 px-4 py-3">
-                  <div className="text-sm font-semibold text-amber-800 dark:text-amber-500">
-                    Sandbox SDK
-                  </div>
-                  <div className="text-sm text-gray-900">Isolated execution</div>
-                </div>
-                <div className="rounded-md border bg-gray-100 px-4 py-3">
-                  <div className="text-sm font-semibold text-pink-800 dark:text-pink-600">
-                    Connection SDK
-                  </div>
-                  <div className="text-sm text-gray-900">MCP/HTTP endpoints</div>
-                </div>
-                <div className="rounded-md border bg-gray-100 px-4 py-3">
-                  <div className="text-sm font-semibold text-gray-1000">Tools & Subagents</div>
-                  <div className="text-sm text-gray-900">Functions, child agents</div>
-                </div>
-              </div>
-            </motion.div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {RUNTIME_ITEMS.map((item) => (
+                <PrimitiveCard
+                  key={item.title}
+                  icon={item.icon}
+                  title={item.titleByMode?.[mode] ?? item.title}
+                  description={item.description}
+                  href={item.managedOnlyHref && selfHosted ? undefined : item.href}
+                  backend={item.backend?.[mode]}
+                />
+              ))}
+            </div>
           </div>
 
-          {/* Channel (right side, stretches full height) */}
-          <motion.div
-            initial={{ opacity: 0, x: 16 }}
-            animate={isInView ? { opacity: 1, x: 0 } : {}}
-            transition={{ delay: 0.5, duration: 0.5 }}
-            className="flex w-full flex-col rounded-md border-2 border-dashed border-cyan-800 dark:border-cyan-600 bg-background p-5 md:w-[180px]"
-          >
-            <div className="mb-1 flex items-center gap-2">
-              <div className="h-2.5 w-2.5 rounded-full bg-cyan-700 dark:bg-cyan-500" />
-              <div className="text-sm font-bold uppercase tracking-widest text-cyan-800 dark:text-cyan-500">
-                Channel
-              </div>
+          {/* Channel */}
+          <div className="relative flex flex-col gap-4 rounded-xl p-5 lg:w-[240px] lg:shrink-0">
+            <GradientBorder />
+            <div className="flex flex-col gap-1">
+              <SectionLabel>Channel</SectionLabel>
+              <span className="text-gray-900 text-copy-14">Where your agent gets surfaced</span>
             </div>
-            <div className="mb-5 text-sm text-gray-900">Where your agent gets surfaced</div>
-            <div className="space-y-2">
-              {["Slack", "Web Chat", "API", "Cron"].map((ch) => (
-                <div
-                  key={ch}
-                  className="rounded-md border bg-gray-100 px-4 py-2 text-sm text-gray-1000"
-                >
-                  {ch}
+
+            <Link
+              href="https://chat-sdk.dev/"
+              className="group relative flex items-start gap-2.5 overflow-hidden rounded-lg p-4 transition-colors material-small hover:bg-background-200 lg:h-0 lg:min-h-0 lg:grow"
+            >
+              <IconMessage className="mt-0.5 shrink-0 text-gray-1000" size={18} />
+              <div className="flex flex-1 flex-col gap-2">
+                <span className="font-medium text-gray-1000 text-copy-14">Chat SDK</span>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 lg:grid-cols-1">
+                  {CHANNELS.map((channel) => (
+                    <span key={channel} className="text-gray-1000 text-copy-14">
+                      {channel}
+                    </span>
+                  ))}
                 </div>
-              ))}
-              <div className="rounded-md border border-dashed px-4 py-2 text-sm text-gray-500">
-                other channels
               </div>
-            </div>
-          </motion.div>
-        </motion.div>
+              <IconArrowUpRight
+                className="absolute top-3 right-3 z-10 text-gray-900 opacity-0 transition-opacity group-hover:opacity-100"
+                size={14}
+              />
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-x-0 bottom-0 hidden h-20 bg-linear-to-t from-background-100 to-transparent lg:block"
+              />
+            </Link>
+          </div>
+        </div>
+
+        <p className="mx-auto mt-6 max-w-2xl text-center text-gray-900 text-copy-14 text-balance">
+          {CAPTIONS[mode]}
+          {selfHosted ? (
+            <>
+              {" "}
+              <Link
+                href="https://github.com/vercel-labs/steve"
+                className="inline-flex items-center gap-0 text-gray-1000 underline decoration-gray-400 underline-offset-2"
+              >
+                See the example
+                <IconArrowUpRightSmall className="text-gray-900" size={16} />
+              </Link>
+            </>
+          ) : null}
+        </p>
       </div>
     </section>
   );

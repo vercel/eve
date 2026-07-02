@@ -44,9 +44,7 @@ describe("gfmToSlackMrkdwn", () => {
   });
 
   it("leaves links with Slack control characters in the URL unchanged", () => {
-    expect(gfmToSlackMrkdwn("see [bad](https://x.dev/a|b)")).toBe(
-      "see [bad](https://x.dev/a|b)",
-    );
+    expect(gfmToSlackMrkdwn("see [bad](https://x.dev/a|b)")).toBe("see [bad](https://x.dev/a|b)");
   });
 
   it("leaves fenced code blocks untouched", () => {

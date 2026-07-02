@@ -3,7 +3,7 @@ import { createHook } from "#compiled/@workflow/core/index.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 
 import type { HookPayload } from "#channel/types.js";
-import { ChannelRequestIdKey } from "#context/keys.js";
+import { ChannelRequestIdKey, SubagentDepthKey, SubagentMaxDepthKey } from "#context/keys.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
@@ -227,6 +227,29 @@ describe("workflowEntry", () => {
       kind: "deliver",
       payloads: [{ message: "hello there", context: undefined }],
     });
+  });
+
+  it("passes delegated subagent depth options to session creation", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      turnControls: [turnResult({ action: "done", output: "ok", sessionState })],
+    });
+
+    await workflowEntry({
+      input: { message: "hello there" },
+      serializedContext: createSerializedContext({
+        [SubagentDepthKey.name]: 3,
+        [SubagentMaxDepthKey.name]: 4,
+      }),
+    });
+
+    expect(createSessionStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subagentDepth: 3,
+        subagentMaxDepth: 4,
+      }),
+    );
   });
 
   it("passes the resumed channel request id to the next turn", async () => {

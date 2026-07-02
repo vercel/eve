@@ -44,6 +44,13 @@ import { buildSubagentRunInput, type SubagentInputSource } from "#execution/suba
 import { createWorkflowRuntime, workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
+import {
+  type DelegatedRuntimeActionRequest,
+  getSubagentDelegationName,
+  isSubagentDelegationAction,
+  resolveSubagentDelegationLimit,
+  type SubagentDelegationLimit,
+} from "#harness/subagent-depth.js";
 
 const log = createLogger("execution.dispatch-runtime-actions");
 
@@ -84,12 +91,25 @@ export async function dispatchRuntimeActionsStep(input: {
   const writer = input.parentWritable.getWriter();
 
   const adapterCtx = buildAdapterContext(adapter, ctx);
+  const delegationLimit = resolveSubagentDelegationLimit(session);
 
   let nextSession = session;
   const results: RuntimeSubagentResultActionResult[] = [];
 
   try {
     for (const action of batch.actions) {
+      if (delegationLimit.reached && isSubagentDelegationAction(action)) {
+        log.warn("subagent depth limit reached; blocking delegated call", {
+          callId: action.callId,
+          currentDepth: delegationLimit.currentDepth,
+          maxDepth: delegationLimit.maxDepth,
+          nodeId: action.nodeId,
+          subagentName: getSubagentDelegationName(action),
+        });
+        results.push(createSubagentDepthLimitResult({ action, delegationLimit }));
+        continue;
+      }
+
       let childSessionId: string;
       let name: string;
       let remote: { readonly url: string } | undefined;
@@ -204,5 +224,24 @@ function createRemoteAgentStartFailureResult(input: {
       message: toErrorMessage(input.error),
     },
     subagentName: input.action.remoteAgentName,
+  };
+}
+
+function createSubagentDepthLimitResult(input: {
+  readonly action: DelegatedRuntimeActionRequest;
+  readonly delegationLimit: SubagentDelegationLimit;
+}): RuntimeSubagentResultActionResult {
+  const subagentName = getSubagentDelegationName(input.action);
+  return {
+    callId: input.action.callId,
+    isError: true,
+    kind: "subagent-result",
+    output: {
+      code: "SUBAGENT_DEPTH_LIMIT_REACHED",
+      currentDepth: input.delegationLimit.currentDepth,
+      maxDepth: input.delegationLimit.maxDepth,
+      message: `Subagent depth limit reached (${input.delegationLimit.maxDepth}); "${subagentName}" was not called.`,
+    },
+    subagentName,
   };
 }

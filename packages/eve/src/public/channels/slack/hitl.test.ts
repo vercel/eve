@@ -5,6 +5,7 @@ import {
   buildAnsweredBlocks,
   buildFreeformModalView,
   deriveHitlResponse,
+  formatInputRequestFallbackText,
   freeformRequestIdFromActionId,
   HITL_ACTION_PREFIX,
   HITL_FREEFORM_ACTION_PREFIX,
@@ -113,6 +114,60 @@ describe("renderInputRequestBlocks", () => {
       value: "deny",
       style: "danger",
     });
+  });
+
+  it("shows tool input for confirmation approval requests", () => {
+    const request = makeRequest({
+      action: {
+        kind: "tool-call",
+        callId: "call_mongo",
+        toolName: "mongodb-mutate",
+        input: {
+          operation: "deleteOne",
+          collection: "org_members",
+          filter: { _id: "qudw7ekkzulpgw3j" },
+        },
+      },
+      display: "confirmation",
+      prompt: "Approve tool call: mongodb-mutate",
+      requestId: "approval_1",
+      options: [
+        { id: "approve", label: "Yes" },
+        { id: "deny", label: "No" },
+      ],
+    });
+
+    const blocks = renderInputRequestBlocks(request);
+
+    expect(blocks).toHaveLength(3);
+    const details = blocks[1] as { type: string; text: { type: string; text: string } };
+    expect(details).toMatchObject({ type: "section", text: { type: "mrkdwn" } });
+    expect(details.text.text).toContain("*Tool input*");
+    expect(details.text.text).toContain('"collection": "org_members"');
+    expect(details.text.text).toContain('"_id": "qudw7ekkzulpgw3j"');
+    expect(blocks[2]).toMatchObject({ type: "actions" });
+  });
+
+  it("keeps long approval input details within the section limit", () => {
+    const blocks = renderInputRequestBlocks(
+      makeRequest({
+        action: {
+          kind: "tool-call",
+          callId: "call_long",
+          toolName: "dangerous_tool",
+          input: { value: "x".repeat(SLACK_SECTION_TEXT_MAX_LENGTH + 500) },
+        },
+        display: "confirmation",
+        options: [
+          { id: "approve", label: "Yes" },
+          { id: "deny", label: "No" },
+        ],
+      }),
+    );
+
+    const details = blocks[1] as { text: { text: string } };
+    expect(details.text.text.length).toBeLessThanOrEqual(SLACK_SECTION_TEXT_MAX_LENGTH);
+    expect(details.text.text).toMatch(/\.\.\.\n```$/u);
   });
 
   it("renders a radio_buttons widget for select-display requests with ≤6 options", () => {
@@ -267,6 +322,39 @@ describe("renderInputRequestBlocks", () => {
   });
 });
 
+describe("formatInputRequestFallbackText", () => {
+  it("includes approval tool input in Slack fallback text", () => {
+    const text = formatInputRequestFallbackText(
+      makeRequest({
+        action: {
+          kind: "tool-call",
+          callId: "call_mongo",
+          toolName: "mongodb-mutate",
+          input: {
+            operation: "deleteOne",
+            collection: "orgs",
+            filter: { _id: "48gtnni64rxqtaoh" },
+          },
+        },
+        display: "confirmation",
+        prompt: "Approve tool call: mongodb-mutate",
+        options: [
+          { id: "approve", label: "Yes" },
+          { id: "deny", label: "No" },
+        ],
+      }),
+    );
+
+    expect(text).toContain("Approve tool call: mongodb-mutate");
+    expect(text).toContain('"collection": "orgs"');
+    expect(text).toContain('"_id": "48gtnni64rxqtaoh"');
+  });
+
+  it("leaves non-approval fallback text unchanged", () => {
+    expect(formatInputRequestFallbackText(makeRequest({ prompt: "Pick one" }))).toBe("Pick one");
+  });
+});
+
 describe("buildFreeformModalView", () => {
   it("emits a modal with the canonical callback_id and the prompt as a header block", () => {
     const view = buildFreeformModalView({
@@ -334,7 +422,7 @@ describe("buildAnsweredBlocks", () => {
       text: { type: "mrkdwn", text: "Approve deploy?" },
     };
     const blocks = buildAnsweredBlocks({
-      promptBlock,
+      promptBlocks: [promptBlock],
       answerLabel: "Approve",
       userId: "U01",
     });
@@ -350,11 +438,46 @@ describe("buildAnsweredBlocks", () => {
     });
   });
 
+  it("preserves multiple prompt/detail blocks", () => {
+    const promptBlock = {
+      type: "section",
+      text: { type: "mrkdwn", text: "Approve tool call: mongodb-mutate" },
+    };
+    const detailBlock = {
+      type: "section",
+      text: { type: "mrkdwn", text: '*Tool input*\n```\n{ "_id": "org_1" }\n```' },
+    };
+
+    const blocks = buildAnsweredBlocks({
+      promptBlocks: [promptBlock, detailBlock],
+      answerLabel: "Yes",
+      userId: "U01",
+    });
+
+    expect(blocks[0]).toBe(promptBlock);
+    expect(blocks[1]).toBe(detailBlock);
+    expect(blocks[2]).toMatchObject({
+      type: "section",
+      text: { text: ":white_check_mark: *Yes*" },
+    });
+  });
+
   it("omits the attribution block when no userId is supplied", () => {
-    const blocks = buildAnsweredBlocks({ promptBlock: undefined, answerLabel: "Deny" });
+    const blocks = buildAnsweredBlocks({ promptBlocks: [], answerLabel: "Deny" });
     expect(blocks).toHaveLength(1);
     expect(blocks[0]).toMatchObject({
       text: { text: ":white_check_mark: *Deny*" },
     });
+  });
+
+  it("caps long freeform answer labels at the section limit", () => {
+    const blocks = buildAnsweredBlocks({
+      promptBlocks: [],
+      answerLabel: "x".repeat(SLACK_SECTION_TEXT_MAX_LENGTH + 500),
+    });
+
+    const answer = blocks[0] as { text: { text: string } };
+    expect(answer.text.text.length).toBeLessThanOrEqual(SLACK_SECTION_TEXT_MAX_LENGTH);
+    expect(answer.text.text).toMatch(/^:white_check_mark: \*x+\.\.\.\*$/u);
   });
 });

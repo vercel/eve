@@ -36,6 +36,9 @@ export const config = defineConfig({
   basePath,
   siteId,
   translations,
+  // Built-in edit link hardcodes `/edit/` and a `content/docs/` prefix; we
+  // render our own `/blob/` link instead (see EditOnGithubAction).
+  pageActions: { editSource: false },
   content: [{ id: "docs", label: "Docs", dir: "docs", route: "/docs" }],
   ai: {
     prompt,
