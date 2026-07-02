@@ -96,8 +96,8 @@ function providerOptions(
     },
     {
       value: "external",
-      label: "External model provider",
-      hint: "Use a model configured outside AI Gateway,\nincluding through OpenRouter or a provider SDK.",
+      label: "Other providers",
+      hint: "Connect directly to a model provider\nvia OPENAI_API_KEY or ANTHROPIC_API_KEY.",
     },
   ];
 }
