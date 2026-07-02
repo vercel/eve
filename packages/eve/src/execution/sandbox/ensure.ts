@@ -167,12 +167,6 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
         session: persistedSession,
       };
     },
-    async dispose() {
-      if (handlePromise !== undefined) {
-        const handle = await handlePromise;
-        await handle?.dispose();
-      }
-    },
     async get(): Promise<SandboxSession | null> {
       const handle = await getHandle();
       return handle?.session ?? null;

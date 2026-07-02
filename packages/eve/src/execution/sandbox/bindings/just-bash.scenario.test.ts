@@ -489,7 +489,7 @@ describe("createLocalSandboxBackend with the just-bash engine", () => {
     });
     const initialState = await initialHandle.captureState();
 
-    await initialHandle.dispose();
+    await initialHandle.shutdown();
 
     await backend.prewarm({
       runtimeContext: { appRoot },

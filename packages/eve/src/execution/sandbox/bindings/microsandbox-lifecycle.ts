@@ -282,7 +282,7 @@ function createHandle(
   sandbox: MicrosandboxVm,
   backendName: string,
   optionsHash: string,
-  onDispose?: () => void,
+  onShutdown?: () => void,
 ): SandboxBackendHandle<MicrosandboxSessionUseOptions> {
   const session = buildSandboxSession(
     createMicrosandboxInternalSession(sandbox),
@@ -308,12 +308,8 @@ function createHandle(
         sessionKey: sandbox.id,
       };
     },
-    async dispose() {
-      onDispose?.();
-      await sandbox.detach();
-    },
     async shutdown() {
-      onDispose?.();
+      onShutdown?.();
       await sandbox.shutdown();
     },
   };

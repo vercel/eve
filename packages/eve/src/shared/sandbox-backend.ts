@@ -13,16 +13,10 @@ export interface SandboxBackendHandle<SO = Record<string, never>> {
   readonly useSessionFn: SandboxSessionUseFn<SO>;
   captureState(): Promise<SandboxBackendSessionState>;
   /**
-   * Releases this process's client for the session without stopping the
-   * underlying compute, so a later `create` can reattach instantly.
-   */
-  dispose(): Promise<void>;
-  /**
    * Stops the underlying compute because the eve server is shutting
-   * down. Unlike {@link dispose}, nothing may be left running
-   * afterwards. The session must remain reattachable from persisted
-   * state on the next server start when the backend supports
-   * durable sessions.
+   * down; nothing may be left running afterwards. The session must
+   * remain reattachable from persisted state on the next server start
+   * when the backend supports durable sessions.
    */
   shutdown(): Promise<void>;
 }

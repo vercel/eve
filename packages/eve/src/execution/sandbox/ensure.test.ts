@@ -75,7 +75,6 @@ function createBackend(): SandboxBackend {
         sessionKey: input.sessionKey,
       }),
       useSessionFn: async () => sandbox.session,
-      dispose: async () => {},
       shutdown: async () => {},
       session: sandbox.session,
     };

@@ -460,7 +460,6 @@ function createHandle(
         sessionKey,
       };
     },
-    async dispose() {},
     // Session sandboxes are persistent, so the SDK resumes a stopped
     // sandbox on the next command after reattach.
     async shutdown() {

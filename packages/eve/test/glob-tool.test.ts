@@ -34,7 +34,6 @@ function createFakeAccess(
     async captureState() {
       return { initialized: false, session: null };
     },
-    async dispose() {},
 
     async get() {
       return {

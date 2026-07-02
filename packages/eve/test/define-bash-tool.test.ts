@@ -41,7 +41,6 @@ describe("defineBashTool", () => {
           session: null,
         };
       },
-      async dispose() {},
 
       async get() {
         return {
@@ -99,7 +98,6 @@ describe("defineBashTool", () => {
           session: null,
         };
       },
-      async dispose() {},
 
       async get() {
         return null;
@@ -133,7 +131,6 @@ describe("defineBashTool", () => {
       async captureState() {
         return { initialized: false, session: null };
       },
-      async dispose() {},
 
       async get() {
         return {

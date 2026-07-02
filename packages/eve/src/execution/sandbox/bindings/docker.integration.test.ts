@@ -324,10 +324,6 @@ describe("createDockerSandboxBackend create", () => {
         sessionKey: SESSION_KEY,
       });
 
-      // Dispose leaves the container running for instant reattach.
-      await handle.dispose();
-      expect(findCall(calls, (args) => args[0] === "stop")).toBeUndefined();
-
       // Server shutdown stops the container; filesystem state survives
       // for the next `create` to restart from.
       await handle.shutdown();
