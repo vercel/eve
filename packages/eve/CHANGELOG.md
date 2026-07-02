@@ -1,5 +1,11 @@
 # eve
 
+## 0.18.2
+
+### Patch Changes
+
+- c5da8e7: Sandbox API requests now append an `eve/<version>` token to the `user-agent` so the sandbox control plane can attribute traffic to eve.
+
 ## 0.18.1
 
 ### Patch Changes
