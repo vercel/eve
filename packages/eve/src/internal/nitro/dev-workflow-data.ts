@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readdir, readFile, rm, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 
@@ -53,9 +54,10 @@ export function pruneWorkflowLocalDataInBackground(appRoot: string): void {
 
 /**
  * Deletes terminal-status workflow runs older than the retention window from
- * the local workflow store, together with their events, steps, hooks, and
- * stream files. Runs in any non-terminal status are never touched, whatever
- * their age, so parked HITL runs stay resumable.
+ * the local workflow store, together with their events, steps, hooks (and
+ * the hooks' token sidecars), and stream files. Runs in any non-terminal
+ * status are never touched, whatever their age, so parked HITL runs stay
+ * resumable.
  */
 export async function pruneWorkflowLocalData(input: {
   readonly appRoot: string;
@@ -229,7 +231,14 @@ async function removeRunLinkedFiles(
   );
 }
 
-/** Hooks carry their run linkage inside the JSON body rather than the filename. */
+/**
+ * Hooks carry their run linkage inside the JSON body rather than the filename.
+ * Each hook also owns up to two sidecars under `hooks/tokens/` — the token
+ * claim file and the recovery marker — that are only reachable through the
+ * hook body, so they are removed here alongside the hook file (sidecars
+ * first, so an interrupted prune leaves the hook file to retry from rather
+ * than unreachable sidecars).
+ */
 async function removeRunLinkedHooks(
   directory: string,
   staleRunIds: ReadonlySet<string>,
@@ -257,12 +266,46 @@ async function removeRunLinkedHooks(
         return;
       }
 
-      const runId = (value as Record<string, unknown>).runId;
+      const hook = value as Record<string, unknown>;
+      const runId = hook.runId;
       if (typeof runId !== "string" || !staleRunIds.has(runId)) {
         return;
       }
 
+      await removeHookTokenSidecars(directory, runId, hook);
       await rm(path, { force: true });
     }),
   );
+}
+
+/**
+ * Deletes a hook's `hooks/tokens/` sidecars: the token claim file
+ * (`<sha256(token)>.json`, which enforces token uniqueness and would
+ * otherwise keep the token claimed forever) and the recovery marker
+ * (`<sha256(token \0 runId \0 hookId)>.recovery.json`). The paths mirror
+ * `hashToken` / `hookRecoveryMarkerPath` in `@workflow/world-local`'s
+ * storage helpers, which the package does not export.
+ */
+async function removeHookTokenSidecars(
+  hooksDirectory: string,
+  runId: string,
+  hook: Record<string, unknown>,
+): Promise<void> {
+  const { hookId, token } = hook;
+  if (typeof token !== "string") {
+    return;
+  }
+
+  const tokensDirectory = join(hooksDirectory, "tokens");
+  const removals = [rm(join(tokensDirectory, `${sha256Hex(token)}.json`), { force: true })];
+  if (typeof hookId === "string") {
+    const markerKey = sha256Hex(`${token}\x00${runId}\x00${hookId}`);
+    removals.push(rm(join(tokensDirectory, `${markerKey}.recovery.json`), { force: true }));
+  }
+
+  await Promise.all(removals);
+}
+
+function sha256Hex(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,11 +30,37 @@ async function writeRun(runId: string, status: string, updatedAtMs: number): Pro
 async function writeRunLinkedFiles(runId: string): Promise<void> {
   const dataDirectory = join(appRoot, ".workflow-data");
   const ulid = runId.slice("wrun_".length);
+  const hookId = `hook_${ulid}`;
+  const token = `${runId}:auth`;
   await writeFile(join(dataDirectory, "events", `${runId}-evnt_01E.json`), "{}");
   await writeFile(join(dataDirectory, "steps", `${runId}-step_01S.json`), "{}");
-  await writeFile(join(dataDirectory, "hooks", `hook_${ulid}.json`), JSON.stringify({ runId }));
+  await writeFile(
+    join(dataDirectory, "hooks", `${hookId}.json`),
+    JSON.stringify({ hookId, runId, token }),
+  );
+  for (const sidecarName of hookTokenSidecarNames(runId)) {
+    await writeFile(join(dataDirectory, "hooks", "tokens", sidecarName), "{}");
+  }
   await writeFile(join(dataDirectory, "streams", "runs", `${runId}.json`), "{}");
   await writeFile(join(dataDirectory, "streams", "chunks", `strm_${ulid}_user-chnk_01C.bin`), "x");
+}
+
+/**
+ * The token claim file and recovery marker written by
+ * `@workflow/world-local`, named after `hashToken` / `hookRecoveryMarkerPath`
+ * in its storage helpers.
+ */
+function hookTokenSidecarNames(runId: string): readonly string[] {
+  const hookId = `hook_${runId.slice("wrun_".length)}`;
+  const token = `${runId}:auth`;
+  return [
+    `${sha256Hex(token)}.json`,
+    `${sha256Hex(`${token}\x00${runId}\x00${hookId}`)}.recovery.json`,
+  ];
+}
+
+function sha256Hex(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 async function directoryNames(...segments: string[]): Promise<readonly string[]> {
@@ -46,7 +73,7 @@ beforeEach(async () => {
     ["runs"],
     ["events"],
     ["steps"],
-    ["hooks"],
+    ["hooks", "tokens"],
     ["streams", "runs"],
     ["streams", "chunks"],
   ]) {
@@ -71,7 +98,8 @@ describe("pruneWorkflowLocalData", () => {
     expect(await directoryNames("runs")).toEqual([]);
     expect(await directoryNames("events")).toEqual([]);
     expect(await directoryNames("steps")).toEqual([]);
-    expect(await directoryNames("hooks")).toEqual([]);
+    expect(await directoryNames("hooks")).toEqual(["tokens"]);
+    expect(await directoryNames("hooks", "tokens")).toEqual([]);
     expect(await directoryNames("streams", "runs")).toEqual([]);
     expect(await directoryNames("streams", "chunks")).toEqual([]);
   });
@@ -84,7 +112,10 @@ describe("pruneWorkflowLocalData", () => {
 
     expect(await directoryNames("runs")).toEqual([`${STALE_RUNNING_RUN_ID}.json`]);
     expect(await directoryNames("events")).toHaveLength(1);
-    expect(await directoryNames("hooks")).toHaveLength(1);
+    expect(await directoryNames("hooks")).toContain(
+      `hook_${STALE_RUNNING_RUN_ID.slice("wrun_".length)}.json`,
+    );
+    expect(await directoryNames("hooks", "tokens")).toHaveLength(2);
   });
 
   it("keeps terminal runs inside the retention window", async () => {
@@ -110,6 +141,9 @@ describe("pruneWorkflowLocalData", () => {
     expect(await directoryNames("events")).toEqual([`${FRESH_COMPLETED_RUN_ID}-evnt_01E.json`]);
     expect(await directoryNames("steps")).toEqual([`${FRESH_COMPLETED_RUN_ID}-step_01S.json`]);
     expect(await directoryNames("streams", "runs")).toEqual([`${FRESH_COMPLETED_RUN_ID}.json`]);
+    expect([...(await directoryNames("hooks", "tokens"))].sort()).toEqual(
+      [...hookTokenSidecarNames(FRESH_COMPLETED_RUN_ID)].sort(),
+    );
   });
 
   it("ignores unreadable run records and unrelated files", async () => {
