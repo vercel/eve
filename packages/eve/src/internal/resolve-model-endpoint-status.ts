@@ -1,4 +1,4 @@
-import type { ModelRouting } from "#shared/agent-definition.js";
+import type { ModelEndpoint } from "#shared/agent-definition.js";
 import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 
 /**
@@ -14,7 +14,7 @@ export interface GatewayCredentialPresence {
 }
 
 /**
- * Composes the build-time {@link ModelRouting} with runtime credential presence
+ * Composes the build-time {@link ModelEndpoint} with runtime credential presence
  * into the consumer-facing {@link ModelEndpointStatus}.
  *
  * Credentials matter only for gateway routing; an external endpoint makes no
@@ -23,7 +23,7 @@ export interface GatewayCredentialPresence {
  * token.
  */
 export function resolveModelEndpointStatus(
-  routing: ModelRouting,
+  routing: ModelEndpoint,
   credentials: GatewayCredentialPresence,
 ): ModelEndpointStatus {
   if (routing.kind === "external") {

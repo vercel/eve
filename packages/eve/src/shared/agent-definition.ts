@@ -1,4 +1,5 @@
 import type { CallSettings, LanguageModel } from "ai";
+import type { ExperimentalCodexModel } from "#shared/codex-subscription-model.js";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
@@ -27,14 +28,15 @@ export type AgentReasoningDefinition = NonNullable<CallSettings["reasoning"]>;
  *   provider slug carried in the model id (e.g. `"anthropic"`), best-effort.
  *   `byok` is set to that provider slug when a `providerOptions.gateway.byok`
  *   block is present.
- * - `external`: a direct provider instance (e.g. `anthropic(...)`) that bypasses
- *   the gateway and talks to the provider's own endpoint. `provider` is the AI
- *   SDK provider name (e.g. `"anthropic"`).
+ * - `external`: an AI SDK model instance whose provider is not `gateway`. It
+ *   can represent a provider or a router such as OpenRouter. eve does not route
+ *   it through AI Gateway. `provider` is the AI SDK provider name (e.g.
+ *   `"anthropic"`).
  *
  * This is a routing fact, not a model-existence check; it does not assert the
  * model id names a real model.
  */
-export type ModelRouting =
+export type ModelEndpoint =
   | { kind: "gateway"; target: string; byok?: string }
   | { kind: "external"; provider: string };
 
@@ -43,14 +45,21 @@ export type InternalAgentModelDefinition = {
   contextWindowTokens?: number;
   source?: ModuleSourceRef;
   providerOptions?: Record<string, JsonObject>;
+  /**
+   * Non-default credential transport serving this model at runtime. Set by
+   * the compiler only when an `experimental_codex` model value applies
+   * (development builds); absent means the model is served by whatever its
+   * routing implies.
+   */
+  transport?: "codex";
 };
 
 /**
- * The model handle you assign to an agent's `model` field. This is the AI SDK
+ * The model handle you assign to an agent's `model` field: an AI SDK
  * `LanguageModel` value (for example, the result of a provider or gateway
- * model call), not an eve-authored definition object.
+ * model call), or the `experimental_codex(...)` local-subscription value.
  */
-export type PublicAgentModelDefinition = LanguageModel;
+export type PublicAgentModelDefinition = LanguageModel | ExperimentalCodexModel;
 
 export interface InternalAgentCompactionDefinition {
   /**
@@ -186,8 +195,8 @@ export type PublicAgentDefinition = {
    */
   readonly experimental?: AgentExperimentalDefinition;
   /**
-   * Language model used for agent turns. Accepts an AI Gateway model ID or any
-   * AI SDK-compatible language model.
+   * Language model used for agent turns. Accepts an AI Gateway model ID, any
+   * AI SDK-compatible language model, or an `experimental_codex(...)` value.
    */
   readonly model: PublicAgentModelDefinition;
   /**

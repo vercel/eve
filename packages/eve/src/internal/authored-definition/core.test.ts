@@ -48,6 +48,20 @@ describe("normalizeAgentDefinition", () => {
     expect(definition.experimental?.workflow).toEqual({ world: "@workflow/world-postgres" });
   });
 
+  it("rejects unknown experimental keys", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          experimental: {
+            useCodexSubscription: true,
+          },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
+  });
+
   it("rejects non-string workflow world values", () => {
     expect(() =>
       normalizeAgentDefinition(

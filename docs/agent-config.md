@@ -20,7 +20,7 @@ export default defineAgent({
 The root `agent.ts` can be omitted when no runtime config is needed. In that case, eve defaults
 to `anthropic/claude-sonnet-4.6`. When `agent.ts` is present, `model` is required.
 
-`model` accepts a gateway model id string, which routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a provider-authored `LanguageModel`.
+`model` accepts a gateway model id string, which routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To configure a model outside AI Gateway, pass a provider-authored `LanguageModel`. To serve an OpenAI model through a local Codex login during development, pass [`experimental_codex(...)`](./guides/using-model-subscriptions).
 
 Provider-specific AI SDK packages are regular project dependencies. A fresh `eve init` app includes the core `ai` package, but it does not install every provider package. Install the provider package you import, then set that provider's API key:
 
@@ -37,11 +37,14 @@ export default defineAgent({
 });
 ```
 
-Direct provider model ids use the provider's native format. For Anthropic, the
+Provider-authored model ids use the provider's native format. For Anthropic, the
 version uses hyphens (`claude-opus-4-8`), while the Gateway id above uses a dot
 (`anthropic/claude-opus-4.8`).
 
-Model use is subject to the terms, data-processing commitments, retention behavior, and available controls of the selected provider and routing path. Review the [AI Gateway model catalog](https://vercel.com/ai-gateway/models) for gateway-routed models, and review the provider's terms when you configure a direct `LanguageModel`.
+Model use is subject to the terms, data-processing commitments, retention behavior, and available controls of the selected provider and routing path. Review the [AI Gateway model catalog](https://vercel.com/ai-gateway/models) for gateway-routed models, and review the provider's terms when you configure a `LanguageModel` outside AI Gateway.
+
+For local development with model-provider subscriptions such as a Codex login,
+see [Using model subscriptions](./guides/using-model-subscriptions).
 
 ## Reasoning effort
 

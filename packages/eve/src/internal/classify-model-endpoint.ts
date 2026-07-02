@@ -1,13 +1,14 @@
 import type { LanguageModel } from "ai";
 
-import type { ModelRouting } from "#shared/agent-definition.js";
+import type { ModelEndpoint } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 
 const GATEWAY_PROVIDER = "gateway";
 
 /**
  * Classifies how an authored model value will be routed at runtime, through the
- * Vercel AI Gateway or directly to a provider.
+ * Vercel AI Gateway or an external model configuration. An external model can
+ * still use a router such as OpenRouter.
  *
  * A bare string id is *defined* as gateway-routed: that is the AI SDK's default
  * (`globalThis.AI_SDK_DEFAULT_PROVIDER ?? gateway`), and the runtime hands the
@@ -25,12 +26,12 @@ const GATEWAY_PROVIDER = "gateway";
  * An unknown id still classifies as gateway-routed, which is the correct routing
  * answer. Model-existence is the catalog's concern, not this function's.
  */
-export function classifyModelRouting(
+export function classifyModelEndpoint(
   model: string | LanguageModel,
   providerOptions?: Record<string, JsonObject>,
-): ModelRouting {
+): ModelEndpoint {
   if (typeof model === "string") {
-    const routing: ModelRouting = { kind: "gateway", target: gatewayTarget(model) };
+    const routing: ModelEndpoint = { kind: "gateway", target: gatewayTarget(model) };
     const byok = readByokProvider(providerOptions);
     if (byok !== undefined) routing.byok = byok;
     return routing;
@@ -45,7 +46,7 @@ export function classifyModelRouting(
   const topLevelProvider = model.provider.split(".")[0]!;
 
   if (topLevelProvider === GATEWAY_PROVIDER) {
-    const routing: ModelRouting = { kind: "gateway", target: gatewayTarget(modelId) };
+    const routing: ModelEndpoint = { kind: "gateway", target: gatewayTarget(modelId) };
     const byok = readByokProvider(providerOptions);
     if (byok !== undefined) routing.byok = byok;
     return routing;

@@ -7,7 +7,7 @@ import {
 import type { GatewayCredentialPresence } from "#internal/resolve-model-endpoint-status.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { localDev, routeAuth, vercelOidc } from "#public/channels/auth.js";
-import type { ModelRouting } from "#shared/agent-definition.js";
+import type { ModelEndpoint } from "#shared/agent-definition.js";
 
 type AgentInfoRouteMode = "development" | "production";
 
@@ -36,7 +36,7 @@ function hasEnvValue(value: string | undefined): boolean {
  * failure means the gateway is unavailable and must not break agent inspection.
  */
 async function resolveGatewayCredentialPresence(
-  routing: ModelRouting,
+  routing: ModelEndpoint,
 ): Promise<GatewayCredentialPresence> {
   const apiKey = hasEnvValue(process.env.AI_GATEWAY_API_KEY);
 

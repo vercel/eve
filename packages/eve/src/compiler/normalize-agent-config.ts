@@ -5,7 +5,13 @@ import { normalizeLogicalPath } from "#discover/filesystem.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
 import { normalizeJsonSchemaDefinition } from "#shared/json-schema.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
-import { classifyModelRouting } from "#internal/classify-model-routing.js";
+import { classifyModelEndpoint } from "#internal/classify-model-endpoint.js";
+import { formatOpenAiGatewayModelId } from "#internal/model-auth/endpoint/codex/catalog.js";
+import {
+  isExperimentalCodexModel,
+  type ExperimentalCodexModel,
+} from "#shared/codex-subscription-model.js";
+import { isLanguageModelInstance } from "#shared/language-model.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
@@ -16,6 +22,7 @@ import type { CompiledRuntimeModelLimits } from "#compiler/model-catalog.js";
 import {
   loadModuleBackedDefinition,
   type ManifestCompileContext,
+  type ManifestCompileMode,
 } from "#compiler/normalize-helpers.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
@@ -44,7 +51,9 @@ export async function compileAgentConfig(
       ? `Expected the default agent config to match the public eve shape.`
       : `Expected the agent config export "${configModule.exportName ?? "default"}" from "${configModulePath}" to match the public eve shape.`,
   );
+  const experimental = normalizeExperimentalDefinition(definition.experimental);
   const model = await normalizeAuthoredModelReference({
+    mode: context.mode,
     modelCatalog: context.modelCatalog,
     purpose: "the primary compaction trigger model",
     contextWindowTokens: definition.modelContextWindowTokens,
@@ -81,7 +90,6 @@ export async function compileAgentConfig(
     compiledConfig.description = definition.description;
   }
 
-  const experimental = normalizeExperimentalDefinition(definition.experimental);
   if (experimental !== undefined) {
     compiledConfig.experimental = experimental;
   }
@@ -114,6 +122,7 @@ export async function compileAgentConfig(
 
   if (definition.compaction?.model !== undefined) {
     compaction.model = await normalizeAuthoredModelReference({
+      mode: context.mode,
       modelCatalog: context.modelCatalog,
       purpose: "the compaction summary model",
       contextWindowTokens: definition.compaction.modelContextWindowTokens,
@@ -149,7 +158,8 @@ function normalizeExperimentalDefinition(
   return compiledExperimental;
 }
 
-async function normalizeAuthoredModelReference(input: {
+interface AuthoredModelReferenceInput {
+  readonly mode: ManifestCompileMode;
   readonly modelCatalog: ManifestCompileContext["modelCatalog"];
   readonly purpose: string;
   readonly contextWindowTokens?: number;
@@ -157,16 +167,23 @@ async function normalizeAuthoredModelReference(input: {
   readonly source?: ModuleSourceRef;
   readonly sourcePath?: string;
   readonly value: PublicAgentModelDefinition;
-}): Promise<CompiledRuntimeModelReference> {
+}
+
+async function normalizeAuthoredModelReference(
+  input: AuthoredModelReferenceInput,
+): Promise<CompiledRuntimeModelReference> {
   if (typeof input.value === "string") {
-    return await withCompiledRuntimeModelLimits(
-      {
-        id: formatLanguageModelGatewayId(input.value),
-        providerOptions: parseProviderOptionsRecord(input.providerOptions),
-        routing: classifyModelRouting(input.value, input.providerOptions),
-      },
-      input,
-    );
+    const model: CompiledRuntimeModelReference = {
+      id: formatLanguageModelGatewayId(input.value),
+      providerOptions: parseProviderOptionsRecord(input.providerOptions),
+      routing: classifyModelEndpoint(input.value, input.providerOptions),
+    };
+
+    return await withCompiledRuntimeModelLimits(model, input);
+  }
+
+  if (isExperimentalCodexModel(input.value)) {
+    return await normalizeExperimentalCodexModelReference(input, input.value);
   }
 
   const source = input.source;
@@ -177,31 +194,16 @@ async function normalizeAuthoredModelReference(input: {
     );
   }
 
-  // While in TypeScript `input.value` is safe to use, we still validate below against runtime input.
+  // While in TypeScript `input.value` is safe to use, we still validate against runtime input.
   const languageModel = input.value;
-  const specificationVersion = languageModel.specificationVersion;
 
-  if (
-    specificationVersion !== "v2" &&
-    specificationVersion !== "v3" &&
-    specificationVersion !== "v4"
-  ) {
+  if (!isLanguageModelInstance(languageModel)) {
     throw new Error(
       `Expected the authored agent config export "${source.exportName ?? "default"}" from "${input.sourcePath ?? source.logicalPath}" to provide a valid AI SDK language model.`,
     );
   }
 
-  if (
-    typeof languageModel.provider !== "string" ||
-    typeof languageModel.modelId !== "string" ||
-    typeof languageModel.doGenerate !== "function" ||
-    typeof languageModel.doStream !== "function"
-  ) {
-    throw new Error(
-      `Expected the authored agent config export "${source.exportName ?? "default"}" from "${input.sourcePath ?? source.logicalPath}" to provide a valid AI SDK language model.`,
-    );
-  }
-
+  const routing = classifyModelEndpoint(languageModel, input.providerOptions);
   const sourceBackedModel = {
     id: formatLanguageModelGatewayId(languageModel),
     source: {
@@ -211,7 +213,7 @@ async function normalizeAuthoredModelReference(input: {
       sourceId: source.sourceId,
     },
     providerOptions: parseProviderOptionsRecord(input.providerOptions),
-    routing: classifyModelRouting(languageModel, input.providerOptions),
+    routing,
   };
 
   if (input.contextWindowTokens === undefined) {
@@ -230,6 +232,61 @@ async function normalizeAuthoredModelReference(input: {
   }
 
   return await withCompiledRuntimeModelLimits(sourceBackedModel, input);
+}
+
+/**
+ * Compiles an `experimental_codex(...)` model value. Development builds route
+ * the model through the local Codex login transport. Production builds never
+ * touch the local login: they optimistically keep the model on its normal
+ * `openai/<model>` AI Gateway route when the gateway catalog confirms the id,
+ * and otherwise compile the authored fallback — failing when there is none.
+ */
+async function normalizeExperimentalCodexModelReference(
+  input: AuthoredModelReferenceInput,
+  descriptor: ExperimentalCodexModel,
+): Promise<CompiledRuntimeModelReference> {
+  const slug = descriptor.model.trim();
+  if (slug.length === 0 || slug.includes("/")) {
+    throw new Error(
+      `experimental_codex requires a bare OpenAI model slug such as "gpt-5.5" for ${input.purpose}, received "${descriptor.model}".`,
+    );
+  }
+
+  const gatewayId = formatOpenAiGatewayModelId(slug);
+  const model: CompiledRuntimeModelReference = {
+    id: gatewayId,
+    providerOptions: parseProviderOptionsRecord(input.providerOptions),
+    routing: classifyModelEndpoint(gatewayId, input.providerOptions),
+  };
+
+  if (input.mode === "development") {
+    return await withCompiledRuntimeModelLimits({ ...model, transport: "codex" }, input);
+  }
+
+  // An authored context window is the escape hatch that always keeps the
+  // gateway route, mirroring the plain string-model behavior.
+  if (input.contextWindowTokens !== undefined) {
+    return { ...model, contextWindowTokens: input.contextWindowTokens };
+  }
+
+  let limits: CompiledRuntimeModelLimits | null;
+  try {
+    limits = await input.modelCatalog.getModelLimits(gatewayId);
+  } catch {
+    limits = null;
+  }
+
+  if (limits !== null) {
+    return { ...model, contextWindowTokens: limits.contextWindowTokens };
+  }
+
+  if (descriptor.fallback !== undefined) {
+    return await normalizeAuthoredModelReference({ ...input, value: descriptor.fallback });
+  }
+
+  throw new Error(
+    `Production build cannot serve ${input.purpose} "${gatewayId}" because the AI Gateway model catalog does not confirm it. Pass a deployable fallback model as the second argument of experimental_codex, or set modelContextWindowTokens to force the "${gatewayId}" gateway route.`,
+  );
 }
 
 function formatAgentConfigModulePath(
@@ -272,6 +329,12 @@ async function withCompiledRuntimeModelLimits(
       ...model,
       contextWindowTokens: input.contextWindowTokens,
     };
+  }
+
+  // Codex subscription compatibility is enforced by the Codex backend, not the
+  // AI Gateway catalog. Authors can still provide modelContextWindowTokens.
+  if (model.transport === "codex") {
+    return model;
   }
 
   let limits: CompiledRuntimeModelLimits | null;

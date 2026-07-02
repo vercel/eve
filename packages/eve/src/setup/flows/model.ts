@@ -21,7 +21,7 @@ import {
   detectProjectIdentity,
   type VercelProjectOperationOptions,
 } from "../project-resolution.js";
-import type { ModelRouting } from "#shared/agent-definition.js";
+import type { ModelEndpoint } from "#shared/agent-definition.js";
 import type { Prompter, SelectNotice, SelectOption } from "../prompter.js";
 import { runInteractive } from "../runner.js";
 import { snapshotSetupState } from "../state.js";
@@ -34,7 +34,7 @@ import { runProviderFlow } from "./provider.js";
 /** The current model id, its routing, and whether `/model` can rewrite it. */
 export interface CurrentAgentModel {
   id: string | null;
-  routing: ModelRouting | null;
+  routing: ModelEndpoint | null;
   /**
    * The authored `model` is a string the source editor can rewrite. False for a
    * source-backed SDK model call (`gateway(...)`, `anthropic(...)`), which is
@@ -137,7 +137,7 @@ function providerStatusHint(
 function modelMenuRows(
   current: string | null,
   provider: ModelProviderStatus,
-  routing: ModelRouting | null,
+  routing: ModelEndpoint | null,
   editable: boolean,
 ): SelectOption<ModelMenuRow>[] {
   let modelRow: SelectOption<ModelMenuRow>;

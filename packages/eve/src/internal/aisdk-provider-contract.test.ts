@@ -5,7 +5,7 @@ import { gateway } from "ai";
 import { describe, expect, it } from "vitest";
 
 /**
- * CANARY: pins the third-party AI SDK behavior that {@link classifyModelRouting}
+ * CANARY: pins the third-party AI SDK behavior that {@link classifyModelEndpoint}
  * depends on to decide gateway-vs-external routing. If an `@ai-sdk/*` upgrade
  * changes these provider identities, this fails loudly here rather than letting
  * routing classification silently flip downstream.
@@ -27,7 +27,7 @@ describe("ai-sdk provider identity contract (canary)", () => {
     expect(gateway.languageModel("anthropic/claude-sonnet-4.6").provider).toBe("gateway");
   });
 
-  it("direct provider instances do not report 'gateway'", () => {
+  it("non-gateway provider instances do not report 'gateway'", () => {
     const providers = [
       anthropic("claude-sonnet-4.6").provider,
       openai("gpt-5.4").provider,

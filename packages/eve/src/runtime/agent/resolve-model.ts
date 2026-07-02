@@ -1,6 +1,10 @@
 import type { LanguageModel } from "ai";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
+import { isExperimentalCodexModel } from "#shared/codex-subscription-model.js";
+import { isLanguageModelValue } from "#shared/language-model.js";
+import { aiGatewayEndpoint } from "#internal/model-auth/endpoint/ai-gateway.js";
+import { codexEndpoint } from "#internal/model-auth/endpoint/codex/endpoint.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { resolveBootstrapRuntimeModel } from "#runtime/agent/bootstrap-model.js";
 import {
@@ -36,11 +40,15 @@ export async function resolveRuntimeModelReference(
     return mockModel;
   }
 
+  if (reference.transport === "codex") {
+    return codexEndpoint.createModel(reference);
+  }
+
   if (isSourceBackedRuntimeModelReference(reference)) {
     return await loadSourceBackedRuntimeModelReference(reference, scope);
   }
 
-  return reference.id;
+  return aiGatewayEndpoint.createModel(reference);
 }
 
 async function loadSourceBackedRuntimeModelReference(
@@ -71,6 +79,17 @@ async function loadSourceBackedRuntimeModelReference(
     throw new Error(
       `Expected the authored agent config export "${reference.source.exportName ?? "default"}" from "${reference.source.logicalPath}" to provide a runtime model.`,
     );
+  }
+
+  // A source-backed reference to an experimental_codex value only compiles in
+  // production, where the compiler selected the deployable fallback route.
+  if (isExperimentalCodexModel(model)) {
+    if (!isLanguageModelValue(model.fallback)) {
+      throw new Error(
+        `Expected the authored agent config export "${reference.source.exportName ?? "default"}" from "${reference.source.logicalPath}" to provide a deployable experimental_codex fallback: an AI SDK language model or a model id string.`,
+      );
+    }
+    return model.fallback;
   }
 
   return model;

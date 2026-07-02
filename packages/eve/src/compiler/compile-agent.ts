@@ -10,12 +10,19 @@ import {
   writeCompilerArtifacts,
 } from "#compiler/artifacts.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import type { ManifestCompileMode } from "#compiler/normalize-helpers.js";
 
 /**
  * Input for compiling the current authored agent into framework-owned
  * discovery artifacts.
  */
 export interface CompileAgentInput {
+  /**
+   * Determines how development-only authored options are compiled. Defaults
+   * to development so local inspection and dev server flows see local-only
+   * behavior unless a production host build opts out explicitly.
+   */
+  mode?: ManifestCompileMode;
   /**
    * Optional {@link ProjectSource} used for discovery reads. Defaults to a
    * disk-backed source so production callers keep their current behaviour.
@@ -67,6 +74,7 @@ export async function compileAgent(input: CompileAgentInput = {}): Promise<Compi
     appRoot: project.appRoot,
     diagnostics: discoveryResult.diagnostics,
     manifest: discoveryResult.manifest,
+    mode: input.mode ?? "development",
   });
   const result: CompileAgentResult = {
     diagnostics: discoveryResult.diagnostics,

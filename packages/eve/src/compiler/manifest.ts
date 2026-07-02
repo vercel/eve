@@ -23,8 +23,9 @@ import type {
   InternalAgentModelDefinition,
   InternalAgentCompactionDefinition,
   AgentBuildDefinition,
-  ModelRouting,
+  ModelEndpoint,
 } from "#shared/agent-definition.js";
+import { modelEndpointSchema } from "#shared/agent-model-schemas.js";
 import type { InternalToolDefinition } from "#shared/tool-definition.js";
 
 /**
@@ -40,7 +41,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 31;
+export const COMPILED_AGENT_MANIFEST_VERSION = 33;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -89,14 +90,14 @@ interface DisabledCompiledChannelEntry {
 /**
  * Serializable runtime model reference preserved in the compiled manifest.
  *
- * Carries {@link ModelRouting} — decided at compile time from the authored model
+ * Carries {@link ModelEndpoint} — decided at compile time from the authored model
  * value — so consumers (the dev server's `/eve/v1/info`, the TUI) can tell how
  * the model is reached without re-resolving it. Runtime model resolution uses
  * the routing-free {@link InternalAgentModelDefinition}; routing is a
  * compiled-output concern only.
  */
 export type CompiledRuntimeModelReference = InternalAgentModelDefinition & {
-  routing: ModelRouting;
+  routing: ModelEndpoint;
 };
 
 /**
@@ -310,29 +311,14 @@ const compiledChannelEntrySchema = z.union([
   disabledCompiledChannelEntrySchema,
 ]) as unknown as z.ZodType<CompiledChannelEntry>;
 
-const modelRoutingSchema = z.union([
-  z
-    .object({
-      kind: z.literal("gateway"),
-      target: z.string(),
-      byok: z.string().optional(),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("external"),
-      provider: z.string(),
-    })
-    .strict(),
-]) satisfies z.ZodType<ModelRouting>;
-
 const compiledRuntimeModelReferenceSchema: z.ZodType<CompiledRuntimeModelReference> = z
   .object({
     contextWindowTokens: z.number().int().positive().optional(),
     id: z.string(),
     source: moduleSourceRefSchema.optional(),
     providerOptions: z.record(z.string(), jsonObjectSchema).optional(),
-    routing: modelRoutingSchema,
+    routing: modelEndpointSchema,
+    transport: z.literal("codex").optional(),
   })
   .strict();
 
@@ -834,8 +820,11 @@ function cloneCompiledRuntimeModelReference(
 ): CompiledRuntimeModelReference {
   const clone: CompiledRuntimeModelReference = {
     id: model.id,
-    routing: cloneModelRouting(model.routing),
+    routing: cloneModelEndpoint(model.routing),
   };
+  if (model.transport !== undefined) {
+    clone.transport = model.transport;
+  }
   if (model.contextWindowTokens !== undefined) {
     clone.contextWindowTokens = model.contextWindowTokens;
   }
@@ -848,7 +837,7 @@ function cloneCompiledRuntimeModelReference(
   return clone;
 }
 
-function cloneModelRouting(routing: ModelRouting): ModelRouting {
+function cloneModelEndpoint(routing: ModelEndpoint): ModelEndpoint {
   if (routing.kind === "external") {
     return { kind: "external", provider: routing.provider };
   }

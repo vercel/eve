@@ -6,7 +6,7 @@ import {
   createLocalSubagentSourceRef,
   createModuleSourceRef,
 } from "#discover/manifest.js";
-import { classifyModelRouting } from "#internal/classify-model-routing.js";
+import { classifyModelEndpoint } from "#internal/classify-model-endpoint.js";
 import type { CompiledAgentDefinition } from "#compiler/manifest.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 
@@ -86,7 +86,7 @@ function createConfig(
   const config: CompiledAgentDefinition = {
     model: {
       id: "openai/gpt-5.5",
-      routing: classifyModelRouting("openai/gpt-5.5"),
+      routing: classifyModelEndpoint("openai/gpt-5.5"),
     },
     name: input.name,
   };

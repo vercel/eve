@@ -4,7 +4,7 @@ import { COMPILE_METADATA_KIND, COMPILE_METADATA_VERSION } from "#compiler/artif
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { createCompiledAgentManifest } from "#compiler/manifest.js";
 import { createCompiledArtifactsBootstrapSource } from "#internal/application/compiled-artifacts.js";
-import { classifyModelRouting } from "#internal/classify-model-routing.js";
+import { classifyModelEndpoint } from "#internal/classify-model-endpoint.js";
 
 describe("createCompiledArtifactsBootstrapSource", () => {
   it("generates static Workflow world bootstrap imports from compiled config", async () => {
@@ -16,7 +16,7 @@ describe("createCompiledArtifactsBootstrapSource", () => {
           config: {
             model: {
               id: "openai/gpt-5.5",
-              routing: classifyModelRouting("openai/gpt-5.5"),
+              routing: classifyModelEndpoint("openai/gpt-5.5"),
             },
             name: "app",
             experimental: {
