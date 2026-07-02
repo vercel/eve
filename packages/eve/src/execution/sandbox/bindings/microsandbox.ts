@@ -2,6 +2,7 @@ import {
   createMicrosandboxHandle,
   prewarmMicrosandboxTemplate,
 } from "#execution/sandbox/bindings/microsandbox-lifecycle.js";
+import { enrichMicrosandboxError } from "#execution/sandbox/bindings/microsandbox-create.js";
 import {
   microsandboxOptionsForHash,
   resolveMicrosandboxOptions,
@@ -56,12 +57,19 @@ export function createMicrosandboxSandboxBackend(
     async prewarm(
       prewarmInput: SandboxBackendPrewarmInput<MicrosandboxBootstrapUseOptions>,
     ): Promise<SandboxBackendPrewarmResult> {
-      return await prewarmMicrosandboxTemplate({
-        backendName: MICROSANDBOX_BACKEND_NAME,
-        options,
-        optionsHash,
-        prewarmInput,
-      });
+      try {
+        return await prewarmMicrosandboxTemplate({
+          backendName: MICROSANDBOX_BACKEND_NAME,
+          options,
+          optionsHash,
+          prewarmInput,
+        });
+      } catch (error) {
+        throw enrichMicrosandboxError({
+          context: `Failed to prewarm microsandbox template "${prewarmInput.templateKey}"`,
+          error,
+        });
+      }
     },
     async create(
       createInput: SandboxBackendCreateInput,

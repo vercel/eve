@@ -60,11 +60,14 @@ export const AuthKey = new ContextKey<SessionAuthContext | null>("eve.auth");
 export const InitiatorAuthKey = new ContextKey<SessionAuthContext | null>("eve.initiatorAuth");
 export const SessionIdKey = new ContextKey<string>("eve.sessionId");
 export const ContinuationTokenKey = new ContextKey<string>("eve.continuationToken");
+export const ChannelRequestIdKey = new ContextKey<string>("eve.channelRequestId");
 export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationProjection>(
   "eve.channelInstrumentation",
 );
 export const ModeKey = new ContextKey<RunMode>("eve.mode");
 export const ParentSessionKey = new ContextKey<SessionParent>("eve.parentSession");
+export const SubagentDepthKey = new ContextKey<number>("eve.subagentDepth");
+export const SubagentMaxDepthKey = new ContextKey<number>("eve.subagentMaxDepth");
 
 /**
  * Session-level capability flags (see {@link SessionCapabilities}). Set
@@ -97,6 +100,7 @@ export interface DurableDynamicToolMetadata {
   readonly resolverSlug: string;
   readonly entryKey: string;
   readonly executeStepFnName?: string;
+  readonly approvalStepFnName?: string;
   readonly closureVars?: Record<string, unknown>;
 }
 

@@ -7,6 +7,7 @@
 
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { isObject } from "#shared/guards.js";
+import { parseTelegramChatType, type TelegramChatType } from "#public/channels/telegram/inbound.js";
 
 /** Telegram bot token, materialized directly or from an async secret provider. */
 export type TelegramBotToken = string | (() => string | Promise<string>);
@@ -47,6 +48,8 @@ export interface TelegramMessageResult {
   readonly id: string;
   /** Telegram chat id associated with the message, when Telegram returned one. */
   readonly chatId?: string;
+  /** Recognized Telegram chat type associated with the message, when returned. */
+  readonly chatType?: TelegramChatType;
   /** Telegram's raw JSON response. */
   readonly raw: unknown;
 }
@@ -284,6 +287,7 @@ function toTelegramMessageResult(body: unknown): TelegramMessageResult {
   return {
     chatId:
       typeof chat.id === "number" || typeof chat.id === "string" ? String(chat.id) : undefined,
+    chatType: parseTelegramChatType(chat.type) ?? undefined,
     id:
       typeof result.message_id === "number" || typeof result.message_id === "string"
         ? String(result.message_id)

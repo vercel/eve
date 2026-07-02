@@ -46,6 +46,41 @@ describe("defineChannel", () => {
     const adapter = getAdapter(channel);
     expect(adapter.kind).toBe("http");
     expect(adapter.fetchFile).toBeUndefined();
+    expect(channel.cors).toBeUndefined();
+  });
+
+  it("normalizes channel CORS options", () => {
+    const channel = defineChannel({
+      cors: {
+        allowHeaders: ["authorization", "content-type"],
+        credentials: true,
+        exposeHeaders: ["x-eve-session-id"],
+        maxAge: 600,
+        methods: ["POST"],
+        origin: ["https://app.example.com"],
+        preflight: { statusCode: 200 },
+      },
+      routes: [POST("/x", async () => new Response("ok"))],
+    });
+
+    expect(channel.cors).toEqual({
+      allowHeaders: ["authorization", "content-type"],
+      credentials: true,
+      exposeHeaders: ["x-eve-session-id"],
+      maxAge: "600",
+      methods: ["POST"],
+      origin: ["https://app.example.com"],
+      preflight: { statusCode: 200 },
+    });
+  });
+
+  it("uses an empty options object for permissive CORS", () => {
+    const channel = defineChannel({
+      cors: true,
+      routes: [POST("/x", async () => new Response("ok"))],
+    });
+
+    expect(channel.cors).toEqual({});
   });
 
   it("declares websocket routes with an eve-owned route discriminator", () => {
@@ -372,6 +407,86 @@ describe("defineChannel", () => {
     expect(capturedCtx.session.turn).toEqual({ id: "turn-1", sequence: 0 });
     expect(typeof capturedChannel.continuationToken).toBe("string");
     expect(typeof capturedChannel.setContinuationToken).toBe("function");
+  });
+
+  it("registers reasoning event handlers with channel and session context", async () => {
+    let appendedData: unknown;
+    let completedData: unknown;
+    let capturedChannel: any;
+    let capturedCtx: any;
+    const channel = defineChannel({
+      routes: [POST("/x", async () => new Response("ok"))],
+      events: {
+        "reasoning.appended": (data, ch, ctx) => {
+          appendedData = data;
+          capturedChannel = ch;
+          capturedCtx = ctx;
+        },
+        "reasoning.completed": (data) => {
+          completedData = data;
+        },
+      },
+    });
+
+    const adapter = getAdapter(channel);
+    const session: Session = {
+      auth: { current: null, initiator: null },
+      sessionId: "sess-channel-test",
+      turn: { id: "turn-1", sequence: 0 },
+    };
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, session);
+
+    const accessor: ContextAccessor = {
+      get: (key) => ctx.get(key as any),
+      has: (key) => ctx.has(key as any),
+      require: (key) => ctx.require(key as any),
+      set: (key, value) => ctx.set(key as any, value),
+      ensure: (key, create) => ctx.ensure(key as any, create),
+    };
+    const adapterCtx = buildAdapterContext(adapter, accessor);
+
+    await contextStorage.run(ctx, async () => {
+      await callAdapterEventHandler(
+        adapter,
+        {
+          type: "reasoning.appended",
+          data: {
+            reasoningDelta: "Need",
+            reasoningSoFar: "Need",
+            sequence: 0,
+            stepIndex: 0,
+            turnId: "turn-1",
+          },
+        },
+        adapterCtx,
+      );
+      await callAdapterEventHandler(
+        adapter,
+        {
+          type: "reasoning.completed",
+          data: {
+            reasoning: "Need to inspect the repo.",
+            sequence: 0,
+            stepIndex: 0,
+            turnId: "turn-1",
+          },
+        },
+        adapterCtx,
+      );
+    });
+
+    expect(appendedData).toMatchObject({
+      reasoningDelta: "Need",
+      reasoningSoFar: "Need",
+      turnId: "turn-1",
+    });
+    expect(completedData).toMatchObject({
+      reasoning: "Need to inspect the repo.",
+      turnId: "turn-1",
+    });
+    expect(typeof capturedChannel.continuationToken).toBe("string");
+    expect(capturedCtx.session.id).toBe("sess-channel-test");
   });
 
   it("session.failed handler receives no ctx parameter", async () => {

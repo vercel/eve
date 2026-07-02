@@ -25,8 +25,8 @@ const defaultDependencies: LinkCommandDependencies = {
 
 /**
  * `eve link`: pick a Vercel team and project (re-linking when one is already
- * linked), run `vercel link`, then pull env so the AI Gateway credential lands
- * in `.env.local`. The flow itself is {@link runLinkFlow}, shared with the dev
+ * linked), run `vercel link` for the selected project, then pull env so the AI Gateway
+ * credential lands in `.env.local`. The flow itself is {@link runLinkFlow}, shared with the dev
  * TUI `/model` menu's provider row. Interactive only: the pickers are the point of the command,
  * so a non-TTY run refuses with guidance instead of guessing a project.
  */
@@ -42,7 +42,7 @@ export async function runLinkCommand(
   }
   if (!dependencies.hasInteractiveTerminal()) {
     logger.error(
-      "`eve link` needs an interactive terminal to pick the team and project. In CI, run `vercel link --project <name> --yes` instead.",
+      "`eve link` needs an interactive terminal to pick the team and project. In CI, run `vercel link --project <name> --yes --non-interactive` instead.",
     );
     process.exitCode = 1;
     return;

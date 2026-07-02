@@ -9,9 +9,11 @@ import mcp from "./@ai-sdk/mcp.mjs";
 import openai from "./@ai-sdk/openai.mjs";
 import otel from "./@ai-sdk/otel.mjs";
 import provider from "./@ai-sdk/provider.mjs";
+import providerUtils from "./@ai-sdk/provider-utils.mjs";
 
 import chatAdapterSlack from "./@chat-adapter/slack.mjs";
 import chatAdapterStateMemory from "./@chat-adapter/state-memory.mjs";
+import chatAdapterTwilio from "./@chat-adapter/twilio.mjs";
 
 import opentelemetryApi from "./@opentelemetry/api.mjs";
 import standardSchemaSpec from "./@standard-schema/spec.mjs";
@@ -20,15 +22,18 @@ import vercelOidc from "./@vercel/oidc.mjs";
 import vercelSandbox from "./@vercel/sandbox.mjs";
 import workflowCore from "./@workflow/core.mjs";
 import workflowErrors from "./@workflow/errors.mjs";
+import workflowSerde from "./@workflow/serde.mjs";
 import workflowWorld from "./@workflow/world.mjs";
 
 import chat from "./chat.mjs";
 import chokidar from "./chokidar.mjs";
 import commander from "./commander.mjs";
 import experimentalAiSdkCodeMode from "./experimental-ai-sdk-code-mode.mjs";
+import eventsourceParserStream from "./eventsource-parser-stream.mjs";
 import grayMatter from "./gray-matter.mjs";
 import jose from "./jose.mjs";
 import jsoncParser from "./jsonc-parser.mjs";
+import jsonSchema from "./json-schema.mjs";
 import picocolors from "./picocolors.mjs";
 import semver from "./semver.mjs";
 import turndown from "./turndown.mjs";
@@ -40,19 +45,23 @@ export const MODULES = [
   chat,
   chatAdapterSlack,
   chatAdapterStateMemory,
+  chatAdapterTwilio,
   chokidar,
   commander,
   experimentalAiSdkCodeMode,
+  eventsourceParserStream,
   google,
   grayMatter,
   jose,
   jsoncParser,
+  jsonSchema,
   mcp,
   openai,
   opentelemetryApi,
   otel,
   picocolors,
   provider,
+  providerUtils,
   semver,
   standardSchemaSpec,
   turndown,
@@ -61,6 +70,7 @@ export const MODULES = [
   vercelSandbox,
   workflowCore,
   workflowErrors,
+  workflowSerde,
   workflowWorld,
   zod,
   zodValidationError,

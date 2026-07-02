@@ -1,7 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BootstrapGenerateResult } from "#runtime/agent/bootstrap-model-utils.js";
-import { createMockAuthoredRuntimeModel } from "#runtime/agent/mock-model-adapter.js";
+import {
+  createMockAuthoredRuntimeModel,
+  shouldMockAuthoredRuntimeModels,
+} from "#runtime/agent/mock-model-adapter.js";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 async function generateWithPrompt(
   prompt: unknown,
@@ -23,6 +30,13 @@ async function generateWithPrompt(
 }
 
 describe("createMockAuthoredRuntimeModel", () => {
+  it("activates for the explicit spawned-server test seam", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EVE_MOCK_AUTHORED_MODELS", "1");
+
+    expect(shouldMockAuthoredRuntimeModels()).toBe(true);
+  });
+
   it("activates a matching skill when the available skill line includes a workspace path", async () => {
     const result = await generateWithPrompt([
       {
@@ -219,42 +233,6 @@ describe("createMockAuthoredRuntimeModel", () => {
       {
         text: 'Bootstrap reply: Call the load_skill tool with skill "echo-marker".',
         type: "text",
-      },
-    ]);
-  });
-
-  it("emits code-mode source for weather tools when code mode is the visible tool", async () => {
-    const result = await generateWithPrompt(
-      [
-        {
-          content: "What is the weather for Lisbon?",
-          role: "user",
-        },
-      ],
-      [
-        {
-          description: [
-            "Run sandboxed JavaScript with these host tools.",
-            "declare const tools: {",
-            "  /** Get the current weather for a city. */",
-            "  get_weather: (input: { city: string }) => Promise<unknown>;",
-            "};",
-          ].join("\n"),
-          name: "code_mode",
-          type: "function",
-        },
-      ],
-    );
-
-    expect(result.finishReason).toEqual({ raw: undefined, unified: "tool-calls" });
-    expect(result.content).toEqual([
-      {
-        input: JSON.stringify({
-          js: 'return await tools.get_weather({ city: "Lisbon" });',
-        }),
-        toolCallId: "call_code_mode",
-        toolName: "code_mode",
-        type: "tool-call",
       },
     ]);
   });

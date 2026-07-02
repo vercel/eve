@@ -10,7 +10,7 @@
  * identity below.
  *
  * Everything lives in this one module on purpose. The catalog is consumed
- * directly from source by both NodeNext tooling (`tsgo` in eve,
+ * directly from source by both NodeNext tooling (`tsc` in eve,
  * which requires explicit `.js` import extensions) and Turbopack (the docs app,
  * which cannot resolve `.js` specifiers back to `.ts`). A single file with no
  * relative imports is the only shape that satisfies both without per-consumer
@@ -151,7 +151,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: true, gallery: true },
     connection: {
       description: "Linear workspace: issues, projects, cycles, and comments.",
-      mcp: { url: "https://mcp.linear.app/sse" },
+      mcp: { url: "https://mcp.linear.app/mcp" },
     },
   },
   {

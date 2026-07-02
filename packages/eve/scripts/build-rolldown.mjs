@@ -2,8 +2,8 @@
  * Single rolldown invocation that emits every `src/**\/*.ts` to its
  * matching `dist/src/**\/*.js` location, minified and comment-stripped.
  *
- * Replaces both the tsgo JS emit and the secondary cli/evals bundler.
- * `tsgo` continues to emit `.d.ts` files only; this script owns every
+ * Replaces TypeScript JS emit and the secondary cli/evals bundler.
+ * `tsc` continues to emit `.d.ts` files only; this script owns every
  * shipped `.js` byte.
  *
  * Topology: `preserveModules: true` keeps the 1:1 source-to-output
@@ -156,7 +156,7 @@ const EXTERNAL_PACKAGES = new Set([
 function isExternalPackageSpecifier(source) {
   // All `#*` subpath imports stay external so the published dist keeps
   // the bare-specifier shape the runtime resolves at load time. Source
-  // files routinely depend on a tsgo-style 1:1 mapping (workflow
+  // files routinely depend on a 1:1 mapping (workflow
   // builder, instrumentation, etc.) and the workflow bundler needs the
   // `eve-source` condition to follow these specifiers back to the
   // matching `.ts` source rather than into the published `.js` tree.

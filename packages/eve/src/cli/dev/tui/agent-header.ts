@@ -7,7 +7,7 @@
  */
 
 import type { AgentInfoResult } from "#client/index.js";
-import { EVE_BETA_TERMS_URL } from "#cli/banner.js";
+import { isPromptControlCommand } from "./prompt-commands.js";
 import type { Theme } from "./theme.js";
 import { truncate } from "./tool-format.js";
 
@@ -31,6 +31,7 @@ export const AGENT_HEADER_TIPS: readonly string[] = [
   "Use /channels to add more ways to reach your agent.",
   "Use /deploy to see your agent go live.",
   "Type /help to see every command.",
+  "Tip: /connect to seamlessly add MCP Connections to your agent",
 ];
 
 /** Picks one tip; `random` is a test seam over Math.random. */
@@ -53,11 +54,6 @@ export function buildAgentHeader(input: AgentHeaderInput): string[] {
   const lines: string[] = [];
   const brand = c.bold("eve");
   lines.push(` ${brand} ${c.dim(truncate(name, Math.max(8, width - 8)))}`);
-  lines.push(
-    ` ${c.dim(
-      truncate(`eve is currently in preview: ${EVE_BETA_TERMS_URL}`, Math.max(8, width - 2)),
-    )}`,
-  );
 
   if (info && (info.diagnostics.discoveryErrors > 0 || info.diagnostics.discoveryWarnings > 0)) {
     const parts: string[] = [];
@@ -81,10 +77,19 @@ export function buildAgentHeader(input: AgentHeaderInput): string[] {
   }
 
   if (input.tip !== undefined) {
-    lines.push(` ${c.dim(truncate(input.tip, Math.max(8, width - 2)))}`);
+    lines.push(` ${renderTip(input.tip, Math.max(8, width - 2), theme)}`);
   }
 
   return lines;
+}
+
+function renderTip(tip: string, width: number, theme: Theme): string {
+  return truncate(tip, width)
+    .split(/(\/[a-z:-]+)/u)
+    .map((part) =>
+      isPromptControlCommand(part) ? theme.colors.blue(part) : theme.colors.dim(part),
+    )
+    .join("");
 }
 
 function plural(count: number): string {

@@ -36,7 +36,7 @@ my-agent/
         └── weekly_recap.ts
 ```
 
-Read the [documentation](https://beta.eve.dev/docs) for the full project layout and guides.
+Read the [documentation](https://eve.dev/docs) for the full project layout and guides.
 
 ## Quick start
 
@@ -87,7 +87,7 @@ Choose the model in `agent/agent.ts`:
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "anthropic/claude-sonnet-4.6",
+  model: "anthropic/claude-sonnet-5",
 });
 ```
 
@@ -98,7 +98,7 @@ npm run dev
 ```
 
 That's a working agent. Add human-in-the-loop prompts, subagents, and schedules as needed.
-Follow the [first-agent tutorial](https://beta.eve.dev/docs/tutorial/first-agent) for a complete
+Follow the [first-agent tutorial](https://eve.dev/docs/tutorial/first-agent) for a complete
 walkthrough.
 
 ## Community

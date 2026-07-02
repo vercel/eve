@@ -68,6 +68,87 @@ function build(fetchMock: typeof fetch, config?: { excludedFiles?: readonly stri
   });
 }
 
+/**
+ * SHA pinning for webhook-driven PR turns.
+ *
+ * Dispatch copies `state.headSha` and `state.baseSha` from the webhook into
+ * {@link buildGitHubPullRequestContext} so injected diffs and sandbox checkout
+ * refer to the same commit.
+ *
+ * Timing gap this covers (single delivery):
+ *   T0  Webhook arrives for commit ABC → state.headSha = ABC
+ *   T1  Contributor pushes commit XYZ before context is built
+ *   T2  GET /pulls/N returns live head XYZ
+ *   Without pinning: /pulls/N/files would load XYZ's diff while checkout still uses ABC.
+ *   With pinning: compare base...ABC loads ABC's diff; metadata shows head_sha: ABC.
+ *
+ * Out of scope for these unit tests:
+ *   - Two overlapping synchronize deliveries (separate webhooks)
+ *   - Head moving after context is built but before the turn completes
+ *   - Title/body from GET /pulls/N while SHAs stay pinned
+ */
+describe("SHA pinning", () => {
+  it("keeps webhook ABC when live PR head is XYZ at context build time", async () => {
+    const webhookHead = "abc111fromwebhook";
+    const webhookBase = "base999fromwebhook";
+    const liveHead = "xyz999alreadyongithub";
+    const liveFilesPatch = "@@ patch for the current PR head";
+
+    const fetchMock = vi.fn((input: Request | URL | string) => {
+      const url = String(input);
+      if (url.includes("/files")) {
+        return Promise.reject(new Error("did not expect /pulls/N/files when headSha is pinned"));
+      }
+      if (url.includes("/compare/")) {
+        return Promise.resolve(
+          jsonResponse({
+            files: [
+              {
+                additions: 1,
+                deletions: 0,
+                filename: "packages/eve/src/at-abc.ts",
+                patch: "@@ diff for abc111",
+                status: "added",
+              },
+            ],
+          }),
+        );
+      }
+      return Promise.resolve(
+        jsonResponse(
+          pullRequest({
+            base: { ref: "main", repo: { full_name: "vercel/eve" }, sha: "other-live-base" },
+            head: { ref: "feature/github", repo: { full_name: "octocat/eve" }, sha: liveHead },
+          }),
+        ),
+      );
+    });
+
+    const messages = await buildGitHubPullRequestContext({
+      api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
+      baseSha: webhookBase,
+      credentials,
+      headSha: webhookHead,
+      installationId: 55,
+      owner: "vercel",
+      pullRequestNumber: 7,
+      repo: "eve",
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://github.test/repos/vercel/eve/pulls/7");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      `https://github.test/repos/vercel/eve/compare/${webhookBase}...${webhookHead}`,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(text(messages)).toContain(`head_sha: ${webhookHead}`);
+    expect(text(messages)).toContain(`base_sha: ${webhookBase}`);
+    expect(text(messages)).not.toContain(liveHead);
+    expect(text(messages)).toContain("- packages/eve/src/at-abc.ts");
+    expect(text(messages)).toContain("@@ diff for abc111");
+    expect(text(messages)).not.toContain(liveFilesPatch);
+  });
+});
+
 describe("GitHub pull-request context", () => {
   it("builds metadata and the changed-file diff by default", async () => {
     const fetchMock = vi

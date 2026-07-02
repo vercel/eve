@@ -44,7 +44,7 @@ Export the result of `defineInstrumentation` as the default export.
 
 Use the `setup` callback to register your OTel provider (for example `registerOTel` from `@vercel/otel`). The framework invokes it at server startup with the resolved agent name. `context.agentName` is resolved at compile time from your project (the package's `name`, falling back to the app directory name), so you never hard-code a service name.
 
-Any OTel-compatible backend works (Braintrust, Honeycomb, Datadog, Jaeger). Install the exporter package you need and configure it in the callback.
+Any OTel-compatible backend works (Braintrust, Raindrop, Arize, Honeycomb, Datadog, Jaeger). Install the exporter package you need and configure it in the callback.
 
 Three more fields control what the AI SDK records inside those spans (see the AI SDK's [telemetry reference](https://ai-sdk.dev/docs/ai-sdk-core/telemetry)):
 

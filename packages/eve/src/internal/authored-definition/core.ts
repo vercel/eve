@@ -1,9 +1,12 @@
-import type { AgentDefinition, AgentBuildDefinition } from "#public/definitions/agent.js";
+import type {
+  AgentDefinition,
+  AgentBuildDefinition,
+  AgentWorkflowDefinition,
+} from "#public/definitions/agent.js";
 import type { ScheduleDefinition, ScheduleRunHandler } from "#public/definitions/schedule.js";
 import type { SkillDefinition, SkillFileContent } from "#public/definitions/skill.js";
 import type { InstructionsDefinition } from "#public/definitions/instructions.js";
 import {
-  expectBoolean,
   expectFunction,
   expectObjectRecord,
   expectOnlyKnownKeys,
@@ -38,10 +41,12 @@ export function normalizeAgentDefinition(
       "compaction",
       "description",
       "experimental",
+      "limits",
       "model",
       "modelContextWindowTokens",
       "modelOptions",
       "outputSchema",
+      "reasoning",
     ],
     message,
   );
@@ -84,7 +89,35 @@ export function normalizeAgentDefinition(
     definition.outputSchema = record.outputSchema as NormalizedAgentDefinition["outputSchema"];
   }
 
+  if (record.reasoning !== undefined) {
+    definition.reasoning = normalizeAgentReasoningDefinition(record.reasoning, message);
+  }
+
+  if (record.limits !== undefined) {
+    definition.limits = normalizeAgentLimitsDefinition(record.limits, message);
+  }
+
   return definition as Readonly<NormalizedAgentDefinition>;
+}
+
+function normalizeAgentReasoningDefinition(
+  value: unknown,
+  message: string,
+): NonNullable<NormalizedAgentDefinition["reasoning"]> {
+  const reasoning = expectString(value, message);
+
+  switch (reasoning) {
+    case "provider-default":
+    case "none":
+    case "minimal":
+    case "low":
+    case "medium":
+    case "high":
+    case "xhigh":
+      return reasoning;
+    default:
+      throw new Error(message);
+  }
 }
 
 function expectPositiveInteger(value: unknown, message: string): number {
@@ -93,6 +126,37 @@ function expectPositiveInteger(value: unknown, message: string): number {
   }
 
   return value;
+}
+
+function normalizeAgentLimitsDefinition(
+  value: unknown,
+  message: string,
+): NonNullable<NormalizedAgentDefinition["limits"]> {
+  const record = expectObjectRecord(value, message);
+  expectOnlyKnownKeys(
+    record,
+    ["maxInputTokensPerSession", "maxOutputTokensPerSession", "maxSubagentDepth"],
+    message,
+  );
+  const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["limits"]>> = {};
+
+  if (record.maxInputTokensPerSession !== undefined) {
+    normalizedDefinition.maxInputTokensPerSession = expectPositiveInteger(
+      record.maxInputTokensPerSession,
+      message,
+    );
+  }
+  if (record.maxOutputTokensPerSession !== undefined) {
+    normalizedDefinition.maxOutputTokensPerSession = expectPositiveInteger(
+      record.maxOutputTokensPerSession,
+      message,
+    );
+  }
+  if (record.maxSubagentDepth !== undefined) {
+    normalizedDefinition.maxSubagentDepth = expectPositiveInteger(record.maxSubagentDepth, message);
+  }
+
+  return normalizedDefinition;
 }
 
 function normalizeAgentBuildDefinition(
@@ -116,16 +180,43 @@ function normalizeAgentBuildDefinition(
   return normalizedDefinition;
 }
 
+function normalizeAgentWorkflowDefinition(
+  value: unknown,
+  message: string,
+): AgentWorkflowDefinition {
+  const record = expectObjectRecord(value, message);
+  expectOnlyKnownKeys(record, ["world"], message);
+  const normalizedDefinition: Mutable<AgentWorkflowDefinition> = {};
+
+  if (record.world !== undefined) {
+    normalizedDefinition.world = normalizeAgentWorkflowWorldDefinition(record.world, message);
+  }
+
+  return normalizedDefinition;
+}
+
+function normalizeAgentWorkflowWorldDefinition(
+  value: unknown,
+  message: string,
+): NonNullable<AgentWorkflowDefinition["world"]> {
+  const packageName = expectString(value, message);
+  if (packageName.trim() === "") {
+    throw new Error(`${message} "experimental.workflow.world" must be a non-empty package name.`);
+  }
+
+  return packageName;
+}
+
 function normalizeAgentExperimentalDefinition(
   value: unknown,
   message: string,
 ): NonNullable<NormalizedAgentDefinition["experimental"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["codeMode"], message);
+  expectOnlyKnownKeys(record, ["workflow"], message);
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["experimental"]>> = {};
 
-  if (record.codeMode !== undefined) {
-    normalizedDefinition.codeMode = expectBoolean(record.codeMode, message);
+  if (record.workflow !== undefined) {
+    normalizedDefinition.workflow = normalizeAgentWorkflowDefinition(record.workflow, message);
   }
 
   return normalizedDefinition;

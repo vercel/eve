@@ -54,33 +54,27 @@ Inbound hooks decide whether to dispatch a turn and with what `auth`. Return `{ 
 - `onDirectMessage(ctx, message)` handles `message.im` events (needs `im:history` scope). Bot-authored messages and edits are filtered out first.
 - `onInteraction(action, ctx)` handles `block_actions` callbacks not consumed by HITL.
 
-You get the triggering mention by default, but not the earlier replies in the thread. Pull them in with `loadThreadContextMessages` and return them as `context`, which eve appends to history as user messages the model sees on every later turn. Use `since: "last-agent-reply"` so repeated mentions in one thread inject only what is new:
+eve attaches the triggering Slack user id to the same model message as the message text. This keeps speaker attribution intact when several people use one thread without making profile lookup requests.
+
+You get the triggering mention by default, but not the earlier replies in the thread. Enable `threadContext` to fetch and inject them with every message attributed by stable Slack user id. Use `since: "last-agent-reply"` so repeated mentions inject only what is new:
 
 ```ts
-import { defaultSlackAuth, loadThreadContextMessages, slackChannel } from "eve/channels/slack";
+import { slackChannel } from "eve/channels/slack";
 import { connectSlackCredentials } from "@vercel/connect/eve";
 
 export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
-  async onAppMention(ctx, message) {
-    const auth = defaultSlackAuth(message, ctx);
-    const prior = await loadThreadContextMessages(ctx.thread, message, {
-      since: "last-agent-reply",
-    });
-    if (prior.length === 0) return { auth };
-    const transcript = prior
-      .map((m) => `${m.isMe ? "you" : (m.user ?? "user")}: ${m.markdown}`)
-      .join("\n");
-    return { auth, context: [`Recent thread messages since your last reply:\n\n${transcript}`] };
-  },
+  threadContext: { since: "last-agent-reply" },
 });
 ```
 
+`threadContext` performs one `conversations.replies` request for each triggering thread reply and requires the matching Slack history scope. Omit it when the agent should see only direct mentions. `loadThreadContextMessages` remains available when you need custom filtering or non-model processing of the raw thread messages.
+
 ### Delivery
 
-The default handlers reply in-thread and show progress. Typing indicators post automatically: `Thinking…` on inbound, `Working…` on `turn.started`, tool status on `actions.requested`. Override `onAppMention` or the `events` handlers to customize.
+The default handlers reply in-thread and show progress. Typing indicators post automatically: `Thinking…` on inbound, `Working…` on `turn.started`, a truncated reasoning snippet on `reasoning.appended`, and tool status on `actions.requested`. Reasoning snippets build progressively: extensions of at least four characters appear immediately, while smaller streamed deltas use the five-second refresh interval to avoid one Slack request per token. Override `events["reasoning.appended"]` if you prefer generic wording. Override `onAppMention` or the `events` handlers to customize.
 
-When a session starts without a `threadTs` (say, from a schedule or `receive(slack, ...)`), it anchors on the first agent post, and later posts and mentions resume that same session. Pass `initialMessage` with a `Card` to land a structured anchor first instead. `threadTs` and `initialMessage` are mutually exclusive.
+When a session starts without a `threadTs` (say, from a schedule or `receive(slack, ...)`), eve gives it a unique temporary continuation token. The first agent post anchors the session to the Slack message timestamp, and later posts and mentions resume that same session. Pass `initialMessage` with a `Card` to land a structured anchor first instead. `threadTs` and `initialMessage` are mutually exclusive.
 
 The example below overrides `onAppMention` to gate on an authored message and posts the completed reply to the thread. Event handlers receive `(eventData, channel, ctx)`, with Slack platform handles on `channel.thread` and `channel.slack`:
 
@@ -105,7 +99,7 @@ export default slackChannel({
 
 HITL renders as Slack buttons and selects. When the user responds, the parked session (paused awaiting input) resumes.
 
-Authorization prompts are private. A sign-in challenge (OAuth URL, device code) is a credential. Anyone who completes it binds their identity to the session's connection. The default `authorization.required` handler delivers the challenge ephemerally to the triggering user, device code included, and posts a public link-free status only when it has no user to target. The handler receives a private-delivery context with `postEphemeral`, `postDirectMessage` (needs the `im:write` scope), and `state`. There is, intentionally, no public `post` and no raw API access.
+Authorization prompts split public status from private credentials. A sign-in challenge (OAuth URL, device code) is a credential. Anyone who completes it binds their identity to the session's connection. The default `authorization.required` handler posts a public, link-free status in the thread, delivers the actual challenge ephemerally to the triggering user, device code included, and then updates that public status when `authorization.completed` fires. The handler receives a private-delivery context with `postEphemeral`, `postDirectMessage` (needs the `im:write` scope), and `state`. There is, intentionally, no public `post` and no raw API access.
 
 ```ts
 events: {

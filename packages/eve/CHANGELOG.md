@@ -1,5 +1,336 @@
 # eve
 
+## 0.19.0
+
+### Minor Changes
+
+- 92f5162: add generic chat sdk channel for adapter-backed agents
+
+### Patch Changes
+
+- 8892504: Render the deployment home page with the eve SVG wordmark, baked-in agent name, and refined ready-state layout.
+- 3daaba0: Reduce development runtime snapshot disk usage by excluding `.env*`, generated dependency, and build output directories, using clone-friendly file copies where supported, and pruning stale snapshots after dev rebuilds.
+- 74ce164: reuse chat sdk twilio primitives for webhook, api, and voice helpers
+- c0a0ae2: Terminal model-call failures in delegated subagent runs (e.g. an unresolvable model id returning 404) now propagate to the parent as a failed subagent result instead of a successful empty output, so orchestrator sessions no longer report success when a delegation failed.
+- 0498252: Tool execution failures now return failed tool results to the model instead of leaving streamed tool calls without matching result history. Agents can recover from failed calls such as a missing `load_skill` target within the same turn.
+
+## 0.18.2
+
+### Patch Changes
+
+- c5da8e7: Sandbox API requests now append an `eve/<version>` token to the `user-agent` so the sandbox control plane can attribute traffic to eve.
+
+## 0.18.1
+
+### Patch Changes
+
+- 68365e8: Show tool call input in Slack approval prompts so operators can inspect approval-gated actions before approving.
+- 68365e8: Harden Slack HITL posting against API limits: large approval batches now split across multiple messages instead of exceeding Slack's 50-block cap, and long freeform answers are truncated so the answered-card update cannot fail.
+
+## 0.18.0
+
+### Minor Changes
+
+- a75dd47: Vercel sandbox: drop the `runtime` option. eve now always boots its hosted sandboxes from the published eve image.
+
+### Patch Changes
+
+- afc7ded: Allow `eve dev` to start from a package-less flat agent that only has `instructions.md`. Development runtime snapshots now generate private package metadata when the authored app has none.
+- 7d1084d: fix(eve): remove unnecessary preview deployment check that prevented production access from `eve dev`
+- 63f94f0: Remove optional framework peer dependencies from the published package metadata so installs no longer resolve unused framework packages.
+- ba2e0ce: Create new Vercel projects through `vercel link` instead of posting directly to the projects API. This lets the Vercel CLI apply its framework and local config handling while eve reads the resulting link metadata, keeps framework-specific eve host integrations when detected, and otherwise ensures new projects use the eve framework preset.
+
+## 0.17.2
+
+### Patch Changes
+
+- afa22f8: Cap recursive subagent delegation at three child-session levels by default, configurable with `defineAgent({ limits: { maxSubagentDepth } })`. At the limit, eve no longer advertises subagent tools and blocks stale delegated calls before starting another child session.
+- 55e9ad5: Update the scaffold's default agent model to `anthropic/claude-sonnet-5`. New agents created with `eve init` (and the setup model picker's pre-selected default) now use Claude Sonnet 5 instead of Claude Sonnet 4.6.
+- f26d600: use Chat SDK Slack format primitives for Slack mrkdwn conversion
+- 087d6fd: use chat sdk slack api primitives for slack channel api helpers
+- 70ebe69: use Chat SDK Slack webhook primitives for Slack channel parsing and verification
+- ed8a935: Keep the `Workflow` orchestration tool root-only. Delegated subagent sessions can still call visible subagent tools directly until the configured depth cap, but eve no longer advertises `Workflow` from those child sessions.
+- 37bd2bb: Use authored `eveChannel()` auth for `GET /eve/v1/info` so remote `eve dev` can authenticate with the same policy as the session routes.
+- 2fdc561: Add `limits.maxInputTokensPerSession` and `limits.maxOutputTokensPerSession` to stop a durable session from starting more model calls after its accumulated provider-reported input or output token usage reaches the configured cap. Root sessions default to a 40M input-token budget, delegated subagent sessions default to 5M, and authored input limits override those defaults.
+- 39c90de: Add explicit `dev:eve`, `build:eve`, and `start:eve` scripts to generated Web Chat projects so users can run the embedded eve app directly when needed.
+
+## 0.17.1
+
+### Patch Changes
+
+- 97aa99b: Add HTTP Basic userinfo and repeatable `-H, --header` support to `eve dev` URL targets so the terminal UI can send credentials or routing headers to protected remote deployments.
+- c7827fb: Stop injecting subagent tool descriptions into delegated child prompts. Child runs now receive only the caller's delegated message plus the stable subagent invocation wrapper.
+- 739af96: Update eve's bundled Workflow SDK dependency set to the latest 5.0.0 beta releases, keeping the core package and local workflow world aligned.
+
+## 0.17.0
+
+### Minor Changes
+
+- 02ed501: Remove the experimental `ExperimentalWorkflow` opt-in marker from the public `eve/tools` API and remove the dynamic Workflow docs. The internal runtime path remains in place for existing compiled manifests, but authored apps can no longer enable the tool through the public API.
+
+### Patch Changes
+
+- 6dc84fc: Keep Telegram proactive private chat sessions keyed to their chat or topic after outbound sends, while group and supergroup proactive sends still anchor to the bot message id.
+
+## 0.16.2
+
+### Patch Changes
+
+- 9580a88: Disable the Workflow SDK turbo first-delivery path for eve. Workflow runs now stay on the fully ordered runtime path instead of the beta turbo mode.
+
+## 0.16.1
+
+### Patch Changes
+
+- 8470695: HTTP channels can now opt into browser CORS with preflight handling. Use `defineChannel({ cors })` for custom channels or `eveChannel({ cors: true | options })` for the eve channel; omitted CORS remains disabled.
+- aa3aca4: The GitHub channel now accepts Vercel Connect-forwarded webhook payloads that omit `x-github-event` and `x-github-delivery` by inferring the supported event type from the payload shape. Headerless forwarded payloads now emit a warning with the inferred metadata instead of being silently acknowledged and ignored.
+- 8713a71: Fix human-in-the-loop approval resume behavior so text replies like `approve` resolve pending tool approvals and unrelated follow-up messages no longer synthesize a denial. Rejected approval results now include explicit approval and not-run metadata for clients.
+- 7fd53f7: Update the curated Linear MCP connection to use Linear's Streamable HTTP endpoint at `https://mcp.linear.app/mcp`. The MCP and OpenAPI connection docs now include fuller setup guidance for Vercel Connect, static credentials, filters, and approvals.
+- c0f9749: Fix Vercel Connect local interactive connection authorization when the dev server uses an IPv4 or IPv6 loopback address. OAuth callbacks now retain the active port while using the `localhost` hostname accepted by Connect, and local `/connect` refreshes the dev runtime before the next prompt can use the new connection.
+- c14b022: The `eve dev` TUI retries one transient agent-inspection failure before treating a local or remote agent as unavailable.
+
+## 0.16.0
+
+### Minor Changes
+
+- 24faac0: Add a searchable `/connect` flow to the local dev TUI. It scaffolds an MCP connection, resolves its Vercel Connect connector, and reuses the model setup flow to create or link a Vercel project when needed. Local Vercel users now authorize Connect with their Vercel user ID instead of a reserved OIDC issuer.
+
+### Patch Changes
+
+- ddda14c: Fresh agents now start model setup from their prefilled `/model` prompt, installing the Vercel CLI and logging in when those prerequisites are missing. Other `eve dev` sessions leave missing model setup as an attention prompt.
+- ca8512a: Generated projects now emit peer-resolution metadata only for their selected package manager. pnpm scaffolds no longer include npm or Yarn fields that can make frozen Vercel installs fail.
+
+## 0.15.5
+
+### Patch Changes
+
+- 8078807: Render authorization prompts in the default web chat projection. Scaffolded web UIs now show OAuth sign-in affordances from `authorization.required` events and update them when authorization completes.
+
+## 0.15.4
+
+### Patch Changes
+
+- da83b03: Slack assistant-thread status text now strips lightweight Markdown before calling Slack, so model progress updates like `**Considering turbo tasks**` display without literal formatting markers.
+- 5b31627: Add a deterministic `mockModel` eval helper with static, prompt-aware, and tool-calling responses.
+- 2e00da7: Scope workflow queue prefixes to each eve agent so multiple uniquely named agents can deploy in the same project without consuming one another's workflow messages.
+- 86ae773: Clarify Vercel build failures when an agent pins the Docker or microsandbox sandbox backend. The error now explains those local backends are unavailable on Vercel and directs users to `defaultBackend()` or an explicit Vercel-compatible backend.
+
+## 0.15.3
+
+### Patch Changes
+
+- d8449cf: Keep provider-managed web search calls replayable when the model emits narration before results or when the provider returns an error.
+
+## 0.15.2
+
+### Patch Changes
+
+- f1abdfd: Deduplicate repeated durable turn dispatches through turn-inbox ownership so a duplicate child workflow no longer fails the active session.
+- f1abdfd: Keep each logical turn active while local or remote subagents run, including while proxying child input requests, so child completion resumes the same turn instead of starting a replacement turn.
+
+## 0.15.1
+
+### Patch Changes
+
+- b049756: Use the active eve development server URL for connection authorization callbacks. Local Vercel Connect flows now return to eve's actual port instead of Workflow's port 3000 fallback.
+- 2933ab2: The local `eve dev` status bar now shows a gray `:port` badge and retains it as terminal width narrows. Status segments now use tighter spacing.
+- 2e4e15d: `eve init` now accepts `--yes` as a no-op compatibility flag and warns before continuing.
+- 2933ab2: Running `eve dev` interactively now reconnects to the healthy loopback dev server recorded for the same app root, with a fresh session for each attached terminal UI. Eve replaces stale or malformed state when it starts a new server. `--host`, `--port`, or `PORT` skips reconnection and reports a healthy recorded server instead.
+
+## 0.15.0
+
+### Minor Changes
+
+- 194a8bb: Add snapshot-based turn and session assertions, lifecycle-aware tool and subagent matching, typed event checks, recorded requirements, and explicit skipped results. The simplified API uses `succeeded`/`parked`, completed calls by default, exact `count` options, and `require*` lookups so evals no longer need manual event scans or thrown assertion errors.
+
+### Patch Changes
+
+- f618bef: New Vercel project names now show the suggested name as a placeholder, so typing replaces it instead of editing a prefilled value.
+- 194a8bb: Make `isChannel` recognize authored channel imports evaluated in a different local runtime bundle from the route instance.
+- d83b418: eve's health endpoint (`/eve/v1/health`) now responds to `HEAD` requests, not just `GET`, so load balancers and uptime monitors that probe with `HEAD` (UptimeRobot, Kubernetes probes, and others) no longer report a healthy deployment as down.
+- e5ccf93: Self-hosted `eve start` now registers the workflow queue handler for custom (non-Vercel) worlds, so jobs dispatched by a configured world no longer return `Unhandled queue` or leave runs stuck `pending` — and you no longer need `eve dev --no-ui` to run a local world in production. eve also fails fast at boot with an actionable error when a configured workflow world's `@workflow/*` version is incompatible with the line eve bundles, instead of surfacing a cryptic `ZodError` deep in workflow replay.
+- 3865605: Stream `actions.requested` as each model tool call arrives, before the tool finishes or a runtime action is dispatched.
+
+## 0.14.0
+
+### Minor Changes
+
+- 78ef30a: Standardize authored tools and connections on an `approval` function that receives the active session context and returns AI SDK 7 approval statuses, with synchronous and asynchronous policies supported. Boolean results remain supported as aliases for user approval and no approval, schedules no longer accept approval configuration, and no AI SDK 6 `needsApproval` adapter remains.
+- 5c32eb0: Remove `defineAgent({ experimental: { codeMode } })` and the `EVE_EXPERIMENTAL_CODE_MODE` fallback. Tools are always exposed directly to the model; model-authored JavaScript orchestration remains available through the experimental `Workflow` tool for subagents and remote agents.
+
+### Patch Changes
+
+- a3d8441: Fix dynamic `Workflow` fan-out so concurrent subagent calls dispatch together, replay in deterministic program order, and resume reliably across runtime isolates. Generated pnpm workspaces now exempt the bundled code-mode package from release-age gating so fresh eve releases install immediately.
+- 91e43ae: Upgrade eve to the stable AI SDK 7 release and copy vendored AI SDK declarations directly from the installed packages. Newly scaffolded pnpm workspaces now exempt the AI SDK, Vercel, and Workflow package families from minimum release age checks.
+- 89969b2: Add a top-level `defineAgent({ reasoning })` option that forwards provider-agnostic reasoning effort to the agent's turn model calls.
+- 5c32eb0: Strengthen the built-in `agent` tool guidance so models know when and how to split large tasks across a fixed batch of parallel recursive calls.
+- 7c532fe: MCP and OpenAPI connections can now resolve `auth` providers and headers from the active session context, enabling per-caller and per-tenant credentials.
+- 72b3d0e: Keep Slack sender ids attached to their message text and add an opt-in `threadContext` setting that injects ID-attributed thread replies since a configurable boundary. Workflow titles retain the original Slack text, while later turns and authorization prompts consistently use the current caller.
+
+## 0.13.8
+
+### Patch Changes
+
+- 9d72bb1: Seed session, subagent, and turn workflow attributes when their runs are created so Workflow turbo mode cannot race tag writes against run creation.
+
+## 0.13.7
+
+### Patch Changes
+
+- c8014d1: Improve Vercel Connect-backed connection auth by allowing authored definitions to include the `evict` hook and clarifying `principal_required` guidance when user-scoped connections run without an authenticated user principal.
+- ff44c4c: Clarify scaffolded guidance for locating bundled eve package docs in workspaces and local installs.
+- 30c5965: Preserve dynamic tool approval gates when session- and turn-scoped tools are replayed from durable metadata. If a replayed approval callback cannot be recovered, eve now requires approval by default instead of silently running the tool unguarded.
+- 55af52e: Acknowledge Slack view submissions with an empty response body so submitted modals close without an error.
+- dd960df: Fix Vercel CLI detection on Windows by invoking npm's command shims through `cmd.exe`, so an installed `vercel` command is no longer misreported as missing.
+
+## 0.13.6
+
+### Patch Changes
+
+- 7f66a06: Add opt-in GitHub channel hooks for check suite, check run, and workflow run webhooks, with normalized CI metadata and pull request dispatch.
+- a63dfa2: Project search now resolves exact names directly and ranks one fallback result page, avoiding unbounded substring-match pagination for short queries.
+- a63dfa2: Fixed remote `/vc:login` rejecting a freshly resolved Vercel project with "The local Vercel OIDC token does not match the resolved deployment: owner_id." The verified deployment now takes its owner id from Vercel's response instead of the team slug used to scope the lookup, so it matches the OIDC token's `owner_id` claim.
+- a63dfa2: In remote sessions, `/vc:login` resolves the target Vercel project and owning team from the deployment URL. When the target requires authentication and Vercel cannot resolve its host in the active scope, the flow asks you to select another team, then reruns the lookup in that scope. When access is denied, for example because a team SSO session expired, it re-authenticates and retries.
+- a63dfa2: Remote `eve dev --url` now treats `/eve/v1/info` as best-effort inspection rather than a connection gate. Once authentication succeeds and the deployment is reachable, the session connects even when the agent info route is absent (confirmed via the public health route) or returns an unrecognized shape (e.g. a deployment built from an older eve). Inspection-only data is simply omitted from the header in that case, and the underlying parse failure now names the offending fields instead of an opaque message.
+- a63dfa2: Remote `eve dev --url` sessions now show deployment and authentication state, try refreshed project-scoped OIDC credentials at startup, and open a cancellable `/vc:login` recovery flow when access is rejected. The flow can update the target project's Trusted Sources after confirmation.
+- c5071e6: Ensure every eve Workflow runtime entrypoint installs the eve queue namespace through a single guarded boundary.
+- c9e895b: Fix `eve dev` streaming throughput and time-to-first-token degrading as parked (`ask_question` / HITL) sessions accumulate. The dev runtime's NDJSON event-stream reader now forwards cancellation to the underlying run stream, so disconnecting from a parked session no longer leaks a filesystem polling loop for the life of the dev server.
+- c6b2da8: Add `$eve.channel_request_id` workflow attributes from Vercel's `x-vercel-id` header so session and turn workflow runs can be joined back to the inbound request that started or resumed them.
+- ab3e6e8: Give each threadless proactive Slack session a unique temporary continuation token so overlapping scheduled runs targeting the same channel do not conflict before they anchor to a Slack thread.
+- a63dfa2: The dev TUI's `/vc` and `/login` commands are now `/vc:install` and `/vc:login`. `/vc:login` is the single Vercel authentication command: it logs in locally and, in remote (`eve dev --url`) sessions, recovers access with Vercel OIDC.
+
+## 0.13.5
+
+### Patch Changes
+
+- c927ecd: Confirm continuation-token ownership before an agent turn starts or a session re-keys. Competing sessions now fail before processing input, and successful delivery reports the hook owner atomically.
+- 5f0f69f: Use Parallel through AI Gateway for the built-in `web_search` tool with every string model. Gateway requests no longer select native provider search tools or pin routing to a model provider.
+- 430ed8c: Teach agents that conditionally delivered work can finish successfully without sending a message. Polling schedules can now intentionally skip delivery without treating an accidental blank model response as success.
+- 25b1b14: fix(eve): catch unserializable tool output values instead of sending them to the model
+
+## 0.13.4
+
+### Patch Changes
+
+- efca390: Make optional sandbox engine loading more resilient after auto-install. eve now
+  probes installed engine packages in a cache-isolated worker, checks ancestor
+  `node_modules` directories for workspace-hoisted installs, and reports a clear
+  post-install diagnostic when an engine package still cannot be loaded.
+- 7079d08: Bundle client-safe vendored dependencies in a neutral chunk group so `eve/react` can use the Zod-backed `/eve/v1/info` validator without pulling in Node-only vendored runtime helpers.
+- 598b5e0: Clear pending connection/tool authorization state after a matching callback resumes a session, so Slack threads do not keep waiting for already-completed auth and swallow follow-up messages.
+- 9298c90: Upgrade the Workflow development packages to their latest beta releases.
+
+## 0.13.3
+
+### Patch Changes
+
+- b33c611: use shared Chat SDK Block Kit primitives for Slack card rendering
+
+## 0.13.2
+
+### Patch Changes
+
+- d82e8d1: Consolidate model provider setup into one choice between project-backed AI Gateway, an inline `AI_GATEWAY_API_KEY`, and direct provider credentials. Gateway key validation now reports its latest result inline without leaving stale errors in the setup panel.
+- b29e2ae: Remote clients can now send Vercel OIDC credentials through a dedicated auth mode and reject malformed agent metadata before using it.
+
+## 0.13.1
+
+### Patch Changes
+
+- 9d8bd6e: Existing production sessions now refresh their system prompt from the latest deployment before each model step. Long-lived channel conversations retain their history and state while adopting updated agent instructions.
+
+## 0.13.0
+
+### Minor Changes
+
+- 306e14e: Remove the top-level `auth` field from `defineTool()` and require tool auth providers to be passed inline to `ctx.getToken(provider)` or `ctx.requireAuth(provider)`.
+- f00ca73: Search every Vercel project in the selected team and preserve the selected project ID through linking.
+
+### Patch Changes
+
+- 36b67fc: Make `eve init` respect ancestor package-manager workspaces when scaffolding nested packages. The scaffold now updates workspace-owned package policy at the npm, pnpm, Yarn, or Bun workspace root instead of writing nested root-only config into the generated package.
+
+## 0.12.3
+
+### Patch Changes
+
+- 680ff48: Text prompts now use block cursors, while active turns and model or channel setup use shared green progress pulses.
+- 27a9701: Resolve extensionless relative imports whose target basename contains dots when bundling authored modules. Local files such as `./mock-registry.schemas` and dependency requires such as `./Reflect.getPrototypeOf` now probe Eve's configured `.ts` and `.js` extensions before being treated as asset imports.
+- 3a64a8f: `eve init` with no target, when run by a coding agent, now prints a setup guide — what to ask the user, then the scaffold command — instead of scaffolding the current directory. The guide routes both channels (Slack credentials) and connections (per-user OAuth) through Vercel Connect so credentials are provisioned rather than hand-managed. `eve init <name>` and `eve init .` are unchanged.
+- 3a64a8f: `eve init` now offers to open an installed coding-agent REPL when its CLI is on `PATH`, while keeping `eve dev` as the default. It detects Claude Code, Codex, Cursor, Droid, Gemini CLI, opencode, and Pi. The selected REPL starts with a project-specific setup prompt and `eve dev --no-ui` verification guidance. Coding-agent and non-interactive launches, plus systems without any supported CLI, keep the existing development-server handoff.
+- 86a35eb: Add inline tool auth provider overloads so tools can call `ctx.getToken(provider, options?)` and `ctx.requireAuth(provider, options?)` without declaring a single top-level `auth`. Vercel Connect providers can be authored inline with `connect("service/agent")` or `connect({ connector, tokenParams })`; the existing top-level tool `auth` field and no-argument tool auth accessors remain supported for compatibility, but are now deprecated in favor of inline providers.
+- 25ab1e7: Preserve dev-runtime snapshots that are still referenced by local durable workflow data so parked HITL turns can resume after `eve dev` rebuilds.
+- 504f59e: Allow `eve eval` target checks to match a scoped package name such as `@acme/agent` against the runtime agent identity `agent`.
+- 0dca794: Restore Slack authorization status updates by posting a link-free public status while sending the sign-in challenge privately, then updating the public status when authorization completes.
+- 3548363: Strengthen Vercel and just-bash process streaming with deterministic completion, safe output cancellation, and idempotent process operations.
+
+## 0.12.2
+
+### Patch Changes
+
+- 8f7d97b: Keep Vercel Sandbox option types synchronized with the installed SDK by vendoring its upstream declaration files instead of maintaining a hand-written copy. Vercel-backed file reads now convert provider Node streams to Eve's public Web stream contract.
+
+## 0.12.1
+
+### Patch Changes
+
+- 3f3a86b: Improve conversation compaction for longer, more reliable sessions.
+- e296fb8: The dev TUI now opens `/model` when the runtime confirms no model provider is configured and refreshes model access after setup. Selected rows now use padded inverse labels with a filled arrow.
+- f68ecbe: Set the Eve Vercel framework preset when creating standalone Eve projects.
+- c084232: Verify remote Vercel deployment origins against the owner and project supplied by `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID`, or by a local project link, before sending ambient credentials. Remote dev and eval clients now refresh scoped OIDC tokens per request and refuse to forward credentials across redirects. Remote `eve dev` and `eve eval --url` targets now require `https://` (loopback hosts may still use `http://`).
+
+## 0.12.0
+
+### Minor Changes
+
+- 7df41e1: Dynamic map resolvers no longer auto-prefix entries with the file slug — the map key is the tool/skill name verbatim (a single `defineTool`/`defineSkill` is still named after the file slug). Namespace keys yourself (e.g. `team__playbook`) when a bare name might collide. A dynamic tool/skill overrides a same-named authored one; two dynamic resolvers emitting the same name now throw, recommending manual namespacing. Connection tools are renamed accordingly: the search tool is `connection_search` and discovered tools are `<connection>__<tool>` (e.g. `linear__list_issues`).
+
+### Patch Changes
+
+- 10e9237: Fix code-defined models under `eve dev`, including NodeNext `.js` imports that target authored `.ts` files. Runtime model resolution now reuses the active agent bundle's module map and node scope, so child agents resolve their own models without rebuilding authored modules on each step.
+
+## 0.11.10
+
+### Patch Changes
+
+- c707ca3: Keep `eve init` and local `eve dev` progress on one terminal row. Init now includes elapsed completion times and preserves useful package-manager diagnostics on failure. With `EVE_LOG_LEVEL=debug`, both commands use plain phase logs instead of animation.
+- 2197c14: Dynamic skill resolvers that return a map now name every entry `<slug>__<key>` even when the map holds a single entry, matching dynamic tools and the documented contract. Previously a one-entry map was advertised and materialized under the bare resolver slug, so `load_skill` failed to find it and adding a second skill silently renamed the first. `load_skill` failures now also list the available skill names so the model can correct a wrong id.
+
+  Adds a `t.loadedSkill(skill, opts?)` eval assertion — sugar for `t.calledTool("load_skill", { input: { skill }, ... })`.
+
+- d22fd04: In the dev TUI, Ctrl+C now clears a non-empty chat or freeform `ask_question` prompt instead of quitting. On an empty prompt it still quits, and during a running turn it still interrupts.
+- d22fd04: The dev TUI prompt now takes multi-line input in both chat and freeform `ask_question` fields. Pasting multi-line text inserts it intact instead of submitting at the first line, `Shift+Enter` inserts a newline, a tall prompt scrolls within the terminal height, and editing moves by whole graphemes so wide and emoji characters aren't split.
+
+## 0.11.9
+
+### Patch Changes
+
+- 4bfbaa0: Add root agent `experimental.workflow.world` configuration for selecting an installed Workflow world package. Eve now loads and registers the configured world at runtime and documents how self-hosted deployments can provide a custom Workflow world.
+
+## 0.11.8
+
+### Patch Changes
+
+- 4622d94: Point the npm README, runtime landing page, and setup guidance at the canonical eve documentation domain.
+- bfc7191: Use the official TypeScript 7 `tsc` compiler for eve builds, base generated projects, and fixture typechecks. Next.js projects and generated Web Chat apps pin `typescript@6.0.3`, which still provides the JavaScript compiler API Next.js requires.
+
+## 0.11.7
+
+### Patch Changes
+
+- 11a9a3e: Report image-pull and VM-boot progress during microsandbox creation, and include phase and provider-specific recovery guidance when prewarm fails.
+- 7b8df64: Serialize optional sandbox engine auto-installs and reload newly installed engines through their package entrypoint file instead of retrying the cached bare specifier. This prevents first-run `eve dev` sessions from racing microsandbox installation or surfacing Node's stale same-process module-not-found result after Bun installs `microsandbox`.
+
+  `eve init` also supports `EVE_INIT_PACKAGE_SPEC` so local tarball/source validation can make the generated project install the same eve build under test instead of resolving the published semver range from the registry.
+
+- 159d4af: Slack reasoning typing indicators now update progressively when the cumulative status grows by at least four characters, preventing opening fragments from remaining stale without issuing one Slack request per token.
+
+## 0.11.6
+
+### Patch Changes
+
+- 23cb00f: Slack channels now refresh assistant thread typing status during streamed reasoning, using a truncated reasoning snippet so long reasoning steps keep visible progress before tool calls or final replies.
+
 ## 0.11.5
 
 ### Patch Changes

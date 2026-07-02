@@ -43,10 +43,10 @@ const REPO_ROOT = fileURLToPath(new URL("../../../..", import.meta.url));
 const ROOT_TYPE_DEFINITIONS = fileURLToPath(
   new URL("../../../../node_modules/@types", import.meta.url),
 );
-const TSGO_BIN_PATH = fileURLToPath(
-  new URL("../../../../node_modules/@typescript/native-preview/bin/tsgo.js", import.meta.url),
+const TSC_BIN_PATH = fileURLToPath(
+  new URL("../../../../node_modules/typescript/bin/tsc", import.meta.url),
 );
-const DEFAULT_AGENT_MODEL_ID = "anthropic/claude-sonnet-4.6";
+const DEFAULT_AGENT_MODEL_ID = "anthropic/claude-sonnet-5";
 
 describe("compiler artifacts", () => {
   it("uses the framework default model when agent.ts is omitted", async () => {
@@ -554,7 +554,7 @@ describe("compileAgent", () => {
       'readonly "channel:support": typeof import("../../agent/channels/support.js").default;',
     );
 
-    await expectTsgoToPass([TSGO_BIN_PATH, "-p", join(appRoot, "tsconfig.json")], {
+    await expectTscToPass([TSC_BIN_PATH, "-p", join(appRoot, "tsconfig.json")], {
       cwd: REPO_ROOT,
     });
   });
@@ -959,7 +959,7 @@ describe("compileAgent", () => {
     );
   });
 
-  it("compiles the authored experimental.codeMode flag into the manifest config", async () => {
+  it("rejects the removed experimental.codeMode field", async () => {
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-compile-experimental-code-mode-",
       APP_ROOT_OPTIONS,
@@ -977,11 +977,7 @@ describe("compileAgent", () => {
       ].join("\n"),
     );
 
-    const result = await compileAgent({
-      startPath: appRoot,
-    });
-
-    expect(result.manifest.config.experimental).toEqual({ codeMode: true });
+    await expect(compileAgent({ startPath: appRoot })).rejects.toThrow("codeMode");
   });
 
   it("uses the authored local subagent id as the canonical compiled runtime id", async () => {
@@ -1370,7 +1366,7 @@ async function createSandboxRevalidationKeyValidationApp(input: {
   return app;
 }
 
-async function expectTsgoToPass(
+async function expectTscToPass(
   args: readonly string[],
   options: { readonly cwd: string },
 ): Promise<void> {
@@ -1380,7 +1376,7 @@ async function expectTsgoToPass(
     if (isCommandError(error)) {
       throw new Error(
         [
-          "tsgo failed.",
+          "tsc failed.",
           `stdout:\n${String(error.stdout ?? "")}`,
           `stderr:\n${String(error.stderr ?? "")}`,
         ].join("\n"),

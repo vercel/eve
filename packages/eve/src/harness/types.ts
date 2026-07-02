@@ -9,6 +9,7 @@ import type { InputResponse } from "#runtime/input/types.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 import type { InternalToolDefinition } from "#shared/tool-definition.js";
+import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 
 /**
@@ -43,6 +44,7 @@ export interface SessionAgent {
    */
   readonly compactionModelReference?: RuntimeModelReference;
   readonly modelReference: RuntimeModelReference;
+  readonly reasoning?: AgentReasoningDefinition;
   readonly system: string;
   readonly tools: readonly SessionToolDefinition[];
 }
@@ -58,6 +60,7 @@ export interface HarnessSession {
   readonly compaction: CompactionConfig;
   readonly continuationToken: string;
   readonly history: ModelMessage[];
+  readonly limits?: SessionLimits;
   readonly outputSchema?: JsonObject;
   /**
    * Stable identifier of the top user-facing session in the dispatch
@@ -71,6 +74,34 @@ export interface HarnessSession {
   readonly sessionId: string;
   readonly sandboxState?: SandboxState;
   readonly state?: SessionStateMap;
+  /**
+   * Number of local delegated subagent hops from the root session to this
+   * session. Root sessions are depth 0. Used by the harness to cap recursive
+   * subagent delegation.
+   */
+  readonly subagentDepth?: number;
+  /**
+   * Maximum delegated child-session depth for this session. When omitted, the
+   * harness uses the framework default.
+   */
+  readonly subagentMaxDepth?: number;
+}
+
+/**
+ * Token limits stored on one durable session.
+ */
+export interface SessionLimits {
+  /**
+   * Maximum provider-reported input tokens this durable session may spend before
+   * eve refuses to start another model call. Defaults to 40M for root sessions
+   * and 5M for delegated subagent sessions.
+   */
+  readonly maxInputTokensPerSession?: number;
+  /**
+   * Maximum provider-reported output tokens this durable session may spend before
+   * eve refuses to start another model call.
+   */
+  readonly maxOutputTokensPerSession?: number;
 }
 
 /**
@@ -187,19 +218,11 @@ export interface ToolLoopHarnessConfig {
    */
   readonly capabilities?: SessionCapabilities;
   /**
-   * Routes executable tools through the sandboxed code-execution wrapper
-   * instead of exposing them directly to the model. Resolved by the
-   * runtime from the agent's `experimental.codeMode` flag (with the
-   * `EVE_EXPERIMENTAL_CODE_MODE` env backstop). Defaults to `false`.
-   */
-  readonly codeMode?: boolean;
-  /**
-   * Exposes the `Workflow` orchestration tool — a code-mode-style sandbox
+   * Exposes the `Workflow` orchestration tool — an isolated JavaScript sandbox
    * whose only callable operations are this agent's subagents and remote
    * agents. Resolved by the runtime from the agent's `workflowEnabled` flag
-   * (set when `agent/tools/workflow.ts` re-exports the `Workflow` marker).
-   * Independent of {@link ToolLoopHarnessConfig.codeMode} — both may be on at
-   * once. Defaults to `false`.
+   * in the compiled manifest.
+   * Defaults to `false`.
    */
   readonly workflow?: boolean;
   readonly handleEvent?: HandleEventFn;

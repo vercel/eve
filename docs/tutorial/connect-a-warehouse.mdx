@@ -7,7 +7,7 @@ The sample dataset got the analytics assistant running, but it's a stand-in. Now
 
 This step depends on Vercel Connect, which is in private beta. No Connect access? Keep the Step 3 sample dataset and read this step for the connection model. Steps 5 through 9 work against the sample dataset, so you can complete the tutorial without a warehouse.
 
-The filename sets the runtime name. Put the file at `agent/connections/warehouse.ts` and it registers as `"warehouse"`, with its tools surfaced as `connection__warehouse__<tool>`.
+The filename sets the runtime name. Put the file at `agent/connections/warehouse.ts` and it registers as `"warehouse"`, with its tools surfaced as `warehouse__<tool>`.
 
 ## Declare the connection
 
@@ -26,6 +26,8 @@ export default defineMcpClientConnection({
 
 `"warehouse"` is the UID you chose when registering the Connect client. By default this OAuth is user-scoped. Each end-user authorizes in their own browser, and eve resolves that user's token before every tool call.
 
+Before testing the warehouse from a web app, make sure the eve channel route auth maps your signed-in app user to `principalType: "user"`. A Connect-backed connection can only start per-user OAuth when the active session already has an authenticated user principal. If route auth still only accepts `localDev()`, a runtime token, or a placeholder guard, the first warehouse tool call fails with `reason: "principal_required"` instead of showing the sign-in challenge.
+
 Once Connect is enabled on your account, wire it up:
 
 1. Install the package: `npm install @vercel/connect`.
@@ -33,7 +35,7 @@ Once Connect is enabled on your account, wire it up:
 3. Link the client to your project.
 4. Run `vercel link` and `vercel env pull` so `VERCEL_OIDC_TOKEN` is available locally.
 
-For the full reference, see [Connections](../connections).
+For the full reference, see [MCP connections](../connections/mcp).
 
 ## What the user sees
 
@@ -49,8 +51,8 @@ The first time, the model picks a warehouse tool but there's no token yet, so th
 
 Right before each request to the MCP server, eve resolves the bearer and sends it as `Authorization: Bearer <token>`. The model only ever sees tool names, descriptions, and results. The credential stays out of its reach.
 
-If you want more control, gate the connection behind approval (`approval: once()`) or narrow which tools the model sees (`tools.allow`). See [Connections](../connections).
+If you want more control, gate the connection behind approval (`approval: once()`) or narrow which tools the model sees (`tools.allow`). See [MCP connections](../connections/mcp).
 
 → Next: [Run analysis](./run-analysis)
 
-Learn more: [Connections](../connections) · [Auth and route protection](../guides/auth-and-route-protection)
+Learn more: [MCP connections](../connections/mcp) · [Auth and route protection](../guides/auth-and-route-protection)

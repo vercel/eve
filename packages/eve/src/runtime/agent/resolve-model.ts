@@ -1,31 +1,28 @@
 import type { LanguageModel } from "ai";
-import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
+import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
-import {
-  expectObjectRecord,
-  getAuthoredModuleExport,
-  materializeAuthoredModuleExport,
-} from "#internal/authored-module.js";
-import type { ModuleDefinitionExport } from "#public/definitions/source.js";
-import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { loadCompiledModuleMap } from "#runtime/loaders/module-map.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { resolveBootstrapRuntimeModel } from "#runtime/agent/bootstrap-model.js";
 import {
   resolveMockAuthoredRuntimeModel,
   shouldMockAuthoredRuntimeModels,
 } from "#runtime/agent/mock-model-adapter.js";
+import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 
 export { shouldMockAuthoredRuntimeModels };
+
+/** Loaded compiled-module scope used to resolve source-backed runtime models. */
+export interface RuntimeModelResolutionScope {
+  readonly moduleMap: CompiledModuleMap;
+  readonly nodeId: string | undefined;
+}
 
 /**
  * Resolves one runtime model reference into the active language model.
  */
 export async function resolveRuntimeModelReference(
   reference: RuntimeModelReference,
-  input: {
-    readonly compiledArtifactsSource?: RuntimeCompiledArtifactsSource;
-  } = {},
+  scope?: RuntimeModelResolutionScope,
 ): Promise<LanguageModel> {
   const bootstrapModel = resolveBootstrapRuntimeModel(reference);
 
@@ -40,7 +37,7 @@ export async function resolveRuntimeModelReference(
   }
 
   if (isSourceBackedRuntimeModelReference(reference)) {
-    return await loadSourceBackedRuntimeModelReference(reference, input);
+    return await loadSourceBackedRuntimeModelReference(reference, scope);
   }
 
   return reference.id;
@@ -50,30 +47,20 @@ async function loadSourceBackedRuntimeModelReference(
   reference: RuntimeModelReference & {
     readonly source: NonNullable<RuntimeModelReference["source"]>;
   },
-  input: {
-    readonly compiledArtifactsSource?: RuntimeCompiledArtifactsSource;
-  },
+  scope: RuntimeModelResolutionScope | undefined,
 ): Promise<LanguageModel> {
-  if (input.compiledArtifactsSource === undefined) {
+  if (scope === undefined) {
     throw new Error(
-      `Expected an explicit compiled artifact source to resolve the authored runtime model "${reference.id}".`,
+      `Expected a compiled module-map scope to resolve the authored runtime model "${reference.id}".`,
     );
   }
 
-  const moduleMap = await loadCompiledModuleMap({
-    compiledArtifactsSource: input.compiledArtifactsSource,
+  const definition = await loadResolvedModuleExport({
+    definition: reference.source,
+    kindLabel: `runtime model "${reference.id}"`,
+    moduleMap: scope.moduleMap,
+    nodeId: scope.nodeId,
   });
-  const moduleNamespace =
-    moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules[reference.source.sourceId];
-
-  const moduleRecord = expectObjectRecord(
-    moduleNamespace,
-    `Missing compiled agent config module for runtime model "${reference.id}" at "${reference.source.logicalPath}".`,
-  );
-  const exportValue = getAuthoredModuleExport(moduleRecord, reference.source);
-  const definition = await materializeAuthoredModuleExport(
-    exportValue as ModuleDefinitionExport<unknown>,
-  );
   const normalizedDefinition = normalizeAgentDefinition(
     definition,
     `Expected the authored agent config export "${reference.source.exportName ?? "default"}" from "${reference.source.logicalPath}" to match the public eve shape.`,
@@ -86,11 +73,7 @@ async function loadSourceBackedRuntimeModelReference(
     );
   }
 
-  if (typeof model === "string") {
-    return model;
-  }
-
-  return model as LanguageModel;
+  return model;
 }
 
 function isSourceBackedRuntimeModelReference(

@@ -34,33 +34,33 @@ curl http://127.0.0.1:3000/eve/v1/session/<sessionId>/stream
 
 The stream is newline-delimited JSON (NDJSON), one event per line:
 
-| Event                     | Meaning                                                                                                             |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `session.started`         | A durable session was created.                                                                                      |
-| `turn.started`            | A new turn began.                                                                                                   |
-| `message.received`        | An inbound user message was accepted.                                                                               |
-| `step.started`            | A model step began.                                                                                                 |
-| `actions.requested`       | The model requested tool calls.                                                                                     |
-| `action.result`           | A tool call returned.                                                                                               |
-| `input.requested`         | The run paused for human input ([HITL](../tools/human-in-the-loop) approval or `ask_question`); carries `requests`. |
-| `subagent.called`         | A subagent was delegated; carries `childSessionId` to attach to.                                                    |
-| `subagent.completed`      | A delegated subagent finished.                                                                                      |
-| `reasoning.appended`      | A reasoning delta (incremental, with cumulative text so far).                                                       |
-| `reasoning.completed`     | The finalized reasoning block.                                                                                      |
-| `message.appended`        | An assistant text delta (incremental, with cumulative text so far).                                                 |
-| `message.completed`       | A finalized assistant text block.                                                                                   |
-| `result.completed`        | The finalized structured result for a turn that requested an output schema; carries `result`.                       |
-| `compaction.requested`    | Context-window compaction began; carries `modelId`, `sessionId`, `turnId`, `usageInputTokens`.                      |
-| `compaction.completed`    | A compaction checkpoint was written to durable history.                                                             |
-| `authorization.required`  | A connection needs OAuth; carries `name`, `description`, and an `authorization` challenge.                          |
-| `authorization.completed` | A connection's authorization resolved; carries `outcome`.                                                           |
-| `step.completed`          | A model step finished; carries `finishReason` and usage.                                                            |
-| `step.failed`             | A model step failed; carries `{ code, message, details? }`.                                                         |
-| `turn.completed`          | The turn finished.                                                                                                  |
-| `turn.failed`             | The turn failed; carries `{ code, message, details? }`.                                                             |
-| `session.waiting`         | The session parked, waiting for the next input (a message, an answer).                                              |
-| `session.failed`          | The session failed.                                                                                                 |
-| `session.completed`       | The session reached a terminal end.                                                                                 |
+| Event                     | Meaning                                                                                                          |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `session.started`         | A durable session was created.                                                                                   |
+| `turn.started`            | A new turn began.                                                                                                |
+| `message.received`        | An inbound user message was accepted.                                                                            |
+| `step.started`            | A model step began.                                                                                              |
+| `actions.requested`       | The model requested one or more actions, including tool calls; calls stream before execution.                    |
+| `action.result`           | A tool call returned.                                                                                            |
+| `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or `ask_question`); carries `requests`. |
+| `subagent.called`         | A subagent was delegated; carries `childSessionId` to attach to.                                                 |
+| `subagent.completed`      | A delegated subagent finished.                                                                                   |
+| `reasoning.appended`      | A reasoning delta (incremental, with cumulative text so far).                                                    |
+| `reasoning.completed`     | The finalized reasoning block.                                                                                   |
+| `message.appended`        | An assistant text delta (incremental, with cumulative text so far).                                              |
+| `message.completed`       | A finalized assistant text block.                                                                                |
+| `result.completed`        | The finalized structured result for a turn that requested an output schema; carries `result`.                    |
+| `compaction.requested`    | Context-window compaction began; carries `modelId`, `sessionId`, `turnId`, `usageInputTokens`.                   |
+| `compaction.completed`    | A compaction checkpoint was written to durable history.                                                          |
+| `authorization.required`  | A connection needs OAuth; carries `name`, `description`, and an `authorization` challenge.                       |
+| `authorization.completed` | A connection's authorization resolved; carries `outcome`.                                                        |
+| `step.completed`          | A model step finished; carries `finishReason` and usage.                                                         |
+| `step.failed`             | A model step failed; carries `{ code, message, details? }`.                                                      |
+| `turn.completed`          | The turn finished.                                                                                               |
+| `turn.failed`             | The turn failed; carries `{ code, message, details? }`.                                                          |
+| `session.waiting`         | The session parked, waiting for the next input (a message, an answer).                                           |
+| `session.failed`          | The session failed.                                                                                              |
+| `session.completed`       | The session reached a terminal end.                                                                              |
 
 `reasoning.appended` and `message.appended` stream deltas as they arrive, and each one carries both the new delta and the cumulative text for the current block. The finalized block shows up on `message.completed` and `reasoning.completed`, which is the compatibility path for clients that don't render incremental streaming.
 
@@ -84,6 +84,8 @@ curl -X POST http://127.0.0.1:3000/eve/v1/session/<sessionId> \
 
 The follow-up reuses the same durable session: same history, same state.
 
+If the session is waiting on a human-in-the-loop approval, a matching text reply such as `approve` or `deny` answers the approval. Other follow-up text is held until the approval is answered, so an unrelated message does not implicitly deny the pending tool call.
+
 For deterministic ordering, send one follow-up at a time and wait for the next `session.waiting` event before sending another message to the same session. See [message delivery and queueing](./execution-model-and-durability#message-delivery-and-queueing) for the current runtime contract.
 
 ## Reconnect and rewind
@@ -102,13 +104,13 @@ Start with the [TypeScript SDK](../guides/client/overview) guide. It covers basi
 
 ## Inspect the agent over HTTP
 
-`GET /eve/v1/info` returns a JSON inspection snapshot for the running agent: model, instructions, authored and framework tools, skills, channels, schedules, subagents, sandbox, connections, hooks, workflow, and workspace metadata. Local development accepts loopback requests; deployed Vercel targets require the route's OIDC auth.
+`GET /eve/v1/info` returns a JSON inspection snapshot for the running agent: model, instructions, authored and framework tools, skills, channels, schedules, subagents, sandbox, connections, hooks, workflow, and workspace metadata. It uses the resolved `eveChannel()` route auth when `agent/channels/eve.ts` authors one; otherwise it falls back to the framework default of Vercel OIDC plus local development access.
 
 ```bash
 curl http://127.0.0.1:3000/eve/v1/info
 ```
 
-The route uses the same default auth chain as the eve channel (`[localDev(), vercelOidc()]`). Locally it answers anonymously; a deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection).
+With the default auth chain (`[vercelOidc(), localDev()]`), a local Vercel OIDC bearer takes precedence and other local requests fall back to development access. A deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection).
 
 ## Dispatch order
 

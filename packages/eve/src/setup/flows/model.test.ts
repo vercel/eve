@@ -17,8 +17,8 @@ const APP_ROOT = "/app/my-agent";
 
 const CATALOG: GatewayCatalogModel[] = [
   {
-    id: "anthropic/claude-sonnet-4.6",
-    name: "Claude Sonnet 4.6",
+    id: "anthropic/claude-sonnet-5",
+    name: "Claude Sonnet 5",
     type: "language",
     owned_by: "anthropic",
     tags: ["web-search"],
@@ -35,7 +35,7 @@ const CATALOG: GatewayCatalogModel[] = [
 function flowDeps(overrides: Partial<ModelFlowDeps> = {}): Partial<ModelFlowDeps> {
   return {
     readCurrentModel: vi.fn(async () => ({
-      id: "anthropic/claude-sonnet-4.6",
+      id: "anthropic/claude-sonnet-5",
       routing: { kind: "gateway", target: "anthropic" } as const,
       editable: true,
     })),
@@ -44,8 +44,10 @@ function flowDeps(overrides: Partial<ModelFlowDeps> = {}): Partial<ModelFlowDeps
         ({ kind: "changed", to: slug }) as const,
     ),
     selectModel: { fetchModels: async () => CATALOG },
-    detectProviderStatus: vi.fn(async () => ({ kind: "unset" }) as const),
-    runVercelFlow: vi.fn(async () => ({ kind: "done" }) as const),
+    detectProviderStatus: vi.fn(
+      async () => ({ kind: "gateway-project", projectName: "my-agent" }) as const,
+    ),
+    runProviderFlow: vi.fn(async () => ({ kind: "done" }) as const),
     ...overrides,
   };
 }
@@ -94,7 +96,7 @@ function scriptedPrompter(input: { menu: (PrompterValue | "esc")[]; picker?: str
 }
 
 describe("runModelFlow", () => {
-  it("paints a stacked menu with the running model and a required provider row", async () => {
+  it("paints a stacked menu with the running model and configured provider", async () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps: flowDeps() })).resolves.toEqual({
@@ -104,20 +106,23 @@ describe("runModelFlow", () => {
     expect(menuPaints).toEqual([
       {
         options: [
-          { value: "model", label: "Change model", hint: "anthropic/claude-sonnet-4.6" },
+          {
+            value: "model",
+            label: "Change model",
+            hint: "anthropic/claude-sonnet-5",
+            description: "The model your agent uses",
+          },
           {
             value: "provider",
-            label: pc.bold(pc.yellow("Configure provider")),
-            hint: "Required to enable the agent",
-            accent: "warning",
+            label: "Change provider",
+            hint: `AI Gateway (Linked to ${pc.bold("my-agent")})`,
+            description: "How your agent reaches the model provider",
           },
-          { value: "done", label: "Done" },
+          { value: "done", label: "Done", description: "Return to the prompt" },
         ],
         notices: [],
         hintLayout: "stacked",
-        // An unconfigured provider is what the agent needs first, so the menu
-        // opens on that row.
-        initialValue: "provider",
+        initialValue: "model",
       },
     ]);
   });
@@ -126,12 +131,12 @@ describe("runModelFlow", () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
     const deps = flowDeps({
       readCurrentModel: vi.fn(async () => ({
-        id: "anthropic/claude-sonnet-4.6",
+        id: "anthropic/claude-sonnet-5",
         routing: { kind: "external", provider: "anthropic" } as const,
         editable: false,
       })),
       // Even though detection finds nothing, external routing must NOT surface
-      // the "Configure provider / Required" gateway UX.
+      // the "Configure model access" gateway UX.
       detectProviderStatus: vi.fn(async () => ({ kind: "unset" }) as const),
     });
 
@@ -146,7 +151,6 @@ describe("runModelFlow", () => {
             value: "model",
             label: "Change model",
             disabled: true,
-            // Disabled because the model isn't a string literal, not because of routing.
             description: "Set via an SDK model call in agent.ts; edit the source to change it",
           },
           {
@@ -155,9 +159,8 @@ describe("runModelFlow", () => {
             disabled: true,
             description: "Disabled in external endpoint mode",
           },
-          { value: "done", label: "Done" },
+          { value: "done", label: "Done", description: "Return to the prompt" },
         ],
-        // One yellow notice explains why both rows are inert.
         notices: [
           {
             tone: "warning",
@@ -165,7 +168,6 @@ describe("runModelFlow", () => {
           },
         ],
         hintLayout: "stacked",
-        // Both action rows are disabled, so the menu opens on Done.
         initialValue: "done",
       },
     ]);
@@ -176,7 +178,7 @@ describe("runModelFlow", () => {
     const deps = flowDeps({
       // `gateway("…")` instance: gateway-routed, but not a string literal eve can rewrite.
       readCurrentModel: vi.fn(async () => ({
-        id: "anthropic/claude-sonnet-4.6",
+        id: "anthropic/claude-sonnet-5",
         routing: { kind: "gateway", target: "anthropic" } as const,
         editable: false,
       })),
@@ -199,8 +201,9 @@ describe("runModelFlow", () => {
         value: "provider",
         label: "Change provider",
         hint: "AI Gateway (AI_GATEWAY_API_KEY in .env.local)",
+        description: "How your agent reaches the model provider",
       },
-      { value: "done", label: "Done" },
+      { value: "done", label: "Done", description: "Return to the prompt" },
     ]);
     // Gateway routing gets no external-restriction notice.
     expect(menuPaints[0]?.notices).toEqual([]);
@@ -230,6 +233,7 @@ describe("runModelFlow", () => {
       value: "provider",
       label: "Change provider",
       hint: `AI Gateway (Linked to ${pc.bold("my-agent")} in ${pc.bold("my-team")})`,
+      description: "How your agent reaches the model provider",
     });
   });
 
@@ -252,6 +256,7 @@ describe("runModelFlow", () => {
       value: "provider",
       label: "Change provider",
       hint: "AI Gateway (AI_GATEWAY_API_KEY in .env.local)",
+      description: "How your agent reaches the model provider",
     });
   });
 
@@ -273,7 +278,7 @@ describe("runModelFlow", () => {
     expect(deps.readCurrentModel).toHaveBeenCalledTimes(1);
   });
 
-  it("returns a rejection without repainting the menu", async () => {
+  it("returns a rejected model result without claiming the model changed", async () => {
     const { prompter, menuPaints } = scriptedPrompter({
       menu: ["model"],
       picker: ["openai/gpt-5.5"],
@@ -292,16 +297,16 @@ describe("runModelFlow", () => {
     expect(menuPaints).toHaveLength(1);
   });
 
-  it("returns to the prompt after provider setup", async () => {
-    const { prompter, menuPaints } = scriptedPrompter({ menu: ["provider"] });
+  it("opens provider setup directly when none is configured", async () => {
+    const { prompter, menuPaints } = scriptedPrompter({ menu: [] });
     const detectProviderStatus = vi
       .fn<ModelFlowDeps["detectProviderStatus"]>()
       .mockResolvedValueOnce({ kind: "unset" })
       .mockResolvedValueOnce({ kind: "gateway-project", projectName: "my-agent" });
-    const runVercelFlow = vi.fn<ModelFlowDeps["runVercelFlow"]>(
+    const runProviderFlow = vi.fn<ModelFlowDeps["runProviderFlow"]>(
       async () => ({ kind: "done", credential: "AI_GATEWAY_API_KEY" }) as const,
     );
-    const deps = flowDeps({ detectProviderStatus, runVercelFlow });
+    const deps = flowDeps({ detectProviderStatus, runProviderFlow });
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
       kind: "done",
@@ -311,15 +316,80 @@ describe("runModelFlow", () => {
       },
     });
 
-    expect(runVercelFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
+    expect(runProviderFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
     expect(detectProviderStatus).toHaveBeenCalledTimes(2);
-    expect(menuPaints).toHaveLength(1);
+    expect(menuPaints).toHaveLength(0);
+  });
+
+  it("honors confirmed provider entry when link metadata looks configured", async () => {
+    const { prompter, menuPaints } = scriptedPrompter({ menu: [] });
+    const runProviderFlow = vi.fn<ModelFlowDeps["runProviderFlow"]>(
+      async () => ({ kind: "done", credential: "VERCEL_OIDC_TOKEN" }) as const,
+    );
+    const deps = flowDeps({ runProviderFlow });
+
+    await expect(
+      runModelFlow({
+        appRoot: APP_ROOT,
+        prompter,
+        initialStep: "provider",
+        deps,
+      }),
+    ).resolves.toEqual({
+      kind: "done",
+      providerOutcome: {
+        credential: "VERCEL_OIDC_TOKEN",
+        status: { kind: "gateway-project", projectName: "my-agent" },
+      },
+    });
+
+    expect(runProviderFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
+    expect(menuPaints).toHaveLength(0);
+  });
+
+  it("refreshes provider state after a committed setup is interrupted", async () => {
+    const { prompter } = scriptedPrompter({ menu: [] });
+    const controller = new AbortController();
+    const detectProviderStatus = vi
+      .fn<ModelFlowDeps["detectProviderStatus"]>()
+      .mockResolvedValueOnce({ kind: "gateway-project", projectName: "my-agent" })
+      .mockResolvedValueOnce({
+        kind: "gateway-key",
+        envKey: "AI_GATEWAY_API_KEY",
+        envFile: ".env.local",
+      });
+    const runProviderFlow = vi.fn<ModelFlowDeps["runProviderFlow"]>(async () => {
+      controller.abort();
+      return { kind: "done", credential: "AI_GATEWAY_API_KEY" };
+    });
+    const deps = flowDeps({ detectProviderStatus, runProviderFlow });
+
+    await expect(
+      runModelFlow({
+        appRoot: APP_ROOT,
+        prompter,
+        initialStep: "provider",
+        signal: controller.signal,
+        deps,
+      }),
+    ).resolves.toEqual({
+      kind: "done",
+      providerOutcome: {
+        credential: "AI_GATEWAY_API_KEY",
+        status: {
+          kind: "gateway-key",
+          envKey: "AI_GATEWAY_API_KEY",
+          envFile: ".env.local",
+        },
+      },
+    });
+    expect(detectProviderStatus.mock.calls[1]?.[1]).toEqual({});
   });
 
   it("treats the external-provider branch as informational — no notice, no outcome", async () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["provider", "esc"] });
     const deps = flowDeps({
-      runVercelFlow: vi.fn(async () => ({ kind: "done", outcome: "external-provider" }) as const),
+      runProviderFlow: vi.fn(async () => ({ kind: "external-provider" }) as const),
     });
 
     // Nothing changed on disk (any existing gateway link is untouched), so
@@ -335,7 +405,7 @@ describe("runModelFlow", () => {
   it("returns to the menu after a cancelled sub-flow and folds an empty exit", async () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["provider", "esc"] });
     const deps = flowDeps({
-      runVercelFlow: vi.fn(async () => ({ kind: "cancelled" }) as const),
+      runProviderFlow: vi.fn(async () => ({ kind: "cancelled" }) as const),
     });
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
@@ -381,7 +451,7 @@ describe("runModelFlow", () => {
     it("lands on Done after the external-provider branch", async () => {
       const { prompter, menuPaints } = scriptedPrompter({ menu: ["provider", "esc"] });
       const deps = flowDeps({
-        runVercelFlow: vi.fn(async () => ({ kind: "done", outcome: "external-provider" }) as const),
+        runProviderFlow: vi.fn(async () => ({ kind: "external-provider" }) as const),
       });
 
       await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
@@ -394,7 +464,7 @@ describe("runModelFlow", () => {
       await runModelFlow({
         appRoot: APP_ROOT,
         prompter: provider.prompter,
-        deps: flowDeps({ runVercelFlow: vi.fn(async () => ({ kind: "cancelled" }) as const) }),
+        deps: flowDeps({ runProviderFlow: vi.fn(async () => ({ kind: "cancelled" }) as const) }),
       });
       expect(provider.menuPaints[1]?.initialValue).toBe("provider");
 

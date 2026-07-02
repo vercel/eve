@@ -8,6 +8,7 @@ import { createStaticSourceChange } from "#source-change/static-source-change.js
 
 import pc from "picocolors";
 
+import { AI_GATEWAY_API_KEY_ENV_VAR } from "../ai-gateway-api-key.js";
 import { interactiveAsker } from "../ask.js";
 import { findEnvFileWithKey } from "../boxes/detect-ai-gateway.js";
 import {
@@ -16,15 +17,19 @@ import {
   type SelectModelDeps,
   type SelectModelOptions,
 } from "../boxes/select-model.js";
-import { detectProjectIdentity, type ProjectDetectionOptions } from "../project-resolution.js";
+import {
+  detectProjectIdentity,
+  type VercelProjectOperationOptions,
+} from "../project-resolution.js";
 import type { ModelRouting } from "#shared/agent-definition.js";
 import type { Prompter, SelectNotice, SelectOption } from "../prompter.js";
 import { runInteractive } from "../runner.js";
 import { snapshotSetupState } from "../state.js";
 import { WizardCancelledError } from "../step.js";
+import { withSpinner } from "../with-spinner.js";
 
 import { inProjectSetupState, prompterSink } from "./in-project.js";
-import { runVercelFlow } from "./vercel.js";
+import { runProviderFlow } from "./provider.js";
 
 /** The current model id, its routing, and whether `/model` can rewrite it. */
 export interface CurrentAgentModel {
@@ -52,7 +57,7 @@ export interface ModelFlowDeps {
   /** Reads how the model is backed right now, for the menu's provider row. */
   detectProviderStatus: typeof detectModelProviderStatus;
   /** The provider sub-flow behind the menu's provider row. */
-  runVercelFlow: typeof runVercelFlow;
+  runProviderFlow: typeof runProviderFlow;
 }
 
 /**
@@ -66,7 +71,7 @@ export type ModelProviderStatus =
   | { kind: "gateway-project"; projectName: string; teamName?: string }
   | {
       kind: "gateway-key";
-      envKey: "AI_GATEWAY_API_KEY" | "VERCEL_OIDC_TOKEN";
+      envKey: typeof AI_GATEWAY_API_KEY_ENV_VAR | "VERCEL_OIDC_TOKEN";
       envFile: string;
     };
 
@@ -79,7 +84,7 @@ export type ModelProviderStatus =
  * disk — so it never surfaces as an outcome.
  */
 export interface ModelProviderOutcome {
-  credential?: "VERCEL_OIDC_TOKEN" | "AI_GATEWAY_API_KEY";
+  credential?: "VERCEL_OIDC_TOKEN" | typeof AI_GATEWAY_API_KEY_ENV_VAR;
   status: ModelProviderStatus;
 }
 
@@ -125,7 +130,7 @@ function providerStatusHint(
  * string literal, so an SDK model call (`gateway(...)` / `anthropic(...)`) is
  * disabled regardless of how it routes. The provider row keys off routing: an
  * external endpoint disables it (gateway credentials don't apply); a gateway
- * endpoint gates it bold-yellow "Configure provider" until a link or credential
+ * endpoint gates it bold-yellow "Configure model access" until a link or credential
  * is detectable (the genuine "no provider connected" state), then "Change
  * provider" naming it.
  */
@@ -137,7 +142,11 @@ function modelMenuRows(
 ): SelectOption<ModelMenuRow>[] {
   let modelRow: SelectOption<ModelMenuRow>;
   if (editable) {
-    modelRow = { value: "model", label: "Change model" };
+    modelRow = {
+      value: "model",
+      label: "Change model",
+      description: "The model your agent uses",
+    };
     if (current !== null) modelRow.hint = current;
   } else {
     modelRow = {
@@ -151,19 +160,17 @@ function modelMenuRows(
   let providerRow: SelectOption<ModelMenuRow>;
   if (routing?.kind === "external") {
     providerRow = {
+      disabled: true,
       value: "provider",
       label: "Change provider",
-      disabled: true,
       description: "Disabled in external endpoint mode",
     };
   } else if (provider.kind === "unset") {
     providerRow = {
       value: "provider",
-      // The label's own color covers every glyph, so it holds whether or not
-      // the cursor row's accent wrap is around it. `accent: "warning"` turns the
-      // cursor pointer yellow to match.
-      label: pc.bold(pc.yellow("Configure provider")),
-      hint: "Required to enable the agent",
+      label: pc.bold("Configure model access"),
+      hint: pc.yellow("Not configured"),
+      description: "How your agent reaches the model provider",
       accent: "warning",
     };
   } else {
@@ -171,12 +178,17 @@ function modelMenuRows(
       value: "provider",
       label: "Change provider",
       hint: providerStatusHint(provider, pc.bold),
+      description: "How your agent reaches the model provider",
     };
   }
 
   // An explicit exit row, like the channels list — Esc works too, but the menu
   // must not make Esc the only way out.
-  return [modelRow, providerRow, { value: "done", label: "Done" }];
+  return [
+    modelRow,
+    providerRow,
+    { value: "done", label: "Done", description: "Return to the prompt" },
+  ];
 }
 
 /**
@@ -187,11 +199,11 @@ function modelMenuRows(
  */
 export async function detectModelProviderStatus(
   appRoot: string,
-  options: ProjectDetectionOptions = {},
+  options: VercelProjectOperationOptions = {},
 ): Promise<ModelProviderStatus> {
   const [identity, gatewayKeyFile, oidcFile] = await Promise.all([
     detectProjectIdentity(appRoot, options),
-    findEnvFileWithKey(appRoot, "AI_GATEWAY_API_KEY"),
+    findEnvFileWithKey(appRoot, AI_GATEWAY_API_KEY_ENV_VAR),
     findEnvFileWithKey(appRoot, "VERCEL_OIDC_TOKEN"),
   ]);
   if (identity !== undefined) {
@@ -203,7 +215,7 @@ export async function detectModelProviderStatus(
     return status;
   }
   if (gatewayKeyFile !== undefined) {
-    return { kind: "gateway-key", envKey: "AI_GATEWAY_API_KEY", envFile: gatewayKeyFile };
+    return { kind: "gateway-key", envKey: AI_GATEWAY_API_KEY_ENV_VAR, envFile: gatewayKeyFile };
   }
   if (oidcFile !== undefined) {
     return { kind: "gateway-key", envKey: "VERCEL_OIDC_TOKEN", envFile: oidcFile };
@@ -218,14 +230,16 @@ export async function detectModelProviderStatus(
  * onboarding uses ({@link selectModel}), pre-selected on the model the
  * runtime currently serves, then the static source edit that bakes the
  * choice into `agent.ts` (activation is the dev server's HMR watcher).
- * The provider row runs {@link runVercelFlow} — the provider gate (AI
- * Gateway or your own), then link-or-paste-a-key.
- * Completed model and provider changes return to the prompt with their result.
+ * The provider row runs {@link runProviderFlow}, whose single menu chooses a
+ * project-backed gateway, an inline gateway key, or an external provider.
+ * A completed model or provider change returns to the prompt with its result.
  * Cancelled flows and external-provider instructions return to the menu.
  */
 export async function runModelFlow(input: {
   appRoot: string;
   prompter: Prompter;
+  /** Opens provider setup before the root menu when runtime evidence requires it. */
+  initialStep?: "provider";
   signal?: AbortSignal;
   deps?: Partial<ModelFlowDeps>;
 }): Promise<ModelFlowResult> {
@@ -234,26 +248,19 @@ export async function runModelFlow(input: {
     readCurrentModel: readCurrentAgentModel,
     applyModel: changeAgentModel,
     detectProviderStatus: detectModelProviderStatus,
-    runVercelFlow,
+    runProviderFlow,
     ...input.deps,
   };
-
-  async function checkProject<T>(task: () => Promise<T>): Promise<T> {
-    const spinner = prompter.log.spinner?.("Checking the project…");
-    try {
-      return await task();
-    } finally {
-      spinner?.stop();
-    }
-  }
 
   // The model read is local, the provider status is a `vercel` round-trip;
   // one ephemeral spinner covers both so the menu paints with no persisted
   // loading lines.
-  const detectProvider = (): Promise<ModelProviderStatus> =>
-    deps.detectProviderStatus(appRoot, { signal });
-  let [{ id: current, routing, editable }, provider] = await checkProject(() =>
-    Promise.all([deps.readCurrentModel(appRoot), detectProvider()]),
+  const detectProvider = (useFlowSignal = true): Promise<ModelProviderStatus> =>
+    deps.detectProviderStatus(appRoot, useFlowSignal && signal !== undefined ? { signal } : {});
+  let [{ id: current, routing, editable }, provider] = await withSpinner(
+    prompter,
+    "Checking the project…",
+    () => Promise.all([deps.readCurrentModel(appRoot), detectProvider()]),
   );
   signal?.throwIfAborted();
 
@@ -277,20 +284,29 @@ export async function runModelFlow(input: {
         : routing?.kind === "external"
           ? "done"
           : "provider";
+  // A gateway model with no provider cannot run. Skip the menu's extra Enter
+  // and open provider setup as soon as that state is confirmed.
+  let openProviderFirst =
+    routing?.kind !== "external" && (input.initialStep === "provider" || provider.kind === "unset");
 
   while (true) {
     let pick: ModelMenuRow;
-    try {
-      pick = await prompter.select<ModelMenuRow>({
-        message: MODEL_MENU_MESSAGE,
-        options: modelMenuRows(current, provider, routing, editable),
-        hintLayout: "stacked",
-        initialValue: nextSelection,
-        notices: externalNotice === undefined ? [] : [externalNotice],
-      });
-    } catch (error) {
-      if (!(error instanceof WizardCancelledError)) throw error;
-      break;
+    if (openProviderFirst) {
+      openProviderFirst = false;
+      pick = "provider";
+    } else {
+      try {
+        pick = await prompter.select<ModelMenuRow>({
+          message: MODEL_MENU_MESSAGE,
+          options: modelMenuRows(current, provider, routing, editable),
+          hintLayout: "stacked",
+          initialValue: nextSelection,
+          notices: externalNotice === undefined ? [] : [externalNotice],
+        });
+      } catch (error) {
+        if (!(error instanceof WizardCancelledError)) throw error;
+        break;
+      }
     }
 
     if (pick === "done") break;
@@ -313,23 +329,25 @@ export async function runModelFlow(input: {
       break;
     }
 
-    const result = await deps.runVercelFlow({ appRoot, prompter, signal });
-    signal?.throwIfAborted();
+    const result = await deps.runProviderFlow({ appRoot, prompter, signal });
     // Backing out of the provider sub-flow changed nothing; the cursor stays on
     // the provider row so a retry is one keypress away.
     if (result.kind === "cancelled") {
+      if (signal?.aborted) return { kind: "cancelled" };
       nextSelection = "provider";
       continue;
     }
     // External-provider setup only shows instructions, so keep the menu open.
-    if ("outcome" in result) {
+    if (result.kind === "external-provider") {
+      if (signal?.aborted) return { kind: "cancelled" };
       nextSelection = "done";
       continue;
     }
     // Only a completed link/own-key sub-flow can move the link or
-    // credentials, so this is the one place the status is re-read.
-    provider = await checkProject(detectProvider);
-    signal?.throwIfAborted();
+    // credentials, so this is the one place the status is re-read. Once that
+    // sub-flow commits, finish without the aborted interaction signal so the
+    // TUI can refresh the state that is already on disk.
+    provider = await withSpinner(prompter, "Checking the project…", () => detectProvider(false));
     providerOutcome = { status: provider };
     if (result.credential !== undefined) providerOutcome.credential = result.credential;
     break;
@@ -363,14 +381,8 @@ async function pickModelFromCatalog(input: {
     deps: {
       // The box fetches inside its gather, so the catalog spinner has to ride
       // the fetch itself to bracket exactly the slow part.
-      fetchModels: async (requestSignal) => {
-        const spinner = prompter.log.spinner?.("Loading the model catalog...");
-        try {
-          return await baseFetch(requestSignal);
-        } finally {
-          spinner?.stop();
-        }
-      },
+      fetchModels: (requestSignal) =>
+        withSpinner(prompter, "Loading the model catalog...", () => baseFetch(requestSignal)),
     },
   };
   if (current !== null) options.defaultModel = current;
@@ -449,7 +461,7 @@ export async function changeAgentModel(input: {
  */
 async function validateModelSlug(appRoot: string, slug: string): Promise<string | null> {
   if (!slug.includes("/")) {
-    return `\`${slug}\` isn't a provider/model id (e.g. anthropic/claude-sonnet-4.6).`;
+    return `\`${slug}\` isn't a provider/model id (e.g. anthropic/claude-sonnet-5).`;
   }
 
   const catalog = createCompiledRuntimeModelCatalogLoader(appRoot);

@@ -15,6 +15,7 @@ import {
   createStepCompletedEvent,
 } from "#protocol/message.js";
 import {
+  createRuntimeToolResultFromToolError,
   createRuntimeToolResultFromMessagePart,
   createRuntimeToolResultFromStepResult,
 } from "#harness/action-result-helpers.js";
@@ -27,7 +28,6 @@ import {
   mergeGatewayAutoCaching,
   type PromptCachePath,
 } from "#harness/prompt-cache.js";
-import { mergeGatewayProviderPin } from "#harness/provider-tools.js";
 import { createRuntimeActionRequestFromToolCall } from "#harness/runtime-actions.js";
 import type { RuntimeToolResultActionResult } from "#runtime/actions/types.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
@@ -69,19 +69,6 @@ interface StepHooksInput {
    * Defaults to `true`.
    */
   readonly emitStepStarted?: boolean;
-  /**
-   * When set on the `gateway-auto` cache path, merges
-   * `providerOptions.gateway.only = [gatewayPinProvider]` so the AI
-   * Gateway only routes to the given provider. Used to keep
-   * provider-specific tools (e.g. Anthropic's `web_search_20250305`)
-   * on a provider that can serve them, converting a transient outage
-   * into a clean retryable 503 rather than a fallback-to-incompatible
-   * provider 400.
-   *
-   * Ignored when the author already set `gateway.only` or
-   * `gateway.order` on the model reference's provider options.
-   */
-  readonly gatewayPinProvider?: string;
   readonly marker: AnthropicCacheMarker | undefined;
   readonly session: HarnessSession;
 }
@@ -171,13 +158,9 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
     };
 
     if (input.cachePath.kind === "gateway-auto") {
-      let providerOptions = mergeGatewayAutoCaching(session.agent.modelReference.providerOptions);
-      if (input.gatewayPinProvider !== undefined) {
-        providerOptions = mergeGatewayProviderPin(providerOptions, input.gatewayPinProvider);
-      }
-      stepResult.providerOptions = providerOptions as NonNullable<
-        typeof stepResult.providerOptions
-      >;
+      stepResult.providerOptions = mergeGatewayAutoCaching(
+        session.agent.modelReference.providerOptions,
+      ) as NonNullable<typeof stepResult.providerOptions>;
     }
 
     return stepResult;
@@ -208,15 +191,15 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
  * arguments — the runtime event stream only sees successfully parsed
  * tool calls.
  *
- * `handledInlineToolResultCallIds` lists approval-resume tool-result
- * call ids the stream already handled inline (see `emitStreamContent`).
- * This skips them to avoid double-emission.
+ * `handledInlineToolResultCallIds` contains results emitted by
+ * `emitStreamContent` or sent to authorization. Skip them here.
  */
 export async function emitStepActions(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
   step: HarnessStepResult,
   options: {
+    readonly emittedActionCallIds?: ReadonlySet<string>;
     readonly excludedActionToolNames: ReadonlySet<string>;
     readonly handledInlineToolResultCallIds?: ReadonlySet<string>;
     readonly tools: ToolLoopHarnessConfig["tools"];
@@ -240,9 +223,14 @@ export async function emitStepActions(
   const isExcluded = (toolCallId: string, toolName: string): boolean =>
     excludedCallIds.has(toolCallId) || options.excludedActionToolNames.has(toolName);
 
-  // actions.requested
+  // Streamed calls already emitted their request. The loop below emits their
+  // result.
   const actions = (step.toolCalls as TypedToolCall<ToolSet>[])
-    .filter((tc) => !isExcluded(tc.toolCallId, tc.toolName))
+    .filter(
+      (toolCall) =>
+        !isExcluded(toolCall.toolCallId, toolCall.toolName) &&
+        !options.emittedActionCallIds?.has(toolCall.toolCallId),
+    )
     .map((toolCall) =>
       createRuntimeActionRequestFromToolCall({
         toolCall,
@@ -336,6 +324,18 @@ function reconcileToolResults(step: HarnessStepResult): readonly RuntimeToolResu
     }
 
     resultsByCallId.set(toolResult.toolCallId, createRuntimeToolResultFromStepResult(toolResult));
+  }
+
+  for (const part of step.content ?? []) {
+    if (part.type !== "tool-error" || part.providerExecuted === true) {
+      continue;
+    }
+
+    if (resultsByCallId.has(part.toolCallId)) {
+      continue;
+    }
+
+    resultsByCallId.set(part.toolCallId, createRuntimeToolResultFromToolError(part));
   }
 
   for (const part of extractToolResultParts(step.response.messages)) {

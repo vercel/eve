@@ -50,18 +50,20 @@ import { theme } from "./lib/theme.ts";
  *      either in the MCP tool's `action.result`, or echoed verbatim in
  *      the assistant's `message.completed`. The marker is random per
  *      run and only ever produced by the bearer-gated MCP stub, so its
- *      presence proves the OAuth token reached MCP. (In code mode the
- *      nested tool result arrives on the resumed turn and the model
- *      addresses the tool through generated JavaScript, so detection
- *      must not hinge on exact toolName equality.)
+ *      presence proves the OAuth token reached MCP.
+ *   4. A normal channel follow-up on the same anchored thread resumes
+ *      the original session after auth completes. This guards the
+ *      durable hook state used by Slack-like follow-ups.
  *
  * Lifecycle note: `runEnvironment()` keeps the MCP stub and OAuth
  * emulator alive while the agent target runs.
  */
 
 const MARKER_TOKEN = `mcp-user-ok-${randomBytes(4).toString("hex")}`;
+const FOLLOWUP_TOKEN = `auth-followup-ok-${randomBytes(4).toString("hex")}`;
 const EXPECTED_TOOL_NAME = "connection__stub-mcp-user__echo_marker";
 const SEEDED_EMAIL = "alice@example.com";
+const THREAD_ID = `auth-user-${randomBytes(4).toString("hex")}`;
 
 /**
  * Asks the OS to pick a free port, then releases it. There is a small
@@ -122,6 +124,7 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
+      threadId: THREAD_ID,
       message: [
         "Use the `stub-mcp-user` connection's `echo_marker` tool.",
         "The model-visible tool name is `connection__stub-mcp-user__echo_marker`.",
@@ -192,10 +195,8 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
     if (event.type === "action.result") {
       const ar = event as ActionResultStreamEvent;
       const result = ar.data.result;
-      // Match on the marker, not exact toolName equality: in code mode
-      // the nested result arrives on the resumed turn and the model may
-      // reach the tool through a normalized identifier. The marker is
-      // random per run and only the bearer-gated MCP stub can emit it.
+      // Match on the marker as well as the stable tool-name suffix. The marker
+      // is random per run and only the bearer-gated MCP stub can emit it.
       if (
         result.kind === "tool-result" &&
         result.toolName.includes("echo_marker") &&
@@ -209,10 +210,9 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
       }
     }
 
-    // Fallback proof for code mode: the prompt instructs the model to
-    // echo the tool's returned text verbatim, so the final assistant
-    // message carries the marker even when the nested tool result event
-    // is suppressed or attributed differently.
+    // Fallback proof: the prompt instructs the model to echo the tool's
+    // returned text verbatim, so the final assistant message carries the
+    // marker even if the result event is unavailable.
     if (
       event.type === "message.completed" &&
       typeof event.data.message === "string" &&
@@ -264,6 +264,68 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
       `[oauth-user] bearer token threaded through to MCP (marker via ${
         toolResultMatched ? "action.result" : "message.completed"
       })`,
+    ),
+  );
+
+  const replyResp = await fetch(`${target.baseUrl}/anchor/reply`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      threadId: THREAD_ID,
+      message: `Reply with the exact string ${FOLLOWUP_TOKEN} and nothing else.`,
+    }),
+  });
+  if (!replyResp.ok) {
+    throw new Error(`POST /anchor/reply failed: ${replyResp.status} ${await replyResp.text()}`);
+  }
+  const replyBody = (await replyResp.json()) as { sessionId?: string };
+  if (replyBody.sessionId !== sessionId) {
+    throw new Error(
+      `Expected follow-up to resume session ${sessionId}, got ${replyBody.sessionId ?? "<none>"}.`,
+    );
+  }
+
+  let followupTokenEchoed = false;
+  let followupBoundary: HandleMessageStreamEvent["type"] | undefined;
+  const followupAbort = new AbortController();
+  const followupTimer = setTimeout(() => followupAbort.abort(), 60_000);
+
+  try {
+    for await (const event of session.stream({ signal: followupAbort.signal })) {
+      if (
+        event.type === "message.completed" &&
+        typeof event.data.message === "string" &&
+        event.data.message.includes(FOLLOWUP_TOKEN)
+      ) {
+        followupTokenEchoed = true;
+      }
+
+      if (event.type === "session.failed") {
+        throw new Error(`Follow-up session failed: ${event.data.code} ${event.data.message}`);
+      }
+
+      if (event.type === "session.waiting" || event.type === "session.completed") {
+        followupBoundary = event.type;
+        break;
+      }
+    }
+  } finally {
+    clearTimeout(followupTimer);
+  }
+
+  if (followupBoundary === undefined) {
+    throw new Error(
+      "Follow-up stream did not reach a session boundary. The session may still be parked on " +
+        "the auth hook instead of the normal continuation hook.",
+    );
+  }
+  if (!followupTokenEchoed) {
+    throw new Error(`Did not see follow-up token ${FOLLOWUP_TOKEN} in assistant output.`);
+  }
+
+  console.log(
+    theme.muted(
+      `[oauth-user] post-auth anchored follow-up resumed original session (${followupBoundary})`,
     ),
   );
 });

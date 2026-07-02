@@ -1,13 +1,9 @@
-export const Logo = () => (
-  <span className="flex items-center gap-2">
-    <span className="font-semibold text-gray-1000 text-lg leading-none">eve</span>
-    <span className="rounded-full border border-blue-300 px-2 py-0.5 font-medium text-blue-700 text-xs leading-none">
-      Beta
-    </span>
-  </span>
-);
+import { LogoEve } from "@vercel/geistdocs/assets/logos/logo-eve";
+import type { GeistdocsGithubConfig } from "@vercel/geistdocs/config";
 
-export const github = {
+export const Logo = () => <LogoEve height={15} />;
+
+export const github: GeistdocsGithubConfig = {
   owner: "vercel",
   repo: "eve",
 };
@@ -20,6 +16,10 @@ export const nav = [
   {
     label: "Integrations",
     href: "/integrations",
+  },
+  {
+    label: "Resources",
+    href: "/resources",
   },
   {
     label: "GitHub",

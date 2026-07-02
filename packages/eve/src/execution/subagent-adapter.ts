@@ -1,4 +1,4 @@
-import { resumeHook } from "#compiled/@workflow/core/runtime.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
@@ -108,7 +108,6 @@ async function forwardSubagentInputRequestStep(input: {
   "use step";
 
   try {
-    process.env.WORKFLOW_QUEUE_NAMESPACE = "eve";
     await resumeHook(input.parentContinuationToken, input.hookPayload);
   } catch (error) {
     const errorId = createErrorId();

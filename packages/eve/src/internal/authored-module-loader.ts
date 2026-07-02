@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
 import { createAuthoredModuleBundleError } from "#internal/authored-module-bundle.js";
@@ -195,6 +195,8 @@ async function loadBundledAuthoredModule(
         }
       : null;
   const plugins = [
+    channelIdentityPlugin,
+    createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
     createAuthoredAssetImportPlugin(),
     createAuthoredPackageTsConfigPathsPlugin({
       appPackageRoot: packageRoot,
@@ -202,7 +204,6 @@ async function loadBundledAuthoredModule(
     }),
     createNodeEsmCompatBannerPlugin({ includeRequire: true }),
     createPackageBoundaryPlugin(packageRoot, externalDependencies),
-    channelIdentityPlugin,
   ].filter((plugin) => plugin !== null);
   let outputFile: { readonly code: string };
 
@@ -244,6 +245,33 @@ async function loadBundledAuthoredModule(
   }
 
   return await import(`${createFileImportSpecifier(bundlePath)}?v=${bundleHash}`);
+}
+
+function createAuthoredRelativeExtensionResolverPlugin(input: {
+  readonly extensions: readonly string[];
+}): Record<string, unknown> {
+  return {
+    name: "eve-authored-relative-extension-resolver",
+    resolveId(source: string, importer: string | undefined) {
+      if (
+        importer === undefined ||
+        importer.startsWith("\0") ||
+        importer.startsWith(CACHED_CHANNEL_PREFIX) ||
+        !isPathImport(source)
+      ) {
+        return undefined;
+      }
+
+      const candidate = isAbsolute(source) ? source : resolve(dirname(importer), source);
+      const resolvedPath = resolveExistingImportPath(candidate, input.extensions);
+
+      if (resolvedPath === undefined) {
+        return undefined;
+      }
+
+      return { id: resolvedPath };
+    },
+  };
 }
 
 function createPackageBoundaryPlugin(
@@ -435,6 +463,41 @@ function resolveExistingExternalFilePath(id: string): string | undefined {
   return undefined;
 }
 
+function resolveExistingImportPath(
+  path: string,
+  extensions: readonly string[],
+): string | undefined {
+  if (isFile(path)) {
+    return path;
+  }
+
+  for (const extension of extensions) {
+    const candidate = `${path}${extension}`;
+
+    if (isFile(candidate)) {
+      return candidate;
+    }
+  }
+
+  for (const extension of extensions) {
+    const candidate = join(path, `index${extension}`);
+
+    if (isFile(candidate)) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
 function normalizeImporterPath(importer: string | undefined): string | undefined {
   if (
     importer === undefined ||
@@ -448,7 +511,7 @@ function normalizeImporterPath(importer: string | undefined): string | undefined
 }
 
 function isPackageImport(source: string): boolean {
-  if (source.startsWith(".") || source.startsWith("/") || /^[A-Za-z]:[\\/]/.test(source)) {
+  if (isPathImport(source)) {
     return false;
   }
 
@@ -461,6 +524,10 @@ function isPackageImport(source: string): boolean {
   }
 
   return !source.startsWith(CACHED_CHANNEL_PREFIX);
+}
+
+function isPathImport(source: string): boolean {
+  return source.startsWith(".") || source.startsWith("/") || /^[A-Za-z]:[\\/]/.test(source);
 }
 
 function isEveFrameworkImport(source: string): boolean {

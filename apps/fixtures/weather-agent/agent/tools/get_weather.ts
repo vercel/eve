@@ -5,7 +5,7 @@ import { z } from "zod";
 const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
 export default defineTool({
-  needsApproval: never(),
+  approval: never(),
   description: "Get the current weather for a city.",
   inputSchema: z.object({
     city: z.string(),

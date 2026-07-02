@@ -26,9 +26,19 @@ function createBoxDeps() {
       validateTeam: vi.fn<ResolveProvisioningDeps["validateTeam"]>(async () => {}),
       resolveTeam: vi.fn<ResolveProvisioningDeps["resolveTeam"]>(async () => "acme"),
       pickTeam: vi.fn<ResolveProvisioningDeps["pickTeam"]>(async () => "acme"),
+      resolveProjectByNameOrId: vi.fn<ResolveProvisioningDeps["resolveProjectByNameOrId"]>(
+        async () => ({
+          projectId: "prj_existing",
+          projectName: "existing-project",
+        }),
+      ),
       pickProject: vi.fn<ResolveProvisioningDeps["pickProject"]>(async () => ({
-        exists: true,
-        project: "weather-app",
+        kind: "existing",
+        project: {
+          projectId: "prj_1",
+          projectName: "weather-app",
+        },
+        team: "acme",
       })),
       pickNewProjectName: vi.fn<ResolveProvisioningDeps["pickNewProjectName"]>(
         async () => "my-agent",
@@ -38,14 +48,13 @@ function createBoxDeps() {
       >(async () => {}),
     },
     linkProject: {
-      linkProject: vi.fn<LinkProjectDeps["linkProject"]>(async () => true),
+      linkProject: vi.fn<LinkProjectDeps["linkProject"]>(async () => ({
+        projectId: "prj_1",
+        projectName: "weather-app",
+      })),
       detectProjectResolution: vi.fn<LinkProjectDeps["detectProjectResolution"]>(async () => ({
         kind: "linked",
         projectId: "prj_1",
-      })),
-      resolveProjectByNameOrId: vi.fn<LinkProjectDeps["resolveProjectByNameOrId"]>(async () => ({
-        id: "prj_1",
-        name: "weather-app",
       })),
       unresolvedProject: vi.fn<LinkProjectDeps["unresolvedProject"]>(() => ({
         kind: "unresolved",
@@ -120,6 +129,8 @@ describe("runLinkFlow", () => {
   });
 
   it("offers create when the caller passes create-or-link (the /model branch)", async () => {
+    const teamSelectMessage = () =>
+      "You need to link to a project to use Vercel Connect.\n\nSelect your team";
     const { prompter } = createFakePrompter({
       single: (opts) => {
         if (stripVTControlCharacters(opts.message) === "Vercel project") return "new";
@@ -133,6 +144,7 @@ describe("runLinkFlow", () => {
       prompter,
       deps,
       projectSelection: "create-or-link",
+      teamSelectMessage,
     });
 
     expect(result).toEqual({ kind: "done", credential: "VERCEL_OIDC_TOKEN" });
@@ -140,6 +152,13 @@ describe("runLinkFlow", () => {
     // existing-project picker — the opposite of the existing-only default.
     expect(deps.resolveProvisioning?.pickNewProjectName).toHaveBeenCalled();
     expect(deps.resolveProvisioning?.pickProject).not.toHaveBeenCalled();
+    expect(deps.resolveProvisioning?.pickTeam).toHaveBeenCalledWith(
+      expect.anything(),
+      APP_ROOT,
+      undefined,
+      expect.objectContaining({ selectMessage: teamSelectMessage }),
+    );
+    expect(prompter.log.message).not.toHaveBeenCalled();
   });
 
   it("runs the pickers on re-link even when the on-disk link is adoptable", async () => {

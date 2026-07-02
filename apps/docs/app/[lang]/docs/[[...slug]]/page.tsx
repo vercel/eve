@@ -1,6 +1,7 @@
 import { MobileDocsBar } from "@vercel/geistdocs/mobile-docs-bar";
-import { createDocsPage } from "@vercel/geistdocs/pages/docs";
+import { createDocsPage, createPageActions } from "@vercel/geistdocs/pages/docs";
 import type { MDXComponents } from "mdx/types";
+import { EditOnGithubAction } from "@/components/geistdocs/edit-on-github";
 import { getMDXComponents } from "@/components/geistdocs/mdx-components";
 import { config } from "@/lib/geistdocs/config";
 import { staticOgImage } from "@/lib/geistdocs/og";
@@ -9,6 +10,11 @@ import { getSiteOrigin } from "@/lib/geistdocs/url";
 
 const docsPage = createDocsPage({
   config,
+  pageActions: createPageActions({
+    config,
+    getExtraActions: ({ page }) =>
+      page.path ? [<EditOnGithubAction key="edit-source" path={page.path} />] : [],
+  }),
   mdx: ({ link }) => {
     const components: MDXComponents = link ? { a: link } : {};
     return getMDXComponents(components);

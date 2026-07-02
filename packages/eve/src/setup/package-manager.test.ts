@@ -27,6 +27,7 @@ describe("resolvePackageManager", () => {
 
   it.each([
     ["pnpm-lock.yaml", "pnpm"],
+    ["pnpm-workspace.yaml", "pnpm"],
     ["package-lock.json", "npm"],
     ["yarn.lock", "yarn"],
     ["bun.lock", "bun"],

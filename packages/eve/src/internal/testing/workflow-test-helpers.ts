@@ -1,4 +1,4 @@
-import { getWorld } from "#compiled/@workflow/core/runtime.js";
+import { getWorld } from "#internal/workflow/runtime.js";
 
 interface WorkflowRunLike {
   readonly runId: string;

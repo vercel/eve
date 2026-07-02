@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { start } from "#compiled/@workflow/core/runtime.js";
+import { start } from "#internal/workflow/runtime.js";
 
 import { workflowEntry } from "#execution/workflow-entry.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";

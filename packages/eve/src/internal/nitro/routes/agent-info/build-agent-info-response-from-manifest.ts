@@ -10,7 +10,7 @@ import { createConnectionSearchResolver } from "#runtime/framework-tools/connect
 import type { AgentInfoManifestData } from "#internal/nitro/routes/agent-info/load-agent-info-data.js";
 import type { ResolvedChannelDefinition, ResolvedToolDefinition } from "#runtime/types.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
-import { CODE_MODE_TOOL_NAME, WORKFLOW_TOOL_NAME } from "#shared/code-mode.js";
+import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 import type {
   AgentInfoFrameworkChannelEntry,
   AgentInfoFrameworkToolEntry,
@@ -239,7 +239,7 @@ export function buildAgentInfoResponseFromManifest(
           status,
         };
       }),
-      reserved: [CODE_MODE_TOOL_NAME, WORKFLOW_TOOL_NAME, LOAD_SKILL_TOOL_NAME],
+      reserved: [WORKFLOW_TOOL_NAME, LOAD_SKILL_TOOL_NAME],
     },
     version: 1,
     workflow: {

@@ -27,6 +27,7 @@
  *   external?: string[] | (source: string) => boolean,
  *   plugins?: Plugin[],
  *   loader?: Record<string, string>,
+ *   platform?: "node" | "neutral",
  *   resolve?: ResolveOptions,
  *   bundling?: "shared" | "standalone",  // default "shared"
  *   chunkGroup?: string,                  // default "node"
@@ -95,14 +96,21 @@ export async function loadDeclaration(relativePath) {
  * `files` can override the default `dist/index.d.ts` copy. Use it for
  * packages whose entrypoint declaration imports sibling declaration files,
  * or for multi-entry packages that need their upstream declaration tree.
+ * `declarationRoot` changes the package-relative source directory when
+ * declarations live outside `dist`.
  *
  * `discoverExtraFiles` is consulted for chunk files the upstream `.d.ts`
  * references by relative path (e.g. chat's `./jsx-runtime-<hash>.d.ts`).
  * Each returned filename is co-copied verbatim into the destination.
  */
-export function createDeclarationCopier({ rewrites = {}, discoverExtraFiles, files } = {}) {
+export function createDeclarationCopier({
+  declarationRoot = "dist",
+  rewrites = {},
+  discoverExtraFiles,
+  files,
+} = {}) {
   return async ({ destinationRoot, packageInfo }) => {
-    const distDir = join(packageInfo.packageRoot, "dist");
+    const distDir = join(packageInfo.packageRoot, declarationRoot);
     const distEntries = await readdir(distDir);
     const declarationFiles =
       typeof files === "function"
@@ -209,9 +217,10 @@ function relativeDeclarationSpecifier(fromOutputPath, targetFileName) {
 /**
  * Returns `Map<externalModuleName, Set<importedName>>` for every
  * `import { ... } from '<external>'`, `export { ... } from '<external>'`,
- * and `import * as <alias> from '<external>'` in a TypeScript declaration
- * source. Local relative paths and `#compiled/*` specifiers are skipped —
- * only bare module specifiers appear in the map.
+ * `import * as <alias> from '<external>'`, and side-effect
+ * `import '<external>'` in a TypeScript declaration source. Local relative
+ * paths and `#compiled/*` specifiers are skipped — only bare module
+ * specifiers appear in the map.
  *
  * `as`-renames are flattened to the original left-side name so the stub
  * exports the symbol the upstream actually references.
@@ -225,6 +234,7 @@ export function collectExternalDeclarationImports(source) {
   const namedPattern = /^(?:import|export)\s+(?:type\s+)?\{([^}]+)\}\s+from\s+['"]([^'"]+)['"];/gm;
   const namespacePattern =
     /^import\s+(?:type\s+)?\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+['"]([^'"]+)['"];/gm;
+  const sideEffectPattern = /^import\s+['"]([^'"]+)['"];/gm;
   const result = new Map();
 
   const isExternal = (moduleName) =>
@@ -281,19 +291,26 @@ export function collectExternalDeclarationImports(source) {
     }
   }
 
+  for (const match of source.matchAll(sideEffectPattern)) {
+    addName(match[1]);
+  }
+
   return result;
 }
 
 /**
- * Rewrites every `from '<moduleName>'` (and the `"`-quoted variant) in
- * a declaration source to `from '<replacement>'`. Used to redirect copied
- * `.d.ts` imports at locally-vendored stubs or `#compiled/*` re-vendoring.
+ * Rewrites every `from '<moduleName>'` and side-effect
+ * `import '<moduleName>'` (including their `"`-quoted variants) in a
+ * declaration source. Used to redirect copied `.d.ts` imports at
+ * locally-vendored stubs or `#compiled/*` re-vendoring.
  */
 export function rewriteImportSource(source, moduleName, replacement) {
   const escaped = moduleName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return source
     .replaceAll(new RegExp(`from '${escaped}'`, "g"), `from '${replacement}'`)
-    .replaceAll(new RegExp(`from "${escaped}"`, "g"), `from "${replacement}"`);
+    .replaceAll(new RegExp(`from "${escaped}"`, "g"), `from "${replacement}"`)
+    .replaceAll(new RegExp(`import '${escaped}'`, "g"), `import '${replacement}'`)
+    .replaceAll(new RegExp(`import "${escaped}"`, "g"), `import "${replacement}"`);
 }
 
 /**
@@ -597,9 +614,26 @@ function getModuleEntries(module, packageInfo) {
   ];
 }
 
+function getModulePlatform(module) {
+  return module.platform ?? "node";
+}
+
+function getDefaultResolve(platform) {
+  return platform === "neutral"
+    ? {
+        conditionNames: ["import", "default"],
+        mainFields: ["module", "main"],
+      }
+    : {
+        conditionNames: ["node", "import", "default"],
+        mainFields: ["module", "main"],
+      };
+}
+
 async function bundleStandaloneModule({ destinationRoot, module, packageInfo, packageRoot }) {
   const warningFilter = createVendoredDependencyWarningFilter();
   const entries = getModuleEntries(module, packageInfo);
+  const platform = getModulePlatform(module);
 
   if (entries.length !== 1 || entries[0]?.outputPath !== "index") {
     throw new Error(
@@ -612,12 +646,9 @@ async function bundleStandaloneModule({ destinationRoot, module, packageInfo, pa
     input: entries[0].input,
     external: module.external ?? [],
     moduleTypes: module.loader ?? {},
-    platform: "node",
+    platform,
     plugins: module.plugins ?? [],
-    resolve: module.resolve ?? {
-      conditionNames: ["node", "import", "default"],
-      mainFields: ["module", "main"],
-    },
+    resolve: module.resolve ?? getDefaultResolve(platform),
     treeshake: true,
     output: {
       banner: "/* oxlint-disable */",
@@ -632,7 +663,13 @@ async function bundleStandaloneModule({ destinationRoot, module, packageInfo, pa
   });
 }
 
-async function bundleModuleGroup({ chunkGroup, preparedModules, packageRoot, compiledRoot }) {
+async function bundleModuleGroup({
+  chunkGroup,
+  platform,
+  preparedModules,
+  packageRoot,
+  compiledRoot,
+}) {
   const warningFilter = createVendoredDependencyWarningFilter();
   const entrypoints = Object.fromEntries(
     preparedModules.flatMap(({ module, packageInfo }) =>
@@ -661,12 +698,9 @@ async function bundleModuleGroup({ chunkGroup, preparedModules, packageRoot, com
     input: entrypoints,
     external,
     moduleTypes,
-    platform: "node",
+    platform,
     plugins,
-    resolve: {
-      conditionNames: ["node", "import", "default"],
-      mainFields: ["module", "main"],
-    },
+    resolve: getDefaultResolve(platform),
     treeshake: true,
     output: {
       banner: "/* oxlint-disable */",
@@ -694,14 +728,24 @@ async function bundleModules({ modules, packageRoot, compiledRoot }) {
 
   const standalone = preparedModules.filter(({ module }) => module.bundling === "standalone");
   const shared = preparedModules.filter(({ module }) => module.bundling !== "standalone");
-  const groups = Map.groupBy(shared, ({ module }) => module.chunkGroup ?? "node");
+  const groups = Map.groupBy(
+    shared,
+    ({ module }) => `${module.chunkGroup ?? "node"}\0${getModulePlatform(module)}`,
+  );
 
   await Promise.all(standalone.map((entry) => bundleStandaloneModule({ ...entry, packageRoot })));
 
   await Promise.all(
-    [...groups].map(([chunkGroup, groupModules]) =>
-      bundleModuleGroup({ chunkGroup, preparedModules: groupModules, packageRoot, compiledRoot }),
-    ),
+    [...groups].map(([groupKey, groupModules]) => {
+      const [chunkGroup, platform] = groupKey.split("\0");
+      return bundleModuleGroup({
+        chunkGroup,
+        platform,
+        preparedModules: groupModules,
+        packageRoot,
+        compiledRoot,
+      });
+    }),
   );
 
   // Inline declaration strings go first so copyDeclarations callbacks can

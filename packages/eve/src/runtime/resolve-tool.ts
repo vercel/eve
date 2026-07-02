@@ -6,14 +6,13 @@ import { expectFunction, expectObjectRecord } from "#internal/authored-module.js
 import { registerDefinitionSource, stampDefinitionKey } from "#public/tool-result-narrowing.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "#runtime/resolve-helpers.js";
-import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 
 /**
  * Resolves one compiled authored tool into a runtime-owned definition
  * with live callbacks reattached from the authored module.
  *
- * Optional hooks (`needsApproval`, plus an optional Standard Schema
+ * Optional hooks (`approval`, plus an optional Standard Schema
  * `inputSchema`) are extracted when
  * declared and validated to have the expected shape; any type mismatch
  * raises a {@link ResolveAgentError} so typos surface at resolve time
@@ -86,11 +85,10 @@ export async function resolveToolDefinition(
  */
 type OptionalResolvedFields = {
   -readonly [K in
-    | "needsApproval"
+    | "approval"
     | "toModelOutput"
     | "inputStandardSchema"
-    | "outputStandardSchema"
-    | "auth"]?: ResolvedToolDefinition[K];
+    | "outputStandardSchema"]?: ResolvedToolDefinition[K];
 };
 
 /**
@@ -104,11 +102,11 @@ function extractOptionalHooks(
 ): OptionalResolvedFields {
   const optional: OptionalResolvedFields = {};
 
-  if (record.needsApproval !== undefined) {
-    optional.needsApproval = expectFunction(
-      record.needsApproval,
-      describe(definition, "to provide a needsApproval function"),
-    ) as ResolvedToolDefinition["needsApproval"];
+  if (record.approval !== undefined) {
+    optional.approval = expectFunction(
+      record.approval,
+      describe(definition, "to provide an approval function"),
+    ) as ResolvedToolDefinition["approval"];
   }
 
   if (record.toModelOutput !== undefined) {
@@ -124,13 +122,6 @@ function extractOptionalHooks(
 
   if (record.outputSchema !== undefined && isFlexibleSchema(record.outputSchema)) {
     optional.outputStandardSchema = record.outputSchema;
-  }
-
-  if (record.auth !== undefined) {
-    optional.auth = normalizeAuthorizationSpec(
-      record.auth,
-      `${describe(definition, "to provide a valid auth object")}:`,
-    );
   }
 
   return optional;

@@ -121,9 +121,9 @@ describe("deployProject box", () => {
 
     await runInteractive([box], pendingState(), silentSink);
 
-    // `--yes` is required even interactively: without skipAutoDetectionConfirmation
-    // the deployments API rejects a never-configured project (created via the bare
-    // projects API) with missing_project_settings, and the CLI cannot recover.
+    // `--yes` is required even interactively: setup already made the deploy
+    // decision, so deploy should not re-open settings confirmation for a fresh
+    // project.
     expect(deps.runVercel).toHaveBeenNthCalledWith(
       1,
       ["deploy", "--prod", "--yes"],

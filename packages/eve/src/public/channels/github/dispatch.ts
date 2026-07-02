@@ -6,6 +6,10 @@ import {
   extractGitHubCommentTrigger,
   formatGitHubContextBlock,
   prependGitHubContext,
+  type GitHubCheckRunWebhookEvent,
+  type GitHubCheckSuiteWebhookEvent,
+  type GitHubCiPayload,
+  type GitHubCiWebhookEvent,
   type GitHubComment,
   type GitHubIssueComment,
   type GitHubIssueCommentEvent,
@@ -14,6 +18,7 @@ import {
   type GitHubPullRequestReviewCommentEvent,
   type GitHubPullRequestWebhookEvent,
   type GitHubUser,
+  type GitHubWorkflowRunWebhookEvent,
 } from "#public/channels/github/inbound.js";
 import {
   buildGitHubPullRequestContext,
@@ -21,6 +26,7 @@ import {
 } from "#public/channels/github/pr-context.js";
 import {
   continuationTokenFromState,
+  stateFromCiEvent,
   stateFromIssueCommentEvent,
   stateFromIssueEvent,
   stateFromPullRequestEvent,
@@ -38,6 +44,7 @@ import type { SendFn } from "#public/definitions/defineChannel.js";
 const log = createLogger("github.dispatch");
 
 type GitHubTurnEvent =
+  | GitHubCiWebhookEvent
   | GitHubIssueCommentEvent
   | GitHubIssueWebhookEvent
   | GitHubPullRequestReviewCommentEvent
@@ -131,9 +138,88 @@ export async function dispatchPullRequest(input: {
   });
 }
 
+/** Dispatches an opt-in check-suite webhook event into the runtime. */
+export async function dispatchCheckSuite(input: {
+  readonly config: GitHubChannelConfig;
+  readonly event: GitHubCheckSuiteWebhookEvent;
+  readonly handler: NonNullable<GitHubChannelConfig["onCheckSuite"]>;
+  readonly send: SendFn<GitHubChannelState>;
+}): Promise<void> {
+  await dispatchCiEvent({
+    ...input,
+    ci: input.event.checkSuite,
+    handlerResult: (ctx) => input.handler(ctx, input.event.checkSuite),
+    label: "Check suite",
+  });
+}
+
+/** Dispatches an opt-in check-run webhook event into the runtime. */
+export async function dispatchCheckRun(input: {
+  readonly config: GitHubChannelConfig;
+  readonly event: GitHubCheckRunWebhookEvent;
+  readonly handler: NonNullable<GitHubChannelConfig["onCheckRun"]>;
+  readonly send: SendFn<GitHubChannelState>;
+}): Promise<void> {
+  await dispatchCiEvent({
+    ...input,
+    ci: input.event.checkRun,
+    handlerResult: (ctx) => input.handler(ctx, input.event.checkRun),
+    label: "Check run",
+  });
+}
+
+/** Dispatches an opt-in workflow-run webhook event into the runtime. */
+export async function dispatchWorkflowRun(input: {
+  readonly config: GitHubChannelConfig;
+  readonly event: GitHubWorkflowRunWebhookEvent;
+  readonly handler: NonNullable<GitHubChannelConfig["onWorkflowRun"]>;
+  readonly send: SendFn<GitHubChannelState>;
+}): Promise<void> {
+  await dispatchCiEvent({
+    ...input,
+    ci: input.event.workflowRun,
+    handlerResult: (ctx) => input.handler(ctx, input.event.workflowRun),
+    label: "Workflow run",
+  });
+}
+
+async function dispatchCiEvent(input: {
+  readonly ci: GitHubCiPayload;
+  readonly config: GitHubChannelConfig;
+  readonly event: GitHubCiWebhookEvent;
+  readonly handlerResult: (ctx: GitHubInboundContext) => GitHubInboundResultOrPromise;
+  readonly label: string;
+  readonly send: SendFn<GitHubChannelState>;
+}): Promise<void> {
+  const state = stateFromCiEvent(input.event);
+  const ctx = buildInboundContext(input.config, input.event);
+  if (state.pullRequestNumber === null) {
+    const result = await runInboundHandler({
+      event: input.event,
+      handlerResult: () => input.handlerResult(ctx),
+    });
+    if (result !== null && result !== undefined) {
+      log.warn("GitHub CI event cannot dispatch without an associated pull request", {
+        deliveryId: input.event.delivery.id,
+        event: input.event.kind,
+      });
+    }
+    return;
+  }
+
+  await dispatchWebhookEventTurn({
+    config: input.config,
+    event: input.event,
+    handlerResult: () => input.handlerResult(ctx),
+    message: formatCiEventMessage(input.label, input.ci),
+    send: input.send,
+    state,
+  });
+}
+
 async function dispatchWebhookEventTurn(input: {
   readonly config: GitHubChannelConfig;
-  readonly event: GitHubIssueWebhookEvent | GitHubPullRequestWebhookEvent;
+  readonly event: GitHubCiWebhookEvent | GitHubIssueWebhookEvent | GitHubPullRequestWebhookEvent;
   readonly handlerResult: () => GitHubInboundResultOrPromise;
   readonly message: string;
   readonly send: SendFn<GitHubChannelState>;
@@ -256,8 +342,10 @@ async function buildPullRequestContext(
   try {
     return await buildGitHubPullRequestContext({
       api: config.api,
+      baseSha: state.baseSha,
       config: config.pullRequestContext,
       credentials: config.credentials,
+      headSha: state.headSha,
       installationId: state.installationId ?? undefined,
       owner: state.owner,
       pullRequestNumber: state.pullRequestNumber,
@@ -272,19 +360,22 @@ async function buildPullRequestContext(
 function buildInboundContext(
   config: GitHubChannelConfig,
   event:
+    | GitHubCiWebhookEvent
     | GitHubIssueCommentEvent
     | GitHubIssueWebhookEvent
     | GitHubPullRequestWebhookEvent
     | GitHubPullRequestReviewCommentEvent,
 ): GitHubInboundContext {
   const state =
-    event.kind === "issue_comment"
-      ? stateFromIssueCommentEvent(event)
-      : event.kind === "issues"
-        ? stateFromIssueEvent(event)
-        : event.kind === "pull_request"
-          ? stateFromPullRequestEvent(event)
-          : stateFromPullRequestReviewCommentEvent(event);
+    event.kind === "check_suite" || event.kind === "check_run" || event.kind === "workflow_run"
+      ? stateFromCiEvent(event)
+      : event.kind === "issue_comment"
+        ? stateFromIssueCommentEvent(event)
+        : event.kind === "issues"
+          ? stateFromIssueEvent(event)
+          : event.kind === "pull_request"
+            ? stateFromPullRequestEvent(event)
+            : stateFromPullRequestReviewCommentEvent(event);
   const binding = buildGitHubBinding({ config, state });
   return {
     conversation: event.conversation,
@@ -319,6 +410,17 @@ function formatPullRequestEventMessage(event: GitHubPullRequestWebhookEvent): st
   return `Pull request ${event.pullRequest.action}: #${event.pullRequest.pullRequestNumber}${
     title ? ` ${title}` : ""
   }`;
+}
+
+function formatCiEventMessage(label: string, event: GitHubCiPayload): string {
+  const outcome = event.conclusion ?? event.status;
+  return `${label} ${event.action}: ${ciEventId(event)}${outcome ? ` (${outcome})` : ""}`;
+}
+
+function ciEventId(event: GitHubCiPayload): number {
+  if ("checkSuiteId" in event) return event.checkSuiteId;
+  if ("checkRunId" in event) return event.checkRunId;
+  return event.workflowRunId;
 }
 
 function isIgnoredInboundComment(

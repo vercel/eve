@@ -123,7 +123,9 @@ describe("ScheduleDispatcher", () => {
         expect(runtime.run).toHaveBeenCalledTimes(1);
 
         const runInput = vi.mocked(runtime.run).mock.calls[0]![0];
-        expect(runInput.continuationToken).toBe("slack:C0123ABC:");
+        expect(runInput.continuationToken).toMatch(
+          /^slack:C0123ABC:[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/,
+        );
         expect(runInput.auth).toEqual(SCHEDULE_APP_AUTH);
       } finally {
         vi.unstubAllEnvs();

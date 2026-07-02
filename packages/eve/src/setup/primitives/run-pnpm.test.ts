@@ -123,6 +123,23 @@ describe("runPnpmInstall", () => {
       { stream: "stderr", text: "WARN deprecated package" },
     ]);
   });
+
+  test("replays stdout when the ancestor workspace probe fails", async () => {
+    mockedExistsSync.mockImplementation((path) => path === "/tmp/pnpm-workspace.yaml");
+    const child = createMockChildProcess();
+    mockedSpawn.mockReturnValueOnce(child);
+    const onOutput = vi.fn();
+
+    const result = runPnpmInstall("/tmp/eve-agent", { onOutput });
+    child.stdout.emit("data", Buffer.from("workspace parse failed\n"));
+    child.emit("close", 1);
+
+    await expect(result).resolves.toBe(false);
+    expect(onOutput.mock.calls.map(([line]) => line)).toEqual([
+      { stream: "stdout", text: "workspace parse failed" },
+      { stream: "stderr", text: "pnpm list --depth -1 --json exited with code 1." },
+    ]);
+  });
 });
 
 describe("runPackageManagerInstall", () => {
@@ -143,6 +160,18 @@ describe("runPackageManagerInstall", () => {
     expect(mockedSpawn).toHaveBeenCalledWith(
       kind,
       expectedArgs,
+      expect.objectContaining({ cwd: "/tmp/app" }),
+    );
+  });
+
+  test("requests npm output before registry operations complete", async () => {
+    await expect(
+      runPackageManagerInstall("npm", "/tmp/app", { progressDetails: true }),
+    ).resolves.toBe(true);
+
+    expect(mockedSpawn).toHaveBeenCalledWith(
+      "npm",
+      ["install", "--loglevel=silly"],
       expect.objectContaining({ cwd: "/tmp/app" }),
     );
   });

@@ -1,7 +1,7 @@
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
-import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
+import { buildSlackAuthContext, slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
 import {
   buildAuthCompletedText,
   buildAuthEphemeralBlocks,
@@ -9,17 +9,27 @@ import {
   formatConnectionDisplayName,
   type ConnectionAuthorizationOutcome,
 } from "#public/channels/slack/connections.js";
-import { renderInputRequestBlocks } from "#public/channels/slack/hitl.js";
+import {
+  formatInputRequestFallbackText,
+  renderInputRequestBlocks,
+} from "#public/channels/slack/hitl.js";
 import type { SlackMessage } from "#public/channels/slack/inbound.js";
-import { truncateMessageText, truncateTypingStatus } from "#public/channels/slack/limits.js";
+import {
+  SLACK_MAX_BLOCKS_PER_MESSAGE,
+  truncateMessageText,
+  truncateTypingStatus,
+} from "#public/channels/slack/limits.js";
 import type {
   SlackChannelEvents,
   SlackChannelInternalEvents,
   SlackContext,
   SlackMentionResult,
 } from "#public/channels/slack/slackChannel.js";
+import type { InputRequest } from "#runtime/input/types.js";
 
 const log = createLogger("slack.defaults");
+const REASONING_TYPING_REFRESH_INTERVAL_MS = 5_000;
+const REASONING_TYPING_MIN_PROGRESS_CHARS = 4;
 
 /**
  * Workspace-scoped projection of the Slack actor that produced
@@ -89,17 +99,41 @@ function firstNonEmptyLine(text: string): string | undefined {
  * Default `input.requested` handler — renders each pending HITL
  * request as Slack `block_actions`. Buttons by default; radio for
  * ≤6-option select requests; static_select for >6-option select
- * requests. Override by declaring `events["input.requested"]`.
+ * requests. Batches split into multiple posts when they would exceed
+ * Slack's 50-block message cap. Override by declaring
+ * `events["input.requested"]`.
  */
 export function defaultInputRequestedHandler(): NonNullable<SlackChannelEvents["input.requested"]> {
   return async (data, channel, _ctx) => {
-    if (data.requests.length === 0) return;
-    const promptText = truncateMessageText(data.requests.map((r) => r.prompt).join("\n"));
-    await channel.thread.post({
-      blocks: data.requests.flatMap(renderInputRequestBlocks),
-      text: promptText,
-    });
+    for (const post of buildInputRequestPosts(data.requests)) {
+      await channel.thread.post(post);
+    }
   };
+}
+
+/**
+ * Groups HITL requests into `chat.postMessage` payloads that stay under
+ * Slack's block-count cap. A request's blocks never split across posts,
+ * so its buttons always land in the same message as its prompt.
+ */
+function buildInputRequestPosts(
+  requests: readonly InputRequest[],
+): Array<{ blocks: unknown[]; text: string }> {
+  const groups: Array<{ blocks: unknown[]; fallbacks: string[] }> = [];
+  for (const request of requests) {
+    const blocks = renderInputRequestBlocks(request);
+    const current = groups.at(-1);
+    if (current && current.blocks.length + blocks.length <= SLACK_MAX_BLOCKS_PER_MESSAGE) {
+      current.blocks.push(...blocks);
+      current.fallbacks.push(formatInputRequestFallbackText(request));
+    } else {
+      groups.push({ blocks, fallbacks: [formatInputRequestFallbackText(request)] });
+    }
+  }
+  return groups.map((group) => ({
+    blocks: group.blocks,
+    text: truncateMessageText(group.fallbacks.join("\n")),
+  }));
 }
 
 /**
@@ -107,13 +141,38 @@ export function defaultInputRequestedHandler(): NonNullable<SlackChannelEvents["
  * and the connection-authorization status flow. Each is overridable
  * per-event by passing the same key under `slackChannel({ events })`.
  * Typed as the internal full-context map because the default
- * `authorization.required` handler owns the public link-free fallback,
+ * `authorization.required` handler owns the public link-free status,
  * which user overrides cannot express.
  */
 export const defaultEvents: SlackChannelInternalEvents = {
   async "turn.started"(_event, channel, _ctx) {
     channel.state.pendingToolCallMessage = null;
+    channel.state.lastReasoningTypingAtMs = null;
+    channel.state.lastReasoningTypingStatus = null;
     await channel.thread.startTyping("Working...");
+  },
+
+  async "reasoning.appended"(event, channel, _ctx) {
+    const line = firstNonEmptyLine(event.reasoningSoFar);
+    if (line === undefined) return;
+
+    const status = truncateTypingStatus(line);
+    const lastStatus = channel.state.lastReasoningTypingStatus;
+    const isProgressiveExtension =
+      lastStatus !== null &&
+      lastStatus !== undefined &&
+      status.startsWith(lastStatus) &&
+      status.length >= lastStatus.length + REASONING_TYPING_MIN_PROGRESS_CHARS;
+    const now = Date.now();
+    const lastAt = channel.state.lastReasoningTypingAtMs;
+    if (!isProgressiveExtension && lastAt !== null && lastAt !== undefined) {
+      const elapsed = now - lastAt;
+      if (elapsed >= 0 && elapsed < REASONING_TYPING_REFRESH_INTERVAL_MS) return;
+    }
+
+    await channel.thread.startTyping(status);
+    channel.state.lastReasoningTypingAtMs = now;
+    channel.state.lastReasoningTypingStatus = status;
   },
 
   async "actions.requested"(event, channel, _ctx) {
@@ -135,7 +194,11 @@ export const defaultEvents: SlackChannelInternalEvents = {
       return;
     }
     channel.state.pendingToolCallMessage = null;
-    if (event.message) await channel.thread.post(event.message);
+    if (!event.message) {
+      await channel.thread.startTyping();
+      return;
+    }
+    await channel.thread.post(event.message);
   },
 
   async "turn.failed"(event, channel, _ctx) {
@@ -164,10 +227,38 @@ export const defaultEvents: SlackChannelInternalEvents = {
     );
   },
 
-  async "authorization.required"(event, channel, _ctx) {
+  async "authorization.required"(event, channel, ctx) {
     const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
-    const triggeringUserId = channel.state.triggeringUserId ?? null;
+    const triggeringUserId =
+      slackUserIdFromAuthContext(ctx.session.auth.current) ??
+      channel.state.triggeringUserId ??
+      null;
     const challengeUrl = event.authorization?.url;
+
+    // Post a public, link-free status so everyone in the thread can see
+    // the session is blocked and later see it complete. The challenge
+    // itself remains private.
+    const pending = channel.state.pendingAuthMessageTs ?? {};
+    if (pending[event.name] === undefined) {
+      const publicText = buildAuthRequiredPublicText({
+        displayName,
+        hasUser: triggeringUserId !== null,
+      });
+      try {
+        const sent = await channel.thread.post(publicText);
+        if (sent.id) {
+          channel.state.pendingAuthMessageTs = {
+            ...pending,
+            [event.name]: sent.id,
+          };
+        }
+      } catch (error) {
+        log.error("Slack auth public message delivery failed", {
+          name: event.name,
+          error,
+        });
+      }
+    }
 
     // The challenge is user-specific: the sign-in link (and device code)
     // must only ever be visible to the triggering user, never posted into
@@ -187,35 +278,12 @@ export const defaultEvents: SlackChannelInternalEvents = {
             ? `Sign in with ${displayName}: ${challengeUrl} (code: ${userCode})`
             : `Sign in with ${displayName}: ${challengeUrl}`,
         });
-        return;
       } catch (error) {
         log.error("Slack auth ephemeral delivery failed", {
           name: event.name,
           error,
         });
       }
-    }
-
-    // Fallback: no user to whisper to, or the ephemeral delivery failed.
-    // The public status is link-free by construction, so the thread learns
-    // the session is blocked without the challenge itself ever going public.
-    const publicText = buildAuthRequiredPublicText({
-      displayName,
-      hasUser: triggeringUserId !== null,
-    });
-    try {
-      const sent = await channel.thread.post(publicText);
-      if (sent.id) {
-        channel.state.pendingAuthMessageTs = {
-          ...channel.state.pendingAuthMessageTs,
-          [event.name]: sent.id,
-        };
-      }
-    } catch (error) {
-      log.error("Slack auth public message delivery failed", {
-        name: event.name,
-        error,
-      });
     }
   },
 

@@ -26,7 +26,7 @@ import { createRuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createRuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
-import { CODE_MODE_TOOL_NAME, WORKFLOW_TOOL_NAME } from "#shared/code-mode.js";
+import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 import type {
   ResolvedChannelDefinition,
   ResolvedRuntimeDelegationNode,
@@ -171,7 +171,6 @@ async function resolveRuntimeAgentNode(
     },
     {
       reservedToolNames: [
-        CODE_MODE_TOOL_NAME,
         WORKFLOW_TOOL_NAME,
         ...(frameworkToolNames.has(LOAD_SKILL_TOOL_NAME) ||
         authoredToolNames.has(LOAD_SKILL_TOOL_NAME)

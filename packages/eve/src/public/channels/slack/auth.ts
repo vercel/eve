@@ -10,6 +10,13 @@ interface SlackAuthContextInput {
   readonly userName?: string;
 }
 
+/** Returns the Slack user id carried by a Slack-derived auth context. */
+export function slackUserIdFromAuthContext(auth: SessionAuthContext | null): string | undefined {
+  if (auth?.authenticator !== "slack-webhook") return undefined;
+  const userId = auth.attributes.user_id;
+  return typeof userId === "string" && userId.length > 0 ? userId : undefined;
+}
+
 /**
  * Builds the Slack-derived session auth context used by inbound
  * messages and signed interactivity callbacks.

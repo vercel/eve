@@ -7,6 +7,7 @@ import {
   type SessionAuthContext,
   SessionIdKey,
   SessionKey,
+  SubagentMaxDepthKey,
 } from "#context/keys.js";
 import { buildRunContext } from "#execution/runtime-context.js";
 
@@ -245,5 +246,21 @@ describe("buildRunContext", () => {
     expect(projection).toBeDefined();
     expect(projection!.kind).toBe("http");
     expect(projection!.metadata).toEqual({});
+  });
+
+  it("seeds inherited subagent max depth from the run input", () => {
+    const ctx = buildRunContext({
+      bundle: createMinimalBundle(),
+      run: {
+        auth: null,
+        adapter: { kind: "subagent" },
+        continuationToken: "t",
+        input: { message: "hi" },
+        mode: "task",
+        subagentMaxDepth: 4,
+      },
+    });
+
+    expect(ctx.require(SubagentMaxDepthKey)).toBe(4);
   });
 });

@@ -72,9 +72,9 @@ export function Chat() {
 | `stop`    | Abort the active request.                                                      |
 | `reset`   | Clear local events, data, errors, and the local session cursor.                |
 
-Most chat UIs only need `data.messages` and `status`. Drop down to `events` to render lower-level activity such as tool calls and reasoning deltas that the default reducer doesn't surface.
+Most chat UIs only need `data.messages` and `status`. Drop down to `events` when you need the authoritative wire events directly, for example to persist an audit log or build a custom projection.
 
-`data.messages` are `EveMessage[]` following the AI SDK `UIMessage` convention, so they drop straight into any AI SDK UI primitive that accepts a `UIMessage[]`. Parts include user text, assistant text, reasoning, tool calls, tool results, and input requests.
+`data.messages` are `EveMessage[]` following the AI SDK `UIMessage` convention, so they drop straight into any AI SDK UI primitive that accepts a `UIMessage[]`. Parts include user text, assistant text, reasoning, tool calls, tool results, input requests, and connection authorization prompts.
 
 ## Sending and streaming
 
@@ -100,7 +100,7 @@ Assistant text, reasoning, tool calls, and tool results stream into `data` as th
 
 ## Human-in-the-loop prompts
 
-Tools opt into approval with `needsApproval`, and the model can also ask a question with `ask_question` — see [Human-in-the-loop](../../tools/human-in-the-loop) for the server-side model. Either way the stream emits an `input.requested` event, and the pending request rides on a `dynamic-tool` part of the latest message at `part.toolMetadata?.eve?.inputRequest`. Read it, then answer through the same session with `send()`:
+Tools opt into approval with `approval`, and the model can also ask a question with `ask_question` — see [Human-in-the-loop](/docs/human-in-the-loop) for the server-side model. Either way the stream emits an `input.requested` event, and the pending request rides on a `dynamic-tool` part of the latest message at `part.toolMetadata?.eve?.inputRequest`. Read it, then answer through the same session with `send()`:
 
 ```tsx
 const request = agent.data.messages
@@ -116,6 +116,38 @@ if (request) {
 ```
 
 `request.prompt` and `request.options` give you what you need to render the approve and deny UI. The default reducer marks the part as responded immediately, then updates it again once eve streams the resumed result.
+
+## Authorization prompts
+
+Connections and tools that need OAuth or another grant emit `authorization.required`. The default reducer projects that into an `authorization` message part with the display name, instructions, device code, and user-facing sign-in URL. Render that part as a normal chat message, then keep the session cursor; eve resumes the parked turn when the callback completes and updates the part after `authorization.completed`:
+
+```tsx
+import type { EveMessagePart } from "eve/react";
+
+function AuthorizationPrompt({ part }: { part: EveMessagePart }) {
+  if (part.type !== "authorization") return null;
+
+  if (part.state === "completed") {
+    return (
+      <p>
+        {part.outcome === "authorized"
+          ? `${part.displayName} connected.`
+          : `${part.displayName} authorization ${part.outcome}.`}
+      </p>
+    );
+  }
+
+  return (
+    <section>
+      <p>{part.description}</p>
+      {part.authorization?.userCode ? <code>{part.authorization.userCode}</code> : null}
+      {part.authorization?.url ? <a href={part.authorization.url}>Sign in</a> : null}
+    </section>
+  );
+}
+```
+
+For fully custom state machines, `authorization.required` and `authorization.completed` are still available on `events` and `onEvent`.
 
 ## Attach page context per turn
 
@@ -186,23 +218,41 @@ const agent = useEveAgent({ reducer: toolCounter });
 
 ## Resumable sessions
 
-The browser conversation lives durably on the server. Persist the `session` cursor to pick it back up after a reload:
+The browser conversation lives durably on the server. Persist both the rendered event log and the `session` cursor to pick it back up after a reload:
 
 ```tsx
-const [initialSession] = useState(() => {
-  const raw = localStorage.getItem("eve-session");
-  return raw ? JSON.parse(raw) : undefined;
+import type { HandleMessageStreamEvent, SessionState } from "eve/client";
+
+type SavedEveChat = {
+  events?: readonly HandleMessageStreamEvent[];
+  session?: SessionState;
+};
+
+const [saved] = useState<SavedEveChat>(() => {
+  const raw = localStorage.getItem("eve-chat");
+  return raw ? JSON.parse(raw) : {};
 });
 
 const agent = useEveAgent({
-  initialSession,
-  onSessionChange(session) {
-    localStorage.setItem("eve-session", JSON.stringify(session));
+  initialEvents: saved.events ?? [],
+  initialSession: saved.session,
+  onFinish(snapshot) {
+    localStorage.setItem(
+      "eve-chat",
+      JSON.stringify({
+        events: snapshot.events,
+        session: snapshot.session,
+      }),
+    );
   },
 });
 ```
 
-Store the full `session` object (`sessionId`, `continuationToken`, `streamIndex`), not a single field.
+Store the full `session` object (`sessionId`, `continuationToken`, `streamIndex`), not a single field. The session cursor lets eve continue the durable conversation; the event log lets your UI render historical messages without replaying the whole stream. A database-backed chat app should usually persist stream events as they arrive with `onEvent` and then save a final snapshot in `onFinish`.
+
+For multiple chat threads, keep one saved event log and session cursor per thread. `host`, `reducer`, `session`, `initialEvents`, `initialSession`, `auth`, `headers`, `maxReconnectAttempts`, and `optimistic` are read when the hook creates its store, so remount the chat component when switching threads, for example with `key={chat.id}`.
+
+If the user can refresh or navigate immediately after pressing send, create your app-level chat row and store the pending user message before calling `send()`. After the request starts, persist the session state as soon as it contains a `sessionId`, then reconnect an interrupted in-flight turn with `session.stream({ startIndex: savedEvents.length })` from the lower-level client.
 
 ## Custom hosts and headers
 

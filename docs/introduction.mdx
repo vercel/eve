@@ -7,12 +7,6 @@ eve is a framework for building durable agents as ordinary files in a TypeScript
 
 Instead of one large configuration object, each part of your agent gets a clear home. Instructions go in one file, tools in one folder, channels in another. eve discovers that structure and turns it into an agent that runs locally, serves HTTP, connects to other platforms, and keeps working across many turns.
 
-<Callout>
-  eve is currently in beta and subject to the [Vercel beta
-  terms](https://vercel.com/docs/release-phases/public-beta-agreement); the framework, APIs,
-  documentation, and behavior may change before general availability.
-</Callout>
-
 ## An eve project at a glance
 
 A small eve app looks like this:
@@ -90,7 +84,7 @@ As the agent grows, each concern still has a predictable home:
 
 | Path                            | Add it when you need...                          |
 | ------------------------------- | ------------------------------------------------ |
-| [`connections/`](./connections) | Tools from external MCP servers                  |
+| [`connections/`](./connections) | Tools from external MCP or OpenAPI services      |
 | [`hooks/`](./guides/hooks)      | Code that reacts to lifecycle and stream events  |
 | [`sandbox/`](./sandbox)         | A controlled workspace for files and commands    |
 | [`subagents/`](./subagents)     | Specialist agents the root agent can delegate to |
@@ -105,5 +99,5 @@ The result stays readable before it runs. The directory tells you what the agent
 - [Tools](./tools): the typed actions your agent calls
 - [Instructions](./instructions): the always-on system prompt that shapes behavior
 - [Channels](./channels/overview): reach the agent from Slack, Discord, or a web UI
-- [Connections](./connections): pull in tools from external MCP servers
+- [Connections](./connections): pull in tools from external services
 - [Project layout](./reference/project-layout): every authored slot under `agent/`

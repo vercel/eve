@@ -17,6 +17,12 @@
  * work runs under `waitUntil` so the webhook ACK is immediate.
  */
 
+import {
+  parseSlackWebhookBody,
+  type SlackBlockActionsPayload,
+  type SlackViewSubmissionPayload,
+} from "#compiled/@chat-adapter/slack/webhook.js";
+
 import { createLogger } from "#internal/logging.js";
 import {
   buildSlackBinding,
@@ -70,15 +76,20 @@ interface ParsedBlockActionsPayload {
  * metadata the handler needs.
  */
 export function parseBlockActionsPayload(
-  body: Record<string, unknown>,
+  body: Record<string, unknown> | SlackBlockActionsPayload,
 ): ParsedBlockActionsPayload | null {
-  const actions = body.actions;
+  if (isSharedBlockActionsPayload(body)) {
+    return parseSharedBlockActionsPayload(body);
+  }
+
+  const rawBody = body as Record<string, unknown>;
+  const actions = rawBody.actions;
   if (!Array.isArray(actions)) return null;
 
   // `channel` and `message` are Optional on block_actions payloads — only
   // present when the action was triggered from a message in a channel.
-  const channel = (body.channel as { id: string } | undefined)?.id;
-  const message = body.message as
+  const channel = (rawBody.channel as { id: string } | undefined)?.id;
+  const message = rawBody.message as
     | { ts: string; thread_ts?: string; blocks?: unknown[] }
     | undefined;
   const threadTs = message?.thread_ts ?? message?.ts;
@@ -86,8 +97,8 @@ export function parseBlockActionsPayload(
 
   // `team` is Required but can be `null` for org-installed apps.
   // `user` is Required and always carries `id`.
-  const team = body.team as { id: string } | null;
-  const userBlock = body.user as {
+  const team = rawBody.team as { id: string } | null;
+  const userBlock = rawBody.user as {
     id: string;
     team_id?: string;
     username?: string;
@@ -119,6 +130,38 @@ export function parseBlockActionsPayload(
   };
 }
 
+function isSharedBlockActionsPayload(
+  body: Record<string, unknown> | SlackBlockActionsPayload,
+): body is SlackBlockActionsPayload {
+  return body.kind === "block_actions" && Array.isArray(body.actions);
+}
+
+function parseSharedBlockActionsPayload(
+  body: SlackBlockActionsPayload,
+): ParsedBlockActionsPayload | null {
+  if (!body.channelId || !body.threadTs) return null;
+
+  return {
+    actions: body.actions.map((action) => ({
+      actionId: action.actionId,
+      value: action.value,
+      blockId: action.blockId,
+      selectedOptionValue: action.selectedOptionValue,
+      messageTs: body.messageTs,
+      label: action.label,
+      user: {
+        id: action.user?.id ?? body.userId,
+        username: action.user?.username,
+        name: action.user?.name,
+      },
+    })),
+    channelId: body.channelId,
+    threadTs: body.threadTs,
+    teamId: body.teamId,
+    messageBlocks: body.messageBlocks ?? [],
+  };
+}
+
 function extractSelectedOptionValue(action: Record<string, unknown>): string | undefined {
   const selected = action.selected_option as { value?: unknown } | undefined;
   return typeof selected?.value === "string" ? selected.value : undefined;
@@ -134,16 +177,24 @@ function extractActionLabel(action: Record<string, unknown>): string | undefined
 }
 
 function findPromptBlock(blocks: readonly unknown[]): unknown {
+  return findPromptBlocks(blocks)[0];
+}
+
+function findPromptBlocks(blocks: readonly unknown[]): unknown[] {
+  const promptBlocks: unknown[] = [];
   for (const block of blocks) {
-    if (
-      typeof block === "object" &&
-      block !== null &&
-      (block as { type?: unknown }).type === "section"
-    ) {
-      return block;
+    if (typeof block !== "object" || block === null) {
+      continue;
+    }
+    const type = (block as { type?: unknown }).type;
+    if (type === "actions") {
+      break;
+    }
+    if (type === "section" || type === "context" || type === "divider" || type === "image") {
+      promptBlocks.push(block);
     }
   }
-  return undefined;
+  return promptBlocks;
 }
 
 function readPromptTextFromBlocks(blocks: readonly unknown[]): string | undefined {
@@ -179,28 +230,29 @@ export async function handleInteractionPost(
   deps: InteractionHandlerDeps,
 ): Promise<Response> {
   const ack = new Response("ok", { status: 200 });
-  const params = new URLSearchParams(rawBody);
-  const payloadStr = params.get("payload");
-  if (!payloadStr) return ack;
 
-  let payload: Record<string, unknown>;
+  let payload;
   try {
-    payload = JSON.parse(payloadStr) as Record<string, unknown>;
+    payload = parseSlackWebhookBody(rawBody, {
+      contentType: "application/x-www-form-urlencoded",
+    });
   } catch {
     log.warn("failed to parse Slack interaction payload");
     return ack;
   }
 
-  if (payload?.type === "view_submission") {
+  if (payload.kind === "view_submission") {
     return handleViewSubmission(payload, ctx, deps);
   }
+
+  if (payload.kind !== "block_actions") return ack;
 
   const interaction = parseBlockActionsPayload(payload);
   if (!interaction) return ack;
 
   const freeformAction = interaction.actions.find((a) => isFreeformAction(a.actionId));
   if (freeformAction) {
-    await openFreeformModal({ payload, interaction, freeformAction, deps });
+    await openFreeformModal({ payload: payload.raw, interaction, freeformAction, deps });
     return ack;
   }
 
@@ -324,28 +376,20 @@ async function openFreeformModal(input: {
 }
 
 async function handleViewSubmission(
-  payload: Record<string, unknown>,
+  payload: SlackViewSubmissionPayload,
   ctx: {
     send: SendFn<SlackChannelState>;
     waitUntil: (task: Promise<unknown>) => void;
   },
   _deps: InteractionHandlerDeps,
 ): Promise<Response> {
-  const ack = new Response("ok", { status: 200 });
-  const view = payload.view as
-    | {
-        callback_id?: string;
-        private_metadata?: string;
-        state?: {
-          values?: Record<string, Record<string, { value?: unknown }>>;
-        };
-      }
-    | undefined;
-  if (view?.callback_id !== HITL_FREEFORM_MODAL_CALLBACK_ID) return ack;
+  // Slack view submissions require an empty 200 body to close the modal.
+  const ack = new Response(null, { status: 200 });
+  if (payload.callbackId !== HITL_FREEFORM_MODAL_CALLBACK_ID) return ack;
 
   let metadata: HitlFreeformModalMetadata;
   try {
-    metadata = JSON.parse(view.private_metadata ?? "") as HitlFreeformModalMetadata;
+    metadata = JSON.parse(payload.privateMetadata ?? "") as HitlFreeformModalMetadata;
   } catch {
     log.warn("freeform view_submission carries invalid private_metadata");
     return ack;
@@ -360,17 +404,19 @@ async function handleViewSubmission(
     return ack;
   }
 
-  const raw =
-    view.state?.values?.[HITL_FREEFORM_MODAL_BLOCK_ID]?.[HITL_FREEFORM_MODAL_ACTION_ID]?.value;
-  const text = typeof raw === "string" ? raw : "";
+  const text =
+    payload.values?.find(
+      (value) =>
+        value.blockId === HITL_FREEFORM_MODAL_BLOCK_ID &&
+        value.actionId === HITL_FREEFORM_MODAL_ACTION_ID,
+    )?.value ?? "";
   if (text.length === 0) return ack;
 
   // `user` is Required on view_submission payloads; `team_id` is on the
   // user object in modern payloads but not guaranteed in all examples.
-  const team = payload.team as { id?: string } | null | undefined;
-  const user = payload.user as { id: string; team_id?: string; username?: string; name?: string };
-  const triggeringUserId = user.id;
-  const teamId = user.team_id ?? team?.id ?? null;
+  const user = payload.user;
+  const triggeringUserId = payload.userId;
+  const teamId = user?.teamId ?? payload.teamId ?? null;
 
   ctx.waitUntil(
     ctx
@@ -381,8 +427,8 @@ async function handleViewSubmission(
             channelId: metadata.channelId,
             teamId,
             threadTs: metadata.threadTs,
-            userId: user.id,
-            userName: user.username ?? user.name,
+            userId: triggeringUserId,
+            userName: user?.username ?? user?.name,
           }),
           continuationToken: metadata.continuationToken,
           state: {
@@ -424,7 +470,7 @@ async function updateAnsweredHitlCard(
   if (!answerLabel) return;
 
   const blocks = buildAnsweredBlocks({
-    promptBlock: findPromptBlock(interaction.messageBlocks),
+    promptBlocks: findPromptBlocks(interaction.messageBlocks),
     answerLabel,
     userId: hitlAction.user.id,
   });
@@ -456,7 +502,7 @@ async function updateAnsweredFreeformCard(input: {
   readonly deps: InteractionHandlerDeps;
 }): Promise<void> {
   const blocks = buildAnsweredBlocks({
-    promptBlock: undefined,
+    promptBlocks: [],
     answerLabel: input.answerLabel,
     userId: input.userId,
   });

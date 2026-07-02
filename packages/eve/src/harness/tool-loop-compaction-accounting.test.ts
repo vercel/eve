@@ -1,4 +1,3 @@
-import type { ModelMessage } from "ai";
 import { generateText, jsonSchema, type LanguageModel, ToolLoopAgent } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -283,88 +282,71 @@ describe("tool-loop structured compaction accounting", () => {
     });
   });
 
-  it("clears exact token accounting when pruning rewrites prompt history", async () => {
-    // Build a history with a large old tool result that will trigger pruning.
-    // The pruning thresholds are: protect 40K tokens, min savings 20K tokens.
-    // We need ~60K+ tokens of tool results total so at least 20K is reclaimable.
-    //
-    // estimateTokens uses JSON.stringify then divides by 4.
-    // A { value: "x".repeat(200_000) } part serializes to ~200K chars ≈ 50K tokens.
-    const largeOldToolResult = {
-      content: [
-        {
-          output: { value: "x".repeat(200_000) },
-          toolCallId: "old-call",
-          toolName: "read_file",
-          type: "tool-result" as const,
-        },
-      ],
-      role: "tool" as const,
-    } as ModelMessage;
-    const recentToolResult = {
-      content: [
-        {
-          output: { value: "y".repeat(200_000) },
-          toolCallId: "recent-call",
-          toolName: "read_file",
-          type: "tool-result" as const,
-        },
-      ],
-      role: "tool" as const,
-    } as ModelMessage;
+  it("keeps tool results verbatim across steps so history is append-only", async () => {
+    // A large tool result that would have been a prime pruning target. With no
+    // reactive pruning, it must survive verbatim across the continuation step —
+    // nothing rewrites earlier messages mid-turn, keeping the prompt prefix
+    // stable for the provider cache.
+    const largeOutput = { value: "x".repeat(200_000) };
 
     setupMockAgentSequence([
       {
-        finishReason: "stop",
+        finishReason: "tool-calls",
         response: {
-          messages: [{ content: "All done.", role: "assistant" }],
+          messages: [
+            {
+              content: [{ input: {}, toolCallId: "call-1", toolName: "add", type: "tool-call" }],
+              role: "assistant",
+            },
+            {
+              content: [
+                { output: largeOutput, toolCallId: "call-1", toolName: "add", type: "tool-result" },
+              ],
+              role: "tool",
+            },
+          ],
         },
-        text: "All done.",
+        text: "",
+        toolCalls: [{ input: {}, toolCallId: "call-1", toolName: "add", type: "tool-call" }],
+        toolResults: [
+          { output: largeOutput, toolCallId: "call-1", toolName: "add", type: "tool-result" },
+        ],
+        usage: { inputTokens: 100 },
+      },
+      {
+        finishReason: "stop",
+        response: { messages: [{ content: "Done.", role: "assistant" }] },
+        text: "Done.",
         toolCalls: [],
         toolResults: [],
-        usage: { inputTokens: 50_000 },
       },
     ]);
 
     const runStep = createToolLoopHarness(createTestConfig());
 
-    const result = await runStep(
-      createTestSession({
-        compaction: {
-          lastKnownInputTokens: 50_000,
-          lastKnownPromptMessageCount: 4,
-          recentWindowSize: 10,
-          threshold: 100_000,
-        },
-        history: [
-          { content: "Read some files", role: "user" },
-          largeOldToolResult,
-          { content: "Got the old file", role: "assistant" },
-          recentToolResult,
-        ],
-      }),
-      { message: "Summarize" },
+    // Threshold far above the history size so compaction never fires; the only
+    // thing that could shrink the large result is pruning, which is gone.
+    const first = await runStep(
+      createTestSession({ compaction: { recentWindowSize: 10, threshold: 100_000_000 } }),
+      { message: "Read a big file" },
     );
+    expect(first.next).toBe(runStep);
 
-    // Pruning should have replaced the old tool result and cleared the
-    // exact token snapshot so the next step falls back to estimation.
-    expect(result.session.compaction.lastKnownInputTokens).toBeUndefined();
-    expect(result.session.compaction.lastKnownPromptMessageCount).toBeUndefined();
+    const second = await expectStepFn(first.next)(first.session);
+    expect(second.next).toBeNull();
 
-    // The old tool result should be pruned.
-    const oldTool = result.session.history.find(
+    const toolResult = second.session.history.find(
       (m) =>
         m.role === "tool" &&
         Array.isArray(m.content) &&
-        (m.content[0] as { toolCallId?: string }).toolCallId === "old-call",
+        (m.content[0] as { toolCallId?: string }).toolCallId === "call-1",
     );
-    expect(oldTool).toBeDefined();
+    expect(toolResult).toBeDefined();
     expect(
-      (Array.isArray(oldTool?.content) ? (oldTool.content[0] as { output?: unknown }) : undefined)
-        ?.output,
-    ).toEqual({
-      type: "text",
-      value: "[Tool result pruned to save context. Call the tool again if needed.]",
-    });
+      (Array.isArray(toolResult?.content)
+        ? (toolResult.content[0] as { output?: unknown })
+        : undefined
+      )?.output,
+    ).toEqual(largeOutput);
   });
 });

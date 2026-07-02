@@ -8,36 +8,34 @@ import {
 import type { Prompter } from "../prompter.js";
 import { requireProjectPath, type SetupState } from "../state.js";
 import type { SetupBox } from "../step.js";
-import { linkProject, resolveProjectByNameOrId, unresolvedProject } from "../vercel-project.js";
+import { linkProject, unresolvedProject } from "../vercel-project.js";
 
 /** Injected for tests; defaults to the real Vercel project helpers. */
 export interface LinkProjectDeps {
   linkProject: typeof linkProject;
   detectProjectResolution: typeof detectProjectResolution;
-  resolveProjectByNameOrId: typeof resolveProjectByNameOrId;
   unresolvedProject: typeof unresolvedProject;
 }
 
 export interface LinkProjectOptions {
-  /** Streams link progress and command output. The box never prompts through it. */
+  /** Streams link progress and, in interactive runs, may confirm ambiguous framework detection. */
   prompter: Prompter;
+  /** Headless runs must not ask follow-up questions after the plan is fixed. */
+  headless?: boolean;
   deps?: LinkProjectDeps;
 }
 
 /**
- * THE PROJECT BOX. Executes the resolved Vercel project plan after scaffolding,
- * once the project directory exists (so `vercel link` can write `.vercel/`).
- * The gather prompts for nothing: every decision was made up front by the
- * resolve-provisioning box, so `perform` owns all the work.
+ * Executes the resolved Vercel project plan after scaffolding, once the project
+ * directory exists. Gather prompts for nothing: the team/project decision was
+ * made in the resolve-provisioning box. Interactive runs may still confirm
+ * ambiguous host framework detections; headless runs resolve those
+ * deterministically inside `linkProject`.
  *
- * The plan is authoritative. The box always re-links to the planned project so
- * a stale or mismatched `.vercel` link can never silently win over the choice
- * made up front. `vercel link --project X --yes` is an idempotent rewrite, so
- * re-runs stay safe. The resolution read back from `.vercel/project.json` lands
- * in `state.project`, which every later box reads.
- *
- * Named `linkVercelProject` because the setup island also exports the
- * `linkProject` executor helper this box drives.
+ * The plan is authoritative: the box always re-links to the planned project so
+ * a stale or mismatched `.vercel` link can't silently win. Re-linking the same
+ * identity is idempotent. The resolution read back from the link metadata lands
+ * in `state.project`.
  */
 export function linkVercelProject(
   options: LinkProjectOptions,
@@ -45,7 +43,6 @@ export function linkVercelProject(
   const deps = options.deps ?? {
     linkProject,
     detectProjectResolution,
-    resolveProjectByNameOrId,
     unresolvedProject,
   };
 
@@ -67,9 +64,13 @@ export function linkVercelProject(
       }
       const projectRoot = requireProjectPath(state);
       const onOutput = createPromptCommandOutput(options.prompter.log);
-      const linked = await deps.linkProject(options.prompter, projectRoot, plan, onOutput, {
-        signal,
-      });
+      const linked = await deps.linkProject(
+        options.prompter,
+        projectRoot,
+        plan,
+        onOutput,
+        options.headless ? { signal, headless: true } : { signal },
+      );
       signal?.throwIfAborted();
       if (!linked) {
         throw new Error(
@@ -79,18 +80,12 @@ export function linkVercelProject(
       const resolution = await deps.detectProjectResolution(projectRoot, { signal });
       if (resolution.kind === "unresolved") {
         throw new Error(
-          "Linked the directory, but could not resolve the Vercel project from .vercel/project.json.",
+          "Linked the directory, but could not resolve the Vercel project from its link metadata.",
         );
       }
-      const expectedProject = await deps.resolveProjectByNameOrId(
-        projectRoot,
-        plan.team,
-        plan.project,
-        { signal },
-      );
-      if (expectedProject === null || resolution.projectId !== expectedProject.id) {
+      if (resolution.projectId !== linked.projectId) {
         throw new Error(
-          `Linked project identity did not match the planned Vercel project "${plan.project}".`,
+          `The linked project does not match the selected project: expected ${linked.projectId}, found ${resolution.projectId}.`,
         );
       }
       return resolution;

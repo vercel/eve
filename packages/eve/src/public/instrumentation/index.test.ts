@@ -84,6 +84,24 @@ describe("isChannel", () => {
     expect(isChannel(resolveCtxChannel, supportChannel)).toBe(true);
   });
 
+  it("recognizes a separately evaluated copy of the authored channel", () => {
+    setChannelInstrumentationKind(supportChannel, "channel:is-channel-test");
+    const importedCopy: typeof supportChannel = {
+      ...supportChannel,
+      adapter: { kind: "defineChannel" },
+    };
+
+    expect(
+      isChannel(
+        {
+          kind: "channel:is-channel-test",
+          metadata: { priority: "high", queueId: null },
+        },
+        importedCopy,
+      ),
+    ).toBe(true);
+  });
+
   it("returns false for DynamicResolveContext.channel with undefined kind", () => {
     setChannelInstrumentationKind(supportChannel, "channel:is-channel-test");
 

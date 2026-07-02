@@ -3,7 +3,11 @@ import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
 import { registerDefinitionSource, stampDefinitionKey } from "#public/tool-result-narrowing.js";
 import { toErrorMessage } from "#shared/errors.js";
-import type { HeadersDefinition, ToolFilterDefinition } from "#runtime/connections/types.js";
+import type {
+  ConnectionAuthResolver,
+  HeadersDefinition,
+  ToolFilterDefinition,
+} from "#runtime/connections/types.js";
 import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "#runtime/resolve-helpers.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
@@ -84,16 +88,20 @@ export async function resolveConnectionDefinition(
     };
 
     if (hasAuth) {
-      try {
-        result.authorization = normalizeAuthorizationSpec(
-          resolvedRecord.auth,
-          `Connection "${definition.connectionName}" at "${definition.logicalPath}":`,
-        );
-      } catch (error) {
-        throw new ResolveAgentError(toErrorMessage(error), {
-          logicalPath: definition.logicalPath,
-          sourceId: definition.sourceId,
-        });
+      if (typeof resolvedRecord.auth === "function") {
+        result.authorization = resolvedRecord.auth as ConnectionAuthResolver;
+      } else {
+        try {
+          result.authorization = normalizeAuthorizationSpec(
+            resolvedRecord.auth,
+            `Connection "${definition.connectionName}" at "${definition.logicalPath}":`,
+          );
+        } catch (error) {
+          throw new ResolveAgentError(toErrorMessage(error), {
+            logicalPath: definition.logicalPath,
+            sourceId: definition.sourceId,
+          });
+        }
       }
     }
 

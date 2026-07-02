@@ -1,5 +1,9 @@
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "openai/gpt-5.5",
+  limits: {
+    maxSubagentDepth: 4,
+  },
+  model: "anthropic/claude-sonnet-5",
+  reasoning: "high",
 });

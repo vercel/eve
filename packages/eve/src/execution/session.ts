@@ -1,10 +1,12 @@
 import type { DurableSession } from "#execution/durable-session-store.js";
-import type { HarnessSession, SessionToolDefinition } from "#harness/types.js";
+import type { HarnessSession, SessionLimits, SessionToolDefinition } from "#harness/types.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 
 const DEFAULT_COMPACTION_RECENT_WINDOW_SIZE = 10;
 const DEFAULT_COMPACTION_THRESHOLD_PERCENT = 0.9;
 const FALLBACK_COMPACTION_THRESHOLD = 100_000;
+export const DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION = 40_000_000;
+export const DEFAULT_SUBAGENT_MAX_INPUT_TOKENS_PER_SESSION = 5_000_000;
 
 /**
  * Creates the durable compaction configuration used by one harness session.
@@ -52,14 +54,13 @@ export interface CreateSessionInput {
   readonly rootSessionId?: string;
   readonly sessionId: string;
   readonly turnAgent: RuntimeTurnAgent;
+  readonly limits?: SessionLimits;
   readonly outputSchema?: HarnessSession["outputSchema"];
+  readonly subagentDepth?: number;
+  readonly subagentMaxDepth?: number;
 }
 
-/**
- * Creates a fresh {@link HarnessSession}. The only site that derives
- * `session.agent.system` from a `turnAgent` — every subsequent turn
- * preserves the prompt via {@link refreshSessionFromTurnAgent}.
- */
+/** Creates a fresh {@link HarnessSession} from the current `turnAgent`. */
 export function createSession(input: CreateSessionInput): HarnessSession {
   const { turnAgent } = input;
   const tools = createSessionToolDefinitions(turnAgent);
@@ -70,6 +71,7 @@ export function createSession(input: CreateSessionInput): HarnessSession {
     agent: {
       compactionModelReference: turnAgent.compactionModel,
       modelReference: turnAgent.model,
+      reasoning: turnAgent.reasoning,
       system: turnAgent.instructions.join("\n\n"),
       tools,
     },
@@ -85,23 +87,28 @@ export function createSession(input: CreateSessionInput): HarnessSession {
   if (input.rootSessionId !== undefined) {
     session.rootSessionId = input.rootSessionId;
   }
+  session.limits = resolveSessionLimits(input);
   if (input.outputSchema !== undefined) {
     session.outputSchema = input.outputSchema;
+  }
+  if (input.subagentDepth !== undefined) {
+    session.subagentDepth = input.subagentDepth;
+  }
+  if (input.subagentMaxDepth !== undefined) {
+    session.subagentMaxDepth = input.subagentMaxDepth;
   }
 
   return session;
 }
 
 /**
- * Refreshes a session with the latest `turnAgent` — replaces model/tool
- * metadata and recalculates compaction thresholds; preserves history and
- * state. Production callers keep the session-start `agent.system` prompt,
- * while dev HMR callers can opt into refreshing it from authored source.
+ * Refreshes a session with the latest `turnAgent` — replaces the system
+ * prompt, model/tool metadata, and compaction thresholds while preserving
+ * conversation history and state.
  */
 export function refreshSessionFromTurnAgent(input: {
   readonly session: HarnessSession;
   readonly turnAgent: RuntimeTurnAgent;
-  readonly refreshSystemPrompt?: boolean;
   readonly compactionOverrides?: {
     readonly thresholdPercent?: number;
   };
@@ -111,10 +118,8 @@ export function refreshSessionFromTurnAgent(input: {
     agent: {
       compactionModelReference: input.turnAgent.compactionModel,
       modelReference: input.turnAgent.model,
-      system:
-        input.refreshSystemPrompt === true
-          ? input.turnAgent.instructions.join("\n\n")
-          : input.session.agent.system,
+      reasoning: input.turnAgent.reasoning,
+      system: input.turnAgent.instructions.join("\n\n"),
       tools: createSessionToolDefinitions(input.turnAgent),
     },
     compaction: createCompactionConfig({
@@ -151,11 +156,14 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
     };
     continuationToken: string;
     history: HarnessSession["history"];
+    limits?: HarnessSession["limits"];
     outputSchema?: HarnessSession["outputSchema"];
     rootSessionId?: string;
     sandboxState?: HarnessSession["sandboxState"];
     sessionId: string;
     state?: HarnessSession["state"];
+    subagentDepth?: number;
+    subagentMaxDepth?: number;
   } = {
     agent: { system: session.agent.system },
     continuationToken: session.continuationToken,
@@ -175,6 +183,9 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
   if (session.rootSessionId !== undefined) {
     durable.rootSessionId = session.rootSessionId;
   }
+  if (session.limits !== undefined) {
+    durable.limits = session.limits;
+  }
   if (session.outputSchema !== undefined) {
     durable.outputSchema = session.outputSchema;
   }
@@ -184,7 +195,12 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
   if (session.state !== undefined) {
     durable.state = session.state;
   }
-
+  if (session.subagentDepth !== undefined) {
+    durable.subagentDepth = session.subagentDepth;
+  }
+  if (session.subagentMaxDepth !== undefined) {
+    durable.subagentMaxDepth = session.subagentMaxDepth;
+  }
   return durable;
 }
 
@@ -209,6 +225,7 @@ export function hydrateDurableSession(input: {
     agent: {
       compactionModelReference: turnAgent.compactionModel,
       modelReference: turnAgent.model,
+      reasoning: turnAgent.reasoning,
       system: durable.agent.system,
       tools,
     },
@@ -226,6 +243,7 @@ export function hydrateDurableSession(input: {
   if (durable.rootSessionId !== undefined) {
     session.rootSessionId = durable.rootSessionId;
   }
+  session.limits = resolveSessionLimits(durable);
   if (durable.outputSchema !== undefined) {
     session.outputSchema = durable.outputSchema;
   }
@@ -235,7 +253,12 @@ export function hydrateDurableSession(input: {
   if (durable.state !== undefined) {
     session.state = durable.state;
   }
-
+  if (durable.subagentDepth !== undefined) {
+    session.subagentDepth = durable.subagentDepth;
+  }
+  if (durable.subagentMaxDepth !== undefined) {
+    session.subagentMaxDepth = durable.subagentMaxDepth;
+  }
   return session;
 }
 
@@ -246,4 +269,24 @@ function createSessionToolDefinitions(turnAgent: RuntimeTurnAgent): SessionToolD
     name: tool.name,
     outputSchema: tool.outputSchema,
   }));
+}
+
+function resolveSessionLimits(input: {
+  readonly limits?: SessionLimits;
+  readonly subagentDepth?: number;
+}): SessionLimits {
+  const maxInputTokensPerSession =
+    input.limits?.maxInputTokensPerSession ??
+    (input.subagentDepth !== undefined && input.subagentDepth > 0
+      ? DEFAULT_SUBAGENT_MAX_INPUT_TOKENS_PER_SESSION
+      : DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION);
+
+  if (input.limits?.maxOutputTokensPerSession === undefined) {
+    return { maxInputTokensPerSession };
+  }
+
+  return {
+    maxInputTokensPerSession,
+    maxOutputTokensPerSession: input.limits.maxOutputTokensPerSession,
+  };
 }

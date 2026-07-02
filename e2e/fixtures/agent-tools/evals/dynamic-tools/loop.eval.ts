@@ -4,15 +4,10 @@ import { defineEval } from "eve/evals";
 export default defineEval({
   description: "Dynamic tools smoke: loop-generated tools keep per-iteration closures.",
   async test(t) {
-    const turn = await t.send(
-      "Call the `dynamic-loop__alpha` tool and tell me the name and index it returned.",
-    );
-    turn.expectOk();
+    await t.send("Call the `alpha` tool and tell me the name and index it returned.");
 
-    t.didNotFail();
-    t.completed();
-    t.calledTool("dynamic-loop__alpha", {
-      isError: false,
+    t.succeeded();
+    t.calledTool("alpha", {
       output: { name: "alpha", index: 0 },
     });
   },

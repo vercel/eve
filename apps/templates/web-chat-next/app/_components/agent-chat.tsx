@@ -17,7 +17,6 @@ import { cn } from "@/lib/utils";
 import { AgentMessage } from "./agent-message";
 
 const AGENT_NAME = "eve-agent";
-const BETA_TERMS_HREF = "https://vercel.com/docs/release-phases/public-beta-agreement";
 
 type AgentStatus = ReturnType<typeof useEveAgent>["status"];
 
@@ -48,14 +47,6 @@ export function AgentChat() {
             <span className="truncate text-muted-foreground text-sm">{AGENT_NAME}</span>
             <StatusDot status={agent.status} />
           </span>
-          <a
-            className="rounded-full border border-amber-500/30 px-2 py-0.5 font-medium text-amber-700 text-xs transition-colors hover:bg-amber-500/10 dark:text-amber-300"
-            href={BETA_TERMS_HREF}
-            rel="noreferrer"
-            target="_blank"
-          >
-            Public preview
-          </a>
         </header>
       )}
 
@@ -101,14 +92,6 @@ export function AgentChat() {
         {isEmpty ? (
           <div className="flex flex-col items-center gap-3 text-center">
             <h1 className="font-medium text-5xl tracking-tighter">{AGENT_NAME}</h1>
-            <a
-              className="rounded-full border border-amber-500/30 px-2 py-0.5 font-medium text-amber-700 text-xs transition-colors hover:bg-amber-500/10 dark:text-amber-300"
-              href={BETA_TERMS_HREF}
-              rel="noreferrer"
-              target="_blank"
-            >
-              Public preview
-            </a>
           </div>
         ) : null}
         <div className="w-full">{composer}</div>

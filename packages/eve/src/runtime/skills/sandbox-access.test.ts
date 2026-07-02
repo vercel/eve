@@ -39,6 +39,17 @@ describe("loadSkillFromSandbox", () => {
       'No skill named "missing"',
     );
   });
+
+  it("lists available skill names when the requested id is missing", async () => {
+    const sandbox = mockSandbox();
+
+    await expect(
+      loadSkillFromSandbox(sandbox.access, "talk-like-a-dog", [
+        "custom__talk-like-a-dog",
+        "research",
+      ]),
+    ).rejects.toThrow("Available skills: custom__talk-like-a-dog, research.");
+  });
 });
 
 describe("createSandboxSkillHandle", () => {

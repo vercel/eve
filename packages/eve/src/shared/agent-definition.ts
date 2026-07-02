@@ -1,4 +1,4 @@
-import type { LanguageModel } from "ai";
+import type { CallSettings, LanguageModel } from "ai";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
@@ -10,6 +10,11 @@ import type { ModuleSourceRef } from "#shared/source-ref.js";
 export interface AgentModelOptionsDefinition {
   readonly providerOptions?: Record<string, JsonObject>;
 }
+
+/**
+ * Provider-agnostic reasoning effort forwarded to the AI SDK model call.
+ */
+export type AgentReasoningDefinition = NonNullable<CallSettings["reasoning"]>;
 
 /**
  * How an agent's model is reached at runtime, decided at compile time from the
@@ -92,23 +97,49 @@ export interface PublicAgentCompactionDefinition {
 }
 
 /**
+ * Configures framework-owned runtime limits for this agent's runs.
+ */
+export interface AgentLimitsDefinition {
+  /**
+   * Maximum number of delegated child-session levels from the root session.
+   *
+   * Root sessions are depth 0. A `maxSubagentDepth` of 3 allows child sessions at
+   * depths 1, 2, and 3; sessions already at depth 3 cannot delegate again.
+   *
+   * @default 3
+   */
+  readonly maxSubagentDepth?: number;
+  /**
+   * Maximum provider-reported input tokens accumulated by one durable session.
+   *
+   * eve checks this before starting each model call. The model call that crosses
+   * the limit is allowed to finish because providers only report exact usage
+   * after the call completes; later model calls in the same session are blocked.
+   *
+   * @default 40_000_000 for root sessions; 5_000_000 for delegated subagent sessions
+   */
+  readonly maxInputTokensPerSession?: number;
+  /**
+   * Maximum provider-reported output tokens accumulated by one durable session.
+   *
+   * eve checks this before starting each model call. The model call that crosses
+   * the limit is allowed to finish because providers only report exact usage
+   * after the call completes; later model calls in the same session are blocked.
+   */
+  readonly maxOutputTokensPerSession?: number;
+}
+
+/**
  * Experimental, opt-in agent capabilities authored in `agent.ts`.
  *
  * These options are unstable and may change or be removed in any release.
- * Each agent (the root agent and every subagent) carries its own flags, so
- * code mode can be enabled for the whole graph, only a subagent, or only
- * the parent.
  */
 export interface AgentExperimentalDefinition {
   /**
-   * Routes executable tools through a sandboxed code-execution wrapper
-   * instead of exposing them directly to the model. The model writes
-   * JavaScript that calls the tools inside the sandbox.
-   *
-   * When unset, eve falls back to the `EVE_EXPERIMENTAL_CODE_MODE`
-   * environment variable (`"1"` enables it) for backwards compatibility.
+   * Durable Workflow runtime configuration. Root agents may use this to select
+   * the Workflow world backing sessions and runs.
    */
-  readonly codeMode?: boolean;
+  readonly workflow?: AgentWorkflowDefinition;
 }
 
 /**
@@ -131,6 +162,26 @@ export interface AgentBuildDefinition {
 }
 
 /**
+ * Package name for a Workflow world module.
+ *
+ * The package must export either a default factory or a `createWorld` factory.
+ * The factory is called at runtime so credentials and deployment-specific
+ * options can come from environment variables instead of the compiled manifest.
+ */
+export type AgentWorkflowWorldDefinition = string;
+
+/**
+ * Advanced durable-runtime configuration for eve's Workflow SDK integration.
+ */
+export interface AgentWorkflowDefinition {
+  /**
+   * Workflow world module used for durable workflow storage, queueing, hooks,
+   * and streaming.
+   */
+  readonly world?: AgentWorkflowWorldDefinition;
+}
+
+/**
  * Compiled-side agent definition. Carries a `name` because the compiler
  * stamps the path-derived `agentId` onto every compiled agent node.
  */
@@ -142,7 +193,9 @@ export type InternalAgentDefinition = {
   experimental?: AgentExperimentalDefinition;
   model: InternalAgentModelDefinition;
   outputSchema?: JsonObject;
+  reasoning?: AgentReasoningDefinition;
   source?: ModuleSourceRef;
+  limits?: AgentLimitsDefinition;
 };
 
 /**
@@ -181,6 +234,15 @@ export type PublicAgentDefinition = {
    */
   readonly modelContextWindowTokens?: number;
   readonly modelOptions?: AgentModelOptionsDefinition;
+  /**
+   * Provider-agnostic reasoning effort for the agent's turn model calls.
+   * Support for individual levels depends on the selected model and provider.
+   */
+  readonly reasoning?: AgentReasoningDefinition;
+  /**
+   * Framework-owned runtime limits for this agent's runs.
+   */
+  readonly limits?: AgentLimitsDefinition;
   /**
    * Optional structured return type used when this agent runs in task mode
    * (for example as a subagent, schedule, or remote job). Interactive

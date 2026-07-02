@@ -9,6 +9,7 @@
 import type { PromptCommandSpec } from "./prompt-commands.js";
 import { sliceVisible, visibleLength } from "./terminal-text.js";
 import type { Theme } from "./theme.js";
+import { renderCursorRow } from "#setup/cli/option-row.js";
 
 /**
  * The typeahead keeps the list scannable; extra matches window around the
@@ -117,7 +118,7 @@ export function inlineCommandHint(state: CommandTypeaheadState): string | undefi
 
 /**
  * Paints the suggestion rows (the select-question grammar): the highlight
- * carries the cursor glyph and a blue name, every row shows its aliases and
+ * carries the cursor glyph and inverse-blue name, every row shows its aliases and
  * description dim, and overflow windows around the highlight. The argument
  * hint is held back for the inline exact-match view ({@link inlineCommandHint})
  * — it only earns space once a single command is committed to.
@@ -145,11 +146,18 @@ export function renderCommandSuggestions(
 
   const rows = visible.map((spec, offset) => {
     const isCursor = start + offset === state.selectedIndex;
-    const cursor = isCursor ? c.cyan(theme.glyph.prompt) : " ";
-    const name = isCursor ? c.blue(`/${spec.name}`) : `/${spec.name}`;
-    const detail = invocation(spec).slice(`/${spec.name}`.length);
-    const pad = " ".repeat(column - invocation(spec).length);
-    return `${cursor} ${name}${c.dim(detail)}${pad}${c.dim(spec.description)}`;
+    const name = `/${spec.name}`;
+    const content = isCursor ? `${theme.glyph.selectedPointer} ${name}` : `  ${name}`;
+    const selection = renderCursorRow(content, isCursor, c);
+    let detail = invocation(spec).slice(`/${spec.name}`.length);
+    let pad = " ".repeat(column - invocation(spec).length);
+    // The selected label's trailing inverse cell replaces the first suffix
+    // space so aliases and descriptions stay in the same columns.
+    if (isCursor) {
+      if (detail.startsWith(" ")) detail = detail.slice(1);
+      else pad = pad.slice(1);
+    }
+    return `${selection}${c.dim(detail)}${pad}${c.dim(spec.description)}`;
   });
 
   return rows.map((row) => (visibleLength(row) > width ? sliceVisible(row, width) : row));

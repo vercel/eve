@@ -16,7 +16,7 @@ Every agent gets an `agent` tool by default. The model calls it to delegate a su
 }
 ```
 
-The copy shares the parent's sandbox and tools, and a child's file writes are immediately visible to the parent. That is what makes parallel calls natural: fan out a few copies to fix different files at once. The copy inherits auth and connections, but starts with fresh conversation history and fresh state. If a declared subagent calls `agent`, the child is a copy of _that_ subagent, not the root.
+The copy shares the parent's sandbox and tools, and a child's file writes are immediately visible to the parent. That is what makes parallel calls natural: emit multiple `agent` calls in one response to fan out a small, fixed set of independent subtasks. eve runs that batch concurrently and returns every result before the parent continues. Give children non-overlapping write scopes when they work in the shared sandbox. The copy inherits auth and connections, but starts with fresh conversation history and fresh state. If a declared subagent calls `agent`, the child is a copy of _that_ subagent, not the root.
 
 The parent transfers data to the child through the `message` input it gives the subagent. Do not include sensitive data in a subagent request unless that child and its inherited tools, connections, sandbox, and telemetry path are appropriate for that data.
 
@@ -77,7 +77,26 @@ The built-in `agent` tool is the exception. Its children share the parent's sand
 
 eve lowers every subagent (built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, outputSchema? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. Set `outputSchema` to run the child in task mode, returning structured output as the tool result.
 
-A declared subagent's tool name is the bare path-derived name, with no prefix. `agent/subagents/researcher/` registers as the tool `researcher`. Unlike connection tools (`connection__<connection>__<tool>`), it carries no namespace, so the model, approvals, logs, and evals all reference it by that name. Its input schema is:
+Subagent delegation is capped by default at three child-session levels. Increase
+or lower that limit with `limits.maxSubagentDepth`:
+
+```ts title="agent/agent.ts"
+export default defineAgent({
+  model: "anthropic/claude-sonnet-5",
+  limits: {
+    maxSubagentDepth: 4,
+  },
+});
+```
+
+The root session is depth 0. With `maxSubagentDepth: 4`, eve may create child sessions
+at depths 1 through 4; a session already at depth 4 cannot delegate again.
+
+At the configured depth, eve stops advertising subagent tools, including declared local subagents, remote-agent tools, the built-in `agent` tool, and the `Workflow` orchestration tool when it would only expose subagents. If a stale or forced subagent call still reaches execution, eve blocks it and returns an error tool result instead of starting another child session.
+
+`Workflow` is root-only. Delegated subagent sessions can still call their own visible subagent tools until the depth cap, but they do not receive the `Workflow` orchestration wrapper.
+
+A declared subagent's tool name is the bare path-derived name, with no prefix. `agent/subagents/researcher/` registers as the tool `researcher`. Unlike connection tools (`<connection>__<tool>`), it carries no namespace, so the model, approvals, logs, and evals all reference it by that name. Its input schema is:
 
 ```ts
 {
@@ -88,7 +107,7 @@ A declared subagent's tool name is the bare path-derived name, with no prefix. `
 
 Because the name lives in the same runtime tool namespace as authored tools, a subagent named `researcher` collides with a tool named `researcher`. eve rejects the build rather than picking a winner, so keep subagent directory names distinct from tool names.
 
-Do not rely on subagent delegation by itself as an approval boundary. Put sensitive tools behind `needsApproval`, connection approval, route/session authorization, or other controls wherever those tools can be called.
+Do not rely on subagent delegation by itself as an approval boundary. Put sensitive tools behind `approval`, connection approval, route/session authorization, or other controls wherever those tools can be called.
 
 Each delegated subagent spins up its own child session and stream. The parent stream carries only the control-plane events `subagent.called` and `subagent.completed`. To follow the child's full progress, read `subagent.called.data.childSessionId` and subscribe at `GET /eve/v1/session/:childSessionId/stream`.
 
@@ -99,4 +118,3 @@ Split out a subagent when the task needs a different prompt or specialist role, 
 ## What to read next
 
 - [Remote agents](./guides/remote-agents): call another eve deployment as a subagent.
-- [Dynamic workflows](./guides/dynamic-workflows): have the model orchestrate its subagents programmatically (fan-out, map-reduce).

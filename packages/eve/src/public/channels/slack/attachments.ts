@@ -90,11 +90,13 @@ export async function collectInboundFileParts(input: {
   if (fromMention.length > 0) return fromMention;
   if (isUploadsDisabled(input.policy)) return [];
 
-  try {
-    await input.thread.refresh();
-  } catch (error) {
-    log.warn("slack thread refresh failed for attachment collection", { error });
-    return [];
+  if (input.thread.recentMessages.length === 0) {
+    try {
+      await input.thread.refresh();
+    } catch (error) {
+      log.warn("slack thread refresh failed for attachment collection", { error });
+      return [];
+    }
   }
 
   const recent = input.thread.recentMessages;

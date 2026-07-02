@@ -5,6 +5,7 @@ import type {
   RuntimeToolResultActionResult,
 } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import { resolveTextToResponses } from "#channel/resolve-text.js";
 import { parseJsonObject } from "#shared/json.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
 import type { HarnessSession, SessionStateMap, StepInput } from "#harness/types.js";
@@ -17,6 +18,7 @@ const IGNORED_INPUT_REASON = "Ignored because the user continued without respond
 
 const TOOL_EXECUTION_DENIED_CODE = "TOOL_EXECUTION_DENIED";
 const TOOL_EXECUTION_DENIED_MESSAGE = "Tool execution was denied.";
+const TOOL_EXECUTION_INVALID_APPROVAL_MESSAGE = "Invalid approval response.";
 
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 
@@ -47,6 +49,8 @@ export interface RejectedActionBatch {
   readonly event: PendingInputBatchEvent;
   readonly results: readonly RuntimeToolResultActionResult[];
 }
+
+type ApprovalTerminalStatus = "approved" | "denied" | "ignored" | "invalid";
 
 /**
  * Returns true when the step input carries user-facing turn input.
@@ -139,16 +143,25 @@ export function resolvePendingInput(input: {
   }
 
   // Pending batch exists -- only resolve if we have actual responses.
-  const responses = stepInput?.inputResponses ?? [];
+  const resolvedStepInput = resolveTextMessageInput(pendingBatch, stepInput);
+  const responses = resolvedStepInput?.inputResponses ?? [];
 
-  if (responses.length === 0 && stepInput?.message === undefined) {
+  if (responses.length === 0 && resolvedStepInput?.message === undefined) {
     return { outcome: "unresolved", messages: baseHistory, session };
   }
 
-  if (responses.length === 0 && stepInput?.message !== undefined) {
-    // A follow-up message arrived but no explicit responses. Auto-deny
-    // all pending requests so the model can continue, and either defer
-    // the message (for approval batches) or pass it through.
+  if (
+    pendingBatch.requests.some((request) => isApprovalRequest(request)) &&
+    hasUnansweredApproval({ pendingBatch, responses })
+  ) {
+    session = queueDeferredStepInput(session, compactStepInput(resolvedStepInput));
+    return { deferredMessage: true, outcome: "unresolved", messages: baseHistory, session };
+  }
+
+  if (responses.length === 0 && resolvedStepInput?.message !== undefined) {
+    // A follow-up message arrived for question-only input with no explicit
+    // responses. Keep the existing question semantics: mark unanswered
+    // question requests ignored so the model can continue with the message.
     const toolParts = buildToolResponseParts(pendingBatch, []);
     const messages: ModelMessage[] = [...baseHistory, ...pendingBatch.responseMessages];
     if (toolParts.length > 0) {
@@ -158,14 +171,13 @@ export function resolvePendingInput(input: {
     const rejectedActions = buildRejectedActionBatch(pendingBatch, []);
     session = clearPendingInputBatch(session);
 
-    if (pendingBatch.requests.some((request) => isApprovalRequest(request))) {
-      session = queueDeferredStepInput(session, {
-        message: stepInput.message,
-      });
-      return { deferredMessage: true, outcome: "resolved", messages, rejectedActions, session };
-    }
-
-    return { outcome: "resolved", messages, rejectedActions, session };
+    return {
+      consumedMessage: resolvedStepInput?.messageConsumed,
+      outcome: "resolved",
+      messages,
+      rejectedActions,
+      session,
+    };
   }
 
   // Record approved tools before clearing the batch.
@@ -191,20 +203,99 @@ export function resolvePendingInput(input: {
   // in the same request. Defer the message so the approval is resolved in
   // isolation; `consumeDeferredStepInput` replays it on the next step.
   if (
-    stepInput?.message !== undefined &&
+    resolvedStepInput?.message !== undefined &&
     pendingBatch.requests.some((request) => isApprovalRequest(request))
   ) {
     session = queueDeferredStepInput(session, {
-      message: stepInput.message,
+      message: resolvedStepInput.message,
     });
 
-    return { deferredMessage: true, outcome: "resolved", messages, rejectedActions, session };
+    return {
+      consumedMessage: resolvedStepInput?.messageConsumed,
+      deferredMessage: true,
+      outcome: "resolved",
+      messages,
+      rejectedActions,
+      session,
+    };
   }
 
-  return { outcome: "resolved", messages, rejectedActions, session };
+  return {
+    consumedMessage: resolvedStepInput?.messageConsumed,
+    outcome: "resolved",
+    messages,
+    rejectedActions,
+    session,
+  };
+}
+
+function resolveTextMessageInput(
+  pendingBatch: PendingInputBatch,
+  stepInput: StepInput | undefined,
+): (StepInput & { readonly messageConsumed?: boolean }) | undefined {
+  if (typeof stepInput?.message !== "string" || (stepInput.inputResponses?.length ?? 0) > 0) {
+    return stepInput;
+  }
+
+  const responses = resolveTextToResponses(stepInput.message, pendingBatch.requests);
+  if (responses.length === 0) {
+    return stepInput;
+  }
+
+  return compactStepInput({
+    ...stepInput,
+    inputResponses: responses,
+    messageConsumed: true,
+    message: undefined,
+  });
+}
+
+function compactStepInput(
+  input: (StepInput & { readonly messageConsumed?: boolean }) | undefined,
+): StepInput & { readonly messageConsumed?: boolean } {
+  if (input === undefined) {
+    return {};
+  }
+
+  const result: {
+    context?: StepInput["context"];
+    inputResponses?: StepInput["inputResponses"];
+    message?: StepInput["message"];
+    messageConsumed?: boolean;
+    outputSchema?: StepInput["outputSchema"];
+  } = {};
+
+  if ((input.context?.length ?? 0) > 0) {
+    result.context = input.context;
+  }
+  if ((input.inputResponses?.length ?? 0) > 0) {
+    result.inputResponses = input.inputResponses;
+  }
+  if (input.message !== undefined) {
+    result.message = input.message;
+  }
+  if (input.messageConsumed === true) {
+    result.messageConsumed = true;
+  }
+  if (input.outputSchema !== undefined) {
+    result.outputSchema = input.outputSchema;
+  }
+
+  return result;
+}
+
+function hasUnansweredApproval(input: {
+  readonly pendingBatch: PendingInputBatch;
+  readonly responses: readonly InputResponse[];
+}): boolean {
+  const responseIds = new Set(input.responses.map((response) => response.requestId));
+  return input.pendingBatch.requests.some(
+    (request) => isApprovalRequest(request) && !responseIds.has(request.requestId),
+  );
 }
 
 type ResolvePendingInputResult = {
+  readonly consumedMessage?: boolean;
   readonly deferredMessage?: boolean;
   readonly outcome: "resolved" | "continue" | "unresolved";
   readonly messages: ModelMessage[];
@@ -364,10 +455,36 @@ function recordApprovedTools(input: {
 function resolveApprovalOutcome(response: InputResponse | undefined): {
   readonly approved: boolean;
   readonly reason: string | undefined;
+  readonly status: ApprovalTerminalStatus;
 } {
+  if (response === undefined) {
+    return {
+      approved: false,
+      reason: IGNORED_INPUT_REASON,
+      status: "ignored",
+    };
+  }
+
+  if (response.optionId === "approve") {
+    return {
+      approved: true,
+      reason: undefined,
+      status: "approved",
+    };
+  }
+
+  if (response.optionId === "deny") {
+    return {
+      approved: false,
+      reason: TOOL_EXECUTION_DENIED_MESSAGE,
+      status: "denied",
+    };
+  }
+
   return {
-    approved: response?.optionId === "approve",
-    reason: response === undefined ? IGNORED_INPUT_REASON : undefined,
+    approved: false,
+    reason: TOOL_EXECUTION_INVALID_APPROVAL_MESSAGE,
+    status: "invalid",
   };
 }
 
@@ -390,7 +507,7 @@ function buildRejectedActionBatch(
       continue;
     }
 
-    const { approved, reason } = resolveApprovalOutcome(responseMap.get(request.requestId));
+    const { approved, reason, status } = resolveApprovalOutcome(responseMap.get(request.requestId));
     if (approved) {
       continue;
     }
@@ -400,8 +517,15 @@ function buildRejectedActionBatch(
       isError: true,
       kind: "tool-result",
       output: {
+        approval: {
+          requestId: request.requestId,
+          status,
+        },
         code: TOOL_EXECUTION_DENIED_CODE,
         message: reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
+        tool: {
+          result: "not_run",
+        },
       },
       toolName: request.action.toolName,
     });

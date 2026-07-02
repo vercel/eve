@@ -1,10 +1,11 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
+import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import {
   createCrossChannelReceiveFn,
   toCrossChannelTargets,
 } from "#channel/cross-channel-receive.js";
 import { createSession, type Session } from "#channel/session.js";
-import type { Runtime, SessionAuthContext } from "#channel/types.js";
+import type { Runtime } from "#channel/types.js";
 import { expectFunction } from "#internal/authored-module.js";
 import type {
   ScheduleDefinition,
@@ -13,16 +14,7 @@ import type {
 } from "#public/definitions/schedule.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 
-/**
- * Pre-built application auth context handed to schedules. Schedules
- * run on behalf of the agent itself, not a downstream user.
- */
-export const SCHEDULE_APP_AUTH: SessionAuthContext = {
-  attributes: {},
-  authenticator: "app",
-  principalId: "eve:app",
-  principalType: "runtime",
-};
+export { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 
 /**
  * Durable adapter kind used when a schedule fires without targeting a

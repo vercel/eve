@@ -4,6 +4,7 @@ import type {
   FetchFileResult,
 } from "#channel/adapter.js";
 import { CHANNEL_SENTINEL, type CompiledChannel } from "#channel/compiled-channel.js";
+import { normalizeChannelCors, type ChannelCors, type ChannelCorsOptions } from "#channel/cors.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import { HTTP_ADAPTER_KIND } from "#channel/http.js";
 import type { TypedReceiveTarget } from "#channel/receive-target.js";
@@ -17,6 +18,7 @@ import type { Session, SessionHandle } from "#channel/session.js";
 declare const CHANNEL_METADATA_TYPE: unique symbol;
 
 export type { Session, SessionHandle } from "#channel/session.js";
+export type { ChannelCors, ChannelCorsOptions } from "#channel/cors.js";
 export { GET, POST, PUT, PATCH, DELETE, WS } from "#channel/routes.js";
 export type {
   HttpRouteDefinition,
@@ -75,6 +77,8 @@ export interface ChannelEvents<TCtx = void> {
   readonly "action.result"?: ChannelEventHandler<"action.result", TCtx>;
   readonly "message.completed"?: ChannelEventHandler<"message.completed", TCtx>;
   readonly "message.appended"?: ChannelEventHandler<"message.appended", TCtx>;
+  readonly "reasoning.appended"?: ChannelEventHandler<"reasoning.appended", TCtx>;
+  readonly "reasoning.completed"?: ChannelEventHandler<"reasoning.completed", TCtx>;
   readonly "input.requested"?: ChannelEventHandler<"input.requested", TCtx>;
   readonly "turn.failed"?: ChannelEventHandler<"turn.failed", TCtx>;
   readonly "turn.completed"?: ChannelEventHandler<"turn.completed", TCtx>;
@@ -113,6 +117,13 @@ export interface ChannelDefinition<
   TMetadata extends Record<string, unknown> = Record<string, unknown>,
 > {
   readonly state?: TState;
+  /**
+   * CORS policy for this channel's HTTP routes. `true` enables H3/Nitro's
+   * permissive defaults (`origin`, methods, request headers, and exposed
+   * headers all `"*"`); `false` or omission leaves CORS untouched. Pass an
+   * object for a serializable subset of H3/Nitro CORS options.
+   */
+  readonly cors?: ChannelCors;
   /**
    * Builds the per-step channel context handed to `events` and `deliver`.
    * Receives the live {@link SessionHandle}, so a factory can close over it to
@@ -176,6 +187,7 @@ export interface Channel<
   readonly __kind: typeof CHANNEL_SENTINEL;
   readonly [CHANNEL_METADATA_TYPE]?: TMetadata;
   readonly routes: readonly RouteDefinition<TState>[];
+  readonly cors?: ChannelCorsOptions;
   readonly receive?: (
     input: ReceiveInput<TReceiveTarget>,
     args: { send: SendFn<TState> },
@@ -204,11 +216,13 @@ export function defineChannel<
   definition: ChannelDefinition<TState, TCtx, TReceiveTarget, TMetadata>,
 ): Channel<TState, TReceiveTarget, TMetadata> {
   const adapter = buildAdapter(definition);
+  const cors = normalizeChannelCors(definition.cors);
 
   const compiled: CompiledChannel<TState, TReceiveTarget, TMetadata> = {
     __kind: CHANNEL_SENTINEL,
     routes: definition.routes,
     adapter,
+    cors,
     receive: definition.receive,
   };
 
@@ -234,6 +248,8 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
     "action.result",
     "message.completed",
     "message.appended",
+    "reasoning.appended",
+    "reasoning.completed",
     "input.requested",
     "turn.failed",
     "turn.completed",

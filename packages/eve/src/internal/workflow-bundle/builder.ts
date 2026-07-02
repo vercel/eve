@@ -26,6 +26,7 @@ import {
   createWorkflowVirtualEntryPlugin,
   WORKFLOW_VIRTUAL_ENTRY_ID,
   type WorkflowBundleBuilderConfig,
+  type WorkflowBundleBuilderOptions,
   type WorkflowBundleCreateWorkflowsBundleOptions,
   type WorkflowBundleCreateWorkflowsBundleResult,
   type WorkflowBundleDiscoveredEntries,
@@ -44,18 +45,20 @@ import {
 } from "#internal/workflow-bundle/vercel-workflow-output.js";
 import {
   detectWorkflowPatterns,
-  WORKFLOW_QUEUE_TRIGGER,
+  createEveWorkflowQueueTrigger,
   type WorkflowManifest,
 } from "#internal/workflow-bundle/workflow-builders.js";
-import { EVE_WORKFLOW_QUEUE_NAMESPACE } from "#internal/workflow/queue-namespace.js";
+import { deriveEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
 
 // Serialize same-output builds so parallel Vercel surfaces never read
 // `workflows.mjs` between the workflow wrapper write and literal rewrite pass.
 const workflowBundleBuildLocks = new Map<string, Promise<void>>();
 
 export class WorkflowBundleBuilder {
+  readonly #agentName: string;
   readonly #compiledArtifactsBootstrapPath: string;
   readonly #outDir: string;
+  readonly #queueNamespace: string;
   protected readonly config: WorkflowBundleBuilderConfig;
   readonly #discoveredEntries = new WeakMap<readonly string[], WorkflowBundleDiscoveredEntries>();
 
@@ -74,8 +77,10 @@ export class WorkflowBundleBuilder {
       workingDir: options.rootDir,
     };
 
+    this.#agentName = options.agentName;
     this.#compiledArtifactsBootstrapPath = options.compiledArtifactsBootstrapPath;
     this.#outDir = options.outDir;
+    this.#queueNamespace = deriveEveWorkflowQueueNamespace(options.agentName);
   }
 
   async build(
@@ -144,7 +149,7 @@ export class WorkflowBundleBuilder {
 
     await addStepRegistrationsImport(workflowsOutfile, stepsOutfile);
     await rewriteWorkflowRuntimeImports(workflowsOutfile);
-    await rewriteWorkflowCodeLiteral(workflowsOutfile);
+    await rewriteWorkflowCodeLiteral(workflowsOutfile, this.#queueNamespace);
 
     const nitroWorkflowOutfile = options.nitroWorkflowOutfile;
 
@@ -154,7 +159,7 @@ export class WorkflowBundleBuilder {
       if (nitroStepOutfile !== undefined) {
         await addStepRegistrationsImport(nitroWorkflowOutfile, nitroStepOutfile);
         await rewriteWorkflowRuntimeImports(nitroWorkflowOutfile);
-        await rewriteWorkflowCodeLiteral(nitroWorkflowOutfile);
+        await rewriteWorkflowCodeLiteral(nitroWorkflowOutfile, this.#queueNamespace);
       }
     }
 
@@ -318,6 +323,7 @@ export class WorkflowBundleBuilder {
       code: interimBundle.code,
       format,
       outfile,
+      queueNamespace: this.#queueNamespace,
       workingDir: this.config.workingDir,
     });
 
@@ -329,6 +335,7 @@ export class WorkflowBundleBuilder {
             code: interimBundleResult,
             format,
             outfile,
+            queueNamespace: this.#queueNamespace,
             workingDir: this.config.workingDir,
           });
         },
@@ -409,7 +416,7 @@ export class WorkflowBundleBuilder {
 
     await Promise.all([
       this.#patchVercelFunctionConfig(stagedFlowFunctionDir, {
-        experimentalTriggers: Array.from([WORKFLOW_QUEUE_TRIGGER]),
+        experimentalTriggers: [createEveWorkflowQueueTrigger(this.#agentName)],
         maxDuration: "max",
         runtime: options.runtime ?? null,
         shouldAddHelpers: false,
@@ -561,7 +568,7 @@ async function rewriteWorkflowRuntimeImports(filePath: string): Promise<void> {
   }
 }
 
-async function rewriteWorkflowCodeLiteral(filePath: string): Promise<void> {
+async function rewriteWorkflowCodeLiteral(filePath: string, queueNamespace: string): Promise<void> {
   const source = await readTextFileIfPresent(filePath);
 
   if (source === null) {
@@ -569,7 +576,7 @@ async function rewriteWorkflowCodeLiteral(filePath: string): Promise<void> {
   }
 
   const declarationPrefix = "const workflowCode = ";
-  const declarationSuffix = `;\n\nexport const POST = workflowEntrypoint(workflowCode, { namespace: ${JSON.stringify(EVE_WORKFLOW_QUEUE_NAMESPACE)} });`;
+  const declarationSuffix = `;\n\nexport const POST = workflowEntrypoint(workflowCode, { namespace: ${JSON.stringify(queueNamespace)} });`;
   const expressionStart = source.indexOf(declarationPrefix);
   const expressionEnd = source.lastIndexOf(declarationSuffix);
 
@@ -686,14 +693,4 @@ async function mirrorFileBypassingUnlink(sourcePath: string, targetPath: string)
   }
 
   await atomicWriteFile(targetPath, sourceContents);
-}
-
-interface WorkflowBundleBuilderOptions {
-  appRoot: string;
-  compiledArtifactsBootstrapPath: string;
-  outDir: string;
-  rootDir: string;
-  watch: boolean;
-  /** Test-harness-only: also scans `src/internal/testing/`. */
-  includeTestFixtures?: boolean;
 }

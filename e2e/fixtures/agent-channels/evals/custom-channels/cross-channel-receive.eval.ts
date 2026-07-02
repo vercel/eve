@@ -1,4 +1,5 @@
 import { defineEval } from "eve/evals";
+import { satisfies } from "eve/evals/expect";
 
 import { postChannel } from "./shared.js";
 
@@ -16,29 +17,20 @@ export default defineEval({
     const payload = await postChannel<{ ok: boolean; sessionId?: string }>(t.target, "/webhook", {
       message: "Reply with the single word: hello.",
     });
-    if (payload.ok !== true || typeof payload.sessionId !== "string") {
-      throw new Error(`Unexpected webhook response: ${JSON.stringify(payload)}`);
-    }
-
-    const session = await t.target.attachSession(payload.sessionId);
-
-    const failures = session.events.filter(
-      (event) =>
-        event.type === "session.failed" ||
-        event.type === "turn.failed" ||
-        event.type === "step.failed",
+    await t.require(
+      payload,
+      satisfies(
+        (value: { ok: boolean; sessionId?: string }) =>
+          value.ok === true && typeof value.sessionId === "string",
+        "webhook returns a session id",
+      ),
     );
-    if (failures.length > 0) {
-      throw new Error(`Cross-channel turn failed: ${JSON.stringify(failures)}`);
-    }
 
-    const completed = session.events.filter((event) => event.type === "message.completed");
-    if (completed.length === 0) {
-      throw new Error("Expected at least one message.completed event in the handoff session.");
-    }
+    const session = await t.target.attachSession(payload.sessionId!);
+    session.succeeded();
+    session.event("message.completed");
+    session.messageIncludes("hello");
 
-    t.didNotFail();
-    t.completed();
-    t.messageIncludes("hello");
+    t.succeeded();
   },
 });

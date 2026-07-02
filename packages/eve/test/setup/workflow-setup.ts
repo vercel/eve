@@ -1,29 +1,34 @@
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { setWorld } from "@workflow/core/runtime";
 import { createLocalWorld } from "@workflow/world-local";
 import { afterAll } from "vitest";
 
 import { resolvePackageRoot } from "#internal/application/package.js";
 import { resolveWorkflowTestOutputDirectory } from "#internal/testing/workflow-vitest-plugin.js";
 import {
-  applyEveWorkflowQueueNamespace,
-  EVE_WORKFLOW_QUEUE_PREFIX,
+  deriveEveWorkflowQueuePrefix,
+  installEveWorkflowQueueNamespace,
 } from "#internal/workflow/queue-namespace.js";
+import { setWorld } from "#internal/workflow/runtime.js";
+
+import { WORKFLOW_TEST_AGENT_NAME } from "./workflow-global-setup.js";
 
 const packageRoot = resolvePackageRoot();
 const outDir = resolveWorkflowTestOutputDirectory(packageRoot);
 const poolId = process.env.VITEST_POOL_ID ?? "0";
+installEveWorkflowQueueNamespace(WORKFLOW_TEST_AGENT_NAME);
 const world = createLocalWorld({
-  dataDir: join(packageRoot, ".workflow-data"),
+  dataDir: join(packageRoot, ".workflow-data", `vitest-${poolId}`),
   tag: `vitest-${poolId}`,
 });
 
 await world.start?.();
 await world.clear();
-applyEveWorkflowQueueNamespace();
-world.registerHandler(EVE_WORKFLOW_QUEUE_PREFIX, createLazyHandler(join(outDir, "workflows.mjs")));
+world.registerHandler(
+  deriveEveWorkflowQueuePrefix(WORKFLOW_TEST_AGENT_NAME),
+  createLazyHandler(join(outDir, "workflows.mjs")),
+);
 setWorld(world);
 
 afterAll(async () => {

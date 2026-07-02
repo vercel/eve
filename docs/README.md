@@ -12,7 +12,7 @@ Important naming note:
 
 ## Legal and safeguards
 
-eve is currently a preview and subject to the Vercel beta terms; the framework, APIs, documentation, and behavior may change before general availability.
+eve is in preview; the framework, APIs, documentation, and behavior may change before general availability.
 
 As the deployer, it is your responsibility to ensure your agent complies with applicable laws.
 
@@ -41,7 +41,7 @@ Read in this order:
 6. [Context Control](./concepts/context-control.md)
 7. [Skills](./skills.mdx)
 8. [Tools](./tools/overview.mdx)
-9. [Connections](./connections.mdx)
+9. [Connections](./connections/overview.mdx)
 10. [Sandboxes](./sandbox.mdx)
 11. [Channels](./channels/overview.mdx)
 12. [Session Context](./reference/typescript-api.md)

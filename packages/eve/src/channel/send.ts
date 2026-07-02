@@ -1,7 +1,7 @@
 import type { FilePart, UserContent } from "ai";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
-import type { Runtime, SessionAuthContext } from "#channel/types.js";
+import type { DeliverInput, RunInput, Runtime, SessionAuthContext } from "#channel/types.js";
 import { createSession, type Session } from "#channel/session.js";
 import type { SendFn, SendOptions, SendPayload } from "#channel/routes.js";
 import { isRuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
@@ -14,6 +14,7 @@ export function createSendFn<TState = undefined>(
   runtime: Runtime,
   adapter: ChannelAdapter<any>,
   channelName: string,
+  metadata: { readonly requestId?: string } = {},
 ): SendFn<TState> {
   return async (
     input: string | UserContent | SendPayload,
@@ -23,6 +24,7 @@ export function createSendFn<TState = undefined>(
     const callback = (options as { callback?: SendOptions<TState>["callback"] }).callback;
     const mode = (options as { mode?: SendOptions<TState>["mode"] }).mode ?? "conversation";
     const state = (options as { state?: TState }).state;
+    const title = (options as { title?: string }).title;
     const rawToken = (options as { continuationToken: string }).continuationToken;
     const continuationToken = `${channelName}:${rawToken}`;
 
@@ -35,11 +37,13 @@ export function createSendFn<TState = undefined>(
     const message = serializeUrlFilePartsInMessage(rawMessage);
 
     try {
-      const { sessionId } = await runtime.deliver({
+      const deliverInput: DeliverInput = {
         auth,
         continuationToken,
+        requestId: metadata.requestId,
         payload: { inputResponses, message, context, outputSchema },
-      });
+      };
+      const { sessionId } = await runtime.deliver(deliverInput);
 
       return createSession(sessionId, rawToken, runtime);
     } catch (error) {
@@ -62,7 +66,7 @@ export function createSendFn<TState = undefined>(
       ? { ...adapter, state: { ...adapter.state, ...(state as Record<string, unknown>) } }
       : adapter;
 
-    const handle = await runtime.run({
+    const runInput: RunInput = {
       adapter: sessionAdapter,
       auth,
       capabilities: mode === "conversation" ? { requestInput: true } : undefined,
@@ -71,7 +75,10 @@ export function createSendFn<TState = undefined>(
       continuationToken,
       input: { message: message ?? "", context, outputSchema },
       mode,
-    });
+      requestId: metadata.requestId,
+      title,
+    };
+    const handle = await runtime.run(runInput);
 
     return createSession(handle.sessionId, rawToken, runtime);
   };

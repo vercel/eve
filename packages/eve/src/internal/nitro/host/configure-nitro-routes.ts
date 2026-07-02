@@ -4,15 +4,14 @@ import { dirname, join, relative } from "node:path";
 import type { Nitro } from "nitro/types";
 import {
   EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN,
-  EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH,
   EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH,
   EVE_HEALTH_ROUTE_PATH,
-  EVE_INFO_ROUTE_PATH,
 } from "#protocol/routes.js";
 import {
   normalizeEsmImportSpecifier,
   stringifyEsmImportSpecifier,
 } from "#internal/application/import-specifier.js";
+import { isVercelBuildEnvironment } from "#internal/application/paths.js";
 import {
   resolvePackageRoot,
   resolvePackageSourceFilePath,
@@ -23,7 +22,7 @@ import {
   createNitroArtifactsConfig,
   type NitroArtifactsConfigInput,
 } from "#internal/nitro/host/artifacts-config.js";
-import { EVE_WORKFLOW_QUEUE_PREFIX } from "#internal/workflow/queue-namespace.js";
+import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
 import {
   computeChannelRouteRegistrations,
   registerChannelVirtualHandlers,
@@ -46,7 +45,7 @@ function registerHandler(
   nitro: Nitro,
   options: {
     handlerPath: string;
-    method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+    method?: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
     route: string;
   },
 ): void {
@@ -268,6 +267,7 @@ export async function configureNitroRoutes(
   if (includesWorkflowBundles(input.surface)) {
     const packageRoot = resolvePackageRoot();
     const builder = new WorkflowBundleBuilder({
+      agentName: preparedHost.compileResult.manifest.config.name,
       appRoot: preparedHost.appRoot,
       compiledArtifactsBootstrapPath: preparedHost.compiledArtifacts.bootstrapPath,
       outDir: preparedHost.workflowBuildDir,
@@ -318,34 +318,26 @@ export async function configureNitroRoutes(
   });
 
   if (includesApplicationRoutes(input.surface)) {
-    // Framework routes that need no build-time config use physical handler
-    // files directly. The home page is a fully static, build-time-baked HTML
-    // string with no agent metadata, so it does not need to round-trip
-    // through the virtual-handler args plumbing.
-    registerHandler(nitro, {
-      handlerPath: resolvePackageSourceFilePath("src/internal/nitro/routes/index.ts"),
-      method: "GET",
-      route: "/",
-    });
-    registerHandler(nitro, {
-      handlerPath: resolvePackageSourceFilePath("src/internal/nitro/routes/health.ts"),
-      method: "GET",
-      route: EVE_HEALTH_ROUTE_PATH,
-    });
-
-    // The agent info endpoint needs `appRoot` baked at build time (used by
-    // the disk-source fallback in dev) and runs request-time auth, so it
-    // stays a virtual handler.
     addFrameworkVirtualHandler(nitro, {
       args: JSON.stringify({
-        ...artifactsConfig,
-        mode: nitro.options.dev ? "development" : "production",
+        agentName: preparedHost.compileResult.manifest.config.name,
       }),
-      handlerExport: "handleAgentInfoRequest",
+      handlerExport: "handleHomePageRequest",
       method: "GET",
-      modulePath: resolvePackageSourceFilePath("src/internal/nitro/routes/info.ts"),
-      route: EVE_INFO_ROUTE_PATH,
+      modulePath: resolvePackageSourceFilePath("src/internal/nitro/routes/index.ts"),
+      route: "/",
     });
+    // Register health for GET and HEAD: each (method, route) pair is a
+    // distinct Nitro handler, so HEAD must be registered explicitly or load
+    // balancers and uptime monitors that probe with HEAD get a 404. Nitro
+    // runs the handler for HEAD and omits the body, leaving GET unchanged.
+    for (const method of ["GET", "HEAD"] as const) {
+      registerHandler(nitro, {
+        handlerPath: resolvePackageSourceFilePath("src/internal/nitro/routes/health.ts"),
+        method,
+        route: EVE_HEALTH_ROUTE_PATH,
+      });
+    }
 
     // Per-channel mounting: one virtual Nitro handler per (method, urlPath) in
     // the merged channel set. Each handler bakes in its route key and artifacts
@@ -371,15 +363,6 @@ export async function configureNitroRoutes(
       });
       addFrameworkVirtualHandler(nitro, {
         args: JSON.stringify({ appRoot: artifactsConfig.appRoot }),
-        handlerExport: "handleDevRuntimeArtifactsRebuildRequest",
-        method: "POST",
-        modulePath: resolvePackageSourceFilePath(
-          "src/internal/nitro/routes/dev-runtime-artifacts.ts",
-        ),
-        route: EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH,
-      });
-      addFrameworkVirtualHandler(nitro, {
-        args: JSON.stringify({ appRoot: artifactsConfig.appRoot }),
         handlerExport: "handleDevScheduleDispatchRequest",
         method: "POST",
         modulePath: resolvePackageSourceFilePath(
@@ -397,12 +380,31 @@ export async function configureNitroRoutes(
       : join(preparedHost.workflowBuildDir, "workflows.mjs")
     : undefined;
 
-  // Direct handler registration is dev-only: it only helps when the local
-  // workflow queue runs inside the same Nitro dev worker. Production
-  // deployments dispatch through Vercel's queue trigger.
+  // Register the direct queue→bundle binding whenever the local/configured
+  // world drives the queue itself, which is true in `eve dev` AND in
+  // self-hosted (non-Vercel) production. In both cases the world dispatches
+  // each job to the matching POST handler in-process, bypassing HTTP loopback
+  // (see `@workflow/world-local`'s queue dispatch: a registered direct handler
+  // short-circuits the `WORKFLOW_LOCAL_BASE_URL` fetch path). Vercel-managed
+  // deploys instead dispatch through Vercel's queue trigger, which calls the
+  // flow route over HTTP, so we never register the binding there — gating on
+  // "not a Vercel build" preserves that path exactly. We additionally require a
+  // configured custom world: without one there is no local world to bind to in
+  // production, so a binding would be dead weight.
+  const hasConfiguredWorkflowWorld =
+    preparedHost.compileResult.manifest.config.experimental?.workflow?.world !== undefined;
+  const localWorldDrivesQueue =
+    nitro.options.dev || (!isVercelBuildEnvironment() && hasConfiguredWorkflowWorld);
   const directHandlerEntries: WorkflowDirectHandlerEntry[] =
-    nitro.options.dev && workflowBundlePath !== undefined
-      ? [{ bundlePath: workflowBundlePath, queuePrefix: EVE_WORKFLOW_QUEUE_PREFIX }]
+    localWorldDrivesQueue && workflowBundlePath !== undefined
+      ? [
+          {
+            bundlePath: workflowBundlePath,
+            queuePrefix: deriveEveWorkflowQueuePrefix(
+              preparedHost.compileResult.manifest.config.name,
+            ),
+          },
+        ]
       : [];
   // Generated handlers will JSON-stringify this at write-time, so we hand them
   // an ESM-safe specifier (Windows drive paths get converted to file://) but

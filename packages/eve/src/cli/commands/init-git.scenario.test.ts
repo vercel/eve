@@ -32,7 +32,7 @@ describe("tryInitializeGit", () => {
     delete process.env.GIT_COMMITTER_NAME;
 
     try {
-      expect(tryInitializeGit(projectPath)).toMatchObject({ kind: "failed" });
+      await expect(tryInitializeGit(projectPath)).resolves.toMatchObject({ kind: "failed" });
       await expect(pathExists(join(projectPath, ".git"))).resolves.toBe(false);
     } finally {
       process.env = previousEnv;

@@ -2,192 +2,56 @@ import type { TextPart, UserContent } from "ai";
 
 import { isObject } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
-
-/** GitHub conversation kinds represented by the channel state. */
-export type GitHubConversationKind = "issue" | "pull_request" | "review_thread";
-
-/** Stable repository identity normalized from webhook payloads. */
-export interface GitHubRepositoryRef {
-  readonly fullName: string;
-  readonly id: number;
-  readonly name: string;
-  readonly owner: string;
-  readonly private: boolean;
-}
-
-/** GitHub actor metadata normalized from webhook payloads. */
-export interface GitHubUser {
-  readonly htmlUrl: string | undefined;
-  readonly id: number;
-  readonly login: string;
-  readonly type: string;
-  readonly url: string | undefined;
-}
-
-/** Verified GitHub webhook delivery headers. */
-export interface GitHubDelivery {
-  readonly event: string;
-  readonly hookId: string | undefined;
-  readonly id: string;
-}
-
-/** Channel-local conversation reference. */
-export interface GitHubConversationRef {
-  readonly issueNumber: number | null;
-  readonly kind: GitHubConversationKind;
-  readonly pullRequestNumber: number | null;
-}
-
-/**
- * Normalized GitHub comment handed to the `onComment` hook. Covers issue and PR
- * timeline comments and inline review comments alike; `ctx.conversation.kind`
- * distinguishes them.
- */
-export interface GitHubComment {
-  readonly author: GitHubUser | undefined;
-  readonly body: string;
-  readonly htmlUrl: string | undefined;
-  readonly id: number;
-  readonly raw: JsonObject;
-  readonly url: string | undefined;
-}
-
-/** Normalized issue/PR timeline comment. */
-export interface GitHubIssueComment {
-  readonly author: GitHubUser | undefined;
-  readonly body: string;
-  readonly htmlUrl: string | undefined;
-  readonly id: number;
-  readonly issueNumber: number;
-  readonly pullRequestNumber: number | null;
-  readonly raw: JsonObject;
-  readonly url: string | undefined;
-}
-
-/** Normalized inline pull-request review comment. */
-export interface GitHubPullRequestReviewComment {
-  readonly author: GitHubUser | undefined;
-  readonly body: string;
-  readonly htmlUrl: string | undefined;
-  readonly id: number;
-  readonly inReplyToId: number | null;
-  readonly pullRequestNumber: number;
-  readonly raw: JsonObject;
-  readonly reviewThreadRootCommentId: number;
-  readonly url: string | undefined;
-}
-
-/**
- * Common `issues` webhook actions, kept open to any action GitHub sends so
- * authors get autocomplete without losing forward compatibility.
- */
-export type GitHubIssueAction =
-  | "assigned"
-  | "closed"
-  | "edited"
-  | "labeled"
-  | "opened"
-  | "reopened"
-  | "unassigned"
-  | "unlabeled"
-  | (string & {});
-
-/** Common `pull_request` webhook actions, kept open to any action GitHub sends. */
-export type GitHubPullRequestAction =
-  | "closed"
-  | "edited"
-  | "labeled"
-  | "opened"
-  | "ready_for_review"
-  | "reopened"
-  | "synchronize"
-  | "unlabeled"
-  | (string & {});
-
-/** Normalized issue event payload. */
-export interface GitHubIssueEvent {
-  readonly action: GitHubIssueAction;
-  readonly issueNumber: number;
-  readonly raw: JsonObject;
-}
-
-/** Normalized pull-request event payload. */
-export interface GitHubPullRequestEvent {
-  readonly action: GitHubPullRequestAction;
-  readonly headSha: string | null;
-  readonly pullRequestNumber: number;
-  readonly raw: JsonObject;
-}
-
-export interface GitHubPingEvent extends GitHubInboundEventBase {
-  readonly kind: "ping";
-}
-
-export interface GitHubIssueCommentEvent extends GitHubInboundEventBase {
-  readonly action: string;
-  readonly baseRef: string | null;
-  readonly baseSha: string | null;
-  readonly comment: GitHubIssueComment;
-  readonly conversation: GitHubConversationRef;
-  readonly defaultBranch: string | null;
-  readonly headRef: string | null;
-  readonly headSha: string | null;
-  readonly kind: "issue_comment";
-}
-
-export interface GitHubPullRequestReviewCommentEvent extends GitHubInboundEventBase {
-  readonly action: string;
-  readonly baseRef: string | null;
-  readonly baseSha: string | null;
-  readonly comment: GitHubPullRequestReviewComment;
-  readonly conversation: GitHubConversationRef;
-  readonly defaultBranch: string | null;
-  readonly headRef: string | null;
-  readonly headSha: string | null;
-  readonly kind: "pull_request_review_comment";
-}
-
-export interface GitHubIssueWebhookEvent extends GitHubInboundEventBase {
-  readonly action: string;
-  readonly conversation: GitHubConversationRef;
-  readonly issue: GitHubIssueEvent;
-  readonly kind: "issues";
-}
-
-export interface GitHubPullRequestWebhookEvent extends GitHubInboundEventBase {
-  readonly action: string;
-  readonly baseRef: string | null;
-  readonly baseSha: string | null;
-  readonly conversation: GitHubConversationRef;
-  readonly defaultBranch: string | null;
-  readonly headRef: string | null;
-  readonly headSha: string | null;
-  readonly kind: "pull_request";
-  readonly pullRequest: GitHubPullRequestEvent;
-}
-
-interface GitHubInboundEventBase {
-  readonly delivery: GitHubDelivery;
-  readonly installationId: number | undefined;
-  readonly raw: JsonObject;
-  readonly repository: GitHubRepositoryRef;
-  readonly sender: GitHubUser;
-}
-
-/** Parsed GitHub webhook event shape consumed by the channel. */
-export type GitHubInboundEvent =
-  | GitHubIssueCommentEvent
-  | GitHubIssueWebhookEvent
-  | GitHubPingEvent
-  | GitHubPullRequestReviewCommentEvent
-  | GitHubPullRequestWebhookEvent;
-
-/** Parsed mention trigger for a bot-directed GitHub comment. */
-export interface GitHubCommentTrigger {
-  readonly kind: "mention";
-  readonly message: string;
-  readonly token: string;
-}
+import type {
+  GitHubAppRef,
+  GitHubCheckRunWebhookEvent,
+  GitHubCheckSuiteWebhookEvent,
+  GitHubCiEvent,
+  GitHubCommentTrigger,
+  GitHubConversationKind,
+  GitHubConversationRef,
+  GitHubInboundEvent,
+  GitHubInboundEventBase,
+  GitHubIssueComment,
+  GitHubIssueCommentEvent,
+  GitHubIssueWebhookEvent,
+  GitHubPullRequestReviewComment,
+  GitHubPullRequestReviewCommentEvent,
+  GitHubPullRequestWebhookEvent,
+  GitHubRepositoryRef,
+  GitHubUser,
+  GitHubWorkflowRunWebhookEvent,
+} from "#public/channels/github/inbound-types.js";
+export type {
+  GitHubAppRef,
+  GitHubCheckRunEvent,
+  GitHubCheckRunWebhookEvent,
+  GitHubCheckSuiteEvent,
+  GitHubCheckSuiteWebhookEvent,
+  GitHubCiEvent,
+  GitHubCiPayload,
+  GitHubCiWebhookEvent,
+  GitHubComment,
+  GitHubCommentTrigger,
+  GitHubConversationKind,
+  GitHubConversationRef,
+  GitHubDelivery,
+  GitHubInboundEvent,
+  GitHubIssueAction,
+  GitHubIssueComment,
+  GitHubIssueCommentEvent,
+  GitHubIssueEvent,
+  GitHubIssueWebhookEvent,
+  GitHubPullRequestAction,
+  GitHubPullRequestEvent,
+  GitHubPullRequestReviewComment,
+  GitHubPullRequestReviewCommentEvent,
+  GitHubPullRequestWebhookEvent,
+  GitHubRepositoryRef,
+  GitHubUser,
+  GitHubWorkflowRunEvent,
+  GitHubWorkflowRunWebhookEvent,
+} from "#public/channels/github/inbound-types.js";
 
 /** Builds the channel-local continuation token for a GitHub conversation. */
 export function githubContinuationToken(input: {
@@ -248,11 +112,10 @@ export function parseGitHubWebhookEvent(input: {
   readonly contentType?: string;
   readonly headers: Headers;
 }): GitHubInboundEvent | null {
-  const eventName = input.headers.get("x-github-event") ?? "";
-  const deliveryId = input.headers.get("x-github-delivery") ?? "";
-  if (!eventName || !deliveryId) return null;
-
   const raw = decodePayload(input.body, input.contentType);
+  const eventName = readHeader(input.headers, "x-github-event") ?? inferGitHubWebhookEventName(raw);
+  if (eventName === null) return null;
+
   const repository = normalizeRepository(raw.repository);
   const sender = normalizeUser(raw.sender);
   if (repository === null || sender === undefined) return null;
@@ -260,8 +123,8 @@ export function parseGitHubWebhookEvent(input: {
   const base = {
     delivery: {
       event: eventName,
-      hookId: input.headers.get("x-github-hook-id") ?? undefined,
-      id: deliveryId,
+      hookId: readHeader(input.headers, "x-github-hook-id") ?? readGitHubHookId(raw),
+      id: readHeader(input.headers, "x-github-delivery") ?? inferGitHubDeliveryId(eventName, raw),
     },
     installationId: readInstallationId(raw.installation),
     raw,
@@ -276,7 +139,45 @@ export function parseGitHubWebhookEvent(input: {
   }
   if (eventName === "issues") return parseIssueEvent(base);
   if (eventName === "pull_request") return parsePullRequestEvent(base);
+  if (eventName === "check_suite") return parseCheckSuiteEvent(base);
+  if (eventName === "check_run") return parseCheckRunEvent(base);
+  if (eventName === "workflow_run") return parseWorkflowRunEvent(base);
   return null;
+}
+
+function inferGitHubWebhookEventName(raw: JsonObject): string | null {
+  if (isObject(raw.hook) && typeof raw.zen === "string") return "ping";
+  if (isObject(raw.comment) && isObject(raw.issue)) return "issue_comment";
+  if (isObject(raw.comment) && isObject(raw.pull_request)) {
+    return "pull_request_review_comment";
+  }
+  if (isObject(raw.check_suite)) return "check_suite";
+  if (isObject(raw.check_run)) return "check_run";
+  if (isObject(raw.workflow_run)) return "workflow_run";
+  if (isObject(raw.issue)) return "issues";
+  if (isObject(raw.pull_request) && !isObject(raw.review)) return "pull_request";
+  return null;
+}
+
+function inferGitHubDeliveryId(eventName: string, raw: JsonObject): string {
+  const id =
+    readObjectNumber(raw.comment, "id") ??
+    readObjectNumber(raw.issue, "id") ??
+    readObjectNumber(raw.issue, "number") ??
+    readObjectNumber(raw.pull_request, "id") ??
+    readObjectNumber(raw.pull_request, "number") ??
+    readObjectNumber(raw.check_suite, "id") ??
+    readObjectNumber(raw.check_run, "id") ??
+    readObjectNumber(raw.workflow_run, "id") ??
+    readObjectNumber(raw.hook, "id") ??
+    "unknown";
+  const action = readAction(raw) || "unknown";
+  return `inferred:${eventName}:${id}:${action}`;
+}
+
+function readHeader(headers: Headers, name: string): string | undefined {
+  const value = headers.get(name)?.trim();
+  return value && value.length > 0 ? value : undefined;
 }
 
 /** Renders deterministic GitHub metadata for the model-visible turn. */
@@ -447,6 +348,97 @@ function parsePullRequestEvent(base: GitHubInboundEventBase): GitHubPullRequestW
   };
 }
 
+function parseCheckSuiteEvent(base: GitHubInboundEventBase): GitHubCheckSuiteWebhookEvent | null {
+  const rawCheckSuite = readEventObject(base.raw.check_suite);
+  if (rawCheckSuite === null) return null;
+  const checkSuiteId = readId(rawCheckSuite);
+  if (checkSuiteId === null) return null;
+  const checkSuite = normalizeCiEvent(base.raw, rawCheckSuite, normalizeApp(rawCheckSuite.app));
+  return {
+    ...base,
+    checkSuite: { ...checkSuite, checkSuiteId },
+    conversation: ciConversation(checkSuite.pullRequests),
+    kind: "check_suite",
+  };
+}
+
+function parseCheckRunEvent(base: GitHubInboundEventBase): GitHubCheckRunWebhookEvent | null {
+  const rawCheckRun = readEventObject(base.raw.check_run);
+  if (rawCheckRun === null) return null;
+  const checkRunId = readId(rawCheckRun);
+  if (checkRunId === null) return null;
+  const checkRun = normalizeCiEvent(base.raw, rawCheckRun, normalizeApp(rawCheckRun.app));
+  return {
+    ...base,
+    checkRun: { ...checkRun, checkRunId },
+    conversation: ciConversation(checkRun.pullRequests),
+    kind: "check_run",
+  };
+}
+
+function parseWorkflowRunEvent(base: GitHubInboundEventBase): GitHubWorkflowRunWebhookEvent | null {
+  const rawWorkflowRun = readEventObject(base.raw.workflow_run);
+  if (rawWorkflowRun === null) return null;
+  const workflowRunId = readId(rawWorkflowRun);
+  if (workflowRunId === null) return null;
+  const workflowRun = normalizeCiEvent(base.raw, rawWorkflowRun, { slug: "github-actions" });
+  return {
+    ...base,
+    conversation: ciConversation(workflowRun.pullRequests),
+    kind: "workflow_run",
+    workflowRun: { ...workflowRun, workflowRunId },
+  };
+}
+
+function normalizeCiEvent(webhook: JsonObject, raw: JsonObject, app: GitHubAppRef): GitHubCiEvent {
+  return {
+    action: readAction(webhook),
+    app,
+    conclusion: readNullableString(raw.conclusion),
+    headSha: readNullableString(raw.head_sha),
+    pullRequests: readPullRequestNumbers(raw.pull_requests),
+    raw,
+    status: readNullableString(raw.status),
+  };
+}
+
+function readEventObject(value: unknown): JsonObject | null {
+  return isObject(value) ? parseJsonObject(value) : null;
+}
+
+function readId(value: JsonObject): number | null {
+  return typeof value.id === "number" ? value.id : null;
+}
+
+function readObjectNumber(value: unknown, key: string): number | null {
+  return isObject(value) && typeof value[key] === "number" ? value[key] : null;
+}
+
+function normalizeApp(value: unknown): GitHubAppRef {
+  return {
+    slug: isObject(value) && typeof value.slug === "string" ? value.slug : null,
+  };
+}
+
+function readNullableString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function readPullRequestNumbers(value: unknown): readonly number[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((pullRequest) =>
+    isObject(pullRequest) && typeof pullRequest.number === "number" ? [pullRequest.number] : [],
+  );
+}
+
+function ciConversation(pullRequests: readonly number[]): GitHubConversationRef {
+  return {
+    issueNumber: null,
+    kind: "pull_request",
+    pullRequestNumber: pullRequests[0] ?? null,
+  };
+}
+
 function decodePayload(body: string, contentType: string | undefined): JsonObject {
   if (contentType?.includes("application/x-www-form-urlencoded") === true) {
     const payload = new URLSearchParams(body).get("payload") ?? "";
@@ -489,6 +481,13 @@ function normalizeUser(value: unknown): GitHubUser | undefined {
 function readInstallationId(value: unknown): number | undefined {
   if (!isObject(value)) return undefined;
   return typeof value.id === "number" ? value.id : undefined;
+}
+
+function readGitHubHookId(raw: JsonObject): string | undefined {
+  if (typeof raw.hook_id === "number") return String(raw.hook_id);
+  if (typeof raw.hook_id === "string" && raw.hook_id.length > 0) return raw.hook_id;
+  const hookId = readObjectNumber(raw.hook, "id");
+  return hookId === null ? undefined : String(hookId);
 }
 
 function readAction(raw: JsonObject): string {

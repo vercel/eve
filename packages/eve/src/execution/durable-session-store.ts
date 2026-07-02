@@ -24,6 +24,7 @@ import { migrateDurableSessionSnapshot } from "#execution/durable-session-migrat
 import { projectToDurableSession } from "#execution/session.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
+import { getRun } from "#internal/workflow/runtime.js";
 
 const EVE_SESSION_STREAM_NAMESPACE = "eve.session";
 
@@ -65,8 +66,9 @@ export interface DurableSessionState {
  * `agent.compactionModelReference`, and the `compaction` thresholds —
  * those are rebuilt every turn from `bundle.turnAgent` by
  * {@link import("#execution/session.js").hydrateDurableSession}.
- * `agent.system` is the session-start prompt snapshot, pinned at
- * `createSession`.
+ * `agent.system` is the last applied prompt snapshot. Before each model step,
+ * the execution layer replaces it from the current deployment's
+ * `bundle.turnAgent`.
  */
 export interface DurableSession {
   readonly sessionId: string;
@@ -79,9 +81,12 @@ export interface DurableSession {
   readonly rootSessionId?: string;
   readonly continuationToken: string;
   readonly history: ModelMessage[];
+  readonly limits?: HarnessSession["limits"];
   readonly outputSchema?: JsonObject;
   readonly state?: SessionStateMap;
   readonly sandboxState?: SandboxState;
+  readonly subagentDepth?: number;
+  readonly subagentMaxDepth?: number;
   readonly agent: {
     readonly system: string;
   };
@@ -130,10 +135,6 @@ export async function readDurableSession(state: DurableSessionState): Promise<Du
     return migrateDurableSessionSnapshot(state.snapshot).session;
   }
 
-  // Dynamic import: the workflow runtime is only available inside a
-  // `"use step"` body, and a static import would pull it into the
-  // workflow-body bundle.
-  const { getRun } = await import("#compiled/@workflow/core/runtime.js");
   const stream = getRun<unknown>(state.sessionId).getReadable<unknown>({
     namespace: EVE_SESSION_STREAM_NAMESPACE,
     startIndex: -1,

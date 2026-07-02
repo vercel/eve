@@ -156,7 +156,7 @@ async function planCustomInteractive(asker: Asker, slug: string): Promise<Connec
       text({
         key: `mcp-url:${slug}`,
         message: `MCP server URL for ${slug}`,
-        placeholder: "https://mcp.example.com/sse",
+        placeholder: "https://mcp.example.com/mcp",
         validate: (value) => (value.trim().length === 0 ? "A URL is required." : null),
       }),
     );

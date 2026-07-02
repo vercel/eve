@@ -1,19 +1,35 @@
-import { basename } from "node:path";
-
 import { Command, CommanderError, InvalidArgumentError } from "#compiled/commander/index.js";
+import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { isCodingAgentLaunch } from "#cli/agent-detection.js";
 import { eveCliBanner } from "#cli/banner.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
+import { resolveDevUiMode, resolveTuiDisplayOptions } from "#cli/dev/ui-options.js";
+import {
+  parseDevelopmentHeaderOption,
+  resolveDevelopmentUrlTarget,
+  type DevelopmentRequestHeaders,
+} from "#cli/dev/url-target.js";
+import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import { LOG_DISPLAY_MODES, parseLogDisplayMode } from "#cli/dev/tui/log-display-mode.js";
+import { resolveTuiTitle, type DevelopmentTuiTarget } from "#cli/dev/tui/target.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
+import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
+import { createLogger } from "#internal/logging.js";
+import type {
+  DevelopmentServer,
+  DevelopmentServerOptions,
+  ProductionServerHandle,
+} from "#internal/nitro/host/types.js";
 import type {
   AssistantResponseStatsMode,
   LogDisplayMode,
   TerminalPartDisplayMode,
-  TuiDisplayOptions,
 } from "#cli/dev/tui/types.js";
+
+export { resolveDevUiMode, resolveTuiDisplayOptions };
 
 interface CliLogger {
   error(message: string): void;
@@ -24,6 +40,7 @@ interface DevelopmentCliOptions {
   assistantResponseStats?: AssistantResponseStatsMode;
   connectionAuth?: TerminalPartDisplayMode;
   contextSize?: number;
+  header?: DevelopmentRequestHeaders;
   host?: string;
   input?: string;
   logs?: LogDisplayMode;
@@ -41,39 +58,25 @@ interface ProductionCliOptions {
   port?: number;
 }
 
-interface DevelopmentServerHandle {
-  readonly url: string;
-  close(): Promise<void>;
-}
-
-interface ProductionServerHandle {
-  readonly url: string;
-  close(): Promise<void>;
-  wait(): Promise<void>;
-}
-
 interface CliRuntimeDependencies {
+  isCodingAgentLaunch(): Promise<boolean>;
+  isActiveDevelopmentServerForApp(input: {
+    readonly appRoot: string;
+    readonly serverUrl: string;
+  }): Promise<boolean>;
   buildHost(appRoot: string): Promise<string>;
   printApplicationInfo(
     logger: CliLogger,
     appRoot: string,
     options?: { json?: boolean },
   ): Promise<void>;
-  runDevelopmentTui(
-    input: { serverUrl: string; appRoot?: string; initialInput?: string } & TuiDisplayOptions,
-  ): Promise<void>;
+  runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<void>;
   runEvalCommand(
     evalIds: readonly string[],
     options: EvalCliOptions,
     logger: CliLogger,
   ): Promise<void>;
-  startHost(
-    appRoot: string,
-    options?: {
-      host?: string;
-      port?: number;
-    },
-  ): Promise<DevelopmentServerHandle>;
+  startHost(appRoot: string, options?: DevelopmentServerOptions): DevelopmentServer;
   startProductionHost(
     appRoot: string,
     options?: {
@@ -84,6 +87,31 @@ interface CliRuntimeDependencies {
 }
 
 type CliRuntimeOverrides = Partial<CliRuntimeDependencies>;
+
+const devBootLog = createLogger("dev.boot");
+
+function createDevBootProgressReporter(
+  row: ReturnType<typeof startCliLiveRow> | undefined,
+): DevBootProgressReporter {
+  return (event) => {
+    switch (event.type) {
+      case "phase-started":
+        row?.update("Building your agent", event.phase);
+        devBootLog.debug(event.phase);
+        return;
+      case "phase-finished":
+        devBootLog.debug(`${event.phase} finished`, { ms: event.elapsedMs });
+        return;
+      case "before-first-paint":
+        row?.stop();
+        return;
+      default: {
+        const exhaustive: never = event;
+        return exhaustive;
+      }
+    }
+  };
+}
 
 interface EvalCliOptions {
   json?: boolean;
@@ -115,8 +143,11 @@ async function loadRunEvalCommand(): Promise<CliRuntimeDependencies["runEvalComm
 }
 
 async function loadStartHost(): Promise<CliRuntimeDependencies["startHost"]> {
-  return (await import("#internal/nitro/host.js")).startDevelopmentServer;
+  return (await import("#internal/nitro/host.js")).createDevelopmentServer;
 }
+
+const loadIsActiveDevelopmentServerForApp = async () =>
+  (await import("#internal/nitro/host.js")).isActiveDevelopmentServerForApp;
 
 async function loadStartProductionHost(): Promise<CliRuntimeDependencies["startProductionHost"]> {
   return (await import("#internal/nitro/host.js")).startProductionServer;
@@ -221,129 +252,8 @@ function parseContextSizeOption(value: string): number {
   return size;
 }
 
-/**
- * The interactive UI `eve dev` runs against a server.
- *
- * - `tui` — the default terminal UI.
- * - `headless` — no UI: just keep the server running (`--no-ui`, or a
- *   non-interactive terminal).
- *
- * Exported for unit coverage of the flag-routing contract.
- */
-export type DevUiMode = "tui" | "headless";
-
-/**
- * Resolves which UI `eve dev` should run from the parsed flags and whether
- * the terminal is interactive. `--no-ui` and non-TTY terminals force
- * `headless`; otherwise the terminal UI runs.
- */
-export function resolveDevUiMode(input: {
-  options: Pick<DevelopmentCliOptions, "ui">;
-  interactive: boolean;
-}): DevUiMode {
-  if (input.options.ui === false || !input.interactive) {
-    return "headless";
-  }
-
-  return "tui";
-}
-
-/**
- * Resolves the terminal UI's header title: an explicit `--name`, else the
- * remote server's host (for `--url`), else the humanized app-folder name
- * (e.g. `apps/fixtures/weather-agent` → "Weather Agent"). Returns `undefined` when
- * nothing meaningful can be derived, so the runner falls back to its own
- * default.
- */
-export function resolveTuiTitle(input: {
-  name: string | undefined;
-  remoteServerUrl: string | undefined;
-  appRoot: string;
-}): string | undefined {
-  if (input.name !== undefined && input.name.length > 0) {
-    return input.name;
-  }
-
-  if (input.remoteServerUrl !== undefined) {
-    try {
-      return new URL(input.remoteServerUrl).host;
-    } catch {
-      return undefined;
-    }
-  }
-
-  const humanized = humanizeProjectName(basename(input.appRoot));
-  return humanized.length > 0 ? humanized : undefined;
-}
-
-function humanizeProjectName(name: string): string {
-  return name
-    .replace(/[-_.]+/gu, " ")
-    .trim()
-    .split(/\s+/u)
-    .filter((word) => word.length > 0)
-    .map((word) => word[0]!.toUpperCase() + word.slice(1))
-    .join(" ");
-}
-
-/**
- * Builds the terminal-UI display options for `eve dev`. Tools default to
- * `auto-collapsed`, reasoning to `full`, and stderr logs are visible so
- * long-running local sandbox work can report progress.
- */
-export function resolveTuiDisplayOptions(options: DevelopmentCliOptions): TuiDisplayOptions {
-  const display: TuiDisplayOptions = {
-    logs: options.logs ?? "stderr",
-    reasoning: options.reasoning ?? "full",
-    tools: options.tools ?? "auto-collapsed",
-  };
-
-  if (options.subagents !== undefined) display.subagents = options.subagents;
-  if (options.connectionAuth !== undefined) display.connectionAuth = options.connectionAuth;
-  if (options.assistantResponseStats !== undefined) {
-    display.assistantResponseStats = options.assistantResponseStats;
-  }
-  if (options.contextSize !== undefined) display.contextSize = options.contextSize;
-  return display;
-}
-
 function hasInteractiveTerminal(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
-}
-
-function rewriteDevelopmentUrlShorthand(argv: readonly string[]): string[] {
-  const shorthandUrl = argv[1];
-
-  if (
-    argv[0] !== "dev" ||
-    argv.length !== 2 ||
-    shorthandUrl === undefined ||
-    shorthandUrl.startsWith("-")
-  ) {
-    return [...argv];
-  }
-
-  return ["dev", "--url", shorthandUrl];
-}
-
-function resolveRemoteDevelopmentServerUrl(options: DevelopmentCliOptions): string | undefined {
-  if (!options.url) {
-    return undefined;
-  }
-
-  if (options.host !== undefined) {
-    throw new InvalidArgumentError("The --host option cannot be used with --url.");
-  }
-
-  if (options.port !== undefined) {
-    throw new InvalidArgumentError("The --port option cannot be used with --url.");
-  }
-
-  if (options.ui === false) {
-    throw new InvalidArgumentError("The --no-ui option cannot be used with --url.");
-  }
-
-  return options.url;
 }
 
 function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Command {
@@ -401,10 +311,22 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .command("init [target]")
     .description("Create a new eve agent, or add one to an existing project directory.")
     .option("--channel-web-nextjs", "Add the Web Chat application (Next.js)")
-    .action(async (target: string | undefined, options: { channelWebNextjs?: boolean }) => {
-      const { runInitCommand } = await import("#cli/commands/init.js");
-      await runInitCommand(logger, appRoot, target, options);
-    });
+    .option("-y, --yes", "Accepted for compatibility; has no effect")
+    .action(
+      async (
+        target: string | undefined,
+        options: { channelWebNextjs?: boolean; yes?: boolean },
+      ) => {
+        if (options.yes) {
+          logger.error("warning: --yes has no effect for eve init.");
+        }
+
+        const { runInitCommand } = await import("#cli/commands/init.js");
+        await runInitCommand(logger, appRoot, target, {
+          channelWebNextjs: options.channelWebNextjs,
+        });
+      },
+    );
 
   registerProjectCommands({ program, logger, appRoot });
 
@@ -457,12 +379,18 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
   program
     .command("dev")
     .description("Start the eve development server or connect to an existing URL.")
+    .argument("[url]", "Connect to an existing server URL", parseDevelopmentServerUrl)
     .option("--host <host>", "Host interface to bind")
     .option("--port <port>", "Port to listen on (defaults to $PORT, then 2000)", parsePortOption)
     .option("-u, --url <url>", "Connect to an existing server URL", parseDevelopmentServerUrl)
+    .option(
+      "-H, --header <header>",
+      'Request header for a URL target, in "Name: value" form (repeatable)',
+      parseDevelopmentHeaderOption,
+    )
     .option("--no-ui", "Start the server without an interactive UI")
     .option("--name <name>", "Title shown in the terminal UI (defaults to the app folder name)")
-    .option("--input <text>", "Pre-fill the prompt input after launching the UI")
+    .option("--input <text>", "Pre-fill the prompt input, or start onboarding with /model")
     .option(
       "--tools <mode>",
       "How tool calls render: full | collapsed | auto-collapsed | hidden",
@@ -500,46 +428,63 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     )
     .addHelpText(
       "after",
-      "\nYou can also pass a bare URL as the only argument, for example: eve dev https://example.com\n",
+      "\nYou can also pass a bare URL, for example: eve dev https://example.com\n",
     )
-    .action(async (options: DevelopmentCliOptions) => {
-      const remoteServerUrl = resolveRemoteDevelopmentServerUrl(options);
+    .action(async (positionalUrl: string | undefined, options: DevelopmentCliOptions) => {
+      const remoteTarget = resolveDevelopmentUrlTarget(options, positionalUrl);
+      const remoteServerUrl = remoteTarget?.serverUrl;
       const interactive = hasInteractiveTerminal();
       const mode = resolveDevUiMode({ options, interactive });
       if (options.input !== undefined && mode === "headless") {
         throw new InvalidArgumentError("--input requires the interactive UI.");
       }
-      const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
-
-      loadDevelopmentEnvironmentFiles(appRoot);
-
-      const runInteractiveUi = async (serverUrl: string): Promise<void> => {
-        logger.log("");
-
-        const runDevelopmentTui = runtime.runDevelopmentTui ?? (await loadRunDevelopmentTui());
+      let existingLocalDevelopmentServer = false;
+      if (remoteServerUrl !== undefined) {
+        const isActive =
+          runtime.isActiveDevelopmentServerForApp ?? (await loadIsActiveDevelopmentServerForApp());
+        existingLocalDevelopmentServer = await isActive({ appRoot, serverUrl: remoteServerUrl });
+      }
+      const runInteractiveUi = async (
+        input: {
+          readonly appRoot?: string;
+          readonly serverUrl: string;
+        },
+        report?: DevBootProgressReporter,
+      ): Promise<void> => {
+        const runDevelopmentTui = await devBootPhase(
+          "loading interactive UI",
+          async () => runtime.runDevelopmentTui ?? (await loadRunDevelopmentTui()),
+          report,
+        );
         const display = resolveTuiDisplayOptions(options);
-        const title = resolveTuiTitle({ name: options.name, remoteServerUrl, appRoot });
+        const target: DevelopmentTuiTarget =
+          remoteServerUrl === undefined || existingLocalDevelopmentServer
+            ? {
+                kind: "local",
+                serverUrl: input.serverUrl,
+                workspaceRoot: input.appRoot ?? appRoot,
+              }
+            : { kind: "remote", serverUrl: input.serverUrl, workspaceRoot: appRoot };
+        const title = resolveTuiTitle({ name: options.name, target });
         if (title !== undefined) display.name = title;
-        const tuiInput: Parameters<CliRuntimeDependencies["runDevelopmentTui"]>[0] = {
-          serverUrl,
+        const tuiInput = {
+          target,
+          initialInput: options.input,
+          onBootProgress: report,
           ...display,
-        };
-        if (remoteServerUrl === undefined) {
-          tuiInput.appRoot = appRoot;
+        } satisfies RunDevelopmentTuiInput;
+        if (remoteTarget?.headers !== undefined) {
+          await runDevelopmentTui({ ...tuiInput, headers: remoteTarget.headers });
+        } else {
+          await runDevelopmentTui(tuiInput);
         }
-        if (options.input !== undefined) {
-          tuiInput.initialInput = options.input;
-        }
-        await runDevelopmentTui(tuiInput);
       };
 
       if (remoteServerUrl) {
+        const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
+        loadDevelopmentEnvironmentFiles(appRoot);
         logger.log(
-          renderCliTaggedLine(theme, {
-            message: `connecting to ${remoteServerUrl}`,
-            tag: "dev",
-            tone: "info",
-          }),
+          `↗ ${existingLocalDevelopmentServer ? "local" : "remote"} mode targeting ${theme.info(new URL(remoteServerUrl).host)}`,
         );
 
         if (mode === "headless") {
@@ -553,34 +498,46 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
           return;
         }
 
-        await runInteractiveUi(remoteServerUrl);
+        logger.log("");
+        await runInteractiveUi({ serverUrl: remoteServerUrl });
         return;
       }
 
-      const startHost = runtime.startHost ?? (await loadStartHost());
-      const server = await startHost(appRoot, {
-        host: options.host,
-        port: options.port,
-      });
-      let closed = false;
+      // Print spacing before the live row; a later write would strand the row.
+      if (mode === "tui") logger.log("");
+      const buildProgress = mode === "tui" ? startCliLiveRow(logger) : undefined;
+      const onBootProgress = createDevBootProgressReporter(buildProgress);
+      buildProgress?.update("Building your agent");
 
+      let closed = false;
+      let server: DevelopmentServer | undefined;
       const closeServer = async () => {
-        if (closed) {
+        if (closed || server === undefined) {
           return;
         }
 
         closed = true;
+        // No-op when this instance attached to a server another process owns.
         await server.close();
       };
 
       try {
+        const startHost = runtime.startHost ?? (await loadStartHost());
+        server = startHost(appRoot, {
+          existing: mode === "tui" ? "attach-if-unconfigured" : "reject",
+          host: options.host,
+          onBootProgress,
+          port: options.port,
+        });
+        const handle = await server.start();
+
         // The terminal UI's header already shows the server URL, and startup
         // no longer clears the screen, so the line would linger as noise.
         // Headless consumers (scripts, scenario tests) still parse it.
         if (mode !== "tui") {
           logger.log(
             renderCliTaggedLine(theme, {
-              message: `server listening at ${server.url}`,
+              message: `server listening at ${handle.url}`,
               tag: "dev",
               tone: "success",
             }),
@@ -606,8 +563,9 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
           });
         }
 
-        await runInteractiveUi(server.url);
+        await runInteractiveUi({ appRoot: handle.appRoot, serverUrl: handle.url }, onBootProgress);
       } finally {
+        buildProgress?.stop();
         await closeServer();
       }
     });
@@ -629,7 +587,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       "[evalIds...]",
       "Eval ids (or directory prefixes) to run (all discovered evals when omitted)",
     )
-    .option("--url <url>", "Remote agent URL (skip local host startup)")
+    .option("--url <url>", "Remote agent URL (skip local host startup)", parseDevelopmentServerUrl)
     .option("--tag <tag...>", "Run only evals carrying a tag")
     .option("--strict", "Fail the exit code when any score falls below its threshold")
     .option("--list", "Print discovered evals without running them")
@@ -656,7 +614,7 @@ export async function runCli(
   runtime: CliRuntimeOverrides = {},
 ): Promise<void> {
   const program = createCliProgram(logger, runtime);
-  const input = argv.length === 0 ? ["dev"] : rewriteDevelopmentUrlShorthand(argv);
+  const input = argv.length === 0 ? ["dev"] : argv;
 
   try {
     await program.parseAsync(input, {
@@ -666,6 +624,18 @@ export async function runCli(
     if (error instanceof CommanderError) {
       if (error.exitCode === 0) {
         return;
+      }
+
+      // A coding agent that fumbles `eve init` can trip commander before the
+      // init action runs, so the action's own agent detection never fires.
+      // Commander has already written its usage error to stderr; add the setup
+      // guide on stdout so the agent gets actionable next steps, but still fall
+      // through to throw so the malformed invocation keeps its nonzero exit.
+      const detectCodingAgentLaunch = runtime.isCodingAgentLaunch ?? isCodingAgentLaunch;
+      const agentLaunched = await detectCodingAgentLaunch();
+      if (input[0] === "init" && agentLaunched) {
+        const { initAgentInstructions } = await import("#cli/commands/agent-instructions.js");
+        logger.log(initAgentInstructions());
       }
 
       throw new Error(error.message);

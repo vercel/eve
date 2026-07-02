@@ -1,4 +1,3 @@
-import type { HandleMessageStreamEvent } from "eve/client";
 import type { EveEvalTargetHandle } from "eve/evals";
 
 /**
@@ -10,7 +9,9 @@ import type { EveEvalTargetHandle } from "eve/evals";
  * cross-checks happen inside `run()` where the attached stream is in hand.
  */
 export const METADATA_TOOL = "dynamic-channel-metadata";
-export const PROMPT = "Call the `dynamic-channel-metadata` tool and report everything it returned.";
+export const PROMPT =
+  "If the `dynamic-channel-metadata` tool is available, call it and report everything it returned. " +
+  "If the tool is not available, reply exactly: metadata tool unavailable. Do not ask for more information.";
 
 export async function startChannelSession(
   target: EveEvalTargetHandle,
@@ -32,23 +33,4 @@ export async function startChannelSession(
     throw new Error(`POST ${path} returned no sessionId: ${text}`);
   }
   return parsed.sessionId;
-}
-
-export function extractToolOutput(
-  events: readonly HandleMessageStreamEvent[],
-  toolName: string,
-): Record<string, unknown> | undefined {
-  for (const event of events) {
-    if (event.type !== "action.result") continue;
-    const result = event.data.result;
-    if (
-      result.kind === "tool-result" &&
-      result.toolName === toolName &&
-      typeof result.output === "object" &&
-      result.output !== null
-    ) {
-      return result.output as Record<string, unknown>;
-    }
-  }
-  return undefined;
 }

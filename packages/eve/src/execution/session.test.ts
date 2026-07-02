@@ -4,6 +4,8 @@ import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import {
   createCompactionConfig,
   createSession,
+  DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
+  DEFAULT_SUBAGENT_MAX_INPUT_TOKENS_PER_SESSION,
   hydrateDurableSession,
   mintSubagentContinuationToken,
   projectToDurableSession,
@@ -75,11 +77,12 @@ describe("createSession", () => {
       continuationToken: "root-token",
       outputSchema,
       sessionId: "sess-root",
-      turnAgent: createTestTurnAgent({ outputSchema }),
+      turnAgent: createTestTurnAgent({ outputSchema, reasoning: "high" }),
     });
 
     expect(session.agent.compactionModelReference).toEqual({ id: "summary-model" });
     expect(session.agent.modelReference).toEqual({ id: "test-model" });
+    expect(session.agent.reasoning).toBe("high");
     expect(session.outputSchema).toEqual(outputSchema);
     expect(session.agent.system).toBe("You are a helpful assistant.\n\nBe concise.");
     expect(session.agent.tools).toEqual([
@@ -180,6 +183,64 @@ describe("createSession", () => {
     });
   });
 
+  it("defaults root sessions to the root input token budget", () => {
+    const session = createSession({
+      continuationToken: "root-token",
+      sessionId: "sess-root",
+      turnAgent: createTestTurnAgent(),
+    });
+
+    expect(session.limits?.maxInputTokensPerSession).toBe(
+      DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
+    );
+  });
+
+  it("defaults delegated subagent sessions to the subagent input token budget", () => {
+    const session = createSession({
+      continuationToken: "subagent-token",
+      sessionId: "sess-child",
+      subagentDepth: 1,
+      turnAgent: createTestTurnAgent(),
+    });
+
+    expect(session.limits?.maxInputTokensPerSession).toBe(
+      DEFAULT_SUBAGENT_MAX_INPUT_TOKENS_PER_SESSION,
+    );
+  });
+
+  it("applies the root input token budget when hydrating a durable session without a stored limit", () => {
+    const hydrated = hydrateDurableSession({
+      durable: {
+        agent: { system: "You are a helpful assistant." },
+        continuationToken: "root-token",
+        history: [],
+        sessionId: "sess-root",
+      },
+      turnAgent: createTestTurnAgent(),
+    });
+
+    expect(hydrated.limits?.maxInputTokensPerSession).toBe(
+      DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
+    );
+  });
+
+  it("applies the subagent input token budget when hydrating a durable child without a stored limit", () => {
+    const hydrated = hydrateDurableSession({
+      durable: {
+        agent: { system: "You are a helpful assistant." },
+        continuationToken: "subagent-token",
+        history: [],
+        sessionId: "sess-child",
+        subagentDepth: 1,
+      },
+      turnAgent: createTestTurnAgent(),
+    });
+
+    expect(hydrated.limits?.maxInputTokensPerSession).toBe(
+      DEFAULT_SUBAGENT_MAX_INPUT_TOKENS_PER_SESSION,
+    );
+  });
+
   it("persists run outputSchema through durable session projection and hydration", () => {
     const agentOutputSchema = {
       properties: { ignored: { type: "string" } },
@@ -207,6 +268,71 @@ describe("createSession", () => {
     expect(durable.outputSchema).toEqual(runOutputSchema);
     expect(hydrated.outputSchema).toEqual(runOutputSchema);
   });
+
+  it("persists subagent depth limits through durable session projection and hydration", () => {
+    const session = createSession({
+      continuationToken: "root-token",
+      sessionId: "sess-root",
+      subagentDepth: 2,
+      subagentMaxDepth: 4,
+      turnAgent: createTestTurnAgent(),
+    });
+
+    const durable = projectToDurableSession(session);
+    const hydrated = hydrateDurableSession({
+      durable,
+      turnAgent: createTestTurnAgent(),
+    });
+
+    expect(durable.subagentDepth).toBe(2);
+    expect(durable.subagentMaxDepth).toBe(4);
+    expect(hydrated.subagentDepth).toBe(2);
+    expect(hydrated.subagentMaxDepth).toBe(4);
+  });
+
+  it("persists session token limits through durable session projection and hydration", () => {
+    const session = createSession({
+      continuationToken: "root-token",
+      limits: {
+        maxInputTokensPerSession: 200_000,
+        maxOutputTokensPerSession: 20_000,
+      },
+      sessionId: "sess-root",
+      turnAgent: createTestTurnAgent(),
+    });
+
+    const durable = projectToDurableSession(session);
+    const hydrated = hydrateDurableSession({
+      durable,
+      turnAgent: createTestTurnAgent(),
+    });
+
+    expect(durable.limits).toEqual({
+      maxInputTokensPerSession: 200_000,
+      maxOutputTokensPerSession: 20_000,
+    });
+    expect(hydrated.limits).toEqual({
+      maxInputTokensPerSession: 200_000,
+      maxOutputTokensPerSession: 20_000,
+    });
+  });
+
+  it("restores current reasoning configuration when hydrating a durable session", () => {
+    const session = createSession({
+      continuationToken: "root-token",
+      sessionId: "sess-root",
+      turnAgent: createTestTurnAgent({ reasoning: "low" }),
+    });
+
+    const durable = projectToDurableSession(session);
+    const hydrated = hydrateDurableSession({
+      durable,
+      turnAgent: createTestTurnAgent({ reasoning: "high" }),
+    });
+
+    expect(durable.agent).toEqual({ system: session.agent.system });
+    expect(hydrated.agent.reasoning).toBe("high");
+  });
 });
 
 describe("mintSubagentContinuationToken", () => {
@@ -222,7 +348,7 @@ describe("mintSubagentContinuationToken", () => {
 });
 
 describe("refreshSessionFromTurnAgent", () => {
-  it("refreshes model/tool metadata while preserving history and system prompt", () => {
+  it("refreshes the current agent configuration while preserving history", () => {
     const session = createSession({
       continuationToken: "root-token",
       sessionId: "sess-root",
@@ -260,7 +386,7 @@ describe("refreshSessionFromTurnAgent", () => {
       contextWindowTokens: 200_000,
       id: "updated-model",
     });
-    expect(refreshed.agent.system).toBe("You are a helpful assistant.\n\nBe concise.");
+    expect(refreshed.agent.system).toBe("Completely different system prompt.");
     expect(refreshed.agent.tools).toEqual([
       {
         description: "Echoes text",
@@ -311,7 +437,7 @@ describe("refreshSessionFromTurnAgent", () => {
     });
   });
 
-  it("never changes the system prompt even when turnAgent instructions differ", () => {
+  it("refreshes the system prompt when turnAgent instructions differ", () => {
     const session = createSession({
       continuationToken: "root-token",
       sessionId: "sess-root",
@@ -322,7 +448,7 @@ describe("refreshSessionFromTurnAgent", () => {
     const refreshed = refreshSessionFromTurnAgent({
       session,
       turnAgent: createTestTurnAgent({
-        instructions: ["Updated prompt that should be ignored."],
+        instructions: ["Updated prompt from the current deployment."],
         model: { contextWindowTokens: 200_000, id: "updated-model" },
       }),
     });
@@ -331,27 +457,6 @@ describe("refreshSessionFromTurnAgent", () => {
       contextWindowTokens: 200_000,
       id: "updated-model",
     });
-    expect(refreshed.agent.system).toBe("Original session-start prompt.");
-  });
-
-  it("refreshes the system prompt when explicitly requested", () => {
-    const session = createSession({
-      continuationToken: "root-token",
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent({
-        instructions: ["Original session-start prompt."],
-      }),
-    });
-    const refreshed = refreshSessionFromTurnAgent({
-      refreshSystemPrompt: true,
-      session,
-      turnAgent: createTestTurnAgent({
-        instructions: ["Updated prompt from authored source.", "Updated tool context."],
-      }),
-    });
-
-    expect(refreshed.agent.system).toBe(
-      "Updated prompt from authored source.\n\nUpdated tool context.",
-    );
+    expect(refreshed.agent.system).toBe("Updated prompt from the current deployment.");
   });
 });

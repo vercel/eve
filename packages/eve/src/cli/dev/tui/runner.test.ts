@@ -2,11 +2,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   Client,
+  ClientError,
   MessageResponse,
   type AgentInfoResult,
   type ClientSession,
   type HandleMessageStreamEvent,
 } from "#client/index.js";
+import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
+import { createDevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
+import type { VercelDeploymentResolution } from "#setup/vercel-deployment.js";
 
 import {
   EveTUIRunner,
@@ -18,7 +22,21 @@ import {
   type PromptCommandOutcome,
 } from "./runner.js";
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
+import { promptCommandsFor } from "./prompt-commands.js";
+import { interruptedError } from "./errors.js";
+import type { RemoteAuthFlow } from "./remote-auth.js";
+import type { RemoteAuthCompletedMutation } from "./remote-auth-result.js";
+import type { RemoteConnectionControllerOptions } from "./remote-connection.js";
+import type { BootDetection, SetupIssue } from "./setup-issues.js";
+import type { SetupFlowRenderer } from "./setup-flow.js";
+import { createFakeSetupFlowRenderer } from "./test/fake-setup-flow-renderer.js";
 import type { VercelStatusSnapshot } from "./vercel-status.js";
+
+const REMOTE_VERIFIED_TARGET = await resolveTestVercelTarget({
+  host: "vpoke.playground-vercel.tools",
+  projectId: "prj_inbound",
+  projectName: "inbound",
+});
 
 /**
  * Real `Client` whose network-touching methods are replaced by vi spies.
@@ -127,6 +145,7 @@ const AGENT_INFO: AgentInfoResult = {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.useRealTimers();
 });
 
@@ -176,6 +195,26 @@ function fakeRenderer(overrides: Partial<AgentTUIRenderer> = {}): AgentTUIRender
   };
 }
 
+function idleSetupFlow(): SetupFlowRenderer {
+  return {
+    begin: vi.fn(),
+    end: vi.fn(),
+    readSelect: vi.fn(async () => undefined),
+    readEditableSelect: vi.fn(async () => undefined),
+    readProviderPicker: vi.fn(async () => undefined),
+    readText: vi.fn(async () => undefined),
+    readAcknowledge: vi.fn(async () => {}),
+    readChoice: vi.fn(() => ({ choice: Promise.resolve(undefined), close: vi.fn() })),
+    setStatus: vi.fn(),
+    renderLine: vi.fn(),
+    renderOutput: vi.fn(),
+    waitForInterrupt: () => ({
+      promise: new Promise<void>(() => {}),
+      dispose: vi.fn(),
+    }),
+  };
+}
+
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason?: unknown) => void;
@@ -191,9 +230,29 @@ async function settleAsyncWork(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
+  await Promise.resolve();
 }
 
 describe("EveTUIRunner agent header", () => {
+  it("reports the paint boundary before rendering the startup header", async () => {
+    const order: string[] = [];
+    const client = stubClient();
+    vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
+    const runner = new EveTUIRunner({
+      session: stubSession(),
+      client,
+      renderer: fakeRenderer({
+        renderAgentHeader: () => order.push("render"),
+      }),
+      serverUrl: "http://localhost:3000",
+      onBootProgress: (event) => order.push(event.type),
+    });
+
+    await runner.run();
+
+    expect(order).toEqual(["phase-started", "phase-finished", "before-first-paint", "render"]);
+  });
+
   it("fetches agent info and renders the startup header", async () => {
     const headers: AgentTUIAgentHeader[] = [];
     const renderer = fakeRenderer({
@@ -244,6 +303,39 @@ describe("EveTUIRunner agent header", () => {
     expect(headers[0]?.name).toBe("Weather Agent");
   });
 
+  it("retries a transient info failure before rendering the startup header", async () => {
+    vi.useFakeTimers();
+    const headers: AgentTUIAgentHeader[] = [];
+    const renderer = fakeRenderer({
+      renderAgentHeader: (header) => headers.push(header),
+    });
+    const client = stubClient();
+    vi.spyOn(client, "info")
+      .mockRejectedValueOnce(new ClientError(500, "Runner did not become ready in time"))
+      .mockResolvedValueOnce(AGENT_INFO);
+    const runner = new EveTUIRunner({
+      session: stubSession(),
+      client,
+      renderer,
+      serverUrl: "http://localhost:3000",
+      name: "Weather Agent",
+    });
+
+    const running = runner.run();
+    await settleAsyncWork();
+    await vi.advanceTimersByTimeAsync(100);
+    await running;
+
+    expect(client.info).toHaveBeenCalledTimes(2);
+    expect(headers).toEqual([
+      {
+        name: "Weather Agent",
+        serverUrl: "http://localhost:3000",
+        info: AGENT_INFO,
+      },
+    ]);
+  });
+
   it("refreshes the agent header when a dev artifact refresh changes the model", async () => {
     const headers: AgentTUIAgentHeader[] = [];
     const prompts: Array<string | undefined> = ["first", "second", undefined];
@@ -252,7 +344,7 @@ describe("EveTUIRunner agent header", () => {
       agent: {
         ...AGENT_INFO.agent,
         model: {
-          id: "anthropic/claude-sonnet-4.6",
+          id: "anthropic/claude-sonnet-5",
         },
       },
     };
@@ -289,12 +381,12 @@ describe("EveTUIRunner agent header", () => {
 
     expect(headers).toHaveLength(2);
     expect(headers[0]?.info?.agent.model.id).toBe("gpt-5");
-    expect(headers[1]?.info?.agent.model.id).toBe("anthropic/claude-sonnet-4.6");
+    expect(headers[1]?.info?.agent.model.id).toBe("anthropic/claude-sonnet-5");
     expect(client.info).toHaveBeenCalledTimes(2);
     expect(session.send).toHaveBeenCalledTimes(2);
   });
 
-  it("refreshes the agent header while waiting for prompt input", async () => {
+  it("retries a transient info failure while refreshing the agent header", async () => {
     vi.useFakeTimers();
     const headers: AgentTUIAgentHeader[] = [];
     const prompt = createDeferred<string | undefined>();
@@ -303,12 +395,15 @@ describe("EveTUIRunner agent header", () => {
       agent: {
         ...AGENT_INFO.agent,
         model: {
-          id: "anthropic/claude-sonnet-4.6",
+          id: "anthropic/claude-sonnet-5",
         },
       },
     };
     const client = stubClient();
-    vi.spyOn(client, "info").mockResolvedValueOnce(AGENT_INFO).mockResolvedValueOnce(nextInfo);
+    vi.spyOn(client, "info")
+      .mockResolvedValueOnce(AGENT_INFO)
+      .mockRejectedValueOnce(new ClientError(500, "Runner did not become ready in time"))
+      .mockResolvedValueOnce(nextInfo);
     const revisions = ["snapshot-a", "snapshot-b"];
     const fetchMock = vi.fn(async () =>
       Response.json({ revision: revisions.shift() ?? "snapshot-b" }),
@@ -337,9 +432,12 @@ describe("EveTUIRunner agent header", () => {
 
     await vi.advanceTimersByTimeAsync(500);
     await settleAsyncWork();
+    await vi.advanceTimersByTimeAsync(100);
+    await settleAsyncWork();
 
     expect(headers).toHaveLength(2);
-    expect(headers[1]?.info?.agent.model.id).toBe("anthropic/claude-sonnet-4.6");
+    expect(headers[1]?.info?.agent.model.id).toBe("anthropic/claude-sonnet-5");
+    expect(client.info).toHaveBeenCalledTimes(3);
     expect(session.send).not.toHaveBeenCalled();
 
     prompt.resolve(undefined);
@@ -603,6 +701,57 @@ describe("EveTUIRunner native continuation state", () => {
   });
 });
 
+describe("EveTUIRunner connection authorization", () => {
+  it("continues a parked interactive authorization session until the callback completes", async () => {
+    const prompts: Array<string | undefined> = ["connect linear", undefined];
+    const updates: Array<{ name: string; state: string }> = [];
+    const pendingCounts: number[] = [];
+    const session = sessionYielding([
+      {
+        type: "authorization.required",
+        data: {
+          authorization: { url: "https://connect.vercel.com/authorize/linear" },
+          description: "Authorization required for linear",
+          name: "linear",
+          webhookUrl: "https://eve.test/connections/linear/callback",
+        },
+      },
+      { type: "session.waiting", data: { wait: "connection-authorization" } },
+    ]);
+    vi.spyOn(session, "stream").mockImplementation(async function* () {
+      yield {
+        type: "authorization.completed",
+        data: { name: "linear", outcome: "authorized" },
+      } as HandleMessageStreamEvent;
+      yield {
+        type: "session.waiting",
+        data: { wait: "next-user-message" },
+      } as HandleMessageStreamEvent;
+    });
+    const renderer: AgentTUIRenderer = {
+      readPrompt: vi.fn(async () => prompts.shift()),
+      upsertConnectionAuth: (update) => updates.push({ name: update.name, state: update.state }),
+      setConnectionAuthPendingCount: (count) => pendingCounts.push(count),
+      renderStream: vi.fn(async (result) => {
+        for await (const event of result.events as AsyncIterable<AgentTUIStreamEvent>) {
+          void event;
+        }
+      }),
+    };
+
+    const runner = new EveTUIRunner({ session, renderer, name: "Weather Agent" });
+    await runner.run();
+
+    expect(session.stream).toHaveBeenCalledTimes(1);
+    expect(updates).toEqual([
+      { name: "linear", state: "required" },
+      { name: "linear", state: "pending" },
+      { name: "linear", state: "authorized" },
+    ]);
+    expect(pendingCounts).toEqual([1, 0]);
+  });
+});
+
 describe("EveTUIRunner failure rendering", () => {
   it("renders one error block for a step/turn/session failure cascade", async () => {
     const prompts: Array<string | undefined> = ["hello", undefined];
@@ -764,7 +913,7 @@ describe("EveTUIRunner reused step indexes", () => {
 });
 
 describe("EveTUIRunner replay guards", () => {
-  it("ignores replayed tool batches and divergent text attempts in one turn", async () => {
+  it("deduplicates repeated call IDs and divergent text attempts in one turn", async () => {
     const prompts: Array<string | undefined> = ["weather", undefined];
     const emitted: AgentTUIStreamEvent[] = [];
     const session = sessionYielding([
@@ -944,13 +1093,55 @@ describe("EveTUIRunner replay guards", () => {
       .map((event) => event.delta)
       .join("");
 
-    expect(toolCalls).toHaveLength(1);
-    expect(toolCalls[0]).toMatchObject({ toolCallId: "call-original" });
-    expect(toolResults).toHaveLength(1);
-    expect(toolResults[0]).toMatchObject({ toolCallId: "call-original" });
+    expect(toolCalls.map((event) => event.toolCallId)).toEqual(["call-original", "call-replay"]);
+    expect(toolResults.map((event) => event.toolCallId)).toEqual(["call-original", "call-replay"]);
     expect(assistantText).toBe("Using the first answer.");
     expect(assistantText).not.toContain("retry");
     expect(emitted.filter((event) => event.type === "finish")).toHaveLength(1);
+  });
+
+  it("renders every call in a 100-way bash fan-out with identical input", async () => {
+    const prompts: Array<string | undefined> = ["run the fan-out", undefined];
+    const emitted: AgentTUIStreamEvent[] = [];
+    const sentence = Array.from({ length: 100 }, (_, index) => `word-${index + 1}`).join(" ");
+    const command = `printf '%s\\n' '${sentence}'`;
+    const session = sessionYielding([
+      ...Array.from({ length: 100 }, (_, index) => ({
+        type: "actions.requested",
+        data: {
+          actions: [
+            {
+              callId: `bash-${index + 1}`,
+              input: { command },
+              kind: "tool-call",
+              toolName: "bash",
+            },
+          ],
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn_0",
+        },
+      })),
+      { type: "session.waiting", data: { wait: "next-user-message" } },
+    ]);
+
+    const renderer: AgentTUIRenderer = {
+      readPrompt: vi.fn(async () => prompts.shift()),
+      renderStream: vi.fn(async (result) => {
+        for await (const event of result.events as AsyncIterable<AgentTUIStreamEvent>) {
+          emitted.push(event);
+        }
+      }),
+    };
+
+    const runner = new EveTUIRunner({ session, renderer, name: "Weather Agent" });
+    await runner.run();
+
+    const toolCalls = emitted.filter((event) => event.type === "tool-call");
+    expect(toolCalls).toHaveLength(100);
+    expect(toolCalls.map((event) => event.toolCallId)).toEqual(
+      Array.from({ length: 100 }, (_, index) => `bash-${index + 1}`),
+    );
   });
 
   it("renders a known tool result that arrives after turn.completed", async () => {
@@ -1065,7 +1256,14 @@ describe("EveTUIRunner setup commands", () => {
       session,
       renderer,
       name: "Weather Agent",
-      promptCommandHandler: createPromptCommandHandler({}),
+      availablePromptCommands: promptCommandsFor("remote"),
+      promptCommandHandler: createPromptCommandHandler({
+        target: {
+          kind: "remote",
+          workspaceRoot: "/tmp/weather-agent",
+          serverUrl: "https://example.com/",
+        },
+      }),
     });
     await runner.run();
 
@@ -1083,13 +1281,258 @@ describe("EveTUIRunner setup commands", () => {
       renderer,
       name: "Weather Agent",
       appRoot: "/tmp/weather-agent",
-      promptCommandHandler: createPromptCommandHandler({ appRoot: "/tmp/weather-agent" }),
+      promptCommandHandler: createPromptCommandHandler({
+        target: {
+          kind: "local",
+          serverUrl: "http://localhost:3000",
+          workspaceRoot: "/tmp/weather-agent",
+        },
+      }),
     });
     await runner.run();
 
     expect(notices).toHaveLength(1);
     expect(notices[0]).toContain("not supported by this renderer");
     expect(session.send).not.toHaveBeenCalled();
+  });
+});
+
+describe("EveTUIRunner remote authentication", () => {
+  const target = {
+    kind: "remote",
+    serverUrl: "https://vpoke.playground-vercel.tools",
+    workspaceRoot: "/tmp/weather-agent",
+  } as const;
+
+  const unresolvedDeployment: VercelDeploymentResolution = {
+    kind: "failed",
+    failure: {
+      cause: "vercel",
+      failure: {
+        code: null,
+        message: "Vercel deployment lookup failed.",
+        stderr: "",
+        stdout: "",
+      },
+    },
+  };
+
+  function remoteOptions(
+    resolveDeployment: NonNullable<
+      RemoteConnectionControllerOptions["resolveDeployment"]
+    > = async () => unresolvedDeployment,
+  ) {
+    return {
+      target,
+      credentials: createDevelopmentCredentialGate(target.serverUrl),
+      resolveDeployment,
+      resolveOidcToken: async () => ({
+        kind: "resolution-failed" as const,
+        message: "No ambient token in this test.",
+      }),
+    };
+  }
+
+  function unauthorized(): ClientError {
+    return new ClientError(
+      401,
+      '{"ok":false,"code":"unauthorized","error":"Authorization is required for this route."}',
+    );
+  }
+
+  function successfulAuth(
+    completedMutations: readonly RemoteAuthCompletedMutation[] = [],
+  ): RemoteAuthFlow {
+    return vi.fn<RemoteAuthFlow>(async () => ({
+      kind: "prepared",
+      target: REMOTE_VERIFIED_TARGET,
+      resolveToken: async () => "fresh-token",
+      completedMutations,
+    }));
+  }
+
+  async function runRemoteAuth(input: {
+    client: Client;
+    flow: RemoteAuthFlow;
+    renderer?: Partial<AgentTUIRenderer>;
+    resolveDeployment?: NonNullable<RemoteConnectionControllerOptions["resolveDeployment"]>;
+  }): Promise<void> {
+    await new EveTUIRunner({
+      session: input.client.session(),
+      client: input.client,
+      renderer: fakeRenderer({ setupFlow: idleSetupFlow(), ...input.renderer }),
+      serverUrl: target.serverUrl,
+      availablePromptCommands: promptCommandsFor("remote"),
+      promptCommandHandler: createPromptCommandHandler({
+        target,
+        remoteAuthFlow: input.flow,
+      }),
+      remote: remoteOptions(input.resolveDeployment),
+    }).run();
+  }
+
+  it("runs /vc:login after an unresolved host returns an authentication challenge", async () => {
+    const client = stubClient();
+    const order: string[] = [];
+    let infoCalls = 0;
+    vi.spyOn(client, "info").mockImplementation(async () => {
+      order.push("info");
+      if (++infoCalls === 1) throw unauthorized();
+      return AGENT_INFO;
+    });
+    const flow = vi.fn<RemoteAuthFlow>(async () => {
+      order.push("login");
+      return {
+        kind: "prepared",
+        target: REMOTE_VERIFIED_TARGET,
+        resolveToken: async () => "fresh-token",
+        completedMutations: [],
+      };
+    });
+    const commandInvocations: Array<{ text: string; status: "failed" | undefined }> = [];
+
+    await runRemoteAuth({
+      client,
+      flow,
+      resolveDeployment: async () => ({ kind: "not-found" }),
+      renderer: {
+        renderCommandInvocation: (text, status) => commandInvocations.push({ text, status }),
+      },
+    });
+
+    expect(order).toEqual(["info", "login", "info"]);
+    expect(commandInvocations).toEqual([{ text: "/vc:login", status: undefined }]);
+  });
+
+  it("runs /vc:login once at startup after the exact remote auth challenge", async () => {
+    const client = stubClient();
+    vi.spyOn(client, "info")
+      .mockRejectedValueOnce(unauthorized())
+      .mockResolvedValueOnce(AGENT_INFO);
+    const commandInvocations: Array<{ text: string; status: "failed" | undefined }> = [];
+    const flow = successfulAuth();
+
+    await runRemoteAuth({
+      client,
+      flow,
+      renderer: {
+        renderCommandInvocation: (text, status) => commandInvocations.push({ text, status }),
+      },
+    });
+
+    expect(flow).toHaveBeenCalledOnce();
+    expect(commandInvocations).toEqual([{ text: "/vc:login", status: undefined }]);
+  });
+
+  it("requests Trusted Sources repair for an environment mismatch", async () => {
+    const client = stubClient();
+    const mismatch = new ClientError(
+      403,
+      "The caller environment is not permitted.\n\n" +
+        "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH\n\niad1::request-id",
+    );
+    vi.spyOn(client, "info").mockRejectedValueOnce(mismatch).mockResolvedValueOnce(AGENT_INFO);
+    const flow = successfulAuth();
+
+    await runRemoteAuth({ client, flow });
+
+    expect(flow).toHaveBeenCalledWith(expect.objectContaining({ configureTrustedSources: true }));
+  });
+
+  it("renders a failed automatic /vc:login as one command result without the request id", async () => {
+    const client = stubClient();
+    vi.spyOn(client, "info")
+      .mockRejectedValueOnce(unauthorized())
+      .mockRejectedValueOnce(
+        new ClientError(
+          403,
+          "Your trusted sources OIDC token's environment is not permitted to access this deployment\n\n" +
+            "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH\n\niad1::zgc5p-1781730251155-85842c28901b",
+        ),
+      );
+    const commandInvocations: Array<{ text: string; status: "failed" | undefined }> = [];
+    const commandResults: string[] = [];
+    const flow = successfulAuth([
+      { kind: "trusted-sources-updated", targetProjectName: "remote-agent" },
+    ]);
+
+    await runRemoteAuth({
+      client,
+      flow,
+      renderer: {
+        renderCommandInvocation: (text, status) => commandInvocations.push({ text, status }),
+        renderCommandResult: (message) => commandResults.push(message),
+      },
+    });
+
+    expect(commandInvocations).toEqual([{ text: "/vc:login", status: "failed" }]);
+    expect(commandResults).toEqual([
+      "Authentication was refreshed, but vpoke.playground-vercel.tools is unavailable: " +
+        "Your trusted sources OIDC token's environment is not permitted to access this deployment.\n\n" +
+        "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH Completed before the failure: updated Trusted Sources for remote-agent.",
+    ]);
+  });
+
+  it("does not start authentication for an ordinary remote HTTP failure", async () => {
+    const client = stubClient();
+    vi.spyOn(client, "info").mockRejectedValue(new ClientError(503, "Unavailable"));
+    const flow = successfulAuth();
+
+    await runRemoteAuth({ client, flow });
+
+    expect(flow).not.toHaveBeenCalled();
+  });
+
+  it("demotes a ready remote after turn dispatch fails", async () => {
+    const client = stubClient();
+    vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
+    const session = client.session();
+    vi.spyOn(session, "send").mockRejectedValue(new Error("socket down"));
+    const statuses: string[] = [];
+    const readPrompt = vi.fn().mockResolvedValueOnce("hello").mockResolvedValueOnce(undefined);
+
+    await new EveTUIRunner({
+      session,
+      client,
+      renderer: fakeRenderer({
+        readPrompt,
+        setRemoteConnectionStatus: (snapshot) => statuses.push(snapshot.connection.state),
+      }),
+      serverUrl: target.serverUrl,
+      remote: remoteOptions(),
+    }).run();
+
+    expect(statuses.at(-1)).toBe("unavailable");
+  });
+
+  it("keeps a ready remote connected after an agent session failure", async () => {
+    const client = stubClient();
+    vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
+    const session = sessionYielding([
+      {
+        type: "session.failed",
+        data: { code: "HookConflictError", message: "HookConflictError: token in use" },
+      },
+    ]);
+    const statuses: string[] = [];
+    const readPrompt = vi.fn().mockResolvedValueOnce("hello").mockResolvedValueOnce(undefined);
+
+    await new EveTUIRunner({
+      session,
+      client,
+      renderer: fakeRenderer({
+        readPrompt,
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events as AsyncIterable<unknown>) void event;
+        }),
+        setRemoteConnectionStatus: (snapshot) => statuses.push(snapshot.connection.state),
+      }),
+      serverUrl: target.serverUrl,
+      remote: remoteOptions(),
+    }).run();
+
+    expect(statuses.at(-1)).toBe("ready");
+    expect(statuses).not.toContain("unavailable");
   });
 });
 
@@ -1152,6 +1595,66 @@ describe("EveTUIRunner renderer teardown", () => {
 
     expect(shutdown).toHaveBeenCalledTimes(1);
   });
+
+  it("aborts child-session streams when Ctrl-C exits the runner", async () => {
+    const client = stubClient();
+    const childSession = client.session({ sessionId: "child-session", streamIndex: 0 });
+    let childSignal: AbortSignal | undefined;
+    vi.spyOn(client, "session").mockReturnValue(childSession);
+    vi.spyOn(childSession, "stream").mockImplementation((options) => {
+      const signal = options?.signal;
+      if (signal === undefined) {
+        throw new Error("Expected the child stream to receive an abort signal.");
+      }
+      childSignal = signal;
+      return {
+        async *[Symbol.asyncIterator]() {
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          yield {
+            type: "session.waiting",
+            data: { wait: "next-user-message" },
+          } as HandleMessageStreamEvent;
+        },
+      };
+    });
+
+    const runner = new EveTUIRunner({
+      client,
+      name: "Weather Agent",
+      renderer: fakeRenderer({
+        readPrompt: vi
+          .fn()
+          .mockResolvedValueOnce("delegate")
+          .mockRejectedValueOnce(interruptedError()),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events as AsyncIterable<unknown>) void event;
+        }),
+      }),
+      session: sessionYielding([
+        {
+          type: "subagent.called",
+          data: {
+            callId: "call-child",
+            childSessionId: "child-session",
+            name: "weather-child",
+            sequence: 0,
+            sessionId: "parent-session",
+            toolName: "delegate_weather",
+            turnId: "turn-parent",
+            workflowId: "workflow-parent",
+          },
+        },
+        { type: "turn.completed", data: { sequence: 0, turnId: "turn-parent" } },
+        { type: "session.waiting", data: { wait: "next-user-message" } },
+      ]),
+    });
+
+    await runner.run();
+
+    expect(childSignal?.aborted).toBe(true);
+  });
 });
 
 describe("EveTUIRunner Vercel status line", () => {
@@ -1184,7 +1687,9 @@ describe("EveTUIRunner Vercel status line", () => {
     await runner.run();
 
     expect(pushes).toEqual([{ identity, pendingDeploy: false }]);
-    expect(detectIdentity).toHaveBeenCalledWith("/tmp/weather-agent");
+    expect(detectIdentity).toHaveBeenCalledWith("/tmp/weather-agent", {
+      signal: expect.any(AbortSignal),
+    });
   });
 
   it("applies command effects: channels mark pending, deploy clears and re-probes", async () => {
@@ -1214,9 +1719,9 @@ describe("EveTUIRunner Vercel status line", () => {
     const outcomes: Record<string, PromptCommandOutcome> = {
       channels: {
         message: "Channels added: slack — run /deploy to ship them.",
-        vercelEffect: { kind: "channels-added" },
+        effect: { kind: "channels-added" },
       },
-      deploy: { message: "Deployed.", vercelEffect: { kind: "deployed" } },
+      deploy: { message: "Deployed.", effect: { kind: "deployed" } },
     };
 
     const runner = new EveTUIRunner({
@@ -1235,6 +1740,138 @@ describe("EveTUIRunner Vercel status line", () => {
       { identity, pendingDeploy: false },
     ]);
     expect(detectIdentity).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes agent info only after a model-access change", async () => {
+    const client = stubClient();
+    const info = vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
+    const prompts: Array<string | undefined> = ["/channels", "/model", undefined];
+    const infoCallsAtPrompt: number[] = [];
+    const renderer = fakeRenderer({
+      readPrompt: vi.fn(async () => {
+        infoCallsAtPrompt.push(info.mock.calls.length);
+        return prompts.shift();
+      }),
+    });
+    const channelsOutcome: PromptCommandOutcome = {
+      message: "Channels added.",
+      effect: { kind: "channels-added" },
+    };
+    const modelOutcome: PromptCommandOutcome = {
+      message: "Connected to AI Gateway.",
+      effect: { kind: "model-access-changed" },
+    };
+
+    const runner = new EveTUIRunner({
+      session: stubSession(),
+      client,
+      renderer,
+      serverUrl: "http://localhost:3000",
+      name: "Weather Agent",
+      appRoot: "/tmp/weather-agent",
+      bootDetections: [],
+      detectProjectIdentity: vi.fn(async () => undefined),
+      promptCommandHandler: {
+        handle: async (command) => (command.name === "model" ? modelOutcome : channelsOutcome),
+      },
+    });
+
+    await runner.run();
+
+    expect(infoCallsAtPrompt).toEqual([1, 1, 2]);
+    expect(info).toHaveBeenCalledTimes(2);
+  });
+
+  it("forces a runtime rebuild after /connect adds a connection", async () => {
+    const client = stubClient();
+    vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
+    const requests: URL[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+        const url = new URL(
+          typeof input === "string" ? input : input instanceof URL ? input : input.url,
+        );
+        requests.push(url);
+        return Response.json({ revision: url.searchParams.get("force") === "1" ? "next" : "base" });
+      }),
+    );
+    const prompts: Array<string | undefined> = ["/connect", undefined];
+    const renderer = fakeRenderer({ readPrompt: vi.fn(async () => prompts.shift()) });
+    const connectOutcome = {
+      message: "Connections added: linear.",
+      effect: { kind: "connection-added" },
+    } satisfies PromptCommandOutcome;
+
+    const runner = new EveTUIRunner({
+      session: stubSession(),
+      client,
+      renderer,
+      serverUrl: "http://localhost:3000",
+      name: "Weather Agent",
+      promptCommandHandler: { handle: async () => connectOutcome },
+    });
+    await runner.run();
+
+    expect(
+      requests.some(
+        (url) =>
+          url.pathname === "/eve/v1/dev/runtime-artifacts/rebuild" &&
+          url.searchParams.get("force") === "1",
+      ),
+    ).toBe(true);
+  });
+
+  it("forces a runtime rebuild through the /connect command path", async () => {
+    const client = stubClient();
+    vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
+    const requests: URL[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+        const url = new URL(
+          typeof input === "string" ? input : input instanceof URL ? input : input.url,
+        );
+        requests.push(url);
+        return Response.json({ revision: url.searchParams.get("force") === "1" ? "next" : "base" });
+      }),
+    );
+    const runConnectionsFlow = vi.fn(async () => ({
+      kind: "done" as const,
+      addedConnections: ["linear"],
+    }));
+    const prompts: Array<string | undefined> = ["/connect", undefined];
+    const renderer = fakeRenderer({
+      readPrompt: vi.fn(async () => prompts.shift()),
+      setupFlow: idleSetupFlow(),
+    });
+
+    const runner = new EveTUIRunner({
+      session: stubSession(),
+      client,
+      renderer,
+      serverUrl: "http://localhost:3000",
+      name: "Weather Agent",
+      appRoot: "/tmp/weather-agent",
+      promptCommandHandler: createPromptCommandHandler({
+        target: {
+          kind: "local",
+          serverUrl: "http://localhost:3000",
+          workspaceRoot: "/tmp/weather-agent",
+        },
+        flows: { runConnectionsFlow },
+      }),
+    });
+    await runner.run();
+
+    expect(runConnectionsFlow).toHaveBeenCalledTimes(1);
+    expect(
+      requests.some(
+        (url) =>
+          url.pathname === "/eve/v1/dev/runtime-artifacts/rebuild" &&
+          url.searchParams.get("force") === "1",
+      ),
+    ).toBe(true);
   });
 
   it("never pushes Vercel status for a remote --url session", async () => {
@@ -1312,10 +1949,19 @@ describe("EveTUIRunner gateway-auth failure rendering", () => {
 });
 
 describe("EveTUIRunner boot setup detection", () => {
-  function bootRunner(input: {
-    appRoot?: string;
-    issues: Array<{ label: string; command: string }>;
-  }) {
+  const disconnectedGatewayInfo: AgentInfoResult = {
+    ...AGENT_INFO,
+    agent: {
+      ...AGENT_INFO.agent,
+      model: {
+        ...AGENT_INFO.agent.model,
+        routing: { kind: "gateway", target: "openai" },
+        endpoint: { kind: "gateway", connected: false },
+      },
+    },
+  };
+
+  function bootRunner(input: { appRoot?: string; issues: SetupIssue[] }) {
     const warnings: string[] = [];
     const session = sessionYielding([]);
     const renderer: AgentTUIRenderer = {
@@ -1333,19 +1979,284 @@ describe("EveTUIRunner boot setup detection", () => {
     return { runner: new EveTUIRunner(options), warnings };
   }
 
+  function providerSetupRefreshRunner(input: {
+    refreshInfo: () => Promise<AgentInfoResult>;
+    renderer?: Partial<AgentTUIRenderer>;
+    bootDetections?: BootDetection[];
+  }) {
+    const client = stubClient();
+    vi.spyOn(client, "info")
+      .mockResolvedValueOnce(disconnectedGatewayInfo)
+      .mockImplementationOnce(input.refreshInfo);
+    const renderer = fakeRenderer({
+      renderSetupWarning: vi.fn(),
+      setupFlow: createFakeSetupFlowRenderer(),
+      ...input.renderer,
+    });
+    const runner = new EveTUIRunner({
+      session: stubSession(),
+      client,
+      renderer,
+      serverUrl: "http://localhost:3000",
+      name: "Weather Agent",
+      appRoot: "/tmp/weather-agent",
+      initialInput: "/model",
+      bootDetections: input.bootDetections ?? [
+        {
+          id: "test",
+          detect: () => [
+            {
+              kind: "attention",
+              label: "model provider not linked",
+              command: "/model",
+            },
+          ],
+        },
+      ],
+      detectProjectIdentity: vi.fn(async () => undefined),
+      getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
+      promptCommandHandler: {
+        handle: async () => ({
+          message: "Connected to AI Gateway via AI_GATEWAY_API_KEY in .env.local.",
+          effect: { kind: "model-access-changed" },
+        }),
+      },
+    });
+
+    return { client, runner };
+  }
+
   it("surfaces detected issues as the attention line at boot", async () => {
     const { runner, warnings } = bootRunner({
       appRoot: "/tmp/weather-agent",
-      issues: [{ label: "AI Gateway credentials", command: "/model" }],
+      issues: [{ kind: "attention", label: "AI Gateway credentials", command: "/model" }],
     });
     await runner.run();
 
     expect(warnings).toEqual(["1 setup issue: AI Gateway credentials · /model"]);
   });
 
+  it("runs the initial model onboarding prerequisites before opening /model", async () => {
+    const order: string[] = [];
+    const authStatuses: Array<"cli-missing" | "logged-out" | "authenticated"> = [
+      "cli-missing",
+      "logged-out",
+      "authenticated",
+    ];
+    const handle = vi.fn(async (command: { name: string }) => {
+      order.push(command.name);
+      return { message: "/model cancelled." };
+    });
+    const renderer = fakeRenderer({
+      readPrompt: vi.fn(async (options?: AgentTUISessionOptions) => {
+        order.push("prompt");
+        expect(options?.initialDraft).toBeUndefined();
+        return undefined;
+      }),
+      setupFlow: createFakeSetupFlowRenderer(),
+    });
+    const runner = new EveTUIRunner({
+      session: sessionYielding([]),
+      renderer,
+      name: "Weather Agent",
+      appRoot: "/tmp/weather-agent",
+      initialInput: "/model",
+      bootDetections: [
+        {
+          id: "test",
+          detect: () => [
+            {
+              kind: "attention",
+              label: "model provider not linked",
+              command: "/model",
+            },
+          ],
+        },
+      ],
+      getVercelAuthStatus: vi.fn(async () => authStatuses.shift() ?? "authenticated"),
+      promptCommandHandler: { handle },
+    });
+
+    await runner.run();
+
+    expect(order).toEqual(["vc:install", "vc:login", "model", "prompt"]);
+    expect(handle).toHaveBeenNthCalledWith(
+      1,
+      { type: "extension", name: "vc:install", argument: "" },
+      expect.objectContaining({ keepSetupFlowOpen: true }),
+    );
+    expect(handle).toHaveBeenNthCalledWith(
+      2,
+      { type: "extension", name: "vc:login", argument: "" },
+      expect.objectContaining({ keepSetupFlowOpen: true }),
+    );
+    expect(handle).toHaveBeenCalledWith(
+      { type: "extension", name: "model", argument: "" },
+      { renderer, title: "Weather Agent", initialModelStep: "provider" },
+    );
+  });
+
+  it("stops onboarding when Vercel CLI installation leaves the CLI unavailable", async () => {
+    const order: string[] = [];
+    const authStatuses: Array<"cli-missing"> = ["cli-missing", "cli-missing"];
+    const end = vi.fn();
+    const setupFlow = createFakeSetupFlowRenderer({ end });
+    const runner = new EveTUIRunner({
+      session: sessionYielding([]),
+      renderer: fakeRenderer({ setupFlow }),
+      name: "Weather Agent",
+      appRoot: "/tmp/weather-agent",
+      initialInput: "/model",
+      bootDetections: [
+        {
+          id: "test",
+          detect: () => [
+            {
+              kind: "attention",
+              label: "model provider not linked",
+              command: "/model",
+            },
+          ],
+        },
+      ],
+      getVercelAuthStatus: vi.fn(async () => authStatuses.shift() ?? "cli-missing"),
+      promptCommandHandler: {
+        handle: async (command) => {
+          order.push(command.name);
+          return { message: "/vc:install cancelled." };
+        },
+      },
+    });
+
+    await runner.run();
+
+    expect(order).toEqual(["vc:install"]);
+    expect(end).toHaveBeenCalledOnce();
+  });
+
+  it("does not auto-open /model outside the prefilled onboarding launch", async () => {
+    const handle = vi.fn(async () => ({ message: "/model cancelled." }));
+    const runner = new EveTUIRunner({
+      session: sessionYielding([]),
+      renderer: fakeRenderer({ setupFlow: createFakeSetupFlowRenderer() }),
+      name: "Weather Agent",
+      appRoot: "/tmp/weather-agent",
+      bootDetections: [
+        {
+          id: "test",
+          detect: () => [
+            {
+              kind: "attention",
+              label: "model provider not linked",
+              command: "/model",
+            },
+          ],
+        },
+      ],
+      promptCommandHandler: { handle },
+    });
+
+    await runner.run();
+
+    expect(handle).not.toHaveBeenCalled();
+  });
+
+  it("keeps a prefilled /model editable without a local app root", async () => {
+    const handle = vi.fn(async () => ({ message: "/model cancelled." }));
+    const readPrompt = vi.fn(async (options?: AgentTUISessionOptions) => {
+      expect(options?.initialDraft).toBe("/model");
+      return undefined;
+    });
+    const runner = new EveTUIRunner({
+      session: sessionYielding([]),
+      renderer: fakeRenderer({ readPrompt, setupFlow: createFakeSetupFlowRenderer() }),
+      name: "Weather Agent",
+      initialInput: "/model",
+      promptCommandHandler: { handle },
+    });
+
+    await runner.run();
+
+    expect(handle).not.toHaveBeenCalled();
+  });
+
+  it("normalizes a committed local key after automatic provider setup", async () => {
+    const clearSetupWarning = vi.fn();
+    const headers: AgentTUIAgentHeader[] = [];
+    const detect = vi.fn(({ info }: { info?: AgentInfoResult }) =>
+      info?.agent.model.endpoint?.kind === "gateway" && !info.agent.model.endpoint.connected
+        ? [
+            {
+              kind: "attention" as const,
+              label: "model provider not linked",
+              command: "/model" as const,
+            },
+          ]
+        : [],
+    );
+    const { client, runner } = providerSetupRefreshRunner({
+      refreshInfo: async () => {
+        vi.stubEnv("AI_GATEWAY_API_KEY", "test-key");
+        return disconnectedGatewayInfo;
+      },
+      bootDetections: [{ id: "test", detect }],
+      renderer: {
+        clearSetupWarning,
+        renderAgentHeader: (header) => headers.push(header),
+      },
+    });
+
+    await runner.run();
+    await vi.waitFor(() => expect(clearSetupWarning).toHaveBeenCalled());
+
+    expect(client.info).toHaveBeenCalledTimes(2);
+    expect(detect.mock.calls.at(-1)?.[0].info?.agent.model.endpoint).toEqual({
+      kind: "gateway",
+      connected: true,
+      credential: "api-key",
+    });
+    expect(headers.map((header) => header.info?.agent.model.endpoint)).toEqual([
+      { kind: "gateway", connected: false },
+      { kind: "gateway", connected: true, credential: "api-key" },
+    ]);
+  });
+
+  it("drops stale disconnected evidence when the post-setup info refresh fails", async () => {
+    const clearSetupWarning = vi.fn();
+    const headers: AgentTUIAgentHeader[] = [];
+    const detect = vi.fn(({ info }: { info?: AgentInfoResult }) =>
+      info?.agent.model.endpoint?.kind === "gateway" && !info.agent.model.endpoint.connected
+        ? [
+            {
+              kind: "attention" as const,
+              label: "model provider not linked",
+              command: "/model" as const,
+            },
+          ]
+        : [],
+    );
+    const { client, runner } = providerSetupRefreshRunner({
+      refreshInfo: async () => {
+        throw new Error("info unavailable");
+      },
+      bootDetections: [{ id: "test", detect }],
+      renderer: {
+        clearSetupWarning,
+        renderAgentHeader: (header) => headers.push(header),
+      },
+    });
+
+    await runner.run();
+    await vi.waitFor(() => expect(clearSetupWarning).toHaveBeenCalled());
+
+    expect(client.info).toHaveBeenCalledTimes(2);
+    expect(detect.mock.calls.at(-1)?.[0].info).toBeUndefined();
+    expect(headers.at(-1)?.info).toBeUndefined();
+  });
+
   it("stays quiet without a local setup context, even with issues", async () => {
     const { runner, warnings } = bootRunner({
-      issues: [{ label: "AI Gateway credentials", command: "/model" }],
+      issues: [{ kind: "attention", label: "AI Gateway credentials", command: "/model" }],
     });
     await runner.run();
 
@@ -1454,7 +2365,13 @@ describe("EveTUIRunner command outcome rendering", () => {
       session,
       renderer,
       name: "Weather Agent",
-      promptCommandHandler: createPromptCommandHandler({}),
+      promptCommandHandler: createPromptCommandHandler({
+        target: {
+          kind: "remote",
+          workspaceRoot: "/tmp/weather-agent",
+          serverUrl: "https://example.com/",
+        },
+      }),
     });
     await runner.run();
 

@@ -72,6 +72,15 @@
  *             for project creation and the dedicated current commands
  *             (`eve link`, `eve channels add`, `eve deploy`) afterward.
  *             Changelogs and changesets are historical records and excluded.
+ *   rule 32 — Every Markdown file under `research/` must have valid YAML
+ *             frontmatter with non-empty `issue` and `status` fields plus an
+ *             ISO `last_updated` date. Research documents are implementation
+ *             plans attached to tracked GitHub work, not an unowned parallel
+ *             backlog.
+ *   rule 33 — Workflow runtime imports and queue-namespace environment writes
+ *             must go through the `src/internal/workflow/runtime.ts` facade and
+ *             `queue-namespace.ts`. The generated agent bootstrap installs the
+ *             agent-scoped namespace before queue-producing APIs can run.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -159,6 +168,7 @@ function isTsLike(relPath) {
  *   rule26: Violation[];
  *   rule27: Violation[];
  *   rule28: Violation[];
+ *   rule33: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -185,6 +195,7 @@ async function scanRepo(state) {
     checkRule26(posix, lines, state.rule26);
     checkRule27(posix, lines, state.rule27);
     checkRule28(posix, lines, state.rule28);
+    checkRule33(posix, lines, state.rule33);
   }
 }
 
@@ -233,6 +244,46 @@ function checkRule15(posix, lines, violations) {
         file: posix,
         line: idx + 1,
         message: `imports from "@workflow/*". Channel and harness code must stay workflow-agnostic. Move the workflow primitive call into src/runtime/ or src/execution/ and have the channel/harness call a thin runtime helper instead.`,
+      });
+    }
+  });
+}
+
+// ---------- Rule 33: namespaced Workflow runtime boundary ----------
+
+const RAW_WORKFLOW_RUNTIME_SPECIFIER_RE =
+  /["'](?:#compiled\/@workflow\/core\/runtime(?:\.js|\/[^"']+\.js)|@workflow\/core\/runtime(?:\/[^"']+)?|workflow\/(?:api|runtime))["']/;
+const WORKFLOW_QUEUE_NAMESPACE_WRITE_RE =
+  /process\.env(?:\.WORKFLOW_QUEUE_NAMESPACE|\[\s*(?:WORKFLOW_QUEUE_NAMESPACE_ENV|["']WORKFLOW_QUEUE_NAMESPACE["'])\s*\])\s*=/;
+const WORKFLOW_RUNTIME_FACADES = new Set(["packages/eve/src/internal/workflow/runtime.ts"]);
+const WORKFLOW_QUEUE_NAMESPACE_MODULE = "packages/eve/src/internal/workflow/queue-namespace.ts";
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule33(posix, lines, violations) {
+  lines.forEach((line, idx) => {
+    const isTypeOnlyImport = /^\s*(?:import|export)\s+type\b/.test(line);
+    const isRuntimeImport =
+      /^(?:import|export)\b|^}\s*from\b|\b(?:import|require)\s*\(/.test(line.trimStart()) &&
+      RAW_WORKFLOW_RUNTIME_SPECIFIER_RE.test(line);
+    if (!WORKFLOW_RUNTIME_FACADES.has(posix) && !isTypeOnlyImport && isRuntimeImport) {
+      violations.push({
+        rule: 33,
+        file: posix,
+        line: idx + 1,
+        message: `imports the raw Workflow runtime. Import from "#internal/workflow/runtime.js" to preserve eve's single Workflow runtime package identity.`,
+      });
+    }
+
+    if (posix !== WORKFLOW_QUEUE_NAMESPACE_MODULE && WORKFLOW_QUEUE_NAMESPACE_WRITE_RE.test(line)) {
+      violations.push({
+        rule: 33,
+        file: posix,
+        line: idx + 1,
+        message: `writes WORKFLOW_QUEUE_NAMESPACE outside the canonical namespace module. Use installEveWorkflowQueueNamespace() so every queue surface derives the same agent-scoped value.`,
       });
     }
   });
@@ -665,6 +716,88 @@ async function checkRule31RemovedCliReferences() {
   return violations;
 }
 
+// ---------- Rule 32: research document frontmatter ----------
+
+const RESEARCH_DIR = "research";
+const RESEARCH_LAST_UPDATED_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * @returns {Promise<Violation[]>}
+ */
+async function checkRule32ResearchFrontmatter() {
+  /** @type {Violation[]} */
+  const violations = [];
+  const researchRoot = join(REPO_ROOT, RESEARCH_DIR);
+
+  try {
+    await readdir(researchRoot);
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return violations;
+    }
+    throw error;
+  }
+
+  for await (const { absPath, relPath } of walkFiles(researchRoot)) {
+    const posix = toPosix(relPath);
+    if (!posix.endsWith(".md")) continue;
+
+    const content = await readFile(absPath, "utf8");
+    if (!matter.test(content)) {
+      violations.push({
+        rule: 32,
+        file: posix,
+        message:
+          "research documents must start with YAML frontmatter containing `issue`, `status`, and `last_updated` fields.",
+      });
+      continue;
+    }
+
+    let data;
+    try {
+      data = matter(content).data;
+    } catch (error) {
+      violations.push({
+        rule: 32,
+        file: posix,
+        message: `research frontmatter must be valid YAML: ${error instanceof Error ? error.message : String(error)}`,
+      });
+      continue;
+    }
+
+    if (data === null || typeof data !== "object" || Array.isArray(data)) {
+      violations.push({
+        rule: 32,
+        file: posix,
+        message: "research frontmatter must parse to an object.",
+      });
+      continue;
+    }
+
+    for (const field of ["issue", "status"]) {
+      if (typeof data[field] === "string" && data[field].trim().length > 0) continue;
+      violations.push({
+        rule: 32,
+        file: posix,
+        message: `research frontmatter must set \`${field}\` to a non-empty string.`,
+      });
+    }
+
+    if (
+      typeof data.last_updated !== "string" ||
+      !RESEARCH_LAST_UPDATED_RE.test(data.last_updated)
+    ) {
+      violations.push({
+        rule: 32,
+        file: posix,
+        message: "research frontmatter must set `last_updated` to a quoted `YYYY-MM-DD` string.",
+      });
+    }
+  }
+
+  return violations;
+}
+
 /**
  * @returns {Promise<Set<string>>}
  */
@@ -841,6 +974,7 @@ async function main() {
     rule26: /** @type {Violation[]} */ ([]),
     rule27: /** @type {Violation[]} */ ([]),
     rule28: /** @type {Violation[]} */ ([]),
+    rule33: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -919,6 +1053,12 @@ async function main() {
 
   // Rule 31
   violations.push(...(await checkRule31RemovedCliReferences()));
+
+  // Rule 32
+  violations.push(...(await checkRule32ResearchFrontmatter()));
+
+  // Rule 33
+  violations.push(...state.rule33);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

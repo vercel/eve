@@ -340,8 +340,71 @@ describe("compactMessages", () => {
         content: "Summary of the large SQL result",
         role: "assistant",
       },
+      { content: "Continue.", role: "user" },
     ]);
     expect(vi.mocked(generateText)).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops tool results and strips assistant tool calls from the kept tail", async () => {
+    const { generateText } = await import("ai");
+
+    vi.mocked(generateText).mockResolvedValue({
+      text: "summary",
+    } as Awaited<ReturnType<typeof generateText>>);
+
+    const messages: ModelMessage[] = [
+      { content: "old context to summarize", role: "user" },
+      { content: "older reply", role: "assistant" },
+      // Recent window (last 4):
+      { content: "do the thing", role: "user" },
+      {
+        content: [
+          { text: "Running the tool.", type: "text" },
+          { input: { x: 1 }, toolCallId: "call-1", toolName: "run", type: "tool-call" },
+        ],
+        role: "assistant",
+      },
+      {
+        content: [
+          {
+            output: { type: "json", value: { ok: true } },
+            toolCallId: "call-1",
+            toolName: "run",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+      { content: "All done.", role: "assistant" },
+    ];
+
+    const model = {} as Parameters<typeof compactMessages>[1];
+    const result = await compactMessages(messages, model, {
+      recentWindowSize: 4,
+      threshold: 100_000,
+    });
+
+    // No tool-result message and no tool_use/tool_result part survives anywhere,
+    // so the rebuilt history has no dangling tool calls.
+    for (const message of result) {
+      expect(message.role).not.toBe("tool");
+      if (Array.isArray(message.content)) {
+        for (const part of message.content) {
+          expect(part.type).not.toBe("tool-call");
+          expect(part.type).not.toBe("tool-result");
+        }
+      }
+    }
+
+    // User messages are kept; the assistant tool-call turn is reduced to its text.
+    expect(result).toEqual([
+      { content: "Summary of our conversation so far:", role: "user" },
+      { content: "summary", role: "assistant" },
+      { content: "do the thing", role: "user" },
+      { content: "Running the tool.", role: "assistant" },
+      { content: "All done.", role: "assistant" },
+      { content: "Continue.", role: "user" },
+    ]);
   });
 
   it("forwards headers to the generateText call", async () => {
