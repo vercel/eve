@@ -2,7 +2,11 @@ import { resumeHook } from "#internal/workflow/runtime.js";
 import { EVE_CALLBACK_ROUTE_PATTERN } from "#protocol/routes.js";
 import type { ChannelMethod, RouteContext } from "#public/definitions/channel.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
-import type { RuntimeSubagentResultActionResult } from "#runtime/actions/types.js";
+import {
+  runtimeSubagentResultUsageSchema,
+  type RuntimeSubagentResultActionResult,
+  type RuntimeSubagentResultUsage,
+} from "#runtime/actions/types.js";
 import type { JsonValue } from "#shared/json.js";
 
 export const HTTP_SESSION_CALLBACK_CHANNEL_NAME_PREFIX = "eve/v1/callback";
@@ -16,6 +20,7 @@ type SessionTerminalCallbackPayload =
       readonly output: string;
       readonly sessionId: string;
       readonly subagentName: string;
+      readonly usage?: RuntimeSubagentResultUsage;
     }
   | {
       readonly callId: string;
@@ -99,12 +104,14 @@ function projectSessionCallbackResult(
   }
 
   if (payload.kind === "session.completed") {
-    return {
+    const base: RuntimeSubagentResultActionResult = {
       callId: payload.callId,
       kind: "subagent-result",
       output: payload.output ?? "",
       subagentName: payload.subagentName,
     };
+    const usage = parseCallbackUsage((payload as { usage?: unknown }).usage);
+    return usage === undefined ? base : { ...base, usage };
   }
 
   if (payload.kind === "session.failed") {
@@ -124,4 +131,17 @@ function projectSessionCallbackResult(
   }
 
   return Response.json({ error: "Unsupported callback kind.", ok: false }, { status: 400 });
+}
+
+/**
+ * Usage arrives from a remote callee that may run a different eve version,
+ * so it is validated independently and dropped — never rejected — when
+ * malformed. The rest of the callback still resumes the parent.
+ */
+function parseCallbackUsage(value: unknown): RuntimeSubagentResultUsage | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const parsed = runtimeSubagentResultUsageSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
 }
