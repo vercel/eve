@@ -2380,6 +2380,146 @@ describe("createToolLoopHarness", () => {
     });
   });
 
+  it("continues the tool loop when load_skill fails during local tool execution", async () => {
+    setupMockAgent({
+      content: [
+        {
+          input: { skill: "missing-demo-skill" },
+          toolCallId: "call-load-skill",
+          toolName: "load_skill",
+          type: "tool-call",
+        },
+      ],
+      finishReason: "tool-calls",
+      fullStreamParts: [
+        {
+          input: { skill: "missing-demo-skill" },
+          toolCallId: "call-load-skill",
+          toolName: "load_skill",
+          type: "tool-call",
+        },
+        {
+          error: new Error(
+            'No skill named "missing-demo-skill" at /workspace/skills/missing-demo-skill/SKILL.md.',
+          ),
+          input: { skill: "missing-demo-skill" },
+          toolCallId: "call-load-skill",
+          toolName: "load_skill",
+          type: "tool-error",
+        },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ],
+      response: {
+        messages: [
+          {
+            content: [
+              {
+                input: { skill: "missing-demo-skill" },
+                toolCallId: "call-load-skill",
+                toolName: "load_skill",
+                type: "tool-call",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [
+        {
+          input: { skill: "missing-demo-skill" },
+          toolCallId: "call-load-skill",
+          toolName: "load_skill",
+          type: "tool-call",
+        },
+      ],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const config = createTestConfig("conversation", emit, {
+      tools: new Map([
+        [
+          "load_skill",
+          {
+            description: "Load a skill.",
+            execute: vi.fn(),
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "load_skill",
+          },
+        ],
+      ]),
+    });
+    const session = createTestSession({
+      agent: {
+        modelReference: { id: "test-model" },
+        system: "You are a test assistant.",
+        tools: [
+          {
+            description: "Load a skill.",
+            inputSchema: { type: "object" },
+            name: "load_skill",
+          },
+        ],
+      },
+    });
+
+    const result = await createToolLoopHarness(config)(session, {
+      message: "Use the missing demo skill.",
+    });
+
+    expect(typeof result.next).toBe("function");
+    expect(events.find((event) => event.type === "action.result")?.data).toEqual({
+      error: {
+        code: "ACTION_RESULT_FAILED",
+        message:
+          'No skill named "missing-demo-skill" at /workspace/skills/missing-demo-skill/SKILL.md.',
+      },
+      result: {
+        callId: "call-load-skill",
+        isError: true,
+        kind: "tool-result",
+        output:
+          'No skill named "missing-demo-skill" at /workspace/skills/missing-demo-skill/SKILL.md.',
+        toolName: "load_skill",
+      },
+      sequence: 0,
+      stepIndex: 0,
+      status: "failed",
+      turnId: "turn_0",
+    });
+    expect(result.session.history.slice(-2)).toEqual([
+      {
+        content: [
+          {
+            input: { skill: "missing-demo-skill" },
+            toolCallId: "call-load-skill",
+            toolName: "load_skill",
+            type: "tool-call",
+          },
+        ],
+        role: "assistant",
+      },
+      {
+        content: [
+          {
+            output: {
+              type: "error-text",
+              value:
+                'No skill named "missing-demo-skill" at /workspace/skills/missing-demo-skill/SKILL.md.',
+            },
+            toolCallId: "call-load-skill",
+            toolName: "load_skill",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+    ]);
+    expect(events.some((event) => event.type === "turn.failed")).toBe(false);
+    expect(events.some((event) => event.type === "session.failed")).toBe(false);
+  });
+
   it("prefers toolResults over response messages when the stream omits the result", async () => {
     setupMockAgent({
       finishReason: "tool-calls",
@@ -2653,6 +2793,39 @@ describe("createToolLoopHarness", () => {
     expect(types).toContain("turn.failed");
     expect(types).toContain("session.failed");
     expect(types).not.toContain("session.waiting");
+  });
+
+  it("surfaces a terminal model-call error to the parent as a failed task result", async () => {
+    // Regression test for https://github.com/vercel/eve/issues/412 — a
+    // delegated subagent runs in task mode; when its model id does not
+    // resolve (terminal 404), the failure must reach the parent as an
+    // error result, not a successful empty output.
+    const error = Object.assign(new Error("No endpoints found for anthropic/claude-3.5-haiku"), {
+      name: "AI_APICallError",
+      statusCode: 404,
+    });
+    setupMockAgentError(error);
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("task", emit));
+
+    const result = await runStep(createTestSession(), { message: "Delegated task" });
+
+    // The task's terminal result must be marked as an error with the
+    // failure message as output, mirroring the non-terminal task-mode
+    // failure shape. Today the terminal branch returns
+    // `{ done: true, output: "" }`, which the parent driver treats as a
+    // successful delegation with empty output.
+    expect(result.next).toMatchObject({
+      done: true,
+      isError: true,
+      output: expect.stringContaining("No endpoints found for anthropic/claude-3.5-haiku"),
+    });
+
+    const types = events.map((e) => e.type);
+    expect(types).toContain("step.failed");
+    expect(types).toContain("turn.failed");
+    expect(types).toContain("session.failed");
   });
 
   it("emits the full terminal failure cascade on an explicit Gateway invalid-request error", async () => {

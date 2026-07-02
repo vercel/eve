@@ -1,32 +1,29 @@
-/**
- * Minimal Twilio REST API wrapper used by the Twilio channel.
- *
- * Requests use Twilio's normal `application/x-www-form-urlencoded`
- * body encoding and HTTP Basic auth. No Twilio SDK dependency is
- * required or exposed through eve public APIs.
- */
+import {
+  callTwilioApi as callPrimitive,
+  encodeTwilioForm,
+  resolveTwilioCredential,
+  TwilioApiError,
+  type TwilioApiResponse,
+  type TwilioCredential,
+  type TwilioFetch,
+} from "#compiled/@chat-adapter/twilio/api.js";
 
 import { resolveTwilioAuthToken, type TwilioAuthToken } from "#public/channels/twilio/verify.js";
 
 /**
- * Builds the Twilio channel-local continuation token
- * (`<from>:<to>`). Route `send()` namespaces this with the channel
- * name before passing it to the runtime (`twilio:<from>:<to>`), so
- * Twilio routes should pass the raw channel-local form returned
- * here. `to` may be empty for proactive sessions that don't yet know
- * the Twilio sender number.
+ * Builds the Twilio channel-local continuation token (`<from>:<to>`).
+ * Eve namespaces this with the channel name before handing it to the runtime.
  */
 export function twilioContinuationToken(from: string, to: string | undefined): string {
   return `${from}:${to ?? ""}`;
 }
 
 /** Twilio Account SID, materialized directly or from an async secret provider. */
-export type TwilioAccountSid = string | (() => string | Promise<string>);
+export type TwilioAccountSid = TwilioCredential;
 
-/** Fetch implementation override matching the global `fetch` signature. Defaults to the runtime global; supply a custom one for tests or non-standard runtimes. */
-export type TwilioFetch = typeof fetch;
+export type { TwilioApiResponse, TwilioFetch };
 
-/** Credentials required for Twilio REST API calls and webhook verification. */
+/** Credentials used for Twilio REST API calls and webhook verification. */
 export interface TwilioCredentials {
   readonly accountSid?: TwilioAccountSid;
   readonly authToken?: TwilioAuthToken;
@@ -37,17 +34,6 @@ export interface TwilioApiOptions {
   readonly credentials?: TwilioCredentials;
   readonly apiBaseUrl?: string;
   readonly fetch?: TwilioFetch;
-}
-
-/**
- * Result of a Twilio REST call: HTTP `status`, an `ok` flag, and `body`.
- * `body` holds parsed JSON for a JSON response, the raw text string
- * otherwise, or `null` when empty.
- */
-export interface TwilioApiResponse {
-  readonly status: number;
-  readonly ok: boolean;
-  readonly body: unknown;
 }
 
 /** Parameters for creating an outbound Twilio message. */
@@ -67,16 +53,21 @@ export interface TwilioUpdateCallInput extends TwilioApiOptions {
 
 /** Resolves a Twilio Account SID, falling back to `TWILIO_ACCOUNT_SID`. */
 export async function resolveTwilioAccountSid(accountSid?: TwilioAccountSid): Promise<string> {
-  const source = accountSid ?? process.env.TWILIO_ACCOUNT_SID;
-  if (!source) throw new Error("TWILIO_ACCOUNT_SID is required.");
-  return typeof source === "function" ? await source() : source;
+  try {
+    return await resolveTwilioCredential(accountSid, "TWILIO_ACCOUNT_SID");
+  } catch (error) {
+    if (error instanceof TwilioApiError && error.status === 0) {
+      throw new Error("TWILIO_ACCOUNT_SID is required.");
+    }
+    throw error;
+  }
 }
 
 /**
  * Calls Twilio's REST API with Basic auth and form-encoded body fields.
  *
- * `path` is relative to `https://api.twilio.com` by default and may be
- * pointed elsewhere through `apiBaseUrl` for tests or proxies.
+ * The return shape intentionally preserves Eve's previous non-throwing HTTP
+ * behavior: non-2xx Twilio responses become `{ ok: false, status, body }`.
  */
 export async function callTwilioApi(input: {
   readonly credentials?: TwilioCredentials;
@@ -85,24 +76,16 @@ export async function callTwilioApi(input: {
   readonly path: string;
   readonly body: Readonly<Record<string, string | number | boolean | undefined | null>>;
 }): Promise<TwilioApiResponse> {
-  const accountSid = await resolveTwilioAccountSid(input.credentials?.accountSid);
-  const authToken = await resolveTwilioAuthToken(input.credentials?.authToken);
-  const apiFetch = input.fetch ?? fetch;
-  const url = `${input.apiBaseUrl ?? "https://api.twilio.com"}${input.path}`;
-  const body = encodeForm(input.body);
-  const response = await apiFetch(url, {
-    method: "POST",
-    headers: {
-      authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`,
-      "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
-    },
-    body,
-  });
-  return {
-    status: response.status,
-    ok: response.ok,
-    body: await parseResponseBody(response),
-  };
+  const credentials = await resolveCredentials(input.credentials);
+  return preserveTwilioApiResponse(
+    callPrimitive({
+      apiBaseUrl: input.apiBaseUrl,
+      body: encodeTwilioForm(input.body),
+      credentials,
+      fetch: input.fetch,
+      path: input.path,
+    }),
+  );
 }
 
 /** Sends an outbound SMS/MMS-style message via Twilio's Messages resource. */
@@ -111,52 +94,63 @@ export async function sendTwilioMessage(input: TwilioSendMessageInput): Promise<
     throw new Error("twilioChannel: sending a message requires from or messagingServiceSid.");
   }
   const accountSid = await resolveTwilioAccountSid(input.credentials?.accountSid);
-  return callTwilioApi({
-    apiBaseUrl: input.apiBaseUrl,
-    credentials: input.credentials,
-    fetch: input.fetch,
-    path: `/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Messages.json`,
-    body: {
-      Body: input.body,
-      From: input.from,
-      MessagingServiceSid: input.messagingServiceSid,
-      StatusCallback: input.statusCallbackUrl,
-      To: input.to,
-    },
-  });
+  const credentials = await resolveCredentials(input.credentials);
+  return preserveTwilioApiResponse(
+    callPrimitive({
+      apiBaseUrl: input.apiBaseUrl,
+      body: encodeTwilioForm({
+        Body: input.body,
+        From: input.from,
+        MessagingServiceSid: input.messagingServiceSid,
+        StatusCallback: input.statusCallbackUrl,
+        To: input.to,
+      }),
+      credentials,
+      fetch: input.fetch,
+      path: `/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Messages.json`,
+    }),
+  );
 }
 
 /** Updates a live Twilio call by posting replacement TwiML to the Calls resource. */
 export async function updateTwilioCall(input: TwilioUpdateCallInput): Promise<TwilioApiResponse> {
   const accountSid = await resolveTwilioAccountSid(input.credentials?.accountSid);
-  return callTwilioApi({
-    apiBaseUrl: input.apiBaseUrl,
-    credentials: input.credentials,
-    fetch: input.fetch,
-    path: `/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Calls/${encodeURIComponent(
-      input.callSid,
-    )}.json`,
-    body: { Twiml: input.twiml },
-  });
+  const credentials = await resolveCredentials(input.credentials);
+  return preserveTwilioApiResponse(
+    callPrimitive({
+      apiBaseUrl: input.apiBaseUrl,
+      body: encodeTwilioForm({ Twiml: input.twiml }),
+      credentials,
+      fetch: input.fetch,
+      path: `/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Calls/${encodeURIComponent(
+        input.callSid,
+      )}.json`,
+    }),
+  );
 }
 
-function encodeForm(
-  body: Readonly<Record<string, string | number | boolean | undefined | null>>,
-): URLSearchParams {
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(body)) {
-    if (value === undefined || value === null) continue;
-    params.set(key, String(value));
-  }
-  return params;
+async function resolveCredentials(
+  credentials: TwilioCredentials | undefined,
+): Promise<{ accountSid: string; authToken: string }> {
+  return {
+    accountSid: await resolveTwilioAccountSid(credentials?.accountSid),
+    authToken: await resolveTwilioAuthToken(credentials?.authToken),
+  };
 }
 
-async function parseResponseBody(response: Response): Promise<unknown> {
-  const text = await response.text();
-  if (!text) return null;
+async function preserveTwilioApiResponse(
+  response: Promise<TwilioApiResponse>,
+): Promise<TwilioApiResponse> {
   try {
-    return JSON.parse(text);
-  } catch {
-    return text;
+    return await response;
+  } catch (error) {
+    if (error instanceof TwilioApiError && error.status !== 0) {
+      return {
+        body: error.body,
+        ok: false,
+        status: error.status,
+      };
+    }
+    throw error;
   }
 }
