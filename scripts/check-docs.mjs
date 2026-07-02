@@ -197,6 +197,11 @@ function renderedUrl(relPath, source) {
   return `/docs${route}`.replace(/\/$/, "");
 }
 
+function linkBaseUrl(relPath, sourceUrl) {
+  const slug = relPath.replace(/\\/g, "/").replace(/\.mdx?$/, "");
+  return slug === "index" || slug.endsWith("/index") ? `${sourceUrl}/` : sourceUrl;
+}
+
 function checkLinks(rootDir) {
   const files = walkMarkdown(rootDir);
   const renderedUrls = new Set();
@@ -218,6 +223,7 @@ function checkLinks(rootDir) {
     if (isExcluded(rel)) continue;
     const source = readFileSync(abs, "utf8");
     const sourceUrl = renderedUrl(rel, source);
+    const baseUrl = linkBaseUrl(rel, sourceUrl);
     let m;
     while ((m = linkRe.exec(source)) !== null) {
       let target = m[1].trim();
@@ -228,7 +234,7 @@ function checkLinks(rootDir) {
       if (!isRel && !isSite) continue; // external, mailto, #anchor, bare /eve/* runtime route, etc.
       target = target.split("#")[0].split("?")[0];
       if (!target) continue; // pure in-page anchor
-      const resolvedUrl = new URL(target, `https://eve.dev${sourceUrl}`).pathname
+      const resolvedUrl = new URL(target, `https://eve.dev${baseUrl}`).pathname
         .replace(/\/$/, "")
         .replace(/\.mdx?$/, "");
       if (resolvedUrl === "/docs") continue; // docs root / index
