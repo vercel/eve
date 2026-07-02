@@ -6,13 +6,13 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { copyDevelopmentSourceSnapshot } from "#internal/nitro/dev-runtime-source-snapshot-copy.js";
 import { createDevelopmentSourceSnapshotPlan } from "#internal/nitro/dev-runtime-source-snapshot.js";
+import { TERMINAL_WORKFLOW_RUN_STATUSES } from "#internal/nitro/dev-workflow-data.js";
 
 const DEV_RUNTIME_ARTIFACTS_DIRECTORY = "dev-runtime";
 const DEV_RUNTIME_ARTIFACTS_POINTER_VERSION = 2;
 const DEV_RUNTIME_SNAPSHOT_RECENT_WINDOW_MS = 15 * 60 * 1000;
 const DEV_RUNTIME_SNAPSHOT_RETAIN_COUNT = 5;
 const DEV_RUNTIME_WORKFLOW_DATA_MAX_SCAN_BYTES = 1024 * 1024;
-const TERMINAL_WORKFLOW_RUN_STATUSES = new Set(["completed", "failed", "cancelled", "canceled"]);
 
 interface DevelopmentRuntimeArtifactsPointerV1 {
   readonly appRoot: string;
