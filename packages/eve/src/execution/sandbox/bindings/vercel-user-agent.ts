@@ -1,11 +1,5 @@
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 
-/**
- * Product token eve appends to the `user-agent` on every Vercel Sandbox API
- * call so the sandbox control plane can attribute traffic to eve and its
- * version. Appended (not prepended) to preserve the SDK's leading
- * `vercel/sandbox/<version>` token, which the control plane parses.
- */
 export function eveSandboxUserAgentToken(): string {
   const { name, version } = resolveInstalledPackageInfo();
   return `${name}/${version}`;
@@ -13,8 +7,7 @@ export function eveSandboxUserAgentToken(): string {
 
 /**
  * Wraps a `fetch` implementation so every request's `user-agent` ends with the
- * {@link eveSandboxUserAgentToken}, identifying the eve client and version
- * while keeping any existing user-agent intact.
+ * {@link eveSandboxUserAgentToken} (e.g.: eve/0.18.1).
  */
 export function withEveSandboxUserAgent(
   inner: typeof globalThis.fetch = globalThis.fetch,
