@@ -5,7 +5,7 @@ import { normalizeLogicalPath } from "#discover/filesystem.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
 import { normalizeJsonSchemaDefinition } from "#shared/json-schema.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
-import { classifyModelRouting } from "#internal/classify-model-routing.js";
+import { classifyModelEndpoint } from "#internal/classify-model-endpoint.js";
 import { formatOpenAiGatewayModelId } from "#internal/model-auth/endpoint/codex/catalog.js";
 import {
   isExperimentalCodexModel,
@@ -175,7 +175,7 @@ async function normalizeAuthoredModelReference(
     const model: CompiledRuntimeModelReference = {
       id: formatLanguageModelGatewayId(input.value),
       providerOptions: parseProviderOptionsRecord(input.providerOptions),
-      routing: classifyModelRouting(input.value, input.providerOptions),
+      routing: classifyModelEndpoint(input.value, input.providerOptions),
     };
 
     return await withCompiledRuntimeModelLimits(model, input);
@@ -218,7 +218,7 @@ async function normalizeAuthoredModelReference(
     );
   }
 
-  const routing = classifyModelRouting(languageModel, input.providerOptions);
+  const routing = classifyModelEndpoint(languageModel, input.providerOptions);
   const sourceBackedModel = {
     id: formatLanguageModelGatewayId(languageModel),
     source: {
@@ -271,7 +271,7 @@ async function normalizeExperimentalCodexModelReference(
   const model: CompiledRuntimeModelReference = {
     id: gatewayId,
     providerOptions: parseProviderOptionsRecord(input.providerOptions),
-    routing: classifyModelRouting(gatewayId, input.providerOptions),
+    routing: classifyModelEndpoint(gatewayId, input.providerOptions),
   };
 
   if (input.mode === "development") {

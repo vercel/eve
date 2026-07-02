@@ -25,7 +25,7 @@ import {
   detectProjectIdentity,
   type VercelProjectOperationOptions,
 } from "../project-resolution.js";
-import type { ModelRouting } from "#shared/agent-definition.js";
+import type { ModelEndpoint } from "#shared/agent-definition.js";
 import type { Prompter, SelectOption } from "../prompter.js";
 import { runInteractive } from "../runner.js";
 import { snapshotSetupState } from "../state.js";
@@ -40,7 +40,7 @@ export interface CurrentAgentModel {
   /** The model is served through the local Codex login transport. */
   codex: boolean;
   id: string | null;
-  routing: ModelRouting | null;
+  routing: ModelEndpoint | null;
   /**
    * The authored `model` is a string the source editor can rewrite. False for a
    * source-backed SDK model call (`gateway(...)`, `anthropic(...)`), which is
@@ -143,7 +143,7 @@ function providerStatusHint(
 function modelMenuRows(
   current: string | null,
   provider: ModelProviderStatus,
-  routing: ModelRouting | null,
+  routing: ModelEndpoint | null,
   codex: boolean,
   editable: boolean,
 ): SelectOption<ModelMenuRow>[] {

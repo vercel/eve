@@ -33,24 +33,20 @@ export function createCodexSubscriptionModel(
     name: "codex",
   }).responses(model);
 
-  return disableCodexResponseStorage(openaiModel);
-}
-
-function disableCodexResponseStorage(model: LanguageModelV4): LanguageModelV4 {
-  return new Proxy(model, {
-    get(target, property, receiver) {
-      if (property === "doGenerate") {
-        return (callOptions: LanguageModelV4CallOptions) =>
-          target.doGenerate(normalizeCodexCallOptions(callOptions));
-      }
-      if (property === "doStream") {
-        return (callOptions: LanguageModelV4CallOptions) =>
-          target.doStream(normalizeCodexCallOptions(callOptions));
-      }
-
-      return Reflect.get(target, property, receiver);
+  // The Codex backend rejects stored responses and server-side item ids, so
+  // every call goes through normalizeCodexCallOptions before delegation.
+  return {
+    specificationVersion: openaiModel.specificationVersion,
+    provider: openaiModel.provider,
+    modelId: openaiModel.modelId,
+    get supportedUrls() {
+      return openaiModel.supportedUrls;
     },
-  });
+    doGenerate: (callOptions: LanguageModelV4CallOptions) =>
+      openaiModel.doGenerate(normalizeCodexCallOptions(callOptions)),
+    doStream: (callOptions: LanguageModelV4CallOptions) =>
+      openaiModel.doStream(normalizeCodexCallOptions(callOptions)),
+  };
 }
 
 function normalizeCodexCallOptions(

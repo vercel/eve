@@ -6,14 +6,14 @@ import {
   resolveCodexEndpointStatus,
   type ResolveCodexEndpointStatusOptions,
 } from "#internal/model-auth/endpoint/codex/status.js";
-import type { ModelRouting } from "#shared/agent-definition.js";
+import type { ModelEndpoint } from "#shared/agent-definition.js";
 import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 
 export interface ResolveModelEndpointStatusOptions
   extends ResolveAiGatewayEndpointStatusOptions, ResolveCodexEndpointStatusOptions {}
 
 export async function resolveModelEndpointStatus(
-  model: { readonly routing: ModelRouting; readonly transport?: "codex" },
+  model: { readonly routing: ModelEndpoint; readonly transport?: "codex" },
   options: ResolveModelEndpointStatusOptions = {},
 ): Promise<ModelEndpointStatus> {
   if (model.transport === "codex") {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { compiledAgentManifestSchema, createCompiledAgentManifest } from "#compiler/manifest.js";
-import { classifyModelRouting } from "#internal/classify-model-routing.js";
+import { classifyModelEndpoint } from "#internal/classify-model-endpoint.js";
 
 describe("compiledAgentManifestSchema", () => {
   it("preserves reasoning configuration", () => {
@@ -9,7 +9,7 @@ describe("compiledAgentManifestSchema", () => {
       agentRoot: "/app/agent",
       appRoot: "/app",
       config: {
-        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
+        model: { id: "openai/gpt-5.5", routing: classifyModelEndpoint("openai/gpt-5.5") },
         name: "app",
         reasoning: "high",
       },
@@ -25,7 +25,7 @@ describe("compiledAgentManifestSchema", () => {
       agentRoot: "/app/agent",
       appRoot: "/app",
       config: {
-        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
+        model: { id: "openai/gpt-5.5", routing: classifyModelEndpoint("openai/gpt-5.5") },
         name: "app",
         experimental: {
           workflow: {

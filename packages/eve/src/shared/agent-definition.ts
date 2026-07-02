@@ -36,7 +36,7 @@ export type AgentReasoningDefinition = NonNullable<CallSettings["reasoning"]>;
  * This is a routing fact, not a model-existence check; it does not assert the
  * model id names a real model.
  */
-export type ModelRouting =
+export type ModelEndpoint =
   | { kind: "gateway"; target: string; byok?: string }
   | { kind: "external"; provider: string };
 

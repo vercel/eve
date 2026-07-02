@@ -1,5 +1,14 @@
 import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
+import type { ModelEndpointFactory } from "#internal/model-auth/endpoint/model-endpoint-factory.js";
 import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
+
+/**
+ * The default endpoint: a gateway model id string resolves through the AI
+ * SDK global default provider, which routes it via the Vercel AI Gateway.
+ */
+export const aiGatewayEndpoint = {
+  createModel: (reference) => reference.id,
+} satisfies ModelEndpointFactory;
 
 export interface ResolveAiGatewayEndpointStatusOptions {
   readonly env?: Record<string, string | undefined>;

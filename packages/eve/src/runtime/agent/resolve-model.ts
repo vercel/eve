@@ -1,9 +1,9 @@
 import type { LanguageModel } from "ai";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
-import { codexModelSlugFromGatewayId } from "#internal/model-auth/endpoint/codex/catalog.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
 import { isExperimentalCodexModel } from "#shared/codex-subscription-model.js";
-import { createCodexSubscriptionModel } from "#internal/model-auth/endpoint/codex/model.js";
+import { aiGatewayEndpoint } from "#internal/model-auth/endpoint/ai-gateway.js";
+import { codexEndpoint } from "#internal/model-auth/endpoint/codex/endpoint.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { resolveBootstrapRuntimeModel } from "#runtime/agent/bootstrap-model.js";
 import {
@@ -39,16 +39,15 @@ export async function resolveRuntimeModelReference(
     return mockModel;
   }
 
-  const codexModel = resolveCodexRuntimeModel(reference);
-  if (codexModel !== null) {
-    return codexModel;
+  if (reference.transport === "codex") {
+    return codexEndpoint.createModel(reference);
   }
 
   if (isSourceBackedRuntimeModelReference(reference)) {
     return await loadSourceBackedRuntimeModelReference(reference, scope);
   }
 
-  return reference.id;
+  return aiGatewayEndpoint.createModel(reference);
 }
 
 async function loadSourceBackedRuntimeModelReference(
@@ -93,20 +92,6 @@ async function loadSourceBackedRuntimeModelReference(
   }
 
   return model;
-}
-
-function resolveCodexRuntimeModel(reference: RuntimeModelReference): LanguageModel | null {
-  if (reference.transport !== "codex") {
-    return null;
-  }
-
-  const model = codexModelSlugFromGatewayId(reference.id);
-
-  if (model === null) {
-    throw new Error(`Codex model auth requires an OpenAI model id, received "${reference.id}".`);
-  }
-
-  return createCodexSubscriptionModel({ model });
 }
 
 function isSourceBackedRuntimeModelReference(

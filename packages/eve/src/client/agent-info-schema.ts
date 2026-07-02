@@ -1,5 +1,5 @@
 import { z } from "#compiled/zod/index.js";
-import { modelRoutingClientSchema } from "#shared/agent-model-schemas.js";
+import { modelEndpointClientSchema } from "#shared/agent-model-schemas.js";
 import { modelEndpointStatusSchema } from "#shared/model-endpoint-status.js";
 
 const source = z.object({
@@ -117,7 +117,7 @@ export const AgentInfoResultSchema = z.object({
       id: z.string(),
       providerOptions: z.unknown().optional(),
       source: source.optional(),
-      routing: modelRoutingClientSchema.optional(),
+      routing: modelEndpointClientSchema.optional(),
       endpoint: modelEndpointStatusSchema.optional(),
     }),
     name: z.string(),
