@@ -4,7 +4,7 @@ description: "Reach your agent from Microsoft Teams via the Bot Framework Activi
 type: integration
 ---
 
-The Teams channel runs your agent inside Microsoft Teams as a bot. It takes Bot Framework Activity POSTs, checks the Bot Connector bearer JWT on each one, and routes message activities to your agent. Human-in-the-loop (HITL) prompts come back as Adaptive Cards, and replies go out over the Bot Framework Connector REST API. See [Channels](./overview) for the contract this builds on.
+The Teams channel runs your agent inside Microsoft Teams as a bot. It takes Bot Framework Activity POSTs, checks the Bot Connector bearer JWT on each one, and routes message activities to your agent. Human-in-the-loop (HITL) prompts come back as Adaptive Cards, and replies go out over the Bot Framework Connector REST API. See [Channels](/docs/channels) for the contract this builds on.
 
 ## Add the channel
 
@@ -63,5 +63,5 @@ export default teamsChannel({
 
 ## What to read next
 
-- [Channels overview](./overview): the channel contract and every built-in channel
+- [Channels overview](/docs/channels): the channel contract and every built-in channel
 - [Auth & route protection](../guides/auth-and-route-protection): authenticating inbound traffic

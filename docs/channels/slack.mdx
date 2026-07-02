@@ -4,7 +4,7 @@ description: "Reach your agent from Slack app mentions and DMs, with thread anch
 type: integration
 ---
 
-The Slack channel puts your agent inside a workspace. It answers `@mentions` and DMs, replies in threads, shows typing indicators, and turns human-in-the-loop (HITL) prompts into buttons. Use it when the conversation should happen where your team already works. Credentials run through [Vercel Connect](../guides/auth-and-route-protection), which handles both the outbound bot token and inbound webhook verification, so there's no `SLACK_BOT_TOKEN` or `SLACK_SIGNING_SECRET` for you to manage. See [Channels](./overview) for the contract this builds on.
+The Slack channel puts your agent inside a workspace. It answers `@mentions` and DMs, replies in threads, shows typing indicators, and turns human-in-the-loop (HITL) prompts into buttons. Use it when the conversation should happen where your team already works. Credentials run through [Vercel Connect](../guides/auth-and-route-protection), which handles both the outbound bot token and inbound webhook verification, so there's no `SLACK_BOT_TOKEN` or `SLACK_SIGNING_SECRET` for you to manage. See [Channels](/docs/channels) for the contract this builds on.
 
 ## Set up Connect
 
@@ -121,5 +121,5 @@ Inbound files behind authenticated Slack URLs are staged with `fetchFile`. See [
 
 ## What to read next
 
-- [Channels overview](./overview): the channel contract and every built-in channel
+- [Channels overview](/docs/channels): the channel contract and every built-in channel
 - [Auth & route protection](../guides/auth-and-route-protection): authenticating inbound traffic

@@ -126,6 +126,6 @@ The order is structural, not incidental. By the time a resolver or hook reads ch
 ## What to read next
 
 - [Execution model & durability](./execution-model-and-durability): what makes a session durable and how parked work resumes.
-- [Channels](../channels/overview): what owns the continuation token and delivery.
+- [Channels](/docs/channels): what owns the continuation token and delivery.
 - [TypeScript SDK](../guides/client/overview): call these routes from scripts and server-side code.
 - [Frontend](../guides/frontend/overview): `useEveAgent` instead of raw routes.

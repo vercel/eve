@@ -7,7 +7,7 @@ The frontend helpers put a browser chat or agent UI on top of an eve agent. `use
 
 ## The integration model
 
-A browser UI is a client of the agent's HTTP routes (the [eve channel](../../channels/overview)). Two layers wire it up:
+A browser UI is a client of the agent's HTTP routes (the [eve channel](/docs/channels)). Two layers wire it up:
 
 - **The framework integration** mounts the eve routes on your app's origin, so the browser never crosses a CORS boundary or reads an env var to find the agent. Pick yours: [Next.js](./nextjs) (`withEve`), [Nuxt](./nuxt) (the `eve/nuxt` module), or [SvelteKit](./sveltekit) (the `eveSvelteKit` Vite plugin). On any other stack the hook talks to same-origin `/eve/v1/*` routes directly, or you pass an explicit `host`.
 - **The hook** (`useEveAgent`) holds the session state, streaming, errors, and composer status. It defaults to same-origin eve routes such as `/eve/v1/session`.
@@ -279,6 +279,6 @@ const agent = useEveAgent({
 ## What to read next
 
 - [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming): the event stream and session cursor
-- [Channels](../../channels/overview): the HTTP routes the hook talks to
+- [Channels](/docs/channels): the HTTP routes the hook talks to
 - [TypeScript SDK](../client/overview): the lower-level client underneath the frontend hooks
 - [Next.js](./nextjs): step-by-step setup for wiring eve into a Next.js app

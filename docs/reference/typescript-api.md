@@ -38,7 +38,7 @@ export default defineTool({
 | `defineMcpClientConnection`                           | `eve/connections`                             | `agent/connections/<name>.ts`        | [MCP connections](../connections/mcp)                  |
 | `defineOpenAPIConnection`                             | `eve/connections`                             | `agent/connections/<name>.ts`        | [OpenAPI connections](../connections/openapi)          |
 | `defineChannel`                                       | `eve/channels`                                | `agent/channels/<name>.ts`           | [Custom channels](../channels/custom)                  |
-| `eveChannel`, `slackChannel`, and the other platforms | `eve/channels/<platform>`                     | `agent/channels/<platform>.ts`       | [Channels](../channels/overview)                       |
+| `eveChannel`, `slackChannel`, and the other platforms | `eve/channels/<platform>`                     | `agent/channels/<platform>.ts`       | [Channels](/docs/channels)                             |
 | `defineSkill`                                         | `eve/skills`                                  | `agent/skills/<name>.ts`             | [Skills](../skills)                                    |
 | `defineInstructions`                                  | `eve/instructions`                            | `agent/instructions.ts`              | [Instructions](../instructions)                        |
 | `defineHook`                                          | `eve/hooks`                                   | `agent/hooks/<slug>.ts`              | [Hooks](../guides/hooks)                               |
