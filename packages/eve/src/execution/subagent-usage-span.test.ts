@@ -21,7 +21,7 @@ vi.mock("#compiled/@opentelemetry/api/index.js", async (importOriginal) => {
   };
 });
 
-const USAGE = { cacheReadTokens: 10, inputTokens: 100, outputTokens: 50 };
+const USAGE = { cacheReadTokens: 10, cacheWriteTokens: 5, inputTokens: 100, outputTokens: 50 };
 
 function subagentResult(
   overrides: Partial<Extract<RuntimeActionResult, { kind: "subagent-result" }>> = {},
@@ -55,6 +55,7 @@ describe("recordSubagentUsageSpans", () => {
         "gen_ai.usage.input_tokens": 100,
         "gen_ai.usage.output_tokens": 50,
         "gen_ai.usage.cache_read.input_tokens": 10,
+        "gen_ai.usage.cache_creation.input_tokens": 5,
       },
     });
     expect(endSpanMock).toHaveBeenCalledTimes(2);

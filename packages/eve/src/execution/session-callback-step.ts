@@ -1,10 +1,9 @@
 import type { SessionCallback } from "#channel/types.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { SessionCallbackKey } from "#context/keys.js";
-import { readCompletedSessionUsage } from "#execution/completed-session-usage.js";
-import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
+import type { Usage } from "#shared/usage.js";
 
 const SESSION_CALLBACK_TIMEOUT_MS = 30_000;
 const log = createLogger("execution.session-callback");
@@ -19,16 +18,16 @@ const log = createLogger("execution.session-callback");
  * hands retry/failure policy back to the Workflow orchestrator rather than
  * letting eve falsely mark the callback delivery as complete.
  *
- * When `sessionState` is provided on a completed callback, the session's
- * token totals ride along as `usage` so the caller can attribute this
- * agent's spend. Usage collection is best-effort and never blocks delivery.
+ * `usage` — the session's token totals — rides along on completed
+ * callbacks so the caller can attribute this agent's spend. Failed
+ * callbacks never carry usage.
  */
 export async function fireSessionCallbackStep(input: {
   readonly error?: unknown;
   readonly output?: unknown;
   readonly serializedContext: Record<string, unknown>;
-  readonly sessionState?: DurableSessionState;
   readonly status: "completed" | "failed";
+  readonly usage?: Usage;
 }): Promise<void> {
   "use step";
 
@@ -42,11 +41,11 @@ export async function fireSessionCallbackStep(input: {
     const callback = parseSerializedSessionCallback(value);
     const body =
       input.status === "completed"
-        ? await buildCompletedCallbackBody({
+        ? buildCompletedCallbackBody({
             callback,
             output: input.output,
             sessionId,
-            sessionState: input.sessionState,
+            usage: input.usage,
           })
         : {
             callId: callback.callId,
@@ -84,12 +83,12 @@ export async function fireSessionCallbackStep(input: {
   }
 }
 
-async function buildCompletedCallbackBody(input: {
+function buildCompletedCallbackBody(input: {
   readonly callback: SessionCallback;
   readonly output: unknown;
   readonly sessionId: string;
-  readonly sessionState: DurableSessionState | undefined;
-}): Promise<Record<string, unknown>> {
+  readonly usage: Usage | undefined;
+}): Record<string, unknown> {
   const base = {
     callId: input.callback.callId,
     kind: "session.completed" as const,
@@ -97,11 +96,7 @@ async function buildCompletedCallbackBody(input: {
     sessionId: input.sessionId,
     subagentName: input.callback.subagentName,
   };
-  if (input.sessionState === undefined) {
-    return base;
-  }
-  const usage = await readCompletedSessionUsage(input.sessionState);
-  return usage === undefined ? base : { ...base, usage };
+  return input.usage === undefined ? base : { ...base, usage: input.usage };
 }
 
 function parseSerializedSessionCallback(value: unknown): SessionCallback {

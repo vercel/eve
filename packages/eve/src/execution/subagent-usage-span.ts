@@ -29,6 +29,7 @@ export function recordSubagentUsageSpans(results: readonly RuntimeActionResult[]
           "gen_ai.usage.input_tokens": usage.inputTokens,
           "gen_ai.usage.output_tokens": usage.outputTokens,
           "gen_ai.usage.cache_read.input_tokens": usage.cacheReadTokens,
+          "gen_ai.usage.cache_creation.input_tokens": usage.cacheWriteTokens,
         },
       });
       span.end();

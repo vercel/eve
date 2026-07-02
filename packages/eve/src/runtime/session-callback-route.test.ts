@@ -78,7 +78,7 @@ describe("session callback route", () => {
           output: "done",
           sessionId: "remote-session",
           subagentName: "research",
-          usage: { cacheReadTokens: 10, inputTokens: 100, outputTokens: 50 },
+          usage: { cacheReadTokens: 10, cacheWriteTokens: 5, inputTokens: 100, outputTokens: 50 },
         }),
         method: "POST",
       }),
@@ -94,7 +94,7 @@ describe("session callback route", () => {
           kind: "subagent-result",
           output: "done",
           subagentName: "research",
-          usage: { cacheReadTokens: 10, inputTokens: 100, outputTokens: 50 },
+          usage: { cacheReadTokens: 10, cacheWriteTokens: 5, inputTokens: 100, outputTokens: 50 },
         },
       ],
     });
@@ -116,6 +116,7 @@ describe("session callback route", () => {
             cacheWriteTokens: 5,
             inputTokens: 100,
             outputTokens: 50,
+            reasoningOutputTokens: 7,
           },
         }),
         method: "POST",
@@ -129,6 +130,7 @@ describe("session callback route", () => {
     };
     expect(payload.results[0]?.usage).toEqual({
       cacheReadTokens: 10,
+      cacheWriteTokens: 5,
       inputTokens: 100,
       outputTokens: 50,
     });
@@ -145,7 +147,12 @@ describe("session callback route", () => {
           output: "done",
           sessionId: "remote-session",
           subagentName: "research",
-          usage: { cacheReadTokens: 10, inputTokens: "lots", outputTokens: 50 },
+          usage: {
+            cacheReadTokens: 10,
+            cacheWriteTokens: 5,
+            inputTokens: "lots",
+            outputTokens: 50,
+          },
         }),
         method: "POST",
       }),
