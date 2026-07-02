@@ -177,6 +177,23 @@ describe("configureNitroRoutes", () => {
     expect(virtualSource).not.toContain('"G:\\');
   });
 
+  it("bakes the agent name into the home page route", async () => {
+    const nitro = createNitroStub();
+
+    await configureNitroRoutes(nitro, createPreparedHost({ agentName: "support-agent" }), {
+      surface: "app",
+    });
+
+    const homeHandler = nitro.options.handlers.find(
+      (handler) => handler.route === "/" && handler.method === "GET",
+    );
+    expect(homeHandler?.handler).toBe("#eve-route/");
+
+    const virtualSource = nitro.options.virtual[homeHandler?.handler ?? ""];
+    expect(virtualSource).toContain("handleHomePageRequest");
+    expect(virtualSource).toContain('{"agentName":"support-agent"}');
+  });
+
   it("registers the health route for HEAD so load balancers probing with HEAD see 200", async () => {
     const nitro = createNitroStub();
 
