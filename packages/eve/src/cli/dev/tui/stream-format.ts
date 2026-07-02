@@ -29,6 +29,8 @@ export type TerminalKey =
   | { type: "ctrl-e" }
   | { type: "ctrl-d" }
   | { type: "ctrl-k" }
+  | { type: "ctrl-n" }
+  | { type: "ctrl-p" }
   | { type: "ctrl-u" }
   | { type: "ctrl-w" }
   | { type: "ctrl-l" }
@@ -172,6 +174,10 @@ export function parseKey(chunk: Buffer): TerminalKey {
       return { type: "ctrl-d" };
     case "\u000b":
       return { type: "ctrl-k" };
+    case "\u000e":
+      return { type: "ctrl-n" };
+    case "\u0010":
+      return { type: "ctrl-p" };
     case "\u000c":
       return { type: "ctrl-l" };
     case "\u0012":

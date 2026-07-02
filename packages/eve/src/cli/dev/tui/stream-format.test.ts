@@ -156,6 +156,11 @@ describe("parseKey", () => {
     });
     expect(parseKey(Buffer.from("\r"))).toEqual({ type: "enter" });
   });
+
+  it("decodes ctrl-n and ctrl-p for emacs-style navigation", () => {
+    expect(parseKey(Buffer.from("\u000e"))).toEqual({ type: "ctrl-n" });
+    expect(parseKey(Buffer.from("\u0010"))).toEqual({ type: "ctrl-p" });
+  });
 });
 
 describe("stripPromptControlCharacters", () => {

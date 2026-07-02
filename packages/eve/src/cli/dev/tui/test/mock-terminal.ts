@@ -62,6 +62,14 @@ export class MockUserInput extends EventEmitter implements TerminalInput {
   ctrlC() {
     this.send("\u0003");
   }
+
+  ctrlN() {
+    this.send("\u000e");
+  }
+
+  ctrlP() {
+    this.send("\u0010");
+  }
 }
 
 export class MockScreen extends EventEmitter implements TerminalOutput {
