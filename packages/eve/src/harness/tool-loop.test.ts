@@ -878,8 +878,10 @@ describe("createToolLoopHarness", () => {
     expect(getSessionTokenUsage(result.session)).toEqual({
       cacheReadTokens: 2,
       cacheWriteTokens: 1,
+      costUsd: 0,
       inputTokens: 7,
       outputTokens: 3,
+      sawCost: false,
     });
   });
 
@@ -899,8 +901,10 @@ describe("createToolLoopHarness", () => {
       usage: {
         cacheReadTokens: 2,
         cacheWriteTokens: 1,
+        costUsd: 0,
         inputTokens: 12,
         outputTokens: 3,
+        sawCost: false,
       },
       tokenKind: "input",
     },
@@ -919,8 +923,10 @@ describe("createToolLoopHarness", () => {
       usage: {
         cacheReadTokens: 2,
         cacheWriteTokens: 1,
+        costUsd: 0,
         inputTokens: 7,
         outputTokens: 3,
+        sawCost: false,
       },
       tokenKind: "output",
     },
@@ -7356,6 +7362,12 @@ describe("createToolLoopHarness", () => {
     it("step.completed event includes usage and cache stats", async () => {
       setupMockAgent({
         finishReason: "stop",
+        providerMetadata: {
+          gateway: {
+            cost: "0.0123",
+            generationId: "gen_test_gateway",
+          },
+        },
         response: { messages: [{ content: "done", role: "assistant" }] },
         text: "done",
         toolCalls: [],
@@ -7377,10 +7389,14 @@ describe("createToolLoopHarness", () => {
 
       const stepCompleted = events.find((e) => e.type === "step.completed");
       expect(stepCompleted?.data.usage).toEqual({
+        costUsd: 0.0123,
         inputTokens: 1000,
         outputTokens: 50,
         cacheReadTokens: 800,
         cacheWriteTokens: 200,
+      });
+      expect(stepCompleted?.data.providerMetadata).toEqual({
+        gateway: { generationId: "gen_test_gateway" },
       });
     });
 
@@ -7399,6 +7415,32 @@ describe("createToolLoopHarness", () => {
 
       const stepCompleted = events.find((e) => e.type === "step.completed");
       expect(stepCompleted?.data.usage).toBeUndefined();
+    });
+
+    it("step.completed event includes gateway cost when tokens are absent", async () => {
+      setupMockAgent({
+        finishReason: "stop",
+        providerMetadata: {
+          gateway: {
+            cost: 0.0042,
+            generationId: "gen_cost_only",
+          },
+        },
+        response: { messages: [{ content: "done", role: "assistant" }] },
+        text: "done",
+        toolCalls: [],
+        toolResults: [],
+      });
+
+      const { emit, events } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      await runStep(createTestSession(), { message: "hi" });
+
+      const stepCompleted = events.find((e) => e.type === "step.completed");
+      expect(stepCompleted?.data.usage).toEqual({ costUsd: 0.0042 });
+      expect(stepCompleted?.data.providerMetadata).toEqual({
+        gateway: { generationId: "gen_cost_only" },
+      });
     });
   });
 

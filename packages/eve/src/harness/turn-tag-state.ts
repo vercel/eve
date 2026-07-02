@@ -22,8 +22,10 @@ const HARNESS_TURN_USAGE_STATE_KEY = "eve.harness.turnUsage";
 export interface TokenUsageTotals {
   readonly cacheReadTokens: number;
   readonly cacheWriteTokens: number;
+  readonly costUsd: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
+  readonly sawCost: boolean;
 }
 
 export type TokenUsageDelta = Partial<TokenUsageTotals>;
@@ -43,8 +45,10 @@ export interface TurnUsageState extends TokenUsageTotals {
 const ZERO_TOKEN_USAGE: TokenUsageTotals = {
   cacheReadTokens: 0,
   cacheWriteTokens: 0,
+  costUsd: 0,
   inputTokens: 0,
   outputTokens: 0,
+  sawCost: false,
 };
 
 /** Reads the stored per-turn token state, or `undefined` when absent. */
@@ -131,8 +135,10 @@ function addTokenUsage(base: TokenUsageTotals, delta: TokenUsageTotals): TokenUs
   return {
     cacheReadTokens: base.cacheReadTokens + delta.cacheReadTokens,
     cacheWriteTokens: base.cacheWriteTokens + delta.cacheWriteTokens,
+    costUsd: base.costUsd + delta.costUsd,
     inputTokens: base.inputTokens + delta.inputTokens,
     outputTokens: base.outputTokens + delta.outputTokens,
+    sawCost: base.sawCost || delta.sawCost,
   };
 }
 
@@ -146,7 +152,9 @@ function toTokenUsageDelta(usage: TokenUsageDelta | undefined): TokenUsageTotals
   return {
     cacheReadTokens: usage.cacheReadTokens ?? 0,
     cacheWriteTokens: usage.cacheWriteTokens ?? 0,
+    costUsd: usage.costUsd ?? 0,
     inputTokens,
     outputTokens,
+    sawCost: usage.costUsd !== undefined,
   };
 }

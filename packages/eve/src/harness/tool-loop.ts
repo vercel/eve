@@ -8,6 +8,7 @@ import {
   isStepCount,
   type LanguageModel,
   type ModelMessage,
+  type ProviderMetadata,
   type SystemModelMessage,
   type TelemetryOptions,
   ToolLoopAgent,
@@ -815,6 +816,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
                     }
                   : {}),
               },
+              providerMetadata: stepResult.providerMetadata,
               text: stepResult.text,
               toolCalls: stepResult.toolCalls,
               toolResults: [...toolResultsByCallId.values()],
@@ -1068,7 +1070,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const nextTurnUsage = accumulateTurnUsage({
       previous: getTurnUsageState(session.state),
       turnId: emissionState.turnId,
-      usage: extractTokenUsageDelta(result.usage),
+      usage: extractTokenUsageDelta({
+        costUsd: extractGatewayCostUsd(result.providerMetadata),
+        usage: result.usage,
+      }),
     });
     session = setTurnUsageState(session, nextTurnUsage);
     // `formatLanguageModelGatewayId` requires `model.provider` to be a string;
@@ -1087,6 +1092,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       "$eve.output_tokens": nextTurnUsage.outputTokens,
       "$eve.cache_read_tokens": nextTurnUsage.cacheReadTokens,
       "$eve.cache_write_tokens": nextTurnUsage.cacheWriteTokens,
+      "$eve.cost_usd": nextTurnUsage.sawCost ? nextTurnUsage.costUsd : undefined,
       "$eve.tool_count": config.tools.size,
     });
 
@@ -1108,19 +1114,42 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
 const SESSION_TOKEN_LIMIT_REACHED_CODE = "SESSION_TOKEN_LIMIT_REACHED";
 
-function extractTokenUsageDelta(
-  usage: HarnessStepResult["usage"] | undefined,
-): TokenUsageDelta | undefined {
-  if (usage === undefined) {
+function extractTokenUsageDelta(input: {
+  readonly costUsd: number | undefined;
+  readonly usage: HarnessStepResult["usage"] | undefined;
+}): TokenUsageDelta | undefined {
+  const usage = input.usage;
+  if (usage === undefined && input.costUsd === undefined) {
     return undefined;
   }
 
   return {
-    cacheReadTokens: usage.inputTokenDetails?.cacheReadTokens,
-    cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens,
-    inputTokens: usage.inputTokens,
-    outputTokens: usage.outputTokens,
+    cacheReadTokens: usage?.inputTokenDetails?.cacheReadTokens,
+    cacheWriteTokens: usage?.inputTokenDetails?.cacheWriteTokens,
+    costUsd: input.costUsd,
+    inputTokens: usage?.inputTokens,
+    outputTokens: usage?.outputTokens,
   };
+}
+
+function extractGatewayCostUsd(providerMetadata: ProviderMetadata | undefined): number | undefined {
+  const gateway = readGatewayMetadata(providerMetadata);
+  const cost = gateway?.cost;
+  if (typeof cost === "number" && Number.isFinite(cost)) {
+    return cost;
+  }
+  if (typeof cost === "string") {
+    const parsed = Number(cost);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function readGatewayMetadata(
+  providerMetadata: ProviderMetadata | undefined,
+): ProviderMetadata[string] | undefined {
+  const gateway = providerMetadata?.gateway;
+  return gateway && typeof gateway === "object" && !Array.isArray(gateway) ? gateway : undefined;
 }
 
 function formatSessionTokenLimitMessage(kind: SessionTokenLimitViolation["kind"]): string {
