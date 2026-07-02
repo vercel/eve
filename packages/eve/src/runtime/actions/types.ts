@@ -1,6 +1,7 @@
 import { z } from "#compiled/zod/index.js";
 
 import { jsonObjectSchema, jsonValueSchema } from "#shared/json-schemas.js";
+import { usageSchema } from "#shared/usage.js";
 
 /**
  * Eve-owned `tool-call` action requested by the model.
@@ -125,25 +126,10 @@ const runtimeToolResultActionResultSchema = z
   .strict();
 
 /**
- * Session-total token usage reported by a completed delegated subagent.
- */
-export type RuntimeSubagentResultUsage = z.infer<typeof runtimeSubagentResultUsageSchema>;
-
-/**
- * Zod schema for the token usage carried on one delegated subagent result.
- *
- * Also validates the `usage` field of remote session callbacks, which may
- * come from a callee on a different eve version — unknown keys are stripped
- * rather than rejected so a newer sender never voids the whole payload.
- */
-export const runtimeSubagentResultUsageSchema = z.object({
-  cacheReadTokens: z.number().int().nonnegative(),
-  inputTokens: z.number().int().nonnegative(),
-  outputTokens: z.number().int().nonnegative(),
-});
-
-/**
  * Runtime-owned subagent result projected back into a harness resume call.
+ *
+ * `usage` carries the completed child session's token totals so the
+ * caller can attribute the subagent's spend.
  */
 export type RuntimeSubagentResultActionResult = z.infer<
   typeof runtimeSubagentResultActionResultSchema
@@ -159,7 +145,7 @@ const runtimeSubagentResultActionResultSchema = z
     kind: z.literal("subagent-result"),
     output: jsonValueSchema,
     subagentName: z.string(),
-    usage: runtimeSubagentResultUsageSchema.optional(),
+    usage: usageSchema.optional(),
   })
   .strict();
 

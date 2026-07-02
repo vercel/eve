@@ -77,7 +77,12 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       if (result.action === "done") {
         await cursor.finish(
           result,
-          { kind: "done", output: result.output ?? "", isError: result.isError },
+          {
+            kind: "done",
+            output: result.output ?? "",
+            isError: result.isError,
+            usage: result.usage,
+          },
           bufferedDeliveries,
         );
         return;
@@ -247,6 +252,7 @@ async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
               isError: result.isError,
               serializedContext: result.serializedContext,
               sessionState: result.sessionState,
+              usage: result.usage,
             },
             kind: "turn-result",
           },

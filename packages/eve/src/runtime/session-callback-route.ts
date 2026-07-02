@@ -2,12 +2,9 @@ import { resumeHook } from "#internal/workflow/runtime.js";
 import { EVE_CALLBACK_ROUTE_PATTERN } from "#protocol/routes.js";
 import type { ChannelMethod, RouteContext } from "#public/definitions/channel.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
-import {
-  runtimeSubagentResultUsageSchema,
-  type RuntimeSubagentResultActionResult,
-  type RuntimeSubagentResultUsage,
-} from "#runtime/actions/types.js";
+import type { RuntimeSubagentResultActionResult } from "#runtime/actions/types.js";
 import type { JsonValue } from "#shared/json.js";
+import { usageSchema, type Usage } from "#shared/usage.js";
 
 export const HTTP_SESSION_CALLBACK_CHANNEL_NAME_PREFIX = "eve/v1/callback";
 
@@ -20,7 +17,7 @@ type SessionTerminalCallbackPayload =
       readonly output: string;
       readonly sessionId: string;
       readonly subagentName: string;
-      readonly usage?: RuntimeSubagentResultUsage;
+      readonly usage?: Usage;
     }
   | {
       readonly callId: string;
@@ -138,10 +135,10 @@ function projectSessionCallbackResult(
  * so it is validated independently and dropped — never rejected — when
  * malformed. The rest of the callback still resumes the parent.
  */
-function parseCallbackUsage(value: unknown): RuntimeSubagentResultUsage | undefined {
+function parseCallbackUsage(value: unknown): Usage | undefined {
   if (value === undefined) {
     return undefined;
   }
-  const parsed = runtimeSubagentResultUsageSchema.safeParse(value);
+  const parsed = usageSchema.safeParse(value);
   return parsed.success ? parsed.data : undefined;
 }

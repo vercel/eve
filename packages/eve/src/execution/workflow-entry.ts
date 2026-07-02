@@ -298,15 +298,15 @@ async function finalizeDone(input: {
     error: failed ? output : undefined,
     output: failed ? undefined : output,
     serializedContext,
-    sessionState: failed ? undefined : input.action.sessionState,
     status: failed ? "failed" : "completed",
+    usage: failed ? undefined : input.action.usage,
   });
   await notifyDelegatedParentStep({
     result: failed
       ? createDelegatedSubagentErrorResult(serializedContext, output)
       : createDelegatedSubagentSuccessResult(serializedContext, output),
     serializedContext,
-    sessionState: failed ? undefined : input.action.sessionState,
+    usage: failed ? undefined : input.action.usage,
   });
   return { output };
 }
