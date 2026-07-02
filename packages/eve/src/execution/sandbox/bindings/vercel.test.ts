@@ -51,6 +51,7 @@ function createMockSandbox(input: {
     runCommand: vi.fn().mockResolvedValue(createMockCommandResult()),
     snapshot: vi.fn().mockResolvedValue({ snapshotId: `${input.name}-snapshot` }),
     status: input.status ?? "running",
+    stop: vi.fn().mockResolvedValue(undefined),
     get tags() {
       return tags;
     },
@@ -927,6 +928,45 @@ describe("createVercelSandbox", () => {
 
     const state = await handle.captureState();
     expect(state.metadata).toEqual({ sandboxName: "persisted-sandbox-name" });
+  });
+
+  it("stops the session sandbox on shutdown so no VM outlives the server", async () => {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+
+    await handle.shutdown();
+
+    expect(sessionSandbox.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips the stop call on shutdown when the sandbox is not running", async () => {
+    const templateSandbox = createMockSandbox({ name: "template" });
+    const sessionSandbox = createMockSandbox({ name: "session", status: "stopped" });
+    const sandboxModule = {
+      Sandbox: {
+        create: vi
+          .fn()
+          .mockResolvedValueOnce(templateSandbox)
+          .mockResolvedValueOnce(sessionSandbox),
+        get: vi.fn().mockResolvedValue(null),
+      },
+    };
+    const backend = createTestVercelSandbox({
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+    await backend.prewarm({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      seedFiles: [],
+      templateKey: "template-key",
+    });
+    const handle = await backend.create({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      sessionKey: "session-key",
+      templateKey: "template-key",
+    });
+
+    await handle.shutdown();
+
+    expect(sessionSandbox.stop).not.toHaveBeenCalled();
   });
 
   it("falls back to creating a new session when the persisted sandbox no longer exists", async () => {

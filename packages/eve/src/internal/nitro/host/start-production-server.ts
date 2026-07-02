@@ -14,7 +14,10 @@ const DEFAULT_PRODUCTION_SERVER_PORT = 3000;
 const HEALTH_POLL_INTERVAL_MS = 250;
 const HEALTH_TIMEOUT_MS = 60_000;
 const LOCAL_SERVER_URL_PATTERN = /https?:\/\/(?:\[[^\]\s]+\]|[^\s/:[\]]+)(?::\d+)?/;
-const TERMINATE_GRACE_MS = 5_000;
+// Must exceed the server's bounded sandbox shutdown (15s in
+// sandbox-shutdown-plugin.ts) so stopping sandboxes on SIGTERM is not
+// cut short by SIGKILL.
+const TERMINATE_GRACE_MS = 20_000;
 const WILDCARD_LISTEN_HOSTNAMES: ReadonlySet<string> = new Set(["[::]", "::", "0.0.0.0"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {

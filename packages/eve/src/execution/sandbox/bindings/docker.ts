@@ -4,6 +4,7 @@ import {
   DOCKER_SANDBOX_LABEL,
   runDockerBaseSetup,
   startDockerContainer,
+  stopDockerContainerIfRunning,
 } from "#execution/sandbox/bindings/docker-container.js";
 import {
   assertDockerDaemonAvailable,
@@ -281,6 +282,11 @@ export function createDockerSandboxBackend(
         // container idles on a sleeping `/bin/sh`, so reattach is
         // instant and any author-started background work survives.
         async dispose() {},
+        // Session state lives in the container filesystem, so a stopped
+        // container restarts with state intact on the next `create`.
+        async shutdown() {
+          await stopDockerContainerIfRunning(cli, containerName);
+        },
       };
     },
   };

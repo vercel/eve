@@ -675,6 +675,14 @@ export async function createApplicationNitro(
     includesApplicationSurface(surface) &&
     (dev || manifestHasWebSocketChannel(preparedHost.compileResult.manifest));
   const nitroPlugins: string[] = [];
+  if (!dev) {
+    // Stops all tracked sandboxes when the production server shuts
+    // down. Dev servers are excluded: the dev CLI parent already stops
+    // dev-tagged sandboxes when the dev server closes.
+    nitroPlugins.push(
+      resolvePackageSourceFilePath("src/internal/nitro/host/sandbox-shutdown-plugin.ts"),
+    );
+  }
   if (manifestEnablesWorkflow(preparedHost.compileResult.manifest)) {
     nitroPlugins.push(
       resolvePackageSourceFilePath("src/internal/nitro/host/workflow-sandbox-runtime-plugin.ts"),

@@ -312,6 +312,10 @@ function createHandle(
       onDispose?.();
       await sandbox.detach();
     },
+    async shutdown() {
+      onDispose?.();
+      await sandbox.shutdown();
+    },
   };
 }
 

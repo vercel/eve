@@ -209,6 +209,11 @@ export function createJustBashHandle(
     async dispose() {
       await sandbox.dispose();
     },
+    // The interpreter lives in this process, so stopping it is all the
+    // shutdown a just-bash sandbox needs.
+    async shutdown() {
+      await sandbox.dispose();
+    },
   };
 }
 
