@@ -193,6 +193,34 @@ describe.skipIf(process.platform === "win32")("connectMicrosandbox", () => {
 });
 
 describe.skipIf(process.platform === "win32")("MicrosandboxVm", () => {
+  it("drains the sandbox before detaching the SDK client", async () => {
+    const sandbox = {
+      detach: vi.fn(async () => {}),
+      drain: vi.fn(async () => {}),
+    };
+    const vm = new MicrosandboxVm(
+      {
+        module: {} as never,
+        options: resolveMicrosandboxOptions({ image: MICROSANDBOX_DEFAULT_IMAGE }),
+        sessionKey: "session-key",
+      },
+      sandbox as never,
+      "sandbox-name",
+      undefined,
+    );
+
+    await vm.drainAndDetach();
+
+    expect(sandbox.drain).toHaveBeenCalledTimes(1);
+    expect(sandbox.detach).toHaveBeenCalledTimes(1);
+    const drainOrder = sandbox.drain.mock.invocationCallOrder[0];
+    const detachOrder = sandbox.detach.mock.invocationCallOrder[0];
+    if (drainOrder === undefined || detachOrder === undefined) {
+      throw new Error("Expected drain and detach to be called.");
+    }
+    expect(drainOrder).toBeLessThan(detachOrder);
+  });
+
   it("finishes streamed commands when the exec handle emits an exit event", async () => {
     const sandbox = {
       async execStreamWith() {

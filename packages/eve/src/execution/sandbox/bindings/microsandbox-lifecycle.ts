@@ -310,7 +310,7 @@ function createHandle(
     },
     async dispose() {
       onDispose?.();
-      await sandbox.detach();
+      await sandbox.drainAndDetach();
     },
   };
 }
