@@ -138,7 +138,9 @@ To avoid PRs that are unlikely to be reviewed or merged:
    ```
 
 6. Make sure `pnpm lint`, `pnpm typecheck`, and `pnpm test` pass.
-7. Open the PR with a clear description of the problem and solution.
+7. Open the PR with a Conventional Commits-style title, such as
+   `fix(eve): resolve session cleanup` or `docs: clarify PR title format`, and a
+   clear description of the problem and solution.
 
 Releases are managed with [Changesets](https://github.com/changesets/changesets) by the maintainers.
 
