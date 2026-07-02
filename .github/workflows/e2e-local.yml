@@ -3,23 +3,52 @@ name: E2E Tests (Local)
 on:
   workflow_dispatch:
   pull_request:
-    paths:
-      - "packages/eve/**"
-      - "pnpm-workspace.yaml"
-      - "pnpm-lock.yaml"
-      - "apps/fixtures/**"
-      - "e2e/**"
-      - ".github/workflows/e2e-local.yml"
-      - ".github/scripts/discover-e2e-fixtures.sh"
 
 concurrency:
   group: e2e-local-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # The workflow must run on every PR so required checks report a status, but
+  # the e2e jobs only need to run when relevant paths changed. Downstream jobs
+  # skip (which satisfies required checks) when nothing relevant changed.
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Detect relevant changes
+        id: filter
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "origin/${BASE_REF}...HEAD")"
+          echo "Changed files:"
+          echo "$changed"
+          pattern='^(packages/eve/|apps/fixtures/|e2e/|pnpm-workspace\.yaml$|pnpm-lock\.yaml$|\.github/workflows/e2e-local\.yml$|\.github/scripts/discover-e2e-fixtures\.sh$)'
+          if grep -qE "$pattern" <<<"$changed"; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
   discover-fixtures:
     name: discover-fixtures
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     outputs:
       matrix: ${{ steps.discover.outputs.matrix }}
     steps:
