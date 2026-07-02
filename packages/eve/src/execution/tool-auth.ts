@@ -34,6 +34,7 @@ import {
   startScopedAuthorization,
   type ScopedAuthorization,
 } from "#runtime/connections/scoped-authorization.js";
+import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 
 /**
  * Wraps one authored tool's `execute` with a context that supports inline
@@ -53,10 +54,10 @@ import {
 export function createToolExecuteWithAuth(input: {
   readonly scope: string;
   readonly execute: (toolInput: unknown, ctx: unknown) => unknown;
-}): (toolInput: unknown) => Promise<unknown> {
+}): (toolInput: unknown, options?: ToolExecuteOptions) => Promise<unknown> {
   const { scope, execute } = input;
 
-  return async (toolInput: unknown): Promise<unknown> => {
+  return async (toolInput: unknown, options?: ToolExecuteOptions): Promise<unknown> => {
     const justAuthorizedScopes = new Set<string>();
 
     try {
@@ -66,6 +67,7 @@ export function createToolExecuteWithAuth(input: {
           inlineAuthState: {},
           justAuthorizedScopes,
           scope,
+          toolCallId: options?.toolCallId,
         }),
       );
     } catch (err) {
@@ -82,11 +84,13 @@ function buildToolContext(input: {
   readonly scope: string;
   readonly justAuthorizedScopes: Set<string>;
   readonly inlineAuthState: InlineAuthState;
+  readonly toolCallId?: string;
 }): ToolContext {
-  const { scope, justAuthorizedScopes, inlineAuthState } = input;
+  const { scope, justAuthorizedScopes, inlineAuthState, toolCallId } = input;
   const base = buildCallbackContext();
   return {
     ...base,
+    toolCallId,
     async getToken(provider?: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult> {
       if (provider === undefined) throw missingProviderError("ctx.getToken");
       return await resolveInlineToken({

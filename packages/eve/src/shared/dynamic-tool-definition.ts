@@ -10,7 +10,10 @@ import type { Approval } from "#public/definitions/approval.js";
 import type { SessionAuth } from "#context/keys.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 
-type ToolContext = SessionContext;
+type ToolContext = SessionContext & {
+  /** Stable AI SDK tool-call id for the currently executing tool. */
+  readonly toolCallId?: string;
+};
 
 /**
  * Stream event types allowed for dynamic tool resolvers. Dispatch

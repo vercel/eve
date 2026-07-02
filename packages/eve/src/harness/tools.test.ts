@@ -1,5 +1,5 @@
 import { type JSONSchema7, jsonSchema } from "ai";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey, type Session } from "#context/keys.js";
@@ -59,12 +59,15 @@ async function executeSdkTool(input: {
     input.tool as {
       readonly execute?: (
         toolInput: unknown,
-        options: { readonly toolCallId: string },
+        options: { readonly messages: readonly unknown[]; readonly toolCallId: string },
       ) => Promise<unknown> | unknown;
     }
   ).execute;
   expect(execute).toBeTypeOf("function");
-  return await execute!(input.toolInput ?? {}, { toolCallId: input.toolCallId ?? "call_1" });
+  return await execute!(input.toolInput ?? {}, {
+    messages: [],
+    toolCallId: input.toolCallId ?? "call_1",
+  });
 }
 
 async function projectSdkToolOutput(input: {
@@ -111,6 +114,36 @@ describe("buildToolSet", () => {
     const result = buildToolSet({ tools });
 
     expect(getJsonSchema(result.echo_city)).toEqual(schema);
+  });
+
+  it("passes the AI SDK tool call id through to harness execute", async () => {
+    const execute = vi.fn(async (_input: unknown, options?: { readonly toolCallId: string }) => ({
+      toolCallId: options?.toolCallId,
+    }));
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "echo_city",
+        {
+          description: "Echo one city.",
+          execute,
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "echo_city",
+        },
+      ],
+    ]);
+
+    const result = buildToolSet({ tools });
+    await expect(
+      executeSdkTool({
+        tool: result.echo_city,
+        toolCallId: "call_echo_city",
+        toolInput: { city: "Brooklyn" },
+      }),
+    ).resolves.toEqual({ toolCallId: "call_echo_city" });
+    expect(execute).toHaveBeenCalledWith(
+      { city: "Brooklyn" },
+      { messages: [], toolCallId: "call_echo_city" },
+    );
   });
 
   it("passes through the output schema to the SDK tool", () => {
