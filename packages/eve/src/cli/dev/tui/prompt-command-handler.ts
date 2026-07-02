@@ -118,6 +118,7 @@ export function createPromptCommandHandler(
           command: command.name,
           appRoot: target.workspaceRoot,
           renderer: flow,
+          disabledConnectionReasons: context.disabledConnectionReasons,
         };
         if (context.initialModelStep !== undefined) {
           commandInput.initialModelStep = context.initialModelStep;
@@ -129,7 +130,9 @@ export function createPromptCommandHandler(
         if (result.effect !== undefined) outcome.effect = result.effect;
         return outcome;
       } finally {
-        flow.end({ preserveDiagnostics: preserveFlowDiagnostics });
+        if (context.keepSetupFlowOpen !== true) {
+          flow.end({ preserveDiagnostics: preserveFlowDiagnostics });
+        }
       }
     },
   };

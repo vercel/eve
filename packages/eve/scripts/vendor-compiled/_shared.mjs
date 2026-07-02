@@ -96,14 +96,21 @@ export async function loadDeclaration(relativePath) {
  * `files` can override the default `dist/index.d.ts` copy. Use it for
  * packages whose entrypoint declaration imports sibling declaration files,
  * or for multi-entry packages that need their upstream declaration tree.
+ * `declarationRoot` changes the package-relative source directory when
+ * declarations live outside `dist`.
  *
  * `discoverExtraFiles` is consulted for chunk files the upstream `.d.ts`
  * references by relative path (e.g. chat's `./jsx-runtime-<hash>.d.ts`).
  * Each returned filename is co-copied verbatim into the destination.
  */
-export function createDeclarationCopier({ rewrites = {}, discoverExtraFiles, files } = {}) {
+export function createDeclarationCopier({
+  declarationRoot = "dist",
+  rewrites = {},
+  discoverExtraFiles,
+  files,
+} = {}) {
   return async ({ destinationRoot, packageInfo }) => {
-    const distDir = join(packageInfo.packageRoot, "dist");
+    const distDir = join(packageInfo.packageRoot, declarationRoot);
     const distEntries = await readdir(distDir);
     const declarationFiles =
       typeof files === "function"

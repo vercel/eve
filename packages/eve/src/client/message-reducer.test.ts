@@ -4,6 +4,8 @@ import { defaultMessageReducer } from "#client/message-reducer.js";
 import {
   createActionResultEvent,
   createActionsRequestedEvent,
+  createAuthorizationCompletedEvent,
+  createAuthorizationRequiredEvent,
   createInputRequestedEvent,
   createMessageAppendedEvent,
   createMessageCompletedEvent,
@@ -234,6 +236,120 @@ describe("defaultMessageReducer", () => {
           turnId: "turn_1",
         },
         parts: [],
+        role: "assistant",
+      },
+    ]);
+  });
+
+  it("projects authorization prompts into assistant message parts", () => {
+    const reducer = defaultMessageReducer();
+    const data = reducer.reduce(
+      reducer.initial(),
+      createAuthorizationRequiredEvent({
+        authorization: {
+          expiresAt: "2026-06-26T12:00:00.000Z",
+          instructions: "Sign in to Notion to continue.",
+          url: "https://connect.example.com/authorize/sca_123",
+          userCode: "ABCD-EFGH",
+        },
+        description: "Authorization required for notion",
+        name: "notion",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+        webhookUrl: "https://agent.example.com/eve/v1/connections/notion/callback/hook",
+      }),
+    );
+
+    expect(data.messages).toEqual([
+      {
+        id: "turn_1:assistant",
+        metadata: {
+          status: "streaming",
+          turnId: "turn_1",
+        },
+        parts: [
+          { type: "step-start" },
+          {
+            authorization: {
+              expiresAt: "2026-06-26T12:00:00.000Z",
+              instructions: "Sign in to Notion to continue.",
+              url: "https://connect.example.com/authorize/sca_123",
+              userCode: "ABCD-EFGH",
+            },
+            description: "Authorization required for Notion",
+            displayName: "Notion",
+            name: "notion",
+            state: "required",
+            stepIndex: 0,
+            turnId: "turn_1",
+            type: "authorization",
+          },
+        ],
+        role: "assistant",
+      },
+    ]);
+  });
+
+  it("updates the pending authorization part when authorization completes", () => {
+    const reducer = defaultMessageReducer();
+    let data = reducer.reduce(
+      reducer.initial(),
+      createAuthorizationRequiredEvent({
+        authorization: {
+          displayName: "Notion",
+          instructions: "Sign in to Notion to continue.",
+          url: "https://connect.example.com/authorize/sca_123",
+        },
+        description: "Sign in to Notion to continue.",
+        name: "notion",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+        webhookUrl: "https://agent.example.com/eve/v1/connections/notion/callback/hook",
+      }),
+    );
+
+    data = reducer.reduce(
+      data,
+      createAuthorizationCompletedEvent({
+        authorization: {
+          displayName: "Notion",
+          url: "https://connect.example.com/authorize/sca_123",
+        },
+        name: "notion",
+        outcome: "authorized",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_2",
+      }),
+    );
+
+    expect(data.messages).toEqual([
+      {
+        id: "turn_1:assistant",
+        metadata: {
+          status: "streaming",
+          turnId: "turn_1",
+        },
+        parts: [
+          { type: "step-start" },
+          {
+            authorization: {
+              displayName: "Notion",
+              instructions: "Sign in to Notion to continue.",
+              url: "https://connect.example.com/authorize/sca_123",
+            },
+            description: "Sign in to Notion to continue.",
+            displayName: "Notion",
+            name: "notion",
+            outcome: "authorized",
+            state: "completed",
+            stepIndex: 0,
+            turnId: "turn_1",
+            type: "authorization",
+          },
+        ],
         role: "assistant",
       },
     ]);

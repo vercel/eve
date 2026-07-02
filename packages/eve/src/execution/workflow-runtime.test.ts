@@ -189,6 +189,25 @@ describe("createWorkflowRuntime#run", () => {
     );
   });
 
+  it("uses an explicit title without changing the workflow model input", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: "driver-run" });
+    const message = "<slack_message>\n<content>ship it</content>\n</slack_message>";
+
+    await buildRuntime(compiledArtifactsSource).run({
+      adapter,
+      auth: null,
+      input: { message },
+      mode: "conversation",
+      title: "ship it",
+    });
+
+    const [, workflowInput, startOptions] = startMock.mock.calls[0]!;
+    expect(workflowInput[0].input.message).toBe(message);
+    expect(startOptions.attributes["$eve.title"]).toBe("ship it");
+  });
+
   it("serializes the channel request id into workflow context", async () => {
     vi.stubEnv("VERCEL_ENV", "production");
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;

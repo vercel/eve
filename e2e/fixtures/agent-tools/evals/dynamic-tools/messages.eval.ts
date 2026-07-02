@@ -1,6 +1,5 @@
 import { defineEval } from "eve/evals";
-
-import { requireToolOutput } from "./shared.js";
+import { satisfies } from "eve/evals/expect";
 
 // The step.started resolver sees the accumulated message history: the
 // second turn's count must exceed the first.
@@ -11,32 +10,37 @@ export default defineEval({
       "Use the `check_messages` tool with label 'turn1' and tell me the messageCount.",
     );
     first.expectOk();
-    const firstCount = requireToolOutput(first, "check_messages").messageCount;
-    if (typeof firstCount !== "number" || firstCount < 1) {
-      throw new Error(
-        `Turn 1: expected messageCount >= 1, got ${JSON.stringify(firstCount)}. ` +
-          "Resolver should see at least the user message.",
-      );
-    }
+    const firstOutput = first.requireToolCall("check_messages").output;
 
     const second = await t.send(
       "Use the `check_messages` tool again with label 'turn2' and tell me the messageCount.",
     );
-    second.expectOk();
-    const secondCount = requireToolOutput(second, "check_messages").messageCount;
-    if (typeof secondCount !== "number" || secondCount <= firstCount) {
-      throw new Error(
-        `Turn 2: expected messageCount > ${firstCount}, got ${JSON.stringify(secondCount)}. ` +
-          "Resolver should see accumulated history.",
-      );
-    }
+    const secondOutput = second.requireToolCall("check_messages").output;
+    t.check(
+      [firstOutput, secondOutput],
+      satisfies(([firstValue, secondValue]: readonly unknown[]) => {
+        const firstCount = readMessageCount(firstValue);
+        const secondCount = readMessageCount(secondValue);
+        return (
+          firstCount !== undefined &&
+          secondCount !== undefined &&
+          firstCount >= 1 &&
+          secondCount > firstCount
+        );
+      }, "message count increases across turns"),
+    );
 
-    t.didNotFail();
-    t.completed();
+    t.succeeded();
     // The accumulated-history property is verified per-turn above
     // (firstCount >= 1, secondCount > firstCount). The model may call the
     // tool more than once in a turn, so assert it was called without error
     // rather than pinning an exact count.
-    t.calledTool("check_messages", { isError: false });
+    t.calledTool("check_messages");
   },
 });
+
+function readMessageCount(value: unknown): number | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const count = (value as { messageCount?: unknown }).messageCount;
+  return typeof count === "number" ? count : undefined;
+}

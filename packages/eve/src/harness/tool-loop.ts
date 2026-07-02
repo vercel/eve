@@ -10,13 +10,11 @@ import {
   type ModelMessage,
   type SystemModelMessage,
   type TelemetryOptions,
-  type ToolModelMessage,
   ToolLoopAgent,
   type ToolSet,
   type TypedToolCall,
   type TypedToolResult,
 } from "ai";
-import type { SessionCapabilities } from "#channel/types.js";
 import { isScheduleAppAuth } from "#channel/schedule-auth.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
@@ -42,25 +40,26 @@ import {
 } from "#protocol/message.js";
 import type { InstrumentationDefinition } from "#public/instrumentation/index.js";
 import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
-import { isCodeModeRuntimeActionInterrupt } from "#harness/code-mode-runtime-action-state.js";
-import { isCodeModeConnectionAuthInterrupt } from "#runtime/framework-tools/code-mode-connection-auth.js";
+import {
+  getWorkflowRuntimeActionInterrupts,
+  isWorkflowRuntimeActionInterrupt,
+} from "#harness/workflow-runtime-action-state.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import {
   hydrateSandboxAttachments,
   stageAttachmentsToSandbox,
 } from "#harness/attachment-staging.js";
+import { buildWorkflowHostTools } from "#harness/workflow-sandbox.js";
 import {
-  applySandboxToolSet,
-  buildSandboxHostTools,
-  createEveCodeModeOptions,
-} from "#harness/code-mode.js";
-import { createCodeModeLifecycle } from "#harness/code-mode-lifecycle.js";
-import { isSandboxEnabled, selectSandboxSurfaces } from "#harness/sandbox-surface.js";
+  getWorkflowContinuationSecurity,
+  readWorkflowContinuationSecurity,
+} from "#harness/workflow-continuation-security.js";
+import { createWorkflowLifecycle } from "#harness/workflow-lifecycle.js";
 import {
-  clearPendingCodeModeInterrupt,
-  getPendingCodeModeInterrupt,
-  setPendingCodeModeInterrupt,
-} from "#harness/code-mode-interrupt-state.js";
+  clearPendingWorkflowInterrupt,
+  getPendingWorkflowInterrupt,
+  setPendingWorkflowInterrupt,
+} from "#harness/workflow-interrupt-state.js";
 import {
   compactMessages,
   getInputTokenCount,
@@ -69,8 +68,12 @@ import {
 } from "#harness/compaction.js";
 import {
   accumulateTurnUsage,
+  getSessionTokenLimitViolation,
+  getSessionTokenUsage,
   getTurnUsageState,
   setTurnUsageState,
+  type SessionTokenLimitViolation,
+  type TokenUsageDelta,
 } from "#harness/turn-tag-state.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import {
@@ -99,8 +102,8 @@ import {
 } from "#harness/input-requests.js";
 import { getInstrumentationConfig } from "#harness/instrumentation-config.js";
 import { resolveAssistantStepText } from "#harness/messages.js";
+import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import {
-  type AuthorizationChallenge,
   type AuthorizationSignal,
   isAuthorizationSignal,
   setPendingAuthorization,
@@ -125,6 +128,7 @@ import {
 } from "#shared/empty-delivery.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
 import { ensureOtelIntegration } from "#harness/otel-integration.js";
+import { getAdvertisedTools } from "#harness/advertised-tools.js";
 import {
   applyLastToolCacheBreakpoint,
   applySystemCacheBreakpoint,
@@ -143,12 +147,17 @@ import {
   type HarnessStepResult,
   isInvalidToolCall,
 } from "#harness/step-hooks.js";
-import { buildToolSetFromDefinitions, buildToolSetWithProviderTools } from "#harness/tools.js";
 import {
-  CODE_MODE_TOOL_NAME,
-  loadCodeModeModule,
-  type CodeModeInterrupt,
-} from "#shared/code-mode.js";
+  buildToolApproval,
+  buildToolSetFromDefinitions,
+  buildToolSetWithProviderTools,
+} from "#harness/tools.js";
+import {
+  continueWorkflowSandboxInterrupt,
+  getWorkflowSandboxInterrupt,
+  type WorkflowSandboxInterrupt,
+  unwrapWorkflowSandboxResult,
+} from "#shared/workflow-sandbox.js";
 import {
   buildFinalOutputTool,
   FINAL_OUTPUT_TOOL_NAME,
@@ -423,6 +432,20 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       stepInput: stepInput.input,
     });
     if (pending.outcome === "unresolved") {
+      if (emit && pending.deferredMessage === true && hasStepInput(input)) {
+        emissionState = await emitTurnPreamble(
+          emit,
+          input ?? {},
+          emissionState,
+          config.runtimeIdentity,
+        );
+        emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
+        return {
+          next: null,
+          session: setHarnessEmissionState(pending.session, emissionState),
+        };
+      }
+
       return { next: null, session: pending.session };
     }
 
@@ -469,7 +492,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       }
     }
 
-    if (stepInput.input?.message !== undefined && !pending.deferredMessage) {
+    if (
+      stepInput.input?.message !== undefined &&
+      !pending.deferredMessage &&
+      !pending.consumedMessage
+    ) {
       // Staging writes FilePart bytes into the sandbox and replaces
       // each part's `data` with a compact `eve-sandbox:` URL. The
       // `messages` array — and everything that flows into
@@ -614,18 +641,24 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       const callMessages = opts.trailingUserNote
         ? [...modelMessages, { role: "user" as const, content: opts.trailingUserNote }]
         : modelMessages;
+      const advertisedHarnessTools = getAdvertisedTools({
+        session,
+        tools: config.tools,
+      });
 
-      const sandboxSurfaces = selectSandboxSurfaces(config);
       const flatTools = await buildToolSetWithProviderTools({
         approvedTools,
         capabilities: config.capabilities,
         disabledProviderTools: opts.disabledProviderTools,
         modelReference: session.agent.modelReference,
-        tools: config.tools,
+        tools: advertisedHarnessTools,
       });
 
       if (ctx !== undefined) {
-        const dynamicTools = buildDynamicTools(ctx);
+        const dynamicTools = getAdvertisedTools({
+          session,
+          tools: buildDynamicTools(ctx),
+        });
         const dynamicToolSet = buildToolSetFromDefinitions({
           approvedTools,
           capabilities: config.capabilities,
@@ -642,24 +675,26 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         flatTools[FINAL_OUTPUT_TOOL_NAME] = buildFinalOutputTool(session.outputSchema);
       }
 
-      const modelTools =
-        sandboxSurfaces.length > 0
-          ? (
-              await applySandboxToolSet({
-                harnessTools: config.tools,
-                lifecycle:
-                  emit !== undefined
-                    ? createCodeModeLifecycle({
-                        emit,
-                        emissionState,
-                        tools: config.tools,
-                      })
-                    : undefined,
-                tools: flatTools,
-                surfaces: sandboxSurfaces,
+      const workflowLifecycle =
+        emit !== undefined
+          ? ({ tools }: { readonly tools: HarnessToolMap }) =>
+              createWorkflowLifecycle({
+                emit,
+                emissionState,
+                tools,
               })
-            ).modelTools
-          : flatTools;
+          : undefined;
+      const workflowConfig =
+        config.workflow === true ? { lifecycle: workflowLifecycle } : undefined;
+
+      const advertisedModelTools = await getAdvertisedTools({
+        modelTools: flatTools,
+        session,
+        tools: advertisedHarnessTools,
+        workflow: workflowConfig,
+      });
+      session = advertisedModelTools.session;
+      const modelTools = advertisedModelTools.modelTools;
 
       const effectiveTools = marker ? applyLastToolCacheBreakpoint(modelTools, marker) : modelTools;
 
@@ -690,21 +725,38 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         },
         onStepFinish: hooks.onStepFinish,
         prepareStep: hooks.prepareStep,
+        reasoning: session.agent.reasoning,
         runtimeContext: telemetryRuntimeContext,
         stopWhen: isStepCount(1),
         telemetry: enrichTelemetry(telemetryConfig, agentName, telemetryRuntimeContext),
+        toolApproval: buildToolApproval(modelTools),
         tools: effectiveTools,
       };
       const agent = new ToolLoopAgent(agentSettings);
 
       const executeModelCall = async (): Promise<HarnessStepResult> => {
         if (emit) {
+          const hiddenRuntimeActionToolNames = [...config.tools]
+            .filter(
+              ([name, tool]) =>
+                tool.runtimeAction !== undefined && advertisedHarnessTools.get(name) === undefined,
+            )
+            .map(([name]) => name);
+          const excludedActionToolNames = new Set([
+            ASK_QUESTION_TOOL_NAME,
+            FINAL_OUTPUT_TOOL_NAME,
+            ...hiddenRuntimeActionToolNames,
+          ]);
           const streamResult = await agent.stream({ messages: callMessages });
           const {
+            emittedActionCallIds,
             handledInlineToolResultCallIds,
             inlineAuthorizationResults,
             inlineToolResultParts,
-          } = await emitStreamContent(emit, emissionState, streamResult.fullStream);
+          } = await emitStreamContent(emit, emissionState, streamResult.fullStream, {
+            excludedActionToolNames,
+            tools: config.tools,
+          });
           const stepResult = await hooks.stepResult;
           if (
             isEmptyModelResponse(stepResult) &&
@@ -714,13 +766,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             throw new EmptyModelResponseError();
           }
           await emitStepActions(emit, emissionState, stepResult, {
-            excludedActionToolNames: new Set([
-              ASK_QUESTION_TOOL_NAME,
-              CODE_MODE_TOOL_NAME,
-              FINAL_OUTPUT_TOOL_NAME,
-            ]),
+            emittedActionCallIds,
+            excludedActionToolNames,
             handledInlineToolResultCallIds,
-            tools: config.tools,
+            tools: advertisedHarnessTools,
           });
           if (inlineToolResultParts.length > 0 || inlineAuthorizationResults.length > 0) {
             const existingToolResults = stepResult.toolResults as TypedToolResult<ToolSet>[];
@@ -788,21 +837,29 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       await emitStepStarted(emit, emissionState, messages);
     }
 
-    // Code-mode continuations (OAuth, approval, runtime-action, …) replay
-    // the sandbox through one generic interrupt path. They run after
-    // step.started so dynamic tools are populated.
-    const pendingCodeModeInterrupt = await continuePendingCodeModeInterrupt({
-      capabilities: config.capabilities,
+    // Workflow continuations replay the sandbox after step.started so nested
+    // action lifecycle events keep the active turn's emission coordinates.
+    const pendingWorkflowInterrupt = await continuePendingWorkflowInterrupt({
       childResults: stepInput.input?.runtimeActionResults,
       config,
       emit,
       emissionState,
-      messages,
       runStep,
       session,
     });
-    if (pendingCodeModeInterrupt !== null) {
-      return pendingCodeModeInterrupt;
+    if (pendingWorkflowInterrupt !== null) {
+      return pendingWorkflowInterrupt;
+    }
+
+    const tokenLimitViolation = getSessionTokenLimitViolation(session);
+    if (tokenLimitViolation !== null) {
+      return failSessionTokenLimit({
+        config,
+        emit,
+        emissionState,
+        session,
+        violation: tokenLimitViolation,
+      });
     }
 
     let result: HarnessStepResult;
@@ -986,7 +1043,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const nextTurnUsage = accumulateTurnUsage({
       previous: getTurnUsageState(session.state),
       turnId: emissionState.turnId,
-      usage: result.usage ?? {},
+      usage: extractTokenUsageDelta(result.usage),
     });
     session = setTurnUsageState(session, nextTurnUsage);
     // `formatLanguageModelGatewayId` requires `model.provider` to be a string;
@@ -1022,6 +1079,63 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
   }
 
   return runStep;
+}
+
+const SESSION_TOKEN_LIMIT_REACHED_CODE = "SESSION_TOKEN_LIMIT_REACHED";
+
+function extractTokenUsageDelta(
+  usage: HarnessStepResult["usage"] | undefined,
+): TokenUsageDelta | undefined {
+  if (usage === undefined) {
+    return undefined;
+  }
+
+  return {
+    cacheReadTokens: usage.inputTokenDetails?.cacheReadTokens,
+    cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+  };
+}
+
+function formatSessionTokenLimitMessage(kind: SessionTokenLimitViolation["kind"]): string {
+  return `The session reached its configured ${kind} token limit.`;
+}
+
+async function failSessionTokenLimit(input: {
+  readonly config: ToolLoopHarnessConfig;
+  readonly emit?: ToolLoopHarnessConfig["handleEvent"];
+  readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
+  readonly session: HarnessSession;
+  readonly violation: SessionTokenLimitViolation;
+}): Promise<StepResult> {
+  const usage = getSessionTokenUsage(input.session);
+  const message = formatSessionTokenLimitMessage(input.violation.kind);
+  const details = {
+    inputTokens: usage.inputTokens,
+    kind: input.violation.kind,
+    limit: input.violation.limit,
+    outputTokens: usage.outputTokens,
+    usedTokens: input.violation.usedTokens,
+  };
+
+  if (input.emit) {
+    await emitFailedStep(input.emit, input.emissionState, {
+      code: SESSION_TOKEN_LIMIT_REACHED_CODE,
+      details,
+      message,
+      sessionId: input.session.sessionId,
+    });
+  }
+
+  return {
+    next: {
+      done: true,
+      isError: input.config.mode === "task" ? true : undefined,
+      output: input.config.mode === "task" ? message : "",
+    },
+    session: input.session,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1391,24 +1505,45 @@ async function handleStepResult(input: {
     result.finishReason !== "tool-calls" &&
     result.toolCalls.length === 0 &&
     hasEmptyDeliverySentinel(resolvedStepOutput);
-  const responseMessages = emptyDelivery ? [] : result.response.messages;
+  const rawResponseMessages = emptyDelivery ? [] : result.response.messages;
   const stepOutput = emptyDelivery ? null : resolvedStepOutput;
+
+  const providerExecutedOutcomeIds = new Set<string>();
+  for (const part of [...(result.content ?? []), ...(result.toolResults ?? [])]) {
+    if (
+      (part.type === "tool-result" || part.type === "tool-error") &&
+      part.providerExecuted === true
+    ) {
+      providerExecutedOutcomeIds.add(part.toolCallId);
+    }
+  }
+  const normalizedProviderHistory = normalizeProviderToolHistory({
+    messages: rawResponseMessages,
+    providerExecutedOutcomeIds,
+  });
+  const responseMessages = normalizedProviderHistory.messages;
 
   const baseSession: HarnessSession = {
     ...session,
     compaction: createNextCompactionConfig(session.compaction, promptMessages, result),
   };
 
-  if (isSandboxEnabled(config)) {
-    const { getCodeModeInterrupt } = await loadCodeModeModule();
-    const codeModeInterrupt = getCodeModeInterrupt(result);
-    if (codeModeInterrupt !== undefined) {
-      return parkOnCodeModeInterrupt({
+  const workflowContinuationSecurity =
+    config.workflow === true ? readWorkflowContinuationSecurity(baseSession) : undefined;
+
+  if (workflowContinuationSecurity !== undefined) {
+    const workflowInterrupt = await getWorkflowSandboxInterrupt(
+      result,
+      workflowContinuationSecurity,
+    );
+    if (workflowInterrupt !== undefined) {
+      if (!isWorkflowRuntimeActionInterrupt(workflowInterrupt)) {
+        throw new Error(`Unsupported Workflow interrupt kind "${workflowInterrupt.payload.kind}".`);
+      }
+      return parkOnWorkflowInterrupt({
         baseSession,
-        config,
-        emit,
         emissionState,
-        interrupt: codeModeInterrupt,
+        interrupt: workflowInterrupt,
         promptMessages,
         responseMessages,
       });
@@ -1422,13 +1557,28 @@ async function handleStepResult(input: {
     excludedCallIds: approvalRequestCallIds,
   });
   const inputRequests: InputRequest[] = [...approvalRequests, ...questionRequests];
+  const advertisedRuntimeActionTools = getAdvertisedTools({
+    session: baseSession,
+    tools: config.tools,
+  });
   const pendingRuntimeActions = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
     .filter((toolCall) => !isInvalidToolCall(toolCall))
     .filter((toolCall) => config.tools.get(toolCall.toolName)?.runtimeAction !== undefined)
+    .filter((toolCall) => {
+      if (advertisedRuntimeActionTools.get(toolCall.toolName)?.runtimeAction !== undefined) {
+        return true;
+      }
+      log.warn("runtime action tool call blocked because tool is not advertised", {
+        callId: toolCall.toolCallId,
+        sessionId: baseSession.sessionId,
+        toolName: toolCall.toolName,
+      });
+      return false;
+    })
     .map((toolCall) =>
       createRuntimeActionRequestFromToolCall({
         toolCall,
-        tools: config.tools,
+        tools: advertisedRuntimeActionTools,
       }),
     );
 
@@ -1531,33 +1681,7 @@ async function handleStepResult(input: {
   // so the prompt prefix stays stable and the provider's prompt cache keeps
   // hitting across steps. Compaction is the sole mechanism that ever rewrites
   // history, and it runs before the model call (see `maybeCompact`).
-  const providerExecutedToolCallIds = new Set(
-    (stepOutput === null ? (result.toolResults ?? []) : [])
-      .filter((toolResult) => toolResult.providerExecuted === true)
-      .map((toolResult) => toolResult.toolCallId),
-  );
-  const providerExecutedToolResults: ToolModelMessage["content"] = [];
-  const continuationMessages: ModelMessage[] = responseMessages.map((message) =>
-    message.role === "assistant" && Array.isArray(message.content)
-      ? {
-          ...message,
-          content: message.content.flatMap((part) => {
-            if (part.type === "tool-result" && providerExecutedToolCallIds.has(part.toolCallId)) {
-              providerExecutedToolResults.push(part);
-              return [];
-            }
-            return [
-              part.type === "tool-call" && providerExecutedToolCallIds.has(part.toolCallId)
-                ? { ...part, providerExecuted: false }
-                : part,
-            ];
-          }),
-        }
-      : message,
-  );
-  if (providerExecutedToolResults.length > 0) {
-    continuationMessages.push({ role: "tool", content: providerExecutedToolResults });
-  }
+  const continuationMessages = responseMessages;
   const updatedHistory: ModelMessage[] = [...promptMessages, ...continuationMessages];
   let nextSession: HarnessSession = { ...baseSession, history: updatedHistory };
 
@@ -1569,7 +1693,9 @@ async function handleStepResult(input: {
 
   const continueLoop =
     !calledFinalOutput &&
-    (continuationMessages.at(-1)?.role === "tool" || hasDeferredStepInput(nextSession));
+    (continuationMessages.at(-1)?.role === "tool" ||
+      normalizedProviderHistory.outcomeEndsResponse ||
+      hasDeferredStepInput(nextSession));
   if (continueLoop) {
     if (emit) {
       emissionState = advanceStep(emissionState);
@@ -1746,144 +1872,103 @@ async function finishConversationTurn(input: {
   return { next: null, session };
 }
 
-/**
- * Continues a code-mode invocation parked on any host interrupt (nested-tool
- * approval, connection auth, …). One generic path: pick the kind-specific
- * resolution, replay the sandbox through the package, splice the final output
- * back into the outer `code_mode` tool result, and re-park if the replay hit a
- * further interrupt.
- */
-async function continuePendingCodeModeInterrupt(input: {
-  readonly capabilities?: SessionCapabilities;
+/** Replays a parked dynamic workflow with completed child-agent results. */
+async function continuePendingWorkflowInterrupt(input: {
   readonly childResults?: readonly { readonly output?: unknown }[];
   readonly config: ToolLoopHarnessConfig;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
-  readonly messages: readonly ModelMessage[];
   readonly runStep: StepFn;
   readonly session: HarnessSession;
 }): Promise<StepResult | null> {
-  const pending = getPendingCodeModeInterrupt(input.session.state);
-  if (pending === undefined) {
-    return null;
-  }
-
-  const {
-    continueCodeModeApproval,
-    continueCodeModeInterrupt,
-    getCodeModeApprovalResponse,
-    isCodeModeApprovalInterrupt,
-    replaceCodeModeInterruptResult,
-    unwrapCodeModeResult,
-  } = await loadCodeModeModule();
+  const pending = getPendingWorkflowInterrupt(input.session.state);
+  if (pending === undefined) return null;
 
   const interrupt = pending.interrupt;
-
-  // Approval can only continue once the user's tool-approval-response arrives;
-  // until then stay parked. Connection-auth resumes as authorized whenever the
-  // turn replays — the authorization webhook drove the resume.
-  const approvalResponse = isCodeModeApprovalInterrupt(interrupt)
-    ? getCodeModeApprovalResponse([...input.messages], interrupt)
-    : undefined;
-  if (isCodeModeApprovalInterrupt(interrupt) && approvalResponse === undefined) {
-    return { next: null, session: input.session };
+  if (!isWorkflowRuntimeActionInterrupt(interrupt)) {
+    throw new Error(`Unsupported Workflow interrupt kind "${interrupt.payload.kind}".`);
   }
 
-  const options = createEveCodeModeOptions({
-    lifecycle:
-      input.emit !== undefined
-        ? createCodeModeLifecycle({
-            emit: input.emit,
-            emissionState: input.emissionState,
-            skipReplayed: true,
-            tools: input.config.tools,
-          })
-        : undefined,
-  });
+  const lifecycle =
+    input.emit === undefined
+      ? undefined
+      : createWorkflowLifecycle({
+          emit: input.emit,
+          emissionState: input.emissionState,
+          skipReplayed: true,
+          tools: input.config.tools,
+        });
+  const continuationSecurity = getWorkflowContinuationSecurity(input.session);
 
   let continuationOutput: unknown;
   try {
-    const hostTools = await buildSandboxHostTools({
-      approvedTools: getApprovedTools(input.session),
-      capabilities: input.capabilities,
+    const hostTools = buildWorkflowHostTools({
       tools: input.config.tools,
     });
 
-    if (isCodeModeApprovalInterrupt(interrupt) && approvalResponse !== undefined) {
-      continuationOutput = await continueCodeModeApproval({
-        approvalResponse,
-        interrupt,
-        options,
+    const childResults = input.childResults ?? [];
+    let currentInterrupt = interrupt;
+    let resultIndex = 0;
+    // Promise.all can park several child calls together. Resolve one ledger
+    // entry per replay until every supplied child result has been consumed.
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      continuationOutput = await continueWorkflowSandboxInterrupt({
+        continuationSecurity,
+        interrupt: currentInterrupt,
+        lifecycle,
+        resolution: childResults[resultIndex]?.output,
         tools: hostTools,
       });
-    } else if (isCodeModeConnectionAuthInterrupt(interrupt)) {
-      continuationOutput = await continueCodeModeInterrupt({
-        interrupt,
-        resolution: { status: "authorized" as const },
-        tools: hostTools,
-        options,
-      });
-    } else if (isCodeModeRuntimeActionInterrupt(interrupt)) {
-      const childResults = input.childResults ?? [];
-      let currentInterrupt = interrupt;
-      let resultIndex = 0;
-      // Each cycle resolves one interrupted entry. For Promise.all with
-      // N agent calls, the bridge batches all N, all children dispatch
-      // concurrently, and we loop to resolve one per replay.
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        continuationOutput = await continueCodeModeInterrupt({
-          interrupt: currentInterrupt,
-          resolution: childResults[resultIndex]?.output,
-          tools: hostTools,
-          options,
-        });
-        const loopUnwrapped = unwrapCodeModeResult(continuationOutput);
-        if (loopUnwrapped.status !== "interrupted") break;
-        if (!isCodeModeRuntimeActionInterrupt(loopUnwrapped.interrupt)) break;
-        if (resultIndex + 1 >= childResults.length) break;
-        resultIndex++;
-        currentInterrupt = loopUnwrapped.interrupt as CodeModeInterrupt;
+      const loopUnwrapped = await unwrapWorkflowSandboxResult(
+        continuationOutput,
+        continuationSecurity,
+      );
+      if (loopUnwrapped.status !== "interrupted") break;
+      if (!isWorkflowRuntimeActionInterrupt(loopUnwrapped.interrupt)) break;
+      if (resultIndex + 1 >= childResults.length) break;
+      const nextInterrupt = getWorkflowRuntimeActionInterrupts(loopUnwrapped.interrupt)[0];
+      if (nextInterrupt === undefined) {
+        throw new Error("Workflow continuation contains no pending runtime-action interrupt.");
       }
-    } else {
-      throw new Error(`Unsupported code-mode interrupt kind "${interrupt.payload.kind}".`);
+      resultIndex++;
+      currentInterrupt = nextInterrupt;
     }
   } catch (error) {
-    logError(log, "code-mode interrupt continuation failed", error);
+    logError(log, "Workflow interrupt continuation failed", error);
     continuationOutput = {
-      error: "code_mode_continuation_failed",
+      error: "workflow_continuation_failed",
       message: toErrorMessage(error),
       retryable: false,
     };
   }
 
-  const unwrapped = unwrapCodeModeResult(continuationOutput);
+  const unwrapped = await unwrapWorkflowSandboxResult(continuationOutput, continuationSecurity);
   const finalOutput = unwrapped.status === "interrupted" ? unwrapped.interrupt : unwrapped.output;
   const baseMessages = [...input.session.history, ...pending.responseMessages];
-  const replacedMessages = isCodeModeRuntimeActionInterrupt(interrupt)
-    ? replaceCodeModeToolResult(
-        baseMessages,
-        (interrupt as { outerToolCallId?: string }).outerToolCallId,
-        finalOutput,
-      )
-    : replaceCodeModeInterruptResult(baseMessages, interrupt as never, finalOutput);
+  const replacedMessages = replaceWorkflowToolResult(
+    baseMessages,
+    (interrupt as { outerToolCallId?: string }).outerToolCallId,
+    finalOutput,
+  );
 
-  let session = clearPendingCodeModeInterrupt({
+  let session = clearPendingWorkflowInterrupt({
     ...input.session,
     history: replacedMessages,
   });
 
   if (unwrapped.status === "interrupted") {
+    if (!isWorkflowRuntimeActionInterrupt(unwrapped.interrupt)) {
+      throw new Error(`Unsupported Workflow interrupt kind "${unwrapped.interrupt.payload.kind}".`);
+    }
     const promptMessageCount = input.session.history.length;
     const promptMessages = replacedMessages.slice(0, promptMessageCount);
     const responseMessages = replacedMessages.slice(promptMessageCount);
     session = { ...session, history: promptMessages };
-    return parkOnCodeModeInterrupt({
+    return parkOnWorkflowInterrupt({
       baseSession: session,
-      config: input.config,
-      emit: input.emit,
       emissionState: input.emissionState,
-      interrupt: unwrapped.interrupt as CodeModeInterrupt,
+      interrupt: unwrapped.interrupt,
       promptMessages,
       responseMessages,
     });
@@ -1892,14 +1977,7 @@ async function continuePendingCodeModeInterrupt(input: {
   return { next: input.runStep, session };
 }
 
-/**
- * Parks the turn on a code-mode host interrupt. Stores the interrupt on the
- * single pending slot, then runs the kind-specific side effect: connection-auth
- * surfaces the authorization challenges and parks on pending authorization;
- * approval surfaces the nested tool's approval request through eve's existing
- * input-request UX.
- */
-function replaceCodeModeToolResult(
+function replaceWorkflowToolResult(
   messages: readonly ModelMessage[],
   outerToolCallId: string | undefined,
   output: unknown,
@@ -1921,125 +1999,30 @@ function replaceCodeModeToolResult(
   }) as ModelMessage[];
 }
 
-async function parkOnCodeModeInterrupt(input: {
+function parkOnWorkflowInterrupt(input: {
   readonly baseSession: HarnessSession;
-  readonly config: ToolLoopHarnessConfig;
-  readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
-  readonly interrupt: CodeModeInterrupt;
+  readonly interrupt: WorkflowSandboxInterrupt;
   readonly promptMessages: readonly ModelMessage[];
   readonly responseMessages: readonly ModelMessage[];
-}): Promise<StepResult> {
-  const { isCodeModeApprovalInterrupt, toCodeModeApprovalMessages } = await loadCodeModeModule();
-  const interrupt = input.interrupt;
+}): StepResult {
+  const interrupt = getWorkflowRuntimeActionInterrupts(input.interrupt)[0];
+  if (interrupt === undefined) {
+    throw new Error("Workflow continuation contains no pending runtime-action interrupt.");
+  }
+
   const baseSession: HarnessSession = {
     ...input.baseSession,
     history: [...input.promptMessages],
   };
 
-  // Connection-auth: the host tool's execute already called startAuthorization
-  // and registered the webhook hook; wrapHostToolForCodeMode threaded the
-  // challenges through the interrupt payload. Surface them and park on pending
-  // authorization — don't call startAuthorization again.
-  if (isCodeModeConnectionAuthInterrupt(interrupt)) {
-    const challenges: AuthorizationChallenge[] = [...(interrupt.payload.challenges ?? [])];
-
-    if (input.emit) {
-      for (const ch of challenges) {
-        await input.emit(
-          createAuthorizationRequiredEvent({
-            authorization: ch.challenge,
-            name: ch.name,
-            description: ch.challenge.instructions ?? `Authorization required for ${ch.name}`,
-            webhookUrl: ch.hookUrl,
-            sequence: input.emissionState.sequence,
-            stepIndex: input.emissionState.stepIndex,
-            turnId: input.emissionState.turnId,
-          }),
-        );
-      }
-    }
-
-    const parkedSession = setPendingCodeModeInterrupt({
-      interrupt,
-      responseMessages: input.responseMessages,
-      session: {
-        ...baseSession,
-        state: setPendingAuthorization(baseSession.state, { challenges }),
-      },
-    });
-
-    return { next: null, session: parkedSession };
-  }
-
-  // Approval: surface the nested tool's approval request as an eve input
-  // request so the existing approval UX drives the resume.
-  if (isCodeModeApprovalInterrupt(interrupt)) {
-    const approvalMessages = toCodeModeApprovalMessages(interrupt);
-    const approvalRequests = extractToolApprovalInputRequests({
-      content: extractAssistantContent(approvalMessages),
-    });
-
-    let parkedSession = setPendingInputBatch({
-      event: {
-        sequence: input.emissionState.sequence,
-        stepIndex: input.emissionState.stepIndex,
-        turnId: input.emissionState.turnId,
-      },
-      requests: approvalRequests,
-      responseMessages: approvalMessages,
-      session: setPendingCodeModeInterrupt({
-        interrupt,
-        responseMessages: input.responseMessages,
-        session: baseSession,
-      }),
-    });
-
-    if (input.emit) {
-      await input.emit(
-        createInputRequestedEvent({
-          requests: approvalRequests,
-          sequence: input.emissionState.sequence,
-          stepIndex: input.emissionState.stepIndex,
-          turnId: input.emissionState.turnId,
-        }),
-      );
-
-      if (input.config.mode === "conversation") {
-        const nextEmissionState = await emitTurnEpilogue(
-          input.emit,
-          input.emissionState,
-          input.config.mode,
-        );
-        parkedSession = setHarnessEmissionState(parkedSession, nextEmissionState);
-      }
-    }
-
-    return { next: null, session: parkedSession };
-  }
-
-  // Runtime-action and any other future kinds: park with no side effects.
-  // The turn step detects the pending state and routes to the appropriate
-  // driver action.
-  const parkedSession = setPendingCodeModeInterrupt({
+  const parkedSession = setPendingWorkflowInterrupt({
     interrupt,
     responseMessages: input.responseMessages,
     session: baseSession,
   });
 
   return { next: null, session: setHarnessEmissionState(parkedSession, input.emissionState) };
-}
-
-function extractAssistantContent(
-  messages: readonly ModelMessage[],
-): NonNullable<HarnessStepResult["content"]> {
-  const content: NonNullable<HarnessStepResult["content"]> = [];
-  for (const message of messages) {
-    if (message.role === "assistant" && Array.isArray(message.content)) {
-      content.push(...(message.content as NonNullable<HarnessStepResult["content"]>));
-    }
-  }
-  return content;
 }
 
 function createNextCompactionConfig(

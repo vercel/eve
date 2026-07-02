@@ -19,10 +19,10 @@ import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
 import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import {
-  getRuntimeActionKeyFromInterrupt,
-  isCodeModeRuntimeActionInterrupt,
-} from "#harness/code-mode-runtime-action-state.js";
-import { getPendingCodeModeInterrupt } from "#harness/code-mode-interrupt-state.js";
+  getRuntimeActionKeysFromWorkflowInterrupt,
+  isWorkflowRuntimeActionInterrupt,
+} from "#harness/workflow-runtime-action-state.js";
+import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import type { JsonObject } from "#shared/json.js";
@@ -43,6 +43,7 @@ import {
   PendingAuthorizationResultKey,
   type AuthorizationResult,
 } from "#harness/authorization.js";
+import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
 import type { AuthorizationCallback } from "#runtime/connections/types.js";
 import {
@@ -60,8 +61,11 @@ import { emitProxiedInputRequest, routeDeliverPayload } from "#execution/subagen
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
-import { turnWorkflow } from "#execution/turn-workflow.js";
-import { createWorkflowRuntime, startWorkflowPreferLatest } from "#execution/workflow-runtime.js";
+import {
+  createWorkflowRuntime,
+  startWorkflowPreferLatest,
+  turnWorkflowReference,
+} from "#execution/workflow-runtime.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 
 /**
@@ -90,7 +94,7 @@ export type DurableStepResult =
       readonly sessionState: DurableSessionState;
     }
   | {
-      readonly action: "dispatch-code-mode-runtime-actions";
+      readonly action: "dispatch-workflow-runtime-actions";
       readonly pendingRuntimeActionKeys: readonly string[];
       readonly serializedContext: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
@@ -111,13 +115,13 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
 
-  // Populate the callback base URL so getHookUrl() works during
-  // tool execution. Reads from workflow metadata (available in steps).
+  // Populate the callback base URL so getHookUrl() works during tool
+  // execution, preferring eve's active local origin over metadata fallback.
   try {
     const { getWorkflowMetadata } = await import("#compiled/@workflow/core/index.js");
     const metadata = getWorkflowMetadata();
     if (typeof metadata.url === "string") {
-      ctx.set(CallbackBaseUrlKey, metadata.url.replace(/\/$/, ""));
+      ctx.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl(metadata.url));
     }
   } catch {
     // Outside a workflow context (e.g. tests) — getHookUrl will return undefined.
@@ -356,14 +360,16 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   if (stepResult.next === null) {
     writer.releaseLock();
 
-    const codeModeInterrupt = getPendingCodeModeInterrupt(stepResult.session.state);
+    const workflowInterrupt = getPendingWorkflowInterrupt(stepResult.session.state);
     if (
-      codeModeInterrupt !== undefined &&
-      isCodeModeRuntimeActionInterrupt(codeModeInterrupt.interrupt)
+      workflowInterrupt !== undefined &&
+      isWorkflowRuntimeActionInterrupt(workflowInterrupt.interrupt)
     ) {
       return {
-        action: "dispatch-code-mode-runtime-actions",
-        pendingRuntimeActionKeys: [getRuntimeActionKeyFromInterrupt(codeModeInterrupt.interrupt)],
+        action: "dispatch-workflow-runtime-actions",
+        pendingRuntimeActionKeys: getRuntimeActionKeysFromWorkflowInterrupt(
+          workflowInterrupt.interrupt,
+        ),
         serializedContext: nextSerializedContext,
         sessionState: nextState,
       };
@@ -637,16 +643,20 @@ export async function dispatchTurnStep(
 ): Promise<{ readonly runId: string }> {
   "use step";
 
-  const run = await startWorkflowPreferLatest(turnWorkflow, [createTurnWorkflowInput(input)], {
-    allowReservedAttributes: true,
-    attributes: normalizeEveAttributes(
-      buildTurnAttributes({
-        parentSessionId: input.sessionState.sessionId,
-        requestId: input.delivery.kind === "deliver" ? input.delivery.requestId : undefined,
-        rootSessionId: readRootSessionId(input.serializedContext) ?? input.sessionState.sessionId,
-      }),
-    ),
-  });
+  const run = await startWorkflowPreferLatest(
+    turnWorkflowReference,
+    [createTurnWorkflowInput(input)],
+    {
+      allowReservedAttributes: true,
+      attributes: normalizeEveAttributes(
+        buildTurnAttributes({
+          parentSessionId: input.sessionState.sessionId,
+          requestId: input.delivery.kind === "deliver" ? input.delivery.requestId : undefined,
+          rootSessionId: readRootSessionId(input.serializedContext) ?? input.sessionState.sessionId,
+        }),
+      ),
+    },
+  );
 
   return { runId: run.runId };
 }

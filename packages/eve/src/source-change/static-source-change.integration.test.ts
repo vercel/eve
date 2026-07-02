@@ -10,7 +10,7 @@ import { createStaticSourceChange } from "#source-change/static-source-change.js
 const SCAFFOLD = `import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "anthropic/claude-sonnet-4.6",
+  model: "anthropic/claude-sonnet-5",
 });
 `;
 

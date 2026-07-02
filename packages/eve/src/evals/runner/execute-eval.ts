@@ -40,6 +40,7 @@ export async function executeEval(options: ExecuteEvalOptions): Promise<EveEvalR
   let result: EveEvalTaskResult;
   let assertions: readonly AssertionResult[] = [];
   let error: string | undefined;
+  let skipReason: string | undefined;
 
   try {
     const outcome = await executeTask({
@@ -52,6 +53,7 @@ export async function executeEval(options: ExecuteEvalOptions): Promise<EveEvalR
     result = outcome.result;
     assertions = outcome.assertions;
     error = outcome.error;
+    skipReason = outcome.skipReason;
   } catch (err) {
     error = toErrorMessage(err);
     result = {
@@ -63,7 +65,7 @@ export async function executeEval(options: ExecuteEvalOptions): Promise<EveEvalR
     };
   }
 
-  const verdict = computeEvalVerdict({ error, assertions });
+  const verdict = computeEvalVerdict({ error, assertions, skipReason });
 
   return {
     id: evaluation.id,
@@ -71,6 +73,7 @@ export async function executeEval(options: ExecuteEvalOptions): Promise<EveEvalR
     assertions,
     verdict,
     error,
+    skipReason,
     startedAt,
     completedAt: new Date().toISOString(),
   };

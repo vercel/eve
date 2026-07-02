@@ -1,5 +1,6 @@
 const PRODUCTION_ENVIRONMENT = "production";
 const VERCEL_PROTECTION_BYPASS_QUERY = "x-vercel-protection-bypass";
+const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
 
 /**
  * Workflow metadata is deployment-specific, so on Vercel it can point at
@@ -18,6 +19,20 @@ export function resolveVercelProductionCallbackBaseUrl(): string | null {
     return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
   }
   return null;
+}
+
+/**
+ * Resolves the origin used for framework-owned workflow callbacks.
+ *
+ * Workflow metadata falls back to port 3000 when its optional local port
+ * discovery is unavailable. eve already configures the local world with the
+ * active dev-server origin, so prefer that value before the metadata fallback.
+ */
+export function resolveWorkflowCallbackBaseUrl(metadataUrl: string): string {
+  const configuredLocalBaseUrl = process.env[WORKFLOW_LOCAL_BASE_URL_ENV]?.trim();
+  const localBaseUrl = configuredLocalBaseUrl ? configuredLocalBaseUrl : undefined;
+  const resolved = resolveVercelProductionCallbackBaseUrl() ?? localBaseUrl ?? metadataUrl;
+  return resolved.replace(/\/$/, "");
 }
 
 /**

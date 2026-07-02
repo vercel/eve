@@ -1,10 +1,22 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
+import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { RouteDefinition, SendFn } from "#channel/routes.js";
 import type { Session } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 export const CHANNEL_SENTINEL = "eve:channel" as const;
 const CHANNEL_INSTRUMENTATION_KIND = Symbol.for("eve.channel.instrumentationKind");
+const CHANNEL_INSTRUMENTATION_KINDS = Symbol.for("eve.channel.instrumentationKinds");
+
+// Nitro dev can evaluate a channel once for its route and again for a resolver
+// import, so separately created channel objects need a process-wide identity.
+type ChannelInstrumentationKindGlobal = typeof globalThis & {
+  [CHANNEL_INSTRUMENTATION_KINDS]?: Map<string, string>;
+};
+
+const channelInstrumentationKindGlobal = globalThis as ChannelInstrumentationKindGlobal;
+channelInstrumentationKindGlobal[CHANNEL_INSTRUMENTATION_KINDS] ??= new Map();
+const channelInstrumentationKinds = channelInstrumentationKindGlobal[CHANNEL_INSTRUMENTATION_KINDS];
 
 export interface CompiledChannel<
   TState = undefined,
@@ -14,6 +26,7 @@ export interface CompiledChannel<
   readonly __kind: typeof CHANNEL_SENTINEL;
   readonly routes: readonly RouteDefinition<TState>[];
   readonly adapter: ChannelAdapter<any>;
+  readonly cors?: NormalizedChannelCorsOptions;
   readonly __metadata?: TMetadata;
   readonly receive?: (
     input: {
@@ -44,9 +57,12 @@ export function getChannelInstrumentationKind(value: unknown): string | undefine
   }
 
   const adapterKind = value.adapter.kind;
-  return typeof adapterKind === "string" && adapterKind.startsWith("channel:")
-    ? adapterKind
-    : undefined;
+  if (typeof adapterKind === "string" && adapterKind.startsWith("channel:")) {
+    return adapterKind;
+  }
+
+  const routeSignature = channelRouteSignature(value);
+  return routeSignature === undefined ? undefined : channelInstrumentationKinds.get(routeSignature);
 }
 
 export function setChannelInstrumentationKind(channel: CompiledChannel, kind: string): void {
@@ -55,4 +71,16 @@ export function setChannelInstrumentationKind(channel: CompiledChannel, kind: st
     enumerable: false,
     value: kind,
   });
+  const routeSignature = channelRouteSignature(channel);
+  if (routeSignature !== undefined) {
+    channelInstrumentationKinds.set(routeSignature, kind);
+  }
+}
+
+function channelRouteSignature(channel: CompiledChannel): string | undefined {
+  if (channel.routes.length === 0) return undefined;
+  return channel.routes
+    .map((route) => `${route.method.toUpperCase()} ${route.path}`)
+    .sort()
+    .join("\n");
 }

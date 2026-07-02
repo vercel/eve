@@ -20,7 +20,7 @@ import type {
   ResolvedToolDefinition,
 } from "#runtime/types.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
-import { CODE_MODE_TOOL_NAME, WORKFLOW_TOOL_NAME } from "#shared/code-mode.js";
+import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 import type { ModelRouting } from "#shared/agent-definition.js";
 import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 
@@ -402,7 +402,7 @@ function buildToolInfo(agent: ResolvedAgent): AgentInfoTools {
       ),
     ],
     framework,
-    reserved: [CODE_MODE_TOOL_NAME, WORKFLOW_TOOL_NAME, LOAD_SKILL_TOOL_NAME],
+    reserved: [WORKFLOW_TOOL_NAME, LOAD_SKILL_TOOL_NAME],
   };
 }
 
@@ -441,7 +441,7 @@ export function renderTool(
     origin: input.origin,
     outputSchema: tool.outputSchema,
     replacesFrameworkTool: input.replacesFrameworkTool,
-    requiresApproval: tool.needsApproval !== undefined,
+    requiresApproval: tool.approval !== undefined,
   };
 }
 

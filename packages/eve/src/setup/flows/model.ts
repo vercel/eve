@@ -461,7 +461,7 @@ export async function changeAgentModel(input: {
  */
 async function validateModelSlug(appRoot: string, slug: string): Promise<string | null> {
   if (!slug.includes("/")) {
-    return `\`${slug}\` isn't a provider/model id (e.g. anthropic/claude-sonnet-4.6).`;
+    return `\`${slug}\` isn't a provider/model id (e.g. anthropic/claude-sonnet-5).`;
   }
 
   const catalog = createCompiledRuntimeModelCatalogLoader(appRoot);

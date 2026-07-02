@@ -162,6 +162,35 @@ describe("createPromptCommandHandler", () => {
     }
   });
 
+  it("keeps the setup panel open for an immediate onboarding handoff", async () => {
+    const runTuiSetupCommand = vi.fn(async () => ({
+      message: "Vercel CLI installed.",
+      preserveFlowDiagnostics: false,
+    }));
+    vi.doMock("./setup-commands.js", () => ({
+      SETUP_FLOW_CONFIG: {
+        "vc:install": { title: "Install the Vercel CLI", indicator: "pulse" },
+      },
+      runTuiSetupCommand,
+    }));
+
+    try {
+      const setupFlow = setupFlowRenderer();
+      const handler = createPromptCommandHandler({ target: LOCAL_TARGET });
+      const handoffContext = Object.assign(context({ setupFlow }), {
+        keepSetupFlowOpen: true,
+      });
+
+      await handler.handle({ type: "extension", name: "vc:install", argument: "" }, handoffContext);
+
+      expect(setupFlow.begin).toHaveBeenCalledWith("Install the Vercel CLI", "pulse");
+      expect(setupFlow.end).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock("./setup-commands.js");
+      vi.resetModules();
+    }
+  });
+
   it("reports a login that completed before remote authentication was cancelled", async () => {
     const setupFlow = setupFlowRenderer();
     const runLoginFlow = vi.fn(async () => ({ kind: "cancelled" as const }));

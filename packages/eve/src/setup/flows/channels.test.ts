@@ -152,7 +152,7 @@ describe("runChannelsFlow", () => {
 
     expect(result).toEqual({ kind: "done", addedChannels: [] });
     expect(addChannelsDeps.ensureChannel).not.toHaveBeenCalled();
-    expect(listPaints[0]?.at(-1)).toMatchObject({ value: "done", label: "Done" });
+    expect(listPaints[0]?.at(-1)).toMatchObject({ value: "done", trailingAction: true });
   });
 
   it("defaults the cursor to Done when every channel is already added or unavailable", async () => {

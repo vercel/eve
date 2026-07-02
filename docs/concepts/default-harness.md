@@ -87,16 +87,6 @@ Three moves shape the harness. The right one depends on whether the model should
 - **Disable** when the model should not have the capability at all. A `disableTool()` sentinel removes the built-in, and the model never sees it. Reach for this to lock down `bash` or `web_fetch` in an agent that should not run shell commands or fetch arbitrary URLs.
 - **Author a new tool** when you want a capability the harness does not ship. Give it a fresh slug under `agent/tools/` and it joins the built-ins instead of replacing one. See [Tools](../tools) for the authoring model.
 
-## The opt-in `Workflow` tool
-
-An experimental `Workflow` tool ships but stays off by default. To turn it on, re-export the opt-in marker from `agent/tools/workflow.ts`:
-
-```ts
-export { ExperimentalWorkflow as default } from "eve/tools";
-```
-
-With it on, the model can orchestrate the agent's own subagents from model-authored JavaScript, all as one durable step. See [Dynamic workflows](../guides/dynamic-workflows).
-
 ## What to read next
 
 - [Tools](../tools): define your own tools, gate them on approval, and shape their output with `toModelOutput`

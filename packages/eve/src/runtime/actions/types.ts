@@ -3,13 +3,15 @@ import { z } from "#compiled/zod/index.js";
 import { jsonObjectSchema, jsonValueSchema } from "#shared/json-schemas.js";
 
 /**
- * Runtime-owned authored tool-call request surfaced by a harness and executed
- * later by step-backed runtime code.
+ * Eve-owned `tool-call` action requested by the model.
+ *
+ * Depending on the tool definition, it can execute locally, be provider
+ * executed, or be handled later by the runtime.
  */
 export type RuntimeToolCallActionRequest = z.infer<typeof runtimeToolCallActionRequestSchema>;
 
 /**
- * Zod schema for one runtime-owned authored tool-call action request.
+ * Zod schema for one Eve-owned `tool-call` action request.
  */
 export const runtimeToolCallActionRequestSchema = z
   .object({
@@ -67,15 +69,12 @@ export const runtimeRemoteAgentCallActionRequestSchema = z
   .strict();
 
 /**
- * Runtime-owned action request surfaced by a harness.
- *
- * Harness-native capabilities such as `bash` do not cross the harness boundary
- * as runtime actions. Only runtime-executed requests use this taxonomy.
+ * Eve-owned `load-skill` action requested by the model.
  */
 type RuntimeLoadSkillActionRequest = z.infer<typeof runtimeLoadSkillActionRequestSchema>;
 
 /**
- * Zod schema for one runtime-owned load-skill action request.
+ * Zod schema for one Eve-owned `load-skill` action request.
  */
 const runtimeLoadSkillActionRequestSchema = z
   .object({
@@ -86,10 +85,10 @@ const runtimeLoadSkillActionRequestSchema = z
   .strict();
 
 /**
- * Runtime-owned action request surfaced by a harness.
+ * Eve-owned action request surfaced by the harness.
  *
- * Harness-native capabilities such as `bash` do not cross the harness boundary
- * as runtime actions. Only runtime-executed requests use this taxonomy.
+ * A `tool-call` is one action kind, alongside control-plane work such as
+ * `load-skill` and runtime-dispatched subagent calls.
  */
 export type RuntimeActionRequest =
   | RuntimeLoadSkillActionRequest

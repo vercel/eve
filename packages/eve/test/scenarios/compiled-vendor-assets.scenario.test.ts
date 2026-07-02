@@ -36,6 +36,21 @@ function containsSourceMapComment(source: string): boolean {
   return /(?:^|\n)\s*\/\/# sourceMappingURL=/u.test(source);
 }
 
+function rewriteDeclarationImports(
+  source: string,
+  rewrites: Readonly<Record<string, string>>,
+): string {
+  let rewritten = source;
+  for (const [moduleName, replacement] of Object.entries(rewrites)) {
+    rewritten = rewritten
+      .replaceAll(`from '${moduleName}'`, `from '${replacement}'`)
+      .replaceAll(`from "${moduleName}"`, `from "${replacement}"`)
+      .replaceAll(`import '${moduleName}'`, `import '${replacement}'`)
+      .replaceAll(`import "${moduleName}"`, `import "${replacement}"`);
+  }
+  return rewritten;
+}
+
 describe("compiled vendor assets", () => {
   it("does not generate source maps for vendored packages", async () => {
     const entries = await readdir(COMPILED_VENDOR_ROOT, {
@@ -182,5 +197,100 @@ describe("compiled vendor assets", () => {
     expect(vendoredSandbox).toContain('from "./_workflow-serde.js"');
     expect(vendoredBaseClient).toContain('from "../_async-retry.js"');
     expect(vendoredBaseClient).toContain('import "#compiled/zod/index.js"');
+  });
+
+  it("copies AI SDK declarations from the installed packages without authored stubs", async () => {
+    const packages = [
+      {
+        name: "@ai-sdk/anthropic",
+        rewrites: {
+          "@ai-sdk/provider": "#compiled/@ai-sdk/provider/index.js",
+          "@ai-sdk/provider-utils": "#compiled/@ai-sdk/provider-utils/index.js",
+          "zod/v4": "#compiled/zod/index.js",
+        },
+      },
+      {
+        name: "@ai-sdk/google",
+        rewrites: {
+          "@ai-sdk/provider": "#compiled/@ai-sdk/provider/index.js",
+          "@ai-sdk/provider-utils": "#compiled/@ai-sdk/provider-utils/index.js",
+        },
+      },
+      {
+        name: "@ai-sdk/mcp",
+        rewrites: {
+          "@ai-sdk/provider": "#compiled/@ai-sdk/provider/index.js",
+          "@ai-sdk/provider-utils": "#compiled/@ai-sdk/provider-utils/index.js",
+          "zod/v4": "#compiled/zod/index.js",
+        },
+      },
+      {
+        name: "@ai-sdk/openai",
+        rewrites: {
+          "@ai-sdk/provider": "#compiled/@ai-sdk/provider/index.js",
+          "@ai-sdk/provider-utils": "#compiled/@ai-sdk/provider-utils/index.js",
+        },
+      },
+      {
+        name: "@ai-sdk/otel",
+        rewrites: {
+          "@ai-sdk/provider": "#compiled/@ai-sdk/provider/index.js",
+          "@ai-sdk/provider-utils": "#compiled/@ai-sdk/provider-utils/index.js",
+          "@opentelemetry/api": "#compiled/@opentelemetry/api/index.js",
+        },
+      },
+      {
+        name: "@ai-sdk/provider",
+        rewrites: {
+          "json-schema": "#compiled/json-schema/index.js",
+        },
+      },
+      {
+        name: "@ai-sdk/provider-utils",
+        rewrites: {
+          "@ai-sdk/provider": "#compiled/@ai-sdk/provider/index.js",
+          "@standard-schema/spec": "#compiled/@standard-schema/spec/index.js",
+          "@workflow/serde": "#compiled/@workflow/serde/index.js",
+          "eventsource-parser/stream": "#compiled/eventsource-parser/stream/index.js",
+          "zod/v3": "#compiled/zod/index.js",
+          "zod/v4": "#compiled/zod/index.js",
+        },
+      },
+    ] as const;
+
+    for (const packageDefinition of packages) {
+      const upstreamRoot = dirname(require.resolve(`${packageDefinition.name}/package.json`));
+      const [upstream, vendored] = await Promise.all([
+        readFile(join(upstreamRoot, "dist/index.d.ts"), "utf8"),
+        readFile(join(COMPILED_VENDOR_ROOT, packageDefinition.name, "index.d.ts"), "utf8"),
+      ]);
+
+      expect(vendored).toBe(rewriteDeclarationImports(upstream, packageDefinition.rewrites));
+    }
+  });
+
+  it("copies AI SDK declaration dependencies from their installed packages", async () => {
+    const jsonSchemaRoot = dirname(require.resolve("@types/json-schema/package.json"));
+    const serdeRoot = dirname(dirname(require.resolve("@workflow/serde")));
+    const eventSourceParserRoot = dirname(require.resolve("eventsource-parser/package.json"));
+    const comparisons = [
+      [join(jsonSchemaRoot, "index.d.ts"), join(COMPILED_VENDOR_ROOT, "json-schema/index.d.ts")],
+      [
+        join(serdeRoot, "dist/index.d.ts"),
+        join(COMPILED_VENDOR_ROOT, "@workflow/serde/index.d.ts"),
+      ],
+      [
+        join(eventSourceParserRoot, "dist/stream.d.ts"),
+        join(COMPILED_VENDOR_ROOT, "eventsource-parser/stream/index.d.ts"),
+      ],
+    ] as const;
+
+    for (const [upstreamPath, vendoredPath] of comparisons) {
+      const [upstream, vendored] = await Promise.all([
+        readFile(upstreamPath, "utf8"),
+        readFile(vendoredPath, "utf8"),
+      ]);
+      expect(vendored).toBe(upstream);
+    }
   });
 });

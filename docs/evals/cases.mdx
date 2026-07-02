@@ -5,6 +5,14 @@ description: "Author single-turn and multi-turn evals with test(t), and fan one 
 
 Each eval file is one graded case by default, and a single file can fan out over a dataset by default-exporting an array (covered below). The runner executes each `test(t)` function against the target, captures every event, and computes a verdict from the [assertions](./assertions) you recorded. Every eval shares one shape, whether single-turn, multi-turn, human-in-the-loop (HITL), or dataset-driven: one `async test(t)` function that drives the agent and asserts inline.
 
+Before adding a case, create the required config at the root of `evals/`. An empty config is enough when you do not need shared judge, reporter, concurrency, or timeout settings:
+
+```ts title="evals/evals.config.ts"
+import { defineEvalConfig } from "eve/evals";
+
+export default defineEvalConfig({});
+```
+
 ## Single-turn evals
 
 The common case sends one turn and asserts on the reply. `t.send(input)` resolves once the turn settles, and `t.reply` is the last assistant message:
@@ -16,7 +24,7 @@ import { includes } from "eve/evals/expect";
 export default defineEval({
   async test(t) {
     await t.send("What is the weather in Brooklyn?");
-    t.completed();
+    t.succeeded();
     t.check(t.reply, includes("Sunny"));
   },
 });
@@ -30,7 +38,7 @@ import { defineEval } from "eve/evals";
 export default defineEval({
   async test(t) {
     await t.send("Hello!");
-    t.completed();
+    t.succeeded();
     t.notCalledTool("get_weather");
   },
 });
@@ -42,6 +50,7 @@ Identity is the file path, so directories are the grouping mechanism. `evals/wea
 
 ```text
 evals/
+├── evals.config.ts
 ├── weather/
 │   ├── shared.ts                    # helpers, not an eval
 │   ├── brooklyn-forecast.eval.ts
@@ -69,25 +78,21 @@ export default defineEval({
 });
 ```
 
-For a precondition no built-in assertion expresses, `throw`. A thrown error marks the eval `failed` with the message in the result:
+Use scoped assertions for intermediate turns. When later control flow depends on a value-level check, `t.require` records a gate and stops the script if it fails:
 
 ```ts title="evals/session-continuity.eval.ts"
 import { defineEval } from "eve/evals";
-import { includes } from "eve/evals/expect";
+import { equals } from "eve/evals/expect";
 
 export default defineEval({
   async test(t) {
-    await t.send("My favorite word is marigold.");
-    const firstSessionId = t.sessionId;
+    const first = await t.send("My favorite word is marigold.");
 
     const second = await t.send("Thanks for remembering.");
-    second.expectOk();
-    if (t.sessionId !== firstSessionId) {
-      throw new Error(`Expected one session; got ${firstSessionId} then ${t.sessionId}.`);
-    }
+    await t.require(second.sessionId, equals(first.sessionId));
 
-    t.completed();
-    t.check(second.message, includes("Thanks for remembering."));
+    t.succeeded();
+    second.messageIncludes("Thanks for remembering.");
   },
 });
 ```
@@ -98,12 +103,16 @@ export default defineEval({
 
 - `t.send(input)` sends a turn and waits for it to settle. It accepts the same input as `ClientSession.send()` (a string or a structured message) and resolves to a turn carrying `.message` and `.expectOk()`.
 - `t.sendFile(text, path, mediaType?)` attaches a local file as a data URL.
-- `t.expectInputRequests(filter?)` asserts the previous turn parked on HITL input and returns the pending requests.
+- `t.requireInputRequest(filter?)` records a gate, requires exactly one pending request, and returns it. Filters match tool name, action input, prompt, display, and option ids.
 - `t.respond(...responses)` answers specific pending input requests and sends them as the next turn.
 - `t.respondAll(optionId)` answers every pending input request with the same option and sends the responses as the next turn.
 - `t.reply` is the last assistant message (or `null`); `t.sessionId` is the current session id; `t.events` is the full typed event stream captured so far.
 
-Each `send` (and `respond`/`respondAll`) resolves to a turn whose `expectOk()` throws only when the turn ended failed. A session left open for a next message is the normal end state of a successful turn.
+Each `send` (and `respond`/`respondAll`) resolves to an immutable turn with `.message`, `.data`, `.events`, `.inputRequests`, `.toolCalls`, `.sessionId`, `.status`, and `.expectOk()`. Use `.sessionId` to relate turns or attach follow-up work to the session that produced a specific turn. `expectOk()` throws only when the turn ended failed; a session left open for a next message is the normal end state of a successful turn.
+
+Use `expectOk()` only when the next operation depends on that intermediate turn succeeding. A final `t.succeeded()` already records a complete-run gate.
+
+To intentionally omit an eval for the current target, call `t.skip(reason)` before sending messages or recording assertions. Skipped evals are reported separately and do not affect the exit code.
 
 Events from every session are captured in the result and artifacts. `t.log(message)` records debug lines into the eval artifact; `--verbose` also streams them to stdout as evals run. `t.signal` is an `AbortSignal` that fires on timeout.
 
@@ -126,7 +135,7 @@ export default rows.map((row) =>
     description: row.task,
     async test(t) {
       await t.send(row.prompt);
-      t.completed();
+      t.succeeded();
       t.check(t.reply, equals(row.sql));
     },
   }),

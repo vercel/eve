@@ -50,10 +50,7 @@ import { theme } from "./lib/theme.ts";
  *      either in the MCP tool's `action.result`, or echoed verbatim in
  *      the assistant's `message.completed`. The marker is random per
  *      run and only ever produced by the bearer-gated MCP stub, so its
- *      presence proves the OAuth token reached MCP. (In code mode the
- *      nested tool result arrives on the resumed turn and the model
- *      addresses the tool through generated JavaScript, so detection
- *      must not hinge on exact toolName equality.)
+ *      presence proves the OAuth token reached MCP.
  *   4. A normal channel follow-up on the same anchored thread resumes
  *      the original session after auth completes. This guards the
  *      durable hook state used by Slack-like follow-ups.
@@ -198,10 +195,8 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
     if (event.type === "action.result") {
       const ar = event as ActionResultStreamEvent;
       const result = ar.data.result;
-      // Match on the marker, not exact toolName equality: in code mode
-      // the nested result arrives on the resumed turn and the model may
-      // reach the tool through a normalized identifier. The marker is
-      // random per run and only the bearer-gated MCP stub can emit it.
+      // Match on the marker as well as the stable tool-name suffix. The marker
+      // is random per run and only the bearer-gated MCP stub can emit it.
       if (
         result.kind === "tool-result" &&
         result.toolName.includes("echo_marker") &&
@@ -215,10 +210,9 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
       }
     }
 
-    // Fallback proof for code mode: the prompt instructs the model to
-    // echo the tool's returned text verbatim, so the final assistant
-    // message carries the marker even when the nested tool result event
-    // is suppressed or attributed differently.
+    // Fallback proof: the prompt instructs the model to echo the tool's
+    // returned text verbatim, so the final assistant message carries the
+    // marker even if the result event is unavailable.
     if (
       event.type === "message.completed" &&
       typeof event.data.message === "string" &&

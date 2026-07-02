@@ -48,6 +48,7 @@ describe("createTuiPrompter", () => {
       prompter.select({
         message: "Project to link",
         search: true,
+        hintLayout: "inline",
         searchAction: {
           label: (query) => `Search for '${query}'`,
           value: (query) => `search:${query}`,
@@ -58,6 +59,7 @@ describe("createTuiPrompter", () => {
     expect(renderer.readSelect).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "search",
+        layout: "task-list",
         searchAction: { label: expect.any(Function) },
       }),
     );
@@ -135,7 +137,7 @@ describe("createTuiPrompter", () => {
         editable: {
           value: "new",
           defaultValue: "weather-agent",
-          formatHint: (value) => `Named '${value}'`,
+          formatHint: (value) => `Name: ${value}`,
         },
       }),
     ).resolves.toEqual({ kind: "edited", value: "new", text: "custom-name" });

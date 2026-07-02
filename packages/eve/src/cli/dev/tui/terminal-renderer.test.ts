@@ -179,6 +179,75 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain("It's 73°F in SF.");
   });
 
+  it("renders interleaved tool lifecycles in arrival order", async () => {
+    const { screen, renderer } = makeRenderer();
+    await renderer.renderStream(
+      streamOf([
+        {
+          type: "tool-call",
+          toolCallId: "first",
+          toolName: "first_search",
+          input: { query: "first" },
+        },
+        { type: "tool-result", toolCallId: "first", output: { result: "first result" } },
+        {
+          type: "tool-call",
+          toolCallId: "second",
+          toolName: "second_search",
+          input: { query: "second" },
+        },
+        { type: "tool-result", toolCallId: "second", output: { result: "second result" } },
+        { type: "finish" },
+      ]),
+      { submittedPrompt: "run both searches", continueSession: false },
+    );
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("✓ first_search");
+    expect(snapshot).toContain("first result");
+    expect(snapshot).toContain("✓ second_search");
+    expect(snapshot).toContain("second result");
+    expect(snapshot.indexOf("first_search")).toBeLessThan(snapshot.indexOf("second_search"));
+    renderer.shutdown();
+  });
+
+  it("renders a concurrent tool batch before any result arrives", async () => {
+    const { screen, renderer } = makeRenderer(120, 140);
+    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const rendering = renderer.renderStream(
+      {
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(controller) {
+            streamController = controller;
+          },
+        }),
+      },
+      { submittedPrompt: "search the tri-state area", continueSession: true },
+    );
+
+    const controller = streamController;
+    expect(controller).toBeDefined();
+    controller?.enqueue({ type: "step-start" });
+    for (let index = 1; index <= 100; index += 1) {
+      controller?.enqueue({
+        type: "tool-call",
+        toolCallId: `search-${index}`,
+        toolName: "web_search",
+        input: { query: `tri-state-${index}` },
+      });
+    }
+
+    await screen.waitForText("tri-state-100");
+
+    const snapshot = screen.snapshot();
+    expect(snapshot.match(/web_search/g)).toHaveLength(100);
+    expect(snapshot).not.toContain("✓ web_search");
+
+    controller?.close();
+    await rendering;
+    renderer.shutdown();
+  });
+
   it("omits the interrupt hint while waiting for the first stream event", async () => {
     const { screen, renderer } = makeRenderer();
     let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
@@ -196,6 +265,29 @@ describe("TerminalRenderer (inline scrollback)", () => {
     await Promise.resolve();
     expect(screen.snapshot()).toContain("Working…");
     expect(screen.snapshot()).not.toContain("Ctrl+C to interrupt");
+
+    streamController?.close();
+    await rendering;
+    renderer.shutdown();
+  });
+
+  it("keeps the authorization wait status while consuming a callback stream", async () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.setConnectionAuthPendingCount(1);
+    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const rendering = renderer.renderStream(
+      {
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(controller) {
+            streamController = controller;
+          },
+        }),
+      },
+      { continueSession: true },
+    );
+
+    await Promise.resolve();
+    expect(screen.snapshot()).toContain("Waiting for connection authorization…");
 
     streamController?.close();
     await rendering;
@@ -515,6 +607,45 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("✓ bash");
+  });
+
+  it("settles an authorization block when its callback arrives in a later stream pass", async () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    renderer.upsertConnectionAuth({
+      name: "linear",
+      description: "Authorization required for linear",
+      state: "required",
+      challenge: { url: "https://connect.vercel.com/authorize/linear" },
+    });
+
+    await renderer.renderStream(streamOf([{ type: "finish" }]), { continueSession: true });
+
+    renderer.upsertConnectionAuth({
+      name: "linear",
+      description: "Authorization required for linear",
+      state: "pending",
+      challenge: { url: "https://connect.vercel.com/authorize/linear" },
+    });
+    expect(screen.snapshot()).toContain("linear · authorization · pending");
+
+    await renderer.renderStream(streamOf([{ type: "finish" }]), { continueSession: true });
+
+    renderer.upsertConnectionAuth({
+      name: "linear",
+      description: "Authorization required for linear",
+      state: "authorized",
+      challenge: { url: "https://connect.vercel.com/authorize/linear" },
+    });
+    renderer.shutdown();
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("linear · authorization · authorized");
+    expect(snapshot).toContain("Authorization complete");
+    expect(snapshot).not.toContain("linear · authorization · required");
+    expect(snapshot).not.toContain("linear · authorization · pending");
+    expect(snapshot).not.toContain("Authorization required for linear");
+    expect(snapshot).not.toContain("https://connect.vercel.com/authorize/linear");
   });
 
   it("does not commit partial live assistant rows while streaming over the viewport", async () => {
@@ -1743,40 +1874,62 @@ describe("TerminalRenderer setup panel", () => {
     renderer.shutdown();
   });
 
-  it("renames the hovered editable row directly via typing and backspace", async () => {
+  it("uses the default name as a placeholder when renaming the hovered row", async () => {
     const { screen, input, renderer } = makeRenderer();
 
     const answer = renderer.setupFlow.readEditableSelect?.({
       message: "Vercel project",
       options: [
-        { value: "new", label: "Create a new project", hint: "Named 'weather-agent'" },
+        { value: "new", label: "Create a new project", hint: "Name: weather-agent" },
         { value: "link", label: "Link an existing project" },
       ],
       initialValue: "new",
       editable: {
         value: "new",
         defaultValue: "weather-agent",
-        formatHint: (value) => `Named '${value}'`,
+        formatHint: (value) => `Name: ${value}`,
       },
     });
     expect(answer).toBeDefined();
 
     // Hovering the editable row is already a live field — no → to enter.
     expect(screen.snapshot()).toContain("type to rename");
-    expect(screen.snapshot()).toContain("Named 'weather-agent");
-    // Backspace edits the seeded default in place, exactly like typing.
+    expect(screen.snapshot()).toContain("Name: weather-agent");
+    // The default is not real editor text, so backspace cannot partially erase
+    // it. Typing replaces the placeholder with the new name.
     input.backspace();
-    input.backspace();
-    // "nt" trimmed off the end of the seeded default.
-    expect(screen.snapshot()).not.toContain("weather-agent");
-    input.type("!");
-    expect(screen.snapshot()).toContain("Named 'weather-age!");
+    expect(screen.snapshot()).toContain("Name: weather-agent");
+    input.type("weather-age!");
+    expect(screen.snapshot()).toContain("Name: weather-age!");
     input.enter();
     await expect(answer).resolves.toEqual({
       kind: "edited",
       value: "new",
       text: "weather-age!",
     });
+    renderer.shutdown();
+  });
+
+  it("returns an untouched editable row as a plain selection", async () => {
+    const { input, renderer } = makeRenderer();
+
+    const answer = renderer.setupFlow.readEditableSelect?.({
+      message: "Vercel project",
+      options: [
+        { value: "new", label: "Create a new project", hint: "Name: weather-agent" },
+        { value: "link", label: "Link an existing project" },
+      ],
+      initialValue: "new",
+      editable: {
+        value: "new",
+        defaultValue: "weather-agent",
+        formatHint: (value) => `Name: ${value}`,
+      },
+    });
+    expect(answer).toBeDefined();
+
+    input.enter();
+    await expect(answer).resolves.toEqual({ kind: "selected", value: "new" });
     renderer.shutdown();
   });
 
@@ -1939,6 +2092,21 @@ describe("TerminalRenderer setup flow session", () => {
     }
   });
 
+  it("uses the attention color for an external-action pulse", () => {
+    const { screen, renderer } = makeRenderer();
+
+    renderer.setupFlow.begin("Agent connections", "pulse");
+    renderer.setupFlow.setStatus({
+      kind: "external-action",
+      text: "Waiting for you to complete setup in the browser…",
+      emphasis: "browser",
+    });
+
+    expect(screen.rawOutput()).toContain("\x1b[33m▪\x1b[39m");
+    expect(screen.rawOutput()).toContain("\x1b[33mbrowser\x1b[39m");
+    renderer.shutdown();
+  });
+
   it("uses an ASCII fallback for pulse setup flows", () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });
     const input = new MockUserInput();
@@ -2040,7 +2208,7 @@ describe("TerminalRenderer setup flow session", () => {
         focusHint: "Already installed",
       },
       { value: "slack", label: "Slack", hint: "Creates slackbot and deploys to Vercel" },
-      { value: "done", label: "Done" },
+      { value: "done", label: "Done", trailingAction: true },
     ];
 
     renderer.setupFlow.begin("Agent channels");
@@ -2059,7 +2227,8 @@ describe("TerminalRenderer setup flow session", () => {
       "warning",
     );
     const second = renderer.setupFlow.readSelect({
-      kind: "task-list",
+      kind: "search",
+      layout: "task-list",
       message: "Where will you chat with your agent?",
       options,
     });
@@ -2086,11 +2255,6 @@ describe("TerminalRenderer setup flow session", () => {
     expect(snapshot).not.toContain("✓ Terminal UI");
     expect(snapshot).toContain("✓ Web Chat");
     expect(snapshot).toContain("Slack       · Creates slackbot and deploys to Vercel");
-    expect(snapshot.indexOf("Done")).toBeLessThan(snapshot.indexOf("Overwrote /tmp/weather-agent"));
-    expect(snapshot.indexOf("Overwrote /tmp/weather-agent")).toBeLessThan(
-      snapshot.indexOf("Scaffolded channel: web"),
-    );
-    expect(snapshot.indexOf("Scaffolded channel: web")).toBeLessThan(snapshot.indexOf("↑/↓ move"));
     expect(snapshot).toContain("Dependency installation failed.");
 
     input.send("\x1b");
@@ -2111,7 +2275,7 @@ describe("TerminalRenderer setup flow session", () => {
           completed: true,
           focusHint: "Already installed",
         },
-        { value: "done", label: "Done" },
+        { value: "done", label: "Done", trailingAction: true },
       ],
     });
     let settled = false;
@@ -2615,12 +2779,12 @@ describe("TerminalRenderer status line", () => {
     pendingDeploy: false,
   };
 
-  it("renders model and Vercel link under the prompt row", async () => {
+  it("renders the local server, model, and Vercel link under the prompt row", async () => {
     const { screen, input, renderer } = makeRenderer();
     renderer.renderAgentHeader({
       name: "Weather Agent",
       serverUrl: "http://localhost:3000",
-      info: agentInfoWithModel("anthropic/claude-sonnet-4-6", {
+      info: agentInfoWithModel("anthropic/claude-sonnet-5", {
         kind: "gateway",
         connected: false,
       }),
@@ -2634,7 +2798,7 @@ describe("TerminalRenderer status line", () => {
     renderer.renderAgentHeader({
       name: "Weather Agent",
       serverUrl: "http://localhost:3000",
-      info: agentInfoWithModel("anthropic/claude-sonnet-4-6", {
+      info: agentInfoWithModel("anthropic/claude-sonnet-5", {
         kind: "gateway",
         connected: true,
         credential: "oidc",
@@ -2645,7 +2809,9 @@ describe("TerminalRenderer status line", () => {
     const promptRow = lines.findIndex((line) => line.includes("❯"));
     expect(promptRow).toBeGreaterThan(-1);
     const statusRow = lines.slice(promptRow + 1).join("\n");
-    expect(statusRow).toContain("anthropic/claude-sonnet-4-6");
+    expect(statusRow).toContain(":3000");
+    expect(statusRow).toContain("anthropic/claude-sonnet-5");
+    expect(statusRow.indexOf(":3000")).toBeLessThan(statusRow.indexOf("anthropic/claude-sonnet-5"));
     // The linked project folds into the connected gateway label.
     expect(statusRow).toContain("AI Gateway (my-agent)");
     expect(statusRow).not.toContain("⚠ AI Gateway");
@@ -2674,7 +2840,7 @@ describe("TerminalRenderer status line", () => {
     renderer.renderAgentHeader({
       name: "Weather Agent",
       serverUrl: "http://localhost:3000",
-      info: agentInfoWithModel("anthropic/claude-sonnet-4-6", {
+      info: agentInfoWithModel("anthropic/claude-sonnet-5", {
         kind: "gateway",
         connected: true,
         credential: "oidc",
@@ -2724,7 +2890,7 @@ describe("TerminalRenderer status line", () => {
       "",
       "   Select your team",
     ]);
-    const status = lines.indexOf("   ↗ vpoke.playground-vercel.tools  · Authenticating via OIDC…");
+    const status = lines.indexOf("   ↗ vpoke.playground-vercel.tools · Authenticating via OIDC…");
     expect(status).toBeGreaterThan(title);
     expect(lines[status - 1]).toBe("");
 
@@ -2760,7 +2926,7 @@ describe("TerminalRenderer status line", () => {
     renderer.renderAgentHeader({
       name: "Weather Agent",
       serverUrl: "http://localhost:3000",
-      info: agentInfoWithModel("anthropic/claude-sonnet-4-6", {
+      info: agentInfoWithModel("anthropic/claude-sonnet-5", {
         kind: "gateway",
         connected: true,
         credential: "oidc",
@@ -2781,7 +2947,7 @@ describe("TerminalRenderer status line", () => {
     renderer.reset();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("anthropic/claude-sonnet-4-6");
+    expect(snapshot).toContain("anthropic/claude-sonnet-5");
     expect(snapshot).toContain("AI Gateway (my-agent)");
     expect(snapshot).toContain("/deploy pending");
     // A fresh conversation clears the token flow entirely (↑ 0 ↓ 0 is noise).

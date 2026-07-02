@@ -147,7 +147,7 @@ describe("renderOptionRow", () => {
     ).toBe(" <dim>▷</dim> <dim>Waiting</dim>");
   });
 
-  test("warning-toned disabled rows keep the label dim and turn the reason yellow", () => {
+  test("warning-toned disabled rows keep the label dim and show a yellow alert annotation", () => {
     expect(
       row({
         label: "Slack",
@@ -157,7 +157,7 @@ describe("renderOptionRow", () => {
           reasonTone: "warning",
         },
       }),
-    ).toBe("   <dim>Slack</dim><yellow> (Requires Vercel account, see /model)</yellow>");
+    ).toBe("   <dim>Slack</dim><yellow> ⚠ Requires Vercel account, see /model</yellow>");
   });
 
   test("a hint tab-aligns behind a padded label column", () => {

@@ -4,6 +4,46 @@ import { compiledAgentManifestSchema, createCompiledAgentManifest } from "#compi
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 
 describe("compiledAgentManifestSchema", () => {
+  it("preserves reasoning configuration", () => {
+    const manifest = createCompiledAgentManifest({
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      config: {
+        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
+        name: "app",
+        reasoning: "high",
+      },
+    });
+
+    const parsed = compiledAgentManifestSchema.parse(manifest);
+
+    expect(parsed.config.reasoning).toBe("high");
+  });
+
+  it("preserves runtime limits configuration", () => {
+    const manifest = createCompiledAgentManifest({
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      config: {
+        limits: {
+          maxInputTokensPerSession: 200_000,
+          maxOutputTokensPerSession: 20_000,
+          maxSubagentDepth: 4,
+        },
+        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
+        name: "app",
+      },
+    });
+
+    const parsed = compiledAgentManifestSchema.parse(manifest);
+
+    expect(parsed.config.limits).toEqual({
+      maxInputTokensPerSession: 200_000,
+      maxOutputTokensPerSession: 20_000,
+      maxSubagentDepth: 4,
+    });
+  });
+
   it("accepts compiled workflow world configuration", () => {
     const manifest = createCompiledAgentManifest({
       agentRoot: "/app/agent",

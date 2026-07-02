@@ -12,7 +12,7 @@ import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import type { RuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
-import { createExecutionNodeStep } from "#execution/node-step.js";
+import { createExecutionNodeStep, createNodeHarnessTools } from "#execution/node-step.js";
 import { createSession } from "#execution/session.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
 
@@ -21,22 +21,6 @@ vi.mock("ai", () => ({
   jsonSchema: vi.fn((schema: unknown) => schema),
   isStepCount: vi.fn((count: number) => count),
   tool: vi.fn((definition: unknown) => definition),
-}));
-
-vi.mock("#compiled/experimental-ai-sdk-code-mode/index.js", () => ({
-  continueCodeModeApproval: vi.fn(),
-  continueCodeModeInterrupt: vi.fn(),
-  createCodeModeTool: vi.fn(() => ({
-    description: "Code mode.",
-    execute: async () => "tool-output",
-    inputSchema: {},
-  })),
-  getCodeModeApprovalResponse: vi.fn(),
-  getCodeModeInterrupt: vi.fn(() => undefined),
-  isCodeModeApprovalInterrupt: vi.fn(() => false),
-  replaceCodeModeInterruptResult: vi.fn(),
-  toCodeModeApprovalMessages: vi.fn(() => []),
-  unwrapCodeModeResult: vi.fn((value: unknown) => ({ output: value, status: "completed" })),
 }));
 
 vi.mock("../runtime/agent/resolve-model.js", () => ({
@@ -73,7 +57,15 @@ function setupMockAgentForToolExecution(toolName: string, args: unknown): void {
 
       const tools = (
         settings as {
-          readonly tools: Record<string, { execute: (input: unknown) => Promise<unknown> }>;
+          readonly tools: Record<
+            string,
+            {
+              execute: (
+                input: unknown,
+                options: { readonly toolCallId: string },
+              ) => Promise<unknown>;
+            }
+          >;
         }
       ).tools;
       const tool = tools[toolName];
@@ -82,7 +74,7 @@ function setupMockAgentForToolExecution(toolName: string, args: unknown): void {
         throw new Error(`Missing test tool "${toolName}".`);
       }
 
-      const output = await tool.execute(args);
+      const output = await tool.execute(args, { toolCallId: `call-${toolName}` });
 
       const result = {
         finishReason: "stop",
@@ -226,13 +218,22 @@ function createNoopRuntime(): Runtime {
   };
 }
 
+describe("createNodeHarnessTools", () => {
+  it("guides the model to split large tasks across parallel recursive agent calls", () => {
+    const agentTool = createNodeHarnessTools({ node: createTestNode() }).get("agent");
+
+    expect(agentTool?.description).toContain("split a large task into independent pieces");
+    expect(agentTool?.description).toContain("multiple `agent` calls in one response");
+    expect(agentTool?.description).toContain("run a small fixed set in parallel");
+    expect(agentTool?.description).toContain("include essential context");
+    expect(agentTool?.description).toContain("non-overlapping scopes");
+    expect(agentTool?.description).not.toContain("eve");
+  });
+});
+
 describe("createExecutionNodeStep", () => {
   it("builds a usable harness step for the root node", async () => {
-    vi.stubEnv("EVE_EXPERIMENTAL_CODE_MODE", "1");
-
-    setupMockAgentForToolExecution("code_mode", {
-      js: 'return await tools["regular-tool"]({ question: "Run the tool." });',
-    });
+    setupMockAgentForToolExecution("regular-tool", { question: "Run the tool." });
 
     const toolRegistry = await createRuntimeToolRegistry({
       tools: [
@@ -266,15 +267,31 @@ describe("createExecutionNodeStep", () => {
       node: rootNode,
     });
 
-    const result = await step(
-      createSession({
-        continuationToken: "test-root",
-        sessionId: "sess-root",
-        turnAgent: rootNode.turnAgent,
-      }),
-      {
-        message: "Run the tool.",
-      },
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(InitiatorAuthKey, null);
+    ctx.set(BundleKey, {
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    } as never);
+    ctx.set(ChannelKey, { kind: "http" });
+    ctx.set(SessionIdKey, "sess-root");
+    ctx.set(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: "sess-root",
+      turn: { id: "root-turn", sequence: 0 },
+    });
+
+    const result = await contextStorage.run(ctx, () =>
+      step(
+        createSession({
+          continuationToken: "test-root",
+          sessionId: "sess-root",
+          turnAgent: rootNode.turnAgent,
+        }),
+        {
+          message: "Run the tool.",
+        },
+      ),
     );
 
     expect(result.next).toEqual({ done: true, output: "tool-output" });

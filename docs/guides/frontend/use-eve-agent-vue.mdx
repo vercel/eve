@@ -89,7 +89,7 @@ async function onFileChange(event: Event) {
 
 ## Human-in-the-loop prompts
 
-A tool opts into approval with `needsApproval` ([Tools](../../tools)). When it triggers, the pending request shows up as a `dynamic-tool` part on the latest message at `part.toolMetadata?.eve?.inputRequest`. Read it, then answer through the same session with `send({ inputResponses })`:
+A tool opts into approval with `approval` ([Tools](../../tools)). When it triggers, the pending request shows up as a `dynamic-tool` part on the latest message at `part.toolMetadata?.eve?.inputRequest`. Read it, then answer through the same session with `send({ inputResponses })`:
 
 ```ts
 import type { EveDynamicToolPart, EveMessagePart } from "eve/vue";

@@ -1,5 +1,10 @@
 import { BlockList, isIP } from "node:net";
 
+import { z } from "#compiled/zod/index.js";
+
+/** HTTP(S) URL accepted as a development-server endpoint. */
+export const httpServerUrlSchema = z.url({ protocol: /^https?$/ });
+
 /**
  * Private, link-local, and otherwise reserved IP ranges that a framework-issued
  * outbound request to a caller-supplied URL must not target. This is the SSRF
@@ -36,6 +41,33 @@ function normalizeAddress(host: string): string {
   }
 
   return withoutZone;
+}
+
+/**
+ * Returns whether `hostname` names the current machine's loopback interface.
+ * Accepts the full IPv4 loopback block, IPv6 loopback, and the RFC 6761
+ * `localhost` namespace. Wildcard bind addresses such as `0.0.0.0` are not
+ * loopback connect targets.
+ */
+export function isLoopbackHostname(hostname: string): boolean {
+  const normalized = normalizeAddress(hostname).toLowerCase();
+
+  if (normalized === "localhost" || normalized.endsWith(".localhost")) {
+    return true;
+  }
+
+  const family = isIP(normalized);
+  if (family === 4) {
+    return normalized.startsWith("127.");
+  }
+
+  return family === 6 && normalized === "::1";
+}
+
+/** Returns whether `urlText` is an HTTP(S) URL with a loopback hostname. */
+export function isLoopbackServerUrl(urlText: string): boolean {
+  const parsed = httpServerUrlSchema.safeParse(urlText);
+  return parsed.success && isLoopbackHostname(new URL(parsed.data).hostname);
 }
 
 /**

@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { contextStorage, ContextContainer } from "#context/container.js";
+import { AuthKey, SessionKey, type SessionAuthContext } from "#context/keys.js";
+import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { OpenApiConnectionClient } from "#runtime/connections/openapi-client.js";
 
@@ -266,6 +269,47 @@ describe("OpenApiConnectionClient", () => {
     expect(calledUrl.toString()).toBe("https://api.example.com/v1/projects/prj_1?teamId=team_9");
     expect(init.method).toBe("GET");
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer secret");
+  });
+
+  it("resolves auth and headers from the active caller", async () => {
+    const fetchMock = vi.fn(
+      async (_url: URL, _init: RequestInit) => new Response(null, { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const current: SessionAuthContext = {
+      attributes: { tenant: "acme" },
+      authenticator: "oidc",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, current);
+    ctx.set(SessionKey, {
+      auth: { current, initiator: current },
+      sessionId: "session-1",
+      turn: { id: "turn-1", sequence: 0 },
+    });
+    const client = new OpenApiConnectionClient(
+      makeConnection({
+        authorization: (callbackContext: SessionContext) => ({
+          getToken: async () => ({
+            token: `token-for-${callbackContext.session.auth.current?.principalId}`,
+          }),
+          principalType: "user",
+        }),
+        headers: (callbackContext: SessionContext) => ({
+          "X-Tenant": String(callbackContext.session.auth.current?.attributes.tenant),
+        }),
+      }),
+    );
+
+    await contextStorage.run(ctx, () => client.executeTool("getProject", { id: "prj_1" }));
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(init.headers).toMatchObject({
+      Authorization: "Bearer token-for-alice",
+      "X-Tenant": "acme",
+    });
   });
 
   it("serializes the request body on execute", async () => {

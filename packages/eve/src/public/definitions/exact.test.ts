@@ -16,7 +16,12 @@ describe("definition helper exact inputs", () => {
   it("preserves literal inference for valid definitions", () => {
     const agent = defineAgent({
       description: "type-test",
-      model: "anthropic/claude-sonnet-4.6",
+      limits: {
+        maxInputTokensPerSession: 200_000,
+        maxOutputTokensPerSession: 20_000,
+        maxSubagentDepth: 4,
+      },
+      model: "anthropic/claude-sonnet-5",
     });
 
     const schedule = defineSchedule({
@@ -25,13 +30,16 @@ describe("definition helper exact inputs", () => {
     });
 
     expect(agent.description).toBe("type-test");
+    expect(agent.limits.maxInputTokensPerSession).toBe(200_000);
+    expect(agent.limits.maxOutputTokensPerSession).toBe(20_000);
+    expect(agent.limits.maxSubagentDepth).toBe(4);
     expect(schedule.cron).toBe("0 9 * * *");
   });
 });
 
 function typeOnlyFixtures(): void {
   const agentWithName = {
-    model: "anthropic/claude-sonnet-4.6",
+    model: "anthropic/claude-sonnet-5",
     name: "agent-name",
   };
   // @ts-expect-error Agent identity is path-derived.
@@ -103,6 +111,20 @@ function typeOnlyFixtures(): void {
     cron: "0 9 * * *",
     markdown: "Send a digest.",
     run() {},
+  });
+
+  defineSchedule({
+    cron: "0 9 * * *",
+    markdown: "Send a digest.",
+    // @ts-expect-error Schedules do not support approval policies.
+    approval: () => "user-approval",
+  });
+
+  defineSchedule({
+    cron: "0 9 * * *",
+    markdown: "Send a digest.",
+    // @ts-expect-error Schedules do not support tool approval policies.
+    needsApproval: () => true,
   });
 
   const skillWithName = {
@@ -205,6 +227,16 @@ function typeOnlyFixtures(): void {
         return { token: "static" };
       },
     },
+    execute() {
+      return null;
+    },
+  });
+
+  defineTool({
+    description: "Removed tool approval key.",
+    inputSchema: { type: "object" },
+    // @ts-expect-error Authored tools use `approval`, not `needsApproval`.
+    needsApproval: () => true,
     execute() {
       return null;
     },

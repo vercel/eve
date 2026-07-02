@@ -64,6 +64,7 @@ export async function runLinkFlow(input: {
    * branch, where a fresh agent has no project yet).
    */
   projectSelection?: "create-or-link" | "existing-only";
+  teamSelectMessage?: (currentTeam: string) => string;
   deps?: Partial<LinkFlowDeps>;
 }): Promise<LinkFlowResult> {
   const { appRoot, prompter, signal, projectSelection = "existing-only" } = input;
@@ -87,7 +88,7 @@ export async function runLinkFlow(input: {
       deps.findEnvFileWithKey(appRoot, "VERCEL_OIDC_TOKEN"),
     ]);
     const credentialFile = gatewayKey ?? oidc;
-    if (credentialFile !== undefined) {
+    if (credentialFile !== undefined && input.teamSelectMessage === undefined) {
       prompter.log.message(
         `This directory is not linked to a Vercel project yet — the model currently runs on credentials from ${credentialFile}.`,
       );
@@ -134,6 +135,7 @@ export async function runLinkFlow(input: {
       // agent can create its first project here instead of dead-ending on an
       // empty project list.
       projectSelection,
+      teamSelectMessage: input.teamSelectMessage,
       deps: deps.resolveProvisioning,
     }),
     linkVercelProject({ prompter, deps: deps.linkProject }),

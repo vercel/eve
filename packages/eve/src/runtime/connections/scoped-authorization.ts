@@ -33,6 +33,8 @@ import {
   type TokenResult,
 } from "#runtime/connections/types.js";
 
+const LOCAL_HTTP_VERCEL_CONNECT_HOSTNAMES: ReadonlySet<string> = new Set(["127.0.0.1", "[::1]"]);
+
 /**
  * Everything the scoped authorization helpers need to drive one
  * authorization strategy: the cache/callback {@link scope}, the
@@ -170,19 +172,46 @@ export async function startScopedAuthorization(
 
   const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;
   const principal = resolveConnectionPrincipal(scope, interactive);
+  const callbackUrl = resolveAuthorizationCallbackUrl({ authorization, callbackUrl: hookUrl });
   const { challenge, resume } = await interactive.startAuthorization({
-    callbackUrl: hookUrl,
+    callbackUrl,
     connection,
     principal,
   });
   return requestAuthorization([
     {
       challenge: stampChallengeDisplayName(challenge, authorization),
-      hookUrl,
+      hookUrl: callbackUrl,
       name: scope,
       resume,
     },
   ]);
+}
+
+/**
+ * Vercel Connect accepts local HTTP callback URLs only when their hostname is
+ * literally `localhost`. Other authorization providers keep the framework's
+ * original callback URL so their registered redirect URI remains unchanged.
+ */
+export function resolveAuthorizationCallbackUrl(input: {
+  readonly authorization: Readonly<AuthorizationDefinition>;
+  readonly callbackUrl: string;
+}): string {
+  if (input.authorization.vercelConnect === undefined) return input.callbackUrl;
+
+  let url: URL;
+  try {
+    url = new URL(input.callbackUrl);
+  } catch {
+    return input.callbackUrl;
+  }
+
+  if (url.protocol !== "http:" || !LOCAL_HTTP_VERCEL_CONNECT_HOSTNAMES.has(url.hostname)) {
+    return input.callbackUrl;
+  }
+
+  url.hostname = "localhost";
+  return url.toString();
 }
 
 /**

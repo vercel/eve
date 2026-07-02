@@ -4,6 +4,7 @@ import type { SessionAuthContext, SessionCallback } from "#channel/types.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { readAgentInfoRouteResponse } from "#internal/nitro/routes/channel-route-context.js";
 import {
   EVE_MESSAGE_STREAM_CONTENT_TYPE,
   EVE_MESSAGE_STREAM_FORMAT,
@@ -12,6 +13,7 @@ import {
   EVE_STREAM_FORMAT_HEADER,
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/message.js";
+import { EVE_INFO_ROUTE_PATH } from "#protocol/routes.js";
 import { type InputResponse, isInputResponse } from "#runtime/input/types.js";
 import { type AuthFn, routeAuth } from "#public/channels/auth.js";
 import {
@@ -26,9 +28,11 @@ import {
   POST,
   GET,
   type Channel,
+  type ChannelCors,
   type ChannelEvents,
   type ChannelSessionOps,
 } from "#public/definitions/defineChannel.js";
+import type { ChannelMethod } from "#public/definitions/channel.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
@@ -42,6 +46,32 @@ export type EveEventContext = ChannelSessionOps;
 
 /** Runtime stream-event handlers supported by `eveChannel({ events })`. */
 export type EveChannelEvents = ChannelEvents<EveEventContext>;
+
+export interface EveChannelCorsOptions {
+  /**
+   * Allowed request origin. Pass a single origin string, an exact-origin list,
+   * `"null"`, or `"*"`. Omit for `"*"`.
+   */
+  readonly origin?: "*" | "null" | string | readonly string[];
+  /** Methods emitted on preflight responses. Omit for `"*"`. */
+  readonly methods?: "*" | readonly ChannelMethod[];
+  /** Request headers emitted on preflight responses. Omit for `"*"`. */
+  readonly allowedHeaders?: "*" | readonly string[];
+  /** Response headers exposed to browser callers. Omit for `"*"`. */
+  readonly exposedHeaders?: "*" | readonly string[];
+  /** Whether to emit `access-control-allow-credentials: true`. */
+  readonly credentials?: boolean;
+  /** Max age, in seconds, emitted on preflight responses. */
+  readonly maxAge?: number | false;
+  /** Preflight response status code. Defaults to 204. */
+  readonly preflightStatus?: number;
+}
+
+/**
+ * Higher-level CORS policy for the default eve HTTP channel. Pass `true` for
+ * fully permissive browser access, or pass an options object to narrow it.
+ */
+export type EveChannelCors = boolean | EveChannelCorsOptions;
 
 /** Low-level eve HTTP handle exposed to `eveChannel({ onMessage })`. */
 export interface EveHandle {
@@ -94,6 +124,12 @@ export interface EveChannelInput {
    */
   readonly uploadPolicy?: UploadPolicyInput;
   /**
+   * Browser CORS policy for the eve HTTP routes. Omit or pass `false` to leave
+   * CORS untouched, pass `true` for fully permissive CORS, or pass an options
+   * object to narrow the policy.
+   */
+  readonly cors?: EveChannelCors;
+  /**
    * Pre-dispatch hook for inbound eve HTTP messages. Runs after route auth and body
    * parsing, before runtime dispatch.
    */
@@ -117,16 +153,33 @@ export interface EveChannel extends Channel {}
 
 /**
  * Builds the default eve HTTP channel: a {@link defineChannel} instance serving the
- * built-in `/eve/v1` routes (POST creates a session, POST delivers a follow-up, GET
- * streams a session's NDJSON event feed). Every route runs {@link EveChannelInput.auth}
- * via {@link routeAuth} before dispatching. Default-export the result as your
- * `agent/channels/eve.ts` channel; reach for {@link defineChannel} directly only for a custom transport.
+ * built-in `/eve/v1` routes (GET inspects the agent, POST creates a session, POST
+ * delivers a follow-up, GET streams a session's NDJSON event feed). Every route
+ * runs {@link EveChannelInput.auth} via {@link routeAuth} before dispatching.
+ * Default-export the result as your `agent/channels/eve.ts` channel; reach for
+ * {@link defineChannel} directly only for a custom transport.
  */
 export function eveChannel(input: EveChannelInput): EveChannel {
   const uploadPolicy = mergeUploadPolicy(input.uploadPolicy);
 
   return defineChannel<undefined, EveEventContext>({
+    cors: normalizeEveCors(input.cors),
     routes: [
+      GET(EVE_INFO_ROUTE_PATH, async (req, args) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+
+        const respond = readAgentInfoRouteResponse(args);
+        if (respond === undefined) {
+          return Response.json(
+            { error: "Agent info route requires internal channel dispatch context.", ok: false },
+            { status: 500 },
+          );
+        }
+
+        return await respond();
+      }),
+
       POST("/eve/v1/session", async (req, { send }) => {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
@@ -298,6 +351,63 @@ export function eveChannel(input: EveChannelInput): EveChannel {
     ],
     events: input.events,
   });
+}
+
+function normalizeEveCors(cors: EveChannelCors | undefined): ChannelCors {
+  if (cors === undefined || cors === false) {
+    return false;
+  }
+  if (cors === true) {
+    return true;
+  }
+
+  const result: {
+    origin?: "*" | "null" | readonly string[];
+    methods?: "*" | readonly string[];
+    allowHeaders?: "*" | readonly string[];
+    exposeHeaders?: "*" | readonly string[];
+    credentials?: boolean;
+    maxAge?: number | false;
+    preflight?: {
+      statusCode?: number;
+    };
+  } = {};
+
+  if (cors.origin !== undefined) {
+    result.origin = normalizeEveCorsOrigin(cors.origin);
+  }
+  if (cors.methods !== undefined) {
+    result.methods = cors.methods;
+  }
+  if (cors.allowedHeaders !== undefined) {
+    result.allowHeaders = cors.allowedHeaders;
+  }
+  if (cors.exposedHeaders !== undefined) {
+    result.exposeHeaders = cors.exposedHeaders;
+  }
+  if (cors.credentials !== undefined) {
+    result.credentials = cors.credentials;
+  }
+  if (cors.maxAge !== undefined) {
+    result.maxAge = cors.maxAge;
+  }
+  if (cors.preflightStatus !== undefined) {
+    result.preflight = { statusCode: cors.preflightStatus };
+  }
+
+  return result;
+}
+
+function normalizeEveCorsOrigin(
+  origin: NonNullable<EveChannelCorsOptions["origin"]>,
+): "*" | "null" | readonly string[] {
+  if (origin === "*" || origin === "null") {
+    return origin;
+  }
+  if (typeof origin === "string") {
+    return [origin];
+  }
+  return origin;
 }
 
 type OnMessageOutcome =

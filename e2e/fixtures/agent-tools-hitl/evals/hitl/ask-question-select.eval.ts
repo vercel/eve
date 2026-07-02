@@ -17,23 +17,15 @@ export default defineEval({
       ].join("\n"),
     );
 
-    const [request] = t.expectInputRequests({ toolName: "ask_question" });
-    if (request === undefined) {
-      throw new Error("Expected a pending ask_question input request.");
-    }
-    if (request.display !== undefined && request.display !== "select") {
-      throw new Error(`Expected select display, got ${String(request.display)}.`);
-    }
-    const optionIds = (request.options ?? []).map((option) => option.id);
-    if (!optionIds.includes("red") || !optionIds.includes("blue")) {
-      throw new Error(`Expected red/blue options, got [${optionIds.join(", ")}].`);
-    }
+    t.requireInputRequest({
+      display: (value) => value === undefined || value === "select",
+      optionIds: ["red", "blue"],
+      toolName: "ask_question",
+    });
 
-    const resumed = await t.respondAll("blue");
-    resumed.expectOk();
+    await t.respondAll("blue");
 
-    t.didNotFail();
-    t.completed();
+    t.succeeded();
     t.messageIncludes(/\bblue\b/i);
   },
 });

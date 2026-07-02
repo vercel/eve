@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   BOOT_DETECTIONS,
   CLI_MISSING_SETUP_ISSUE,
-  automaticSetupCommand,
   detectSetupIssues,
   formatSetupIssuesLine,
   LOGIN_SETUP_ISSUE,
@@ -65,10 +64,9 @@ describe("BOOT_DETECTIONS", () => {
     expect(issues).toEqual([
       { kind: "attention", label: "model provider not linked", command: "/model" },
     ]);
-    expect(automaticSetupCommand(issues)).toBeUndefined();
   });
 
-  it("opens model setup only when the runtime confirms the gateway is disconnected", async () => {
+  it("diagnoses a disconnected gateway", async () => {
     const info = infoWithRouting(
       { kind: "gateway", target: "openai" },
       { kind: "gateway", connected: false },
@@ -77,15 +75,11 @@ describe("BOOT_DETECTIONS", () => {
     const issues = await detectSetupIssues(context({ info }));
     expect(issues).toEqual([
       {
-        kind: "model-provider-unconfigured",
+        kind: "attention",
         label: "model provider not linked",
         command: "/model",
       },
     ]);
-    expect(automaticSetupCommand(issues)).toEqual({
-      prompt: "/model",
-      initialModelStep: "provider",
-    });
   });
 
   it.each([
@@ -198,7 +192,7 @@ describe("formatSetupIssuesLine", () => {
 describe("orderedSetupIssues", () => {
   it("puts the auth prerequisite before the boot detections", () => {
     const modelIssue = {
-      kind: "model-provider-unconfigured" as const,
+      kind: "attention" as const,
       label: "model provider not linked",
       command: "/model" as const,
     };

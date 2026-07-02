@@ -37,6 +37,9 @@ const BASE_VERSIONS = {
   zodPackageVersion: "4.0.0",
 } as const;
 
+const RELEASE_AGE_POLICY =
+  'minimumReleaseAgeExclude:\n  - "@ai-sdk/*"\n  - "@rolldown/*"\n  - "@vercel/*"\n  - "@workflow/*"\n  - ai\n  - experimental-ai-sdk-code-mode\n  - eve\n  - nitro\n  - rolldown\n  - workflow\n';
+
 const WEB_VERSIONS = {
   ...BASE_VERSIONS,
   nextPackageVersion: "16.0.0",
@@ -150,15 +153,10 @@ describe("runInitCommand", () => {
     );
     const manifest = await readFile(join(projectPath, "package.json"), "utf8");
     expect(manifest).toContain('"eve": "^0.6.0"');
-    // `@vercel/connect`'s optional `ai` peer rejects prereleases, so npm/yarn
-    // need `ai` forced to the pinned prerelease or the install fails (ERESOLVE).
-    const packageJson = JSON.parse(manifest) as {
-      dependencies: Record<string, string>;
-      overrides: Record<string, string>;
-      resolutions: Record<string, string>;
-    };
-    expect(packageJson.overrides.ai).toBe(packageJson.dependencies.ai);
-    expect(packageJson.resolutions.ai).toBe(packageJson.dependencies.ai);
+    // pnpm accepts the optional prerelease peer without a manager-specific pin.
+    const packageJson: unknown = JSON.parse(manifest);
+    expect(packageJson).not.toHaveProperty("overrides");
+    expect(packageJson).not.toHaveProperty("resolutions");
     await expect(pathExists(join(projectPath, "app"))).resolves.toBe(false);
     await expect(pathExists(join(projectPath, ".vercel"))).resolves.toBe(false);
     await expect(pathExists(join(projectPath, "vercel.json"))).resolves.toBe(false);
@@ -174,6 +172,8 @@ describe("runInitCommand", () => {
       "exec",
       "eve",
       "dev",
+      "--input",
+      "/model",
     ]);
     // Substring assertions keep the expectations color-agnostic; picocolors
     // decides at import time whether the strings carry escape codes. The boot
@@ -291,6 +291,8 @@ describe("runInitCommand", () => {
         "exec",
         "eve",
         "dev",
+        "--input",
+        "/model",
       ]);
       expect(output.messages[1]).toContain("Created an eve agent in ");
       expect(output.messages[1]).toContain(projectPath);
@@ -298,12 +300,12 @@ describe("runInitCommand", () => {
   );
 
   it.each([
-    ["npm", ["exec", "--", "eve", "dev"]],
-    ["yarn", ["eve", "dev"]],
-    ["bun", ["x", "eve", "dev"]],
+    ["npm", "overrides", ["exec", "--", "eve", "dev", "--input", "/model"]],
+    ["yarn", "resolutions", ["eve", "dev", "--input", "/model"]],
+    ["bun", "overrides", ["x", "eve", "dev", "--input", "/model"]],
   ] as const)(
     "scaffolds a fresh project owned by the invoking manager %s without pnpm policy",
-    async (kind, devArguments) => {
+    async (kind, aiPinField, devArguments) => {
       const parentDirectory = await mkdtemp(join(tmpdir(), `eve-init-agent-${kind}-`));
       const output = logger();
       const deps = dependencies();
@@ -318,6 +320,13 @@ describe("runInitCommand", () => {
       // The workspace policy is pnpm configuration; a scaffold owned by
       // another manager must not receive it.
       await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
+      const packageJson: unknown = JSON.parse(
+        await readFile(join(projectPath, "package.json"), "utf8"),
+      );
+      expect(packageJson).toHaveProperty(aiPinField);
+      expect(packageJson).not.toHaveProperty(
+        aiPinField === "overrides" ? "resolutions" : "overrides",
+      );
       expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
         kind,
         projectPath,
@@ -352,14 +361,20 @@ describe("runInitCommand", () => {
       projectPath,
       expect.anything(),
     );
-    expect(deps.spawnPackageManager).toHaveBeenCalledWith("bun", projectPath, ["x", "eve", "dev"]);
+    expect(deps.spawnPackageManager).toHaveBeenCalledWith("bun", projectPath, [
+      "x",
+      "eve",
+      "dev",
+      "--input",
+      "/model",
+    ]);
   });
 
   it.each([
-    ["npm", "package-lock.json", "bun", ["exec", "--", "eve", "dev"]],
-    ["yarn", "yarn.lock", "npm", ["eve", "dev"]],
-    ["bun", "bun.lock", "npm", ["x", "eve", "dev"]],
-    ["pnpm", "pnpm-lock.yaml", "npm", ["exec", "eve", "dev"]],
+    ["npm", "package-lock.json", "bun", ["exec", "--", "eve", "dev", "--input", "/model"]],
+    ["yarn", "yarn.lock", "npm", ["eve", "dev", "--input", "/model"]],
+    ["bun", "bun.lock", "npm", ["x", "eve", "dev", "--input", "/model"]],
+    ["pnpm", "pnpm-lock.yaml", "npm", ["exec", "eve", "dev", "--input", "/model"]],
   ] as const)(
     "scaffolds a fresh named project with the ancestor %s lockfile before the launcher",
     async (kind, lockfile, invokingManager, devArguments) => {
@@ -410,7 +425,7 @@ describe("runInitCommand", () => {
     const projectPath = join(appsDirectory, "my-agent");
     await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "packages:\n  - apps/*\n\nallowBuilds:\n  sharp: false\n\nminimumReleaseAgeExclude:\n  - eve\n",
+      `packages:\n  - apps/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectPath, "package.json"), "utf8"),
@@ -459,7 +474,7 @@ describe("runInitCommand", () => {
     const projectPath = join(agentsDirectory, "my-agent");
     await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\nminimumReleaseAgeExclude:\n  - eve\n",
+      `packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectPath, "package.json"), "utf8"),
@@ -501,7 +516,7 @@ describe("runInitCommand", () => {
     await expect(pathExists(join(projectPath, "app/page.tsx"))).resolves.toBe(true);
     await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\nminimumReleaseAgeExclude:\n  - eve\n",
+      `packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectPath, "package.json"), "utf8"),
@@ -527,8 +542,8 @@ describe("runInitCommand", () => {
   });
 
   it.each([
-    ["yarn", "yarn.lock", "resolutions", ["eve", "dev"]],
-    ["bun", "bun.lock", "overrides", ["x", "eve", "dev"]],
+    ["yarn", "yarn.lock", "resolutions", ["eve", "dev", "--input", "/model"]],
+    ["bun", "bun.lock", "overrides", ["x", "eve", "dev", "--input", "/model"]],
   ] as const)(
     "scaffolds a fresh %s workspace member without nested root-only package fields",
     async (kind, lockfile, rootAiPinField, devArguments) => {
@@ -605,6 +620,8 @@ describe("runInitCommand", () => {
       "--",
       "eve",
       "dev",
+      "--input",
+      "/model",
     ]);
   });
 
@@ -619,7 +636,7 @@ describe("runInitCommand", () => {
     expect(deps.spawnPackageManager).toHaveBeenCalledWith(
       "pnpm",
       join(parentDirectory, "my-agent"),
-      ["exec", "eve", "dev"],
+      ["exec", "eve", "dev", "--input", "/model"],
     );
   });
 
@@ -650,6 +667,8 @@ describe("runInitCommand", () => {
       "exec",
       "eve",
       "dev",
+      "--input",
+      "/model",
     ]);
   });
 

@@ -43,6 +43,14 @@ function parse(event: string, payload: Record<string, unknown>, contentType = "a
   });
 }
 
+function parseWithoutGitHubHeaders(payload: Record<string, unknown>) {
+  return parseGitHubWebhookEvent({
+    body: JSON.stringify(payload),
+    contentType: "application/json",
+    headers: new Headers(),
+  });
+}
+
 describe("GitHub inbound parsing", () => {
   it("detects issue comments versus PR timeline comments", () => {
     const issue = parse(
@@ -71,6 +79,59 @@ describe("GitHub inbound parsing", () => {
       comment: { issueNumber: 7, pullRequestNumber: 7 },
       conversation: { kind: "pull_request" },
       kind: "issue_comment",
+    });
+  });
+
+  it("infers issue comment events when forwarded without GitHub headers", () => {
+    const event = parseWithoutGitHubHeaders(
+      basePayload({
+        action: "created",
+        comment: { body: "@testbot hello", id: 10, user: { id: 1, login: "octocat" } },
+        issue: { number: 5 },
+      }),
+    );
+
+    expect(event).toMatchObject({
+      comment: { issueNumber: 5, pullRequestNumber: null },
+      conversation: { kind: "issue", issueNumber: 5 },
+      delivery: {
+        event: "issue_comment",
+        id: "inferred:issue_comment:10:created",
+      },
+      kind: "issue_comment",
+    });
+  });
+
+  it("infers pull request and review comment events when forwarded without GitHub headers", () => {
+    const pullRequest = parseWithoutGitHubHeaders(
+      basePayload({
+        action: "opened",
+        pull_request: {
+          id: 777,
+          number: 7,
+        },
+      }),
+    );
+    const reviewComment = parseWithoutGitHubHeaders(
+      basePayload({
+        action: "created",
+        comment: { body: "@testbot simplify", id: 101, user: { id: 1, login: "octocat" } },
+        pull_request: { number: 7 },
+      }),
+    );
+
+    expect(pullRequest).toMatchObject({
+      delivery: { event: "pull_request", id: "inferred:pull_request:777:opened" },
+      kind: "pull_request",
+      pullRequest: { pullRequestNumber: 7 },
+    });
+    expect(reviewComment).toMatchObject({
+      comment: { id: 101, pullRequestNumber: 7 },
+      delivery: {
+        event: "pull_request_review_comment",
+        id: "inferred:pull_request_review_comment:101:created",
+      },
+      kind: "pull_request_review_comment",
     });
   });
 

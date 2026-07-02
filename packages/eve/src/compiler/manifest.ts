@@ -9,6 +9,7 @@ import {
   type CompiledRemoteAgentNode,
 } from "#compiler/remote-agent-node.js";
 import type { ChannelRouteMethod } from "#public/definitions/channel.js";
+import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import { jsonObjectSchema } from "#shared/json-schemas.js";
 import type { Node } from "#shared/node.js";
 import type {
@@ -39,7 +40,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 30;
+export const COMPILED_AGENT_MANIFEST_VERSION = 32;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -68,6 +69,11 @@ export interface CompiledChannelDefinition {
    * Omitted when the route does not register an adapter.
    */
   readonly adapterKind?: string;
+  /**
+   * Serializable CORS options to apply to this channel route. Omitted when the
+   * channel leaves CORS untouched.
+   */
+  readonly cors?: NormalizedChannelCorsOptions;
 }
 
 /**
@@ -259,6 +265,23 @@ const channelMethodSchema = z.union([
   z.literal("WEBSOCKET"),
 ]);
 
+const compiledChannelCorsSchema = z
+  .object({
+    origin: z.union([z.literal("*"), z.literal("null"), z.array(z.string())]).optional(),
+    methods: z.union([z.literal("*"), z.array(z.string())]).optional(),
+    allowHeaders: z.union([z.literal("*"), z.array(z.string())]).optional(),
+    exposeHeaders: z.union([z.literal("*"), z.array(z.string())]).optional(),
+    credentials: z.boolean().optional(),
+    maxAge: z.union([z.string(), z.literal(false)]).optional(),
+    preflight: z
+      .object({
+        statusCode: z.number().int().min(100).max(599).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict() satisfies z.ZodType<NormalizedChannelCorsOptions>;
+
 const compiledChannelDefinitionSchema = z
   .object({
     kind: z.literal("channel"),
@@ -270,6 +293,7 @@ const compiledChannelDefinitionSchema = z
     sourceKind: z.literal("module"),
     exportName: z.string().optional(),
     adapterKind: z.string().optional(),
+    cors: compiledChannelCorsSchema.optional(),
   })
   .strict();
 
@@ -333,6 +357,14 @@ const compiledAgentCompactionDefinitionSchema: z.ZodType<CompiledAgentCompaction
   })
   .strict();
 
+const compiledAgentLimitsDefinitionSchema = z
+  .object({
+    maxSubagentDepth: z.number().int().positive().optional(),
+    maxInputTokensPerSession: z.number().int().positive().optional(),
+    maxOutputTokensPerSession: z.number().int().positive().optional(),
+  })
+  .strict();
+
 const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
   .object({
     build: compiledAgentBuildDefinitionSchema.optional(),
@@ -340,7 +372,6 @@ const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
     description: z.string().optional(),
     experimental: z
       .object({
-        codeMode: z.boolean().optional(),
         workflow: compiledAgentWorkflowDefinitionSchema.optional(),
       })
       .strict()
@@ -348,7 +379,11 @@ const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
     model: compiledRuntimeModelReferenceSchema,
     name: z.string(),
     outputSchema: jsonObjectSchema.optional(),
+    reasoning: z
+      .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
+      .optional(),
     source: moduleSourceRefSchema.optional(),
+    limits: compiledAgentLimitsDefinitionSchema.optional(),
   })
   .strict();
 
@@ -680,7 +715,6 @@ export function createCompiledAgentNodeManifest(input: {
         input.config.experimental === undefined
           ? undefined
           : {
-              codeMode: input.config.experimental.codeMode,
               workflow:
                 input.config.experimental.workflow === undefined
                   ? undefined
@@ -691,6 +725,15 @@ export function createCompiledAgentNodeManifest(input: {
       model: cloneCompiledRuntimeModelReference(input.config.model),
       name: input.config.name,
       outputSchema: input.config.outputSchema,
+      reasoning: input.config.reasoning,
+      limits:
+        input.config.limits === undefined
+          ? undefined
+          : {
+              maxInputTokensPerSession: input.config.limits.maxInputTokensPerSession,
+              maxOutputTokensPerSession: input.config.limits.maxOutputTokensPerSession,
+              maxSubagentDepth: input.config.limits.maxSubagentDepth,
+            },
       source:
         input.config.source === undefined
           ? undefined

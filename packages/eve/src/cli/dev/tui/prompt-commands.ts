@@ -1,6 +1,7 @@
 export type PromptCommandExtensionName =
   | "model"
   | "channels"
+  | "connect"
   | "deploy"
   | "vc:install"
   | "vc:login";
@@ -102,6 +103,14 @@ const PROMPT_COMMAND_DEFINITIONS = [
     description: "Add chat channels to the agent",
     takesArgument: false,
     build: () => ({ type: "extension", name: "channels", argument: "" }),
+    targets: ["local"],
+  },
+  {
+    name: "connect",
+    aliases: [],
+    description: "Add an MCP server through Vercel Connect",
+    takesArgument: false,
+    build: () => ({ type: "extension", name: "connect", argument: "" }),
     targets: ["local"],
   },
   {

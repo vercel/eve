@@ -1,4 +1,4 @@
-import { loadDeclaration } from "../_shared.mjs";
+import { createDeclarationCopier } from "../_shared.mjs";
 
 /**
  * `ai` is a peer dep of eve (consumers install it), so it must never be
@@ -15,5 +15,15 @@ export default {
   compiledPath: "@ai-sdk/otel",
   chunkGroup: "workflow",
   external: isAiImport,
-  declaration: await loadDeclaration("@ai-sdk/otel.d.ts"),
+  copyDeclarations: createDeclarationCopier({
+    rewrites: {
+      ai: { kind: "external" },
+      "@ai-sdk/provider": { kind: "vendored", compiledPath: "@ai-sdk/provider" },
+      "@ai-sdk/provider-utils": {
+        kind: "vendored",
+        compiledPath: "@ai-sdk/provider-utils",
+      },
+      "@opentelemetry/api": { kind: "vendored", compiledPath: "@opentelemetry/api" },
+    },
+  }),
 };

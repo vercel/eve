@@ -17,8 +17,8 @@ const APP_ROOT = "/app/my-agent";
 
 const CATALOG: GatewayCatalogModel[] = [
   {
-    id: "anthropic/claude-sonnet-4.6",
-    name: "Claude Sonnet 4.6",
+    id: "anthropic/claude-sonnet-5",
+    name: "Claude Sonnet 5",
     type: "language",
     owned_by: "anthropic",
     tags: ["web-search"],
@@ -35,7 +35,7 @@ const CATALOG: GatewayCatalogModel[] = [
 function flowDeps(overrides: Partial<ModelFlowDeps> = {}): Partial<ModelFlowDeps> {
   return {
     readCurrentModel: vi.fn(async () => ({
-      id: "anthropic/claude-sonnet-4.6",
+      id: "anthropic/claude-sonnet-5",
       routing: { kind: "gateway", target: "anthropic" } as const,
       editable: true,
     })),
@@ -109,7 +109,7 @@ describe("runModelFlow", () => {
           {
             value: "model",
             label: "Change model",
-            hint: "anthropic/claude-sonnet-4.6",
+            hint: "anthropic/claude-sonnet-5",
             description: "The model your agent uses",
           },
           {
@@ -131,7 +131,7 @@ describe("runModelFlow", () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
     const deps = flowDeps({
       readCurrentModel: vi.fn(async () => ({
-        id: "anthropic/claude-sonnet-4.6",
+        id: "anthropic/claude-sonnet-5",
         routing: { kind: "external", provider: "anthropic" } as const,
         editable: false,
       })),
@@ -178,7 +178,7 @@ describe("runModelFlow", () => {
     const deps = flowDeps({
       // `gateway("…")` instance: gateway-routed, but not a string literal eve can rewrite.
       readCurrentModel: vi.fn(async () => ({
-        id: "anthropic/claude-sonnet-4.6",
+        id: "anthropic/claude-sonnet-5",
         routing: { kind: "gateway", target: "anthropic" } as const,
         editable: false,
       })),

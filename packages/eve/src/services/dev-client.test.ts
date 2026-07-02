@@ -93,6 +93,67 @@ describe("runtime-artifact refresher session rotation", () => {
 });
 
 describe("createDevelopmentRuntimeArtifactSessionRefresher", () => {
+  it("forces a rebuild and rotates an active session after a known source change", async () => {
+    const requests: Array<{ method: string; url: string }> = [];
+    const fetchMock = createDevFetchMock({
+      requests,
+      revisions: ["snapshot-a", "snapshot-b"],
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new Client({ host: "http://localhost:3000" });
+    const refresher = createDevelopmentRuntimeArtifactSessionRefresher({
+      serverUrl: "http://localhost:3000",
+    });
+    let session = client.session();
+
+    session = await refresher.refreshIdle({
+      createSession: () => client.session(),
+      session,
+    });
+    await (await session.send({ message: "first" })).result();
+    const before = session;
+
+    session = await refresher.refreshAfterSourceChange({
+      createSession: () => client.session(),
+      session,
+    });
+
+    expect(session).not.toBe(before);
+    expect(
+      requests.some((request) => {
+        const url = new URL(request.url);
+        return (
+          request.method === "POST" &&
+          url.pathname === "/eve/v1/dev/runtime-artifacts/rebuild" &&
+          url.searchParams.get("force") === "1"
+        );
+      }),
+    ).toBe(true);
+  });
+
+  it("rotates an active session after a known source change without a baseline revision", async () => {
+    const fetchMock = createDevFetchMock({
+      requests: [],
+      revisions: ["snapshot-b"],
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new Client({ host: "http://localhost:3000" });
+    const refresher = createDevelopmentRuntimeArtifactSessionRefresher({
+      serverUrl: "http://localhost:3000",
+    });
+    let session = client.session();
+
+    await (await session.send({ message: "first" })).result();
+    const before = session;
+
+    session = await refresher.refreshAfterSourceChange({
+      createSession: () => client.session(),
+      session,
+    });
+
+    expect(session).not.toBe(before);
+  });
+
   it("reports local dev artifact revision changes for normal prompts", async () => {
     const requests: Array<{ method: string; url: string }> = [];
     const fetchMock = createDevFetchMock({

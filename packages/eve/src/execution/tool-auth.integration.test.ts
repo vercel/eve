@@ -232,6 +232,47 @@ describe("tool-hosted authorization", () => {
     });
   });
 
+  it("uses a localhost callback URL for a Vercel Connect inline provider", async () => {
+    let receivedCallbackUrl: string | undefined;
+    const inlineAuth: AuthorizationDefinition = {
+      principalType: "user",
+      vercelConnect: { connector: "mcp.notion.com/notion" },
+      async getToken(): Promise<TokenResult> {
+        throw requiredError();
+      },
+      async startAuthorization({ callbackUrl }) {
+        receivedCallbackUrl = callbackUrl;
+        return { challenge: { url: "https://idp.example/auth" } };
+      },
+      async completeAuthorization(): Promise<TokenResult> {
+        return { token: "after-signin" };
+      },
+    };
+    const tool = authoredTool({
+      name: "search_notion",
+      async execute(_input, ctx) {
+        return await ctx.getToken(inlineAuth);
+      },
+    });
+    const runtime = createTestRuntime({ tools: [tool] });
+
+    const result = await runtime.runAsSession(
+      { sessionId: "session_connect_callback" },
+      async () => {
+        seedUserPrincipal();
+        loadContext().set(CallbackBaseUrlKey, "http://[::1]:2000");
+        return runtime.executeTool(tool, {});
+      },
+    );
+
+    expect(isAuthorizationSignal(result)).toBe(true);
+    if (!isAuthorizationSignal(result)) throw new Error("expected signal");
+    expect(receivedCallbackUrl).toBe(
+      "http://localhost:2000/eve/v1/connections/search_notion__mcp.notion.com_notion/callback/session_auth%3Aauth",
+    );
+    expect(result.challenges[0]?.hookUrl).toBe(receivedCallbackUrl);
+  });
+
   it("parks the turn with a challenge when getToken throws Required", async () => {
     const auth: AuthorizationDefinition = {
       principalType: "user",

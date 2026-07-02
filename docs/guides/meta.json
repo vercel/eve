@@ -8,7 +8,6 @@
     "session-context",
     "state",
     "dynamic-capabilities",
-    "dynamic-workflows",
     "remote-agents",
     "dev-tui",
     "frontend",

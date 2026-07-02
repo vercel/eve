@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
 import type { DurableDynamicToolMetadata } from "#context/keys.js";
+import type { ApprovalContext } from "#public/definitions/approval.js";
 import { defineTool } from "#public/definitions/tool.js";
 
 vi.mock("#context/build-callback-context.js", () => ({
@@ -444,6 +445,24 @@ function createCtx(): ContextContainer {
   return ctx;
 }
 
+function createApprovalContext(input: {
+  readonly toolInput?: Record<string, unknown>;
+  readonly toolName: string;
+}): ApprovalContext {
+  return {
+    approvedTools: new Set(),
+    getSandbox: vi.fn(),
+    getSkill: vi.fn(),
+    session: {
+      auth: { current: null, initiator: null },
+      id: "test-session",
+      turn: { id: "test-turn", sequence: 0 },
+    },
+    toolInput: input.toolInput,
+    toolName: input.toolName,
+  } as ApprovalContext;
+}
+
 function makeEvent(type: string): HandleMessageStreamEvent {
   return { type, data: {} } as HandleMessageStreamEvent;
 }
@@ -853,13 +872,13 @@ describe("framework dynamic tools (no bundler transform)", () => {
     expect(tools[0]!.name).toBe("analytics");
   });
 
-  it("propagates needsApproval from a step-scoped entry into the harness tool", async () => {
+  it("propagates approval from a step-scoped entry into the harness tool", async () => {
     const ctx = createCtx();
-    const approvalFn = vi.fn(() => true);
+    const approvalFn = vi.fn(() => "user-approval" as const);
     const entry: DynamicToolEntry = {
       description: "destructive op",
       inputSchema: { type: "object" },
-      needsApproval: approvalFn,
+      approval: approvalFn,
       execute: async (): Promise<unknown> => ({ ok: true }),
     };
     const resolver = createResolver("connection", ["step.started"], () => ({ risky: entry }));
@@ -876,25 +895,20 @@ describe("framework dynamic tools (no bundler transform)", () => {
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(1);
     expect(tools[0]!.name).toBe("risky");
-    expect(tools[0]!.needsApproval).toBe(approvalFn);
-    expect(
-      tools[0]!.needsApproval!({
-        approvedTools: new Set(),
-        toolInput: undefined,
-        toolName: "risky",
-      }),
-    ).toBe(true);
+    expect(tools[0]!.approval).toBe(approvalFn);
+    const approvalCtx = createApprovalContext({ toolName: "risky" });
+    expect(tools[0]!.approval!(approvalCtx)).toBe("user-approval");
     expect(testRegistry.has("eve:framework-dynamic:connection:risky")).toBe(false);
     expect(testRegistry.has("eve:dynamic-tool-approval:connection:risky")).toBe(false);
   });
 
-  it("replays needsApproval from session-scoped dynamic tools", async () => {
+  it("replays approval from session-scoped dynamic tools", async () => {
     const ctx = createCtx();
-    const approvalFn = vi.fn(() => true);
+    const approvalFn = vi.fn(async () => "user-approval" as const);
     const entry: DynamicToolEntry = {
       description: "destructive op",
       inputSchema: { type: "object" },
-      needsApproval: approvalFn,
+      approval: approvalFn,
       execute: async (): Promise<unknown> => ({ ok: true }),
     };
     const resolver = createResolver("session_guard", ["session.started"], () => ({
@@ -913,18 +927,12 @@ describe("framework dynamic tools (no bundler transform)", () => {
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(1);
     expect(tools[0]!.name).toBe("guarded");
-    expect(
-      tools[0]!.needsApproval!({
-        approvedTools: new Set(),
-        toolInput: { draftId: "draft_123" },
-        toolName: "guarded",
-      }),
-    ).toBe(true);
-    expect(approvalFn).toHaveBeenCalledExactlyOnceWith({
-      approvedTools: new Set(),
+    const approvalCtx = createApprovalContext({
       toolInput: { draftId: "draft_123" },
       toolName: "guarded",
     });
+    await expect(tools[0]!.approval!(approvalCtx)).resolves.toBe("user-approval");
+    expect(approvalFn).toHaveBeenCalledExactlyOnceWith(approvalCtx);
   });
 
   it("propagates outputSchema from dynamic entries into harness tools and metadata", async () => {
@@ -960,7 +968,7 @@ describe("framework dynamic tools (no bundler transform)", () => {
     expect((tools[0]!.outputSchema as { jsonSchema: unknown }).jsonSchema).toEqual(outputSchema);
   });
 
-  it("leaves needsApproval undefined when a step-scoped entry omits it", async () => {
+  it("leaves approval undefined when a step-scoped entry omits it", async () => {
     const ctx = createCtx();
     const resolver = createResolver("connection", ["step.started"], () => ({
       safe: createFrameworkTool("read-only op"),
@@ -975,7 +983,7 @@ describe("framework dynamic tools (no bundler transform)", () => {
 
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(1);
-    expect(tools[0]!.needsApproval).toBeUndefined();
+    expect(tools[0]!.approval).toBeUndefined();
   });
 
   it("re-dispatch updates the registered step function", async () => {

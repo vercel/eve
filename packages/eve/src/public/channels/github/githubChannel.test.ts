@@ -112,6 +112,18 @@ function signedRequest(event: string, payload: Record<string, unknown>): Request
   });
 }
 
+function signedRequestWithoutGitHubHeaders(payload: Record<string, unknown>): Request {
+  const body = JSON.stringify(payload);
+  return new Request("https://example.com/eve/v1/github", {
+    body,
+    headers: {
+      "content-type": "application/json",
+      "x-hub-signature-256": signGitHubWebhookBody(body, SECRET),
+    },
+    method: "POST",
+  });
+}
+
 /** Builds a webhook request carrying a deliberately invalid HMAC signature. */
 function badlySignedRequest(event: string, payload: Record<string, unknown>): Request {
   const body = JSON.stringify(payload);
@@ -242,6 +254,51 @@ describe("githubChannel", () => {
         triggeringCommentId: 10,
       },
     });
+  });
+
+  it("dispatches Connect-forwarded issue comments without GitHub event headers", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const channel = githubChannel({
+      botName: "testbot",
+      credentials: { webhookSecret: SECRET },
+    });
+    const { send } = await firePost(
+      channel,
+      signedRequestWithoutGitHubHeaders(
+        basePayload({
+          action: "created",
+          comment: {
+            body: "@testbot help me",
+            html_url: "https://github.test/vercel/eve/issues/5#issuecomment-10",
+            id: 10,
+            user: { id: 1, login: "octocat", type: "User" },
+          },
+          issue: { number: 5 },
+        }),
+      ),
+    );
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const [payload, options] = send.mock.calls[0]!;
+    expect(payload.message).toContain("delivery_id: inferred:issue_comment:10:created");
+    expect(payload.message).toContain("help me");
+    expect(options).toMatchObject({
+      auth: {
+        attributes: {
+          delivery_id: "inferred:issue_comment:10:created",
+        },
+      },
+      continuationToken: "repo:123:issue:5",
+    });
+    expect(warn).toHaveBeenCalledWith(
+      "[eve:github.channel] GitHub webhook missing standard headers; inferred metadata from payload",
+      expect.objectContaining({
+        deliveryId: "inferred:issue_comment:10:created",
+        event: "issue_comment",
+        missingHeaders: ["x-github-event", "x-github-delivery"],
+        repository: "vercel/eve",
+      }),
+    );
   });
 
   it("verifies inbound webhooks via webhookVerifier instead of HMAC when supplied", async () => {

@@ -9,12 +9,6 @@
   ],
   "versionGroups": [
     {
-      "label": "docs intentionally pins its own ai / @ai-sdk/react versions",
-      "dependencies": ["ai", "@ai-sdk/react"],
-      "packages": ["eve-docs"],
-      "isIgnored": true
-    },
-    {
       "label": "Workspace packages must use the workspace: protocol",
       "dependencies": ["eve-*", "eve"],
       "dependencyTypes": ["dev", "prod", "peer"],
@@ -38,10 +32,8 @@
       "label": "Shared third-party deps must use the catalog: protocol",
       "policy": "catalog",
       "dependencies": [
-        "@ai-sdk/**",
         "@types/node",
         "typescript",
-        "ai",
         "next",
         "@types/react",
         "@types/react-dom",

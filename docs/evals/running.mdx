@@ -26,9 +26,11 @@ Positional ids match exactly or by directory prefix: `eve eval weather` runs `ev
 
 | Code | Means                                                                           |
 | ---- | ------------------------------------------------------------------------------- |
-| `0`  | Every eval passed its gates (and soft thresholds, under `--strict`)             |
+| `0`  | Every non-skipped eval passed its gates (and soft thresholds, under `--strict`) |
 | `1`  | Any eval failed (a failed gate, an execution error, or a strict threshold miss) |
 | `2`  | Configuration error                                                             |
+
+An eval that calls `t.skip(reason)` is reported as skipped, does not count as passed or failed, and never changes the exit code.
 
 ## Artifacts
 

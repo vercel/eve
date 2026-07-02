@@ -292,33 +292,25 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
         );
       }
 
-      let conversationId = requestedConversationId;
+      const receiveState: TelegramChannelState = {
+        ...initialTelegramState(config.botUsername),
+        chatId,
+        conversationId: requestedConversationId ?? null,
+        messageThreadId: messageThreadId ?? null,
+      };
+
       if (initialMessage !== undefined) {
         const handle = buildTelegramHandle({
           config,
-          state: {
-            ...initialTelegramState(config.botUsername),
-            chatId,
-            messageThreadId: messageThreadId ?? null,
-          },
+          state: receiveState,
         });
-        const posted = await handle.sendMessage(initialMessage);
-        conversationId = posted.id || undefined;
+        await handle.sendMessage(initialMessage);
       }
 
       return send(input.message, {
         auth: input.auth,
-        continuationToken: telegramContinuationToken({
-          chatId,
-          conversationId,
-          messageThreadId,
-        }),
-        state: {
-          ...initialTelegramState(config.botUsername),
-          chatId,
-          conversationId: conversationId ?? null,
-          messageThreadId: messageThreadId ?? null,
-        },
+        continuationToken: continuationTokenFromState(receiveState),
+        state: receiveState,
       });
     },
 
@@ -350,7 +342,11 @@ function buildTelegramHandle(input: {
   const credentials = input.config.credentials;
 
   function anchor(posted: TelegramMessageResult): void {
-    if (!posted.id || state.chatType === "private") return;
+    const chatType = state.chatType ?? posted.chatType ?? null;
+    if (state.chatType === null && posted.chatType !== undefined) {
+      state.chatType = posted.chatType;
+    }
+    if (!posted.id || !shouldAnchorTelegramConversation(chatType)) return;
     state.conversationId = posted.id;
     if (state.chatId) {
       input.session?.setContinuationToken(
@@ -441,6 +437,10 @@ function buildTelegramHandle(input: {
       }
     },
   };
+}
+
+function shouldAnchorTelegramConversation(chatType: TelegramChatType | null): boolean {
+  return chatType === "group" || chatType === "supergroup";
 }
 
 async function postTelegramMessage(

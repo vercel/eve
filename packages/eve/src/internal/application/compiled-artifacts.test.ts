@@ -58,8 +58,9 @@ describe("createCompiledArtifactsBootstrapSource", () => {
     });
 
     expect(source).toContain('import * as workflowWorldModule from "@acme/eve-world";');
+    expect(source).toContain('installEveWorkflowQueueNamespace("app");');
     expect(source).toContain(
-      "await installConfiguredWorkflowWorld({ module: workflowWorldModule });",
+      'await installConfiguredWorkflowWorld({ module: workflowWorldModule, packageName: "@acme/eve-world" });',
     );
   });
 });

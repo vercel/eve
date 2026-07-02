@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 import type {
@@ -16,6 +16,10 @@ vi.mock("#execution/sandbox/template-prewarm-lock.js", () => ({
 }));
 
 describe("prewarmAppSandboxes", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("uses the stable sandbox app root for dev snapshot artifact sources", async () => {
     const appRoot = process.cwd();
     const firstSnapshotRoot = `${appRoot}/.eve/dev-runtime/snapshots/one/app`;
@@ -68,6 +72,46 @@ describe("prewarmAppSandboxes", () => {
     expect(inputs).toHaveLength(0);
     expect(signatures).toHaveLength(1);
   });
+
+  it.each(["docker", "microsandbox"])(
+    "explains that %s is unavailable during Vercel prewarm",
+    async (backendName) => {
+      vi.stubEnv("VERCEL", "1");
+
+      const appRoot = process.cwd();
+      const cause = new Error("backend host check failed");
+      const log = vi.fn();
+
+      await expect(
+        prewarmAppSandboxes({
+          appRoot,
+          compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(appRoot),
+          dispatch: async () => {
+            throw cause;
+          },
+          loadAgentGraph: async () => createGraph(backendName),
+          log,
+        }),
+      ).rejects.toMatchObject({
+        cause,
+        message: expect.stringContaining(
+          `The ${backendName} sandbox backend is not available when deploying on Vercel.`,
+        ),
+      });
+
+      const messages = log.mock.calls.map(([message]) => String(message));
+      expect(messages).toEqual([
+        "eve: initializing 1 sandbox template...",
+        expect.stringContaining(
+          `The ${backendName} sandbox backend is not available when deploying on Vercel.`,
+        ),
+      ]);
+      expect(messages[1]).toContain("Use defaultBackend()");
+      expect(messages[1]).toContain("Vercel-compatible backend explicitly, such as vercel()");
+      expect(messages[1]).toContain("Original");
+      expect(messages[1]).toContain(cause.message);
+    },
+  );
 });
 
 function recordPrewarmInputs(inputs: SandboxBackendPrewarmInput[]) {
@@ -82,12 +126,12 @@ function recordPrewarmInputs(inputs: SandboxBackendPrewarmInput[]) {
   };
 }
 
-function createGraph(): ResolvedAgentGraphBundle {
+function createGraph(backendName = "test"): ResolvedAgentGraphBundle {
   const backend: SandboxBackend = {
     async create() {
       throw new Error("Unexpected create call.");
     },
-    name: "test",
+    name: backendName,
     async prewarm() {
       return { reused: true };
     },

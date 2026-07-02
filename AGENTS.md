@@ -48,15 +48,18 @@ pnpm test               # unit + integration
 pnpm test:unit          # unit tests (<3s)
 pnpm test:integration   # integration tests (<10s)
 pnpm test:scenario      # scenario tests (2–5 min; requires pnpm build first)
-pnpm test:e2e           # fixture-owned eve eval suites
+pnpm test:e2e           # fixture-owned eve eval suites (CI only)
 pnpm test:tui           # TUI smoke scripts (not e2e)
 ```
 
-Verify while iterating, not only at the end: run `pnpm test:unit` after each
-meaningful edit, `pnpm test:integration` before declaring a unit of work done,
-and `pnpm test:scenario` when touching the compiler, runtime, dev server, CLI,
-or scenario fixtures. Nothing is done until `typecheck`, `lint`, `fmt`,
-`build`, and the tests all pass. Documentation-only changes are exempt.
+We value fast local iteration whenever possible. Run `pnpm fmt`, `pnpm lint`,
+and `pnpm typecheck` frequently to catch inexpensive failures early, and run
+unit tests after material behavioral changes. Integration and scenario tests
+are comparatively slow, so do not run them after every change; run the
+narrowest relevant test when a change needs behavioral validation. Copy edits,
+typo fixes, small code reorganizations, and similar non-behavioral changes can
+proceed without local integration or scenario runs. CI is always the official
+line of defense, and every required check must pass before merge.
 
 ## Coding principles
 
@@ -119,8 +122,7 @@ assertion:
 - **Scenario** (`src/**/*.scenario.test.ts`, `test/scenarios/`): real
   subprocess, HTTP port, or bundler.
 - **E2E** (`e2e/fixtures/*/evals/`, plus `apps/fixtures/weather-fixture/evals/`):
-  fixture-owned `eve eval` suites. Local e2e is just `eve eval`; Vercel e2e is
-  fixture-local prebuilt deploy followed by `eve eval --url`.
+  fixture-owned `eve eval` suites that run only in CI.
 
 **Running a single file or filtered test: always pass the tier config.** Only
 the `vitest.<tier>.config.ts` files alias `#*` imports to `./src`; a bare
@@ -142,45 +144,23 @@ content is defined inline as `ScenarioAppDescriptor` objects (CI enforces this).
 ## End-to-end tests
 
 Automated tests cover module-level behavior, but they don't prove a fixture
-agent boots, accepts a request, and streams a response over HTTP. Before
-declaring agent-affecting work done, run the relevant fixture evals from the
-fixture directory:
-
-```sh
-cd e2e/fixtures/agent-tools
-pnpm exec eve eval --strict
-```
-
-The fixture agents and judges run against real models (`openai/gpt-5.5`), so
-the environment must provide the corresponding model-provider credentials.
+agent boots, accepts a request, and streams a response over HTTP. E2E suites
+cannot run locally and must run in CI. When a change needs e2e coverage, add or
+update the relevant fixture eval, then proceed to commit and push. Optionally
+watch CI for the results and iterate on any failures.
 
 Pick the fixture that exercises the surface you changed; if none does, add a
 new eval under the matching fixture's `evals/` directory. E2E evals must be
 deterministic and self-contained. Keep e2e free of external service startup
 and injected env requirements (beyond model-provider credentials).
 
-For Vercel e2e, deploy the fixture directory to the shared Vercel project and
-evaluate the immutable deployment URL:
-
-```sh
-vc link --yes --project "$VERCEL_PROJECT_ID"
-vc env pull --yes --environment=preview
-VERCEL=1 VERCEL_ENV=preview VERCEL_TARGET_ENV=preview \
-  VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID" \
-  VERCEL_DEPLOYMENT_ID="dpl_eve_e2e_manual" \
-  pnpm exec eve build
-DEPLOYMENT_URL="$(vc deploy --prebuilt --yes --target=preview | tail -n 1)"
-npx eve eval --strict --url "$DEPLOYMENT_URL"
-```
-
 Do not set `VERCEL_TEAM_ID` at build: sandbox template keys must derive
 identically at build and runtime, and Vercel has no team variable at runtime.
 
 The shared Vercel project's Preview env must provide the model-provider
 credentials the fixtures need. TUI smoke tests
-live under `packages/eve/test/tui-client` and run with `pnpm test:tui`. If you
-cannot run a relevant suite in your environment, say so explicitly rather than
-claiming verification passed. See [`e2e/README.md`](./e2e/README.md).
+live under `packages/eve/test/tui-client` and run with `pnpm test:tui`. See
+[`e2e/README.md`](./e2e/README.md).
 
 ## Documentation
 

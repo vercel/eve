@@ -1,5 +1,6 @@
 import { EVE_HEALTH_ROUTE_PATH, EVE_INFO_ROUTE_PATH } from "#protocol/routes.js";
 import { AgentInfoResponseError } from "#client/agent-info-error.js";
+import { encodeBasicCredentials } from "#internal/http/basic-auth.js";
 import { AgentInfoResultSchema } from "#client/agent-info-schema.js";
 import { ClientError } from "#client/client-error.js";
 import { ClientSession } from "#client/session.js";
@@ -194,8 +195,7 @@ export class Client {
       // Skip the header entirely on an empty token rather than emitting a
       // malformed `Bearer ` value the server has to reject. The dev client's
       // OIDC resolver returns "" when no token is available locally; the
-      // request then goes out unauthenticated and the framework's
-      // `vercelOidc()` channel handler returns a clean 401.
+      // request then follows the framework channel's local-dev fallback.
       const token = (await resolveTokenValue(auth.bearer)).trim();
       return token.length === 0 ? {} : { authorization: `Bearer ${token}` };
     }
@@ -241,15 +241,4 @@ function withRedirectPolicy(
   redirect: ClientRedirectPolicy | undefined,
 ): RequestInit {
   return redirect === undefined ? init : { ...init, redirect };
-}
-
-/**
- * Encodes a username:password pair as a base64 Basic auth credential.
- * Uses `TextEncoder` for correct UTF-8 handling across all runtimes.
- */
-function encodeBasicCredentials(username: string, password: string): string {
-  const encoder = new TextEncoder();
-  const bytes = encoder.encode(`${username}:${password}`);
-  const binaryString = Array.from(bytes, (byte) => String.fromCodePoint(byte)).join("");
-  return btoa(binaryString);
 }

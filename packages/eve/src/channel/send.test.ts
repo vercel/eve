@@ -216,4 +216,20 @@ describe("createSendFn", () => {
     const runInput = vi.mocked(runtime.run).mock.calls[0]![0];
     expect(runInput.adapter.state).toEqual({ channelId: "C1", threadTs: "T1" });
   });
+
+  it("keeps an explicit workflow title separate from the model message", async () => {
+    const runtime = createRuntime(new RuntimeNoActiveSessionError("test:token"));
+    const send = createSendFn(runtime, ADAPTER, "test");
+    const message = "<slack_message>\n<content>ship it</content>\n</slack_message>";
+
+    await send(message, {
+      auth: null,
+      continuationToken: "token",
+      title: "ship it",
+    });
+
+    const runInput = vi.mocked(runtime.run).mock.calls[0]![0];
+    expect(runInput.input.message).toBe(message);
+    expect(runInput.title).toBe("ship it");
+  });
 });

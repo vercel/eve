@@ -8,7 +8,6 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
-import { resolveCodeModeEnabled } from "#shared/code-mode.js";
 import {
   resolveRuntimeModelReference,
   type RuntimeModelResolutionScope,
@@ -24,6 +23,13 @@ import { preserveFrameworkStateOnCompaction } from "#execution/compaction.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 
 const log = createLogger("execution.node-step");
+
+const BUILT_IN_AGENT_TOOL_DESCRIPTION = [
+  "Delegate a focused subtask to a fresh copy of yourself.",
+  "Use it to isolate complex work or split a large task into independent pieces.",
+  "Issue multiple `agent` calls in one response to run a small fixed set in parallel.",
+  "Each child has fresh history and state but shares your tools and sandbox, so include essential context in `message` and give parallel writers non-overlapping scopes.",
+].join(" ");
 
 /**
  * Factory that creates a {@link Runtime} for the given compiled
@@ -67,7 +73,6 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
   const tools = createNodeHarnessTools({ node: input.node });
   return createToolLoopHarness({
     capabilities: input.capabilities,
-    codeMode: resolveCodeModeEnabled(input.node.agent.config?.experimental?.codeMode),
     workflow: input.node.agent.workflowEnabled === true,
     handleEvent: input.handleEvent,
     mode: input.mode,
@@ -142,7 +147,7 @@ export function createNodeHarnessTools(input: {
 
   if (!tools.has("agent")) {
     tools.set("agent", {
-      description: "Launch a new agent to handle a complex, multi-step subtask.",
+      description: BUILT_IN_AGENT_TOOL_DESCRIPTION,
       inputSchema: jsonSchema(SUBAGENT_TOOL_INPUT_SCHEMA),
       name: "agent",
       runtimeAction: {
@@ -216,7 +221,7 @@ function resolveHarnessToolDefinition(input: {
     }),
     inputSchema: def.inputStandardSchema ?? jsonSchema(def.inputSchema ?? {}),
     name: def.name,
-    needsApproval: def.needsApproval,
+    approval: def.approval,
     outputSchema: def.outputStandardSchema ?? maybeJsonSchema(def.outputSchema),
     toModelOutput: def.toModelOutput,
   };

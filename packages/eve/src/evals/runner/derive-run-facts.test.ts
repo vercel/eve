@@ -31,7 +31,7 @@ function actionResult(input: {
   callId: string;
   toolName: string;
   output?: unknown;
-  status?: "completed" | "failed";
+  status?: "completed" | "failed" | "rejected";
   isError?: boolean;
 }): HandleMessageStreamEvent {
   return {
@@ -46,7 +46,30 @@ function actionResult(input: {
       },
       sequence: 1,
       stepIndex: 0,
-      status: input.status ?? "completed",
+      status: input.status ?? (input.isError === true ? "failed" : "completed"),
+      turnId: "t1",
+    },
+  };
+}
+
+function subagentResult(input: {
+  callId: string;
+  subagentName: string;
+  output: unknown;
+  status: "completed" | "failed" | "rejected";
+}): HandleMessageStreamEvent {
+  return {
+    type: "action.result",
+    data: {
+      result: {
+        callId: input.callId,
+        kind: "subagent-result",
+        output: input.output as never,
+        subagentName: input.subagentName,
+      },
+      sequence: 1,
+      stepIndex: 0,
+      status: input.status,
       turnId: "t1",
     },
   };
@@ -102,7 +125,7 @@ describe("deriveRunFacts", () => {
         name: "get_weather",
         input: { city: "Brooklyn" },
         output: { tempF: 72 },
-        isError: false,
+        status: "completed",
         turnIndex: 0,
         sessionId: "s1",
       },
@@ -110,7 +133,7 @@ describe("deriveRunFacts", () => {
         name: "bash",
         input: { command: "pwd" },
         output: "command denied",
-        isError: true,
+        status: "failed",
         turnIndex: 0,
         sessionId: "s1",
       },
@@ -118,14 +141,102 @@ describe("deriveRunFacts", () => {
     expect(facts.toolCallCount).toBe(2);
   });
 
-  it("marks tool calls failed when the result carries isError", () => {
+  it("uses the normalized failed lifecycle status for error results", () => {
     const events: HandleMessageStreamEvent[] = [
       actionsRequested([{ callId: "c1", toolName: "bash" }]),
       actionResult({ callId: "c1", toolName: "bash", isError: true }),
     ];
 
     const facts = deriveRunFacts(events);
-    expect(facts.toolCalls[0]?.isError).toBe(true);
+    expect(facts.toolCalls[0]?.status).toBe("failed");
+  });
+
+  it("distinguishes pending, completed, failed, and rejected tool calls", () => {
+    const events: HandleMessageStreamEvent[] = [
+      actionsRequested([
+        { callId: "pending", toolName: "pending" },
+        { callId: "completed", toolName: "completed" },
+        { callId: "failed", toolName: "failed" },
+        { callId: "rejected", toolName: "rejected" },
+      ]),
+      actionResult({ callId: "completed", toolName: "completed" }),
+      actionResult({ callId: "failed", toolName: "failed", status: "failed" }),
+      actionResult({ callId: "rejected", toolName: "rejected", status: "rejected" }),
+    ];
+
+    expect(deriveRunFacts(events).toolCalls.map((call) => call.status)).toEqual([
+      "pending",
+      "completed",
+      "failed",
+      "rejected",
+    ]);
+  });
+
+  it("derives pending tool calls from HITL input requests", () => {
+    const facts = deriveRunFacts([turnStarted("t1", 0), inputRequested(["approval"])]);
+
+    expect(facts.toolCalls).toEqual([
+      {
+        name: "bash",
+        input: {},
+        output: undefined,
+        status: "pending",
+        turnIndex: 0,
+        sessionId: undefined,
+      },
+    ]);
+  });
+
+  it("pairs HITL tool calls with resumed results by call id", () => {
+    const events: HandleMessageStreamEvent[] = [
+      turnStarted("t1", 0),
+      inputRequested(["approval"]),
+      turnStarted("t2", 1),
+      actionResult({
+        callId: "approval-call",
+        toolName: "bash",
+        output: "approved",
+      }),
+    ];
+
+    expect(deriveRunFacts(events).toolCalls).toEqual([
+      {
+        name: "bash",
+        input: {},
+        output: "approved",
+        status: "completed",
+        turnIndex: 0,
+        sessionId: undefined,
+      },
+    ]);
+  });
+
+  it("derives resolved tool calls from result-only turn events", () => {
+    const facts = deriveRunFacts([
+      turnStarted("t2", 1),
+      actionResult({ callId: "approval-call", toolName: "bash", status: "rejected" }),
+    ]);
+
+    expect(facts.toolCalls).toEqual([
+      {
+        name: "bash",
+        input: {},
+        output: null,
+        status: "rejected",
+        turnIndex: 0,
+        sessionId: undefined,
+      },
+    ]);
+  });
+
+  it("deduplicates tool calls surfaced by request and HITL events", () => {
+    const events: HandleMessageStreamEvent[] = [
+      turnStarted("t1", 0),
+      actionsRequested([{ callId: "approval-call", toolName: "bash" }]),
+      inputRequested(["approval"]),
+    ];
+
+    expect(deriveRunFacts(events).toolCalls).toHaveLength(1);
   });
 
   it("stamps the turn index from turn.started boundaries", () => {
@@ -211,12 +322,34 @@ describe("deriveRunFacts", () => {
         name: "weather",
         remoteUrl: "http://127.0.0.1:4001",
         output: "Sunny, 72F",
-        isError: false,
+        status: "completed",
         turnIndex: 0,
         sessionId: "s0",
       },
     ]);
     expect(facts.subagentCallCount).toBe(1);
+  });
+
+  it("derives failed subagent calls from result-only events", () => {
+    const facts = deriveRunFacts([
+      turnStarted("t1", 0),
+      subagentResult({
+        callId: "c1",
+        subagentName: "weather",
+        output: { code: "REMOTE_AGENT_START_FAILED" },
+        status: "failed",
+      }),
+    ]);
+
+    expect(facts.subagentCalls).toEqual([
+      {
+        name: "weather",
+        output: { code: "REMOTE_AGENT_START_FAILED" },
+        status: "failed",
+        turnIndex: 0,
+        sessionId: undefined,
+      },
+    ]);
   });
 
   it("extracts inline subagent calls from subagent.started events", () => {

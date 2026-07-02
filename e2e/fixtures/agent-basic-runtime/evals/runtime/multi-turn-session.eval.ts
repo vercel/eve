@@ -1,4 +1,5 @@
 import { defineEval } from "eve/evals";
+import { equals } from "eve/evals/expect";
 
 /**
  * Core session-route runtime behavior: multi-turn session continuity.
@@ -10,20 +11,13 @@ export default defineEval({
   description: "Session runtime smoke: multi-turn.",
 
   async test(t) {
-    await t.send("My favorite word is marigold. Remember it.");
-    const firstSessionId = t.sessionId;
+    const first = await t.send("My favorite word is marigold. Remember it.");
 
     const second = await t.send("What is my favorite word? Reply with just the word.");
-    second.expectOk();
 
-    if (t.sessionId !== firstSessionId) {
-      throw new Error(
-        `Expected both turns in one session; got ${String(firstSessionId)} then ${String(t.sessionId)}.`,
-      );
-    }
+    await t.require(second.sessionId, equals(first.sessionId));
 
-    t.didNotFail();
-    t.completed();
+    t.succeeded();
     t.messageIncludes(/marigold/i);
   },
 });

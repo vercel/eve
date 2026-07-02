@@ -33,7 +33,7 @@ export default defineEval({
   reporters: [Braintrust({ projectName: "weather-agent" })],
   async test(t) {
     await t.send("What is the weather in Brooklyn?");
-    t.completed();
+    t.succeeded();
   },
 });
 ```
@@ -52,7 +52,7 @@ Braintrust needs its SDK installed in the app and credentials in the environment
 eve eval --strict --junit .eve/junit.xml
 ```
 
-Each eval becomes one `<testcase>` named by its path-derived id; failed gates and execution errors land as failure messages on the matching test case, so CI surfaces them inline.
+Each eval becomes one `<testcase>` named by its path-derived id; failed gates and execution errors become failures, while `t.skip(reason)` produces a JUnit `<skipped>` result.
 
 ## Custom reporters
 

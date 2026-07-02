@@ -1,11 +1,14 @@
 import { Client } from "#client/index.js";
 import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import {
-  resolveDevelopmentClientOptions,
+  resolveLocalDevelopmentClientOptions,
   resolveRemoteDevelopmentClientOptions,
 } from "#services/dev-client/client-options.js";
 import { createDevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
-import { resolveDevelopmentOidcToken } from "#services/dev-client/request-headers.js";
+import {
+  resolveDevelopmentOidcToken,
+  resolveLinkedDevelopmentOidcToken,
+} from "#services/dev-client/request-headers.js";
 import { isVercelAuthChallenge } from "#services/dev-client/vercel-auth-error.js";
 import { resolveVercelDeployment } from "#setup/vercel-deployment.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -13,6 +16,7 @@ import { toErrorMessage } from "#shared/errors.js";
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
 import { promptCommandsFor } from "./prompt-commands.js";
 import { formatRemoteAuthChallengeMessage } from "./remote-auth-result.js";
+import { probeMcpConnection } from "./mcp-connection-status.js";
 import { EveTUIRunner, type EveTUIRunnerOptions } from "./runner.js";
 import { remoteHost, type DevelopmentTuiTarget, type RemoteDevelopmentTarget } from "./target.js";
 import type { TuiDisplayOptions } from "./types.js";
@@ -22,10 +26,11 @@ export type { DevelopmentTuiTarget } from "./target.js";
 export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
   /** The local server or remote URL used by this TUI session. */
   readonly target: DevelopmentTuiTarget;
+  /** Additional request headers sent by this TUI client. */
+  readonly headers?: Readonly<Record<string, string>>;
   /**
-   * Text to seed the prompt input with after the UI launches. The buffer is
-   * editable and is not auto-submitted — the user presses Enter to send it.
-   * Applies to the first prompt only.
+   * Text to seed the prompt input with after the UI launches. A bare local
+   * `/model` starts fresh-agent onboarding. Applies to the first prompt only.
    */
   readonly initialInput?: string;
   /** Reports local CLI boot phases. Omitted for remote and programmatic TUI runs. */
@@ -74,14 +79,20 @@ function prepareDevelopmentTarget(target: DevelopmentTuiTarget): PreparedDevelop
  * the inline error region rather than crashing the command.
  */
 export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<void> {
-  const { target, initialInput, onBootProgress, ...display } = input;
+  const { target, headers, initialInput, onBootProgress, ...display } = input;
   const prepared = prepareDevelopmentTarget(target);
   const { serverUrl } = target;
+  const headerOptions = headers === undefined ? {} : { headers };
 
   const client = new Client(
     prepared.kind === "local"
-      ? resolveDevelopmentClientOptions(serverUrl)
+      ? resolveLocalDevelopmentClientOptions({
+          ...headerOptions,
+          serverUrl,
+          token: () => resolveLinkedDevelopmentOidcToken(prepared.target.workspaceRoot),
+        })
       : resolveRemoteDevelopmentClientOptions({
+          ...headerOptions,
           serverUrl,
           credentials: prepared.remote.credentials,
         }),
@@ -101,6 +112,7 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
   };
   if (prepared.kind === "local") {
     options.appRoot = prepared.target.workspaceRoot;
+    options.probeMcpConnection = probeMcpConnection;
   } else {
     options.remote = prepared.remote;
   }

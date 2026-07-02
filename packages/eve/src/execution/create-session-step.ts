@@ -30,6 +30,8 @@ export async function createSessionStep(input: {
   readonly nodeId?: string;
   readonly rootSessionId?: string;
   readonly sessionId: string;
+  readonly subagentDepth?: number;
+  readonly subagentMaxDepth?: number;
 }): Promise<CreateSessionStepResult> {
   "use step";
 
@@ -43,9 +45,16 @@ export async function createSessionStep(input: {
       thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
     },
     continuationToken: input.continuationToken,
+    limits: {
+      maxInputTokensPerSession: bundle.resolvedAgent.config.limits?.maxInputTokensPerSession,
+      maxOutputTokensPerSession: bundle.resolvedAgent.config.limits?.maxOutputTokensPerSession,
+    },
     outputSchema: input.outputSchema,
     rootSessionId: input.rootSessionId,
     sessionId: input.sessionId,
+    subagentDepth: input.subagentDepth,
+    subagentMaxDepth:
+      input.subagentMaxDepth ?? bundle.resolvedAgent.config.limits?.maxSubagentDepth,
     turnAgent: bundle.turnAgent,
   });
 

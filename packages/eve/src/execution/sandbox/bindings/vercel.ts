@@ -408,15 +408,18 @@ function createSessionCreateParams(
   }
 
   /*
-   * Strip both `source` and `runtime` from author-supplied create options for the
-   * template-backed session path. The framework owns the source there, and the SDK
-   * rejects `runtime` for a snapshot because its runtime is already baked into it.
+   * Strip `source`, `runtime`, and `image` from author-supplied create options
+   * for the template-backed session path. The framework owns the source there,
+   * and a snapshot source is mutually exclusive with both `runtime` and `image`
+   * (the template snapshot already has the eve image baked in).
    */
   const {
+    image: _image,
     runtime: _runtime,
     source: _source,
     ...sessionCreateOptions
-  } = input.createOptions as VercelCreateOptions & Partial<Record<"runtime" | "source", unknown>>;
+  } = input.createOptions as VercelCreateOptions &
+    Partial<Record<"image" | "runtime" | "source", unknown>>;
 
   return {
     ...sessionCreateOptions,

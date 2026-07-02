@@ -5,7 +5,7 @@ import { applyModelNameToSource } from "#source-change/apply-model-name.js";
 const SCAFFOLD = `import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "anthropic/claude-sonnet-4.6",
+  model: "anthropic/claude-sonnet-5",
 });
 `;
 
@@ -15,11 +15,11 @@ describe("applyModelNameToSource", () => {
 
     expect(result.kind).toBe("applied");
     if (result.kind !== "applied") return;
-    expect(result.from).toBe("anthropic/claude-sonnet-4.6");
+    expect(result.from).toBe("anthropic/claude-sonnet-5");
     expect(result.to).toBe("anthropic/claude-opus-4.6");
     // Only the literal changed; the rest of the file is byte-identical.
     expect(result.nextSource).toBe(
-      SCAFFOLD.replace("anthropic/claude-sonnet-4.6", "anthropic/claude-opus-4.6"),
+      SCAFFOLD.replace("anthropic/claude-sonnet-5", "anthropic/claude-opus-4.6"),
     );
   });
 
@@ -38,7 +38,7 @@ describe("applyModelNameToSource", () => {
     const source = `export default defineAgent({
   // primary model
   model: "a/b",
-  experimental: { codeMode: true },
+  experimental: { workflow: { world: "@acme/workflow-world" } },
 });
 `;
     const result = await applyModelNameToSource(source, "c/d");
@@ -46,7 +46,9 @@ describe("applyModelNameToSource", () => {
     expect(result.kind).toBe("applied");
     if (result.kind !== "applied") return;
     expect(result.nextSource).toContain("// primary model");
-    expect(result.nextSource).toContain("experimental: { codeMode: true }");
+    expect(result.nextSource).toContain(
+      'experimental: { workflow: { world: "@acme/workflow-world" } }',
+    );
     expect(result.nextSource).toContain(`model: "c/d"`);
   });
 
@@ -62,7 +64,7 @@ describe("applyModelNameToSource", () => {
   });
 
   it("is a no-op when the value is unchanged", async () => {
-    const result = await applyModelNameToSource(SCAFFOLD, "anthropic/claude-sonnet-4.6");
+    const result = await applyModelNameToSource(SCAFFOLD, "anthropic/claude-sonnet-5");
 
     expect(result.kind).toBe("applied");
     if (result.kind !== "applied") return;
@@ -95,7 +97,7 @@ describe("applyModelNameToSource", () => {
 
   it("bails when model is absent", async () => {
     const result = await applyModelNameToSource(
-      `export default defineAgent({ experimental: { codeMode: true } });\n`,
+      `export default defineAgent({ experimental: { workflow: {} } });\n`,
       "c/d",
     );
 

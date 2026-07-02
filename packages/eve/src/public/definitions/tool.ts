@@ -3,6 +3,7 @@ import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index
 import { stampDefinitionKey } from "#public/tool-result-narrowing.js";
 import type { PublicToolDefinition, ToolModelOutput } from "#shared/tool-definition.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
+import type { Approval } from "#public/definitions/approval.js";
 import type { JsonObject } from "#shared/json.js";
 import type {
   AuthorizationDefinition,
@@ -17,22 +18,7 @@ import {
   type DynamicSentinel,
 } from "#shared/dynamic-tool-definition.js";
 
-type ApprovalToolInput<TInput> = TInput extends object ? Readonly<TInput> : TInput;
 type ApprovalContextInput<TInput> = unknown extends TInput ? Record<string, unknown> : TInput;
-
-/**
- * Context passed to a tool's {@link ToolDefinition.needsApproval} function.
- *
- * `approvedTools` is the set of tool names (or compound approval keys)
- * already approved at least once in the current session. `toolName` is the
- * runtime name of the tool being evaluated. `toolInput` is the raw input the
- * model passed, available for input-aware decisions (e.g. per-connection scoping).
- */
-export interface NeedsApprovalContext<TInput = Record<string, unknown>> {
-  readonly approvedTools: ReadonlySet<string>;
-  readonly toolInput?: ApprovalToolInput<TInput>;
-  readonly toolName: string;
-}
 
 export type { ToolModelOutput } from "#shared/tool-definition.js";
 
@@ -121,7 +107,7 @@ export type ToolDefinition<TInput = unknown, TOutput = unknown> = PublicToolDefi
    * - {@link never}: never require approval
    * - {@link once}: require approval only the first time per session
    */
-  needsApproval?: (ctx: NeedsApprovalContext<ApprovalContextInput<TInput>>) => boolean;
+  approval?: Approval<ApprovalContextInput<TInput>>;
   /**
    * Optional projection controlling what the model sees as the tool result.
    * Receives the full `TOutput` from {@link execute} and returns the
@@ -155,10 +141,7 @@ export function defineTool<
   ):
     | Promise<StandardJSONSchemaV1.InferOutput<TOutputSchema>>
     | StandardJSONSchemaV1.InferOutput<TOutputSchema>;
-  needsApproval?: ToolDefinition<
-    StandardJSONSchemaV1.InferOutput<TInputSchema>,
-    unknown
-  >["needsApproval"];
+  approval?: ToolDefinition<StandardJSONSchemaV1.InferOutput<TInputSchema>, unknown>["approval"];
   toModelOutput?: ToolDefinition<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
@@ -178,10 +161,7 @@ export function defineTool<
     input: StandardJSONSchemaV1.InferOutput<TSchema>,
     ctx: ToolContext,
   ): Promise<TOutput> | TOutput;
-  needsApproval?: ToolDefinition<
-    StandardJSONSchemaV1.InferOutput<TSchema>,
-    unknown
-  >["needsApproval"];
+  approval?: ToolDefinition<StandardJSONSchemaV1.InferOutput<TSchema>, unknown>["approval"];
   toModelOutput?: ToolDefinition<unknown, TOutput>["toModelOutput"];
 }): ToolDefinition<StandardJSONSchemaV1.InferOutput<TSchema>, TOutput>;
 export function defineTool<
@@ -196,7 +176,7 @@ export function defineTool<
   ):
     | Promise<StandardJSONSchemaV1.InferOutput<TOutputSchema>>
     | StandardJSONSchemaV1.InferOutput<TOutputSchema>;
-  needsApproval?: ToolDefinition<Record<string, unknown>, unknown>["needsApproval"];
+  approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
   toModelOutput?: ToolDefinition<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
@@ -207,7 +187,7 @@ export function defineTool<TOutput>(definition: {
   inputSchema: JsonObject;
   outputSchema?: JsonObject;
   execute(input: Record<string, unknown>, ctx: ToolContext): Promise<TOutput> | TOutput;
-  needsApproval?: ToolDefinition<Record<string, unknown>, unknown>["needsApproval"];
+  approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
   toModelOutput?: ToolDefinition<unknown, TOutput>["toModelOutput"];
 }): ToolDefinition<Record<string, unknown>, TOutput>;
 export function defineTool<TInput = unknown, TOutput = unknown>(
@@ -317,50 +297,5 @@ export function isDisabledToolSentinel(value: unknown): value is DisabledToolSen
     typeof value === "object" &&
     value !== null &&
     (value as { kind?: unknown }).kind === DISABLED_TOOL_SENTINEL_KIND
-  );
-}
-
-/**
- * Marker discriminator written into the {@link ExperimentalWorkflow} opt-in
- * sentinel.
- */
-const ENABLE_WORKFLOW_TOOL_SENTINEL_KIND = "eve:enable-workflow-tool";
-
-/**
- * Marker value re-exported as the default export of a file in `agent/tools/`
- * (conventionally `agent/tools/workflow.ts`) to enable the framework `Workflow`
- * orchestration tool. The tool is off unless this marker is present,
- * mirroring the {@link disableTool} opt-out in reverse.
- */
-export interface EnableWorkflowToolSentinel {
-  readonly kind: typeof ENABLE_WORKFLOW_TOOL_SENTINEL_KIND;
-}
-
-/**
- * Opt-in marker for the framework `Workflow` tool, a code-mode sandbox whose
- * only callable operations are this agent's subagents and remote agents, for
- * orchestrating them from model-authored JavaScript. Re-export it as the
- * default export of `agent/tools/workflow.ts`:
- *
- * ```ts
- * export { ExperimentalWorkflow as default } from "eve/tools";
- * ```
- *
- * The capability is experimental. The resulting model-facing tool is still
- * called `Workflow`.
- */
-export const ExperimentalWorkflow: EnableWorkflowToolSentinel = Object.freeze({
-  kind: ENABLE_WORKFLOW_TOOL_SENTINEL_KIND,
-});
-
-/**
- * Type guard: returns whether `value` is the {@link ExperimentalWorkflow}
- * opt-in sentinel.
- */
-export function isEnableWorkflowToolSentinel(value: unknown): value is EnableWorkflowToolSentinel {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as { kind?: unknown }).kind === ENABLE_WORKFLOW_TOOL_SENTINEL_KIND
   );
 }

@@ -241,6 +241,11 @@ export interface RunInput {
   /** Inbound channel request id used to correlate workflow attributes. */
   readonly requestId?: string;
   /**
+   * Human-readable workflow title for top-level sessions. When omitted, the
+   * runtime derives `$eve.title` from {@link input.message}.
+   */
+  readonly title?: string;
+  /**
    * Optional terminal callback. When present, the runtime posts a single
    * callback when the session completes or fails.
    */
@@ -267,6 +272,17 @@ export interface RunInput {
   };
   readonly mode: RunMode;
   readonly parent?: SessionParent;
+  /**
+   * Framework-owned depth of delegated local subagent sessions. Root sessions
+   * omit this and are treated as depth 0; each local child receives
+   * parent depth + 1.
+   */
+  readonly subagentDepth?: number;
+  /**
+   * Optional maximum delegated subagent depth inherited by this run. When
+   * omitted, the session uses its resolved agent config or eve's default.
+   */
+  readonly subagentMaxDepth?: number;
 }
 
 export interface DeliverInput {

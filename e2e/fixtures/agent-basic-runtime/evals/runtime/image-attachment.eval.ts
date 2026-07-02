@@ -39,8 +39,7 @@ export default defineEval({
       );
     }
 
-    t.didNotFail();
-    t.completed();
+    t.succeeded();
     t.messageIncludes(/cat/i);
   },
 });

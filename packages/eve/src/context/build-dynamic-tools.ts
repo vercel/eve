@@ -10,7 +10,7 @@ import {
 import type { DurableDynamicToolMetadata } from "#context/keys.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { createLogger } from "#internal/logging.js";
-import type { NeedsApprovalContext } from "#public/definitions/tool.js";
+import type { ApprovalContext, ApprovalStatus } from "#public/definitions/approval.js";
 
 const log = createLogger("dynamic-tools");
 
@@ -53,7 +53,7 @@ function replayTools(metadata: readonly DurableDynamicToolMetadata[]): HarnessTo
       execute: (input: unknown) => stepFn(m.closureVars, input, buildCallbackContext()),
       inputSchema: jsonSchema(m.inputSchema),
       name: m.name,
-      needsApproval: buildReplayedNeedsApproval(m),
+      approval: buildReplayedApproval(m),
       outputSchema: m.outputSchema === undefined ? undefined : jsonSchema(m.outputSchema),
     });
   }
@@ -61,24 +61,24 @@ function replayTools(metadata: readonly DurableDynamicToolMetadata[]): HarnessTo
   return tools;
 }
 
-function buildReplayedNeedsApproval(
+function buildReplayedApproval(
   metadata: DurableDynamicToolMetadata,
-): HarnessToolDefinition["needsApproval"] | undefined {
-  if (metadata.needsApprovalStepFnName === undefined) {
+): HarnessToolDefinition["approval"] | undefined {
+  if (metadata.approvalStepFnName === undefined) {
     return undefined;
   }
 
-  const approvalStepFn = lookupStepFunction(metadata.needsApprovalStepFnName);
+  const approvalStepFn = lookupStepFunction(metadata.approvalStepFnName);
   if (approvalStepFn === null) {
     log.warn(
-      `Dynamic tool "${metadata.name}" references approval function "${metadata.needsApprovalStepFnName}" ` +
+      `Dynamic tool "${metadata.name}" references approval function "${metadata.approvalStepFnName}" ` +
         "which is not registered — requiring approval by default.",
     );
-    return () => true;
+    return () => "user-approval";
   }
 
-  return (approvalCtx: NeedsApprovalContext) =>
-    Boolean(approvalStepFn(metadata.closureVars ?? {}, approvalCtx));
+  return async (approvalCtx: ApprovalContext) =>
+    (await approvalStepFn(metadata.closureVars ?? {}, approvalCtx)) as ApprovalStatus;
 }
 
 /**

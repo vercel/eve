@@ -30,7 +30,7 @@ import { bash } from "eve/tools/defaults";
 export default defineTool({
   ...bash,
   description: "Run a vetted shell command in the project sandbox.",
-  needsApproval: always(),
+  approval: always(),
   async execute(input) {
     return bash.execute(input);
   },
