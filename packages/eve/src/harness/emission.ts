@@ -36,7 +36,8 @@ import { toError } from "#shared/errors.js";
 import type { JsonObject } from "#shared/json.js";
 import {
   createRuntimeToolResultFromStepResult,
-  createRuntimeToolResultFromValue,
+  createRuntimeToolResultFromToolError,
+  createToolResultMessagePartFromToolError,
 } from "#harness/action-result-helpers.js";
 import {
   createRuntimeActionRequestFromToolCall,
@@ -592,25 +593,11 @@ export async function emitStreamContent(
         if (toolError.providerExecuted === true) {
           await collectProviderToolCall(toolError);
           await providerActionBatch.flush();
-          await emitActionResult(
-            createRuntimeToolResultFromValue({
-              callId: toolError.toolCallId,
-              isError: true,
-              output: toError(toolError.error),
-              toolName: toolError.toolName,
-            }),
-          );
+          await emitActionResult(createRuntimeToolResultFromToolError(toolError));
         } else if (emittedActionCallIds.has(toolError.toolCallId)) {
-          await emitActionResult(
-            createRuntimeToolResultFromValue({
-              callId: toolError.toolCallId,
-              isError: true,
-              output: toError(toolError.error),
-              toolName: toolError.toolName,
-            }),
-          );
+          await emitActionResult(createRuntimeToolResultFromToolError(toolError));
           handledInlineToolResultCallIds.add(toolError.toolCallId);
-          trailingInlineToolResultParts.push(createInlineToolErrorResultPart(toolError));
+          trailingInlineToolResultParts.push(createToolResultMessagePartFromToolError(toolError));
         }
         break;
       }
@@ -679,18 +666,6 @@ export async function emitStreamContent(
     inlineAuthorizationResults,
     inlineToolResultParts,
     trailingInlineToolResultParts,
-  };
-}
-
-function createInlineToolErrorResultPart(toolError: TypedToolError<ToolSet>): InlineToolResultPart {
-  return {
-    type: "tool-result",
-    toolCallId: toolError.toolCallId,
-    toolName: toolError.toolName,
-    output: {
-      type: "error-text",
-      value: toError(toolError.error).message,
-    },
   };
 }
 

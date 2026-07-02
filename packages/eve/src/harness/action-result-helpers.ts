@@ -102,6 +102,21 @@ export function createRuntimeToolResultFromToolError(
 }
 
 /**
+ * Builds the inline tool-result message part that repairs model history after a
+ * local tool execution error.
+ */
+export function createToolResultMessagePartFromToolError(
+  toolError: TypedToolError<ToolSet>,
+): ToolResultPart {
+  return {
+    type: "tool-result",
+    toolCallId: toolError.toolCallId,
+    toolName: toolError.toolName,
+    output: { type: "error-text", value: toError(toolError.error).message },
+  };
+}
+
+/**
  * Builds a `RuntimeToolResultActionResult` from one tool-result message
  * part as it appears on `step.response.messages`. Used as a fallback when
  * the result is missing from `step.toolResults` (some providers — notably
