@@ -45,10 +45,6 @@ export interface BashResult {
  * Used by the framework `bash` tool and by author tools constructed via
  * `defineBashTool`. Centralizing the executor here keeps the error
  * messages and result shape identical across all bash-style tools.
- *
- * Turn cancellation reaches the underlying command through the session
- * itself: callers pass a session bound via `bindSandboxAbortSignal`
- * (`requireSandboxSession(abortSignal)` or `ctx.getSandbox()`).
  */
 export async function executeBashOnSandbox(
   sandbox: SandboxSession,

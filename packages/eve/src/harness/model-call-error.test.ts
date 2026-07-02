@@ -132,8 +132,6 @@ describe("classifyModelCallError", () => {
   it("returns terminal for a turn cancellation, even when marked retryable", () => {
     expect(classifyModelCallError(new TurnCancelledError())).toBe("terminal");
 
-    // Cancellation wins over every other classification signal: an abort
-    // surfacing through a retryable transport error must not be retried.
     const wrapped = Object.assign(new Error("socket hang up"), {
       cause: new TurnCancelledError(),
       isRetryable: true,

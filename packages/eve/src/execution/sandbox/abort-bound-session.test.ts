@@ -103,12 +103,9 @@ describe("bindSandboxAbortSignal", () => {
     expect(composed).not.toBe(callController.signal);
     expect(composed?.aborted).toBe(false);
 
-    // The caller's signal still aborts the composed signal.
     callController.abort(new Error("call-level abort"));
     expect(composed?.aborted).toBe(true);
 
-    // The bound (turn) signal aborts even when the caller provided one:
-    // per-call signals can never opt sandbox work out of turn cancellation.
     await bound.run({ abortSignal: new AbortController().signal, command: "echo again" });
     const second = calls[1]?.abortSignal;
     expect(second?.aborted).toBe(false);

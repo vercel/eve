@@ -2222,8 +2222,6 @@ async function runModelCallWithRetries<T>(
     try {
       return await fn();
     } catch (error) {
-      // Signal-based, not error-shape-based: an aborted call may surface
-      // as any provider error, and none of those may be retried.
       throwIfTurnAborted(abortSignal);
       if (attempt === MODEL_CALL_MAX_ATTEMPTS || classifyModelCallError(error) !== "retry") {
         throw error;

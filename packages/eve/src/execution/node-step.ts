@@ -46,10 +46,7 @@ export type CreateRuntime = (config: {
  * Input for building a harness step for one resolved runtime node.
  */
 export interface CreateExecutionNodeStepInput {
-  /**
-   * Cooperative cancellation signal for the active turn, forwarded to
-   * the tool-loop harness. See `ToolLoopHarnessConfig.abortSignal`.
-   */
+  /** Cancellation signal forwarded to the tool-loop harness. */
   readonly abortSignal?: AbortSignal;
   /**
    * Session-level capabilities propagated from the runtime. The

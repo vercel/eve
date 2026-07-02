@@ -24,14 +24,9 @@ export interface WebFetchInput {
   readonly url: string;
 }
 
-/**
- * Per-call options accepted by {@link executeWebFetchTool}.
- */
+/** Per-call options accepted by {@link executeWebFetchTool}. */
 export interface WebFetchExecuteOptions {
-  /**
-   * Turn cancellation signal combined with the per-request timeout so an
-   * aborted turn stops the in-flight fetch.
-   */
+  /** Signal combined with the request timeout. */
   readonly abortSignal?: AbortSignal;
 }
 

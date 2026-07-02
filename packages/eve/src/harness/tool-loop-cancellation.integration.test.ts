@@ -52,10 +52,6 @@ function createConfig(
   };
 }
 
-/**
- * A model whose stream starts producing text and then stays open until the
- * test ends it — the shape of a long in-flight generation.
- */
 function createHangingStreamModel(onStreamStarted: () => void): MockLanguageModelV3 {
   return new MockLanguageModelV3({
     modelId: "integration-model",
@@ -67,7 +63,6 @@ function createHangingStreamModel(onStreamStarted: () => void): MockLanguageMode
           controller.enqueue({ id: "text-1", type: "text-start" });
           controller.enqueue({ delta: "Working on it", id: "text-1", type: "text-delta" });
           onStreamStarted();
-          // Never closed: the abort must end this call.
         },
       }),
     }),
@@ -148,7 +143,6 @@ describe("tool loop cancellation (real AI SDK)", () => {
                 },
                 { once: true },
               );
-              // The tool observed the call — cancel the turn now.
               abortController.abort(cancellation);
             });
           },

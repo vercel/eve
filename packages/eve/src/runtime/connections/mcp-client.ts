@@ -132,8 +132,6 @@ export class McpConnectionClient implements ConnectionClient {
         );
       }
 
-      // The `@ai-sdk/mcp` tool executor forwards `abortSignal` into the
-      // JSON-RPC request, rejecting the pending call on abort.
       return await sdkTool.execute(args, { abortSignal: options?.abortSignal } as never);
     } catch (error) {
       return await this.#rethrowClassified(error);

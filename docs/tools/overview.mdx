@@ -37,7 +37,7 @@ When a tool returns structured data, add an optional `outputSchema`. With Zod or
 `execute` gets a `ctx` carrying the runtime accessors:
 
 - `ctx.session`: session metadata, turn, auth, parent lineage.
-- `ctx.abortSignal`: aborts when the active turn is cancelled. Pass it to fetches, SDK calls, and other cancellation-aware work the tool starts so cancelling the turn stops that work too. Sandbox sessions from `ctx.getSandbox()` are already bound to this signal — every `run`, read, and write is cancellable without passing it explicitly. Cancellation is best effort: a tool that ignores the signal runs to completion, but its result is discarded.
+- `ctx.abortSignal`: aborts when the active turn is cancelled. Pass it to cancellation-aware work; sandbox sessions from `ctx.getSandbox()` are already bound to it.
 - `ctx.getSandbox()`: the live [sandbox](/docs/sandbox) handle.
 - `ctx.getSkill(id)`: read a packaged [skill](/docs/skills)'s metadata and files.
 

@@ -2627,8 +2627,6 @@ describe("createToolLoopHarness", () => {
               abortController.abort(abortReason);
               yield { reason: abortReason.message, type: "abort" };
             })(),
-            // The SDK never resolves step results for an aborted step;
-            // the harness must settle without awaiting them.
             steps: new Promise<never>(() => {}),
           };
         });
@@ -2651,8 +2649,6 @@ describe("createToolLoopHarness", () => {
   it("does not retry or recover a model call once the turn signal has aborted", async () => {
     const abortController = new AbortController();
     const cancellation = new TurnCancelledError();
-    // Retryable transport error: without the abort check this rejection
-    // would re-enter the retry loop and back off.
     const streamMock = vi.fn().mockImplementation(async () => {
       abortController.abort(cancellation);
       throw Object.assign(new Error("socket hang up"), { isRetryable: true });

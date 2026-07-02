@@ -72,13 +72,7 @@ export interface ToolAuthOptions {
  * resolves that provider inline, which lets one tool use multiple credentials.
  */
 export type ToolContext = SessionContext & {
-  /**
-   * Aborts when the active turn is cancelled. Pass it to
-   * cancellation-aware work the tool starts (fetches, sandbox commands,
-   * SDK calls) so cancelling the turn stops that work too. Cancellation
-   * is best effort: tools that ignore the signal run to completion, but
-   * their result is discarded.
-   */
+  /** Aborts when the active turn is cancelled. */
   readonly abortSignal: AbortSignal;
   /**
    * Resolves the bearer token for an inline provider. This accepts the same

@@ -433,10 +433,7 @@ export interface ConnectionToolMetadata {
 
 /** Per-call options for {@link ConnectionClient.executeTool}. */
 export interface ConnectionToolExecuteOptions {
-  /**
-   * Turn cancellation signal forwarded into the underlying transport
-   * (MCP request, OpenAPI fetch) so an aborted turn stops the call.
-   */
+  /** Signal forwarded into the underlying transport. */
   readonly abortSignal?: AbortSignal;
 }
 

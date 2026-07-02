@@ -19,8 +19,6 @@ describe("isTurnCancellation", () => {
   it("matches the canonical error and name-preserving copies", () => {
     expect(isTurnCancellation(new TurnCancelledError())).toBe(true);
 
-    // Structured-clone / serialization survivors keep `name` but lose
-    // class identity.
     const copy = Object.assign(new Error("The turn was cancelled."), {
       name: "TurnCancelledError",
     });
@@ -44,7 +42,6 @@ describe("isTurnCancellation", () => {
   });
 
   it("does not match generic abort shapes", () => {
-    // A tool's internal fetch timeout is a failure, not a cancellation.
     expect(isTurnCancellation(new DOMException("aborted", "AbortError"))).toBe(false);
     expect(isTurnCancellation(new DOMException("timeout", "TimeoutError"))).toBe(false);
     expect(isTurnCancellation(new Error("aborted"))).toBe(false);

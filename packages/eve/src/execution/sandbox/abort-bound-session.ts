@@ -12,17 +12,8 @@ import type {
 } from "#shared/sandbox-session.js";
 
 /**
- * Wraps a sandbox session so every I/O call carries `abortSignal` by
- * default. This is how the turn's cancellation signal reaches sandbox
- * work without each call site threading it manually: sessions handed to
- * tool executions (`ctx.getSandbox()`, the framework sandbox tools) are
- * bound to the turn signal, so `sandbox.run({ command })` is already
- * cancellable.
- *
- * A signal provided on an individual call is composed with the bound
- * signal via `AbortSignal.any`, so per-call signals (timeouts, caller
- * scopes) add abort reasons but can never opt sandbox work out of turn
- * cancellation.
+ * Returns a sandbox session that applies `abortSignal` to every operation.
+ * Per-call signals are composed with the bound signal.
  */
 export function bindSandboxAbortSignal(
   session: SandboxSession,

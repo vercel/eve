@@ -11,9 +11,7 @@ import { bindSandboxAbortSignal } from "#execution/sandbox/abort-bound-session.j
  * lookup, null checks, and error messages so each executor does not
  * duplicate them.
  *
- * When `abortSignal` is provided, the returned session is bound to it:
- * every sandbox call the executor makes carries the signal without
- * threading it manually.
+ * Binds the returned session to `abortSignal` when provided.
  */
 export async function requireSandboxSession(abortSignal?: AbortSignal): Promise<SandboxSession> {
   const sandboxAccess = loadContext().get(SandboxKey);

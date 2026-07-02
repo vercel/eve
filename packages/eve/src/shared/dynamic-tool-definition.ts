@@ -11,7 +11,7 @@ import type { SessionAuth } from "#context/keys.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 
 type ToolContext = SessionContext & {
-  /** Aborts when the active turn is cancelled. See `ToolContext.abortSignal`. */
+  /** Aborts when the active turn is cancelled. */
   readonly abortSignal: AbortSignal;
 };
 

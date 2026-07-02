@@ -48,10 +48,7 @@ Two small public additions; everything else is internal plumbing.
 
 ```ts
 export type ToolContext = SessionContext & {
-  /**
-   * Aborts when the active turn is cancelled. Pass this signal to
-   * cancellation-aware work started by the tool.
-   */
+  /** Aborts when the active turn is cancelled. */
   readonly abortSignal: AbortSignal;
   // ...existing members
 };

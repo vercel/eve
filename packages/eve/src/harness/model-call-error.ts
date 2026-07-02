@@ -290,8 +290,6 @@ export function isNoOutputGeneratedError(error: unknown): boolean {
  * Classifies a model-call failure into the runtime's recovery policy.
  */
 export function classifyModelCallError(error: unknown): "retry" | "recoverable" | "terminal" {
-  // A cancelled turn is an intentional outcome: never retry the model
-  // call and never route it through the recovery pipeline.
   if (isTurnCancellation(error)) {
     return "terminal";
   }

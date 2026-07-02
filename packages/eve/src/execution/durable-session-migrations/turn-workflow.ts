@@ -20,12 +20,7 @@ import { turnWorkflowInputV0ToV1 } from "./turn-workflow-v0-to-v1.js";
 export const TURN_WORKFLOW_INPUT_VERSION = 1;
 
 export interface TurnStepInput {
-  /**
-   * Cooperative cancellation signal for the turn. Workflow-serializable,
-   * so it crosses the `"use step"` boundary and aborts harness work
-   * mid-step. Nothing populates it yet: the root turn workflow will own
-   * the durable `AbortController` when a cancellation trigger ships.
-   */
+  /** Cancellation signal forwarded into the turn step. */
   readonly abortSignal?: AbortSignal;
   readonly input: HookPayload | undefined;
   readonly parentWritable: WritableStream<Uint8Array>;
