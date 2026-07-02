@@ -575,4 +575,47 @@ describe("defaultMessageReducer", () => {
       { type: "step-start" },
     ]);
   });
+
+  it("projects structured file parts from message.received onto the user message", () => {
+    const reducer = defaultMessageReducer();
+    let data = reducer.initial();
+
+    data = reducer.reduce(data, {
+      data: {
+        message: "describe this\n[file: report.pdf (application/pdf)]",
+        parts: [
+          { text: "describe this", type: "text" },
+          { filename: "report.pdf", mediaType: "application/pdf", size: 4, type: "file" },
+        ],
+        sequence: 1,
+        turnId: "turn_1",
+      },
+      type: "message.received",
+    });
+
+    const userMessage = data.messages.find((message) => message.role === "user");
+    expect(userMessage?.parts).toEqual([
+      { state: "done", text: "describe this", type: "text" },
+      {
+        filename: "report.pdf",
+        mediaType: "application/pdf",
+        size: 4,
+        type: "file",
+        url: undefined,
+      },
+    ]);
+  });
+
+  it("falls back to a single text part when message.received omits parts", () => {
+    const reducer = defaultMessageReducer();
+    let data = reducer.initial();
+
+    data = reducer.reduce(data, {
+      data: { message: "hello there", sequence: 1, turnId: "turn_1" },
+      type: "message.received",
+    });
+
+    const userMessage = data.messages.find((message) => message.role === "user");
+    expect(userMessage?.parts).toEqual([{ state: "done", text: "hello there", type: "text" }]);
+  });
 });

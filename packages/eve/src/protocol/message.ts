@@ -1,6 +1,12 @@
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
 import type { UserContent } from "ai";
 
+import {
+  deserializeUrlFilePart,
+  hasInternalRefScheme,
+  isSerializedUrlFilePart,
+} from "#internal/attachments/url-refs.js";
+import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
@@ -10,7 +16,7 @@ export const EVE_STREAM_FORMAT_HEADER = "x-eve-stream-format";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "16";
+export const EVE_MESSAGE_STREAM_VERSION = "17";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -146,11 +152,39 @@ export interface TurnStartedStreamEvent {
 }
 
 /**
+ * One structured part of a received user message, projected onto the wire so
+ * clients can render attachments instead of the flattened `message` summary.
+ *
+ * `file` carries attachment metadata only — `mediaType`, optional `filename`
+ * and `size`, and a `url` that is present **only** when the inbound data was a
+ * client-resolvable `http(s)`/`data:` URL. Raw bytes and internal
+ * `eve-sandbox:` paths are never projected. Inbound image parts normalize into
+ * the `file` variant via their media type.
+ */
+export type MessageReceivedPart =
+  | {
+      readonly type: "text";
+      readonly text: string;
+    }
+  | {
+      readonly type: "file";
+      readonly mediaType: string;
+      readonly filename?: string;
+      readonly size?: number;
+      readonly url?: string;
+    };
+
+/**
  * Stream event emitted when the runtime receives one normalized user message.
+ *
+ * `message` is a flattened text summary kept for back-compat; `parts` carries
+ * the structured projection (text + attachment metadata) when the inbound turn
+ * was a structured `UserContent` array.
  */
 export interface MessageReceivedStreamEvent {
   data: {
     message: string;
+    parts?: readonly MessageReceivedPart[];
     sequence: number;
     turnId: string;
   };
@@ -638,11 +672,11 @@ export function createTurnStartedEvent(input: {
 /**
  * Creates the `message.received` event for one normalized user message.
  *
- * When the message is a structured `UserContent` array (e.g. text + file
- * parts), the event surfaces a text summary: concatenated text parts with
- * `[file: filename (mediaType)]` placeholders for non-text parts. This
- * keeps the wire event as a simple string for dev-REPL and web
- * consumers while preserving the authored turn content upstream.
+ * `message` is a flattened text summary — concatenated text parts with
+ * `[file: filename (mediaType)]` placeholders — kept so dev-REPL and other
+ * string-only consumers keep working. `parts` carries the structured
+ * projection (text + attachment metadata) so clients can render attachments.
+ * Raw attachment bytes and internal sandbox paths are never projected.
  */
 export function createMessageReceivedEvent(input: {
   readonly message: string | UserContent;
@@ -652,6 +686,7 @@ export function createMessageReceivedEvent(input: {
   return {
     data: {
       message: summarizeUserContent(input.message),
+      parts: projectUserContentParts(input.message),
       sequence: input.sequence,
       turnId: input.turnId,
     },
@@ -676,6 +711,102 @@ function summarizeUserContent(message: string | UserContent): string {
     }
   }
   return pieces.join("\n");
+}
+
+const PROJECTED_PART_FALLBACK_MEDIA_TYPE = "application/octet-stream";
+
+/**
+ * Projects a `UserContent` message into structured {@link MessageReceivedPart}s.
+ *
+ * Text parts pass through verbatim. File and image parts surface metadata only
+ * — never raw bytes — and expose a `url` only when the inbound data is a
+ * client-resolvable `http(s)`/`data:` URL. Sandbox-resident refs contribute
+ * `mediaType`/`size` from the ref but never leak their internal path as a URL.
+ */
+function projectUserContentParts(message: string | UserContent): readonly MessageReceivedPart[] {
+  if (typeof message === "string") {
+    return [{ text: message, type: "text" }];
+  }
+
+  const parts: MessageReceivedPart[] = [];
+  for (const part of message) {
+    if (part.type === "text") {
+      parts.push({ text: part.text, type: "text" });
+    } else if (part.type === "file") {
+      parts.push(projectFileLikePart(part.data, part.mediaType, part.filename));
+    } else if (part.type === "image") {
+      parts.push(
+        projectFileLikePart(
+          part.image,
+          part.mediaType ?? PROJECTED_PART_FALLBACK_MEDIA_TYPE,
+          undefined,
+        ),
+      );
+    }
+  }
+  return parts;
+}
+
+function projectFileLikePart(
+  data: unknown,
+  mediaType: string,
+  filename: string | undefined,
+): MessageReceivedPart {
+  // Sandbox-resident ref: trusted metadata, but never expose the internal path.
+  if (isSandboxRefUrl(data)) {
+    const ref = decodeSandboxRef(data);
+    return {
+      filename: filename ?? basenameOf(ref.path),
+      mediaType: ref.mediaType,
+      size: ref.size,
+      type: "file",
+    };
+  }
+  // Raw bytes: surface a cheap byte length; the bytes themselves never travel.
+  if (data instanceof Uint8Array || data instanceof ArrayBuffer) {
+    return { filename, mediaType, size: data.byteLength, type: "file" };
+  }
+  // Everything else carries a `url` only when it resolves to a client-fetchable
+  // URL; opaque payloads and internal ref schemes contribute no `url`.
+  return { filename, mediaType, type: "file", ...clientUrlFragment(data) };
+}
+
+/**
+ * Builds the `url` fragment to spread onto a projected file part. Yields
+ * `{ url }` only when `data` resolves to a client-fetchable `http(s)`/`data:`
+ * URL — including an `eve-url:` ref, which wraps one — and otherwise an empty
+ * object so the part carries no `url`. Internal ref schemes and opaque payloads
+ * (e.g. base64) never produce a URL; `data:` URLs pass through verbatim so the
+ * attachment bytes survive unchanged.
+ */
+function clientUrlFragment(data: unknown): { readonly url?: string } {
+  if (isSerializedUrlFilePart(data)) {
+    return { url: deserializeUrlFilePart(data).href };
+  }
+  if (data instanceof URL) {
+    return isClientResolvableUrl(data) ? { url: data.href } : {};
+  }
+  if (typeof data !== "string" || hasInternalRefScheme(data)) {
+    return {};
+  }
+  if (data.startsWith("data:")) {
+    return { url: data };
+  }
+  try {
+    const parsed = new URL(data);
+    return isClientResolvableUrl(parsed) ? { url: parsed.href } : {};
+  } catch {
+    return {};
+  }
+}
+
+function isClientResolvableUrl(url: URL): boolean {
+  return url.protocol === "http:" || url.protocol === "https:" || url.protocol === "data:";
+}
+
+function basenameOf(path: string): string {
+  const segment = path.slice(path.lastIndexOf("/") + 1);
+  return segment.length > 0 ? segment : path;
 }
 
 /**

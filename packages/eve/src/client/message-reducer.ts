@@ -8,6 +8,7 @@ import type {
   EveMessagePart,
   EveMessageToolMetadata,
 } from "#client/message-reducer-types.js";
+import type { MessageReceivedPart } from "#protocol/message.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 
@@ -89,7 +90,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
           status: "complete",
           turnId: event.data.turnId,
         },
-        parts: [{ type: "text", text: event.data.message, state: "done" }],
+        parts: projectReceivedParts(event.data.parts, event.data.message),
         role: "user",
       });
 
@@ -424,12 +425,40 @@ function findToolPartByApprovalId(
   return undefined;
 }
 
+/**
+ * Projects a received user message into renderable parts. Prefers the
+ * structured `parts` from the stream event (so attachments render) and falls
+ * back to a single text part for events from servers that predate `parts`.
+ */
+function projectReceivedParts(
+  parts: readonly MessageReceivedPart[] | undefined,
+  message: string,
+): readonly EveMessagePart[] {
+  if (parts === undefined) {
+    return [{ type: "text", text: message, state: "done" }];
+  }
+
+  return parts.map((part) =>
+    part.type === "text"
+      ? { type: "text", text: part.text, state: "done" }
+      : {
+          filename: part.filename,
+          mediaType: part.mediaType,
+          size: part.size,
+          type: "file",
+          url: part.url,
+        },
+  );
+}
+
 function partKey(part: EveMessagePart): string {
   switch (part.type) {
     case "text":
       return `text:${part.stepIndex ?? 0}`;
     case "reasoning":
       return `reasoning:${part.stepIndex ?? 0}`;
+    case "file":
+      return `file:${part.stepIndex ?? 0}:${part.filename ?? part.url ?? part.mediaType}`;
     case "step-start":
       return "step-start";
     case "dynamic-tool":
