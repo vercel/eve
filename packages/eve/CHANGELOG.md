@@ -1,5 +1,19 @@
 # eve
 
+## 0.19.0
+
+### Minor Changes
+
+- 92f5162: add generic chat sdk channel for adapter-backed agents
+
+### Patch Changes
+
+- 8892504: Render the deployment home page with the eve SVG wordmark, baked-in agent name, and refined ready-state layout.
+- 3daaba0: Reduce development runtime snapshot disk usage by excluding `.env*`, generated dependency, and build output directories, using clone-friendly file copies where supported, and pruning stale snapshots after dev rebuilds.
+- 74ce164: reuse chat sdk twilio primitives for webhook, api, and voice helpers
+- c0a0ae2: Terminal model-call failures in delegated subagent runs (e.g. an unresolvable model id returning 404) now propagate to the parent as a failed subagent result instead of a successful empty output, so orchestrator sessions no longer report success when a delegation failed.
+- 0498252: Tool execution failures now return failed tool results to the model instead of leaving streamed tool calls without matching result history. Agents can recover from failed calls such as a missing `load_skill` target within the same turn.
+
 ## 0.18.2
 
 ### Patch Changes
