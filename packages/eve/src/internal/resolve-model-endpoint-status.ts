@@ -1,11 +1,11 @@
 import {
-  resolveAiGatewayEndpointStatus,
+  aiGatewayEndpoint,
   type ResolveAiGatewayEndpointStatusOptions,
 } from "#internal/model-auth/endpoint/ai-gateway.js";
 import {
-  resolveCodexEndpointStatus,
+  codexEndpoint,
   type ResolveCodexEndpointStatusOptions,
-} from "#internal/model-auth/endpoint/codex/status.js";
+} from "#internal/model-auth/endpoint/codex/endpoint.js";
 import type { ModelEndpoint } from "#shared/agent-definition.js";
 import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 
@@ -17,10 +17,10 @@ export async function resolveModelEndpointStatus(
   options: ResolveModelEndpointStatusOptions = {},
 ): Promise<ModelEndpointStatus> {
   if (model.transport === "codex") {
-    return await resolveCodexEndpointStatus(options);
+    return await codexEndpoint.resolveStatus(options);
   }
   if (model.routing.kind === "external") {
     return { kind: "external", provider: model.routing.provider };
   }
-  return await resolveAiGatewayEndpointStatus(options);
+  return await aiGatewayEndpoint.resolveStatus(options);
 }
