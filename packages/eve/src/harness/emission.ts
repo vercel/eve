@@ -333,6 +333,7 @@ interface EmittedStreamContent {
   readonly handledInlineToolResultCallIds: ReadonlySet<string>;
   readonly inlineAuthorizationResults: readonly TypedToolResult<ToolSet>[];
   readonly inlineToolResultParts: readonly InlineToolResultPart[];
+  readonly trailingInlineToolResultParts: readonly InlineToolResultPart[];
 }
 
 interface StreamActionEmissionOptions {
@@ -366,6 +367,7 @@ export async function emitStreamContent(
   const handledInlineToolResultCallIds = new Set<string>();
   const inlineAuthorizationResults: TypedToolResult<ToolSet>[] = [];
   const inlineToolResultParts: InlineToolResultPart[] = [];
+  const trailingInlineToolResultParts: InlineToolResultPart[] = [];
 
   const flushCurrentMessage = async (): Promise<void> => {
     if (currentMessage.length === 0) {
@@ -608,6 +610,7 @@ export async function emitStreamContent(
             }),
           );
           handledInlineToolResultCallIds.add(toolError.toolCallId);
+          trailingInlineToolResultParts.push(createInlineToolErrorResultPart(toolError));
         }
         break;
       }
@@ -675,6 +678,19 @@ export async function emitStreamContent(
     handledInlineToolResultCallIds,
     inlineAuthorizationResults,
     inlineToolResultParts,
+    trailingInlineToolResultParts,
+  };
+}
+
+function createInlineToolErrorResultPart(toolError: TypedToolError<ToolSet>): InlineToolResultPart {
+  return {
+    type: "tool-result",
+    toolCallId: toolError.toolCallId,
+    toolName: toolError.toolName,
+    output: {
+      type: "error-text",
+      value: toError(toolError.error).message,
+    },
   };
 }
 

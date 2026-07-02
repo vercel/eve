@@ -2379,6 +2379,146 @@ describe("createToolLoopHarness", () => {
     });
   });
 
+  it("continues the tool loop when load_skill fails during local tool execution", async () => {
+    setupMockAgent({
+      content: [
+        {
+          input: { skill: "missing-demo-skill" },
+          toolCallId: "call-load-skill",
+          toolName: "load_skill",
+          type: "tool-call",
+        },
+      ],
+      finishReason: "tool-calls",
+      fullStreamParts: [
+        {
+          input: { skill: "missing-demo-skill" },
+          toolCallId: "call-load-skill",
+          toolName: "load_skill",
+          type: "tool-call",
+        },
+        {
+          error: new Error(
+            'No skill named "missing-demo-skill" at /workspace/skills/missing-demo-skill/SKILL.md.',
+          ),
+          input: { skill: "missing-demo-skill" },
+          toolCallId: "call-load-skill",
+          toolName: "load_skill",
+          type: "tool-error",
+        },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ],
+      response: {
+        messages: [
+          {
+            content: [
+              {
+                input: { skill: "missing-demo-skill" },
+                toolCallId: "call-load-skill",
+                toolName: "load_skill",
+                type: "tool-call",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [
+        {
+          input: { skill: "missing-demo-skill" },
+          toolCallId: "call-load-skill",
+          toolName: "load_skill",
+          type: "tool-call",
+        },
+      ],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const config = createTestConfig("conversation", emit, {
+      tools: new Map([
+        [
+          "load_skill",
+          {
+            description: "Load a skill.",
+            execute: vi.fn(),
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "load_skill",
+          },
+        ],
+      ]),
+    });
+    const session = createTestSession({
+      agent: {
+        modelReference: { id: "test-model" },
+        system: "You are a test assistant.",
+        tools: [
+          {
+            description: "Load a skill.",
+            inputSchema: { type: "object" },
+            name: "load_skill",
+          },
+        ],
+      },
+    });
+
+    const result = await createToolLoopHarness(config)(session, {
+      message: "Use the missing demo skill.",
+    });
+
+    expect(typeof result.next).toBe("function");
+    expect(events.find((event) => event.type === "action.result")?.data).toEqual({
+      error: {
+        code: "ACTION_RESULT_FAILED",
+        message:
+          'No skill named "missing-demo-skill" at /workspace/skills/missing-demo-skill/SKILL.md.',
+      },
+      result: {
+        callId: "call-load-skill",
+        isError: true,
+        kind: "tool-result",
+        output:
+          'No skill named "missing-demo-skill" at /workspace/skills/missing-demo-skill/SKILL.md.',
+        toolName: "load_skill",
+      },
+      sequence: 0,
+      stepIndex: 0,
+      status: "failed",
+      turnId: "turn_0",
+    });
+    expect(result.session.history.slice(-2)).toEqual([
+      {
+        content: [
+          {
+            input: { skill: "missing-demo-skill" },
+            toolCallId: "call-load-skill",
+            toolName: "load_skill",
+            type: "tool-call",
+          },
+        ],
+        role: "assistant",
+      },
+      {
+        content: [
+          {
+            output: {
+              type: "error-text",
+              value:
+                'No skill named "missing-demo-skill" at /workspace/skills/missing-demo-skill/SKILL.md.',
+            },
+            toolCallId: "call-load-skill",
+            toolName: "load_skill",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+    ]);
+    expect(events.some((event) => event.type === "turn.failed")).toBe(false);
+    expect(events.some((event) => event.type === "session.failed")).toBe(false);
+  });
+
   it("prefers toolResults over response messages when the stream omits the result", async () => {
     setupMockAgent({
       finishReason: "tool-calls",

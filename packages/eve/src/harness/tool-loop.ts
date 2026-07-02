@@ -753,6 +753,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             handledInlineToolResultCallIds,
             inlineAuthorizationResults,
             inlineToolResultParts,
+            trailingInlineToolResultParts,
           } = await emitStreamContent(emit, emissionState, streamResult.fullStream, {
             excludedActionToolNames,
             tools: config.tools,
@@ -761,7 +762,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           if (
             isEmptyModelResponse(stepResult) &&
             inlineToolResultParts.length === 0 &&
-            inlineAuthorizationResults.length === 0
+            inlineAuthorizationResults.length === 0 &&
+            trailingInlineToolResultParts.length === 0
           ) {
             throw new EmptyModelResponseError();
           }
@@ -771,7 +773,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             handledInlineToolResultCallIds,
             tools: advertisedHarnessTools,
           });
-          if (inlineToolResultParts.length > 0 || inlineAuthorizationResults.length > 0) {
+          if (
+            inlineToolResultParts.length > 0 ||
+            inlineAuthorizationResults.length > 0 ||
+            trailingInlineToolResultParts.length > 0
+          ) {
             const existingToolResults = stepResult.toolResults as TypedToolResult<ToolSet>[];
             const toolResultsByCallId = new Map(
               existingToolResults.map((toolResult) => [toolResult.toolCallId, toolResult]),
@@ -793,12 +799,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
               finishReason: stepResult.finishReason,
               response: {
                 ...stepResult.response,
-                ...(inlineToolResultParts.length > 0
+                ...(inlineToolResultParts.length > 0 || trailingInlineToolResultParts.length > 0
                   ? {
-                      messages: [
-                        { role: "tool" as const, content: [...inlineToolResultParts] },
-                        ...stepResult.response.messages,
-                      ],
+                      messages: insertInlineToolResultMessages({
+                        append: trailingInlineToolResultParts,
+                        prepend: inlineToolResultParts,
+                        responseMessages: stepResult.response.messages,
+                      }),
                     }
                   : {}),
               },
@@ -1306,6 +1313,44 @@ async function runModelCallRecoveryPipeline(input: {
     }
   }
   return { outcome: "failed", error };
+}
+
+type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
+type ToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
+type StepResponseMessage = HarnessStepResult["response"]["messages"][number];
+
+function insertInlineToolResultMessages(input: {
+  readonly append: readonly ToolResultPart[];
+  readonly prepend: readonly ToolResultPart[];
+  readonly responseMessages: readonly StepResponseMessage[];
+}): StepResponseMessage[] {
+  const existingCallIds = extractToolResultCallIds(input.responseMessages);
+  const prepend = input.prepend.filter((part) => !existingCallIds.has(part.toolCallId));
+  const append = input.append.filter((part) => !existingCallIds.has(part.toolCallId));
+
+  return [
+    ...(prepend.length > 0 ? [{ role: "tool" as const, content: [...prepend] }] : []),
+    ...input.responseMessages,
+    ...(append.length > 0 ? [{ role: "tool" as const, content: [...append] }] : []),
+  ] satisfies StepResponseMessage[];
+}
+
+function extractToolResultCallIds(messages: readonly StepResponseMessage[]): ReadonlySet<string> {
+  const callIds = new Set<string>();
+
+  for (const message of messages) {
+    if (message.role !== "tool" || !Array.isArray(message.content)) {
+      continue;
+    }
+
+    for (const part of message.content) {
+      if (part.type === "tool-result") {
+        callIds.add(part.toolCallId);
+      }
+    }
+  }
+
+  return callIds;
 }
 
 /**

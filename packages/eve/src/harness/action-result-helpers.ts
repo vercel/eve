@@ -1,6 +1,7 @@
-import type { ModelMessage, ToolSet, TypedToolResult } from "ai";
+import type { ModelMessage, ToolSet, TypedToolError, TypedToolResult } from "ai";
 
 import type { RuntimeToolResultActionResult } from "#runtime/actions/types.js";
+import { toError } from "#shared/errors.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import {
   authorizationPendingAsJsonObject,
@@ -82,6 +83,21 @@ export function createRuntimeToolResultFromStepResult(
     callId: toolResult.toolCallId,
     output: toolResult.output,
     toolName: toolResult.toolName,
+  });
+}
+
+/**
+ * Builds a failed `RuntimeToolResultActionResult` from one AI SDK
+ * `tool-error` part.
+ */
+export function createRuntimeToolResultFromToolError(
+  toolError: TypedToolError<ToolSet>,
+): RuntimeToolResultActionResult {
+  return createRuntimeToolResultFromValue({
+    callId: toolError.toolCallId,
+    isError: true,
+    output: toError(toolError.error),
+    toolName: toolError.toolName,
   });
 }
 
