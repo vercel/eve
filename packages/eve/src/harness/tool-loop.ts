@@ -987,8 +987,15 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             message: errorMessage,
             sessionId: session.sessionId,
           });
+          // In task mode (delegated subagent runs) the terminal failure
+          // must be the task's error result so the parent driver resumes
+          // with a failed `subagent-result` instead of a successful empty
+          // output (https://github.com/vercel/eve/issues/412).
           return {
-            next: { done: true, output: "" },
+            next:
+              config.mode === "task"
+                ? { done: true, isError: true, output: errorMessage }
+                : { done: true, output: "" },
             session,
           };
         }

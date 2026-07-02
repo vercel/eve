@@ -2556,6 +2556,39 @@ describe("createToolLoopHarness", () => {
     expect(types).not.toContain("session.waiting");
   });
 
+  it("surfaces a terminal model-call error to the parent as a failed task result", async () => {
+    // Regression test for https://github.com/vercel/eve/issues/412 — a
+    // delegated subagent runs in task mode; when its model id does not
+    // resolve (terminal 404), the failure must reach the parent as an
+    // error result, not a successful empty output.
+    const error = Object.assign(new Error("No endpoints found for anthropic/claude-3.5-haiku"), {
+      name: "AI_APICallError",
+      statusCode: 404,
+    });
+    setupMockAgentError(error);
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("task", emit));
+
+    const result = await runStep(createTestSession(), { message: "Delegated task" });
+
+    // The task's terminal result must be marked as an error with the
+    // failure message as output, mirroring the non-terminal task-mode
+    // failure shape. Today the terminal branch returns
+    // `{ done: true, output: "" }`, which the parent driver treats as a
+    // successful delegation with empty output.
+    expect(result.next).toMatchObject({
+      done: true,
+      isError: true,
+      output: expect.stringContaining("No endpoints found for anthropic/claude-3.5-haiku"),
+    });
+
+    const types = events.map((e) => e.type);
+    expect(types).toContain("step.failed");
+    expect(types).toContain("turn.failed");
+    expect(types).toContain("session.failed");
+  });
+
   it("emits the full terminal failure cascade on an explicit Gateway invalid-request error", async () => {
     setupMockAgentError(
       createGatewayModelCallError({
