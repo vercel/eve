@@ -131,14 +131,16 @@ export type RuntimeSubagentResultUsage = z.infer<typeof runtimeSubagentResultUsa
 
 /**
  * Zod schema for the token usage carried on one delegated subagent result.
+ *
+ * Also validates the `usage` field of remote session callbacks, which may
+ * come from a callee on a different eve version — unknown keys are stripped
+ * rather than rejected so a newer sender never voids the whole payload.
  */
-const runtimeSubagentResultUsageSchema = z
-  .object({
-    cacheReadTokens: z.number().int().nonnegative(),
-    inputTokens: z.number().int().nonnegative(),
-    outputTokens: z.number().int().nonnegative(),
-  })
-  .strict();
+export const runtimeSubagentResultUsageSchema = z.object({
+  cacheReadTokens: z.number().int().nonnegative(),
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+});
 
 /**
  * Runtime-owned subagent result projected back into a harness resume call.

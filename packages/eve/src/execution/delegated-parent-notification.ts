@@ -9,12 +9,9 @@ import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
 import type { RuntimeSubagentResultActionResult } from "#runtime/actions/types.js";
 import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter.js";
-import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
-import { getTurnUsageState } from "#harness/turn-tag-state.js";
-import { createLogger } from "#internal/logging.js";
+import { readCompletedSessionUsage } from "#execution/completed-session-usage.js";
+import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-
-const log = createLogger("execution.delegated-parent-notification");
 
 /**
  * Resumes the parent driver's hook with a delegated subagent result.
@@ -62,22 +59,6 @@ async function withCompletedSessionUsage(
     return result;
   }
 
-  try {
-    const durable = await readDurableSession(sessionState);
-    const turn = getTurnUsageState(durable.state);
-    if (turn === undefined) {
-      return result;
-    }
-    return {
-      ...result,
-      usage: {
-        cacheReadTokens: turn.session.cacheReadTokens,
-        inputTokens: turn.session.inputTokens,
-        outputTokens: turn.session.outputTokens,
-      },
-    };
-  } catch (error) {
-    log.warn("failed to read delegated subagent usage", { error });
-    return result;
-  }
+  const usage = await readCompletedSessionUsage(sessionState);
+  return usage === undefined ? result : { ...result, usage };
 }
