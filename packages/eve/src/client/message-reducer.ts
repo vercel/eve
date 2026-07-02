@@ -506,20 +506,21 @@ function projectReceivedParts(
   parts: readonly MessageReceivedPart[] | undefined,
   message: string,
 ): readonly EveMessagePart[] {
-  if (parts === undefined) {
-    return [{ type: "text", text: message, state: "done" }];
-  }
-
-  return parts.map((part) =>
-    part.type === "text"
-      ? { type: "text", text: part.text, state: "done" }
-      : {
-          filename: part.filename,
-          mediaType: part.mediaType,
-          size: part.size,
-          type: "file",
-          url: part.url,
-        },
+  // `parts` is absent only for servers that predate the field; fall back to a
+  // single text part. An empty array means "structured, but no parts" and maps
+  // to `[]` — so the nullish coalesce, not a length check, is what we want.
+  return (
+    parts?.map((part) =>
+      part.type === "text"
+        ? { type: "text", text: part.text, state: "done" }
+        : {
+            filename: part.filename,
+            mediaType: part.mediaType,
+            size: part.size,
+            type: "file",
+            url: part.url,
+          },
+    ) ?? [{ type: "text", text: message, state: "done" }]
   );
 }
 
