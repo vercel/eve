@@ -166,14 +166,30 @@ describe("buildStatusLine", () => {
     expect(noModel).toBe("12,300 tokens · /deploy pending");
   });
 
-  it("renders the three model-endpoint states", () => {
+  it("renders the model-endpoint states", () => {
+    const codex = buildStatusLine({
+      model: "openai/gpt-5.5",
+      endpoint: { kind: "codex", connected: true, credential: "chatgpt" },
+      theme: plain,
+      width: 120,
+    });
+    expect(codex).toBe("openai/gpt-5.5 · Codex");
+
+    const codexDisconnected = buildStatusLine({
+      model: "openai/gpt-5.5",
+      endpoint: { kind: "codex", connected: false, reason: "missing" },
+      theme: plain,
+      width: 120,
+    });
+    expect(codexDisconnected).toBe("openai/gpt-5.5 · ⚠ Codex");
+
     const external = buildStatusLine({
       model: "anthropic/claude-sonnet-4-6",
       endpoint: { kind: "external", provider: "anthropic" },
       theme: plain,
       width: 120,
     });
-    expect(external).toBe("anthropic/claude-sonnet-4-6 · External endpoint");
+    expect(external).toBe("anthropic/claude-sonnet-4-6 · External model provider");
 
     const linked = buildStatusLine({
       model: "m",

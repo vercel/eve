@@ -20,7 +20,7 @@ export interface StatusLineInput {
    * out.
    */
   logLevel?: LogDisplayMode;
-  /** Model endpoint readiness: external, or AI Gateway connected/not-connected. */
+  /** Model endpoint readiness: Codex, external provider, or AI Gateway connected/not-connected. */
   endpoint?: ModelEndpointStatus;
   /** Workspace-scoped Vercel state; identity absent while unlinked or still resolving. */
   vercel?: VercelStatusSnapshot;
@@ -53,7 +53,12 @@ function renderEndpoint(
   if (input.remote !== undefined || input.endpoint === undefined) return undefined;
 
   const c = input.theme.colors;
-  if (input.endpoint.kind === "external") return c.dim("External endpoint");
+  if (input.endpoint.kind === "codex") {
+    return input.endpoint.connected
+      ? c.dim("Codex")
+      : c.yellow(`${input.theme.glyph.warning} Codex`);
+  }
+  if (input.endpoint.kind === "external") return c.dim("External model provider");
   if (!input.endpoint.connected) return c.yellow(`${input.theme.glyph.warning} AI Gateway`);
 
   const projectName = input.vercel?.identity?.projectName;

@@ -125,9 +125,18 @@ describe("BOOT_DETECTIONS", () => {
     ]);
   });
 
-  it("stays quiet for an external-provider model — gateway linking/credentials don't apply", async () => {
+  it("stays quiet for an external model configuration — gateway linking/credentials don't apply", async () => {
     const info = infoWithRouting({ kind: "external", provider: "anthropic" });
     // No gateway env credentials and the unlinked appRoot would otherwise flag.
+    expect(await detectSetupIssues(context({ info }))).toEqual([]);
+  });
+
+  it("stays quiet for a Codex subscription endpoint", async () => {
+    const info = infoWithRouting(
+      { kind: "gateway", target: "openai" },
+      { kind: "codex", connected: true, credential: "chatgpt" },
+    );
+
     expect(await detectSetupIssues(context({ info }))).toEqual([]);
   });
 

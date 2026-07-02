@@ -1006,7 +1006,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       display: "select",
       options: [
         { id: "gateway", label: "AI Gateway", description: "Managed access" },
-        { id: "external", label: "Other providers", description: "Direct access" },
+        { id: "external", label: "External model provider", description: "Outside AI Gateway" },
       ],
     });
 

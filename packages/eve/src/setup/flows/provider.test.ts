@@ -32,7 +32,7 @@ function createDeps() {
 }
 
 describe("runProviderFlow", () => {
-  it("hands the Dev TUI one project, inline-key, and direct-provider menu", async () => {
+  it("hands the Dev TUI one project, inline-key, and external-provider menu", async () => {
     const fake = createFakePrompter();
     const deps = createDeps();
     const picker: ProviderPicker = async (request) => {
@@ -124,7 +124,7 @@ describe("runProviderFlow", () => {
     });
   });
 
-  it("shows direct-provider instructions without changing credentials", async () => {
+  it("shows external-provider instructions without changing credentials", async () => {
     const fake = createFakePrompter();
     const deps = createDeps();
 

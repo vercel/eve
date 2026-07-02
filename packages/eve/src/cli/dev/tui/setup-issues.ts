@@ -35,6 +35,7 @@ export interface BootDetection {
 
 type ModelProviderAccess =
   | { kind: "unknown" }
+  | { kind: "codex" }
   | { kind: "external" }
   | {
       kind: "gateway";
@@ -88,8 +89,14 @@ function modelProviderAccess(
   context: Pick<BootDetectionContext, "env" | "info">,
 ): ModelProviderAccess {
   const model = context.info?.agent.model;
+  if (model?.endpoint?.kind === "codex") {
+    return { kind: "codex" };
+  }
   if (model?.routing?.kind === "external") return { kind: "external" };
-  if (model?.routing?.kind !== "gateway") return { kind: "unknown" };
+  if (model?.routing?.kind !== "gateway") {
+    if (model?.endpoint?.kind === "external") return { kind: "external" };
+    return { kind: "unknown" };
+  }
 
   // The compiled routing decides whether gateway credentials apply. A freshly
   // loaded API key outranks a stale OIDC endpoint, matching gateway resolution.
@@ -111,9 +118,9 @@ function modelProviderAccess(
 }
 
 /**
- * One diagnosis for the model-provider path. An external-provider model is
- * skipped entirely: it reaches the model with its own provider key, so gateway
- * linking and credentials don't apply (and /model can't reconfigure it). For a
+ * One diagnosis for the model-provider path. An external model configuration is
+ * skipped entirely: its credentials are outside AI Gateway, so gateway linking
+ * and credentials don't apply (and /model can't reconfigure it). For a
  * gateway model it reports only the most-root cause; an unlinked directory
  * implies missing OIDC, so listing both would double-count what /model's
  * provider step fixes in one pass. The header and detection receive the same
@@ -125,7 +132,7 @@ const modelProvider: BootDetection = {
   async detect({ appRoot, env, info }) {
     const access = modelProviderAccess({ env, info });
 
-    if (access.kind === "external") return [];
+    if (access.kind === "external" || access.kind === "codex") return [];
     if (access.kind === "gateway") {
       if (access.runtime.status === "connected") return [];
       if (access.runtime.status === "disconnected") {

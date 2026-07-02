@@ -1,39 +1,26 @@
+import {
+  aiGatewayEndpoint,
+  type ResolveAiGatewayEndpointStatusOptions,
+} from "#internal/model-auth/endpoint/ai-gateway.js";
+import {
+  codexEndpoint,
+  type ResolveCodexEndpointStatusOptions,
+} from "#internal/model-auth/endpoint/codex/endpoint.js";
 import type { ModelEndpoint } from "#shared/agent-definition.js";
 import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 
-/**
- * Presence of the two gateway credentials, read from wherever the caller can
- * observe them: the running server's `process.env` (runtime-authoritative) or
- * an app's `.env` files (dev/setup-time). Only meaningful for gateway routing.
- */
-export interface GatewayCredentialPresence {
-  /** `AI_GATEWAY_API_KEY` is set. */
-  readonly apiKey: boolean;
-  /** A Vercel OIDC token is available (`VERCEL_OIDC_TOKEN` or a linked project). */
-  readonly oidc: boolean;
-}
+export interface ResolveModelEndpointStatusOptions
+  extends ResolveAiGatewayEndpointStatusOptions, ResolveCodexEndpointStatusOptions {}
 
-/**
- * Composes the build-time {@link ModelEndpoint} with runtime credential presence
- * into the consumer-facing {@link ModelEndpointStatus}.
- *
- * Credentials matter only for gateway routing; an external endpoint makes no
- * connectedness claim. `api-key` outranks `oidc` to match the AI SDK gateway
- * provider, which uses `AI_GATEWAY_API_KEY` when present and otherwise the OIDC
- * token.
- */
-export function resolveModelEndpointStatus(
-  routing: ModelEndpoint,
-  credentials: GatewayCredentialPresence,
-): ModelEndpointStatus {
-  if (routing.kind === "external") {
-    return { kind: "external", provider: routing.provider };
+export async function resolveModelEndpointStatus(
+  model: { readonly routing: ModelEndpoint; readonly transport?: "codex" },
+  options: ResolveModelEndpointStatusOptions = {},
+): Promise<ModelEndpointStatus> {
+  if (model.transport === "codex") {
+    return await codexEndpoint.resolveStatus(options);
   }
-  if (credentials.apiKey) {
-    return { kind: "gateway", connected: true, credential: "api-key" };
+  if (model.routing.kind === "external") {
+    return { kind: "external", provider: model.routing.provider };
   }
-  if (credentials.oidc) {
-    return { kind: "gateway", connected: true, credential: "oidc" };
-  }
-  return { kind: "gateway", connected: false };
+  return await aiGatewayEndpoint.resolveStatus(options);
 }

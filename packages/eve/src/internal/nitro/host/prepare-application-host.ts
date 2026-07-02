@@ -25,6 +25,7 @@ export async function prepareApplicationHost(
   } = {},
 ): Promise<PreparedApplicationHost> {
   const compileResult = await compileAgent({
+    mode: options.dev === true ? "development" : "production",
     startPath,
   });
   const schedules = await loadResolvedCompiledSchedules({

@@ -42,7 +42,7 @@ The world package should read credentials and host-specific options from runtime
 
 Set these in your deployment environment or secret manager, never in source or compiled artifacts:
 
-- **A model credential.** The lowest-setup Vercel option is the Vercel AI Gateway. Link a Vercel project, and gateway model ids like `anthropic/claude-opus-4.8` authenticate through Vercel OIDC, with no provider keys to manage. Outside Vercel, either set `AI_GATEWAY_API_KEY` for gateway-routed models or configure a direct provider model with an [AI SDK provider package](https://ai-sdk.dev/docs/foundations/providers-and-models) and set that provider's key, for example `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`.
+- **A model credential.** The lowest-setup Vercel option is the Vercel AI Gateway. Link a Vercel project, and gateway model ids like `anthropic/claude-opus-4.8` authenticate through Vercel OIDC, with no provider keys to manage. Outside Vercel, either set `AI_GATEWAY_API_KEY` for gateway-routed models or configure a model outside AI Gateway with an [AI SDK provider package](https://ai-sdk.dev/docs/foundations/providers-and-models) and that provider's credentials, for example `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`.
 - **Route-auth secrets**, for example `ROUTE_AUTH_BASIC_PASSWORD` and any JWT/OIDC signing keys referenced by your channel's `auth` (see [Auth and route protection](./auth-and-route-protection)).
 
 Route-auth secrets are never serialized into the compiled discovery or module-map artifacts. The runtime re-materializes them from the authored channel definition instead. If your deployment sits behind Vercel preview protection and you want to drive it with `eve dev`, set `VERCEL_AUTOMATION_BYPASS_SECRET` locally before launching.
@@ -142,7 +142,7 @@ Self-deployed agents should make the Vercel-specific choices explicit:
 
 - Let the Workflow SDK use its default local world, which stores workflow state under `.workflow-data`, configure your host so that directory is on persistent storage, or select another world with `experimental.workflow.world` in the root `agent.ts`. When you select a custom world, install a world package built against the same `@workflow/*` line as your eve release (currently the `5.0.0-beta` line). The npm `latest` tag may lag, so pin the version explicitly, for example `pnpm add @workflow/world-postgres@5.0.0-beta.x`. A mismatched world (such as a `4.x` package against a `5.x` core) fails with a `ZodError: invalid_union` during run replay.
 - If you put a reverse proxy or ingress in front of eve, forward **both** `/eve/` and `/.well-known/workflow/`. The workflow world delivers run callbacks to `/.well-known/workflow/v1/flow`; a proxy restricted to `/eve/` lets sessions start but silently stalls runs forever, because the callbacks never reach eve.
-- Install the AI SDK package for your provider, then use a direct provider model object and `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` when you want no Gateway dependency.
+- Install the AI SDK package for your provider, then configure a model outside AI Gateway with that provider's credentials when you want no Gateway dependency.
 - Use `AI_GATEWAY_API_KEY` if you still want Gateway routing from a non-Vercel host.
 - Replace `vercelOidc()` with auth that your host can verify.
 - Use `defaultBackend()`, a pinned non-Vercel sandbox backend such as Docker or microsandbox, or your own `SandboxBackend` adapter.

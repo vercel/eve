@@ -22,10 +22,10 @@ export type ProviderConnection = "project" | "own-key" | "external";
 
 export const PROVIDER_QUESTION = "Which model provider do you want to use?";
 
-export const EXTERNAL_PROVIDER_INSTRUCTIONS_TITLE = "Using another model provider";
+export const EXTERNAL_PROVIDER_INSTRUCTIONS_TITLE = "Using an external model provider";
 export const EXTERNAL_PROVIDER_INSTRUCTIONS: readonly string[] = [
-  `Set your provider's API key in ${AI_GATEWAY_API_KEY_ENV_FILE} — e.g. ANTHROPIC_API_KEY or OPENAI_API_KEY.`,
-  'In agent/agent.ts, set `model` to a provider-authored model — e.g. `anthropic("claude-opus-4.8")` from `@ai-sdk/anthropic`.',
+  `Configure the credentials your provider requires. For API-key providers, set the key in ${AI_GATEWAY_API_KEY_ENV_FILE}, e.g. ANTHROPIC_API_KEY or OPENAI_API_KEY.`,
+  'In agent/agent.ts, set `model` to a provider-authored model, e.g. `anthropic("claude-opus-4.8")` from `@ai-sdk/anthropic`.',
   "See https://eve.dev/docs/agent-config for details.",
   "A running `eve dev` reloads env files automatically — no restart needed.",
 ];
@@ -42,7 +42,7 @@ export type ProviderFlowResult =
   | LinkFlowResult
   | {
       kind: "external-provider";
-      /** The user runs a non-gateway provider; nothing was linked or written. */
+      /** The user uses a model configuration outside AI Gateway; nothing was linked or written. */
     };
 
 type AcceptedGatewayKeyValidation = Exclude<GatewayKeyValidation, { kind: "invalid" }>;
@@ -126,7 +126,7 @@ async function selectProvider(input: {
  * THE PROVIDER FLOW behind the dev TUI `/model` menu's provider row
  * (`eve link` keeps {@link runLinkFlow}'s shape). One question chooses a
  * project-backed AI Gateway connection, an `AI_GATEWAY_API_KEY`, or an
- * external provider. The project branch runs the link flow in create-or-link
+ * external model provider. The project branch runs the link flow in create-or-link
  * mode, so a project-less agent can create its first project rather than
  * dead-end on an empty list.
  */

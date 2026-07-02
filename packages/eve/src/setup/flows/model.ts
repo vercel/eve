@@ -2,6 +2,10 @@ import { join } from "node:path";
 
 import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
 import { discoverAgent } from "#discover/discover-agent.js";
+import {
+  codexModelSlugFromGatewayId,
+  parseCodexModelId,
+} from "#internal/model-auth/endpoint/codex/catalog.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { inspectApplication } from "#services/inspect-application.js";
 import { createStaticSourceChange } from "#source-change/static-source-change.js";
@@ -22,7 +26,7 @@ import {
   type VercelProjectOperationOptions,
 } from "../project-resolution.js";
 import type { ModelEndpoint } from "#shared/agent-definition.js";
-import type { Prompter, SelectNotice, SelectOption } from "../prompter.js";
+import type { Prompter, SelectOption } from "../prompter.js";
 import { runInteractive } from "../runner.js";
 import { snapshotSetupState } from "../state.js";
 import { WizardCancelledError } from "../step.js";
@@ -33,6 +37,8 @@ import { runProviderFlow } from "./provider.js";
 
 /** The current model id, its routing, and whether `/model` can rewrite it. */
 export interface CurrentAgentModel {
+  /** The model is served through the local Codex login transport. */
+  codex: boolean;
   id: string | null;
   routing: ModelEndpoint | null;
   /**
@@ -51,7 +57,7 @@ export interface ModelFlowDeps {
    */
   readCurrentModel: (appRoot: string) => Promise<CurrentAgentModel>;
   /** Applies the picked slug to authored source. */
-  applyModel: (input: { appRoot: string; slug: string }) => Promise<ApplyModelOutcome>;
+  applyModel: (input: ApplyModelInput) => Promise<ApplyModelOutcome>;
   /** Catalog fetch behind the shared model picker. */
   selectModel?: SelectModelDeps;
   /** Reads how the model is backed right now, for the menu's provider row. */
@@ -63,8 +69,8 @@ export interface ModelFlowDeps {
 /**
  * How the agent's model is backed right now, as far as the local directory
  * shows: a linked Vercel project, a gateway credential in an env file, or
- * nothing detectable. An external provider (own ANTHROPIC_API_KEY etc.)
- * leaves no marker eve owns, so it reads as `unset`.
+ * nothing detectable. An external model configuration has no AI Gateway marker
+ * eve owns, so this status reads as `unset`.
  */
 export type ModelProviderStatus =
   | { kind: "unset" }
@@ -101,6 +107,7 @@ export type ModelFlowResult =
 // The bordered panel's title ("Configure the agent model") is the menu's header,
 // so the select itself carries no message — avoiding a redundant second title.
 export const MODEL_MENU_MESSAGE = "";
+const CODEX_MODEL_PROMPT_MESSAGE = "Which OpenAI model should your local Codex login use?";
 
 type ModelMenuRow = "model" | "provider" | "done";
 
@@ -124,22 +131,60 @@ function providerStatusHint(
 }
 
 /**
- * The two-row configure menu. The two rows answer independent questions.
+ * The configure menu. An external model has one fixed provider-status row;
+ * gateway-routed models retain independent model and provider actions.
  *
  * The model row keys off `editable`: eve can rewrite `model` only when it is a
  * string literal, so an SDK model call (`gateway(...)` / `anthropic(...)`) is
- * disabled regardless of how it routes. The provider row keys off routing: an
- * external endpoint disables it (gateway credentials don't apply); a gateway
- * endpoint gates it bold-yellow "Configure model access" until a link or credential
- * is detectable (the genuine "no provider connected" state), then "Change
- * provider" naming it.
+ * disabled regardless of how it routes. A gateway endpoint gates its provider
+ * row bold-yellow "Configure model access" until a link or credential is
+ * detectable, then calls it "Change provider".
  */
 function modelMenuRows(
   current: string | null,
   provider: ModelProviderStatus,
   routing: ModelEndpoint | null,
+  codex: boolean,
   editable: boolean,
 ): SelectOption<ModelMenuRow>[] {
+  const doneRow: SelectOption<ModelMenuRow> = {
+    value: "done",
+    label: "Done",
+    description: "Return to the prompt",
+  };
+
+  if (codex) {
+    return [
+      {
+        value: "model",
+        label: "Change model",
+        description: "The OpenAI model your local Codex login uses",
+        ...(current !== null && { hint: current }),
+      },
+      {
+        disabled: true,
+        value: "provider",
+        label: "Model provider",
+        hint: `${pc.bold("Direct")} ${pc.blue("❉ OpenAI Codex")}`,
+        description: "⚠ Cannot be modified programmatically",
+      },
+      doneRow,
+    ];
+  }
+
+  if (routing?.kind === "external") {
+    return [
+      {
+        disabled: true,
+        value: "provider",
+        label: "Model provider",
+        hint: pc.bold("Direct"),
+        description: "⚠ Cannot be modified programmatically",
+      },
+      doneRow,
+    ];
+  }
+
   let modelRow: SelectOption<ModelMenuRow>;
   if (editable) {
     modelRow = {
@@ -158,14 +203,7 @@ function modelMenuRows(
   }
 
   let providerRow: SelectOption<ModelMenuRow>;
-  if (routing?.kind === "external") {
-    providerRow = {
-      disabled: true,
-      value: "provider",
-      label: "Change provider",
-      description: "Disabled in external endpoint mode",
-    };
-  } else if (provider.kind === "unset") {
+  if (provider.kind === "unset") {
     providerRow = {
       value: "provider",
       label: pc.bold("Configure model access"),
@@ -182,13 +220,9 @@ function modelMenuRows(
     };
   }
 
-  // An explicit exit row, like the channels list — Esc works too, but the menu
-  // must not make Esc the only way out.
-  return [
-    modelRow,
-    providerRow,
-    { value: "done", label: "Done", description: "Return to the prompt" },
-  ];
+  // An explicit exit row, like the channels list. Esc works too, but it must
+  // not be the only way out.
+  return [modelRow, providerRow, doneRow];
 }
 
 /**
@@ -226,12 +260,14 @@ export async function detectModelProviderStatus(
 /**
  * THE MODEL FLOW for the dev TUI's `/model`: a two-row action menu that
  * loops, uniting the model pick and the provider setup behind one entry
- * point. "Change model" runs the same searchable AI Gateway catalog picker
- * onboarding uses ({@link selectModel}), pre-selected on the model the
- * runtime currently serves, then the static source edit that bakes the
- * choice into `agent.ts` (activation is the dev server's HMR watcher).
+ * point. For Gateway-backed models, "Change model" runs the same searchable AI
+ * Gateway catalog picker onboarding uses ({@link selectModel}), pre-selected
+ * on the model the runtime currently serves. For Codex subscription models, it
+ * asks for an OpenAI model id directly and lets the Codex backend report
+ * account/model compatibility. Both paths then run the static source edit that
+ * bakes the choice into `agent.ts` (activation is the dev server's HMR watcher).
  * The provider row runs {@link runProviderFlow}, whose single menu chooses a
- * project-backed gateway, an inline gateway key, or an external provider.
+ * project-backed gateway, an inline gateway key, or an external model provider.
  * A completed model or provider change returns to the prompt with its result.
  * Cancelled flows and external-provider instructions return to the menu.
  */
@@ -257,7 +293,7 @@ export async function runModelFlow(input: {
   // loading lines.
   const detectProvider = (useFlowSignal = true): Promise<ModelProviderStatus> =>
     deps.detectProviderStatus(appRoot, useFlowSignal && signal !== undefined ? { signal } : {});
-  let [{ id: current, routing, editable }, provider] = await withSpinner(
+  let [{ id: current, routing, codex, editable }, provider] = await withSpinner(
     prompter,
     "Checking the project…",
     () => Promise.all([deps.readCurrentModel(appRoot), detectProvider()]),
@@ -266,20 +302,11 @@ export async function runModelFlow(input: {
 
   let lastApply: ApplyModelOutcome | undefined;
   let providerOutcome: ModelProviderOutcome | undefined;
-  // Explains, once, why every row is inert for an external-provider model.
-  const externalNotice: SelectNotice | undefined =
-    routing?.kind === "external"
-      ? {
-          tone: "warning",
-          text: "`agent.ts` specifies a model provider directly. In-TUI configuration is restricted to AI Gateway endpoints.",
-        }
-      : undefined;
-
   // Start at the first useful row. Cancellation keeps the current row.
   let nextSelection: ModelMenuRow =
-    provider.kind === "unset" && routing?.kind !== "external"
+    provider.kind === "unset" && routing?.kind !== "external" && !codex
       ? "provider"
-      : editable
+      : codex || editable
         ? "model"
         : routing?.kind === "external"
           ? "done"
@@ -287,7 +314,9 @@ export async function runModelFlow(input: {
   // A gateway model with no provider cannot run. Skip the menu's extra Enter
   // and open provider setup as soon as that state is confirmed.
   let openProviderFirst =
-    routing?.kind !== "external" && (input.initialStep === "provider" || provider.kind === "unset");
+    !codex &&
+    routing?.kind !== "external" &&
+    (input.initialStep === "provider" || provider.kind === "unset");
 
   while (true) {
     let pick: ModelMenuRow;
@@ -298,10 +327,9 @@ export async function runModelFlow(input: {
       try {
         pick = await prompter.select<ModelMenuRow>({
           message: MODEL_MENU_MESSAGE,
-          options: modelMenuRows(current, provider, routing, editable),
+          options: modelMenuRows(current, provider, routing, codex, editable),
           hintLayout: "stacked",
           initialValue: nextSelection,
-          notices: externalNotice === undefined ? [] : [externalNotice],
         });
       } catch (error) {
         if (!(error instanceof WizardCancelledError)) throw error;
@@ -312,13 +340,18 @@ export async function runModelFlow(input: {
     if (pick === "done") break;
 
     if (pick === "model") {
-      const slug = await pickModelFromCatalog({
-        appRoot,
-        prompter,
-        current,
-        signal,
-        deps: deps.selectModel,
-      });
+      const slug = codex
+        ? await promptCodexModelId({
+            current,
+            prompter,
+          })
+        : await pickModelFromCatalog({
+            appRoot,
+            prompter,
+            current,
+            signal,
+            deps: deps.selectModel,
+          });
       if (slug === undefined) {
         nextSelection = "model";
         continue;
@@ -396,12 +429,36 @@ async function pickModelFromCatalog(input: {
   return result.kind === "cancelled" ? undefined : result.state.modelId;
 }
 
+async function promptCodexModelId(input: {
+  current: string | null;
+  prompter: Prompter;
+}): Promise<string | undefined> {
+  try {
+    const modelId = await input.prompter.text({
+      message: CODEX_MODEL_PROMPT_MESSAGE,
+      placeholder: "openai/gpt-5.5",
+      ...(input.current !== null && { defaultValue: input.current }),
+      validate: validateCodexModelPromptValue,
+    });
+    const trimmed = modelId.trim();
+    return trimmed.length === 0 ? undefined : trimmed;
+  } catch (error) {
+    if (error instanceof WizardCancelledError) return undefined;
+    throw error;
+  }
+}
+
 /** The outcome of applying a model slug to the agent's authored source. */
 export type ApplyModelOutcome =
   | { kind: "changed"; to: string }
   | { kind: "unchanged"; model: string }
   /** Invalid slug or an uneditable source — `message` says which and why. */
   | { kind: "rejected"; message: string };
+
+export interface ApplyModelInput {
+  readonly appRoot: string;
+  readonly slug: string;
+}
 
 /** The one-line transcript form of an apply outcome (`/model <slug>`'s reply). */
 export function formatApplyModelOutcome(outcome: ApplyModelOutcome): string {
@@ -418,19 +475,23 @@ export function formatApplyModelOutcome(outcome: ApplyModelOutcome): string {
 /**
  * Applies a `/model <slug>` change to the local agent's authored source.
  *
- * This is the caller layer for the static source-change registry: it
- * validates the slug against the AI Gateway model catalog, then edits
+ * This is the caller layer for the static source-change registry: it refuses
+ * uneditable (source-backed) models, validates the slug for the current
+ * model-auth boundary — both read from the compiled model — then edits
  * `agent.ts` via {@link createStaticSourceChange}. Activation is the dev
- * server's HMR watcher; {@link formatApplyModelOutcome} renders the outcome
- * as the TUI's one-line reply.
+ * server's HMR watcher; {@link formatApplyModelOutcome} renders the outcome as
+ * the TUI's one-line reply.
  */
-export async function changeAgentModel(input: {
-  readonly appRoot: string;
-  readonly slug: string;
-}): Promise<ApplyModelOutcome> {
+export async function changeAgentModel(input: ApplyModelInput): Promise<ApplyModelOutcome> {
   const { appRoot, slug } = input;
 
-  const rejection = await validateModelSlug(appRoot, slug);
+  const current = await readCurrentAgentModel(appRoot);
+  const refusal = modelChangeRefusal(current);
+  if (refusal !== null) {
+    return { kind: "rejected", message: refusal };
+  }
+
+  const rejection = await validateModelSlug(appRoot, slug, current.codex);
   if (rejection !== null) {
     return { kind: "rejected", message: rejection };
   }
@@ -452,16 +513,29 @@ export async function changeAgentModel(input: {
 }
 
 /**
- * Returns a rejection message when `slug` is malformed or absent from the
- * model catalog, or null when it is safe to apply.
+ * Returns a rejection message when `slug` is malformed or invalid for the
+ * active model-auth boundary, or null when it is safe to apply.
  *
- * UX note: `/model` only reports success after eve confirms the id. A real
- * turn still needs Gateway/provider access, so treating an offline catalog as
- * success would give a false "model changed" result.
+ * UX note: Gateway-routed model changes remain catalog-confirmed. Codex
+ * subscription changes only validate the OpenAI id shape because account/model
+ * compatibility belongs to the Codex backend response.
  */
-async function validateModelSlug(appRoot: string, slug: string): Promise<string | null> {
+async function validateModelSlug(
+  appRoot: string,
+  slug: string,
+  codex: boolean,
+): Promise<string | null> {
+  if (codex) {
+    return validateOpenAiModelId(slug);
+  }
+
   if (!slug.includes("/")) {
     return `\`${slug}\` isn't a provider/model id (e.g. anthropic/claude-sonnet-4.6).`;
+  }
+
+  const codexSlug = parseCodexModelId(slug);
+  if (codexSlug !== null) {
+    return codexTransportIdRejection(slug, codexSlug);
   }
 
   const catalog = createCompiledRuntimeModelCatalogLoader(appRoot);
@@ -477,6 +551,35 @@ async function validateModelSlug(appRoot: string, slug: string): Promise<string 
   return null;
 }
 
+function validateCodexModelPromptValue(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return "Enter an OpenAI model id such as openai/gpt-5.5.";
+  }
+  return validateOpenAiModelId(trimmed) ?? undefined;
+}
+
+function validateOpenAiModelId(modelId: string): string | null {
+  if (!modelId.includes("/")) {
+    return `\`${modelId}\` isn't a provider/model id (e.g. openai/gpt-5.5).`;
+  }
+
+  const codexSlug = parseCodexModelId(modelId);
+  if (codexSlug !== null) {
+    return codexTransportIdRejection(modelId, codexSlug);
+  }
+
+  if (codexModelSlugFromGatewayId(formatLanguageModelGatewayId(modelId)) === null) {
+    return `Codex subscription models must be OpenAI model ids such as \`openai/gpt-5.5\`.`;
+  }
+
+  return null;
+}
+
+function codexTransportIdRejection(modelId: string, slug: string): string {
+  return `\`${modelId}\` is a Codex transport id, not a model id. Use \`experimental_codex("${slug}")\` as the \`model\` value.`;
+}
+
 /**
  * Reads the model the runtime is currently serving. That's the compiled
  * `config.model.id`, the same field `eve info` reports. Returns null when the
@@ -489,12 +592,13 @@ async function readCurrentAgentModel(appRoot: string): Promise<CurrentAgentModel
     // A source-backed model (an SDK model call) carries `source`; a string id
     // does not, and only a string is a literal the editor can rewrite.
     return {
+      codex: model?.transport === "codex",
       id: model?.id ?? null,
       routing: model?.routing ?? null,
       editable: model !== undefined && model.source === undefined,
     };
   } catch {
-    return { id: null, routing: null, editable: false };
+    return { codex: false, id: null, routing: null, editable: false };
   }
 }
 
@@ -504,16 +608,11 @@ async function readCurrentAgentModel(appRoot: string): Promise<CurrentAgentModel
  * null when the model is an editable string. Editability is independent of
  * routing: a `gateway(...)` call is gateway-routed yet still uneditable here.
  */
-export async function modelChangeRefusalForUneditableModel(
-  appRoot: string,
-): Promise<string | null> {
-  const { editable, routing } = await readCurrentAgentModel(appRoot);
-  if (editable) {
-    return null;
-  }
+function modelChangeRefusal(current: CurrentAgentModel): string | null {
+  if (current.editable) return null;
   const detail =
-    routing?.kind === "external"
-      ? `the external provider \`${routing.provider}\``
+    current.routing?.kind === "external"
+      ? `the external model provider \`${current.routing.provider}\``
       : "an SDK model call";
   return `Model is set via ${detail} in agent.ts, not a string literal; /model can't rewrite it. Edit \`model\` in agent.ts.`;
 }

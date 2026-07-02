@@ -1,13 +1,10 @@
-import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
 import { buildAgentInfoResponseFromManifest } from "#internal/nitro/routes/agent-info/build-agent-info-response-from-manifest.js";
 import {
   loadAgentInfoManifestData,
   resolveAgentInfoCompiledArtifactsSource,
 } from "#internal/nitro/routes/agent-info/load-agent-info-data.js";
-import type { GatewayCredentialPresence } from "#internal/resolve-model-endpoint-status.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { localDev, routeAuth, vercelOidc } from "#public/channels/auth.js";
-import type { ModelEndpoint } from "#shared/agent-definition.js";
 
 type AgentInfoRouteMode = "development" | "production";
 
@@ -22,34 +19,7 @@ async function createAgentInfoPayload(input: AgentInfoRouteInput) {
 
   return buildAgentInfoResponseFromManifest(data, {
     mode: input.mode ?? "development",
-    gatewayCredentials: await resolveGatewayCredentialPresence(data.manifest.config.model.routing),
   });
-}
-
-function hasEnvValue(value: string | undefined): boolean {
-  return value !== undefined && value.trim() !== "";
-}
-
-/**
- * Mirrors the AI Gateway credential selection order. The Vercel OIDC SDK owns
- * request-context, environment, and linked-project token resolution; lookup
- * failure means the gateway is unavailable and must not break agent inspection.
- */
-async function resolveGatewayCredentialPresence(
-  routing: ModelEndpoint,
-): Promise<GatewayCredentialPresence> {
-  const apiKey = hasEnvValue(process.env.AI_GATEWAY_API_KEY);
-
-  if (routing.kind === "external" || apiKey) {
-    return { apiKey, oidc: false };
-  }
-
-  try {
-    await getVercelOidcToken();
-    return { apiKey: false, oidc: true };
-  } catch {
-    return { apiKey: false, oidc: false };
-  }
 }
 
 /**
