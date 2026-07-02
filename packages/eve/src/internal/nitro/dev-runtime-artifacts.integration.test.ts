@@ -184,6 +184,47 @@ describe("development runtime artifact snapshots", () => {
     });
   });
 
+  it("excludes generated output and dependency directories from source snapshots", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-generated-output-");
+    const agentRoot = join(appRoot, "agent");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+    const manifestPath = join(compileDirectoryPath, "compiled-agent-manifest.json");
+
+    await mkdir(agentRoot, { recursive: true });
+    await mkdir(join(appRoot, "node_modules", "heavy-package"), { recursive: true });
+    await mkdir(join(appRoot, ".next", "cache"), { recursive: true });
+    await mkdir(join(appRoot, ".generated", "compiled"), { recursive: true });
+    await mkdir(join(appRoot, "build"), { recursive: true });
+    await mkdir(join(appRoot, "dist"), { recursive: true });
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(join(appRoot, ".env"), "SECRET=default\n");
+    await writeFile(join(appRoot, ".env.local"), "SECRET=local\n");
+    await writeFile(join(appRoot, ".env.example"), "SECRET=example\n");
+    await writeFile(join(appRoot, "package.json"), '{"type":"module"}\n');
+    await writeFile(join(agentRoot, "agent.ts"), "export const answer = 42;\n");
+    await writeFile(join(appRoot, "node_modules", "heavy-package", "index.js"), "export {}\n");
+    await writeFile(join(appRoot, ".next", "cache", "webpack.bin"), "cache\n");
+    await writeFile(join(appRoot, ".generated", "compiled", "bundle.js"), "generated\n");
+    await writeFile(join(appRoot, "build", "server.js"), "build\n");
+    await writeFile(join(appRoot, "dist", "index.js"), "dist\n");
+    await writeFile(manifestPath, `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`);
+
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+
+    expect(existsSync(join(snapshot.runtimeAppRoot, "agent", "agent.ts"))).toBe(true);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "node_modules"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, ".env"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, ".env.local"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, ".env.example"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, ".next"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, ".generated"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "build"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "dist"))).toBe(false);
+  });
+
   it("prunes stale snapshots while preserving the active and recent snapshots", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-artifacts-prune-");
     const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
@@ -556,6 +597,8 @@ describe("development runtime artifact snapshots", () => {
 
     await mkdir(agentRoot, { recursive: true });
     await mkdir(join(packageRoot, "src"), { recursive: true });
+    await mkdir(join(packageRoot, "build"), { recursive: true });
+    await mkdir(join(packageRoot, "dist"), { recursive: true });
     await mkdir(join(packageRoot, "node_modules"), { recursive: true });
     await mkdir(externalPackageRoot, { recursive: true });
     await mkdir(join(workspaceRoot, "packages", "unused"), { recursive: true });
@@ -591,7 +634,7 @@ describe("development runtime artifact snapshots", () => {
           dependencies: {
             "external-message": "1.0.0",
           },
-          exports: "./src/index.ts",
+          exports: "./dist/index.js",
           name: "@repo/message",
           type: "module",
         },
@@ -618,6 +661,11 @@ describe("development runtime artifact snapshots", () => {
     );
     await writeFile(
       join(packageRoot, "src", "index.ts"),
+      'export const sourceMessage = "snapshotted-source";\n',
+    );
+    await writeFile(join(packageRoot, "build", "artifact.js"), "build output\n");
+    await writeFile(
+      join(packageRoot, "dist", "index.js"),
       'import { externalMessage } from "external-message";\nexport const message = `snapshotted:${externalMessage}`;\n',
     );
     await writeFile(
@@ -641,9 +689,13 @@ describe("development runtime artifact snapshots", () => {
       project: { appRoot },
     } as CompileAgentResult);
 
-    await writeFile(join(packageRoot, "src", "index.ts"), 'export const message = "live";\n');
+    await writeFile(join(packageRoot, "dist", "index.js"), 'export const message = "live";\n');
 
     expect(existsSync(join(snapshot.snapshotSourceRoot, "packages", "message"))).toBe(true);
+    expect(existsSync(join(snapshot.snapshotSourceRoot, "packages", "message", "build"))).toBe(
+      true,
+    );
+    expect(existsSync(join(snapshot.snapshotSourceRoot, "packages", "message", "dist"))).toBe(true);
     expect(existsSync(join(snapshot.snapshotSourceRoot, "packages", "unused"))).toBe(false);
     await expect(
       lstat(

@@ -105,6 +105,7 @@ const mockedWatcher = vi.hoisted(() => {
 const prepareApplicationHostMock = vi.hoisted(() => vi.fn());
 const clearCompiledRuntimeAgentBundleCacheMock = vi.hoisted(() => vi.fn());
 const startDevelopmentSandboxPrewarmInBackgroundMock = vi.hoisted(() => vi.fn());
+const pruneDevelopmentRuntimeArtifactsSnapshotsInBackgroundMock = vi.hoisted(() => vi.fn());
 const resolveNitroCompiledArtifactsSourceMock = vi.hoisted(() =>
   vi.fn((config: { readonly appRoot?: string }) => ({
     appRoot: `${config.appRoot ?? "/tmp/eve-test"}/.eve/dev-runtime-test`,
@@ -125,6 +126,17 @@ vi.mock("./prepare-application-host.js", () => ({
 vi.mock("#execution/sandbox/development-prewarm.js", () => ({
   startDevelopmentSandboxPrewarmInBackground: startDevelopmentSandboxPrewarmInBackgroundMock,
 }));
+
+vi.mock("#internal/nitro/dev-runtime-artifacts.js", async () => {
+  const actual = await vi.importActual<typeof import("#internal/nitro/dev-runtime-artifacts.js")>(
+    "#internal/nitro/dev-runtime-artifacts.js",
+  );
+  return {
+    ...actual,
+    pruneDevelopmentRuntimeArtifactsSnapshotsInBackground:
+      pruneDevelopmentRuntimeArtifactsSnapshotsInBackgroundMock,
+  };
+});
 
 vi.mock("#internal/nitro/routes/runtime-artifacts.js", () => ({
   resolveNitroCompiledArtifactsSource: resolveNitroCompiledArtifactsSourceMock,
@@ -159,6 +171,7 @@ beforeEach(() => {
   prepareApplicationHostMock.mockReset();
   clearCompiledRuntimeAgentBundleCacheMock.mockReset();
   startDevelopmentSandboxPrewarmInBackgroundMock.mockReset();
+  pruneDevelopmentRuntimeArtifactsSnapshotsInBackgroundMock.mockReset();
   resolveNitroCompiledArtifactsSourceMock.mockClear();
 });
 
@@ -191,6 +204,9 @@ describe("startAuthoredSourceWatcher", () => {
       await watcher.rebuild();
 
       expect(prepareApplicationHostMock).toHaveBeenCalledWith(previousHost.appRoot, { dev: true });
+      expect(pruneDevelopmentRuntimeArtifactsSnapshotsInBackgroundMock).toHaveBeenCalledWith(
+        nextHost.appRoot,
+      );
       expect(clearCompiledRuntimeAgentBundleCacheMock).toHaveBeenCalledTimes(1);
     } finally {
       await watcher.close();
