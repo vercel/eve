@@ -305,6 +305,7 @@ async function finalizeDone(input: {
       ? createDelegatedSubagentErrorResult(serializedContext, output)
       : createDelegatedSubagentSuccessResult(serializedContext, output),
     serializedContext,
+    sessionState: failed ? undefined : input.action.sessionState,
   });
   return { output };
 }

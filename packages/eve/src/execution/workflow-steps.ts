@@ -58,6 +58,7 @@ import {
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import { createExecutionNodeStep } from "#execution/node-step.js";
 import { emitProxiedInputRequest, routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
+import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
@@ -210,6 +211,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     }
     resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
   } else if (input.input?.kind === "runtime-action-result") {
+    recordSubagentUsageSpans(input.input.results);
     resolved = { runtimeActionResults: input.input.results };
   }
 

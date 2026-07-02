@@ -125,6 +125,22 @@ const runtimeToolResultActionResultSchema = z
   .strict();
 
 /**
+ * Session-total token usage reported by a completed delegated subagent.
+ */
+export type RuntimeSubagentResultUsage = z.infer<typeof runtimeSubagentResultUsageSchema>;
+
+/**
+ * Zod schema for the token usage carried on one delegated subagent result.
+ */
+const runtimeSubagentResultUsageSchema = z
+  .object({
+    cacheReadTokens: z.number().int().nonnegative(),
+    inputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative(),
+  })
+  .strict();
+
+/**
  * Runtime-owned subagent result projected back into a harness resume call.
  */
 export type RuntimeSubagentResultActionResult = z.infer<
@@ -141,6 +157,7 @@ const runtimeSubagentResultActionResultSchema = z
     kind: z.literal("subagent-result"),
     output: jsonValueSchema,
     subagentName: z.string(),
+    usage: runtimeSubagentResultUsageSchema.optional(),
   })
   .strict();
 
