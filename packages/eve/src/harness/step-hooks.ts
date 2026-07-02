@@ -15,6 +15,7 @@ import {
   createStepCompletedEvent,
 } from "#protocol/message.js";
 import {
+  createRuntimeToolResultFromToolError,
   createRuntimeToolResultFromMessagePart,
   createRuntimeToolResultFromStepResult,
 } from "#harness/action-result-helpers.js";
@@ -323,6 +324,18 @@ function reconcileToolResults(step: HarnessStepResult): readonly RuntimeToolResu
     }
 
     resultsByCallId.set(toolResult.toolCallId, createRuntimeToolResultFromStepResult(toolResult));
+  }
+
+  for (const part of step.content ?? []) {
+    if (part.type !== "tool-error" || part.providerExecuted === true) {
+      continue;
+    }
+
+    if (resultsByCallId.has(part.toolCallId)) {
+      continue;
+    }
+
+    resultsByCallId.set(part.toolCallId, createRuntimeToolResultFromToolError(part));
   }
 
   for (const part of extractToolResultParts(step.response.messages)) {

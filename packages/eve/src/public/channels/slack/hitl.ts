@@ -13,6 +13,7 @@
  */
 
 import {
+  SLACK_SECTION_TEXT_MAX_LENGTH,
   truncateModalTitle,
   truncatePlainText,
   truncateSectionText,
@@ -59,6 +60,10 @@ export const HITL_FREEFORM_MODAL_ACTION_ID = "eve_freeform_text";
  */
 const RADIO_SELECT_OPTION_LIMIT = 6;
 const BUTTON_ACTION_ID_RE = /^(?<requestId>.+):button:\d+$/u;
+const TOOL_INPUT_PREFIX = "*Tool input*\n```\n";
+const TOOL_INPUT_SUFFIX = "\n```";
+const ANSWERED_TEXT_PREFIX = ":white_check_mark: *";
+const ANSWERED_TEXT_SUFFIX = "*";
 
 /**
  * Subset of one Slack interactivity action the HITL decoder reads.
@@ -137,6 +142,7 @@ export function renderInputRequestBlocks(request: InputRequest): unknown[] {
     text: { text: truncateSectionText(request.prompt), type: "mrkdwn" },
     type: "section",
   };
+  const details = renderInputRequestDetailBlocks(request);
   const actionId = `${HITL_ACTION_PREFIX}${request.requestId}`;
 
   const options = request.options;
@@ -152,12 +158,13 @@ export function renderInputRequestBlocks(request: InputRequest): unknown[] {
             options: options.map(buildOption),
             placeholder: { type: "plain_text", text: "Choose an option" },
           };
-    return [prompt, { type: "actions", elements: [widget] }];
+    return [prompt, ...details, { type: "actions", elements: [widget] }];
   }
 
   if (options && options.length > 0) {
     return [
       prompt,
+      ...details,
       {
         type: "actions",
         elements: options.map((opt, index) => buildButton(opt, actionId, index)),
@@ -168,6 +175,7 @@ export function renderInputRequestBlocks(request: InputRequest): unknown[] {
   if (acceptsFreeform) {
     return [
       prompt,
+      ...details,
       {
         type: "actions",
         elements: [
@@ -184,6 +192,16 @@ export function renderInputRequestBlocks(request: InputRequest): unknown[] {
   }
 
   return [prompt];
+}
+
+/**
+ * Creates the fallback text for one HITL request. Slack clients use this
+ * outside the rich Block Kit surface, so include the same approval details
+ * that appear in the blocks.
+ */
+export function formatInputRequestFallbackText(request: InputRequest): string {
+  const details = formatToolInputDetails(request);
+  return details === undefined ? request.prompt : `${request.prompt}\n${details}`;
 }
 
 /**
@@ -287,26 +305,34 @@ function buildOption(opt: NonNullable<InputRequest["options"]>[number]): Record<
 
 /**
  * Renders the "answered" replacement blocks for a previously-posted
- * HITL card. Preserves the original prompt block (so context stays
- * visible), appends a confirmation line naming the chosen answer, and
- * attributes the click to the user when their id is known.
+ * HITL card. Preserves the original prompt/detail blocks (so context
+ * stays visible), appends a confirmation line naming the chosen answer,
+ * and attributes the click to the user when their id is known.
  *
  * Slack's `chat.update` replaces every block in one shot, so the caller
  * passes the full list to `blocks` and the rendered fallback text to
  * `text`.
  */
 export function buildAnsweredBlocks(input: {
-  readonly promptBlock: unknown;
+  readonly promptBlocks: readonly unknown[];
   readonly answerLabel: string;
   readonly userId?: string;
 }): unknown[] {
   const blocks: unknown[] = [];
-  if (input.promptBlock !== undefined && input.promptBlock !== null) {
-    blocks.push(input.promptBlock);
+  for (const promptBlock of input.promptBlocks) {
+    if (promptBlock !== undefined && promptBlock !== null) {
+      blocks.push(promptBlock);
+    }
   }
+  // Freeform answers echo user-typed text, which can exceed the section
+  // limit on its own; cap the label so `chat.update` cannot fail.
+  const answerLabel = truncateWithEllipsis(
+    input.answerLabel,
+    SLACK_SECTION_TEXT_MAX_LENGTH - ANSWERED_TEXT_PREFIX.length - ANSWERED_TEXT_SUFFIX.length,
+  );
   blocks.push({
     type: "section",
-    text: { type: "mrkdwn", text: `:white_check_mark: *${input.answerLabel}*` },
+    text: { type: "mrkdwn", text: `${ANSWERED_TEXT_PREFIX}${answerLabel}${ANSWERED_TEXT_SUFFIX}` },
   });
   if (input.userId && input.userId.length > 0) {
     blocks.push({
@@ -315,4 +341,38 @@ export function buildAnsweredBlocks(input: {
     });
   }
   return blocks;
+}
+
+function renderInputRequestDetailBlocks(request: InputRequest): unknown[] {
+  const details = formatToolInputDetails(request);
+  return details === undefined
+    ? []
+    : [{ type: "section", text: { type: "mrkdwn", text: details } }];
+}
+
+function formatToolInputDetails(request: InputRequest): string | undefined {
+  if (!isApprovalRequest(request)) return undefined;
+
+  const json = JSON.stringify(request.action.input, null, 2);
+  if (json === "{}") return undefined;
+
+  const bodyBudget =
+    SLACK_SECTION_TEXT_MAX_LENGTH - TOOL_INPUT_PREFIX.length - TOOL_INPUT_SUFFIX.length;
+  const body = truncateWithEllipsis(json, bodyBudget);
+  return `${TOOL_INPUT_PREFIX}${body}${TOOL_INPUT_SUFFIX}`;
+}
+
+function truncateWithEllipsis(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  const sliceLength = Math.max(0, maxLength - 3);
+  return `${value.slice(0, sliceLength).trimEnd()}...`;
+}
+
+function isApprovalRequest(request: InputRequest): boolean {
+  return (
+    request.display === "confirmation" &&
+    request.options?.length === 2 &&
+    request.options[0]?.id === "approve" &&
+    request.options[1]?.id === "deny"
+  );
 }

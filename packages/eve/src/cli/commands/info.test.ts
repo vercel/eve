@@ -44,7 +44,7 @@ function makeCompiledState(): CompileAgentResult {
     appRoot: APP_ROOT,
     config: {
       model: {
-        id: "anthropic/claude-sonnet-4.6",
+        id: "anthropic/claude-sonnet-5",
         routing: { kind: "gateway", target: "anthropic" },
       },
       name: "triage-bot",
@@ -102,7 +102,7 @@ describe("buildApplicationInfoJson", () => {
     });
 
     expect(json.status).toBe("ready");
-    expect(json.model).toBe("anthropic/claude-sonnet-4.6");
+    expect(json.model).toBe("anthropic/claude-sonnet-5");
     expect(json.tools).toEqual(["create_ticket"]);
     expect(json.skills).toEqual([]);
     expect(json.diagnostics).toEqual({ errors: 0, warnings: 0 });

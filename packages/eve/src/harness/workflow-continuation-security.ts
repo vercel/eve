@@ -29,9 +29,9 @@ export function ensureWorkflowContinuationSecurity(session: HarnessSession): Har
   };
 }
 
-export function getWorkflowContinuationSecurity(
+export function readWorkflowContinuationSecurity(
   session: HarnessSession,
-): WorkflowSandboxContinuationSecurity {
+): WorkflowSandboxContinuationSecurity | undefined {
   const stored = session.state?.[WORKFLOW_CONTINUATION_SECURITY_KEY];
   if (
     typeof stored !== "object" ||
@@ -40,7 +40,7 @@ export function getWorkflowContinuationSecurity(
     typeof (stored as { signingKey?: unknown }).signingKey !== "string" ||
     !/^[A-Za-z0-9_-]{43}$/.test((stored as { signingKey: string }).signingKey)
   ) {
-    throw new Error("Workflow continuation security state is missing or invalid.");
+    return undefined;
   }
 
   return {
@@ -48,4 +48,14 @@ export function getWorkflowContinuationSecurity(
     // A parked workflow can legitimately wait far beyond code mode's one-hour default.
     maxAgeMs: WORKFLOW_CONTINUATION_MAX_AGE_MS,
   };
+}
+
+export function getWorkflowContinuationSecurity(
+  session: HarnessSession,
+): WorkflowSandboxContinuationSecurity {
+  const security = readWorkflowContinuationSecurity(session);
+  if (security === undefined) {
+    throw new Error("Workflow continuation security state is missing or invalid.");
+  }
+  return security;
 }

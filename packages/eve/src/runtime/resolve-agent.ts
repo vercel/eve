@@ -153,6 +153,7 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
     outputSchema?: ResolvedAgent["config"]["outputSchema"];
     reasoning?: ResolvedAgent["config"]["reasoning"];
     source?: ResolvedAgent["config"]["source"];
+    limits?: ResolvedAgent["config"]["limits"];
   } = {
     model:
       manifest.config.model.source === undefined
@@ -228,6 +229,14 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
 
   if (manifest.config.source !== undefined) {
     config.source = createResolvedModuleSourceRef(manifest.config.source);
+  }
+
+  if (manifest.config.limits !== undefined) {
+    config.limits = {
+      maxSubagentDepth: manifest.config.limits.maxSubagentDepth,
+      maxInputTokensPerSession: manifest.config.limits.maxInputTokensPerSession,
+      maxOutputTokensPerSession: manifest.config.limits.maxOutputTokensPerSession,
+    };
   }
 
   return config;

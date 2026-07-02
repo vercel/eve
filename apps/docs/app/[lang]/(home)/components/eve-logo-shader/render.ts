@@ -91,13 +91,15 @@ export function createEve5Renderer(
   device: Device,
   format: GPUTextureFormat,
   mesh: MeshData,
-  options: { thicknessScale?: number; theme?: "light" | "dark" } = {},
+  options: { thicknessScale?: number; theme?: "light" | "dark"; paddingRadius?: number; bloom?: boolean } = {},
 ) {
   const studioCubemap = createStudioCubemap(device);
   renderStudioCubemap(device, studioCubemap);
   const orbitTarget = meshOrbitTarget(mesh);
   const thicknessScale = options.thicknessScale ?? meshThicknessScale(mesh.bounds);
   const isLight = options.theme === "light";
+  const paddingRadius = options.paddingRadius ?? BLOOM_RADIUS;
+  const bloomEnabled = options.bloom ?? true;
 
   const glassBackShader = device.createShader(compile(glassBackWgsl));
   const glassFrontShader = device.createShader(compile(glassFrontWgsl));
@@ -261,7 +263,7 @@ export function createEve5Renderer(
     size: 16,
     usage: ["uniform", "copy_dst"],
   });
-  compositeParamsBuffer.write(new Float32Array([BLOOM_STRENGTH, 0, 0, 0]));
+  compositeParamsBuffer.write(new Float32Array([bloomEnabled ? BLOOM_STRENGTH : 0, 0, 0, 0]));
   const blurSampler = device.gpu.createSampler({
     label: "eve-5-bloom-sampler",
     magFilter: "linear",
@@ -284,7 +286,7 @@ export function createEve5Renderer(
   let bloomTargets: BloomTargets | undefined;
 
   const writeParams = (target: { buffer: Buffer }, controls: RenderControls, logicalWidth: number, logicalHeight: number, passKind: number) => {
-    const padded = getPaddedRenderSize(logicalWidth, logicalHeight);
+    const padded = getPaddedRenderSize(logicalWidth, logicalHeight, paddingRadius);
     const fovRad = degreesToRadians(controls.fov);
     const verticalScale = padded.height / logicalHeight;
     const fovEff = 2 * Math.atan(verticalScale * Math.tan(fovRad * 0.5));
@@ -318,7 +320,7 @@ export function createEve5Renderer(
   };
 
   const ensureBloomTargets = (logicalWidth: number, logicalHeight: number) => {
-    const padded = getPaddedRenderSize(logicalWidth, logicalHeight);
+    const padded = getPaddedRenderSize(logicalWidth, logicalHeight, paddingRadius);
     if (bloomTargets?.width === padded.width && bloomTargets.height === padded.height) return bloomTargets;
     bloomTargets?.scene.destroy();
     bloomTargets?.backMaterial.destroy();
@@ -520,13 +522,13 @@ export function createEve5Renderer(
     pass.end();
   };
 
-  const renderComposite = (view: GPUTextureView, targets: BloomTargets) => {
+  const renderComposite = (view: GPUTextureView, targets: BloomTargets, bloomTexture: GPUTexture = targets.vertical) => {
     const bindGroup = device.gpu.createBindGroup({
       label: "eve-5-bloom-composite-bind-group",
       layout: compositePipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: targets.scene.createView() },
-        { binding: 1, resource: targets.vertical.createView() },
+        { binding: 1, resource: bloomTexture.createView() },
         { binding: 2, resource: blurSampler },
         { binding: 3, resource: { buffer: compositeParamsBuffer.gpu } },
       ],
@@ -581,6 +583,10 @@ export function createEve5Renderer(
         renderLightComposite(target, targets);
         return;
       }
+      if (!bloomEnabled) {
+        renderComposite(target, targets, targets.scene);
+        return;
+      }
       renderBlur(targets.scene, targets.horizontal, [1, 0], true);
       renderBlur(targets.horizontal, targets.vertical, [0, 1], false);
       renderComposite(target, targets);
@@ -627,10 +633,11 @@ type BloomTargets = {
   vertical: GPUTexture;
 };
 
-export function getPaddedRenderSize(width: number, height: number) {
+export function getPaddedRenderSize(width: number, height: number, paddingRadius = BLOOM_RADIUS) {
+  const padding = Math.max(0, Math.round(paddingRadius)) * 2;
   return {
-    width: Math.max(1, Math.round(width)) + BLOOM_RADIUS * 2,
-    height: Math.max(1, Math.round(height)) + BLOOM_RADIUS * 2,
+    width: Math.max(1, Math.round(width)) + padding,
+    height: Math.max(1, Math.round(height)) + padding,
   };
 }
 

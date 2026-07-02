@@ -318,13 +318,13 @@ export async function configureNitroRoutes(
   });
 
   if (includesApplicationRoutes(input.surface)) {
-    // Framework routes that need no build-time config use physical handler
-    // files directly. The home page is a fully static, build-time-baked HTML
-    // string with no agent metadata, so it does not need to round-trip
-    // through the virtual-handler args plumbing.
-    registerHandler(nitro, {
-      handlerPath: resolvePackageSourceFilePath("src/internal/nitro/routes/index.ts"),
+    addFrameworkVirtualHandler(nitro, {
+      args: JSON.stringify({
+        agentName: preparedHost.compileResult.manifest.config.name,
+      }),
+      handlerExport: "handleHomePageRequest",
       method: "GET",
+      modulePath: resolvePackageSourceFilePath("src/internal/nitro/routes/index.ts"),
       route: "/",
     });
     // Register health for GET and HEAD: each (method, route) pair is a

@@ -49,10 +49,10 @@ import {
   hydrateSandboxAttachments,
   stageAttachmentsToSandbox,
 } from "#harness/attachment-staging.js";
-import { applyWorkflowTool, buildWorkflowHostTools } from "#harness/workflow-sandbox.js";
+import { buildWorkflowHostTools } from "#harness/workflow-sandbox.js";
 import {
-  ensureWorkflowContinuationSecurity,
   getWorkflowContinuationSecurity,
+  readWorkflowContinuationSecurity,
 } from "#harness/workflow-continuation-security.js";
 import { createWorkflowLifecycle } from "#harness/workflow-lifecycle.js";
 import {
@@ -68,8 +68,12 @@ import {
 } from "#harness/compaction.js";
 import {
   accumulateTurnUsage,
+  getSessionTokenLimitViolation,
+  getSessionTokenUsage,
   getTurnUsageState,
   setTurnUsageState,
+  type SessionTokenLimitViolation,
+  type TokenUsageDelta,
 } from "#harness/turn-tag-state.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import {
@@ -124,6 +128,7 @@ import {
 } from "#shared/empty-delivery.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
 import { ensureOtelIntegration } from "#harness/otel-integration.js";
+import { getAdvertisedTools } from "#harness/advertised-tools.js";
 import {
   applyLastToolCacheBreakpoint,
   applySystemCacheBreakpoint,
@@ -479,9 +484,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
 
     session = pending.session;
-    if (config.workflow === true) {
-      session = ensureWorkflowContinuationSecurity(session);
-    }
     let messages: ModelMessage[] = pending.messages;
 
     if (stepInput.input?.context !== undefined) {
@@ -639,17 +641,24 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       const callMessages = opts.trailingUserNote
         ? [...modelMessages, { role: "user" as const, content: opts.trailingUserNote }]
         : modelMessages;
+      const advertisedHarnessTools = getAdvertisedTools({
+        session,
+        tools: config.tools,
+      });
 
       const flatTools = await buildToolSetWithProviderTools({
         approvedTools,
         capabilities: config.capabilities,
         disabledProviderTools: opts.disabledProviderTools,
         modelReference: session.agent.modelReference,
-        tools: config.tools,
+        tools: advertisedHarnessTools,
       });
 
       if (ctx !== undefined) {
-        const dynamicTools = buildDynamicTools(ctx);
+        const dynamicTools = getAdvertisedTools({
+          session,
+          tools: buildDynamicTools(ctx),
+        });
         const dynamicToolSet = buildToolSetFromDefinitions({
           approvedTools,
           capabilities: config.capabilities,
@@ -666,24 +675,26 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         flatTools[FINAL_OUTPUT_TOOL_NAME] = buildFinalOutputTool(session.outputSchema);
       }
 
-      const modelTools =
-        config.workflow === true
-          ? (
-              await applyWorkflowTool({
-                continuationSecurity: getWorkflowContinuationSecurity(session),
-                harnessTools: config.tools,
-                lifecycle:
-                  emit !== undefined
-                    ? createWorkflowLifecycle({
-                        emit,
-                        emissionState,
-                        tools: config.tools,
-                      })
-                    : undefined,
-                tools: flatTools,
+      const workflowLifecycle =
+        emit !== undefined
+          ? ({ tools }: { readonly tools: HarnessToolMap }) =>
+              createWorkflowLifecycle({
+                emit,
+                emissionState,
+                tools,
               })
-            ).modelTools
-          : flatTools;
+          : undefined;
+      const workflowConfig =
+        config.workflow === true ? { lifecycle: workflowLifecycle } : undefined;
+
+      const advertisedModelTools = await getAdvertisedTools({
+        modelTools: flatTools,
+        session,
+        tools: advertisedHarnessTools,
+        workflow: workflowConfig,
+      });
+      session = advertisedModelTools.session;
+      const modelTools = advertisedModelTools.modelTools;
 
       const effectiveTools = marker ? applyLastToolCacheBreakpoint(modelTools, marker) : modelTools;
 
@@ -725,13 +736,24 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       const executeModelCall = async (): Promise<HarnessStepResult> => {
         if (emit) {
-          const excludedActionToolNames = new Set([ASK_QUESTION_TOOL_NAME, FINAL_OUTPUT_TOOL_NAME]);
+          const hiddenRuntimeActionToolNames = [...config.tools]
+            .filter(
+              ([name, tool]) =>
+                tool.runtimeAction !== undefined && advertisedHarnessTools.get(name) === undefined,
+            )
+            .map(([name]) => name);
+          const excludedActionToolNames = new Set([
+            ASK_QUESTION_TOOL_NAME,
+            FINAL_OUTPUT_TOOL_NAME,
+            ...hiddenRuntimeActionToolNames,
+          ]);
           const streamResult = await agent.stream({ messages: callMessages });
           const {
             emittedActionCallIds,
             handledInlineToolResultCallIds,
             inlineAuthorizationResults,
             inlineToolResultParts,
+            trailingInlineToolResultParts,
           } = await emitStreamContent(emit, emissionState, streamResult.fullStream, {
             excludedActionToolNames,
             tools: config.tools,
@@ -740,7 +762,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           if (
             isEmptyModelResponse(stepResult) &&
             inlineToolResultParts.length === 0 &&
-            inlineAuthorizationResults.length === 0
+            inlineAuthorizationResults.length === 0 &&
+            trailingInlineToolResultParts.length === 0
           ) {
             throw new EmptyModelResponseError();
           }
@@ -748,9 +771,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             emittedActionCallIds,
             excludedActionToolNames,
             handledInlineToolResultCallIds,
-            tools: config.tools,
+            tools: advertisedHarnessTools,
           });
-          if (inlineToolResultParts.length > 0 || inlineAuthorizationResults.length > 0) {
+          if (
+            inlineToolResultParts.length > 0 ||
+            inlineAuthorizationResults.length > 0 ||
+            trailingInlineToolResultParts.length > 0
+          ) {
             const existingToolResults = stepResult.toolResults as TypedToolResult<ToolSet>[];
             const toolResultsByCallId = new Map(
               existingToolResults.map((toolResult) => [toolResult.toolCallId, toolResult]),
@@ -772,12 +799,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
               finishReason: stepResult.finishReason,
               response: {
                 ...stepResult.response,
-                ...(inlineToolResultParts.length > 0
+                ...(inlineToolResultParts.length > 0 || trailingInlineToolResultParts.length > 0
                   ? {
-                      messages: [
-                        { role: "tool" as const, content: [...inlineToolResultParts] },
-                        ...stepResult.response.messages,
-                      ],
+                      messages: insertInlineToolResultMessages({
+                        append: trailingInlineToolResultParts,
+                        prepend: inlineToolResultParts,
+                        responseMessages: stepResult.response.messages,
+                      }),
                     }
                   : {}),
               },
@@ -828,6 +856,17 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     });
     if (pendingWorkflowInterrupt !== null) {
       return pendingWorkflowInterrupt;
+    }
+
+    const tokenLimitViolation = getSessionTokenLimitViolation(session);
+    if (tokenLimitViolation !== null) {
+      return failSessionTokenLimit({
+        config,
+        emit,
+        emissionState,
+        session,
+        violation: tokenLimitViolation,
+      });
     }
 
     let result: HarnessStepResult;
@@ -1011,7 +1050,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const nextTurnUsage = accumulateTurnUsage({
       previous: getTurnUsageState(session.state),
       turnId: emissionState.turnId,
-      usage: result.usage ?? {},
+      usage: extractTokenUsageDelta(result.usage),
     });
     session = setTurnUsageState(session, nextTurnUsage);
     // `formatLanguageModelGatewayId` requires `model.provider` to be a string;
@@ -1047,6 +1086,63 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
   }
 
   return runStep;
+}
+
+const SESSION_TOKEN_LIMIT_REACHED_CODE = "SESSION_TOKEN_LIMIT_REACHED";
+
+function extractTokenUsageDelta(
+  usage: HarnessStepResult["usage"] | undefined,
+): TokenUsageDelta | undefined {
+  if (usage === undefined) {
+    return undefined;
+  }
+
+  return {
+    cacheReadTokens: usage.inputTokenDetails?.cacheReadTokens,
+    cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+  };
+}
+
+function formatSessionTokenLimitMessage(kind: SessionTokenLimitViolation["kind"]): string {
+  return `The session reached its configured ${kind} token limit.`;
+}
+
+async function failSessionTokenLimit(input: {
+  readonly config: ToolLoopHarnessConfig;
+  readonly emit?: ToolLoopHarnessConfig["handleEvent"];
+  readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
+  readonly session: HarnessSession;
+  readonly violation: SessionTokenLimitViolation;
+}): Promise<StepResult> {
+  const usage = getSessionTokenUsage(input.session);
+  const message = formatSessionTokenLimitMessage(input.violation.kind);
+  const details = {
+    inputTokens: usage.inputTokens,
+    kind: input.violation.kind,
+    limit: input.violation.limit,
+    outputTokens: usage.outputTokens,
+    usedTokens: input.violation.usedTokens,
+  };
+
+  if (input.emit) {
+    await emitFailedStep(input.emit, input.emissionState, {
+      code: SESSION_TOKEN_LIMIT_REACHED_CODE,
+      details,
+      message,
+      sessionId: input.session.sessionId,
+    });
+  }
+
+  return {
+    next: {
+      done: true,
+      isError: input.config.mode === "task" ? true : undefined,
+      output: input.config.mode === "task" ? message : "",
+    },
+    session: input.session,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1217,6 +1313,44 @@ async function runModelCallRecoveryPipeline(input: {
     }
   }
   return { outcome: "failed", error };
+}
+
+type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
+type ToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
+type StepResponseMessage = HarnessStepResult["response"]["messages"][number];
+
+function insertInlineToolResultMessages(input: {
+  readonly append: readonly ToolResultPart[];
+  readonly prepend: readonly ToolResultPart[];
+  readonly responseMessages: readonly StepResponseMessage[];
+}): StepResponseMessage[] {
+  const existingCallIds = extractToolResultCallIds(input.responseMessages);
+  const prepend = input.prepend.filter((part) => !existingCallIds.has(part.toolCallId));
+  const append = input.append.filter((part) => !existingCallIds.has(part.toolCallId));
+
+  return [
+    ...(prepend.length > 0 ? [{ role: "tool" as const, content: [...prepend] }] : []),
+    ...input.responseMessages,
+    ...(append.length > 0 ? [{ role: "tool" as const, content: [...append] }] : []),
+  ] satisfies StepResponseMessage[];
+}
+
+function extractToolResultCallIds(messages: readonly StepResponseMessage[]): ReadonlySet<string> {
+  const callIds = new Set<string>();
+
+  for (const message of messages) {
+    if (message.role !== "tool" || !Array.isArray(message.content)) {
+      continue;
+    }
+
+    for (const part of message.content) {
+      if (part.type === "tool-result") {
+        callIds.add(part.toolCallId);
+      }
+    }
+  }
+
+  return callIds;
 }
 
 /**
@@ -1439,9 +1573,14 @@ async function handleStepResult(input: {
     compaction: createNextCompactionConfig(session.compaction, promptMessages, result),
   };
 
-  if (config.workflow === true) {
-    const continuationSecurity = getWorkflowContinuationSecurity(baseSession);
-    const workflowInterrupt = await getWorkflowSandboxInterrupt(result, continuationSecurity);
+  const workflowContinuationSecurity =
+    config.workflow === true ? readWorkflowContinuationSecurity(baseSession) : undefined;
+
+  if (workflowContinuationSecurity !== undefined) {
+    const workflowInterrupt = await getWorkflowSandboxInterrupt(
+      result,
+      workflowContinuationSecurity,
+    );
     if (workflowInterrupt !== undefined) {
       if (!isWorkflowRuntimeActionInterrupt(workflowInterrupt)) {
         throw new Error(`Unsupported Workflow interrupt kind "${workflowInterrupt.payload.kind}".`);
@@ -1463,13 +1602,28 @@ async function handleStepResult(input: {
     excludedCallIds: approvalRequestCallIds,
   });
   const inputRequests: InputRequest[] = [...approvalRequests, ...questionRequests];
+  const advertisedRuntimeActionTools = getAdvertisedTools({
+    session: baseSession,
+    tools: config.tools,
+  });
   const pendingRuntimeActions = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
     .filter((toolCall) => !isInvalidToolCall(toolCall))
     .filter((toolCall) => config.tools.get(toolCall.toolName)?.runtimeAction !== undefined)
+    .filter((toolCall) => {
+      if (advertisedRuntimeActionTools.get(toolCall.toolName)?.runtimeAction !== undefined) {
+        return true;
+      }
+      log.warn("runtime action tool call blocked because tool is not advertised", {
+        callId: toolCall.toolCallId,
+        sessionId: baseSession.sessionId,
+        toolName: toolCall.toolName,
+      });
+      return false;
+    })
     .map((toolCall) =>
       createRuntimeActionRequestFromToolCall({
         toolCall,
-        tools: config.tools,
+        tools: advertisedRuntimeActionTools,
       }),
     );
 

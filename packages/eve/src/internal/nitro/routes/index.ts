@@ -8,17 +8,20 @@ import type { H3Event } from "nitro";
 const EVE_DOCS_URL = "https://eve.dev/docs";
 
 const DEPLOYMENT_URL_PLACEHOLDER = "{{DEPLOYMENT_URL}}";
+const AGENT_NAME_PLACEHOLDER = "{{AGENT_NAME}}";
+
+const EVE_LOGO_SVG = `<svg aria-hidden="true" class="logo" fill="none" viewBox="0 0 169 53" xmlns="http://www.w3.org/2000/svg">
+    <path d="M169 8.47h-51.39L81.73 53H70.36L113 0H169zM169 44.51v8.47h-45.87V44.5zM45.87 52.98H0V44.5h45.87zM38.66 30.55H0v-8.47h38.66z" fill="currentColor"></path>
+    <path d="M169 30.55h-38.66v-8.47H169zM75.52 8.47H0V0h75.52z" fill="currentColor"></path>
+  </svg>`;
 
 /**
  * Barebones HTML served at `GET /`.
  *
- * Reveals no information about the deployed agent — no name, no model,
- * no instructions, no list of skills or schedules, no API endpoint paths.
- * This is intentional: the root URL of a deployment is reachable by
- * anyone on the public internet, and the deployment must not advertise
- * its agent's configuration to unauthenticated callers. Inspection JSON
- * (model id, instructions, tools, skills, etc.) lives behind the resolved
- * eve channel auth policy at `/eve/v1/info`.
+ * Reveals only the deployed agent's display name — no model, no instructions,
+ * no list of skills or schedules, no API endpoint paths. Inspection JSON
+ * (model id, instructions, tools, skills, etc.) lives behind the resolved eve
+ * channel auth policy at `/eve/v1/info`.
  *
  * The page also loads zero external assets — no fonts, no scripts, no
  * images, no analytics beacons — so it cannot leak the deployment's
@@ -45,24 +48,20 @@ const HOME_PAGE_HTML_TEMPLATE = `<!doctype html>
     --muted: #6b6b6b;
     --faint: #999;
     --border: rgba(0, 0, 0, 0.09);
-    --surface: rgba(0, 0, 0, 0.025);
     --accent: #00c46a;
-    --accent-glow: rgba(0, 196, 106, 0.18);
-    --button-bg: #0a0a0a;
-    --button-fg: #fff;
+    --divider: rgba(0, 0, 0, 0.22);
+    --brand-opacity: 0.08;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #000;
-      --fg: #ededed;
-      --muted: #8f8f8f;
-      --faint: #666;
-      --border: rgba(255, 255, 255, 0.1);
-      --surface: rgba(255, 255, 255, 0.035);
+      --bg: #0a0a0a;
+      --fg: #f5f5f5;
+      --muted: #a3a3a3;
+      --faint: #737373;
+      --border: rgba(255, 255, 255, 0.14);
       --accent: #46d4a4;
-      --accent-glow: rgba(70, 212, 164, 0.22);
-      --button-bg: #fff;
-      --button-fg: #000;
+      --divider: rgba(255, 255, 255, 0.22);
+      --brand-opacity: 0.12;
     }
   }
   * { box-sizing: border-box; }
@@ -89,40 +88,71 @@ const HOME_PAGE_HTML_TEMPLATE = `<!doctype html>
   }
   main {
     width: 100%;
-    max-width: 32rem;
-    text-align: center;
+    max-width: 28rem;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1.5rem;
+  }
+  .brand {
+    margin: 0;
+    display: flex;
+    justify-content: flex-start;
+    color: var(--fg);
+    opacity: var(--brand-opacity);
+  }
+  .logo {
+    display: block;
+    width: 4.875rem;
+    height: auto;
+  }
+  .panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+  }
+  .agent-row {
+    display: flex;
+    align-items: center;
+    gap: 0.9375rem;
+    min-width: 0;
+  }
+  .agent-name {
+    color: var(--fg);
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1.55;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .status {
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.3125rem 0.75rem;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 9999px;
-    font-size: 0.75rem;
-    color: var(--muted);
-    margin: 0 0 2rem;
+    font-size: inherit;
+    line-height: inherit;
+    color: var(--accent);
+    margin: 0;
   }
   .status-dot {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
     border-radius: 50%;
     background: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-glow);
     flex-shrink: 0;
   }
-  h1 {
-    margin: 0 0 0.875rem;
-    font-size: clamp(2.5rem, 9vw, 3.25rem);
-    font-weight: 500;
-    letter-spacing: -0.05em;
-    line-height: 1;
+  .lede-divider {
+    color: var(--divider);
   }
   .lede {
-    margin: 0 0 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0;
     color: var(--muted);
-    font-size: 0.9375rem;
+    font-size: 0.875rem;
   }
   .lede a {
     color: var(--fg);
@@ -146,13 +176,12 @@ const HOME_PAGE_HTML_TEMPLATE = `<!doctype html>
     gap: 0.625rem;
     width: 100%;
     max-width: 28rem;
-    padding: 0.75rem 1rem;
-    background: var(--surface);
+    padding: 0.8125rem 1.0625rem;
     border: 1px solid var(--border);
     border-radius: 0.5rem;
     text-align: left;
     font-size: 0.8125rem;
-    margin: 0 auto;
+    margin: 1rem 0 0;
     overflow-x: auto;
     white-space: nowrap;
   }
@@ -166,16 +195,17 @@ const HOME_PAGE_HTML_TEMPLATE = `<!doctype html>
 </head>
 <body>
 <main>
-  <span class="status mono">
-    <span class="status-dot" aria-hidden="true"></span>
-    running
-  </span>
-  <h1 class="mono">eve</h1>
-  <p class="lede">The agent is up and accepting messages. <a href="${EVE_DOCS_URL}">Read the docs<span class="lede-arrow" aria-hidden="true">&nbsp;&rarr;</span></a></p>
-  <div class="terminal mono" role="group" aria-label="Send a message from your terminal">
-    <span class="terminal-prompt" aria-hidden="true">$</span>
-    <span class="terminal-cmd">eve dev ${DEPLOYMENT_URL_PLACEHOLDER}</span>
-  </div>
+  <div class="brand" aria-label="eve">${EVE_LOGO_SVG}</div>
+  <section class="panel" aria-label="Agent status">
+    <div class="agent-row">
+      <strong class="agent-name">${AGENT_NAME_PLACEHOLDER}</strong>
+    </div>
+    <p class="lede"><span class="status"><span class="status-dot" aria-hidden="true"></span>Ready</span><span class="lede-divider" aria-hidden="true">／</span><span>Agent is up and accepting messages.</span> <a href="${EVE_DOCS_URL}">Docs<span class="lede-arrow" aria-hidden="true">&nbsp;&rarr;</span></a></p>
+    <div class="terminal mono" role="group" aria-label="Send a message from your terminal">
+      <span class="terminal-prompt" aria-hidden="true">$</span>
+      <span class="terminal-cmd">eve dev ${DEPLOYMENT_URL_PLACEHOLDER}</span>
+    </div>
+  </section>
 </main>
 </body>
 </html>
@@ -227,12 +257,16 @@ function resolveDeploymentUrl(request: Request): string {
  * for tests so callers can supply a real {@link Request}; production
  * traffic flows through the Nitro {@link H3Event} default export.
  */
-export function buildHomePageResponse(request: Request): Response {
+export function buildHomePageResponse(
+  input: {
+    readonly agentName: string;
+  },
+  request: Request,
+): Response {
   const deploymentUrl = resolveDeploymentUrl(request);
-  const html = HOME_PAGE_HTML_TEMPLATE.replace(
-    DEPLOYMENT_URL_PLACEHOLDER,
-    escapeHtml(deploymentUrl),
-  );
+  const html = HOME_PAGE_HTML_TEMPLATE.replace(AGENT_NAME_PLACEHOLDER, () =>
+    escapeHtml(input.agentName),
+  ).replace(DEPLOYMENT_URL_PLACEHOLDER, () => escapeHtml(deploymentUrl));
 
   return new Response(html, {
     headers: {
@@ -246,6 +280,15 @@ export function buildHomePageResponse(request: Request): Response {
  * Nitro route handler for `GET /`. Adapts the Nitro event shape into
  * {@link buildHomePageResponse}.
  */
-export default function handleHomePageRequest(event: H3Event): Response {
-  return buildHomePageResponse(event.req);
+export function handleHomePageRequest(
+  input: {
+    readonly agentName: string;
+  },
+  request: Request,
+): Response {
+  return buildHomePageResponse(input, request);
+}
+
+export default function handleStaticHomePageRequest(event: H3Event): Response {
+  return buildHomePageResponse({ agentName: "eve" }, event.req);
 }

@@ -4,6 +4,7 @@ import type { HarnessSession } from "#harness/types.js";
 import {
   ensureWorkflowContinuationSecurity,
   getWorkflowContinuationSecurity,
+  readWorkflowContinuationSecurity,
 } from "#harness/workflow-continuation-security.js";
 
 function makeSession(state?: HarnessSession["state"]): HarnessSession {
@@ -34,6 +35,7 @@ describe("workflow continuation security", () => {
     expect(security.maxAgeMs).toBe(365 * 24 * 60 * 60 * 1000);
     expect(ensureWorkflowContinuationSecurity(secured)).toBe(secured);
     expect(getWorkflowContinuationSecurity(secured)).toEqual(security);
+    expect(readWorkflowContinuationSecurity(secured)).toEqual(security);
   });
 
   it("rejects malformed persisted security state", () => {
@@ -47,5 +49,9 @@ describe("workflow continuation security", () => {
     expect(() => ensureWorkflowContinuationSecurity(session)).toThrow(
       "Workflow continuation security state is missing or invalid.",
     );
+    expect(() => getWorkflowContinuationSecurity(session)).toThrow(
+      "Workflow continuation security state is missing or invalid.",
+    );
+    expect(readWorkflowContinuationSecurity(session)).toBeUndefined();
   });
 });

@@ -8,6 +8,7 @@ import { AuthKey, ContinuationTokenKey, ModeKey, SessionIdKey } from "#context/k
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
 import { setPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import { DEFAULT_SUBAGENT_MAX_DEPTH } from "#harness/subagent-depth.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
@@ -496,6 +497,95 @@ describe("dispatchRuntimeActionsStep", () => {
     });
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).callback.token).toBe(
       "turn-inbox",
+    );
+    expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE)).toBeUndefined();
+  });
+
+  it("blocks pending subagent calls at the subagent depth limit", async () => {
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {
+        subagentsByNodeId: new Map(),
+      },
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const session = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "call-1",
+          description: "Delegate the work.",
+          input: { message: "try to recurse" },
+          kind: "subagent-call",
+          name: "delegate",
+          nodeId: "subagents/delegate",
+          subagentName: "delegate",
+        },
+      ],
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createStubSession({
+        continuationToken: "http:parent",
+        sessionId: "parent-session",
+        subagentDepth: DEFAULT_SUBAGENT_MAX_DEPTH + 1,
+        subagentMaxDepth: DEFAULT_SUBAGENT_MAX_DEPTH + 1,
+      }),
+    });
+    installSessionStoreMocks([session]);
+
+    const sessionState = createStubSessionState({
+      continuationToken: "http:parent",
+      sessionId: "parent-session",
+    });
+
+    await expect(
+      dispatchRuntimeActionsStep({
+        parentContinuationToken: "turn-inbox",
+        parentWritable: createTestWritable(),
+        serializedContext: createSerializedContext(),
+        sessionState,
+      }),
+    ).resolves.toEqual({
+      results: [
+        {
+          callId: "call-1",
+          isError: true,
+          kind: "subagent-result",
+          output: {
+            code: "SUBAGENT_DEPTH_LIMIT_REACHED",
+            currentDepth: DEFAULT_SUBAGENT_MAX_DEPTH + 1,
+            maxDepth: DEFAULT_SUBAGENT_MAX_DEPTH + 1,
+            message: `Subagent depth limit reached (${DEFAULT_SUBAGENT_MAX_DEPTH + 1}); "delegate" was not called.`,
+          },
+          subagentName: "delegate",
+        },
+      ],
+      sessionState,
+    });
+    expect(startMock).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      "[eve:execution.dispatch-runtime-actions] subagent depth limit reached; blocking delegated call",
+      expect.objectContaining({
+        callId: "call-1",
+        currentDepth: DEFAULT_SUBAGENT_MAX_DEPTH + 1,
+        maxDepth: DEFAULT_SUBAGENT_MAX_DEPTH + 1,
+        subagentName: "delegate",
+      }),
     );
     expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE)).toBeUndefined();
   });

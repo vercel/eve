@@ -10,6 +10,7 @@ import type { HarnessSession } from "#harness/types.js";
 import type { JsonObject } from "#shared/json.js";
 import type { RuntimeSubagentCallActionRequest } from "#runtime/actions/types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
+import { resolveSubagentDelegationLimit } from "#harness/subagent-depth.js";
 
 /**
  * Pending runtime-action batch event metadata needed for child run lineage.
@@ -83,6 +84,7 @@ export function buildSubagentRunInput(input: {
   // explicit root, so its own `sessionId` becomes the root for its
   // children.
   const rootSessionId = session.rootSessionId ?? session.sessionId;
+  const delegationLimit = resolveSubagentDelegationLimit(session);
 
   const runInput: RunInput = {
     adapter: {
@@ -116,6 +118,8 @@ export function buildSubagentRunInput(input: {
         sequence: batchEvent.sequence,
       },
     },
+    subagentDepth: delegationLimit.nextChildDepth,
+    subagentMaxDepth: session.subagentMaxDepth,
   };
 
   return { childContinuationToken, runInput };

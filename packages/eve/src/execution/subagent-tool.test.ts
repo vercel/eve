@@ -157,6 +157,25 @@ describe("buildSubagentRunInput", () => {
     });
   });
 
+  it("increments subagent depth for the child run input", () => {
+    const nestedSession: HarnessSession = {
+      ...makeSession(),
+      sessionId: "intermediate-session",
+      subagentDepth: 2,
+      subagentMaxDepth: 4,
+    };
+    const { runInput } = buildRuntimeSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 1, turnId: "turn-99" },
+      initiatorAuth: null,
+      session: nestedSession,
+    });
+
+    expect(runInput.subagentDepth).toBe(3);
+    expect(runInput.subagentMaxDepth).toBe(4);
+  });
+
   it("threads outputSchema from action input to RunInput", () => {
     const schema = { type: "object", properties: { result: { type: "string" } } };
     const action: RuntimeSubagentCallActionRequest = {

@@ -16,7 +16,12 @@ describe("definition helper exact inputs", () => {
   it("preserves literal inference for valid definitions", () => {
     const agent = defineAgent({
       description: "type-test",
-      model: "anthropic/claude-sonnet-4.6",
+      limits: {
+        maxInputTokensPerSession: 200_000,
+        maxOutputTokensPerSession: 20_000,
+        maxSubagentDepth: 4,
+      },
+      model: "anthropic/claude-sonnet-5",
     });
 
     const schedule = defineSchedule({
@@ -25,13 +30,16 @@ describe("definition helper exact inputs", () => {
     });
 
     expect(agent.description).toBe("type-test");
+    expect(agent.limits.maxInputTokensPerSession).toBe(200_000);
+    expect(agent.limits.maxOutputTokensPerSession).toBe(20_000);
+    expect(agent.limits.maxSubagentDepth).toBe(4);
     expect(schedule.cron).toBe("0 9 * * *");
   });
 });
 
 function typeOnlyFixtures(): void {
   const agentWithName = {
-    model: "anthropic/claude-sonnet-4.6",
+    model: "anthropic/claude-sonnet-5",
     name: "agent-name",
   };
   // @ts-expect-error Agent identity is path-derived.

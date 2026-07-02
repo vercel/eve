@@ -71,6 +71,7 @@ export async function compileAgentConfig(
     outputSchema?: JsonObject;
     reasoning?: CompiledAgentDefinition["reasoning"];
     source?: ModuleSourceRef;
+    limits?: CompiledAgentDefinition["limits"];
   } = {
     compaction,
     model,
@@ -101,6 +102,14 @@ export async function compileAgentConfig(
 
   if (definition.reasoning !== undefined) {
     compiledConfig.reasoning = definition.reasoning;
+  }
+
+  if (definition.limits !== undefined) {
+    compiledConfig.limits = {
+      maxSubagentDepth: definition.limits.maxSubagentDepth,
+      maxInputTokensPerSession: definition.limits.maxInputTokensPerSession,
+      maxOutputTokensPerSession: definition.limits.maxOutputTokensPerSession,
+    };
   }
 
   if (configModule !== undefined) {

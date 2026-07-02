@@ -786,7 +786,7 @@ describe("verifyVercelOidc", () => {
     }
   });
 
-  it("rejects a development user token on production", async () => {
+  it("authenticates a development user token as a service principal on production", async () => {
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_current");
     vi.stubEnv("VERCEL_TARGET_ENV", "production");
 
@@ -799,7 +799,15 @@ describe("verifyVercelOidc", () => {
         user_id: "user_ada",
       });
 
-      await expect(verifyVercelOidc(token)).resolves.toEqual({ ok: false });
+      const result = await verifyVercelOidc(token);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.sessionAuth).toMatchObject({
+          principalType: "service",
+          subject: "owner:acme:project:weather-agent:environment:development",
+        });
+      }
     } finally {
       issuer.restore();
     }

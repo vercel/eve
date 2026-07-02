@@ -204,10 +204,16 @@ export function noFailedActions(): RunAssertion {
           (evt.data.status === "failed" || evt.data.result.isError === true),
       );
       if (failed.length === 0) return PASS;
-      const names = failed.map((evt) =>
-        evt.data.result.kind === "tool-result" ? evt.data.result.toolName : evt.data.result.kind,
-      );
-      return fail(`${failed.length} failed action(s): ${names.join(", ")}`);
+      const details = failed.map(formatFailedActionResult);
+      return fail(`${failed.length} failed action(s): ${details.join("; ")}`, {
+        failedActions: failed.map((evt) => ({
+          callId: evt.data.result.callId,
+          error: evt.data.error,
+          kind: evt.data.result.kind,
+          output: evt.data.result.output,
+          status: evt.data.status,
+        })),
+      });
     },
   };
 }
@@ -371,6 +377,34 @@ function failureDetail(prefix: string, code: string | undefined): string {
   return code === undefined ? prefix : `${prefix} (code: ${code})`;
 }
 
+function formatFailedActionResult(
+  event: Extract<HandleMessageStreamEvent, { type: "action.result" }>,
+): string {
+  const { result, status } = event.data;
+  const parts = [
+    actionResultLabel(result),
+    `callId=${result.callId}`,
+    `status=${status}`,
+    result.isError === true ? "isError=true" : undefined,
+    event.data.error?.message === undefined ? undefined : `error=${event.data.error.message}`,
+    `output=${truncate(formatUnknown(result.output))}`,
+  ];
+  return parts.filter((part) => part !== undefined).join(" ");
+}
+
+function actionResultLabel(
+  result: Extract<HandleMessageStreamEvent, { type: "action.result" }>["data"]["result"],
+): string {
+  switch (result.kind) {
+    case "tool-result":
+      return `tool-result:${result.toolName}`;
+    case "subagent-result":
+      return `subagent-result:${result.subagentName}`;
+    case "load-skill-result":
+      return result.name === undefined ? "load-skill-result" : `load-skill-result:${result.name}`;
+  }
+}
+
 function runFailure(result: EveEvalAssertionSubject): AssertionOutcome | undefined {
   if (result.status === "failed") {
     return fail(failureDetail("run failed", result.derived.failureCode));
@@ -387,6 +421,16 @@ function runFailure(result: EveEvalAssertionSubject): AssertionOutcome | undefin
 function truncate(text: string | undefined, max = 200): string {
   if (text === undefined) return "undefined";
   return text.length <= max ? text : `${text.slice(0, max)}…`;
+}
+
+function formatUnknown(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function validateCount(count: number | undefined): void {

@@ -13,6 +13,7 @@ import providerUtils from "./@ai-sdk/provider-utils.mjs";
 
 import chatAdapterSlack from "./@chat-adapter/slack.mjs";
 import chatAdapterStateMemory from "./@chat-adapter/state-memory.mjs";
+import chatAdapterTwilio from "./@chat-adapter/twilio.mjs";
 
 import opentelemetryApi from "./@opentelemetry/api.mjs";
 import standardSchemaSpec from "./@standard-schema/spec.mjs";
@@ -44,6 +45,7 @@ export const MODULES = [
   chat,
   chatAdapterSlack,
   chatAdapterStateMemory,
+  chatAdapterTwilio,
   chokidar,
   commander,
   experimentalAiSdkCodeMode,

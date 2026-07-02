@@ -52,7 +52,7 @@ const fallback = defaultBackend({
   docker: { image: "ghcr.io/vercel/eve:latest" },
   justBash: {},
   microsandbox: {},
-  vercel: { runtime: "node24" },
+  vercel: { resources: { vcpus: 2 } },
 });
 
 void docker;

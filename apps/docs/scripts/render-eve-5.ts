@@ -1,3 +1,28 @@
+// This script uses @vgpu/adapter-node, which requires native Vulkan support and a
+// new-enough GLIBC. Run it inside the software-Vulkan Docker image when baking
+// the static Eve logo fallback:
+//
+//   docker run --rm \
+//     -v /home/user/eve-worktrees/eve-migrate-shader:/work \
+//     -w /work/apps/docs \
+//     -e VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
+//     -e LIBGL_ALWAYS_SOFTWARE=1 \
+//     -e EVE_LOGO_RENDER_THEME=dark \
+//     -e EVE_LOGO_RENDER_WIDTH=1095 \
+//     -e EVE_LOGO_RENDER_HEIGHT=348 \
+//     -e EVE_LOGO_RENDER_PADDING=0 \
+//     -e EVE_LOGO_RENDER_BLOOM=0 \
+//     browser-webgpu-lab:native-vgpu-node \
+//     bash -lc 'xvfb-run -a bash -lc "NODE_OPTIONS=--loader=./scripts/wgsl-node-loader.mjs ./node_modules/.bin/tsx scripts/render-eve-5.ts"'
+//
+// The Docker image provides GLIBC 2.41, lavapipe/llvmpipe, libvulkan, and xvfb.
+// Convert the generated tmp/eve-5-renders/<run>/output.png to the desired
+// public/eve-5/fallback-<theme>.webp with ImageMagick from the same container.
+// Set EVE_LOGO_RENDER_THEME=light|dark and EVE_LOGO_RENDER_WIDTH/HEIGHT when
+// baking production fallbacks. Fallback images are content-only: render without
+// bloom or padding, then place them inside the padded canvas box in CSS so the
+// animated shader appears to "turn on" around the same logo geometry.
+
 import { createHash } from "node:crypto";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -17,11 +42,16 @@ import {
 const RUN_ID = new Date().toISOString().replaceAll(":", "-").replace(".", "-");
 const OUT_DIR = resolve(process.cwd(), "tmp/eve-5-renders", RUN_ID);
 const FORMAT: GPUTextureFormat = "rgba8unorm";
-const LOGICAL_WIDTH = 960;
-const LOGICAL_HEIGHT = Math.round(LOGICAL_WIDTH / (78 / 25));
-const PADDED_SIZE = getPaddedRenderSize(LOGICAL_WIDTH, LOGICAL_HEIGHT);
+const PADDING_RADIUS = readNonNegativeIntegerEnv("EVE_LOGO_RENDER_PADDING", 0);
+const BLOOM_ENABLED = readBooleanEnv("EVE_LOGO_RENDER_BLOOM", false);
+const OUTPUT_WIDTH = readPositiveIntegerEnv("EVE_LOGO_RENDER_WIDTH", 1095, PADDING_RADIUS * 2);
+const OUTPUT_HEIGHT = readPositiveIntegerEnv("EVE_LOGO_RENDER_HEIGHT", 348, PADDING_RADIUS * 2);
+const LOGICAL_WIDTH = Math.max(1, OUTPUT_WIDTH - PADDING_RADIUS * 2);
+const LOGICAL_HEIGHT = Math.max(1, OUTPUT_HEIGHT - PADDING_RADIUS * 2);
+const PADDED_SIZE = getPaddedRenderSize(LOGICAL_WIDTH, LOGICAL_HEIGHT, PADDING_RADIUS);
 const WIDTH = PADDED_SIZE.width;
 const HEIGHT = PADDED_SIZE.height;
+const THEME = readThemeEnv();
 const MODEL_PATH = resolve(process.cwd(), "public/eve-5/eve-logo.gltf");
 const DEFAULT_CONTROLS: RenderControls = {
   yaw: 0,
@@ -43,7 +73,7 @@ async function main() {
   let renderer: ReturnType<typeof createEve5Renderer> | undefined;
 
   try {
-    renderer = createEve5Renderer(app.device, FORMAT, mesh);
+    renderer = createEve5Renderer(app.device, FORMAT, mesh, { theme: THEME, paddingRadius: PADDING_RADIUS, bloom: BLOOM_ENABLED });
     const output = await renderView(renderer, app.device, DEFAULT_CONTROLS, "output.png");
     await renderView(renderer, app.device, { ...DEFAULT_CONTROLS, yaw: -0.49, pitch: 0.31 }, "rotated.png");
     await renderView(renderer, app.device, { ...DEFAULT_CONTROLS, wireframe: true }, "wireframe.png");
@@ -51,10 +81,12 @@ async function main() {
     const log = {
       runId: RUN_ID,
       outDir: OUT_DIR,
-      dimensions: { width: WIDTH, height: HEIGHT, format: FORMAT },
+      dimensions: { width: WIDTH, height: HEIGHT, format: FORMAT, theme: THEME },
       bloom: {
-        radius: BLOOM_RADIUS,
-        strength: BLOOM_STRENGTH,
+        enabled: BLOOM_ENABLED,
+        runtimeRadius: BLOOM_RADIUS,
+        radius: PADDING_RADIUS,
+        strength: BLOOM_ENABLED ? BLOOM_STRENGTH : 0,
         threshold: BLOOM_THRESHOLD,
         logical: { width: LOGICAL_WIDTH, height: LOGICAL_HEIGHT },
         padded: { width: WIDTH, height: HEIGHT },
@@ -116,6 +148,41 @@ async function loadMeshFromDisk(path: string) {
     const bufferPath = resolve(path, "..", uri);
     return exactArrayBuffer(await readFile(bufferPath));
   });
+}
+
+function readPositiveIntegerEnv(name: string, fallback: number, minimumExclusive = 0) {
+  const value = process.env[name];
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= minimumExclusive) {
+    throw new Error(`${name} must be an integer greater than ${minimumExclusive}.`);
+  }
+  return parsed;
+}
+
+function readNonNegativeIntegerEnv(name: string, fallback: number) {
+  const value = process.env[name];
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`${name} must be a non-negative integer.`);
+  }
+  return parsed;
+}
+
+function readBooleanEnv(name: string, fallback: boolean) {
+  const value = process.env[name];
+  if (!value) return fallback;
+  const normalized = value.toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  throw new Error(`${name} must be a boolean value.`);
+}
+
+function readThemeEnv(): "light" | "dark" {
+  const value = process.env.EVE_LOGO_RENDER_THEME ?? "dark";
+  if (value === "light" || value === "dark") return value;
+  throw new Error('EVE_LOGO_RENDER_THEME must be "light" or "dark".');
 }
 
 function exactArrayBuffer(buffer: Buffer) {

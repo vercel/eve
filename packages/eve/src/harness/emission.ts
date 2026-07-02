@@ -36,7 +36,8 @@ import { toError } from "#shared/errors.js";
 import type { JsonObject } from "#shared/json.js";
 import {
   createRuntimeToolResultFromStepResult,
-  createRuntimeToolResultFromValue,
+  createRuntimeToolResultFromToolError,
+  createToolResultMessagePartFromToolError,
 } from "#harness/action-result-helpers.js";
 import {
   createRuntimeActionRequestFromToolCall,
@@ -333,6 +334,7 @@ interface EmittedStreamContent {
   readonly handledInlineToolResultCallIds: ReadonlySet<string>;
   readonly inlineAuthorizationResults: readonly TypedToolResult<ToolSet>[];
   readonly inlineToolResultParts: readonly InlineToolResultPart[];
+  readonly trailingInlineToolResultParts: readonly InlineToolResultPart[];
 }
 
 interface StreamActionEmissionOptions {
@@ -366,6 +368,7 @@ export async function emitStreamContent(
   const handledInlineToolResultCallIds = new Set<string>();
   const inlineAuthorizationResults: TypedToolResult<ToolSet>[] = [];
   const inlineToolResultParts: InlineToolResultPart[] = [];
+  const trailingInlineToolResultParts: InlineToolResultPart[] = [];
 
   const flushCurrentMessage = async (): Promise<void> => {
     if (currentMessage.length === 0) {
@@ -590,24 +593,11 @@ export async function emitStreamContent(
         if (toolError.providerExecuted === true) {
           await collectProviderToolCall(toolError);
           await providerActionBatch.flush();
-          await emitActionResult(
-            createRuntimeToolResultFromValue({
-              callId: toolError.toolCallId,
-              isError: true,
-              output: toError(toolError.error),
-              toolName: toolError.toolName,
-            }),
-          );
+          await emitActionResult(createRuntimeToolResultFromToolError(toolError));
         } else if (emittedActionCallIds.has(toolError.toolCallId)) {
-          await emitActionResult(
-            createRuntimeToolResultFromValue({
-              callId: toolError.toolCallId,
-              isError: true,
-              output: toError(toolError.error),
-              toolName: toolError.toolName,
-            }),
-          );
+          await emitActionResult(createRuntimeToolResultFromToolError(toolError));
           handledInlineToolResultCallIds.add(toolError.toolCallId);
+          trailingInlineToolResultParts.push(createToolResultMessagePartFromToolError(toolError));
         }
         break;
       }
@@ -675,6 +665,7 @@ export async function emitStreamContent(
     handledInlineToolResultCallIds,
     inlineAuthorizationResults,
     inlineToolResultParts,
+    trailingInlineToolResultParts,
   };
 }
 

@@ -182,7 +182,7 @@ export function composeOnboardingBoxes(options: OnboardingBoxesOptions): AnySetu
     // The complete-setup execution phase: everything a one-shot run defers.
     ...[
       detectAiGateway(),
-      linkVercelProject({ prompter: options.prompter }),
+      linkVercelProject({ prompter: options.prompter, headless: options.headless }),
       applyAiGatewayCredential({ prompter: options.prompter }),
       addChannels({
         asker,
