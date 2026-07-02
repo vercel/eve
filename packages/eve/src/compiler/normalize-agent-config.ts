@@ -11,6 +11,7 @@ import {
   isExperimentalCodexModel,
   type ExperimentalCodexModel,
 } from "#shared/codex-subscription-model.js";
+import { isLanguageModelInstance } from "#shared/language-model.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
@@ -193,26 +194,10 @@ async function normalizeAuthoredModelReference(
     );
   }
 
-  // While in TypeScript `input.value` is safe to use, we still validate below against runtime input.
+  // While in TypeScript `input.value` is safe to use, we still validate against runtime input.
   const languageModel = input.value;
-  const specificationVersion = languageModel.specificationVersion;
 
-  if (
-    specificationVersion !== "v2" &&
-    specificationVersion !== "v3" &&
-    specificationVersion !== "v4"
-  ) {
-    throw new Error(
-      `Expected the authored agent config export "${source.exportName ?? "default"}" from "${input.sourcePath ?? source.logicalPath}" to provide a valid AI SDK language model.`,
-    );
-  }
-
-  if (
-    typeof languageModel.provider !== "string" ||
-    typeof languageModel.modelId !== "string" ||
-    typeof languageModel.doGenerate !== "function" ||
-    typeof languageModel.doStream !== "function"
-  ) {
+  if (!isLanguageModelInstance(languageModel)) {
     throw new Error(
       `Expected the authored agent config export "${source.exportName ?? "default"}" from "${input.sourcePath ?? source.logicalPath}" to provide a valid AI SDK language model.`,
     );

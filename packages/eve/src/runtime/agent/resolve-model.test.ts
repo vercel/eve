@@ -92,6 +92,30 @@ describe("resolveRuntimeModelReference", () => {
         },
         { moduleMap: {} as CompiledModuleMap, nodeId: undefined },
       ),
-    ).rejects.toThrow("deployable fallback model");
+    ).rejects.toThrow("deployable experimental_codex fallback");
+  });
+
+  it("rejects a source-backed experimental_codex fallback that is not a language model", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+
+    // Hand-built descriptor: the factory types fallback as LanguageModel, but
+    // a reloaded module can carry anything at runtime.
+    mocks.loadResolvedModuleExport.mockResolvedValue({
+      model: {
+        kind: "eve.experimental-codex-model",
+        model: "gpt-5.5",
+        fallback: { specificationVersion: "v1" },
+      },
+    });
+
+    await expect(
+      resolveRuntimeModelReference(
+        {
+          id: "openai/gpt-5.5",
+          source: { sourceKind: "module", logicalPath: "agent.ts", sourceId: "agent.ts" },
+        },
+        { moduleMap: {} as CompiledModuleMap, nodeId: undefined },
+      ),
+    ).rejects.toThrow("deployable experimental_codex fallback");
   });
 });
