@@ -1,8 +1,6 @@
 import { Params, VertexInput, VertexOutput, glass_vs_main, is_back_facing_to_camera } from "../shared/glass-common.wgsl";
 
 @group(0) @binding(0) var<uniform> params: Params;
-@group(0) @binding(1) var studioCube: texture_2d_array<f32>;
-@group(0) @binding(2) var studioSampler: sampler;
 
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {

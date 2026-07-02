@@ -25,12 +25,21 @@ export type MeshData = {
 
 export type EveMaterial = "glass" | "normal" | "camera reflected normal" | "metallic" | "back-albedo" | "back-depth" | "thickness";
 
+export type ImprintRenderOptions = {
+  progress?: number;
+  gridScaleMultiplier?: number;
+  glyphScale?: number;
+  time?: number;
+  mouse?: readonly [number, number];
+};
+
 export type RenderControls = {
   yaw: number;
   pitch: number;
   radius: number;
   fov: number;
   envYaw: number;
+  envPitch: number;
   insideRendering: boolean;
   outsideRendering: boolean;
   material: EveMaterial;
@@ -53,14 +62,19 @@ export type StudioCubemap = {
   faceParams: Buffer;
 };
 
-const PARAMS_BYTE_SIZE = 144;
-const CUBE_PARAMS_BYTE_SIZE = 16;
+const PARAMS_BYTE_SIZE = 176;
+const CUBE_MAX_LIGHTS = 16;
+const CUBE_LIGHT_FLOAT_COUNT = 12;
+const CUBE_PARAMS_FLOAT_COUNT = 4 + CUBE_MAX_LIGHTS * CUBE_LIGHT_FLOAT_COUNT;
+const CUBE_PARAMS_BYTE_SIZE = CUBE_PARAMS_FLOAT_COUNT * Float32Array.BYTES_PER_ELEMENT;
 export const CUBE_SIZE = 256;
 export const CUBE_FACE_COUNT = 6;
 export const CUBE_FORMAT: GPUTextureFormat = "rgba16float";
 export const BLOOM_RADIUS = 16;
 export const SCENE_FORMAT: GPUTextureFormat = "rgba16float";
 export const BLOOM_STRENGTH = 0.85;
+export const BLOOM_STRENGTH_OFF = BLOOM_STRENGTH;
+export const BLOOM_STRENGTH_ON = BLOOM_STRENGTH_OFF * 0.25;
 export const BLOOM_THRESHOLD = 0;
 const BACK_DEPTH_FORMAT: GPUTextureFormat = "depth32float";
 
@@ -78,14 +92,49 @@ const MATERIAL_KIND: Record<EveMaterial, number> = {
   "back-depth": 0,
   thickness: 4,
 };
-const CAMERA_NEAR = 0.05;
-const CAMERA_FAR = 20;
+const CAMERA_CLIP_PADDING = 0.02;
+export const BASELINE_CAMERA_RADIUS = 1.9;
+export const BASELINE_CAMERA_FOV = 35;
+export const DEFAULT_CAMERA_FOV = BASELINE_CAMERA_FOV / 2;
 const EVE_THICKNESS_SCALE_MULTIPLIER = 1.3;
 const PREVIEW_BACK_ALBEDO = 0;
 const PREVIEW_BACK_DEPTH = 1;
+const DEFAULT_IMPRINT_CELL_SIZE = 16;
+const DEFAULT_IMPRINT_GLYPH_SCALE = 1.35;
 
 type Mat4 = Float32Array;
 type Vec3 = [number, number, number];
+
+type EnvLightConfig = {
+  name: string;
+  position: readonly [number, number, number];
+  color: string;
+  intensity: number;
+  radius: number;
+  softness: number;
+  luminance: number;
+};
+
+// Editable environment-light knobs. Hex colors are sRGB and are converted to
+// linear values before the one-time cubemap bake. Light and dark intentionally
+// start as duplicated white studio setups so each theme can be tuned independently.
+export const EVE_LIGHT_ENV_LIGHTS = [
+  { name: "top-left high", position: [-1.4, 2, -0.4], color: "#FFFFFF", intensity: 1, radius: 0.3, softness: 0.02, luminance: 10 },
+  { name: "front high", position: [0, 0, 2], color: "#FFFFFF", intensity: 2, radius: 0.8, softness: 0.02, luminance: 1 },
+  { name: "back high", position: [1, 0, -2], color: "#FFFFFF", intensity: 10, radius: 0.5, softness: 0.1, luminance: 0.2 },
+  { name: "back-right", position: [0.4, -0.3, -1], color: "#FFFFFF", intensity: 1, radius: 0.1, softness: 1, luminance: 0.5 },
+  { name: "front-bottom-right", position: [1, -2, -0.5], color: "#FFFFFF", intensity: 1, radius: 0.2, softness: 1, luminance: 5 },
+  { name: "front-bottom-left", position: [-0.3, -0.2, -0.2], color: "#FFFFFF", intensity: 1, radius: 0.3, softness: 4, luminance: 3 },
+] as const satisfies readonly EnvLightConfig[];
+
+export const EVE_DARK_ENV_LIGHTS = [
+  { name: "top-left high", position: [-1.3, 2, -0.3], color: "#FFFFFF", intensity: 2, radius: 0.3, softness: 0.02, luminance: 10 },
+  { name: "front-left high", position: [-0.4, 1, 1], color: "#FFFFFF", intensity: 1, radius: 0.9, softness: 0.02, luminance: 1 },
+  { name: "front-right", position: [5, 0, 10], color: "#FFFFFF", intensity: 1.5, radius: 0.5, softness: 0.1, luminance: 0.2 },
+  { name: "back-right", position: [0.4, -0.3, -1], color: "#FFFFFF", intensity: 5, radius: 0.1, softness: 1, luminance: 0.5 },
+  { name: "front-bottom-right", position: [1, -2, -0.5], color: "#FFFFFF", intensity: 1, radius: 0.2, softness: 1, luminance: 5 },
+  { name: "front-bottom-left", position: [-0.3, -0.2, -0.2], color: "#FFFFFF", intensity: 1, radius: 0.3, softness: 4, luminance: 3 },
+] as const satisfies readonly EnvLightConfig[];
 
 export function createEve5Renderer(
   device: Device,
@@ -93,11 +142,12 @@ export function createEve5Renderer(
   mesh: MeshData,
   options: { thicknessScale?: number; theme?: "light" | "dark"; paddingRadius?: number; bloom?: boolean } = {},
 ) {
-  const studioCubemap = createStudioCubemap(device);
-  renderStudioCubemap(device, studioCubemap);
+  const studioCubemap = createStudioCubemap(device, "eve-5-studio-hdr-cubemap");
+  const isLight = options.theme === "light";
+  const envLights = isLight ? EVE_LIGHT_ENV_LIGHTS : EVE_DARK_ENV_LIGHTS;
+  renderStudioCubemap(device, studioCubemap, envLights);
   const orbitTarget = meshOrbitTarget(mesh);
   const thicknessScale = options.thicknessScale ?? meshThicknessScale(mesh.bounds);
-  const isLight = options.theme === "light";
   const paddingRadius = options.paddingRadius ?? BLOOM_RADIUS;
   const bloomEnabled = options.bloom ?? true;
 
@@ -263,7 +313,6 @@ export function createEve5Renderer(
     size: 16,
     usage: ["uniform", "copy_dst"],
   });
-  compositeParamsBuffer.write(new Float32Array([bloomEnabled ? BLOOM_STRENGTH : 0, 0, 0, 0]));
   const blurSampler = device.gpu.createSampler({
     label: "eve-5-bloom-sampler",
     magFilter: "linear",
@@ -285,18 +334,27 @@ export function createEve5Renderer(
   });
   let bloomTargets: BloomTargets | undefined;
 
-  const writeParams = (target: { buffer: Buffer }, controls: RenderControls, logicalWidth: number, logicalHeight: number, passKind: number) => {
-    const padded = getPaddedRenderSize(logicalWidth, logicalHeight, paddingRadius);
+  const writeParams = (
+    target: { buffer: Buffer },
+    controls: RenderControls,
+    logicalWidth: number,
+    logicalHeight: number,
+    passKind: number,
+    projectionPaddingRadius = paddingRadius,
+    imprint: ImprintRenderOptions = {},
+  ) => {
+    const padded = getPaddedRenderSize(logicalWidth, logicalHeight, projectionPaddingRadius);
     const fovRad = degreesToRadians(controls.fov);
     const verticalScale = padded.height / logicalHeight;
     const fovEff = 2 * Math.atan(verticalScale * Math.tan(fovRad * 0.5));
     const aspect = padded.width / padded.height;
     const eye = orbitEye(orbitTarget, controls.radius, controls.yaw, controls.pitch);
-    const proj = perspective(fovEff, aspect, CAMERA_NEAR, CAMERA_FAR);
+    const basis = cameraBasis(eye, orbitTarget);
+    const clip = cameraClipPlanes(mesh.bounds, eye, basis.forward);
+    const proj = perspective(fovEff, aspect, clip.near, clip.far);
     const view = lookAt(eye, orbitTarget, [0, 1, 0]);
     const viewProj = multiply(proj, view);
-    const basis = cameraBasis(eye, orbitTarget);
-    const data = new Float32Array(36);
+    const data = new Float32Array(44);
     data.set(viewProj, 0);
     data[16] = eye[0];
     data[17] = eye[1];
@@ -316,6 +374,19 @@ export function createEve5Renderer(
     data[31] = MATERIAL_KIND[controls.material];
     data[32] = thicknessScale;
     data[33] = controls.envYaw;
+    data[34] = controls.envPitch;
+    data[35] = isLight ? 0 : 1;
+    const distToFrontPlane = Math.max(0.001, -dot(eye, basis.forward));
+    const pxPerModelUnit = padded.height / (2 * distToFrontPlane * Math.tan(fovEff * 0.5));
+    const gridScale = (pxPerModelUnit / DEFAULT_IMPRINT_CELL_SIZE) * Math.max(0.001, imprint.gridScaleMultiplier ?? 1);
+    data[36] = Math.max(0, Math.min(1, imprint.progress ?? 0));
+    data[37] = gridScale;
+    data[38] = Math.max(0.1, imprint.glyphScale ?? DEFAULT_IMPRINT_GLYPH_SCALE);
+    data[39] = imprint.time ?? 0;
+    data[40] = imprint.mouse?.[0] ?? 0;
+    data[41] = imprint.mouse?.[1] ?? 0;
+    data[42] = 0;
+    data[43] = 0;
     target.buffer.write(data);
   };
 
@@ -341,8 +412,15 @@ export function createEve5Renderer(
     return bloomTargets;
   };
 
-  const renderBackMaterial = (target: GPUTextureView, depth: GPUTextureView, controls: RenderControls, logicalWidth: number, logicalHeight: number) => {
-    writeParams(insideParams, controls, logicalWidth, logicalHeight, PASS_INSIDE);
+  const renderBackMaterial = (
+    target: GPUTextureView,
+    depth: GPUTextureView,
+    controls: RenderControls,
+    logicalWidth: number,
+    logicalHeight: number,
+    projectionPaddingRadius = paddingRadius,
+  ) => {
+    writeParams(insideParams, controls, logicalWidth, logicalHeight, PASS_INSIDE, projectionPaddingRadius);
     const pass = new RenderPass(device, {
       label: "eve-5-back-material-pass",
       colorAttachments: [{ view: target, loadOp: "clear", storeOp: "store", clearValue: [0, 0, 0, 1] }],
@@ -363,8 +441,15 @@ export function createEve5Renderer(
     pass.end();
   };
 
-  const renderBackDepth = (target: GPUTextureView, depth: GPUTextureView, controls: RenderControls, logicalWidth: number, logicalHeight: number) => {
-    writeParams(backDepthParams, controls, logicalWidth, logicalHeight, PASS_INSIDE);
+  const renderBackDepth = (
+    target: GPUTextureView,
+    depth: GPUTextureView,
+    controls: RenderControls,
+    logicalWidth: number,
+    logicalHeight: number,
+    projectionPaddingRadius = paddingRadius,
+  ) => {
+    writeParams(backDepthParams, controls, logicalWidth, logicalHeight, PASS_INSIDE, projectionPaddingRadius);
     const pass = new RenderPass(device, {
       label: "eve-5-back-depth-pass",
       colorAttachments: [{ view: target, loadOp: "clear", storeOp: "store", clearValue: [0, 0, 0, 1] }],
@@ -384,11 +469,20 @@ export function createEve5Renderer(
     pass.end();
   };
 
-  const renderScene = (view: GPUTextureView, backMaterial: GPUTexture, backDepth: GPUTexture, controls: RenderControls, logicalWidth: number, logicalHeight: number) => {
-    writeParams(outsideParams, controls, logicalWidth, logicalHeight, PASS_OUTSIDE);
-    writeParams(wireParams, controls, logicalWidth, logicalHeight, PASS_WIREFRAME);
-    writeParams(envBgParams, controls, logicalWidth, logicalHeight, PASS_OUTSIDE);
-    writeParams(opaqueOutsideParams, controls, logicalWidth, logicalHeight, PASS_OUTSIDE);
+  const renderScene = (
+    view: GPUTextureView,
+    backMaterial: GPUTexture,
+    backDepth: GPUTexture,
+    controls: RenderControls,
+    logicalWidth: number,
+    logicalHeight: number,
+    projectionPaddingRadius = paddingRadius,
+    imprint: ImprintRenderOptions = {},
+  ) => {
+    writeParams(outsideParams, controls, logicalWidth, logicalHeight, PASS_OUTSIDE, projectionPaddingRadius, imprint);
+    writeParams(wireParams, controls, logicalWidth, logicalHeight, PASS_WIREFRAME, projectionPaddingRadius);
+    writeParams(envBgParams, controls, logicalWidth, logicalHeight, PASS_OUTSIDE, projectionPaddingRadius);
+    writeParams(opaqueOutsideParams, controls, logicalWidth, logicalHeight, PASS_OUTSIDE, projectionPaddingRadius);
 
     const outsideBindGroup = createParamsBindGroup(
       device,
@@ -475,8 +569,16 @@ export function createEve5Renderer(
     pass.end();
   };
 
-  const renderThicknessDebug = (view: GPUTextureView, backMaterial: GPUTexture, backDepth: GPUTexture, controls: RenderControls, logicalWidth: number, logicalHeight: number) => {
-    writeParams(outsideParams, controls, logicalWidth, logicalHeight, PASS_OUTSIDE);
+  const renderThicknessDebug = (
+    view: GPUTextureView,
+    backMaterial: GPUTexture,
+    backDepth: GPUTexture,
+    controls: RenderControls,
+    logicalWidth: number,
+    logicalHeight: number,
+    projectionPaddingRadius = paddingRadius,
+  ) => {
+    writeParams(outsideParams, controls, logicalWidth, logicalHeight, PASS_OUTSIDE, projectionPaddingRadius);
     const outsideBindGroup = createParamsBindGroup(
       device,
       frontDisplayPipeline,
@@ -522,7 +624,8 @@ export function createEve5Renderer(
     pass.end();
   };
 
-  const renderComposite = (view: GPUTextureView, targets: BloomTargets, bloomTexture: GPUTexture = targets.vertical) => {
+  const renderComposite = (view: GPUTextureView, targets: BloomTargets, bloomTexture: GPUTexture = targets.vertical, strength = BLOOM_STRENGTH_OFF) => {
+    compositeParamsBuffer.write(new Float32Array([strength, 0, 0, 0]));
     const bindGroup = device.gpu.createBindGroup({
       label: "eve-5-bloom-composite-bind-group",
       layout: compositePipeline.getBindGroupLayout(0),
@@ -562,34 +665,39 @@ export function createEve5Renderer(
     pass.end();
   };
 
+  const renderGlassTarget = (target: GPUTextureView, controls: RenderControls, logicalWidth: number, logicalHeight: number, imprint: ImprintRenderOptions = {}) => {
+    const safeWidth = Math.max(1, Math.round(logicalWidth));
+    const safeHeight = Math.max(1, Math.round(logicalHeight));
+    const targets = ensureBloomTargets(safeWidth, safeHeight);
+    const backSurfaceDepthView = targets.backSurfaceDepth.createView();
+    renderBackMaterial(targets.backMaterial.createView(), backSurfaceDepthView, controls, safeWidth, safeHeight);
+    renderBackDepth(targets.backDepth.createView(), backSurfaceDepthView, controls, safeWidth, safeHeight);
+    if (controls.material === "back-albedo" || controls.material === "back-depth") {
+      renderTargetPreview(target, targets, controls);
+      return;
+    }
+    if (controls.material === "thickness") {
+      renderThicknessDebug(target, targets.backMaterial, targets.backDepth, controls, safeWidth, safeHeight);
+      return;
+    }
+    renderScene(targets.scene.createView(), targets.backMaterial, targets.backDepth, controls, safeWidth, safeHeight, paddingRadius, imprint);
+    if (isLight) {
+      renderLightComposite(target, targets);
+      return;
+    }
+    if (!bloomEnabled) {
+      renderComposite(target, targets, targets.scene, 0);
+      return;
+    }
+    const effectiveBloomStrength = mix(BLOOM_STRENGTH_OFF, BLOOM_STRENGTH_ON, clampUnit(imprint.progress ?? 0));
+    renderBlur(targets.scene, targets.horizontal, [1, 0], true);
+    renderBlur(targets.horizontal, targets.vertical, [0, 1], false);
+    renderComposite(target, targets, targets.vertical, effectiveBloomStrength);
+  };
+
   return {
-    render(target: GPUTextureView, controls: RenderControls, logicalWidth: number, logicalHeight: number) {
-      const safeWidth = Math.max(1, Math.round(logicalWidth));
-      const safeHeight = Math.max(1, Math.round(logicalHeight));
-      const targets = ensureBloomTargets(safeWidth, safeHeight);
-      const backSurfaceDepthView = targets.backSurfaceDepth.createView();
-      renderBackMaterial(targets.backMaterial.createView(), backSurfaceDepthView, controls, safeWidth, safeHeight);
-      renderBackDepth(targets.backDepth.createView(), backSurfaceDepthView, controls, safeWidth, safeHeight);
-      if (controls.material === "back-albedo" || controls.material === "back-depth") {
-        renderTargetPreview(target, targets, controls);
-        return;
-      }
-      if (controls.material === "thickness") {
-        renderThicknessDebug(target, targets.backMaterial, targets.backDepth, controls, safeWidth, safeHeight);
-        return;
-      }
-      renderScene(targets.scene.createView(), targets.backMaterial, targets.backDepth, controls, safeWidth, safeHeight);
-      if (isLight) {
-        renderLightComposite(target, targets);
-        return;
-      }
-      if (!bloomEnabled) {
-        renderComposite(target, targets, targets.scene);
-        return;
-      }
-      renderBlur(targets.scene, targets.horizontal, [1, 0], true);
-      renderBlur(targets.horizontal, targets.vertical, [0, 1], false);
-      renderComposite(target, targets);
+    render(target: GPUTextureView, controls: RenderControls, logicalWidth: number, logicalHeight: number, imprint?: ImprintRenderOptions) {
+      renderGlassTarget(target, controls, logicalWidth, logicalHeight, imprint);
     },
     dispose() {
       gpuMesh.vertexBuffer.destroy();
@@ -659,9 +767,9 @@ function createBackDepthTexture(device: Device, label: string, width: number, he
   });
 }
 
-export function createStudioCubemap(device: Device): StudioCubemap {
+export function createStudioCubemap(device: Device, label = "eve-5-studio-hdr-cubemap"): StudioCubemap {
   const texture = device.gpu.createTexture({
-    label: "eve-5-studio-hdr-cubemap",
+    label,
     size: { width: CUBE_SIZE, height: CUBE_SIZE, depthOrArrayLayers: CUBE_FACE_COUNT },
     dimension: "2d",
     format: CUBE_FORMAT,
@@ -683,7 +791,7 @@ export function createStudioCubemap(device: Device): StudioCubemap {
   return { texture, view, sampler, faceParams };
 }
 
-export function renderStudioCubemap(device: Device, cubemap: StudioCubemap) {
+export function renderStudioCubemap(device: Device, cubemap: StudioCubemap, lights: readonly EnvLightConfig[], globalIntensity = 1) {
   const pipeline = createRenderPipeline(device, {
     label: "eve-5-studio-cubemap-bake-pipeline",
     shader: device.createShader(compile(eveCubemapWgsl)),
@@ -699,7 +807,7 @@ export function renderStudioCubemap(device: Device, cubemap: StudioCubemap) {
   });
 
   for (let face = 0; face < CUBE_FACE_COUNT; face += 1) {
-    cubemap.faceParams.write(new Float32Array([face, 0, 0, 0]));
+    cubemap.faceParams.write(cubeParamsData(face, lights, globalIntensity));
     const pass = new RenderPass(device, {
       label: `eve-5-studio-cubemap-face-${face}`,
       colorAttachments: [
@@ -716,6 +824,48 @@ export function renderStudioCubemap(device: Device, cubemap: StudioCubemap) {
     pass.draw(3);
     pass.end();
   }
+}
+
+function cubeParamsData(face: number, lights: readonly EnvLightConfig[], globalIntensity: number) {
+  if (lights.length > CUBE_MAX_LIGHTS) {
+    throw new Error(`Studio cubemap supports up to ${CUBE_MAX_LIGHTS} lights, received ${lights.length}`);
+  }
+
+  const data = new Float32Array(CUBE_PARAMS_FLOAT_COUNT);
+  data[0] = face;
+  data[1] = lights.length;
+
+  lights.forEach((light, index) => {
+    const [r, g, b] = lightColorLinear(light);
+    const offset = 4 + index * CUBE_LIGHT_FLOAT_COUNT;
+    data[offset] = light.position[0];
+    data[offset + 1] = light.position[1];
+    data[offset + 2] = light.position[2];
+    data[offset + 3] = light.radius;
+    data[offset + 4] = r;
+    data[offset + 5] = g;
+    data[offset + 6] = b;
+    data[offset + 7] = light.intensity * globalIntensity;
+    data[offset + 8] = light.softness;
+    data[offset + 9] = light.luminance;
+  });
+
+  return data;
+}
+
+function lightColorLinear(light: EnvLightConfig): Vec3 {
+  return srgbHexToLinear(light.color);
+}
+
+function srgbHexToLinear(hex: string): Vec3 {
+  const normalized = hex.replace(/^#/, "");
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) {
+    throw new Error(`Expected a 6-digit sRGB hex color, received ${hex}`);
+  }
+  return [0, 2, 4].map((offset) => {
+    const channel = Number.parseInt(normalized.slice(offset, offset + 2), 16) / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  }) as Vec3;
 }
 
 function createEnvParamsBinding(device: Device, pipeline: GPURenderPipeline, cubemap: StudioCubemap, label: string) {
@@ -895,6 +1045,31 @@ export function meshThicknessScale(bounds: Bounds) {
   return Math.max(normalizedZExtent * EVE_THICKNESS_SCALE_MULTIPLIER, 0.000001);
 }
 
+function cameraClipPlanes(bounds: Bounds, eye: Vec3, forward: Vec3) {
+  const corners: Vec3[] = [
+    [bounds.min[0], bounds.min[1], bounds.min[2]],
+    [bounds.min[0], bounds.min[1], bounds.max[2]],
+    [bounds.min[0], bounds.max[1], bounds.min[2]],
+    [bounds.min[0], bounds.max[1], bounds.max[2]],
+    [bounds.max[0], bounds.min[1], bounds.min[2]],
+    [bounds.max[0], bounds.min[1], bounds.max[2]],
+    [bounds.max[0], bounds.max[1], bounds.min[2]],
+    [bounds.max[0], bounds.max[1], bounds.max[2]],
+  ];
+  let near = Infinity;
+  let far = -Infinity;
+  for (const corner of corners) {
+    const position = normalizePositionForGpu(corner, bounds);
+    const depth = dot(sub(position, eye), forward);
+    near = Math.min(near, depth);
+    far = Math.max(far, depth);
+  }
+  return {
+    near: Math.max(0.001, near - CAMERA_CLIP_PADDING),
+    far: Math.max(0.002, far + CAMERA_CLIP_PADDING),
+  };
+}
+
 function cameraAxisDepthRange(bounds: Bounds, forward: Vec3) {
   const corners: Vec3[] = [
     [bounds.min[0], bounds.min[1], bounds.min[2]],
@@ -1008,6 +1183,14 @@ function dot(a: Vec3, b: Vec3): number {
   return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
 
+function clampUnit(value: number) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function mix(from: number, to: number, amount: number) {
+  return from + (to - from) * amount;
+}
+
 function length(a: Vec3): number {
   return Math.hypot(a[0], a[1], a[2]);
 }
@@ -1015,6 +1198,12 @@ function length(a: Vec3): number {
 function normalize(a: Vec3): Vec3 {
   const l = length(a) || 1;
   return [a[0] / l, a[1] / l, a[2] / l];
+}
+
+export function cameraRadiusForFov(fovDegrees: number, baselineRadius = BASELINE_CAMERA_RADIUS, baselineFovDegrees = BASELINE_CAMERA_FOV) {
+  const baselineHalfFov = degreesToRadians(baselineFovDegrees) * 0.5;
+  const targetHalfFov = degreesToRadians(fovDegrees) * 0.5;
+  return (baselineRadius * Math.tan(baselineHalfFov)) / Math.tan(targetHalfFov);
 }
 
 function degreesToRadians(degrees: number) {

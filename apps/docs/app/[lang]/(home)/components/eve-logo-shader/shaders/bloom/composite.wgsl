@@ -18,6 +18,7 @@ struct CompositeParams {
 @group(0) @binding(3) var<uniform> params: CompositeParams;
 
 const DISPLAY_GAMMA = 2.2;
+const BLOOM_RADIAL_FULL_RADIUS = 0.55;
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
@@ -51,6 +52,9 @@ fn linear_to_display(color: vec3f) -> vec3f {
 fn fs_main(input: VertexOutput) -> @location(0) vec4f {
   let scene = textureSample(sceneTexture, texSampler, input.uv).rgb;
   let bloom = textureSample(bloomTexture, texSampler, input.uv).rgb;
-  let linearColor = scene + bloom * params.strength;
+  let sceneSize = vec2f(textureDimensions(sceneTexture));
+  let aspectCorrectUv = (input.uv - vec2f(0.5)) * vec2f(sceneSize.x / max(sceneSize.y, 1.0), 1.0);
+  let bloomRadial = smoothstep(0.0, BLOOM_RADIAL_FULL_RADIUS, length(aspectCorrectUv));
+  let linearColor = scene + bloom * params.strength * bloomRadial;
   return vec4f(linear_to_display(aces_tonemap(linearColor)), 1.0);
 }
