@@ -119,7 +119,7 @@ export interface AgentLimitsDefinition {
    * parallel calls alike). Calls beyond the limit fail with an error result
    * instead of starting a child session.
    *
-   * @default 10
+   * @default 100
    */
   readonly maxSubagents?: number;
   /**

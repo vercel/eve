@@ -95,7 +95,7 @@ An experimental `Workflow` tool ships but stays off by default. To turn it on, r
 export { ExperimentalWorkflow as default } from "eve/tools";
 ```
 
-With it on, the model can orchestrate the agent's own subagents from model-authored JavaScript, all as one durable step. The tool is root-only — delegated subagent sessions never see it — and one program may dispatch at most `limits.maxSubagents` subagent calls (default 10). See [Dynamic workflows](../guides/dynamic-workflows).
+With it on, the model can orchestrate the agent's own subagents from model-authored JavaScript, all as one durable step. The tool is root-only — delegated subagent sessions never see it — and one program may dispatch at most `limits.maxSubagents` subagent calls (default 100). See [Dynamic workflows](../guides/dynamic-workflows).
 
 ## What to read next
 

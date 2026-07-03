@@ -18,7 +18,7 @@ describe("workflowToolDescription", () => {
   it("advertises the default subagent-call budget", () => {
     const description = workflowToolDescription(["agent"]);
 
-    expect(description).toContain("at most 10 agent calls");
+    expect(description).toContain("at most 100 agent calls");
     expect(description).toContain("WORKFLOW_SUBAGENT_LIMIT_REACHED");
   });
 

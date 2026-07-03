@@ -5,7 +5,7 @@ import type { WorkflowSandboxInterrupt } from "#shared/workflow-sandbox.js";
  * Default for `limits.maxSubagents`: the maximum number of subagent (and
  * remote-agent) calls one `Workflow` tool invocation may dispatch.
  */
-export const DEFAULT_WORKFLOW_MAX_SUBAGENTS = 10;
+export const DEFAULT_WORKFLOW_MAX_SUBAGENTS = 100;
 
 /**
  * Partition of one workflow interrupt's pending runtime actions against the

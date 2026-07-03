@@ -55,7 +55,7 @@ A workflow reaches only this agent's own agents: the built-in `agent` (a copy of
 
 Workflow orchestration is capped in two independent ways.
 
-**Per-program call budget.** One Workflow program may dispatch at most `limits.maxSubagents` subagent calls in total, counted across the whole program — sequential and parallel calls alike. The default is 10. Calls beyond the budget do not start a child session; they resolve inside the program with a `WORKFLOW_SUBAGENT_LIMIT_REACHED` error result, and the budget is stated in the tool's description so the model sizes its fan-out to fit.
+**Per-program call budget.** One Workflow program may dispatch at most `limits.maxSubagents` subagent calls in total, counted across the whole program — sequential and parallel calls alike. The default is 100. Calls beyond the budget do not start a child session; they resolve inside the program with a `WORKFLOW_SUBAGENT_LIMIT_REACHED` error result, and the budget is stated in the tool's description so the model sizes its fan-out to fit.
 
 ```ts title="agent/agent.ts"
 export default defineAgent({

@@ -330,7 +330,7 @@ export interface EnableWorkflowToolSentinel {
  *
  * Only the root session sees the `Workflow` tool — delegated subagent sessions
  * never get it — and one Workflow program may dispatch at most
- * `limits.maxSubagents` subagent calls (default 10).
+ * `limits.maxSubagents` subagent calls (default 100).
  *
  * The capability is experimental. The resulting model-facing tool is still
  * called `Workflow`.
