@@ -46,14 +46,26 @@ export async function resolveConnectionDefinition(
       name: definition.connectionName,
     } as const;
 
+    // Prefer the URL produced by the re-imported module over the
+    // manifest snapshot. Authored connections may compute the URL from
+    // ambient state (env vars injected only at runtime, most notably
+    // Vercel Services bindings whose target is unresolvable at build).
+    // The compiler still validated a URL at build; using the runtime
+    // value keeps env-driven and binding-driven endpoints correct
+    // without requiring authors to opt into a resolver form.
+    const runtimeUrl =
+      typeof resolvedRecord.url === "string" && resolvedRecord.url.length > 0
+        ? resolvedRecord.url
+        : definition.url;
+
     const sourceKey = `connection-source:${definition.sourceId}`;
     stampDefinitionKey(resolvedRecord, sourceKey);
     registerDefinitionSource(sourceKey, sourceEntry);
-    // Use the compiled `url` (the MCP endpoint or OpenAPI base URL) as
-    // the secondary key so it matches the authoring-time key stamped by
-    // the `define*` factory for both protocols. The live record only
-    // carries `url` for MCP connections.
-    registerDefinitionSource(`connection:${definition.url}`, sourceEntry);
+    // Use the runtime URL as the secondary key so it matches the
+    // authoring-time key stamped by the `define*` factory (which runs
+    // on the same re-imported module). The live record only carries
+    // `url` for MCP connections.
+    registerDefinitionSource(`connection:${runtimeUrl}`, sourceEntry);
 
     const hasAuth = resolvedRecord.auth !== undefined;
     const hasHeaders = resolvedRecord.headers !== undefined;
@@ -84,7 +96,7 @@ export async function resolveConnectionDefinition(
       protocol: definition.protocol,
       sourceId: definition.sourceId,
       sourceKind: "module",
-      url: definition.url,
+      url: runtimeUrl,
     };
 
     if (hasAuth) {
