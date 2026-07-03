@@ -5,7 +5,11 @@ import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { createDevelopmentServer, type DevelopmentServer } from "#internal/nitro/host.js";
 import { createEvalClient } from "#evals/cli/eval-client.js";
-import { discoverAndImportEvals, discoverEvalConfig } from "#evals/runner/discover.js";
+import {
+  discoverAndImportEvals,
+  discoverEvalConfig,
+  findMisplacedEvalDirs,
+} from "#evals/runner/discover.js";
 import { runEvals } from "#evals/runner/run-evals.js";
 import { ConsoleReporter } from "#evals/runner/reporters/console.js";
 import { JUnit } from "#evals/runner/reporters/junit.js";
@@ -48,7 +52,15 @@ export async function runEvalCommand(
   const discovered = await discoverAndImportEvals(appRoot, requestedEvalIds);
 
   if (discovered.length === 0) {
-    if (requestedEvalIds) {
+    const misplaced = await findMisplacedEvalDirs(appRoot);
+    if (misplaced.length > 0) {
+      logger.error(
+        "No evals found under evals/, but eval files are present inside agent/:\n" +
+          misplaced.map((dir) => `  - ${dir}`).join("\n") +
+          "\neve eval only scans the top-level evals/ directory (a sibling of agent/). " +
+          "Move these files there.",
+      );
+    } else if (requestedEvalIds) {
       logger.error(`No evals found matching: ${requestedEvalIds.join(", ")}`);
     } else {
       logger.error("No evals found. Create files under evals/ with the *.eval.ts extension.");
