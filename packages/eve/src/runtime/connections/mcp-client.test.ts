@@ -343,6 +343,65 @@ describe("McpConnectionClient authorization recovery", () => {
   });
 });
 
+describe("McpConnectionClient tool input schema sanitization", () => {
+  beforeEach(() => {
+    createMCPClient.mockReset();
+  });
+
+  it("flattens a tool's top-level union input schema for both metadata and the SDK tool set", async () => {
+    const toolsFromDefinitions = vi.fn().mockReturnValue({});
+    const client = {
+      close: vi.fn(),
+      listTools: vi.fn().mockResolvedValue({
+        tools: [
+          {
+            description: "",
+            inputSchema: {
+              anyOf: [
+                { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+                { type: "object", properties: { email: { type: "string" } }, required: ["email"] },
+              ],
+            },
+            name: "union_tool",
+          },
+          {
+            description: "",
+            inputSchema: { type: "object", properties: { q: { type: "string" } } },
+            name: "plain_tool",
+          },
+        ],
+      }),
+      toolsFromDefinitions,
+    };
+    createMCPClient.mockResolvedValue(client);
+
+    const mcpClient = new McpConnectionClient(makeConnection());
+    const metadata = await mcpClient.getToolMetadata();
+
+    expect(metadata.find((m) => m.name === "union_tool")?.inputSchema).toEqual({
+      additionalProperties: true,
+      properties: { email: { type: "string" }, id: { type: "string" } },
+      type: "object",
+    });
+
+    // The SDK tool set is built from the sanitized definitions, so the raw
+    // top-level union never reaches the model request.
+    const firstCall = toolsFromDefinitions.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    const passedTools = (
+      firstCall![0] as { tools: { inputSchema: Record<string, unknown>; name: string }[] }
+    ).tools;
+    expect(passedTools.find((t) => t.name === "union_tool")?.inputSchema).not.toHaveProperty(
+      "anyOf",
+    );
+    // A conforming tool is passed through untouched.
+    expect(passedTools.find((t) => t.name === "plain_tool")?.inputSchema).toEqual({
+      properties: { q: { type: "string" } },
+      type: "object",
+    });
+  });
+});
+
 describe("passesToolFilter", () => {
   it("passes all tools when filter is undefined", () => {
     expect(passesToolFilter("any_tool", undefined)).toBe(true);

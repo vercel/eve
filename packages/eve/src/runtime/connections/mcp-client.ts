@@ -2,12 +2,14 @@ import { createMCPClient, type MCPClient } from "#compiled/@ai-sdk/mcp/index.js"
 import type { ToolSet } from "ai";
 
 import { buildCallbackContext } from "#context/build-callback-context.js";
+import { createLogger } from "#internal/logging.js";
 import { ConnectionAuthorizationRequiredError } from "#public/connections/errors.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
 import { isObject } from "#shared/guards.js";
+import { flattenTopLevelUnionToolInputSchema } from "#shared/json-schema.js";
 import type {
   AuthorizationDefinition,
   ConnectionClient,
@@ -17,6 +19,8 @@ import type {
   HeaderValue,
   ToolFilterDefinition,
 } from "#runtime/connections/types.js";
+
+const logger = createLogger("connection.mcp-client");
 
 interface McpToolCache {
   readonly metadata: readonly ConnectionToolMetadata[];
@@ -179,9 +183,11 @@ export class McpConnectionClient implements ConnectionClient {
     // elements are `Tool<unknown, CallToolResult>`. The AI SDK's
     // `ToolSet` constraint only admits `Tool<any | never, any | never>`,
     // so a single-hop cast is required — the runtime shape is identical.
-    const tools = client.toolsFromDefinitions({ tools: filteredTools }) as ToolSet;
+    const sanitizedTools = filteredTools.map((t) => this.#sanitizeToolInputSchema(t));
 
-    const metadata: ConnectionToolMetadata[] = filteredTools.map((t) => ({
+    const tools = client.toolsFromDefinitions({ tools: sanitizedTools }) as ToolSet;
+
+    const metadata: ConnectionToolMetadata[] = sanitizedTools.map((t) => ({
       annotations: t.annotations as Record<string, unknown> | undefined,
       description: t.description ?? "",
       inputSchema: (t.inputSchema ?? {}) as Record<string, unknown>,
@@ -193,6 +199,32 @@ export class McpConnectionClient implements ConnectionClient {
     }));
 
     return { metadata, tools };
+  }
+
+  /**
+   * Rewrites a tool whose input schema uses a top-level `oneOf`/`allOf`/`anyOf`
+   * union into a single object schema. Anthropic rejects such a schema and
+   * fails the *entire* model request with an HTTP 400 before the agent can
+   * respond, so one non-conforming third-party tool would otherwise take down
+   * every tool in the turn. Logs the offending connection + tool name so a
+   * recurrence is diagnosable at a glance instead of surfacing only as an
+   * opaque `tools.N.custom.input_schema` gateway rejection.
+   */
+  #sanitizeToolInputSchema<T extends { readonly name: string; readonly inputSchema?: unknown }>(
+    tool: T,
+  ): T {
+    if (!isObject(tool.inputSchema)) {
+      return tool;
+    }
+    const { changed, schema } = flattenTopLevelUnionToolInputSchema(tool.inputSchema);
+    if (!changed) {
+      return tool;
+    }
+    logger.warn(
+      "rewrote a connection tool's top-level union input schema — providers such as Anthropic reject oneOf/allOf/anyOf at the top level of a tool input_schema",
+      { connection: this.#connection.connectionName, tool: tool.name },
+    );
+    return { ...tool, inputSchema: schema };
   }
 
   async close(): Promise<void> {
