@@ -45,11 +45,11 @@ export const InstallSwitcher = ({
   >
     <CommandPromptList>
       <CommandPromptTrigger value="humans" onClickCapture={() => onValueChange?.("humans")}>
-        For humans
+        For you
       </CommandPromptTrigger>
       <CommandPromptTriggerDivider />
       <CommandPromptTrigger value="agents" onClickCapture={() => onValueChange?.("agents")}>
-        For agents
+        For your agent
       </CommandPromptTrigger>
     </CommandPromptList>
 
