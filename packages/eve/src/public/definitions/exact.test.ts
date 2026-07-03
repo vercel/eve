@@ -20,6 +20,7 @@ describe("definition helper exact inputs", () => {
         maxInputTokensPerSession: 200_000,
         maxOutputTokensPerSession: 20_000,
         maxSubagentDepth: 4,
+        maxSubagents: 6,
       },
       model: "anthropic/claude-sonnet-5",
     });
@@ -33,6 +34,7 @@ describe("definition helper exact inputs", () => {
     expect(agent.limits.maxInputTokensPerSession).toBe(200_000);
     expect(agent.limits.maxOutputTokensPerSession).toBe(20_000);
     expect(agent.limits.maxSubagentDepth).toBe(4);
+    expect(agent.limits.maxSubagents).toBe(6);
     expect(schedule.cron).toBe("0 9 * * *");
   });
 });

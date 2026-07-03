@@ -223,10 +223,18 @@ export interface ToolLoopHarnessConfig {
    * Exposes the `Workflow` orchestration tool — an isolated JavaScript sandbox
    * whose only callable operations are this agent's subagents and remote
    * agents. Resolved by the runtime from the agent's `workflowEnabled` flag
-   * in the compiled manifest.
+   * (set when `agent/tools/workflow.ts` re-exports the `ExperimentalWorkflow`
+   * marker). Only root sessions ever see the tool.
    * Defaults to `false`.
    */
   readonly workflow?: boolean;
+  /**
+   * Maximum subagent calls one `Workflow` invocation may dispatch, from the
+   * agent's `limits.maxSubagents`. Advertised in the tool description; the
+   * dispatch step enforces it. Defaults to
+   * {@link import("#harness/workflow-subagent-limit.js").DEFAULT_WORKFLOW_MAX_SUBAGENTS}.
+   */
+  readonly workflowMaxSubagents?: number;
   readonly handleEvent?: HandleEventFn;
   /**
    * Execution mode for the current harness.

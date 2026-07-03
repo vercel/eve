@@ -77,6 +77,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     abortSignal: input.abortSignal,
     capabilities: input.capabilities,
     workflow: input.node.agent.workflowEnabled === true,
+    workflowMaxSubagents: input.node.agent.config?.limits?.maxSubagents,
     handleEvent: input.handleEvent,
     mode: input.mode,
     onCompaction: preserveFrameworkStateOnCompaction,

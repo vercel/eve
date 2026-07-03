@@ -40,6 +40,7 @@ describe("normalizeAgentDefinition", () => {
           maxInputTokensPerSession: 200_000,
           maxOutputTokensPerSession: 20_000,
           maxSubagentDepth: 4,
+          maxSubagents: 6,
         },
       },
       FAILURE_MESSAGE,
@@ -49,6 +50,7 @@ describe("normalizeAgentDefinition", () => {
       maxInputTokensPerSession: 200_000,
       maxOutputTokensPerSession: 20_000,
       maxSubagentDepth: 4,
+      maxSubagents: 6,
     });
   });
 
@@ -58,6 +60,18 @@ describe("normalizeAgentDefinition", () => {
         {
           model: "openai/gpt-5.5",
           limits: { maxSubagentDepth },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
+  });
+
+  it.each([0, 1.5, -1, "6"])("rejects invalid workflow max subagents %j", (maxSubagents) => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          limits: { maxSubagents },
         },
         FAILURE_MESSAGE,
       ),
