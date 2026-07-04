@@ -30,6 +30,7 @@ import {
   type SessionDeliveryHook,
 } from "#execution/session-delivery-hook.js";
 import { readSerializedSubagentSessionDepth } from "#harness/subagent-depth.js";
+import { readSerializedSubagentMaxCallsPerStep } from "#harness/subagent-fanout.js";
 
 // workflow-entry.ts is the durable workflow body — the bundler rejects
 // node built-ins here, so `internal/logging.ts` cannot be imported.
@@ -90,6 +91,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     const { subagentDepth, subagentMaxDepth } = readSerializedSubagentSessionDepth(
       input.serializedContext,
     );
+    const subagentMaxCallsPerStep = readSerializedSubagentMaxCallsPerStep(input.serializedContext);
 
     const { state: sessionState } = await createSessionStep({
       compiledArtifactsSource: serializedBundle.source,
@@ -99,6 +101,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       rootSessionId: rootSessionIdFromParent,
       sessionId,
       subagentDepth,
+      subagentMaxCallsPerStep,
       subagentMaxDepth,
     });
 

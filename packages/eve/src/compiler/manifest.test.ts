@@ -28,6 +28,7 @@ describe("compiledAgentManifestSchema", () => {
         limits: {
           maxInputTokensPerSession: 200_000,
           maxOutputTokensPerSession: 20_000,
+          maxSubagentCallsPerStep: 6,
           maxSubagentDepth: 4,
         },
         model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
@@ -40,6 +41,7 @@ describe("compiledAgentManifestSchema", () => {
     expect(parsed.config.limits).toEqual({
       maxInputTokensPerSession: 200_000,
       maxOutputTokensPerSession: 20_000,
+      maxSubagentCallsPerStep: 6,
       maxSubagentDepth: 4,
     });
   });

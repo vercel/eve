@@ -34,6 +34,7 @@ import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js
 import { toErrorMessage } from "#shared/errors.js";
 import {
   createActionResultEvent,
+  createActionsRequestedEvent,
   createCompactionCompletedEvent,
   createCompactionRequestedEvent,
   createInputRequestedEvent,
@@ -131,6 +132,7 @@ import {
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
 import { ensureOtelIntegration } from "#harness/otel-integration.js";
 import { getAdvertisedTools } from "#harness/advertised-tools.js";
+import { applySubagentFanoutLimit } from "#harness/subagent-fanout.js";
 import {
   applyLastToolCacheBreakpoint,
   applySystemCacheBreakpoint,
@@ -739,16 +741,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       const executeModelCall = async (): Promise<HarnessStepResult> => {
         if (emit) {
-          const hiddenRuntimeActionToolNames = [...config.tools]
-            .filter(
-              ([name, tool]) =>
-                tool.runtimeAction !== undefined && advertisedHarnessTools.get(name) === undefined,
-            )
-            .map(([name]) => name);
           const excludedActionToolNames = new Set([
             ASK_QUESTION_TOOL_NAME,
             FINAL_OUTPUT_TOOL_NAME,
-            ...hiddenRuntimeActionToolNames,
+            ...getRuntimeActionToolNames(config.tools),
           ]);
           const streamResult = await agent.stream({
             abortSignal: config.abortSignal,
@@ -1526,6 +1522,18 @@ function buildEmptyResponseNudge(emptyDeliveryEnabled: boolean): string {
   return `${EMPTY_RESPONSE_NUDGE} If the current task explicitly requires conditional delivery and there is nothing to report, reply with exactly ${EMPTY_DELIVERY_SENTINEL}.`;
 }
 
+function getRuntimeActionToolNames(tools: HarnessToolMap): readonly string[] {
+  const names: string[] = [];
+
+  for (const [name, definition] of tools) {
+    if (definition.runtimeAction !== undefined) {
+      names.push(name);
+    }
+  }
+
+  return names;
+}
+
 /**
  * Recovers a model call that completed without content (see
  * {@link EmptyModelResponseError}) by reissuing the same call once, with
@@ -1675,6 +1683,27 @@ async function handleStepResult(input: {
     );
 
   if (pendingRuntimeActions.length > 0) {
+    const pendingSession: HarnessSession = { ...baseSession, history: [...promptMessages] };
+    const limitedRuntimeActions = applySubagentFanoutLimit({
+      actions: pendingRuntimeActions,
+      session: pendingSession,
+      step: {
+        stepIndex: emissionState.stepIndex,
+        turnId: emissionState.turnId,
+      },
+    });
+
+    if (emit !== undefined && limitedRuntimeActions.actions.length > 0) {
+      await emit(
+        createActionsRequestedEvent({
+          actions: limitedRuntimeActions.actions,
+          sequence: emissionState.sequence,
+          stepIndex: emissionState.stepIndex,
+          turnId: emissionState.turnId,
+        }),
+      );
+    }
+
     // Stamp the live emission state onto the parked session so the
     // resume turn is classified as a continuation (turnId set), not a
     // fresh turn. Every other park path does this; without it the
@@ -1686,13 +1715,15 @@ async function handleStepResult(input: {
       session: setHarnessEmissionState(
         setPendingRuntimeActionBatch({
           actions: pendingRuntimeActions,
+          dispatchActions: limitedRuntimeActions.actions,
           event: {
             sequence: emissionState.sequence,
             stepIndex: emissionState.stepIndex,
             turnId: emissionState.turnId,
           },
+          prefilledResults: limitedRuntimeActions.rejectedResults,
           responseMessages,
-          session: { ...baseSession, history: [...promptMessages] },
+          session: limitedRuntimeActions.session,
         }),
         emissionState,
       ),

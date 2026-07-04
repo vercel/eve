@@ -3,7 +3,12 @@ import { createHook } from "#compiled/@workflow/core/index.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 
 import type { HookPayload } from "#channel/types.js";
-import { ChannelRequestIdKey, SubagentDepthKey, SubagentMaxDepthKey } from "#context/keys.js";
+import {
+  ChannelRequestIdKey,
+  SubagentDepthKey,
+  SubagentMaxCallsPerStepKey,
+  SubagentMaxDepthKey,
+} from "#context/keys.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
@@ -240,6 +245,7 @@ describe("workflowEntry", () => {
       input: { message: "hello there" },
       serializedContext: createSerializedContext({
         [SubagentDepthKey.name]: 3,
+        [SubagentMaxCallsPerStepKey.name]: 6,
         [SubagentMaxDepthKey.name]: 4,
       }),
     });
@@ -247,6 +253,7 @@ describe("workflowEntry", () => {
     expect(createSessionStep).toHaveBeenCalledWith(
       expect.objectContaining({
         subagentDepth: 3,
+        subagentMaxCallsPerStep: 6,
         subagentMaxDepth: 4,
       }),
     );

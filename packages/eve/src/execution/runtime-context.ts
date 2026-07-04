@@ -12,6 +12,7 @@ import {
   ParentSessionKey,
   SessionCallbackKey,
   SubagentDepthKey,
+  SubagentMaxCallsPerStepKey,
   SubagentMaxDepthKey,
 } from "#context/keys.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
@@ -61,6 +62,10 @@ export function buildRunContext(input: {
 
   if (run.subagentDepth !== undefined) {
     ctx.set(SubagentDepthKey, run.subagentDepth);
+  }
+
+  if (run.subagentMaxCallsPerStep !== undefined) {
+    ctx.set(SubagentMaxCallsPerStepKey, run.subagentMaxCallsPerStep);
   }
 
   if (run.subagentMaxDepth !== undefined) {

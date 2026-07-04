@@ -101,6 +101,15 @@ export interface PublicAgentCompactionDefinition {
  */
 export interface AgentLimitsDefinition {
   /**
+   * Maximum number of subagent calls one model step may dispatch.
+   *
+   * Applies to the built-in `agent` tool, authored subagents, remote agents,
+   * and subagent calls launched by Workflow.
+   *
+   * @default 4
+   */
+  readonly maxSubagentCallsPerStep?: number;
+  /**
    * Maximum number of delegated child-session levels from the root session.
    *
    * Root sessions are depth 0. A `maxSubagentDepth` of 3 allows child sessions at

@@ -162,6 +162,7 @@ describe("buildSubagentRunInput", () => {
       ...makeSession(),
       sessionId: "intermediate-session",
       subagentDepth: 2,
+      subagentMaxCallsPerStep: 6,
       subagentMaxDepth: 4,
     };
     const { runInput } = buildRuntimeSubagentRunInput({
@@ -173,6 +174,7 @@ describe("buildSubagentRunInput", () => {
     });
 
     expect(runInput.subagentDepth).toBe(3);
+    expect(runInput.subagentMaxCallsPerStep).toBe(6);
     expect(runInput.subagentMaxDepth).toBe(4);
   });
 

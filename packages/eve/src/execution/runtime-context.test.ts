@@ -7,6 +7,7 @@ import {
   type SessionAuthContext,
   SessionIdKey,
   SessionKey,
+  SubagentMaxCallsPerStepKey,
   SubagentMaxDepthKey,
 } from "#context/keys.js";
 import { buildRunContext } from "#execution/runtime-context.js";
@@ -262,5 +263,21 @@ describe("buildRunContext", () => {
     });
 
     expect(ctx.require(SubagentMaxDepthKey)).toBe(4);
+  });
+
+  it("seeds inherited subagent max calls per step from the run input", () => {
+    const ctx = buildRunContext({
+      bundle: createMinimalBundle(),
+      run: {
+        auth: null,
+        adapter: { kind: "subagent" },
+        continuationToken: "t",
+        input: { message: "hi" },
+        mode: "task",
+        subagentMaxCallsPerStep: 6,
+      },
+    });
+
+    expect(ctx.require(SubagentMaxCallsPerStepKey)).toBe(6);
   });
 });

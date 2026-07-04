@@ -104,6 +104,25 @@ describe("createSessionStep", () => {
     expect(state.snapshot?.session.subagentMaxDepth).toBe(4);
   });
 
+  it("seeds subagent max calls per step from resolved agent config", async () => {
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      resolvedAgent: {
+        config: {
+          limits: { maxSubagentCallsPerStep: 6 },
+        },
+      },
+      turnAgent: TestTurnAgent,
+    } as never);
+
+    const { state } = await createSessionStep({
+      compiledArtifactsSource: { kind: "bundled" },
+      continuationToken: "http:test",
+      sessionId: "sess-root",
+    });
+
+    expect(state.snapshot?.session.subagentMaxCallsPerStep).toBe(6);
+  });
+
   it("keeps inherited subagent max depth when one is provided", async () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       resolvedAgent: {
@@ -122,5 +141,25 @@ describe("createSessionStep", () => {
     });
 
     expect(state.snapshot?.session.subagentMaxDepth).toBe(4);
+  });
+
+  it("keeps inherited subagent max calls per step when one is provided", async () => {
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      resolvedAgent: {
+        config: {
+          limits: { maxSubagentCallsPerStep: 2 },
+        },
+      },
+      turnAgent: TestTurnAgent,
+    } as never);
+
+    const { state } = await createSessionStep({
+      compiledArtifactsSource: { kind: "bundled" },
+      continuationToken: "subagent:test",
+      sessionId: "sess-child",
+      subagentMaxCallsPerStep: 6,
+    });
+
+    expect(state.snapshot?.session.subagentMaxCallsPerStep).toBe(6);
   });
 });

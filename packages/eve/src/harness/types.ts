@@ -81,6 +81,11 @@ export interface HarnessSession {
    */
   readonly subagentDepth?: number;
   /**
+   * Maximum delegated subagent calls allowed from one model step. When omitted,
+   * the harness uses the framework default.
+   */
+  readonly subagentMaxCallsPerStep?: number;
+  /**
    * Maximum delegated child-session depth for this session. When omitted, the
    * harness uses the framework default.
    */

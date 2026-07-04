@@ -19,6 +19,7 @@ describe("definition helper exact inputs", () => {
       limits: {
         maxInputTokensPerSession: 200_000,
         maxOutputTokensPerSession: 20_000,
+        maxSubagentCallsPerStep: 6,
         maxSubagentDepth: 4,
       },
       model: "anthropic/claude-sonnet-5",
@@ -32,6 +33,7 @@ describe("definition helper exact inputs", () => {
     expect(agent.description).toBe("type-test");
     expect(agent.limits.maxInputTokensPerSession).toBe(200_000);
     expect(agent.limits.maxOutputTokensPerSession).toBe(20_000);
+    expect(agent.limits.maxSubagentCallsPerStep).toBe(6);
     expect(agent.limits.maxSubagentDepth).toBe(4);
     expect(schedule.cron).toBe("0 9 * * *");
   });

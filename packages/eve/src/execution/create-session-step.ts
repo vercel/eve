@@ -31,6 +31,7 @@ export async function createSessionStep(input: {
   readonly rootSessionId?: string;
   readonly sessionId: string;
   readonly subagentDepth?: number;
+  readonly subagentMaxCallsPerStep?: number;
   readonly subagentMaxDepth?: number;
 }): Promise<CreateSessionStepResult> {
   "use step";
@@ -53,6 +54,8 @@ export async function createSessionStep(input: {
     rootSessionId: input.rootSessionId,
     sessionId: input.sessionId,
     subagentDepth: input.subagentDepth,
+    subagentMaxCallsPerStep:
+      input.subagentMaxCallsPerStep ?? bundle.resolvedAgent.config.limits?.maxSubagentCallsPerStep,
     subagentMaxDepth:
       input.subagentMaxDepth ?? bundle.resolvedAgent.config.limits?.maxSubagentDepth,
     turnAgent: bundle.turnAgent,

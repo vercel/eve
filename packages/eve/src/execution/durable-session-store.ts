@@ -86,6 +86,7 @@ export interface DurableSession {
   readonly state?: SessionStateMap;
   readonly sandboxState?: SandboxState;
   readonly subagentDepth?: number;
+  readonly subagentMaxCallsPerStep?: number;
   readonly subagentMaxDepth?: number;
   readonly agent: {
     readonly system: string;

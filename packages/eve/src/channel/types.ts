@@ -279,6 +279,11 @@ export interface RunInput {
    */
   readonly subagentDepth?: number;
   /**
+   * Optional maximum delegated subagent calls allowed from one model step.
+   * Inherited by delegated child runs.
+   */
+  readonly subagentMaxCallsPerStep?: number;
+  /**
    * Optional maximum delegated subagent depth inherited by this run. When
    * omitted, the session uses its resolved agent config or eve's default.
    */

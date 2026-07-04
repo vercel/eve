@@ -119,6 +119,7 @@ export function buildSubagentRunInput(input: {
       },
     },
     subagentDepth: delegationLimit.nextChildDepth,
+    subagentMaxCallsPerStep: session.subagentMaxCallsPerStep,
     subagentMaxDepth: session.subagentMaxDepth,
   };
 

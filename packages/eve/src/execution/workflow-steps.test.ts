@@ -410,6 +410,97 @@ describe("dispatchRuntimeActionsStep", () => {
     );
   });
 
+  it("starts only dispatch actions and returns prefilled subagent results", async () => {
+    const compiledArtifactsSource = {} as never;
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {
+        subagentsByNodeId: new Map(),
+      },
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    startMock.mockResolvedValue({ runId: "child-run" });
+    getRunMock.mockReturnValue({
+      getReadable: () =>
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.close();
+          },
+        }),
+    });
+
+    const acceptedAction = {
+      callId: "call-1",
+      description: "Launch another copy.",
+      input: { message: "accepted" },
+      kind: "subagent-call" as const,
+      name: "agent",
+      nodeId: "__root__",
+      subagentName: "agent",
+    };
+    const rejectedResult = {
+      callId: "call-2",
+      isError: true,
+      kind: "subagent-result" as const,
+      output: {
+        code: "EVE_SUBAGENT_STEP_LIMIT_EXCEEDED",
+        message:
+          "This step requested 2 subagent calls, but eve allows 1. The first 1 were started. Retry the remaining work in a later step with at most 1 subagent calls.",
+      },
+      subagentName: "agent",
+    };
+    const session = setPendingRuntimeActionBatch({
+      actions: [
+        acceptedAction,
+        {
+          callId: "call-2",
+          description: "Launch another copy.",
+          input: { message: "rejected" },
+          kind: "subagent-call" as const,
+          name: "agent",
+          nodeId: "__root__",
+          subagentName: "agent",
+        },
+      ],
+      dispatchActions: [acceptedAction],
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      prefilledResults: [rejectedResult],
+      responseMessages: [],
+      session: createStubSession({
+        continuationToken: "http:parent",
+        sessionId: "parent-session",
+      }),
+    });
+    installSessionStoreMocks([session]);
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState({
+        continuationToken: "http:parent",
+        sessionId: "parent-session",
+      }),
+    });
+
+    expect(startMock).toHaveBeenCalledTimes(1);
+    expect(result.results).toEqual([rejectedResult]);
+  });
+
   it("returns a failed subagent result when remote session creation fails", async () => {
     const remote = {
       definition: {

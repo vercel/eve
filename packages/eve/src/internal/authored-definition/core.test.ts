@@ -39,6 +39,7 @@ describe("normalizeAgentDefinition", () => {
         limits: {
           maxInputTokensPerSession: 200_000,
           maxOutputTokensPerSession: 20_000,
+          maxSubagentCallsPerStep: 6,
           maxSubagentDepth: 4,
         },
       },
@@ -48,9 +49,25 @@ describe("normalizeAgentDefinition", () => {
     expect(definition.limits).toEqual({
       maxInputTokensPerSession: 200_000,
       maxOutputTokensPerSession: 20_000,
+      maxSubagentCallsPerStep: 6,
       maxSubagentDepth: 4,
     });
   });
+
+  it.each([0, 1.5, -1, "4"])(
+    "rejects invalid subagent max calls per step %j",
+    (maxSubagentCallsPerStep) => {
+      expect(() =>
+        normalizeAgentDefinition(
+          {
+            model: "openai/gpt-5.5",
+            limits: { maxSubagentCallsPerStep },
+          },
+          FAILURE_MESSAGE,
+        ),
+      ).toThrow(FAILURE_MESSAGE);
+    },
+  );
 
   it.each([0, 1.5, -1, "4"])("rejects invalid subagent max depth %j", (maxSubagentDepth) => {
     expect(() =>

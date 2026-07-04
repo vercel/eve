@@ -92,12 +92,17 @@ export async function dispatchRuntimeActionsStep(input: {
 
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const delegationLimit = resolveSubagentDelegationLimit(session);
+  const dispatchActions = batch.dispatchActions ?? batch.actions;
 
   let nextSession = session;
-  const results: RuntimeSubagentResultActionResult[] = [];
+  const results: RuntimeSubagentResultActionResult[] = [
+    ...(batch.prefilledResults ?? []).filter(
+      (result): result is RuntimeSubagentResultActionResult => result.kind === "subagent-result",
+    ),
+  ];
 
   try {
-    for (const action of batch.actions) {
+    for (const action of dispatchActions) {
       if (delegationLimit.reached && isSubagentDelegationAction(action)) {
         log.warn("subagent depth limit reached; blocking delegated call", {
           callId: action.callId,

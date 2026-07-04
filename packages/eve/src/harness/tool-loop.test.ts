@@ -714,6 +714,91 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
+  it("publishes only accepted subagent calls when the step fan-out limit is exceeded", async () => {
+    setupMockAgent({
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          {
+            content: [
+              {
+                input: { message: "first" },
+                toolCallId: "call-1",
+                toolName: "delegate",
+                type: "tool-call",
+              },
+              {
+                input: { message: "second" },
+                toolCallId: "call-2",
+                toolName: "delegate",
+                type: "tool-call",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [
+        {
+          input: { message: "first" },
+          toolCallId: "call-1",
+          toolName: "delegate",
+          type: "tool-call",
+        },
+        {
+          input: { message: "second" },
+          toolCallId: "call-2",
+          toolName: "delegate",
+          type: "tool-call",
+        },
+      ],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, { tools: createDelegationToolMap() }),
+    );
+
+    const result = await runStep(createTestSession({ subagentMaxCallsPerStep: 1 }), {
+      message: "Hi",
+    });
+
+    expect(events.find((event) => event.type === "actions.requested")?.data.actions).toEqual([
+      {
+        callId: "call-1",
+        description: "Delegate to a subagent.",
+        input: { message: "first" },
+        kind: "subagent-call",
+        name: "delegate",
+        nodeId: "workers",
+        subagentName: "worker",
+      },
+    ]);
+    expect(getPendingRuntimeActionBatch(result.session.state)).toMatchObject({
+      dispatchActions: [
+        {
+          callId: "call-1",
+          kind: "subagent-call",
+        },
+      ],
+      prefilledResults: [
+        {
+          callId: "call-2",
+          isError: true,
+          kind: "subagent-result",
+          output: {
+            code: "EVE_SUBAGENT_STEP_LIMIT_EXCEEDED",
+            message:
+              "This step requested 2 subagent calls, but eve allows 1. The first 1 were started. Retry the remaining work in a later step with at most 1 subagent calls.",
+          },
+          subagentName: "worker",
+        },
+      ],
+    });
+  });
+
   it("does not publish subagent calls from the current run at the depth limit", async () => {
     setupMockAgent({
       finishReason: "tool-calls",

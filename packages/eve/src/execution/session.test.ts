@@ -274,6 +274,7 @@ describe("createSession", () => {
       continuationToken: "root-token",
       sessionId: "sess-root",
       subagentDepth: 2,
+      subagentMaxCallsPerStep: 6,
       subagentMaxDepth: 4,
       turnAgent: createTestTurnAgent(),
     });
@@ -285,8 +286,10 @@ describe("createSession", () => {
     });
 
     expect(durable.subagentDepth).toBe(2);
+    expect(durable.subagentMaxCallsPerStep).toBe(6);
     expect(durable.subagentMaxDepth).toBe(4);
     expect(hydrated.subagentDepth).toBe(2);
+    expect(hydrated.subagentMaxCallsPerStep).toBe(6);
     expect(hydrated.subagentMaxDepth).toBe(4);
   });
 
