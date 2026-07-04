@@ -10,6 +10,12 @@ export struct Params {
   materialKind: f32,
   thicknessScale: f32,
   envYaw: f32,
+  envPitch: f32,
+  glassAbsorption: f32,
+  // x = imprint progress, y = grid scale (cells/model unit), z = glyph scale, w = time seconds.
+  ascii0: vec4f,
+  // x/y = normalized mouse offset; z/w reserved.
+  ascii1: vec4f,
 };
 
 export struct VertexInput {
@@ -22,6 +28,7 @@ export struct VertexOutput {
   @location(0) normal: vec3f,
   @location(1) viewDir: vec3f,
   @location(2) cameraAxisDepth: f32,
+  @location(3) modelPos: vec3f,
 };
 
 export const OUTSIDE_PASS_THRESHOLD = 0.5;
@@ -35,6 +42,7 @@ export fn glass_vs_main(input: VertexInput, params: Params) -> VertexOutput {
   // Depth along the camera forward axis in object/world space. Unlike view-space distance,
   // this is independent of orbit radius, so front/back subtraction gives stable thickness.
   output.cameraAxisDepth = dot(input.position, normalize(params.cameraForward));
+  output.modelPos = input.position;
   return output;
 }
 
