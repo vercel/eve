@@ -31,8 +31,8 @@ export default defineTool({
   ...bash,
   description: "Run a vetted shell command in the project sandbox.",
   approval: always(),
-  async execute(input) {
-    return bash.execute(input);
+  async execute(input, ctx) {
+    return bash.execute(input, ctx);
   },
 });
 `,

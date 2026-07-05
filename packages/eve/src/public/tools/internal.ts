@@ -25,6 +25,8 @@ export function toPublicToolDefinition(definition: ResolvedToolDefinition): Tool
     execute: (input, ctx) =>
       internalExecute(input, {
         abortSignal: ctx.abortSignal,
+        // The public context carries no model history, so the bridged
+        // options cannot reproduce the AI SDK's `messages`.
         messages: [],
         toolCallId: ctx.callId,
       }),
