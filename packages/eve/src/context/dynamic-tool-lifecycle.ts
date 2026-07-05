@@ -33,7 +33,7 @@ function toHarnessToolDefinition(name: string, entry: DynamicToolEntry): Harness
   return {
     description: entry.description,
     execute: (input: unknown, options) =>
-      entry.execute(input as Record<string, unknown>, buildBaseToolContext(options?.abortSignal)),
+      entry.execute(input as Record<string, unknown>, buildBaseToolContext(options)),
     inputSchema: convertInputSchema(entry.inputSchema),
     name,
     approval: entry.approval,
@@ -119,7 +119,7 @@ export function replayDynamicSessionTools(
     tools.push({
       description: m.description,
       execute: (input: unknown, options) =>
-        stepFn(m.closureVars, input, buildBaseToolContext(options?.abortSignal)),
+        stepFn(m.closureVars, input, buildBaseToolContext(options)),
       inputSchema: jsonSchema(m.inputSchema),
       name: m.name,
       outputSchema: m.outputSchema === undefined ? undefined : jsonSchema(m.outputSchema),

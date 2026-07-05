@@ -10,7 +10,7 @@ export type ToolExecuteOptions = Omit<ToolExecutionOptions<unknown>, "context">;
 
 export type ToolExecuteFn<TInput = unknown, TOutput = unknown> = (
   input: TInput,
-  options?: ToolExecuteOptions,
+  options: ToolExecuteOptions,
 ) => Promise<TOutput> | TOutput;
 
 interface ToolDefinitionBase {

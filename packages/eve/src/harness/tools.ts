@@ -34,7 +34,10 @@ type ToolModelOutputValue =
 
 type NativeApprovalStatus = Exclude<ApprovalStatus, boolean>;
 
-const toolApprovals = new WeakMap<object, (toolInput: unknown) => Promise<NativeApprovalStatus>>();
+const toolApprovals = new WeakMap<
+  object,
+  (toolInput: unknown, callId: string) => Promise<NativeApprovalStatus>
+>();
 
 /**
  * Builds an AI SDK `ToolSet` from unified harness tool definitions.
@@ -302,8 +305,8 @@ export async function buildToolSetWithProviderTools(input: {
 function buildApprovalFn(
   definition: HarnessToolDefinition,
   input: { readonly approvedTools?: ReadonlySet<string> },
-): (toolInput: unknown) => Promise<NativeApprovalStatus> {
-  return async (toolInput: unknown) => {
+): (toolInput: unknown, callId: string) => Promise<NativeApprovalStatus> {
+  return async (toolInput: unknown, callId: string) => {
     if (definition.approval === undefined) return undefined;
 
     const toolInputRecord = isObject(toolInput) ? toolInput : undefined;
@@ -311,6 +314,7 @@ function buildApprovalFn(
     const status = await definition.approval({
       ...buildCallbackContext(),
       approvedTools: input.approvedTools ?? new Set(),
+      callId,
       toolInput: toolInputRecord,
       toolName: definition.name,
     });
@@ -327,6 +331,6 @@ export function buildToolApproval(
     if (toolDefinition === undefined) return undefined;
 
     const approval = toolApprovals.get(toolDefinition);
-    return (await approval?.(toolCall.input)) as ToolApprovalStatus;
+    return (await approval?.(toolCall.input, toolCall.toolCallId)) as ToolApprovalStatus;
   };
 }

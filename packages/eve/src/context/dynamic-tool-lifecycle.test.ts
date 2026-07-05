@@ -50,6 +50,8 @@ function qualifyDynamicToolNames(
   return result;
 }
 
+const executeOptions = { messages: [], toolCallId: "call_1" };
+
 const stubEntry = defineTool({
   description: "test",
   inputSchema: { type: "object" },
@@ -278,7 +280,7 @@ describe("replayDynamicSessionTools", () => {
 
       // Execute the replayed tool — mock provides the callback context
       const tool = tools[0]!;
-      tool.execute!({ query: "test" });
+      tool.execute!({ query: "test" }, executeOptions);
       expect(stepFn).toHaveBeenCalledWith(
         { apiUrl: "https://api.example.com", tenantName: "Acme" },
         { query: "test" },
@@ -319,11 +321,11 @@ describe("replayDynamicSessionTools", () => {
       const tools = replayDynamicSessionTools(metadata, []);
 
       const tool = tools[0]!;
-      tool.execute!({});
+      tool.execute!({}, executeOptions);
 
       // Mutating the metadata object after replay should NOT affect calls
       closureVars.counter = 999;
-      tool.execute!({});
+      tool.execute!({}, executeOptions);
 
       // Both calls get the same closure vars reference from metadata.
       // This documents current behavior: replay passes by reference.
@@ -451,6 +453,7 @@ function createApprovalContext(input: {
 }): ApprovalContext {
   return {
     approvedTools: new Set(),
+    callId: "call_1",
     getSandbox: vi.fn(),
     getSkill: vi.fn(),
     session: {
@@ -794,7 +797,7 @@ describe("framework dynamic tools (no bundler transform)", () => {
     expect(replayedTools[0]!.name).toBe("search");
 
     // Execute the replayed tool — the original closure is invoked
-    await replayedTools[0]!.execute!({ query: "test" });
+    await replayedTools[0]!.execute!({ query: "test" }, executeOptions);
     expect(executeFn).toHaveBeenCalledWith({ query: "test" });
   });
 
@@ -822,7 +825,7 @@ describe("framework dynamic tools (no bundler transform)", () => {
     expect(tools).toHaveLength(1);
     expect(tools[0]!.name).toBe("assist");
 
-    await tools[0]!.execute!({ action: "help" });
+    await tools[0]!.execute!({ action: "help" }, executeOptions);
     expect(executeFn).toHaveBeenCalledWith({ action: "help" });
   });
 
@@ -1006,7 +1009,7 @@ describe("framework dynamic tools (no bundler transform)", () => {
 
     ctx.clearVirtualContext();
     let tools = buildDynamicTools(ctx);
-    const result1 = await tools[0]!.execute!({});
+    const result1 = await tools[0]!.execute!({}, executeOptions);
     expect(result1).toEqual({ version: 1 });
 
     // Re-dispatch overwrites the resolver's slot
@@ -1020,7 +1023,7 @@ describe("framework dynamic tools (no bundler transform)", () => {
     ctx.clearVirtualContext();
     tools = buildDynamicTools(ctx);
     expect(tools[0]!.description).toBe("v2");
-    const result2 = await tools[0]!.execute!({});
+    const result2 = await tools[0]!.execute!({}, executeOptions);
     expect(result2).toEqual({ version: 2 });
   });
 });

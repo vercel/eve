@@ -11,10 +11,14 @@ type ApprovalToolInput<TInput> = TInput extends object ? Readonly<TInput> : TInp
  * `approvedTools` is the set of tool names (or compound approval keys)
  * already approved at least once in the current session. `toolName` is the
  * runtime name of the tool being evaluated. `toolInput` is the raw input the
- * model passed, available for input-aware decisions.
+ * model passed, available for input-aware decisions. `callId` is the id of
+ * the tool call being evaluated — it matches the `callId` on the call's
+ * `actions.requested` and `action.result` channel events and the `callId`
+ * the tool's `execute` context receives if the call is approved.
  */
 export interface ApprovalContext<TInput = Record<string, unknown>> extends SessionContext {
   readonly approvedTools: ReadonlySet<string>;
+  readonly callId: string;
   readonly toolInput?: ApprovalToolInput<TInput>;
   readonly toolName: string;
 }

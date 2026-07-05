@@ -75,6 +75,13 @@ export type ToolContext = SessionContext & {
   /** Aborts when the active turn is cancelled. */
   readonly abortSignal: AbortSignal;
   /**
+   * Id of the current tool call. Matches the `callId` on this call's
+   * `actions.requested` and `action.result` channel events and on its
+   * {@link ApprovalContext}, so approval-gated tools can derive one identity
+   * that stays stable across proposal, rejection, and execution.
+   */
+  readonly callId: string;
+  /**
    * Resolves the bearer token for an inline provider. This accepts the same
    * auth shapes as a connection's `auth` field, including `connect("...")`
    * from `@vercel/connect/eve`.
