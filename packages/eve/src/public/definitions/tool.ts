@@ -75,10 +75,8 @@ export type ToolContext = SessionContext & {
   /** Aborts when the active turn is cancelled. */
   readonly abortSignal: AbortSignal;
   /**
-   * Id of the current tool call. Matches the `callId` on this call's
-   * `actions.requested` and `action.result` channel events and on its
-   * {@link ApprovalContext}, so approval-gated tools can derive one identity
-   * that stays stable across proposal, rejection, and execution.
+   * Id of the current tool call — the same `callId` carried by the call's
+   * stream events and its {@link ApprovalContext}.
    */
   readonly callId: string;
   /**
