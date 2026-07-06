@@ -1,3 +1,5 @@
+import { fullscreen_clip_position, fullscreen_uv } from "../shared/fullscreen.wgsl";
+
 // Bloom blur pass.
 // Separable finite Gaussian blur; samples every integer texel in [-BLOOM_RADIUS, BLOOM_RADIUS]
 // with no skipped pixels. Pass 0 extracts bright pixels and blurs horizontally. Pass 1 blurs
@@ -23,16 +25,9 @@ const BLOOM_SIGMA: f32 = 5.3333335; // radius / 3.0; finite support reaches exac
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
-  var positions = array<vec2f, 3>(
-    vec2f(-1.0, -3.0),
-    vec2f(-1.0, 1.0),
-    vec2f(3.0, 1.0),
-  );
-
   var output: VertexOutput;
-  let position = positions[vertexIndex];
-  output.position = vec4f(position, 0.0, 1.0);
-  output.uv = position * vec2f(0.5, -0.5) + vec2f(0.5, 0.5);
+  output.position = fullscreen_clip_position(vertexIndex);
+  output.uv = fullscreen_uv(vertexIndex);
   return output;
 }
 
