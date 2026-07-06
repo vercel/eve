@@ -1,11 +1,7 @@
 import type { HandleMessageStreamEvent } from "../../protocol/message.js";
 import type { SessionContext } from "./callback-context.js";
 import type { ExactDefinition } from "./exact.js";
-import type {
-  GenericHookDefinition,
-  GenericStreamEventHook,
-  GenericStreamEventHooks,
-} from "#shared/hook-definition.js";
+import type { GenericHookDefinition, GenericStreamEventHooks } from "#shared/hook-definition.js";
 
 /**
  * Every hook handler receives this context.
@@ -31,10 +27,7 @@ export interface HookContext extends SessionContext {
  * {@link HandleMessageStreamEvent}). {@link StreamEventHooks} infers `TEvent`
  * from the event key. The typed event is the first argument, `ctx` is the last.
  */
-export type StreamEventHook<TEvent extends { type: string }> = GenericStreamEventHook<
-  TEvent,
-  HookContext
->;
+export type StreamEventHook<TEvent> = (event: TEvent, ctx: HookContext) => void | Promise<void>;
 
 /**
  * Map of stream-event subscribers an authored hook file may declare.
