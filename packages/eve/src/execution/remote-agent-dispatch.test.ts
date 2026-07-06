@@ -104,6 +104,39 @@ describe("startRemoteAgentSession", () => {
     expect(body.mode).toBe("task");
   });
 
+  it("passes the outbound auth context to the auth function", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, sessionId: "remote-session" }), { status: 202 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const auth = vi.fn().mockResolvedValue({ headers: { authorization: "Bearer contextual" } });
+
+    await startRemoteAgentSession({
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      remote: { ...createRemoteAgent(), auth },
+      session: {
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100000 },
+        continuationToken: "eve:parent-token",
+        history: [],
+        sessionId: "parent-session",
+      },
+    });
+
+    expect(auth).toHaveBeenCalledExactlyOnceWith({
+      callId: "call-remote",
+      message: "find the marker",
+      remoteAgentName: "research",
+    });
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      authorization: "Bearer contextual",
+    });
+  });
+
   it("targets an active turn inbox when a callback token is supplied", async () => {
     const fetchMock = vi
       .fn()

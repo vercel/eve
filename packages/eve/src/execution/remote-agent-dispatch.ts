@@ -3,6 +3,7 @@ import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import { formatSubagentInput } from "#execution/subagent-invocation.js";
 import type { HarnessSession } from "#harness/types.js";
+import type { OutboundAuthContext } from "#public/agents/auth.js";
 import type { RuntimeRemoteAgentCallActionRequest } from "#runtime/actions/types.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
@@ -22,7 +23,10 @@ export async function startRemoteAgentSession(input: {
     throw new Error("Cannot dispatch remote agent without a callback base URL.");
   }
 
-  const headers = await resolveRemoteAgentRequestHeaders(input.remote);
+  const headers = await resolveRemoteAgentRequestHeaders({
+    action: input.action,
+    remote: input.remote,
+  });
   const response = await fetch(createRemoteAgentSessionUrl(input.remote), {
     body: JSON.stringify({
       callback: {
@@ -88,18 +92,26 @@ function createRemoteAgentSessionUrl(remote: ResolvedRuntimeRemoteAgentNode): st
   return new URL(remote.path, `${trimTrailingSlash(remote.url)}/`).toString();
 }
 
-async function resolveRemoteAgentRequestHeaders(
-  remote: ResolvedRuntimeRemoteAgentNode,
-): Promise<Record<string, string>> {
+async function resolveRemoteAgentRequestHeaders(input: {
+  readonly action: RuntimeRemoteAgentCallActionRequest;
+  readonly remote: ResolvedRuntimeRemoteAgentNode;
+}): Promise<Record<string, string>> {
   const headers: Record<string, string> = {};
-  if (remote.headers !== undefined) {
+  if (input.remote.headers !== undefined) {
     Object.assign(
       headers,
-      typeof remote.headers === "function" ? await remote.headers() : remote.headers,
+      typeof input.remote.headers === "function"
+        ? await input.remote.headers()
+        : input.remote.headers,
     );
   }
-  if (remote.auth !== undefined) {
-    Object.assign(headers, (await remote.auth()).headers);
+  if (input.remote.auth !== undefined) {
+    const context: OutboundAuthContext = {
+      callId: input.action.callId,
+      message: rawRemoteAgentCallMessage(input.action),
+      remoteAgentName: input.action.remoteAgentName,
+    };
+    Object.assign(headers, (await input.remote.auth(context)).headers);
   }
   return headers;
 }
@@ -108,13 +120,16 @@ function formatRemoteAgentCallInputMessage(input: {
   readonly action: RuntimeRemoteAgentCallActionRequest;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
 }): string {
-  const message = typeof input.action.input.message === "string" ? input.action.input.message : "";
   return formatSubagentInput({
     description: input.remote.description,
-    message,
+    message: rawRemoteAgentCallMessage(input.action),
     name: input.action.remoteAgentName,
     type: "remote",
   }).message;
+}
+
+function rawRemoteAgentCallMessage(action: RuntimeRemoteAgentCallActionRequest): string {
+  return typeof action.input.message === "string" ? action.input.message : "";
 }
 
 function trimTrailingSlash(value: string): string {

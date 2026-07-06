@@ -3,12 +3,31 @@ import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
 import type { TokenValue } from "#client/types.js";
 
 /**
- * Outbound request auth hook for remote agent dispatch. Runs once per
- * outbound request; returns the headers (e.g. `authorization`) to merge onto
- * that request. Use {@link vercelOidc}, {@link bearer}, or {@link basic} to
- * construct one, or supply a custom function for other schemes.
+ * Per-dispatch context handed to an {@link OutboundAuthFn}. Carries the
+ * parent's remote-agent tool call so custom auth schemes can derive
+ * credentials from what is being dispatched.
  */
-export type OutboundAuthFn = () => Promise<{
+export interface OutboundAuthContext {
+  /** Tool-call id of the parent's remote-agent call. */
+  readonly callId: string;
+  /**
+   * Raw `message` the parent model passed in the tool call, before eve wraps
+   * it in the delegated subagent prompt sent to the remote deployment.
+   */
+  readonly message: string;
+  /** Name of the remote agent being dispatched. */
+  readonly remoteAgentName: string;
+}
+
+/**
+ * Outbound request auth hook for remote agent dispatch. Runs once per
+ * outbound request with the {@link OutboundAuthContext} for that dispatch;
+ * returns the headers (e.g. `authorization`) to merge onto the request. Use
+ * {@link vercelOidc}, {@link bearer}, or {@link basic} to construct one, or
+ * supply a custom function for other schemes — functions that ignore the
+ * context remain valid.
+ */
+export type OutboundAuthFn = (context: OutboundAuthContext) => Promise<{
   readonly headers: Readonly<Record<string, string>>;
 }>;
 

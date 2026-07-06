@@ -45,6 +45,23 @@ A remote agent lowers to the same `{ message, outputSchema? }` tool shape as a l
 
 If you are calling another Vercel-deployed eve agent, reach for `vercelOidc()`. The remote verifies the OIDC token to authorize the caller. See [Auth & route protection](./auth-and-route-protection) for the receiving side.
 
+For other schemes, supply your own function. It runs once per outbound dispatch and receives an `OutboundAuthContext` with the call being dispatched — `message` (the raw tool-call message from the parent model, before eve wraps it in the delegated prompt), `remoteAgentName`, and `callId` — so credentials can depend on what is being sent:
+
+```ts title="agent/subagents/weather.ts"
+import { defineRemoteAgent } from "eve";
+import type { OutboundAuthContext } from "eve/agents/auth";
+
+export default defineRemoteAgent({
+  url: "https://weather-agent.example.com",
+  description: "Answers weather questions.",
+  auth: async ({ message, remoteAgentName }: OutboundAuthContext) => ({
+    headers: { authorization: `Bearer ${await mintScopedToken(remoteAgentName, message)}` },
+  }),
+});
+```
+
+Functions that ignore the context (like the built-in helpers) remain valid `OutboundAuthFn`s.
+
 ## How remote dispatch and callbacks work
 
 A local subagent runs inline. A remote one runs in its own deployment, so dispatch is asynchronous:
