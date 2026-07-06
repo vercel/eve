@@ -47,12 +47,13 @@ export function writeParams(args: { target: { buffer: Buffer }; controls: Render
     data[34] = controls.envPitch;
     data[35] = isLight ? 0 : 1;
     const metrics = paintMappingMetrics(
-  meshBounds,
-  controls,
-  logicalWidth,
-  logicalHeight,
-  imprint.gridScaleMultiplier ?? DEFAULT_IMPRINT_GRID_SCALE_MULTIPLIER,
-  projectionPaddingRadius,
+      meshBounds,
+      controls,
+      logicalWidth,
+      logicalHeight,
+      imprint.gridScaleMultiplier ?? DEFAULT_IMPRINT_GRID_SCALE_MULTIPLIER,
+      projectionPaddingRadius,
+      imprint.devicePixelRatio,
     );
     const gridScale = metrics.gridScale;
     data[36] = Math.max(0, Math.min(1, imprint.progress ?? 0));

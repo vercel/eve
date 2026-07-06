@@ -6,33 +6,22 @@ import { sd_box, sd_equilateral_triangle, sd_rotated_box } from "./sdf.wgsl";
 
 export const ASCII_BASE_DOT_RADIUS = 0.075;
 export const ASCII_EDGE_SQUARE_HALF_SIZE = 0.22;
-export const HOVER_ENTRY_START = 0.020;
-export const HOVER_ENTRY_FULL = 1.;
+export const HOVER_ENTRY_START = 0.1;
+export const HOVER_ENTRY_FULL = 0.5;
 
 export fn shape_distance(p: vec2f, value: f32) -> f32 {
   if (value < 0.002) {
     return 1.0;
   }
-  // Luminance/noise selects the glyph only. Keep each glyph's dimensions fixed so
-  // glyph size is controlled by grid geometry and the glyphScale uniform, not value.
-  // Phase 3 removes triangles from this base set. The freed upper band is folded
-  // into circle/square so paint=0 keeps the same dot/dash/circle/square character.
-  if (value < 0.18) {
-    return length(p) - ASCII_BASE_DOT_RADIUS;
-  }
-  if (value < 0.36) {
-    return length(p) - 0.145;
-  }
-  if (value < 0.58) {
-    return sd_box(p, vec2f(0.27, 0.055));
-  }
-  if (value < 0.80) {
-    return length(p) - 0.235;
-  }
-  return sd_box(p, vec2f(0.255, 0.255));
+  // Voronoi luminance now selects the spinner glyph ramp (| / \ – — ▲). Keep glyph dimensions
+  // fixed so size is controlled by grid geometry and glyphScale, not value. After the tiny
+  // empty band the remaining range is divided into six equal hard-switch stations.
+  let normalizedValue = clamp((value - 0.002) / (1.0 - 0.002), 0.0, 1.0);
+  let station = clamp(i32(floor(normalizedValue * 6.0)), 0, 5);
+  return spinner_station_distance(p, station);
 }
 
-fn hover_station_distance(p: vec2f, station: i32) -> f32 {
+fn spinner_station_distance(p: vec2f, station: i32) -> f32 {
   if (station <= 0) {
     return sd_rotated_box(p, vec2f(0.28, 0.05), 1.57079632679);
   }
@@ -52,14 +41,26 @@ fn hover_station_distance(p: vec2f, station: i32) -> f32 {
   return sd_equilateral_triangle(p / scale) * scale;
 }
 
+fn imprint_station_distance(p: vec2f, station: i32) -> f32 {
+  if (station <= 0) {
+    return length(p) - ASCII_BASE_DOT_RADIUS;
+  }
+  if (station == 1) {
+    return length(p) - 0.145;
+  }
+  if (station == 2) {
+    return sd_box(p, vec2f(0.27, 0.055));
+  }
+  if (station == 3) {
+    return length(p) - 0.235;
+  }
+  return sd_box(p, vec2f(0.255, 0.255));
+}
+
 export fn hover_shape_distance(p: vec2f, hover: f32) -> f32 {
-  // Paint drives only this clean station ramp: | -> / -> \ -> – -> — -> triangle.
-  // Squares stay exclusive to base noise.
-  // The base noise-selected glyph is not part of the paint-only glass reveal.
+  // Paint drives only this clean station ramp: dot -> circle -> dash -> circle -> square.
+  // Hard switch: each station covers an equal-length range; no blending between glyphs.
   let t = clamp((hover - HOVER_ENTRY_START) / (1.0 - HOVER_ENTRY_START), 0.0, 1.0);
-  let stationPosition = t * 5.0;
-  let station = min(i32(floor(stationPosition)), 4);
-  let f = stationPosition - f32(station);
-  let fs = f * f * (3.0 - 2.0 * f);
-  return mix(hover_station_distance(p, station), hover_station_distance(p, station + 1), fs);
+  let station = clamp(i32(floor(t * 5.0)), 0, 4);
+  return imprint_station_distance(p, station);
 }

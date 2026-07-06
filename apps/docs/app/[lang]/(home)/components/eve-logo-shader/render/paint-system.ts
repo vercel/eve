@@ -6,7 +6,6 @@ import { Device } from "@vgpu/core";
 import { RenderPass } from "@vgpu/render";
 import { createPaintDebugBindGroup, createPaintDecayBindGroup } from "./bindings";
 import {
-  DEFAULT_IMPRINT_CELL_SIZE,
   DEFAULT_IMPRINT_GRID_SCALE_MULTIPLIER,
   DEFAULT_PAINT_BRUSH_RADIUS,
   DEFAULT_PAINT_BRUSH_STRENGTH,
@@ -15,6 +14,7 @@ import {
   DEFAULT_PAINT_DIFFUSION_RATE,
   DEFAULT_PAINT_DT,
   PAINT_STROKE_MOVEMENT_EPSILON_CELLS,
+  imprintCellSizeForDevicePixelRatio,
 } from "./constants";
 import { mix } from "./math";
 import { paintMappingMetrics } from "./pointer-mapping";
@@ -39,9 +39,10 @@ export function createPaintSystem(device: Device, resources: RendererResources, 
     targets = undefined;
   };
 
-  const ensure = (logicalWidth: number, logicalHeight: number) => {
-    const cols = Math.max(1, Math.ceil(logicalWidth / DEFAULT_IMPRINT_CELL_SIZE));
-    const rows = Math.max(1, Math.ceil(logicalHeight / DEFAULT_IMPRINT_CELL_SIZE));
+  const ensure = (logicalWidth: number, logicalHeight: number, devicePixelRatio?: number) => {
+    const cellSize = imprintCellSizeForDevicePixelRatio(devicePixelRatio);
+    const cols = Math.max(1, Math.ceil(logicalWidth / cellSize));
+    const rows = Math.max(1, Math.ceil(logicalHeight / cellSize));
     if (targets?.cols === cols && targets.rows === rows) return targets;
     dispose();
     const ping = createPaintTexture(device, "eve-5-paint-ping", cols, rows);
@@ -235,6 +236,7 @@ export function createPaintSystem(device: Device, resources: RendererResources, 
       logicalHeight,
       imprint.gridScaleMultiplier ?? DEFAULT_IMPRINT_GRID_SCALE_MULTIPLIER,
       projectionPaddingRadius,
+      imprint.devicePixelRatio,
     );
     resources.buffers.voronoiNoiseParamsBuffer.write(
       new Float32Array([

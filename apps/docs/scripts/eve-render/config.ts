@@ -6,6 +6,7 @@ import {
   BLOOM_STRENGTH_ON,
   BLOOM_THRESHOLD,
   DEFAULT_CAMERA_FOV,
+  DEFAULT_IMPRINT_DEVICE_PIXEL_RATIO,
   DEFAULT_IMPRINT_GRID_SCALE_MULTIPLIER,
   DEFAULT_PAINT_BRUSH_RADIUS,
   DEFAULT_PAINT_BRUSH_STRENGTH,
@@ -54,6 +55,7 @@ export function readRenderConfig() {
   const width = paddedSize.width;
   const height = paddedSize.height;
   const theme = readThemeEnv();
+  const dpr = readPositiveNumberEnv("EVE_LOGO_RENDER_DPR", DEFAULT_IMPRINT_DEVICE_PIXEL_RATIO);
   const imprintProgress = readUnitIntervalEnv("EVE_LOGO_RENDER_IMPRINT_PROGRESS");
   const imprintGridScaleMultiplier = readPositiveNumberEnv(
     "EVE_LOGO_IMPRINT_GRID_SCALE_MULTIPLIER",
@@ -122,6 +124,7 @@ export function readRenderConfig() {
     width,
     height,
     theme,
+    dpr,
     imprintProgress,
     imprintGridScaleMultiplier,
     imprintGlyphScale,

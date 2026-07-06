@@ -68,7 +68,7 @@ export async function setupTransitionDebugGui({
   imprint.open();
   const paint = gui.addFolder("Paint");
   paint
-    .add(transitionDebug, "paintDecayPerFrame120", 0.008, 0.08, 0.001)
+    .add(transitionDebug, "paintDecayPerFrame120", 0.002, 0.08, 0.001)
     .name("Decay/frame @120fps");
   paint.add(transitionDebug, "diffusionAmount", 0, 24, 0.1).name("Diffusion (1/s)");
   paint.add(transitionDebug, "diffusionJitter", 0, 4, 0.01).name("Diffusion jitter");

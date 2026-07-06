@@ -84,6 +84,7 @@ function imprintOptions(
     glyphScale: config.imprintGlyphScale,
     time: readNoiseTimeEnv(),
     mouse: [0, 0] as const,
+    devicePixelRatio: config.dpr,
     paint,
   };
 }

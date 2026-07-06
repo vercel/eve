@@ -75,7 +75,7 @@ export function uploadStaticNoiseTexture(device: Device, texture: GPUTexture, wi
       values[offset] = hashPaintCell(x, y, 0xa511e9b3);
       values[offset + 1] = hashPaintCell(x, y, 0x63d83595);
       values[offset + 2] = hashPaintCell(x, y, 0xf9bd1c5b);
-      values[offset + 3] = 0;
+      values[offset + 3] = hashPaintCell(x, y, 0x1c4b256d);
     }
   }
   device.gpu.queue.writeTexture(

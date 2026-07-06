@@ -15,9 +15,21 @@ export function renderBlur(
   target: GPUTexture,
   direction: [number, number],
   extract: boolean,
+  radius: number,
 ) {
+  const kernelRadius = Math.max(0, Math.round(radius));
+  const sigma = Math.max(0.001, kernelRadius / 3);
   resources.buffers.blurParamsBuffer.write(
-    new Float32Array([direction[0], direction[1], extract ? 1 : 0, BLOOM_THRESHOLD]),
+    new Float32Array([
+      direction[0],
+      direction[1],
+      extract ? 1 : 0,
+      BLOOM_THRESHOLD,
+      kernelRadius,
+      sigma,
+      0,
+      0,
+    ]),
   );
   const bindGroup = device.gpu.createBindGroup({
     label: "eve-5-bloom-blur-bind-group",

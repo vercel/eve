@@ -1,6 +1,7 @@
 import type { RefObject } from "react";
 import { evePointerInteractionMode } from "../mobile-motion";
-import { BLOOM_RADIUS, mapClientPointToPaintCell } from "../render";
+import { bloomRadiusForDevicePixelRatio, mapClientPointToPaintCell } from "../render";
+import { getBrowserDevicePixelRatio } from "./canvas-sizing";
 import type { ControlsRef, HeroRuntimeState } from "./state";
 
 // Owns browser pointer input for env yaw and paint brush updates.
@@ -67,8 +68,10 @@ export function createPointerController({
       deactivateBrush();
       return;
     }
-    const logicalWidth = Math.max(1, canvas.width - BLOOM_RADIUS * 2);
-    const logicalHeight = Math.max(1, canvas.height - BLOOM_RADIUS * 2);
+    const devicePixelRatio = getBrowserDevicePixelRatio();
+    const paddingRadius = bloomRadiusForDevicePixelRatio(devicePixelRatio);
+    const logicalWidth = Math.max(1, canvas.width - paddingRadius * 2);
+    const logicalHeight = Math.max(1, canvas.height - paddingRadius * 2);
     const mapping = mapClientPointToPaintCell({
       clientX: event.clientX,
       clientY: event.clientY,
@@ -80,6 +83,8 @@ export function createPointerController({
       controls: controlsRef.current,
       meshBounds: mesh.bounds,
       gridScaleMultiplier: state.paintGridScaleMultiplier,
+      paddingRadius,
+      devicePixelRatio,
     });
     if (!mapping?.insideLogicalBounds) {
       deactivateBrush();

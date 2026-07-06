@@ -9,6 +9,7 @@ import { ASCII_BASE_DOT_RADIUS, ASCII_EDGE_SQUARE_HALF_SIZE, HOVER_ENTRY_START, 
 const IMPRINT_VORONOI_FREQUENCY = 4.8;
 const ASCII_VORONOI_Z_SPEED = 0.35;
 const REVEAL_STAGGER_WINDOW = 0.25;
+export const HOVER_OVERLAY_SCALE = 0.5; // scales hover spinner-glyph opacity only
 
 export fn ascii_voronoi_noise_for_cell(modelPosXY: vec2f, gridScale: f32, time: f32) -> vec2f {
   let safeGridScale = max(gridScale, 0.001);
@@ -46,7 +47,7 @@ export fn ascii_imprint_coverage(modelPosXY: vec2f, gridScale: f32, glyphScale: 
   let selectedGlyphCoverage = 1.0 - smoothstep(0.0, selectedGlyphAa, selectedGlyphDistance);
   let hoverGlyphCoverage = 1.0 - smoothstep(0.0, hoverGlyphAa, hoverGlyphDistance);
   let hoverEntry = smoothstep(HOVER_ENTRY_START, HOVER_ENTRY_FULL, safeHover);
-  let selectedCoverage = mix(selectedGlyphCoverage, hoverGlyphCoverage, hoverEntry);
+  let selectedCoverage = selectedGlyphCoverage;
   let interiorGlyph = max(selectedCoverage, baseDotCoverage);
   let edgeGlyphDistance = sd_box(scaledP, vec2f(ASCII_EDGE_SQUARE_HALF_SIZE)) * safeGlyphScale;
   let edgeGlyphAa = max(fwidth(edgeGlyphDistance), 0.01);
@@ -66,6 +67,9 @@ export fn ascii_imprint_coverage(modelPosXY: vec2f, gridScale: f32, glyphScale: 
   // Paint reveal is independent from the noise chain. On glass (progress=0) this contributes
   // only the clean station ramp; in ASCII mode it cleanly overrides the selected glyph while
   // the base dots/edge squares remain part of the imprint chain.
-  let hoverCoverage = hoverGlyphCoverage * hoverEntry;
-  return max(imprintCoverage, hoverCoverage);
+  let hoverCoverage = hoverGlyphCoverage * hoverEntry * HOVER_OVERLAY_SCALE;
+  // Hard per-cell switchover: once hover passes the entry threshold, the entire cell shows
+  // only the spinner glyph; otherwise only the imprint glyph contributes.
+  let hoverGate = step(HOVER_ENTRY_START, safeHover);
+  return mix(imprintCoverage, hoverCoverage, hoverGate);
 }

@@ -71,7 +71,7 @@ export function createResources(
   );
   const blurParamsBuffer = device.createBuffer({
     label: "eve-5-bloom-blur-params",
-    size: 16,
+    size: 32,
     usage: ["uniform", "copy_dst"],
   });
   const compositeParamsBuffer = device.createBuffer({

@@ -23,7 +23,8 @@ struct PaintParams {
 @group(0) @binding(2) var staticNoiseTex: texture_2d<f32>;
 
 const TAU = 6.28318530718;
-const BRUSH_EDGE_NOISE = 2.5;
+const BRUSH_EDGE_NOISE = 1.5;
+const PAINT_VALUE_MAX = 3.0; // Stored paint max; values >1 give a hidden decay buffer while display clamps at 1.0.
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
@@ -64,6 +65,7 @@ fn fs_main(input: VertexOutput) -> @location(0) f32 {
   // Static per-cell hash rotates/scales the four taps, then snaps them to texels.
   // r32float is unfilterable here, so this stays textureLoad-only and preserves the
   // convex 5-tap update while making diffusion grow organically instead of as a disc.
+  // Channel usage: r=angle hash, g=diffusion scale hash, b=brush-edge hash, a=decay multiplier.
   let staticNoise = textureLoad(staticNoiseTex, q, 0);
   let jitter = clamp(params.diffusionJitter, 0.0, 4.0);
   let angle = staticNoise.r * TAU;
@@ -85,16 +87,18 @@ fn fs_main(input: VertexOutput) -> @location(0) f32 {
   let diffused = (1.0 - 4.0 * diffusionWeight) * c + diffusionWeight * (n0 + n1 + n2 + n3);
 
   let cellCenter = vec2f(q) + vec2f(0.5);
-  let radius = max(params.brushRadius, 0.0001) * 0.5;
+  let radius = max(params.brushRadius, 0.0001);
   let segmentDistance = segment_distance(cellCenter, params.brushPreviousCell, params.brushCell);
   // Per-cell hash perturbs the capsule edge to keep brush stamps organic. The noise is static
   // per cell (free) so strokes stay stable frame-to-frame but lose the perfect capsule.
-  let brushNoise = (staticNoise.b - 0.5) * BRUSH_EDGE_NOISE * 5.;
+  let brushNoise = (staticNoise.b - 0.5) * BRUSH_EDGE_NOISE;
   let noisyDistance = clamp(segmentDistance + brushNoise, 0.0, radius + BRUSH_EDGE_NOISE);
   let brushFalloff = 1.0 - smoothstep(0.0, radius, noisyDistance);
-  let brush = step(0.5, params.brushActive) * max(params.brushStrength, 0.0) * dt * brushFalloff * 0.6;
+  let brush = step(0.5, params.brushActive) * max(params.brushStrength, 0.0) * dt * brushFalloff;
 
-  var outValue = clamp(diffused - max(params.decayRate, 0.0) * 0.2 * dt + brush, 0.0, 1.0);
+  let decayMultiplier = mix(1.0, 2.0, staticNoise.a);
+  let decayRate = max(params.decayRate, 0.0) * decayMultiplier;
+  var outValue = clamp(diffused - decayRate * 0.2 * dt + brush, 0.0, PAINT_VALUE_MAX);
   if (outValue < 0.001) {
     outValue = 0.0;
   }

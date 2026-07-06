@@ -43,6 +43,7 @@ export const EVE_THICKNESS_SCALE_MULTIPLIER = 1.3;
 export const PREVIEW_BACK_ALBEDO = 0;
 export const PREVIEW_BACK_DEPTH = 1;
 export const DEFAULT_IMPRINT_CELL_SIZE = 16;
+export const DEFAULT_IMPRINT_DEVICE_PIXEL_RATIO = 2;
 export const DEFAULT_IMPRINT_GRID_SCALE_MULTIPLIER = 0.71;
 export const DEFAULT_IMPRINT_GLYPH_SCALE = 1.35;
 export const PAINT_FORMAT: GPUTextureFormat = "r32float";
@@ -50,11 +51,38 @@ export const PAINT_STATIC_NOISE_FORMAT: GPUTextureFormat = "rgba32float";
 export const VORONOI_NOISE_FORMAT: GPUTextureFormat = "r32float";
 export const PAINT_PARAMS_BYTE_SIZE = 48;
 export const VORONOI_NOISE_PARAMS_BYTE_SIZE = 16;
-export const DEFAULT_PAINT_DECAY_PER_FRAME_120 = 0.008;
+export const DEFAULT_PAINT_DECAY_PER_FRAME_120 = 0.032;
 export const DEFAULT_PAINT_DECAY_RATE = DEFAULT_PAINT_DECAY_PER_FRAME_120 * 120;
-export const DEFAULT_PAINT_DIFFUSION_RATE = 4.5;
+export const DEFAULT_PAINT_DIFFUSION_RATE = 1.6;
 export const DEFAULT_PAINT_DIFFUSION_JITTER = 4.0;
 export const DEFAULT_PAINT_BRUSH_RADIUS = 8.0;
 export const DEFAULT_PAINT_BRUSH_STRENGTH = 32.0;
 export const DEFAULT_PAINT_DT = 1 / 60;
 export const PAINT_STROKE_MOVEMENT_EPSILON_CELLS = 0.05;
+
+function safeDevicePixelRatioOrDefault(devicePixelRatio: number | undefined) {
+  return Number.isFinite(devicePixelRatio)
+    ? Math.max(0.001, devicePixelRatio)
+    : DEFAULT_IMPRINT_DEVICE_PIXEL_RATIO;
+}
+
+export function imprintCellSizeForDevicePixelRatio(
+  devicePixelRatio = DEFAULT_IMPRINT_DEVICE_PIXEL_RATIO,
+) {
+  return (
+    DEFAULT_IMPRINT_CELL_SIZE *
+    (safeDevicePixelRatioOrDefault(devicePixelRatio) / DEFAULT_IMPRINT_DEVICE_PIXEL_RATIO)
+  );
+}
+
+export function bloomRadiusForDevicePixelRatio(
+  devicePixelRatio = DEFAULT_IMPRINT_DEVICE_PIXEL_RATIO,
+) {
+  return Math.max(
+    0,
+    Math.round(
+      BLOOM_RADIUS *
+        (safeDevicePixelRatioOrDefault(devicePixelRatio) / DEFAULT_IMPRINT_DEVICE_PIXEL_RATIO),
+    ),
+  );
+}

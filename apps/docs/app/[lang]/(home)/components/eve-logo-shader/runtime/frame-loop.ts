@@ -99,8 +99,8 @@ export function createDrawLoop({
     controlsRef.current.envYaw = state.mouseEnvYaw + state.agentsEnvYawMix * AGENTS_ENV_YAW_OFFSET;
     controlsRef.current.envPitch = state.mouseEnvPitch;
 
-    resizeCanvas(canvas);
-    const { logicalWidth, logicalHeight } = getCanvasLogicalSize(canvas);
+    const devicePixelRatio = resizeCanvas(canvas);
+    const { logicalWidth, logicalHeight } = getCanvasLogicalSize(canvas, devicePixelRatio);
 
     try {
       const transitionDurationSeconds = clampRange(transitionDebug.durationSeconds, 0.05, 2);
@@ -136,6 +136,7 @@ export function createDrawLoop({
           glyphScale: clampRange(transitionDebug.glyphScale, 0.5, 2.5),
           time: timeSeconds,
           mouse: [state.asciiMouseX, state.asciiMouseY],
+          devicePixelRatio,
           paint: {
             // rAF timestamps are ms; deltaSeconds is converted once above and all paint
             // decay/diffusion/brush math expects seconds. Brush cells are raw pointer cells
@@ -146,7 +147,7 @@ export function createDrawLoop({
             brushRadius: clampRange(transitionDebug.brushRadius, 1, 8),
             brushStrength: clampRange(transitionDebug.brushStrength, 4, 32),
             brushActive: brushCanWrite,
-            decayRate: clampRange(transitionDebug.paintDecayPerFrame120, 0.008, 0.08) * 120,
+            decayRate: clampRange(transitionDebug.paintDecayPerFrame120, 0.002, 0.08) * 120,
             diffusionRate: clampRange(transitionDebug.diffusionAmount, 0, 24),
             diffusionJitter: clampRange(transitionDebug.diffusionJitter, 0, 4),
           },

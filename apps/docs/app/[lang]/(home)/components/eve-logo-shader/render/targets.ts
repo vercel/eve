@@ -6,8 +6,8 @@ import { Device } from "@vgpu/core";
 import { createBackDepthTexture, createBloomTexture, getPaddedRenderSize } from "./textures";
 import type { BloomTargets } from "./types";
 
-export function createBloomTargetCache(device: Device, paddingRadius: number) {
-  let targets: BloomTargets | undefined;
+export function createBloomTargetCache(device: Device) {
+  let targets: (BloomTargets & { paddingRadius: number }) | undefined;
 
   const dispose = () => {
     targets?.scene.destroy();
@@ -20,13 +20,20 @@ export function createBloomTargetCache(device: Device, paddingRadius: number) {
   };
 
   return {
-    ensure(logicalWidth: number, logicalHeight: number) {
+    ensure(logicalWidth: number, logicalHeight: number, paddingRadius: number) {
       const padded = getPaddedRenderSize(logicalWidth, logicalHeight, paddingRadius);
-      if (targets?.width === padded.width && targets.height === padded.height) return targets;
+      if (
+        targets?.width === padded.width &&
+        targets.height === padded.height &&
+        targets.paddingRadius === paddingRadius
+      ) {
+        return targets;
+      }
       dispose();
       targets = {
         width: padded.width,
         height: padded.height,
+        paddingRadius,
         scene: createBloomTexture(device, "eve-5-scene-linear-hdr", padded.width, padded.height),
         backMaterial: createBloomTexture(
           device,

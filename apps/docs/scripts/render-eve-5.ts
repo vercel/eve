@@ -87,6 +87,7 @@ async function main() {
         theme: config.theme,
         stage: config.renderStage,
         requestedStage: config.requestedRenderStage,
+        dpr: config.dpr,
         envYaw: config.renderEnvYaw,
         envYawTime: config.renderEnvYawTime ?? null,
       },

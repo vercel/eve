@@ -62,6 +62,7 @@ export type ImprintRenderOptions = {
   time?: number;
   mouse?: readonly [number, number];
   paint?: PaintRenderOptions;
+  devicePixelRatio?: number;
 };
 
 export type RenderControls = {
@@ -97,6 +98,7 @@ export type PaintPointerMappingInput = {
   meshBounds: Bounds;
   gridScaleMultiplier?: number;
   paddingRadius?: number;
+  devicePixelRatio?: number;
 };
 
 export type PaintPointerMapping = {

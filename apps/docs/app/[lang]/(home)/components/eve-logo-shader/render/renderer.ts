@@ -3,7 +3,7 @@
 // Imported exclusively by render.ts.
 
 import { Device } from "@vgpu/core";
-import { BLOOM_STRENGTH_OFF, BLOOM_STRENGTH_ON } from "./constants";
+import { BLOOM_STRENGTH_OFF, BLOOM_STRENGTH_ON, bloomRadiusForDevicePixelRatio } from "./constants";
 import { clampUnit, mix } from "./math";
 import { createPaintSystem } from "./paint-system";
 import { renderBackDepth, renderBackMaterial } from "./passes/back-pass";
@@ -27,7 +27,7 @@ export function createEve5Renderer(
   } = {},
 ) {
   const resources = createResources(device, format, mesh, options);
-  const bloomTargets = createBloomTargetCache(device, resources.paddingRadius);
+  const bloomTargets = createBloomTargetCache(device);
   const paintSystem = createPaintSystem(device, resources, mesh);
 
   const renderGlassTarget = (
@@ -39,8 +39,9 @@ export function createEve5Renderer(
   ) => {
     const safeWidth = Math.max(1, Math.round(logicalWidth));
     const safeHeight = Math.max(1, Math.round(logicalHeight));
-    const targets = bloomTargets.ensure(safeWidth, safeHeight);
-    const currentPaintTargets = paintSystem.ensure(safeWidth, safeHeight);
+    const paddingRadius = options.paddingRadius ?? bloomRadiusForDevicePixelRatio(imprint.devicePixelRatio);
+    const targets = bloomTargets.ensure(safeWidth, safeHeight, paddingRadius);
+    const currentPaintTargets = paintSystem.ensure(safeWidth, safeHeight, imprint.devicePixelRatio);
     const backSurfaceDepthView = targets.backSurfaceDepth.createView();
 
     renderBackMaterial(
@@ -52,6 +53,7 @@ export function createEve5Renderer(
       controls,
       safeWidth,
       safeHeight,
+      paddingRadius,
     );
     renderBackDepth(
       device,
@@ -62,6 +64,7 @@ export function createEve5Renderer(
       controls,
       safeWidth,
       safeHeight,
+      paddingRadius,
     );
 
     paintSystem.apply(currentPaintTargets, imprint.paint);
@@ -82,6 +85,7 @@ export function createEve5Renderer(
         controls,
         safeWidth,
         safeHeight,
+        paddingRadius,
       );
       return;
     }
@@ -95,7 +99,7 @@ export function createEve5Renderer(
       controls,
       safeWidth,
       safeHeight,
-      resources.paddingRadius,
+      paddingRadius,
       imprint,
     );
     renderScene(
@@ -111,7 +115,7 @@ export function createEve5Renderer(
       controls,
       safeWidth,
       safeHeight,
-      resources.paddingRadius,
+      paddingRadius,
       imprint,
     );
 
@@ -128,8 +132,8 @@ export function createEve5Renderer(
       BLOOM_STRENGTH_ON,
       clampUnit(imprint.progress ?? 0),
     );
-    renderBlur(device, resources, targets.scene, targets.horizontal, [1, 0], true);
-    renderBlur(device, resources, targets.horizontal, targets.vertical, [0, 1], false);
+    renderBlur(device, resources, targets.scene, targets.horizontal, [1, 0], true, paddingRadius);
+    renderBlur(device, resources, targets.horizontal, targets.vertical, [0, 1], false, paddingRadius);
     renderComposite(device, resources, target, targets, targets.vertical, effectiveBloomStrength);
   };
 

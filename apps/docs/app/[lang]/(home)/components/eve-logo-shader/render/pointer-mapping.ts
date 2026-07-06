@@ -3,7 +3,11 @@
 // Imported by render/renderer.ts and re-exported only through render.ts facade.
 
 import type { Bounds, PaintPointerMapping, PaintPointerMappingInput, RenderControls } from "./types";
-import { BLOOM_RADIUS, DEFAULT_IMPRINT_CELL_SIZE, DEFAULT_IMPRINT_GRID_SCALE_MULTIPLIER } from "./constants";
+import {
+  BLOOM_RADIUS,
+  DEFAULT_IMPRINT_GRID_SCALE_MULTIPLIER,
+  imprintCellSizeForDevicePixelRatio,
+} from "./constants";
 import { meshOrbitTargetFromBounds } from "./camera";
 import { degreesToRadians, dot } from "./math";
 import { getPaddedRenderSize } from "./textures";
@@ -33,6 +37,7 @@ export function mapClientPointToPaintCell(
     logicalHeight,
     input.gridScaleMultiplier ?? DEFAULT_IMPRINT_GRID_SCALE_MULTIPLIER,
     paddingRadius,
+    input.devicePixelRatio,
   );
   const modelX = (xLog - logicalWidth * 0.5) / metrics.pxPerModelUnit;
   const modelY = (logicalHeight * 0.5 - yLog) / metrics.pxPerModelUnit;
@@ -57,6 +62,7 @@ export function paintMappingMetrics(
   logicalHeight: number,
   gridScaleMultiplier: number,
   paddingRadius: number,
+  devicePixelRatio?: number,
 ) {
   const padded = getPaddedRenderSize(logicalWidth, logicalHeight, paddingRadius);
   const fovRad = degreesToRadians(controls.fov);
@@ -67,8 +73,8 @@ export function paintMappingMetrics(
   const basis = cameraBasis(eye, orbitTarget);
   const distToFrontPlane = Math.max(0.001, -dot(eye, basis.forward));
   const pxPerModelUnit = padded.height / (2 * distToFrontPlane * Math.tan(fovEff * 0.5));
-  const gridScale =
-    (pxPerModelUnit / DEFAULT_IMPRINT_CELL_SIZE) * Math.max(0.001, gridScaleMultiplier);
+  const cellSize = imprintCellSizeForDevicePixelRatio(devicePixelRatio);
+  const gridScale = (pxPerModelUnit / cellSize) * Math.max(0.001, gridScaleMultiplier);
   const normalizedBounds = normalizedMeshBounds(bounds);
   const originCell: [number, number] = [
     Math.floor(normalizedBounds.min[0] * gridScale),
