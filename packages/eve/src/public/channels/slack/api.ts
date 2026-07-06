@@ -33,11 +33,7 @@ import { isCardElement, type CardElement, type FileUpload } from "#compiled/chat
 import { createLogger, logError } from "#internal/logging.js";
 import { cardToBlocks, cardToFallbackText } from "#public/channels/slack/blocks.js";
 import { truncateTypingStatus } from "#public/channels/slack/limits.js";
-import {
-  gfmToSlackMrkdwn,
-  rewriteBareMentions,
-  slackMrkdwnToGfm,
-} from "#public/channels/slack/mrkdwn.js";
+import { rewriteBareMentions, slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
 
 const log = createLogger("slack.api");
 
@@ -124,14 +120,15 @@ export interface SlackPostedMessage {
  * - The channel uploads each file via Slack's modern
  *   `files.getUploadURLExternal` → POST bytes → `files.completeUploadExternal`
  *   flow.
- * - For `{ markdown }` / `{ text }`: the text becomes the file post's
- *   `initial_comment`, producing a single Slack message with text and
- *   files.
- * - For `{ blocks }` / `{ card }`: the structured message lands first
- *   via `chat.postMessage`, then the files are uploaded as a
+ * - For `{ text }`: the text becomes the file post's `initial_comment`,
+ *   producing a single Slack message with text and files. Slack
+ *   interprets `initial_comment` as mrkdwn.
+ * - For `{ markdown }` / `{ blocks }` / `{ card }`: the message lands
+ *   first via `chat.postMessage`, then the files are uploaded as a
  *   follow-up message in the same thread. Slack has no native way to
- *   attach arbitrary files inside a Block Kit message, so the two
- *   land as separate posts in the same thread.
+ *   attach arbitrary files inside those message surfaces, and
+ *   `initial_comment` cannot render Slack's full Markdown table/header
+ *   support.
  */
 interface SlackPostWithFiles {
   readonly files?: readonly FileUpload[];
@@ -220,10 +217,10 @@ export interface SlackThread {
    * becomes `{ card }`. Otherwise pass a {@link SlackPostInput}
    * explicitly, any variant of which may carry `files`.
    *
-   * With `files`, the channel runs Slack's three-step upload flow and
-   * either attaches them to this message (markdown / text variants) or
-   * posts them as a follow-up in the same thread (blocks / card
-   * variants).
+   * With `files`, the channel runs Slack's three-step upload flow. The
+   * `{ text }` variant attaches files with the text as the upload
+   * comment; `{ markdown }`, `{ blocks }`, and `{ card }` post the
+   * message first and upload files as a follow-up in the same thread.
    */
   post(message: string | CardElement | SlackPostInput): Promise<SlackPostedMessage>;
 
@@ -326,7 +323,8 @@ interface SlackBinding {
  * Auto-anchor: when the binding starts without a `threadTs`, the first
  * `chat.postMessage` adopts its own `ts` as the thread root, updating the
  * live `threadTs` and firing `onThreadTsChanged` so the caller can
- * persist the anchor. Ephemerals and files-only posts do not anchor.
+ * persist the anchor. Ephemerals and upload-only file posts do not
+ * anchor.
  */
 export function buildSlackBinding(input: {
   readonly botToken: SlackBotToken | undefined;
@@ -365,16 +363,12 @@ export function buildSlackBinding(input: {
       const message = normalizePostInput(rawMessage);
       const files = message.files ?? [];
       const hasStructured = "blocks" in message || "card" in message;
+      const shouldPostBeforeFiles = hasStructured || "markdown" in message;
 
-      // markdown / text + files: single Slack message with files attached
-      // via files.completeUploadExternal's initial_comment.
-      if (files.length > 0 && !hasStructured) {
-        const comment =
-          "markdown" in message
-            ? rewriteBareMentions(gfmToSlackMrkdwn(message.markdown))
-            : "text" in message
-              ? rewriteBareMentions(message.text)
-              : undefined;
+      // text + files: single Slack message with files attached via
+      // files.completeUploadExternal's mrkdwn-only initial_comment.
+      if (files.length > 0 && !shouldPostBeforeFiles) {
+        const comment = "text" in message ? rewriteBareMentions(message.text) : undefined;
         const result = await uploadFiles(files, { initialComment: comment });
         const id =
           Array.isArray(result.raw.files) && result.raw.files.length > 0
@@ -389,13 +383,13 @@ export function buildSlackBinding(input: {
       const id = response.id;
       handleMessageTs(id);
 
-      // blocks / card + files: structured message lands first, then upload
-      // files as a follow-up post in the same thread.
-      if (files.length > 0 && hasStructured) {
+      // markdown / blocks / card + files: message lands first, then
+      // files upload as a follow-up post in the same thread.
+      if (files.length > 0 && shouldPostBeforeFiles) {
         try {
           await uploadFiles(files);
         } catch (error) {
-          log.warn("file upload after structured post failed", { error });
+          log.warn("file upload after message post failed", { error });
         }
       }
       return { id, raw: response.raw };
