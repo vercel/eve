@@ -3,6 +3,7 @@ import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import type { ResolvedAgent } from "#runtime/types.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
 import type { InternalAgentModelDefinition } from "#shared/agent-definition.js";
+import type { AvailableSkillDescription } from "#execution/skills/instructions.js";
 
 /**
  * Fixed internal model reference used only by the framework-owned bootstrap
@@ -19,6 +20,7 @@ export type RuntimeModelReference = Readonly<InternalAgentModelDefinition>;
  * Minimal runtime-owned agent shape prepared for one harness turn.
  */
 export interface RuntimeTurnAgent {
+  readonly availableSkills?: readonly AvailableSkillDescription[];
   readonly id: string;
   readonly instructions: readonly string[];
   /**
@@ -52,11 +54,14 @@ export function createResolvedRuntimeTurnAgent(input: {
 }): RuntimeTurnAgent {
   const agent = input.agent;
   return {
+    availableSkills: agent.skills.map((skill) => ({
+      description: skill.description,
+      name: skill.name,
+    })),
     id: agent.config.name,
     instructions: composeRuntimeBasePrompt({
       connections: agent.connections,
       instructions: agent.instructions,
-      skills: agent.skills,
       toolsAvailable: input.tools.length > 0,
       workspaceSpec: agent.workspaceSpec,
     }),

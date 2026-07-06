@@ -55,7 +55,7 @@ function createTestRegistry(
   return {
     sandbox: {
       definition: resolved,
-      workspaceResourceRoot: { contentHash: "test-content-hash", logicalPath: "", rootEntries: [] },
+      workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
     },
   };
 }

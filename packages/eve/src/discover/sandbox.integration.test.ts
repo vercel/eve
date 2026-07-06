@@ -6,11 +6,7 @@ import {
   DISCOVER_SANDBOX_DIRECTORY_INVALID,
   readSortedDirectoryEntries,
 } from "#discover/grammar.js";
-import {
-  DISCOVER_SANDBOX_FOLDER_EMPTY,
-  DISCOVER_SANDBOX_WORKSPACE_SKILLS_RESERVED,
-  discoverSandboxSource,
-} from "#discover/sandbox.js";
+import { DISCOVER_SANDBOX_FOLDER_EMPTY, discoverSandboxSource } from "#discover/sandbox.js";
 
 describe("discoverSandboxSource (memory)", () => {
   it("returns no entries when the agent has no sandbox/ folder", async () => {
@@ -147,7 +143,7 @@ describe("discoverSandboxSource (memory)", () => {
     expect(result.sandboxWorkspace).toBeNull();
   });
 
-  it("reports DISCOVER_SANDBOX_WORKSPACE_SKILLS_RESERVED when workspace/ contains a skills/ subtree", async () => {
+  it("allows workspace/ to contain a skills/ subtree", async () => {
     const project = buildMemoryAgentProject({
       agentFiles: {
         "sandbox/workspace/skills/shadow.md": "shadowed",
@@ -161,10 +157,8 @@ describe("discoverSandboxSource (memory)", () => {
       source: project.source,
     });
 
-    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
-      DISCOVER_SANDBOX_WORKSPACE_SKILLS_RESERVED,
-    );
-    expect(result.sandboxWorkspace).toBeNull();
+    expect(result.diagnostics).toEqual([]);
+    expect(result.sandboxWorkspace?.rootEntries).toEqual(["skills/"]);
   });
 
   it("discovers a top-level sandbox.<ext> when no sandbox/ folder exists", async () => {

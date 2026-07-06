@@ -97,6 +97,26 @@ describe("createSession", () => {
     ]);
   });
 
+  it("renders available skill paths with the chosen skill root", () => {
+    const session = createSession({
+      continuationToken: "root-token",
+      sessionId: "sess-root",
+      skillRoot: "/home/agent/.agents/skills",
+      turnAgent: createTestTurnAgent({
+        availableSkills: [{ description: "Research topics.", name: "research" }],
+      }),
+    });
+
+    expect(session.agent.system).toContain(
+      "Skill files live under `/home/agent/.agents/skills/<skill>/`.",
+    );
+    expect(session.agent.system).toContain(
+      "- research: Research topics. (path: /home/agent/.agents/skills/research/SKILL.md)",
+    );
+    expect(session.agent.system).not.toContain("/workspace/skills");
+    expect(session.agent.system).not.toContain("fallback");
+  });
+
   it("starts with empty history and stores the continuation token verbatim", () => {
     const session = createSession({
       continuationToken: "root-token",
@@ -458,5 +478,31 @@ describe("refreshSessionFromTurnAgent", () => {
       id: "updated-model",
     });
     expect(refreshed.agent.system).toBe("Updated prompt from the current deployment.");
+  });
+
+  it("refreshes available skill paths with the chosen skill root", () => {
+    const session = createSession({
+      continuationToken: "root-token",
+      sessionId: "sess-root",
+      turnAgent: createTestTurnAgent({
+        availableSkills: [{ description: "Research topics.", name: "research" }],
+      }),
+    });
+    const refreshed = refreshSessionFromTurnAgent({
+      session,
+      skillRoot: "/workspace/skills",
+      turnAgent: createTestTurnAgent({
+        availableSkills: [{ description: "Research topics.", name: "research" }],
+      }),
+    });
+
+    expect(refreshed.agent.system).toContain(
+      "Skill files live under `/workspace/skills/<skill>/`.",
+    );
+    expect(refreshed.agent.system).toContain(
+      "- research: Research topics. (path: /workspace/skills/research/SKILL.md)",
+    );
+    expect(refreshed.agent.system).not.toContain("$HOME");
+    expect(refreshed.agent.system).not.toContain("fallback");
   });
 });

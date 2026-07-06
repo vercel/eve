@@ -1,4 +1,5 @@
 import type { DurableSession } from "#execution/durable-session-store.js";
+import { formatAvailableSkillsSection } from "#execution/skills/instructions.js";
 import type { HarnessSession, SessionLimits, SessionToolDefinition } from "#harness/types.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 
@@ -56,6 +57,7 @@ export interface CreateSessionInput {
   readonly turnAgent: RuntimeTurnAgent;
   readonly limits?: SessionLimits;
   readonly outputSchema?: HarnessSession["outputSchema"];
+  readonly skillRoot?: string;
   readonly subagentDepth?: number;
   readonly subagentMaxDepth?: number;
 }
@@ -72,7 +74,10 @@ export function createSession(input: CreateSessionInput): HarnessSession {
       compactionModelReference: turnAgent.compactionModel,
       modelReference: turnAgent.model,
       reasoning: turnAgent.reasoning,
-      system: turnAgent.instructions.join("\n\n"),
+      system: createSessionSystemPrompt({
+        skillRoot: input.skillRoot,
+        turnAgent,
+      }),
       tools,
     },
     compaction: createCompactionConfig({
@@ -112,6 +117,7 @@ export function refreshSessionFromTurnAgent(input: {
   readonly compactionOverrides?: {
     readonly thresholdPercent?: number;
   };
+  readonly skillRoot?: string;
 }): HarnessSession {
   return {
     ...input.session,
@@ -119,7 +125,10 @@ export function refreshSessionFromTurnAgent(input: {
       compactionModelReference: input.turnAgent.compactionModel,
       modelReference: input.turnAgent.model,
       reasoning: input.turnAgent.reasoning,
-      system: input.turnAgent.instructions.join("\n\n"),
+      system: createSessionSystemPrompt({
+        skillRoot: input.skillRoot,
+        turnAgent: input.turnAgent,
+      }),
       tools: createSessionToolDefinitions(input.turnAgent),
     },
     compaction: createCompactionConfig({
@@ -129,6 +138,20 @@ export function refreshSessionFromTurnAgent(input: {
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
   };
+}
+
+function createSessionSystemPrompt(input: {
+  readonly skillRoot?: string;
+  readonly turnAgent: RuntimeTurnAgent;
+}): string {
+  const skillSection = formatAvailableSkillsSection(input.turnAgent.availableSkills ?? [], {
+    skillRoot: input.skillRoot,
+  });
+  const blocks =
+    skillSection === null
+      ? input.turnAgent.instructions
+      : [...input.turnAgent.instructions, skillSection];
+  return blocks.join("\n\n");
 }
 
 /**

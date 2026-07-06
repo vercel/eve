@@ -288,7 +288,10 @@ async function loadResourceRootSeedFiles(input: {
   readonly compileDirectoryPath: string;
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
 }): Promise<readonly SandboxSeedFile[]> {
-  if (input.workspaceResourceRoot.rootEntries.length === 0) {
+  if (
+    input.workspaceResourceRoot.contentHash === undefined &&
+    input.workspaceResourceRoot.rootEntries.length === 0
+  ) {
     return [];
   }
   const materialized = await materializeWorkspaceDirectory(

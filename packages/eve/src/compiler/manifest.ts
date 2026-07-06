@@ -787,10 +787,6 @@ export function deriveResourceRootEntries(input: {
 }): readonly string[] {
   const rootEntries = new Set<string>();
 
-  if ((input.skills ?? []).length > 0) {
-    rootEntries.add("skills/");
-  }
-
   for (const workspace of input.sandboxWorkspaces ?? []) {
     for (const entry of workspace.rootEntries) {
       rootEntries.add(entry);

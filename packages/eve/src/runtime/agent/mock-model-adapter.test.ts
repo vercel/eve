@@ -37,13 +37,13 @@ describe("createMockAuthoredRuntimeModel", () => {
     expect(shouldMockAuthoredRuntimeModels()).toBe(true);
   });
 
-  it("activates a matching skill when the available skill line includes a workspace path", async () => {
+  it("activates a matching skill when the available skill line includes a skill path", async () => {
     const result = await generateWithPrompt([
       {
         content: [
           "Available skills\n",
           "Listed skills are available in this run.\n",
-          "- weather-skill: Use the weather tool before answering forecast or temperature questions. (path: /workspace/skills/weather-skill/SKILL.md)",
+          "- weather-skill: Use the weather tool before answering forecast or temperature questions. (path: /home/agent/.agents/skills/weather-skill/SKILL.md)",
         ].join(""),
         role: "system",
       },
@@ -70,7 +70,7 @@ describe("createMockAuthoredRuntimeModel", () => {
         content: [
           "Available skills\n",
           "Listed skills are available in this run.\n",
-          "- research: Research unfamiliar topics before answering with confidence. (path: /workspace/skills/research/SKILL.md)",
+          "- research: Research unfamiliar topics before answering with confidence. (path: /home/agent/.agents/skills/research/SKILL.md)",
         ].join(""),
         role: "system",
       },
@@ -95,7 +95,7 @@ describe("createMockAuthoredRuntimeModel", () => {
         content: [
           "Available skills\n",
           "Listed skills are available in this run.\n",
-          "- release: Use for release checklist requests. (path: /workspace/skills/release/SKILL.md)",
+          "- release: Use for release checklist requests. (path: /home/agent/.agents/skills/release/SKILL.md)",
         ].join(""),
         role: "system",
       },
@@ -103,7 +103,7 @@ describe("createMockAuthoredRuntimeModel", () => {
         content: [
           "Available skills\n",
           "Listed skills are available in this run.\n",
-          "- tenant-weather: Use tenant weather policy before answering forecast questions. (path: /workspace/skills/tenant-weather/SKILL.md)",
+          "- tenant-weather: Use tenant weather policy before answering forecast questions. (path: /home/agent/.agents/skills/tenant-weather/SKILL.md)",
         ].join(""),
         role: "system",
       },
@@ -134,7 +134,7 @@ describe("createMockAuthoredRuntimeModel", () => {
           "",
           "Available skills",
           "Listed skills are available in this run.",
-          "- echo-marker: Use when the user asks for the echo marker. (path: /workspace/skills/echo-marker/SKILL.md)",
+          "- echo-marker: Use when the user asks for the echo marker. (path: /home/agent/.agents/skills/echo-marker/SKILL.md)",
           "",
           "Another section that must not be parsed as skills.",
         ].join("\n"),
@@ -163,7 +163,7 @@ describe("createMockAuthoredRuntimeModel", () => {
         content: [
           "Available skills",
           "Listed skills are available in this run.",
-          "- echo-marker: Use when the user asks for the echo marker. (path: /workspace/skills/echo-marker/SKILL.md)",
+          "- echo-marker: Use when the user asks for the echo marker. (path: /home/agent/.agents/skills/echo-marker/SKILL.md)",
         ].join("\n"),
         role: "system",
       },

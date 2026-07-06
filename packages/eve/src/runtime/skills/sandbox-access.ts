@@ -1,13 +1,13 @@
 import type { SandboxSession } from "#public/definitions/sandbox.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 import type { SkillHandle } from "#execution/skills/types.js";
-import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
+import { resolveSandboxSkillReadPaths } from "#shared/skill-paths.js";
 
 const FRONTMATTER_PATTERN = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
 
 /**
  * Validates a skill id before it is used as one path segment under
- * `/workspace/skills`.
+ * the sandbox skill root.
  */
 export function assertSafeSkillId(id: string): asserts id is string {
   if (
@@ -41,16 +41,21 @@ export async function loadSkillFromSandbox(
 ): Promise<string> {
   assertSafeSkillId(id);
   const sandbox = await requireSandboxSession(access);
-  const path = skillFilePath(id, "SKILL.md");
-  const instructions = await sandbox.readTextFile({ path });
+  const paths = await resolveSandboxSkillReadPaths({
+    name: id,
+    relativePath: "SKILL.md",
+    sandbox,
+  });
 
-  if (instructions === null) {
-    const hint =
-      availableNames.length > 0 ? ` Available skills: ${availableNames.join(", ")}.` : "";
-    throw new Error(`No skill named "${id}" at ${path}.${hint}`);
+  for (const path of paths) {
+    const instructions = await sandbox.readTextFile({ path });
+    if (instructions !== null) {
+      return instructions.replace(FRONTMATTER_PATTERN, "");
+    }
   }
 
-  return instructions.replace(FRONTMATTER_PATTERN, "");
+  const hint = availableNames.length > 0 ? ` Available skills: ${availableNames.join(", ")}.` : "";
+  throw new Error(`No skill named "${id}" at ${paths[0]}.${hint}`);
 }
 
 /**
@@ -64,20 +69,41 @@ export function createSandboxSkillHandle(access: SandboxAccess, id: string): Ski
     name: id,
     file(relativePath: string) {
       assertSafeSkillRelativePath(relativePath);
-      const path = skillFilePath(id, relativePath);
 
       return {
         async bytes(): Promise<Uint8Array> {
           const sandbox = await requireSandboxSession(access);
-          const content = await sandbox.readBinaryFile({ path });
-          if (content === null) throw new Error(`Skill file not found: ${path}`);
-          return content;
+          const paths = await resolveSandboxSkillReadPaths({
+            name: id,
+            relativePath,
+            sandbox,
+          });
+
+          for (const path of paths) {
+            const content = await sandbox.readBinaryFile({ path });
+            if (content !== null) {
+              return content;
+            }
+          }
+
+          throw new Error(`Skill file not found: ${paths[0]}`);
         },
         async text(): Promise<string> {
           const sandbox = await requireSandboxSession(access);
-          const content = await sandbox.readTextFile({ path });
-          if (content === null) throw new Error(`Skill file not found: ${path}`);
-          return content;
+          const paths = await resolveSandboxSkillReadPaths({
+            name: id,
+            relativePath,
+            sandbox,
+          });
+
+          for (const path of paths) {
+            const content = await sandbox.readTextFile({ path });
+            if (content !== null) {
+              return content;
+            }
+          }
+
+          throw new Error(`Skill file not found: ${paths[0]}`);
         },
       };
     },
@@ -103,8 +129,4 @@ async function requireSandboxSession(access: SandboxAccess): Promise<SandboxSess
     throw new Error("The sandbox is not available in the current authored runtime context.");
   }
   return sandbox;
-}
-
-function skillFilePath(id: string, relativePath: string): string {
-  return `${WORKSPACE_ROOT}/skills/${id}/${relativePath}`;
 }

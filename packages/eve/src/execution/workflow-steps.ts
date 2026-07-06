@@ -9,7 +9,14 @@ import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
 import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
 import { dispatchDynamicToolEvent } from "#context/dynamic-tool-lifecycle.js";
-import { AuthKey, CapabilitiesKey, ContinuationTokenKey, ModeKey } from "#context/keys.js";
+import type { ContextContainer } from "#context/container.js";
+import {
+  AuthKey,
+  CapabilitiesKey,
+  ContinuationTokenKey,
+  ModeKey,
+  SandboxKey,
+} from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { runStep, withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
@@ -59,8 +66,10 @@ import {
 import { createExecutionNodeStep } from "#execution/node-step.js";
 import { emitProxiedInputRequest, routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
+import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
+import { resolveSandboxSkillRoot } from "#shared/skill-paths.js";
 import {
   createWorkflowRuntime,
   startWorkflowPreferLatest,
@@ -309,11 +318,16 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       lifecycleSession: HarnessSession,
       stepInput: StepInput | undefined,
     ): Promise<StepResult> => {
+      const skillRoot = await resolveSessionSkillRoot({
+        ctx,
+        turnAgent: bundle.turnAgent,
+      });
       const refreshedSession = refreshSessionFromTurnAgent({
         compactionOverrides: {
           thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
         },
         session: lifecycleSession,
+        skillRoot,
         turnAgent: bundle.turnAgent,
       });
 
@@ -415,6 +429,27 @@ function derivePendingState(session: HarnessSession): {
     };
   }
   return base;
+}
+
+async function resolveSessionSkillRoot(input: {
+  readonly ctx: ContextContainer;
+  readonly turnAgent: RuntimeTurnAgent;
+}): Promise<string | undefined> {
+  if ((input.turnAgent.availableSkills?.length ?? 0) === 0) {
+    return undefined;
+  }
+
+  const access = input.ctx.get(SandboxKey);
+  if (access === undefined) {
+    return undefined;
+  }
+
+  const sandbox = await access.get();
+  if (sandbox === null) {
+    return undefined;
+  }
+
+  return await resolveSandboxSkillRoot({ sandbox });
 }
 
 /**
