@@ -88,9 +88,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     // Derived once and reused for createSession + tag emission so the
     // chain-root id can never drift between persisted session and tags.
     const rootSessionIdFromParent = readRootSessionId(input.serializedContext);
-    const { subagentDepth, subagentMaxDepth } = readSerializedSubagentSessionDepth(
-      input.serializedContext,
-    );
+    const { subagentDepth } = readSerializedSubagentSessionDepth(input.serializedContext);
 
     const { state: sessionState } = await createSessionStep({
       compiledArtifactsSource: serializedBundle.source,
@@ -101,7 +99,6 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       rootSessionId: rootSessionIdFromParent,
       sessionId,
       subagentDepth,
-      subagentMaxDepth,
     });
 
     return await runDriverLoop({

@@ -14,6 +14,7 @@ import {
   CapabilitiesKey,
   ChannelInstrumentationKey,
   InitiatorAuthKey,
+  WorkflowMaxSubagentsKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
@@ -51,6 +52,7 @@ import {
   resolveSubagentDelegationLimit,
   type SubagentDelegationLimit,
 } from "#harness/subagent-depth.js";
+import { resolveInheritedCountLimit } from "#execution/run-session-limits.js";
 
 const log = createLogger("execution.dispatch-runtime-actions");
 
@@ -88,6 +90,10 @@ export async function dispatchRuntimeActionsStep(input: {
   const capabilities = ctx.get(CapabilitiesKey);
   const channelMetadata = ctx.get(ChannelInstrumentationKey);
   const initiatorAuth = ctx.get(InitiatorAuthKey) ?? null;
+  const workflowMaxSubagents = resolveInheritedCountLimit({
+    configured: bundle.resolvedAgent.config.limits?.maxSubagents,
+    inherited: ctx.get(WorkflowMaxSubagentsKey),
+  });
   const writer = input.parentWritable.getWriter();
 
   const adapterCtx = buildAdapterContext(adapter, ctx);
@@ -138,6 +144,7 @@ export async function dispatchRuntimeActionsStep(input: {
             parentContinuationToken: input.parentContinuationToken,
             session,
             source,
+            workflowMaxSubagents,
           });
           const handle = await startWorkflowRuntimeRun({
             compiledArtifactsSource: bundle.compiledArtifactsSource,

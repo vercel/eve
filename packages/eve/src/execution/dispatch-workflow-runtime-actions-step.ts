@@ -15,7 +15,9 @@ import {
 } from "#harness/workflow-subagent-limit.js";
 import { getSubagentDelegationName, isSubagentDelegationAction } from "#harness/subagent-depth.js";
 import { createLogger } from "#internal/logging.js";
+import { WorkflowMaxSubagentsKey } from "#context/keys.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { resolveInheritedCountLimit } from "#execution/run-session-limits.js";
 import type {
   RuntimeActionRequest,
   RuntimeSubagentResultActionResult,
@@ -45,11 +47,15 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
 
   const ctx = await deserializeContext(input.serializedContext);
   const bundle = ctx.require(BundleKey);
+  const maxSubagents = resolveInheritedCountLimit({
+    configured: bundle.resolvedAgent.config.limits?.maxSubagents,
+    inherited: ctx.get(WorkflowMaxSubagentsKey),
+  });
 
   const plan = planWorkflowSubagentDispatch({
     actions,
     interrupt: pending.interrupt,
-    maxSubagents: bundle.resolvedAgent.config.limits?.maxSubagents,
+    maxSubagents,
   });
 
   const blockedResults = plan.blocked.map((action) => {

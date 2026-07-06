@@ -15,7 +15,7 @@ import type { ChannelInstrumentationProjection } from "#channel/instrumentation.
 
 export type RunSessionLimits = Pick<
   AgentLimitsDefinition,
-  "maxInputTokensPerSession" | "maxOutputTokensPerSession"
+  "maxInputTokensPerSession" | "maxOutputTokensPerSession" | "maxSubagentDepth" | "maxSubagents"
 >;
 
 // ---------------------------------------------------------------------------
@@ -279,9 +279,10 @@ export interface RunInput {
   readonly mode: RunMode;
   readonly parent?: SessionParent;
   /**
-   * Runtime-supplied session token limits. Delegated local subagents use this
-   * to carry the parent's remaining quota with the same limit fields authors
-   * configure on agents; `false` means no inherited cap for that axis.
+   * Runtime-supplied session limits. Delegated local subagents use this to
+   * carry the parent's remaining quota and delegation caps with the same limit
+   * fields authors configure on agents; `false` means no inherited token cap
+   * for that axis.
    */
   readonly limits?: RunSessionLimits;
   /**
@@ -290,11 +291,6 @@ export interface RunInput {
    * parent depth + 1.
    */
   readonly subagentDepth?: number;
-  /**
-   * Optional maximum delegated subagent depth inherited by this run. When
-   * omitted, the session uses its resolved agent config or eve's default.
-   */
-  readonly subagentMaxDepth?: number;
 }
 
 export interface DeliverInput {

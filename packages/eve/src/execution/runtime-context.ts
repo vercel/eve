@@ -13,6 +13,7 @@ import {
   SessionCallbackKey,
   SubagentDepthKey,
   SubagentMaxDepthKey,
+  WorkflowMaxSubagentsKey,
 } from "#context/keys.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 
@@ -63,8 +64,12 @@ export function buildRunContext(input: {
     ctx.set(SubagentDepthKey, run.subagentDepth);
   }
 
-  if (run.subagentMaxDepth !== undefined) {
-    ctx.set(SubagentMaxDepthKey, run.subagentMaxDepth);
+  if (run.limits?.maxSubagentDepth !== undefined) {
+    ctx.set(SubagentMaxDepthKey, run.limits.maxSubagentDepth);
+  }
+
+  if (run.limits?.maxSubagents !== undefined) {
+    ctx.set(WorkflowMaxSubagentsKey, run.limits.maxSubagents);
   }
 
   return ctx;

@@ -8,6 +8,7 @@ import {
   SessionIdKey,
   SessionKey,
   SubagentMaxDepthKey,
+  WorkflowMaxSubagentsKey,
 } from "#context/keys.js";
 import { buildRunContext } from "#execution/runtime-context.js";
 
@@ -248,7 +249,7 @@ describe("buildRunContext", () => {
     expect(projection!.metadata).toEqual({});
   });
 
-  it("seeds inherited subagent max depth from the run input", () => {
+  it("seeds inherited run limits from the run input", () => {
     const ctx = buildRunContext({
       bundle: createMinimalBundle(),
       run: {
@@ -256,11 +257,12 @@ describe("buildRunContext", () => {
         adapter: { kind: "subagent" },
         continuationToken: "t",
         input: { message: "hi" },
+        limits: { maxSubagentDepth: 4, maxSubagents: 7 },
         mode: "task",
-        subagentMaxDepth: 4,
       },
     });
 
     expect(ctx.require(SubagentMaxDepthKey)).toBe(4);
+    expect(ctx.require(WorkflowMaxSubagentsKey)).toBe(7);
   });
 });

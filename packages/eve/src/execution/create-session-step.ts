@@ -4,7 +4,8 @@ import {
   createDurableSessionState,
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
-import { createSession, type AuthoredSessionLimits } from "#execution/session.js";
+import { createSession } from "#execution/session.js";
+import { resolveInheritedTokenLimit } from "#execution/run-session-limits.js";
 import type { RunSessionLimits } from "#channel/types.js";
 import type { JsonObject } from "#shared/json.js";
 
@@ -33,7 +34,6 @@ export async function createSessionStep(input: {
   readonly rootSessionId?: string;
   readonly sessionId: string;
   readonly subagentDepth?: number;
-  readonly subagentMaxDepth?: number;
 }): Promise<CreateSessionStepResult> {
   "use step";
 
@@ -48,11 +48,11 @@ export async function createSessionStep(input: {
     },
     continuationToken: input.continuationToken,
     limits: {
-      maxInputTokensPerSession: resolveSessionTokenLimit({
+      maxInputTokensPerSession: resolveInheritedTokenLimit({
         configured: bundle.resolvedAgent.config.limits?.maxInputTokensPerSession,
         inherited: input.inheritedLimits?.maxInputTokensPerSession,
       }),
-      maxOutputTokensPerSession: resolveSessionTokenLimit({
+      maxOutputTokensPerSession: resolveInheritedTokenLimit({
         configured: bundle.resolvedAgent.config.limits?.maxOutputTokensPerSession,
         inherited: input.inheritedLimits?.maxOutputTokensPerSession,
       }),
@@ -62,22 +62,10 @@ export async function createSessionStep(input: {
     sessionId: input.sessionId,
     subagentDepth: input.subagentDepth,
     subagentMaxDepth:
-      input.subagentMaxDepth ?? bundle.resolvedAgent.config.limits?.maxSubagentDepth,
+      input.inheritedLimits?.maxSubagentDepth ??
+      bundle.resolvedAgent.config.limits?.maxSubagentDepth,
     turnAgent: bundle.turnAgent,
   });
 
   return { state: createDurableSessionState({ session }) };
-}
-
-function resolveSessionTokenLimit(input: {
-  readonly configured: AuthoredSessionLimits[keyof AuthoredSessionLimits] | undefined;
-  readonly inherited: RunSessionLimits[keyof RunSessionLimits] | undefined;
-}): number | false | undefined {
-  if (input.inherited === undefined || input.inherited === false) {
-    return input.configured;
-  }
-  if (input.configured === undefined || input.configured === false) {
-    return input.inherited;
-  }
-  return Math.min(input.configured, input.inherited);
 }

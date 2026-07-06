@@ -197,8 +197,8 @@ describe("createSessionStep", () => {
     const { state } = await createSessionStep({
       compiledArtifactsSource: { kind: "bundled" },
       continuationToken: "subagent:test",
+      inheritedLimits: { maxSubagentDepth: 4 },
       sessionId: "sess-child",
-      subagentMaxDepth: 4,
     });
 
     expect(state.snapshot?.session.subagentMaxDepth).toBe(4);
