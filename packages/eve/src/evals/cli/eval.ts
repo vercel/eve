@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
+import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { createDevelopmentServer, type DevelopmentServer } from "#internal/nitro/host.js";
 import { createEvalClient } from "#evals/cli/eval-client.js";
@@ -166,6 +167,9 @@ export async function runEvalCommand(
   } finally {
     if (devServer) {
       await devServer.close();
+      await shutdownActiveSandboxHandles({
+        log: (message) => logger.error(message),
+      });
     }
   }
 
