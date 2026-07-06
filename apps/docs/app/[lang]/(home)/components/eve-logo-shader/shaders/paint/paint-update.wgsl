@@ -24,7 +24,7 @@ struct PaintParams {
 
 const TAU = 6.28318530718;
 const BRUSH_EDGE_NOISE = 1.5;
-const PAINT_VALUE_MAX = 3.0; // Stored paint max; values >1 give a hidden decay buffer while display clamps at 1.0.
+const PAINT_VALUE_MAX = 2.0; // Stored paint max; values >1 give a hidden decay buffer while display clamps at 1.0.
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
