@@ -365,6 +365,75 @@ describe("chatSdkChannel", () => {
     expect(state.editSupported).toBe(false);
   });
 
+  it("finalizes the streamed anchor when a step completes with tool-calls", async () => {
+    const adapter = testAdapter();
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const state: ChatSdkChannelState = {
+      anchorMessageId: "posted-1",
+      editSupported: true,
+      streamStepIndex: 0,
+      thread: serializedThread(),
+    };
+    const channelAdapter = withState(getAdapter(bridge.channel), state);
+    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+
+    await callEvent(
+      channelAdapter,
+      makeEvent("message.completed", {
+        finishReason: "tool-calls",
+        message: "Let me check that.\nlooking now",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+
+    expect(adapter.edited).toEqual([
+      {
+        message: { markdown: "Let me check that.\nlooking now" },
+        messageId: "posted-1",
+        threadId: THREAD_ID,
+      },
+    ]);
+    expect(adapter.posted).toEqual([]);
+    expect(state.pendingToolCallMessage).toBe("Let me check that.");
+    expect(state.anchorMessageId).toBeNull();
+  });
+
+  it("does not post intermediate tool-call narration when streaming is off", async () => {
+    const adapter = testAdapter();
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      state: memoryState(),
+      streaming: false,
+      userName: "bot",
+    });
+    const state: ChatSdkChannelState = { thread: serializedThread() };
+    const channelAdapter = withState(getAdapter(bridge.channel), state);
+    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+
+    await callEvent(
+      channelAdapter,
+      makeEvent("message.completed", {
+        finishReason: "tool-calls",
+        message: "Let me check that.",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+
+    expect(adapter.posted).toEqual([]);
+    expect(adapter.edited).toEqual([]);
+    expect(state.pendingToolCallMessage).toBe("Let me check that.");
+  });
+
   it("renders input requests as Chat SDK cards and resumes on button actions", async () => {
     const adapter = testAdapter();
     const bridge = chatSdkChannel({

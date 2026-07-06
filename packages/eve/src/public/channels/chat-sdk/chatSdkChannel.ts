@@ -368,27 +368,23 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
         channel.state.pendingToolCallMessage = event.message
           ? (firstNonEmptyLine(event.message) ?? null)
           : null;
-        clearStream(channel.state);
+        // Finalize the streamed anchor so it shows the complete pre-tool-call
+        // text rather than the last throttled edit. Pass `false` so nothing new
+        // is posted when nothing was streamed — intermediate tool-call narration
+        // must not become a standalone message on non-streaming surfaces.
+        if (event.message) {
+          await finalizeStreamedMessage(channel, event.message, false);
+        } else {
+          clearStream(channel.state);
+        }
         return;
       }
       channel.state.pendingToolCallMessage = null;
-      if (!event.message || !channel.thread) {
+      if (!event.message) {
         clearStream(channel.state);
         return;
       }
-      const anchor = channel.state.anchorMessageId;
-      if (canStream(channel) && anchor) {
-        try {
-          await editMessage(channel.thread, anchor, event.message);
-        } catch (error) {
-          if (!isNotImplemented(error)) throw error;
-          channel.state.editSupported = false;
-          await channel.thread.post({ markdown: event.message });
-        }
-      } else {
-        await channel.thread.post({ markdown: event.message });
-      }
-      clearStream(channel.state);
+      await finalizeStreamedMessage(channel, event.message, true);
     },
     async "turn.failed"(event, channel, _ctx) {
       await postFailure(channel.thread, "I hit an error while handling your request", event);
@@ -420,6 +416,39 @@ async function safeStartTyping(thread: Thread | null, status?: string): Promise<
  */
 async function editMessage(thread: Thread, messageId: string, markdown: string): Promise<void> {
   await thread.adapter.editMessage(thread.id, messageId, { markdown });
+}
+
+/**
+ * Finalizes a completed assistant message. When a streamed anchor exists, edits
+ * it in place so it shows the complete text instead of the last throttled
+ * delta. When no anchor was streamed and `postWhenNoAnchor` is `true`, posts the
+ * message fresh (the normal path for a final reply on a non-streaming surface);
+ * when `false`, leaves the surface untouched so intermediate tool-call narration
+ * does not become a standalone message. Clears the stream anchor either way.
+ */
+async function finalizeStreamedMessage(
+  channel: ChatSdkChannelContext,
+  message: string,
+  postWhenNoAnchor: boolean,
+): Promise<void> {
+  const thread = channel.thread;
+  if (!thread) {
+    clearStream(channel.state);
+    return;
+  }
+  const anchor = channel.state.anchorMessageId;
+  if (canStream(channel) && anchor) {
+    try {
+      await editMessage(thread, anchor, message);
+    } catch (error) {
+      if (!isNotImplemented(error)) throw error;
+      channel.state.editSupported = false;
+      if (postWhenNoAnchor) await thread.post({ markdown: message });
+    }
+  } else if (postWhenNoAnchor) {
+    await thread.post({ markdown: message });
+  }
+  clearStream(channel.state);
 }
 
 /** Whether streamed edits are enabled and still supported by the adapter. */
