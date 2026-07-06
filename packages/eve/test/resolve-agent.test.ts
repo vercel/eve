@@ -269,7 +269,9 @@ describe("resolveAgent", () => {
       sourceId: "tools/get-weather.mjs",
       sourceKind: "module",
     });
-    expect(resolved.tools[0]?.execute?.({ city: "Brooklyn" })).toEqual({
+    expect(
+      resolved.tools[0]?.execute?.({ city: "Brooklyn" }, { messages: [], toolCallId: "call_1" }),
+    ).toEqual({
       city: "Brooklyn",
     });
   });

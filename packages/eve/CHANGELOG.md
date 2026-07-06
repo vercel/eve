@@ -1,5 +1,18 @@
 # eve
 
+## 0.20.0
+
+### Minor Changes
+
+- 6f9364a: Sandboxes are now stopped when the eve server shuts down. Self-hosted production servers stop every open sandbox (microsandbox VMs, Docker containers, Vercel sandboxes, just-bash interpreters) on `SIGTERM`/`SIGINT`, matching the cleanup `eve dev` already performs, and sessions reattach from persisted state on the next start. Breaking change for custom sandbox backends: `SandboxBackendHandle` gains a required `shutdown()` and the unused `dispose()` is removed.
+
+### Patch Changes
+
+- 7699e98: `eve eval` now prints a clear, actionable message when it finds no evals but detects `*.eval.ts` files placed inside `agent/`. Instead of the generic "No evals found", it names the offending directories and reminds you that eval files belong in the top-level `evals/` directory (a sibling of `agent/`).
+- f3a05c5: `ToolContext` and `ApprovalContext` now expose `callId`, the tool call id carried by the call's stream events, so approval-gated tools can key records to one identity across proposal, rejection, and execution.
+- f9621b6: Resuming a durable session whose history references a file attachment no longer fails the turn when the staged bytes are gone (for example after a redeploy pointed the session at a fresh sandbox). The missing attachment degrades to a `FileNotFound` text notice the model can interpret, so the run continues instead of ending in `session.failed`.
+- c233a6a: The turn harness now propagates a cooperative `AbortSignal` end to end: model calls, retries, recovery, compaction, and tool executions all honor it, and an aborted turn settles with a canonical `TurnCancelledError` that is never retried or misclassified as a failure. Authored tools receive the signal as `ctx.abortSignal` (and via the AI SDK execute options), and framework tools forward it into sandbox commands, file I/O, `web_fetch`, and MCP/OpenAPI connection calls. This is the lowest layer of turn cancellation — no trigger exists yet, so runtime behavior is unchanged until the cancellation API ships.
+
 ## 0.19.0
 
 ### Minor Changes

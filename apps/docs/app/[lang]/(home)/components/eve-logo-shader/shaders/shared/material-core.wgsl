@@ -1,4 +1,4 @@
-import { sample_cubemap_array_yaw } from "./cube-sample.wgsl";
+import { sample_env } from "./cube-sample.wgsl";
 
 // Shared material/reflection primitives for eve-5 mesh materials.
 // Keep camera-facing normal orientation and reflection direction here so glass,
@@ -13,12 +13,25 @@ export fn env_reflect_dir(n: vec3f, v: vec3f) -> vec3f {
   return normalize(reflect(-normalize(v), normalize(n)));
 }
 
-export fn env_reflection_from_dir(envCube: texture_2d_array<f32>, envSampler: sampler, reflected: vec3f, envYaw: f32) -> vec3f {
-  return sample_cubemap_array_yaw(envCube, envSampler, reflected, envYaw);
+export fn env_reflection_from_dir(
+  envCube: texture_2d_array<f32>,
+  envSampler: sampler,
+  reflected: vec3f,
+  envYaw: f32,
+  envPitch: f32,
+) -> vec3f {
+  return sample_env(envCube, envSampler, reflected, envYaw, envPitch);
 }
 
-export fn env_reflection(envCube: texture_2d_array<f32>, envSampler: sampler, n: vec3f, v: vec3f, envYaw: f32) -> vec3f {
-  return env_reflection_from_dir(envCube, envSampler, env_reflect_dir(n, v), envYaw);
+export fn env_reflection(
+  envCube: texture_2d_array<f32>,
+  envSampler: sampler,
+  n: vec3f,
+  v: vec3f,
+  envYaw: f32,
+  envPitch: f32,
+) -> vec3f {
+  return env_reflection_from_dir(envCube, envSampler, env_reflect_dir(n, v), envYaw, envPitch);
 }
 
 export fn encode_normal(n: vec3f) -> vec3f {

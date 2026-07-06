@@ -10,6 +10,7 @@
     "twilio",
     "github",
     "linear",
+    "chat-sdk",
     "custom"
   ]
 }

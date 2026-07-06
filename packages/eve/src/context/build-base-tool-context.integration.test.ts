@@ -17,7 +17,7 @@ describe("buildBaseToolContext – getSandbox abort binding", () => {
     const controller = new AbortController();
 
     await runtime.runAsSession({ sandbox }, async () => {
-      const ctx = buildBaseToolContext(controller.signal);
+      const ctx = buildBaseToolContext({ abortSignal: controller.signal, toolCallId: "call_1" });
       const live = await ctx.getSandbox();
       await live.run({ command: "echo ready" });
     });
@@ -36,7 +36,7 @@ describe("buildBaseToolContext – getSandbox abort binding", () => {
     const runtime = createTestRuntime();
 
     await runtime.runAsSession({ sandbox }, async () => {
-      const ctx = buildBaseToolContext(undefined);
+      const ctx = buildBaseToolContext({ toolCallId: "call_1" });
       const live = await ctx.getSandbox();
       await live.run({ command: "echo ready" });
     });

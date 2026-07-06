@@ -54,19 +54,19 @@ import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 export function createToolExecuteWithAuth(input: {
   readonly scope: string;
   readonly execute: (toolInput: unknown, ctx: unknown) => unknown;
-}): (toolInput: unknown, options?: ToolExecuteOptions) => Promise<unknown> {
+}): (toolInput: unknown, options: ToolExecuteOptions) => Promise<unknown> {
   const { scope, execute } = input;
 
-  return async (toolInput: unknown, options?: ToolExecuteOptions): Promise<unknown> => {
+  return async (toolInput: unknown, options: ToolExecuteOptions): Promise<unknown> => {
     const justAuthorizedScopes = new Set<string>();
 
     try {
       return await execute(
         toolInput,
         buildToolContext({
-          abortSignal: options?.abortSignal,
           inlineAuthState: {},
           justAuthorizedScopes,
+          options,
           scope,
         }),
       );
@@ -81,13 +81,13 @@ export function createToolExecuteWithAuth(input: {
 }
 
 function buildToolContext(input: {
-  readonly abortSignal: AbortSignal | undefined;
+  readonly options: ToolExecuteOptions;
   readonly scope: string;
   readonly justAuthorizedScopes: Set<string>;
   readonly inlineAuthState: InlineAuthState;
 }): ToolContext {
   const { scope, justAuthorizedScopes, inlineAuthState } = input;
-  const base = buildBaseToolContext(input.abortSignal);
+  const base = buildBaseToolContext(input.options);
   return {
     ...base,
     async getToken(provider?: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult> {

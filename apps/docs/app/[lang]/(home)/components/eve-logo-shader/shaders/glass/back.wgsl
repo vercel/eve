@@ -38,10 +38,10 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
       return vec4f(encode_normal(reflected), 1.0);
     }
     case 3u: {
-      return vec4f(env_reflection_from_dir(studioCube, studioSampler, reflected, params.envYaw), 1.0);
+      return vec4f(env_reflection_from_dir(studioCube, studioSampler, reflected, params.envYaw, params.envPitch), 1.0);
     }
     default: {
-      return shade_glass(studioCube, studioSampler, n, v, reflected, params.envYaw, true);
+      return shade_glass(studioCube, studioSampler, n, v, reflected, params.envYaw, params.envPitch, true, params.glassAbsorption);
     }
   }
 }
