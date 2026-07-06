@@ -14,8 +14,16 @@
  * `turnId` keys the turn totals so a fresh turn starts at zero without relying
  * on a separate "reset" code path. Session totals stay in the same state record
  * and keep accumulating until the durable session ends.
+ *
+ * `TokenUsageTotals` carries `costUsd`/`sawCost` alongside the token counts
+ * for the `$eve.*` dashboard tags and session limits — fields the
+ * cross-cutting {@link TokenUsage} contract (subagent results, callback
+ * bodies, usage spans) does not carry. {@link toUsage} projects a total down
+ * to that shared shape at the one site (the driver's `done` action) where a
+ * session total crosses into it.
  */
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 const HARNESS_TURN_USAGE_STATE_KEY = "eve.harness.turnUsage";
 
@@ -70,6 +78,16 @@ export type SessionTokenLimitViolation =
 
 export function getSessionTokenUsage(session: Pick<HarnessSession, "state">): TokenUsageTotals {
   return getTurnUsageState(session.state)?.session ?? ZERO_TOKEN_USAGE;
+}
+
+/** Projects a {@link TokenUsageTotals} down to the cross-cutting {@link TokenUsage} shape. */
+export function toUsage(totals: TokenUsageTotals): TokenUsage {
+  return {
+    cacheReadTokens: totals.cacheReadTokens,
+    cacheWriteTokens: totals.cacheWriteTokens,
+    inputTokens: totals.inputTokens,
+    outputTokens: totals.outputTokens,
+  };
 }
 
 export function getSessionTokenLimitViolation(

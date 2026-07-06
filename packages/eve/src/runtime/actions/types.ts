@@ -1,6 +1,7 @@
 import { z } from "#compiled/zod/index.js";
 
 import { jsonObjectSchema, jsonValueSchema } from "#shared/json-schemas.js";
+import { tokenUsageSchema } from "#shared/token-usage.js";
 
 /**
  * Eve-owned `tool-call` action requested by the model.
@@ -126,6 +127,9 @@ const runtimeToolResultActionResultSchema = z
 
 /**
  * Runtime-owned subagent result projected back into a harness resume call.
+ *
+ * `usage` carries the completed child session's token totals so the
+ * caller can attribute the subagent's spend.
  */
 export type RuntimeSubagentResultActionResult = z.infer<
   typeof runtimeSubagentResultActionResultSchema
@@ -141,6 +145,7 @@ const runtimeSubagentResultActionResultSchema = z
     kind: z.literal("subagent-result"),
     output: jsonValueSchema,
     subagentName: z.string(),
+    usage: tokenUsageSchema.optional(),
   })
   .strict();
 

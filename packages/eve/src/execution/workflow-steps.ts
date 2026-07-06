@@ -32,6 +32,8 @@ import {
 import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
+import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 import type { JsonObject } from "#shared/json.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
@@ -65,6 +67,7 @@ import {
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import { createExecutionNodeStep } from "#execution/node-step.js";
 import { emitProxiedInputRequest, routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
+import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-attributes.js";
@@ -92,6 +95,8 @@ export type DurableStepResult =
       readonly isError?: boolean;
       readonly serializedContext: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
+      /** Session-total token usage; set on `done` when the session spent any. */
+      readonly usage?: TokenUsage;
     }
   | {
       readonly action: "park";
@@ -219,6 +224,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     }
     resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
   } else if (input.input?.kind === "runtime-action-result") {
+    recordSubagentUsageSpans(input.input.results);
     resolved = { runtimeActionResults: input.input.results };
   }
 
@@ -363,12 +369,14 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     "done" in stepResult.next
   ) {
     await writer.close();
+    const sessionTotals = getTurnUsageState(stepResult.session.state)?.session;
     return {
       action: "done",
       output: stepResult.next.output,
       isError: stepResult.next.isError,
       serializedContext: nextSerializedContext,
       sessionState: nextState,
+      usage: sessionTotals === undefined ? undefined : toUsage(sessionTotals),
     };
   }
 
