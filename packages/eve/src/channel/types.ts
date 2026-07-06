@@ -5,12 +5,18 @@ import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
+import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 
 export type { ContextAccessor } from "#context/key.js";
 export type { ChannelInstrumentationProjection } from "#channel/instrumentation.js";
 
 import type { ChannelInstrumentationProjection } from "#channel/instrumentation.js";
+
+export type RunSessionLimits = Pick<
+  AgentLimitsDefinition,
+  "maxInputTokensPerSession" | "maxOutputTokensPerSession"
+>;
 
 // ---------------------------------------------------------------------------
 // Lineage
@@ -217,15 +223,6 @@ export interface SessionCapabilities {
  * (started by routes) and delegated child runs (started by the
  * subagent tool wrapper).
  */
-/**
- * Remaining session token quota a delegating parent grants a child run.
- * Fields are absent on axes where the parent is uncapped.
- */
-export interface SubagentTokenBudget {
-  readonly maxInputTokens?: number;
-  readonly maxOutputTokens?: number;
-}
-
 export interface RunInput {
   readonly adapter: ChannelAdapter<any>;
   /**
@@ -282,19 +279,17 @@ export interface RunInput {
   readonly mode: RunMode;
   readonly parent?: SessionParent;
   /**
+   * Runtime-supplied session token limits. Delegated local subagents use this
+   * to carry the parent's remaining quota with the same limit fields authors
+   * configure on agents; `false` means no inherited cap for that axis.
+   */
+  readonly limits?: RunSessionLimits;
+  /**
    * Framework-owned depth of delegated local subagent sessions. Root sessions
    * omit this and are treated as depth 0; each local child receives
    * parent depth + 1.
    */
   readonly subagentDepth?: number;
-  /**
-   * Remaining session token quota the delegating parent grants this child
-   * run, computed at dispatch time from the parent's limits minus its
-   * accumulated usage. Caps the child's resolved session limits so a
-   * delegated tree can never outspend the quota configured at its root.
-   * Omitted on root runs and when the parent is uncapped.
-   */
-  readonly subagentTokenBudget?: SubagentTokenBudget;
   /**
    * Optional maximum delegated subagent depth inherited by this run. When
    * omitted, the session uses its resolved agent config or eve's default.

@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { SubagentTokenBudgetKey } from "#context/keys.js";
-import {
-  readSerializedSubagentTokenBudget,
-  resolveRemainingSessionTokenBudget,
-} from "#harness/subagent-token-budget.js";
+import { resolveRemainingSessionTokenLimits } from "#harness/subagent-token-budget.js";
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession, SessionLimits } from "#harness/types.js";
 
@@ -41,9 +37,12 @@ function createSessionWithUsage(input: {
   return setTurnUsageState(base, { ...usage, session: usage, turnId: "turn_0" });
 }
 
-describe("resolveRemainingSessionTokenBudget", () => {
-  it("returns undefined for an uncapped session", () => {
-    expect(resolveRemainingSessionTokenBudget(createSessionWithUsage({}))).toBeUndefined();
+describe("resolveRemainingSessionTokenLimits", () => {
+  it("returns false axes for an uncapped session", () => {
+    expect(resolveRemainingSessionTokenLimits(createSessionWithUsage({}))).toEqual({
+      maxInputTokensPerSession: false,
+      maxOutputTokensPerSession: false,
+    });
   });
 
   it("returns the configured limits minus accumulated usage", () => {
@@ -53,9 +52,9 @@ describe("resolveRemainingSessionTokenBudget", () => {
       usedOutputTokens: 20_000,
     });
 
-    expect(resolveRemainingSessionTokenBudget(session)).toEqual({
-      maxInputTokens: 700_000,
-      maxOutputTokens: 30_000,
+    expect(resolveRemainingSessionTokenLimits(session)).toEqual({
+      maxInputTokensPerSession: 700_000,
+      maxOutputTokensPerSession: 30_000,
     });
   });
 
@@ -64,8 +63,9 @@ describe("resolveRemainingSessionTokenBudget", () => {
       limits: { maxInputTokensPerSession: 1_000_000 },
     });
 
-    expect(resolveRemainingSessionTokenBudget(session)).toEqual({
-      maxInputTokens: 1_000_000,
+    expect(resolveRemainingSessionTokenLimits(session)).toEqual({
+      maxInputTokensPerSession: 1_000_000,
+      maxOutputTokensPerSession: false,
     });
   });
 
@@ -75,7 +75,10 @@ describe("resolveRemainingSessionTokenBudget", () => {
       usedInputTokens: 150_000,
     });
 
-    expect(resolveRemainingSessionTokenBudget(session)).toEqual({ maxInputTokens: 0 });
+    expect(resolveRemainingSessionTokenLimits(session)).toEqual({
+      maxInputTokensPerSession: 0,
+      maxOutputTokensPerSession: false,
+    });
   });
 
   it("splits the remaining quota across the batch's delegated calls", () => {
@@ -85,9 +88,9 @@ describe("resolveRemainingSessionTokenBudget", () => {
       usedOutputTokens: 20_000,
     });
 
-    expect(resolveRemainingSessionTokenBudget(session, 3)).toEqual({
-      maxInputTokens: 300_000,
-      maxOutputTokens: 10_000,
+    expect(resolveRemainingSessionTokenLimits(session, 3)).toEqual({
+      maxInputTokensPerSession: 300_000,
+      maxOutputTokensPerSession: 10_000,
     });
   });
 
@@ -96,7 +99,10 @@ describe("resolveRemainingSessionTokenBudget", () => {
       limits: { maxInputTokensPerSession: 100 },
     });
 
-    expect(resolveRemainingSessionTokenBudget(session, 3)).toEqual({ maxInputTokens: 33 });
+    expect(resolveRemainingSessionTokenLimits(session, 3)).toEqual({
+      maxInputTokensPerSession: 33,
+      maxOutputTokensPerSession: false,
+    });
   });
 
   it("treats a non-positive fan-out as a single delegation", () => {
@@ -104,52 +110,28 @@ describe("resolveRemainingSessionTokenBudget", () => {
       limits: { maxInputTokensPerSession: 100 },
     });
 
-    expect(resolveRemainingSessionTokenBudget(session, 0)).toEqual({ maxInputTokens: 100 });
+    expect(resolveRemainingSessionTokenLimits(session, 0)).toEqual({
+      maxInputTokensPerSession: 100,
+      maxOutputTokensPerSession: false,
+    });
   });
 
   it("keeps uncapped parents uncapped regardless of fan-out", () => {
-    expect(resolveRemainingSessionTokenBudget(createSessionWithUsage({}), 5)).toBeUndefined();
+    expect(resolveRemainingSessionTokenLimits(createSessionWithUsage({}), 5)).toEqual({
+      maxInputTokensPerSession: false,
+      maxOutputTokensPerSession: false,
+    });
   });
 
-  it("omits uncapped axes from the budget", () => {
+  it("marks uncapped axes as false", () => {
     const session = createSessionWithUsage({
       limits: { maxOutputTokensPerSession: 50_000 },
       usedOutputTokens: 10_000,
     });
 
-    expect(resolveRemainingSessionTokenBudget(session)).toEqual({ maxOutputTokens: 40_000 });
-  });
-});
-
-describe("readSerializedSubagentTokenBudget", () => {
-  it("round-trips a serialized budget", () => {
-    expect(
-      readSerializedSubagentTokenBudget({
-        [SubagentTokenBudgetKey.name]: { maxInputTokens: 700_000, maxOutputTokens: 30_000 },
-      }),
-    ).toEqual({ maxInputTokens: 700_000, maxOutputTokens: 30_000 });
-  });
-
-  it("returns undefined when absent", () => {
-    expect(readSerializedSubagentTokenBudget({})).toBeUndefined();
-  });
-
-  it("degrades malformed values to no inherited budget", () => {
-    expect(
-      readSerializedSubagentTokenBudget({ [SubagentTokenBudgetKey.name]: "700000" }),
-    ).toBeUndefined();
-    expect(
-      readSerializedSubagentTokenBudget({
-        [SubagentTokenBudgetKey.name]: { maxInputTokens: -5, maxOutputTokens: 1.5 },
-      }),
-    ).toBeUndefined();
-  });
-
-  it("keeps valid axes when the other is malformed", () => {
-    expect(
-      readSerializedSubagentTokenBudget({
-        [SubagentTokenBudgetKey.name]: { maxInputTokens: 700_000, maxOutputTokens: "x" },
-      }),
-    ).toEqual({ maxInputTokens: 700_000 });
+    expect(resolveRemainingSessionTokenLimits(session)).toEqual({
+      maxInputTokensPerSession: false,
+      maxOutputTokensPerSession: 40_000,
+    });
   });
 });

@@ -11,7 +11,7 @@ import type { JsonObject } from "#shared/json.js";
 import type { RuntimeSubagentCallActionRequest } from "#runtime/actions/types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
 import { resolveSubagentDelegationLimit } from "#harness/subagent-depth.js";
-import { resolveRemainingSessionTokenBudget } from "#harness/subagent-token-budget.js";
+import { resolveRemainingSessionTokenLimits } from "#harness/subagent-token-budget.js";
 
 /**
  * Pending runtime-action batch event metadata needed for child run lineage.
@@ -59,10 +59,10 @@ export function buildSubagentRunInput(input: {
   /**
    * Number of local subagent calls dispatched in this batch. The parent's
    * remaining token quota is split evenly across them so parallel children
-   * are collectively — not individually — bounded by it. Remote agents run
+   * are collectively, not individually, bounded by it. Remote agents run
    * under their own deployment's limits and are not counted.
    */
-  readonly delegationFanOut?: number;
+  readonly fanoutSize?: number;
   readonly initiatorAuth: SessionAuthContext | null;
   /** Hook token owned by the workflow currently waiting for this child. */
   readonly parentContinuationToken?: string;
@@ -93,7 +93,7 @@ export function buildSubagentRunInput(input: {
   // children.
   const rootSessionId = session.rootSessionId ?? session.sessionId;
   const delegationLimit = resolveSubagentDelegationLimit(session);
-  const tokenBudget = resolveRemainingSessionTokenBudget(session, input.delegationFanOut);
+  const inheritedLimits = resolveRemainingSessionTokenLimits(session, input.fanoutSize);
 
   const runInput: {
     -readonly [K in keyof RunInput]: RunInput[K];
@@ -119,6 +119,7 @@ export function buildSubagentRunInput(input: {
       message: formatSubagentCallInputMessage({ action, source }),
       outputSchema: action.input.outputSchema as JsonObject | undefined,
     },
+    limits: inheritedLimits,
     mode: "task",
     parent: {
       callId: action.callId,
@@ -132,10 +133,6 @@ export function buildSubagentRunInput(input: {
     subagentDepth: delegationLimit.nextChildDepth,
     subagentMaxDepth: session.subagentMaxDepth,
   };
-
-  if (tokenBudget !== undefined) {
-    runInput.subagentTokenBudget = tokenBudget;
-  }
 
   return { childContinuationToken, runInput };
 }

@@ -194,22 +194,7 @@ describe("createSession", () => {
     );
   });
 
-  it("defaults delegated subagent sessions to the parent's granted token budget", () => {
-    const session = createSession({
-      continuationToken: "subagent-token",
-      sessionId: "sess-child",
-      subagentDepth: 1,
-      subagentTokenBudget: { maxInputTokens: 123_456, maxOutputTokens: 7_890 },
-      turnAgent: createTestTurnAgent(),
-    });
-
-    expect(session.limits).toEqual({
-      maxInputTokensPerSession: 123_456,
-      maxOutputTokensPerSession: 7_890,
-    });
-  });
-
-  it("leaves delegated subagent sessions uncapped when the parent granted no budget", () => {
+  it("leaves delegated subagent sessions uncapped by default", () => {
     const session = createSession({
       continuationToken: "subagent-token",
       sessionId: "sess-child",
@@ -218,32 +203,6 @@ describe("createSession", () => {
     });
 
     expect(session.limits).toEqual({});
-  });
-
-  it("caps an authored subagent limit at the parent's granted budget", () => {
-    const session = createSession({
-      continuationToken: "subagent-token",
-      limits: { maxInputTokensPerSession: 10_000_000 },
-      sessionId: "sess-child",
-      subagentDepth: 1,
-      subagentTokenBudget: { maxInputTokens: 2_000_000 },
-      turnAgent: createTestTurnAgent(),
-    });
-
-    expect(session.limits?.maxInputTokensPerSession).toBe(2_000_000);
-  });
-
-  it("keeps a tighter authored subagent limit under a larger granted budget", () => {
-    const session = createSession({
-      continuationToken: "subagent-token",
-      limits: { maxInputTokensPerSession: 1_000_000 },
-      sessionId: "sess-child",
-      subagentDepth: 1,
-      subagentTokenBudget: { maxInputTokens: 2_000_000 },
-      turnAgent: createTestTurnAgent(),
-    });
-
-    expect(session.limits?.maxInputTokensPerSession).toBe(1_000_000);
   });
 
   it("uncaps a root session when the authored limit is false", () => {
@@ -257,17 +216,16 @@ describe("createSession", () => {
     expect(session.limits).toEqual({});
   });
 
-  it("still applies the parent's granted budget when the child authored false", () => {
+  it("uncaps a delegated subagent session when the authored limit is false", () => {
     const session = createSession({
       continuationToken: "subagent-token",
       limits: { maxInputTokensPerSession: false },
       sessionId: "sess-child",
       subagentDepth: 1,
-      subagentTokenBudget: { maxInputTokens: 500_000 },
       turnAgent: createTestTurnAgent(),
     });
 
-    expect(session.limits?.maxInputTokensPerSession).toBe(500_000);
+    expect(session.limits).toEqual({});
   });
 
   it("treats a durable session without stored limits as uncapped on hydration", () => {

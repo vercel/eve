@@ -4,8 +4,8 @@ import {
   createDurableSessionState,
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
-import { createSession } from "#execution/session.js";
-import type { SubagentTokenBudget } from "#channel/types.js";
+import { createSession, type AuthoredSessionLimits } from "#execution/session.js";
+import type { RunSessionLimits } from "#channel/types.js";
 import type { JsonObject } from "#shared/json.js";
 
 /**
@@ -27,13 +27,13 @@ export interface CreateSessionStepResult {
 export async function createSessionStep(input: {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly continuationToken: string;
+  readonly inheritedLimits?: RunSessionLimits;
   readonly outputSchema?: JsonObject;
   readonly nodeId?: string;
   readonly rootSessionId?: string;
   readonly sessionId: string;
   readonly subagentDepth?: number;
   readonly subagentMaxDepth?: number;
-  readonly subagentTokenBudget?: SubagentTokenBudget;
 }): Promise<CreateSessionStepResult> {
   "use step";
 
@@ -48,8 +48,14 @@ export async function createSessionStep(input: {
     },
     continuationToken: input.continuationToken,
     limits: {
-      maxInputTokensPerSession: bundle.resolvedAgent.config.limits?.maxInputTokensPerSession,
-      maxOutputTokensPerSession: bundle.resolvedAgent.config.limits?.maxOutputTokensPerSession,
+      maxInputTokensPerSession: resolveSessionTokenLimit({
+        configured: bundle.resolvedAgent.config.limits?.maxInputTokensPerSession,
+        inherited: input.inheritedLimits?.maxInputTokensPerSession,
+      }),
+      maxOutputTokensPerSession: resolveSessionTokenLimit({
+        configured: bundle.resolvedAgent.config.limits?.maxOutputTokensPerSession,
+        inherited: input.inheritedLimits?.maxOutputTokensPerSession,
+      }),
     },
     outputSchema: input.outputSchema,
     rootSessionId: input.rootSessionId,
@@ -57,9 +63,21 @@ export async function createSessionStep(input: {
     subagentDepth: input.subagentDepth,
     subagentMaxDepth:
       input.subagentMaxDepth ?? bundle.resolvedAgent.config.limits?.maxSubagentDepth,
-    subagentTokenBudget: input.subagentTokenBudget,
     turnAgent: bundle.turnAgent,
   });
 
   return { state: createDurableSessionState({ session }) };
+}
+
+function resolveSessionTokenLimit(input: {
+  readonly configured: AuthoredSessionLimits[keyof AuthoredSessionLimits] | undefined;
+  readonly inherited: RunSessionLimits[keyof RunSessionLimits] | undefined;
+}): number | false | undefined {
+  if (input.inherited === undefined || input.inherited === false) {
+    return input.configured;
+  }
+  if (input.configured === undefined || input.configured === false) {
+    return input.inherited;
+  }
+  return Math.min(input.configured, input.inherited);
 }

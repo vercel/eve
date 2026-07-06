@@ -176,6 +176,21 @@ describe("buildSubagentRunInput", () => {
     expect(runInput.subagentMaxDepth).toBe(4);
   });
 
+  it("threads inherited token limits through the child run input", () => {
+    const { runInput } = buildRuntimeSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      session: makeSession(),
+    });
+
+    expect(runInput.limits).toEqual({
+      maxInputTokensPerSession: false,
+      maxOutputTokensPerSession: false,
+    });
+  });
+
   it("threads outputSchema from action input to RunInput", () => {
     const schema = { type: "object", properties: { result: { type: "string" } } };
     const action: RuntimeSubagentCallActionRequest = {

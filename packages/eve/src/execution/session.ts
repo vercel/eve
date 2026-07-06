@@ -1,4 +1,3 @@
-import type { SubagentTokenBudget } from "#channel/types.js";
 import type { DurableSession } from "#execution/durable-session-store.js";
 import type { HarnessSession, SessionLimits, SessionToolDefinition } from "#harness/types.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
@@ -68,7 +67,6 @@ export interface CreateSessionInput {
   readonly outputSchema?: HarnessSession["outputSchema"];
   readonly subagentDepth?: number;
   readonly subagentMaxDepth?: number;
-  readonly subagentTokenBudget?: SubagentTokenBudget;
 }
 
 /** Creates a fresh {@link HarnessSession} from the current `turnAgent`. */
@@ -290,7 +288,6 @@ function createSessionToolDefinitions(turnAgent: RuntimeTurnAgent): SessionToolD
 function resolveSessionLimits(input: {
   readonly limits?: AuthoredSessionLimits;
   readonly subagentDepth?: number;
-  readonly subagentTokenBudget?: SubagentTokenBudget;
 }): SessionLimits {
   const isSubagent = input.subagentDepth !== undefined && input.subagentDepth > 0;
 
@@ -299,12 +296,10 @@ function resolveSessionLimits(input: {
     // Subagents have no fixed default: uncapped parents delegate uncapped
     // children, capped parents delegate their remaining quota (inherited).
     fallback: isSubagent ? undefined : DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
-    inherited: input.subagentTokenBudget?.maxInputTokens,
   });
   const maxOutputTokensPerSession = resolveSessionTokenLimit({
     authored: input.limits?.maxOutputTokensPerSession,
     fallback: undefined,
-    inherited: input.subagentTokenBudget?.maxOutputTokens,
   });
 
   const limits: { maxInputTokensPerSession?: number; maxOutputTokensPerSession?: number } = {};
@@ -320,14 +315,6 @@ function resolveSessionLimits(input: {
 function resolveSessionTokenLimit(input: {
   readonly authored: number | false | undefined;
   readonly fallback: number | undefined;
-  readonly inherited: number | undefined;
 }): number | undefined {
-  // `false` skips both the authored value and the default. The inherited
-  // parent budget still applies: a child cannot self-exempt from what the
-  // delegating parent has left to spend.
-  const authored = input.authored === false ? undefined : (input.authored ?? input.fallback);
-  if (input.inherited === undefined) {
-    return authored;
-  }
-  return authored === undefined ? input.inherited : Math.min(authored, input.inherited);
+  return input.authored === false ? undefined : (input.authored ?? input.fallback);
 }

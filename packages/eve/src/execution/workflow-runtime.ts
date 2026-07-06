@@ -95,65 +95,11 @@ export function createWorkflowRuntime(config: {
 }): Runtime {
   return {
     async run(input: RunInput): Promise<RunHandle> {
-      const bundle = await getCompiledRuntimeAgentBundle({
+      return startWorkflowRuntimeRun({
         compiledArtifactsSource: config.compiledArtifactsSource,
         nodeId: config.nodeId,
+        run: input,
       });
-      const ctx = buildRunContext({ bundle, run: input });
-      const serializedContext = serializeContext(ctx);
-      const parentLineage = readParentLineage(serializedContext);
-      const attributes =
-        parentLineage.sessionId === undefined
-          ? buildSessionAttributes({
-              inputMessage: input.title ?? input.input.message,
-              serializedContext,
-            })
-          : buildSubagentRootAttributes({
-              identity: { nodeId: bundle.nodeId ?? ROOT_RUNTIME_AGENT_NODE_ID },
-              parentCallId: parentLineage.callId,
-              parentSessionId: parentLineage.sessionId,
-              parentTurnId: parentLineage.turnId,
-              rootSessionId: parentLineage.rootSessionId ?? parentLineage.sessionId,
-              serializedContext,
-            });
-
-      let run: Awaited<ReturnType<typeof startWorkflowPreferLatest>>;
-      try {
-        run = await startWorkflowPreferLatest(
-          workflowEntryReference,
-          [
-            {
-              input: input.input,
-              serializedContext,
-            },
-          ],
-          {
-            allowReservedAttributes: true,
-            attributes: normalizeEveAttributes(attributes),
-          },
-        );
-      } catch (error) {
-        logError(log, "failed to start workflow run", error, {
-          continuationToken: input.continuationToken,
-        });
-        throw error;
-      }
-
-      let events: ReadableStream<HandleMessageStreamEvent> | undefined;
-      const getEvents = () => {
-        events ??= parseNdjsonStream<HandleMessageStreamEvent>(() =>
-          getRun(run.runId).getReadable(),
-        );
-        return events;
-      };
-
-      return {
-        continuationToken: input.continuationToken ?? run.runId,
-        get events() {
-          return getEvents();
-        },
-        sessionId: run.runId,
-      };
     },
 
     async deliver(input: DeliverInput): Promise<{ sessionId: string }> {
@@ -187,6 +133,71 @@ export function createWorkflowRuntime(config: {
         getRun(sessionId).getReadable({ startIndex: options?.startIndex }),
       );
     },
+  };
+}
+
+export async function startWorkflowRuntimeRun(input: {
+  readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
+  readonly nodeId?: string;
+  readonly run: RunInput;
+}): Promise<RunHandle> {
+  const bundle = await getCompiledRuntimeAgentBundle({
+    compiledArtifactsSource: input.compiledArtifactsSource,
+    nodeId: input.nodeId,
+  });
+  const ctx = buildRunContext({ bundle, run: input.run });
+  const serializedContext = serializeContext(ctx);
+  const parentLineage = readParentLineage(serializedContext);
+  const attributes =
+    parentLineage.sessionId === undefined
+      ? buildSessionAttributes({
+          inputMessage: input.run.title ?? input.run.input.message,
+          serializedContext,
+        })
+      : buildSubagentRootAttributes({
+          identity: { nodeId: bundle.nodeId ?? ROOT_RUNTIME_AGENT_NODE_ID },
+          parentCallId: parentLineage.callId,
+          parentSessionId: parentLineage.sessionId,
+          parentTurnId: parentLineage.turnId,
+          rootSessionId: parentLineage.rootSessionId ?? parentLineage.sessionId,
+          serializedContext,
+        });
+
+  let run: Awaited<ReturnType<typeof startWorkflowPreferLatest>>;
+  try {
+    run = await startWorkflowPreferLatest(
+      workflowEntryReference,
+      [
+        {
+          input: input.run.input,
+          limits: input.run.limits,
+          serializedContext,
+        },
+      ],
+      {
+        allowReservedAttributes: true,
+        attributes: normalizeEveAttributes(attributes),
+      },
+    );
+  } catch (error) {
+    logError(log, "failed to start workflow run", error, {
+      continuationToken: input.run.continuationToken,
+    });
+    throw error;
+  }
+
+  let events: ReadableStream<HandleMessageStreamEvent> | undefined;
+  const getEvents = () => {
+    events ??= parseNdjsonStream<HandleMessageStreamEvent>(() => getRun(run.runId).getReadable());
+    return events;
+  };
+
+  return {
+    continuationToken: input.run.continuationToken ?? run.runId,
+    get events() {
+      return getEvents();
+    },
+    sessionId: run.runId,
   };
 }
 

@@ -30,7 +30,6 @@ import {
   type SessionDeliveryHook,
 } from "#execution/session-delivery-hook.js";
 import { readSerializedSubagentSessionDepth } from "#harness/subagent-depth.js";
-import { readSerializedSubagentTokenBudget } from "#harness/subagent-token-budget.js";
 
 // workflow-entry.ts is the durable workflow body — the bundler rejects
 // node built-ins here, so `internal/logging.ts` cannot be imported.
@@ -43,6 +42,7 @@ import { readSerializedSubagentTokenBudget } from "#harness/subagent-token-budge
  */
 export interface WorkflowEntryInput {
   readonly input: RunInput["input"];
+  readonly limits?: RunInput["limits"];
   readonly serializedContext: Record<string, unknown>;
 }
 
@@ -91,18 +91,17 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     const { subagentDepth, subagentMaxDepth } = readSerializedSubagentSessionDepth(
       input.serializedContext,
     );
-    const subagentTokenBudget = readSerializedSubagentTokenBudget(input.serializedContext);
 
     const { state: sessionState } = await createSessionStep({
       compiledArtifactsSource: serializedBundle.source,
       continuationToken,
+      inheritedLimits: input.limits,
       nodeId: serializedBundle.nodeId,
       outputSchema: input.input.outputSchema,
       rootSessionId: rootSessionIdFromParent,
       sessionId,
       subagentDepth,
       subagentMaxDepth,
-      subagentTokenBudget,
     });
 
     return await runDriverLoop({

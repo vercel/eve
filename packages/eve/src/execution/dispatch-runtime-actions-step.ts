@@ -41,7 +41,7 @@ import {
 } from "#execution/remote-agent-dispatch.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#execution/subagent-tool.js";
-import { createWorkflowRuntime, workflowEntryReference } from "#execution/workflow-runtime.js";
+import { startWorkflowRuntimeRun, workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import {
@@ -93,10 +93,10 @@ export async function dispatchRuntimeActionsStep(input: {
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const delegationLimit = resolveSubagentDelegationLimit(session);
   // Split the parent's remaining token quota across the batch's local
-  // subagent calls — the children that actually receive an enforced cap.
+  // subagent calls, the children that actually receive an enforced cap.
   // Remote agents run on their own deployment under their own limits and
   // do not dilute the local shares.
-  const delegationFanOut = batch.actions.filter((action) => action.kind === "subagent-call").length;
+  const fanoutSize = batch.actions.filter((action) => action.kind === "subagent-call").length;
 
   let nextSession = session;
   const results: RuntimeSubagentResultActionResult[] = [];
@@ -127,23 +127,23 @@ export async function dispatchRuntimeActionsStep(input: {
             registered?.definition.kind === "subagent"
               ? { description: registered.definition.description, type: "local" }
               : { type: "runtime" };
-          const childRuntime = createWorkflowRuntime({
-            compiledArtifactsSource: bundle.compiledArtifactsSource,
-            nodeId: action.nodeId,
-          });
           const { childContinuationToken, runInput } = buildSubagentRunInput({
             action,
             auth,
             batchEvent: batch.event,
             capabilities,
             channelMetadata,
-            delegationFanOut,
+            fanoutSize,
             initiatorAuth,
             parentContinuationToken: input.parentContinuationToken,
             session,
             source,
           });
-          const handle = await childRuntime.run(runInput);
+          const handle = await startWorkflowRuntimeRun({
+            compiledArtifactsSource: bundle.compiledArtifactsSource,
+            nodeId: action.nodeId,
+            run: runInput,
+          });
 
           nextSession = recordPendingSubagentChildToken({
             callId: action.callId,
