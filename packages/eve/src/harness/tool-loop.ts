@@ -688,7 +688,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
               })
           : undefined;
       const workflowConfig =
-        config.workflow === true ? { lifecycle: workflowLifecycle } : undefined;
+        config.workflow === true
+          ? { lifecycle: workflowLifecycle, maxSubagents: config.workflowMaxSubagents }
+          : undefined;
 
       const advertisedModelTools = await getAdvertisedTools({
         modelTools: flatTools,

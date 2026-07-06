@@ -1,4 +1,4 @@
-import { isDisabledToolSentinel } from "#public/definitions/tool.js";
+import { isDisabledToolSentinel, isEnableWorkflowToolSentinel } from "#public/definitions/tool.js";
 import {
   expectFunction,
   expectObjectRecord,
@@ -19,19 +19,6 @@ type NormalizedAuthoredTool = Readonly<Omit<InternalToolDefinitionWithExecuteFn,
 type MutableNormalizedAuthoredTool = {
   -readonly [K in keyof NormalizedAuthoredTool]: NormalizedAuthoredTool[K];
 };
-const ENABLE_WORKFLOW_TOOL_SENTINEL_KIND = "eve:enable-workflow-tool";
-
-interface EnableWorkflowToolSentinel {
-  readonly kind: typeof ENABLE_WORKFLOW_TOOL_SENTINEL_KIND;
-}
-
-function isEnableWorkflowToolSentinel(value: unknown): value is EnableWorkflowToolSentinel {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as { kind?: unknown }).kind === ENABLE_WORKFLOW_TOOL_SENTINEL_KIND
-  );
-}
 
 /**
  * Result of normalizing one authored tool default export. Either a real tool

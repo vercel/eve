@@ -306,3 +306,52 @@ export function isDisabledToolSentinel(value: unknown): value is DisabledToolSen
     (value as { kind?: unknown }).kind === DISABLED_TOOL_SENTINEL_KIND
   );
 }
+
+/**
+ * Marker discriminator written into the {@link ExperimentalWorkflow} opt-in
+ * sentinel.
+ */
+const ENABLE_WORKFLOW_TOOL_SENTINEL_KIND = "eve:enable-workflow-tool";
+
+/**
+ * Marker value re-exported as the default export of a file in `agent/tools/`
+ * (conventionally `agent/tools/workflow.ts`) to enable the framework `Workflow`
+ * orchestration tool. The tool is off unless this marker is present,
+ * mirroring the {@link disableTool} opt-out in reverse.
+ */
+export interface EnableWorkflowToolSentinel {
+  readonly kind: typeof ENABLE_WORKFLOW_TOOL_SENTINEL_KIND;
+}
+
+/**
+ * Opt-in marker for the framework `Workflow` tool, an isolated JavaScript sandbox whose
+ * only callable operations are this agent's subagents and remote agents, for
+ * orchestrating them from model-authored JavaScript. Re-export it as the
+ * default export of `agent/tools/workflow.ts`:
+ *
+ * ```ts
+ * export { ExperimentalWorkflow as default } from "eve/tools";
+ * ```
+ *
+ * Only the root session sees the `Workflow` tool — delegated subagent sessions
+ * never get it — and one Workflow program may dispatch at most
+ * `limits.maxSubagents` subagent calls (default 100).
+ *
+ * The capability is experimental. The resulting model-facing tool is still
+ * called `Workflow`.
+ */
+export const ExperimentalWorkflow: EnableWorkflowToolSentinel = Object.freeze({
+  kind: ENABLE_WORKFLOW_TOOL_SENTINEL_KIND,
+});
+
+/**
+ * Type guard: returns whether `value` is the {@link ExperimentalWorkflow}
+ * opt-in sentinel.
+ */
+export function isEnableWorkflowToolSentinel(value: unknown): value is EnableWorkflowToolSentinel {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { kind?: unknown }).kind === ENABLE_WORKFLOW_TOOL_SENTINEL_KIND
+  );
+}

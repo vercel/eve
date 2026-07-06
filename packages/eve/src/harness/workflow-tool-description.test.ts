@@ -15,6 +15,19 @@ describe("workflowToolDescription", () => {
     expect(description).toContain("ordinary tools");
   });
 
+  it("advertises the default subagent-call budget", () => {
+    const description = workflowToolDescription(["agent"]);
+
+    expect(description).toContain("at most 100 agent calls");
+    expect(description).toContain("WORKFLOW_SUBAGENT_LIMIT_REACHED");
+  });
+
+  it("advertises a configured subagent-call budget", () => {
+    const description = workflowToolDescription(["agent"], { maxSubagents: 4 });
+
+    expect(description).toContain("at most 4 agent calls");
+  });
+
   it("names every callable agent and safely formats a hyphenated subagent example", () => {
     const description = workflowToolDescription(["agent", "echo-marker", "stock_price"]);
 

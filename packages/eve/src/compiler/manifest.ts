@@ -360,6 +360,7 @@ const compiledAgentCompactionDefinitionSchema: z.ZodType<CompiledAgentCompaction
 const compiledAgentLimitsDefinitionSchema = z
   .object({
     maxSubagentDepth: z.number().int().positive().optional(),
+    maxSubagents: z.number().int().positive().optional(),
     maxInputTokensPerSession: z.number().int().positive().optional(),
     maxOutputTokensPerSession: z.number().int().positive().optional(),
   })
@@ -733,6 +734,7 @@ export function createCompiledAgentNodeManifest(input: {
               maxInputTokensPerSession: input.config.limits.maxInputTokensPerSession,
               maxOutputTokensPerSession: input.config.limits.maxOutputTokensPerSession,
               maxSubagentDepth: input.config.limits.maxSubagentDepth,
+              maxSubagents: input.config.limits.maxSubagents,
             },
       source:
         input.config.source === undefined

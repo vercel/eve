@@ -1,3 +1,5 @@
+import { DEFAULT_WORKFLOW_MAX_SUBAGENTS } from "#harness/workflow-subagent-limit.js";
+
 /**
  * Builds the model-facing description for the `Workflow` orchestration tool.
  *
@@ -13,8 +15,15 @@
  * framing.
  *
  * @param toolNames - Names of the agent functions callable inside the sandbox.
+ * @param options - `maxSubagents`: the invocation's subagent-call budget
+ *   (defaults to {@link DEFAULT_WORKFLOW_MAX_SUBAGENTS}), surfaced so the
+ *   model sizes its fan-out to fit.
  */
-export function workflowToolDescription(toolNames: readonly string[]): string {
+export function workflowToolDescription(
+  toolNames: readonly string[],
+  options?: { readonly maxSubagents?: number },
+): string {
+  const maxSubagents = options?.maxSubagents ?? DEFAULT_WORKFLOW_MAX_SUBAGENTS;
   const agents = toolNames.length > 0 ? toolNames : ["agent"];
   const list = agents.map((name) => `\`${name}\``).join(", ");
   const subagents = agents.filter((name) => name !== "agent");
@@ -38,6 +47,8 @@ Do not use \`Workflow\` when:
 - JavaScript would only wrap work the parent agent can express more clearly with direct calls.
 
 Workflow earns its overhead when code materially controls call count, concurrency, ordering, data flow, or aggregation. Put the complete orchestration in one JavaScript program and return the final JSON-serializable value.
+
+One Workflow program may dispatch at most ${String(maxSubagents)} agent calls in total (sequential and parallel calls alike); calls beyond that budget fail with \`WORKFLOW_SUBAGENT_LIMIT_REACHED\` instead of running. Size fan-outs to fit the budget.
 
 The only callable operations are these agents — no filesystem, network, shell, or other tools: ${list}. Call them only through the \`tools\` object, using the exact member syntax in the API reference below. Each call is async and resolves to the child's result, or a typed object when you pass an \`outputSchema\`. Sequence with \`await\`, run agents concurrently with \`Promise.all([...])\`, and use \`map\`/\`filter\`/\`flatMap\` to build calls and combine results. The program's return value becomes the tool result.
 

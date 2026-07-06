@@ -110,6 +110,19 @@ export interface AgentLimitsDefinition {
    */
   readonly maxSubagentDepth?: number;
   /**
+   * Maximum number of subagent calls one `Workflow` tool invocation may
+   * dispatch.
+   *
+   * Applies to the opt-in `Workflow` orchestration tool: a single
+   * model-authored workflow program may spawn at most this many subagent or
+   * remote-agent calls, counted across the whole program (sequential and
+   * parallel calls alike). Calls beyond the limit fail with an error result
+   * instead of starting a child session.
+   *
+   * @default 100
+   */
+  readonly maxSubagents?: number;
+  /**
    * Maximum provider-reported input tokens accumulated by one durable session.
    *
    * eve checks this before starting each model call. The model call that crosses

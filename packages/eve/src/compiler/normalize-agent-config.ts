@@ -107,6 +107,7 @@ export async function compileAgentConfig(
   if (definition.limits !== undefined) {
     compiledConfig.limits = {
       maxSubagentDepth: definition.limits.maxSubagentDepth,
+      maxSubagents: definition.limits.maxSubagents,
       maxInputTokensPerSession: definition.limits.maxInputTokensPerSession,
       maxOutputTokensPerSession: definition.limits.maxOutputTokensPerSession,
     };

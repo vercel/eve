@@ -33,6 +33,7 @@ type AdvertisedModelToolsInput = {
       readonly session: HarnessSession;
       readonly tools: HarnessToolMap;
     }) => WorkflowSandboxLifecycle | undefined;
+    readonly maxSubagents?: number;
   };
 };
 
@@ -93,6 +94,7 @@ async function getAdvertisedModelTools(
     continuationSecurity: getWorkflowContinuationSecurity(session),
     harnessTools: workflowHostTools,
     lifecycle: input.workflow.lifecycle?.({ session, tools: workflowHostTools }),
+    maxSubagents: input.workflow.maxSubagents,
     tools: input.modelTools,
   });
 
