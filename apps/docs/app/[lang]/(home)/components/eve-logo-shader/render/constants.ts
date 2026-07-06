@@ -61,9 +61,11 @@ export const DEFAULT_PAINT_DT = 1 / 60;
 export const PAINT_STROKE_MOVEMENT_EPSILON_CELLS = 0.05;
 
 function safeDevicePixelRatioOrDefault(devicePixelRatio: number | undefined) {
-  return Number.isFinite(devicePixelRatio)
-    ? Math.max(0.001, devicePixelRatio)
+  const ratio = typeof devicePixelRatio === "number" && Number.isFinite(devicePixelRatio)
+    ? devicePixelRatio
     : DEFAULT_IMPRINT_DEVICE_PIXEL_RATIO;
+
+  return Math.max(0.001, ratio);
 }
 
 export function imprintCellSizeForDevicePixelRatio(
