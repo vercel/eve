@@ -9,6 +9,8 @@ A skill is a model-loadable procedure that follows the `SKILL.md` convention. It
 
 eve scans the files under `agent/skills/` and exposes each one's description to the model alongside a framework-owned `load_skill` tool. When a request matches a skill's description (or you name the skill outright), the model calls `load_skill`, and eve appends that skill's markdown to the active turn's context.
 
+At runtime, skill package files are placed under `$HOME/.agents/skills/<skill>/`. If `$HOME` is unavailable in a sandbox, eve falls back to `/workspace/skills/<skill>/`. `load_skill` reads `SKILL.md` automatically; any sibling references inside that file, such as `references/checklist.md`, are relative to the directory containing that specific `SKILL.md`.
+
 The description is a routing hint, not a label. Write it as the task that should trigger activation:
 
 ```md
@@ -68,7 +70,7 @@ const research = ctx.getSkill("research");
 const checklist = await research.file("references/checklist.md").text();
 ```
 
-The handle exposes the skill's `name` and `file(relativePath)`; file content is read lazily from the active sandbox.
+The handle exposes the skill's `name` and `file(relativePath)`; file content is read lazily from the active sandbox, relative to that skill package directory.
 
 ## Dynamic skills
 
