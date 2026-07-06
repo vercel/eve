@@ -122,6 +122,67 @@
       }
     },
     {
+      "name": "public-sandbox-backends",
+      "description": "Public sandbox implementation barrels have matching backend implementation files.",
+      "paths": [
+        "packages/eve/src/public/sandbox/{sandboxName}.ts",
+        "!packages/eve/src/public/sandbox/index.ts",
+        "!packages/eve/src/public/sandbox/*-sandbox.ts"
+      ],
+      "must": [
+        {
+          "name": "public-sandbox-barrels-must-reexport-their-backend",
+          "description": "Public sandbox barrels re-export their backend factory and create options from matching implementation files.",
+          "must": {
+            "haveFiles": ["backends/${sandboxName}.ts", "${sandboxName}-sandbox.ts"],
+            "export": [
+              {
+                "name": "${sandboxName.toFlatCase()}",
+                "from": "#public/sandbox/backends/${sandboxName}.js"
+              }
+            ],
+            "exportTypes": [
+              {
+                "name": "${sandboxName.toPascalCase()}SandboxCreateOptions",
+                "from": "#public/sandbox/${sandboxName}-sandbox.js"
+              }
+            ]
+          }
+        },
+        {
+          "name": "public-sandbox-options-must-export-create-options",
+          "description": "Public sandbox option files export the matching create options type.",
+          "for": {
+            "files": ["${sandboxName}-sandbox.ts"]
+          },
+          "must": {
+            "exportTypes": ["${sandboxName.toPascalCase()}SandboxCreateOptions"]
+          }
+        },
+        {
+          "name": "public-sandbox-backends-must-export-their-factory",
+          "description": "Public sandbox backend implementation files export the matching backend factory using the public create options type.",
+          "for": {
+            "files": ["backends/${sandboxName}.ts"]
+          },
+          "must": {
+            "importTypes": [
+              {
+                "name": "${sandboxName.toPascalCase()}SandboxCreateOptions",
+                "from": "#public/sandbox/${sandboxName}-sandbox.js"
+              }
+            ],
+            "exportFunctions": [
+              {
+                "name": "${sandboxName.toFlatCase()}",
+                "receiveParamsOfTypes": ["${sandboxName.toPascalCase()}SandboxCreateOptions"]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "eval-loaders",
       "description": "Eval loaders must export their required symbols.",
       "paths": [

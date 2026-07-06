@@ -9,7 +9,7 @@ import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
  * stay stable while the underlying runtime evolves. Supported hosts:
  * macOS on Apple Silicon, or Linux (glibc) with KVM enabled.
  */
-export interface MicrosandboxCreateOptions {
+export interface MicrosandboxSandboxCreateOptions {
   /**
    * OCI image used as the base runtime. eve prepares this image with
    * Bash, the framework workspace, and the sandbox user before authored
@@ -41,6 +41,11 @@ export interface MicrosandboxCreateOptions {
   /** Initial network policy applied to sandboxes after framework setup. */
   readonly networkPolicy?: SandboxNetworkPolicy;
 }
+
+/**
+ * @deprecated Use {@link MicrosandboxSandboxCreateOptions} instead.
+ */
+export type MicrosandboxCreateOptions = MicrosandboxSandboxCreateOptions;
 
 /**
  * Options accepted by the microsandbox backend's `bootstrap({ use })` hook.
