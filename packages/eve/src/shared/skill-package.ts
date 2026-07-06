@@ -4,11 +4,7 @@ import { dirname, join } from "node:path";
 
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
-import {
-  FALLBACK_SKILL_ROOT,
-  resolveSandboxSkillRoot,
-  resolveSandboxSkillWritePath,
-} from "#shared/skill-paths.js";
+import { resolveSandboxSkillRoot, resolveSandboxSkillWritePath } from "#shared/skill-paths.js";
 
 export interface NormalizedSkillPackageFile {
   readonly content: Buffer;
@@ -104,15 +100,12 @@ export async function removeSkillPackageFromSandbox(input: {
 }): Promise<void> {
   assertSafeSkillPackageName(input.name);
   const root = await resolveSandboxSkillRoot({ sandbox: input.sandbox });
-  const paths = new Set([`${root}/${input.name}`, `${FALLBACK_SKILL_ROOT}/${input.name}`]);
 
-  for (const path of paths) {
-    await input.sandbox.removePath({
-      force: true,
-      path,
-      recursive: true,
-    });
-  }
+  await input.sandbox.removePath({
+    force: true,
+    path: `${root}/${input.name}`,
+    recursive: true,
+  });
 }
 
 /**

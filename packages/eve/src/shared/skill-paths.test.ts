@@ -7,6 +7,7 @@ import {
   formatFallbackSkillPath,
   formatSkillModelPath,
   resolveSandboxSeedFilePath,
+  resolveSandboxSkillReadPaths,
   resolveSandboxSkillRoot,
 } from "#shared/skill-paths.js";
 
@@ -48,6 +49,38 @@ describe("skill path helpers", () => {
     await expect(resolveSandboxSkillRoot({ sandbox: sandbox.session })).resolves.toBe(
       FALLBACK_SKILL_ROOT,
     );
+  });
+
+  it("reads only from the resolved HOME skill root when HOME is usable", async () => {
+    const sandbox = mockSandbox({
+      commands: {
+        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+      },
+    });
+
+    await expect(
+      resolveSandboxSkillReadPaths({
+        name: "research",
+        relativePath: "SKILL.md",
+        sandbox: sandbox.session,
+      }),
+    ).resolves.toEqual(["/home/agent/.agents/skills/research/SKILL.md"]);
+  });
+
+  it("reads from /workspace/skills only when that root is selected", async () => {
+    const sandbox = mockSandbox({
+      commands: {
+        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "\n" },
+      },
+    });
+
+    await expect(
+      resolveSandboxSkillReadPaths({
+        name: "research",
+        relativePath: "SKILL.md",
+        sandbox: sandbox.session,
+      }),
+    ).resolves.toEqual(["/workspace/skills/research/SKILL.md"]);
   });
 
   it("resolves model-facing seed paths before writing to the sandbox", async () => {

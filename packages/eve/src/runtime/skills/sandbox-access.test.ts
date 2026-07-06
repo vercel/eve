@@ -37,11 +37,23 @@ describe("loadSkillFromSandbox", () => {
     await expect(loadSkillFromSandbox(sandbox.access, "research")).resolves.toBe("# Research\n");
   });
 
-  it("falls back to the legacy workspace skill path when the home path is missing", async () => {
+  it("does not read an ordinary workspace skills subtree when HOME is usable", async () => {
     const sandbox = mockSandbox({
       commands: {
         [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
       },
+      initialFiles: {
+        "/workspace/skills/research/SKILL.md": "# Research\n",
+      },
+    });
+
+    await expect(loadSkillFromSandbox(sandbox.access, "research")).rejects.toThrow(
+      'No skill named "research" at /home/agent/.agents/skills/research/SKILL.md.',
+    );
+  });
+
+  it("reads the legacy workspace skill path when HOME is unavailable", async () => {
+    const sandbox = mockSandbox({
       initialFiles: {
         "/workspace/skills/research/SKILL.md": "# Research\n",
       },

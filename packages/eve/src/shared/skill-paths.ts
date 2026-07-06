@@ -47,18 +47,13 @@ export async function resolveSandboxSkillReadPaths(input: {
   readonly relativePath: string;
   readonly sandbox: SandboxSession;
 }): Promise<readonly string[]> {
-  const primaryRoot = await resolveSandboxSkillRoot({ sandbox: input.sandbox });
-  const primaryPath = formatSkillPath({
-    name: input.name,
-    relativePath: input.relativePath,
-    root: primaryRoot,
-  });
-  const fallbackPath = formatFallbackSkillPath({
-    name: input.name,
-    relativePath: input.relativePath,
-  });
-
-  return primaryPath === fallbackPath ? [primaryPath] : [primaryPath, fallbackPath];
+  return [
+    formatSkillPath({
+      name: input.name,
+      relativePath: input.relativePath,
+      root: await resolveSandboxSkillRoot({ sandbox: input.sandbox }),
+    }),
+  ];
 }
 
 export async function resolveSandboxSkillWritePath(input: {
