@@ -43,6 +43,11 @@ export interface ConnectionSourceRef extends ModuleSourceRef {
 }
 
 /**
+ * Hook source reference preserved by the discovery manifest.
+ */
+export type HookSourceRef = ModuleSourceRef;
+
+/**
  * Instructions source reference preserved by discovery for compiler
  * normalization.
  */
@@ -55,6 +60,11 @@ export type SkillSourceRef =
   | MarkdownSourceRef<SkillDefinition>
   | ModuleSourceRef
   | (NamedSkillDefinition & SkillPackageSourceRef);
+
+/**
+ * Tool source reference preserved by the discovery manifest.
+ */
+export type ToolSourceRef = ModuleSourceRef;
 
 /**
  * Recursive manifest entry for a local subagent package.

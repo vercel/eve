@@ -12,12 +12,7 @@ import type {
   twilioChannel,
   TwilioInstrumentationMetadata,
 } from "#public/channels/twilio/index.js";
-import {
-  POST,
-  WS,
-  defineChannel,
-  type InferChannelMetadata,
-} from "#public/definitions/defineChannel.js";
+import { POST, WS, defineChannel, type InferChannelMetadata } from "#public/definitions/channel.js";
 
 type IsEqual<TLeft, TRight> =
   (<T>() => T extends TLeft ? 1 : 2) extends <T>() => T extends TRight ? 1 : 2

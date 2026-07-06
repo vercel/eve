@@ -49,7 +49,7 @@ import type {
   SlackInteractionAction,
   SlackInteractionUser,
 } from "#public/channels/slack/slackChannel.js";
-import type { SendFn } from "#public/definitions/defineChannel.js";
+import type { SendFn } from "#public/definitions/channel.js";
 
 const log = createLogger("slack.interactions");
 

@@ -33,7 +33,7 @@ import {
   type Channel,
   type ChannelSessionOps,
   type SendFn,
-} from "#public/definitions/defineChannel.js";
+} from "#public/definitions/channel.js";
 import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
 import type { InputResponse } from "#runtime/input/types.js";
