@@ -92,9 +92,11 @@ export interface HarnessSession {
  */
 export interface SessionLimits {
   /**
-   * Maximum provider-reported input tokens this durable session may spend before
-   * eve refuses to start another model call. Defaults to 40M for root sessions
-   * and 5M for delegated subagent sessions.
+   * Maximum provider-reported input tokens this durable session may spend
+   * before eve refuses to start another model call. Absent when the session
+   * is uncapped. Root sessions default to 40M unless authored otherwise;
+   * delegated subagent sessions receive the parent's remaining quota at
+   * dispatch time.
    */
   readonly maxInputTokensPerSession?: number;
   /**

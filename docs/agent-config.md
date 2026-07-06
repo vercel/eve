@@ -96,10 +96,18 @@ either limit is allowed to finish because providers only report exact token
 usage after a call completes. Follow-up model calls in the same session fail
 with `SESSION_TOKEN_LIMIT_REACHED`.
 
-When `maxInputTokensPerSession` is omitted, eve applies a default input budget:
-`40_000_000` provider-reported input tokens for root sessions and `5_000_000`
-for delegated subagent sessions. `maxOutputTokensPerSession` is unset unless
-configured.
+When `maxInputTokensPerSession` is omitted, root sessions apply a default
+input budget of `40_000_000` provider-reported input tokens.
+`maxOutputTokensPerSession` is unset unless configured. Setting either limit
+to `false` uncaps that axis — the session never stops on it.
+
+Delegated subagent sessions have no fixed default. Each child receives a
+share of the delegating parent's remaining quota at dispatch time — the
+remainder (limit minus accumulated usage) split evenly across the batch's
+local subagent calls — and a completed child's usage counts against the
+parent's quota, so a delegation tree can never outspend the budget configured
+at its root. An authored child limit applies only when it is tighter than the
+parent's grant; an uncapped parent delegates uncapped children.
 
 ## Workflow world
 
@@ -142,14 +150,14 @@ installed package must stay external in hosted output, list it in
 
 `defineAgent` takes a few more fields, all optional. For the exported types, see the [TypeScript API](./reference/typescript-api).
 
-| Field          | Type                                    | Default          | Description                                                                                                                                                                                                                                        |
-| -------------- | --------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `reasoning`    | `AgentReasoningDefinition`              | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                                                      |
-| `modelOptions` | `AgentModelOptionsDefinition`           | none             | Provider option overrides forwarded to the model call.                                                                                                                                                                                             |
-| `limits`       | `AgentLimitsDefinition`                 | field-specific   | Framework-owned runtime limits. `maxSubagentDepth` defaults to `3`; `maxInputTokensPerSession` defaults to `40_000_000` for root sessions and `5_000_000` for delegated subagent sessions; `maxOutputTokensPerSession` is unset unless configured. |
-| `experimental` | `{ workflow?: { world?: string } }`     | unset            | Opt-in settings that can change or disappear in any release. Treat them as unstable. `workflow.world` selects the Workflow world package backing session state, queues, hooks, and streams on the root agent.                                      |
-| `outputSchema` | Standard Schema or a JSON Schema object | none             | Structured return type for task-mode runs (a subagent, schedule, or remote job). Interactive conversation turns ignore it unless the client supplies a per-message schema.                                                                         |
-| `build`        | `{ externalDependencies?: string[] }`   | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                           |
+| Field          | Type                                    | Default          | Description                                                                                                                                                                                                                                                                                                    |
+| -------------- | --------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reasoning`    | `AgentReasoningDefinition`              | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                                                                                                                  |
+| `modelOptions` | `AgentModelOptionsDefinition`           | none             | Provider option overrides forwarded to the model call.                                                                                                                                                                                                                                                         |
+| `limits`       | `AgentLimitsDefinition`                 | field-specific   | Framework-owned runtime limits. `maxSubagentDepth` defaults to `3`; `maxInputTokensPerSession` defaults to `40_000_000` for root sessions, and delegated subagent sessions inherit the parent's remaining quota; `maxOutputTokensPerSession` is unset unless configured; `false` uncaps a session token limit. |
+| `experimental` | `{ workflow?: { world?: string } }`     | unset            | Opt-in settings that can change or disappear in any release. Treat them as unstable. `workflow.world` selects the Workflow world package backing session state, queues, hooks, and streams on the root agent.                                                                                                  |
+| `outputSchema` | Standard Schema or a JSON Schema object | none             | Structured return type for task-mode runs (a subagent, schedule, or remote job). Interactive conversation turns ignore it unless the client supplies a per-message schema.                                                                                                                                     |
+| `build`        | `{ externalDependencies?: string[] }`   | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                                                                                       |
 
 `externalDependencies` is a packaging control only. It keeps selected packages as runtime dependencies in the hosted output; it does not authorize, configure, or review any third-party service those packages may call.
 

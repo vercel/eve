@@ -217,6 +217,15 @@ export interface SessionCapabilities {
  * (started by routes) and delegated child runs (started by the
  * subagent tool wrapper).
  */
+/**
+ * Remaining session token quota a delegating parent grants a child run.
+ * Fields are absent on axes where the parent is uncapped.
+ */
+export interface SubagentTokenBudget {
+  readonly maxInputTokens?: number;
+  readonly maxOutputTokens?: number;
+}
+
 export interface RunInput {
   readonly adapter: ChannelAdapter<any>;
   /**
@@ -278,6 +287,14 @@ export interface RunInput {
    * parent depth + 1.
    */
   readonly subagentDepth?: number;
+  /**
+   * Remaining session token quota the delegating parent grants this child
+   * run, computed at dispatch time from the parent's limits minus its
+   * accumulated usage. Caps the child's resolved session limits so a
+   * delegated tree can never outspend the quota configured at its root.
+   * Omitted on root runs and when the parent is uncapped.
+   */
+  readonly subagentTokenBudget?: SubagentTokenBudget;
   /**
    * Optional maximum delegated subagent depth inherited by this run. When
    * omitted, the session uses its resolved agent config or eve's default.

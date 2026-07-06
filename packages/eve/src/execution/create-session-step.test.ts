@@ -1,10 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
-import {
-  DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
-  DEFAULT_SUBAGENT_MAX_INPUT_TOKENS_PER_SESSION,
-} from "#execution/session.js";
+import { DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION } from "#execution/session.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 
@@ -40,7 +37,28 @@ describe("createSessionStep", () => {
     );
   });
 
-  it("defaults delegated subagent sessions to the subagent input token budget", async () => {
+  it("limits delegated subagent sessions to the parent's granted token budget", async () => {
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      resolvedAgent: {
+        config: {},
+      },
+      turnAgent: TestTurnAgent,
+    } as never);
+
+    const { state } = await createSessionStep({
+      compiledArtifactsSource: { kind: "bundled" },
+      continuationToken: "subagent:test",
+      sessionId: "sess-child",
+      subagentDepth: 1,
+      subagentTokenBudget: { maxInputTokens: 3_000_000 },
+    });
+
+    expect(state.snapshot?.session.limits).toEqual({
+      maxInputTokensPerSession: 3_000_000,
+    });
+  });
+
+  it("leaves delegated subagent sessions uncapped without a granted budget", async () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       resolvedAgent: {
         config: {},
@@ -55,9 +73,7 @@ describe("createSessionStep", () => {
       subagentDepth: 1,
     });
 
-    expect(state.snapshot?.session.limits?.maxInputTokensPerSession).toBe(
-      DEFAULT_SUBAGENT_MAX_INPUT_TOKENS_PER_SESSION,
-    );
+    expect(state.snapshot?.session.limits).toEqual({});
   });
 
   it("seeds session token limits from resolved agent config", async () => {

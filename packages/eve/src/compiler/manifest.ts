@@ -357,12 +357,14 @@ const compiledAgentCompactionDefinitionSchema: z.ZodType<CompiledAgentCompaction
   })
   .strict();
 
+const sessionTokenLimitSchema = z.union([z.number().int().positive(), z.literal(false)]);
+
 const compiledAgentLimitsDefinitionSchema = z
   .object({
     maxSubagentDepth: z.number().int().positive().optional(),
     maxSubagents: z.number().int().positive().optional(),
-    maxInputTokensPerSession: z.number().int().positive().optional(),
-    maxOutputTokensPerSession: z.number().int().positive().optional(),
+    maxInputTokensPerSession: sessionTokenLimitSchema.optional(),
+    maxOutputTokensPerSession: sessionTokenLimitSchema.optional(),
   })
   .strict();
 

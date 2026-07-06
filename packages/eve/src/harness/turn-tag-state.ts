@@ -149,6 +149,30 @@ export function accumulateTurnUsage(input: {
   };
 }
 
+/**
+ * Folds a delegated child session's reported totals into the parent's
+ * session totals without touching the in-flight turn totals. Turn tags
+ * attribute only the parent's own model calls (child spend is attributed by
+ * the caller-side `invoke_agent` span); session totals feed the session
+ * token limits and the remaining-quota budget granted to later delegations.
+ */
+export function accumulateSessionUsage(input: {
+  readonly previous: TurnUsageState | undefined;
+  readonly usage: TokenUsageDelta;
+}): TurnUsageState {
+  const delta = toTokenUsageDelta(input.usage);
+  const base = input.previous ?? {
+    ...ZERO_TOKEN_USAGE,
+    session: ZERO_TOKEN_USAGE,
+    turnId: "",
+  };
+
+  return {
+    ...base,
+    session: addTokenUsage(base.session, delta),
+  };
+}
+
 function addTokenUsage(base: TokenUsageTotals, delta: TokenUsageTotals): TokenUsageTotals {
   return {
     cacheReadTokens: base.cacheReadTokens + delta.cacheReadTokens,

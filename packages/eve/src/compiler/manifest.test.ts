@@ -44,6 +44,28 @@ describe("compiledAgentManifestSchema", () => {
     });
   });
 
+  it("preserves uncapped (false) session token limits", () => {
+    const manifest = createCompiledAgentManifest({
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      config: {
+        limits: {
+          maxInputTokensPerSession: false,
+          maxOutputTokensPerSession: false,
+        },
+        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
+        name: "app",
+      },
+    });
+
+    const parsed = compiledAgentManifestSchema.parse(manifest);
+
+    expect(parsed.config.limits).toEqual({
+      maxInputTokensPerSession: false,
+      maxOutputTokensPerSession: false,
+    });
+  });
+
   it("accepts compiled workflow world configuration", () => {
     const manifest = createCompiledAgentManifest({
       agentRoot: "/app/agent",

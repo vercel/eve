@@ -128,6 +128,15 @@ function expectPositiveInteger(value: unknown, message: string): number {
   return value;
 }
 
+/** `false` means "explicitly uncapped" for session token limits. */
+function expectPositiveIntegerOrFalse(value: unknown, message: string): number | false {
+  if (value === false) {
+    return false;
+  }
+
+  return expectPositiveInteger(value, message);
+}
+
 function normalizeAgentLimitsDefinition(
   value: unknown,
   message: string,
@@ -141,13 +150,13 @@ function normalizeAgentLimitsDefinition(
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["limits"]>> = {};
 
   if (record.maxInputTokensPerSession !== undefined) {
-    normalizedDefinition.maxInputTokensPerSession = expectPositiveInteger(
+    normalizedDefinition.maxInputTokensPerSession = expectPositiveIntegerOrFalse(
       record.maxInputTokensPerSession,
       message,
     );
   }
   if (record.maxOutputTokensPerSession !== undefined) {
-    normalizedDefinition.maxOutputTokensPerSession = expectPositiveInteger(
+    normalizedDefinition.maxOutputTokensPerSession = expectPositiveIntegerOrFalse(
       record.maxOutputTokensPerSession,
       message,
     );
