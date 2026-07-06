@@ -1,0 +1,209 @@
+---
+title: "Chat SDK"
+description: "Bridge any Vercel Chat SDK adapter — Slack, Discord, Telegram, WhatsApp, email, and more — to your agent through one channel, using your own credentials and state store."
+---
+
+The Chat SDK channel connects your agent to any [Vercel Chat SDK](https://chat-sdk.dev) adapter. You pick an adapter (`@chat-adapter/slack`, `@resend/chat-sdk-adapter`, and so on), register handlers for the messages you care about, and call `send` to hand each turn to eve. Use it to reach a surface eve does not ship a first-class channel for, or when you want to manage credentials and state with the Chat SDK's own primitives rather than [Vercel Connect](../guides/auth-and-route-protection). See [Channels](./overview) for the contract this builds on.
+
+You supply an adapter and a state store: the adapter owns provider auth, webhook verification, and delivery, while eve owns session dispatch, streaming, typing, and human-in-the-loop. First-class channels such as [Slack](./slack) manage credentials through Vercel Connect instead — reach for whichever fits the surface you are targeting.
+
+## Install
+
+Add eve, the Chat SDK core (`chat`), an adapter, and a state adapter. The example below uses the Resend email adapter with the in-memory state store:
+
+```bash
+npm install eve@latest chat @resend/chat-sdk-adapter @chat-adapter/state-memory
+```
+
+Swap in whichever adapter matches your surface — `@chat-adapter/slack`, `@chat-adapter/discord`, `@chat-adapter/telegram`, and so on. Any Chat SDK adapter works.
+
+## Add the channel
+
+`chatSdkChannel` returns `{ bot, channel, send }`. Register Chat SDK handlers on `bot`, call `send` from those handlers to start or resume an eve session, and export `channel` as the module default:
+
+```ts title="agent/channels/resend.ts"
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { createResendAdapter } from "@resend/chat-sdk-adapter";
+import type { Message, Thread } from "chat";
+import { chatSdkChannel } from "eve/channels/chat-sdk";
+
+export const { bot, channel, send } = chatSdkChannel({
+  userName: "Resend Bot",
+  adapters: {
+    resend: createResendAdapter({
+      fromAddress: "hello@example.com",
+      fromName: "Resend Bot",
+    }),
+  },
+  state: createMemoryState(),
+  streaming: false,
+});
+
+bot.onNewMention(async (thread: Thread, message: Message) => {
+  await thread.subscribe();
+  await send(message.text, { thread });
+});
+
+bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
+  await send(message.text, { thread });
+});
+
+export default channel;
+```
+
+`adapters` is a map of adapter name to adapter instance; each entry mounts its own webhook (see below). `state` takes any Chat SDK state adapter: `createMemoryState()` is fine for local development, but use a durable adapter (Redis, Upstash, etc.) in production so thread subscriptions and inbound deduplication survive restarts. `send` accepts a plain string, an AI SDK `UserContent` array, or a `SendPayload`, and must be called from inside a Chat SDK handler — it dispatches the turn on the webhook that is currently running.
+
+Deploy once the channel file is in place:
+
+```bash
+eve deploy
+```
+
+`eve deploy` links the project if needed and deploys to Vercel production.
+
+## Configure the webhook route
+
+Each adapter mounts one `POST` route at `/eve/v1/{adapterName}`, so the `resend` adapter above is served at `/eve/v1/resend`. Point your provider's webhook (the Resend inbound address, the Slack Event Subscriptions URL, etc.) at that path.
+
+Override the base path for every adapter with `route`, or pin an individual adapter's path with `routes`:
+
+```ts
+export const { bot, channel, send } = chatSdkChannel({
+  userName: "Resend Bot",
+  adapters: { resend: createResendAdapter({ fromAddress: "hello@example.com" }) },
+  state: createMemoryState(),
+  route: "/webhooks", // resend now mounts at /webhooks/resend
+  routes: { resend: "/webhooks/inbound-email" }, // …or pin it exactly
+});
+```
+
+Use `routes` when a provider requires a fixed URL or when you are migrating an existing endpoint without changing the provider's settings.
+
+## How the channel handles messages
+
+### Dispatch
+
+You choose which Chat SDK events start a turn by registering handlers on `bot` and calling `send`:
+
+- `bot.onNewMention(thread, message)` fires on a fresh `@mention` (or, for surfaces like email, a new inbound thread). Call `thread.subscribe()` when you want later replies in the same thread to keep reaching the agent.
+- `bot.onSubscribedMessage(thread, message)` fires on subsequent messages in a subscribed thread.
+- `bot.onAction`, `bot.onReaction`, and `bot.onSlashCommand` are available for adapters that emit them.
+
+`send(input, options)` starts or resumes the eve session. The `thread` you pass determines the continuation token and the persisted channel state, so replies land back on the originating thread:
+
+```ts
+bot.onNewMention(async (thread, message) => {
+  await send(message.text, { thread, title: "Support request" });
+});
+```
+
+`options` accepts `{ thread, auth?, title?, mode?, callback?, adapterName? }`. `title` sets the eve session's display title without changing the model message; `auth` attaches an authenticated principal to the turn.
+
+### Delivery
+
+The default handlers post the agent's reply back to the thread — no `events` override required. Completed assistant messages are posted as markdown (`{ markdown: … }`) so adapters render rich text and email HTML rather than a raw string.
+
+Streaming is on by default: the channel posts an initial message and edits it as tokens arrive (`message.appended`), throttled by `streamingEditIntervalMs` (default `1000`). Set `streaming: false` for surfaces that deliver one message per turn — email, for example — so the reply posts once on completion instead of editing:
+
+```ts
+chatSdkChannel({
+  userName: "Resend Bot",
+  adapters: { resend: createResendAdapter({ fromAddress: "hello@example.com" }) },
+  state: createMemoryState(),
+  streaming: false,
+});
+```
+
+Typing indicators post automatically where the adapter supports them: `Working…` on `turn.started`, and tool status on `actions.requested`.
+
+### Optional capabilities degrade gracefully
+
+Adapters do not all implement every operation. When an adapter's `startTyping` or `editMessage` throws a `NotImplementedError` (or an error with code `NOT_IMPLEMENTED`), the channel swallows it: typing indicators are skipped, and a streaming edit falls back to a single final post for the rest of the session. You never have to guard optional capabilities in your own handlers. The same predicate is exported as `isNotImplemented` if you want it in custom `events`:
+
+```ts
+import { isNotImplemented } from "eve/channels/chat-sdk";
+```
+
+Override any default by passing `events`. Handlers receive `(eventData, channel, ctx)`, with the rebuilt Chat SDK thread on `channel.thread`:
+
+```ts
+chatSdkChannel({
+  userName: "Resend Bot",
+  adapters: { resend: createResendAdapter({ fromAddress: "hello@example.com" }) },
+  state: createMemoryState(),
+  events: {
+    "message.completed"(eventData, channel) {
+      if (eventData.finishReason === "tool-calls" || !eventData.message || !channel.thread) return;
+      return channel.thread.post({ markdown: eventData.message });
+    },
+  },
+});
+```
+
+### Human-in-the-loop (HITL)
+
+HITL prompts render as a Chat SDK `Card` with buttons. Button clicks resume the parked session automatically — the channel wires `bot.onAction` for you. Change the action-id prefix with `inputActionPrefix` (default `eve_input:`) if your app already uses it, and provide `resolveInputAuth` to carry user or tenant auth across the resume:
+
+```ts
+chatSdkChannel({
+  userName: "Support Bot",
+  adapters: { slack: createSlackAdapter() },
+  state: createMemoryState(),
+  resolveInputAuth: (event) => ({
+    authenticator: "slack",
+    principalType: "user",
+    principalId: event.user?.userId ?? "unknown",
+    attributes: {},
+  }),
+});
+```
+
+### Proactive sessions
+
+Start a session without an inbound webhook through `channel.receive({ message, target, auth })` — from a schedule `run` handler, or `args.receive(channel, ...)` from another channel. The target is a serialized Chat SDK thread, or `{ threadId, adapterName }` when you only have a provider-native thread id:
+
+```ts
+await channel.receive({
+  message: "Your weekly digest is ready.",
+  target: { adapterName: "resend", threadId: "resend:user@example.com" },
+  auth: null,
+});
+```
+
+### Attachments
+
+`send` takes plain text or an AI SDK `UserContent` array. To forward a Chat SDK message's attachments, convert it with `messageToUserContent`, which returns `message.text` when there are no attachments and a `UserContent` array (text plus one file part per attachment URL) when there are:
+
+```ts
+import { messageToUserContent } from "eve/channels/chat-sdk";
+
+bot.onNewMention(async (thread, message) => {
+  await send(messageToUserContent(message), { thread });
+});
+```
+
+See [File uploads](./custom#file-uploads) for how eve stages remote file URLs before the model call.
+
+## Configuration reference
+
+| Option                    | Default      | Purpose                                                                  |
+| ------------------------- | ------------ | ------------------------------------------------------------------------ |
+| `adapters`                | —            | Map of adapter name to Chat SDK adapter instance. One webhook per entry. |
+| `state`                   | —            | Chat SDK state adapter for subscriptions, locks, and dedupe.             |
+| `userName`                | —            | Display name for the bot (a standard Chat SDK `ChatConfig` field).       |
+| `route`                   | `/eve/v1`    | Base path for generated adapter webhooks (`{route}/{adapter}`).          |
+| `routes`                  | —            | Per-adapter path overrides for fixed or migrated webhook URLs.           |
+| `streaming`               | `true`       | Post-then-edit streaming. Set `false` for one-message-per-turn surfaces. |
+| `streamingEditIntervalMs` | `1000`       | Minimum interval between streaming edits.                                |
+| `events`                  | built-in     | Per-event handlers. A supplied handler replaces that built-in default.   |
+| `inputActionPrefix`       | `eve_input:` | Prefix for default HITL button action ids.                               |
+| `resolveInputAuth`        | `null`       | Auth resolver applied when a HITL button click resumes a session.        |
+| `webhook`                 | —            | Extra Chat SDK webhook options (eve owns `waitUntil`).                   |
+
+Any other Chat SDK `ChatConfig` field (for example `concurrency`) is accepted and passed through.
+
+## What to read next
+
+- [Channels overview](./overview): the channel contract and every built-in channel
+- [Custom channels](./custom): build a channel for any surface with `defineChannel`
+- [Auth & route protection](../guides/auth-and-route-protection): authenticating inbound traffic
