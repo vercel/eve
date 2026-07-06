@@ -8,6 +8,7 @@ import {
   isStepCount,
   type LanguageModel,
   type ModelMessage,
+  type ProviderMetadata,
   type SystemModelMessage,
   type TelemetryOptions,
   ToolLoopAgent,
@@ -120,6 +121,7 @@ import {
   summarizeKnownModelCallConfigError,
   summarizeKnownModelCallRequestError,
 } from "#harness/model-call-error.js";
+import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import {
   CONDITIONAL_DELIVERY_INSTRUCTION,
@@ -519,6 +521,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const attributionHeaders = buildGatewayAttributionHeaders(model, config.runtimeIdentity);
 
     ({ messages, session } = await maybeCompact({
+      abortSignal: config.abortSignal,
       emit,
       emissionState,
       headers: attributionHeaders,
@@ -747,21 +750,27 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             FINAL_OUTPUT_TOOL_NAME,
             ...hiddenRuntimeActionToolNames,
           ]);
-          const streamResult = await agent.stream({ messages: callMessages });
+          const streamResult = await agent.stream({
+            abortSignal: config.abortSignal,
+            messages: callMessages,
+          });
           const {
             emittedActionCallIds,
             handledInlineToolResultCallIds,
             inlineAuthorizationResults,
             inlineToolResultParts,
+            trailingInlineToolResultParts,
           } = await emitStreamContent(emit, emissionState, streamResult.fullStream, {
             excludedActionToolNames,
             tools: config.tools,
           });
+          throwIfTurnAborted(config.abortSignal);
           const stepResult = await hooks.stepResult;
           if (
             isEmptyModelResponse(stepResult) &&
             inlineToolResultParts.length === 0 &&
-            inlineAuthorizationResults.length === 0
+            inlineAuthorizationResults.length === 0 &&
+            trailingInlineToolResultParts.length === 0
           ) {
             throw new EmptyModelResponseError();
           }
@@ -771,7 +780,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             handledInlineToolResultCallIds,
             tools: advertisedHarnessTools,
           });
-          if (inlineToolResultParts.length > 0 || inlineAuthorizationResults.length > 0) {
+          if (
+            inlineToolResultParts.length > 0 ||
+            inlineAuthorizationResults.length > 0 ||
+            trailingInlineToolResultParts.length > 0
+          ) {
             const existingToolResults = stepResult.toolResults as TypedToolResult<ToolSet>[];
             const toolResultsByCallId = new Map(
               existingToolResults.map((toolResult) => [toolResult.toolCallId, toolResult]),
@@ -793,15 +806,17 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
               finishReason: stepResult.finishReason,
               response: {
                 ...stepResult.response,
-                ...(inlineToolResultParts.length > 0
+                ...(inlineToolResultParts.length > 0 || trailingInlineToolResultParts.length > 0
                   ? {
-                      messages: [
-                        { role: "tool" as const, content: [...inlineToolResultParts] },
-                        ...stepResult.response.messages,
-                      ],
+                      messages: insertInlineToolResultMessages({
+                        append: trailingInlineToolResultParts,
+                        prepend: inlineToolResultParts,
+                        responseMessages: stepResult.response.messages,
+                      }),
                     }
                   : {}),
               },
+              providerMetadata: stepResult.providerMetadata,
               text: stepResult.text,
               toolCalls: stepResult.toolCalls,
               toolResults: [...toolResultsByCallId.values()],
@@ -810,7 +825,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           }
           return stepResult;
         }
-        await agent.generate({ messages: callMessages });
+        await agent.generate({ abortSignal: config.abortSignal, messages: callMessages });
+        throwIfTurnAborted(config.abortSignal);
         const stepResult = await hooks.stepResult;
         if (isEmptyModelResponse(stepResult)) {
           throw new EmptyModelResponseError();
@@ -824,6 +840,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           sessionId: session.sessionId,
           turnId: emissionState.turnId,
         },
+        config.abortSignal,
       );
     };
 
@@ -869,6 +886,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         suppressStepStartedEmission: true,
       });
     } catch (error) {
+      throwIfTurnAborted(config.abortSignal);
+
       // Stage order: drop a gateway-rejected provider tool first, then
       // reissue an empty response; see runModelCallRecoveryPipeline for
       // the skip/act semantics.
@@ -893,6 +912,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             }),
         ],
       });
+      throwIfTurnAborted(config.abortSignal);
 
       if (recoveryResult.outcome === "recovered") {
         result = recoveryResult.result;
@@ -987,8 +1007,15 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             message: errorMessage,
             sessionId: session.sessionId,
           });
+          // In task mode (delegated subagent runs) the terminal failure
+          // must be the task's error result so the parent driver resumes
+          // with a failed `subagent-result` instead of a successful empty
+          // output (https://github.com/vercel/eve/issues/412).
           return {
-            next: { done: true, output: "" },
+            next:
+              config.mode === "task"
+                ? { done: true, isError: true, output: errorMessage }
+                : { done: true, output: "" },
             session,
           };
         }
@@ -1043,7 +1070,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const nextTurnUsage = accumulateTurnUsage({
       previous: getTurnUsageState(session.state),
       turnId: emissionState.turnId,
-      usage: extractTokenUsageDelta(result.usage),
+      usage: extractTokenUsageDelta({
+        costUsd: extractGatewayCostUsd(result.providerMetadata),
+        usage: result.usage,
+      }),
     });
     session = setTurnUsageState(session, nextTurnUsage);
     // `formatLanguageModelGatewayId` requires `model.provider` to be a string;
@@ -1062,6 +1092,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       "$eve.output_tokens": nextTurnUsage.outputTokens,
       "$eve.cache_read_tokens": nextTurnUsage.cacheReadTokens,
       "$eve.cache_write_tokens": nextTurnUsage.cacheWriteTokens,
+      "$eve.cost_usd": nextTurnUsage.sawCost ? nextTurnUsage.costUsd : undefined,
       "$eve.tool_count": config.tools.size,
     });
 
@@ -1083,19 +1114,42 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
 const SESSION_TOKEN_LIMIT_REACHED_CODE = "SESSION_TOKEN_LIMIT_REACHED";
 
-function extractTokenUsageDelta(
-  usage: HarnessStepResult["usage"] | undefined,
-): TokenUsageDelta | undefined {
-  if (usage === undefined) {
+function extractTokenUsageDelta(input: {
+  readonly costUsd: number | undefined;
+  readonly usage: HarnessStepResult["usage"] | undefined;
+}): TokenUsageDelta | undefined {
+  const usage = input.usage;
+  if (usage === undefined && input.costUsd === undefined) {
     return undefined;
   }
 
   return {
-    cacheReadTokens: usage.inputTokenDetails?.cacheReadTokens,
-    cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens,
-    inputTokens: usage.inputTokens,
-    outputTokens: usage.outputTokens,
+    cacheReadTokens: usage?.inputTokenDetails?.cacheReadTokens,
+    cacheWriteTokens: usage?.inputTokenDetails?.cacheWriteTokens,
+    costUsd: input.costUsd,
+    inputTokens: usage?.inputTokens,
+    outputTokens: usage?.outputTokens,
   };
+}
+
+function extractGatewayCostUsd(providerMetadata: ProviderMetadata | undefined): number | undefined {
+  const gateway = readGatewayMetadata(providerMetadata);
+  const cost = gateway?.cost;
+  if (typeof cost === "number" && Number.isFinite(cost)) {
+    return cost;
+  }
+  if (typeof cost === "string") {
+    const parsed = Number(cost);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function readGatewayMetadata(
+  providerMetadata: ProviderMetadata | undefined,
+): ProviderMetadata[string] | undefined {
+  const gateway = providerMetadata?.gateway;
+  return gateway && typeof gateway === "object" && !Array.isArray(gateway) ? gateway : undefined;
 }
 
 function formatSessionTokenLimitMessage(kind: SessionTokenLimitViolation["kind"]): string {
@@ -1306,6 +1360,44 @@ async function runModelCallRecoveryPipeline(input: {
     }
   }
   return { outcome: "failed", error };
+}
+
+type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
+type ToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
+type StepResponseMessage = HarnessStepResult["response"]["messages"][number];
+
+function insertInlineToolResultMessages(input: {
+  readonly append: readonly ToolResultPart[];
+  readonly prepend: readonly ToolResultPart[];
+  readonly responseMessages: readonly StepResponseMessage[];
+}): StepResponseMessage[] {
+  const existingCallIds = extractToolResultCallIds(input.responseMessages);
+  const prepend = input.prepend.filter((part) => !existingCallIds.has(part.toolCallId));
+  const append = input.append.filter((part) => !existingCallIds.has(part.toolCallId));
+
+  return [
+    ...(prepend.length > 0 ? [{ role: "tool" as const, content: [...prepend] }] : []),
+    ...input.responseMessages,
+    ...(append.length > 0 ? [{ role: "tool" as const, content: [...append] }] : []),
+  ] satisfies StepResponseMessage[];
+}
+
+function extractToolResultCallIds(messages: readonly StepResponseMessage[]): ReadonlySet<string> {
+  const callIds = new Set<string>();
+
+  for (const message of messages) {
+    if (message.role !== "tool" || !Array.isArray(message.content)) {
+      continue;
+    }
+
+    for (const part of message.content) {
+      if (part.type === "tool-result") {
+        callIds.add(part.toolCallId);
+      }
+    }
+  }
+
+  return callIds;
 }
 
 /**
@@ -2058,6 +2150,7 @@ function createNextCompactionConfig(
  * harness uses to rebuild `session.history` after the step.
  */
 async function maybeCompact(input: {
+  readonly abortSignal?: AbortSignal;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly headers?: Record<string, string>;
@@ -2102,6 +2195,7 @@ async function maybeCompact(input: {
     compaction.providerOptions,
     input.telemetry,
     input.headers,
+    input.abortSignal,
   );
 
   if (input.onCompaction) {
@@ -2150,11 +2244,14 @@ function resolveApprovalKeyFromTools(
 async function runModelCallWithRetries<T>(
   fn: () => Promise<T>,
   diag: { readonly sessionId: string; readonly turnId: string },
+  abortSignal?: AbortSignal,
 ): Promise<T> {
   for (let attempt = 1; ; attempt++) {
+    throwIfTurnAborted(abortSignal);
     try {
       return await fn();
     } catch (error) {
+      throwIfTurnAborted(abortSignal);
       if (attempt === MODEL_CALL_MAX_ATTEMPTS || classifyModelCallError(error) !== "retry") {
         throw error;
       }

@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.18.0",
+  "version": "0.20.0",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -216,6 +216,11 @@
       "import": "./dist/src/public/channels/slack/index.js",
       "default": "./dist/src/public/channels/slack/index.js"
     },
+    "./channels/chat-sdk": {
+      "types": "./dist/src/public/channels/chat-sdk/index.d.ts",
+      "import": "./dist/src/public/channels/chat-sdk/index.js",
+      "default": "./dist/src/public/channels/chat-sdk/index.js"
+    },
     "./channels/github": {
       "types": "./dist/src/public/channels/github/index.d.ts",
       "import": "./dist/src/public/channels/github/index.js",
@@ -296,6 +301,7 @@
     "@ai-sdk/provider-utils": "catalog:",
     "@chat-adapter/slack": "4.31.0",
     "@chat-adapter/state-memory": "4.31.0",
+    "@chat-adapter/twilio": "4.31.0",
     "@clack/core": "1.3.1",
     "@nuxt/kit": "^4.0.0",
     "@standard-schema/spec": "1.1.0",

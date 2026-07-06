@@ -2,6 +2,7 @@ import { executeGrepOnSandbox, type GrepInput } from "#execution/sandbox/grep-to
 import { requireSandboxSession } from "#execution/sandbox/require-sandbox.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
+import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 
 /**
  * Shared input schema used by the framework `grep` tool and any author tool
@@ -74,8 +75,11 @@ export const GREP_OUTPUT_SCHEMA: JsonObject = {
 /**
  * Framework-owned executor that delegates to the default sandbox.
  */
-async function executeGrep(input: unknown): Promise<unknown> {
-  return executeGrepOnSandbox(await requireSandboxSession(), input as GrepInput);
+async function executeGrep(input: unknown, options?: ToolExecuteOptions): Promise<unknown> {
+  return executeGrepOnSandbox(
+    await requireSandboxSession(options?.abortSignal),
+    input as GrepInput,
+  );
 }
 
 export const GREP_TOOL_DEFINITION: ResolvedToolDefinition = {

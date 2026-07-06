@@ -11,6 +11,7 @@ import { isObject } from "#shared/guards.js";
 import type {
   AuthorizationDefinition,
   ConnectionClient,
+  ConnectionToolExecuteOptions,
   ConnectionToolMetadata,
   HeadersDefinition,
   HeaderValue,
@@ -116,7 +117,11 @@ export class McpConnectionClient implements ConnectionClient {
    * so callers re-enter the authorization flow instead of surfacing an
    * opaque transport error.
    */
-  async executeTool(toolName: string, args: unknown): Promise<unknown> {
+  async executeTool(
+    toolName: string,
+    args: unknown,
+    options?: ConnectionToolExecuteOptions,
+  ): Promise<unknown> {
     try {
       const { tools } = await this.#ensureTools();
 
@@ -127,7 +132,7 @@ export class McpConnectionClient implements ConnectionClient {
         );
       }
 
-      return await sdkTool.execute(args, {} as never);
+      return await sdkTool.execute(args, { abortSignal: options?.abortSignal } as never);
     } catch (error) {
       return await this.#rethrowClassified(error);
     }

@@ -20,6 +20,8 @@ import { turnWorkflowInputV0ToV1 } from "./turn-workflow-v0-to-v1.js";
 export const TURN_WORKFLOW_INPUT_VERSION = 1;
 
 export interface TurnStepInput {
+  /** Cancellation signal forwarded into the turn step. */
+  readonly abortSignal?: AbortSignal;
   readonly input: HookPayload | undefined;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;

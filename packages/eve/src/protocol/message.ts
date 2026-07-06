@@ -1,5 +1,5 @@
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
-import type { UserContent } from "ai";
+import type { ProviderMetadata, UserContent } from "ai";
 
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
@@ -10,7 +10,7 @@ export const EVE_STREAM_FORMAT_HEADER = "x-eve-stream-format";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "16";
+export const EVE_MESSAGE_STREAM_VERSION = "17";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -26,6 +26,15 @@ export type AssistantStepFinishReason =
   | "other"
   | "stop"
   | "tool-calls";
+
+type ProviderMetadataEntry = NonNullable<ProviderMetadata[string]>;
+type GatewayGenerationId = Extract<ProviderMetadataEntry["generationId"], string>;
+
+export interface StepCompletedProviderMetadata {
+  readonly gateway: {
+    readonly generationId: GatewayGenerationId;
+  };
+}
 
 /**
  * Durable metadata attached to one persisted session stream event.
@@ -357,10 +366,12 @@ export interface StepStartedStreamEvent {
 export interface StepCompletedStreamEvent {
   data: {
     finishReason: AssistantStepFinishReason;
+    providerMetadata?: StepCompletedProviderMetadata;
     sequence: number;
     stepIndex: number;
     turnId: string;
     usage?: {
+      readonly costUsd?: number;
       readonly inputTokens?: number;
       readonly outputTokens?: number;
       readonly cacheReadTokens?: number;
@@ -987,10 +998,12 @@ export function createStepStartedEvent(input: {
  */
 export function createStepCompletedEvent(input: {
   readonly finishReason: AssistantStepFinishReason;
+  readonly providerMetadata?: StepCompletedProviderMetadata;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
   readonly usage?: {
+    readonly costUsd?: number;
     readonly inputTokens?: number;
     readonly outputTokens?: number;
     readonly cacheReadTokens?: number;
@@ -1006,6 +1019,9 @@ export function createStepCompletedEvent(input: {
 
   if (input.usage !== undefined) {
     data.usage = input.usage;
+  }
+  if (input.providerMetadata !== undefined) {
+    data.providerMetadata = input.providerMetadata;
   }
 
   return {

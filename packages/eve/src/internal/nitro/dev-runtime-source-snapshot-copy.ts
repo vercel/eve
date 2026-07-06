@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { constants as fsConstants, existsSync } from "node:fs";
 import { cp, lstat, mkdir, readFile, readdir, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
@@ -17,14 +17,18 @@ import {
 } from "#internal/nitro/dev-runtime-source-snapshot.js";
 
 const SNAPSHOT_SKIP_NAMES = new Set([
+  ".generated",
   ".eve",
   ".git",
+  ".next",
   ".output",
   ".turbo",
   ".vercel",
   ".workflow-data",
   "node_modules",
 ]);
+const SNAPSHOT_APP_ROOT_SKIP_NAMES = new Set(["build", "dist"]);
+const SNAPSHOT_COPY_MODE = fsConstants.COPYFILE_FICLONE;
 
 export async function copyDevelopmentSourceSnapshot(
   plan: DevelopmentSourceSnapshotPlan,
@@ -71,7 +75,10 @@ async function copySnapshotPath(input: {
     }
 
     await mkdir(dirname(input.targetPath), { recursive: true });
-    await cp(input.sourcePath, input.targetPath, { recursive: true });
+    await cp(input.sourcePath, input.targetPath, {
+      mode: SNAPSHOT_COPY_MODE,
+      recursive: true,
+    });
   } catch (error) {
     throw new DevelopmentRuntimeSourceSnapshotError(
       `Failed to copy development runtime source snapshot path "${input.sourcePath}" to "${input.targetPath}": ${formatErrorMessage(error)}`,
@@ -89,24 +96,56 @@ async function copySnapshotDirectory(input: {
   for (const entry of await readdir(input.sourcePath, { withFileTypes: true })) {
     const sourcePath = join(input.sourcePath, entry.name);
 
-    if (shouldSkipSnapshotSource(input.plan.sourceRoot, sourcePath)) {
+    if (shouldSkipSnapshotSource(input.plan, sourcePath)) {
       continue;
     }
 
     await cp(sourcePath, join(input.targetPath, entry.name), {
-      filter: (source) => !shouldSkipSnapshotSource(input.plan.sourceRoot, source),
+      filter: (source) => !shouldSkipSnapshotSource(input.plan, source),
+      mode: SNAPSHOT_COPY_MODE,
       recursive: true,
     });
   }
 }
 
-function shouldSkipSnapshotSource(sourceRoot: string, sourcePath: string): boolean {
-  const relativePath = relative(sourceRoot, sourcePath);
+function shouldSkipSnapshotSource(
+  plan: DevelopmentSourceSnapshotPlan,
+  sourcePath: string,
+): boolean {
+  const relativePath = relative(plan.sourceRoot, sourcePath);
   if (relativePath.length === 0) {
     return false;
   }
 
-  return relativePath.split(/[\\/]/).some((part) => SNAPSHOT_SKIP_NAMES.has(part));
+  if (
+    relativePath
+      .split(/[\\/]/)
+      .some((part) => SNAPSHOT_SKIP_NAMES.has(part) || part.startsWith(".env"))
+  ) {
+    return true;
+  }
+
+  return isDirectAppRootSkipPath({
+    appRoot: plan.appRoot,
+    sourcePath,
+  });
+}
+
+function isDirectAppRootSkipPath(input: {
+  readonly appRoot: string;
+  readonly sourcePath: string;
+}): boolean {
+  if (!isPathInsideOrEqual(input.sourcePath, input.appRoot)) {
+    return false;
+  }
+
+  const relativePath = relative(input.appRoot, input.sourcePath);
+  if (relativePath.length === 0) {
+    return false;
+  }
+
+  const firstPart = relativePath.split(/[\\/]/)[0];
+  return firstPart !== undefined && SNAPSHOT_APP_ROOT_SKIP_NAMES.has(firstPart);
 }
 
 async function rewriteSnapshotTsConfigAbsoluteExtends(

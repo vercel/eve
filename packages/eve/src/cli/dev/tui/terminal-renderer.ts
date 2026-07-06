@@ -524,7 +524,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
           return;
         }
         switch (key.type) {
-          case "up": {
+          case "up":
+          case "ctrl-p": {
             const open = suggestions();
             if (open !== undefined) {
               this.#typeahead = moveTypeaheadSelection(open, -1);
@@ -538,7 +539,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
             else recall(this.#promptHistory.previous(editor.text));
             break;
           }
-          case "down": {
+          case "down":
+          case "ctrl-n": {
             const open = suggestions();
             if (open !== undefined) {
               this.#typeahead = moveTypeaheadSelection(open, 1);
@@ -853,6 +855,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         if (mode === "select") {
           switch (key.type) {
             case "up":
+            case "ctrl-p":
               if (totalRows > 0) {
                 cursorIndex = (cursorIndex - 1 + totalRows) % totalRows;
                 renderSection();
@@ -860,6 +863,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
               }
               break;
             case "down":
+            case "ctrl-n":
               if (totalRows > 0) {
                 cursorIndex = (cursorIndex + 1) % totalRows;
                 renderSection();

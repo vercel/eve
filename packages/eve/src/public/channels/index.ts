@@ -60,6 +60,7 @@ export interface ChannelMetadataMap {
   readonly subagent: InstrumentationChannelMetadata;
   readonly unknown: InstrumentationChannelMetadata;
   readonly "channel:slack": import("#public/channels/slack/slackChannel.js").SlackInstrumentationMetadata;
+  readonly "channel:chat-sdk": import("#public/channels/chat-sdk/chatSdkChannel.js").ChatSdkInstrumentationMetadata;
   readonly "channel:discord": import("#public/channels/discord/index.js").DiscordInstrumentationMetadata;
   readonly "channel:twilio": import("#public/channels/twilio/twilioChannel.js").TwilioInstrumentationMetadata;
   readonly "channel:teams": import("#public/channels/teams/index.js").TeamsInstrumentationMetadata;
@@ -84,6 +85,7 @@ export type InstrumentationChannelKind = keyof ChannelMetadataMap;
  */
 export interface ChannelReferenceMap {
   readonly "channel:slack": import("#public/channels/slack/slackChannel.js").SlackChannel;
+  readonly "channel:chat-sdk": import("#public/channels/chat-sdk/chatSdkChannel.js").ChatSdkChannel;
   readonly "channel:discord": import("#public/channels/discord/discordChannel.js").DiscordChannel;
   readonly "channel:twilio": import("#public/channels/twilio/twilioChannel.js").TwilioChannel;
   readonly "channel:teams": import("#public/channels/teams/teamsChannel.js").TeamsChannel;

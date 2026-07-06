@@ -452,14 +452,19 @@ describe("emitStreamContent action requests", () => {
     const localEmit = createEmitStub();
     const providerEmit = createEmitStub();
 
-    await emitStreamContent(localEmit, EMISSION_STATE, streamOf(parts(false)), {
+    const localResult = await emitStreamContent(localEmit, EMISSION_STATE, streamOf(parts(false)), {
       excludedActionToolNames: new Set(),
       tools,
     });
-    await emitStreamContent(providerEmit, EMISSION_STATE, streamOf(parts(true)), {
-      excludedActionToolNames: new Set(),
-      tools,
-    });
+    const providerResult = await emitStreamContent(
+      providerEmit,
+      EMISSION_STATE,
+      streamOf(parts(true)),
+      {
+        excludedActionToolNames: new Set(),
+        tools,
+      },
+    );
 
     const localEvents = vi.mocked(localEmit).mock.calls.map(([event]) => event);
     const providerEvents = vi.mocked(providerEmit).mock.calls.map(([event]) => event);
@@ -478,6 +483,15 @@ describe("emitStreamContent action requests", () => {
       },
       type: "action.result",
     });
+    expect(localResult.trailingInlineToolResultParts).toEqual([
+      {
+        output: { type: "error-text", value: "Search failed" },
+        toolCallId: "call-1",
+        toolName: "web_search",
+        type: "tool-result",
+      },
+    ]);
+    expect(providerResult.trailingInlineToolResultParts).toEqual([]);
   });
 });
 

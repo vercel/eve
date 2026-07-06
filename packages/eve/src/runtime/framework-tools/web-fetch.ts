@@ -1,9 +1,10 @@
 import { executeWebFetchTool, type WebFetchInput } from "#execution/web-fetch/tool.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
+import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 import type { JsonObject } from "#shared/json.js";
 
-async function executeWebFetch(input: unknown): Promise<unknown> {
-  return executeWebFetchTool(input as WebFetchInput);
+async function executeWebFetch(input: unknown, options?: ToolExecuteOptions): Promise<unknown> {
+  return executeWebFetchTool(input as WebFetchInput, { abortSignal: options?.abortSignal });
 }
 
 export const WEB_FETCH_INPUT_SCHEMA: JsonObject = {

@@ -1,8 +1,17 @@
+const MAX_ENV_LIGHTS = 16u;
+
+struct EnvLight {
+  positionRadius: vec4f,
+  colorIntensity: vec4f,
+  params: vec4f,
+};
+
 struct CubeParams {
   face: f32,
+  lightCount: f32,
   _pad0: f32,
   _pad1: f32,
-  _pad2: f32,
+  lights: array<EnvLight, 16>,
 };
 
 struct VertexOutput {
@@ -51,7 +60,7 @@ fn cube_dir(face: f32, uv: vec2f) -> vec3f {
   return normalize(vec3f(-p.x, -p.y, -1.0));
 }
 
-fn spot(dir: vec3f, center: vec3f, radius: f32, softness: f32, luminance: f32) -> vec3f {
+fn spot(dir: vec3f, center: vec3f, radius: f32, softness: f32, luminance: f32, color: vec3f, intensity: f32) -> vec3f {
   let d = distance(normalize(dir), normalize(center));
   let soft = clamp(softness, 0.0, 1.0);
   // Gaussian softboxes keep an HDR tail instead of clamping to exact zero at radius.
@@ -60,26 +69,34 @@ fn spot(dir: vec3f, center: vec3f, radius: f32, softness: f32, luminance: f32) -
   // softness widens/narrows the falloff without changing the desaturated white color.
   let sigma = max(radius * mix(0.35, 0.85, soft), 0.001);
   let t = exp(-0.5 * (d / sigma) * (d / sigma));
-  // White, desaturated studio softboxes. Units are scene-linear relative cd/m^2-ish values.
-  return vec3f(1.0) * (t * luminance);
+  // Units are scene-linear relative cd/m^2-ish values.
+  return color * (t * luminance * intensity);
 }
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4f {
   let dir = cube_dir(params.face, input.uv);
 
-  // Dim black studio with high-dynamic-range white cards/softboxes.
+  // Dim black studio with high-dynamic-range configurable cards/softboxes.
   var radiance = vec3f(0.0);
+  let lightCount = min(u32(params.lightCount), MAX_ENV_LIGHTS);
 
-  // dir center radius softness luminance
-  radiance += spot(dir, vec3f(-1.4, 2., -0.4), 0.3, 0.02, 10.0); // top-left high
-  radiance += spot(dir, vec3f(-0.4, 1., 1.), 0.9, 0.02, 1.0); // front-left high
+  for (var index = 0u; index < MAX_ENV_LIGHTS; index += 1u) {
+    if (index >= lightCount) {
+      break;
+    }
 
-  radiance += spot(dir, vec3f(0.5, 0., 1.)*10., 0.5, 0.1, 0.2); // front-right
-  radiance += spot(dir, vec3f(0.4, -0.3, -1.), 0.1, 1., 0.5); // back-right
+    let light = params.lights[index];
+    radiance += spot(
+      dir,
+      light.positionRadius.xyz,
+      light.positionRadius.w,
+      light.params.x,
+      light.params.y,
+      light.colorIntensity.rgb,
+      light.colorIntensity.w,
+    );
+  }
 
-  radiance += spot(dir, vec3f(1.0, -2., -0.5), 0.2, 1., 5.); // front-bottom-right
-  radiance += spot(dir, vec3f(-0.3, -0.2, -0.2), 0.3, 4., 3.); // front-bottom-left
-  
   return vec4f(radiance, 1.0);
 }

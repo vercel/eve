@@ -5,6 +5,7 @@ import {
 import { requireSandboxSession } from "#execution/sandbox/require-sandbox.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
+import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 
 /**
  * Shared input schema used by the framework `write_file` tool and any author
@@ -47,8 +48,11 @@ export const WRITE_FILE_OUTPUT_SCHEMA: JsonObject = {
 /**
  * Framework-owned executor that delegates to the default sandbox.
  */
-async function executeWriteFile(input: unknown): Promise<unknown> {
-  return executeWriteFileOnSandbox(await requireSandboxSession(), input as WriteFileInput);
+async function executeWriteFile(input: unknown, options?: ToolExecuteOptions): Promise<unknown> {
+  return executeWriteFileOnSandbox(
+    await requireSandboxSession(options?.abortSignal),
+    input as WriteFileInput,
+  );
 }
 
 export const WRITE_FILE_TOOL_DEFINITION: ResolvedToolDefinition = {

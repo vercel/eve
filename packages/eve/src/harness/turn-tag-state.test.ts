@@ -12,8 +12,10 @@ import type { HarnessSession } from "#harness/types.js";
 const ZERO_SESSION_USAGE = {
   cacheReadTokens: 0,
   cacheWriteTokens: 0,
+  costUsd: 0,
   inputTokens: 0,
   outputTokens: 0,
+  sawCost: false,
 };
 
 function makeSession(state?: HarnessSession["state"]): HarnessSession {
@@ -45,6 +47,8 @@ describe("accumulateTurnUsage", () => {
       outputTokens: 3,
       cacheReadTokens: 2,
       cacheWriteTokens: 0,
+      costUsd: 0,
+      sawCost: false,
       session: {
         ...ZERO_SESSION_USAGE,
         cacheReadTokens: 2,
@@ -72,11 +76,40 @@ describe("accumulateTurnUsage", () => {
       outputTokens: 50,
       cacheReadTokens: 800,
       cacheWriteTokens: 200,
+      costUsd: 0,
+      sawCost: false,
       session: {
         cacheReadTokens: 800,
         cacheWriteTokens: 200,
+        costUsd: 0,
         inputTokens: 1000,
         outputTokens: 50,
+        sawCost: false,
+      },
+    });
+  });
+
+  it("accumulates gateway cost from normalized usage", () => {
+    const next = accumulateTurnUsage({
+      previous: undefined,
+      turnId: "turn_0",
+      usage: {
+        costUsd: 0.0123,
+      },
+    });
+
+    expect(next).toEqual({
+      turnId: "turn_0",
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd: 0.0123,
+      sawCost: true,
+      session: {
+        ...ZERO_SESSION_USAGE,
+        costUsd: 0.0123,
+        sawCost: true,
       },
     });
   });
@@ -88,11 +121,15 @@ describe("accumulateTurnUsage", () => {
       outputTokens: 50,
       cacheReadTokens: 8,
       cacheWriteTokens: 5,
+      costUsd: 0.01,
+      sawCost: true,
       session: {
         cacheReadTokens: 8,
         cacheWriteTokens: 5,
+        costUsd: 0.01,
         inputTokens: 100,
         outputTokens: 50,
+        sawCost: true,
       },
     };
     const next = accumulateTurnUsage({
@@ -101,6 +138,7 @@ describe("accumulateTurnUsage", () => {
       usage: {
         cacheReadTokens: 4,
         cacheWriteTokens: 3,
+        costUsd: 0.02,
         inputTokens: 12,
         outputTokens: 7,
       },
@@ -112,11 +150,15 @@ describe("accumulateTurnUsage", () => {
       outputTokens: 57,
       cacheReadTokens: 12,
       cacheWriteTokens: 8,
+      costUsd: 0.03,
+      sawCost: true,
       session: {
         cacheReadTokens: 12,
         cacheWriteTokens: 8,
+        costUsd: 0.03,
         inputTokens: 112,
         outputTokens: 57,
+        sawCost: true,
       },
     });
   });
@@ -128,11 +170,15 @@ describe("accumulateTurnUsage", () => {
       outputTokens: 50,
       cacheReadTokens: 8,
       cacheWriteTokens: 5,
+      costUsd: 0.01,
+      sawCost: true,
       session: {
         cacheReadTokens: 80,
         cacheWriteTokens: 50,
+        costUsd: 0.05,
         inputTokens: 1000,
         outputTokens: 500,
+        sawCost: true,
       },
     };
     const next = accumulateTurnUsage({
@@ -147,11 +193,15 @@ describe("accumulateTurnUsage", () => {
       outputTokens: 5,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
+      costUsd: 0,
+      sawCost: false,
       session: {
         cacheReadTokens: 80,
         cacheWriteTokens: 50,
+        costUsd: 0.05,
         inputTokens: 1020,
         outputTokens: 505,
+        sawCost: true,
       },
     });
   });
@@ -169,6 +219,8 @@ describe("accumulateTurnUsage", () => {
       outputTokens: 0,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
+      costUsd: 0,
+      sawCost: false,
       session: ZERO_SESSION_USAGE,
     });
   });
@@ -182,6 +234,8 @@ describe("session state round-trip", () => {
       outputTokens: 1,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
+      costUsd: 0,
+      sawCost: false,
       session: {
         ...ZERO_SESSION_USAGE,
         inputTokens: 5,
@@ -195,6 +249,8 @@ describe("session state round-trip", () => {
       outputTokens: 1,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
+      costUsd: 0,
+      sawCost: false,
       session: {
         ...ZERO_SESSION_USAGE,
         inputTokens: 5,
@@ -215,6 +271,8 @@ describe("session state round-trip", () => {
       outputTokens: 1,
       cacheReadTokens: 1,
       cacheWriteTokens: 0,
+      costUsd: 0,
+      sawCost: false,
       session: {
         ...ZERO_SESSION_USAGE,
         cacheReadTokens: 1,
@@ -246,13 +304,17 @@ describe("session token limits", () => {
       turnId: "turn_0",
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
+      costUsd: 0,
       inputTokens: 10,
       outputTokens: 3,
+      sawCost: false,
       session: {
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
+        costUsd: 0,
         inputTokens: 10,
         outputTokens: 3,
+        sawCost: false,
       },
     });
 

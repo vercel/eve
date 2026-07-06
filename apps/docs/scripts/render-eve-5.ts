@@ -32,10 +32,15 @@ import { PNG } from "pngjs";
 import { decodeGltfMesh } from "../app/[lang]/(home)/components/eve-logo-shader/mesh";
 import {
   BLOOM_RADIUS,
-  BLOOM_STRENGTH,
+  BLOOM_STRENGTH_OFF,
+  BLOOM_STRENGTH_ON,
   BLOOM_THRESHOLD,
+  DEFAULT_CAMERA_FOV,
+  cameraRadiusForFov,
   createEve5Renderer,
   getPaddedRenderSize,
+  type EveMaterial,
+  type MeshData,
   type RenderControls,
 } from "../app/[lang]/(home)/components/eve-logo-shader/render";
 
@@ -52,16 +57,23 @@ const PADDED_SIZE = getPaddedRenderSize(LOGICAL_WIDTH, LOGICAL_HEIGHT, PADDING_R
 const WIDTH = PADDED_SIZE.width;
 const HEIGHT = PADDED_SIZE.height;
 const THEME = readThemeEnv();
+const IMPRINT_PROGRESS = readUnitIntervalEnv("EVE_LOGO_RENDER_IMPRINT_PROGRESS");
+const IMPRINT_GRID_SCALE_MULTIPLIER = readPositiveNumberEnv("EVE_LOGO_IMPRINT_GRID_SCALE_MULTIPLIER", 1);
+const IMPRINT_GLYPH_SCALE = readPositiveNumberEnv("EVE_LOGO_IMPRINT_GLYPH_SCALE", 1.35);
+const REQUESTED_RENDER_STAGE = readRenderStageEnv();
+const RENDER_STAGE: EveMaterial = REQUESTED_RENDER_STAGE;
+const RENDER_YAW = readFiniteNumberEnv("EVE_LOGO_RENDER_YAW", 0);
 const MODEL_PATH = resolve(process.cwd(), "public/eve-5/eve-logo.gltf");
 const DEFAULT_CONTROLS: RenderControls = {
-  yaw: 0,
+  yaw: RENDER_YAW,
   pitch: 0,
-  radius: 1.9,
-  fov: 35,
+  radius: cameraRadiusForFov(DEFAULT_CAMERA_FOV),
+  fov: DEFAULT_CAMERA_FOV,
   envYaw: 0,
+  envPitch: 0,
   insideRendering: true,
   outsideRendering: true,
-  material: "glass",
+  material: RENDER_STAGE,
   wireframe: false,
   showEnv: false,
 };
@@ -73,37 +85,60 @@ async function main() {
   let renderer: ReturnType<typeof createEve5Renderer> | undefined;
 
   try {
-    renderer = createEve5Renderer(app.device, FORMAT, mesh, { theme: THEME, paddingRadius: PADDING_RADIUS, bloom: BLOOM_ENABLED });
-    const output = await renderView(renderer, app.device, DEFAULT_CONTROLS, "output.png");
-    await renderView(renderer, app.device, { ...DEFAULT_CONTROLS, yaw: -0.49, pitch: 0.31 }, "rotated.png");
-    await renderView(renderer, app.device, { ...DEFAULT_CONTROLS, wireframe: true }, "wireframe.png");
+    renderer = createEve5Renderer(app.device, FORMAT, mesh, {
+      theme: THEME,
+      paddingRadius: PADDING_RADIUS,
+      bloom: BLOOM_ENABLED,
+    });
+
+    const renderResult = await renderDefaultViews(renderer, app.device, DEFAULT_CONTROLS);
 
     const log = {
       runId: RUN_ID,
       outDir: OUT_DIR,
-      dimensions: { width: WIDTH, height: HEIGHT, format: FORMAT, theme: THEME },
+      dimensions: {
+        width: WIDTH,
+        height: HEIGHT,
+        format: FORMAT,
+        theme: THEME,
+        stage: RENDER_STAGE,
+        requestedStage: REQUESTED_RENDER_STAGE,
+      },
       bloom: {
         enabled: BLOOM_ENABLED,
         runtimeRadius: BLOOM_RADIUS,
         radius: PADDING_RADIUS,
-        strength: BLOOM_ENABLED ? BLOOM_STRENGTH : 0,
+        strength: BLOOM_ENABLED ? effectiveBloomStrength(IMPRINT_PROGRESS ?? 0) : 0,
+        strengthOff: BLOOM_STRENGTH_OFF,
+        strengthOn: BLOOM_STRENGTH_ON,
         threshold: BLOOM_THRESHOLD,
         logical: { width: LOGICAL_WIDTH, height: LOGICAL_HEIGHT },
         padded: { width: WIDTH, height: HEIGHT },
       },
+      imprint:
+        IMPRINT_PROGRESS !== undefined
+          ? {
+              enabled: true,
+              progress: IMPRINT_PROGRESS,
+              gridScaleMultiplier: IMPRINT_GRID_SCALE_MULTIPLIER,
+              glyphScale: IMPRINT_GLYPH_SCALE,
+              noise: { time: readNoiseTimeEnv(), mouse: [0, 0] },
+              stage: "front-glass-material-imprint",
+            }
+          : { enabled: false },
       mesh: {
         vertices: mesh.positions.length / 3,
         triangles: mesh.indices.length / 3,
         bounds: mesh.bounds,
       },
-      files: {
-        output: "output.png",
-        rotated: "rotated.png",
-        wireframe: "wireframe.png",
-        log: "log.json",
-      },
-      output: pixelStats(WIDTH, HEIGHT, output),
+      files: renderResult.files,
+      output: renderResult.output,
     };
+
+    const logWithOptionalBounds: typeof log & { bounds?: unknown } = log;
+    if ("bounds" in renderResult) {
+      logWithOptionalBounds.bounds = renderResult.bounds;
+    }
 
     await writeFile(resolve(OUT_DIR, "log.json"), `${JSON.stringify(log, null, 2)}\n`);
     console.log(JSON.stringify(log, null, 2));
@@ -115,23 +150,66 @@ async function main() {
   }
 }
 
+async function renderDefaultViews(
+  renderer: ReturnType<typeof createEve5Renderer>,
+  device: Awaited<ReturnType<typeof App.create>>["device"],
+  controls: RenderControls,
+) {
+  const output = await renderView(renderer, device, controls, outputFileName(), WIDTH, HEIGHT, LOGICAL_WIDTH, LOGICAL_HEIGHT);
+  await renderView(renderer, device, { ...controls, yaw: RENDER_YAW || -0.49, pitch: RENDER_YAW ? controls.pitch : 0.31 }, "rotated.png", WIDTH, HEIGHT, LOGICAL_WIDTH, LOGICAL_HEIGHT);
+  await renderView(renderer, device, { ...controls, wireframe: true }, "wireframe.png", WIDTH, HEIGHT, LOGICAL_WIDTH, LOGICAL_HEIGHT);
+
+  return {
+    files: {
+      output: outputFileName(),
+      rotated: "rotated.png",
+      wireframe: "wireframe.png",
+      log: "log.json",
+    },
+    output: pixelStats(WIDTH, HEIGHT, output),
+  };
+}
+
+function outputFileName() {
+  return IMPRINT_PROGRESS === undefined ? "output.png" : `imprint-${formatProgressForFile(IMPRINT_PROGRESS)}.png`;
+}
+
+function effectiveBloomStrength(imprintProgress: number) {
+  return BLOOM_STRENGTH_OFF + (BLOOM_STRENGTH_ON - BLOOM_STRENGTH_OFF) * imprintProgress;
+}
+
+function imprintOptions() {
+  if (IMPRINT_PROGRESS === undefined) return undefined;
+  return {
+    progress: IMPRINT_PROGRESS,
+    gridScaleMultiplier: IMPRINT_GRID_SCALE_MULTIPLIER,
+    glyphScale: IMPRINT_GLYPH_SCALE,
+    time: readNoiseTimeEnv(),
+    mouse: [0, 0] as const,
+  };
+}
+
 async function renderView(
   renderer: ReturnType<typeof createEve5Renderer>,
   device: Awaited<ReturnType<typeof App.create>>["device"],
   controls: RenderControls,
   file: string,
+  width: number,
+  height: number,
+  logicalWidth: number,
+  logicalHeight: number,
 ) {
   const target = device.createTexture({
     label: `eve-5-static-${file}`,
-    size: [WIDTH, HEIGHT],
+    size: [width, height],
     format: FORMAT,
     usage: ["render_attachment", "copy_src"],
   });
   try {
-    renderer.render(target.createView(), controls, LOGICAL_WIDTH, LOGICAL_HEIGHT);
+    renderer.render(target.createView(), controls, logicalWidth, logicalHeight, imprintOptions());
     await device.queue.flush();
     const pixels = new Uint8Array(await target.read());
-    await writePng(resolve(OUT_DIR, file), WIDTH, HEIGHT, pixels);
+    await writePng(resolve(OUT_DIR, file), width, height, pixels);
     return pixels;
   } finally {
     target.destroy();
@@ -150,12 +228,42 @@ async function loadMeshFromDisk(path: string) {
   });
 }
 
+function readFiniteNumberEnv(name: string, fallback: number) {
+  const value = process.env[name];
+  if (!value) return fallback;
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`${name} must be a finite number.`);
+  }
+  return parsed;
+}
+
 function readPositiveIntegerEnv(name: string, fallback: number, minimumExclusive = 0) {
   const value = process.env[name];
   if (!value) return fallback;
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed <= minimumExclusive) {
     throw new Error(`${name} must be an integer greater than ${minimumExclusive}.`);
+  }
+  return parsed;
+}
+
+function readPositiveNumberEnv(name: string, fallback: number) {
+  const value = process.env[name];
+  if (!value) return fallback;
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive number.`);
+  }
+  return parsed;
+}
+
+function readUnitIntervalEnv(name: string) {
+  const value = process.env[name];
+  if (value === undefined || value === "") return undefined;
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    throw new Error(`${name} must be a finite number between 0 and 1.`);
   }
   return parsed;
 }
@@ -177,6 +285,42 @@ function readBooleanEnv(name: string, fallback: boolean) {
   if (["1", "true", "yes", "on"].includes(normalized)) return true;
   if (["0", "false", "no", "off"].includes(normalized)) return false;
   throw new Error(`${name} must be a boolean value.`);
+}
+
+function readRenderStageEnv(): EveMaterial {
+  const values: Record<string, EveMaterial> = {
+    glass: "glass",
+    "back-albedo": "back-albedo",
+    "back-depth": "back-depth",
+    thickness: "thickness",
+    normal: "normal",
+    "camera-reflected-normal": "camera reflected normal",
+    metallic: "metallic",
+  };
+  const value = process.env.EVE_LOGO_RENDER_STAGE ?? "glass";
+  const stage = values[value];
+  if (!stage) {
+    throw new Error(`EVE_LOGO_RENDER_STAGE must be one of: ${Object.keys(values).join(", ")}.`);
+  }
+  return stage;
+}
+
+function stageFileName(stage: EveMaterial) {
+  return stage.replaceAll(" ", "-");
+}
+
+function formatProgressForFile(progress: number) {
+  return progress.toFixed(3).replace(/0+$/, "").replace(/\.$/, "").replace(".", "p");
+}
+
+function readNoiseTimeEnv() {
+  const value = process.env.EVE_LOGO_RENDER_NOISE_TIME;
+  if (!value) return 0;
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error("EVE_LOGO_RENDER_NOISE_TIME must be a finite number.");
+  }
+  return parsed;
 }
 
 function readThemeEnv(): "light" | "dark" {

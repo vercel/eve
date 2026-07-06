@@ -193,6 +193,56 @@ describe.skipIf(process.platform === "win32")("connectMicrosandbox", () => {
 });
 
 describe.skipIf(process.platform === "win32")("MicrosandboxVm", () => {
+  it("stops the VM before detaching the SDK client on shutdown", async () => {
+    const sandbox = {
+      detach: vi.fn(async () => {}),
+      stop: vi.fn(async () => {}),
+    };
+    const vm = new MicrosandboxVm(
+      {
+        module: {} as never,
+        options: resolveMicrosandboxOptions({ image: MICROSANDBOX_DEFAULT_IMAGE }),
+        sessionKey: "session-key",
+      },
+      sandbox as never,
+      "sandbox-name",
+      undefined,
+    );
+
+    await vm.shutdown();
+
+    expect(sandbox.stop).toHaveBeenCalledTimes(1);
+    expect(sandbox.detach).toHaveBeenCalledTimes(1);
+    const stopOrder = sandbox.stop.mock.invocationCallOrder[0];
+    const detachOrder = sandbox.detach.mock.invocationCallOrder[0];
+    if (stopOrder === undefined || detachOrder === undefined) {
+      throw new Error("Expected stop and detach to be called.");
+    }
+    expect(stopOrder).toBeLessThan(detachOrder);
+  });
+
+  it("detaches even when stopping the VM fails on shutdown", async () => {
+    const sandbox = {
+      detach: vi.fn(async () => {}),
+      stop: vi.fn(async () => {
+        throw new Error("stop failed");
+      }),
+    };
+    const vm = new MicrosandboxVm(
+      {
+        module: {} as never,
+        options: resolveMicrosandboxOptions({ image: MICROSANDBOX_DEFAULT_IMAGE }),
+        sessionKey: "session-key",
+      },
+      sandbox as never,
+      "sandbox-name",
+      undefined,
+    );
+
+    await expect(vm.shutdown()).resolves.toBeUndefined();
+    expect(sandbox.detach).toHaveBeenCalledTimes(1);
+  });
+
   it("finishes streamed commands when the exec handle emits an exit event", async () => {
     const sandbox = {
       async execStreamWith() {

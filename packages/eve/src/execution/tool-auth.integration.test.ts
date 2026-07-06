@@ -98,6 +98,21 @@ describe("tool-hosted authorization", () => {
     expect(calls).toBe(1);
   });
 
+  it("exposes the tool call id on the authored context", async () => {
+    const tool = authoredTool({
+      name: "observe_call_id",
+      execute(_input, ctx) {
+        return { callId: ctx.callId };
+      },
+    });
+    const runtime = createTestRuntime({ tools: [tool] });
+
+    const result = await runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {}));
+
+    // The test harness dispatches every executeTool call as "call_test".
+    expect(result).toEqual({ callId: "call_test" });
+  });
+
   it("resolves and caches an inline provider on a plain tool", async () => {
     let calls = 0;
     const inlineAuth: AuthorizationDefinition = {

@@ -9,6 +9,7 @@ import {
   summarizeKnownModelCallConfigError,
   summarizeKnownModelCallRequestError,
 } from "#harness/model-call-error.js";
+import { TurnCancelledError } from "#harness/turn-cancellation.js";
 
 /**
  * Builds the shape `ai@7.0.0-canary.169+` rejects with when a model
@@ -126,6 +127,16 @@ describe("classifyModelCallError", () => {
     // "retry" would re-run executeModelCall against step hooks whose
     // one-shot stepResult promise already resolved with the empty result.
     expect(classifyModelCallError(new EmptyModelResponseError())).toBe("recoverable");
+  });
+
+  it("returns terminal for a turn cancellation, even when marked retryable", () => {
+    expect(classifyModelCallError(new TurnCancelledError())).toBe("terminal");
+
+    const wrapped = Object.assign(new Error("socket hang up"), {
+      cause: new TurnCancelledError(),
+      isRetryable: true,
+    });
+    expect(classifyModelCallError(wrapped)).toBe("terminal");
   });
 
   it("returns retry when the AI SDK marks the error as retryable", () => {

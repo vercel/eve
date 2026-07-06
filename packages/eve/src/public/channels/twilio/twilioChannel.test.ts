@@ -7,7 +7,8 @@ import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
-import { twilioChannel } from "#public/channels/twilio/twilioChannel.js";
+import type { TwilioTextMessage } from "#public/channels/twilio/inbound.js";
+import { twilioChannel, type TwilioContext } from "#public/channels/twilio/twilioChannel.js";
 import { signTwilioRequest } from "#public/channels/twilio/verify.js";
 
 const AUTH_TOKEN = "test-auth-token";
@@ -72,6 +73,24 @@ function signedFormRequest(path: string, params: URLSearchParams): Request {
   });
 }
 
+function signedGetRequest(path: string, params: URLSearchParams): Request {
+  const url = new URL(`https://example.com${path}`);
+  for (const [key, value] of params) {
+    url.searchParams.append(key, value);
+  }
+  const signature = signTwilioRequest({
+    authToken: AUTH_TOKEN,
+    params: new URLSearchParams(),
+    url: url.toString(),
+  });
+  return new Request(url, {
+    headers: {
+      "x-twilio-signature": signature,
+    },
+    method: "GET",
+  });
+}
+
 async function firePost(
   channel: unknown,
   path: string,
@@ -107,6 +126,41 @@ async function firePost(
   return { response, send, waitUntil };
 }
 
+async function fireGet(
+  channel: unknown,
+  path: string,
+  params: URLSearchParams,
+): Promise<{
+  response: Response;
+  send: ReturnType<typeof vi.fn>;
+  waitUntil: ReturnType<typeof vi.fn>;
+}> {
+  const compiled = asCompiled(channel);
+  const get = compiled.routes.find((r) => r.method === "GET" && r.path === path);
+  if (!get || !isHttpRouteDefinition(get)) {
+    throw new Error(`Expected Twilio channel to define GET ${path}.`);
+  }
+  const send = vi.fn().mockResolvedValue({ continuationToken: "ct", id: "s1" });
+  const waitUntil = vi.fn();
+
+  const response = await get.handler(signedGetRequest(path, params), {
+    getSession: vi.fn() as any,
+    params: {},
+    requestIp: null,
+    send,
+    waitUntil,
+  } as any);
+
+  let drained = 0;
+  while (drained < waitUntil.mock.calls.length) {
+    const pending = waitUntil.mock.calls.slice(drained).map(([task]) => task as Promise<unknown>);
+    drained = waitUntil.mock.calls.length;
+    await Promise.allSettled(pending);
+  }
+
+  return { response, send, waitUntil };
+}
+
 describe("twilioChannel() inbound text pipeline", () => {
   const ORIGINAL_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 
@@ -125,8 +179,11 @@ describe("twilioChannel() inbound text pipeline", () => {
   it("mounts message, voice, and transcription routes below the base route", () => {
     const channel = twilioChannel({ allowFrom: "*", route: "/twilio" });
     expect(channel.routes.map((route) => ({ method: route.method, path: route.path }))).toEqual([
+      { method: "GET", path: "/twilio/messages" },
       { method: "POST", path: "/twilio/messages" },
+      { method: "GET", path: "/twilio/voice" },
       { method: "POST", path: "/twilio/voice" },
+      { method: "GET", path: "/twilio/voice/transcription" },
       { method: "POST", path: "/twilio/voice/transcription" },
     ]);
   });
@@ -171,6 +228,57 @@ describe("twilioChannel() inbound text pipeline", () => {
         lastMessageSid: "SM123",
         to: "+15557654321",
       },
+    });
+  });
+
+  it("dispatches verified GET inbound text webhooks", async () => {
+    const channel = twilioChannel({ allowFrom: "*" });
+    const params = new URLSearchParams({
+      Body: "hello from get",
+      From: "+15551234567",
+      MessageSid: "SM123",
+      To: "+15557654321",
+    });
+
+    const { response, send } = await fireGet(channel, "/eve/v1/twilio/messages", params);
+
+    expect(response.status).toBe(200);
+    expect(send).toHaveBeenCalledTimes(1);
+    const [payload, options] = send.mock.calls[0]!;
+    expect(payload).toMatchObject({ message: "hello from get" });
+    expect(options).toMatchObject({
+      continuationToken: "+15551234567:+15557654321",
+      state: {
+        from: "+15551234567",
+        lastMessageSid: "SM123",
+        to: "+15557654321",
+      },
+    });
+  });
+
+  it("passes inbound media metadata from Twilio message webhooks", async () => {
+    const onText = vi.fn((_ctx: TwilioContext, _message: TwilioTextMessage) => ({ auth: null }));
+    const channel = twilioChannel({ allowFrom: "*", onText });
+    const params = new URLSearchParams({
+      Body: "see attached",
+      From: "+15551234567",
+      MediaContentType0: "image/png",
+      MediaUrl0: "https://api.twilio.com/2010-04-01/Accounts/AC123/Messages/MM123/Media/ME123",
+      NumMedia: "1",
+      To: "+15557654321",
+    });
+
+    await firePost(channel, "/eve/v1/twilio/messages", params);
+
+    expect(onText).toHaveBeenCalledTimes(1);
+    expect(onText.mock.calls[0]![1]).toMatchObject({
+      body: "see attached",
+      media: [
+        {
+          contentType: "image/png",
+          url: "https://api.twilio.com/2010-04-01/Accounts/AC123/Messages/MM123/Media/ME123",
+        },
+      ],
     });
   });
 

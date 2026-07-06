@@ -433,7 +433,7 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
           }) as JsonObject,
           approval,
           outputSchema: result.outputSchema as JsonObject | undefined,
-          async execute(input: Record<string, unknown>) {
+          async execute(input: Record<string, unknown>, executeCtx) {
             const reg = loadContext().get(ConnectionRegistryKey)!;
             const conn = reg.getConnections().find((c) => c.connectionName === connectionName);
             const interactiveAuth = (await resolveInteractiveAuth(reg, connectionName)) as
@@ -460,7 +460,9 @@ export function createConnectionSearchEvents(): DynamicToolEvents {
 
             try {
               const client = reg.getClient(connectionName);
-              return await client.executeTool(toolName, input);
+              return await client.executeTool(toolName, input, {
+                abortSignal: executeCtx.abortSignal,
+              });
             } catch (err) {
               if (!isConnectionAuthorizationRequiredError(err) || !interactiveAuth) {
                 throw err;

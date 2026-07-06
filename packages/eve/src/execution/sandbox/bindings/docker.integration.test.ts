@@ -324,9 +324,15 @@ describe("createDockerSandboxBackend create", () => {
         sessionKey: SESSION_KEY,
       });
 
-      // Dispose leaves the container running for instant reattach.
-      await handle.dispose();
-      expect(findCall(calls, (args) => args[0] === "stop")).toBeUndefined();
+      // Server shutdown stops the container; filesystem state survives
+      // for the next `create` to restart from.
+      await handle.shutdown();
+      expect(findCall(calls, (args) => args[0] === "stop")?.args).toEqual([
+        "stop",
+        "-t",
+        "0",
+        SESSION_KEY,
+      ]);
     } finally {
       if (previousRunId === undefined) {
         delete process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV];

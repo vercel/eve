@@ -26,6 +26,7 @@ import {
 } from "#harness/authorization.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { withToolOutputSerializationError } from "#harness/tool-output-serialization.js";
+import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 
 type ToolModelOutputValue =
   | { readonly type: "json"; readonly value: JSONValue }
@@ -33,7 +34,10 @@ type ToolModelOutputValue =
 
 type NativeApprovalStatus = Exclude<ApprovalStatus, boolean>;
 
-const toolApprovals = new WeakMap<object, (toolInput: unknown) => Promise<NativeApprovalStatus>>();
+const toolApprovals = new WeakMap<
+  object,
+  (toolInput: unknown, callId: string) => Promise<NativeApprovalStatus>
+>();
 
 /**
  * Builds an AI SDK `ToolSet` from unified harness tool definitions.
@@ -170,11 +174,11 @@ export function buildToolSetFromDefinitions(input: {
  */
 export function wrapToolExecute(
   definition: HarnessToolDefinition,
-): ((input: any, options: { readonly toolCallId: string }) => Promise<any>) | undefined {
+): ((input: any, options: ToolExecuteOptions) => Promise<any>) | undefined {
   const execute = definition.execute;
   if (execute === undefined) return undefined;
   return async (input, options) => {
-    const output = await execute(input);
+    const output = await execute(input, options);
     if (isAuthorizationSignal(output)) {
       stashToolInterrupt(loadContext(), options.toolCallId, output);
       return modelFacingAuthorizationOutput(output);
@@ -301,8 +305,8 @@ export async function buildToolSetWithProviderTools(input: {
 function buildApprovalFn(
   definition: HarnessToolDefinition,
   input: { readonly approvedTools?: ReadonlySet<string> },
-): (toolInput: unknown) => Promise<NativeApprovalStatus> {
-  return async (toolInput: unknown) => {
+): (toolInput: unknown, callId: string) => Promise<NativeApprovalStatus> {
+  return async (toolInput: unknown, callId: string) => {
     if (definition.approval === undefined) return undefined;
 
     const toolInputRecord = isObject(toolInput) ? toolInput : undefined;
@@ -310,6 +314,7 @@ function buildApprovalFn(
     const status = await definition.approval({
       ...buildCallbackContext(),
       approvedTools: input.approvedTools ?? new Set(),
+      callId,
       toolInput: toolInputRecord,
       toolName: definition.name,
     });
@@ -326,6 +331,6 @@ export function buildToolApproval(
     if (toolDefinition === undefined) return undefined;
 
     const approval = toolApprovals.get(toolDefinition);
-    return (await approval?.(toolCall.input)) as ToolApprovalStatus;
+    return (await approval?.(toolCall.input, toolCall.toolCallId)) as ToolApprovalStatus;
   };
 }

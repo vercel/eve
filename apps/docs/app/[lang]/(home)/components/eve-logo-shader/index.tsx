@@ -6,7 +6,8 @@ import fallbackDarkImage from "../../../../../public/eve-5/fallback-dark-content
 import fallbackLightImage from "../../../../../public/eve-5/fallback-light-content.webp";
 import { useEffect, useRef, useState, type ComponentProps, type CSSProperties } from "react";
 import { decodeGltfMesh, meshAspect } from "./mesh";
-import { BLOOM_RADIUS, createEve5Renderer, type RenderControls } from "./render";
+import { BLOOM_RADIUS, DEFAULT_CAMERA_FOV, cameraRadiusForFov, createEve5Renderer, type RenderControls } from "./render";
+import type { InstallAudience } from "../install-switcher";
 
 class BrowserAdapter implements VGPUAdapter {
   async requestDevice(): Promise<Device> {
@@ -26,9 +27,10 @@ const DEFAULT_LOGO_ASPECT = 78 / 25;
 const DEFAULT_CONTROLS: RenderControls = {
   yaw: 0,
   pitch: 0,
-  radius: 1.9,
-  fov: 35,
+  radius: cameraRadiusForFov(DEFAULT_CAMERA_FOV),
+  fov: DEFAULT_CAMERA_FOV,
   envYaw: 0,
+  envPitch: 0,
   insideRendering: true,
   outsideRendering: true,
   material: "glass",
@@ -38,10 +40,35 @@ const DEFAULT_CONTROLS: RenderControls = {
 const LOGO_RENDER_HEIGHT = 500;
 const MAX_DEVICE_PIXEL_RATIO = 2;
 const FALLBACK_IMAGE_PADDING = BLOOM_RADIUS / MAX_DEVICE_PIXEL_RATIO;
-const MAX_ENV_YAW = 0.45;
+const MAX_ENV_YAW = 0.3;
+const MAX_ENV_PITCH = 0.2;
 const ENV_YAW_LERP_SPEED = 3;
+const AGENTS_ENV_YAW_OFFSET = -Math.PI * 0.1;
+export const AGENTS_ENV_YAW_LERP_SPEED = 3;
+const LOGO_MODE_TRANSITION_DURATION_SECONDS = 0.45;
+const IMPRINT_GLYPH_SCALE = 1.35;
+const ASCII_MOUSE_LERP_SPEED = 6;
+
 const CANVAS_FADE_FALLBACK_MS = 800;
 const CANVAS_REVEAL_RENDER_COUNT = 3;
+
+type EveTransitionDebugGui = {
+  destroy(): void;
+};
+
+type EveTransitionDebugState = {
+  overrideEnabled: boolean;
+  progress: number;
+  gridScaleMultiplier: number;
+  glyphScale: number;
+  durationSeconds: number;
+};
+
+declare global {
+  interface Window {
+    __eveLogoTransitionDebugGui?: EveTransitionDebugGui;
+  }
+}
 
 function getCurrentTheme(): "light" | "dark" {
   if (typeof document === "undefined") return "light";
@@ -91,7 +118,7 @@ function usePrefersReducedMotion() {
   return prefersReducedMotion;
 }
 
-export function EveLogoShader() {
+export function EveLogoShader({ audience = "humans" }: { audience?: InstallAudience }) {
   const theme = useResolvedTheme();
   const prefersReducedMotion = usePrefersReducedMotion();
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -99,12 +126,31 @@ export function EveLogoShader() {
   const [logoAspect, setLogoAspect] = useState(DEFAULT_LOGO_ASPECT);
   const [revealed, setRevealed] = useState(false);
   const [showLightFallback, setShowLightFallback] = useState(false);
+  const targetAgentsEnvYawMixRef = useRef(audience === "agents" ? 1 : 0);
+  const targetLogoModeProgressRef = useRef(audience === "agents" ? 1 : 0);
+  const agentsSelected = audience === "agents";
+  targetAgentsEnvYawMixRef.current = agentsSelected ? 1 : 0;
+  targetLogoModeProgressRef.current = agentsSelected ? 1 : 0;
+
+  useEffect(() => {
+    const agentsSelected = audience === "agents";
+    targetAgentsEnvYawMixRef.current = agentsSelected ? 1 : 0;
+    targetLogoModeProgressRef.current = agentsSelected ? 1 : 0;
+  }, [audience]);
 
   useEffect(() => {
     let cancelled = false;
     let animationFrame = 0;
     let cleanup: (() => void) | undefined;
-    let targetEnvYaw = controlsRef.current.envYaw;
+    let mouseEnvYaw = controlsRef.current.envYaw;
+    let targetMouseEnvYaw = mouseEnvYaw;
+    let mouseEnvPitch = controlsRef.current.envPitch;
+    let targetMouseEnvPitch = mouseEnvPitch;
+    let asciiMouseX = 0;
+    let asciiMouseY = 0;
+    let targetAsciiMouseX = 0;
+    let targetAsciiMouseY = 0;
+    let agentsEnvYawMix = targetAgentsEnvYawMixRef.current;
     let previousFrameTime = performance.now();
 
     const canvas = canvasRef.current;
@@ -121,12 +167,19 @@ export function EveLogoShader() {
     }
     setShowLightFallback(false);
 
-    const updateEnvYaw = (clientX: number) => {
+    const updateEnvRotation = (clientX: number, clientY: number) => {
       const viewportWidth = Math.max(1, window.innerWidth || 1);
-      const normalizedX = Math.max(-1, Math.min(1, (clientX / viewportWidth) * 2 - 1));
-      targetEnvYaw = normalizedX * MAX_ENV_YAW;
+      const viewportHeight = Math.max(1, window.innerHeight || 1);
+      const clampedX = Math.max(0, Math.min(viewportWidth, clientX));
+      const clampedY = Math.max(0, Math.min(viewportHeight, clientY));
+      const normalizedX = (clampedX / viewportWidth) * 2 - 1;
+      const normalizedY = (clampedY / viewportHeight) * 2 - 1;
+      targetMouseEnvYaw = normalizedX * MAX_ENV_YAW;
+      targetMouseEnvPitch = normalizedY * MAX_ENV_PITCH;
+      targetAsciiMouseX = normalizedX;
+      targetAsciiMouseY = normalizedY;
     };
-    const onPointerMove = (event: PointerEvent) => updateEnvYaw(event.clientX);
+    const onPointerMove = (event: PointerEvent) => updateEnvRotation(event.clientX, event.clientY);
     window.addEventListener("pointermove", onPointerMove, { passive: true });
 
     async function start() {
@@ -154,9 +207,52 @@ export function EveLogoShader() {
       const alphaMode = renderTheme === "light" ? "premultiplied" : "opaque";
       context.configure({ device: app.device.gpu, format, alphaMode });
       const renderer = createEve5Renderer(app.device, format, mesh, { theme: renderTheme });
+      let modeTransitionProgress = targetLogoModeProgressRef.current;
+      let disposed = false;
+      let transitionDebugGui: EveTransitionDebugGui | undefined;
+      const transitionDebug: EveTransitionDebugState = {
+        overrideEnabled: false,
+        progress: modeTransitionProgress,
+        gridScaleMultiplier: 1.03,
+        glyphScale: IMPRINT_GLYPH_SCALE,
+        durationSeconds: LOGO_MODE_TRANSITION_DURATION_SECONDS,
+      };
       previousFrameTime = performance.now();
 
-      let disposed = false;
+      const destroyTransitionDebugGui = () => {
+        if (!transitionDebugGui) return;
+        if (window.__eveLogoTransitionDebugGui === transitionDebugGui) {
+          delete window.__eveLogoTransitionDebugGui;
+        }
+        transitionDebugGui.destroy();
+        transitionDebugGui = undefined;
+      };
+      const setupTransitionDebugGui = async () => {
+        if (!new URLSearchParams(window.location.search).has("debug")) return;
+        const { GUI } = await import("lil-gui");
+        if (cancelled || disposed) return;
+        window.__eveLogoTransitionDebugGui?.destroy();
+        const gui = new GUI({ title: "Eve logo imprint" });
+        let guiDestroyed = false;
+        const guiHandle: EveTransitionDebugGui = {
+          destroy() {
+            if (guiDestroyed) return;
+            guiDestroyed = true;
+            gui.destroy();
+          },
+        };
+        transitionDebugGui = guiHandle;
+        window.__eveLogoTransitionDebugGui = guiHandle;
+        gui.add(transitionDebug, "overrideEnabled").name("Override imprint");
+        gui.add(transitionDebug, "progress", 0, 1, 0.001).name("Imprint progress");
+        const imprint = gui.addFolder("Imprint");
+        imprint.add(transitionDebug, "gridScaleMultiplier", 0.5, 2, 0.01).name("Grid scale multiplier");
+        imprint.add(transitionDebug, "glyphScale", 0.5, 2.5, 0.01).name("Glyph scale");
+        imprint.open();
+        gui.add(transitionDebug, "durationSeconds", 0.05, 2, 0.01).name("Transition duration (s)");
+      };
+      void setupTransitionDebugGui();
+
       let successfulRenderCount = 0;
       let finishCanvasFade: (() => void) | undefined;
       const dispose = () => {
@@ -166,6 +262,7 @@ export function EveLogoShader() {
         finishCanvasFade?.();
         resetCanvasVisibility(canvas);
         if (!cancelled) setRevealed(false);
+        destroyTransitionDebugGui();
         renderer.dispose();
         app.device.destroy();
       };
@@ -187,7 +284,14 @@ export function EveLogoShader() {
 
         const deltaSeconds = Math.max(0, (frameTime - previousFrameTime) / 1000);
         previousFrameTime = frameTime;
-        controlsRef.current.envYaw = safeLerp(controlsRef.current.envYaw, targetEnvYaw, deltaSeconds * ENV_YAW_LERP_SPEED);
+        mouseEnvYaw = safeLerp(mouseEnvYaw, targetMouseEnvYaw, deltaSeconds * ENV_YAW_LERP_SPEED);
+        mouseEnvPitch = safeLerp(mouseEnvPitch, targetMouseEnvPitch, deltaSeconds * ENV_YAW_LERP_SPEED);
+        asciiMouseX = safeLerp(asciiMouseX, targetAsciiMouseX, deltaSeconds * ASCII_MOUSE_LERP_SPEED);
+        asciiMouseY = safeLerp(asciiMouseY, targetAsciiMouseY, deltaSeconds * ASCII_MOUSE_LERP_SPEED);
+        const targetAgentsEnvYawMix = targetAgentsEnvYawMixRef.current;
+        agentsEnvYawMix = safeLerp(agentsEnvYawMix, targetAgentsEnvYawMix, deltaSeconds * AGENTS_ENV_YAW_LERP_SPEED);
+        controlsRef.current.envYaw = mouseEnvYaw + agentsEnvYawMix * AGENTS_ENV_YAW_OFFSET;
+        controlsRef.current.envPitch = mouseEnvPitch;
 
         resizeCanvas(canvas);
         // The renderer pads the logical scene size by BLOOM_RADIUS on each side before allocating
@@ -198,7 +302,27 @@ export function EveLogoShader() {
         const logicalHeight = Math.max(1, canvas.height - BLOOM_RADIUS * 2);
 
         try {
-          renderer.render(context.getCurrentTexture().createView(), controlsRef.current, logicalWidth, logicalHeight);
+          const transitionDurationSeconds = clampRange(transitionDebug.durationSeconds, 0.05, 2);
+          modeTransitionProgress = stepLogoModeProgress(
+            modeTransitionProgress,
+            targetLogoModeProgressRef.current,
+            deltaSeconds,
+            transitionDurationSeconds,
+          );
+          const animatedMixProgress = easeLogoModeProgress(modeTransitionProgress);
+          const mixProgress = transitionDebug.overrideEnabled ? clampUnit(transitionDebug.progress) : animatedMixProgress;
+          const timeSeconds = frameTime / 1000;
+          renderer.render(context.getCurrentTexture().createView(), controlsRef.current, logicalWidth, logicalHeight, {
+            progress: mixProgress,
+            gridScaleMultiplier: clampRange(transitionDebug.gridScaleMultiplier, 0.5, 2),
+            glyphScale: clampRange(transitionDebug.glyphScale, 0.5, 2.5),
+            time: timeSeconds,
+            mouse: [asciiMouseX, asciiMouseY],
+          });
+
+          canvas.dataset.eveRenderMode = mixProgress >= 0.5 ? "agents" : "humans";
+          canvas.dataset.eveAsciiProgress = mixProgress.toFixed(3);
+          canvas.dataset.eveAsciiMode = mixProgress > 0.001 ? "active" : "inactive";
         } catch {
           cancelled = true;
           setRevealed(false);
@@ -282,10 +406,13 @@ export function EveLogoShader() {
         visible={!revealed}
         className="hidden dark:block"
       />
-      <canvas ref={canvasRef} className="absolute inset-0 size-full opacity-0 transition-opacity duration-700 ease-linear" />
-      <div
-        className={`pointer-events-none absolute inset-0 hidden bg-gradient-to-b from-transparent md:block ${theme === "light" ? "to-background-200" : "to-black"}`}
+      <canvas
+        ref={canvasRef}
+        data-eve-audience={audience}
+        data-eve-target-ascii={audience === "agents" ? "true" : "false"}
+        className="absolute inset-0 size-full opacity-0 transition-opacity duration-700 ease-linear"
       />
+      <div className="pointer-events-none absolute inset-0 hidden bg-gradient-to-b from-transparent from-20% to-background-200/80 md:block dark:from-40% dark:to-black" />
     </div>
   );
 }
@@ -354,6 +481,27 @@ function resizeCanvas(canvas: HTMLCanvasElement | null) {
 function safeLerp(from: number, to: number, amount: number) {
   const safeAmount = Math.max(0, Math.min(1, amount));
   return from + (to - from) * safeAmount;
+}
+
+function clampUnit(value: number) {
+  return clampRange(value, 0, 1);
+}
+
+function clampRange(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function stepLogoModeProgress(current: number, target: number, deltaSeconds: number, durationSeconds: number) {
+  const safeTarget = target >= 0.5 ? 1 : 0;
+  const safeDuration = clampRange(durationSeconds, 0.05, 2);
+  const step = Math.max(0, deltaSeconds) / safeDuration;
+  if (Math.abs(safeTarget - current) <= step) return safeTarget;
+  return current + Math.sign(safeTarget - current) * step;
+}
+
+function easeLogoModeProgress(progress: number) {
+  const t = Math.max(0, Math.min(1, progress));
+  return t * t * (3 - 2 * t);
 }
 
 function resetCanvasVisibility(canvas: HTMLCanvasElement | null) {

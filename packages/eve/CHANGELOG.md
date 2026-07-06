@@ -1,5 +1,45 @@
 # eve
 
+## 0.20.0
+
+### Minor Changes
+
+- 6f9364a: Sandboxes are now stopped when the eve server shuts down. Self-hosted production servers stop every open sandbox (microsandbox VMs, Docker containers, Vercel sandboxes, just-bash interpreters) on `SIGTERM`/`SIGINT`, matching the cleanup `eve dev` already performs, and sessions reattach from persisted state on the next start. Breaking change for custom sandbox backends: `SandboxBackendHandle` gains a required `shutdown()` and the unused `dispose()` is removed.
+
+### Patch Changes
+
+- 7699e98: `eve eval` now prints a clear, actionable message when it finds no evals but detects `*.eval.ts` files placed inside `agent/`. Instead of the generic "No evals found", it names the offending directories and reminds you that eval files belong in the top-level `evals/` directory (a sibling of `agent/`).
+- f3a05c5: `ToolContext` and `ApprovalContext` now expose `callId`, the tool call id carried by the call's stream events, so approval-gated tools can key records to one identity across proposal, rejection, and execution.
+- f9621b6: Resuming a durable session whose history references a file attachment no longer fails the turn when the staged bytes are gone (for example after a redeploy pointed the session at a fresh sandbox). The missing attachment degrades to a `FileNotFound` text notice the model can interpret, so the run continues instead of ending in `session.failed`.
+- c233a6a: The turn harness now propagates a cooperative `AbortSignal` end to end: model calls, retries, recovery, compaction, and tool executions all honor it, and an aborted turn settles with a canonical `TurnCancelledError` that is never retried or misclassified as a failure. Authored tools receive the signal as `ctx.abortSignal` (and via the AI SDK execute options), and framework tools forward it into sandbox commands, file I/O, `web_fetch`, and MCP/OpenAPI connection calls. This is the lowest layer of turn cancellation — no trigger exists yet, so runtime behavior is unchanged until the cancellation API ships.
+
+## 0.19.0
+
+### Minor Changes
+
+- 92f5162: add generic chat sdk channel for adapter-backed agents
+
+### Patch Changes
+
+- 8892504: Render the deployment home page with the eve SVG wordmark, baked-in agent name, and refined ready-state layout.
+- 3daaba0: Reduce development runtime snapshot disk usage by excluding `.env*`, generated dependency, and build output directories, using clone-friendly file copies where supported, and pruning stale snapshots after dev rebuilds.
+- 74ce164: reuse chat sdk twilio primitives for webhook, api, and voice helpers
+- c0a0ae2: Terminal model-call failures in delegated subagent runs (e.g. an unresolvable model id returning 404) now propagate to the parent as a failed subagent result instead of a successful empty output, so orchestrator sessions no longer report success when a delegation failed.
+- 0498252: Tool execution failures now return failed tool results to the model instead of leaving streamed tool calls without matching result history. Agents can recover from failed calls such as a missing `load_skill` target within the same turn.
+
+## 0.18.2
+
+### Patch Changes
+
+- c5da8e7: Sandbox API requests now append an `eve/<version>` token to the `user-agent` so the sandbox control plane can attribute traffic to eve.
+
+## 0.18.1
+
+### Patch Changes
+
+- 68365e8: Show tool call input in Slack approval prompts so operators can inspect approval-gated actions before approving.
+- 68365e8: Harden Slack HITL posting against API limits: large approval batches now split across multiple messages instead of exceeding Slack's 50-block cap, and long freeform answers are truncated so the answered-card update cannot fail.
+
 ## 0.18.0
 
 ### Minor Changes

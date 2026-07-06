@@ -2,6 +2,7 @@ import { executeGlobOnSandbox, type GlobInput } from "#execution/sandbox/glob-to
 import { requireSandboxSession } from "#execution/sandbox/require-sandbox.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
+import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 
 /**
  * Shared input schema used by the framework `glob` tool and any author tool
@@ -54,8 +55,11 @@ export const GLOB_OUTPUT_SCHEMA: JsonObject = {
 /**
  * Framework-owned executor that delegates to the default sandbox.
  */
-async function executeGlob(input: unknown): Promise<unknown> {
-  return executeGlobOnSandbox(await requireSandboxSession(), input as GlobInput);
+async function executeGlob(input: unknown, options?: ToolExecuteOptions): Promise<unknown> {
+  return executeGlobOnSandbox(
+    await requireSandboxSession(options?.abortSignal),
+    input as GlobInput,
+  );
 }
 
 export const GLOB_TOOL_DEFINITION: ResolvedToolDefinition = {

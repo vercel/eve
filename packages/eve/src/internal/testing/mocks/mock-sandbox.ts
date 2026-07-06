@@ -249,9 +249,6 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
         session: null,
       };
     },
-    async dispose(): Promise<void> {
-      // No-op: nothing to release in memory.
-    },
     async get(): Promise<SandboxSession> {
       return session;
     },

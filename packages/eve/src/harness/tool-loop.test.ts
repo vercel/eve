@@ -37,6 +37,7 @@ import { hasDeferredStepInput, setPendingInputBatch } from "#harness/input-reque
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { getSessionTokenUsage, setTurnUsageState } from "#harness/turn-tag-state.js";
 import { DEFAULT_SUBAGENT_MAX_DEPTH } from "#harness/subagent-depth.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
@@ -877,8 +878,10 @@ describe("createToolLoopHarness", () => {
     expect(getSessionTokenUsage(result.session)).toEqual({
       cacheReadTokens: 2,
       cacheWriteTokens: 1,
+      costUsd: 0,
       inputTokens: 7,
       outputTokens: 3,
+      sawCost: false,
     });
   });
 
@@ -898,8 +901,10 @@ describe("createToolLoopHarness", () => {
       usage: {
         cacheReadTokens: 2,
         cacheWriteTokens: 1,
+        costUsd: 0,
         inputTokens: 12,
         outputTokens: 3,
+        sawCost: false,
       },
       tokenKind: "input",
     },
@@ -918,8 +923,10 @@ describe("createToolLoopHarness", () => {
       usage: {
         cacheReadTokens: 2,
         cacheWriteTokens: 1,
+        costUsd: 0,
         inputTokens: 7,
         outputTokens: 3,
+        sawCost: false,
       },
       tokenKind: "output",
     },
@@ -2379,6 +2386,146 @@ describe("createToolLoopHarness", () => {
     });
   });
 
+  it("continues the tool loop when load_skill fails during local tool execution", async () => {
+    setupMockAgent({
+      content: [
+        {
+          input: { skill: "missing-demo-skill" },
+          toolCallId: "call-load-skill",
+          toolName: "load_skill",
+          type: "tool-call",
+        },
+      ],
+      finishReason: "tool-calls",
+      fullStreamParts: [
+        {
+          input: { skill: "missing-demo-skill" },
+          toolCallId: "call-load-skill",
+          toolName: "load_skill",
+          type: "tool-call",
+        },
+        {
+          error: new Error(
+            'No skill named "missing-demo-skill" at /workspace/skills/missing-demo-skill/SKILL.md.',
+          ),
+          input: { skill: "missing-demo-skill" },
+          toolCallId: "call-load-skill",
+          toolName: "load_skill",
+          type: "tool-error",
+        },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ],
+      response: {
+        messages: [
+          {
+            content: [
+              {
+                input: { skill: "missing-demo-skill" },
+                toolCallId: "call-load-skill",
+                toolName: "load_skill",
+                type: "tool-call",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [
+        {
+          input: { skill: "missing-demo-skill" },
+          toolCallId: "call-load-skill",
+          toolName: "load_skill",
+          type: "tool-call",
+        },
+      ],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const config = createTestConfig("conversation", emit, {
+      tools: new Map([
+        [
+          "load_skill",
+          {
+            description: "Load a skill.",
+            execute: vi.fn(),
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "load_skill",
+          },
+        ],
+      ]),
+    });
+    const session = createTestSession({
+      agent: {
+        modelReference: { id: "test-model" },
+        system: "You are a test assistant.",
+        tools: [
+          {
+            description: "Load a skill.",
+            inputSchema: { type: "object" },
+            name: "load_skill",
+          },
+        ],
+      },
+    });
+
+    const result = await createToolLoopHarness(config)(session, {
+      message: "Use the missing demo skill.",
+    });
+
+    expect(typeof result.next).toBe("function");
+    expect(events.find((event) => event.type === "action.result")?.data).toEqual({
+      error: {
+        code: "ACTION_RESULT_FAILED",
+        message:
+          'No skill named "missing-demo-skill" at /workspace/skills/missing-demo-skill/SKILL.md.',
+      },
+      result: {
+        callId: "call-load-skill",
+        isError: true,
+        kind: "tool-result",
+        output:
+          'No skill named "missing-demo-skill" at /workspace/skills/missing-demo-skill/SKILL.md.',
+        toolName: "load_skill",
+      },
+      sequence: 0,
+      stepIndex: 0,
+      status: "failed",
+      turnId: "turn_0",
+    });
+    expect(result.session.history.slice(-2)).toEqual([
+      {
+        content: [
+          {
+            input: { skill: "missing-demo-skill" },
+            toolCallId: "call-load-skill",
+            toolName: "load_skill",
+            type: "tool-call",
+          },
+        ],
+        role: "assistant",
+      },
+      {
+        content: [
+          {
+            output: {
+              type: "error-text",
+              value:
+                'No skill named "missing-demo-skill" at /workspace/skills/missing-demo-skill/SKILL.md.',
+            },
+            toolCallId: "call-load-skill",
+            toolName: "load_skill",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+    ]);
+    expect(events.some((event) => event.type === "turn.failed")).toBe(false);
+    expect(events.some((event) => event.type === "session.failed")).toBe(false);
+  });
+
   it("prefers toolResults over response messages when the stream omits the result", async () => {
     setupMockAgent({
       finishReason: "tool-calls",
@@ -2457,6 +2604,100 @@ describe("createToolLoopHarness", () => {
       status: "completed",
       turnId: "turn_0",
     });
+  });
+
+  it("propagates streamed cancellation without waiting for onStepFinish or emitting failures", async () => {
+    const abortController = new AbortController();
+    const abortReason = new TurnCancelledError();
+
+    vi.mocked(ToolLoopAgent).mockImplementation(function (
+      this: ToolLoopAgent,
+      settings: MockAgentSettings,
+    ) {
+      this.stream = vi
+        .fn()
+        .mockImplementation(async (options: { abortSignal?: AbortSignal; messages: unknown[] }) => {
+          expect(options.abortSignal).toBe(abortController.signal);
+          if (settings.prepareStep) {
+            await settings.prepareStep({
+              context: undefined,
+              messages: options.messages,
+              model: {},
+              stepNumber: 0,
+              steps: [],
+            });
+          }
+
+          return {
+            fullStream: (async function* () {
+              abortController.abort(abortReason);
+              yield { reason: abortReason.message, type: "abort" };
+            })(),
+            steps: new Promise<never>(() => {}),
+          };
+        });
+      return this;
+    } as MockAgentConstructor);
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, { abortSignal: abortController.signal }),
+    );
+
+    await expect(runStep(createTestSession(), { message: "Hi" })).rejects.toBe(abortReason);
+
+    const eventTypes = events.map((event) => event.type);
+    expect(eventTypes).not.toContain("step.failed");
+    expect(eventTypes).not.toContain("turn.failed");
+    expect(eventTypes).not.toContain("session.failed");
+  });
+
+  it("does not retry or recover a model call once the turn signal has aborted", async () => {
+    const abortController = new AbortController();
+    const cancellation = new TurnCancelledError();
+    const streamMock = vi.fn().mockImplementation(async () => {
+      abortController.abort(cancellation);
+      throw Object.assign(new Error("socket hang up"), { isRetryable: true });
+    });
+    vi.mocked(ToolLoopAgent).mockImplementation(function (this: ToolLoopAgent) {
+      this.stream = streamMock;
+      this.generate = streamMock;
+      return this;
+    } as MockAgentConstructor);
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, { abortSignal: abortController.signal }),
+    );
+
+    await expect(runStep(createTestSession(), { message: "Hi" })).rejects.toBe(cancellation);
+    expect(streamMock).toHaveBeenCalledTimes(1);
+
+    const eventTypes = events.map((event) => event.type);
+    expect(eventTypes).not.toContain("step.failed");
+    expect(eventTypes).not.toContain("turn.failed");
+    expect(eventTypes).not.toContain("session.failed");
+  });
+
+  it("does not start a model call when the turn signal is already aborted", async () => {
+    const abortController = new AbortController();
+    const cancellation = new TurnCancelledError();
+    abortController.abort(cancellation);
+
+    const streamMock = vi.fn();
+    vi.mocked(ToolLoopAgent).mockImplementation(function (this: ToolLoopAgent) {
+      this.stream = streamMock;
+      this.generate = streamMock;
+      return this;
+    } as MockAgentConstructor);
+
+    const { emit } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, { abortSignal: abortController.signal }),
+    );
+
+    await expect(runStep(createTestSession(), { message: "Hi" })).rejects.toBe(cancellation);
+    expect(streamMock).not.toHaveBeenCalled();
   });
 
   it("emits a recoverable failure cascade and parks the session on a non-terminal model-call error", async () => {
@@ -2554,6 +2795,39 @@ describe("createToolLoopHarness", () => {
     expect(types).toContain("turn.failed");
     expect(types).toContain("session.failed");
     expect(types).not.toContain("session.waiting");
+  });
+
+  it("surfaces a terminal model-call error to the parent as a failed task result", async () => {
+    // Regression test for https://github.com/vercel/eve/issues/412 — a
+    // delegated subagent runs in task mode; when its model id does not
+    // resolve (terminal 404), the failure must reach the parent as an
+    // error result, not a successful empty output.
+    const error = Object.assign(new Error("No endpoints found for anthropic/claude-3.5-haiku"), {
+      name: "AI_APICallError",
+      statusCode: 404,
+    });
+    setupMockAgentError(error);
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("task", emit));
+
+    const result = await runStep(createTestSession(), { message: "Delegated task" });
+
+    // The task's terminal result must be marked as an error with the
+    // failure message as output, mirroring the non-terminal task-mode
+    // failure shape. Today the terminal branch returns
+    // `{ done: true, output: "" }`, which the parent driver treats as a
+    // successful delegation with empty output.
+    expect(result.next).toMatchObject({
+      done: true,
+      isError: true,
+      output: expect.stringContaining("No endpoints found for anthropic/claude-3.5-haiku"),
+    });
+
+    const types = events.map((e) => e.type);
+    expect(types).toContain("step.failed");
+    expect(types).toContain("turn.failed");
+    expect(types).toContain("session.failed");
   });
 
   it("emits the full terminal failure cascade on an explicit Gateway invalid-request error", async () => {
@@ -7088,6 +7362,12 @@ describe("createToolLoopHarness", () => {
     it("step.completed event includes usage and cache stats", async () => {
       setupMockAgent({
         finishReason: "stop",
+        providerMetadata: {
+          gateway: {
+            cost: "0.0123",
+            generationId: "gen_test_gateway",
+          },
+        },
         response: { messages: [{ content: "done", role: "assistant" }] },
         text: "done",
         toolCalls: [],
@@ -7109,10 +7389,14 @@ describe("createToolLoopHarness", () => {
 
       const stepCompleted = events.find((e) => e.type === "step.completed");
       expect(stepCompleted?.data.usage).toEqual({
+        costUsd: 0.0123,
         inputTokens: 1000,
         outputTokens: 50,
         cacheReadTokens: 800,
         cacheWriteTokens: 200,
+      });
+      expect(stepCompleted?.data.providerMetadata).toEqual({
+        gateway: { generationId: "gen_test_gateway" },
       });
     });
 
@@ -7131,6 +7415,32 @@ describe("createToolLoopHarness", () => {
 
       const stepCompleted = events.find((e) => e.type === "step.completed");
       expect(stepCompleted?.data.usage).toBeUndefined();
+    });
+
+    it("step.completed event includes gateway cost when tokens are absent", async () => {
+      setupMockAgent({
+        finishReason: "stop",
+        providerMetadata: {
+          gateway: {
+            cost: 0.0042,
+            generationId: "gen_cost_only",
+          },
+        },
+        response: { messages: [{ content: "done", role: "assistant" }] },
+        text: "done",
+        toolCalls: [],
+        toolResults: [],
+      });
+
+      const { emit, events } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      await runStep(createTestSession(), { message: "hi" });
+
+      const stepCompleted = events.find((e) => e.type === "step.completed");
+      expect(stepCompleted?.data.usage).toEqual({ costUsd: 0.0042 });
+      expect(stepCompleted?.data.providerMetadata).toEqual({
+        gateway: { generationId: "gen_cost_only" },
+      });
     });
   });
 

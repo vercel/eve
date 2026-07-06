@@ -13,7 +13,7 @@
  * execution-layer adapter that wraps one tool's `execute`.
  */
 
-import { buildCallbackContext } from "#context/build-callback-context.js";
+import { buildBaseToolContext } from "#context/build-base-tool-context.js";
 import {
   ConnectionAuthorizationFailedError,
   ConnectionAuthorizationRequiredError,
@@ -34,6 +34,7 @@ import {
   startScopedAuthorization,
   type ScopedAuthorization,
 } from "#runtime/connections/scoped-authorization.js";
+import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 
 /**
  * Wraps one authored tool's `execute` with a context that supports inline
@@ -53,10 +54,10 @@ import {
 export function createToolExecuteWithAuth(input: {
   readonly scope: string;
   readonly execute: (toolInput: unknown, ctx: unknown) => unknown;
-}): (toolInput: unknown) => Promise<unknown> {
+}): (toolInput: unknown, options: ToolExecuteOptions) => Promise<unknown> {
   const { scope, execute } = input;
 
-  return async (toolInput: unknown): Promise<unknown> => {
+  return async (toolInput: unknown, options: ToolExecuteOptions): Promise<unknown> => {
     const justAuthorizedScopes = new Set<string>();
 
     try {
@@ -65,6 +66,7 @@ export function createToolExecuteWithAuth(input: {
         buildToolContext({
           inlineAuthState: {},
           justAuthorizedScopes,
+          options,
           scope,
         }),
       );
@@ -79,12 +81,13 @@ export function createToolExecuteWithAuth(input: {
 }
 
 function buildToolContext(input: {
+  readonly options: ToolExecuteOptions;
   readonly scope: string;
   readonly justAuthorizedScopes: Set<string>;
   readonly inlineAuthState: InlineAuthState;
 }): ToolContext {
   const { scope, justAuthorizedScopes, inlineAuthState } = input;
-  const base = buildCallbackContext();
+  const base = buildBaseToolContext(input.options);
   return {
     ...base,
     async getToken(provider?: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult> {

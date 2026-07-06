@@ -2,6 +2,7 @@ import { type BashInput, executeBashOnSandbox } from "#execution/sandbox/bash-to
 import { requireSandboxSession } from "#execution/sandbox/require-sandbox.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
+import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 
 /**
  * Shared input schema used by the framework `bash` tool and any author tool
@@ -47,8 +48,11 @@ export const BASH_OUTPUT_SCHEMA: JsonObject = {
  * sandbox dependencies remain lazily loaded inside the execution layer, so the
  * top-level import here does not force those backends to initialize eagerly.
  */
-async function executeBash(input: unknown): Promise<unknown> {
-  return executeBashOnSandbox(await requireSandboxSession(), input as BashInput);
+async function executeBash(input: unknown, options?: ToolExecuteOptions): Promise<unknown> {
+  return executeBashOnSandbox(
+    await requireSandboxSession(options?.abortSignal),
+    input as BashInput,
+  );
 }
 
 export const BASH_TOOL_DEFINITION: ResolvedToolDefinition = {

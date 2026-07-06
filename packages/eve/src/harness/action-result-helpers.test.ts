@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
+import {
+  createRuntimeToolResultFromToolError,
+  createRuntimeToolResultFromValue,
+} from "#harness/action-result-helpers.js";
 
 describe("createRuntimeToolResultFromValue", () => {
   it("rejects non-JSON-serializable successful action results", () => {
@@ -44,6 +47,26 @@ describe("createRuntimeToolResultFromValue", () => {
       kind: "tool-result",
       output: "tool failed",
       toolName: "broken",
+    });
+  });
+});
+
+describe("createRuntimeToolResultFromToolError", () => {
+  it("projects AI SDK tool-error parts as failed action results", () => {
+    expect(
+      createRuntimeToolResultFromToolError({
+        error: new Error('No skill named "demo"'),
+        input: { skill: "demo" },
+        toolCallId: "call_load_skill",
+        toolName: "load_skill",
+        type: "tool-error",
+      }),
+    ).toEqual({
+      callId: "call_load_skill",
+      isError: true,
+      kind: "tool-result",
+      output: 'No skill named "demo"',
+      toolName: "load_skill",
     });
   });
 });

@@ -17,6 +17,11 @@ import { ContextContainer, contextStorage, loadContext } from "#context/containe
 import { SessionKey } from "#context/keys.js";
 import type { Session } from "#context/keys.js";
 import {
+  clearActiveSandboxHandlesForTest,
+  countActiveSandboxHandles,
+  shutdownActiveSandboxHandles,
+} from "#execution/sandbox/active-handles.js";
+import {
   clearInitializedDevelopmentSandboxBackendNames,
   EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV,
   getInitializedDevelopmentSandboxBackendNames,
@@ -70,7 +75,7 @@ function createBackend(): SandboxBackend {
         sessionKey: input.sessionKey,
       }),
       useSessionFn: async () => sandbox.session,
-      dispose: async () => {},
+      shutdown: async () => {},
       session: sandbox.session,
     };
   });
@@ -320,6 +325,19 @@ describe("ensureSandboxAccess", () => {
         },
       }),
     );
+  });
+
+  it("tracks created handles for server shutdown", async () => {
+    clearActiveSandboxHandlesForTest();
+    const backend = createBackend();
+    const registry = createTestRegistry({}, backend);
+
+    const access = await ensure({ registry });
+    await access.get();
+
+    expect(countActiveSandboxHandles()).toBe(1);
+    await shutdownActiveSandboxHandles();
+    expect(countActiveSandboxHandles()).toBe(0);
   });
 
   it("records the backend after a development sandbox is initialized", async () => {

@@ -12,7 +12,7 @@ import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 import { createLogger } from "#internal/logging.js";
 import { normalizeJsonSchemaDefinition } from "#internal/json-schema.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { buildCallbackContext } from "#context/build-callback-context.js";
+import { buildBaseToolContext } from "#context/build-base-tool-context.js";
 import type { ContextContainer } from "#context/container.js";
 import type { ContextKey } from "#context/key.js";
 import {
@@ -32,8 +32,8 @@ const log = createLogger("dynamic-tools");
 function toHarnessToolDefinition(name: string, entry: DynamicToolEntry): HarnessToolDefinition {
   return {
     description: entry.description,
-    execute: (input: unknown) =>
-      entry.execute(input as Record<string, unknown>, buildCallbackContext()),
+    execute: (input: unknown, options) =>
+      entry.execute(input as Record<string, unknown>, buildBaseToolContext(options)),
     inputSchema: convertInputSchema(entry.inputSchema),
     name,
     approval: entry.approval,
@@ -118,7 +118,8 @@ export function replayDynamicSessionTools(
 
     tools.push({
       description: m.description,
-      execute: (input: unknown) => stepFn(m.closureVars, input, buildCallbackContext()),
+      execute: (input: unknown, options) =>
+        stepFn(m.closureVars, input, buildBaseToolContext(options)),
       inputSchema: jsonSchema(m.inputSchema),
       name: m.name,
       outputSchema: m.outputSchema === undefined ? undefined : jsonSchema(m.outputSchema),

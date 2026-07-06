@@ -1,5 +1,6 @@
 import { isObject } from "#shared/guards.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
+import { isTurnCancellation } from "#harness/turn-cancellation.js";
 
 const RESPONSE_BODY_SNIPPET_LIMIT = 1_000;
 const GATEWAY_MODEL_REQUEST_REJECTED_MESSAGE =
@@ -289,6 +290,10 @@ export function isNoOutputGeneratedError(error: unknown): boolean {
  * Classifies a model-call failure into the runtime's recovery policy.
  */
 export function classifyModelCallError(error: unknown): "retry" | "recoverable" | "terminal" {
+  if (isTurnCancellation(error)) {
+    return "terminal";
+  }
+
   // Not "retry": the empty response already resolved the step hooks'
   // one-shot stepResult promise, so a same-hooks retry would read the
   // stale empty result. The harness reissues with fresh hooks instead

@@ -10,7 +10,10 @@ import type { Approval } from "#public/definitions/approval.js";
 import type { SessionAuth } from "#context/keys.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 
-type ToolContext = SessionContext;
+type ToolContext = SessionContext & {
+  /** Aborts when the active turn is cancelled. */
+  readonly abortSignal: AbortSignal;
+};
 
 /**
  * Stream event types allowed for dynamic tool resolvers. Dispatch
