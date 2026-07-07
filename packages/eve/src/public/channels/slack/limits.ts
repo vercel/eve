@@ -35,6 +35,14 @@ export const SLACK_SECTION_TEXT_MAX_LENGTH = 3000;
 export const SLACK_MESSAGE_TEXT_MAX_LENGTH = 40000;
 
 /**
+ * `chat.postMessage`'s native `markdown_text` field is capped at 12000 chars —
+ * a lower limit than the plain `text` field. A markdown reply must be chunked
+ * against this cap, not {@link SLACK_MESSAGE_TEXT_MAX_LENGTH}, or it still
+ * fails with `msg_too_long`.
+ */
+export const SLACK_MARKDOWN_TEXT_MAX_LENGTH = 12000;
+
+/**
  * `chat.postMessage` rejects payloads with more than 50 blocks
  * (`invalid_blocks`).
  */
@@ -90,6 +98,42 @@ export function truncateMessageText(value: string): string {
  */
 export function truncateModalTitle(value: string): string {
   return truncateWithEllipsis(value, SLACK_MODAL_TITLE_MAX_LENGTH);
+}
+
+/**
+ * Splits a message body that exceeds a Slack length limit into ordered chunks
+ * that each fit, so a long reply is delivered as multiple messages instead of
+ * failing with `msg_too_long` (or being silently truncated). Prefers to break
+ * on a paragraph, then a line, then a word boundary within each window, and
+ * hard-cuts only when a single run has no boundary. Returns `[text]` unchanged
+ * when it already fits, and never returns empty chunks.
+ *
+ * Defaults to {@link SLACK_MESSAGE_TEXT_MAX_LENGTH} (the `chat.postMessage`
+ * `text` cap); pass a smaller `maxLength` for other surfaces.
+ */
+export function splitForSlackMessage(
+  text: string,
+  maxLength: number = SLACK_MESSAGE_TEXT_MAX_LENGTH,
+): string[] {
+  if (text.length <= maxLength) return [text];
+
+  const chunks: string[] = [];
+  let remaining = text;
+  while (remaining.length > maxLength) {
+    const window = remaining.slice(0, maxLength);
+    // Prefer the latest paragraph/line/word boundary in the window; ignore
+    // boundaries in the first half so we don't emit tiny fragments.
+    let cut = window.lastIndexOf("\n\n");
+    if (cut < maxLength / 2) cut = window.lastIndexOf("\n");
+    if (cut < maxLength / 2) cut = window.lastIndexOf(" ");
+    if (cut <= 0) cut = maxLength; // no usable boundary — hard cut at the limit
+
+    const chunk = remaining.slice(0, cut).trimEnd();
+    if (chunk.length > 0) chunks.push(chunk);
+    remaining = remaining.slice(cut).replace(/^\s+/u, "");
+  }
+  if (remaining.length > 0) chunks.push(remaining);
+  return chunks;
 }
 
 function truncateWithEllipsis(value: string, maxLength: number): string {

@@ -368,6 +368,16 @@ export interface SlackChannelConfig {
   readonly route?: string;
 
   /**
+   * When a reply's plain text/markdown exceeds Slack's `chat.postMessage` field
+   * limit (40000 chars for `text`, 12000 for the native `markdown_text` field),
+   * split it into multiple thread messages instead of failing the post with
+   * `msg_too_long`. Defaults to `true`. Set `false` to keep the single-post
+   * behavior. Structured (`blocks`/`card`) and file posts are unaffected either
+   * way.
+   */
+  readonly chunkMessages?: boolean;
+
+  /**
    * Inbound upload policy applied to file attachments before they reach
    * the harness. Violating attachments are dropped with a warning so the
    * mention's text portion still gets delivered. Pass `"disabled"` to
@@ -446,12 +456,14 @@ function rebuildSlackContext(
   state: SlackChannelState,
   session: SessionHandle,
   credentials: SlackChannelCredentials | undefined,
+  chunkMessages: boolean | undefined,
 ): SlackChannelContext {
   const { thread, slack } = buildSlackBinding({
     botToken: credentials?.botToken,
     channelId: state.channelId ?? "",
     threadTs: state.threadTs ?? "",
     teamId: state.teamId ?? undefined,
+    chunkMessages,
     onThreadTsChanged(ts) {
       state.threadTs = ts;
       if (state.channelId) {
@@ -537,7 +549,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     },
 
     context(state, session) {
-      return rebuildSlackContext(state, session, config.credentials);
+      return rebuildSlackContext(state, session, config.credentials, config.chunkMessages);
     },
 
     routes: [

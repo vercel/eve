@@ -32,7 +32,12 @@ import { isCardElement, type CardElement, type FileUpload } from "#compiled/chat
 
 import { createLogger, logError } from "#internal/logging.js";
 import { cardToBlocks, cardToFallbackText } from "#public/channels/slack/blocks.js";
-import { truncateTypingStatus } from "#public/channels/slack/limits.js";
+import {
+  SLACK_MARKDOWN_TEXT_MAX_LENGTH,
+  SLACK_MESSAGE_TEXT_MAX_LENGTH,
+  splitForSlackMessage,
+  truncateTypingStatus,
+} from "#public/channels/slack/limits.js";
 import { rewriteBareMentions, slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
 
 const log = createLogger("slack.api");
@@ -332,10 +337,13 @@ export function buildSlackBinding(input: {
   readonly threadTs: string;
   readonly teamId: string | undefined;
   readonly onThreadTsChanged?: (ts: string) => void;
+  /** Chunk over-limit text/markdown replies instead of erroring. Defaults to `true`. */
+  readonly chunkMessages?: boolean;
 }): SlackBinding {
   const request = createSlackRequester(input.botToken);
   const messages: SlackThreadMessage[] = [];
   let currentThreadTs = input.threadTs;
+  const chunkingEnabled = input.chunkMessages ?? true;
 
   function handleMessageTs(ts: string): void {
     if (currentThreadTs || ts === currentThreadTs) return;
@@ -375,6 +383,28 @@ export function buildSlackBinding(input: {
             ? String((result.raw.files[0] as { id?: unknown }).id ?? "")
             : "";
         return { id, raw: result.raw };
+      }
+
+      // Long plain text / markdown posts in ordered chunks instead of failing
+      // with `msg_too_long`; the first chunk anchors the thread and the return
+      // matches the single-post contract. Each kind chunks against its own cap.
+      const chunkable = files.length === 0 && chunkingEnabled ? longTextField(message) : undefined;
+      const chunkLimit =
+        chunkable?.kind === "markdown"
+          ? SLACK_MARKDOWN_TEXT_MAX_LENGTH
+          : SLACK_MESSAGE_TEXT_MAX_LENGTH;
+      if (chunkable && chunkable.value.length > chunkLimit) {
+        let first: SlackPostedMessage | undefined;
+        for (const part of splitForSlackMessage(chunkable.value, chunkLimit)) {
+          const chunk: SlackPostInput = chunkable.kind === "text" ? { text: part } : { markdown: part };
+          const chunkResponse = await postSlackMessage(
+            buildPostMessageOptions(chunk, input.channelId, currentThreadTs, input.botToken),
+          );
+          handleMessageTs(chunkResponse.id);
+          first ??= { id: chunkResponse.id, raw: chunkResponse.raw };
+        }
+        // `value.length > limit > 0` guarantees at least one chunk was posted.
+        return first as SlackPostedMessage;
       }
 
       const response = await postSlackMessage(
@@ -487,6 +517,21 @@ function normalizePostInput(message: string | CardElement | SlackPostInput): Sla
   if (typeof message === "string") return { markdown: message };
   if (isCardElement(message)) return { card: message };
   return message;
+}
+
+/**
+ * Returns the single free-text body of a message (the `text` or `markdown`
+ * variant) so it can be length-checked and chunked, or `undefined` for
+ * structured (`blocks`/`card`) messages, whose length is bounded per-block and
+ * must not be split at the message level.
+ */
+function longTextField(
+  message: SlackPostInput,
+): { readonly kind: "text" | "markdown"; readonly value: string } | undefined {
+  if ("blocks" in message || "card" in message) return undefined;
+  if ("text" in message) return { kind: "text", value: message.text };
+  if ("markdown" in message) return { kind: "markdown", value: message.markdown };
+  return undefined;
 }
 
 function buildPostMessageOptions(
