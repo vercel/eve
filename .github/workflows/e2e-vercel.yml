@@ -82,8 +82,10 @@ jobs:
             token_args=(--token "$VERCEL_TOKEN")
           fi
           team_args=()
+          scope_args=()
           if [ -n "${VERCEL_ORG_ID:-}" ]; then
             team_args=(--team "$VERCEL_ORG_ID")
+            scope_args=(--scope "$VERCEL_ORG_ID")
           fi
 
           pnpm exec vc link --yes --project "$VERCEL_PROJECT_ID" "${team_args[@]}" "${token_args[@]}"
@@ -108,7 +110,9 @@ jobs:
           # above because EVE_E2E_REDEPLOY_ALIAS is unset there.
           if npx eve eval --tag redeploy --list >/dev/null 2>&1; then
             ALIAS="eve-e2e-${{ matrix.name }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.vercel.app"
-            pnpm exec vc alias set "$DEPLOYMENT_URL" "$ALIAS" "${token_args[@]}"
+            # vc alias does not infer the team from the project link the way
+            # link/deploy do, so pass the scope explicitly.
+            pnpm exec vc alias set "$DEPLOYMENT_URL" "$ALIAS" "${token_args[@]}" "${scope_args[@]}"
             EVE_E2E_REDEPLOY_ALIAS="$ALIAS" \
               npx eve eval --tag redeploy --strict --verbose \
               --url "https://$ALIAS" --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}-redeploy.xml"

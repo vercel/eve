@@ -145,6 +145,10 @@ async function deployToAlias(t: EveEvalContext, alias: string, phase: string): P
 
   const tokenArgs =
     process.env.VERCEL_TOKEN === undefined ? [] : ["--token", process.env.VERCEL_TOKEN];
+  // vc alias does not infer the team from the project link the way deploy
+  // does, so pass the scope explicitly.
+  const scopeArgs =
+    process.env.VERCEL_ORG_ID === undefined ? [] : ["--scope", process.env.VERCEL_ORG_ID];
   const deploy = await execFileAsync(
     "pnpm",
     ["exec", "vc", "deploy", "--prebuilt", "--yes", "--target=preview", ...tokenArgs],
@@ -158,7 +162,7 @@ async function deployToAlias(t: EveEvalContext, alias: string, phase: string): P
 
   await execFileAsync(
     "pnpm",
-    ["exec", "vc", "alias", "set", deploymentUrl, alias, ...tokenArgs],
+    ["exec", "vc", "alias", "set", deploymentUrl, alias, ...tokenArgs, ...scopeArgs],
     EXEC_OPTIONS,
   );
 }
