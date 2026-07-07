@@ -105,12 +105,23 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
       });
     }
 
-    const reattaching =
-      persistedSession?.backendName === backend.name &&
-      persistedSession.sessionKey === keys.sessionKey;
+    // The session eve may reattach to: the persisted record is only
+    // meaningful when it names the sandbox this step derived. A rotated
+    // session key (the sandbox definition changed) means the backend
+    // provisions a fresh sandbox, so per-session initialization must run
+    // again even though the durable state says it already did.
+    const reattachSession =
+      persistedSession !== null &&
+      persistedSession.backendName === backend.name &&
+      persistedSession.sessionKey === keys.sessionKey
+        ? persistedSession
+        : null;
+    if (reattachSession === null) {
+      initialized = false;
+    }
 
     const createInput: SandboxBackendCreateInput = {
-      existingMetadata: reattaching ? persistedSession?.metadata : undefined,
+      existingMetadata: reattachSession?.metadata,
       runtimeContext: { appRoot },
       sessionKey: keys.sessionKey,
       tags: input.tags,
@@ -135,10 +146,7 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
       sessionKey: keys.sessionKey,
     });
 
-    // A rotated session key (the sandbox definition changed) means the
-    // backend provisions a fresh sandbox, so per-session initialization
-    // must run again even though the durable state says it already did.
-    if (!initialized || !reattaching) {
+    if (!initialized) {
       await runOnSession(async () => {
         await definition.onSession?.({ ctx: buildCallbackContext(), use: handle.useSessionFn });
       });
