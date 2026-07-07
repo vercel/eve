@@ -101,117 +101,24 @@ jobs:
 
           npx eve eval --strict --verbose --url "$DEPLOYMENT_URL" --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}.xml"
 
+          # Redeploy-tagged evals rebuild and redeploy the fixture from inside
+          # the eval body, repointing a run-scoped alias at each new
+          # deployment. They run against the alias (immutable deployment URLs
+          # never change what they serve) and are skipped in the main suite
+          # above because EVE_E2E_REDEPLOY_ALIAS is unset there.
+          if npx eve eval --tag redeploy --list >/dev/null 2>&1; then
+            ALIAS="eve-e2e-${{ matrix.name }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.vercel.app"
+            pnpm exec vc alias set "$DEPLOYMENT_URL" "$ALIAS" "${token_args[@]}"
+            EVE_E2E_REDEPLOY_ALIAS="$ALIAS" \
+              npx eve eval --tag redeploy --strict --verbose \
+              --url "https://$ALIAS" --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}-redeploy.xml"
+          fi
+
       - name: Upload eval artifacts
         if: failure()
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v6
         with:
           name: eval-artifacts-vercel-${{ matrix.name }}
-          path: |
-            .junit
-            e2e/fixtures/*/.eve/evals
-            apps/fixtures/*/.eve/evals
-          include-hidden-files: true
-          if-no-files-found: ignore
-          retention-days: 7
-
-  # Sandbox semantics across deployment updates. One `eve eval` run drives a
-  # single target, so the redeploy boundary lives here: deploy, run one phase
-  # eval, redeploy, run the next. Covers both documented behaviors — an
-  # unchanged redeploy keeps a session's sandbox workspace, and a
-  # skill-adding redeploy rotates the session sandbox while the new skill
-  # becomes usable in the resumed session.
-  e2e-redeploy:
-    name: e2e-vercel (sandbox-redeploy)
-    runs-on: ubuntu-latest
-
-    env:
-      EVE_EVAL_JUNIT_DIR: ${{ github.workspace }}/.junit
-      FIXTURE_DIR: e2e/fixtures/agent-tools-sandbox
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_USE_EXPERIMENTAL_FRAMEWORKS: "1"
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          persist-credentials: false
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version-file: .nvmrc
-          cache: "pnpm"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build eve package
-        # Full build, not build:js: the deployed/runtime bundles must carry the
-        # stamped package version (scripts/stamp-version-tokens.mjs) and docs.
-        run: pnpm --filter eve run build
-
-      - name: Deploy three times and run one redeploy phase per deployment
-        run: |
-          set -euo pipefail
-          mkdir -p "$EVE_EVAL_JUNIT_DIR"
-          cd "$FIXTURE_DIR"
-
-          token_args=()
-          if [ -n "${VERCEL_TOKEN:-}" ]; then
-            token_args=(--token "$VERCEL_TOKEN")
-          fi
-          team_args=()
-          if [ -n "${VERCEL_ORG_ID:-}" ]; then
-            team_args=(--team "$VERCEL_ORG_ID")
-          fi
-
-          pnpm exec vc link --yes --project "$VERCEL_PROJECT_ID" "${team_args[@]}" "${token_args[@]}"
-          pnpm exec vc env pull --yes --environment=preview "${token_args[@]}"
-
-          # Sandbox templates key on VERCEL_PROJECT_ID (present at build and
-          # runtime). Do not add VERCEL_TEAM_ID: it does not exist at runtime,
-          # so the deployed function could not resolve a team-scoped template.
-          deploy() {
-            VERCEL=1 \
-              VERCEL_ENV=preview \
-              VERCEL_TARGET_ENV=preview \
-              VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID" \
-              VERCEL_DEPLOYMENT_ID="dpl_eve_e2e_redeploy_$1_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}" \
-              pnpm exec eve build 1>&2
-            pnpm exec vc deploy --prebuilt --yes --target=preview "${token_args[@]}" | tail -n 1
-          }
-
-          URL_WRITE="$(deploy write)"
-          EVE_E2E_REDEPLOY_PHASE=write \
-            npx eve eval sandbox/redeploy/write --strict --verbose \
-            --url "$URL_WRITE" --junit "$EVE_EVAL_JUNIT_DIR/redeploy-write.xml"
-
-          URL_PERSIST="$(deploy read_persist)"
-          EVE_E2E_REDEPLOY_PHASE=read-persist \
-            npx eve eval sandbox/redeploy/read-persist --strict --verbose \
-            --url "$URL_PERSIST" --junit "$EVE_EVAL_JUNIT_DIR/redeploy-read-persist.xml"
-
-          # The "deployment update" under test: add a stub skill. Skills are
-          # part of the sandbox workspace resources, so this rotates the
-          # session sandbox key.
-          mkdir -p agent/skills
-          cp redeploy-variant/skills/deploy-note.md agent/skills/deploy-note.md
-
-          URL_ROTATED="$(deploy read_rotated)"
-          EVE_E2E_REDEPLOY_PHASE=read-rotated \
-            npx eve eval sandbox/redeploy/read-rotated --strict --verbose \
-            --url "$URL_ROTATED" --junit "$EVE_EVAL_JUNIT_DIR/redeploy-read-rotated.xml"
-
-      - name: Upload eval artifacts
-        if: failure()
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v6
-        with:
-          name: eval-artifacts-vercel-sandbox-redeploy
           path: |
             .junit
             e2e/fixtures/*/.eve/evals

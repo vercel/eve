@@ -61,21 +61,20 @@ identically at build and runtime, and Vercel has no team variable at runtime.
 
 ### Redeploy suite
 
-`agent-tools-sandbox` carries three phase-gated evals under
-`evals/sandbox/redeploy/` that prove sandbox semantics across deployment
-updates: an unchanged redeploy keeps a session's `/workspace` state, and a
-redeploy that adds a skill rotates the session sandbox (the old file is gone)
-while the new skill becomes usable in the resumed session.
+`agent-tools-sandbox/evals/sandbox/redeploy.eval.ts` proves sandbox semantics
+across deployment updates: a redeploy that only touches instructions keeps a
+session's `/workspace` state, and a redeploy that adds a skill rotates the
+session sandbox (the old file is gone) while the new skill becomes usable in
+the same session.
 
-One `eve eval` run drives a single target, so these evals skip themselves
-unless `EVE_E2E_REDEPLOY_PHASE` selects their phase. The
-`e2e-vercel (sandbox-redeploy)` job in `.github/workflows/e2e-vercel.yml`
-owns the orchestration: deploy, run the `write` phase, redeploy unchanged,
-run `read-persist`, copy `redeploy-variant/skills/deploy-note.md` into
-`agent/skills/`, deploy again, and run `read-rotated`. Session ids cross the
-phase boundary through `.eve/evals/redeploy-state.json` in the fixture
-directory. In every other context (local matrix, plain `eve eval --strict`)
-the three evals report as skipped.
+The eval redeploys from inside its test body: it mutates the agent source,
+runs `eve build` + `vc deploy`, and repoints a run-scoped Vercel alias at
+each new deployment, polling `/eve/v1/info` until the alias serves it.
+Because immutable deployment URLs never change what they serve, the eval
+must run against the alias — the `e2e-vercel` workflow sets
+`EVE_E2E_REDEPLOY_ALIAS`, aliases the deployment, and runs `--tag redeploy`
+evals as a second `eve eval` invocation after the main suite. Without the
+alias env (local matrix, plain `eve eval --strict`) the eval skips.
 
 Most fixture agents run against `anthropic/claude-sonnet-5` and judges run
 against `openai/gpt-5.5`. Both are real models, so the environment must provide
