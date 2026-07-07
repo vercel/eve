@@ -8,6 +8,7 @@ import {
 } from "#compiler/artifacts.js";
 import { createCompiledAgentManifest } from "#compiler/manifest.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { createFakeVercelOidcToken } from "#internal/testing/vercel-oidc-token.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { withBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
 import {
@@ -94,9 +95,25 @@ async function deriveSessionKey(input?: {
   return keys.sessionKey;
 }
 
-function createOidcToken(claims: Record<string, unknown>): string {
-  const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
-  return `${encode({ alg: "none" })}.${encode(claims)}.signature`;
+/**
+ * Derives one vercel-backed session key under exactly the given env.
+ * Unlisted project and deployment variables are stubbed empty so ambient
+ * CI values cannot leak into the derivation.
+ */
+async function deriveVercelSessionKey(env: Record<string, string>): Promise<string> {
+  const stubbed = {
+    VERCEL_DEPLOYMENT_ID: "",
+    VERCEL_OIDC_TOKEN: "",
+    VERCEL_PROJECT_ID: "",
+    ...env,
+  };
+  for (const [key, value] of Object.entries(stubbed)) {
+    vi.stubEnv(key, value);
+  }
+
+  return await withBundledMetadata(createMetadataFixture("1.0.0"), () =>
+    deriveSessionKey({ backendName: "vercel" }),
+  );
 }
 
 describe("createRuntimeSandboxKeys", () => {
@@ -105,78 +122,46 @@ describe("createRuntimeSandboxKeys", () => {
   });
 
   it("pins the vercel session key across deployments when only the OIDC token names the project", async () => {
-    vi.stubEnv("VERCEL_PROJECT_ID", "");
-    vi.stubEnv("VERCEL_OIDC_TOKEN", createOidcToken({ project_id: "prj_123" }));
+    const token = createFakeVercelOidcToken({ project_id: "prj_123" });
 
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_first");
-    const first = await withBundledMetadata(createMetadataFixture("1.0.0"), () =>
-      deriveSessionKey({ backendName: "vercel" }),
-    );
-
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_second");
-    const second = await withBundledMetadata(createMetadataFixture("1.0.0"), () =>
-      deriveSessionKey({ backendName: "vercel" }),
-    );
+    const first = await deriveVercelSessionKey({
+      VERCEL_DEPLOYMENT_ID: "dpl_first",
+      VERCEL_OIDC_TOKEN: token,
+    });
+    const second = await deriveVercelSessionKey({
+      VERCEL_DEPLOYMENT_ID: "dpl_second",
+      VERCEL_OIDC_TOKEN: token,
+    });
 
     expect(first).toBe(second);
   });
 
   it("derives the same session key from the project id env var and the OIDC token claim", async () => {
-    vi.stubEnv("VERCEL_PROJECT_ID", "prj_123");
-    const fromEnv = await withBundledMetadata(createMetadataFixture("1.0.0"), () =>
-      deriveSessionKey({ backendName: "vercel" }),
-    );
-
-    vi.stubEnv("VERCEL_PROJECT_ID", "");
-    vi.stubEnv("VERCEL_OIDC_TOKEN", createOidcToken({ project_id: "prj_123" }));
-    const fromToken = await withBundledMetadata(createMetadataFixture("1.0.0"), () =>
-      deriveSessionKey({ backendName: "vercel" }),
-    );
+    const fromEnv = await deriveVercelSessionKey({ VERCEL_PROJECT_ID: "prj_123" });
+    const fromToken = await deriveVercelSessionKey({
+      VERCEL_OIDC_TOKEN: createFakeVercelOidcToken({ project_id: "prj_123" }),
+    });
 
     expect(fromEnv).toBe(fromToken);
   });
 
   it("never scopes the session key by deployment id, even without a resolvable project id", async () => {
-    vi.stubEnv("VERCEL_PROJECT_ID", "");
-    vi.stubEnv("VERCEL_OIDC_TOKEN", "");
-
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_first");
-    const first = await withBundledMetadata(createMetadataFixture("1.0.0"), () =>
-      deriveSessionKey({ backendName: "vercel" }),
-    );
-
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_second");
-    const second = await withBundledMetadata(createMetadataFixture("1.0.0"), () =>
-      deriveSessionKey({ backendName: "vercel" }),
-    );
-
-    expect(first).toBe(second);
-  });
-
-  it("pins the vercel session key across deployments", async () => {
-    vi.stubEnv("VERCEL_PROJECT_ID", "prj_123");
-
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_first");
-    const first = await withBundledMetadata(createMetadataFixture("1.0.0"), () =>
-      deriveSessionKey({ backendName: "vercel" }),
-    );
-
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_second");
-    const second = await withBundledMetadata(createMetadataFixture("1.0.0"), () =>
-      deriveSessionKey({ backendName: "vercel" }),
-    );
+    const first = await deriveVercelSessionKey({ VERCEL_DEPLOYMENT_ID: "dpl_first" });
+    const second = await deriveVercelSessionKey({ VERCEL_DEPLOYMENT_ID: "dpl_second" });
 
     expect(first).toBe(second);
   });
 
   it("keeps the session key stable across unrelated source and eve version changes", async () => {
+    const changedMetadata = createMetadataFixture("2.0.0");
+
     const first = await withBundledMetadata(createMetadataFixture("1.0.0"), () =>
       deriveSessionKey(),
     );
     const second = await withBundledMetadata(
       {
-        ...createMetadataFixture("2.0.0"),
-        discovery: { ...createMetadataFixture("2.0.0").discovery, sourceGraphHash: "f".repeat(64) },
+        ...changedMetadata,
+        discovery: { ...changedMetadata.discovery, sourceGraphHash: "f".repeat(64) },
       },
       () => deriveSessionKey(),
     );
