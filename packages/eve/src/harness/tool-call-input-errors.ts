@@ -8,19 +8,38 @@ export function createInvalidToolCallInputError(input: {
 }): TypedToolError<ToolSet> {
   const { toolCall } = input;
 
-  return {
+  const toolError: {
+    dynamic?: true;
+    error: unknown;
+    input: unknown;
+    providerExecuted?: true;
+    providerMetadata?: TypedToolCall<ToolSet>["providerMetadata"];
+    toolCallId: string;
+    toolMetadata?: TypedToolCall<ToolSet>["toolMetadata"];
+    toolName: string;
+    type: "tool-error";
+  } = {
     type: "tool-error",
     toolCallId: toolCall.toolCallId,
     toolName: toolCall.toolName,
     input: toolCall.input,
     error: input.error,
-    ...(toolCall.dynamic === true ? { dynamic: true as const } : {}),
-    ...(toolCall.providerExecuted === true ? { providerExecuted: true as const } : {}),
-    ...(toolCall.providerMetadata !== undefined
-      ? { providerMetadata: toolCall.providerMetadata }
-      : {}),
-    ...(toolCall.toolMetadata !== undefined ? { toolMetadata: toolCall.toolMetadata } : {}),
-  } as TypedToolError<ToolSet>;
+  };
+
+  if (toolCall.dynamic === true) {
+    toolError.dynamic = true;
+  }
+  if (toolCall.providerExecuted === true) {
+    toolError.providerExecuted = true;
+  }
+  if (toolCall.providerMetadata !== undefined) {
+    toolError.providerMetadata = toolCall.providerMetadata;
+  }
+  if (toolCall.toolMetadata !== undefined) {
+    toolError.toolMetadata = toolCall.toolMetadata;
+  }
+
+  return toolError as TypedToolError<ToolSet>;
 }
 
 export function getInvalidToolCallInputError(input: {
