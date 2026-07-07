@@ -10,24 +10,27 @@ export interface VercelOidcTokenClaims {
   readonly projectId: string | undefined;
 }
 
+const EMPTY_CLAIMS: VercelOidcTokenClaims = { ownerId: undefined, projectId: undefined };
+
 /**
- * Decodes the payload claims of a Vercel OIDC token, or returns
- * `undefined` when the value is not a decodable JWT.
+ * Decodes the payload claims of a Vercel OIDC token. Values that are not
+ * decodable JWTs, or that carry no recognized claims, decode to empty
+ * claims — callers only ever check individual fields.
  */
-export function decodeVercelOidcTokenClaims(token: string): VercelOidcTokenClaims | undefined {
+export function decodeVercelOidcTokenClaims(token: string): VercelOidcTokenClaims {
   const payloadSegment = token.split(".")[1];
   if (payloadSegment === undefined || payloadSegment.length === 0) {
-    return undefined;
+    return EMPTY_CLAIMS;
   }
 
   let payload: unknown;
   try {
     payload = JSON.parse(Buffer.from(payloadSegment, "base64url").toString("utf8"));
   } catch {
-    return undefined;
+    return EMPTY_CLAIMS;
   }
   if (payload === null || typeof payload !== "object") {
-    return undefined;
+    return EMPTY_CLAIMS;
   }
 
   const claims = payload as { readonly owner_id?: unknown; readonly project_id?: unknown };
@@ -55,5 +58,5 @@ export function resolveVercelProjectIdFromEnvironment(): string | undefined {
     return undefined;
   }
 
-  return decodeVercelOidcTokenClaims(token)?.projectId;
+  return decodeVercelOidcTokenClaims(token).projectId;
 }

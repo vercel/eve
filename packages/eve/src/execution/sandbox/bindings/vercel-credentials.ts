@@ -46,7 +46,7 @@ function readNonEmptyEnvironmentVariable(key: string): string | undefined {
 
 function getVercelSandboxCredentialsFromOidcToken(token: string): VercelSandboxCredentials {
   const claims = decodeVercelOidcTokenClaims(token);
-  if (claims?.ownerId === undefined || claims.projectId === undefined) {
+  if (claims.ownerId === undefined || claims.projectId === undefined) {
     throw new Error("Invalid Vercel OIDC token: missing owner_id or project_id.");
   }
 
