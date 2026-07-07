@@ -13,15 +13,29 @@ import type { EveEvalContext } from "eve/evals";
 // each redeploy repoints the alias, so the runner's client — and the durable
 // session it drives — lands on the new deployment without any URL swap.
 //
-// Timeline under test, in one session:
-//   t0  write a file into the session's sandbox workspace
+// Deployment adoption is dispatch-dependent. Turn dispatch routes parked
+// sessions' turns to the latest deployment only where the workflow world can
+// resolve "latest" (production; branch-carrying previews). Branch-less CLI
+// preview deploys — which is what this eval pushes — pin turn execution to
+// the deployment that created the session (see shouldRouteToLatestDeployment
+// in execution/workflow-runtime.ts). The timeline below asserts exactly the
+// preview contract; the pinned-turn gate at t3 is a deliberate tripwire that
+// must be flipped when dispatch gains preview latest-routing.
+//
+// Timeline under test:
+//   t0  session A writes a file into its sandbox workspace
 //   t1  push a deployment update that touches only agent instructions
-//   t2  the file is still readable: session sandbox keys ignore both the
-//       deployment id and unrelated source changes
+//   t2  session A still reads the file: the parked session keeps working when
+//       its messages route through the new deployment, and its sandbox
+//       (keyed per durable session, not per deployment) is untouched
 //   t1' push a deployment update that adds a skill — skills materialize into
 //       the sandbox workspace resources, so the sandbox version hash rotates
-//   t3  the file is gone: the session got a fresh sandbox from the new template
-//   t4  the new skill loads and shapes the reply in the same session
+//       for anything executing the new code
+//   t3  session A still sees the file: its turns are pinned to the original
+//       deployment on preview, so neither the new manifest nor the rotated
+//       sandbox key applies to it
+//   t4  a NEW session B adopts the new deployment: the added skill loads and
+//       shapes the reply
 //
 // Requires EVE_E2E_REDEPLOY_ALIAS plus Vercel credentials and a linked
 // fixture directory (the e2e-vercel workflow provides all three); skips
@@ -57,7 +71,7 @@ const EXEC_OPTIONS = { maxBuffer: 64 * 1024 * 1024 } as const;
 
 export default defineEval({
   description:
-    "Sandbox: a session's workspace survives an unrelated redeploy and rotates when a redeploy adds a skill.",
+    "Sandbox: a parked session survives redeploys with its workspace intact (pinned on preview), and new sessions adopt the new deployment.",
   tags: ["redeploy"],
   timeoutMs: 20 * 60_000,
   async test(t) {
@@ -104,17 +118,23 @@ export default defineEval({
       await deployToAlias(t, alias, "skill");
       await waitForAliasToServe(t, `"${SKILL_NAME}"`);
 
-      // t3: the rotated sandbox no longer has the file.
+      // t3: TRIPWIRE — on preview, session A's turns stay pinned to the
+      // deployment that created it, so its sandbox key never rotates and the
+      // file is still present. When turn dispatch gains preview
+      // latest-routing, this gate flips to /absent/ (and the skill becomes
+      // loadable in session A too).
       const probe = await t.send(
         `Run the bash command \`test -f ${FILE_PATH} && echo present || echo absent\` ` +
           "and reply with the command output verbatim.",
       );
       probe.expectOk();
-      probe.calledTool("bash", { output: /absent/ });
-      probe.messageIncludes("absent");
+      probe.calledTool("bash", { output: /present/ });
+      probe.messageIncludes("present");
 
-      // t4: the added skill is usable in the same session.
-      const skill = await t.send(
+      // t4: a fresh session adopts the new deployment — the added skill is
+      // advertised and usable.
+      const adopted = t.newSession();
+      const skill = await adopted.send(
         "Please use the deploy note skill and follow its instructions exactly.",
       );
       skill.expectOk();

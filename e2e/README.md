@@ -62,10 +62,14 @@ identically at build and runtime, and Vercel has no team variable at runtime.
 ### Redeploy suite
 
 `agent-tools-sandbox/evals/sandbox/redeploy.eval.ts` proves sandbox semantics
-across deployment updates: a redeploy that only touches instructions keeps a
-session's `/workspace` state, and a redeploy that adds a skill rotates the
-session sandbox (the old file is gone) while the new skill becomes usable in
-the same session.
+across deployment updates as they behave on preview targets: a parked session
+keeps working (with its `/workspace` state intact) when messages route through
+a new deployment, its turns stay pinned to the deployment that created it
+(branch-less CLI preview deploys cannot resolve a "latest" deployment; see
+`shouldRouteToLatestDeployment` in `execution/workflow-runtime.ts`), and new
+sessions adopt the new deployment — a skill added by the redeploy loads there.
+The pinned-turn assertion is a deliberate tripwire: it must be flipped when
+turn dispatch gains preview latest-routing.
 
 The eval redeploys from inside its test body: it mutates the agent source,
 runs `eve build` + `vc deploy`, and repoints a run-scoped Vercel alias at
