@@ -6,6 +6,7 @@ import {
   SLACK_MODAL_TITLE_MAX_LENGTH,
   SLACK_SECTION_TEXT_MAX_LENGTH,
   SLACK_TYPING_STATUS_MAX_LENGTH,
+  splitForSlackMessage,
   truncateMessageText,
   truncateModalTitle,
   truncatePlainText,
@@ -107,5 +108,41 @@ describe("truncateMessageText", () => {
     const result = truncateMessageText(long);
     expect(result.length).toBeLessThanOrEqual(SLACK_MESSAGE_TEXT_MAX_LENGTH);
     expect(result.endsWith("...")).toBe(true);
+  });
+});
+
+describe("splitForSlackMessage", () => {
+  it("returns the text unchanged when it already fits", () => {
+    expect(splitForSlackMessage("hello world", 40)).toEqual(["hello world"]);
+    expect(splitForSlackMessage("a".repeat(SLACK_MESSAGE_TEXT_MAX_LENGTH))).toHaveLength(1);
+  });
+
+  it("splits over-limit text into chunks that each fit and are non-empty", () => {
+    const long = "a".repeat(SLACK_MESSAGE_TEXT_MAX_LENGTH * 2 + 500);
+    const chunks = splitForSlackMessage(long);
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      expect(chunk.length).toBeLessThanOrEqual(SLACK_MESSAGE_TEXT_MAX_LENGTH);
+      expect(chunk.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("prefers paragraph boundaries", () => {
+    const para = "p".repeat(60);
+    expect(splitForSlackMessage([para, para].join("\n\n"), 100)).toEqual([para, para]);
+  });
+
+  it("falls back to word boundaries when there are no newlines", () => {
+    const chunks = splitForSlackMessage("word ".repeat(40).trim(), 20);
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      expect(chunk.length).toBeLessThanOrEqual(20);
+      expect(chunk.startsWith(" ")).toBe(false);
+      expect(chunk.endsWith(" ")).toBe(false);
+    }
+  });
+
+  it("hard-cuts a single run with no usable boundary", () => {
+    expect(splitForSlackMessage("z".repeat(45), 20)).toEqual(["z".repeat(20), "z".repeat(20), "z".repeat(5)]);
   });
 });

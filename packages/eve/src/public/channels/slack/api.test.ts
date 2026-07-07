@@ -3,6 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Card, CardText } from "#compiled/chat/index.js";
 import { decodeSlackApiBody } from "#public/channels/slack/api-encoding.js";
 import { buildSlackBinding, callSlackApi } from "#public/channels/slack/api.js";
+import {
+  SLACK_MARKDOWN_TEXT_MAX_LENGTH,
+  SLACK_MESSAGE_TEXT_MAX_LENGTH,
+} from "#public/channels/slack/limits.js";
 
 interface FetchCall {
   url: string;
@@ -657,5 +661,117 @@ describe("auto-anchor on first post", () => {
     await Promise.all([thread.post("a"), thread.post("b"), thread.post("c")]);
 
     expect(anchors).toHaveLength(1);
+  });
+});
+
+describe("SlackThread.post chunking", () => {
+  let mock: ReturnType<typeof buildFetchMock>;
+
+  beforeEach(() => {
+    mock = buildFetchMock();
+    vi.stubGlobal("fetch", mock.fetch);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const postMessageCalls = () =>
+    mock.calls.filter((c) => c.url === "https://slack.com/api/chat.postMessage");
+
+  it("splits a text reply over the Slack limit into multiple posts that each fit", async () => {
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+
+    await thread.post({ text: "a".repeat(SLACK_MESSAGE_TEXT_MAX_LENGTH + 1000) });
+
+    const posts = postMessageCalls();
+    expect(posts.length).toBeGreaterThan(1);
+    for (const post of posts) {
+      const body = post.body as { text?: string };
+      expect((body.text ?? "").length).toBeLessThanOrEqual(SLACK_MESSAGE_TEXT_MAX_LENGTH);
+    }
+  });
+
+  it("splits an over-limit markdown reply into posts that each fit the markdown_text limit", async () => {
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+
+    await thread.post({ markdown: "b".repeat(SLACK_MESSAGE_TEXT_MAX_LENGTH + 1000) });
+
+    const posts = postMessageCalls();
+    expect(posts.length).toBeGreaterThan(1);
+    for (const post of posts) {
+      const body = post.body as { markdown_text?: string };
+      expect((body.markdown_text ?? "").length).toBeLessThanOrEqual(SLACK_MARKDOWN_TEXT_MAX_LENGTH);
+    }
+  });
+
+  it("chunks a markdown reply between the markdown and text limits (regression: markdown_text is 12000, not 40000)", async () => {
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+
+    // Fits the 40000 `text` cap but exceeds the 12000 `markdown_text` cap, so it
+    // must still be chunked — otherwise Slack rejects it with `msg_too_long`.
+    await thread.post({ markdown: "b".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH + 5000) });
+
+    const posts = postMessageCalls();
+    expect(posts.length).toBeGreaterThan(1);
+    for (const post of posts) {
+      const body = post.body as { markdown_text?: string };
+      expect((body.markdown_text ?? "").length).toBeLessThanOrEqual(SLACK_MARKDOWN_TEXT_MAX_LENGTH);
+    }
+  });
+
+  it("does not chunk a markdown reply within the markdown_text limit", async () => {
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+
+    await thread.post({ markdown: "b".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH - 100) });
+
+    expect(postMessageCalls()).toHaveLength(1);
+  });
+
+  it("posts a single message when chunking is disabled", async () => {
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+      chunkMessages: false,
+    });
+
+    await thread.post({ text: "a".repeat(SLACK_MESSAGE_TEXT_MAX_LENGTH + 1000) });
+
+    expect(postMessageCalls()).toHaveLength(1);
+  });
+
+  it("does not chunk a reply within the limit", async () => {
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+
+    await thread.post({ text: "short reply" });
+
+    expect(postMessageCalls()).toHaveLength(1);
   });
 });
