@@ -184,7 +184,7 @@ describe("createSessionStep", () => {
     expect(state.snapshot?.session.subagentMaxDepth).toBe(4);
   });
 
-  it("keeps inherited subagent max depth when one is provided", async () => {
+  it("keeps a tighter configured subagent max depth under the inherited cap", async () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       resolvedAgent: {
         config: {
@@ -201,6 +201,85 @@ describe("createSessionStep", () => {
       sessionId: "sess-child",
     });
 
+    expect(state.snapshot?.session.subagentMaxDepth).toBe(2);
+  });
+
+  it("caps configured subagent max depth at the inherited cap", async () => {
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      resolvedAgent: {
+        config: {
+          limits: { maxSubagentDepth: 6 },
+        },
+      },
+      turnAgent: TestTurnAgent,
+    } as never);
+
+    const { state } = await createSessionStep({
+      compiledArtifactsSource: { kind: "bundled" },
+      continuationToken: "subagent:test",
+      inheritedLimits: { maxSubagentDepth: 4 },
+      sessionId: "sess-child",
+    });
+
     expect(state.snapshot?.session.subagentMaxDepth).toBe(4);
+  });
+
+  it("keeps a tighter configured workflow max subagents under the inherited cap", async () => {
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      resolvedAgent: {
+        config: {
+          limits: { maxSubagents: 5 },
+        },
+      },
+      turnAgent: TestTurnAgent,
+    } as never);
+
+    const { state } = await createSessionStep({
+      compiledArtifactsSource: { kind: "bundled" },
+      continuationToken: "subagent:test",
+      inheritedLimits: { maxSubagents: 12 },
+      sessionId: "sess-child",
+    });
+
+    expect(state.snapshot?.session.workflowMaxSubagents).toBe(5);
+  });
+
+  it("seeds workflow max subagents from resolved agent config", async () => {
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      resolvedAgent: {
+        config: {
+          limits: { maxSubagents: 12 },
+        },
+      },
+      turnAgent: TestTurnAgent,
+    } as never);
+
+    const { state } = await createSessionStep({
+      compiledArtifactsSource: { kind: "bundled" },
+      continuationToken: "http:test",
+      sessionId: "sess-root",
+    });
+
+    expect(state.snapshot?.session.workflowMaxSubagents).toBe(12);
+  });
+
+  it("caps configured workflow max subagents at the inherited cap", async () => {
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      resolvedAgent: {
+        config: {
+          limits: { maxSubagents: 12 },
+        },
+      },
+      turnAgent: TestTurnAgent,
+    } as never);
+
+    const { state } = await createSessionStep({
+      compiledArtifactsSource: { kind: "bundled" },
+      continuationToken: "subagent:test",
+      inheritedLimits: { maxSubagents: 5 },
+      sessionId: "sess-child",
+    });
+
+    expect(state.snapshot?.session.workflowMaxSubagents).toBe(5);
   });
 });

@@ -5,7 +5,10 @@ import {
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
 import { createSession } from "#execution/session.js";
-import { resolveInheritedTokenLimit } from "#execution/run-session-limits.js";
+import {
+  resolveInheritedCountLimit,
+  resolveInheritedTokenLimit,
+} from "#execution/run-session-limits.js";
 import type { RunSessionLimits } from "#channel/types.js";
 import type { JsonObject } from "#shared/json.js";
 
@@ -42,12 +45,18 @@ export async function createSessionStep(input: {
     nodeId: input.nodeId,
   });
 
+  // Every axis below resolves tighter-wins against the cap inherited from the
+  // delegating parent: a child may narrow what its parent granted, never widen
+  // it. Root runs have no inherited limits, so their configured values apply.
   const session = createSession({
     compactionOverrides: {
       thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
     },
     continuationToken: input.continuationToken,
     limits: {
+      // Inherited token limits are the parent's remaining quota share at
+      // dispatch time; an authored `false` uncaps only when there is nothing
+      // to inherit.
       maxInputTokensPerSession: resolveInheritedTokenLimit({
         configured: bundle.resolvedAgent.config.limits?.maxInputTokensPerSession,
         inherited: input.inheritedLimits?.maxInputTokensPerSession,
@@ -61,10 +70,18 @@ export async function createSessionStep(input: {
     rootSessionId: input.rootSessionId,
     sessionId: input.sessionId,
     subagentDepth: input.subagentDepth,
-    subagentMaxDepth:
-      input.inheritedLimits?.maxSubagentDepth ??
-      bundle.resolvedAgent.config.limits?.maxSubagentDepth,
+    // Depth is absolute (root = 0), so the tighter cap lets a child stop
+    // delegation earlier in its subtree but never extend past the root's cap.
+    subagentMaxDepth: resolveInheritedCountLimit({
+      configured: bundle.resolvedAgent.config.limits?.maxSubagentDepth,
+      inherited: input.inheritedLimits?.maxSubagentDepth,
+    }),
     turnAgent: bundle.turnAgent,
+    // Caps one Workflow invocation's fan-out anywhere in this session.
+    workflowMaxSubagents: resolveInheritedCountLimit({
+      configured: bundle.resolvedAgent.config.limits?.maxSubagents,
+      inherited: input.inheritedLimits?.maxSubagents,
+    }),
   });
 
   return { state: createDurableSessionState({ session }) };

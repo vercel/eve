@@ -106,6 +106,9 @@ export interface AgentLimitsDefinition {
    * Root sessions are depth 0. A `maxSubagentDepth` of 3 allows child sessions at
    * depths 1, 2, and 3; sessions already at depth 3 cannot delegate again.
    *
+   * Delegated subagent sessions resolve this against the cap inherited from
+   * the delegating parent; the tighter value wins.
+   *
    * @default 3
    */
   readonly maxSubagentDepth?: number;
@@ -118,6 +121,9 @@ export interface AgentLimitsDefinition {
    * remote-agent calls, counted across the whole program (sequential and
    * parallel calls alike). Calls beyond the limit fail with an error result
    * instead of starting a child session.
+   *
+   * Delegated subagent sessions resolve this against the cap inherited from
+   * the delegating parent; the tighter value wins.
    *
    * @default 100
    */

@@ -185,8 +185,8 @@ describe("buildSubagentRunInput", () => {
       session: {
         ...makeSession(),
         subagentMaxDepth: 4,
+        workflowMaxSubagents: 7,
       },
-      workflowMaxSubagents: 7,
     });
 
     expect(runInput.limits).toEqual({

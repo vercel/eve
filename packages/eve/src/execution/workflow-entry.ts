@@ -29,7 +29,7 @@ import {
   createSessionDeliveryHook,
   type SessionDeliveryHook,
 } from "#execution/session-delivery-hook.js";
-import { readSerializedSubagentSessionDepth } from "#harness/subagent-depth.js";
+import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
 
 // workflow-entry.ts is the durable workflow body — the bundler rejects
 // node built-ins here, so `internal/logging.ts` cannot be imported.
@@ -88,7 +88,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     // Derived once and reused for createSession + tag emission so the
     // chain-root id can never drift between persisted session and tags.
     const rootSessionIdFromParent = readRootSessionId(input.serializedContext);
-    const { subagentDepth } = readSerializedSubagentSessionDepth(input.serializedContext);
+    const subagentDepth = readSerializedSubagentDepth(input.serializedContext);
 
     const { state: sessionState } = await createSessionStep({
       compiledArtifactsSource: serializedBundle.source,

@@ -14,7 +14,6 @@ import {
   CapabilitiesKey,
   ChannelInstrumentationKey,
   InitiatorAuthKey,
-  WorkflowMaxSubagentsKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
@@ -42,7 +41,7 @@ import {
 } from "#execution/remote-agent-dispatch.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#execution/subagent-tool.js";
-import { startWorkflowRuntimeRun, workflowEntryReference } from "#execution/workflow-runtime.js";
+import { createWorkflowRuntime, workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import {
@@ -52,7 +51,6 @@ import {
   resolveSubagentDelegationLimit,
   type SubagentDelegationLimit,
 } from "#harness/subagent-depth.js";
-import { resolveInheritedCountLimit } from "#execution/run-session-limits.js";
 
 const log = createLogger("execution.dispatch-runtime-actions");
 
@@ -90,10 +88,6 @@ export async function dispatchRuntimeActionsStep(input: {
   const capabilities = ctx.get(CapabilitiesKey);
   const channelMetadata = ctx.get(ChannelInstrumentationKey);
   const initiatorAuth = ctx.get(InitiatorAuthKey) ?? null;
-  const workflowMaxSubagents = resolveInheritedCountLimit({
-    configured: bundle.resolvedAgent.config.limits?.maxSubagents,
-    inherited: ctx.get(WorkflowMaxSubagentsKey),
-  });
   const writer = input.parentWritable.getWriter();
 
   const adapterCtx = buildAdapterContext(adapter, ctx);
@@ -133,6 +127,10 @@ export async function dispatchRuntimeActionsStep(input: {
             registered?.definition.kind === "subagent"
               ? { description: registered.definition.description, type: "local" }
               : { type: "runtime" };
+          const childRuntime = createWorkflowRuntime({
+            compiledArtifactsSource: bundle.compiledArtifactsSource,
+            nodeId: action.nodeId,
+          });
           const { childContinuationToken, runInput } = buildSubagentRunInput({
             action,
             auth,
@@ -144,13 +142,8 @@ export async function dispatchRuntimeActionsStep(input: {
             parentContinuationToken: input.parentContinuationToken,
             session,
             source,
-            workflowMaxSubagents,
           });
-          const handle = await startWorkflowRuntimeRun({
-            compiledArtifactsSource: bundle.compiledArtifactsSource,
-            nodeId: action.nodeId,
-            run: runInput,
-          });
+          const handle = await childRuntime.run(runInput);
 
           nextSession = recordPendingSubagentChildToken({
             callId: action.callId,

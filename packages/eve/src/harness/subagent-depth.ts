@@ -1,4 +1,4 @@
-import { SubagentDepthKey, SubagentMaxDepthKey } from "#context/keys.js";
+import { SubagentDepthKey } from "#context/keys.js";
 import type { HarnessSession } from "#harness/types.js";
 import type {
   RuntimeActionRequest,
@@ -32,18 +32,11 @@ export function resolveSubagentDelegationLimit(
   };
 }
 
-export function readSerializedSubagentSessionDepth(
+export function readSerializedSubagentDepth(
   serializedContext: Readonly<Record<string, unknown>>,
-): {
-  readonly subagentDepth?: number;
-  readonly subagentMaxDepth?: number;
-} {
+): number | undefined {
   const subagentDepth = parseSubagentDepth(serializedContext[SubagentDepthKey.name]);
-  const subagentMaxDepth = parseSubagentMaxDepth(serializedContext[SubagentMaxDepthKey.name]);
-  return {
-    subagentDepth: subagentDepth === 0 ? undefined : subagentDepth,
-    subagentMaxDepth,
-  };
+  return subagentDepth === 0 ? undefined : subagentDepth;
 }
 
 export function isSubagentDelegationAction(

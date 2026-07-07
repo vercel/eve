@@ -3,6 +3,7 @@ import { formatSubagentInput } from "#execution/subagent-invocation.js";
 import type {
   ChannelInstrumentationProjection,
   RunInput,
+  RunSessionLimits,
   SessionAuthContext,
   SessionCapabilities,
 } from "#channel/types.js";
@@ -68,10 +69,6 @@ export function buildSubagentRunInput(input: {
   readonly parentContinuationToken?: string;
   readonly session: HarnessSession;
   readonly source: SubagentInputSource;
-  /**
-   * Effective `limits.maxSubagents` cap for Workflow invocations in the child.
-   */
-  readonly workflowMaxSubagents?: number;
 }): SubagentRunInputBuild {
   const {
     action,
@@ -97,15 +94,15 @@ export function buildSubagentRunInput(input: {
   // children.
   const rootSessionId = session.rootSessionId ?? session.sessionId;
   const delegationLimit = resolveSubagentDelegationLimit(session);
-  const inheritedLimits = {
-    ...resolveRemainingSessionTokenLimits(session, input.fanoutSize),
-    ...(session.subagentMaxDepth === undefined
-      ? {}
-      : { maxSubagentDepth: session.subagentMaxDepth }),
-    ...(input.workflowMaxSubagents === undefined
-      ? {}
-      : { maxSubagents: input.workflowMaxSubagents }),
-  };
+  const inheritedLimits: {
+    -readonly [K in keyof RunSessionLimits]: RunSessionLimits[K];
+  } = resolveRemainingSessionTokenLimits(session, input.fanoutSize);
+  if (session.subagentMaxDepth !== undefined) {
+    inheritedLimits.maxSubagentDepth = session.subagentMaxDepth;
+  }
+  if (session.workflowMaxSubagents !== undefined) {
+    inheritedLimits.maxSubagents = session.workflowMaxSubagents;
+  }
 
   const runInput: {
     -readonly [K in keyof RunInput]: RunInput[K];

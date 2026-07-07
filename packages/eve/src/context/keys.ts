@@ -13,7 +13,6 @@ import type {
   SessionCallback,
   SessionCapabilities,
   SessionParent,
-  RunSessionLimits,
   SessionTurn,
 } from "#channel/types.js";
 import { ContextKey } from "#context/key.js";
@@ -68,10 +67,6 @@ export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationPr
 export const ModeKey = new ContextKey<RunMode>("eve.mode");
 export const ParentSessionKey = new ContextKey<SessionParent>("eve.parentSession");
 export const SubagentDepthKey = new ContextKey<number>("eve.subagentDepth");
-export const SubagentMaxDepthKey = new ContextKey<number>("eve.subagentMaxDepth");
-export const WorkflowMaxSubagentsKey = new ContextKey<
-  NonNullable<RunSessionLimits["maxSubagents"]>
->("eve.workflowMaxSubagents");
 
 /**
  * Session-level capability flags (see {@link SessionCapabilities}). Set

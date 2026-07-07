@@ -9,13 +9,7 @@ import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
 import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
 import { dispatchDynamicToolEvent } from "#context/dynamic-tool-lifecycle.js";
-import {
-  AuthKey,
-  CapabilitiesKey,
-  ContinuationTokenKey,
-  ModeKey,
-  WorkflowMaxSubagentsKey,
-} from "#context/keys.js";
+import { AuthKey, CapabilitiesKey, ContinuationTokenKey, ModeKey } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { runStep, withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
@@ -68,7 +62,6 @@ import { createExecutionNodeStep } from "#execution/node-step.js";
 import { emitProxiedInputRequest, routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
 import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
-import { resolveInheritedCountLimit } from "#execution/run-session-limits.js";
 import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import {
@@ -317,10 +310,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     }
 
     const capabilities = ctx.get(CapabilitiesKey);
-    const workflowMaxSubagents = resolveInheritedCountLimit({
-      configured: bundle.resolvedAgent.config.limits?.maxSubagents,
-      inherited: ctx.get(WorkflowMaxSubagentsKey),
-    });
 
     const runHarnessStep = async (
       lifecycleSession: HarnessSession,
@@ -345,7 +334,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           nodeId: bundle.nodeId,
         },
         node: bundle.graph.root,
-        workflowMaxSubagents,
+        workflowMaxSubagents: refreshedSession.workflowMaxSubagents,
       });
       return step(refreshedSession, stepInput);
     };

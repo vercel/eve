@@ -85,6 +85,13 @@ export interface HarnessSession {
    * harness uses the framework default.
    */
   readonly subagentMaxDepth?: number;
+  /**
+   * Effective maximum subagent calls one `Workflow` invocation may dispatch
+   * for this session. Resolved at session creation as the tighter of the
+   * agent's `limits.maxSubagents` and any cap inherited from the parent run.
+   * When omitted, the dispatch step applies the framework default.
+   */
+  readonly workflowMaxSubagents?: number;
 }
 
 /**
