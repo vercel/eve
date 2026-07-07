@@ -10,9 +10,12 @@ import {
 import { loadCompileMetadata } from "#runtime/loaders/compile-metadata.js";
 import type { RuntimeSandboxTemplatePlan } from "#runtime/sandbox/template-plan.js";
 
-// v6: the local backend's default engine moved from just-bash to
-// Docker; bumping invalidates just-bash-era template state.
-const RUNTIME_SANDBOX_CONTRACT_VERSION = 6;
+/*
+ * Template keys include this version for sandbox runtime contract changes
+ * that are not captured by source or resource hashes. Version 7 writes static
+ * skill seed files to the sandbox user's $HOME/.agents/skills directory.
+ */
+const RUNTIME_SANDBOX_CONTRACT_VERSION = 7;
 
 /**
  * Input for deriving the stable runtime keys used for one sandbox definition.

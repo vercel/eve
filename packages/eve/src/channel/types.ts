@@ -5,12 +5,18 @@ import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
+import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 
 export type { ContextAccessor } from "#context/key.js";
 export type { ChannelInstrumentationProjection } from "#channel/instrumentation.js";
 
 import type { ChannelInstrumentationProjection } from "#channel/instrumentation.js";
+
+export type RunSessionLimits = Pick<
+  AgentLimitsDefinition,
+  "maxInputTokensPerSession" | "maxOutputTokensPerSession" | "maxSubagentDepth" | "maxSubagents"
+>;
 
 // ---------------------------------------------------------------------------
 // Lineage
@@ -273,16 +279,18 @@ export interface RunInput {
   readonly mode: RunMode;
   readonly parent?: SessionParent;
   /**
+   * Runtime-supplied session limits. Delegated local subagents use this to
+   * carry the parent's remaining quota and delegation caps with the same limit
+   * fields authors configure on agents; `false` means no inherited token cap
+   * for that axis.
+   */
+  readonly limits?: RunSessionLimits;
+  /**
    * Framework-owned depth of delegated local subagent sessions. Root sessions
    * omit this and are treated as depth 0; each local child receives
    * parent depth + 1.
    */
   readonly subagentDepth?: number;
-  /**
-   * Optional maximum delegated subagent depth inherited by this run. When
-   * omitted, the session uses its resolved agent config or eve's default.
-   */
-  readonly subagentMaxDepth?: number;
 }
 
 export interface DeliverInput {

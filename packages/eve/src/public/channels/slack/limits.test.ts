@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   SLACK_BLOCK_KIT_PLAIN_TEXT_MAX_LENGTH,
+  SLACK_CARD_BODY_TEXT_MAX_LENGTH,
+  SLACK_CARD_SUBTEXT_MAX_LENGTH,
   SLACK_MESSAGE_TEXT_MAX_LENGTH,
   SLACK_MODAL_TITLE_MAX_LENGTH,
   SLACK_SECTION_TEXT_MAX_LENGTH,
   SLACK_TYPING_STATUS_MAX_LENGTH,
+  truncateCardBodyText,
+  truncateCardSubtext,
   truncateMessageText,
   truncateModalTitle,
   truncatePlainText,
@@ -94,6 +98,32 @@ describe("truncateSectionText", () => {
   it("does not append ellipsis when the input is exactly at the limit", () => {
     const exact = "p".repeat(SLACK_SECTION_TEXT_MAX_LENGTH);
     expect(truncateSectionText(exact)).toBe(exact);
+  });
+});
+
+describe("truncateCardBodyText", () => {
+  it("returns short strings unchanged", () => {
+    expect(truncateCardBodyText("Approve deploy?")).toBe("Approve deploy?");
+  });
+
+  it("caps long strings at the card body limit with a trailing ellipsis", () => {
+    const long = "c".repeat(SLACK_CARD_BODY_TEXT_MAX_LENGTH + 50);
+    const result = truncateCardBodyText(long);
+    expect(result.length).toBeLessThanOrEqual(SLACK_CARD_BODY_TEXT_MAX_LENGTH);
+    expect(result.endsWith("...")).toBe(true);
+  });
+});
+
+describe("truncateCardSubtext", () => {
+  it("returns short strings unchanged", () => {
+    expect(truncateCardSubtext(":white_check_mark: *Allow*")).toBe(":white_check_mark: *Allow*");
+  });
+
+  it("caps long strings at the card subtext limit with a trailing ellipsis", () => {
+    const long = "s".repeat(SLACK_CARD_SUBTEXT_MAX_LENGTH + 50);
+    const result = truncateCardSubtext(long);
+    expect(result.length).toBeLessThanOrEqual(SLACK_CARD_SUBTEXT_MAX_LENGTH);
+    expect(result.endsWith("...")).toBe(true);
   });
 });
 

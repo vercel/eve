@@ -82,7 +82,7 @@ agent/sandbox/
     scripts/run.sh          ← lands at /workspace/scripts/run.sh
 ```
 
-Every file under `workspace/` mirrors into the sandbox cwd with its structure intact, and eve lists the top-level entries to the model in the prompt automatically. One subtree is off limits. Skill discovery already seeds skill files under `/workspace/skills/`, so authoring `agent/sandbox/workspace/skills/...` is rejected; put those under `agent/skills/` instead.
+Every file under `workspace/` mirrors into the sandbox cwd with its structure intact, and eve lists the top-level entries to the model in the prompt automatically. `agent/skills/` files are materialized separately under `$HOME/.agents/skills/`, so `agent/sandbox/workspace/skills/...` is an ordinary workspace subtree when you choose to author one.
 
 ## Overriding the sandbox
 

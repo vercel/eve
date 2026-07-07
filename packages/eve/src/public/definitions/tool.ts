@@ -15,10 +15,18 @@ import {
   DYNAMIC_SENTINEL_KIND,
   TOOL_BRAND,
   type DynamicEvents,
+  type DynamicEventsWithFallback,
   type DynamicSentinel,
 } from "#shared/dynamic-tool-definition.js";
 
 type ApprovalContextInput<TInput> = unknown extends TInput ? Record<string, unknown> : TInput;
+type DynamicEventMapHandler<TEvents extends DynamicEvents> = Extract<
+  NonNullable<TEvents[keyof TEvents]>,
+  (...args: never[]) => unknown
+>;
+type DynamicEventMapResult<TEvents extends DynamicEvents> = Awaited<
+  ReturnType<DynamicEventMapHandler<TEvents>>
+>;
 
 export type { ToolModelOutput } from "#shared/tool-definition.js";
 
@@ -262,11 +270,25 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
  * whose name matches an authored one overrides it; two dynamic resolvers
  * emitting the same name is an error.
  */
-export function defineDynamic(definition: { readonly events: DynamicEvents }): DynamicSentinel {
-  const sentinel: DynamicSentinel = {
+export function defineDynamic<const TEvents extends DynamicEvents>(definition: {
+  readonly events: TEvents;
+}): DynamicSentinel<DynamicEventMapResult<TEvents>>;
+export function defineDynamic<
+  const TEvents extends DynamicEventsWithFallback,
+  TFallback = unknown,
+>(definition: {
+  readonly fallback: TFallback;
+  readonly events: TEvents;
+}): DynamicSentinel<Exclude<DynamicEventMapResult<TEvents>, undefined>, TFallback>;
+export function defineDynamic<TResult = unknown, TFallback = unknown>(definition: {
+  readonly fallback?: TFallback;
+  readonly events: DynamicEvents<TResult>;
+}): DynamicSentinel<TResult, TFallback> {
+  const sentinel = {
     kind: DYNAMIC_SENTINEL_KIND,
     events: definition.events,
-  };
+    ...(Object.hasOwn(definition, "fallback") ? { fallback: definition.fallback } : {}),
+  } as DynamicSentinel<TResult, TFallback>;
   stampDefinitionKey(sentinel, `dynamic:${Object.keys(definition.events).join(",")}`);
   return sentinel;
 }

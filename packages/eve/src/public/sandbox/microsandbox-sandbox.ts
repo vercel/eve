@@ -9,7 +9,7 @@ import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
  * stay stable while the underlying runtime evolves. Supported hosts:
  * macOS on Apple Silicon, or Linux (glibc) with KVM enabled.
  */
-export interface MicrosandboxCreateOptions {
+export interface MicrosandboxSandboxCreateOptions {
   /**
    * OCI image used as the base runtime. eve prepares this image with
    * Bash, the framework workspace, and the sandbox user before authored

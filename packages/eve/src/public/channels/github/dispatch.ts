@@ -39,7 +39,7 @@ import type {
   GitHubInboundResult,
   GitHubInboundResultOrPromise,
 } from "#public/channels/github/githubChannel.js";
-import type { SendFn } from "#public/definitions/defineChannel.js";
+import type { SendFn } from "#public/definitions/channel.js";
 
 const log = createLogger("github.dispatch");
 

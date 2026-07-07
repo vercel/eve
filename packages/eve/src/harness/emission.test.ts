@@ -493,6 +493,68 @@ describe("emitStreamContent action requests", () => {
     ]);
     expect(providerResult.trailingInlineToolResultParts).toEqual([]);
   });
+
+  it("turns non-object tool call input into a failed tool result for the model", async () => {
+    const tools = new Map<string, HarnessToolDefinition>([
+      [
+        "web_search",
+        {
+          description: "Search the web.",
+          execute: async () => ({ results: [] }),
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "web_search",
+        },
+      ],
+    ]);
+    const emit = createEmitStub();
+    const message =
+      'Failed to parse tool-call arguments for "web_search" (call-bad): Expected a JSON-serializable object.';
+
+    const result = await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        {
+          input: "not an object",
+          toolCallId: "call-bad",
+          toolName: "web_search",
+          type: "tool-call",
+        },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+      {
+        excludedActionToolNames: new Set(),
+        tools,
+      },
+    );
+
+    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    expect(events).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          error: { code: "ACTION_RESULT_FAILED", message },
+          result: {
+            callId: "call-bad",
+            isError: true,
+            kind: "tool-result",
+            output: message,
+            toolName: "web_search",
+          },
+          status: "failed",
+        }),
+        type: "action.result",
+      }),
+    ]);
+    expect([...result.invalidInputToolCallIds]).toEqual(["call-bad"]);
+    expect(result.trailingInlineToolResultParts).toEqual([
+      {
+        output: { type: "error-text", value: message },
+        toolCallId: "call-bad",
+        toolName: "web_search",
+        type: "tool-result",
+      },
+    ]);
+  });
 });
 
 describe("emitStreamContent error-part handling", () => {

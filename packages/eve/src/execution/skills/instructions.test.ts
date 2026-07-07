@@ -37,23 +37,31 @@ describe("formatAvailableSkillsSection", () => {
     expect(result).toContain(
       "If multiple skills match, activate the minimal set that covers the task.",
     );
-    expect(result).toContain("Packaged sibling files under a skill path can be inspected");
     expect(result).toContain(
-      "- test-skill: A test skill (path: /workspace/skills/test-skill/SKILL.md)",
+      "Skill files are available after load_skill resolves the active sandbox skill location.",
     );
+    expect(result).toContain(
+      "resolve them relative to the directory containing that specific SKILL.md",
+    );
+    expect(result).toContain("- test-skill: A test skill");
+    expect(result).not.toContain("/workspace/skills");
   });
 
-  it("formats skill line with name and description", () => {
+  it("formats skill line with the resolved skill root", () => {
     const skill = createTestSkill({
       logicalPath: "skills/my-skill/SKILL.md",
       name: "my-skill",
     });
 
-    const result = formatAvailableSkillsSection([skill]);
+    const result = formatAvailableSkillsSection([skill], {
+      skillRoot: "/home/agent/.agents/skills",
+    });
 
+    expect(result).toContain("Skill files live under `/home/agent/.agents/skills/<skill>/`.");
     expect(result).toContain(
-      "- my-skill: A test skill (path: /workspace/skills/my-skill/SKILL.md)",
+      "- my-skill: A test skill (path: /home/agent/.agents/skills/my-skill/SKILL.md)",
     );
+    expect(result).not.toContain("fallback");
   });
 
   it("always lists all skills in the menu regardless of activation state", () => {
@@ -63,12 +71,8 @@ describe("formatAvailableSkillsSection", () => {
     const result = formatAvailableSkillsSection([s1, s2]);
 
     expect(result).toContain("Available skills");
-    expect(result).toContain(
-      "- skill-one: A test skill (path: /workspace/skills/skill-one/SKILL.md)",
-    );
-    expect(result).toContain(
-      "- skill-two: A test skill (path: /workspace/skills/skill-two/SKILL.md)",
-    );
+    expect(result).toContain("- skill-one: A test skill");
+    expect(result).toContain("- skill-two: A test skill");
   });
 
   it("never includes active skill markdown content", () => {
@@ -77,9 +81,7 @@ describe("formatAvailableSkillsSection", () => {
     const result = formatAvailableSkillsSection([skill]);
 
     expect(result).toContain("Available skills");
-    expect(result).toContain(
-      "- test-skill: A test skill (path: /workspace/skills/test-skill/SKILL.md)",
-    );
+    expect(result).toContain("- test-skill: A test skill");
     expect(result).not.toContain("Skill (test-skill)");
     expect(result).not.toContain("# Full Instructions");
   });

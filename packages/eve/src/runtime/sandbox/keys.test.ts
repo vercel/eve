@@ -12,7 +12,7 @@ import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-a
 import { withBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
 import { createRuntimeSandboxTemplateKey } from "#runtime/sandbox/keys.js";
 
-const RUNTIME_SANDBOX_CONTRACT_VERSION = 6;
+const RUNTIME_SANDBOX_CONTRACT_VERSION = 7;
 
 const CONTENT_HASH = "a".repeat(64);
 

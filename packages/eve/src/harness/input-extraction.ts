@@ -64,6 +64,7 @@ export function extractQuestionInputRequests(input: {
  */
 export function extractToolApprovalInputRequests(input: {
   readonly content: readonly ContentPart<ToolSet>[];
+  readonly excludedCallIds?: ReadonlySet<string>;
 }): InputRequest[] {
   const requests: InputRequest[] = [];
   const toolCallsById = new Map<string, TypedToolCall<ToolSet>>();
@@ -94,6 +95,10 @@ export function extractToolApprovalInputRequests(input: {
         ? undefined
         : toolCallsById.get(approvalRequest.toolCallId));
     if (toolCall === undefined) {
+      continue;
+    }
+
+    if (input.excludedCallIds?.has(toolCall.toolCallId)) {
       continue;
     }
 

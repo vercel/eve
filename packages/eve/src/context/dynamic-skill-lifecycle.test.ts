@@ -13,6 +13,8 @@ import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-contex
 import type { ResolvedDynamicSkillResolver } from "#runtime/types.js";
 import type { SkillPackageDefinition } from "#shared/skill-definition.js";
 
+const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
+
 function createMockBundle(authoredSkillNames: readonly string[] = []): CompiledBundle {
   return {
     adapterRegistry: undefined as never,
@@ -33,7 +35,11 @@ function createMockBundle(authoredSkillNames: readonly string[] = []): CompiledB
 
 function createCtx(authoredSkillNames: readonly string[] = []) {
   const ctx = new ContextContainer();
-  const sandbox = mockSandbox();
+  const sandbox = mockSandbox({
+    commands: {
+      [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+    },
+  });
   ctx.set(SessionIdKey, "test-session");
   ctx.set(SandboxKey, sandbox.access);
   ctx.set(BundleKey, createMockBundle(authoredSkillNames));
@@ -74,7 +80,7 @@ function makeSkill(description: string, markdown = description): SkillPackageDef
 
 describe("dispatchDynamicSkillEvent", () => {
   it("clears removed dynamic skills from the durable announcement", async () => {
-    const { ctx } = createCtx();
+    const { ctx, sandbox } = createCtx();
     let enabled = true;
     const resolver = createResolver("tenant", () =>
       enabled ? makeSkill("Tenant policy", "Follow tenant policy.") : null,
@@ -102,6 +108,7 @@ describe("dispatchDynamicSkillEvent", () => {
 
     expect(ctx.get(DynamicSkillManifestKey)).toEqual({});
     expect(ctx.get(PendingSkillAnnouncementKey)).toBe("");
+    expect(sandbox.removedPaths).toEqual(["/home/agent/.agents/skills/tenant"]);
   });
 
   it("keeps remaining dynamic skills in the announcement when one resolver removes its skill", async () => {
@@ -149,7 +156,9 @@ describe("dispatchDynamicSkillEvent", () => {
       custom: [{ description: "Talk like a dog", name: "talk-like-a-dog" }],
     });
     expect(ctx.get(PendingSkillAnnouncementKey)).toContain("talk-like-a-dog: Talk like a dog");
-    expect(sandbox.writes.some((w) => w.path.includes("/skills/talk-like-a-dog/"))).toBe(true);
+    expect(
+      sandbox.writes.some((w) => w.path.includes("/home/agent/.agents/skills/talk-like-a-dog/")),
+    ).toBe(true);
   });
 
   it("lets a dynamic skill override a same-named authored skill instead of throwing", async () => {
@@ -169,9 +178,11 @@ describe("dispatchDynamicSkillEvent", () => {
     expect(ctx.get(DynamicSkillManifestKey)).toEqual({
       custom: [{ description: "Dynamic override", name: "talk-like-a-dog" }],
     });
-    expect(sandbox.writes.some((w) => w.path.includes("/skills/talk-like-a-dog/SKILL.md"))).toBe(
-      true,
-    );
+    expect(
+      sandbox.writes.some((w) =>
+        w.path.includes("/home/agent/.agents/skills/talk-like-a-dog/SKILL.md"),
+      ),
+    ).toBe(true);
   });
 
   it("collapses a directly-returned single defineSkill to the bare slug", async () => {
@@ -188,7 +199,9 @@ describe("dispatchDynamicSkillEvent", () => {
     expect(ctx.get(DynamicSkillManifestKey)).toEqual({
       tenant: [{ description: "Tenant policy", name: "tenant" }],
     });
-    expect(sandbox.writes.some((w) => w.path.includes("/skills/tenant/"))).toBe(true);
+    expect(sandbox.writes.some((w) => w.path.includes("/home/agent/.agents/skills/tenant/"))).toBe(
+      true,
+    );
   });
 
   it("throws and recommends manual namespacing when two resolvers emit the same name", async () => {

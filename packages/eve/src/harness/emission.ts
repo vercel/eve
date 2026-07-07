@@ -43,6 +43,7 @@ import {
   createRuntimeActionRequestFromToolCall,
   resolveToolCallInputObject,
 } from "#harness/runtime-actions.js";
+import { createInvalidToolCallInputError } from "#harness/tool-call-input-errors.js";
 import type {
   RuntimeActionRequest,
   RuntimeToolResultActionResult,
@@ -332,6 +333,7 @@ export function normalizeAssistantStepFinishReason(
 interface EmittedStreamContent {
   readonly emittedActionCallIds: ReadonlySet<string>;
   readonly handledInlineToolResultCallIds: ReadonlySet<string>;
+  readonly invalidInputToolCallIds: ReadonlySet<string>;
   readonly inlineAuthorizationResults: readonly TypedToolResult<ToolSet>[];
   readonly inlineToolResultParts: readonly InlineToolResultPart[];
   readonly trailingInlineToolResultParts: readonly InlineToolResultPart[];
@@ -366,6 +368,7 @@ export async function emitStreamContent(
   const providerToolCallIdsSeen = new Set<string>();
   const providerActionBatch = createProviderStreamActionBatch({ emitFn, state });
   const handledInlineToolResultCallIds = new Set<string>();
+  const invalidInputToolCallIds = new Set<string>();
   const inlineAuthorizationResults: TypedToolResult<ToolSet>[] = [];
   const inlineToolResultParts: InlineToolResultPart[] = [];
   const trailingInlineToolResultParts: InlineToolResultPart[] = [];
@@ -467,10 +470,15 @@ export async function emitStreamContent(
         }),
       );
     } catch (error) {
-      // A malformed tool call can arrive before the SDK marks its final call
-      // invalid. Let the SDK's recovery path handle it instead of failing the
-      // whole step while projecting UI events.
       if (error instanceof TypeError) {
+        const toolError = createInvalidToolCallInputError({ error, toolCall });
+        invalidInputToolCallIds.add(toolCall.toolCallId);
+        if (currentMessage.trim().length > 0) {
+          await flushCurrentMessage();
+        }
+        await emitActionResult(createRuntimeToolResultFromToolError(toolError));
+        handledInlineToolResultCallIds.add(toolCall.toolCallId);
+        trailingInlineToolResultParts.push(createToolResultMessagePartFromToolError(toolError));
         return;
       }
       throw error;
@@ -666,6 +674,7 @@ export async function emitStreamContent(
   return {
     emittedActionCallIds,
     handledInlineToolResultCallIds,
+    invalidInputToolCallIds,
     inlineAuthorizationResults,
     inlineToolResultParts,
     trailingInlineToolResultParts,

@@ -20,6 +20,8 @@ export interface AlsContext extends ContextAccessor {
    * Used by the serialization layer to persist context at step boundaries.
    */
   entries(): Iterable<readonly [ContextKey<unknown>, unknown]>;
+  /** Stores a step-local value that shadows the durable value and is never serialized. */
+  setVirtualContext<T>(key: ContextKey<T>, value: T): void;
 }
 
 /**

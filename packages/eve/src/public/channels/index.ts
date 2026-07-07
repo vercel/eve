@@ -29,14 +29,14 @@ export {
   type WebSocketRouteHooks,
   type WebSocketUpgradeRequest,
   type WebSocketUpgradeResult,
-} from "#public/definitions/defineChannel.js";
+} from "#public/definitions/channel.js";
 export {
   createWebSocketUpgradeServer,
   type WebSocketUpgradeServerBridge,
 } from "#channel/websocket-upgrade-server.js";
 
 import { getChannelInstrumentationKind } from "#channel/compiled-channel.js";
-import type { Channel } from "#public/definitions/defineChannel.js";
+import type { Channel } from "#public/definitions/channel.js";
 
 // ---------------------------------------------------------------------------
 // Channel metadata maps and isChannel narrowing

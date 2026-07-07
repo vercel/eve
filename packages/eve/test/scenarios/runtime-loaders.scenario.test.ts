@@ -434,7 +434,7 @@ describe("runtime compiled artifact loaders", () => {
     });
     expect(resolvedAgent.instructions).toEqual(manifest.instructions);
     expect(resolvedAgent.workspaceSpec).toEqual({
-      rootEntries: ["skills/"],
+      rootEntries: [],
     });
     expect(Object.keys(moduleMap.nodes)).toEqual([ROOT_COMPILED_AGENT_NODE_ID]);
   });

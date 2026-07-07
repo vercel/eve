@@ -1,4 +1,4 @@
-import type { MicrosandboxCreateOptions } from "#public/sandbox/microsandbox-sandbox.js";
+import type { MicrosandboxSandboxCreateOptions } from "#public/sandbox/microsandbox-sandbox.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 
 export const MICROSANDBOX_DEFAULT_IMAGE = "ghcr.io/vercel/eve:latest";
@@ -29,7 +29,7 @@ export interface ResolvedMicrosandboxOptions {
  * Applies defaults to `microsandbox(opts)`.
  */
 export function resolveMicrosandboxOptions(
-  options: MicrosandboxCreateOptions | undefined,
+  options: MicrosandboxSandboxCreateOptions | undefined,
 ): ResolvedMicrosandboxOptions {
   return {
     cpus: options?.cpus ?? MICROSANDBOX_DEFAULT_CPUS,

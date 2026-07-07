@@ -1,7 +1,7 @@
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
-import type { ResolvedSchedule } from "#runtime/types.js";
+import type { ResolvedScheduleDefinition } from "#runtime/types.js";
 import { createScheduleRegistrations } from "#runtime/schedules/register.js";
 
 /**
@@ -44,7 +44,9 @@ class ResolveScheduleError extends Error {
 /**
  * Resolves runtime-owned schedules from the compiled manifest.
  */
-export async function resolveSchedules(input: ResolveSchedulesInput): Promise<ResolvedSchedule[]> {
+export async function resolveSchedules(
+  input: ResolveSchedulesInput,
+): Promise<ResolvedScheduleDefinition[]> {
   return [...input.manifest.schedules].map((schedule) => {
     const base = {
       cron: schedule.cron,
@@ -56,10 +58,10 @@ export async function resolveSchedules(input: ResolveSchedulesInput): Promise<Re
     };
 
     if (schedule.markdown !== undefined) {
-      return { ...base, markdown: schedule.markdown } as ResolvedSchedule;
+      return { ...base, markdown: schedule.markdown } as ResolvedScheduleDefinition;
     }
 
-    return base as ResolvedSchedule;
+    return base as ResolvedScheduleDefinition;
   });
 }
 
@@ -69,7 +71,7 @@ export async function resolveSchedules(input: ResolveSchedulesInput): Promise<Re
  */
 export async function loadResolvedCompiledSchedules(
   input: LoadResolvedCompiledSchedulesInput,
-): Promise<ResolvedSchedule[]> {
+): Promise<ResolvedScheduleDefinition[]> {
   const manifest = await loadCompiledManifest({
     compiledArtifactsSource: input.compiledArtifactsSource,
   });
@@ -86,7 +88,7 @@ export async function loadResolvedCompiledSchedules(
 export async function loadResolvedCompiledScheduleByTaskName(
   taskName: string,
   input: LoadResolvedCompiledSchedulesInput,
-): Promise<ResolvedSchedule> {
+): Promise<ResolvedScheduleDefinition> {
   const schedules = await loadResolvedCompiledSchedules(input);
   const scheduleBySourceId = new Map(schedules.map((schedule) => [schedule.sourceId, schedule]));
 

@@ -98,6 +98,10 @@ const response = await session.send({
 await response.result();
 ```
 
+The stream confirms the turn with `message.received`. Its `data.message` remains the flattened
+summary for compatibility, and `data.parts` contains structured text and file metadata for clients
+that render attachments. File parts never include raw bytes or internal sandbox paths.
+
 ## Answer human input requests
 
 Tools can pause for approval or ask the user a question. The stream emits `input.requested` with one or more requests. Reply through the same session with `inputResponses`:

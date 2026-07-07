@@ -7,7 +7,11 @@ import {
 } from "#internal/authored-module.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
 import { normalizeJsonSchemaDefinition } from "#internal/json-schema.js";
-import { isDynamicSentinel, type DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
+import {
+  isDynamicSentinel,
+  rejectDynamicSentinelFallback,
+  type DynamicToolEventName,
+} from "#shared/dynamic-tool-definition.js";
 
 /**
  * Canonical normalized shape of one authored tool default export.
@@ -45,6 +49,7 @@ type NormalizedToolEntry =
  */
 export function normalizeToolDefinition(value: unknown, message: string): NormalizedToolEntry {
   if (isDynamicSentinel(value)) {
+    rejectDynamicSentinelFallback(value, message);
     return {
       kind: "dynamic-tool",
       eventNames: Object.keys(value.events) as DynamicToolEventName[],

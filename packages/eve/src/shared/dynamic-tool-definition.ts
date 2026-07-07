@@ -140,11 +140,18 @@ export type DynamicToolEvents = {
  * the slot directory (tools/ vs skills/) determines the required return,
  * validated at runtime by the respective resolver.
  */
-export type DynamicEvents = {
+export type DynamicEvents<TResult = unknown> = {
   readonly [K in DynamicToolEventName]?: (
     event: unknown,
     ctx: DynamicResolveContext,
-  ) => unknown | Promise<unknown>;
+  ) => TResult | Promise<TResult>;
+};
+
+export type DynamicEventsWithFallback<TResult = unknown> = {
+  readonly [K in DynamicToolEventName]?: (
+    event: unknown,
+    ctx: DynamicResolveContext,
+  ) => Exclude<TResult, undefined> | Promise<Exclude<TResult, undefined>>;
 };
 
 /**
@@ -153,13 +160,26 @@ export type DynamicEvents = {
 export const DYNAMIC_SENTINEL_KIND = "eve:dynamic" as const;
 
 /**
- * Return value of `defineDynamic`: the runtime shape of a
- * `defineDynamic({ events })` export, stamped with a sentinel kind the
- * compiler/normalizer detects.
+ * Return value of `defineDynamic`: the runtime shape of a dynamic export,
+ * stamped with a sentinel kind the compiler/normalizer detects. `TFallback`
+ * is `never` except for dynamic agent models, the only slot with a fallback.
  */
-export interface DynamicSentinel {
+export type DynamicSentinel<TResult = unknown, TFallback = never> = {
   readonly kind: typeof DYNAMIC_SENTINEL_KIND;
-  readonly events: DynamicEvents;
+  readonly events: DynamicEvents<TResult>;
+} & ([TFallback] extends [never] ? object : { readonly fallback: TFallback });
+
+/**
+ * Throws when a dynamic sentinel outside the agent `model` slot carries a
+ * `fallback` — anywhere else it would be silently dead configuration.
+ */
+export function rejectDynamicSentinelFallback(sentinel: DynamicSentinel, message: string): void {
+  if (!("fallback" in sentinel)) {
+    return;
+  }
+  throw new Error(
+    `${message} "fallback" is only supported on a dynamic agent model (the "model" field in agent.ts). For dynamic tools, skills, and instructions, author a static entry as the default or return null.`,
+  );
 }
 
 export function isDynamicSentinel(value: unknown): value is DynamicSentinel {

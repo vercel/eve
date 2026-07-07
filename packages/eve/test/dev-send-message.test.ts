@@ -207,6 +207,7 @@ describe("sendDevelopmentMessage", () => {
       {
         data: {
           message: "Thanks",
+          parts: [{ text: "Thanks", type: "text" }],
           sequence: 2,
           turnId: "turn_002",
         },
@@ -371,6 +372,7 @@ describe("sendDevelopmentMessage", () => {
       {
         data: {
           message: "What's the weather?",
+          parts: [{ text: "What's the weather?", type: "text" }],
           sequence: 2,
           turnId: "turn_002",
         },

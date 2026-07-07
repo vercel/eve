@@ -14,8 +14,17 @@ import {
   expectString,
   getOptionalStringRecordProperty,
 } from "#internal/authored-module.js";
+import type { PublicAgentStaticModelDefinition } from "#shared/agent-definition.js";
+import {
+  isDynamicSentinel,
+  type DynamicEvents,
+  type DynamicToolEventName,
+} from "#shared/dynamic-tool-definition.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+type MutableDynamicEvents = {
+  -readonly [K in DynamicToolEventName]?: DynamicEvents[DynamicToolEventName];
+};
 
 type NormalizedAgentDefinition = Omit<AgentDefinition, "build"> & {
   build?: {
@@ -55,7 +64,7 @@ export function normalizeAgentDefinition(
   }
 
   const definition: Mutable<NormalizedAgentDefinition> = {
-    model: record.model as NormalizedAgentDefinition["model"],
+    model: normalizeAgentModelDefinition(record.model, message),
   };
 
   if (record.description !== undefined) {
@@ -128,6 +137,47 @@ function expectPositiveInteger(value: unknown, message: string): number {
   return value;
 }
 
+function normalizeAgentModelDefinition(
+  value: unknown,
+  message: string,
+): NormalizedAgentDefinition["model"] {
+  // Bare-sentinel check so a fallback-less defineDynamic hits the
+  // actionable error below instead of the generic invalid-model path.
+  if (!isDynamicSentinel(value)) {
+    return value as NormalizedAgentDefinition["model"];
+  }
+
+  const record = expectObjectRecord(value, message);
+  expectOnlyKnownKeys(record, ["events", "fallback", "kind"], message);
+
+  if (record.fallback === undefined) {
+    throw new Error(`${message} Dynamic model definitions must include a "fallback" model.`);
+  }
+
+  const rawEvents = expectObjectRecord(record.events, message);
+  const events: MutableDynamicEvents = {};
+  for (const [eventName, handler] of Object.entries(rawEvents)) {
+    events[eventName as DynamicToolEventName] = expectFunction(handler, message) as NonNullable<
+      DynamicEvents[DynamicToolEventName]
+    >;
+  }
+
+  return {
+    events,
+    fallback: record.fallback as PublicAgentStaticModelDefinition,
+    kind: record.kind,
+  } as NormalizedAgentDefinition["model"];
+}
+
+/** `false` means "explicitly uncapped" for session token limits. */
+function expectPositiveIntegerOrFalse(value: unknown, message: string): number | false {
+  if (value === false) {
+    return false;
+  }
+
+  return expectPositiveInteger(value, message);
+}
+
 function normalizeAgentLimitsDefinition(
   value: unknown,
   message: string,
@@ -141,13 +191,13 @@ function normalizeAgentLimitsDefinition(
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["limits"]>> = {};
 
   if (record.maxInputTokensPerSession !== undefined) {
-    normalizedDefinition.maxInputTokensPerSession = expectPositiveInteger(
+    normalizedDefinition.maxInputTokensPerSession = expectPositiveIntegerOrFalse(
       record.maxInputTokensPerSession,
       message,
     );
   }
   if (record.maxOutputTokensPerSession !== undefined) {
-    normalizedDefinition.maxOutputTokensPerSession = expectPositiveInteger(
+    normalizedDefinition.maxOutputTokensPerSession = expectPositiveIntegerOrFalse(
       record.maxOutputTokensPerSession,
       message,
     );
@@ -251,7 +301,12 @@ function normalizeAgentCompactionDefinition(
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["compaction"]>> = {};
 
   if (record.model !== undefined) {
-    normalizedDefinition.model = record.model as NormalizedAgentDefinition["model"];
+    if (isDynamicSentinel(record.model)) {
+      throw new Error(
+        `${message} "compaction.model" does not support defineDynamic — provide a static model.`,
+      );
+    }
+    normalizedDefinition.model = record.model as PublicAgentStaticModelDefinition;
   }
 
   if (record.modelContextWindowTokens !== undefined) {

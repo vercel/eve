@@ -213,6 +213,19 @@ describe("normalizeToolDefinition", () => {
     expect(entry.eventNames).toEqual(["session.started"]);
   });
 
+  it("rejects a defineDynamic tool export carrying a fallback", () => {
+    const dynamicTools = defineDynamic({
+      fallback: "not-supported-here",
+      events: {
+        "session.started": async () => ({}),
+      },
+    });
+
+    expect(() => normalizeToolDefinition(dynamicTools, FAILURE_MESSAGE)).toThrow(
+      '"fallback" is only supported on a dynamic agent model',
+    );
+  });
+
   it("handles defineDynamic with multiple events", () => {
     const dynamicTools = defineDynamic({
       events: {

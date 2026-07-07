@@ -15,6 +15,7 @@ import {
   resolvePendingInput,
   setPendingInputBatch,
 } from "#harness/input-requests.js";
+import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
 import { buildToolApproval, buildToolSet } from "#harness/tools.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 
@@ -97,6 +98,21 @@ describe("createRuntimeToolCallActionFromToolCall", () => {
     expect(result.input).toEqual({
       path: "/workspace/foo.txt",
     });
+  });
+
+  it("includes the tool name when tool call input is not a JSON object", () => {
+    expect(() =>
+      createRuntimeToolCallActionFromToolCall({
+        toolCall: {
+          toolCallId: "call-123",
+          toolName: "bash",
+          input: [],
+          type: "tool-call",
+        } as never,
+      }),
+    ).toThrow(
+      'Failed to parse tool-call arguments for "bash" (call-123): Expected a JSON-serializable object.',
+    );
   });
 });
 
@@ -788,5 +804,60 @@ describe("resolvePendingInput", () => {
         }),
       ),
     ).resolves.toBe("not-applicable");
+  });
+});
+
+describe("resolvePendingInput with a session-limit continuation batch", () => {
+  function createLimitBatchSession(): HarnessSession {
+    return setPendingInputBatch({
+      requests: [
+        createSessionLimitContinuationRequest({
+          sessionId: "sess-test",
+          totalUsedTokens: 12,
+          violation: { kind: "input", limit: 12, usedTokens: 12 },
+        }),
+      ],
+      responseMessages: [],
+      session: createHarnessSession(),
+    });
+  }
+
+  it("resolves a continue answer without appending tool messages", () => {
+    const result = resolvePendingInput({
+      session: createLimitBatchSession(),
+      stepInput: {
+        inputResponses: [{ optionId: "continue", requestId: "sess-test:limit:input:12" }],
+      },
+    });
+
+    expect(result.outcome).toBe("resolved");
+    expect(result.limitContinuation).toEqual({ granted: true });
+    // The prompt is harness-authored — no tool call exists in model history,
+    // so resolution must not append a tool message.
+    expect(result.messages).toEqual([{ content: "previous", role: "user" }]);
+  });
+
+  it("resolves a stop answer as not granted", () => {
+    const result = resolvePendingInput({
+      session: createLimitBatchSession(),
+      stepInput: {
+        inputResponses: [{ optionId: "stop", requestId: "sess-test:limit:input:12" }],
+      },
+    });
+
+    expect(result.outcome).toBe("resolved");
+    expect(result.limitContinuation).toEqual({ granted: false });
+    expect(result.messages).toEqual([{ content: "previous", role: "user" }]);
+  });
+
+  it("treats a plain follow-up message as ignoring the prompt", () => {
+    const result = resolvePendingInput({
+      session: createLimitBatchSession(),
+      stepInput: { message: "also do this other thing" },
+    });
+
+    expect(result.outcome).toBe("resolved");
+    expect(result.limitContinuation).toBeUndefined();
+    expect(result.messages).toEqual([{ content: "previous", role: "user" }]);
   });
 });

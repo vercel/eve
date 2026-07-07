@@ -31,7 +31,7 @@ import {
   type ChannelCors,
   type ChannelEvents,
   type ChannelSessionOps,
-} from "#public/definitions/defineChannel.js";
+} from "#public/definitions/channel.js";
 import type { ChannelMethod } from "#public/definitions/channel.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";

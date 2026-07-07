@@ -12,7 +12,6 @@ import {
   ParentSessionKey,
   SessionCallbackKey,
   SubagentDepthKey,
-  SubagentMaxDepthKey,
 } from "#context/keys.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 
@@ -63,9 +62,9 @@ export function buildRunContext(input: {
     ctx.set(SubagentDepthKey, run.subagentDepth);
   }
 
-  if (run.subagentMaxDepth !== undefined) {
-    ctx.set(SubagentMaxDepthKey, run.subagentMaxDepth);
-  }
+  // `run.limits` deliberately never enters the context: inherited limits ride
+  // the typed workflow-entry payload into `createSessionStep` and live on the
+  // session from then on.
 
   return ctx;
 }

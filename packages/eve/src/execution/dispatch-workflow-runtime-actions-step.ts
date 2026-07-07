@@ -49,7 +49,7 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
   const plan = planWorkflowSubagentDispatch({
     actions,
     interrupt: pending.interrupt,
-    maxSubagents: bundle.resolvedAgent.config.limits?.maxSubagents,
+    maxSubagents: durableSession.workflowMaxSubagents,
   });
 
   const blockedResults = plan.blocked.map((action) => {

@@ -94,7 +94,7 @@ export default defineSandbox({
   },
   {
     descriptor: SLACK_ROUTE_PORTABILITY_DESCRIPTOR,
-    include: ["src/public/channels/slack/index.ts", "src/public/definitions/defineChannel.ts"],
+    include: ["src/public/channels/slack/index.ts", "src/public/definitions/channel.ts"],
     name: "lets tsc typecheck a default-exported slackChannel without extra annotations",
     packageExports: {
       "./channels/slack": {
@@ -104,7 +104,7 @@ export default defineSandbox({
   },
   {
     descriptor: DISCORD_ROUTE_PORTABILITY_DESCRIPTOR,
-    include: ["src/public/channels/discord/index.ts", "src/public/definitions/defineChannel.ts"],
+    include: ["src/public/channels/discord/index.ts", "src/public/definitions/channel.ts"],
     name: "lets tsc typecheck a default-exported discordChannel without extra annotations",
     packageExports: {
       "./channels/discord": {
@@ -114,7 +114,7 @@ export default defineSandbox({
   },
   {
     descriptor: GITHUB_ROUTE_PORTABILITY_DESCRIPTOR,
-    include: ["src/public/channels/github/index.ts", "src/public/definitions/defineChannel.ts"],
+    include: ["src/public/channels/github/index.ts", "src/public/definitions/channel.ts"],
     name: "lets tsc typecheck a default-exported githubChannel without extra annotations",
     packageExports: {
       "./channels/github": {
@@ -124,7 +124,7 @@ export default defineSandbox({
   },
   {
     descriptor: TWILIO_ROUTE_PORTABILITY_DESCRIPTOR,
-    include: ["src/public/channels/twilio/index.ts", "src/public/definitions/defineChannel.ts"],
+    include: ["src/public/channels/twilio/index.ts", "src/public/definitions/channel.ts"],
     name: "lets tsc typecheck a default-exported twilioChannel without extra annotations",
     packageExports: {
       "./channels/twilio": {
@@ -134,7 +134,7 @@ export default defineSandbox({
   },
   {
     descriptor: TEAMS_ROUTE_PORTABILITY_DESCRIPTOR,
-    include: ["src/public/channels/teams/index.ts", "src/public/definitions/defineChannel.ts"],
+    include: ["src/public/channels/teams/index.ts", "src/public/definitions/channel.ts"],
     name: "lets tsc typecheck a default-exported teamsChannel without extra annotations",
     packageExports: {
       "./channels/teams": {
@@ -144,7 +144,7 @@ export default defineSandbox({
   },
   {
     descriptor: TELEGRAM_ROUTE_PORTABILITY_DESCRIPTOR,
-    include: ["src/public/channels/telegram/index.ts", "src/public/definitions/defineChannel.ts"],
+    include: ["src/public/channels/telegram/index.ts", "src/public/definitions/channel.ts"],
     name: "lets tsc typecheck a default-exported telegramChannel without extra annotations",
     packageExports: {
       "./channels/telegram": {

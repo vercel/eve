@@ -4,7 +4,7 @@
  * `#runtime/sessions/runtime-context-keys.ts`.
  */
 
-import type { SystemModelMessage } from "ai";
+import type { LanguageModel, SystemModelMessage } from "ai";
 
 import type { JsonObject } from "#shared/json.js";
 import type {
@@ -18,6 +18,7 @@ import type {
 import { ContextKey } from "#context/key.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 import type { RunMode } from "#shared/run-mode.js";
+import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 
 // Re-export so consumers don't need a direct channel/ import.
 export type { SessionAuthContext, SessionParent, SessionTurn } from "#channel/types.js";
@@ -67,7 +68,6 @@ export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationPr
 export const ModeKey = new ContextKey<RunMode>("eve.mode");
 export const ParentSessionKey = new ContextKey<SessionParent>("eve.parentSession");
 export const SubagentDepthKey = new ContextKey<number>("eve.subagentDepth");
-export const SubagentMaxDepthKey = new ContextKey<number>("eve.subagentMaxDepth");
 
 /**
  * Session-level capability flags (see {@link SessionCapabilities}). Set
@@ -87,6 +87,31 @@ export const SessionCallbackKey = new ContextKey<SessionCallback>("eve.sessionCa
 
 export const SessionKey = new ContextKey<Session>("eve.session");
 export const SandboxKey = new ContextKey<SandboxAccess>("eve.sandbox");
+
+// ---------------------------------------------------------------------------
+// Dynamic model keys
+// ---------------------------------------------------------------------------
+
+/** Session-scoped dynamic model selection (from `session.started`). */
+export const SessionDynamicModelReferenceKey = new ContextKey<RuntimeModelReference | null>(
+  "eve.sessionDynamicModelReference",
+);
+
+/** Turn-scoped dynamic model selection (from `turn.started`). */
+export const TurnDynamicModelReferenceKey = new ContextKey<RuntimeModelReference | null>(
+  "eve.turnDynamicModelReference",
+);
+
+export interface LiveDynamicModelSelection {
+  /** Live provider instance; absent for string selections, which resolve through the reference. */
+  readonly model?: LanguageModel;
+  readonly reference: RuntimeModelReference;
+}
+
+/** Virtual step-scoped dynamic model selection (from `step.started`); never serialized. */
+export const LiveStepDynamicModelSelectionKey = new ContextKey<LiveDynamicModelSelection | null>(
+  "eve.liveStepDynamicModelSelection",
+);
 
 // ---------------------------------------------------------------------------
 // Dynamic tool keys

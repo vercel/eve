@@ -1,6 +1,7 @@
 import type { LanguageModel, ModelMessage, UserContent } from "ai";
 
 import type { SessionCapabilities } from "#channel/types.js";
+import type { AlsContext } from "#context/container.js";
 import type { HandleMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
@@ -43,6 +44,8 @@ export interface SessionAgent {
    * When omitted, the harness uses the active turn model for compaction.
    */
   readonly compactionModelReference?: RuntimeModelReference;
+  /** `defineDynamic.fallback` for dynamic-model agents; serves whenever no scoped selection is set. */
+  readonly dynamicModelDefaultReference?: RuntimeModelReference;
   readonly modelReference: RuntimeModelReference;
   readonly reasoning?: AgentReasoningDefinition;
   readonly system: string;
@@ -85,6 +88,13 @@ export interface HarnessSession {
    * harness uses the framework default.
    */
   readonly subagentMaxDepth?: number;
+  /**
+   * Effective maximum subagent calls one `Workflow` invocation may dispatch
+   * for this session. Resolved at session creation as the tighter of the
+   * agent's `limits.maxSubagents` and any cap inherited from the parent run.
+   * When omitted, the dispatch step applies the framework default.
+   */
+  readonly workflowMaxSubagents?: number;
 }
 
 /**
@@ -92,9 +102,11 @@ export interface HarnessSession {
  */
 export interface SessionLimits {
   /**
-   * Maximum provider-reported input tokens this durable session may spend before
-   * eve refuses to start another model call. Defaults to 40M for root sessions
-   * and 5M for delegated subagent sessions.
+   * Maximum provider-reported input tokens this durable session may spend
+   * before eve refuses to start another model call. Absent when the session
+   * is uncapped. Root sessions default to 40M unless authored otherwise;
+   * delegated subagent sessions receive the parent's remaining quota at
+   * dispatch time.
    */
   readonly maxInputTokensPerSession?: number;
   /**
@@ -251,6 +263,12 @@ export interface ToolLoopHarnessConfig {
    * compacted history.
    */
   readonly onCompaction?: () => readonly ModelMessage[];
+  readonly dispatchDynamicModelEvent?: (input: {
+    readonly ctx: AlsContext;
+    readonly event: HandleMessageStreamEvent;
+    readonly fallback: RuntimeModelReference;
+    readonly messages: readonly ModelMessage[];
+  }) => Promise<void>;
   readonly resolveModel: (reference: RuntimeModelReference) => Promise<LanguageModel>;
   /**
    * Runtime identity metadata attached to the `session.started` event.
