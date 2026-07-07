@@ -43,11 +43,6 @@ export interface MicrosandboxSandboxCreateOptions {
 }
 
 /**
- * @deprecated Use {@link MicrosandboxSandboxCreateOptions} instead.
- */
-export type MicrosandboxCreateOptions = MicrosandboxSandboxCreateOptions;
-
-/**
  * Options accepted by the microsandbox backend's `bootstrap({ use })` hook.
  */
 export interface MicrosandboxBootstrapUseOptions {
