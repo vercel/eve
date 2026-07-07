@@ -13,7 +13,7 @@ import {
   messageToUserContent,
   type ChatSdkChannelState,
 } from "#public/channels/chat-sdk/index.js";
-import type { RouteHandlerArgs, SendFn } from "#public/definitions/defineChannel.js";
+import type { RouteHandlerArgs, SendFn } from "#public/definitions/channel.js";
 import type {
   Adapter,
   AdapterPostableMessage,

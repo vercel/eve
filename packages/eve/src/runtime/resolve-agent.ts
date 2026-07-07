@@ -1,4 +1,7 @@
-import type { CompiledAgentNodeManifest, CompiledInstructions } from "#compiler/manifest.js";
+import type {
+  CompiledAgentNodeManifest,
+  CompiledInstructionsDefinition,
+} from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { resolveChannelDefinition } from "#runtime/resolve-channel.js";
 
@@ -19,7 +22,7 @@ import type {
   ResolvedAgent,
   ResolvedChannelDefinition,
   ResolvedSkillDefinition,
-  ResolvedInstructions,
+  ResolvedInstructionsDefinition,
 } from "#runtime/types.js";
 
 /**
@@ -96,7 +99,7 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
     input.manifest.sandbox === null
       ? null
       : await resolveSandboxDefinition(input.manifest.sandbox, input.moduleMap, input.nodeId);
-  const instructions = createResolvedInstructions(input.manifest.instructions);
+  const instructions = createResolvedInstructionsDefinition(input.manifest.instructions);
   const workspaceResourceRoot = input.manifest.workspaceResourceRoot;
   const resolvedAgent: ResolvedAgent = {
     channels: resolvedChannels,
@@ -128,9 +131,9 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
   return resolvedAgent;
 }
 
-function createResolvedInstructions(
-  instructions: CompiledInstructions | undefined,
-): ResolvedInstructions | undefined {
+function createResolvedInstructionsDefinition(
+  instructions: CompiledInstructionsDefinition | undefined,
+): ResolvedInstructionsDefinition | undefined {
   if (instructions === undefined) {
     return undefined;
   }

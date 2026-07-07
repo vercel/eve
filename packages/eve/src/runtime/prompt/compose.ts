@@ -1,7 +1,7 @@
 import { formatAvailableSkillsSection } from "#execution/skills/instructions.js";
 import type {
   ResolvedConnectionDefinition,
-  ResolvedInstructions,
+  ResolvedInstructionsDefinition,
   ResolvedSkillDefinition,
 } from "#runtime/types.js";
 import { createWorkspacePromptSection } from "#runtime/workspace/spec.js";
@@ -17,7 +17,7 @@ const PARALLEL_ACTION_INSTRUCTION =
  */
 interface ComposeRuntimeBasePromptInput {
   connections?: readonly ResolvedConnectionDefinition[];
-  instructions?: ResolvedInstructions;
+  instructions?: ResolvedInstructionsDefinition;
   skills?: readonly ResolvedSkillDefinition[];
   toolsAvailable?: boolean;
   workspaceSpec?: WorkspaceRuntimeSpec;
@@ -38,7 +38,7 @@ export function composeRuntimeBasePrompt(input: ComposeRuntimeBasePromptInput): 
 }
 
 function createInstructionsPromptBlocks(
-  instructions: ResolvedInstructions | undefined,
+  instructions: ResolvedInstructionsDefinition | undefined,
 ): readonly string[] {
   if (instructions === undefined) {
     return [];

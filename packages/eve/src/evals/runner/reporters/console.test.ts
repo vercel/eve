@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
-import { ConsoleReporter } from "#evals/runner/reporters/console.js";
+import { Console } from "#evals/runner/reporters/console.js";
 import type { EveEvalResult, EveEvalRunSummary } from "#evals/types.js";
 
-describe("ConsoleReporter", () => {
+describe("Console", () => {
   it("reports skipped evals and their reason", () => {
     const lines: string[] = [];
-    const reporter = new ConsoleReporter({ color: false, log: (line) => lines.push(line) });
+    const reporter = Console({ color: false, log: (line) => lines.push(line) });
     const result = skippedResult();
 
     reporter.onEvalComplete(result);

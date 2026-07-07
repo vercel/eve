@@ -4,7 +4,7 @@ import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { CardElement } from "#compiled/chat/index.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { ChannelSessionOps } from "#public/definitions/defineChannel.js";
+import type { ChannelSessionOps } from "#public/definitions/channel.js";
 
 import { createLogger, logError } from "#internal/logging.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
@@ -48,12 +48,7 @@ import {
   type UploadPolicyInput,
 } from "#public/channels/upload-policy.js";
 import { verifySlackRequest, type SlackWebhookVerifier } from "#public/channels/slack/verify.js";
-import {
-  defineChannel,
-  POST,
-  type Channel,
-  type SendFn,
-} from "#public/definitions/defineChannel.js";
+import { defineChannel, POST, type Channel, type SendFn } from "#public/definitions/channel.js";
 import { markEventHandled } from "./utils.js";
 
 const log = createLogger("slack.channel");

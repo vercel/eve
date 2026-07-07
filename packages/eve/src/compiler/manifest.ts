@@ -10,6 +10,7 @@ import {
 } from "#compiler/remote-agent-node.js";
 import type { ChannelRouteMethod } from "#public/definitions/channel.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
+import type { InternalInstructionsDefinition } from "#shared/instructions-definition.js";
 import { jsonObjectSchema } from "#shared/json-schemas.js";
 import type { Node } from "#shared/node.js";
 import type {
@@ -124,7 +125,8 @@ export type CompiledAgentDefinition = Omit<InternalAgentDefinition, "model" | "c
  * Normalized authored instructions prompt preserved in the compiled
  * manifest.
  */
-export type CompiledInstructions = z.infer<typeof compiledInstructionsSchema>;
+export type CompiledInstructionsDefinition = InternalInstructionsDefinition &
+  (Omit<MarkdownSourceRef<undefined>, "definition"> | Omit<ModuleSourceRef, "exportName">);
 
 /**
  * Normalized authored skill preserved in the compiled manifest.
@@ -390,7 +392,7 @@ const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
   })
   .strict();
 
-const compiledInstructionsSchema = z
+const compiledInstructionsSchema: z.ZodType<CompiledInstructionsDefinition> = z
   .object({
     name: z.string(),
     logicalPath: z.string(),
@@ -687,7 +689,7 @@ export function createCompiledAgentNodeManifest(input: {
   readonly sandboxWorkspaces?: readonly CompiledSandboxWorkspace[];
   readonly schedules?: readonly CompiledScheduleDefinition[];
   readonly skills?: readonly CompiledSkillDefinition[];
-  readonly instructions?: CompiledInstructions;
+  readonly instructions?: CompiledInstructionsDefinition;
   readonly tools?: readonly CompiledToolDefinition[];
   readonly workspaceResourceRoot?: CompiledWorkspaceResourceRoot;
 }): CompiledAgentNodeManifest {
@@ -834,7 +836,7 @@ export function createCompiledAgentManifest(input: {
   readonly skills?: readonly CompiledSkillDefinition[];
   readonly subagentEdges?: readonly CompiledSubagentEdge[];
   readonly subagents?: readonly CompiledSubagentNode[];
-  readonly instructions?: CompiledInstructions;
+  readonly instructions?: CompiledInstructionsDefinition;
   readonly tools?: readonly CompiledToolDefinition[];
 }): CompiledAgentManifest {
   return {
