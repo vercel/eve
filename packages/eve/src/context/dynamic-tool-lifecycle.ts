@@ -60,7 +60,7 @@ function convertOptionalOutputSchema(schema: unknown): FlexibleSchema | undefine
 }
 
 function qualifyDynamicToolNames(
-  slug: string,
+  resolver: ResolvedDynamicToolResolver,
   isSingle: boolean,
   entries: Readonly<Record<string, DynamicToolEntry>>,
 ): Array<{ name: string; entryKey: string; entry: DynamicToolEntry }> {
@@ -72,12 +72,17 @@ function qualifyDynamicToolNames(
   // A single returned defineTool is named after the file slug; a map names each
   // entry by its bare key (authors namespace keys themselves if needed).
   if (isSingle) {
-    result.push({ name: slug, entryKey: keys[0]!, entry: entries[keys[0]!]! });
+    result.push({ name: resolver.slug, entryKey: keys[0]!, entry: entries[keys[0]!]! });
     return result;
   }
 
+  // Map entries from an extension resolver are prefixed with the mount
+  // namespace so extension-produced tools are namespaced like the extension's
+  // static tools. The single-tool case above already uses the namespaced slug.
+  const prefix =
+    resolver.extensionNamespace !== undefined ? `${resolver.extensionNamespace}__` : "";
   for (const key of keys) {
-    result.push({ name: key, entryKey: key, entry: entries[key]! });
+    result.push({ name: `${prefix}${key}`, entryKey: key, entry: entries[key]! });
   }
   return result;
 }
@@ -247,7 +252,7 @@ async function resolveToolsFromEvent(
     if (outcome.value === null) continue;
 
     const { resolver, entries, isSingle } = outcome.value;
-    const named = qualifyDynamicToolNames(resolver.slug, isSingle, entries);
+    const named = qualifyDynamicToolNames(resolver, isSingle, entries);
     for (const { name, entryKey, entry } of named) {
       const previousOwner = dynamicToolOwners.get(name);
       if (previousOwner !== undefined && previousOwner !== resolver.slug) {

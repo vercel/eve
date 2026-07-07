@@ -186,6 +186,11 @@
       "import": "./dist/src/public/context/index.js",
       "default": "./dist/src/public/context/index.js"
     },
+    "./extension": {
+      "types": "./dist/src/public/extension/index.d.ts",
+      "import": "./dist/src/public/extension/index.js",
+      "default": "./dist/src/public/extension/index.js"
+    },
     "./instrumentation": {
       "types": "./dist/src/public/instrumentation/index.d.ts",
       "import": "./dist/src/public/instrumentation/index.js",

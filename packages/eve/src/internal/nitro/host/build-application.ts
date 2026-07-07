@@ -14,6 +14,10 @@ import { WorkflowBundleBuilder } from "#internal/workflow-bundle/builder.js";
 import { normalizeEveVercelFunctionOutput } from "#internal/workflow-bundle/vercel-workflow-output.js";
 import { createApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
 import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-summary.js";
+import {
+  buildExtensionPackage,
+  tryReadExtensionBuildConfig,
+} from "#internal/nitro/host/build-extension.js";
 import { prepareApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
 import { runVercelBuildPrewarm } from "#internal/nitro/host/vercel-build-prewarm.js";
 import type { NitroBuildSurface, PreparedApplicationHost } from "#internal/nitro/host/types.js";
@@ -230,6 +234,11 @@ async function buildVercelNitroSurface(
  * Builds the production Nitro output for an eve application.
  */
 export async function buildApplication(rootDir: string): Promise<string> {
+  const extensionBuild = await tryReadExtensionBuildConfig(rootDir);
+  if (extensionBuild !== null) {
+    return buildExtensionPackage(rootDir, extensionBuild);
+  }
+
   const preparedHost = await prepareApplicationHost(rootDir);
 
   if (!process.env.VERCEL) {

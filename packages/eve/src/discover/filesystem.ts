@@ -33,6 +33,7 @@ export type AgentRootEntryKind =
   | "agent-config-module"
   | "channels-directory"
   | "connections-directory"
+  | "extensions-directory"
   | "hooks-directory"
   | "instructions-directory"
   | "instructions-markdown"
@@ -148,6 +149,10 @@ export function classifyAgentRootEntry(
 
     if (name === "connections") {
       return "connections-directory";
+    }
+
+    if (name === "extensions") {
+      return "extensions-directory";
     }
 
     if (name === "hooks") {

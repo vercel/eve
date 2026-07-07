@@ -20,6 +20,7 @@ import {
   type NitroArtifactsConfigInput,
 } from "#internal/nitro/host/artifacts-config.js";
 import { createCompiledSandboxBackendPrunePlugin } from "#internal/nitro/host/compiled-sandbox-backend-prune-plugin.js";
+import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
 import { configureNitroRoutes } from "#internal/nitro/host/configure-nitro-routes.js";
 import { applyEveCronHandlerRoute } from "#internal/nitro/host/cron-handler-route.js";
 import { createNitroBundlerConfig } from "#internal/nitro/host/nitro-bundler-config.js";
@@ -660,9 +661,16 @@ export async function createApplicationNitro(
       : unconfiguredOptionalEnginePackages
     ).push(packageName);
   }
+  const extensionScopePlugin = createExtensionScopePlugin(
+    (preparedHost.compileResult.manifest.extensionMounts ?? []).map((mount) => ({
+      sourceRoot: mount.sourceRoot,
+      packageNamespace: mount.packageNamespace,
+    })),
+  );
   const nitroBundlerPlugins = [
     compiledSandboxBackendPrunePlugin,
     createOptionalEngineDependencyPlugin(unconfiguredOptionalEnginePackages),
+    extensionScopePlugin,
   ].filter((plugin) => plugin !== null);
   const nitroRolldownConfig = createNitroBundlerConfig(nitroBundlerPlugins);
   const nitroRollupConfig = createNitroBundlerConfig(nitroBundlerPlugins);
