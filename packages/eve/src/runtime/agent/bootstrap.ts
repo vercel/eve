@@ -3,6 +3,7 @@ import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import type { ResolvedAgent } from "#runtime/types.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
 import type { InternalAgentModelDefinition } from "#shared/agent-definition.js";
+import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { AvailableSkillDescription } from "#execution/skills/instructions.js";
 
 /**
@@ -17,6 +18,15 @@ export const BOOTSTRAP_RUNTIME_MODEL_ID = "eve-bootstrap-model";
 export type RuntimeModelReference = Readonly<InternalAgentModelDefinition>;
 
 /**
+ * Runtime-owned reference to a dynamic model resolver authored in `agent.ts`.
+ */
+export type RuntimeDynamicModelReference = Readonly<
+  ModuleSourceRef & {
+    readonly eventNames: readonly string[];
+  }
+>;
+
+/**
  * Minimal runtime-owned agent shape prepared for one harness turn.
  */
 export interface RuntimeTurnAgent {
@@ -29,6 +39,7 @@ export interface RuntimeTurnAgent {
    * When omitted, the harness uses the active turn model for compaction.
    */
   readonly compactionModel?: RuntimeModelReference;
+  readonly dynamicModel?: RuntimeDynamicModelReference;
   readonly model: RuntimeModelReference;
   readonly nodeId?: string;
   readonly outputSchema?: ResolvedAgent["config"]["outputSchema"];
@@ -66,6 +77,7 @@ export function createResolvedRuntimeTurnAgent(input: {
       workspaceSpec: agent.workspaceSpec,
     }),
     compactionModel: agent.config.compaction?.model,
+    dynamicModel: agent.config.dynamicModel,
     model: agent.config.model,
     nodeId: input.nodeId,
     outputSchema: agent.config.outputSchema,

@@ -32,6 +32,7 @@ import type {
 } from "#shared/source-ref.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
 import type { InternalAgentDefinition } from "#shared/agent-definition.js";
+import type { RuntimeDynamicModelReference } from "#runtime/agent/bootstrap.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
 import type { SandboxBackend } from "#shared/sandbox-backend.js";
 import type { SandboxBootstrapContext, SandboxSessionContext } from "#shared/sandbox-definition.js";
@@ -301,6 +302,7 @@ export type ResolvedRuntimeDelegationNode =
  */
 export type ResolvedAgentDefinition = Readonly<
   Omit<InternalAgentDefinition, "build" | "source"> & {
+    dynamicModel?: RuntimeDynamicModelReference;
     source?: Readonly<NonNullable<InternalAgentDefinition["source"]>>;
   }
 >;

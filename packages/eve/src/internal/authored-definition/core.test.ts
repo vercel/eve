@@ -4,6 +4,7 @@ import {
   normalizeAgentDefinition,
   normalizeScheduleDefinition,
 } from "#internal/authored-definition/core.js";
+import { defineDynamic } from "#public/definitions/tool.js";
 
 const FAILURE_MESSAGE = "Expected the agent config to match the public eve shape.";
 
@@ -18,6 +19,27 @@ describe("normalizeAgentDefinition", () => {
     );
 
     expect(definition.reasoning).toBe("high");
+  });
+
+  it("accepts dynamic model definitions", () => {
+    const model = defineDynamic({
+      fallback: "openai/gpt-5.5",
+      events: {
+        "session.started": () => "openai/gpt-5.5-mini",
+      },
+    });
+    const definition = normalizeAgentDefinition(
+      {
+        model,
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.model).toMatchObject({
+      fallback: "openai/gpt-5.5",
+      kind: "eve:dynamic",
+    });
+    expect(typeof (definition.model as typeof model).events["session.started"]).toBe("function");
   });
 
   it("rejects unsupported reasoning effort", () => {

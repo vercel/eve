@@ -44,6 +44,32 @@ describe("compiledAgentManifestSchema", () => {
     });
   });
 
+  it("preserves dynamic model resolver source", () => {
+    const manifest = createCompiledAgentManifest({
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      config: {
+        dynamicModel: {
+          eventNames: ["session.started"],
+          logicalPath: "agent.ts",
+          sourceId: "agent-config",
+          sourceKind: "module",
+        },
+        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
+        name: "app",
+      },
+    });
+
+    const parsed = compiledAgentManifestSchema.parse(manifest);
+
+    expect(parsed.config.dynamicModel).toEqual({
+      eventNames: ["session.started"],
+      logicalPath: "agent.ts",
+      sourceId: "agent-config",
+      sourceKind: "module",
+    });
+  });
+
   it("preserves uncapped (false) session token limits", () => {
     const manifest = createCompiledAgentManifest({
       agentRoot: "/app/agent",

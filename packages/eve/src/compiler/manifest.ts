@@ -40,7 +40,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 32;
+export const COMPILED_AGENT_MANIFEST_VERSION = 33;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -100,6 +100,18 @@ export type CompiledRuntimeModelReference = InternalAgentModelDefinition & {
 };
 
 /**
+ * Optional dynamic model resolver preserved in the compiled manifest.
+ *
+ * The compiled `config.model` remains the fallback model. When present,
+ * this source reference points back to the agent config module that exported
+ * `defineDynamic({ fallback, events })`; runtime reloads that module only for
+ * subscribed events.
+ */
+export type CompiledDynamicModelDefinition = ModuleSourceRef & {
+  readonly eventNames: readonly string[];
+};
+
+/**
  * Normalized hosted-build configuration preserved in the compiled manifest.
  */
 type CompiledAgentBuildDefinition = AgentBuildDefinition;
@@ -118,6 +130,7 @@ type CompiledAgentCompactionDefinition = Omit<InternalAgentCompactionDefinition,
 export type CompiledAgentDefinition = Omit<InternalAgentDefinition, "model" | "compaction"> & {
   model: CompiledRuntimeModelReference;
   compaction?: CompiledAgentCompactionDefinition;
+  dynamicModel?: CompiledDynamicModelDefinition;
 };
 
 /**
@@ -256,6 +269,16 @@ const moduleSourceRefSchema: z.ZodType<ModuleSourceRef> = z
   })
   .strict();
 
+const compiledDynamicModelDefinitionSchema: z.ZodType<CompiledDynamicModelDefinition> = z
+  .object({
+    eventNames: z.array(z.string()).readonly(),
+    exportName: z.string().optional(),
+    sourceKind: z.literal("module"),
+    logicalPath: z.string(),
+    sourceId: z.string(),
+  })
+  .strict();
+
 const channelMethodSchema = z.union([
   z.literal("GET"),
   z.literal("POST"),
@@ -373,6 +396,7 @@ const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
     build: compiledAgentBuildDefinitionSchema.optional(),
     compaction: compiledAgentCompactionDefinitionSchema.optional(),
     description: z.string().optional(),
+    dynamicModel: compiledDynamicModelDefinitionSchema.optional(),
     experimental: z
       .object({
         workflow: compiledAgentWorkflowDefinitionSchema.optional(),
@@ -714,6 +738,12 @@ export function createCompiledAgentNodeManifest(input: {
         thresholdPercent: input.config.compaction?.thresholdPercent,
       },
       description: input.config.description,
+      dynamicModel:
+        input.config.dynamicModel === undefined
+          ? undefined
+          : {
+              ...input.config.dynamicModel,
+            },
       experimental:
         input.config.experimental === undefined
           ? undefined

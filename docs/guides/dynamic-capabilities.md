@@ -1,9 +1,43 @@
 ---
 title: "Dynamic Capabilities"
-description: "Resolve tools, skills, and instructions at runtime with defineDynamic: the resolver events, execution order, and how dynamic tools survive step boundaries."
+description: "Resolve models, tools, skills, and instructions at runtime: dynamic model selection, defineDynamic resolver events, execution order, and durable dynamic tools."
 ---
 
-`defineDynamic` resolves tools, skills, and instructions at runtime from a session event instead of declaring them up front. Reach for it when the right capabilities aren't known until the session starts, because they hinge on who the caller is, what tenant they belong to, feature flags, or external data. The [tools](../tools), [skills](../skills), and [instructions](../instructions) guides each point here for their dynamic form.
+Dynamic capabilities let eve choose runtime behavior from the active caller,
+channel, tenant, feature flags, or external data. Use `defineDynamic` in
+`agent.ts` for dynamic model selection, and in tools, skills, and instructions
+that resolve from session events instead of being declared up front. The
+[tools](../tools), [skills](../skills), and
+[instructions](../instructions) guides each point here for their dynamic form.
+
+## Dynamic models
+
+Dynamic model selection lives in `agent.ts` because each agent has one active
+turn model. Use `defineDynamic({ fallback, events })`:
+
+```ts title="agent/agent.ts"
+import { defineAgent, defineDynamic } from "eve";
+
+export default defineAgent({
+  model: defineDynamic({
+    fallback: "anthropic/claude-sonnet-5",
+    events: {
+      "session.started": (_event, ctx) =>
+        ctx.session.auth.initiator?.attributes.plan === "enterprise"
+          ? "anthropic/claude-opus-4.8"
+          : null,
+    },
+  }),
+});
+```
+
+Choose `"session.started"` for one lookup per session, `"turn.started"` for
+one lookup per user turn, or `"step.started"` for per-model-step selection.
+Handlers receive `ctx.session`, `ctx.channel`, and `ctx.messages`. Return
+`null` to leave that scope unset and fall back to the next scope, ending at
+`fallback`. See
+[agent.ts](../agent-config#choose-the-model-dynamically) for model metadata
+overrides such as `modelContextWindowTokens`.
 
 ## Dynamic tools
 

@@ -43,6 +43,62 @@ version uses hyphens (`claude-opus-4-8`), while the Gateway id above uses a dot
 
 Model use is subject to the terms, data-processing commitments, retention behavior, and available controls of the selected provider and routing path. Review the [AI Gateway model catalog](https://vercel.com/ai-gateway/models) for gateway-routed models, and review the provider's terms when you configure a direct `LanguageModel`.
 
+### Choose the model dynamically
+
+Use `defineDynamic` when the right model depends on the caller, channel,
+tenant, or current conversation. `fallback` is the build-time model: eve uses it
+for compiled metadata, compaction defaults, and whenever no scoped dynamic
+selection is active.
+
+```ts title="agent/agent.ts"
+import { defineAgent, defineDynamic } from "eve";
+
+export default defineAgent({
+  model: defineDynamic({
+    fallback: "anthropic/claude-sonnet-5",
+    events: {
+      "session.started": async (_event, ctx) => {
+        const plan = ctx.session.auth.initiator?.attributes.plan;
+        return plan === "enterprise" ? "anthropic/claude-opus-4.8" : null;
+      },
+      "step.started": (_event, ctx) =>
+        ctx.channel.kind === "slack" ? "openai/gpt-5.5-mini" : null,
+    },
+  }),
+});
+```
+
+Choose the event scope based on how often the lookup needs to run:
+`session.started` runs once for the session, `turn.started` runs once per user
+turn, and `step.started` runs for each model step before compaction and the
+model call. Step selections override turn selections, turn selections override
+session selections, and all dynamic selections fall back to `fallback`.
+
+Handlers receive the same read-only context shape used by dynamic tools,
+skills, and instructions: `ctx.session`, `ctx.channel`, and `ctx.messages`.
+Return a gateway model id string, a direct AI SDK `LanguageModel`, or an object
+when the selected model needs its own metadata:
+
+```ts
+return {
+  model: "openai/gpt-5.5-mini",
+  modelContextWindowTokens: 128_000,
+  modelOptions: {
+    providerOptions: {
+      gateway: { order: ["openai"] },
+    },
+  },
+};
+```
+
+`modelContextWindowTokens` is optional, but useful for custom or unlisted
+models so compaction uses the selected model's actual context window. If you
+omit `modelOptions`, eve reuses the agent-level `modelOptions`.
+
+Session- and turn-scoped selections are serialized across workflow step
+boundaries, so return model id strings from those scopes. Use `step.started`
+when the selected model is a direct provider `LanguageModel` object.
+
 ## Reasoning effort
 
 Set `reasoning` to control the model's reasoning effort through AI SDK's

@@ -2,6 +2,11 @@ import type { CallSettings, LanguageModel } from "ai";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
+import {
+  isDynamicSentinel,
+  type DynamicResolveContext,
+  type DynamicSentinel,
+} from "#shared/dynamic-tool-definition.js";
 
 /**
  * Optional overrides that eve forwards to the AI SDK model runtime call for
@@ -46,11 +51,73 @@ export type InternalAgentModelDefinition = {
 };
 
 /**
- * The model handle you assign to an agent's `model` field. This is the AI SDK
- * `LanguageModel` value (for example, the result of a provider or gateway
- * model call), not an eve-authored definition object.
+ * A concrete model handle. Strings route through the AI SDK default provider
+ * (eve's scaffold configures the Vercel AI Gateway); provider instances use
+ * that provider directly.
  */
-export type PublicAgentModelDefinition = LanguageModel;
+export type PublicAgentStaticModelDefinition = string | LanguageModel;
+
+/**
+ * Optional dynamic resolver context passed to dynamic model event handlers.
+ * Mirrors other dynamic capability resolvers: session identity/auth, channel
+ * metadata, and the current model-visible conversation history.
+ */
+export type AgentModelResolveContext = DynamicResolveContext;
+
+export interface PublicAgentModelSelectionDefinition {
+  /**
+   * Concrete model selected by a dynamic resolver.
+   */
+  readonly model: PublicAgentStaticModelDefinition;
+  /**
+   * Optional context window override for this selected model, in tokens.
+   * Use this when the selected model is custom or not in the AI Gateway
+   * catalog, so compaction can use a correct threshold.
+   */
+  readonly modelContextWindowTokens?: number;
+  /**
+   * Optional provider options for this selected model. When omitted, eve uses
+   * the agent-level `modelOptions`.
+   */
+  readonly modelOptions?: AgentModelOptionsDefinition;
+}
+
+export type PublicAgentDynamicModelResult =
+  | PublicAgentStaticModelDefinition
+  | PublicAgentModelSelectionDefinition
+  | null;
+
+export type AgentModelResolver = (
+  event: unknown,
+  ctx: AgentModelResolveContext,
+) => PublicAgentDynamicModelResult | Promise<PublicAgentDynamicModelResult>;
+
+export type PublicAgentDynamicModelDefinition = DynamicSentinel<
+  PublicAgentDynamicModelResult,
+  PublicAgentStaticModelDefinition
+>;
+
+export interface PublicAgentDynamicModelDefinitionInput {
+  /**
+   * Build-time fallback model. eve uses this for static metadata, compaction
+   * defaults, and any resolver result of `null`.
+   */
+  readonly fallback: PublicAgentStaticModelDefinition;
+  readonly events: DynamicSentinel<PublicAgentDynamicModelResult>["events"];
+}
+
+export function isDynamicModelDefinition(
+  value: unknown,
+): value is PublicAgentDynamicModelDefinition {
+  return isDynamicSentinel(value) && "fallback" in value;
+}
+
+/**
+ * The model handle you assign to an agent's `model` field.
+ */
+export type PublicAgentModelDefinition =
+  | PublicAgentStaticModelDefinition
+  | PublicAgentDynamicModelDefinition;
 
 export interface InternalAgentCompactionDefinition {
   /**
@@ -87,7 +154,7 @@ export interface PublicAgentCompactionDefinition {
    *
    * When omitted, eve uses the active turn model for the summary call.
    */
-  readonly model?: PublicAgentModelDefinition;
+  readonly model?: PublicAgentStaticModelDefinition;
   /**
    * Fraction of the primary model context window that triggers compaction.
    *
@@ -248,8 +315,9 @@ export type PublicAgentDefinition = {
    */
   readonly experimental?: AgentExperimentalDefinition;
   /**
-   * Language model used for agent turns. Accepts an AI Gateway model ID or any
-   * AI SDK-compatible language model.
+   * Language model used for agent turns. Accepts an AI Gateway model ID, any AI
+   * SDK-compatible language model, or `defineDynamic({ fallback, events })` for
+   * scoped dynamic model selection.
    */
   readonly model: PublicAgentModelDefinition;
   /**

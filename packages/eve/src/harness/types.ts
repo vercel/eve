@@ -1,6 +1,7 @@
 import type { LanguageModel, ModelMessage, UserContent } from "ai";
 
 import type { SessionCapabilities } from "#channel/types.js";
+import type { AlsContext } from "#context/container.js";
 import type { HandleMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
@@ -43,6 +44,12 @@ export interface SessionAgent {
    * When omitted, the harness uses the active turn model for compaction.
    */
   readonly compactionModelReference?: RuntimeModelReference;
+  /**
+   * Fallback model for dynamic model agents. Kept in memory so a resolver
+   * returning `null` uses `defineDynamic.fallback` even after a previous step
+   * selected a different model.
+   */
+  readonly dynamicModelDefaultReference?: RuntimeModelReference;
   readonly modelReference: RuntimeModelReference;
   readonly reasoning?: AgentReasoningDefinition;
   readonly system: string;
@@ -260,6 +267,12 @@ export interface ToolLoopHarnessConfig {
    * compacted history.
    */
   readonly onCompaction?: () => readonly ModelMessage[];
+  readonly dispatchDynamicModelEvent?: (input: {
+    readonly ctx: AlsContext;
+    readonly event: HandleMessageStreamEvent;
+    readonly fallback: RuntimeModelReference;
+    readonly messages: readonly ModelMessage[];
+  }) => Promise<void>;
   readonly resolveModel: (reference: RuntimeModelReference) => Promise<LanguageModel>;
   /**
    * Runtime identity metadata attached to the `session.started` event.

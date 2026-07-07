@@ -14,11 +14,13 @@ import {
   AuthKey,
   ChannelInstrumentationKey,
   InitiatorAuthKey,
+  LiveStepDynamicModelSelectionKey,
   LiveStepToolsKey,
   ParentSessionKey,
   SandboxKey,
   SessionKey,
   SessionDynamicInstructionsKey,
+  SessionDynamicModelReferenceKey,
 } from "#context/keys.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
@@ -626,6 +628,113 @@ describe("createToolLoopHarness", () => {
     expect(agentCall).toBeDefined();
     expect(agentCall!.tools).toHaveProperty("add");
     expect(agentCall!.tools).not.toHaveProperty("Workflow");
+  });
+
+  it("uses dynamic model selection for the model call", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const resolveModel = vi.fn().mockResolvedValue("fallback-model" as LanguageModel);
+    const dispatchDynamicModelEvent: NonNullable<
+      ToolLoopHarnessConfig["dispatchDynamicModelEvent"]
+    > = vi.fn(async ({ ctx, event, fallback, messages }) => {
+      expect(event.type).toBe("step.started");
+      expect(messages.at(-1)).toEqual({ content: "Hi", role: "user" });
+      expect(fallback).toEqual({ contextWindowTokens: 100_000, id: "fallback-model" });
+
+      ctx.setVirtualContext(LiveStepDynamicModelSelectionKey, {
+        model: "selected-model" as LanguageModel,
+        reference: {
+          contextWindowTokens: 200_000,
+          id: "selected-model",
+          providerOptions: { gateway: { order: ["openai"] } },
+        },
+      });
+    });
+    const config = createTestConfig("conversation", undefined, {
+      dispatchDynamicModelEvent,
+      resolveModel,
+    });
+    const runStep = createToolLoopHarness(config);
+    const ctx = new ContextContainer();
+    const session = createTestSession({
+      agent: {
+        dynamicModelDefaultReference: { contextWindowTokens: 100_000, id: "fallback-model" },
+        modelReference: { contextWindowTokens: 100_000, id: "fallback-model" },
+        system: "You are a test assistant.",
+        tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
+      },
+      compaction: { recentWindowSize: 10, threshold: 90_000 },
+    });
+
+    const result = await contextStorage.run(ctx, () => runStep(session, { message: "Hi" }));
+
+    const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+    expect(agentCall).toBeDefined();
+    expect(agentCall!.model).toBe("selected-model");
+    expect(dispatchDynamicModelEvent).toHaveBeenCalledTimes(1);
+    expect(resolveModel).not.toHaveBeenCalled();
+    expect(result.session.agent.modelReference).toEqual({
+      contextWindowTokens: 200_000,
+      id: "selected-model",
+      providerOptions: { gateway: { order: ["openai"] } },
+    });
+    expect(result.session.compaction.threshold).toBe(180_000);
+  });
+
+  it("uses session-scoped dynamic model selection for the model call", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const resolveModel = vi.fn(async (reference) => {
+      expect(reference).toEqual({
+        contextWindowTokens: 200_000,
+        id: "selected-model",
+        providerOptions: { gateway: { order: ["openai"] } },
+      });
+      return "selected-model" as LanguageModel;
+    });
+    const config = createTestConfig("conversation", undefined, {
+      resolveModel,
+    });
+    const runStep = createToolLoopHarness(config);
+    const ctx = new ContextContainer();
+    ctx.set(SessionDynamicModelReferenceKey, {
+      contextWindowTokens: 200_000,
+      id: "selected-model",
+      providerOptions: { gateway: { order: ["openai"] } },
+    });
+    const session = createTestSession({
+      agent: {
+        dynamicModelDefaultReference: { contextWindowTokens: 100_000, id: "fallback-model" },
+        modelReference: { contextWindowTokens: 100_000, id: "fallback-model" },
+        system: "You are a test assistant.",
+        tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
+      },
+      compaction: { recentWindowSize: 10, threshold: 90_000 },
+    });
+
+    const result = await contextStorage.run(ctx, () => runStep(session, { message: "Hi" }));
+
+    const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+    expect(agentCall).toBeDefined();
+    expect(agentCall!.model).toBe("selected-model");
+    expect(result.session.agent.modelReference).toEqual({
+      contextWindowTokens: 200_000,
+      id: "selected-model",
+      providerOptions: { gateway: { order: ["openai"] } },
+    });
+    expect(result.session.compaction.threshold).toBe(180_000);
   });
 
   it("hides subagent tools from the model after the subagent depth limit", async () => {

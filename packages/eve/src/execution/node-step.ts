@@ -1,6 +1,7 @@
 import { jsonSchema, type FlexibleSchema, type LanguageModel } from "ai";
 
 import type { Runtime, SessionCapabilities } from "#channel/types.js";
+import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
@@ -78,6 +79,13 @@ export interface CreateExecutionNodeStepInput {
  */
 export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): StepFn {
   const resolveModel = createRuntimeModelResolver(input.modelResolutionScope);
+  const dispatchModelEvent =
+    input.node.turnAgent.dynamicModel === undefined
+      ? undefined
+      : createRuntimeDynamicModelEventDispatcher(
+          input.modelResolutionScope,
+          input.node.turnAgent.dynamicModel,
+        );
   const tools = createNodeHarnessTools({ node: input.node });
   return createToolLoopHarness({
     abortSignal: input.abortSignal,
@@ -87,6 +95,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     handleEvent: input.handleEvent,
     mode: input.mode,
     onCompaction: preserveFrameworkStateOnCompaction,
+    dispatchDynamicModelEvent: dispatchModelEvent,
     resolveModel,
     runtimeIdentity: buildRuntimeIdentity(input.node),
     tools,
@@ -129,6 +138,21 @@ function createRuntimeModelResolver(
   scope: RuntimeModelResolutionScope,
 ): (modelReference: Parameters<typeof resolveRuntimeModelReference>[0]) => Promise<LanguageModel> {
   return (modelReference) => resolveRuntimeModelReference(modelReference, scope);
+}
+
+function createRuntimeDynamicModelEventDispatcher(
+  scope: RuntimeModelResolutionScope,
+  dynamicModel: NonNullable<ResolvedRuntimeAgentNode["turnAgent"]["dynamicModel"]>,
+): NonNullable<Parameters<typeof createToolLoopHarness>[0]["dispatchDynamicModelEvent"]> {
+  return (input) =>
+    dispatchDynamicModelEvent({
+      ctx: input.ctx,
+      dynamicModel,
+      event: input.event,
+      fallback: input.fallback,
+      messages: input.messages,
+      scope,
+    });
 }
 
 /**

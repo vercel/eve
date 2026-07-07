@@ -2,14 +2,20 @@ import type { PublicAgentDefinition } from "#shared/agent-definition.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
 
 export type {
+  AgentModelResolveContext,
   AgentModelOptionsDefinition,
+  AgentModelResolver,
   AgentReasoningDefinition,
   AgentBuildDefinition,
+  PublicAgentDynamicModelDefinition as AgentDynamicModelDefinition,
+  PublicAgentDynamicModelResult as AgentDynamicModelResult,
   AgentExperimentalDefinition,
   AgentLimitsDefinition,
+  PublicAgentModelSelectionDefinition as AgentModelSelectionDefinition,
   AgentWorkflowDefinition,
   AgentWorkflowWorldDefinition,
   PublicAgentModelDefinition as AgentModelDefinition,
+  PublicAgentStaticModelDefinition as AgentStaticModelDefinition,
   PublicAgentCompactionDefinition as AgentCompactionDefinition,
 } from "#shared/agent-definition.js";
 

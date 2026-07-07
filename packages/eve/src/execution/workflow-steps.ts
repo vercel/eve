@@ -7,6 +7,7 @@ import type {
 } from "#channel/types.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
+import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
 import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
 import { dispatchDynamicToolEvent } from "#context/dynamic-tool-lifecycle.js";
 import { AuthKey, CapabilitiesKey, ContinuationTokenKey, ModeKey } from "#context/keys.js";
@@ -265,6 +266,19 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   ): Promise<void> => {
     const emitted = await emit(event);
     await dispatchStreamEventHooks({ ctx, registry: hookRegistry, event: emitted });
+    if (emitted.type !== "step.started") {
+      await dispatchDynamicModelEvent({
+        ctx,
+        dynamicModel: bundle.turnAgent.dynamicModel,
+        event: emitted,
+        fallback: bundle.turnAgent.model,
+        messages: messages ?? [],
+        scope: {
+          moduleMap: bundle.moduleMap,
+          nodeId: bundle.nodeId,
+        },
+      });
+    }
     await dispatchDynamicToolEvent({
       ctx,
       resolvers: dynamicToolResolvers,

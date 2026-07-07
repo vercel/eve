@@ -11,7 +11,7 @@ import type { LanguageModel } from "ai";
  * `openai.responses`) to disambiguate request shapes. The Gateway routes on the
  * top-level provider only, so any segments after the first dot are dropped.
  */
-export function formatLanguageModelGatewayId(model: LanguageModel): string {
+export function formatLanguageModelGatewayId(model: string | LanguageModel): string {
   if (typeof model === "string") {
     return model;
   }
