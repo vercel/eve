@@ -93,8 +93,17 @@ export default defineAgent({
 
 Input and output budgets are checked independently. The model call that crosses
 either limit is allowed to finish because providers only report exact token
-usage after a call completes. Follow-up model calls in the same session fail
-with `SESSION_TOKEN_LIMIT_REACHED`.
+usage after a call completes. Before the next model call, eve pauses the
+session and sends a deterministic continuation prompt with two options:
+**Continue** grants a fresh budget window of the configured size (both input
+and output windows reset together), and **Stop** ends the session gracefully
+(`session.completed`) — declining is a user decision, not an error. A reply
+that answers neither option re-raises the prompt; the reply stays in history
+and is processed once the budget is granted.
+
+Sessions that cannot reach a human — task-mode runs such as schedules and
+subagents without input proxying — skip the prompt and fail the next model
+call with `SESSION_TOKEN_LIMIT_REACHED`.
 
 When `maxInputTokensPerSession` is omitted, eve applies a default input budget:
 `40_000_000` provider-reported input tokens for root sessions and `5_000_000`
