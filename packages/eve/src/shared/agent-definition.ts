@@ -51,34 +51,19 @@ export type InternalAgentModelDefinition = {
 };
 
 /**
- * A concrete model handle. Strings route through the AI SDK default provider
- * (eve's scaffold configures the Vercel AI Gateway); provider instances use
- * that provider directly.
+ * A concrete model handle: an AI Gateway model id string or an AI SDK
+ * `LanguageModel` instance.
  */
 export type PublicAgentStaticModelDefinition = string | LanguageModel;
 
-/**
- * Optional dynamic resolver context passed to dynamic model event handlers.
- * Mirrors other dynamic capability resolvers: session identity/auth, channel
- * metadata, and the current model-visible conversation history.
- */
+/** Context passed to dynamic model event handlers; the shared dynamic resolver context. */
 export type AgentModelResolveContext = DynamicResolveContext;
 
 export interface PublicAgentModelSelectionDefinition {
-  /**
-   * Concrete model selected by a dynamic resolver.
-   */
   readonly model: PublicAgentStaticModelDefinition;
-  /**
-   * Optional context window override for this selected model, in tokens.
-   * Use this when the selected model is custom or not in the AI Gateway
-   * catalog, so compaction can use a correct threshold.
-   */
+  /** Context window of the selected model, in tokens; never inherited from the fallback. */
   readonly modelContextWindowTokens?: number;
-  /**
-   * Optional provider options for this selected model. When omitted, eve uses
-   * the agent-level `modelOptions`.
-   */
+  /** Provider options for the selected model; defaults to the agent-level `modelOptions`. */
   readonly modelOptions?: AgentModelOptionsDefinition;
 }
 
@@ -98,10 +83,7 @@ export type PublicAgentDynamicModelDefinition = DynamicSentinel<
 >;
 
 export interface PublicAgentDynamicModelDefinitionInput {
-  /**
-   * Build-time fallback model. eve uses this for static metadata, compaction
-   * defaults, and any resolver result of `null`.
-   */
+  /** Compiled static model: build-time metadata and the active model when no scope is set. */
   readonly fallback: PublicAgentStaticModelDefinition;
   readonly events: DynamicSentinel<PublicAgentDynamicModelResult>["events"];
 }

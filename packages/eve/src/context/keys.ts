@@ -92,36 +92,23 @@ export const SandboxKey = new ContextKey<SandboxAccess>("eve.sandbox");
 // Dynamic model keys
 // ---------------------------------------------------------------------------
 
-/**
- * Session-scoped dynamic model selection (from `session.started`).
- * Persists for the session lifetime.
- */
+/** Session-scoped dynamic model selection (from `session.started`). */
 export const SessionDynamicModelReferenceKey = new ContextKey<RuntimeModelReference | null>(
   "eve.sessionDynamicModelReference",
 );
 
-/**
- * Turn-scoped dynamic model selection (from `turn.started`).
- * Replaced each turn by the dynamic model resolver when subscribed.
- */
+/** Turn-scoped dynamic model selection (from `turn.started`). */
 export const TurnDynamicModelReferenceKey = new ContextKey<RuntimeModelReference | null>(
   "eve.turnDynamicModelReference",
 );
 
 export interface LiveDynamicModelSelection {
-  /**
-   * Live provider instance, present only when the resolver returned a
-   * `LanguageModel` object. String selections carry just `reference` and
-   * resolve through the model resolver so mock adapters keep precedence.
-   */
+  /** Live provider instance; absent for string selections, which resolve through the reference. */
   readonly model?: LanguageModel;
   readonly reference: RuntimeModelReference;
 }
 
-/**
- * Virtual step-scoped dynamic model selection from `step.started`.
- * Re-resolved every step and never serialized.
- */
+/** Virtual step-scoped dynamic model selection (from `step.started`); never serialized. */
 export const LiveStepDynamicModelSelectionKey = new ContextKey<LiveDynamicModelSelection | null>(
   "eve.liveStepDynamicModelSelection",
 );

@@ -141,10 +141,8 @@ function normalizeAgentModelDefinition(
   value: unknown,
   message: string,
 ): NormalizedAgentDefinition["model"] {
-  // Branch on the bare sentinel, not `isDynamicModelDefinition`: the latter
-  // also requires `fallback`, which would misroute a fallback-less
-  // `defineDynamic({ events })` into the static-model path and bury the
-  // actionable error below under a generic invalid-model failure.
+  // Bare-sentinel check so a fallback-less defineDynamic hits the
+  // actionable error below instead of the generic invalid-model path.
   if (!isDynamicSentinel(value)) {
     return value as NormalizedAgentDefinition["model"];
   }

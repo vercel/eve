@@ -44,11 +44,7 @@ export interface SessionAgent {
    * When omitted, the harness uses the active turn model for compaction.
    */
   readonly compactionModelReference?: RuntimeModelReference;
-  /**
-   * Fallback model for dynamic model agents. Kept in memory so a resolver
-   * returning `null` uses `defineDynamic.fallback` even after a previous step
-   * selected a different model.
-   */
+  /** `defineDynamic.fallback` for dynamic-model agents; serves whenever no scoped selection is set. */
   readonly dynamicModelDefaultReference?: RuntimeModelReference;
   readonly modelReference: RuntimeModelReference;
   readonly reasoning?: AgentReasoningDefinition;

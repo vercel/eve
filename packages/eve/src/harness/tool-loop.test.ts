@@ -768,14 +768,12 @@ describe("createToolLoopHarness", () => {
     const first = await contextStorage.run(ctx, () => runStep(session, { message: "Hi" }));
     expect(first.session.compaction.threshold).toBe(180_000);
 
-    // A second step with the same selection must not rescale again
-    // (regression: the threshold used to compound to 360k per extra step).
+    // Regression: the threshold used to compound (360k) on every extra step.
     const second = await contextStorage.run(ctx, () =>
       runStep(first.session, { message: "Again" }),
     );
     expect(second.session.compaction.threshold).toBe(180_000);
 
-    // And clearing the selection restores the fallback-derived threshold.
     ctx.set(SessionDynamicModelReferenceKey, null);
     const third = await contextStorage.run(ctx, () => runStep(second.session, { message: "Back" }));
     expect(third.session.agent.modelReference).toEqual({

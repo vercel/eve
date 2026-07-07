@@ -100,11 +100,7 @@ export interface RuntimeIdentity {
     readonly gitBranch?: string;
     readonly gitSha?: string;
   };
-  /**
-   * Configured model id. Agents with a dynamic model report
-   * `dynamic:<fallback id>` — per-scope selections happen after this
-   * identity is built, so only the compiled fallback is known here.
-   */
+  /** Configured model id; dynamic-model agents report `dynamic:<fallback id>`. */
   readonly modelId: string;
 }
 

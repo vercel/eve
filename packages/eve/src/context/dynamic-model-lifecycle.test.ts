@@ -119,7 +119,6 @@ describe("dynamic model lifecycle", () => {
 
     expect(getActiveDynamicModelSelection(ctx)?.reference.id).toBe("openai/gpt-5.5-turn");
 
-    // A null turn result clears the turn slot and falls back to session scope.
     turnResult = null;
     await dispatch(createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }));
 
@@ -170,9 +169,7 @@ describe("dynamic model lifecycle", () => {
   });
 
   it("strips step-scoped live provider instances in mock mode", async () => {
-    // NODE_ENV=test (the vitest default) activates the authored-model mock
-    // adapter; the stored selection must be reference-only so resolution
-    // flows through the resolver where the mock keeps precedence.
+    // NODE_ENV=test (the vitest default) activates the mock adapter.
     const ctx = new ContextContainer();
     const stepModel = createLanguageModel("openai.responses", "gpt-step");
     const moduleMap = createModuleMap({

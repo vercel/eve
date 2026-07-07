@@ -1,9 +1,8 @@
 import { defineEval } from "eve/evals";
 
 /**
- * Dynamic-model smoke: with no selection marker the resolver returns `null`,
- * so the compiled `fallback` model serves the turn, and the runtime identity
- * on `session.started` reports the model as `dynamic:<fallback id>`.
+ * No selection marker: the resolver returns `null`, the fallback serves the
+ * turn, and the runtime identity reports `dynamic:<fallback id>`.
  */
 export default defineEval({
   description: "Dynamic model smoke: null selection serves the fallback model.",

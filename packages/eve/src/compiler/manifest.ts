@@ -101,12 +101,8 @@ export type CompiledRuntimeModelReference = InternalAgentModelDefinition & {
 };
 
 /**
- * Optional dynamic model resolver preserved in the compiled manifest.
- *
- * The compiled `config.model` remains the fallback model. When present,
- * this source reference points back to the agent config module that exported
- * `defineDynamic({ fallback, events })`; runtime reloads that module only for
- * subscribed events.
+ * Dynamic model resolver source preserved in the compiled manifest; the
+ * compiled `config.model` remains the fallback model.
  */
 export type CompiledDynamicModelDefinition = ModuleSourceRef & {
   readonly eventNames: readonly string[];

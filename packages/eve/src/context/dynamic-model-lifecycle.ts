@@ -133,9 +133,7 @@ function setSelectionForEvent(
   selection: ResolvedRuntimeModelSelection | null,
 ): void {
   if (eventType === "step.started") {
-    // In mock mode (unit tiers, `eve eval` mock runs) drop the live instance
-    // so the selection resolves through the reference path, where the
-    // deterministic mock adapter keeps precedence over real providers.
+    // In mock mode drop the live instance so the mock adapter keeps precedence.
     const stored =
       selection !== null && selection.model !== undefined && shouldMockAuthoredRuntimeModels()
         ? { reference: selection.reference }

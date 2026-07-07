@@ -31,13 +31,7 @@ export interface RuntimeModelResolutionScope {
 }
 
 export interface ResolvedRuntimeModelSelection {
-  /**
-   * Live provider instance returned by a dynamic resolver. Present only when
-   * the resolver returned a `LanguageModel` object; string selections carry
-   * just the serializable `reference` and resolve through
-   * {@link resolveRuntimeModelReference} so the bootstrap and mock adapters
-   * keep precedence.
-   */
+  /** Live provider instance; absent for string selections, which resolve through the reference so mock/bootstrap adapters keep precedence. */
   readonly model?: LanguageModel;
   readonly reference: RuntimeModelReference;
 }
@@ -148,9 +142,7 @@ export function normalizeDynamicRuntimeModelResult(input: {
     selection.modelOptions?.providerOptions === undefined
       ? input.fallback.providerOptions
       : parseProviderOptionsRecord(selection.modelOptions.providerOptions);
-  // Deliberately not inherited from the fallback: a different model's context
-  // window is not a safe guess. When omitted, the compaction threshold stays
-  // derived from the last reference that declared a window.
+  // Never inherited from the fallback: a different model's window is not a safe guess.
   const contextWindowTokens = selection.modelContextWindowTokens;
 
   if (typeof selection.model === "string") {

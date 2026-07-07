@@ -1,13 +1,9 @@
 import { defineAgent, defineDynamic, type DynamicResolveContext } from "eve";
 
 /**
- * Dynamic-model e2e fixture.
- *
- * The resolver runs at `turn.started` so the evals can exercise per-turn
- * selection, null fallback, and resolver-failure degradation in one session.
- * Real agents should usually resolve at `session.started` — see the
- * dynamic-capabilities guide for the prompt-cache implications of switching
- * models mid-session.
+ * Dynamic-model e2e fixture. Resolves at `turn.started` (not the usual
+ * `session.started`) so one session can exercise selection, null fallback,
+ * and resolver-failure degradation.
  */
 export default defineAgent({
   model: defineDynamic({
@@ -17,8 +13,6 @@ export default defineAgent({
         const text = lastUserText(ctx.messages);
 
         if (text.includes("[model: boom]")) {
-          // Exercised by resolver-failure.eval.ts: a throwing resolver must
-          // degrade to the fallback model, not fail the turn.
           throw new Error("intentional resolver failure");
         }
 

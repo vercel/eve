@@ -58,8 +58,6 @@ describe("dynamic runtime model resolution", () => {
       result,
     });
 
-    // String selections are reference-only so they resolve through
-    // `resolveRuntimeModelReference` (mock/bootstrap adapters keep precedence).
     expect(resolved).toEqual({
       reference: {
         contextWindowTokens: 128_000,

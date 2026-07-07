@@ -1,10 +1,6 @@
 import { defineEval } from "eve/evals";
 
-/**
- * Dynamic-model smoke: a throwing resolver degrades to the compiled
- * `fallback` model instead of failing the turn. The marker makes the
- * fixture's `turn.started` resolver throw before returning a selection.
- */
+/** A throwing resolver degrades to the fallback model instead of failing the turn. */
 export default defineEval({
   description: "Dynamic model smoke: a throwing resolver falls back instead of failing the turn.",
   async test(t) {

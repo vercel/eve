@@ -315,9 +315,6 @@ async function resolveActiveRuntimeModel(input: {
   }
 
   return {
-    // A live provider instance (step-scoped selection) is used directly;
-    // everything else resolves through `resolveModel` so the bootstrap and
-    // mock adapters keep precedence over gateway ids.
     model:
       selected.model !== undefined
         ? selected.model
@@ -330,10 +327,8 @@ function updateSessionModelReference(
   session: HarnessSession,
   modelReference: RuntimeModelReference,
 ): HarnessSession {
-  // The prior reference must be the one the current threshold was computed
-  // against — `session.agent.modelReference` (reset together with the
-  // threshold by session create/refresh/hydrate). Using the static fallback
-  // here would compound the threshold on every step of a multi-step turn.
+  // Rescale from the reference the current threshold was computed against;
+  // rescaling from the static fallback would compound the threshold per step.
   const priorReference = session.agent.modelReference;
   return {
     ...session,

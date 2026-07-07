@@ -161,11 +161,8 @@ export const DYNAMIC_SENTINEL_KIND = "eve:dynamic" as const;
 
 /**
  * Return value of `defineDynamic`: the runtime shape of a dynamic export,
- * stamped with a sentinel kind the compiler/normalizer detects.
- *
- * `TFallback = never` means the resolver has no fallback, so a missing event
- * handler may resolve to no value. Any other `TFallback` means the dynamic
- * value has a guaranteed fallback when an event is missing or clears itself.
+ * stamped with a sentinel kind the compiler/normalizer detects. `TFallback`
+ * is `never` except for dynamic agent models, the only slot with a fallback.
  */
 export type DynamicSentinel<TResult = unknown, TFallback = never> = {
   readonly kind: typeof DYNAMIC_SENTINEL_KIND;
@@ -174,10 +171,7 @@ export type DynamicSentinel<TResult = unknown, TFallback = never> = {
 
 /**
  * Throws when a dynamic sentinel outside the agent `model` slot carries a
- * `fallback`. Only dynamic models support `fallback` (it doubles as the
- * compiled static model); on tools, skills, and instructions it would be
- * silently dead configuration — the additive slots fall back by authoring a
- * static entry in the same directory or by returning `null`.
+ * `fallback` — anywhere else it would be silently dead configuration.
  */
 export function rejectDynamicSentinelFallback(sentinel: DynamicSentinel, message: string): void {
   if (!("fallback" in sentinel)) {
