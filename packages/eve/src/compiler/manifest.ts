@@ -377,6 +377,8 @@ const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
       })
       .strict()
       .optional(),
+    hasInputFormatter: z.boolean().optional(),
+    inputSchema: jsonObjectSchema.optional(),
     model: compiledRuntimeModelReferenceSchema,
     name: z.string(),
     outputSchema: jsonObjectSchema.optional(),
@@ -723,6 +725,8 @@ export function createCompiledAgentNodeManifest(input: {
                       world: input.config.experimental.workflow.world,
                     },
             },
+      hasInputFormatter: input.config.hasInputFormatter,
+      inputSchema: input.config.inputSchema,
       model: cloneCompiledRuntimeModelReference(input.config.model),
       name: input.config.name,
       outputSchema: input.config.outputSchema,

@@ -204,12 +204,28 @@ export type InternalAgentDefinition = {
   build?: AgentBuildDefinition;
   compaction?: InternalAgentCompactionDefinition;
   experimental?: AgentExperimentalDefinition;
+  /**
+   * Marks that the authored config module exports a `formatInput` function.
+   * The function itself cannot cross the compiled manifest; the runtime loads
+   * it from the config source module when this flag is set.
+   */
+  hasInputFormatter?: boolean;
+  inputSchema?: JsonObject;
   model: InternalAgentModelDefinition;
   outputSchema?: JsonObject;
   reasoning?: AgentReasoningDefinition;
   source?: ModuleSourceRef;
   limits?: AgentLimitsDefinition;
 };
+
+/**
+ * Formats the validated subagent tool-call input into the caller message
+ * delegated to the subagent. Declared alongside a custom `inputSchema` so
+ * structured tool input renders into the delegated prompt; eve still wraps
+ * the returned string in the standard subagent preamble. Must be synchronous
+ * and side-effect free.
+ */
+export type SubagentInputFormatter = (input: JsonObject) => string;
 
 /**
  * Shared public definition for an agent.
@@ -263,4 +279,21 @@ export type PublicAgentDefinition = {
    * per-message output schema.
    */
   readonly outputSchema?: StandardJSONSchemaV1<unknown, unknown> | JsonObject;
+  /**
+   * Custom JSON Schema for the lowered subagent tool's input. Only meaningful
+   * when this agent runs as a subagent: replaces the default
+   * `{ message, outputSchema? }` tool shape the parent model sees. When set,
+   * the per-call `outputSchema` escape hatch is disabled (the definition-level
+   * `outputSchema` still applies). Pair with {@link SubagentInputFormatter}
+   * via `formatInput` to control how structured input renders into the
+   * delegated prompt.
+   */
+  readonly inputSchema?: StandardJSONSchemaV1<unknown, unknown> | JsonObject;
+  /**
+   * Formats the validated subagent tool-call input into the delegated caller
+   * message. Only meaningful when this agent runs as a subagent. Defaults to
+   * the input's `message` string, or the JSON-serialized input when a custom
+   * `inputSchema` carries no `message` field.
+   */
+  readonly formatInput?: SubagentInputFormatter;
 };

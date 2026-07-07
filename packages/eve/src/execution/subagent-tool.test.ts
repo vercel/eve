@@ -249,6 +249,72 @@ describe("buildSubagentRunInput", () => {
     expect(runInput.input.message).not.toContain(action.description);
   });
 
+  it("formats structured input with the definition formatInput", () => {
+    const { runInput } = buildSubagentRunInput({
+      action: {
+        ...makeAction(),
+        input: { priority: "high", title: "Resolve flaky test" },
+      },
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      session: makeSession(),
+      source: {
+        description: "Creates Linear issues.",
+        formatInput: (input) => `Create issue "${input.title}" with priority ${input.priority}.`,
+        hasCustomInputSchema: true,
+        type: "local",
+      },
+    });
+
+    expect(runInput.input.message).toContain(
+      'Caller message:\nCreate issue "Resolve flaky test" with priority high.',
+    );
+  });
+
+  it("serializes structured input as JSON when a custom schema has no formatInput", () => {
+    const { runInput } = buildSubagentRunInput({
+      action: {
+        ...makeAction(),
+        input: { title: "Resolve flaky test" },
+      },
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      session: makeSession(),
+      source: {
+        description: "Creates Linear issues.",
+        hasCustomInputSchema: true,
+        type: "local",
+      },
+    });
+
+    expect(runInput.input.message).toContain('Caller message:\n{"title":"Resolve flaky test"}');
+  });
+
+  it("ignores per-call outputSchema when the definition declares a custom inputSchema", () => {
+    const { runInput } = buildSubagentRunInput({
+      action: {
+        ...makeAction(),
+        input: {
+          outputSchema: { properties: { hijacked: { type: "string" } }, type: "object" },
+          title: "Resolve flaky test",
+        },
+      },
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      session: makeSession(),
+      source: {
+        description: "Creates Linear issues.",
+        hasCustomInputSchema: true,
+        type: "local",
+      },
+    });
+
+    expect(runInput.input.outputSchema).toBeUndefined();
+  });
+
   it("leaves outputSchema undefined when not provided", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),

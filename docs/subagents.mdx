@@ -75,7 +75,33 @@ The built-in `agent` tool is the exception. Its children share the parent's sand
 
 ## What the parent sees
 
-eve lowers every subagent (built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, outputSchema? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. Set `outputSchema` to run the child in task mode, returning structured output as the tool result.
+eve lowers every subagent (built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same default `{ message, outputSchema? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. Set `outputSchema` to run the child in task mode, returning structured output as the tool result.
+
+### Custom input schema
+
+A declared or remote subagent can replace the default tool shape with its own `inputSchema`, so the parent model calls it with structured input instead of one free-form message. Pair it with `formatInput` to control how that input renders into the prompt the child receives:
+
+```ts title="agent/subagents/issues/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  description: "Creates tracker issues.",
+  model: "anthropic/claude-sonnet-5",
+  inputSchema: {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      priority: { type: "string", enum: ["low", "medium", "high"] },
+    },
+    required: ["title"],
+    additionalProperties: false,
+  },
+  formatInput: (input) =>
+    `Create an issue titled "${input.title}" with priority ${input.priority ?? "medium"}.`,
+});
+```
+
+`inputSchema` accepts a Standard Schema or a JSON Schema object and is lowered to JSON Schema at compile time. `formatInput` must be synchronous; eve still wraps its return value in the standard subagent preamble. Without `formatInput`, eve uses the input's `message` string when present, or the JSON-serialized input otherwise. Declaring `inputSchema` removes the per-call `outputSchema` escape hatch — the definition-level `outputSchema` still applies. Both fields are ignored on the root agent and on the built-in `agent` tool, which keeps the default shape.
 
 Subagent delegation is capped by default at three child-session levels. Increase
 or lower that limit with `limits.maxSubagentDepth`:
@@ -96,7 +122,7 @@ At the configured depth, eve stops advertising subagent tools, including declare
 
 `Workflow` is root-only. Delegated subagent sessions can still call their own visible subagent tools until the depth cap, but they do not receive the `Workflow` orchestration wrapper. The number of subagent calls one Workflow program may dispatch is capped separately by `limits.maxSubagents` (default 100); see [Dynamic workflows](./guides/dynamic-workflows).
 
-A declared subagent's tool name is the bare path-derived name, with no prefix. `agent/subagents/researcher/` registers as the tool `researcher`. Unlike connection tools (`<connection>__<tool>`), it carries no namespace, so the model, approvals, logs, and evals all reference it by that name. Its input schema is:
+A declared subagent's tool name is the bare path-derived name, with no prefix. `agent/subagents/researcher/` registers as the tool `researcher`. Unlike connection tools (`<connection>__<tool>`), it carries no namespace, so the model, approvals, logs, and evals all reference it by that name. Its default input schema is:
 
 ```ts
 {
@@ -104,6 +130,8 @@ A declared subagent's tool name is the bare path-derived name, with no prefix. `
   outputSchema?: object; // when set, the child runs in task mode and returns structured output
 }
 ```
+
+A definition-level `inputSchema` replaces this shape entirely (see [Custom input schema](#custom-input-schema)).
 
 Because the name lives in the same runtime tool namespace as authored tools, a subagent named `researcher` collides with a tool named `researcher`. eve rejects the build rather than picking a winner, so keep subagent directory names distinct from tool names.
 

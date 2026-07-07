@@ -120,7 +120,12 @@ export async function dispatchRuntimeActionsStep(input: {
           const registered = bundle.subagentRegistry.subagentsByNodeId.get(action.nodeId);
           const source: SubagentInputSource =
             registered?.definition.kind === "subagent"
-              ? { description: registered.definition.description, type: "local" }
+              ? {
+                  description: registered.definition.description,
+                  formatInput: registered.definition.formatInput,
+                  hasCustomInputSchema: registered.definition.inputSchema !== undefined,
+                  type: "local",
+                }
               : { type: "runtime" };
           const childRuntime = createWorkflowRuntime({
             compiledArtifactsSource: bundle.compiledArtifactsSource,

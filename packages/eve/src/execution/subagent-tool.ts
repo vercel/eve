@@ -1,5 +1,6 @@
 import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter.js";
-import { formatSubagentInput } from "#execution/subagent-invocation.js";
+import { formatSubagentInput, resolveSubagentCallMessage } from "#execution/subagent-invocation.js";
+import type { SubagentInputFormatter } from "#shared/agent-definition.js";
 import type {
   ChannelInstrumentationProjection,
   RunInput,
@@ -23,6 +24,13 @@ interface BatchEventMetadata {
 export type SubagentInputSource =
   | {
       readonly description: string;
+      readonly formatInput?: SubagentInputFormatter;
+      /**
+       * Set when the subagent definition declares a custom `inputSchema`.
+       * Disables the per-call `outputSchema` escape hatch, which only exists
+       * on the default subagent tool shape.
+       */
+      readonly hasCustomInputSchema?: boolean;
       readonly type: "local";
     }
   | {
@@ -106,7 +114,10 @@ export function buildSubagentRunInput(input: {
     initiatorAuth,
     input: {
       message: formatSubagentCallInputMessage({ action, source }),
-      outputSchema: action.input.outputSchema as JsonObject | undefined,
+      outputSchema:
+        source.type === "local" && source.hasCustomInputSchema === true
+          ? undefined
+          : (action.input.outputSchema as JsonObject | undefined),
     },
     mode: "task",
     parent: {
@@ -132,19 +143,20 @@ function formatSubagentCallInputMessage(input: {
   readonly action: Pick<RuntimeSubagentCallActionRequest, "input" | "subagentName">;
   readonly source: SubagentInputSource;
 }): string {
-  const { message } = input.action.input as { message: string };
-
   switch (input.source.type) {
     case "local":
       return formatSubagentInput({
         description: input.source.description,
-        message,
+        message: resolveSubagentCallMessage({
+          callInput: input.action.input,
+          formatInput: input.source.formatInput,
+        }),
         name: input.action.subagentName,
         type: "local",
       }).message;
     case "runtime":
       return formatSubagentInput({
-        message,
+        message: resolveSubagentCallMessage({ callInput: input.action.input }),
         name: input.action.subagentName,
         type: "runtime",
       }).message;

@@ -31,7 +31,7 @@ import type {
   MarkdownSourceRef,
 } from "#shared/source-ref.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
-import type { InternalAgentDefinition } from "#shared/agent-definition.js";
+import type { InternalAgentDefinition, SubagentInputFormatter } from "#shared/agent-definition.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
 import type { SandboxBackend } from "#shared/sandbox-backend.js";
 import type { SandboxBootstrapContext, SandboxSessionContext } from "#shared/sandbox-definition.js";
@@ -266,6 +266,8 @@ export type ResolvedRuntimeSubagentNode = Readonly<
   ModuleSourceRef &
     Node & {
       description: string;
+      formatInput?: SubagentInputFormatter;
+      inputSchema?: JsonObject;
       kind: "subagent";
       name: string;
     }
@@ -280,7 +282,9 @@ export type ResolvedRuntimeRemoteAgentNode = Readonly<
     Node & {
       auth?: OutboundAuthFn;
       description: string;
+      formatInput?: SubagentInputFormatter;
       headers?: HeadersValue;
+      inputSchema?: JsonObject;
       kind: "remote";
       name: string;
       outputSchema?: JsonObject;

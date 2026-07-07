@@ -2,6 +2,7 @@ import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index
 import type { HeadersValue } from "#client/types.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import { EVE_CREATE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
+import type { SubagentInputFormatter } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 
 /**
@@ -14,7 +15,23 @@ export interface RemoteAgentDefinition {
    * The parent agent reads this as the lowered subagent tool's description.
    */
   readonly description: string;
+  /**
+   * Formats the validated tool-call input into the caller message sent to the
+   * remote deployment. eve still wraps the returned string in the standard
+   * subagent preamble. Defaults to the input's `message` string, or the
+   * JSON-serialized input when a custom `inputSchema` carries no `message`
+   * field.
+   */
+  readonly formatInput?: SubagentInputFormatter;
   readonly headers?: HeadersValue;
+  /**
+   * Custom JSON Schema for the lowered subagent tool's input. Replaces the
+   * default `{ message, outputSchema? }` tool shape the parent model sees.
+   * Lowered to JSON Schema at compile time. When set, the per-call
+   * `outputSchema` escape hatch is disabled (the definition-level
+   * `outputSchema` still applies).
+   */
+  readonly inputSchema?: StandardJSONSchemaV1<unknown, unknown> | JsonObject;
   readonly kind: "remote";
   /**
    * Optional structured return type the caller requires from the remote agent.

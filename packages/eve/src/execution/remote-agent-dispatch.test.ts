@@ -104,6 +104,104 @@ describe("startRemoteAgentSession", () => {
     expect(body.mode).toBe("task");
   });
 
+  it("formats the delegated message with the definition formatInput", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, sessionId: "remote-session" }), { status: 202 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startRemoteAgentSession({
+      action: {
+        ...createAction(),
+        input: { city: "Seoul", days: 3 },
+      },
+      callbackBaseUrl: "https://caller.example.com",
+      remote: {
+        ...createRemoteAgent(),
+        formatInput: (input) => `Forecast request: ${input.city} for ${input.days} days.`,
+        inputSchema: {
+          properties: { city: { type: "string" }, days: { type: "number" } },
+          required: ["city"],
+          type: "object",
+        },
+      },
+      session: createSession(),
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+    expect(body.message).toContain("Caller message:\nForecast request: Seoul for 3 days.");
+  });
+
+  it("serializes structured input as JSON when a custom inputSchema has no formatInput", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, sessionId: "remote-session" }), { status: 202 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startRemoteAgentSession({
+      action: {
+        ...createAction(),
+        input: { city: "Seoul" },
+      },
+      callbackBaseUrl: "https://caller.example.com",
+      remote: {
+        ...createRemoteAgent(),
+        inputSchema: {
+          properties: { city: { type: "string" } },
+          required: ["city"],
+          type: "object",
+        },
+      },
+      session: createSession(),
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+    expect(body.message).toContain(`Caller message:\n{"city":"Seoul"}`);
+  });
+
+  it("ignores per-call outputSchema when the definition declares a custom inputSchema", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, sessionId: "remote-session" }), { status: 202 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const declaredOutputSchema = {
+      properties: { answer: { type: "string" } },
+      required: ["answer"],
+      type: "object",
+    } as const;
+
+    await startRemoteAgentSession({
+      action: {
+        ...createAction(),
+        input: {
+          city: "Seoul",
+          outputSchema: { properties: { hijacked: { type: "string" } }, type: "object" },
+        },
+      },
+      callbackBaseUrl: "https://caller.example.com",
+      remote: {
+        ...createRemoteAgent(),
+        inputSchema: {
+          properties: { city: { type: "string" } },
+          required: ["city"],
+          type: "object",
+        },
+        outputSchema: declaredOutputSchema,
+      },
+      session: createSession(),
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+    expect(body.outputSchema).toEqual(declaredOutputSchema);
+  });
+
   it("targets an active turn inbox when a callback token is supplied", async () => {
     const fetchMock = vi
       .fn()
@@ -173,6 +271,17 @@ describe("startRemoteAgentSession", () => {
     );
   });
 });
+
+function createSession() {
+  return {
+    agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+    compaction: { recentWindowSize: 10, threshold: 100000 },
+    continuationToken: "eve:parent-token",
+    history: [],
+    sessionId: "parent-session",
+    state: {},
+  };
+}
 
 function createAction(): RuntimeRemoteAgentCallActionRequest {
   return {

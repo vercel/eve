@@ -233,6 +233,7 @@ function compileRemoteAgent(input: {
     ...moduleSource,
     description: definition.description,
     entryPath: input.source.entryPath,
+    inputSchema: definition.inputSchema,
     name: input.source.subagentId,
     nodeId: input.source.sourceId,
     outputSchema: definition.outputSchema,
@@ -286,6 +287,7 @@ function normalizeRemoteAgentDefinition(
   message: string,
 ): {
   readonly description: string;
+  readonly inputSchema?: JsonObject;
   readonly outputSchema?: JsonObject;
   readonly path: string;
   readonly url: string;
@@ -293,7 +295,17 @@ function normalizeRemoteAgentDefinition(
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(
     record,
-    ["auth", "description", "headers", "kind", "outputSchema", "path", "url"],
+    [
+      "auth",
+      "description",
+      "formatInput",
+      "headers",
+      "inputSchema",
+      "kind",
+      "outputSchema",
+      "path",
+      "url",
+    ],
     message,
   );
 
@@ -301,8 +313,16 @@ function normalizeRemoteAgentDefinition(
     throw new Error(`${message} Expected "kind" to be "remote".`);
   }
 
+  if (record.formatInput !== undefined && typeof record.formatInput !== "function") {
+    throw new Error(`${message} Expected "formatInput" to be a function.`);
+  }
+
   return {
     description: expectString(record.description, message),
+    inputSchema:
+      record.inputSchema === undefined
+        ? undefined
+        : normalizeJsonSchemaDefinition(record.inputSchema, "input"),
     outputSchema:
       record.outputSchema === undefined
         ? undefined

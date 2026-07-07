@@ -32,6 +32,38 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow(FAILURE_MESSAGE);
   });
 
+  it("accepts a custom inputSchema and formatInput", () => {
+    const inputSchema = {
+      properties: { city: { type: "string" } },
+      required: ["city"],
+      type: "object",
+    };
+    const formatInput = (input: Record<string, unknown>) => `city=${input.city}`;
+    const definition = normalizeAgentDefinition(
+      {
+        formatInput,
+        inputSchema,
+        model: "openai/gpt-5.5",
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.inputSchema).toEqual(inputSchema);
+    expect(definition.formatInput).toBe(formatInput);
+  });
+
+  it("rejects a non-function formatInput", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          formatInput: "not a function",
+          model: "openai/gpt-5.5",
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
+  });
+
   it("accepts positive agent limits", () => {
     const definition = normalizeAgentDefinition(
       {

@@ -1,7 +1,7 @@
 import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
 import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
-import { formatSubagentInput } from "#execution/subagent-invocation.js";
+import { formatSubagentInput, resolveSubagentCallMessage } from "#execution/subagent-invocation.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeRemoteAgentCallActionRequest } from "#runtime/actions/types.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
@@ -36,8 +36,10 @@ export async function startRemoteAgentSession(input: {
       },
       message: formatRemoteAgentCallInputMessage({ action: input.action, remote: input.remote }),
       mode: "task",
-      outputSchema:
-        (input.action.input.outputSchema as object | undefined) ?? input.remote.outputSchema,
+      outputSchema: resolveRemoteAgentCallOutputSchema({
+        action: input.action,
+        remote: input.remote,
+      }),
     }),
     headers: {
       "content-type": "application/json",
@@ -108,13 +110,30 @@ function formatRemoteAgentCallInputMessage(input: {
   readonly action: RuntimeRemoteAgentCallActionRequest;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
 }): string {
-  const message = typeof input.action.input.message === "string" ? input.action.input.message : "";
   return formatSubagentInput({
     description: input.remote.description,
-    message,
+    message: resolveSubagentCallMessage({
+      callInput: input.action.input,
+      formatInput: input.remote.formatInput,
+    }),
     name: input.action.remoteAgentName,
     type: "remote",
   }).message;
+}
+
+/**
+ * The per-call `outputSchema` escape hatch only exists on the default
+ * subagent tool shape; a definition-level `inputSchema` replaces that shape,
+ * so only the definition-level `outputSchema` applies.
+ */
+function resolveRemoteAgentCallOutputSchema(input: {
+  readonly action: RuntimeRemoteAgentCallActionRequest;
+  readonly remote: ResolvedRuntimeRemoteAgentNode;
+}): object | undefined {
+  if (input.remote.inputSchema !== undefined) {
+    return input.remote.outputSchema;
+  }
+  return (input.action.input.outputSchema as object | undefined) ?? input.remote.outputSchema;
 }
 
 function trimTrailingSlash(value: string): string {

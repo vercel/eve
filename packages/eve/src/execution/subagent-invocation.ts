@@ -1,4 +1,6 @@
 import type { StepInput } from "#harness/types.js";
+import type { SubagentInputFormatter } from "#shared/agent-definition.js";
+import type { JsonObject } from "#shared/json.js";
 
 /**
  * Narrowed form of {@link StepInput} whose `message` is always a plain string.
@@ -6,6 +8,25 @@ import type { StepInput } from "#harness/types.js";
  */
 export interface FormattedSubagentInvocation extends StepInput {
   readonly message: string;
+}
+
+/**
+ * Derives the caller message for one subagent call from the validated tool
+ * input. A definition-level `formatInput` wins; otherwise the input's
+ * `message` string is used, falling back to the JSON-serialized input for
+ * custom input shapes that carry no `message` field.
+ */
+export function resolveSubagentCallMessage(input: {
+  readonly callInput: JsonObject;
+  readonly formatInput?: SubagentInputFormatter;
+}): string {
+  if (input.formatInput !== undefined) {
+    return input.formatInput(input.callInput);
+  }
+
+  return typeof input.callInput.message === "string"
+    ? input.callInput.message
+    : JSON.stringify(input.callInput);
 }
 
 type RuntimeSubagentInputFormatRequest = {

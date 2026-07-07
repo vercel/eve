@@ -589,6 +589,142 @@ describe("resolveRuntimeAgentGraph", () => {
     });
   });
 
+  it("resolves custom input schemas and formatters for local and remote subagents", async () => {
+    const appRoot = "/app";
+    const agentRoot = "/app/agent";
+    const issuesRoot = "/app/agent/subagents/issues";
+    const issuesInputSchema = {
+      additionalProperties: false,
+      properties: { priority: { type: "string" }, title: { type: "string" } },
+      required: ["title"],
+      type: "object",
+    };
+    const weatherInputSchema = {
+      additionalProperties: false,
+      properties: { city: { type: "string" } },
+      required: ["city"],
+      type: "object",
+    };
+    const localFormatInput = (input: Record<string, unknown>) => `Create issue: ${input.title}`;
+    const remoteFormatInput = (input: Record<string, unknown>) => `Forecast for ${input.city}`;
+    const issuesManifest = createCompiledAgentNodeManifest({
+      agentRoot: issuesRoot,
+      appRoot,
+      config: {
+        description: "Creates tracker issues.",
+        hasInputFormatter: true,
+        inputSchema: issuesInputSchema,
+        model: {
+          id: TEST_DEFAULT_MODEL_ID,
+          routing: { kind: "gateway", target: "openai" },
+        },
+        name: "issues",
+        source: {
+          logicalPath: "agent.ts",
+          sourceId: "agent.ts",
+          sourceKind: "module",
+        },
+      },
+    });
+    const manifest = createCompiledAgentManifest({
+      agentRoot,
+      appRoot,
+      config: {
+        model: {
+          id: TEST_DEFAULT_MODEL_ID,
+          routing: { kind: "gateway", target: "openai" },
+        },
+        name: "router",
+      },
+      remoteAgents: [
+        {
+          description: "Answer weather questions remotely.",
+          entryPath: `${agentRoot}/subagents/weather.ts`,
+          inputSchema: weatherInputSchema,
+          logicalPath: "subagents/weather.ts",
+          name: "weather",
+          nodeId: "subagents/weather.ts",
+          path: "/eve/v1/session",
+          rootPath: agentRoot,
+          sourceId: "subagents/weather.ts",
+          sourceKind: "module",
+          url: "https://weather.example.com",
+        },
+      ],
+      subagentEdges: [
+        {
+          childNodeId: "subagents/issues",
+          parentNodeId: ROOT_COMPILED_AGENT_NODE_ID,
+        },
+      ],
+      subagents: [
+        {
+          agent: issuesManifest,
+          description: "Creates tracker issues.",
+          entryPath: issuesRoot,
+          logicalPath: "subagents/issues",
+          name: "issues",
+          nodeId: "subagents/issues",
+          rootPath: issuesRoot,
+          sourceId: "subagents/issues",
+          sourceKind: "module",
+        },
+      ],
+    });
+    const graph = await resolveRuntimeAgentGraph({
+      manifest,
+      moduleMap: {
+        nodes: {
+          [ROOT_COMPILED_AGENT_NODE_ID]: {
+            modules: {
+              "subagents/weather.ts": {
+                default: {
+                  description: "Answer weather questions remotely.",
+                  formatInput: remoteFormatInput,
+                  kind: "remote",
+                  path: "/eve/v1/session",
+                  url: "https://weather.example.com",
+                },
+              },
+            },
+          },
+          "subagents/issues": {
+            modules: {
+              "agent.ts": {
+                default: {
+                  description: "Creates tracker issues.",
+                  formatInput: localFormatInput,
+                  model: TEST_DEFAULT_MODEL_ID,
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const localSubagent = graph.root.subagentRegistry.subagentsByName.get("issues");
+    const remoteSubagent = graph.root.subagentRegistry.subagentsByName.get("weather");
+
+    expect(localSubagent?.prepared.inputSchema).toEqual(issuesInputSchema);
+    expect(localSubagent?.definition).toMatchObject({
+      inputSchema: issuesInputSchema,
+      kind: "subagent",
+    });
+    expect(
+      localSubagent?.definition.kind === "subagent"
+        ? localSubagent.definition.formatInput
+        : undefined,
+    ).toBe(localFormatInput);
+
+    expect(remoteSubagent?.prepared.inputSchema).toEqual(weatherInputSchema);
+    expect(
+      remoteSubagent?.definition.kind === "remote"
+        ? remoteSubagent.definition.formatInput
+        : undefined,
+    ).toBe(remoteFormatInput);
+  });
+
   it("lets an authored tool replace a framework tool by name collision", async () => {
     const manifest = createCompiledAgentManifest({
       agentRoot: "/app/agent",

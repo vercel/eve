@@ -310,6 +310,8 @@ async function resolveRuntimeSubagent(input: {
 }): Promise<ResolvedRuntimeSubagentNode> {
   const resolvedSubagent: ResolvedRuntimeSubagentNode = {
     description: input.sourceRef.description,
+    formatInput: await resolveSubagentInputFormatter(input),
+    inputSchema: input.sourceRef.agent.config.inputSchema,
     kind: "subagent",
     logicalPath: input.sourceRef.logicalPath,
     name: input.sourceRef.name,
@@ -328,6 +330,54 @@ async function resolveRuntimeSubagent(input: {
   });
 
   return resolvedSubagent;
+}
+
+/**
+ * Loads the local subagent's `formatInput` from its authored config module.
+ * The compiled manifest only carries the `hasInputFormatter` flag — functions
+ * cannot cross the manifest — so the module is loaded on demand from the
+ * child node's module scope.
+ */
+async function resolveSubagentInputFormatter(input: {
+  readonly moduleMap: CompiledModuleMap;
+  readonly sourceRef: CompiledSubagentNode;
+}): Promise<ResolvedRuntimeSubagentNode["formatInput"]> {
+  const config = input.sourceRef.agent.config;
+  if (config.hasInputFormatter !== true) {
+    return undefined;
+  }
+  if (config.source === undefined) {
+    throw new ResolveRuntimeAgentGraphError(
+      `Subagent "${input.sourceRef.logicalPath}" declares a formatInput but its config module source is missing.`,
+      {
+        nodeId: toRuntimeNodeId(input.sourceRef.nodeId),
+        sourceId: input.sourceRef.sourceId,
+      },
+    );
+  }
+
+  const resolvedExportValue = await loadResolvedModuleExport({
+    definition: config.source,
+    kindLabel: "subagent config",
+    moduleMap: input.moduleMap,
+    nodeId: input.sourceRef.nodeId,
+  });
+  const resolvedRecord = expectObjectRecord(
+    resolvedExportValue,
+    `Expected subagent config source "${input.sourceRef.logicalPath}" to export an object.`,
+  );
+
+  if (typeof resolvedRecord.formatInput !== "function") {
+    throw new ResolveRuntimeAgentGraphError(
+      `Expected subagent config source "${input.sourceRef.logicalPath}" to export a formatInput function.`,
+      {
+        nodeId: toRuntimeNodeId(input.sourceRef.nodeId),
+        sourceId: input.sourceRef.sourceId,
+      },
+    );
+  }
+
+  return resolvedRecord.formatInput as ResolvedRuntimeSubagentNode["formatInput"];
 }
 
 async function resolveRuntimeRemoteAgent(input: {
@@ -349,7 +399,9 @@ async function resolveRuntimeRemoteAgent(input: {
   const resolvedRemoteAgent: {
     auth?: ResolvedRuntimeRemoteAgentNode["auth"];
     description: string;
+    formatInput?: ResolvedRuntimeRemoteAgentNode["formatInput"];
     headers?: HeadersValue;
+    inputSchema?: ResolvedRuntimeRemoteAgentNode["inputSchema"];
     kind: "remote";
     logicalPath: string;
     name: string;
@@ -361,6 +413,7 @@ async function resolveRuntimeRemoteAgent(input: {
     url: string;
   } = {
     description: input.sourceRef.description,
+    inputSchema: input.sourceRef.inputSchema,
     kind: "remote",
     logicalPath: input.sourceRef.logicalPath,
     name: input.sourceRef.name,
@@ -374,6 +427,11 @@ async function resolveRuntimeRemoteAgent(input: {
 
   if (typeof resolvedRecord.auth === "function") {
     resolvedRemoteAgent.auth = resolvedRecord.auth as ResolvedRuntimeRemoteAgentNode["auth"];
+  }
+
+  if (typeof resolvedRecord.formatInput === "function") {
+    resolvedRemoteAgent.formatInput =
+      resolvedRecord.formatInput as ResolvedRuntimeRemoteAgentNode["formatInput"];
   }
 
   const headers = resolveRemoteAgentHeaders(resolvedRecord.headers);

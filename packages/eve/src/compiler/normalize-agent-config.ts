@@ -66,6 +66,8 @@ export async function compileAgentConfig(
     };
     description?: string;
     experimental?: CompiledAgentDefinition["experimental"];
+    hasInputFormatter?: boolean;
+    inputSchema?: JsonObject;
     model: CompiledRuntimeModelReference;
     name: string;
     outputSchema?: JsonObject;
@@ -98,6 +100,14 @@ export async function compileAgentConfig(
 
   if (definition.outputSchema !== undefined) {
     compiledConfig.outputSchema = normalizeJsonSchemaDefinition(definition.outputSchema, "output");
+  }
+
+  if (definition.inputSchema !== undefined) {
+    compiledConfig.inputSchema = normalizeJsonSchemaDefinition(definition.inputSchema, "input");
+  }
+
+  if (definition.formatInput !== undefined) {
+    compiledConfig.hasInputFormatter = true;
   }
 
   if (definition.reasoning !== undefined) {

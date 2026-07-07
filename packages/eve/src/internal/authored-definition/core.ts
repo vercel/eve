@@ -41,6 +41,8 @@ export function normalizeAgentDefinition(
       "compaction",
       "description",
       "experimental",
+      "formatInput",
+      "inputSchema",
       "limits",
       "model",
       "modelContextWindowTokens",
@@ -87,6 +89,17 @@ export function normalizeAgentDefinition(
 
   if (record.outputSchema !== undefined) {
     definition.outputSchema = record.outputSchema as NormalizedAgentDefinition["outputSchema"];
+  }
+
+  if (record.inputSchema !== undefined) {
+    definition.inputSchema = record.inputSchema as NormalizedAgentDefinition["inputSchema"];
+  }
+
+  if (record.formatInput !== undefined) {
+    definition.formatInput = expectFunction(
+      record.formatInput,
+      message,
+    ) as NormalizedAgentDefinition["formatInput"];
   }
 
   if (record.reasoning !== undefined) {

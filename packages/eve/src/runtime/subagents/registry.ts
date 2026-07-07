@@ -21,8 +21,10 @@ export interface RuntimeSubagentRegistry {
 }
 
 /**
- * Stable JSON Schema lowered onto every subagent tool. Subagents always
- * accept one free-form `message` string from the parent agent.
+ * Default JSON Schema lowered onto a subagent tool: one free-form `message`
+ * string plus the per-call `outputSchema` escape hatch. A definition-level
+ * `inputSchema` replaces this shape (and disables the per-call
+ * `outputSchema`).
  */
 export const SUBAGENT_TOOL_INPUT_SCHEMA: JsonObject = Object.freeze({
   type: "object",
@@ -99,7 +101,7 @@ function createPreparedRuntimeSubagentTool(
 ): PreparedRuntimeDelegationTool {
   return {
     description: definition.description,
-    inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
+    inputSchema: definition.inputSchema ?? SUBAGENT_TOOL_INPUT_SCHEMA,
     kind: definition.kind,
     logicalPath: definition.logicalPath,
     name: definition.name,
