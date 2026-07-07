@@ -1,5 +1,11 @@
 # eve
 
+## 0.21.1
+
+### Patch Changes
+
+- 0b42ba1: `eve eval` now shuts down tracked sandbox handles after a local one-shot eval run completes. This prevents local sandbox compute, including microsandbox sessions, from outliving the eval process.
+
 ## 0.21.0
 
 ### Minor Changes
