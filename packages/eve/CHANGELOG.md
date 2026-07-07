@@ -1,5 +1,16 @@
 # eve
 
+## 0.22.0
+
+### Minor Changes
+
+- 2958abf: feat(eve): add `konsistent` with initial config to enforce structural conventions
+
+### Patch Changes
+
+- b7d1089: Add `defineDynamic({ fallback, events })` support for scoped dynamic agent model selection. Agents can choose a model once per session, once per turn, or per model step while keeping a compiled fallback for metadata and unset scopes.
+- bd287b1: fix(eve): pass error messages when tool call input is invalid back to model instead of throwing so that it can try again
+
 ## 0.21.1
 
 ### Patch Changes
