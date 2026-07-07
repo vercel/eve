@@ -20,7 +20,8 @@ import type { EveEvalContext } from "eve/evals";
 // the deployment that created the session (see shouldRouteToLatestDeployment
 // in execution/workflow-runtime.ts). The timeline below asserts exactly the
 // preview contract; the pinned-turn gate at t3 is a deliberate tripwire that
-// must be flipped when dispatch gains preview latest-routing.
+// must be flipped when dispatch gains preview latest-routing
+// (https://github.com/vercel/eve/issues/582).
 //
 // Timeline under test:
 //   t0  session A writes a file into its sandbox workspace
@@ -121,8 +122,8 @@ export default defineEval({
       // t3: TRIPWIRE — on preview, session A's turns stay pinned to the
       // deployment that created it, so its sandbox key never rotates and the
       // file is still present. When turn dispatch gains preview
-      // latest-routing, this gate flips to /absent/ (and the skill becomes
-      // loadable in session A too).
+      // latest-routing (issue #582), this gate flips to /absent/ (and the
+      // skill becomes loadable in session A too).
       const probe = await t.send(
         `Run the bash command \`test -f ${FILE_PATH} && echo present || echo absent\` ` +
           "and reply with the command output verbatim.",

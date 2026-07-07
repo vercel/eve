@@ -69,7 +69,8 @@ a new deployment, its turns stay pinned to the deployment that created it
 `shouldRouteToLatestDeployment` in `execution/workflow-runtime.ts`), and new
 sessions adopt the new deployment — a skill added by the redeploy loads there.
 The pinned-turn assertion is a deliberate tripwire: it must be flipped when
-turn dispatch gains preview latest-routing.
+turn dispatch gains preview latest-routing
+(https://github.com/vercel/eve/issues/582).
 
 The eval redeploys from inside its test body: it mutates the agent source,
 runs `eve build` + `vc deploy`, and repoints a run-scoped Vercel alias at
