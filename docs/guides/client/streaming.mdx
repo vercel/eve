@@ -61,20 +61,25 @@ function handleEvent(event: HandleMessageStreamEvent) {
 
 The most common UI events are:
 
-| Event                | Use                                                              |
-| -------------------- | ---------------------------------------------------------------- |
-| `message.received`   | Confirm the user message landed.                                 |
-| `reasoning.appended` | Render reasoning deltas when the model provides them.            |
-| `message.appended`   | Render assistant text deltas.                                    |
-| `actions.requested`  | Show tool calls as the model requests them, before execution.    |
-| `action.result`      | Show tool call results.                                          |
-| `input.requested`    | Pause the UI for approval or a question answer.                  |
-| `result.completed`   | Read structured output from an [output schema](./output-schema). |
-| `session.waiting`    | Enable the composer for the next turn.                           |
-| `session.completed`  | Mark the conversation terminal.                                  |
-| `session.failed`     | Mark the conversation failed.                                    |
+| Event                | Use                                                                            |
+| -------------------- | ------------------------------------------------------------------------------ |
+| `message.received`   | Confirm the user message landed; `data.parts` includes text and file metadata. |
+| `reasoning.appended` | Render reasoning deltas when the model provides them.                          |
+| `message.appended`   | Render assistant text deltas.                                                  |
+| `actions.requested`  | Show tool calls as the model requests them, before execution.                  |
+| `action.result`      | Show tool call results.                                                        |
+| `input.requested`    | Pause the UI for approval or a question answer.                                |
+| `result.completed`   | Read structured output from an [output schema](./output-schema).               |
+| `session.waiting`    | Enable the composer for the next turn.                                         |
+| `session.completed`  | Mark the conversation terminal.                                                |
+| `session.failed`     | Mark the conversation failed.                                                  |
 
 For the complete event table, see [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming).
+
+When a submitted message includes attachments, `message.received.data.message` stays the
+flattened compatibility summary, while `message.received.data.parts` carries renderable text and
+file metadata. File parts never include raw bytes or internal sandbox paths; `url` appears only for
+client-resolvable `http(s)` and `data:` URLs.
 
 ## Authorization pauses
 

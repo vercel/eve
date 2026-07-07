@@ -3,6 +3,8 @@ import type { EveDynamicToolPart, EveMessagePart } from "eve/vue";
 
 const { data, status, error, send, stop } = useEveAgent();
 
+type EveFilePart = Extract<EveMessagePart, { type: "file" }>;
+
 const isBusy = computed(() => status.value === "submitted" || status.value === "streaming");
 const isEmpty = computed(() => data.value.messages.length === 0);
 
@@ -58,6 +60,25 @@ function handleInputResponses(
 function partKey(part: EveMessagePart, index: number): string {
   if (part.type === "dynamic-tool") return part.toolCallId;
   return `${part.type}:${index}`;
+}
+
+function fileLabel(part: EveFilePart): string {
+  return part.filename ?? "Attachment";
+}
+
+function fileDetail(part: EveFilePart): string {
+  return [part.mediaType, formatBytes(part.size)].filter(Boolean).join(" - ");
+}
+
+function isImageFile(part: EveFilePart): boolean {
+  return part.url !== undefined && part.mediaType.startsWith("image/");
+}
+
+function formatBytes(size: number | undefined): string | undefined {
+  if (size === undefined) return undefined;
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 </script>
 
@@ -130,6 +151,78 @@ function partKey(part: EveMessagePart, index: number): string {
                   :text="part.text"
                   :is-streaming="part.state === 'streaming'"
                 />
+
+                <a
+                  v-else-if="part.type === 'file' && part.url"
+                  :href="part.url"
+                  target="_blank"
+                  rel="noreferrer"
+                  class="flex max-w-sm items-center gap-3 rounded-md border border-border/80 bg-background/60 p-2"
+                >
+                  <img
+                    v-if="isImageFile(part as EveFilePart)"
+                    :src="part.url"
+                    :alt="fileLabel(part as EveFilePart)"
+                    class="size-12 shrink-0 rounded-sm object-cover"
+                  />
+                  <span
+                    v-else
+                    class="flex size-10 shrink-0 items-center justify-center rounded-sm bg-muted text-muted-foreground"
+                  >
+                    <svg
+                      class="size-4"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      viewBox="0 0 24 24"
+                    >
+                      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+                      <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+                    </svg>
+                  </span>
+                  <span class="min-w-0 flex-1">
+                    <span class="block truncate font-medium">{{
+                      fileLabel(part as EveFilePart)
+                    }}</span>
+                    <span
+                      v-if="fileDetail(part as EveFilePart)"
+                      class="block truncate text-muted-foreground"
+                    >
+                      {{ fileDetail(part as EveFilePart) }}
+                    </span>
+                  </span>
+                </a>
+
+                <div
+                  v-else-if="part.type === 'file'"
+                  class="flex max-w-sm items-center gap-3 rounded-md border border-border/80 bg-background/60 p-2"
+                >
+                  <span
+                    class="flex size-10 shrink-0 items-center justify-center rounded-sm bg-muted text-muted-foreground"
+                  >
+                    <svg
+                      class="size-4"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      viewBox="0 0 24 24"
+                    >
+                      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+                      <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+                    </svg>
+                  </span>
+                  <span class="min-w-0 flex-1">
+                    <span class="block truncate font-medium">{{
+                      fileLabel(part as EveFilePart)
+                    }}</span>
+                    <span
+                      v-if="fileDetail(part as EveFilePart)"
+                      class="block truncate text-muted-foreground"
+                    >
+                      {{ fileDetail(part as EveFilePart) }}
+                    </span>
+                  </span>
+                </div>
 
                 <ToolBlock
                   v-else-if="part.type === 'dynamic-tool'"
