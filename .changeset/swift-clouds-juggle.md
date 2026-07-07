@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-fix(eve): improve error message detail for when tool call input is invalid (e.g. not serializable)
+fix(eve): pass error messages when tool call input is invalid back to model instead of throwing so that it can try again

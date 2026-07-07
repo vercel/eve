@@ -57,7 +57,9 @@ export type HarnessStepResult = Pick<
   | "toolCalls"
   | "toolResults"
   | "usage"
->;
+> & {
+  readonly invalidInputToolCallIds?: ReadonlySet<string>;
+};
 
 // ---------------------------------------------------------------------------
 // Hook builder input / output
@@ -209,6 +211,7 @@ export async function emitStepActions(
   step: HarnessStepResult,
   options: {
     readonly emittedActionCallIds?: ReadonlySet<string>;
+    readonly excludedActionCallIds?: ReadonlySet<string>;
     readonly excludedActionToolNames: ReadonlySet<string>;
     readonly handledInlineToolResultCallIds?: ReadonlySet<string>;
     readonly tools: ToolLoopHarnessConfig["tools"];
@@ -220,9 +223,11 @@ export async function emitStepActions(
       .map((toolCall) => toolCall.toolCallId),
   );
   const excludedCallIds = new Set<string>([
+    ...(options.excludedActionCallIds ?? []),
     ...providerExecutedCallIds,
     ...extractToolApprovalInputRequests({
       content: (step.content ?? []) as ContentPart<ToolSet>[],
+      excludedCallIds: options.excludedActionCallIds,
     }).map((request) => request.action.callId),
     ...(step.toolCalls as TypedToolCall<ToolSet>[])
       .filter(isInvalidToolCall)

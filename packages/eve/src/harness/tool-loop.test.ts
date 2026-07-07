@@ -287,7 +287,7 @@ async function* createMockFullStream(
             yield { id: "text-1", text: part.text, type: "text-delta" };
             break;
           case "tool-call":
-            yield part as Record<string, unknown>;
+            yield toolCallsById.get(String(part.toolCallId)) ?? (part as Record<string, unknown>);
             break;
           case "tool-approval-request": {
             const toolCall = toolCallsById.get(String(part.toolCallId));
@@ -2280,6 +2280,101 @@ describe("createToolLoopHarness", () => {
     expect(events.some((event) => event.type === "turn.failed")).toBe(false);
     expect(events.find((event) => event.type === "step.completed")?.data).toMatchObject({
       finishReason: "tool-calls",
+    });
+  });
+
+  it("feeds non-object tool call input back to the model as a failed tool result", async () => {
+    const invalidInput = "not an object";
+    const errorMessage =
+      'Failed to parse tool-call arguments for "add" (call-bad): Expected a JSON-serializable object.';
+    setupMockAgent({
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          {
+            content: [
+              {
+                input: invalidInput,
+                toolCallId: "call-bad",
+                toolName: "add",
+                type: "tool-call",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [
+        {
+          input: invalidInput,
+          toolCallId: "call-bad",
+          toolName: "add",
+          type: "tool-call",
+        },
+      ],
+      toolResults: [],
+    });
+
+    const { emit } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const firstStep = await runStep(createTestSession(), { message: "Add these" });
+
+    expect(firstStep.next).toBe(runStep);
+    expect(firstStep.session.history).toEqual([
+      { content: "Add these", role: "user" },
+      {
+        content: [
+          {
+            input: invalidInput,
+            toolCallId: "call-bad",
+            toolName: "add",
+            type: "tool-call",
+          },
+        ],
+        role: "assistant",
+      },
+      {
+        content: [
+          {
+            output: { type: "error-text", value: errorMessage },
+            toolCallId: "call-bad",
+            toolName: "add",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+    ]);
+
+    setupMockAgent({
+      finishReason: "stop",
+      response: {
+        messages: [{ content: "I'll use object arguments next time.", role: "assistant" }],
+      },
+      text: "I'll use object arguments next time.",
+      toolCalls: [],
+      toolResults: [],
+    });
+    await runStep(firstStep.session);
+
+    const secondInstance = vi.mocked(ToolLoopAgent).mock.results[1]?.value as
+      | { stream: ReturnType<typeof vi.fn> }
+      | undefined;
+    const secondCall = secondInstance?.stream.mock.calls[0]?.[0] as
+      | { messages: ModelMessage[] }
+      | undefined;
+    expect(secondCall?.messages).toEqual(firstStep.session.history);
+    expect(secondCall?.messages.at(-1)).toEqual({
+      content: [
+        {
+          output: { type: "error-text", value: errorMessage },
+          toolCallId: "call-bad",
+          toolName: "add",
+          type: "tool-result",
+        },
+      ],
+      role: "tool",
     });
   });
 

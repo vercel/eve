@@ -14,6 +14,7 @@ import {
   ToolLoopAgent,
   type ToolSet,
   type TypedToolCall,
+  type TypedToolError,
   type TypedToolResult,
 } from "ai";
 import { isScheduleAppAuth } from "#channel/schedule-auth.js";
@@ -93,6 +94,7 @@ import {
   extractQuestionInputRequests,
   extractToolApprovalInputRequests,
 } from "#harness/input-extraction.js";
+import { createToolResultMessagePartFromToolError } from "#harness/action-result-helpers.js";
 import { buildTelemetryRuntimeContext } from "#harness/instrumentation-runtime-context.js";
 import {
   consumeDeferredStepInput,
@@ -144,6 +146,7 @@ import {
   resolvePendingRuntimeActions,
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
+import { getInvalidToolCallInputError } from "#harness/tool-call-input-errors.js";
 import {
   buildStepHooks,
   emitStepActions,
@@ -774,6 +777,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           const {
             emittedActionCallIds,
             handledInlineToolResultCallIds,
+            invalidInputToolCallIds,
             inlineAuthorizationResults,
             inlineToolResultParts,
             trailingInlineToolResultParts,
@@ -793,6 +797,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           }
           await emitStepActions(emit, emissionState, stepResult, {
             emittedActionCallIds,
+            excludedActionCallIds: invalidInputToolCallIds,
             excludedActionToolNames,
             handledInlineToolResultCallIds,
             tools: advertisedHarnessTools,
@@ -837,6 +842,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
               text: stepResult.text,
               toolCalls: stepResult.toolCalls,
               toolResults: [...toolResultsByCallId.values()],
+              invalidInputToolCallIds,
               usage: stepResult.usage,
             };
           }
@@ -1357,6 +1363,25 @@ function insertInlineToolResultMessages(input: {
   ] satisfies StepResponseMessage[];
 }
 
+function getInvalidToolCallInputErrors(input: {
+  readonly toolCalls: readonly TypedToolCall<ToolSet>[];
+}): readonly TypedToolError<ToolSet>[] {
+  const errors: TypedToolError<ToolSet>[] = [];
+
+  for (const toolCall of input.toolCalls) {
+    if (toolCall.toolName === FINAL_OUTPUT_TOOL_NAME) {
+      continue;
+    }
+
+    const toolError = getInvalidToolCallInputError({ toolCall });
+    if (toolError !== undefined) {
+      errors.push(toolError);
+    }
+  }
+
+  return errors;
+}
+
 function extractToolResultCallIds(messages: readonly StepResponseMessage[]): ReadonlySet<string> {
   const callIds = new Set<string>();
 
@@ -1572,7 +1597,22 @@ async function handleStepResult(input: {
     result.finishReason !== "tool-calls" &&
     result.toolCalls.length === 0 &&
     hasEmptyDeliverySentinel(resolvedStepOutput);
-  const rawResponseMessages = emptyDelivery ? [] : result.response.messages;
+  const invalidInputToolErrors = getInvalidToolCallInputErrors({
+    toolCalls: result.toolCalls as TypedToolCall<ToolSet>[],
+  });
+  const invalidInputToolCallIds = new Set([
+    ...(result.invalidInputToolCallIds ?? []),
+    ...invalidInputToolErrors.map((toolError) => toolError.toolCallId),
+  ]);
+  const rawResponseMessages = emptyDelivery
+    ? []
+    : insertInlineToolResultMessages({
+        append: invalidInputToolErrors.map((toolError) =>
+          createToolResultMessagePartFromToolError(toolError),
+        ),
+        prepend: [],
+        responseMessages: result.response.messages,
+      });
   const stepOutput = emptyDelivery ? null : resolvedStepOutput;
 
   const providerExecutedOutcomeIds = new Set<string>();
@@ -1617,11 +1657,14 @@ async function handleStepResult(input: {
     }
   }
 
-  const approvalRequests = extractToolApprovalInputRequests({ content: result.content ?? [] });
+  const approvalRequests = extractToolApprovalInputRequests({
+    content: result.content ?? [],
+    excludedCallIds: invalidInputToolCallIds,
+  });
   const approvalRequestCallIds = new Set(approvalRequests.map((request) => request.action.callId));
   const questionRequests = extractQuestionInputRequests({
     toolCalls: result.toolCalls,
-    excludedCallIds: approvalRequestCallIds,
+    excludedCallIds: new Set([...invalidInputToolCallIds, ...approvalRequestCallIds]),
   });
   const inputRequests: InputRequest[] = [...approvalRequests, ...questionRequests];
   const advertisedRuntimeActionTools = getAdvertisedTools({
@@ -1630,6 +1673,7 @@ async function handleStepResult(input: {
   });
   const pendingRuntimeActions = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
     .filter((toolCall) => !isInvalidToolCall(toolCall))
+    .filter((toolCall) => !invalidInputToolCallIds.has(toolCall.toolCallId))
     .filter((toolCall) => config.tools.get(toolCall.toolName)?.runtimeAction !== undefined)
     .filter((toolCall) => {
       if (advertisedRuntimeActionTools.get(toolCall.toolName)?.runtimeAction !== undefined) {
