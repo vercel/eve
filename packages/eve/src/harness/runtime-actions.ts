@@ -5,6 +5,11 @@ import { getRuntimeActionRequestKey, getRuntimeActionResultKey } from "#runtime/
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { clearProxyInputRequestsForChild } from "#harness/proxy-input-requests.js";
+import {
+  accumulateSessionUsage,
+  getTurnUsageState,
+  setTurnUsageState,
+} from "#harness/turn-tag-state.js";
 import type {
   HarnessEmitFn,
   HarnessSession,
@@ -284,6 +289,22 @@ export async function resolvePendingRuntimeActions(input: {
         nextSession = clearProxyInputRequestsForChild(nextSession, childToken);
       }
     }
+  }
+
+  // Draw completed child spend down against the parent's session totals so
+  // the session token limits and the remaining-quota budget granted to later
+  // delegations account for what the tree has already spent.
+  for (const result of readyResults) {
+    if (result.kind !== "subagent-result" || result.usage === undefined) {
+      continue;
+    }
+    nextSession = setTurnUsageState(
+      nextSession,
+      accumulateSessionUsage({
+        previous: getTurnUsageState(nextSession.state),
+        usage: result.usage,
+      }),
+    );
   }
 
   const toolResults = readyResults.map((result) => {

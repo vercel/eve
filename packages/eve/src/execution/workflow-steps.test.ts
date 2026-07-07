@@ -368,6 +368,10 @@ describe("dispatchRuntimeActionsStep", () => {
           input: {
             message: expect.stringContaining("Description: Local delegate child description."),
           },
+          limits: {
+            maxInputTokensPerSession: false,
+            maxOutputTokensPerSession: false,
+          },
           serializedContext: expect.objectContaining({
             "eve.channel": expect.objectContaining({
               kind: "subagent",

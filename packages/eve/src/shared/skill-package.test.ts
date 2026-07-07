@@ -7,6 +7,8 @@ import {
   writeSkillPackageToSandbox,
 } from "#shared/skill-package.js";
 
+const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
+
 describe("normalizeSkillPackage", () => {
   it("generates SKILL.md and sorts package files deterministically", () => {
     const packageDefinition = normalizeSkillPackage({
@@ -68,7 +70,11 @@ describe("normalizeSkillPackage", () => {
 
 describe("writeSkillPackageToSandbox", () => {
   it("writes generated and sibling files into the live skill package directory", async () => {
-    const sandbox = mockSandbox();
+    const sandbox = mockSandbox({
+      commands: {
+        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+      },
+    });
     const skill = normalizeSkillPackage({
       name: "tenant",
       description: "Tenant-specific procedures.",
@@ -80,13 +86,56 @@ describe("writeSkillPackageToSandbox", () => {
 
     await writeSkillPackageToSandbox({ sandbox: sandbox.session, skill });
 
+    expect(sandbox.files.get("/home/agent/.agents/skills/tenant/SKILL.md")).toBe(
+      "Follow tenant policy.",
+    );
+    expect(sandbox.files.get("/home/agent/.agents/skills/tenant/references/policy.md")).toBe(
+      "Policy body",
+    );
+  });
+
+  it("falls back to the legacy workspace skill directory when HOME is unavailable", async () => {
+    const sandbox = mockSandbox();
+    const skill = normalizeSkillPackage({
+      name: "tenant",
+      description: "Tenant-specific procedures.",
+      markdown: "Follow tenant policy.",
+    });
+
+    await writeSkillPackageToSandbox({ sandbox: sandbox.session, skill });
+
     expect(sandbox.files.get("/workspace/skills/tenant/SKILL.md")).toBe("Follow tenant policy.");
-    expect(sandbox.files.get("/workspace/skills/tenant/references/policy.md")).toBe("Policy body");
   });
 });
 
 describe("removeSkillPackageFromSandbox", () => {
-  it("validates the skill name before removing the package directory", async () => {
+  it("removes only the resolved HOME package directory", async () => {
+    const sandbox = mockSandbox({
+      commands: {
+        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+      },
+      initialFiles: {
+        "/home/agent/.agents/skills/tenant_policy-1/SKILL.md": "Tenant policy",
+        "/home/agent/.agents/skills/tenant_policy-1/references/policy.md": "Policy",
+        "/workspace/skills/tenant_policy-1/SKILL.md": "Tenant policy",
+        "/workspace/skills/tenant_policy-1/references/policy.md": "Policy",
+      },
+    });
+
+    await removeSkillPackageFromSandbox({ sandbox: sandbox.session, name: "tenant_policy-1" });
+
+    expect(sandbox.removedPaths).toEqual(["/home/agent/.agents/skills/tenant_policy-1"]);
+    expect(sandbox.files.has("/home/agent/.agents/skills/tenant_policy-1/SKILL.md")).toBe(false);
+    expect(
+      sandbox.files.has("/home/agent/.agents/skills/tenant_policy-1/references/policy.md"),
+    ).toBe(false);
+    expect(sandbox.files.get("/workspace/skills/tenant_policy-1/SKILL.md")).toBe("Tenant policy");
+    expect(sandbox.files.get("/workspace/skills/tenant_policy-1/references/policy.md")).toBe(
+      "Policy",
+    );
+  });
+
+  it("removes /workspace/skills only when HOME is unavailable", async () => {
     const sandbox = mockSandbox({
       initialFiles: {
         "/workspace/skills/tenant_policy-1/SKILL.md": "Tenant policy",

@@ -250,7 +250,7 @@ describe("resolveAgent", () => {
       },
     ]);
     expect(resolved.workspaceSpec).toEqual({
-      rootEntries: ["skills/"],
+      rootEntries: [],
     });
     expect(resolved.tools).toHaveLength(1);
     expect(resolved.tools[0]).toMatchObject({

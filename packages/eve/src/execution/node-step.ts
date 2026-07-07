@@ -64,6 +64,12 @@ export interface CreateExecutionNodeStepInput {
   readonly mode: RunMode;
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
+  /**
+   * Effective `limits.maxSubagents` cap for Workflow invocations in this run,
+   * materialized on the session at creation (config resolved against any
+   * inherited parent cap).
+   */
+  readonly workflowMaxSubagents?: number;
 }
 
 /**
@@ -77,7 +83,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     abortSignal: input.abortSignal,
     capabilities: input.capabilities,
     workflow: input.node.agent.workflowEnabled === true,
-    workflowMaxSubagents: input.node.agent.config?.limits?.maxSubagents,
+    workflowMaxSubagents: input.workflowMaxSubagents,
     handleEvent: input.handleEvent,
     mode: input.mode,
     onCompaction: preserveFrameworkStateOnCompaction,

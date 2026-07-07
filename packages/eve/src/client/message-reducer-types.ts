@@ -39,9 +39,10 @@ export interface EveMessageMetadata {
  * One renderable part of an {@link EveMessage}, discriminated by `type`.
  *
  * `text` and `reasoning` store streamed content with a `state` of `"streaming"`
- * or `"done"`; `step-start` marks the boundary of an agent step; and
- * `dynamic-tool` ({@link EveDynamicToolPart}) holds the tool call and its
- * lifecycle state. `stepIndex` ties a part to the agent step that produced it.
+ * or `"done"`; `file` carries user-attachment metadata; `step-start` marks the
+ * boundary of an agent step; and `dynamic-tool` ({@link EveDynamicToolPart})
+ * holds the tool call and its lifecycle state. `stepIndex` ties a part to the
+ * agent step that produced it.
  */
 export type EveMessagePart =
   | {
@@ -57,6 +58,14 @@ export type EveMessagePart =
       readonly stepIndex?: number;
       readonly text: string;
       readonly type: "reasoning";
+    }
+  | {
+      readonly filename?: string;
+      readonly mediaType: string;
+      readonly size?: number;
+      readonly stepIndex?: number;
+      readonly type: "file";
+      readonly url?: string;
     }
   | {
       readonly type: "step-start";

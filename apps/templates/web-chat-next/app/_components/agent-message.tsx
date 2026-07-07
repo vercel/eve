@@ -6,7 +6,14 @@ import type {
   EveMessage,
   EveMessagePart,
 } from "eve/react";
-import { CheckCircleIcon, ExternalLinkIcon, KeyRoundIcon, XCircleIcon } from "lucide-react";
+import {
+  CheckCircleIcon,
+  ExternalLinkIcon,
+  FileIcon,
+  ImageIcon,
+  KeyRoundIcon,
+  XCircleIcon,
+} from "lucide-react";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
 import {
@@ -24,6 +31,8 @@ export type AgentInputResponse = {
   readonly requestId: string;
   readonly text?: string;
 };
+
+type EveFilePart = Extract<EveMessagePart, { type: "file" }>;
 
 export function AgentMessage({
   canRespond,
@@ -88,6 +97,8 @@ function AgentMessagePart({
           <ReasoningContent>{part.text}</ReasoningContent>
         </Reasoning>
       );
+    case "file":
+      return <AttachmentPart part={part} />;
     case "authorization":
       return <AuthorizationPrompt part={part} />;
     case "dynamic-tool":
@@ -113,6 +124,37 @@ function AgentMessagePart({
         </Tool>
       );
   }
+}
+
+function AttachmentPart({ part }: { readonly part: EveFilePart }) {
+  const label = part.filename ?? "Attachment";
+  const detail = [part.mediaType, formatBytes(part.size)].filter(Boolean).join(" - ");
+  const isImage = part.mediaType.startsWith("image/") && part.url !== undefined;
+  const Icon = isImage ? ImageIcon : FileIcon;
+  const body = (
+    <span className="flex max-w-sm items-center gap-3 rounded-md border bg-background/60 p-2 text-sm">
+      {isImage ? (
+        <img alt={label} className="size-12 shrink-0 rounded-sm object-cover" src={part.url} />
+      ) : (
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-sm bg-muted text-muted-foreground">
+          <Icon className="size-4" />
+        </span>
+      )}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium">{label}</span>
+        {detail ? <span className="block truncate text-muted-foreground">{detail}</span> : null}
+      </span>
+      {part.url ? <ExternalLinkIcon className="size-4 shrink-0 text-muted-foreground" /> : null}
+    </span>
+  );
+
+  return part.url ? (
+    <a href={part.url} rel="noreferrer" target="_blank">
+      {body}
+    </a>
+  ) : (
+    body
+  );
 }
 
 function AuthorizationPrompt({ part }: { readonly part: EveAuthorizationPart }) {
@@ -206,6 +248,19 @@ function formatAuthorizationOutcome(outcome: NonNullable<EveAuthorizationPart["o
     case "timed-out":
       return "timed out";
   }
+}
+
+function formatBytes(size: number | undefined): string | undefined {
+  if (size === undefined) {
+    return undefined;
+  }
+  if (size < 1024) {
+    return `${size} B`;
+  }
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function InputRequestActions({

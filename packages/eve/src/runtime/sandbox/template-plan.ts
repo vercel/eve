@@ -45,7 +45,10 @@ export function createRuntimeSandboxTemplatePlan(input: {
     };
   }
 
-  if (input.workspaceResourceRoot.rootEntries.length === 0) {
+  if (
+    input.workspaceResourceRoot.contentHash === undefined &&
+    input.workspaceResourceRoot.rootEntries.length === 0
+  ) {
     return { kind: "none" };
   }
 

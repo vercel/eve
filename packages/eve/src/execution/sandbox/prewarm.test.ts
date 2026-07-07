@@ -14,6 +14,9 @@ vi.mock("#execution/sandbox/template-prewarm-lock.js", () => ({
   withSandboxTemplatePrewarmLock: async (_input: unknown, callback: () => Promise<unknown>) =>
     await callback(),
 }));
+vi.mock("#runtime/workspace/seed-files.js", () => ({
+  materializeWorkspaceDirectory: vi.fn(async () => []),
+}));
 
 describe("prewarmAppSandboxes", () => {
   afterEach(() => {
@@ -26,6 +29,11 @@ describe("prewarmAppSandboxes", () => {
     const secondSnapshotRoot = `${appRoot}/.eve/dev-runtime/snapshots/two/app`;
     const firstInputs: SandboxBackendPrewarmInput[] = [];
     const secondInputs: SandboxBackendPrewarmInput[] = [];
+    const workspaceResourceRoot = {
+      contentHash: "workspace-content-hash",
+      logicalPath: "empty-resource-root",
+      rootEntries: [],
+    };
 
     await prewarmAppSandboxes({
       appRoot,
@@ -34,7 +42,7 @@ describe("prewarmAppSandboxes", () => {
         sandboxAppRoot: appRoot,
       }),
       dispatch: recordPrewarmInputs(firstInputs),
-      loadAgentGraph: async () => createGraph(),
+      loadAgentGraph: async () => createGraph({ workspaceResourceRoot }),
     });
     await prewarmAppSandboxes({
       appRoot,
@@ -43,7 +51,7 @@ describe("prewarmAppSandboxes", () => {
         sandboxAppRoot: appRoot,
       }),
       dispatch: recordPrewarmInputs(secondInputs),
-      loadAgentGraph: async () => createGraph(),
+      loadAgentGraph: async () => createGraph({ workspaceResourceRoot }),
     });
 
     expect(firstInputs).toHaveLength(1);
@@ -89,7 +97,7 @@ describe("prewarmAppSandboxes", () => {
           dispatch: async () => {
             throw cause;
           },
-          loadAgentGraph: async () => createGraph(backendName),
+          loadAgentGraph: async () => createGraph({ backendName }),
           log,
         }),
       ).rejects.toMatchObject({
@@ -126,12 +134,21 @@ function recordPrewarmInputs(inputs: SandboxBackendPrewarmInput[]) {
   };
 }
 
-function createGraph(backendName = "test"): ResolvedAgentGraphBundle {
+function createGraph(
+  input: {
+    readonly backendName?: string;
+    readonly workspaceResourceRoot?: {
+      readonly contentHash?: string;
+      readonly logicalPath: string;
+      readonly rootEntries: readonly string[];
+    };
+  } = {},
+): ResolvedAgentGraphBundle {
   const backend: SandboxBackend = {
     async create() {
       throw new Error("Unexpected create call.");
     },
-    name: backendName,
+    name: input.backendName ?? "test",
     async prewarm() {
       return { reused: true };
     },
@@ -150,8 +167,7 @@ function createGraph(backendName = "test"): ResolvedAgentGraphBundle {
     sandboxRegistry: {
       sandbox: {
         definition,
-        workspaceResourceRoot: {
-          contentHash: "workspace-content-hash",
+        workspaceResourceRoot: input.workspaceResourceRoot ?? {
           logicalPath: "",
           rootEntries: [],
         },

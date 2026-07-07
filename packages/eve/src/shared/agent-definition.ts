@@ -106,6 +106,9 @@ export interface AgentLimitsDefinition {
    * Root sessions are depth 0. A `maxSubagentDepth` of 3 allows child sessions at
    * depths 1, 2, and 3; sessions already at depth 3 cannot delegate again.
    *
+   * Delegated subagent sessions resolve this against the cap inherited from
+   * the delegating parent; the tighter value wins.
+   *
    * @default 3
    */
   readonly maxSubagentDepth?: number;
@@ -119,6 +122,9 @@ export interface AgentLimitsDefinition {
    * parallel calls alike). Calls beyond the limit fail with an error result
    * instead of starting a child session.
    *
+   * Delegated subagent sessions resolve this against the cap inherited from
+   * the delegating parent; the tighter value wins.
+   *
    * @default 100
    */
   readonly maxSubagents?: number;
@@ -129,17 +135,26 @@ export interface AgentLimitsDefinition {
    * the limit is allowed to finish because providers only report exact usage
    * after the call completes; later model calls in the same session are blocked.
    *
-   * @default 40_000_000 for root sessions; 5_000_000 for delegated subagent sessions
+   * `false` disables the limit: the session is uncapped.
+   *
+   * Delegated subagent sessions default to the delegating parent's remaining
+   * quota at dispatch time, and the parent's remaining quota always caps an
+   * authored child limit — a child can never outspend its parent's budget.
+   *
+   * @default 40_000_000 for root sessions; the parent's remaining quota for delegated subagent sessions
    */
-  readonly maxInputTokensPerSession?: number;
+  readonly maxInputTokensPerSession?: number | false;
   /**
    * Maximum provider-reported output tokens accumulated by one durable session.
    *
    * eve checks this before starting each model call. The model call that crosses
    * the limit is allowed to finish because providers only report exact usage
    * after the call completes; later model calls in the same session are blocked.
+   *
+   * `false` disables the limit. Unset by default; delegated subagent sessions
+   * inherit the parent's remaining output quota when the parent has one.
    */
-  readonly maxOutputTokensPerSession?: number;
+  readonly maxOutputTokensPerSession?: number | false;
 }
 
 /**

@@ -124,6 +124,7 @@ export function createWorkflowRuntime(config: {
           [
             {
               input: input.input,
+              limits: input.limits,
               serializedContext,
             },
           ],

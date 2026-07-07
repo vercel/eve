@@ -114,8 +114,8 @@ describe("Vercel build-time sandbox prewarm", () => {
 
     expect(events.seededTemplates).toEqual(["default", "default"]);
     expect([...events.writtenFilePaths].sort()).toEqual([
-      "/workspace/skills/research/SKILL.md",
-      "/workspace/skills/route-weather/SKILL.md",
+      "$HOME/.agents/skills/research/SKILL.md",
+      "$HOME/.agents/skills/route-weather/SKILL.md",
     ]);
   });
 });

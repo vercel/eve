@@ -1,5 +1,6 @@
 "use client";
 
+import type { UserContent } from "ai";
 import { useEveAgent } from "eve/react";
 import { AlertCircleIcon } from "lucide-react";
 import {
@@ -27,9 +28,27 @@ export function AgentChat() {
 
   const handleSubmit = async (message: PromptInputMessage) => {
     const text = message.text.trim();
-    if (!text || isBusy) return;
+    if ((text.length === 0 && message.files.length === 0) || isBusy) return;
 
-    await agent.send({ message: text });
+    if (message.files.length === 0) {
+      await agent.send({ message: text });
+      return;
+    }
+
+    const parts: UserContent = [];
+    if (text.length > 0) {
+      parts.push({ text, type: "text" });
+    }
+    for (const file of message.files) {
+      parts.push({
+        data: file.url,
+        filename: file.filename,
+        mediaType: file.mediaType,
+        type: "file",
+      });
+    }
+
+    await agent.send({ message: parts });
   };
 
   const composer = (

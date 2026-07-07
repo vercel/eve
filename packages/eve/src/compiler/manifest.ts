@@ -359,12 +359,14 @@ const compiledAgentCompactionDefinitionSchema: z.ZodType<CompiledAgentCompaction
   })
   .strict();
 
+const sessionTokenLimitSchema = z.union([z.number().int().positive(), z.literal(false)]);
+
 const compiledAgentLimitsDefinitionSchema = z
   .object({
     maxSubagentDepth: z.number().int().positive().optional(),
     maxSubagents: z.number().int().positive().optional(),
-    maxInputTokensPerSession: z.number().int().positive().optional(),
-    maxOutputTokensPerSession: z.number().int().positive().optional(),
+    maxInputTokensPerSession: sessionTokenLimitSchema.optional(),
+    maxOutputTokensPerSession: sessionTokenLimitSchema.optional(),
   })
   .strict();
 
@@ -790,10 +792,6 @@ export function deriveResourceRootEntries(input: {
   readonly skills?: readonly CompiledSkillDefinition[];
 }): readonly string[] {
   const rootEntries = new Set<string>();
-
-  if ((input.skills ?? []).length > 0) {
-    rootEntries.add("skills/");
-  }
 
   for (const workspace of input.sandboxWorkspaces ?? []) {
     for (const entry of workspace.rootEntries) {

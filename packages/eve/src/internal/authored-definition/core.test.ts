@@ -54,6 +54,36 @@ describe("normalizeAgentDefinition", () => {
     });
   });
 
+  it("accepts false to uncap session token limits", () => {
+    const definition = normalizeAgentDefinition(
+      {
+        model: "openai/gpt-5.5",
+        limits: {
+          maxInputTokensPerSession: false,
+          maxOutputTokensPerSession: false,
+        },
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.limits).toEqual({
+      maxInputTokensPerSession: false,
+      maxOutputTokensPerSession: false,
+    });
+  });
+
+  it("rejects false for subagent max depth", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          limits: { maxSubagentDepth: false },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
+  });
+
   it.each([0, 1.5, -1, "4"])("rejects invalid subagent max depth %j", (maxSubagentDepth) => {
     expect(() =>
       normalizeAgentDefinition(
