@@ -12,4 +12,4 @@ export {
   type StreamEventHook,
   type StreamEventHooks,
   defineHook,
-} from "../definitions/hook.js";
+} from "#public/definitions/hook.js";

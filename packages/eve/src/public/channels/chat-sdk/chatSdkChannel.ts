@@ -32,7 +32,7 @@ import {
   type SendFn,
   type SendOptions,
   type Session,
-} from "#public/definitions/defineChannel.js";
+} from "#public/definitions/channel.js";
 
 const log = createLogger("chat-sdk.channel");
 const DEFAULT_ROUTE = "/eve/v1";

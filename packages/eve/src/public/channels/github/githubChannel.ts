@@ -1,7 +1,7 @@
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { ChannelSessionOps } from "#public/definitions/defineChannel.js";
+import type { ChannelSessionOps } from "#public/definitions/channel.js";
 
 import { createLogger } from "#internal/logging.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
@@ -46,7 +46,7 @@ import {
 } from "#public/channels/github/state.js";
 import type { GitHubPullRequestContextConfig } from "#public/channels/github/pr-context.js";
 import { verifyGitHubRequest } from "#public/channels/github/verify.js";
-import { defineChannel, POST, type Channel } from "#public/definitions/defineChannel.js";
+import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
 
 const log = createLogger("github.channel");
 

@@ -1,6 +1,6 @@
 import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
-import type { ModuleSourceRef } from "#shared/source-ref.js";
+import type { ToolSourceRef } from "#discover/manifest.js";
 import type { CompiledToolDefinition, CompiledDynamicToolDefinition } from "#compiler/manifest.js";
 import {
   loadModuleBackedDefinition,
@@ -34,7 +34,7 @@ export type CompiledToolEntry =
  */
 export async function compileToolEntry(
   agentRoot: string,
-  source: ModuleSourceRef,
+  source: ToolSourceRef,
   options: ModuleBackedDefinitionLoadOptions = {},
 ): Promise<CompiledToolEntry> {
   const entry = normalizeToolDefinition(

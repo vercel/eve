@@ -13,9 +13,9 @@ import { resolveSchedules } from "#runtime/schedules/resolve-schedule.js";
 import type {
   ResolvedAgent,
   ResolvedSandboxDefinition,
-  ResolvedSchedule,
+  ResolvedScheduleDefinition,
   ResolvedSkillDefinition,
-  ResolvedInstructions,
+  ResolvedInstructionsDefinition,
 } from "#runtime/types.js";
 
 /**
@@ -25,12 +25,12 @@ import type {
 export interface AgentInfoData {
   readonly agent: ResolvedAgent;
   readonly manifest: CompiledAgentManifest;
-  readonly schedules: readonly ResolvedSchedule[];
+  readonly schedules: readonly ResolvedScheduleDefinition[];
 }
 
 export interface AgentInfoManifestData {
   readonly manifest: CompiledAgentManifest;
-  readonly schedules: readonly ResolvedSchedule[];
+  readonly schedules: readonly ResolvedScheduleDefinition[];
 }
 
 /**
@@ -120,7 +120,7 @@ export type {
   CompiledAgentManifest,
   CompiledSubagentNode,
   ResolvedSandboxDefinition,
-  ResolvedSchedule,
+  ResolvedScheduleDefinition,
   ResolvedSkillDefinition,
-  ResolvedInstructions,
+  ResolvedInstructionsDefinition,
 };

@@ -3,7 +3,7 @@ import type { InstructionsSourceRef } from "#discover/manifest.js";
 import { normalizeInstructionsDefinition } from "#internal/authored-definition/core.js";
 import type {
   CompiledDynamicInstructionsDefinition,
-  CompiledInstructions,
+  CompiledInstructionsDefinition,
 } from "#compiler/manifest.js";
 import {
   loadModuleBackedDefinition,
@@ -19,7 +19,7 @@ import { isDynamicSentinel, type DynamicToolEventName } from "#shared/dynamic-to
  * produces model messages at runtime.
  */
 export type CompiledInstructionsEntry =
-  | { readonly kind: "instructions"; readonly definition: CompiledInstructions }
+  | { readonly kind: "instructions"; readonly definition: CompiledInstructionsDefinition }
   | {
       readonly kind: "dynamic-instructions";
       readonly definition: CompiledDynamicInstructionsDefinition;
@@ -107,7 +107,7 @@ export async function compileInstructions(
   agentRoot: string,
   source: InstructionsSourceRef,
   options: ModuleBackedDefinitionLoadOptions = {},
-): Promise<CompiledInstructions> {
+): Promise<CompiledInstructionsDefinition> {
   const entry = await compileInstructionsEntry(agentRoot, source, options);
   if (entry.kind === "dynamic-instructions") {
     throw new Error(

@@ -2,7 +2,7 @@ import type { TeamsInstrumentationMetadata } from "#public/channels/teams/index.
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { ChannelSessionOps } from "#public/definitions/defineChannel.js";
+import type { ChannelSessionOps } from "#public/definitions/channel.js";
 
 import { createLogger, logError } from "#internal/logging.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
@@ -52,12 +52,7 @@ import {
 } from "#public/channels/teams/inbound.js";
 import { verifyTeamsRequest, type TeamsWebhookVerifier } from "#public/channels/teams/verify.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import {
-  defineChannel,
-  POST,
-  type Channel,
-  type SendFn,
-} from "#public/definitions/defineChannel.js";
+import { defineChannel, POST, type Channel, type SendFn } from "#public/definitions/channel.js";
 
 const log = createLogger("teams.channel");
 

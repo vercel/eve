@@ -99,6 +99,21 @@ describe("createRuntimeToolCallActionFromToolCall", () => {
       path: "/workspace/foo.txt",
     });
   });
+
+  it("includes the tool name when tool call input is not a JSON object", () => {
+    expect(() =>
+      createRuntimeToolCallActionFromToolCall({
+        toolCall: {
+          toolCallId: "call-123",
+          toolName: "bash",
+          input: [],
+          type: "tool-call",
+        } as never,
+      }),
+    ).toThrow(
+      'Failed to parse tool-call arguments for "bash" (call-123): Expected a JSON-serializable object.',
+    );
+  });
 });
 
 describe("resolvePendingInput", () => {

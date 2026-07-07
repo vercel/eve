@@ -11,7 +11,7 @@ import type {
   AgentInfoData,
   CompiledSubagentNode,
   ResolvedSandboxDefinition,
-  ResolvedSchedule,
+  ResolvedScheduleDefinition,
   ResolvedSkillDefinition,
 } from "#internal/nitro/routes/agent-info/load-agent-info-data.js";
 import type {
@@ -456,7 +456,7 @@ function renderSkill(skill: ResolvedSkillDefinition): AgentInfoSkillEntry {
   };
 }
 
-export function renderSchedule(schedule: ResolvedSchedule): AgentInfoScheduleEntry {
+export function renderSchedule(schedule: ResolvedScheduleDefinition): AgentInfoScheduleEntry {
   return {
     ...toSource(schedule),
     cron: schedule.cron,

@@ -4,6 +4,7 @@ import { createLogger } from "#internal/logging.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload } from "#channel/types.js";
+import type { FetchFileResult, FetchFileFunction } from "#shared/channel-definition.js";
 
 const log = createLogger("channel.adapter");
 
@@ -94,11 +95,7 @@ export type ChannelEventHandlers<TCtx extends ChannelAdapterContext<any> = Chann
  * When fields are provided, staging prefers them over the values the
  * channel populated at ingestion time.
  */
-export interface FetchFileResult {
-  readonly bytes: Buffer;
-  readonly mediaType?: string;
-  readonly filename?: string;
-}
+export type { FetchFileResult };
 
 export type ChannelInstrumentationMetadata = Readonly<Record<string, unknown>>;
 
@@ -160,7 +157,7 @@ export type ChannelAdapter<TCtx extends ChannelAdapterContext<any> = ChannelAdap
    * Credentials should be captured in the closure at channel
    * construction time.
    */
-  readonly fetchFile?: (url: string) => Promise<Buffer | FetchFileResult | null>;
+  readonly fetchFile?: FetchFileFunction;
 
   /**
    * Framework-owned observability projection for the active channel.

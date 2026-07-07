@@ -6,7 +6,7 @@ import type {
 } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import { resolveTextToResponses } from "#channel/resolve-text.js";
-import { parseJsonObject } from "#shared/json.js";
+import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
 import {
   isSessionLimitContinuationRequest,
@@ -648,16 +648,30 @@ export function createRuntimeToolCallActionFromToolCall(input: {
 }): RuntimeToolCallActionRequest {
   return {
     callId: input.toolCall.toolCallId,
-    input: resolveToolCallInputObject(input.toolCall.input),
+    input: resolveToolCallInputObject(input.toolCall.input, {
+      callId: input.toolCall.toolCallId,
+      toolName: input.toolCall.toolName,
+    }),
     kind: "tool-call",
     toolName: input.toolCall.toolName,
   };
 }
 
-function resolveToolCallInputObject(value: unknown) {
+function resolveToolCallInputObject(
+  value: unknown,
+  context: { readonly callId: string; readonly toolName: string },
+): JsonObject {
   if (value === undefined || value === null) {
     return {};
   }
 
-  return parseJsonObject(value);
+  try {
+    return parseJsonObject(value);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new TypeError(
+      `Failed to parse tool-call arguments for "${context.toolName}" (${context.callId}): ${detail}`,
+      { cause: error },
+    );
+  }
 }
