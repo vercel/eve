@@ -556,13 +556,15 @@
       '<div id="toast-root"></div>';
 
     $('#lnb-new').addEventListener('click', () => nav('request'));
-    const saved = localStorage.getItem('ls-theme');
+    // 샌드박스 iframe 등 저장소 접근이 차단된 환경 대비
+    const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* 무시 */ } } };
+    const saved = store.get('ls-theme');
     if (saved) document.documentElement.dataset.theme = saved;
     else if (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.dataset.theme = 'dark';
     $('#theme-toggle').addEventListener('click', () => {
       const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
       document.documentElement.dataset.theme = next;
-      localStorage.setItem('ls-theme', next);
+      store.set('ls-theme', next);
     });
     render();
   }
