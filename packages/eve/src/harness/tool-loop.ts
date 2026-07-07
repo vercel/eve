@@ -730,6 +730,15 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         },
         onStepFinish: hooks.onStepFinish,
         prepareStep: hooks.prepareStep,
+        // Authored `modelOptions.providerOptions` (e.g. `{ openai: { store:
+        // false } }`) must reach the model call. Without this only the
+        // `gateway-auto` cache path in `prepareStep` ever applied them, so
+        // direct-provider agents silently lost their provider options — which,
+        // for the OpenAI Responses model, left `store` defaulting to true and
+        // broke multi-turn (prior turns sent as unresolvable `item_reference`s).
+        providerOptions: session.agent.modelReference.providerOptions as
+          | ProviderMetadata
+          | undefined,
         reasoning: session.agent.reasoning,
         runtimeContext: telemetryRuntimeContext,
         stopWhen: isStepCount(1),

@@ -858,6 +858,31 @@ describe("createToolLoopHarness", () => {
     expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0]).toMatchObject({ reasoning: "high" });
   });
 
+  it("forwards the authored model provider options to the model call", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const runStep = createToolLoopHarness(createTestConfig());
+    const session = createTestSession({
+      agent: {
+        modelReference: { id: "test-model", providerOptions: { openai: { store: false } } },
+        system: "You are a test assistant.",
+        tools: [],
+      },
+    });
+
+    await runStep(session, { message: "Hi" });
+
+    expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0]).toMatchObject({
+      providerOptions: { openai: { store: false } },
+    });
+  });
+
   it("accumulates provider-reported token usage across the session", async () => {
     setupMockAgent({
       finishReason: "stop",
