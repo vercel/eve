@@ -4,7 +4,7 @@ description: "Reach your agent from GitHub App webhooks, with @mention dispatch,
 type: integration
 ---
 
-The GitHub channel lets the agent work directly on a repository. Someone `@mentions` it in an issue, PR, or review comment, and the agent answers right there in the thread, with the PR diff already in context and the repo checked out into the sandbox. It takes GitHub App webhooks at `/eve/v1/github`, checks the signature, derives auth from whoever triggered the event, and replies on the native surface. See [Channels](./overview) for the contract this builds on.
+The GitHub channel lets the agent work directly on a repository. Someone `@mentions` it in an issue, PR, or review comment, and the agent answers right there in the thread, with the PR diff already in context and the repo checked out into the sandbox. It takes GitHub App webhooks at `/eve/v1/github`, checks the signature, derives auth from whoever triggered the event, and replies on the native surface. See [Channels](/docs/channels) for the contract this builds on.
 
 ## Add the channel
 
@@ -95,5 +95,5 @@ For anything the channel doesn't wrap, call `ctx.github.request({ method, path, 
 
 ## What to read next
 
-- [Channels overview](./overview): the channel contract and every built-in channel
+- [Channels overview](/docs/channels): the channel contract and every built-in channel
 - [Auth & route protection](../guides/auth-and-route-protection): authenticating inbound traffic

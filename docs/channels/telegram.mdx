@@ -4,7 +4,7 @@ description: "Reach your agent from Telegram bot webhooks, with inline-keyboard 
 type: integration
 ---
 
-The Telegram channel puts your agent behind a Telegram bot. It takes Bot API webhooks, checks the `X-Telegram-Bot-Api-Secret-Token` header before trusting anything, and routes the messages it cares about (private chats plus group messages that address the bot) to a reply over `sendMessage`. See [Channels](./overview) for the contract this builds on.
+The Telegram channel puts your agent behind a Telegram bot. It takes Bot API webhooks, checks the `X-Telegram-Bot-Api-Secret-Token` header before trusting anything, and routes the messages it cares about (private chats plus group messages that address the bot) to a reply over `sendMessage`. See [Channels](/docs/channels) for the contract this builds on.
 
 ## Add the channel
 
@@ -68,5 +68,5 @@ export default telegramChannel({
 
 ## What to read next
 
-- [Channels overview](./overview): the channel contract and every built-in channel
+- [Channels overview](/docs/channels): the channel contract and every built-in channel
 - [Auth & route protection](../guides/auth-and-route-protection): authenticating inbound traffic

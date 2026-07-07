@@ -4,7 +4,7 @@ description: "Reach your agent over SMS and speech-transcribed phone calls with 
 type: integration
 ---
 
-The Twilio channel puts your agent on a phone number, so people can text it or call it. Inbound SMS arrives as a webhook. Inbound calls are answered with TwiML `<Gather input="speech">`, and the resulting transcript feeds the same eve session that SMS uses, so a caller and a texter look identical downstream. Every request is checked against `X-Twilio-Signature` before anything else runs. The raw continuation token is `From:To`. See [Channels](./overview) for the contract this builds on.
+The Twilio channel puts your agent on a phone number, so people can text it or call it. Inbound SMS arrives as a webhook. Inbound calls are answered with TwiML `<Gather input="speech">`, and the resulting transcript feeds the same eve session that SMS uses, so a caller and a texter look identical downstream. Every request is checked against `X-Twilio-Signature` before anything else runs. The raw continuation token is `From:To`. See [Channels](/docs/channels) for the contract this builds on.
 
 ## Add the channel
 
@@ -80,5 +80,5 @@ For example, you may be required to inform callers and texters that calls are re
 
 ## What to read next
 
-- [Channels overview](./overview): the channel contract and every built-in channel
+- [Channels overview](/docs/channels): the channel contract and every built-in channel
 - [Auth & route protection](../guides/auth-and-route-protection): authenticating inbound traffic
