@@ -27,6 +27,7 @@ import {
   getInitializedDevelopmentSandboxBackendNames,
 } from "#execution/sandbox/development-run.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
+import type { SandboxState } from "#sandbox/state.js";
 
 const mocks = vi.hoisted(() => ({
   prewarmAppSandboxes: vi.fn(async () => {}),
@@ -87,6 +88,7 @@ async function ensure(input: {
   readonly compiledArtifactsSource?: RuntimeCompiledArtifactsSource;
   readonly runOnSession?: (callback: () => Promise<void>) => Promise<void>;
   readonly registry: RuntimeSandboxRegistry;
+  readonly state?: SandboxState;
   readonly tags?: Record<string, string>;
 }) {
   return await ensureSandboxAccess({
@@ -96,7 +98,7 @@ async function ensure(input: {
     registry: input.registry,
     runOnSession: input.runOnSession,
     sessionId: "session_1",
-    state: null,
+    state: input.state ?? null,
     tags: input.tags,
   });
 }
@@ -269,6 +271,52 @@ describe("ensureSandboxAccess", () => {
       }),
       use: expect.any(Function),
     });
+  });
+
+  it("reattaches with persisted metadata and skips onSession when the session key matches", async () => {
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, createSession());
+    const runOnSession = async (callback: () => Promise<void>) =>
+      await contextStorage.run(ctx, callback);
+    const onSession = vi.fn();
+    const backend = createBackend();
+    const registry = createTestRegistry({ onSession }, backend);
+
+    const first = await ensure({ registry, runOnSession });
+    await first.get();
+    const state = await first.captureState();
+    expect(onSession).toHaveBeenCalledTimes(1);
+
+    const second = await ensure({ registry, runOnSession, state });
+    await second.get();
+
+    expect(onSession).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(backend.create).mock.calls[1]?.[0].existingMetadata).toEqual({});
+  });
+
+  it("re-runs onSession and drops stale metadata when the session key rotates", async () => {
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, createSession());
+    const onSession = vi.fn();
+    const backend = createBackend();
+    const registry = createTestRegistry({ onSession }, backend);
+
+    const access = await ensure({
+      registry,
+      runOnSession: async (callback) => await contextStorage.run(ctx, callback),
+      state: {
+        initialized: true,
+        session: {
+          backendName: "test",
+          metadata: { sandboxName: "stale" },
+          sessionKey: "eve-sbx-ses-test-stale-key",
+        },
+      },
+    });
+    await access.get();
+
+    expect(onSession).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(backend.create).mock.calls[0]?.[0].existingMetadata).toBeUndefined();
   });
 
   it("does not pass bootstrap or seed files to runtime create", async () => {

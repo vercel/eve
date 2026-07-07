@@ -8,6 +8,7 @@ import {
   type RuntimeCompiledArtifactsSource,
 } from "#runtime/compiled-artifacts-source.js";
 import { loadCompileMetadata } from "#runtime/loaders/compile-metadata.js";
+import { resolveVercelProjectIdFromEnvironment } from "#shared/vercel-project.js";
 import type { RuntimeSandboxTemplatePlan } from "#runtime/sandbox/template-plan.js";
 
 // v6: the local backend's default engine moved from just-bash to
@@ -64,7 +65,7 @@ export async function createRuntimeSandboxTemplateKey(input: {
   const scope = await resolveRuntimeSandboxScope({
     backendName: input.backendName,
     compiledArtifactsSource: input.compiledArtifactsSource,
-    scopeKind: input.templatePlan.kind === "source-graph" ? "deployment" : "stable",
+    scopeKind: input.templatePlan.kind === "source-graph" ? "deployment" : "project",
   });
   const versionHash = resolveRuntimeSandboxVersionHash({
     compiledArtifactsSource: input.compiledArtifactsSource,
@@ -105,52 +106,89 @@ async function loadCompileMetadataForKeys(
   }
 }
 
-async function createRuntimeSandboxSessionKey(input: {
-  readonly backendName: string;
-  readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
-  readonly nodeId: string;
-  readonly sessionId: string;
-}): Promise<string> {
+/**
+ * Creates the stable session sandbox key for one sandbox definition.
+ *
+ * Session keys are pinned per durable session: the scope is stable across
+ * deployments so a session reattaches to the same sandbox after a redeploy
+ * and keeps its `/workspace` state. The key also folds in the sandbox
+ * definition's version hash, so changing the sandbox itself (bootstrap
+ * source, `revalidationKey`, or workspace seed content) rotates the
+ * session sandbox onto the new template — unrelated source changes do not.
+ */
+async function createRuntimeSandboxSessionKey(
+  input: CreateRuntimeSandboxKeysInput,
+): Promise<string> {
   const scope = await resolveRuntimeSandboxScope({
     backendName: input.backendName,
     compiledArtifactsSource: input.compiledArtifactsSource,
-    scopeKind: "deployment",
+    scopeKind: "project",
   });
+  const version = await resolveRuntimeSandboxSessionVersion(input);
   const nodeScope = sanitizeRuntimeSandboxKey(input.nodeId);
 
   return sanitizeRuntimeSandboxKey(
-    `eve-sbx-ses-${input.backendName}-${scope}-${input.sessionId}-${nodeScope}`,
+    `eve-sbx-ses-${input.backendName}-${scope}-${version}-${input.sessionId}-${nodeScope}`,
   );
+}
+
+/**
+ * Resolves the version segment of a session key. Reuses the template
+ * version hash so the segment changes exactly when the sandbox
+ * definition changes. The eve package version deliberately does not
+ * participate: upgrading eve must not discard session sandbox state.
+ */
+async function resolveRuntimeSandboxSessionVersion(input: {
+  readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
+  readonly nodeId: string;
+  readonly sourceId: string;
+  readonly templatePlan: RuntimeSandboxTemplatePlan;
+}): Promise<string> {
+  const versionHash =
+    input.templatePlan.kind === "none"
+      ? "none"
+      : resolveRuntimeSandboxVersionHash({
+          compiledArtifactsSource: input.compiledArtifactsSource,
+          metadata: await loadCompileMetadataForKeys(input.compiledArtifactsSource),
+          nodeId: input.nodeId,
+          sourceId: input.sourceId,
+          templatePlan: input.templatePlan,
+        });
+
+  return createStableHash(`${RUNTIME_SANDBOX_CONTRACT_VERSION}:${versionHash}`).slice(0, 12);
 }
 
 /**
  * Resolves the partition key used in Vercel Sandbox template/session names.
  *
- * Source-graph templates use deployment id for Vercel. Stable templates
- * prefer the Vercel project id, then fall back through deployment id,
- * realpath(appRoot), and the compiled-artifacts cache key.
+ * Project scopes — session keys and non-source-graph templates — key on the
+ * Vercel project id and never on deployment-scoped identifiers: a session
+ * key that varies per deployment would silently discard session sandbox
+ * state on every redeploy. Deployment scopes (source-graph templates) key
+ * on the deployment id. Both fall back to realpath(appRoot) and the
+ * compiled-artifacts cache key outside Vercel.
  *
- * Stable scopes key on `VERCEL_PROJECT_ID` alone because it is the only
- * identifier Vercel exposes at both build-time prewarm and deployed runtime;
- * any build-only identifier (e.g. team id) would leave the prewarmed template
+ * The project id (env var or OIDC token claim) is the only identifier
+ * Vercel exposes at both build-time prewarm and deployed runtime; any
+ * build-only identifier (e.g. team id) would leave the prewarmed template
  * "not provisioned" at runtime.
  */
 async function resolveRuntimeSandboxScope(input: {
   readonly backendName: string;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
-  readonly scopeKind: "deployment" | "stable";
+  readonly scopeKind: "deployment" | "project";
 }): Promise<string> {
   if (input.backendName === "vercel") {
-    if (input.scopeKind === "stable") {
+    if (input.scopeKind === "project") {
       const projectScope = resolveVercelProjectScope();
       if (projectScope !== undefined) {
         return createStableHash(projectScope).slice(0, 16);
       }
-    }
-
-    const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
-    if (deploymentId !== undefined && deploymentId.length > 0) {
-      return createStableHash(deploymentId).slice(0, 16);
+    } else {
+      const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
+      if (deploymentId !== undefined && deploymentId.length > 0) {
+        return createStableHash(deploymentId).slice(0, 16);
+      }
     }
   }
 
@@ -204,8 +242,8 @@ function resolveSourceGraphHash(
 }
 
 function resolveVercelProjectScope(): string | undefined {
-  const projectId = process.env.VERCEL_PROJECT_ID?.trim();
-  if (projectId === undefined || projectId.length === 0) {
+  const projectId = resolveVercelProjectIdFromEnvironment();
+  if (projectId === undefined) {
     return undefined;
   }
 
