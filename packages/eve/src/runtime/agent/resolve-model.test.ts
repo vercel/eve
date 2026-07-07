@@ -58,8 +58,9 @@ describe("dynamic runtime model resolution", () => {
       result,
     });
 
+    // String selections are reference-only so they resolve through
+    // `resolveRuntimeModelReference` (mock/bootstrap adapters keep precedence).
     expect(resolved).toEqual({
-      model: "openai/gpt-5.5-mini",
       reference: {
         contextWindowTokens: 128_000,
         id: "openai/gpt-5.5-mini",
@@ -68,7 +69,7 @@ describe("dynamic runtime model resolution", () => {
     });
   });
 
-  it("inherits fallback metadata when a dynamic selection omits overrides", () => {
+  it("inherits fallback provider options but never the fallback context window", () => {
     const resolved = normalizeDynamicRuntimeModelResult({
       fallback: {
         contextWindowTokens: 256_000,
@@ -79,10 +80,22 @@ describe("dynamic runtime model resolution", () => {
     });
 
     expect(resolved.reference).toEqual({
-      contextWindowTokens: 256_000,
+      contextWindowTokens: undefined,
       id: "openai/gpt-5.5-mini",
       providerOptions: { gateway: { order: ["openai"] } },
     });
+  });
+
+  it("rejects selections with unknown keys", () => {
+    expect(() =>
+      normalizeDynamicRuntimeModelResult({
+        fallback: { id: "openai/gpt-5.5" },
+        result: {
+          model: "openai/gpt-5.5-mini",
+          contextWindowTokens: 128_000,
+        } as never,
+      }),
+    ).toThrowError(/unknown key\(s\): contextWindowTokens/);
   });
 });
 

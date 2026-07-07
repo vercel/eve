@@ -109,7 +109,12 @@ export const TurnDynamicModelReferenceKey = new ContextKey<RuntimeModelReference
 );
 
 export interface LiveDynamicModelSelection {
-  readonly model: LanguageModel;
+  /**
+   * Live provider instance, present only when the resolver returned a
+   * `LanguageModel` object. String selections carry just `reference` and
+   * resolve through the model resolver so mock adapters keep precedence.
+   */
+  readonly model?: LanguageModel;
   readonly reference: RuntimeModelReference;
 }
 

@@ -31,7 +31,14 @@ export interface RuntimeModelResolutionScope {
 }
 
 export interface ResolvedRuntimeModelSelection {
-  readonly model: LanguageModel;
+  /**
+   * Live provider instance returned by a dynamic resolver. Present only when
+   * the resolver returned a `LanguageModel` object; string selections carry
+   * just the serializable `reference` and resolve through
+   * {@link resolveRuntimeModelReference} so the bootstrap and mock adapters
+   * keep precedence.
+   */
+  readonly model?: LanguageModel;
   readonly reference: RuntimeModelReference;
 }
 
@@ -141,13 +148,14 @@ export function normalizeDynamicRuntimeModelResult(input: {
     selection.modelOptions?.providerOptions === undefined
       ? input.fallback.providerOptions
       : parseProviderOptionsRecord(selection.modelOptions.providerOptions);
-  const contextWindowTokens =
-    selection.modelContextWindowTokens ?? input.fallback.contextWindowTokens;
+  // Deliberately not inherited from the fallback: a different model's context
+  // window is not a safe guess. When omitted, the compaction threshold stays
+  // derived from the last reference that declared a window.
+  const contextWindowTokens = selection.modelContextWindowTokens;
 
   if (typeof selection.model === "string") {
     const id = formatLanguageModelGatewayId(selection.model);
     return {
-      model: id,
       reference: {
         id,
         contextWindowTokens,
@@ -168,7 +176,18 @@ export function normalizeDynamicRuntimeModelResult(input: {
   };
 }
 
+const DYNAMIC_MODEL_SELECTION_KEYS = new Set(["model", "modelContextWindowTokens", "modelOptions"]);
+
 function validateDynamicModelSelection(selection: PublicAgentModelSelectionDefinition): void {
+  const unknownKeys = Object.keys(selection).filter(
+    (key) => !DYNAMIC_MODEL_SELECTION_KEYS.has(key),
+  );
+  if (unknownKeys.length > 0) {
+    throw new Error(
+      `Dynamic model resolver returned a selection with unknown key(s): ${unknownKeys.join(", ")}. Expected { model, modelContextWindowTokens?, modelOptions? }.`,
+    );
+  }
+
   const contextWindowTokens = selection.modelContextWindowTokens;
   if (
     contextWindowTokens !== undefined &&

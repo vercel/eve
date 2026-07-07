@@ -18,6 +18,7 @@ import type {
 import {
   loadDynamicRuntimeModelDefinition,
   normalizeDynamicRuntimeModelResult,
+  shouldMockAuthoredRuntimeModels,
   type ResolvedRuntimeModelSelection,
   type RuntimeModelResolutionScope,
 } from "#runtime/agent/resolve-model.js";
@@ -32,9 +33,7 @@ const ALLOWED_DYNAMIC_MODEL_EVENTS = new Set<DynamicToolEventName>([
   "step.started",
 ]);
 
-export type ActiveDynamicModelSelection =
-  | LiveDynamicModelSelection
-  | { readonly reference: RuntimeModelReference };
+export type ActiveDynamicModelSelection = LiveDynamicModelSelection;
 
 function isDynamicModelEventName(value: string): value is DynamicToolEventName {
   return ALLOWED_DYNAMIC_MODEL_EVENTS.has(value as DynamicToolEventName);
@@ -110,7 +109,7 @@ export async function dispatchDynamicModelEvent(input: {
     if (
       selection !== null &&
       input.event.type !== "step.started" &&
-      typeof selection.model !== "string"
+      selection.model !== undefined
     ) {
       log.error(
         `Dynamic model resolver (${input.event.type}) returned a provider object, but session- and turn-scoped model selections must be serializable. Return a model id string for this scope, or use "step.started".`,
@@ -134,7 +133,14 @@ function setSelectionForEvent(
   selection: ResolvedRuntimeModelSelection | null,
 ): void {
   if (eventType === "step.started") {
-    ctx.setVirtualContext(LiveStepDynamicModelSelectionKey, selection);
+    // In mock mode (unit tiers, `eve eval` mock runs) drop the live instance
+    // so the selection resolves through the reference path, where the
+    // deterministic mock adapter keeps precedence over real providers.
+    const stored =
+      selection !== null && selection.model !== undefined && shouldMockAuthoredRuntimeModels()
+        ? { reference: selection.reference }
+        : selection;
+    ctx.setVirtualContext(LiveStepDynamicModelSelectionKey, stored);
     return;
   }
 

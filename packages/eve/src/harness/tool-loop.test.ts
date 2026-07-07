@@ -737,6 +737,54 @@ describe("createToolLoopHarness", () => {
     expect(result.session.compaction.threshold).toBe(180_000);
   });
 
+  it("keeps the compaction threshold stable across steps with the same dynamic selection", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const config = createTestConfig("conversation", undefined, {
+      resolveModel: vi.fn().mockResolvedValue("selected-model" as LanguageModel),
+    });
+    const runStep = createToolLoopHarness(config);
+    const ctx = new ContextContainer();
+    ctx.set(SessionDynamicModelReferenceKey, {
+      contextWindowTokens: 200_000,
+      id: "selected-model",
+    });
+    const session = createTestSession({
+      agent: {
+        dynamicModelDefaultReference: { contextWindowTokens: 100_000, id: "fallback-model" },
+        modelReference: { contextWindowTokens: 100_000, id: "fallback-model" },
+        system: "You are a test assistant.",
+        tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
+      },
+      compaction: { recentWindowSize: 10, threshold: 90_000 },
+    });
+
+    const first = await contextStorage.run(ctx, () => runStep(session, { message: "Hi" }));
+    expect(first.session.compaction.threshold).toBe(180_000);
+
+    // A second step with the same selection must not rescale again
+    // (regression: the threshold used to compound to 360k per extra step).
+    const second = await contextStorage.run(ctx, () =>
+      runStep(first.session, { message: "Again" }),
+    );
+    expect(second.session.compaction.threshold).toBe(180_000);
+
+    // And clearing the selection restores the fallback-derived threshold.
+    ctx.set(SessionDynamicModelReferenceKey, null);
+    const third = await contextStorage.run(ctx, () => runStep(second.session, { message: "Back" }));
+    expect(third.session.agent.modelReference).toEqual({
+      contextWindowTokens: 100_000,
+      id: "fallback-model",
+    });
+    expect(third.session.compaction.threshold).toBe(90_000);
+  });
+
   it("hides subagent tools from the model after the subagent depth limit", async () => {
     setupMockAgent({
       finishReason: "stop",

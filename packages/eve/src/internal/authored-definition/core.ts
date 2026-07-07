@@ -14,11 +14,12 @@ import {
   expectString,
   getOptionalStringRecordProperty,
 } from "#internal/authored-module.js";
+import type { PublicAgentStaticModelDefinition } from "#shared/agent-definition.js";
 import {
-  isDynamicModelDefinition,
-  type PublicAgentStaticModelDefinition,
-} from "#shared/agent-definition.js";
-import type { DynamicEvents, DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
+  isDynamicSentinel,
+  type DynamicEvents,
+  type DynamicToolEventName,
+} from "#shared/dynamic-tool-definition.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 type MutableDynamicEvents = {
@@ -140,7 +141,11 @@ function normalizeAgentModelDefinition(
   value: unknown,
   message: string,
 ): NormalizedAgentDefinition["model"] {
-  if (!isDynamicModelDefinition(value)) {
+  // Branch on the bare sentinel, not `isDynamicModelDefinition`: the latter
+  // also requires `fallback`, which would misroute a fallback-less
+  // `defineDynamic({ events })` into the static-model path and bury the
+  // actionable error below under a generic invalid-model failure.
+  if (!isDynamicSentinel(value)) {
     return value as NormalizedAgentDefinition["model"];
   }
 
@@ -298,6 +303,11 @@ function normalizeAgentCompactionDefinition(
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["compaction"]>> = {};
 
   if (record.model !== undefined) {
+    if (isDynamicSentinel(record.model)) {
+      throw new Error(
+        `${message} "compaction.model" does not support defineDynamic — provide a static model.`,
+      );
+    }
     normalizedDefinition.model = record.model as PublicAgentStaticModelDefinition;
   }
 

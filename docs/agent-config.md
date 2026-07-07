@@ -58,21 +58,31 @@ export default defineAgent({
     fallback: "anthropic/claude-sonnet-5",
     events: {
       "session.started": async (_event, ctx) => {
+        if (ctx.channel.kind === "slack") return "anthropic/claude-haiku-4.5";
         const plan = ctx.session.auth.initiator?.attributes.plan;
         return plan === "enterprise" ? "anthropic/claude-opus-4.8" : null;
       },
-      "step.started": (_event, ctx) =>
-        ctx.channel.kind === "slack" ? "openai/gpt-5.5-mini" : null,
     },
   }),
 });
 ```
 
-Choose the event scope based on how often the lookup needs to run:
-`session.started` runs once for the session, `turn.started` runs once per user
-turn, and `step.started` runs for each model step before compaction and the
-model call. Step selections override turn selections, turn selections override
-session selections, and all dynamic selections fall back to `fallback`.
+`session.started` is the right scope for almost every use case — caller,
+channel, tenant, and plan are all fixed for the lifetime of a session, and the
+model stays stable for the whole conversation. `turn.started` runs once per
+user turn, and `step.started` runs before every model step. Step selections
+override turn selections, turn selections override session selections, and all
+dynamic selections fall back to `fallback`.
+
+> **Changing models invalidates the provider prompt cache.** Prompt caching is
+> per model: every switch abandons the cached prefix and re-ingests the entire
+> conversation at uncached input-token prices, then rebuilds the cache on the
+> new model. A `turn.started` resolver that flips between models pays this on
+> every flip; a `step.started` resolver that flips mid-turn pays it on every
+> step and also loses cache hits _within_ a single turn. Only resolve at
+> `turn.started` or `step.started` when the selection genuinely depends on the
+> conversation as it evolves, and prefer returning a stable choice (or `null`)
+> so consecutive calls stay on one model.
 
 Handlers receive the same read-only context shape used by dynamic tools,
 skills, and instructions: `ctx.session`, `ctx.channel`, and `ctx.messages`.
@@ -91,13 +101,26 @@ return {
 };
 ```
 
-`modelContextWindowTokens` is optional, but useful for custom or unlisted
-models so compaction uses the selected model's actual context window. If you
-omit `modelOptions`, eve reuses the agent-level `modelOptions`.
+Set `modelContextWindowTokens` whenever the selected model's context window
+differs from the fallback's. It is never inherited: a selection without it has
+no known window, so the compaction trigger keeps using the last known window
+(the fallback's at turn start). If you omit `modelOptions`, eve reuses the
+agent-level `modelOptions`.
 
 Session- and turn-scoped selections are serialized across workflow step
 boundaries, so return model id strings from those scopes. Use `step.started`
 when the selected model is a direct provider `LanguageModel` object.
+
+Dynamic model selection always degrades to `fallback`, never to a failed turn:
+a resolver that throws, returns an invalid selection, or returns a provider
+object from a session/turn scope logs an error and leaves that scope unset.
+Monitor your logs when a resolver depends on an external service — a broken
+resolver silently serves the fallback model. Build-time validation (gateway
+routing, credential checks, context-window lookup) applies to `fallback` only;
+a resolver can select a model the deployment has no credentials for, which
+fails at request time. The `session.started` runtime identity reports a
+dynamic agent's model as `dynamic:<fallback id>`; per-scope selections happen
+after that identity is built.
 
 ## Reasoning effort
 

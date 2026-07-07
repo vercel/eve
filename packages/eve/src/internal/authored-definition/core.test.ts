@@ -42,6 +42,40 @@ describe("normalizeAgentDefinition", () => {
     expect(typeof (definition.model as typeof model).events["session.started"]).toBe("function");
   });
 
+  it("rejects a dynamic model without a fallback", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: defineDynamic({
+            events: {
+              "session.started": () => "openai/gpt-5.5-mini",
+            },
+          }),
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('Dynamic model definitions must include a "fallback" model.');
+  });
+
+  it("rejects a dynamic compaction model", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          compaction: {
+            model: defineDynamic({
+              fallback: "openai/gpt-5.5-mini",
+              events: {
+                "session.started": () => "openai/gpt-5.5-mini",
+              },
+            }),
+          },
+          model: "openai/gpt-5.5",
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('"compaction.model" does not support defineDynamic');
+  });
+
   it("rejects unsupported reasoning effort", () => {
     expect(() =>
       normalizeAgentDefinition(

@@ -31,13 +31,23 @@ export default defineAgent({
 });
 ```
 
-Choose `"session.started"` for one lookup per session, `"turn.started"` for
-one lookup per user turn, or `"step.started"` for per-model-step selection.
+`"session.started"` — one lookup when the session starts — is the right scope
+for almost every use case: caller, channel, tenant, and plan are session-stable,
+and the model stays fixed for the whole conversation. `"turn.started"` resolves
+once per user turn and `"step.started"` before every model step; because prompt
+caches are per model, every switch abandons the cached prefix and re-ingests
+the full conversation at uncached prices. Reach for those scopes only when the
+selection genuinely depends on the evolving conversation, and return a stable
+choice (or `null`) so consecutive calls stay on one model.
+
 Handlers receive `ctx.session`, `ctx.channel`, and `ctx.messages`. Return
 `null` to leave that scope unset and fall back to the next scope, ending at
-`fallback`. See
+`fallback`. A resolver that throws or returns an invalid selection logs an
+error and leaves its scope unset — model selection degrades to `fallback`
+rather than failing the turn. See
 [agent.ts](../agent-config#choose-the-model-dynamically) for model metadata
-overrides such as `modelContextWindowTokens`.
+overrides such as `modelContextWindowTokens`, the prompt-cache implications of
+each scope, and the fallback semantics.
 
 ## Dynamic tools
 
