@@ -172,6 +172,22 @@ export type DynamicSentinel<TResult = unknown, TFallback = never> = {
   readonly events: DynamicEvents<TResult>;
 } & ([TFallback] extends [never] ? object : { readonly fallback: TFallback });
 
+/**
+ * Throws when a dynamic sentinel outside the agent `model` slot carries a
+ * `fallback`. Only dynamic models support `fallback` (it doubles as the
+ * compiled static model); on tools, skills, and instructions it would be
+ * silently dead configuration — the additive slots fall back by authoring a
+ * static entry in the same directory or by returning `null`.
+ */
+export function rejectDynamicSentinelFallback(sentinel: DynamicSentinel, message: string): void {
+  if (!("fallback" in sentinel)) {
+    return;
+  }
+  throw new Error(
+    `${message} "fallback" is only supported on a dynamic agent model (the "model" field in agent.ts). For dynamic tools, skills, and instructions, author a static entry as the default or return null.`,
+  );
+}
+
 export function isDynamicSentinel(value: unknown): value is DynamicSentinel {
   return (
     typeof value === "object" &&

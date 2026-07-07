@@ -9,7 +9,11 @@ import {
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
-import { isDynamicSentinel, type DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
+import {
+  isDynamicSentinel,
+  rejectDynamicSentinelFallback,
+  type DynamicToolEventName,
+} from "#shared/dynamic-tool-definition.js";
 
 /**
  * Compiled instructions entry produced from one authored `instructions/*`
@@ -68,6 +72,10 @@ export async function compileInstructionsEntry(
   });
 
   if (isDynamicSentinel(exportValue)) {
+    rejectDynamicSentinelFallback(
+      exportValue,
+      `Expected the instructions export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
+    );
     const slug = stripLogicalPathExtension(source.logicalPath).replace(/^instructions\//, "");
     return {
       kind: "dynamic-instructions",

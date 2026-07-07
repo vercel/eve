@@ -44,7 +44,13 @@ Handlers receive `ctx.session`, `ctx.channel`, and `ctx.messages`. Return
 `null` to leave that scope unset and fall back to the next scope, ending at
 `fallback`. A resolver that throws or returns an invalid selection logs an
 error and leaves its scope unset — model selection degrades to `fallback`
-rather than failing the turn. See
+rather than failing the turn.
+
+`fallback` exists only for dynamic models, where the agent must always have
+exactly one model and the compiled fallback anchors build-time metadata.
+Dynamic tools, skills, and instructions are additive: their default is a
+static entry authored in the same directory (or nothing), so passing
+`fallback` to their `defineDynamic` export is a build error. See
 [agent.ts](../agent-config#choose-the-model-dynamically) for model metadata
 overrides such as `modelContextWindowTokens`, the prompt-cache implications of
 each scope, and the fallback semantics.
