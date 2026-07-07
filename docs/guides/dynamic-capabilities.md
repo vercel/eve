@@ -3,57 +3,23 @@ title: "Dynamic Capabilities"
 description: "Resolve models, tools, skills, and instructions at runtime: dynamic model selection, defineDynamic resolver events, execution order, and durable dynamic tools."
 ---
 
-Dynamic capabilities let eve choose runtime behavior from the active caller,
-channel, tenant, feature flags, or external data. Use `defineDynamic` in
-`agent.ts` for dynamic model selection, and in tools, skills, and instructions
-that resolve from session events instead of being declared up front. The
-[tools](../tools), [skills](../skills), and
-[instructions](../instructions) guides each point here for their dynamic form.
+`defineDynamic` resolves the model, tools, skills, and instructions at runtime from a session event instead of declaring them up front. Reach for it when the right capability isn't known until the session starts, because it hinges on who the caller is, what tenant they belong to, feature flags, or external data. The [tools](../tools), [skills](../skills), and [instructions](../instructions) guides each point here for their dynamic form.
 
 ## Dynamic models
 
-Dynamic model selection lives in `agent.ts` because each agent has one active
-turn model. Use `defineDynamic({ fallback, events })`:
+The `model` field in `agent.ts` accepts `defineDynamic({ fallback, events })`.
+Resolvers run at `session.started`, `turn.started`, or `step.started`
+(precedence: step > turn > session > `fallback`); `null` leaves a scope unset
+and failures degrade to the next scope. Prefer `session.started` — prompt
+caches are per model, so switching mid-session re-ingests the conversation at
+uncached prices. See
+[agent configuration](../agent-config#choose-the-model-dynamically) for the
+full contract.
 
-```ts title="agent/agent.ts"
-import { defineAgent, defineDynamic } from "eve";
-
-export default defineAgent({
-  model: defineDynamic({
-    fallback: "anthropic/claude-sonnet-5",
-    events: {
-      "session.started": (_event, ctx) =>
-        ctx.session.auth.initiator?.attributes.plan === "enterprise"
-          ? "anthropic/claude-opus-4.8"
-          : null,
-    },
-  }),
-});
-```
-
-`"session.started"` — one lookup when the session starts — is the right scope
-for almost every use case: caller, channel, tenant, and plan are session-stable,
-and the model stays fixed for the whole conversation. `"turn.started"` resolves
-once per user turn and `"step.started"` before every model step; because prompt
-caches are per model, every switch abandons the cached prefix and re-ingests
-the full conversation at uncached prices. Reach for those scopes only when the
-selection genuinely depends on the evolving conversation, and return a stable
-choice (or `null`) so consecutive calls stay on one model.
-
-Handlers receive `ctx.session`, `ctx.channel`, and `ctx.messages`. Return
-`null` to leave that scope unset and fall back to the next scope, ending at
-`fallback`. A resolver that throws or returns an invalid selection logs an
-error and leaves its scope unset — model selection degrades to `fallback`
-rather than failing the turn.
-
-`fallback` exists only for dynamic models, where the agent must always have
-exactly one model and the compiled fallback anchors build-time metadata.
-Dynamic tools, skills, and instructions are additive: their default is a
-static entry authored in the same directory (or nothing), so passing
-`fallback` to their `defineDynamic` export is a build error. See
-[agent.ts](../agent-config#choose-the-model-dynamically) for model metadata
-overrides such as `modelContextWindowTokens`, the prompt-cache implications of
-each scope, and the fallback semantics.
+`fallback` is model-only: the agent always needs exactly one model, and the
+compiled fallback anchors build-time metadata. Tools, skills, and instructions
+default by authoring a static entry (or returning `null`), so `fallback` on
+their `defineDynamic` export is a build error.
 
 ## Dynamic tools
 
