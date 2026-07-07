@@ -1,0 +1,572 @@
+/**
+ * 로싸인(LawSign) 프론트엔드 SPA 코어
+ * - 해시 기반 라우팅(#/documents?view=kanban&status=...) → 필터 상태를 URL에 보존
+ * - 공통 UI(토스트/모달/뱃지/차트/QR), 대시보드, 문서함(리스트·칸반), 검증 포털
+ * - 서명 요청 3단계 플로우는 js/request.js 참조
+ */
+(function (LS) {
+  'use strict';
+
+  // ── 유틸 ──────────────────────────────────────────────────────────
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const $ = (sel, root) => (root || document).querySelector(sel);
+  const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+
+  function debounce(fn, ms) {
+    let t;
+    return function () {
+      clearTimeout(t);
+      const args = arguments;
+      t = setTimeout(() => fn.apply(this, args), ms);
+    };
+  }
+
+  function relTime(ts) {
+    const diff = Date.now() - ts;
+    const m = Math.floor(diff / 60000);
+    if (m < 1) return '방금 전';
+    if (m < 60) return m + '분 전';
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + '시간 전';
+    const d = Math.floor(h / 24);
+    if (d < 8) return d + '일 전';
+    return fmtDate(ts);
+  }
+  function fmtDate(ts) {
+    const d = new Date(ts);
+    const p = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+  function fmtDateTime(ts) {
+    const d = new Date(ts);
+    const p = (n) => String(n).padStart(2, '0');
+    return fmtDate(ts) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+  const staleDays = (d) => Math.floor((Date.now() - d.lastActivityAt) / 86400000);
+
+  // ── 아이콘 (24px stroke 아이콘 셋, 자체 제작) ────────────────────
+  const I = (path, size) =>
+    '<svg width="' + (size || 16) + '" height="' + (size || 16) + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + path + '</svg>';
+  const icons = {
+    home: I('<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>'),
+    pen: I('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>'),
+    folder: I('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>'),
+    shield: I('<path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6Z"/><path d="m9 12 2 2 4-4"/>'),
+    search: I('<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>'),
+    bell: I('<path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M10.3 21a2 2 0 0 0 3.4 0"/>'),
+    clock: I('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+    user: I('<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 5-5.5 8-5.5s6.5 1.5 8 5.5"/>'),
+    doc: I('<path d="M6 2h8l4 4v16H6Z"/><path d="M14 2v4h4"/>'),
+    plus: I('<path d="M12 5v14M5 12h14"/>'),
+    check: I('<path d="m4 12.5 5 5L20 6.5"/>'),
+    x: I('<path d="m6 6 12 12M18 6 6 18"/>'),
+    dots: I('<circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.6" fill="currentColor" stroke="none"/>'),
+    grid: I('<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>'),
+    rows: I('<rect x="4" y="5" width="16" height="4" rx="1.5"/><rect x="4" y="15" width="16" height="4" rx="1.5"/>'),
+    text: I('<path d="M5 6h14M12 6v13"/>'),
+    checkbox: I('<rect x="4" y="4" width="16" height="16" rx="3"/><path d="m8.5 12 2.5 2.5L16 9"/>'),
+    calendar: I('<rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>'),
+    image: I('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m5 18 5-5 3 3 3-3 3 3"/>'),
+    stamp: I('<path d="M9 11V6a3 3 0 0 1 6 0v5"/><path d="M5 15a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2H5Z"/><path d="M5 20h14"/>'),
+    download: I('<path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/>'),
+    sun: I('<circle cx="12" cy="12" r="4.5"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12h2.5M19 12h2.5M5 5l1.8 1.8M17.2 17.2 19 19M19 5l-1.8 1.8M6.8 17.2 5 19"/>'),
+    send: I('<path d="m3.5 11.5 17-7.5-7.5 17-2-7.5Z"/>'),
+    warn: I('<path d="M12 3 2.5 20h19Z"/><path d="M12 10v4.5"/><circle cx="12" cy="17.2" r="0.8" fill="currentColor" stroke="none"/>'),
+    diamond: I('<path d="M6 3h12l4 6-10 12L2 9Z"/><path d="M2 9h20M9.5 3 8 9l4 12M14.5 3 16 9l-4 12"/>'),
+  };
+  LS.icons = icons;
+
+  // ── 상태 메타 ─────────────────────────────────────────────────────
+  const STATUS = {
+    DRAFT: { label: '요청 전', color: 'gray' },
+    SCHEDULED: { label: '예약됨', color: 'violet' },
+    NEED_MY_SIGN: { label: '내 서명 필요', color: 'red' },
+    PENDING_OTHERS: { label: '상대 서명 대기', color: 'blue' },
+    COMPLETED: { label: '서명 완료', color: 'green' },
+    REJECTED: { label: '거절·취소', color: 'gray' },
+  };
+  const statusBadge = (s) => '<span class="badge ' + STATUS[s].color + '">' + STATUS[s].label + '</span>';
+
+  // ── 토스트 & 모달 ─────────────────────────────────────────────────
+  function toast(msg, opts) {
+    const root = $('#toast-root');
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.innerHTML = msg;
+    root.appendChild(el);
+    setTimeout(() => {
+      el.style.transition = 'opacity 0.3s';
+      el.style.opacity = '0';
+      setTimeout(() => el.remove(), 320);
+    }, (opts && opts.ms) || 2600);
+    return el;
+  }
+
+  function openModal(html, opts) {
+    closeModal();
+    const back = document.createElement('div');
+    back.className = 'modal-backdrop';
+    back.innerHTML = '<div class="modal ' + ((opts && opts.wide) ? 'wide' : '') + '" role="dialog" aria-modal="true">' + html + '</div>';
+    back.addEventListener('click', (e) => { if (e.target === back) closeModal(); });
+    document.body.appendChild(back);
+    $$('.modal-close', back).forEach((b) => b.addEventListener('click', closeModal));
+    return back;
+  }
+  function closeModal() {
+    const b = $('.modal-backdrop');
+    if (b) b.remove();
+  }
+  LS.ui = { esc, $, $$, debounce, relTime, fmtDate, fmtDateTime, toast, openModal, closeModal, statusBadge, STATUS, staleDays };
+
+  // ── SVG 꺾은선 차트 (외부 라이브러리 없이 렌더) ──────────────────
+  function lineChart(points, opts) {
+    const W = 640, Hh = 200, padX = 34, padY = 22;
+    const max = Math.max.apply(null, points.map((p) => p.completed)) * 1.15;
+    const stepX = (W - padX * 2) / (points.length - 1);
+    const xy = points.map((p, i) => [padX + i * stepX, Hh - padY - (p.completed / max) * (Hh - padY * 2)]);
+    const path = xy.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+    const area = path + ' L' + xy[xy.length - 1][0].toFixed(1) + ' ' + (Hh - padY) + ' L' + padX + ' ' + (Hh - padY) + ' Z';
+    const gridY = [0.25, 0.5, 0.75].map((r) => {
+      const y = Hh - padY - r * (Hh - padY * 2);
+      return '<line x1="' + padX + '" x2="' + (W - padX) + '" y1="' + y + '" y2="' + y + '" stroke="var(--border)" stroke-dasharray="3 4"/>';
+    }).join('');
+    const labels = points.filter((_, i) => i % 7 === 0).map((p, i) => '<text x="' + (padX + i * 7 * stepX) + '" y="' + (Hh - 4) + '" font-size="10" fill="var(--text-3)" text-anchor="middle">' + esc(p.date) + '</text>').join('');
+    const last = xy[xy.length - 1];
+    return (
+      '<svg viewBox="0 0 ' + W + ' ' + Hh + '" preserveAspectRatio="none" role="img" aria-label="최근 30일 서명 완료 추이">' +
+      '<defs><linearGradient id="lg-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--brand-500)" stop-opacity="0.22"/><stop offset="1" stop-color="var(--brand-500)" stop-opacity="0"/></linearGradient></defs>' +
+      gridY +
+      '<path d="' + area + '" fill="url(#lg-fill)"/>' +
+      '<path d="' + path + '" fill="none" stroke="var(--brand-600)" stroke-width="2.5" stroke-linejoin="round"/>' +
+      '<circle cx="' + last[0] + '" cy="' + last[1] + '" r="4" fill="var(--brand-600)"/>' +
+      labels +
+      '</svg>'
+    );
+  }
+
+  // ── 의사 QR (검증 URL 시각화 · 프로토타입 표기) ──────────────────
+  function qrSvg(seed) {
+    const N = 21;
+    let acc = 0;
+    for (let i = 0; i < seed.length; i++) acc = ((acc << 5) - acc + seed.charCodeAt(i)) >>> 0;
+    const rnd = () => { acc = (acc * 1664525 + 1013904223) >>> 0; return acc / 4294967296; };
+    let cells = '';
+    const finder = (x, y) =>
+      '<rect x="' + x + '" y="' + y + '" width="7" height="7" fill="#111"/><rect x="' + (x + 1) + '" y="' + (y + 1) + '" width="5" height="5" fill="#fff"/><rect x="' + (x + 2) + '" y="' + (y + 2) + '" width="3" height="3" fill="#111"/>';
+    for (let y = 0; y < N; y++)
+      for (let x = 0; x < N; x++) {
+        const inFinder = (x < 8 && y < 8) || (x > N - 9 && y < 8) || (x < 8 && y > N - 9);
+        if (!inFinder && rnd() > 0.52) cells += '<rect x="' + x + '" y="' + y + '" width="1" height="1" fill="#111"/>';
+      }
+    return '<svg viewBox="0 0 ' + N + ' ' + N + '" shape-rendering="crispEdges">' + cells + finder(0, 0) + finder(N - 7, 0) + finder(0, N - 7) + '</svg>';
+  }
+  LS.qrSvg = qrSvg;
+
+  // ── 라우터 ───────────────────────────────────────────────────────
+  const routes = {};
+  LS.route = (name, render) => { routes[name] = render; };
+
+  function parseHash() {
+    const h = location.hash.replace(/^#\/?/, '') || 'dashboard';
+    const [path, qs] = h.split('?');
+    const params = {};
+    if (qs) qs.split('&').forEach((kv) => { const [k, v] = kv.split('='); params[decodeURIComponent(k)] = decodeURIComponent(v || ''); });
+    return { path: path || 'dashboard', params };
+  }
+  function nav(path, params) {
+    const qs = params ? Object.keys(params).filter((k) => params[k] !== '' && params[k] != null).map((k) => encodeURIComponent(k) + '=' + encodeURIComponent(params[k])).join('&') : '';
+    location.hash = '#/' + path + (qs ? '?' + qs : '');
+  }
+  LS.nav = nav;
+
+  async function render() {
+    const { path, params } = parseHash();
+    const view = routes[path] || routes.dashboard;
+    $$('.lnb-item, .bottom-nav a').forEach((a) => a.classList.toggle('active', a.dataset.route === path));
+    const main = $('#app-main');
+    main.innerHTML = '<div class="page dim" style="padding:40px 0;text-align:center">불러오는 중…</div>';
+    try {
+      await view(main, params);
+    } catch (e) {
+      main.innerHTML = '<div class="page"><div class="card card-pad">화면을 불러오지 못했습니다: ' + esc(e.message) + '</div></div>';
+    }
+    window.scrollTo(0, 0);
+  }
+  window.addEventListener('hashchange', render);
+
+  // ══════════════════════════════════════════════════════════════════
+  // 화면 1: 홈 대시보드
+  // ══════════════════════════════════════════════════════════════════
+  LS.route('dashboard', async (main) => {
+    const sum = await LS.api.getDashboardSummary();
+    const c = sum.counts;
+    const stats = [
+      { k: '내 서명 필요', v: c.NEED_MY_SIGN, color: 'var(--red-600)', status: 'NEED_MY_SIGN' },
+      { k: '상대 서명 대기', v: c.PENDING_OTHERS, color: 'var(--blue-600)', status: 'PENDING_OTHERS' },
+      { k: '서명 완료', v: c.COMPLETED, color: 'var(--green-600)', status: 'COMPLETED' },
+      { k: '예약 발송', v: c.SCHEDULED, color: 'var(--violet-600)', status: 'SCHEDULED' },
+    ];
+    const tpls = await LS.api.listTemplates();
+
+    main.innerHTML =
+      '<div class="page">' +
+      '<div class="dash-head"><div><h1>' + esc(LS.workspace.name) + ' 님, 환영합니다</h1>' +
+      '<div class="sub">' + icons.warn + ' 오늘 처리해야 할 요주의 문서가 ' + (c.NEED_MY_SIGN + sum.urgent.length) + '건 있습니다.</div></div>' +
+      '<button class="btn primary" id="dash-new">' + icons.pen + ' 새 서명 요청 시작하기</button></div>' +
+
+      '<div class="stat-grid">' + stats.map((s) =>
+        '<div class="stat" style="--accent:' + s.color + '" data-status="' + s.status + '" role="button" tabindex="0">' +
+        '<div class="k"><span class="dot" style="background:' + s.color + '"></span>' + s.k + '</div>' +
+        '<div class="v">' + s.v.toLocaleString() + '<span class="dim" style="font-size:13px;font-weight:600"> 건</span></div></div>').join('') +
+      '</div>' +
+
+      '<div class="dash-grid">' +
+      '<section class="card card-pad"><div class="section-title">' + icons.grid + ' 서명 파이프라인 현황 <span class="badge gray">최근 30일</span></div>' +
+      '<div class="chart-wrap">' + lineChart(sum.trend) + '</div></section>' +
+
+      '<section class="card card-pad"><div class="section-title" style="color:var(--red-600)">' + icons.warn + ' 마감 임박 · 요주의 문서</div>' +
+      (sum.urgent.length ? sum.urgent.map((d) =>
+        '<div class="urgent-item"><div class="t">' + esc(d.title) + '</div>' +
+        '<div class="meta"><span class="badge red">' + staleDays(d) + '일 경과</span><span>' + icons.clock + ' ' + relTime(d.lastActivityAt) + '</span></div>' +
+        '<button class="btn sm" data-remind="' + d.id + '">' + icons.bell + ' 독촉 알림 발송 (카카오톡·이메일)</button></div>').join('')
+        : '<p class="dim" style="margin-top:12px">지연 중인 문서가 없습니다. 👍</p>') +
+      '</section></div>' +
+
+      '<section class="card card-pad" style="margin-top:16px"><div class="section-title">⚡ 퀵 템플릿 — 자주 쓰는 양식으로 바로 시작</div>' +
+      '<div class="tpl-grid">' + tpls.map((t) =>
+        '<button class="tpl-card" data-tpl="' + t.id + '"><span class="ic">' + icons.doc + '</span><b>' + esc(t.title) + '</b>' +
+        '<span class="dim" style="font-size:11.5px">입력 필드 ' + t.fields + '개 · ' + t.usedCount + '회 사용</span></button>').join('') +
+      '<button class="tpl-card add">' + icons.plus + ' 내 템플릿 추가</button></div></section>' +
+      '</div>';
+
+    $('#dash-new').addEventListener('click', () => nav('request'));
+    $$('.stat', main).forEach((el) => el.addEventListener('click', () => nav('documents', { status: el.dataset.status, view: 'kanban' })));
+    $$('[data-tpl]', main).forEach((el) => el.addEventListener('click', () => nav('request', { tpl: el.dataset.tpl })));
+    $$('[data-remind]', main).forEach((el) =>
+      el.addEventListener('click', async () => {
+        el.disabled = true;
+        const r = await LS.api.remindSigners(el.dataset.remind);
+        toast('🔔 서명자 ' + r.sent + '명에게 독촉 알림을 발송했습니다.');
+        el.innerHTML = icons.check + ' 발송 완료';
+      })
+    );
+  });
+
+  // ══════════════════════════════════════════════════════════════════
+  // 화면 2: 문서함 (리스트 뷰 ⇄ 칸반 뷰, 필터 상태는 URL에 유지)
+  // ══════════════════════════════════════════════════════════════════
+  const KANBAN_COLS = [
+    { key: 'PRE', title: '📝 요청 전 (작성·예약)', statuses: ['DRAFT', 'SCHEDULED'], drop: 'DRAFT' },
+    { key: 'NEED_MY_SIGN', title: '✍️ 내 서명 필요', statuses: ['NEED_MY_SIGN'], drop: 'NEED_MY_SIGN' },
+    { key: 'PENDING_OTHERS', title: '⏳ 상대 서명 대기', statuses: ['PENDING_OTHERS'], drop: 'PENDING_OTHERS' },
+    { key: 'COMPLETED', title: '✅ 서명 완료됨', statuses: ['COMPLETED'], drop: 'COMPLETED' },
+  ];
+
+  LS.route('documents', async (main, params) => {
+    const view = params.view === 'kanban' ? 'kanban' : 'list';
+    const state = { q: params.q || '', status: params.status || '', label: params.label || '' };
+    const syncUrl = () => nav('documents', { view, q: state.q, status: state.status, label: state.label });
+
+    main.innerHTML =
+      '<div class="page">' +
+      '<div class="docbox-head"><h1 style="font-size:20px">' + icons.folder + ' 문서함</h1>' +
+      '<div class="toolbar-row">' +
+      '<div class="view-toggle"><button data-v="list" class="' + (view === 'list' ? 'active' : '') + '">' + icons.rows + ' 리스트</button>' +
+      '<button data-v="kanban" class="' + (view === 'kanban' ? 'active' : '') + '">' + icons.grid + ' 칸반</button></div>' +
+      '<button class="btn primary" id="doc-new">' + icons.pen + ' 새 서명 요청</button></div></div>' +
+
+      '<div class="toolbar-row" style="margin-bottom:14px">' +
+      '<div class="search-box">' + icons.search + '<input class="input" id="doc-q" placeholder="문서 제목·서명자로 찾기" value="' + esc(state.q) + '"></div>' +
+      '<select class="input" id="doc-label" style="width:auto"><option value="">🏷️ 라벨 전체</option>' +
+      LS.labels.map((l) => '<option ' + (state.label === l ? 'selected' : '') + '>' + esc(l) + '</option>').join('') + '</select>' +
+      (view === 'list'
+        ? '<div class="status-tabs" id="doc-tabs">' +
+          ['', 'DRAFT', 'NEED_MY_SIGN', 'PENDING_OTHERS', 'COMPLETED'].map((s) =>
+            '<button data-s="' + s + '" class="' + (state.status === s ? 'active' : '') + '">' + (s ? STATUS[s].label : '전체') + '</button>').join('') + '</div>'
+        : '<span class="dim" style="font-size:12px">카드를 드래그하여 상태를 변경할 수 있습니다</span>') +
+      '</div>' +
+      '<div id="doc-body"></div></div>';
+
+    $('#doc-new').addEventListener('click', () => nav('request'));
+    $$('.view-toggle button', main).forEach((b) => b.addEventListener('click', () => nav('documents', { view: b.dataset.v, q: state.q, status: state.status, label: state.label })));
+    $('#doc-label').addEventListener('change', (e) => { state.label = e.target.value; syncUrl(); });
+    // 실시간 검색: 500ms 디바운스로 서버 질의 횟수를 통제 (본문만 갱신, URL은 replaceState)
+    $('#doc-q').addEventListener('input', debounce((e) => {
+      state.q = e.target.value.trim();
+      history.replaceState(null, '', '#/documents?' + ['view=' + view, state.q && 'q=' + encodeURIComponent(state.q), state.status && 'status=' + state.status, state.label && 'label=' + encodeURIComponent(state.label)].filter(Boolean).join('&'));
+      drawBody();
+    }, 500));
+    if (view === 'list') $$('#doc-tabs button').forEach((b) => b.addEventListener('click', () => { state.status = b.dataset.s; syncUrl(); }));
+
+    async function drawBody() {
+      const body = $('#doc-body');
+      if (view === 'list') {
+        const res = await LS.api.listDocuments({ q: state.q, status: state.status, label: state.label });
+        body.innerHTML =
+          '<div class="card" style="overflow-x:auto"><table class="doc-table"><thead><tr>' +
+          '<th>문서</th><th>상태</th><th class="hide-m">서명자</th><th class="hide-m">라벨</th><th>마지막 활동</th><th></th></tr></thead><tbody>' +
+          (res.items.length ? res.items.map((d) =>
+            '<tr data-id="' + d.id + '"><td class="doc-title-cell">' + esc(d.title) +
+            '<small>' + (d.hash ? '🔒 문서 잠금 · 해시 등록됨' : '서명 기한 ' + d.expirationDays + '일') + '</small></td>' +
+            '<td>' + statusBadge(d.status) + (d.status === 'PENDING_OTHERS' && staleDays(d) >= 3 ? ' <span class="badge red">⏳ 리마인드 필요</span>' : '') + '</td>' +
+            '<td class="hide-m">' + esc(d.signers.map((s) => s.name).join(', ') || '—') + '</td>' +
+            '<td class="hide-m">' + (d.label ? '<span class="badge brand">' + esc(d.label) + '</span>' : '<span class="dim">—</span>') + '</td>' +
+            '<td class="dim">' + relTime(d.lastActivityAt) + '</td>' +
+            '<td><button class="menu-btn btn ghost sm" data-menu="' + d.id + '">' + icons.dots + '</button></td></tr>').join('')
+            : '<tr><td colspan="6" class="dim" style="text-align:center;padding:34px">조건에 맞는 문서가 없습니다.</td></tr>') +
+          '</tbody></table></div>' +
+          '<p class="dim" style="margin-top:10px;font-size:12px">총 ' + res.total.toLocaleString() + '건 · 표시 ' + res.items.length + '건 — 대용량 목록은 커서 기반 페이지네이션 + 가상 스크롤로 렌더링</p>';
+        bindRowMenus(body);
+      } else {
+        const res = await LS.api.listDocuments({ q: state.q, label: state.label });
+        body.innerHTML = '<div class="kanban">' + KANBAN_COLS.map((col) => {
+          const items = res.items.filter((d) => col.statuses.includes(d.status));
+          const total = col.key === 'COMPLETED' ? Math.max(items.length, 325) : items.length;
+          return (
+            '<div class="kanban-col" data-drop="' + col.drop + '"><div class="kanban-col-head">' + col.title +
+            ' <span class="cnt">' + total.toLocaleString() + '건</span></div><div class="kanban-col-body">' +
+            (items.slice(0, 12).map(kanbanCard).join('') || '<p class="dim" style="font-size:12px;padding:6px 4px">문서 없음</p>') +
+            (items.length > 12 ? '<button class="btn ghost sm">더 보기 (' + (total - 12).toLocaleString() + '건) — 가상 스크롤 구간</button>' : '') +
+            '</div></div>');
+        }).join('') + '</div>';
+        bindKanban(body);
+        bindRowMenus(body);
+      }
+    }
+
+    function kanbanCard(d) {
+      const stale = d.status === 'PENDING_OTHERS' && staleDays(d) >= 3;
+      return (
+        '<div class="kcard' + (stale ? ' stale' : '') + '" draggable="true" data-id="' + d.id + '">' +
+        '<div class="top">' + (d.urgent ? '<span class="badge red">⚠️ 긴급</span>' : d.label ? '<span class="badge brand">' + esc(d.label) + '</span>' : '<span class="badge gray">라벨 없음</span>') +
+        '<button class="menu-btn" data-menu="' + d.id + '" aria-label="문서 메뉴">' + icons.dots + '</button></div>' +
+        '<div class="t">' + esc(d.title) + '</div>' +
+        '<div class="who">' + icons.user + ' ' + esc(d.signers.map((s) => s.name).join(', ') || '서명자 미지정') + '</div>' +
+        '<div class="foot"><span>' + icons.clock + ' ' + relTime(d.lastActivityAt) + '</span>' +
+        (stale ? '<span class="badge red">⏳ 리마인드 필요</span>' : d.status === 'COMPLETED' ? '<span class="badge gold">' + icons.diamond + ' 해시 증명</span>' : '') +
+        '</div></div>');
+    }
+
+    // 칸반 DnD: Optimistic UI — 화면 먼저 이동, 서버 PATCH는 후행. 실패 시 롤백.
+    function bindKanban(root) {
+      let dragged = null;
+      $$('.kcard', root).forEach((card) => {
+        card.addEventListener('dragstart', () => { dragged = card; card.classList.add('dragging'); });
+        card.addEventListener('dragend', () => { card.classList.remove('dragging'); });
+      });
+      $$('.kanban-col', root).forEach((col) => {
+        col.addEventListener('dragover', (e) => { e.preventDefault(); col.classList.add('drag-over'); });
+        col.addEventListener('dragleave', () => col.classList.remove('drag-over'));
+        col.addEventListener('drop', async (e) => {
+          e.preventDefault();
+          col.classList.remove('drag-over');
+          if (!dragged) return;
+          const id = dragged.dataset.id;
+          const target = col.dataset.drop;
+          const from = dragged.parentElement;
+          col.querySelector('.kanban-col-body').prepend(dragged); // Optimistic move
+          if (target === 'PENDING_OTHERS') {
+            openSendConfirm(id, () => { from.prepend(dragged); });
+          } else {
+            try {
+              await LS.api.updateDocumentStatus(id, target);
+              toast('상태를 「' + STATUS[target].label + '」(으)로 변경했습니다.');
+            } catch (err) {
+              from.prepend(dragged); // 롤백
+              toast('⚠️ 상태 변경 실패 — 원위치로 복구했습니다.');
+            }
+          }
+        });
+      });
+    }
+
+    function openSendConfirm(id, rollback) {
+      const m = openModal(
+        '<div class="modal-head"><h3>' + icons.send + ' 서명 요청을 발송할까요?</h3><button class="modal-close">×</button></div>' +
+        '<div class="modal-body"><p class="muted">카드를 「상대 서명 대기」로 이동하면 지정된 서명자에게 카카오톡·이메일로 서명 요청이 즉시 발송됩니다.</p>' +
+        '<div class="toolbar-row" style="margin-top:16px;justify-content:flex-end"><button class="btn" id="send-cancel">취소</button>' +
+        '<button class="btn primary" id="send-ok">' + icons.send + ' 발송하기</button></div></div>');
+      $('#send-cancel', m).addEventListener('click', () => { rollback(); closeModal(); });
+      $('#send-ok', m).addEventListener('click', async () => {
+        await LS.api.updateDocumentStatus(id, 'PENDING_OTHERS');
+        closeModal();
+        toast('🚀 서명 요청을 발송했습니다.');
+      });
+    }
+
+    function bindRowMenus(root) {
+      $$('[data-menu]', root).forEach((b) =>
+        b.addEventListener('click', (e) => { e.stopPropagation(); openHistoryModal(b.dataset.menu); }));
+      $$('tr[data-id]', root).forEach((tr) => tr.addEventListener('click', () => openHistoryModal(tr.dataset.id)));
+    }
+
+    await drawBody();
+  });
+
+  // ── 문서 이력 & 무결성 검증 모달 ─────────────────────────────────
+  const AUDIT_DOT = { ISSUED: '🟢', VIEWED: '🟡', SIGNED: '🔵', LOCKED: '🟣', REMIND: '🔔', STATUS: '⚙️' };
+  async function openHistoryModal(id) {
+    const d = await LS.api.getDocument(id);
+    openModal(
+      '<div class="modal-head"><h3>문서 진행 이력 · 무결성 검증</h3><button class="modal-close">×</button></div>' +
+      '<div class="modal-body">' +
+      '<p style="font-weight:800">' + esc(d.title) + '</p>' +
+      '<div style="margin:6px 0 14px">' + statusBadge(d.status) + (d.label ? ' <span class="badge brand">' + esc(d.label) + '</span>' : '') + '</div>' +
+      (d.hash
+        ? '<label class="field-label">🔒 문서 고유 해시 (SHA-256)</label><code class="hash-chip">' + d.hash + '</code>'
+        : '<p class="dim" style="font-size:12.5px">해시는 모든 서명 완료 후 문서 잠금 시점에 생성·등록됩니다.</p>') +
+      '<label class="field-label" style="margin-top:16px">진행 타임라인 (Audit Trail)</label>' +
+      '<ul class="timeline">' + d.audit.map((a) =>
+        '<li><span class="when">' + LS.ui.fmtDateTime(a.at) + '</span><span>' + (AUDIT_DOT[a.type] || '·') + ' <b>' + esc(a.detail) + '</b>' +
+        '<span class="dim"> — ' + esc(a.actor) + (a.ip !== '-' ? ' · IP ' + esc(a.ip) + ' · ' + esc(a.ua) : '') + '</span></span></li>').join('') + '</ul>' +
+      '<div class="toolbar-row" style="margin-top:16px;justify-content:flex-end">' +
+      (d.status === 'PENDING_OTHERS' ? '<button class="btn" id="hist-remind">' + icons.bell + ' 독촉 알림</button>' : '') +
+      (d.hash ? '<button class="btn" id="hist-cert">' + icons.doc + ' 감사추적 인증서</button>' : '') +
+      '<button class="btn primary">' + icons.download + ' 원본 PDF</button></div></div>',
+      { wide: true }
+    );
+    const rm = $('#hist-remind');
+    if (rm) rm.addEventListener('click', async () => { const r = await LS.api.remindSigners(id); toast('🔔 ' + r.sent + '명에게 독촉 알림 발송'); closeModal(); });
+    const ct = $('#hist-cert');
+    if (ct) ct.addEventListener('click', () => { closeModal(); nav('certificate', { id: d.id }); });
+  }
+  LS.openHistoryModal = openHistoryModal;
+
+  // ══════════════════════════════════════════════════════════════════
+  // 화면 3: 감사추적 인증서 (완료 PDF 마지막 페이지 병합본의 웹 미리보기)
+  // ══════════════════════════════════════════════════════════════════
+  LS.route('certificate', async (main, params) => {
+    const d = await LS.api.getDocument(params.id);
+    const tx = '0x' + (d.hash || '').slice(0, 40);
+    main.innerHTML =
+      '<div class="page" style="max-width:820px">' +
+      '<div class="toolbar-row no-print" style="justify-content:space-between;margin-bottom:14px">' +
+      '<button class="btn" onclick="history.back()">← 돌아가기</button>' +
+      '<button class="btn primary" onclick="window.print()">🖨️ 인쇄 / PDF 저장</button></div>' +
+      '<div class="cert">' +
+      '<div class="cert-head"><div class="lnb-logo" style="padding:0"><span class="mark">L</span><span><span class="law">Law</span>Sign</span></div>' +
+      '<div style="text-align:center"><div class="qr-box">' + qrSvg(d.hash || d.id) + '</div><small class="dim" style="font-size:10px">검증용 QR (스캔 시 원본 대조)</small></div></div>' +
+      '<h2>전자서명 감사추적 인증서</h2><div class="sub-en">AUDIT TRAIL CERTIFICATE</div>' +
+
+      '<div class="cert-sec"><h4>1. 문서 기본 정보 (Document Identity)</h4><dl>' +
+      '<dt>문서 번호 (ID)</dt><dd class="mono">' + esc(d.id) + '</dd>' +
+      '<dt>문서 제목</dt><dd><b>' + esc(d.title) + '</b></dd>' +
+      '<dt>발행처 (Issuer)</dt><dd>' + esc(LS.workspace.name) + '</dd>' +
+      '<dt>서명 기한</dt><dd>' + d.expirationDays + '일</dd>' +
+      '<dt>문서 상태</dt><dd>✅ 모든 서명 완료 · 문서 잠금 적용됨</dd></dl></div>' +
+
+      '<div class="cert-sec"><h4>2. 무결성 검증 정보 (Integrity &amp; Security)</h4><dl>' +
+      '<dt>파일 해시<br><small class="dim">SHA-256</small></dt><dd><code class="hash-chip">' + (d.hash || '-') + '</code></dd>' +
+      '<dt>블록체인 TXID</dt><dd><code class="hash-chip">' + tx + '</code><small class="dim">Private Ledger Network 기록 · 블록 탐색기에서 독립 확인 가능</small></dd></dl></div>' +
+
+      '<div class="cert-sec"><h4>3. 서명 진행 이력 (Audit Trail Logs)</h4>' +
+      '<ul class="timeline">' + d.audit.map((a) =>
+        '<li><span class="when">' + LS.ui.fmtDateTime(a.at) + '</span><span>' + (AUDIT_DOT[a.type] || '·') + ' <b>' + esc(a.detail) + '</b>' +
+        '<span class="dim"> — ' + esc(a.actor) + (a.ip !== '-' ? ' · IP ' + esc(a.ip) + ' · ' + esc(a.ua) : '') + '</span></span></li>').join('') + '</ul></div>' +
+
+      '<div class="cert-foot"><span>본 인증서는 로싸인(LawSign) 시스템에 의해 전자서명법 및 관련 법령에 의거하여 기록·발급되었습니다.<br>우측 상단 QR 코드를 스캔하면 위변조 여부와 원본을 즉시 확인할 수 있습니다.</span>' +
+      '<span>발급일시: ' + LS.ui.fmtDateTime(Date.now()) + '<br>LawSign Trust Service</span></div>' +
+      '</div></div>';
+  });
+
+  // ══════════════════════════════════════════════════════════════════
+  // 화면 4: 원본 검증 포털 (Zero-Knowledge — 파일은 서버로 전송하지 않음)
+  // ══════════════════════════════════════════════════════════════════
+  LS.route('validator', async (main) => {
+    main.innerHTML =
+      '<div class="page">' +
+      '<div class="validator-hero"><div class="shield">' + icons.shield.replace('width="16" height="16"', 'width="28" height="28"') + '</div>' +
+      '<h1>LawSign 원본 검증 포털</h1>' +
+      '<p class="muted" style="max-width:560px;margin:8px auto 0">문서 파일을 올리면 <b>브라우저 안에서만</b> SHA-256 해시를 계산해 발행 원장과 대조합니다.<br>' +
+      '원본 파일은 <b>절대 서버로 전송되지 않으며</b>, 해시 문자열 하나만 대조됩니다 (Zero-Knowledge 검증).</p></div>' +
+      '<div class="dropzone" id="vz" role="button" tabindex="0">' +
+      '<div style="font-size:30px;margin-bottom:8px">📄</div><b>검증할 문서를 여기에 끌어다 놓거나 클릭하여 선택</b>' +
+      '<p class="dim" style="margin-top:6px;font-size:12.5px">PDF · 이미지 · 모든 파일 형식 지원</p></div>' +
+      '<input type="file" id="vz-file" hidden>' +
+      '<div class="toolbar-row no-print" style="justify-content:center;margin-top:14px">' +
+      '<button class="btn sm" id="demo-ok">✅ 정품 샘플 파일 내려받기</button>' +
+      '<button class="btn sm" id="demo-bad">🚨 변조 샘플 파일 내려받기</button></div>' +
+      '<div id="vz-result"></div></div>';
+
+    const dz = $('#vz');
+    const fileInput = $('#vz-file');
+    dz.addEventListener('click', () => fileInput.click());
+    dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('over'); });
+    dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+    dz.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('over'); if (e.dataTransfer.files[0]) verify(e.dataTransfer.files[0]); });
+    fileInput.addEventListener('change', () => fileInput.files[0] && verify(fileInput.files[0]));
+
+    const demo = LS.api.getDemoFile();
+    const dl = (name, content) => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    };
+    $('#demo-ok').addEventListener('click', () => dl(demo.name, demo.content));
+    $('#demo-bad').addEventListener('click', () => dl('변조된_' + demo.name, demo.content + ' ')); // 1바이트 변조
+
+    async function verify(file) {
+      const out = $('#vz-result');
+      out.innerHTML = '<p class="dim" style="text-align:center;margin-top:16px">브라우저에서 해시 계산 중… (Web Crypto API)</p>';
+      if (!window.crypto || !crypto.subtle) {
+        out.innerHTML = '<div class="verify-result bad"><h3>' + icons.warn + ' 이 브라우저에서는 Web Crypto API를 사용할 수 없습니다</h3></div>';
+        return;
+      }
+      const hex = await LS.api.sha256Hex(await file.arrayBuffer());
+      const res = await LS.api.verifyHash(hex);
+      if (res.valid) {
+        const r = res.record;
+        out.innerHTML =
+          '<div class="verify-result ok"><h3>' + icons.check + ' 위변조되지 않은 원본 문서입니다</h3><dl>' +
+          '<dt>문서 제목</dt><dd><b>' + esc(r.title) + '</b></dd>' +
+          '<dt>발행처</dt><dd>' + esc(r.issuer) + ' <span class="badge gold">' + icons.diamond + ' 블록체인 증명됨</span></dd>' +
+          '<dt>완료 일시</dt><dd>' + LS.ui.fmtDateTime(r.completedAt || Date.now()) + '</dd>' +
+          '<dt>파일 해시</dt><dd class="mono">' + hex + '</dd>' +
+          '<dt>원장 TXID</dt><dd class="mono">' + esc(r.txId) + '</dd></dl></div>';
+      } else {
+        out.innerHTML =
+          '<div class="verify-result bad"><h3>' + icons.warn + ' 문서가 변조되었거나 등록되지 않은 파일입니다</h3>' +
+          '<p class="muted" style="margin-top:8px;font-size:13px">단 1바이트만 수정되어도 해시가 완전히 달라집니다. 발행처에 원본 재발급을 요청하세요.</p>' +
+          '<dl><dt>계산된 해시</dt><dd class="mono">' + hex + '</dd><dt>원장 대조</dt><dd>일치 항목 없음</dd></dl></div>';
+      }
+    }
+  });
+
+  // ── 앱 셸 부트스트랩 ─────────────────────────────────────────────
+  function boot() {
+    const navItems = [
+      { route: 'dashboard', label: '홈', ic: icons.home },
+      { route: 'documents', label: '문서함', ic: icons.folder },
+      { route: 'request', label: '서명 요청', ic: icons.pen },
+      { route: 'validator', label: '검증 포털', ic: icons.shield },
+    ];
+    document.body.innerHTML =
+      '<div class="app-shell">' +
+      '<nav class="lnb"><div class="lnb-logo"><span class="mark">L</span><span><span class="law">Law</span>Sign</span></div>' +
+      '<button class="lnb-cta" id="lnb-new">' + icons.pen + ' 새 서명 요청</button>' +
+      navItems.map((n) => '<a class="lnb-item" data-route="' + n.route + '" href="#/' + n.route + '">' + n.ic + ' ' + n.label +
+        (n.route === 'documents' ? '<span class="cnt">1</span>' : '') + '</a>').join('') +
+      '<button class="lnb-item" id="theme-toggle">' + icons.sun + ' 테마 전환</button>' +
+      '<div class="lnb-footer">LawSign v1.0 · 프론트엔드 프로토타입</div>' +
+      '<div class="lnb-user"><span class="avatar">청</span><div><b>' + esc(LS.workspace.name) + '</b><small>Enterprise 플랜</small></div></div></nav>' +
+      '<main class="main" id="app-main"></main></div>' +
+      '<nav class="bottom-nav">' + navItems.map((n) => '<a data-route="' + n.route + '" href="#/' + n.route + '">' + n.ic + ' <span>' + n.label + '</span></a>').join('') + '</nav>' +
+      '<div id="toast-root"></div>';
+
+    $('#lnb-new').addEventListener('click', () => nav('request'));
+    const saved = localStorage.getItem('ls-theme');
+    if (saved) document.documentElement.dataset.theme = saved;
+    else if (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.dataset.theme = 'dark';
+    $('#theme-toggle').addEventListener('click', () => {
+      const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = next;
+      localStorage.setItem('ls-theme', next);
+    });
+    render();
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+})(window.LS);
