@@ -30,6 +30,8 @@ export const TEAMS_HITL_CHOICE_INPUT_ID = "eve_option";
 /** Text input id used for freeform HITL requests. */
 export const TEAMS_HITL_FREEFORM_INPUT_ID = "eve_freeform_text";
 
+const TOOL_INPUT_PREFIX = "Tool input\n";
+
 /** Renders one input request as a Teams message body containing an Adaptive Card. */
 export function renderInputRequestMessage(
   request: InputRequest,
@@ -37,7 +39,7 @@ export function renderInputRequestMessage(
 ): TeamsMessageBody {
   return {
     attachments: [renderInputRequestAttachment(request, options)],
-    text: request.prompt,
+    text: formatInputRequestFallbackText(request),
   };
 }
 
@@ -59,6 +61,7 @@ export function renderInputRequestAttachment(
         type: "TextBlock",
         wrap: true,
       },
+      ...renderInputRequestDetailBlocks(request),
       ...renderInputs(request),
     ],
     type: "AdaptiveCard",
@@ -69,6 +72,16 @@ export function renderInputRequestAttachment(
     content: parseJsonObject(card),
     contentType: TEAMS_ADAPTIVE_CARD_CONTENT_TYPE,
   };
+}
+
+/**
+ * Creates the fallback text for one HITL request. Teams clients use this
+ * outside the Adaptive Card surface, so include the same approval details
+ * that appear in the card.
+ */
+function formatInputRequestFallbackText(request: InputRequest): string {
+  const details = formatToolInputDetails(request);
+  return details === undefined ? request.prompt : `${request.prompt}\n${details}`;
 }
 
 /** Renders an answered Teams card that replaces a pending HITL prompt. */
@@ -188,6 +201,19 @@ function renderInputs(request: InputRequest): readonly Record<string, unknown>[]
   return [];
 }
 
+function renderInputRequestDetailBlocks(request: InputRequest): readonly Record<string, unknown>[] {
+  const details = formatToolInputDetails(request);
+  return details === undefined
+    ? []
+    : [
+        {
+          text: details,
+          type: "TextBlock",
+          wrap: true,
+        },
+      ];
+}
+
 function renderActions(request: InputRequest): readonly Record<string, unknown>[] {
   const options = request.options;
   if (options && options.length > 0 && request.display !== "select") {
@@ -214,6 +240,25 @@ function renderActions(request: InputRequest): readonly Record<string, unknown>[
       type: "Action.Submit",
     },
   ];
+}
+
+function formatToolInputDetails(request: InputRequest): string | undefined {
+  if (!isApprovalRequest(request)) return undefined;
+
+  const json = JSON.stringify(request.action.input, null, 2);
+  if (json === "{}") return undefined;
+
+  const bodyBudget = TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH - TOOL_INPUT_PREFIX.length;
+  return `${TOOL_INPUT_PREFIX}${truncate(json, bodyBudget)}`;
+}
+
+function isApprovalRequest(request: InputRequest): boolean {
+  return (
+    request.display === "confirmation" &&
+    request.options?.length === 2 &&
+    request.options[0]?.id === "approve" &&
+    request.options[1]?.id === "deny"
+  );
 }
 
 function readActivityValue(activity: TeamsActivity): Record<string, unknown> | null {

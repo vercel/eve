@@ -10,6 +10,7 @@ import {
   TEAMS_HITL_FREEFORM_INPUT_ID,
 } from "#public/channels/teams/hitl.js";
 import { parseTeamsActivity } from "#public/channels/teams/inbound.js";
+import { TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH } from "#public/channels/teams/limits.js";
 import type { InputRequest } from "#runtime/input/types.js";
 
 describe("Teams HITL helpers", () => {
@@ -21,6 +22,93 @@ describe("Teams HITL helpers", () => {
       data: { [TEAMS_HITL_DATA_KEY]: { optionId: "approve", requestId: "REQ" } },
       type: "Action.Submit",
     });
+  });
+
+  it("includes approval tool input in the card body and fallback text", () => {
+    const body = renderInputRequestMessage(
+      request({
+        action: {
+          callId: "TC",
+          input: {
+            collection: "org_members",
+            filter: { _id: "org_123" },
+            operation: "deleteOne",
+          },
+          kind: "tool-call",
+          toolName: "delete_org_member",
+        },
+        prompt: "Approve tool call: delete_org_member",
+      }),
+    );
+    const card = body.attachments?.[0]?.content as { body?: Array<Record<string, unknown>> };
+    const detailBlock = card.body?.find(
+      (entry) => typeof entry.text === "string" && entry.text.includes("Tool input"),
+    );
+
+    expect(body.text).toContain("Tool input");
+    expect(body.text).toContain('"collection": "org_members"');
+    expect(detailBlock).toMatchObject({
+      type: "TextBlock",
+      wrap: true,
+    });
+    expect(detailBlock?.text).toContain('"operation": "deleteOne"');
+    expect(detailBlock?.text).toContain('"_id": "org_123"');
+  });
+
+  it("omits empty approval tool input from the card body and fallback text", () => {
+    const body = renderInputRequestMessage(request());
+    const card = body.attachments?.[0]?.content as { body?: Array<Record<string, unknown>> };
+
+    expect(body.text).toBe("Approve deploy?");
+    expect(
+      card.body?.some(
+        (entry) => typeof entry.text === "string" && entry.text.includes("Tool input"),
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps non-approval tool input out of the card body and fallback text", () => {
+    const body = renderInputRequestMessage(
+      request({
+        action: {
+          callId: "TC",
+          input: { query: "status" },
+          kind: "tool-call",
+          toolName: "lookup_status",
+        },
+        display: "select",
+        options: [{ id: "status", label: "Status" }],
+        prompt: "Choose what to inspect",
+      }),
+    );
+    const card = body.attachments?.[0]?.content as { body?: Array<Record<string, unknown>> };
+
+    expect(body.text).toBe("Choose what to inspect");
+    expect(
+      card.body?.some(
+        (entry) => typeof entry.text === "string" && entry.text.includes("Tool input"),
+      ),
+    ).toBe(false);
+  });
+
+  it("truncates approval tool input inside the Teams text limit", () => {
+    const body = renderInputRequestMessage(
+      request({
+        action: {
+          callId: "TC",
+          input: { body: "x".repeat(TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH + 500) },
+          kind: "tool-call",
+          toolName: "send_large_payload",
+        },
+      }),
+    );
+    const card = body.attachments?.[0]?.content as { body?: Array<Record<string, unknown>> };
+    const detailBlock = card.body?.find(
+      (entry) => typeof entry.text === "string" && entry.text.includes("Tool input"),
+    );
+
+    expect(detailBlock?.text).toHaveLength(TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH);
+    expect(detailBlock?.text).toContain("...");
   });
 
   it("renders select requests with a ChoiceSet", () => {
@@ -69,7 +157,7 @@ describe("Teams HITL helpers", () => {
   });
 });
 
-function request(): InputRequest {
+function request(overrides: Partial<InputRequest> = {}): InputRequest {
   return {
     action: { callId: "TC", input: {}, kind: "tool-call", toolName: "deploy" },
     display: "confirmation",
@@ -79,6 +167,7 @@ function request(): InputRequest {
     ],
     prompt: "Approve deploy?",
     requestId: "REQ",
+    ...overrides,
   };
 }
 
