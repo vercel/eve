@@ -2,7 +2,14 @@
 
 import { App, Device, type VGPUAdapter } from "@vgpu/core";
 import { createDevicePixelRatio, prefersReducedMotion as prefersReducedMotionSync } from "phase";
-import { useLoop, useMediaQuery, usePrefersReducedMotion, useSize, useStableCallback } from "phase/react";
+import {
+  useLoop,
+  useMediaQuery,
+  usePrefersReducedMotion,
+  useSize,
+  useStableCallback,
+  useSyncedRef,
+} from "phase/react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { preload } from "react-dom";
 import { meshAspect } from "./mesh";
@@ -82,7 +89,7 @@ export function EveLogoShader({ audience = "humans" }: { audience?: InstallAudie
   const controlsRef = useRef<RenderControls>({ ...DEFAULT_CONTROLS });
   const canvasLayoutRef = useRef<CanvasLayout>(INITIAL_CANVAS_LAYOUT);
   const devicePixelRatioRef = useRef(1);
-  const coarsePointerRef = useRef(coarsePointer);
+  const coarsePointerRef = useSyncedRef(coarsePointer);
   const stateRef = useRef<HeroRuntimeState | null>(null);
   const drawLoopRef = useRef<DrawLoop | null>(null);
   const loopPhaseRef = useRef("idle");
@@ -95,8 +102,6 @@ export function EveLogoShader({ audience = "humans" }: { audience?: InstallAudie
   const agentsSelected = audience === "agents";
   targetAgentsEnvYawMixRef.current = agentsSelected ? 1 : 0;
   targetLogoModeProgressRef.current = agentsSelected ? 1 : 0;
-  coarsePointerRef.current = coarsePointer;
-
   const handleCanvasRevealed = useStableCallback(() => {
     if (!stateRef.current?.cancelled) setRevealed(true);
   });

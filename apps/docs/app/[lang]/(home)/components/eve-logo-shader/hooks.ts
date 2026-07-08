@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useSyncedRef } from "phase/react";
+import { useEffect, useState } from "react";
 
 // Owns browser theme subscriptions for the Eve hero.
 // INVARIANT: resolution order matches the old index.tsx hooks exactly.
@@ -14,8 +15,7 @@ export function getCurrentTheme(prefersDarkTheme: boolean): "light" | "dark" {
 
 export function useResolvedTheme(prefersDarkTheme: boolean) {
   const [theme, setTheme] = useState<"light" | "dark">("light");
-  const prefersDarkThemeRef = useRef(prefersDarkTheme);
-  prefersDarkThemeRef.current = prefersDarkTheme;
+  const prefersDarkThemeRef = useSyncedRef(prefersDarkTheme);
 
   useEffect(() => {
     const syncTheme = () => setTheme(getCurrentTheme(prefersDarkThemeRef.current));
