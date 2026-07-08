@@ -2,11 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   callTeamsConnectorApi,
+  parseTeamsConversationThreadId,
   replyToTeamsActivity,
   resolveTeamsAccessToken,
   sendTeamsActivity,
   splitTeamsMessageText,
-  normalizeTeamsContinuationAddress,
   teamsContinuationToken,
   triggerTeamsTypingIndicator,
   updateTeamsActivity,
@@ -23,22 +23,28 @@ describe("Teams Connector API wrapper", () => {
     ).toBe("T%201:19%3Aabc%40thread.skype:A%3A1");
   });
 
-  it("normalizes channel thread suffixes before building continuation tokens", () => {
-    expect(
-      normalizeTeamsContinuationAddress({
-        conversationId: "19:abc@thread.tacv2;messageid=THREAD_ROOT",
-        replyToActivityId: "VOLATILE_ACTIVITY",
-      }),
-    ).toEqual({
-      conversationId: "19:abc@thread.tacv2",
-      replyToActivityId: "THREAD_ROOT",
+  it("normalizes channel-thread conversation suffixes in continuation tokens", () => {
+    expect(parseTeamsConversationThreadId("19:abc@thread.skype;messageid=A%3A1")).toEqual({
+      conversationId: "19:abc@thread.skype",
+      threadRootActivityId: "A:1",
+    });
+    expect(parseTeamsConversationThreadId("19:abc@thread.skype;messageid=")).toEqual({
+      conversationId: "19:abc@thread.skype",
+      threadRootActivityId: undefined,
     });
     expect(
       teamsContinuationToken({
-        conversationId: "19:abc@thread.tacv2;messageid=THREAD_ROOT",
-        tenantId: "TENANT",
+        conversationId: "19:abc@thread.skype;messageid=A%3A1",
+        tenantId: "T 1",
       }),
-    ).toBe("TENANT:19%3Aabc%40thread.tacv2:THREAD_ROOT");
+    ).toBe("T%201:19%3Aabc%40thread.skype:A%3A1");
+    expect(
+      teamsContinuationToken({
+        conversationId: "19:abc@thread.skype;messageid=stale",
+        replyToActivityId: "A:1",
+        tenantId: "T 1",
+      }),
+    ).toBe("T%201:19%3Aabc%40thread.skype:A%3A1");
   });
 
   it("requests and caches Bot Connector access tokens", async () => {
