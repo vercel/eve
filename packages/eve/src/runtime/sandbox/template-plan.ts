@@ -18,9 +18,6 @@ export type RuntimeSandboxTemplatePlan =
       readonly kind: "bootstrap";
       readonly revalidationKey?: string;
       readonly sourceHash: string;
-    }
-  | {
-      readonly kind: "source-graph";
     };
 
 /**

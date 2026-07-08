@@ -1,24 +1,19 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, defaultDeliverResult } from "#channel/adapter.js";
-import type {
-  DeliverPayload,
-  SessionAuthContext,
-  SubagentInputRequestHookPayload,
-} from "#channel/types.js";
+import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
 import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
 import { dispatchDynamicToolEvent } from "#context/dynamic-tool-lifecycle.js";
-import { AuthKey, CapabilitiesKey, ContinuationTokenKey, ModeKey } from "#context/keys.js";
+import { AuthKey, CapabilitiesKey, ModeKey } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { runStep, withContextScope } from "#context/run-step.js";
+import { runStep } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
-import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import {
   getRuntimeActionKeysFromWorkflowInterrupt,
   isWorkflowRuntimeActionInterrupt,
@@ -60,8 +55,9 @@ import {
   type TurnWorkflowDispatchInput,
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import { createExecutionNodeStep } from "#execution/node-step.js";
-import { emitProxiedInputRequest, routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
+import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
 import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
+import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
@@ -448,20 +444,6 @@ function derivePendingState(session: HarnessSession): {
 }
 
 /**
- * Re-stamps `session.continuationToken` from `ContinuationTokenKey`
- * after channels call `setContinuationToken(...)`. Idempotent when the
- * token is unchanged.
- */
-export function reconcileSessionContinuationToken(
-  ctx: Awaited<ReturnType<typeof deserializeContext>>,
-  session: HarnessSession,
-): HarnessSession {
-  const next = ctx.get(ContinuationTokenKey);
-  if (next === undefined || next === session.continuationToken) return session;
-  return { ...session, continuationToken: next };
-}
-
-/**
  * Resolves the single output schema in effect for this turn, decoupling schema
  * enforcement from {@link RunMode}: downstream the harness reads
  * `session.outputSchema` unconditionally and never re-derives it from mode.
@@ -552,84 +534,6 @@ export async function emitTerminalSessionFailureStep(input: {
       error: writeError,
     });
   }
-}
-
-export interface ProxyInputRequestResult {
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}
-
-/**
- * Emits a proxied `input.requested` event through the parent's adapter
- * and records the routing entries on the parent session.
- */
-export async function runProxyInputRequestStep(input: {
-  readonly hookPayload: SubagentInputRequestHookPayload;
-  readonly parentWritable: WritableStream<Uint8Array>;
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}): Promise<ProxyInputRequestResult> {
-  "use step";
-
-  const durableSession = await readDurableSession(input.sessionState);
-  const ctx = await deserializeContext(input.serializedContext);
-  const adapter = ctx.require(ChannelKey);
-  const adapterCtx = buildAdapterContext(adapter, ctx);
-  const mode = ctx.require(ModeKey);
-  const bundle = ctx.require(BundleKey);
-  const session = hydrateDurableSession({
-    compactionOverrides: {
-      thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
-    },
-    durable: durableSession,
-    turnAgent: bundle.turnAgent,
-  });
-  const writer = input.parentWritable.getWriter();
-
-  let scopeResult: {
-    readonly result: readonly (readonly [requestId: string, childContinuationToken: string])[];
-    readonly session: HarnessSession;
-  };
-  try {
-    const emit = async (event: HandleMessageStreamEvent): Promise<void> => {
-      const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
-      await writer.write(encodeMessageStreamEvent(timestampHandleMessageStreamEvent(transformed)));
-    };
-
-    scopeResult = await withContextScope(ctx, session, async (enrichedSession) => {
-      const proxyResult = await emitProxiedInputRequest({
-        emit,
-        hookPayload: input.hookPayload,
-        mode,
-        session: enrichedSession,
-      });
-      return { result: proxyResult.entries, session: proxyResult.session };
-    });
-  } finally {
-    writer.releaseLock();
-  }
-
-  // Persist adapter-state mutations (e.g. Slack's `pendingRequests`
-  // cache populated by the `input.requested` handler) so the next
-  // `turnStep` observes them across the serialized context
-  // boundary. Without this the workflow runtime rehydrates a stale
-  // adapter and later text-reply deliveries miss the cached batch.
-  setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
-
-  const nextSerializedContext = serializeContext(ctx);
-
-  const sessionWithProxyEntries = upsertProxyInputRequests({
-    entries: scopeResult.result,
-    forChildContinuationToken: input.hookPayload.childContinuationToken,
-    session: scopeResult.session,
-  });
-  const nextSession = reconcileSessionContinuationToken(ctx, sessionWithProxyEntries);
-  const nextState = createDurableSessionState({ session: nextSession });
-
-  return {
-    serializedContext: nextSerializedContext,
-    sessionState: nextState,
-  };
 }
 
 export interface RoutedDeliverResult {

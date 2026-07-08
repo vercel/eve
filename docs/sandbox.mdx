@@ -164,7 +164,7 @@ You can also write your own backend. A `SandboxBackend` is an adapter object wit
 There are two hooks, scoped differently:
 
 - **`bootstrap({ use })`** is template-scoped and runs once when the template is built. Put reusable setup here that every later session inherits, such as cloning a baseline repo, installing dependencies, or seeding files. Call `use()` to get a `SandboxSession`. Only template filesystem state and supported backend metadata carry into later sessions; config like network policy does not. If external inputs affect what bootstrap produces, set `revalidationKey: () => string` so eve knows when to rebuild the template (authored sandbox source and seed contents are already tracked for you).
-- **`onSession({ use, ctx })`** is durable-session-scoped and runs once per session. Put per-session setup here, including network policy, resources, timeout, per-user credentials, and one-time markers. Because it runs inside the active runtime context, it can read `ctx.session` and derive the current principal without baking credentials into the template. Call `use(opts?)` to get a `SandboxSession`; `opts` flow to the backend's update path after create.
+- **`onSession({ use, ctx })`** is durable-session-scoped and runs once per session (and again if a sandbox definition change replaces the session's sandbox). Put per-session setup here, including network policy, resources, timeout, per-user credentials, and one-time markers. Because it runs inside the active runtime context, it can read `ctx.session` and derive the current principal without baking credentials into the template. Call `use(opts?)` to get a `SandboxSession`; `opts` flow to the backend's update path after create.
 
 If you require a network policy or other configuration for every session, configure it on the backend factory or in `onSession`; do not rely on bootstrap-only configuration.
 
@@ -184,6 +184,8 @@ export default defineSandbox({
 ```
 
 Sessions are persistent, and how the underlying runtime idles out depends on the backend. On the Vercel backend, the VM times out after a period of inactivity (default 30 minutes); eve preserves the filesystem and resumes the sandbox on the next message as if nothing happened, even days later. The Docker backend keeps a long-lived container per durable session and persists `/workspace` across turns without that timeout, and the just-bash backend stores its virtual filesystem under `.eve/sandbox-cache/`. In every case, `/workspace` survives between turns for the same session.
+
+Session sandboxes are keyed per durable session, not per deployment, so redeploying your app does not discard them. A session gets a replacement sandbox only when the sandbox definition itself changes — the authored sandbox source, workspace seed content, or `revalidationKey` — in which case the next turn starts from the rebuilt template and `onSession` runs again.
 
 When the eve server stops, no sandbox compute outlives it. `eve dev` stops the sandboxes it started when the dev server closes, and a self-hosted production server stops every open sandbox on shutdown (`SIGTERM`/`SIGINT`). Session state persists across the stop — the next server start reattaches each durable session from its stopped container, VM, or snapshot. Custom `SandboxBackend` adapters participate through the handle's `shutdown()` method: stop the underlying compute, keeping the session reattachable from persisted state where the backend supports it.
 

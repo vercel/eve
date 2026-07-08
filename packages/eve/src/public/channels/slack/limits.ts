@@ -30,6 +30,16 @@ export const SLACK_BLOCK_KIT_PLAIN_TEXT_MAX_LENGTH = 75;
 export const SLACK_SECTION_TEXT_MAX_LENGTH = 3000;
 
 /**
+ * Block Kit `card` blocks cap `body.text` at 200 chars.
+ */
+export const SLACK_CARD_BODY_TEXT_MAX_LENGTH = 200;
+
+/**
+ * Block Kit `card` blocks cap `subtext.text` at 200 chars.
+ */
+export const SLACK_CARD_SUBTEXT_MAX_LENGTH = 200;
+
+/**
  * Top-level `text` field on `chat.postMessage` is capped at 40000 chars.
  */
 export const SLACK_MESSAGE_TEXT_MAX_LENGTH = 40000;
@@ -75,6 +85,22 @@ export function truncatePlainText(value: string | undefined): string | undefined
  */
 export function truncateSectionText(value: string): string {
   return truncateWithEllipsis(value, SLACK_SECTION_TEXT_MAX_LENGTH);
+}
+
+/**
+ * Caps a card block's `body.text` at the Slack limit with a trailing
+ * ellipsis.
+ */
+export function truncateCardBodyText(value: string): string {
+  return truncateWithEllipsis(value, SLACK_CARD_BODY_TEXT_MAX_LENGTH);
+}
+
+/**
+ * Caps a card block's `subtext.text` at the Slack limit with a trailing
+ * ellipsis.
+ */
+export function truncateCardSubtext(value: string): string {
+  return truncateWithEllipsis(value, SLACK_CARD_SUBTEXT_MAX_LENGTH);
 }
 
 /**

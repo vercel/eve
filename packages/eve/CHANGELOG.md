@@ -1,5 +1,25 @@
 # eve
 
+## 0.22.1
+
+### Patch Changes
+
+- 9c63a4e: Export `callSlackApi` and `resolveSlackBotToken` from `eve/channels/slack`. Code running outside a webhook-side handler — schedules resolving reactions or reading history, for example — has no `ctx.slack` handle; these were the internal primitives behind `slack.request`, already public-shaped and documented, and are now importable so apps stop hand-rolling `fetch` against the Slack Web API.
+- 210f097: Session sandboxes are now keyed per durable session instead of per deployment, so redeploying no longer discards a session's `/workspace` state. A session gets a fresh sandbox only when the sandbox definition itself changes (authored sandbox source, workspace seed content, or `revalidationKey`), and `onSession` runs again on the replacement sandbox.
+- a3efd4b: Render Slack HITL button prompts as card blocks, move approval tool input into collapsible containers, and keep answered-card updates scoped to the answered request so sibling batched approval buttons remain clickable.
+- 3c6abbf: Surface authorization prompts and completion updates from local subagents on the parent channel, including through nested delegation chains, while keeping the authorization callback scoped to the child session.
+
+## 0.22.0
+
+### Minor Changes
+
+- 2958abf: feat(eve): add `konsistent` with initial config to enforce structural conventions
+
+### Patch Changes
+
+- b7d1089: Add `defineDynamic({ fallback, events })` support for scoped dynamic agent model selection. Agents can choose a model once per session, once per turn, or per model step while keeping a compiled fallback for metadata and unset scopes.
+- bd287b1: fix(eve): pass error messages when tool call input is invalid back to model instead of throwing so that it can try again
+
 ## 0.21.1
 
 ### Patch Changes

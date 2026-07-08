@@ -17,6 +17,8 @@ import {
   HITL_FREEFORM_MODAL_CALLBACK_ID,
 } from "#public/channels/slack/hitl.js";
 import {
+  SLACK_CARD_BODY_TEXT_MAX_LENGTH,
+  SLACK_CARD_SUBTEXT_MAX_LENGTH,
   SLACK_MAX_BLOCKS_PER_MESSAGE,
   SLACK_MESSAGE_TEXT_MAX_LENGTH,
   SLACK_SECTION_TEXT_MAX_LENGTH,
@@ -426,7 +428,18 @@ describe("slackChannel() default event handlers", () => {
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(String(url)).toBe("https://slack.com/api/chat.postMessage");
     const body = parseSlackRequestBody(init as RequestInit) as {
-      blocks: Array<{ elements?: Array<{ action_id: string; value: string }> }>;
+      blocks: Array<{
+        actions?: Array<{
+          action_id: string;
+          style?: string;
+          text: { emoji?: boolean; text: string; type: string };
+          value: string;
+        }>;
+        body?: { text: string; type: string; verbatim?: boolean };
+        child_blocks?: Array<{ text?: { text?: string; type?: string }; type: string }>;
+        title?: { text: string; type: string };
+        type: string;
+      }>;
       channel: string;
       text: string;
       thread_ts: string;
@@ -437,13 +450,51 @@ describe("slackChannel() default event handlers", () => {
       thread_ts: "1700000000.000001",
     });
 
-    const actions = body.blocks.find((block) => Array.isArray(block.elements));
-    const actionIds = actions?.elements?.map((element) => element.action_id) ?? [];
+    expect(body.blocks).toHaveLength(2);
+    const [card, details] = body.blocks;
+    expect(card).toMatchObject({
+      type: "card",
+      body: {
+        type: "mrkdwn",
+        text: "*Approve tool call: mongodb-mutate*",
+        verbatim: false,
+      },
+    });
+    expect(card?.body?.text.length).toBeLessThanOrEqual(SLACK_CARD_BODY_TEXT_MAX_LENGTH);
+    expect(details).toMatchObject({
+      type: "container",
+      title: { type: "plain_text", text: "Tool input" },
+      is_collapsible: true,
+      default_collapsed: false,
+      child_blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: '```\n{\n  "operation": "deleteMany"\n}\n```',
+          },
+        },
+      ],
+    });
+
+    const actions = card?.actions ?? [];
+    const actionIds = actions.map((element) => element.action_id);
     expect(actionIds).toEqual([
       `${HITL_ACTION_PREFIX}approval_abc123:button:0`,
       `${HITL_ACTION_PREFIX}approval_abc123:button:1`,
     ]);
     expect(new Set(actionIds).size).toBe(actionIds.length);
+    expect(actions).toMatchObject([
+      {
+        text: { type: "plain_text", text: "Deny", emoji: false },
+        value: "deny",
+      },
+      {
+        style: "primary",
+        text: { type: "plain_text", text: "Allow", emoji: false },
+        value: "approve",
+      },
+    ]);
   });
 
   it("input.requested caps section and fallback text so Slack does not reject the post", async () => {
@@ -496,9 +547,10 @@ describe("slackChannel() default event handlers", () => {
     );
     const ctx = buildAdapterContext(adapter, stubAccessor());
 
-    // 20 approval requests render 3 blocks each (prompt, tool input,
-    // actions) = 60 blocks, which must split across two posts.
-    const requests = Array.from({ length: 20 }, (_, index) => ({
+    // Approval requests with tool input render as a card plus a tool-input
+    // container. 60 requests must split across three posts to stay below
+    // Slack's 50-block message cap.
+    const requests = Array.from({ length: 60 }, (_, index) => ({
       action: {
         callId: `call_${index}`,
         input: { operation: "deleteMany" },
@@ -520,22 +572,26 @@ describe("slackChannel() default event handlers", () => {
       ctx,
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     const allRequestIds: string[] = [];
     for (const [url, init] of fetchMock.mock.calls) {
       expect(String(url)).toBe("https://slack.com/api/chat.postMessage");
       const body = parseSlackRequestBody(init as RequestInit) as {
-        blocks: Array<{ type: string; elements?: Array<{ action_id: string }> }>;
+        blocks: Array<{
+          type: string;
+          actions?: Array<{ action_id: string }>;
+          elements?: Array<{ action_id: string }>;
+        }>;
       };
       expect(body.blocks.length).toBeLessThanOrEqual(SLACK_MAX_BLOCKS_PER_MESSAGE);
       for (const block of body.blocks) {
-        for (const element of block.elements ?? []) {
+        for (const element of block.actions ?? block.elements ?? []) {
           const requestId = element.action_id.replace(/^.*:(approval_\d+):button:\d+$/u, "$1");
           if (!allRequestIds.includes(requestId)) allRequestIds.push(requestId);
         }
       }
     }
-    expect(allRequestIds).toHaveLength(20);
+    expect(allRequestIds).toHaveLength(60);
   });
 
   it("turn.started calls assistant.threads.setStatus", async () => {
@@ -1499,6 +1555,281 @@ describe("slackChannel() HITL interaction pipeline", () => {
         triggeringUserId: "U_APPROVER",
       },
     });
+  });
+
+  it("updates one answered HITL card without removing sibling batched buttons", async () => {
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+
+    const firstDenyActionId = `${HITL_ACTION_PREFIX}approval_451:button:0`;
+    const firstApproveActionId = `${HITL_ACTION_PREFIX}approval_451:button:1`;
+    const secondDenyActionId = `${HITL_ACTION_PREFIX}approval_508:button:0`;
+    const secondApproveActionId = `${HITL_ACTION_PREFIX}approval_508:button:1`;
+
+    const { send } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        team: { id: "T01" },
+        user: {
+          id: "U_APPROVER",
+          username: "ada",
+          name: "ada",
+          team_id: "T01",
+        },
+        channel: { id: "C01" },
+        message: {
+          ts: "1700000000.000010",
+          thread_ts: "1700000000.000001",
+          blocks: [
+            {
+              type: "card",
+              body: {
+                type: "mrkdwn",
+                text: "*Approve issue 451?*",
+                verbatim: false,
+              },
+              actions: [
+                {
+                  type: "button",
+                  action_id: firstDenyActionId,
+                  text: { type: "plain_text", text: "Deny" },
+                  value: "deny",
+                },
+                {
+                  type: "button",
+                  action_id: firstApproveActionId,
+                  text: { type: "plain_text", text: "Allow" },
+                  value: "approve",
+                },
+              ],
+            },
+            {
+              type: "container",
+              title: { type: "plain_text", text: "Tool input" },
+              is_collapsible: true,
+              default_collapsed: false,
+              child_blocks: [
+                { type: "section", text: { type: "mrkdwn", text: '```\n{"issue":451}\n```' } },
+              ],
+            },
+            {
+              type: "card",
+              body: {
+                type: "mrkdwn",
+                text: "*Approve issue 508?*",
+                verbatim: false,
+              },
+              actions: [
+                {
+                  type: "button",
+                  action_id: secondDenyActionId,
+                  text: { type: "plain_text", text: "Deny" },
+                  value: "deny",
+                },
+                {
+                  type: "button",
+                  action_id: secondApproveActionId,
+                  text: { type: "plain_text", text: "Allow" },
+                  value: "approve",
+                },
+              ],
+            },
+            {
+              type: "container",
+              title: { type: "plain_text", text: "Tool input" },
+              is_collapsible: true,
+              default_collapsed: false,
+              child_blocks: [
+                { type: "section", text: { type: "mrkdwn", text: '```\n{"issue":508}\n```' } },
+              ],
+            },
+          ],
+        },
+        actions: [
+          {
+            action_id: firstApproveActionId,
+            text: { type: "plain_text", text: "Allow" },
+            value: "approve",
+          },
+        ],
+      }),
+    );
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[0]).toEqual({
+      inputResponses: [{ optionId: "approve", requestId: "approval_451" }],
+    });
+
+    const updateCall = fetchMock.mock.calls.find(
+      ([url]) => String(url) === "https://slack.com/api/chat.update",
+    );
+    expect(updateCall).toBeDefined();
+    const body = parseSlackRequestBody(updateCall?.[1] as RequestInit) as {
+      blocks: Array<{
+        actions?: Array<{ action_id?: string }>;
+        elements?: Array<{ action_id?: string }>;
+        subtext?: { text?: string };
+        text?: { text?: string };
+      }>;
+      channel: string;
+      text: string;
+      ts: string;
+    };
+
+    expect(body).toMatchObject({
+      channel: "C01",
+      text: "Answered: Allow",
+      ts: "1700000000.000010",
+    });
+    expect(JSON.stringify(body.blocks)).toContain("Approve issue 451?");
+    expect(JSON.stringify(body.blocks)).toContain("Allow");
+    expect(JSON.stringify(body.blocks)).toContain("Tool input");
+    expect(JSON.stringify(body.blocks)).toContain("Approve issue 508?");
+    expect(body.blocks[0]?.subtext?.text).toBe(":white_check_mark: *Allow* by <@U_APPROVER>");
+    expect(body.blocks[0]?.subtext?.text?.length).toBeLessThanOrEqual(
+      SLACK_CARD_SUBTEXT_MAX_LENGTH,
+    );
+
+    const remainingActionIds = body.blocks.flatMap(
+      (block) =>
+        (block.actions ?? block.elements)
+          ?.map((element) => element.action_id)
+          .filter((actionId): actionId is string => typeof actionId === "string") ?? [],
+    );
+    expect(remainingActionIds).toEqual([secondDenyActionId, secondApproveActionId]);
+  });
+
+  it("covers the observed e0 batched escalation approval run", async () => {
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+    const adapter = withState(getAdapter(channel), THREAD_STATE);
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("input.requested", {
+        requests: [
+          {
+            action: {
+              callId: "toolu_escalate_451",
+              input: { issueNumber: 451, ownerSlackUserId: "U0AT7H56S90" },
+              kind: "tool-call",
+              toolName: "escalate_issue",
+            },
+            display: "confirmation",
+            options: [
+              { id: "approve", label: "Yes" },
+              { id: "deny", label: "No" },
+            ],
+            prompt: "Approve tool call: escalate_issue",
+            requestId: "approval_451",
+          },
+          {
+            action: {
+              callId: "toolu_escalate_508",
+              input: { issueNumber: 508 },
+              kind: "tool-call",
+              toolName: "escalate_issue",
+            },
+            display: "confirmation",
+            options: [
+              { id: "approve", label: "Yes" },
+              { id: "deny", label: "No" },
+            ],
+            prompt: "Approve tool call: escalate_issue",
+            requestId: "approval_508",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_0",
+      }),
+      ctx,
+    );
+
+    const postCall = fetchMock.mock.calls.find(
+      ([url]) => String(url) === "https://slack.com/api/chat.postMessage",
+    );
+    expect(postCall).toBeDefined();
+    const posted = parseSlackRequestBody(postCall?.[1] as RequestInit) as {
+      blocks: Array<{
+        actions?: Array<{ action_id?: string; text?: { text?: string }; value?: string }>;
+        child_blocks?: Array<{ text?: { text?: string } }>;
+        title?: { text?: string };
+        type?: string;
+      }>;
+    };
+    expect(posted.blocks).toHaveLength(4);
+    expect(posted.blocks[1]?.child_blocks?.[0]?.text?.text).toContain('"issueNumber": 451');
+    expect(posted.blocks[1]?.child_blocks?.[0]?.text?.text).toContain(
+      '"ownerSlackUserId": "U0AT7H56S90"',
+    );
+    expect(posted.blocks[3]?.child_blocks?.[0]?.text?.text).toContain('"issueNumber": 508');
+
+    const firstDenyAction = posted.blocks[0]?.actions?.find((action) => action.value === "deny");
+    expect(firstDenyAction).toMatchObject({
+      action_id: `${HITL_ACTION_PREFIX}approval_451:button:0`,
+      text: { text: "Deny" },
+      value: "deny",
+    });
+
+    const { send } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        team: { id: "T01" },
+        user: {
+          id: "U0AT7H56S90",
+          username: "rui",
+          name: "rui",
+          team_id: "T01",
+        },
+        channel: { id: "C01" },
+        message: {
+          ts: "1700000000.000010",
+          thread_ts: "1700000000.000001",
+          blocks: posted.blocks,
+        },
+        actions: [
+          {
+            action_id: firstDenyAction?.action_id,
+            text: { type: "plain_text", text: "Deny" },
+            value: "deny",
+          },
+        ],
+      }),
+    );
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[0]).toEqual({
+      inputResponses: [{ optionId: "deny", requestId: "approval_451" }],
+    });
+
+    const updateCall = fetchMock.mock.calls.find(
+      ([url]) => String(url) === "https://slack.com/api/chat.update",
+    );
+    expect(updateCall).toBeDefined();
+    const body = parseSlackRequestBody(updateCall?.[1] as RequestInit) as {
+      blocks: Array<{
+        actions?: Array<{ action_id?: string }>;
+        child_blocks?: Array<{ text?: { text?: string } }>;
+        elements?: Array<{ action_id?: string }>;
+        subtext?: { text?: string };
+      }>;
+    };
+
+    expect(body.blocks[0]?.subtext?.text).toBe(":white_check_mark: *Deny* by <@U0AT7H56S90>");
+    expect(body.blocks[1]?.child_blocks?.[0]?.text?.text).toContain('"issueNumber": 451');
+    expect(body.blocks[3]?.child_blocks?.[0]?.text?.text).toContain('"issueNumber": 508');
+    const remainingActionIds = body.blocks.flatMap(
+      (block) =>
+        (block.actions ?? block.elements)
+          ?.map((element) => element.action_id)
+          .filter((actionId): actionId is string => typeof actionId === "string") ?? [],
+    );
+    expect(remainingActionIds).toEqual([
+      `${HITL_ACTION_PREFIX}approval_508:button:0`,
+      `${HITL_ACTION_PREFIX}approval_508:button:1`,
+    ]);
   });
 
   it("resumes freeform modal answers with the submitting Slack user auth", async () => {

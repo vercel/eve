@@ -11,13 +11,13 @@ The Slack channel puts your agent inside a workspace. It answers `@mentions` and
 Create a Slack Connect client and copy its UID (e.g. `slack/my-agent`), then attach this project as the trigger destination at eve's Slack route:
 
 ```bash
-npm install -g vercel@latest && export FF_CONNECT_ENABLED=1
+npm install -g vercel@latest
 vercel connect create slack --triggers
 vercel connect detach <uid> --yes
 vercel connect attach <uid> --triggers --trigger-path /eve/v1/slack --yes
 ```
 
-`FF_CONNECT_ENABLED=1` turns on the Connect commands, which are feature-flagged in the Vercel CLI today. The `create` step provisions a destination at the default Connect path. `detach` then `attach --trigger-path /eve/v1/slack` re-points the trigger at the eve Slack route, since eve does not serve the default Connect path. `--triggers` turns on Slack Event Subscriptions; without it, Slack never delivers `app_mention` or `message.im`. You can also create the client from the [Connect dashboard](https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Go+to+Connect).
+The `create` step provisions a destination at the default Connect path. `detach` then `attach --trigger-path /eve/v1/slack` re-points the trigger at the eve Slack route, since eve does not serve the default Connect path. `--triggers` turns on Slack Event Subscriptions; without it, Slack never delivers `app_mention` or `message.im`. You can also create the client from the [Connect dashboard](https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Go+to+Connect).
 
 ## Add the channel
 
@@ -69,6 +69,33 @@ export default slackChannel({
 ```
 
 `threadContext` performs one `conversations.replies` request for each triggering thread reply and requires the matching Slack history scope. Omit it when the agent should see only direct mentions. `loadThreadContextMessages` remains available when you need custom filtering or non-model processing of the raw thread messages.
+
+### Slack API calls outside a handler
+
+Inside webhook-side handlers (`onAppMention`, `onInteraction`, `events`),
+`ctx.slack.request(operation, body)` is the raw-API escape hatch. Outside
+those contexts there is no handle — a schedule resolving reactions on old
+messages, for example, has no inbound Slack request. For that, call the
+same primitive the handle uses directly:
+
+```ts
+import { callSlackApi, resolveSlackBotToken } from "eve/channels/slack";
+import { connectSlackCredentials } from "@vercel/connect/eve";
+
+const { botToken } = connectSlackCredentials("slack/my-agent");
+const response = await callSlackApi({
+  botToken,
+  operation: "reactions.get",
+  body: { channel: "C0123456789", timestamp: "1712345678.000100", full: true },
+});
+if (!response.ok) throw new Error(String(response.error));
+```
+
+`callSlackApi` resolves function-form tokens (secret managers, Connect
+rotation) at call time and form-encodes the body — the only safe default,
+since Slack's JSON support is partial (`conversations.replies` rejects
+JSON). `resolveSlackBotToken` materializes a `SlackBotToken` to a string
+when you need the bearer token itself.
 
 ### Delivery
 

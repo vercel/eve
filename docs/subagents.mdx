@@ -109,7 +109,7 @@ Because the name lives in the same runtime tool namespace as authored tools, a s
 
 Do not rely on subagent delegation by itself as an approval boundary. Put sensitive tools behind `approval`, connection approval, route/session authorization, or other controls wherever those tools can be called.
 
-Each delegated subagent spins up its own child session and stream. The parent stream carries only the control-plane events `subagent.called` and `subagent.completed`. To follow the child's full progress, read `subagent.called.data.childSessionId` and subscribe at `GET /eve/v1/session/:childSessionId/stream`.
+Each delegated subagent spins up its own child session and stream. The parent stream carries the control-plane events `subagent.called` and `subagent.completed`, plus interactive `input.requested`, `authorization.required`, and `authorization.completed` events proxied from descendants so the root channel can prompt the user. To follow the child's other progress, read `subagent.called.data.childSessionId` and subscribe at `GET /eve/v1/session/:childSessionId/stream`.
 
 ## When to split
 
