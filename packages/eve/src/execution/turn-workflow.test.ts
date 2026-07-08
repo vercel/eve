@@ -4,13 +4,14 @@ import type { HookPayload } from "#channel/types.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
 import { turnWorkflow } from "#execution/turn-workflow.js";
 import {
   TURN_WORKFLOW_INPUT_VERSION,
   type TurnWorkflowInput,
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import { runProxyInputRequestStep, turnStep } from "#execution/workflow-steps.js";
+import { turnStep } from "#execution/workflow-steps.js";
 
 const resumeHookMock = vi.fn();
 const createHookMock = vi.fn();
@@ -28,8 +29,11 @@ vi.mock("./route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
 }));
 
+vi.mock("./subagent-event-proxy-step.js", () => ({
+  runProxySubagentEventStep: vi.fn(),
+}));
+
 vi.mock("./workflow-steps.js", () => ({
-  runProxyInputRequestStep: vi.fn(),
   turnStep: vi.fn(),
 }));
 
@@ -483,7 +487,7 @@ describe("turnWorkflow", () => {
       results: [],
       sessionState: pendingState,
     });
-    vi.mocked(runProxyInputRequestStep).mockResolvedValue({
+    vi.mocked(runProxySubagentEventStep).mockResolvedValue({
       serializedContext: { state: "proxied" },
       sessionState: proxyState,
     });
@@ -511,7 +515,7 @@ describe("turnWorkflow", () => {
     });
     await turnWorkflow(input);
 
-    expect(runProxyInputRequestStep).toHaveBeenCalledOnce();
+    expect(runProxySubagentEventStep).toHaveBeenCalledOnce();
     expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
       continuationToken: "http:test",
       inboxToken: "turn-token:inbox",
@@ -528,6 +532,133 @@ describe("turnWorkflow", () => {
         sessionState: proxyState,
       }),
     );
+  });
+
+  it("proxies child authorization lifecycle events while continuing to await its result", async () => {
+    const pendingState = createSessionState();
+    const requiredState = createSessionState();
+    const completedAuthState = createSessionState();
+    const completedState = createSessionState();
+    const requiredEvent = {
+      data: {
+        authorization: { displayName: "Linear", url: "https://idp.example/authorize" },
+        description: "Authorization required for linear",
+        name: "linear",
+        sequence: 0,
+        stepIndex: 1,
+        turnId: "turn_0",
+        webhookUrl: "https://eve.example/connections/linear/callback/child%3Aauth",
+      },
+      type: "authorization.required" as const,
+    };
+    const completedEvent = {
+      data: {
+        authorization: { displayName: "Linear", url: "https://idp.example/authorize" },
+        name: "linear",
+        outcome: "authorized" as const,
+        sequence: 0,
+        stepIndex: 2,
+        turnId: "turn_0",
+      },
+      type: "authorization.completed" as const,
+    };
+    installInbox([
+      {
+        callId: "call-1",
+        childSessionId: "child-session",
+        event: requiredEvent,
+        kind: "subagent-authorization-event",
+        subagentName: "delegate",
+      },
+      {
+        callId: "call-1",
+        childSessionId: "child-session",
+        event: completedEvent,
+        kind: "subagent-authorization-event",
+        subagentName: "delegate",
+      },
+      {
+        kind: "runtime-action-result",
+        results: [
+          {
+            callId: "call-1",
+            kind: "subagent-result",
+            output: "authorized child output",
+            subagentName: "delegate",
+          },
+        ],
+      },
+    ]);
+    vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
+      results: [],
+      sessionState: pendingState,
+    });
+    vi.mocked(runProxySubagentEventStep)
+      .mockResolvedValueOnce({
+        serializedContext: { state: "auth-required" },
+        sessionState: requiredState,
+      })
+      .mockResolvedValueOnce({
+        serializedContext: { state: "auth-completed" },
+        sessionState: completedAuthState,
+      });
+    vi.mocked(turnStep)
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
+        serializedContext: { state: "pending" },
+        sessionState: pendingState,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "done",
+        serializedContext: { state: "done" },
+        sessionState: completedState,
+      });
+
+    const { input, parentWritable } = createInput({
+      driverCapabilities: { turnInbox: true },
+      mode: "task",
+      sessionState: pendingState,
+    });
+    await turnWorkflow(input);
+
+    expect(vi.mocked(runProxySubagentEventStep).mock.calls).toEqual([
+      [
+        {
+          hookPayload: expect.objectContaining({ event: requiredEvent }),
+          parentWritable,
+          serializedContext: { state: "pending" },
+          sessionState: pendingState,
+        },
+      ],
+      [
+        {
+          hookPayload: expect.objectContaining({ event: completedEvent }),
+          parentWritable,
+          serializedContext: { state: "auth-required" },
+          sessionState: requiredState,
+        },
+      ],
+    ]);
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0]).toMatchObject({
+      input: {
+        kind: "runtime-action-result",
+        results: [expect.objectContaining({ output: "authorized child output" })],
+      },
+      serializedContext: { state: "auth-completed" },
+      sessionState: completedAuthState,
+    });
+    expect(resumeHookMock).not.toHaveBeenCalledWith(
+      "turn-token",
+      expect.objectContaining({ kind: "turn-delivery-request" }),
+    );
+    expect(routeDeliverToChildren).not.toHaveBeenCalled();
+    expect(
+      resumeHookMock.mock.calls.filter((call) => call[1]?.kind === "turn-result"),
+    ).toHaveLength(1);
   });
 
   it("mints a unique delivery request id per wait so a stale forward is not re-accepted", async () => {

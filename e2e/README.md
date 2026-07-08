@@ -59,6 +59,28 @@ npx eve eval --strict --url "$DEPLOYMENT_URL"
 Do not set `VERCEL_TEAM_ID` at build: sandbox template keys must derive
 identically at build and runtime, and Vercel has no team variable at runtime.
 
+### Redeploy suite
+
+`agent-tools-sandbox/evals/sandbox/redeploy.eval.ts` proves sandbox semantics
+across deployment updates as they behave on preview targets: a parked session
+keeps working (with its `/workspace` state intact) when messages route through
+a new deployment, its turns stay pinned to the deployment that created it
+(branch-less CLI preview deploys cannot resolve a "latest" deployment; see
+`shouldRouteToLatestDeployment` in `execution/workflow-runtime.ts`), and new
+sessions adopt the new deployment — a skill added by the redeploy loads there.
+The pinned-turn assertion is a deliberate tripwire: it must be flipped when
+turn dispatch gains preview latest-routing
+(https://github.com/vercel/eve/issues/582).
+
+The eval redeploys from inside its test body: it mutates the agent source,
+runs `eve build` + `vc deploy`, and repoints a run-scoped Vercel alias at
+each new deployment, polling `/eve/v1/info` until the alias serves it.
+Because immutable deployment URLs never change what they serve, the eval
+must run against the alias — the `e2e-vercel` workflow sets
+`EVE_E2E_REDEPLOY_ALIAS`, aliases the deployment, and runs `--tag redeploy`
+evals as a second `eve eval` invocation after the main suite. Without the
+alias env (local matrix, plain `eve eval --strict`) the eval skips.
+
 Most fixture agents run against `anthropic/claude-sonnet-5` and judges run
 against `openai/gpt-5.5`. Both are real models, so the environment must provide
 the corresponding model-provider credentials. `agent-workflow-stress` uses eve's

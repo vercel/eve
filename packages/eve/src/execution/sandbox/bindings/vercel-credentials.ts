@@ -1,4 +1,5 @@
 import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
+import { decodeVercelOidcTokenClaims } from "#shared/vercel-project.js";
 import { withEveSandboxUserAgent } from "#execution/sandbox/bindings/vercel-user-agent.js";
 import type { VercelCreateOptions } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 
@@ -44,27 +45,12 @@ function readNonEmptyEnvironmentVariable(key: string): string | undefined {
 }
 
 function getVercelSandboxCredentialsFromOidcToken(token: string): VercelSandboxCredentials {
-  const payloadSegment = token.split(".")[1];
-  if (payloadSegment === undefined) {
-    throw new Error("Invalid Vercel OIDC token: missing payload.");
-  }
-
-  const payload = JSON.parse(
-    Buffer.from(base64UrlToBase64(payloadSegment), "base64").toString("utf8"),
-  ) as { owner_id?: unknown; project_id?: unknown };
-  const teamId = typeof payload.owner_id === "string" ? payload.owner_id : undefined;
-  const projectId = typeof payload.project_id === "string" ? payload.project_id : undefined;
-
-  if (teamId === undefined || projectId === undefined) {
+  const claims = decodeVercelOidcTokenClaims(token);
+  if (claims.ownerId === undefined || claims.projectId === undefined) {
     throw new Error("Invalid Vercel OIDC token: missing owner_id or project_id.");
   }
 
-  return { projectId, teamId, token };
-}
-
-function base64UrlToBase64(value: string): string {
-  const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
-  return base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+  return { projectId: claims.projectId, teamId: claims.ownerId, token };
 }
 
 export interface VercelSandboxCredentials {

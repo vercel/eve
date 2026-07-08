@@ -24,11 +24,11 @@ import { createTurnWorkflowInput } from "#execution/durable-session-migrations/t
 import { projectToDurableSession } from "#execution/session.js";
 import { createExecutionNodeStep } from "#execution/node-step.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
+import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
 import {
   dispatchTurnStep,
   emitTerminalSessionFailureStep,
   resolveEffectiveOutputSchema,
-  runProxyInputRequestStep,
   turnStep,
 } from "#execution/workflow-steps.js";
 import {
@@ -1113,7 +1113,7 @@ describe("emitTerminalSessionFailureStep", () => {
   });
 });
 
-describe("runProxyInputRequestStep", () => {
+describe("runProxySubagentEventStep", () => {
   // Ensures adapter state mutations made while proxying input requests
   // are serialized for the next durable workflow step.
 
@@ -1220,7 +1220,7 @@ describe("runProxyInputRequestStep", () => {
       continuationToken: "http:proxy-test",
     });
 
-    const result = await runProxyInputRequestStep({
+    const result = await runProxySubagentEventStep({
       hookPayload: buildHookPayload(),
       parentWritable: createTestWritable(),
       serializedContext: buildSerializedContextForAdapter(cachingAdapter),
@@ -1277,7 +1277,7 @@ describe("runProxyInputRequestStep", () => {
       continuationToken: "http:proxy-test",
     });
 
-    const result = await runProxyInputRequestStep({
+    const result = await runProxySubagentEventStep({
       hookPayload: buildHookPayload(),
       parentWritable: createTestWritable(),
       serializedContext: buildSerializedContextForAdapter(rekeyingAdapter),
