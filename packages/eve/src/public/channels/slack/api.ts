@@ -33,7 +33,7 @@ import { isCardElement, type CardElement, type FileUpload } from "#compiled/chat
 import { createLogger, logError } from "#internal/logging.js";
 import { cardToBlocks, cardToFallbackText } from "#public/channels/slack/blocks.js";
 import { truncateTypingStatus } from "#public/channels/slack/limits.js";
-import { rewriteBareMentions, slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
+import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
 
 const log = createLogger("slack.api");
 
@@ -368,7 +368,7 @@ export function buildSlackBinding(input: {
       // text + files: single Slack message with files attached via
       // files.completeUploadExternal's mrkdwn-only initial_comment.
       if (files.length > 0 && !shouldPostBeforeFiles) {
-        const comment = "text" in message ? rewriteBareMentions(message.text) : undefined;
+        const comment = "text" in message ? message.text : undefined;
         const result = await uploadFiles(files, { initialComment: comment });
         const id =
           Array.isArray(result.raw.files) && result.raw.files.length > 0
@@ -514,10 +514,10 @@ function buildPostMessageOptions(
     return base;
   }
   if ("markdown" in message) {
-    base.markdownText = rewriteBareMentions(message.markdown);
+    base.markdownText = message.markdown;
     return base;
   }
-  base.text = rewriteBareMentions(message.text);
+  base.text = message.text;
   return base;
 }
 

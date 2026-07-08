@@ -234,6 +234,84 @@ describe("SlackHandle.uploadFiles", () => {
   });
 });
 
+describe("SlackThread outbound mention formatting", () => {
+  let mock: ReturnType<typeof buildFetchMock>;
+
+  beforeEach(() => {
+    mock = buildFetchMock();
+    vi.stubGlobal("fetch", mock.fetch);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("preserves literal bare @ tokens in markdown posts", async () => {
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+    const markdown =
+      "bump @scope/package-name, install `@scope/another-package`, ping <@U012ABC456>";
+
+    await thread.post(markdown);
+
+    const post = mock.calls.find((c) => c.url === "https://slack.com/api/chat.postMessage");
+    expect((post!.body as { markdown_text: string }).markdown_text).toBe(markdown);
+  });
+
+  it("preserves literal bare @ tokens in text posts", async () => {
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+    const text = "release notes mention @scope/package-name and literal @word";
+
+    await thread.post({ text });
+
+    const post = mock.calls.find((c) => c.url === "https://slack.com/api/chat.postMessage");
+    expect((post!.body as { text: string }).text).toBe(text);
+  });
+
+  it("preserves literal bare @ tokens in file initial comments", async () => {
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+    const text = "attached report for @scope/package-name";
+
+    await thread.post({
+      text,
+      files: [{ data: Buffer.from([1, 2]), filename: "report.csv", mimeType: "text/csv" }],
+    });
+
+    const complete = mock.calls.find(
+      (c) => c.url === "https://slack.com/api/files.completeUploadExternal",
+    )!;
+    expect((complete.body as { initial_comment: string }).initial_comment).toBe(text);
+  });
+
+  it("preserves explicit Slack mention markup from mentionUser", async () => {
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.0",
+      teamId: undefined,
+    });
+
+    await thread.post(`ping ${thread.mentionUser("U012ABC456")}`);
+
+    const post = mock.calls.find((c) => c.url === "https://slack.com/api/chat.postMessage");
+    expect((post!.body as { markdown_text: string }).markdown_text).toBe("ping <@U012ABC456>");
+  });
+});
+
 describe("SlackThread.post with files", () => {
   let mock: ReturnType<typeof buildFetchMock>;
 
