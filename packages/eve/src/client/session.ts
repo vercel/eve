@@ -1,23 +1,19 @@
-import type { MessageStreamEvent } from "#protocol/message.js";
+import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/message.js";
-import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
-import { ResetResponseSchema } from "#protocol/reset-session.js";
 import {
   EVE_CREATE_SESSION_ROUTE_PATH,
-  EVE_RESET_SESSION_ROUTE_PATH,
-  createEveCancelTurnRoutePath,
   createEveContinueSessionRoutePath,
 } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
 import { MessageResponse } from "#client/message-response.js";
-import { followStreamIterable } from "#client/open-stream.js";
-import { advanceSession, createInitialSessionState } from "#client/session-utils.js";
-import { serializeOutputSchema } from "#shared/tool-schema.js";
+import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
+import { openStreamBody, openStreamIterable } from "#client/open-stream.js";
+import { normalizeOutputSchemaForRequest } from "#client/output-schema.js";
+import { StreamReconnectExhaustedError } from "#client/session-errors.js";
+import { advanceSession, preserveActiveSession } from "#client/session-utils.js";
 import { createClientUrl } from "#client/url.js";
 import type {
-  CancelSessionResult,
   ClientRedirectPolicy,
-  ResetResult,
   SendTurnInput,
   SendTurnPayload,
   SessionState,
@@ -33,6 +29,7 @@ const DELIVER_RETRY_DELAY_MS = 200;
  */
 interface SessionContext {
   readonly host: string;
+  readonly maxReconnectAttempts: number;
   readonly preserveCompletedSessions: boolean;
   readonly redirect?: ClientRedirectPolicy;
   resolveHeaders(perRequest?: Readonly<Record<string, string>>): Promise<Headers>;
@@ -56,9 +53,8 @@ export class ClientSession {
   }
 
   /**
-   * Current session cursor. The assigned session ID appears as soon as a send
-   * is accepted; the continuation token and stream index advance as its event
-   * stream is consumed. Serialize this to persist and resume later.
+   * Current session cursor. Always reflects the latest state after each
+   * completed turn. Serialize this to persist and resume later.
    */
   get state(): SessionState {
     return this.#state;
@@ -77,14 +73,6 @@ export class ClientSession {
     const postResult = await this.#postTurn(payload, state);
     const { continuationToken, sessionId } = postResult;
 
-    // Cancellation and observation can begin as soon as the POST is accepted,
-    // before the response stream reaches a turn boundary.
-    if (this.#state === state) {
-      const nextState = { ...state, sessionId };
-      if (continuationToken !== undefined) nextState.continuationToken = continuationToken;
-      this.#state = nextState;
-    }
-
     return new MessageResponse<TOutput>({
       continuationToken,
       createStream: () => this.#createEventStream(sessionId, continuationToken, state, payload),
@@ -93,160 +81,20 @@ export class ClientSession {
   }
 
   /**
-   * Requests cooperative cancellation of this session's active turn.
-   *
-   * Both `accepted` and `no_active_turn` are successful outcomes. The latter
-   * means the active turn settled before the request arrived or the session is
-   * already parked. `turnId` limits the request to the turn the caller
-   * observed; a stale guard is consumed as a benign no-op. Credentials are
-   * resolved immediately before the request.
-   *
-   * @throws {Error} If this handle has not started or attached to a session.
-   * @throws {ClientError} If the cancel route returns a non-successful status.
-   */
-  async cancel(options?: { turnId?: string }): Promise<CancelSessionResult> {
-    const sessionId = this.#state.sessionId;
-    if (!sessionId) {
-      throw new Error("Session has no session ID. Send a message first.");
-    }
-
-    const url = createClientUrl(this.#context.host, createEveCancelTurnRoutePath(sessionId));
-    const headers = await this.#context.resolveHeaders();
-    headers.set("content-type", "application/json");
-
-    const response = await fetch(
-      url,
-      withRedirectPolicy(
-        {
-          headers,
-          method: "POST",
-          body: options ? JSON.stringify(options) : undefined,
-        },
-        this.#context.redirect,
-      ),
-    );
-    const body = await response.text();
-
-    if (!response.ok) {
-      throw new ClientError(response.status, body, response.headers);
-    }
-
-    let payload: unknown;
-    try {
-      payload = JSON.parse(body);
-    } catch {
-      throw new Error(`Cancel route returned invalid JSON (${response.status}).`);
-    }
-
-    const result = CancelTurnResponseSchema.safeParse(payload);
-    if (!result.success || result.data.sessionId !== sessionId) {
-      throw new Error(`Cancel route returned an invalid response (${response.status}).`);
-    }
-
-    return { sessionId: result.data.sessionId, status: result.data.status };
-  }
-
-  /**
-   * Terminally retires the session that owns this handle's continuation token.
-   *
-   * Unlike {@link cancel}, reset does not merely stop an active turn: it
-   * releases the durable workflow owner so the next {@link send} creates a
-   * fresh conversation and initializes a new session-scoped sandbox on first
-   * sandbox use. Resetting a never-started handle is a successful no-op. After
-   * a successful reset, this handle has no session state.
-   *
-   * @throws {ClientError} If the reset route returns a non-successful status.
-   */
-  async reset(): Promise<ResetResult> {
-    const state = this.#state;
-    const continuationToken = state.continuationToken;
-
-    if (continuationToken === undefined) {
-      if (state.sessionId !== undefined) {
-        throw new Error(
-          "Session has no continuation token. Consume its event stream before resetting.",
-        );
-      }
-      this.#state = createInitialSessionState();
-      return { status: "no_active_session" };
-    }
-
-    const url = createClientUrl(this.#context.host, EVE_RESET_SESSION_ROUTE_PATH);
-    const headers = await this.#context.resolveHeaders();
-    headers.set("content-type", "application/json");
-
-    const response = await fetch(
-      url,
-      withRedirectPolicy(
-        {
-          body: JSON.stringify({ continuationToken }),
-          headers,
-          method: "POST",
-        },
-        this.#context.redirect,
-      ),
-    );
-    const body = await response.text();
-
-    if (!response.ok) {
-      throw new ClientError(response.status, body, response.headers);
-    }
-
-    let payload: unknown;
-    try {
-      payload = JSON.parse(body);
-    } catch {
-      throw new Error(`Reset route returned invalid JSON (${response.status}).`);
-    }
-
-    const result = ResetResponseSchema.safeParse(payload);
-    if (!result.success) {
-      throw new Error(`Reset route returned an invalid response (${response.status}).`);
-    }
-    if (
-      result.data.status === "reset" &&
-      state.sessionId !== undefined &&
-      result.data.previousSessionId !== state.sessionId
-    ) {
-      throw new Error(`Reset route returned an invalid response (${response.status}).`);
-    }
-
-    if (this.#state === state) {
-      this.#state = createInitialSessionState();
-    }
-
-    return result.data.status === "reset"
-      ? { previousSessionId: result.data.previousSessionId, status: "reset" }
-      : { status: "no_active_session" };
-  }
-
-  /**
    * Opens this session's event stream for the current session ID.
    *
    * Resumes from the session's stored stream cursor unless `options.startIndex`
-   * overrides it. By default, the stream reconnects from its cursor when the
-   * connection ends; pass `streamReconnectPolicy: { reconnect: false }` to use
-   * one connection. Negative indices read relative to the current tail on one connection
-   * and do not advance the stored absolute cursor.
-   *
-   * Pass `follow: false` for a bounded read: yields events up to the durable
-   * tail observed when the stream opens, then returns instead of following.
-   * The stored cursor still advances past the consumed events.
+   * overrides it. The returned iterable reconnects on transient socket
+   * disconnects, up to the client's `maxReconnectAttempts`.
    *
    * @throws {Error} If the session has no session ID (no message has been sent
-   *   yet), or if `follow: false` is combined with a negative `startIndex`.
+   *   yet).
    */
-  stream(options?: StreamOptions): AsyncIterable<MessageStreamEvent> {
+  stream(options?: StreamOptions): AsyncIterable<HandleMessageStreamEvent> {
     const sessionId = this.#state.sessionId;
 
     if (!sessionId) {
       throw new Error("Session has no session ID. Send a message first.");
-    }
-
-    if (options?.follow === false && (options.startIndex ?? this.#state.streamIndex) < 0) {
-      throw new Error(
-        "stream({ follow: false }) requires a nonnegative startIndex; a tail-relative cursor cannot be bounded.",
-      );
     }
 
     return this.#streamAndAdvance(sessionId, options);
@@ -269,7 +117,7 @@ export class ClientSession {
 
     const body = createHandleMessageBody({
       input,
-      outputSchema: serializeOutputSchema(input.outputSchema),
+      outputSchema: normalizeOutputSchemaForRequest(input.outputSchema),
       session,
     });
 
@@ -304,7 +152,7 @@ export class ClientSession {
   }
 
   // ---------------------------------------------------------------------------
-  // Internal: event stream consumption
+  // Internal: event stream with reconnection
   // ---------------------------------------------------------------------------
 
   async *#createEventStream(
@@ -312,52 +160,124 @@ export class ClientSession {
     continuationToken: string | undefined,
     initialState: SessionState,
     input: SendTurnPayload,
-  ): AsyncGenerator<MessageStreamEvent> {
-    const events: MessageStreamEvent[] = [];
+  ): AsyncGenerator<HandleMessageStreamEvent> {
+    const events: HandleMessageStreamEvent[] = [];
+    const initialStreamIndex = initialState.sessionId === sessionId ? initialState.streamIndex : 0;
+    let currentStreamIndex = initialStreamIndex;
+    let statePreserved = false;
 
     try {
-      for await (const event of followStreamIterable({
-        host: this.#context.host,
-        resolveHeaders: () => this.#context.resolveHeaders(input.headers),
-        redirect: this.#context.redirect,
-        streamReconnectPolicy: input.streamReconnectPolicy,
-        sessionId,
-        signal: input.signal,
-        startIndex: initialState.sessionId === sessionId ? initialState.streamIndex : 0,
-      })) {
-        events.push(event);
-        yield event;
+      let remainingReconnectAttempts = this.#context.maxReconnectAttempts;
 
-        if (isCurrentTurnBoundaryEvent(event)) {
+      while (true) {
+        const body = await this.#openStreamBody(
+          sessionId,
+          currentStreamIndex,
+          input.signal,
+          input.headers,
+        );
+
+        let foundBoundary = false;
+
+        try {
+          for await (const event of readNdjsonStream(body)) {
+            events.push(event);
+            currentStreamIndex += 1;
+            yield event;
+
+            if (isCurrentTurnBoundaryEvent(event)) {
+              foundBoundary = true;
+              break;
+            }
+          }
+        } catch (error) {
+          if (!isStreamDisconnectError(error)) {
+            throw error;
+          }
+        }
+
+        if (foundBoundary) {
           break;
         }
+
+        // A caller-initiated abort is a stop signal, not a transient socket
+        // disconnect — do not reconnect.
+        if (input.signal?.aborted) {
+          break;
+        }
+
+        if (remainingReconnectAttempts <= 0) {
+          this.#state = preserveActiveSession({
+            continuationToken,
+            session: initialState,
+            sessionId,
+            streamIndex: currentStreamIndex,
+          });
+          statePreserved = true;
+          throw new StreamReconnectExhaustedError({
+            maxReconnectAttempts: this.#context.maxReconnectAttempts,
+            sessionId,
+            streamIndex: currentStreamIndex,
+          });
+        }
+
+        remainingReconnectAttempts -= 1;
       }
+    } catch (error) {
+      if (!input.signal?.aborted && !statePreserved) {
+        this.#state = preserveActiveSession({
+          continuationToken,
+          session: initialState,
+          sessionId,
+          streamIndex: currentStreamIndex,
+        });
+        statePreserved = true;
+      }
+      throw error;
     } finally {
-      this.#state = advanceSession({
-        continuationToken,
-        events,
-        preserveCompletedSessions: this.#context.preserveCompletedSessions,
-        sessionId,
-        session: initialState,
-      });
+      if (!statePreserved) {
+        this.#state = advanceSession({
+          continuationToken,
+          events,
+          preserveCompletedSessions: this.#context.preserveCompletedSessions,
+          sessionId,
+          session: initialState,
+        });
+      }
     }
+  }
+
+  async #openStreamBody(
+    sessionId: string,
+    startIndex: number,
+    signal?: AbortSignal,
+    headers?: Readonly<Record<string, string>>,
+  ): Promise<ReadableStream<Uint8Array>> {
+    return await openStreamBody({
+      host: this.#context.host,
+      resolveHeaders: () => this.#context.resolveHeaders(headers),
+      redirect: this.#context.redirect,
+      sessionId,
+      signal,
+      startIndex,
+    });
   }
 
   async *#streamAndAdvance(
     sessionId: string,
     options?: StreamOptions,
-  ): AsyncGenerator<MessageStreamEvent> {
+  ): AsyncGenerator<HandleMessageStreamEvent> {
     const initialState = this.#state;
     const streamIndex = options?.startIndex ?? initialState.streamIndex;
-    const events: MessageStreamEvent[] = [];
+    const events: HandleMessageStreamEvent[] = [];
+    let statePreserved = false;
 
     try {
-      for await (const event of followStreamIterable({
-        follow: options?.follow,
+      for await (const event of openStreamIterable({
         host: this.#context.host,
+        maxReconnectAttempts: this.#context.maxReconnectAttempts,
         resolveHeaders: () => this.#context.resolveHeaders(),
         redirect: this.#context.redirect,
-        streamReconnectPolicy: options?.streamReconnectPolicy,
         sessionId,
         signal: options?.signal,
         startIndex: streamIndex,
@@ -365,8 +285,32 @@ export class ClientSession {
         events.push(event);
         yield event;
       }
+
+      if (!options?.signal?.aborted && !hasCurrentTurnBoundary(events)) {
+        const nextStreamIndex = streamIndex + events.length;
+        this.#state = preserveActiveSession({
+          continuationToken: initialState.continuationToken,
+          session: initialState,
+          sessionId,
+          streamIndex: nextStreamIndex,
+        });
+        statePreserved = true;
+
+        return;
+      }
+    } catch (error) {
+      if (!options?.signal?.aborted) {
+        this.#state = preserveActiveSession({
+          continuationToken: initialState.continuationToken,
+          session: initialState,
+          sessionId,
+          streamIndex: streamIndex + events.length,
+        });
+        statePreserved = true;
+      }
+      throw error;
     } finally {
-      if (streamIndex >= 0) {
+      if (!statePreserved) {
         this.#state = advanceSession({
           continuationToken: initialState.continuationToken,
           events,
@@ -435,6 +379,10 @@ function normalizeSendTurnInput<TOutput>(input: SendTurnInput<TOutput>): SendTur
   return typeof input === "string" ? { message: input } : input;
 }
 
+function hasCurrentTurnBoundary(events: readonly HandleMessageStreamEvent[]): boolean {
+  return events.some(isCurrentTurnBoundaryEvent);
+}
+
 function createHandleMessageBody(input: {
   readonly input: SendTurnPayload;
   readonly outputSchema?: Record<string, unknown>;
@@ -479,8 +427,4 @@ function createHandleMessageBody(input: {
   }
 
   return body;
-}
-
-function withRedirectPolicy(init: RequestInit, redirect?: ClientRedirectPolicy): RequestInit {
-  return redirect === undefined ? init : { ...init, redirect };
 }

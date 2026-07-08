@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { effectScope } from "vue";
 
 import { EveAgentStore, type EveAgentStoreSnapshot } from "#client/eve-agent-store.js";
+import { StreamReconnectExhaustedError } from "#client/session-errors.js";
 import { useEveAgent } from "#vue/use-eve-agent.js";
 import type { EveMessageData } from "#client/message-reducer.js";
 import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
@@ -256,6 +257,48 @@ describe("EveAgentStore (Vue composable backing store)", () => {
     expect(seenErrors.map((e) => e.message)).toEqual(["Bad Request"]);
     expect(store.snapshot.status).toBe("error");
     expect(store.snapshot.error?.message).toBe("Bad Request");
+  });
+
+  it("surfaces reconnect exhaustion as a store error while keeping the session cursor", async () => {
+    const events = [
+      createMessageReceivedEvent({
+        message: "Hello",
+        sequence: 0,
+        turnId: "turn_1",
+      }),
+    ];
+
+    const startResponse = createDeferred<Response>();
+    vi.spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(startResponse.promise)
+      .mockResolvedValueOnce(createEagerStreamResponse(events));
+
+    const store = new EveAgentStore({
+      maxReconnectAttempts: 0,
+      reducer: defaultMessageReducer(),
+    });
+
+    const seenErrors: Error[] = [];
+    store.setCallbacks({
+      onError(error) {
+        seenErrors.push(error);
+      },
+    });
+
+    const sendPromise = store.send({ message: "Hello" });
+    startResponse.resolve(createStartedMessageResponse("session_1", "http:session_1"));
+    await sendPromise;
+
+    expect(seenErrors).toHaveLength(1);
+    expect(seenErrors[0]).toBeInstanceOf(StreamReconnectExhaustedError);
+    expect(store.snapshot.status).toBe("error");
+    expect(store.snapshot.error).toBeInstanceOf(StreamReconnectExhaustedError);
+    expect(store.snapshot.session).toEqual({
+      continuationToken: "http:session_1",
+      sessionId: "session_1",
+      streamIndex: 1,
+    });
+    expect(store.snapshot.events).toEqual(events);
   });
 
   it("resets state and creates a new session", async () => {
