@@ -41,9 +41,7 @@ export async function tryReadExtensionBuildConfig(
 
   const packageName = typeof pkg.name === "string" && pkg.name.length > 0 ? pkg.name : "extension";
   const bareName = packageName.slice(packageName.lastIndexOf("/") + 1);
-  const shortName = /^[A-Za-z_$]/.test(bareName)
-    ? bareName.replace(/[^A-Za-z0-9_$]/g, "_")
-    : `_${bareName.replace(/[^A-Za-z0-9_$]/g, "_")}`;
+  const shortName = safeJsIdentifier(bareName);
   return {
     sourceRoot: resolve(appRoot, extensionRoot),
     packageName,
@@ -173,5 +171,17 @@ function toolExportName(logicalPath: string): string {
       break;
     }
   }
-  return name.replace(/^tools\//, "").replaceAll("/", "_");
+  return safeJsIdentifier(name.replace(/^tools\//, ""));
+}
+
+/**
+ * Coerces a name into a valid JS identifier for a generated
+ * `export { default as … }` binding: non-identifier characters (dashes from
+ * kebab-case tool names, path separators) become `_`, and a leading digit is
+ * prefixed with `_`. Without this, a tool like `get-weather.ts` would emit the
+ * invalid binding `export { default as get-weather }`.
+ */
+function safeJsIdentifier(name: string): string {
+  const sanitized = name.replace(/[^A-Za-z0-9_$]/g, "_");
+  return /^[A-Za-z_$]/.test(sanitized) ? sanitized : `_${sanitized}`;
 }

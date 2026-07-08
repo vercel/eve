@@ -60,6 +60,24 @@ describe("extension build", () => {
     );
   });
 
+  it("sanitizes kebab-case tool names into valid export bindings", async () => {
+    const root = await createExtensionPackage();
+    await writeFile(
+      join(root, "ext", "tools", "get-weather.mjs"),
+      'export default { description: "Get the weather.", async execute() { return {}; } };\n',
+      "utf8",
+    );
+    const config = await tryReadExtensionBuildConfig(root);
+    const outDir = await buildExtensionPackage(root, config!);
+
+    const toolsIndex = await readFile(join(outDir, "tools", "index.mjs"), "utf8");
+    // The binding is a valid JS identifier; the source path keeps the kebab name.
+    expect(toolsIndex).toContain(
+      'export { default as get_weather } from "../../ext/tools/get-weather.mjs"',
+    );
+    expect(toolsIndex).not.toContain("as get-weather ");
+  });
+
   it("fills the package exports map so authors do not hand-list it", async () => {
     const root = await createExtensionPackage();
     const config = await tryReadExtensionBuildConfig(root);
