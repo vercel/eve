@@ -83,7 +83,12 @@ alias env (local matrix, plain `eve eval --strict`) the eval skips.
 
 Most fixture agents run against `anthropic/claude-sonnet-5` and judges run
 against `openai/gpt-5.5`. Both are real models, so the environment must provide
-the corresponding model-provider credentials. `agent-workflow-stress` uses eve's
+the corresponding model-provider credentials. `agent-prompt-cache` is the one
+fixture that authors a direct `@ai-sdk/anthropic` model instance instead of a
+gateway model id: its eval asserts the harness's Anthropic cache-breakpoint
+placement, which only runs on that path. The instance points at the AI
+Gateway's Anthropic-compatible Messages endpoint so it uses the same
+`AI_GATEWAY_API_KEY` credential as every other fixture. `agent-workflow-stress` uses eve's
 `mockModel` fixture helper so its 100-turn runs stay fast and deterministic. Its
 concurrent and sequential evals cover high-volume session execution and repeated
 session resumption respectively.
