@@ -877,7 +877,7 @@ importers:
         version: 25.9.1
       typescript:
         specifier: 'catalog:'
-        version: 7.0.1-rc
+        version: 7.0.2
 
   e2e/fixtures/gizmo-extension:
     dependencies:
@@ -893,7 +893,7 @@ importers:
         version: 25.9.1
       typescript:
         specifier: 'catalog:'
-        version: 7.0.1-rc
+        version: 7.0.2
 
   e2e/fixtures/toolkit-extension:
     dependencies:
@@ -909,7 +909,7 @@ importers:
         version: 25.9.1
       typescript:
         specifier: 'catalog:'
-        version: 7.0.1-rc
+        version: 7.0.2
 
   packages/eve:
     dependencies:

@@ -1,5 +1,6 @@
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
+import semver from "#compiled/semver/index.js";
 import { createDiscoverErrorDiagnostic, type DiscoverDiagnostic } from "#discover/diagnostics.js";
 import { parseExtensionMountSpecifier } from "#discover/extension-specifier.js";
 import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "#discover/filesystem.js";
@@ -44,6 +45,13 @@ export const DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT =
  * Emitted when a resolved package is not a valid eve extension.
  */
 export const DISCOVER_EXTENSION_PACKAGE_INVALID = "discover/extension-package-invalid";
+
+/**
+ * Emitted when the app's eve version does not satisfy an extension's declared
+ * `peerDependencies.eve` range — the tie between an extension and the eve it was
+ * built for.
+ */
+export const DISCOVER_EXTENSION_EVE_INCOMPATIBLE = "discover/extension-eve-incompatible";
 
 /**
  * Emitted when an extension source tree declares agent-level config (`agent.ts`),
@@ -139,6 +147,8 @@ export async function locateExtensionMount(input: {
    * the file and directory mount forms name it at different path positions.
    */
   readonly namespace: string;
+  /** The app's eve version, checked against the extension's `peerDependencies.eve`. */
+  readonly eveVersion: string;
 }): Promise<{ location?: ExtensionMountLocation; diagnostics: DiscoverDiagnostic[] }> {
   const mountPath = join(input.agentRoot, input.mount.logicalPath);
   const { namespace } = input;
@@ -192,7 +202,7 @@ export async function locateExtensionMount(input: {
   }
 
   const manifestPath = join(packageRoot, "package.json");
-  let pkg: { name?: unknown; eve?: { extension?: unknown } };
+  let pkg: { name?: unknown; eve?: { extension?: unknown }; peerDependencies?: { eve?: unknown } };
   try {
     pkg = JSON.parse(await input.source.readTextFile(manifestPath)) as typeof pkg;
   } catch {
@@ -221,6 +231,25 @@ export async function locateExtensionMount(input: {
   }
 
   const packageName = typeof pkg.name === "string" && pkg.name.length > 0 ? pkg.name : specifier;
+
+  // Tie the extension to the eve it was built for. Only a real semver range is
+  // enforced; workspace/link/file protocols are resolved by the package manager.
+  const peerRange = pkg.peerDependencies?.eve;
+  if (
+    typeof peerRange === "string" &&
+    semver.validRange(peerRange) !== null &&
+    !semver.intersects(input.eveVersion, peerRange)
+  ) {
+    return {
+      diagnostics: [
+        createDiscoverErrorDiagnostic({
+          code: DISCOVER_EXTENSION_EVE_INCOMPATIBLE,
+          message: `Extension "${packageName}" requires eve "${peerRange}", but this app uses eve ${input.eveVersion}. Upgrade the extension to a version that supports this eve, or align your eve version.`,
+          sourcePath: manifestPath,
+        }),
+      ],
+    };
+  }
 
   return {
     location: {

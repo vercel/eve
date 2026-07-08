@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { buildMemoryAgentProject } from "#internal/testing/memory-agent-source.js";
 import { discoverAgent } from "#discover/discover-agent.js";
 import {
+  DISCOVER_EXTENSION_EVE_INCOMPATIBLE,
   DISCOVER_EXTENSION_MOUNT_AMBIGUOUS,
   DISCOVER_EXTENSION_MOUNT_MISSING_DECLARATION,
   DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED,
@@ -907,6 +908,71 @@ describe("discoverAgent (memory)", () => {
     );
     expect(collision).toBeDefined();
     expect(collision?.message).toContain("extensions/crm/");
+  });
+
+  it("rejects a mounted extension whose eve peer range the app does not satisfy", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: "ext" },
+          peerDependencies: { eve: "^2" },
+        }),
+        "node_modules/@acme/crm/ext/extension.ts": "export default {};\n",
+        "node_modules/@acme/crm/ext/tools/search.ts": "export default {};\n",
+      },
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+      eveVersion: "1.4.0",
+    });
+
+    const incompatible = result.diagnostics.find(
+      (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_EVE_INCOMPATIBLE,
+    );
+    expect(incompatible).toBeDefined();
+    expect(incompatible?.message).toContain("^2");
+    expect(incompatible?.message).toContain("1.4.0");
+    expect(result.manifest.resolvedExtensions).toEqual([]);
+  });
+
+  it("mounts an extension when the app's eve satisfies its peer range", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: "ext" },
+          peerDependencies: { eve: "^2" },
+        }),
+        "node_modules/@acme/crm/ext/extension.ts": "export default {};\n",
+        "node_modules/@acme/crm/ext/tools/search.ts": "export default {};\n",
+      },
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+      eveVersion: "2.3.0",
+    });
+
+    expect(
+      result.diagnostics.some(
+        (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_EVE_INCOMPATIBLE,
+      ),
+    ).toBe(false);
+    expect(result.manifest.resolvedExtensions).toHaveLength(1);
   });
 
   it("rejects an extension that declares schedules", async () => {
