@@ -1,9 +1,9 @@
 ---
 title: "Extensions"
-description: "Package tools, connections, skills, hooks, and schedules as a reusable npm package and mount it into an agent with one file."
+description: "Package tools, connections, skills, and hooks as a reusable npm package and mount it into an agent with one file."
 ---
 
-An extension packages eve concepts — tools, connections, skills, instructions, hooks, schedules — as a reusable npm or local package. You author it as an agent-shaped directory, and a consumer mounts it under `agent/extensions/` — a single file for the common case, or a directory when it needs overrides. The consumer's build composes the extension's contributions into the agent under a namespace derived from the mount name. Nothing is copied; upgrades come through the package manager.
+An extension packages eve concepts — tools, connections, skills, instructions, hooks — as a reusable npm or local package. You author it as an agent-shaped directory, and a consumer mounts it under `agent/extensions/` — a single file for the common case, or a directory when it needs overrides. The consumer's build composes the extension's contributions into the agent under a namespace derived from the mount name. Nothing is copied; upgrades come through the package manager.
 
 ## Authoring
 
@@ -148,6 +148,6 @@ export default defineTool({ ...search, approval: always() });
 
 ## Limits
 
-Per-session limits (token budgets, subagent depth) are the consuming agent's to own and are enforced on the session, so an extension's tools and schedules run within them. An extension cannot declare limits, a sandbox, or agent config.
+Per-session limits (token budgets, subagent depth) are the consuming agent's to own and are enforced on the session, so an extension's tools run within them. An extension cannot declare schedules, limits, a sandbox, or agent config — background scheduling in particular runs on the consuming agent's deployment under its limits, so it stays the agent's to own.
 
 An extension also cannot mount other extensions — an `extensions/` slot inside an extension is a build error. Only a consuming agent mounts extensions; nesting is reserved for a future release.

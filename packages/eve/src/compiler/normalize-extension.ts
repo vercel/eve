@@ -7,7 +7,6 @@ import type {
   CompiledDynamicSkillDefinition,
   CompiledDynamicToolDefinition,
   CompiledHookDefinition,
-  CompiledScheduleDefinition,
   CompiledSkillDefinition,
   CompiledToolDefinition,
 } from "#compiler/manifest.js";
@@ -15,7 +14,6 @@ import { compileConnectionDefinition } from "#compiler/normalize-connection.js";
 import type { ManifestCompileContext } from "#compiler/normalize-helpers.js";
 import { compileHookEntry } from "#compiler/normalize-hook.js";
 import { compileInstructionsEntry } from "#compiler/normalize-instructions.js";
-import { compileScheduleDefinition } from "#compiler/normalize-schedule.js";
 import { compileSkillSource } from "#compiler/normalize-skill.js";
 import { compileToolEntry } from "#compiler/normalize-tool.js";
 
@@ -27,7 +25,6 @@ export interface CompiledExtensionContributions {
   readonly tools: CompiledToolDefinition[];
   readonly dynamicTools: CompiledDynamicToolDefinition[];
   readonly hooks: CompiledHookDefinition[];
-  readonly schedules: CompiledScheduleDefinition[];
   readonly skills: CompiledSkillDefinition[];
   readonly dynamicSkills: CompiledDynamicSkillDefinition[];
   readonly dynamicInstructions: CompiledDynamicInstructionsDefinition[];
@@ -143,17 +140,6 @@ async function composeManifestContributions(input: {
     };
   });
 
-  const schedules: CompiledScheduleDefinition[] = (
-    await Promise.all(
-      manifest.schedules.map((source) => compileScheduleDefinition(sourceRoot, source, options)),
-    )
-  ).map((schedule) => ({
-    ...schedule,
-    name: `${prefix}${schedule.name}`,
-    sourceId: scopeSourceId(schedule.sourceId),
-    logicalPath: rebase(schedule.logicalPath),
-  }));
-
   const skills: CompiledSkillDefinition[] = [];
   const dynamicSkills: CompiledDynamicSkillDefinition[] = [];
   for (const source of manifest.skills) {
@@ -208,7 +194,6 @@ async function composeManifestContributions(input: {
     tools,
     dynamicTools,
     hooks,
-    schedules,
     skills,
     dynamicSkills,
     dynamicInstructions,
@@ -219,10 +204,10 @@ async function composeManifestContributions(input: {
 
 /**
  * Merges two composed contribution sets with earlier-set-wins precedence per
- * composed name. Named contributions (tools, connections, skills, schedules,
- * dynamic tools) dedup by their model-facing identifier so an override shadows
- * the extension's same-named entry; unnamed contributions (hooks, dynamic
- * skills, dynamic instructions, instruction fragments) simply concatenate.
+ * composed name. Named contributions (tools, connections, skills, dynamic
+ * tools) dedup by their model-facing identifier so an override shadows the
+ * extension's same-named entry; unnamed contributions (hooks, dynamic skills,
+ * dynamic instructions, instruction fragments) simply concatenate.
  *
  * Exported for unit testing: passing the consumer overrides as `primary` and
  * the extension's own contributions as `secondary` yields consumer-wins
@@ -243,10 +228,6 @@ export function mergeContributions(
       (connection) => connection.connectionName,
     ),
     skills: dedupeBy([...primary.skills, ...secondary.skills], (skill) => skill.name),
-    schedules: dedupeBy(
-      [...primary.schedules, ...secondary.schedules],
-      (schedule) => schedule.name,
-    ),
     hooks: [...primary.hooks, ...secondary.hooks],
     dynamicSkills: [...primary.dynamicSkills, ...secondary.dynamicSkills],
     dynamicInstructions: [...primary.dynamicInstructions, ...secondary.dynamicInstructions],

@@ -18,7 +18,6 @@ function contributions(
     tools: [],
     dynamicTools: [],
     hooks: [],
-    schedules: [],
     skills: [],
     dynamicSkills: [],
     dynamicInstructions: [],
@@ -34,7 +33,6 @@ describe("mergeContributions", () => {
       tools: [{ name: "crm__search", logicalPath: "override" }] as never,
       connections: [{ connectionName: "crm__api", logicalPath: "override" }] as never,
       skills: [{ name: "crm__lookup", logicalPath: "override" }] as never,
-      schedules: [{ name: "crm__sweep", logicalPath: "override" }] as never,
       dynamicTools: [{ slug: "crm__dynamic", logicalPath: "override" }] as never,
     });
     const secondary = contributions({
@@ -44,7 +42,6 @@ describe("mergeContributions", () => {
       ] as never,
       connections: [{ connectionName: "crm__api", logicalPath: "extension" }] as never,
       skills: [{ name: "crm__lookup", logicalPath: "extension" }] as never,
-      schedules: [{ name: "crm__sweep", logicalPath: "extension" }] as never,
       dynamicTools: [{ slug: "crm__dynamic", logicalPath: "extension" }] as never,
     });
 
@@ -56,7 +53,6 @@ describe("mergeContributions", () => {
     ]);
     expect(merged.connections).toEqual([{ connectionName: "crm__api", logicalPath: "override" }]);
     expect(merged.skills).toEqual([{ name: "crm__lookup", logicalPath: "override" }]);
-    expect(merged.schedules).toEqual([{ name: "crm__sweep", logicalPath: "override" }]);
     expect(merged.dynamicTools).toEqual([{ slug: "crm__dynamic", logicalPath: "override" }]);
   });
 

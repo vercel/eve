@@ -10,6 +10,7 @@ import {
   DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED,
   DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT,
   DISCOVER_EXTENSION_SANDBOX_UNSUPPORTED,
+  DISCOVER_EXTENSION_SCHEDULE_UNSUPPORTED,
   locateExtensionMount,
   mountNamespace,
 } from "#discover/extensions.js";
@@ -178,6 +179,17 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
           code: DISCOVER_EXTENSION_SANDBOX_UNSUPPORTED,
           message: "An extension may not declare a sandbox — it is the consuming agent's to own.",
           sourcePath: join(agentRoot, sandboxResult.sandbox.logicalPath),
+        }),
+      );
+    }
+    const [firstSchedule] = schedulesResult.schedules;
+    if (firstSchedule !== undefined) {
+      diagnostics.push(
+        createDiscoverErrorDiagnostic({
+          code: DISCOVER_EXTENSION_SCHEDULE_UNSUPPORTED,
+          message:
+            "An extension may not declare schedules — background scheduling runs on the consuming agent's deployment under its limits, so it is the consuming agent's to own.",
+          sourcePath: join(agentRoot, firstSchedule.logicalPath),
         }),
       );
     }

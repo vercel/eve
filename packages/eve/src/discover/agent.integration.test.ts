@@ -9,6 +9,7 @@ import {
   DISCOVER_EXTENSION_MOUNT_MISSING_DECLARATION,
   DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED,
   DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT,
+  DISCOVER_EXTENSION_SCHEDULE_UNSUPPORTED,
 } from "#discover/extensions.js";
 import {
   DISCOVER_DEPRECATED_SYSTEM_SLOT,
@@ -906,6 +907,34 @@ describe("discoverAgent (memory)", () => {
     );
     expect(collision).toBeDefined();
     expect(collision?.message).toContain("extensions/crm/");
+  });
+
+  it("rejects an extension that declares schedules", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: "ext" },
+        }),
+        "node_modules/@acme/crm/ext/extension.ts": "export default {};\n",
+        // Background scheduling is the consuming agent's to own, not an extension's.
+        "node_modules/@acme/crm/ext/schedules/sweep.md": '---\ncron: "0 9 * * *"\n---\nSweep.',
+      },
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      DISCOVER_EXTENSION_SCHEDULE_UNSUPPORTED,
+    );
   });
 
   it("rejects an extension that mounts another extension", async () => {

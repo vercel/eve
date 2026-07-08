@@ -60,6 +60,13 @@ export const DISCOVER_EXTENSION_AGENT_CONFIG_UNSUPPORTED =
 export const DISCOVER_EXTENSION_SANDBOX_UNSUPPORTED = "discover/extension-sandbox-unsupported";
 
 /**
+ * Emitted when an extension source tree declares `schedules`. Background
+ * scheduling runs sessions on the consuming agent's deployment under its limits,
+ * so it is the consuming agent's to own, not an extension's.
+ */
+export const DISCOVER_EXTENSION_SCHEDULE_UNSUPPORTED = "discover/extension-schedule-unsupported";
+
+/**
  * Resolved on-disk location of one mounted extension package.
  */
 export interface ExtensionMountLocation {

@@ -185,7 +185,6 @@ async function compileAgentNodeManifest(
   const dynamicToolSlugs = new Set(dynamicTools.map((tool) => tool.slug));
   const connectionNames = new Set(connections.map((connection) => connection.connectionName));
   const skillNames = new Set(skills.map((skill) => skill.name));
-  const scheduleNames = new Set(schedules.map((schedule) => schedule.name));
   const extensionInstructionFragments: string[] = [];
   for (const mount of [...manifest.resolvedExtensions].sort((left, right) =>
     left.namespace.localeCompare(right.namespace),
@@ -218,12 +217,6 @@ async function compileAgentNodeManifest(
       if (!skillNames.has(skill.name)) {
         skillNames.add(skill.name);
         skills.push(skill);
-      }
-    }
-    for (const schedule of contributions.schedules) {
-      if (!scheduleNames.has(schedule.name)) {
-        scheduleNames.add(schedule.name);
-        schedules.push(schedule);
       }
     }
     hooks.push(...contributions.hooks);
