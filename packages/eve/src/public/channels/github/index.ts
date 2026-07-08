@@ -1,4 +1,5 @@
 export {
+  callGitHubApi,
   GitHubApiError,
   type GitHubApiMethod,
   type GitHubApiOptions,
@@ -6,6 +7,7 @@ export {
   type GitHubJsonObject,
   type GitHubPostedComment,
   type GitHubReactionContent,
+  type GitHubRequestOptions,
 } from "#public/channels/github/api.js";
 export { type GitHubHandle, type GitHubThread } from "#public/channels/github/binding.js";
 export {

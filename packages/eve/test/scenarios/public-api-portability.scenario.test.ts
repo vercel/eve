@@ -11,6 +11,7 @@ import {
   EVE_ROUTE_PORTABILITY_DESCRIPTOR,
   DISCORD_ROUTE_PORTABILITY_DESCRIPTOR,
   GITHUB_ROUTE_PORTABILITY_DESCRIPTOR,
+  LINEAR_ROUTE_PORTABILITY_DESCRIPTOR,
   SLACK_ROUTE_PORTABILITY_DESCRIPTOR,
   TEAMS_ROUTE_PORTABILITY_DESCRIPTOR,
   TELEGRAM_ROUTE_PORTABILITY_DESCRIPTOR,
@@ -115,10 +116,20 @@ export default defineSandbox({
   {
     descriptor: GITHUB_ROUTE_PORTABILITY_DESCRIPTOR,
     include: ["src/public/channels/github/index.ts", "src/public/definitions/channel.ts"],
-    name: "lets tsc typecheck a default-exported githubChannel without extra annotations",
+    name: "lets tsc typecheck a default-exported githubChannel and helper API without extra annotations",
     packageExports: {
       "./channels/github": {
         types: "./dist/src/public/channels/github/index.d.ts",
+      },
+    },
+  },
+  {
+    descriptor: LINEAR_ROUTE_PORTABILITY_DESCRIPTOR,
+    include: ["src/public/channels/linear/index.ts", "src/public/definitions/channel.ts"],
+    name: "lets tsc typecheck a default-exported linearChannel and verifier helper without extra annotations",
+    packageExports: {
+      "./channels/linear": {
+        types: "./dist/src/public/channels/linear/index.d.ts",
       },
     },
   },

@@ -126,6 +126,23 @@ Before the first model call, every triggered turn checks out the relevant ref in
 
 For anything the channel doesn't wrap, call `ctx.github.request({ method, path, body })`. It carries installation-token auth.
 
+Outside a channel handler, use the same transport helper directly:
+
+```ts
+import { callGitHubApi } from "eve/channels/github";
+
+const repo = await callGitHubApi({
+  credentials,
+  installationId,
+  method: "GET",
+  path: "/repos/vercel/eve",
+});
+```
+
+`callGitHubApi` uses the channel's installation-token flow by default, accepts
+the same API base URL and fetch overrides as the channel, and throws
+`GitHubApiError` for non-2xx responses.
+
 ## What to read next
 
 - [Channels overview](./overview): the channel contract and every built-in channel

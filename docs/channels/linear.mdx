@@ -94,6 +94,21 @@ Inbound file attachments are not supported on this channel today.
 
 Event handlers receive `channel.linear`, which exposes `createActivity`, `listActivities`, and `updateSession` for custom Agent Activity delivery and Agent Session metadata.
 
+When you need to verify Linear webhooks in a custom route before applying
+app-specific filtering, use the same verifier the channel uses:
+
+```ts
+import { verifyLinearRequest } from "eve/channels/linear";
+
+export async function POST(request: Request) {
+  const body = await verifyLinearRequest(request, {
+    webhookSecret: process.env.LINEAR_WEBHOOK_SECRET,
+  });
+
+  return new Response(body);
+}
+```
+
 ## Custom hooks
 
 Return `{ auth }` to dispatch, or `null` to acknowledge without waking the agent.
