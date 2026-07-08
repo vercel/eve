@@ -675,6 +675,8 @@ export async function createApplicationNitro(
     includesApplicationSurface(surface) &&
     (dev || manifestHasWebSocketChannel(preparedHost.compileResult.manifest));
   const nitroPlugins: string[] = [];
+  nitroPlugins.push(preparedHost.compiledArtifacts.bootstrapPath);
+  nitroPlugins.push(preparedHost.compiledArtifacts.workflowWorldPluginPath);
   if (!dev) {
     // Stops all tracked sandboxes when the production server shuts
     // down. Dev servers are excluded: the dev CLI parent already stops
@@ -691,7 +693,6 @@ export async function createApplicationNitro(
   if (preparedHost.compiledArtifacts.instrumentationPluginPath !== undefined) {
     nitroPlugins.push(preparedHost.compiledArtifacts.instrumentationPluginPath);
   }
-  nitroPlugins.push(preparedHost.compiledArtifacts.bootstrapPath);
   await prepareEveVersionedCacheDirectory(nitroBuildDir);
   const nitro = await createNitro(
     {

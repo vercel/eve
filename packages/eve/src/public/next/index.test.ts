@@ -28,7 +28,7 @@ describe("withEve", () => {
     vi.unstubAllEnvs();
   });
 
-  it("emits eve rewrites through beforeFiles when no user rewrites exist", async () => {
+  it("does not add Next.js rewrites on Vercel", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_URL", "preview.example.com");
@@ -36,23 +36,12 @@ describe("withEve", () => {
     const config = await resolveConfig(withEve<TestConfig>({}));
     const rewrites = await config.rewrites?.();
 
-    expect(isRewriteSections(rewrites)).toBe(true);
-    if (!isRewriteSections(rewrites)) {
-      return;
-    }
-
-    expect(rewrites.beforeFiles).toEqual([
-      {
-        destination: `${EVE_NEXT_SERVICE_PREFIX}/eve/v1/:path+`,
-        source: "/eve/v1/:path+",
-      },
-    ]);
+    expect(rewrites).toBeUndefined();
   });
 
   it("omits the basePath override so Next.js applies a configured basePath", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("VERCEL", "1");
-    vi.stubEnv("VERCEL_URL", "preview.example.com");
+    vi.stubEnv("EVE_NEXT_PRODUCTION_ORIGIN", "https://agent.example.com");
 
     const config = await resolveConfig(
       withEve<TestConfig>({
@@ -63,30 +52,28 @@ describe("withEve", () => {
     const [eveRewrite] = getBeforeFiles(rewrites);
 
     expect(eveRewrite).toEqual({
-      destination: `${EVE_NEXT_SERVICE_PREFIX}/eve/v1/:path+`,
+      destination: `https://agent.example.com${EVE_NEXT_SERVICE_PREFIX}/eve/v1/:path+`,
       source: "/eve/v1/:path+",
     });
     expect(eveRewrite).not.toHaveProperty("basePath");
   });
 
-  it("adds production Vercel rewrites to the private eve service namespace", async () => {
+  it("adds non-Vercel production rewrites to the configured eve service namespace", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("VERCEL", "1");
-    vi.stubEnv("VERCEL_URL", "preview.example.com");
+    vi.stubEnv("EVE_NEXT_PRODUCTION_ORIGIN", "https://agent.example.com");
 
     const config = await resolveConfig(withEve<TestConfig>({}));
     const rewrites = await config.rewrites?.();
 
     expect(getBeforeFiles(rewrites)).toContainEqual({
-      destination: `${EVE_NEXT_SERVICE_PREFIX}/eve/v1/:path+`,
+      destination: `https://agent.example.com${EVE_NEXT_SERVICE_PREFIX}/eve/v1/:path+`,
       source: "/eve/v1/:path+",
     });
   });
 
   it("only rewrites eve-prefixed non-index routes", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("VERCEL", "1");
-    vi.stubEnv("VERCEL_URL", "preview.example.com");
+    vi.stubEnv("EVE_NEXT_PRODUCTION_ORIGIN", "https://agent.example.com");
 
     const config = await resolveConfig(withEve<TestConfig>({}));
     const rewrites = await config.rewrites?.();
@@ -99,14 +86,13 @@ describe("withEve", () => {
 
   it("rewrites authored channel routes under the eve protocol prefix", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("VERCEL", "1");
-    vi.stubEnv("VERCEL_URL", "preview.example.com");
+    vi.stubEnv("EVE_NEXT_PRODUCTION_ORIGIN", "https://agent.example.com");
 
     const config = await resolveConfig(withEve<TestConfig>({}));
     const rewrites = await config.rewrites?.();
 
     expect(getBeforeFiles(rewrites)).toContainEqual({
-      destination: `${EVE_NEXT_SERVICE_PREFIX}/eve/v1/:path+`,
+      destination: `https://agent.example.com${EVE_NEXT_SERVICE_PREFIX}/eve/v1/:path+`,
       source: "/eve/v1/:path+",
     });
   });
@@ -124,7 +110,7 @@ describe("withEve", () => {
     });
   });
 
-  it("ignores Vercel deployment URL when creating local service rewrites", async () => {
+  it("ignores Vercel deployment URL by leaving routing to Build Output config", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_URL", "http://preview.example.com");
@@ -132,10 +118,7 @@ describe("withEve", () => {
     const config = await resolveConfig(withEve<TestConfig>({}));
     const rewrites = await config.rewrites?.();
 
-    expect(getBeforeFiles(rewrites)).toContainEqual({
-      destination: `${EVE_NEXT_SERVICE_PREFIX}/eve/v1/:path+`,
-      source: "/eve/v1/:path+",
-    });
+    expect(rewrites).toBeUndefined();
   });
 
   it("ignores production origin overrides on Vercel", async () => {
@@ -146,16 +129,12 @@ describe("withEve", () => {
     const config = await resolveConfig(withEve<TestConfig>({}));
     const rewrites = await config.rewrites?.();
 
-    expect(getBeforeFiles(rewrites)).toContainEqual({
-      destination: `${EVE_NEXT_SERVICE_PREFIX}/eve/v1/:path+`,
-      source: "/eve/v1/:path+",
-    });
+    expect(rewrites).toBeUndefined();
   });
 
   it("preserves object config values and existing array rewrites", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("VERCEL", "1");
-    vi.stubEnv("VERCEL_URL", "preview.example.com");
+    vi.stubEnv("EVE_NEXT_PRODUCTION_ORIGIN", "https://agent.example.com");
 
     const config = await resolveConfig(
       withEve<TestConfig>({
@@ -179,7 +158,7 @@ describe("withEve", () => {
     }
 
     expect(rewrites.beforeFiles).toContainEqual({
-      destination: `${EVE_NEXT_SERVICE_PREFIX}/eve/v1/:path+`,
+      destination: `https://agent.example.com${EVE_NEXT_SERVICE_PREFIX}/eve/v1/:path+`,
       source: "/eve/v1/:path+",
     });
     expect(rewrites.afterFiles).toContainEqual({
@@ -190,8 +169,7 @@ describe("withEve", () => {
 
   it("prepends eve rewrites to beforeFiles when user rewrites use sections", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("VERCEL", "1");
-    vi.stubEnv("VERCEL_URL", "preview.example.com");
+    vi.stubEnv("EVE_NEXT_PRODUCTION_ORIGIN", "https://agent.example.com");
 
     const config = await resolveConfig(
       withEve<TestConfig>({
@@ -221,7 +199,7 @@ describe("withEve", () => {
     }
 
     expect(rewrites.beforeFiles?.at(0)).toEqual({
-      destination: `${EVE_NEXT_SERVICE_PREFIX}/eve/v1/:path+`,
+      destination: `https://agent.example.com${EVE_NEXT_SERVICE_PREFIX}/eve/v1/:path+`,
       source: "/eve/v1/:path+",
     });
     expect(rewrites.beforeFiles).toContainEqual({
@@ -238,8 +216,7 @@ describe("withEve", () => {
 
   it("accepts a custom private service prefix", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("VERCEL", "1");
-    vi.stubEnv("VERCEL_URL", "preview.example.com");
+    vi.stubEnv("EVE_NEXT_PRODUCTION_ORIGIN", "https://agent.example.com");
 
     const config = await resolveConfig(
       withEve<TestConfig>(
@@ -252,7 +229,7 @@ describe("withEve", () => {
     const rewrites = await config.rewrites?.();
 
     expect(getBeforeFiles(rewrites)).toContainEqual({
-      destination: "/internal/eve/eve/v1/:path+",
+      destination: "https://agent.example.com/internal/eve/eve/v1/:path+",
       source: "/eve/v1/:path+",
     });
   });

@@ -191,7 +191,7 @@ pnpm add @workflow/world-postgres@5.0.0-beta.x
 ```
 
 The npm `latest` tag can lag behind that line, so an unpinned install may pull
-an incompatible major that fails with `ZodError: invalid_union` at run replay.
+an incompatible protocol version that the Workflow SDK rejects during initialization.
 
 Put credentials and host-specific options in runtime environment variables read
 by the world package, not in `agent.ts`. For the Postgres world, that means

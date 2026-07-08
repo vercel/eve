@@ -1,3 +1,4 @@
+import type { MutableRefObject } from "react";
 import { DEFAULT_IMPRINT_DEVICE_PIXEL_RATIO, bloomRadiusForDevicePixelRatio } from "../render";
 
 // Owns canvas and hero-logo sizing math for the browser renderer.
@@ -8,6 +9,14 @@ export const DEFAULT_LOGO_ASPECT = 78 / 25;
 const LOGO_RENDER_HEIGHT = 500;
 const MAX_DEVICE_PIXEL_RATIO = DEFAULT_IMPRINT_DEVICE_PIXEL_RATIO;
 
+export type CanvasLayout = {
+  width: number;
+  height: number;
+};
+
+export type CanvasLayoutRef = MutableRefObject<CanvasLayout>;
+export type DevicePixelRatioRef = MutableRefObject<number>;
+
 export function getLogicalRenderSize(aspect: number) {
   return {
     width: Math.max(1, Math.round(LOGO_RENDER_HEIGHT * aspect)),
@@ -15,16 +24,20 @@ export function getLogicalRenderSize(aspect: number) {
   };
 }
 
-export function getBrowserDevicePixelRatio() {
-  return Math.min(window.devicePixelRatio || 1, MAX_DEVICE_PIXEL_RATIO);
+export function getBrowserDevicePixelRatio(devicePixelRatio: number) {
+  return Math.min(devicePixelRatio || 1, MAX_DEVICE_PIXEL_RATIO);
 }
 
-export function resizeCanvas(canvas: HTMLCanvasElement | null) {
-  const dpr = getBrowserDevicePixelRatio();
+export function resizeCanvas(
+  canvas: HTMLCanvasElement | null,
+  canvasLayoutRef: CanvasLayoutRef,
+  devicePixelRatioRef: DevicePixelRatioRef,
+) {
+  const dpr = getBrowserDevicePixelRatio(devicePixelRatioRef.current);
   if (!canvas) return dpr;
-  const rect = canvas.getBoundingClientRect();
-  const width = Math.max(1, Math.floor(rect.width * dpr));
-  const height = Math.max(1, Math.floor(rect.height * dpr));
+  const { width: cssWidth, height: cssHeight } = canvasLayoutRef.current;
+  const width = Math.max(1, Math.floor(cssWidth * dpr));
+  const height = Math.max(1, Math.floor(cssHeight * dpr));
   if (canvas.width !== width || canvas.height !== height) {
     canvas.width = width;
     canvas.height = height;
@@ -34,7 +47,7 @@ export function resizeCanvas(canvas: HTMLCanvasElement | null) {
 
 export function getCanvasLogicalSize(
   canvas: HTMLCanvasElement,
-  devicePixelRatio = getBrowserDevicePixelRatio(),
+  devicePixelRatio: number,
 ) {
   // The renderer pads the logical scene size by a DPR-scaled bloom radius on each side before
   // allocating its offscreen back/depth targets. The canvas itself is that padded physical render

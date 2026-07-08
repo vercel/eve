@@ -7,9 +7,8 @@ import { resolveEveDestinationPrefix } from "./server.js";
 import { ensureEveVercelOutputConfig } from "./vercel-output-config.js";
 
 /**
- * Default private route namespace for hosting eve as a separate experimental
- * Vercel service behind the Next.js app. {@link WithEveOptions.servicePrefix}
- * defaults to this value.
+ * Default private route namespace for legacy manually configured Vercel
+ * services. {@link WithEveOptions.servicePrefix} defaults to this value.
  */
 export const EVE_NEXT_SERVICE_PREFIX = "/_eve_internal/eve";
 
@@ -92,11 +91,11 @@ export interface WithEveOptions {
    */
   readonly eveBuildCommand?: string;
   /**
-   * Private Vercel service prefix for the eve deployment. Defaults to
-   * {@link EVE_NEXT_SERVICE_PREFIX} (`/_eve_internal/eve`). `withEve` normalizes
-   * the prefix (adds a leading slash, strips trailing slashes) and rejects a
-   * prefix that resolves to the root route. The prefix must match the eve
-   * service's mount in Vercel Build Output config.
+   * Private route namespace for legacy manually configured Vercel services and
+   * non-Vercel production proxying. Defaults to {@link EVE_NEXT_SERVICE_PREFIX}
+   * (`/_eve_internal/eve`). `withEve` normalizes the prefix (adds a leading
+   * slash, strips trailing slashes) and rejects a prefix that resolves to the
+   * root route.
    */
   readonly servicePrefix?: string;
 }
@@ -243,7 +242,8 @@ async function resolveNextConfig<TConfig extends EveNextConfig>(
  *
  * In development, starts `eve dev --no-ui --port 0` for the eve app and
  * rewrites eve protocol endpoints to that local URL. In Vercel production,
- * rewrites to the resolved private eve service prefix.
+ * writes Build Output service routes so Vercel sends eve protocol endpoints to
+ * the eve service directly.
  * Outside Vercel production, serves an existing `.output/server/index.mjs` build
  * on a stable local port when present; otherwise set `EVE_NEXT_PRODUCTION_ORIGIN`
  * to the origin serving the eve service namespace.
@@ -266,6 +266,11 @@ export function withEve<TConfig extends EveNextConfig>(
       nextRoot,
       servicePrefix: servicePrefixInput,
     });
+
+    if (process.env.VERCEL) {
+      return nextConfig;
+    }
+
     const productionDestination = resolveProductionDestination(configuredVercel.servicePrefix);
 
     return {

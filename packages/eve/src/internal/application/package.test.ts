@@ -25,8 +25,6 @@ describe("resolveWorkflowModulePath", () => {
 
 describe("resolveExpectedWorkflowVersion", () => {
   it("reads the @workflow/core line from eve's own package.json", () => {
-    // Single source of truth: eve declares the workflow line it bundles in its
-    // own package.json, so this resolves to a concrete prerelease version.
     expect(resolveExpectedWorkflowVersion()).toMatch(/^\d+\.\d+\.\d+/);
   });
 });
