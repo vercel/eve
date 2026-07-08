@@ -15,13 +15,13 @@ import { type AgentDefinition, defineAgent } from "eve";
  * CI has no `ANTHROPIC_API_KEY`, so the instance points at the AI Gateway's
  * Anthropic-compatible Messages endpoint, which honors `cache_control` and
  * passes `cache_read_input_tokens` / `cache_creation_input_tokens` through
- * unchanged. Same `AI_GATEWAY_API_KEY` credential as every other fixture;
- * `VERCEL_OIDC_TOKEN` is the local-dev fallback, and the gateway accepts
- * either as the `x-api-key` value.
+ * unchanged. The same AI Gateway credential as every other fixture is sent
+ * as a bearer token: `AI_GATEWAY_API_KEY` takes precedence, with
+ * `VERCEL_OIDC_TOKEN` as the fallback.
  */
 const anthropic = createAnthropic({
   baseURL: "https://ai-gateway.vercel.sh/v1",
-  apiKey: process.env.AI_GATEWAY_API_KEY ?? process.env.VERCEL_OIDC_TOKEN ?? "unset",
+  authToken: process.env.AI_GATEWAY_API_KEY ?? process.env.VERCEL_OIDC_TOKEN ?? "unset",
 });
 
 const agent: AgentDefinition = defineAgent({
