@@ -1,6 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const createVercelSandbox = vi.fn(() => ({ name: "islo" }));
+interface CapturedCreateVercelSandboxInput {
+  readonly createOptions: {
+    readonly fetch: typeof globalThis.fetch;
+    readonly token?: string;
+  };
+}
+
+const { createVercelSandbox } = vi.hoisted(() => ({
+  createVercelSandbox: vi.fn((_: unknown) => ({ name: "islo" })),
+}));
 
 vi.mock("#execution/sandbox/bindings/vercel.js", () => ({
   createVercelSandbox,
@@ -31,19 +40,23 @@ describe("islo sandbox backend", () => {
 
     islo();
 
-    const call = createVercelSandbox.mock.calls[0]?.[0];
-    expect(call?.createOptions.token).toBe("islo-token");
+    const call = createVercelSandbox.mock.calls[0]?.[0] as CapturedCreateVercelSandboxInput;
+    expect(call.createOptions.token).toBe("islo-token");
   });
 
   it("rewrites Vercel API fetch URLs to the Islo API host", async () => {
-    const delegate = vi.fn(async () => new Response(null, { status: 200 }));
+    const delegate = vi.fn(
+      async (_url: string | URL | Request, _init?: RequestInit) =>
+        new Response(null, { status: 200 }),
+    );
     islo({ fetch: delegate });
 
-    const call = createVercelSandbox.mock.calls[0]?.[0];
-    const fetch = call?.createOptions.fetch as typeof globalThis.fetch;
+    const call = createVercelSandbox.mock.calls[0]?.[0] as CapturedCreateVercelSandboxInput;
+    const fetch = call.createOptions.fetch;
     await fetch("https://api.vercel.com/v10/sandboxes");
 
-    const [requestOrUrl] = delegate.mock.calls[0] ?? [];
+    const requestOrUrl = delegate.mock.calls[0]?.[0] as string | URL | Request | undefined;
+    expect(requestOrUrl).toBeDefined();
     const url = requestOrUrl instanceof Request ? requestOrUrl.url : String(requestOrUrl);
     expect(url).toBe("https://api.islo.dev/v10/sandboxes");
   });

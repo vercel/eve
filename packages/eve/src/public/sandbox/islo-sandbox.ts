@@ -17,6 +17,11 @@ export type IsloSandboxCreateOptions = VercelSandboxCreateOptions & {
    * Defaults to `https://api.islo.dev`.
    */
   readonly apiBaseUrl?: string;
+  /**
+   * Optional API token. When omitted, `islo()` falls back to `ISLO_TOKEN`
+   * then `ISLO_API_KEY`.
+   */
+  readonly token?: string;
 };
 
 /**
