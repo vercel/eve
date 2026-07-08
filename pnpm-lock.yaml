@@ -587,28 +587,6 @@ importers:
         specifier: 'catalog:'
         version: 7.0.2
 
-  e2e/fixtures/agent-extensions:
-    dependencies:
-      eve:
-        specifier: workspace:*
-        version: link:../../../packages/eve
-      gizmo-extension:
-        specifier: workspace:*
-        version: link:../gizmo-extension
-      toolkit-extension:
-        specifier: workspace:*
-        version: link:../toolkit-extension
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 25.9.1
-      typescript:
-        specifier: 'catalog:'
-        version: 7.0.1-rc
-
   e2e/fixtures/agent-model:
     dependencies:
       eve:
@@ -878,6 +856,28 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
+
+  e2e/fixtures/extensions:
+    dependencies:
+      eve:
+        specifier: workspace:*
+        version: link:../../../packages/eve
+      gizmo-extension:
+        specifier: workspace:*
+        version: link:../gizmo-extension
+      toolkit-extension:
+        specifier: workspace:*
+        version: link:../toolkit-extension
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.9.1
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.1-rc
 
   e2e/fixtures/gizmo-extension:
     dependencies:
