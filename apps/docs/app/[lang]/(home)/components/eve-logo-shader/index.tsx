@@ -2,7 +2,7 @@
 
 import { App, Device, type VGPUAdapter } from "@vgpu/core";
 import { createDevicePixelRatio, prefersReducedMotion as prefersReducedMotionSync } from "phase";
-import { useLifecycle, useMediaQuery, usePrefersReducedMotion, useStableCallback } from "phase/react";
+import { useLoop, useMediaQuery, usePrefersReducedMotion, useSize, useStableCallback } from "phase/react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { preload } from "react-dom";
 import { meshAspect } from "./mesh";
@@ -25,7 +25,7 @@ import {
   type EveTransitionDebugGui,
   type EveTransitionDebugState,
 } from "./runtime/debug-gui";
-import { createDrawLoop } from "./runtime/frame-loop";
+import { createDrawLoop, type DrawLoop } from "./runtime/frame-loop";
 import { createPointerController, syncPointerInteractionMode } from "./runtime/pointer-input";
 import type { HeroRuntimeState } from "./runtime/state";
 import {
@@ -77,14 +77,16 @@ export function EveLogoShader({ audience = "humans" }: { audience?: InstallAudie
   const prefersReducedMotion = usePrefersReducedMotion();
   const coarsePointer = useMediaQuery("(pointer: coarse)");
   const containerRef = useRef<HTMLDivElement>(null);
+  const { size: containerSize } = useSize({ ref: containerRef });
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const controlsRef = useRef<RenderControls>({ ...DEFAULT_CONTROLS });
   const canvasLayoutRef = useRef<CanvasLayout>(INITIAL_CANVAS_LAYOUT);
   const devicePixelRatioRef = useRef(1);
   const coarsePointerRef = useRef(coarsePointer);
   const stateRef = useRef<HeroRuntimeState | null>(null);
-  const drawLoopRef = useRef<{ start: () => void; stop: () => void } | null>(null);
-  const lifecyclePhaseRef = useRef("idle");
+  const drawLoopRef = useRef<DrawLoop | null>(null);
+  const loopPhaseRef = useRef("idle");
+  const invalidatePointerCanvasRectRef = useRef(() => {});
   const [logoAspect, setLogoAspect] = useState(DEFAULT_LOGO_ASPECT);
   const [revealed, setRevealed] = useState(false);
   const [showLightFallback, setShowLightFallback] = useState(false);
@@ -107,18 +109,30 @@ export function EveLogoShader({ audience = "humans" }: { audience?: InstallAudie
     fatalErrorRef.current?.();
   });
 
-  useLifecycle({
+  const { phase: loopPhase } = useLoop({
     ref: containerRef,
     reducedMotion: "pause",
     intersectionOptions: { threshold: 0 },
-    onPhaseChange: (phase) => {
-      lifecyclePhaseRef.current = phase;
-      const canvas = canvasRef.current;
-      if (!IS_PRODUCTION && canvas) canvas.dataset.heroPhase = String(phase);
-      if (phase === "active") drawLoopRef.current?.start();
-      else drawLoopRef.current?.stop();
+    onTick: (frame) => {
+      drawLoopRef.current?.step(frame.time);
     },
   });
+
+  useEffect(() => {
+    loopPhaseRef.current = loopPhase;
+    const canvas = canvasRef.current;
+    if (!IS_PRODUCTION && canvas) {
+      canvas.dataset.heroPhase = loopPhase === "running" ? "active" : String(loopPhase);
+    }
+    if (loopPhase === "running") drawLoopRef.current?.start();
+    else drawLoopRef.current?.stop();
+  }, [loopPhase]);
+
+  useEffect(() => {
+    if (!containerSize) return;
+    canvasLayoutRef.current = containerSize;
+    invalidatePointerCanvasRectRef.current();
+  }, [containerSize]);
 
   useEffect(() => {
     const state = stateRef.current;
@@ -162,25 +176,10 @@ export function EveLogoShader({ audience = "humans" }: { audience?: InstallAudie
     resetCanvasVisibility(canvas);
     setRevealed(false);
 
-    let invalidatePointerCanvasRect = () => {};
-    const updateCanvasLayout = () => {
-      const element = containerRef.current;
-      if (!element) return;
-      const rect = element.getBoundingClientRect();
-      canvasLayoutRef.current = { width: rect.width, height: rect.height };
-      invalidatePointerCanvasRect();
-    };
-    updateCanvasLayout();
-    const resizeObserver = new ResizeObserver((entries) => {
-      const size = entries[0]?.contentRect;
-      if (size) canvasLayoutRef.current = { width: size.width, height: size.height };
-      invalidatePointerCanvasRect();
-    });
-    if (containerRef.current) resizeObserver.observe(containerRef.current);
     const dprWatcher = createDevicePixelRatio({
       onChange: (dpr) => {
         devicePixelRatioRef.current = dpr;
-        invalidatePointerCanvasRect();
+        invalidatePointerCanvasRectRef.current();
       },
     });
     devicePixelRatioRef.current = dprWatcher.dpr;
@@ -193,14 +192,13 @@ export function EveLogoShader({ audience = "humans" }: { audience?: InstallAudie
       canvasLayoutRef,
       devicePixelRatioRef,
     });
-    invalidatePointerCanvasRect = pointerController.invalidateCanvasRect;
+    invalidatePointerCanvasRectRef.current = pointerController.invalidateCanvasRect;
 
     const cleanupSetup = () => {
       state.cancelled = true;
-      cancelAnimationFrame(state.animationFrame);
       pointerController.detach();
-      resizeObserver.disconnect();
       dprWatcher.stop();
+      invalidatePointerCanvasRectRef.current = () => {};
       state.cleanup = undefined;
       stateRef.current = null;
       drawLoopRef.current = null;
@@ -236,7 +234,6 @@ export function EveLogoShader({ audience = "humans" }: { audience?: InstallAudie
       state.activeMesh = mesh;
       setLogoAspect(meshAspect(mesh));
       await nextFrame();
-      updateCanvasLayout();
       resizeCanvas(canvas, canvasLayoutRef, devicePixelRatioRef);
 
       const app = await App.create({ adapter: new BrowserAdapter() });
@@ -326,7 +323,7 @@ export function EveLogoShader({ audience = "humans" }: { audience?: InstallAudie
       drawLoopDispose = drawLoop.dispose;
       drawLoopRef.current = drawLoop;
       fatalErrorRef.current = dispose;
-      if (lifecyclePhaseRef.current === "active") drawLoop.start();
+      if (loopPhaseRef.current === "running") drawLoop.start();
 
       return dispose;
     }
@@ -342,7 +339,6 @@ export function EveLogoShader({ audience = "humans" }: { audience?: InstallAudie
 
     return () => {
       state.cancelled = true;
-      cancelAnimationFrame(state.animationFrame);
       cleanupSetup();
       disposeRuntime?.();
     };

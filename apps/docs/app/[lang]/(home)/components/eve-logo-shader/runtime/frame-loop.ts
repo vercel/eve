@@ -11,9 +11,9 @@ import {
 import type { EveTransitionDebugState } from "./debug-gui";
 import type { ControlsRef, HeroRuntimeState } from "./state";
 
-// Owns the Eve hero rAF draw loop and canvas reveal sequencing.
+// Owns the Eve hero draw step and canvas reveal sequencing.
 // INVARIANT: dataset markers, paint movement gating, and fallback-on-error behavior are preserved.
-// Imported only by index.tsx's single effect.
+// Imported only by index.tsx's single effect and driven by phase's useLoop.
 
 const ENV_YAW_LERP_SPEED = 3;
 export const AGENTS_ENV_YAW_LERP_SPEED = 3;
@@ -63,6 +63,13 @@ function getHeroFrameLoopProbe(): EveHeroFrameLoopProbe | undefined {
   }
   return window.__eveHeroFrameLoop;
 }
+
+export type DrawLoop = {
+  start: () => void;
+  stop: () => void;
+  step: (frameTime?: number) => void;
+  dispose: () => void;
+};
 
 export function createDrawLoop({
   state,
@@ -114,7 +121,7 @@ export function createDrawLoop({
   };
 
   const draw = (frameTime = performance.now()) => {
-    if (state.cancelled) return;
+    if (!running || state.cancelled) return;
 
     const deltaSeconds = Math.min(
       MAX_FRAME_DELTA_SECONDS,
@@ -238,8 +245,6 @@ export function createDrawLoop({
       frameLoopProbe.lastFrameAt = frameTime;
       updateFrameLoopProbeDataset();
     }
-
-    if (running) state.animationFrame = requestAnimationFrame(draw);
   };
 
   const start = () => {
@@ -254,12 +259,10 @@ export function createDrawLoop({
     if (evePointerInteractionMode(state.isCoarsePointer).autoRotateEnvYaw) {
       state.autoRotateStartTime = frameTime;
     }
-    state.animationFrame = requestAnimationFrame(draw);
   };
 
   const stop = () => {
     running = false;
-    cancelAnimationFrame(state.animationFrame);
     state.animationFrame = 0;
     if (frameLoopProbe) {
       frameLoopProbe.running = false;
@@ -270,6 +273,7 @@ export function createDrawLoop({
   return {
     start,
     stop,
+    step: draw,
     dispose() {
       stop();
       finishCanvasFade?.();
