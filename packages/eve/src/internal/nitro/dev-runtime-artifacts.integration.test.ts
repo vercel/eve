@@ -669,6 +669,58 @@ describe("development runtime artifact snapshots", () => {
     expect(existsSync(retiredSnapshotRoot)).toBe(false);
   });
 
+  it("preserves snapshots referenced by generated Nitro files", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-artifacts-prune-nitro-");
+    const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
+    const activeSnapshotRoot = join(snapshotsRoot, "active");
+    const nitroReferencedSnapshotRoot = join(snapshotsRoot, "nitro-referenced");
+    const staleSnapshotRoot = join(snapshotsRoot, "stale");
+    const oldSnapshotTime = new Date(1_000);
+
+    for (const snapshotRoot of [
+      activeSnapshotRoot,
+      nitroReferencedSnapshotRoot,
+      staleSnapshotRoot,
+    ]) {
+      await mkdir(snapshotRoot, { recursive: true });
+      await writeFile(join(snapshotRoot, "marker.txt"), snapshotRoot);
+      await utimes(snapshotRoot, oldSnapshotTime, oldSnapshotTime);
+    }
+
+    await activateDevelopmentRuntimeArtifactsSnapshot({
+      appRoot,
+      snapshot: {
+        runtimeAppRoot: join(activeSnapshotRoot, "source", "app"),
+        snapshotRoot: activeSnapshotRoot,
+        snapshotSourceRoot: join(activeSnapshotRoot, "source"),
+      },
+    });
+    await mkdir(join(appRoot, ".eve", "nitro", "workflow"), { recursive: true });
+    await writeFile(
+      join(appRoot, ".eve", "nitro", "workflow", "steps.mjs"),
+      `import "${join(
+        nitroReferencedSnapshotRoot,
+        "source",
+        "app",
+        ".eve",
+        "compile",
+        "compiled-artifacts-bootstrap.mjs",
+      ).replaceAll("\\", "/")}";\n`,
+    );
+
+    await pruneDevelopmentRuntimeArtifactsSnapshots({
+      appRoot,
+      now: 1_000_000,
+      recentWindowMs: 0,
+      retainCount: 0,
+    });
+
+    await expect(readdir(snapshotsRoot)).resolves.toEqual(
+      expect.arrayContaining(["active", "nitro-referenced"]),
+    );
+    expect(existsSync(staleSnapshotRoot)).toBe(false);
+  });
+
   it("removes a partially staged snapshot when staging fails", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-artifacts-failed-stage-");
     const agentRoot = join(appRoot, "agent");
