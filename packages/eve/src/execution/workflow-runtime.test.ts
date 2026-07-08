@@ -4,7 +4,9 @@ import type { ChannelAdapter } from "#channel/adapter.js";
 import { ChannelRequestIdKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
+  clearLatestDeploymentFallbackMemoForTest,
   createWorkflowRuntime,
+  LATEST_DEPLOYMENT_NO_GIT_BRANCH_MESSAGE,
   LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE,
   sessionTimeoutWorkflowReference,
   turnWorkflowReference,
@@ -36,6 +38,7 @@ vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
 
 afterEach(() => {
   getHookByTokenMock.mockReset();
+  clearLatestDeploymentFallbackMemoForTest();
   getRunMock.mockReset();
   getWorldMock.mockReset();
   resumeHookMock.mockReset();
@@ -458,6 +461,7 @@ describe("createWorkflowRuntime#run", () => {
         "$eve.trigger": "subagent",
         "$eve.type": "subagent",
       },
+      deploymentId: "latest",
     });
   });
 
@@ -495,12 +499,95 @@ describe("createWorkflowRuntime#run", () => {
     });
   });
 
+  it("falls back to the current deployment when the no-git-branch error is wrapped", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    const branchlessDeploymentError = new Error("Failed to resolve latest deployment", {
+      cause: new Error(LATEST_DEPLOYMENT_NO_GIT_BRANCH_MESSAGE),
+    });
+    startMock
+      .mockRejectedValueOnce(branchlessDeploymentError)
+      .mockResolvedValueOnce({ runId: "driver-run" });
+
+    await buildRuntime(compiledArtifactsSource).run({
+      adapter,
+      auth: null,
+      input: { message: "hello" },
+      mode: "task",
+    });
+
+    expect(startMock).toHaveBeenNthCalledWith(1, workflowEntryReference, expect.any(Array), {
+      allowReservedAttributes: true,
+      attributes: {
+        "$eve.title": "hello",
+        "$eve.trigger": "http",
+        "$eve.type": "session",
+      },
+      deploymentId: "latest",
+    });
+    expect(startMock).toHaveBeenNthCalledWith(2, workflowEntryReference, expect.any(Array), {
+      allowReservedAttributes: true,
+      attributes: {
+        "$eve.title": "hello",
+        "$eve.trigger": "http",
+        "$eve.type": "session",
+      },
+    });
+  });
+
+  it("memoizes latest-deployment fallback after a pinned dispatch succeeds", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock
+      .mockRejectedValueOnce(new Error(LATEST_DEPLOYMENT_NO_GIT_BRANCH_MESSAGE))
+      .mockResolvedValueOnce({ runId: "first-run" })
+      .mockResolvedValueOnce({ runId: "second-run" });
+
+    await buildRuntime(compiledArtifactsSource).run({
+      adapter,
+      auth: null,
+      input: { message: "first" },
+      mode: "task",
+    });
+    await buildRuntime(compiledArtifactsSource).run({
+      adapter,
+      auth: null,
+      input: { message: "second" },
+      mode: "task",
+    });
+
+    expect(startMock).toHaveBeenNthCalledWith(1, workflowEntryReference, expect.any(Array), {
+      allowReservedAttributes: true,
+      attributes: {
+        "$eve.title": "first",
+        "$eve.trigger": "http",
+        "$eve.type": "session",
+      },
+      deploymentId: "latest",
+    });
+    expect(startMock).toHaveBeenNthCalledWith(2, workflowEntryReference, expect.any(Array), {
+      allowReservedAttributes: true,
+      attributes: {
+        "$eve.title": "first",
+        "$eve.trigger": "http",
+        "$eve.type": "session",
+      },
+    });
+    expect(startMock).toHaveBeenNthCalledWith(3, workflowEntryReference, expect.any(Array), {
+      allowReservedAttributes: true,
+      attributes: {
+        "$eve.title": "second",
+        "$eve.trigger": "http",
+        "$eve.type": "session",
+      },
+    });
+  });
+
   it.each(["preview", "development", undefined])(
-    "pins workflowEntry to the current deployment when VERCEL_ENV is %s",
+    "starts workflowEntry on the latest deployment when VERCEL_ENV is %s",
     async (vercelEnv) => {
-      // Preview and CLI deployments carry no git branch reference, so the
-      // platform cannot resolve "latest" for them (HTTP 400). They must pin
-      // to their own immutable deployment.
       if (vercelEnv === undefined) {
         vi.stubEnv("VERCEL_ENV", "");
         delete process.env.VERCEL_ENV;
@@ -526,6 +613,7 @@ describe("createWorkflowRuntime#run", () => {
           "$eve.trigger": "http",
           "$eve.type": "session",
         },
+        deploymentId: "latest",
       });
     },
   );

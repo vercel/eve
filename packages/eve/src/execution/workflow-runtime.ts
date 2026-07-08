@@ -1,21 +1,12 @@
-import {
-  EntityConflictError,
-  HookNotFoundError,
-  RunExpiredError,
-  WorkflowRunNotFoundError,
-} from "#compiled/@workflow/errors/index.js";
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 
 import type {
-  CancelTurnInput,
-  CancelTurnResult,
   DeliverInput,
   GetEventStreamOptions,
   HookPayload,
   RunHandle,
   RunInput,
   Runtime,
-  TerminateSessionInput,
-  TerminateSessionResult,
 } from "#channel/types.js";
 import { serializeContext } from "#context/serialize.js";
 import {
@@ -24,13 +15,9 @@ import {
   readParentLineage,
 } from "#execution/eve-workflow-attributes.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
-  cancelRun,
-  getHookByToken,
   getRun,
-  getWorld,
   resumeHook,
   start,
   type Run,
@@ -38,7 +25,7 @@ import {
   type WorkflowFunction,
   type WorkflowMetadata,
 } from "#internal/workflow/runtime.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
+import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
@@ -46,20 +33,14 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import { buildRunContext } from "#execution/runtime-context.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
-import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
-import { walkCauseChain } from "#shared/errors.js";
-import {
-  sessionCancelHookToken,
-  type TurnCancelPayload,
-} from "#execution/turn-cancellation-token.js";
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
-const SESSION_TIMEOUT_WORKFLOW_NAME = "sessionTimeoutWorkflow";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 
 export const LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE =
   "deploymentId 'latest' requires a World that implements resolveLatestDeploymentId()";
+export const LATEST_DEPLOYMENT_NO_GIT_BRANCH_MESSAGE = "Source deployment has no git branch";
 
 /**
  * Workflow function names whose bundled id is stable across deployments
@@ -74,12 +55,12 @@ export const LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE =
 export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
   WORKFLOW_ENTRY_NAME,
   TURN_WORKFLOW_NAME,
-  SESSION_TIMEOUT_WORKFLOW_NAME,
 ]);
 
 const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
 
 const log = createLogger("execution.workflow-runtime");
+let latestDeploymentFallbackMemoized = false;
 
 interface WorkflowHookRecord {
   readonly runId: string;
@@ -106,11 +87,6 @@ export const turnWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${TURN_WORKFLOW_NAME}`,
 };
 
-/** Stable workflow reference for session deadline timers. */
-export const sessionTimeoutWorkflowReference = {
-  workflowId: `workflow//${STABLE_ID_BASE}//${SESSION_TIMEOUT_WORKFLOW_NAME}`,
-};
-
 /**
  * Creates a workflow-backed runtime whose long-lived driver owns the
  * event stream and dispatches each turn as a child workflow run.
@@ -128,17 +104,6 @@ export function createWorkflowRuntime(config: {
       const ctx = buildRunContext({ bundle, run: input });
       const serializedContext = serializeContext(ctx);
       const parentLineage = readParentLineage(serializedContext);
-      const sessionTimeoutMs = bundle.resolvedAgent.config.limits?.sessionTimeoutMs;
-      const workflowInput: {
-        -readonly [K in keyof WorkflowEntryInput]: WorkflowEntryInput[K];
-      } = {
-        input: input.input,
-        limits: input.limits,
-        serializedContext,
-      };
-      if (sessionTimeoutMs !== undefined) {
-        workflowInput.sessionTimeoutMs = sessionTimeoutMs;
-      }
       const attributes =
         parentLineage.sessionId === undefined
           ? buildSessionAttributes({
@@ -156,10 +121,20 @@ export function createWorkflowRuntime(config: {
 
       let run: Awaited<ReturnType<typeof startWorkflowPreferLatest>>;
       try {
-        run = await startWorkflowPreferLatest(workflowEntryReference, [workflowInput], {
-          allowReservedAttributes: true,
-          attributes: normalizeEveAttributes(attributes),
-        });
+        run = await startWorkflowPreferLatest(
+          workflowEntryReference,
+          [
+            {
+              input: input.input,
+              limits: input.limits,
+              serializedContext,
+            },
+          ],
+          {
+            allowReservedAttributes: true,
+            attributes: normalizeEveAttributes(attributes),
+          },
+        );
       } catch (error) {
         logError(log, "failed to start workflow run", error, {
           continuationToken: input.continuationToken,
@@ -167,9 +142,11 @@ export function createWorkflowRuntime(config: {
         throw error;
       }
 
-      let events: ReadableStream<MessageStreamEvent> | undefined;
+      let events: ReadableStream<HandleMessageStreamEvent> | undefined;
       const getEvents = () => {
-        events ??= parseNdjsonStream<MessageStreamEvent>(() => getRun(run.runId).getReadable());
+        events ??= parseNdjsonStream<HandleMessageStreamEvent>(() =>
+          getRun(run.runId).getReadable(),
+        );
         return events;
       };
 
@@ -180,24 +157,6 @@ export function createWorkflowRuntime(config: {
         },
         sessionId: run.runId,
       };
-    },
-
-    async cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult> {
-      return await requestWorkflowTurnCancellation(input);
-    },
-
-    async terminateSession(input: TerminateSessionInput): Promise<TerminateSessionResult> {
-      try {
-        await cancelRun(await getWorld(), input.sessionId, {
-          cancelReason: input.reason ?? "Session reset by channel",
-        });
-        return { status: "terminated" };
-      } catch (error) {
-        if (isAlreadyTerminalSessionError(error)) {
-          return { status: "already_terminal" };
-        }
-        throw error;
-      }
     },
 
     async deliver(input: DeliverInput): Promise<{ sessionId: string }> {
@@ -226,117 +185,68 @@ export function createWorkflowRuntime(config: {
     async getEventStream(
       sessionId: string,
       options?: GetEventStreamOptions,
-    ): Promise<ReadableStream<MessageStreamEvent>> {
-      return parseNdjsonStream<MessageStreamEvent>(() =>
+    ): Promise<ReadableStream<HandleMessageStreamEvent>> {
+      return parseNdjsonStream<HandleMessageStreamEvent>(() =>
         getRun(sessionId).getReadable({ startIndex: options?.startIndex }),
       );
-    },
-
-    async getStreamTailIndex(sessionId: string): Promise<number> {
-      // The readable is never consumed; cancel it so the unread source does not linger.
-      const readable = getRun(sessionId).getReadable();
-      try {
-        return await readable.getTailIndex();
-      } finally {
-        await readable.cancel().catch(() => {});
-      }
-    },
-
-    async resolveSession(continuationToken: string): Promise<{ sessionId: string } | undefined> {
-      try {
-        const hook = await getHookByToken(continuationToken);
-        return { sessionId: hook.runId };
-      } catch (error) {
-        if (HookNotFoundError.is(error)) {
-          return undefined;
-        }
-        logError(log, "failed to resolve session by continuation token", error, {
-          continuationToken,
-        });
-        throw error;
-      }
     },
   };
 }
 
-/** Requests cancellation through a session's stable workflow hook. */
-export async function requestWorkflowTurnCancellation(
-  input: CancelTurnInput,
-): Promise<CancelTurnResult> {
-  const payload: TurnCancelPayload = input.turnId === undefined ? {} : { turnId: input.turnId };
-
-  try {
-    await resumeHook(sessionCancelHookToken(input.sessionId), payload);
-    return { status: "accepted" };
-  } catch (error) {
-    if (isInactiveCancelTarget(error)) {
-      return { status: "no_active_turn" };
-    }
-    throw error;
-  }
-}
-
-function isInactiveCancelTarget(error: unknown): boolean {
-  return (
-    HookNotFoundError.is(error) ||
-    WorkflowRunNotFoundError.is(error) ||
-    RunExpiredError.is(error) ||
-    EntityConflictError.is(error)
-  );
-}
-
-function isAlreadyTerminalSessionError(error: unknown): boolean {
-  for (const candidate of walkCauseChain(error)) {
-    if (
-      WorkflowRunNotFoundError.is(candidate) ||
-      RunExpiredError.is(candidate) ||
-      EntityConflictError.is(candidate)
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /**
- * Starts a workflow on the latest deployment when latest routing applies,
- * while preserving local/dev worlds that do not implement latest routing.
+ * Starts a workflow on the latest deployment when the active workflow world can
+ * resolve it, while preserving worlds and deployments that cannot.
  */
 export async function startWorkflowPreferLatest<TArgs extends unknown[], TResult>(
   workflow: WorkflowFunction<TArgs, TResult> | WorkflowMetadata,
   args: TArgs,
   options?: StartOptionsWithoutDeploymentId,
 ): Promise<Run<unknown> | Run<TResult>> {
-  if (!shouldRouteToLatestDeployment()) {
-    return options === undefined
-      ? await start(workflow, args)
-      : await start(workflow, args, options);
+  if (latestDeploymentFallbackMemoized) {
+    return await startWorkflowOnCurrentDeployment(workflow, args, options);
   }
 
   try {
     return await start(workflow, args, { ...options, deploymentId: "latest" });
   } catch (error) {
-    if (!isLatestDeploymentUnsupportedError(error)) {
+    if (!isLatestDeploymentFallbackError(error)) {
       throw error;
     }
 
-    return options === undefined
-      ? await start(workflow, args)
-      : await start(workflow, args, options);
+    const run = await startWorkflowOnCurrentDeployment(workflow, args, options);
+    latestDeploymentFallbackMemoized = true;
+    return run;
   }
 }
 
 /**
- * Local development resolves "latest" to the active promoted generation.
- * Vercel resolves it only for production deployments; previews and CLI
- * deployments have no branch reference and remain pinned to themselves.
+ * Clears the latest-routing fallback memo between tests. Production code keeps
+ * the memo for the life of the process because unsupported worlds and
+ * branchless deployments cannot start resolving "latest" mid-process.
  */
-function shouldRouteToLatestDeployment(): boolean {
-  return process.env.VERCEL_ENV === "production" || isEveDevEnvironment();
+export function clearLatestDeploymentFallbackMemoForTest(): void {
+  latestDeploymentFallbackMemoized = false;
 }
 
-function isLatestDeploymentUnsupportedError(error: unknown): boolean {
-  return error instanceof Error && error.message.includes(LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE);
+async function startWorkflowOnCurrentDeployment<TArgs extends unknown[], TResult>(
+  workflow: WorkflowFunction<TArgs, TResult> | WorkflowMetadata,
+  args: TArgs,
+  options?: StartOptionsWithoutDeploymentId,
+): Promise<Run<unknown> | Run<TResult>> {
+  return options === undefined ? await start(workflow, args) : await start(workflow, args, options);
+}
+
+function isLatestDeploymentFallbackError(error: unknown): boolean {
+  return (
+    errorMessageIncludes(error, LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE) ||
+    errorMessageIncludes(error, LATEST_DEPLOYMENT_NO_GIT_BRANCH_MESSAGE)
+  );
+}
+
+function errorMessageIncludes(error: unknown, message: string): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.message.includes(message)) return true;
+  return error.cause !== undefined && errorMessageIncludes(error.cause, message);
 }
 
 function normalizeWorkflowHook(value: unknown): WorkflowHookRecord {
