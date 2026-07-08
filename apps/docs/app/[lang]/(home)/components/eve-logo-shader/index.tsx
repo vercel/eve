@@ -66,7 +66,7 @@ const DEFAULT_CONTROLS: RenderControls = {
 };
 export const AGENTS_ENV_YAW_LERP_SPEED = 3;
 const LOGO_MODE_TRANSITION_DURATION_SECONDS = 0.45;
-const IMPRINT_GLYPH_SCALE = 1.35;
+const IMPRINT_GLYPH_SCALE = 1.27;
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const INITIAL_CANVAS_LAYOUT: CanvasLayout = { width: 1, height: 1 };
 
@@ -256,7 +256,7 @@ export function EveLogoShader({ audience = "humans" }: { audience?: InstallAudie
       const transitionDebug: EveTransitionDebugState = {
         overrideEnabled: false,
         progress: modeTransitionProgressRef.current,
-        gridScaleMultiplier: DEFAULT_IMPRINT_GRID_SCALE_MULTIPLIER,
+        gridScaleMultiplier: 1.31,
         glyphScale: IMPRINT_GLYPH_SCALE,
         durationSeconds: LOGO_MODE_TRANSITION_DURATION_SECONDS,
         paintDecayPerFrame120: DEFAULT_PAINT_DECAY_PER_FRAME_120,
