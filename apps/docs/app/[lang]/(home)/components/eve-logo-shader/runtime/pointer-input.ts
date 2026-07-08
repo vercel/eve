@@ -1,7 +1,11 @@
 import type { RefObject } from "react";
 import { evePointerInteractionMode } from "../mobile-motion";
 import { bloomRadiusForDevicePixelRatio, mapClientPointToPaintCell } from "../render";
-import { getBrowserDevicePixelRatio } from "./canvas-sizing";
+import {
+  getBrowserDevicePixelRatio,
+  type CanvasLayoutRef,
+  type DevicePixelRatioRef,
+} from "./canvas-sizing";
 import type { ControlsRef, HeroRuntimeState } from "./state";
 
 // Owns browser pointer input for env yaw and paint brush updates.
@@ -12,25 +16,59 @@ const MAX_ENV_YAW = 0.3;
 const MAX_ENV_PITCH = 0.2;
 const PAINT_POINTER_MOVE_EPSILON_PX = 0.5;
 
+export function syncPointerInteractionMode(state: HeroRuntimeState, isCoarsePointer: boolean) {
+  state.isCoarsePointer = isCoarsePointer;
+  if (evePointerInteractionMode(state.isCoarsePointer).autoRotateEnvYaw) {
+    state.targetBrushActive = false;
+    state.targetMouseEnvPitch = 0;
+    state.targetAsciiMouseX = 0;
+    state.targetAsciiMouseY = 0;
+    state.autoRotateStartTime = performance.now();
+  }
+}
+
 export function createPointerController({
   state,
   controlsRef,
   canvasRef,
+  coarsePointerRef,
+  canvasLayoutRef,
+  devicePixelRatioRef,
 }: {
   state: HeroRuntimeState;
   controlsRef: ControlsRef;
   canvasRef: RefObject<HTMLCanvasElement | null>;
+  coarsePointerRef: RefObject<boolean>;
+  canvasLayoutRef: CanvasLayoutRef;
+  devicePixelRatioRef: DevicePixelRatioRef;
 }) {
-  const coarsePointerQuery = window.matchMedia("(pointer: coarse)");
-  const syncPointerInteractionMode = () => {
-    state.isCoarsePointer = coarsePointerQuery.matches;
-    if (evePointerInteractionMode(state.isCoarsePointer).autoRotateEnvYaw) {
-      state.targetBrushActive = false;
-      state.targetMouseEnvPitch = 0;
-      state.targetAsciiMouseX = 0;
-      state.targetAsciiMouseY = 0;
-      state.autoRotateStartTime = performance.now();
+  let cachedCanvasRect: DOMRectReadOnly | undefined;
+  let rectInvalidated = true;
+
+  const getCanvasRect = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return undefined;
+    const { width, height } = canvasLayoutRef.current;
+    if (
+      !cachedCanvasRect ||
+      rectInvalidated ||
+      cachedCanvasRect.width !== width ||
+      cachedCanvasRect.height !== height
+    ) {
+      const rect = canvas.getBoundingClientRect();
+      cachedCanvasRect = new DOMRectReadOnly(
+        rect.left,
+        rect.top,
+        width || rect.width,
+        height || rect.height,
+      );
+      rectInvalidated = false;
     }
+    return cachedCanvasRect;
+  };
+
+  const invalidateCanvasRect = () => {
+    rectInvalidated = true;
   };
 
   const updateEnvRotation = (clientX: number, clientY: number) => {
@@ -68,14 +106,19 @@ export function createPointerController({
       deactivateBrush();
       return;
     }
-    const devicePixelRatio = getBrowserDevicePixelRatio();
+    const rect = getCanvasRect();
+    if (!rect) {
+      deactivateBrush();
+      return;
+    }
+    const devicePixelRatio = getBrowserDevicePixelRatio(devicePixelRatioRef.current);
     const paddingRadius = bloomRadiusForDevicePixelRatio(devicePixelRatio);
     const logicalWidth = Math.max(1, canvas.width - paddingRadius * 2);
     const logicalHeight = Math.max(1, canvas.height - paddingRadius * 2);
     const mapping = mapClientPointToPaintCell({
       clientX: event.clientX,
       clientY: event.clientY,
-      rect: canvas.getBoundingClientRect(),
+      rect,
       canvasWidth: canvas.width,
       canvasHeight: canvas.height,
       logicalWidth,
@@ -115,18 +158,21 @@ export function createPointerController({
     updatePaintBrush(event);
   };
 
-  syncPointerInteractionMode();
-  coarsePointerQuery.addEventListener("change", syncPointerInteractionMode);
+  syncPointerInteractionMode(state, coarsePointerRef.current);
   window.addEventListener("pointermove", onPointerMove, { passive: true });
+  window.addEventListener("scroll", invalidateCanvasRect, { passive: true });
+  window.addEventListener("resize", invalidateCanvasRect, { passive: true });
   window.addEventListener("pointerout", deactivateBrush, { passive: true });
   window.addEventListener("blur", deactivateBrush);
 
   return {
+    invalidateCanvasRect,
     detach() {
       window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("scroll", invalidateCanvasRect);
+      window.removeEventListener("resize", invalidateCanvasRect);
       window.removeEventListener("pointerout", deactivateBrush);
       window.removeEventListener("blur", deactivateBrush);
-      coarsePointerQuery.removeEventListener("change", syncPointerInteractionMode);
     },
   };
 }

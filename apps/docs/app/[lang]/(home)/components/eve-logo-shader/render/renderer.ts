@@ -41,7 +41,7 @@ export function createEve5Renderer(
     const safeHeight = Math.max(1, Math.round(logicalHeight));
     const paddingRadius = options.paddingRadius ?? bloomRadiusForDevicePixelRatio(imprint.devicePixelRatio);
     const targets = bloomTargets.ensure(safeWidth, safeHeight, paddingRadius);
-    const currentPaintTargets = paintSystem.ensure(safeWidth, safeHeight, imprint.devicePixelRatio);
+    const currentPaintTargets = paintSystem.ensure(safeWidth, safeHeight, imprint.gridScaleMultiplier);
     const backSurfaceDepthView = targets.backSurfaceDepth.createView();
 
     renderBackMaterial(
