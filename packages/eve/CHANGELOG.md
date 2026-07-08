@@ -1,5 +1,14 @@
 # eve
 
+## 0.22.1
+
+### Patch Changes
+
+- 9c63a4e: Export `callSlackApi` and `resolveSlackBotToken` from `eve/channels/slack`. Code running outside a webhook-side handler — schedules resolving reactions or reading history, for example — has no `ctx.slack` handle; these were the internal primitives behind `slack.request`, already public-shaped and documented, and are now importable so apps stop hand-rolling `fetch` against the Slack Web API.
+- 210f097: Session sandboxes are now keyed per durable session instead of per deployment, so redeploying no longer discards a session's `/workspace` state. A session gets a fresh sandbox only when the sandbox definition itself changes (authored sandbox source, workspace seed content, or `revalidationKey`), and `onSession` runs again on the replacement sandbox.
+- a3efd4b: Render Slack HITL button prompts as card blocks, move approval tool input into collapsible containers, and keep answered-card updates scoped to the answered request so sibling batched approval buttons remain clickable.
+- 3c6abbf: Surface authorization prompts and completion updates from local subagents on the parent channel, including through nested delegation chains, while keeping the authorization callback scoped to the child session.
+
 ## 0.22.0
 
 ### Minor Changes
