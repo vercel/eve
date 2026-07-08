@@ -119,6 +119,8 @@ window.LS = window.LS || {};
     doc({ title: '260703 노진명약정서(형사)_작성자 강춘철사무장', status: 'PENDING_OTHERS', label: '약정서', signers: [{ name: '노진명', contact: 'jm.noh@example.com', status: 'VIEWED' }], createdAt: now - 4 * D, lastActivityAt: now - 1 * D }),
     doc({ title: '합의서(김진원)_피해자 최현지 님', status: 'COMPLETED', label: '합의서', signers: [{ name: '최현지', contact: 'hj.choi@example.com', status: 'SIGNED' }], createdAt: now - 2 * D, lastActivityAt: now - 2 * H, completedAt: now - 2 * H }),
     doc({ title: '합의서(김춘중)_피해자 이영민 님', status: 'COMPLETED', label: '합의서', signers: [{ name: '이영민', contact: 'ym.lee@example.com', status: 'SIGNED' }], createdAt: now - 3 * D, lastActivityAt: now - 5 * H, completedAt: now - 5 * H }),
+    doc({ title: '내용증명 회신 동의서(강춘철)_요청 취소', status: 'REJECTED', label: '내용증명', signers: [{ name: '강춘철', contact: 'cc.kang@example.com', status: 'REJECTED' }], createdAt: now - 6 * D, lastActivityAt: now - 5 * D }),
+    doc({ title: '위임장(노진명)_서명 거절', status: 'REJECTED', label: '위임장', signers: [{ name: '노진명', contact: 'jm.noh@example.com', status: 'REJECTED' }], createdAt: now - 9 * D, lastActivityAt: now - 8 * D }),
   ];
 
   // 완료 문서 물량 생성 (총 325건 규모 시뮬레이션 — 리스트/칸반 가상 스크롤 검증용)
@@ -183,6 +185,11 @@ window.LS = window.LS || {};
   // ── 공개 API ──────────────────────────────────────────────────────
   LS.workspace = WORKSPACE;
   LS.labels = LABELS;
+  /** 연동된 발신 계정 — 실서비스: Gmail OAuth2(gmail.send 스코프) + 카카오 비즈메시지 발신프로필 */
+  LS.senderAccounts = {
+    gmail: { email: 'cheong.law@gmail.com', connected: true },
+    kakao: { profile: '@법무법인청', connected: true },
+  };
 
   LS.api = {
     /** GET /api/v1/dashboard/summary */
@@ -202,12 +209,19 @@ window.LS = window.LS || {};
       return { counts: Object.assign({}, REMOTE_TOTALS), trend, urgent, urgentTotal: urgent.length };
     },
 
-    /** GET /api/v1/documents?status=&q=&label=&page=&size= */
+    /** GET /api/v1/documents?status=&q=&label=&range=&page=&size= — status=REMIND는 서버측 지연 필터 */
     async listDocuments(params) {
       params = params || {};
       await delay();
       let rows = DB.documents.slice();
-      if (params.status) rows = rows.filter((d) => d.status === params.status);
+      if (params.status === 'REMIND') {
+        const staleLine = Date.now() - 3 * D;
+        rows = rows.filter((d) => d.status === 'PENDING_OTHERS' && d.lastActivityAt < staleLine);
+      } else if (params.status) rows = rows.filter((d) => d.status === params.status);
+      if (params.rangeDays) {
+        const since = Date.now() - Number(params.rangeDays) * D;
+        rows = rows.filter((d) => d.lastActivityAt >= since);
+      }
       if (params.label) rows = rows.filter((d) => d.label === params.label);
       if (params.q) {
         const q = params.q.toLowerCase();
@@ -262,6 +276,31 @@ window.LS = window.LS || {};
       d.lastActivityAt = Date.now();
       d.audit.push({ at: d.lastActivityAt, type: 'REMIND', actor: WORKSPACE.name, detail: '독촉 알림 발송 (카카오톡·이메일)', ip: '112.153.24.11', ua: 'Web' });
       return { sent: d.signers.filter((s) => s.status !== 'SIGNED').length };
+    },
+
+    /**
+     * POST /api/v1/documents/{id}/notify — 메일함 발신
+     * channel: 'EMAIL'(Gmail API users.messages.send) | 'KAKAO'(알림톡 템플릿)
+     * 서버는 큐 적재 후 202 응답, Worker가 실제 발신. 발신 내역은 감사 로그에 기록.
+     */
+    async sendNotification(id, payload) {
+      await delay(320);
+      const d = await this.getDocument(id);
+      const channelLabel = payload.channel === 'KAKAO' ? '카카오톡 알림톡' : 'Gmail 이메일';
+      d.lastActivityAt = Date.now();
+      d.audit.push({
+        at: d.lastActivityAt,
+        type: 'NOTIFY',
+        actor: WORKSPACE.name,
+        detail: channelLabel + ' 발신 → ' + (payload.to || []).join(', '),
+        ip: '112.153.24.11',
+        ua: 'Web',
+      });
+      return {
+        sent: (payload.to || []).length,
+        channel: payload.channel,
+        messageId: (payload.channel === 'KAKAO' ? 'kko_' : 'gml_') + Math.random().toString(36).slice(2, 12),
+      };
     },
 
     /** GET /api/v1/contacts?q= — 스마트 연락처 자동완성 (서버측 prefix 검색 가정) */

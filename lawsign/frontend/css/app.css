@@ -467,6 +467,71 @@ table.doc-table { width: 100%; border-collapse: collapse; }
 :root[data-theme="dark"] .toast button.undo { background: rgba(0, 0, 0, 0.18); }
 .toast button.undo:hover { background: rgba(255, 255, 255, 0.28); }
 
+/* ── 잔여 건수 쿼터 (플랜 사용량) ──────────────── */
+.lnb-quota { display: flex; align-items: center; gap: 8px; padding: 0 4px 14px; font-size: 11.5px; color: var(--text-3); }
+.lnb-quota b { color: var(--text-2); }
+.lnb-quota .bar { flex: 1; height: 5px; border-radius: 5px; background: var(--surface-2); overflow: hidden; }
+.lnb-quota .bar i { display: block; height: 100%; background: var(--text-2); border-radius: 5px; }
+
+/* ── 메일함 레이아웃 (폴더 레일 + 리스트) ──────── */
+.mailbox-layout { display: grid; grid-template-columns: 196px minmax(0, 1fr); gap: 14px; align-items: start; }
+.mail-rail { position: sticky; top: 18px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; display: flex; flex-direction: column; gap: 2px; }
+.rail-group { font-size: 10.5px; font-weight: 800; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; padding: 12px 10px 4px; }
+.rail-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 7px 10px; border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--text-2); text-align: left; }
+.rail-item:hover { background: var(--surface-2); color: var(--text); }
+.rail-item.active { background: var(--brand-50); color: var(--brand-600); }
+.rail-item .cnt { font-size: 11px; font-weight: 700; color: var(--text-3); }
+.rail-item.active .cnt { color: var(--brand-600); }
+.rail-item.hot .cnt { background: var(--red-100); color: var(--red-600); border-radius: 12px; padding: 0 7px; }
+
+.mail-list { overflow: hidden; }
+.mail-row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.1s; }
+.mail-row:last-child { border-bottom: none; }
+.mail-row:hover { background: var(--surface-2); }
+.mail-avatar { width: 34px; height: 34px; border-radius: 50%; flex: none; background: var(--brand-100); color: var(--brand-600); display: grid; place-items: center; font-weight: 800; font-size: 13px; }
+.mail-main { flex: 1; min-width: 0; }
+.mail-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mail-title { font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-row.unread .mail-title { font-weight: 800; }
+.mail-row.unread .mail-avatar { background: var(--brand-600); color: #fff; }
+.mail-snippet { font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
+.mail-side { flex: none; display: flex; align-items: center; gap: 4px; }
+.mail-time { font-size: 11.5px; color: var(--text-3); }
+.mail-actions { display: none; gap: 2px; }
+.icon-a { padding: 6px; border-radius: 7px; color: var(--text-2); display: grid; place-items: center; }
+.icon-a:hover { background: var(--brand-50); color: var(--brand-600); }
+@media (hover: hover) {
+  .mail-row:hover .mail-time { display: none; }
+  .mail-row:hover .mail-actions { display: flex; }
+}
+@media (hover: none) {
+  .mail-actions { display: flex; }
+}
+
+/* ── 캘린더 뷰 ────────────────────────────────── */
+.cal-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; font-size: 11px; font-weight: 700; color: var(--text-3); text-align: center; margin-bottom: 4px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-cell { min-height: 78px; border: 1px solid var(--border); border-radius: 8px; padding: 6px; background: var(--surface); display: flex; flex-direction: column; gap: 4px; }
+.cal-cell.off { background: transparent; border-color: transparent; }
+.cal-cell.today { border-color: var(--brand-600); box-shadow: 0 0 0 2px var(--brand-100); }
+.cal-cell.has { cursor: pointer; }
+.cal-cell.has:hover { background: var(--brand-50); border-color: var(--brand-500); }
+.cal-cell .d { font-size: 11.5px; font-weight: 700; color: var(--text-2); }
+.cal-cell.today .d { color: var(--brand-600); }
+.cal-chips { display: flex; flex-direction: column; gap: 2px; }
+.cal-chip { font-size: 10.5px; font-weight: 700; border-radius: 6px; padding: 1px 6px; white-space: nowrap; width: fit-content; }
+.cal-chip.send { background: var(--blue-100); color: var(--blue-600); }
+.cal-chip.done { background: var(--green-100); color: var(--green-600); }
+.cal-chip.wait { background: var(--amber-100); color: var(--amber-600); }
+
+/* ── 요청 방식 선택 카드 ──────────────────────── */
+.method-grid { display: grid; gap: 10px; margin-top: 12px; }
+.method-card { display: flex; align-items: center; gap: 14px; text-align: left; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; background: var(--surface); transition: border-color 0.12s, transform 0.12s, box-shadow 0.12s; }
+.method-card:hover { border-color: var(--brand-500); transform: translateY(-1px); box-shadow: var(--shadow-md); }
+.method-card .ic { width: 44px; height: 44px; border-radius: 12px; flex: none; background: var(--brand-50); color: var(--brand-600); display: grid; place-items: center; }
+.method-card b { display: block; font-size: 14px; }
+.method-card small { color: var(--text-2); font-size: 12.5px; }
+
 /* ── 모바일 상단 앱바 ─────────────────────────── */
 .top-appbar { display: none; }
 
@@ -475,6 +540,10 @@ table.doc-table { width: 100%; border-collapse: collapse; }
 
 @media (max-width: 1020px) {
   .dash-grid, .request-layout { grid-template-columns: 1fr; }
+  .mailbox-layout { grid-template-columns: 1fr; }
+  .mail-rail { position: static; flex-direction: row; overflow-x: auto; }
+  .mail-rail .rail-group { display: none; }
+  .rail-item { white-space: nowrap; width: auto; flex: none; }
   .editor-layout { grid-template-columns: 148px 1fr; }
   .thumb-rail { display: none; }
   .stat-grid, .tpl-grid { grid-template-columns: repeat(2, 1fr); }

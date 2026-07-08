@@ -107,6 +107,8 @@
 | PATCH | `/documents/{id}` | `updateDocumentStatus(id, status)` | 칸반 DnD. Optimistic → 실패 시 클라이언트 롤백 |
 | POST | `/documents/{id}/send` | `sendDocument(payload)` | 202 Accepted — 발송은 메시지 큐 비동기 처리 |
 | POST | `/documents/{id}/remind` | `remindSigners(id)` | 미서명자 대상 카카오톡·이메일 독촉, `{sent: n}` |
+| POST | `/documents/{id}/notify` | `sendNotification(id, payload)` | 메일함 발신. `channel: EMAIL`(Gmail API `users.messages.send`, OAuth2 `gmail.send` 스코프) 또는 `KAKAO`(비즈메시지 알림톡 승인 템플릿). 202 + `{sent, channel, messageId}`, 감사 로그 `NOTIFY` 기록 |
+| GET | `/documents/calendar?year=&month=` | (클라이언트 집계) | 일자별 `{sent, signed, waiting}` 집계 — 발송약정=해당일 발송·예약, 서명됨=해당일 체결, 서명대기=해당일 발송분 중 미체결. 서명 기한·예약 발송은 Google Calendar API로 사용자 캘린더에 이벤트 동기화 |
 
 `POST /documents/{id}/send` 요청 예:
 

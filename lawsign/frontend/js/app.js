@@ -73,6 +73,10 @@
     send: I('<path d="m3.5 11.5 17-7.5-7.5 17-2-7.5Z"/>'),
     warn: I('<path d="M12 3 2.5 20h19Z"/><path d="M12 10v4.5"/><circle cx="12" cy="17.2" r="0.8" fill="currentColor" stroke="none"/>'),
     diamond: I('<path d="M6 3h12l4 6-10 12L2 9Z"/><path d="M2 9h20M9.5 3 8 9l4 12M14.5 3 16 9l-4 12"/>'),
+    mail: I('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>'),
+    chat: I('<path d="M21 12a8 8 0 0 1-8 8H4l2.5-3A8 8 0 1 1 21 12Z"/>'),
+    link: I('<path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5"/>'),
+    upload: I('<path d="M12 16V5"/><path d="m7 9 5-5 5 5"/><path d="M5 20h14"/>'),
   };
   LS.icons = icons;
 
@@ -312,60 +316,246 @@
     { key: 'COMPLETED', title: '✅ 서명 완료됨', statuses: ['COMPLETED'], drop: 'COMPLETED' },
   ];
 
+  // 벤치마크 LNB(모든 상태/진행 중/종결됨/요청 전/문서 관리)를 메일함 폴더 레일로 재구성
+  const MAIL_GROUPS = [
+    { title: '', items: [{ key: '', label: '전체 문서함' }] },
+    { title: '진행 중', items: [{ key: 'NEED_MY_SIGN', label: '내 서명 필요' }, { key: 'PENDING_OTHERS', label: '상대 서명 대기' }] },
+    { title: '종결됨', items: [{ key: 'COMPLETED', label: '서명 완료됨' }, { key: 'REJECTED', label: '거절·취소됨' }] },
+    { title: '요청 전', items: [{ key: 'DRAFT', label: '작성 중' }, { key: 'SCHEDULED', label: '예약됨' }] },
+    { title: '문서 관리', items: [{ key: 'REMIND', label: '리마인더' }, { key: '_EXPORT', label: '데이터 추출' }] },
+  ];
+  const folderLabel = (key) => {
+    for (const g of MAIL_GROUPS) for (const it of g.items) if (it.key === key) return it.label;
+    return '전체 문서함';
+  };
+
   LS.route('documents', async (main, params) => {
-    const view = params.view === 'kanban' ? 'kanban' : 'list';
-    const state = { q: params.q || '', status: params.status || '', label: params.label || '' };
-    const syncUrl = () => nav('documents', { view, q: state.q, status: state.status, label: state.label });
+    const view = params.view === 'kanban' ? 'kanban' : params.view === 'calendar' ? 'calendar' : 'mail';
+    const state = { q: params.q || '', status: params.status || '', label: params.label || '', range: params.range || '' };
+    const urlOf = (over) => Object.assign({ view, q: state.q, status: state.status, label: state.label, range: state.range }, over || {});
+    const syncUrl = () => nav('documents', urlOf());
 
-    main.innerHTML =
-      '<div class="page">' +
-      '<div class="docbox-head"><h1 style="font-size:20px">' + icons.folder + ' 문서함</h1>' +
-      '<div class="toolbar-row">' +
-      '<div class="view-toggle"><button data-v="list" class="' + (view === 'list' ? 'active' : '') + '">' + icons.rows + ' 리스트</button>' +
-      '<button data-v="kanban" class="' + (view === 'kanban' ? 'active' : '') + '">' + icons.grid + ' 칸반</button></div>' +
-      '<button class="btn primary" id="doc-new">' + icons.pen + ' 새 서명 요청</button></div></div>' +
-
-      '<div class="toolbar-row" style="margin-bottom:14px">' +
+    const filtersHtml =
+      '<div class="toolbar-row" style="margin-bottom:12px">' +
       '<div class="search-box">' + icons.search + '<input class="input" id="doc-q" placeholder="문서 제목·서명자로 찾기" value="' + esc(state.q) + '"></div>' +
       '<select class="input" id="doc-label" style="width:auto"><option value="">🏷️ 라벨 전체</option>' +
       LS.labels.map((l) => '<option ' + (state.label === l ? 'selected' : '') + '>' + esc(l) + '</option>').join('') + '</select>' +
-      (view === 'list'
-        ? '<div class="status-tabs" id="doc-tabs">' +
-          ['', 'DRAFT', 'NEED_MY_SIGN', 'PENDING_OTHERS', 'COMPLETED'].map((s) =>
-            '<button data-s="' + s + '" class="' + (state.status === s ? 'active' : '') + '">' + (s ? STATUS[s].label : '전체') + '</button>').join('') + '</div>'
-        : '<span class="dim" style="font-size:12px">카드를 드래그하여 상태를 변경할 수 있습니다</span>') +
-      '</div>' +
-      '<div id="doc-body"></div></div>';
+      '<select class="input" id="doc-range" style="width:auto">' +
+      [['', '📅 기간 전체'], ['1', '오늘'], ['7', '최근 7일'], ['30', '최근 30일']].map(([v, t]) =>
+        '<option value="' + v + '" ' + (state.range === v ? 'selected' : '') + '>' + t + '</option>').join('') + '</select>' +
+      (view === 'kanban' ? '<span class="dim" style="font-size:12px">카드를 드래그하여 상태를 변경할 수 있습니다</span>' : '') +
+      '</div>';
+
+    main.innerHTML =
+      '<div class="page">' +
+      '<div class="docbox-head"><h1 style="font-size:20px">' + icons.mail + ' 메일함 ' +
+      '<span class="badge gold">' + icons.check + ' Gmail 연동됨</span> <span class="badge amber">💬 카카오 알림톡</span></h1>' +
+      '<div class="toolbar-row">' +
+      '<div class="view-toggle">' +
+      [['mail', icons.mail + ' 메일함'], ['kanban', icons.grid + ' 칸반'], ['calendar', icons.calendar + ' 캘린더']].map(([v, t]) =>
+        '<button data-v="' + v + '" class="' + (view === v ? 'active' : '') + '">' + t + '</button>').join('') + '</div>' +
+      '<button class="btn primary" id="doc-new">' + icons.pen + ' 새 서명 요청</button></div></div>' +
+      (view === 'mail'
+        ? '<div class="mailbox-layout"><aside class="mail-rail" id="mail-rail" aria-label="메일함 폴더"></aside>' +
+          '<section class="mail-pane">' + filtersHtml + '<div id="doc-body"></div></section></div>'
+        : view === 'kanban'
+        ? filtersHtml + '<div id="doc-body"></div>'
+        : '<div id="doc-body"></div>') +
+      '</div>';
 
     $('#doc-new').addEventListener('click', () => nav('request'));
-    $$('.view-toggle button', main).forEach((b) => b.addEventListener('click', () => nav('documents', { view: b.dataset.v, q: state.q, status: state.status, label: state.label })));
-    $('#doc-label').addEventListener('change', (e) => { state.label = e.target.value; syncUrl(); });
+    $$('.view-toggle button', main).forEach((b) => b.addEventListener('click', () => nav('documents', urlOf({ view: b.dataset.v }))));
+    const labelSel = $('#doc-label');
+    if (labelSel) labelSel.addEventListener('change', (e) => { state.label = e.target.value; syncUrl(); });
+    const rangeSel = $('#doc-range');
+    if (rangeSel) rangeSel.addEventListener('change', (e) => { state.range = e.target.value; syncUrl(); });
     // 실시간 검색: 500ms 디바운스로 서버 질의 횟수를 통제 (본문만 갱신, URL은 replaceState)
-    $('#doc-q').addEventListener('input', debounce((e) => {
+    const qInput = $('#doc-q');
+    if (qInput) qInput.addEventListener('input', debounce((e) => {
       state.q = e.target.value.trim();
-      history.replaceState(null, '', '#/documents?' + ['view=' + view, state.q && 'q=' + encodeURIComponent(state.q), state.status && 'status=' + state.status, state.label && 'label=' + encodeURIComponent(state.label)].filter(Boolean).join('&'));
+      const p = urlOf();
+      history.replaceState(null, '', '#/documents?' + Object.keys(p).filter((k) => p[k]).map((k) => k + '=' + encodeURIComponent(p[k])).join('&'));
       drawBody();
     }, 500));
-    if (view === 'list') $$('#doc-tabs button').forEach((b) => b.addEventListener('click', () => { state.status = b.dataset.s; syncUrl(); }));
+
+    // ── 폴더 레일 (전체/진행 중/종결됨/요청 전/문서 관리 + 건수) ──
+    async function drawRail() {
+      const rail = $('#mail-rail');
+      if (!rail) return;
+      const all = await LS.api.listDocuments({ size: 500 });
+      const counts = { '': all.items.length, REMIND: 0 };
+      all.items.forEach((d) => {
+        counts[d.status] = (counts[d.status] || 0) + 1;
+        if (d.status === 'PENDING_OTHERS' && staleDays(d) >= 3) counts.REMIND++;
+      });
+      rail.innerHTML = MAIL_GROUPS.map((g) =>
+        (g.title ? '<div class="rail-group">' + g.title + '</div>' : '') +
+        g.items.map((it) => {
+          if (it.key === '_EXPORT') return '<button class="rail-item" data-export="1">' + icons.download + ' <span>데이터 추출</span></button>';
+          const n = counts[it.key] || 0;
+          return '<button class="rail-item' + (state.status === it.key ? ' active' : '') + (it.key === 'REMIND' && n ? ' hot' : '') + '" data-key="' + it.key + '">' +
+            '<span>' + it.label + '</span><span class="cnt">' + n.toLocaleString() + '</span></button>';
+        }).join('')
+      ).join('');
+      $$('.rail-item[data-key]', rail).forEach((b) => b.addEventListener('click', () => { state.status = b.dataset.key; syncUrl(); }));
+      const exp = $('[data-export]', rail);
+      if (exp) exp.addEventListener('click', exportCsv);
+    }
+
+    /** 데이터 추출 — 현재 필터 결과를 CSV(UTF-8 BOM, 엑셀 호환)로 내려받기 */
+    async function exportCsv() {
+      const res = await LS.api.listDocuments({ q: state.q, status: state.status, label: state.label, rangeDays: state.range, size: 500 });
+      const cell = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+      const rows = [['문서 제목', '상태', '서명자', '라벨', '마지막 활동', '해시 등록'].map(cell).join(',')]
+        .concat(res.items.map((d) => [d.title, STATUS[d.status].label, d.signers.map((s) => s.name).join(' / '), d.label || '', LS.ui.fmtDateTime(d.lastActivityAt), d.hash ? 'Y' : 'N'].map(cell).join(',')));
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob(['﻿' + rows.join('\n')], { type: 'text/csv;charset=utf-8' }));
+      a.download = 'lawsign_documents_' + LS.ui.fmtDate(Date.now()) + '.csv';
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast('📊 문서 ' + res.items.length + '건을 CSV로 추출했습니다.');
+    }
+
+    // ── 캘린더 뷰: 일자별 ①발송약정 ②서명됨 ③서명대기 집계 ──────────
+    async function drawCalendar(body) {
+      const res = await LS.api.listDocuments({ size: 500 });
+      const y = cal.y;
+      const m = cal.m;
+      const byDay = {}; // day -> { sent, signed, waiting, docs: [] }
+      const slot = (day) => (byDay[day] = byDay[day] || { sent: 0, signed: 0, waiting: 0, docs: [] });
+      res.items.forEach((d) => {
+        const c = new Date(d.createdAt);
+        if (c.getFullYear() === y && c.getMonth() === m) {
+          const s = slot(c.getDate());
+          s.sent++; // 발송약정: 해당 일자에 발송(예약 포함)된 요청
+          if (d.status === 'PENDING_OTHERS' || d.status === 'NEED_MY_SIGN' || d.status === 'SCHEDULED') s.waiting++;
+          s.docs.push(d);
+        }
+        if (d.completedAt) {
+          const e = new Date(d.completedAt);
+          if (e.getFullYear() === y && e.getMonth() === m) {
+            const s = slot(e.getDate());
+            s.signed++;
+            if (!s.docs.includes(d)) s.docs.push(d);
+          }
+        }
+      });
+      const first = new Date(y, m, 1).getDay();
+      const days = new Date(y, m + 1, 0).getDate();
+      const today = new Date();
+      let cells = '';
+      for (let i = 0; i < first; i++) cells += '<div class="cal-cell off"></div>';
+      for (let day = 1; day <= days; day++) {
+        const s = byDay[day];
+        const isToday = today.getFullYear() === y && today.getMonth() === m && today.getDate() === day;
+        cells +=
+          '<div class="cal-cell' + (isToday ? ' today' : '') + (s ? ' has' : '') + '" data-day="' + day + '">' +
+          '<span class="d">' + day + '</span>' +
+          (s
+            ? '<span class="cal-chips">' +
+              (s.sent ? '<span class="cal-chip send" title="발송약정">📤 ' + s.sent + '</span>' : '') +
+              (s.signed ? '<span class="cal-chip done" title="서명됨">✅ ' + s.signed + '</span>' : '') +
+              (s.waiting ? '<span class="cal-chip wait" title="서명대기">⏳ ' + s.waiting + '</span>' : '') +
+              '</span>'
+            : '') +
+          '</div>';
+      }
+      body.innerHTML =
+        '<div class="card card-pad">' +
+        '<div class="toolbar-row" style="justify-content:space-between;margin-bottom:12px">' +
+        '<div class="section-title">' + icons.calendar + ' ' + y + '년 ' + (m + 1) + '월 발송·체결 캘린더 <span class="badge gold">' + icons.check + ' Google Calendar 연동됨</span></div>' +
+        '<span class="toolbar-row"><button class="btn sm" id="cal-prev">‹ 이전 달</button><button class="btn sm" id="cal-next">다음 달 ›</button></span></div>' +
+        '<div class="toolbar-row" style="gap:14px;margin-bottom:10px;font-size:12px">' +
+        '<span class="cal-chip send">📤 발송약정</span><span class="cal-chip done">✅ 서명됨</span><span class="cal-chip wait">⏳ 서명대기</span>' +
+        '<span class="dim">날짜를 클릭하면 해당 일자의 문서를 확인합니다. 서명 기한·예약 발송은 Google Calendar에 자동 등록됩니다.</span></div>' +
+        '<div class="cal-week">' + ['일', '월', '화', '수', '목', '금', '토'].map((w) => '<span>' + w + '</span>').join('') + '</div>' +
+        '<div class="cal-grid">' + cells + '</div></div>';
+      $('#cal-prev').addEventListener('click', () => { cal.m--; if (cal.m < 0) { cal.m = 11; cal.y--; } drawBody(); });
+      $('#cal-next').addEventListener('click', () => { cal.m++; if (cal.m > 11) { cal.m = 0; cal.y++; } drawBody(); });
+      $$('.cal-cell.has', body).forEach((cell) =>
+        cell.addEventListener('click', () => {
+          const s = byDay[+cell.dataset.day];
+          openModal(
+            '<div class="modal-head"><h3>' + (m + 1) + '월 ' + cell.dataset.day + '일 — 발송약정 ' + s.sent + ' · 서명됨 ' + s.signed + ' · 서명대기 ' + s.waiting + '</h3><button class="modal-close">×</button></div>' +
+            '<div class="modal-body"><div class="card mail-list">' + s.docs.map(mailRow).join('') + '</div></div>',
+            { wide: true });
+          bindMailActions($('.modal-backdrop'));
+          bindRowMenus($('.modal-backdrop'));
+        }));
+    }
+
+    // 벤치마크 규칙: 10개씩 보기 + 페이지네이션 (상태별 목록의 기본 탐색 단위)
+    let pageSize = 10;
+    let pageNo = 1;
+    const nowD = new Date();
+    const cal = { y: nowD.getFullYear(), m: nowD.getMonth() };
+
+    function mailRow(d) {
+      const unread = d.status === 'NEED_MY_SIGN' || (d.status === 'PENDING_OTHERS' && Date.now() - d.lastActivityAt < 86400000);
+      const first = d.signers[0];
+      const meta = [
+        '요청 ' + LS.ui.fmtDate(d.createdAt).slice(5),
+        d.completedAt ? '체결 ' + LS.ui.fmtDate(d.completedAt).slice(5) : null,
+        d.label || null,
+        d.hash ? '🔒 해시 등록' : '기한 ' + d.expirationDays + '일',
+      ].filter(Boolean).join(' · ');
+      return (
+        '<div class="mail-row' + (unread ? ' unread' : '') + '" data-id="' + d.id + '" role="button" tabindex="0">' +
+        '<span class="mail-avatar">' + esc(((first && first.name) || '문').slice(0, 1)) + '</span>' +
+        '<div class="mail-main"><div class="mail-top"><span class="mail-title">' + esc(d.title) + '</span>' + statusBadge(d.status) +
+        (d.status === 'PENDING_OTHERS' && staleDays(d) >= 3 ? ' <span class="badge red">⏳ 리마인드</span>' : '') + '</div>' +
+        '<div class="mail-snippet">' + esc(d.signers.map((s) => s.name).join(', ') || '서명자 미지정') + ' · ' + meta + '</div></div>' +
+        '<div class="mail-side"><span class="mail-time">' + relTime(d.lastActivityAt) + '</span>' +
+        '<span class="mail-actions">' +
+        '<button class="icon-a" title="Gmail 이메일 발신" data-mail="' + d.id + '" aria-label="이메일 발신">' + icons.mail + '</button>' +
+        '<button class="icon-a" title="카카오톡 알림 발신" data-kakao="' + d.id + '" aria-label="카카오톡 알림">' + icons.chat + '</button>' +
+        '<button class="icon-a" title="이력·검증" data-menu="' + d.id + '" aria-label="문서 메뉴">' + icons.dots + '</button>' +
+        '</span></div></div>');
+    }
+
+    function bindMailActions(root) {
+      $$('[data-mail]', root).forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); LS.openComposeModal(b.dataset.mail, 'EMAIL'); }));
+      $$('[data-kakao]', root).forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); LS.openComposeModal(b.dataset.kakao, 'KAKAO'); }));
+      $$('.mail-row', root).forEach((r) => r.addEventListener('click', () => openHistoryModal(r.dataset.id)));
+    }
 
     async function drawBody() {
+      drawRail();
       const body = $('#doc-body');
-      if (view === 'list') {
-        const res = await LS.api.listDocuments({ q: state.q, status: state.status, label: state.label });
-        body.innerHTML =
-          '<div class="card" style="overflow-x:auto"><table class="doc-table"><thead><tr>' +
-          '<th>문서</th><th>상태</th><th class="hide-m">서명자</th><th class="hide-m">라벨</th><th>마지막 활동</th><th></th></tr></thead><tbody>' +
-          (res.items.length ? res.items.map((d) =>
-            '<tr data-id="' + d.id + '"><td class="doc-title-cell">' + esc(d.title) +
-            '<small>' + (d.hash ? '🔒 문서 잠금 · 해시 등록됨' : '서명 기한 ' + d.expirationDays + '일') + '</small></td>' +
-            '<td>' + statusBadge(d.status) + (d.status === 'PENDING_OTHERS' && staleDays(d) >= 3 ? ' <span class="badge red">⏳ 리마인드 필요</span>' : '') + '</td>' +
-            '<td class="hide-m">' + esc(d.signers.map((s) => s.name).join(', ') || '—') + '</td>' +
-            '<td class="hide-m">' + (d.label ? '<span class="badge brand">' + esc(d.label) + '</span>' : '<span class="dim">—</span>') + '</td>' +
-            '<td class="dim">' + relTime(d.lastActivityAt) + '</td>' +
-            '<td><button class="menu-btn btn ghost sm" data-menu="' + d.id + '">' + icons.dots + '</button></td></tr>').join('')
-            : '<tr><td colspan="6">' + emptyState('조건에 맞는 문서가 없습니다', state.q ? '「' + esc(state.q) + '」 검색어를 바꾸거나 필터를 해제해 보세요.' : '첫 서명 요청을 시작해 보세요.', '<button class="btn primary sm" onclick="LS.nav(\'request\')">' + icons.pen + ' 새 서명 요청</button>') + '</td></tr>') +
-          '</tbody></table></div>' +
-          '<p class="dim" style="margin-top:10px;font-size:12px">총 ' + res.total.toLocaleString() + '건 · 표시 ' + res.items.length + '건 — 대용량 목록은 커서 기반 페이지네이션 + 가상 스크롤로 렌더링</p>';
+      if (view === 'calendar') {
+        await drawCalendar(body);
+        return;
+      }
+      if (view === 'mail') {
+        const res = await LS.api.listDocuments({ q: state.q, status: state.status, label: state.label, rangeDays: state.range, size: 500 });
+        const total = res.items.length;
+        const pages = Math.max(1, Math.ceil(total / pageSize));
+        pageNo = Math.min(pageNo, pages);
+        const slice = res.items.slice((pageNo - 1) * pageSize, pageNo * pageSize);
+        const remindHead = state.status === 'REMIND'
+          ? '<div class="editor-hint" style="margin-bottom:12px">📅 <b>오늘의 리마인드가 ' + total + '건</b> 있습니다 — 3일 이상 응답이 없는 요청입니다. 행의 발신 버튼으로 즉시 독촉하세요.</div>'
+          : '';
+        body.innerHTML = total
+          ? remindHead + '<div class="card mail-list">' + slice.map(mailRow).join('') + '</div>' +
+            '<div class="toolbar-row" style="margin-top:12px;justify-content:space-between">' +
+            '<span class="dim" style="font-size:12px">총 ' + total.toLocaleString() + '건 · ' + pageNo + '/' + pages + ' 페이지</span>' +
+            '<span class="toolbar-row"><select class="input" id="page-size" style="width:auto;padding:5px 8px;font-size:12px">' +
+            [10, 25, 50].map((n) => '<option value="' + n + '" ' + (pageSize === n ? 'selected' : '') + '>' + n + '개씩 보기</option>').join('') + '</select>' +
+            '<button class="btn sm" id="pg-prev" ' + (pageNo <= 1 ? 'disabled' : '') + '>‹ 이전</button>' +
+            '<button class="btn sm" id="pg-next" ' + (pageNo >= pages ? 'disabled' : '') + '>다음 ›</button></span></div>'
+          : remindHead + '<div class="card">' + emptyState(
+              "'" + folderLabel(state.status) + "' 상태의 문서가 없습니다",
+              state.q ? '「' + esc(state.q) + '」 검색어를 바꾸거나 필터를 해제해 보세요.' : '다른 폴더를 확인하거나 새 서명 요청을 시작해 보세요.',
+              '<button class="btn sm" id="back-all">↩ 모든 문서로 돌아가기</button> <button class="btn primary sm" onclick="LS.nav(\'request\')">' + icons.pen + ' 새 서명 요청</button>') + '</div>';
+        const backAll = $('#back-all', body);
+        if (backAll) backAll.addEventListener('click', () => { state.status = ''; syncUrl(); });
+        const ps = $('#page-size', body);
+        if (ps) ps.addEventListener('change', (e) => { pageSize = +e.target.value; pageNo = 1; drawBody(); });
+        const pv = $('#pg-prev', body);
+        if (pv) pv.addEventListener('click', () => { pageNo--; drawBody(); });
+        const px = $('#pg-next', body);
+        if (px) px.addEventListener('click', () => { pageNo++; drawBody(); });
+        bindMailActions(body);
         bindRowMenus(body);
       } else {
         const res = await LS.api.listDocuments({ q: state.q, label: state.label });
@@ -464,7 +654,7 @@
   });
 
   // ── 문서 이력 & 무결성 검증 모달 ─────────────────────────────────
-  const AUDIT_DOT = { ISSUED: '🟢', VIEWED: '🟡', SIGNED: '🔵', LOCKED: '🟣', REMIND: '🔔', STATUS: '⚙️' };
+  const AUDIT_DOT = { ISSUED: '🟢', VIEWED: '🟡', SIGNED: '🔵', LOCKED: '🟣', REMIND: '🔔', STATUS: '⚙️', NOTIFY: '✉️' };
   async function openHistoryModal(id) {
     const d = await LS.api.getDocument(id);
     openModal(
@@ -491,6 +681,60 @@
     if (ct) ct.addEventListener('click', () => { closeModal(); nav('certificate', { id: d.id }); });
   }
   LS.openHistoryModal = openHistoryModal;
+
+  // ── 메시지 발신 컴포즈 모달 (Gmail API · 카카오 알림톡) ──────────
+  LS.openComposeModal = async function (id, channel) {
+    const d = await LS.api.getDocument(id);
+    let chan = channel || 'EMAIL';
+    const targets = d.signers.filter((s) => s.status !== 'SIGNED');
+    const recipients = (targets.length ? targets : d.signers).map((s) => s.name + ' <' + s.contact + '>');
+    const acc = LS.senderAccounts;
+    const defaultBody =
+      '안녕하세요, ' + ((targets[0] || d.signers[0] || {}).name || '고객') + '님.\n' +
+      '「' + d.title + '」 문서의 전자서명이 대기 중입니다.\n' +
+      '아래 링크에서 내용을 확인하신 후 서명을 완료해 주세요. (기한: ' + d.expirationDays + '일)\n' +
+      'https://sign.lawsign.example/d/' + d.id;
+
+    const m = openModal(
+      '<div class="modal-head"><h3>' + icons.send + ' 메시지 발신</h3><button class="modal-close">×</button></div>' +
+      '<div class="modal-body">' +
+      '<div class="toolbar-row" style="margin-bottom:14px">' +
+      '<button class="btn chan-pill" data-chan="EMAIL">' + icons.mail + ' 이메일 (Gmail)</button>' +
+      '<button class="btn chan-pill" data-chan="KAKAO">' + icons.chat + ' 카카오톡 알림톡</button></div>' +
+      '<div style="display:grid;gap:12px">' +
+      '<div><label class="field-label">받는 사람</label><div class="toolbar-row">' +
+      recipients.map((r) => '<span class="badge brand">' + esc(r) + '</span>').join('') + '</div></div>' +
+      '<div id="cmp-subject-row"><label class="field-label">제목</label>' +
+      '<input class="input" id="cmp-subject" value="' + esc('[로싸인] 「' + d.title + '」 서명 요청 안내') + '"></div>' +
+      '<div><label class="field-label">메시지</label><textarea class="input" id="cmp-body" rows="5">' + esc(defaultBody) + '</textarea></div>' +
+      '<div class="dim" id="cmp-account" style="font-size:12px"></div></div>' +
+      '<div class="toolbar-row" style="margin-top:16px;justify-content:flex-end">' +
+      '<button class="btn" id="cmp-cancel">취소</button><button class="btn primary" id="cmp-send">' + icons.send + ' 발신하기</button></div></div>',
+      { wide: true });
+
+    function paint() {
+      LS.ui.$$('.chan-pill', m).forEach((b) => b.classList.toggle('primary', b.dataset.chan === chan));
+      LS.ui.$('#cmp-subject-row', m).style.display = chan === 'EMAIL' ? '' : 'none';
+      LS.ui.$('#cmp-account', m).innerHTML = chan === 'EMAIL'
+        ? '발신 계정: <b>' + acc.gmail.email + '</b> <span class="badge green">Gmail 연동됨</span> — Gmail API(users.messages.send) 경유'
+        : '발신 프로필: <b>' + acc.kakao.profile + '</b> <span class="badge amber">알림톡 승인 템플릿</span> — 카카오 비즈메시지 경유';
+    }
+    LS.ui.$$('.chan-pill', m).forEach((b) => b.addEventListener('click', () => { chan = b.dataset.chan; paint(); }));
+    LS.ui.$('#cmp-cancel', m).addEventListener('click', closeModal);
+    LS.ui.$('#cmp-send', m).addEventListener('click', async () => {
+      const btn = LS.ui.$('#cmp-send', m);
+      btn.disabled = true;
+      const res = await LS.api.sendNotification(id, {
+        channel: chan,
+        to: recipients,
+        subject: chan === 'EMAIL' ? LS.ui.$('#cmp-subject', m).value : undefined,
+        body: LS.ui.$('#cmp-body', m).value,
+      });
+      closeModal();
+      toast((chan === 'EMAIL' ? '✉️ Gmail로 ' : '💬 카카오톡으로 ') + res.sent + '명에게 발신 완료 (ID: ' + res.messageId + ')');
+    });
+    paint();
+  };
 
   // ══════════════════════════════════════════════════════════════════
   // 화면 3: 감사추적 인증서 (완료 PDF 마지막 페이지 병합본의 웹 미리보기)
@@ -598,7 +842,7 @@
   function boot() {
     const navItems = [
       { route: 'dashboard', label: '홈', ic: icons.home },
-      { route: 'documents', label: '문서함', ic: icons.folder },
+      { route: 'documents', label: '메일함', ic: icons.mail },
       { route: 'request', label: '서명 요청', ic: icons.pen },
       { route: 'validator', label: '검증 포털', ic: icons.shield },
     ];
@@ -610,6 +854,7 @@
       '<div class="app-shell">' +
       '<nav class="lnb"><div class="lnb-logo"><span class="mark">L</span><span><span class="law">Law</span>Sign</span></div>' +
       '<button class="lnb-cta" id="lnb-new">' + icons.pen + ' 새 서명 요청</button>' +
+      '<div class="lnb-quota"><span>잔여 <b>1,836</b>건</span><span class="bar"><i style="width:28%"></i></span></div>' +
       navItems.map((n) => '<a class="lnb-item" data-route="' + n.route + '" href="#/' + n.route + '">' + n.ic + ' ' + n.label +
         (n.route === 'documents' ? '<span class="cnt">1</span>' : '') + '</a>').join('') +
       '<button class="lnb-item" id="theme-toggle">' + icons.sun + ' 테마 전환</button>' +
