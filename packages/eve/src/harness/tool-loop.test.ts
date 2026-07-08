@@ -3149,6 +3149,23 @@ describe("createToolLoopHarness", () => {
     expect((stepFailed!.data as { details?: { errorId?: string } }).details?.errorId).toBeDefined();
   });
 
+  it("rethrows a recoverable task-mode model error for durable step retry", async () => {
+    setupMockAgentError(new Error("Model blew up"));
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("task", emit));
+
+    await expect(runStep(createTestSession(), { message: "Delegated task" })).rejects.toThrow(
+      "Model blew up",
+    );
+
+    const types = events.map((event) => event.type);
+    expect(types).not.toContain("step.failed");
+    expect(types).not.toContain("turn.failed");
+    expect(types).not.toContain("session.failed");
+    expect(types).not.toContain("session.waiting");
+  });
+
   it("parks the session on an ambiguous GatewayInternalServerError 400 model-call error", async () => {
     setupMockAgentError(
       createGatewayModelCallError({

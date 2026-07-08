@@ -1150,10 +1150,26 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         }
 
         if (config.mode === "task") {
+          if (
+            classification === "recoverable" &&
+            !(finalError instanceof EmptyModelResponseError)
+          ) {
+            // Task runs cannot park for user-driven recovery. Let the durable
+            // step retry from committed session state, but only for errors
+            // that did not already consume the in-process transient budget or
+            // the dedicated empty-response reissue.
+            log.warn(
+              requestSummary?.message ??
+                "model call failed recoverably in task mode — rethrowing for durable step retry",
+              modelCallLogFields,
+            );
+            throw finalError;
+          }
+
           // A task run cannot park for a user retry (turnWorkflow rejects
-          // `next: null` in task mode), so the failure is the task's
-          // terminal result, mirroring finishTaskTurn's unfulfilled-schema
-          // shape.
+          // `next: null` in task mode). Classified transient errors arrive
+          // here only after their bounded in-process retries are exhausted;
+          // empty responses already received their specialized reissue.
           log.error(
             requestSummary?.message ?? "model call failed; failing the task run",
             modelCallLogFields,

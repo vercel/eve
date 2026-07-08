@@ -32,7 +32,6 @@ import {
 } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
-import { toError } from "#shared/errors.js";
 import type { JsonObject } from "#shared/json.js";
 import {
   createRuntimeToolResultFromStepResult,
@@ -52,6 +51,7 @@ import { isAuthorizationSignal, isPendingAuthorizationToolOutput } from "#harnes
 import { contextStorage } from "#context/container.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
 import { createProviderStreamActionBatch } from "#harness/stream-actions.js";
+import { normalizeModelStreamError } from "#harness/model-call-error.js";
 import type {
   HarnessEmitFn,
   HarnessSession,
@@ -342,18 +342,6 @@ interface EmittedStreamContent {
 interface StreamActionEmissionOptions {
   readonly excludedActionToolNames: ReadonlySet<string>;
   readonly tools: HarnessToolMap;
-}
-
-/** Keeps provider discriminators reachable after coercing a plain stream error. */
-function normalizeModelStreamError(raw: unknown): Error {
-  const error = toError(raw);
-  if (error === raw) return error;
-
-  Object.defineProperty(error, "cause", {
-    configurable: true,
-    value: raw,
-  });
-  return error;
 }
 
 /**

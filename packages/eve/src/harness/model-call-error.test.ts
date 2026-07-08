@@ -6,6 +6,7 @@ import {
   extractModelCallErrorDetails,
   extractUnsupportedProviderToolTypes,
   isNoOutputGeneratedError,
+  normalizeModelStreamError,
   summarizeKnownModelCallConfigError,
   summarizeKnownModelCallRequestError,
 } from "#harness/model-call-error.js";
@@ -114,6 +115,24 @@ describe("EmptyModelResponseError", () => {
     const error = new EmptyModelResponseError({ cause: sdkError });
     expect(error.cause).toBe(sdkError);
     expect(error.message).toContain("did not return a response");
+  });
+});
+
+describe("normalizeModelStreamError", () => {
+  it("retains a plain provider payload for classification", () => {
+    const raw = { message: "Overloaded", type: "overloaded_error" };
+    const error = normalizeModelStreamError(raw);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe("Overloaded");
+    expect(error.cause).toBe(raw);
+    expect(classifyModelCallError(error)).toBe("retry");
+  });
+
+  it("returns Error instances unchanged", () => {
+    const raw = new Error("stream failed");
+
+    expect(normalizeModelStreamError(raw)).toBe(raw);
   });
 });
 
