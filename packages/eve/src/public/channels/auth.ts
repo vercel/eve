@@ -442,7 +442,11 @@ function formatChallenge(challenge: UnauthorizedChallenge): string {
 }
 
 function escapeChallengeValue(value: string): string {
-  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+  return value
+    .replaceAll("\\", "\\\\")
+    .replaceAll('"', '\\"')
+    .replaceAll("\r", "")
+    .replaceAll("\n", "");
 }
 
 /**

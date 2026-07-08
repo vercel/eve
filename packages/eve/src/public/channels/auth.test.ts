@@ -251,12 +251,20 @@ describe("createUnauthorizedResponse", () => {
     const response = createUnauthorizedResponse({
       challenges: [
         { scheme: "Basic", parameters: { realm: "weather" } },
-        { scheme: "Bearer", parameters: { error: 'need "token"' } },
+        {
+          scheme: "Bearer",
+          parameters: { error: 'need "token"', error_description: "bad\r\nnext" },
+        },
       ],
     });
 
-    expect(response.headers.get("www-authenticate")).toContain('Basic realm="weather"');
-    expect(response.headers.get("www-authenticate")).toMatch(/Bearer error="need \\"token\\""/);
+    const header = response.headers.get("www-authenticate");
+
+    expect(header).toContain('Basic realm="weather"');
+    expect(header).toMatch(/Bearer error="need \\"token\\""/);
+    expect(header).toContain('error_description="badnext"');
+    expect(header).not.toContain("\r");
+    expect(header).not.toContain("\n");
   });
 });
 
