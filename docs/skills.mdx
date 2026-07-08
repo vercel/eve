@@ -59,7 +59,7 @@ eve generates `SKILL.md` from `markdown`, and each `files` entry becomes a packa
 
 ## Skills are scoped per agent
 
-Skills are scoped to the agent that declares them. A [subagent](./subagents)'s `skills/` are invisible to the root agent, and the reverse holds too. There's no shared-skill mechanism, so put shared executable helpers in `lib/`.
+Skills are scoped to the agent that declares them. A [subagent](./subagents)'s `skills/` are invisible to the root agent, and the reverse holds too. To reuse an authored skill package locally, symlink its markdown file or package directory into each agent's own `skills/` directory. eve follows those links during discovery and copies their resolved contents into the compiled workspace resources, so deployment artifacts remain self-contained. Put shared executable helpers in `lib/`.
 
 ## Read skill files at runtime
 

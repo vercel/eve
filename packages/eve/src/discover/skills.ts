@@ -8,6 +8,7 @@ import {
   classifySkillsDirectoryEntry,
   getDirectoryEntryType,
   getSupportedModuleBaseName,
+  type DirectoryEntryType,
   normalizeLogicalPath,
 } from "#discover/filesystem.js";
 import { readSortedDirectoryEntries } from "#discover/grammar.js";
@@ -96,9 +97,10 @@ export async function discoverSkills(input: DiscoverSkillsInput): Promise<Discov
   const entries = await readSortedDirectoryEntries(source, skillsDirectoryPath);
 
   for (const entry of entries) {
+    const entryPath = join(skillsDirectoryPath, entry.name);
     const discoveredSkill = await discoverOneSkill({
       entryName: entry.name,
-      entryType: getDirectoryEntryType(entry),
+      entryType: await resolveSkillEntryType(source, entryPath, getDirectoryEntryType(entry)),
       skillsDirectoryPath,
       skillsLogicalPath,
       source,
@@ -203,9 +205,25 @@ async function discoverPackagedSkill(input: {
   skillId: string | null;
 }> {
   const entries = await readSortedDirectoryEntries(input.source, input.skillRootPath);
-  const skillFileName = entries.find(
-    (entry) => entry.isFile() && entry.name.toLowerCase() === "skill.md",
-  )?.name;
+  let skillFileName: string | undefined;
+
+  for (const entry of entries) {
+    if (entry.name.toLowerCase() !== "skill.md") {
+      continue;
+    }
+
+    const entryType = await resolveSkillEntryType(
+      input.source,
+      join(input.skillRootPath, entry.name),
+      getDirectoryEntryType(entry),
+    );
+
+    if (entryType === "file") {
+      skillFileName = entry.name;
+      break;
+    }
+  }
+
   const skillFilePath = join(input.skillRootPath, skillFileName ?? "SKILL.md");
   const logicalPath = normalizeLogicalPath(
     join(input.logicalSkillsPath, input.skillId, skillFileName ?? "SKILL.md"),
@@ -393,11 +411,13 @@ async function discoverSkillPackagePaths(
   } = {};
 
   for (const entry of entries) {
-    if (!entry.isDirectory()) {
-      continue;
-    }
+    const entryType = await resolveSkillEntryType(
+      source,
+      join(skillRootPath, entry.name),
+      getDirectoryEntryType(entry),
+    );
 
-    switch (classifySkillPackageEntry(entry.name, getDirectoryEntryType(entry))) {
+    switch (classifySkillPackageEntry(entry.name, entryType)) {
       case "skill-assets-directory":
         packagePaths.assetsPath = join(skillRootPath, entry.name);
         break;
@@ -413,6 +433,19 @@ async function discoverSkillPackagePaths(
   }
 
   return packagePaths;
+}
+
+async function resolveSkillEntryType(
+  source: ProjectSource,
+  entryPath: string,
+  entryType: DirectoryEntryType,
+): Promise<DirectoryEntryType> {
+  if (entryType !== "other") {
+    return entryType;
+  }
+
+  const targetType = await source.stat(entryPath);
+  return targetType === "directory" || targetType === "file" ? targetType : "other";
 }
 
 function formatSkillDiscoveryError(skillFilePath: string, error: unknown): string {

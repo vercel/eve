@@ -1,3 +1,5 @@
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -11,6 +13,43 @@ import {
   DISCOVER_SKILL_MARKDOWN_MISSING,
   discoverSkills,
 } from "#discover/skills.js";
+
+async function withDiskAgentProject<T>(
+  callback: (paths: { agentRoot: string; appRoot: string; tempRoot: string }) => Promise<T>,
+): Promise<T> {
+  const tempRoot = await mkdtemp(join(tmpdir(), "eve-skills-"));
+  const appRoot = join(tempRoot, "app");
+  const agentRoot = join(appRoot, "agent");
+
+  try {
+    await mkdir(join(agentRoot, "skills"), { recursive: true });
+    return await callback({ agentRoot, appRoot, tempRoot });
+  } finally {
+    await rm(tempRoot, { force: true, recursive: true });
+  }
+}
+
+async function trySymlink(
+  target: string,
+  path: string,
+  type?: "dir" | "file" | "junction",
+): Promise<boolean> {
+  try {
+    await symlink(target, path, type);
+    return true;
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error.code === "EPERM" || error.code === "EACCES")
+    ) {
+      return false;
+    }
+
+    throw error;
+  }
+}
 
 describe("discoverSkills (memory)", () => {
   it("discovers packaged, markdown, and module-backed skills", async () => {
@@ -235,5 +274,122 @@ describe("discoverSkills (memory)", () => {
       DISCOVER_SKILL_COLLISION,
       DISCOVER_SKILL_COLLISION,
     ]);
+  });
+});
+
+describe("discoverSkills (disk)", () => {
+  it("discovers flat markdown skills through file symlinks", async ({ skip }) => {
+    await withDiskAgentProject(async ({ agentRoot, tempRoot }) => {
+      const sharedSkillPath = join(tempRoot, "shared", "research-source.md");
+      await mkdir(join(tempRoot, "shared"), { recursive: true });
+      await writeFile(
+        sharedSkillPath,
+        [
+          "---",
+          "description: Research complex marketplace questions before replying.",
+          "---",
+          "Use the shared research process.",
+        ].join("\n"),
+      );
+
+      const symlinkPath = join(agentRoot, "skills", "market-research.md");
+      if (!(await trySymlink(sharedSkillPath, symlinkPath, "file"))) {
+        skip("file symlink creation is unavailable on this platform");
+      }
+
+      const result = await discoverSkills({ agentRoot });
+
+      expect(result.diagnostics).toEqual([]);
+      expect(result.skills).toEqual([
+        {
+          definition: {
+            description: "Research complex marketplace questions before replying.",
+            markdown: "Use the shared research process.",
+          },
+          sourceKind: "markdown",
+          logicalPath: "skills/market-research.md",
+          sourceId: "skills/market-research.md",
+        },
+      ]);
+    });
+  });
+
+  it("discovers packaged skills whose SKILL.md is a file symlink", async ({ skip }) => {
+    await withDiskAgentProject(async ({ agentRoot, tempRoot }) => {
+      const sharedSkillPath = join(tempRoot, "shared", "SKILL.md");
+      const skillRoot = join(agentRoot, "skills", "market-research");
+      const symlinkPath = join(skillRoot, "SKILL.md");
+      await mkdir(join(tempRoot, "shared"), { recursive: true });
+      await mkdir(skillRoot, { recursive: true });
+      await writeFile(
+        sharedSkillPath,
+        [
+          "---",
+          "description: Research complex marketplace questions before replying.",
+          "---",
+          "Use the packaged research process.",
+        ].join("\n"),
+      );
+
+      if (!(await trySymlink(sharedSkillPath, symlinkPath, "file"))) {
+        skip("file symlink creation is unavailable on this platform");
+      }
+
+      const result = await discoverSkills({ agentRoot });
+
+      expect(result.diagnostics).toEqual([]);
+      expect(result.skills).toEqual([
+        {
+          description: "Research complex marketplace questions before replying.",
+          sourceKind: "skill-package",
+          logicalPath: "skills/market-research/SKILL.md",
+          markdown: "Use the packaged research process.",
+          name: "market-research",
+          rootPath: skillRoot,
+          skillFilePath: symlinkPath,
+          skillId: "market-research",
+          sourceId: "skills/market-research/SKILL.md",
+        },
+      ]);
+    });
+  });
+
+  it("discovers packaged skills through directory symlinks or junctions", async ({ skip }) => {
+    await withDiskAgentProject(async ({ agentRoot, tempRoot }) => {
+      const sharedSkillRoot = join(tempRoot, "shared", "market-research");
+      const symlinkPath = join(agentRoot, "skills", "market-research");
+      await mkdir(sharedSkillRoot, { recursive: true });
+      await writeFile(
+        join(sharedSkillRoot, "SKILL.md"),
+        [
+          "---",
+          "description: Research complex marketplace questions before replying.",
+          "---",
+          "Use the directory-linked research process.",
+        ].join("\n"),
+      );
+
+      const linkType = process.platform === "win32" ? "junction" : "dir";
+      if (!(await trySymlink(sharedSkillRoot, symlinkPath, linkType))) {
+        skip("directory symlink or junction creation is unavailable on this platform");
+      }
+
+      const result = await discoverSkills({ agentRoot });
+
+      expect(result.diagnostics).toEqual([]);
+      expect(result.skills).toEqual([
+        {
+          description: "Research complex marketplace questions before replying.",
+          sourceKind: "skill-package",
+          logicalPath: "skills/market-research/SKILL.md",
+          markdown: "Use the directory-linked research process.",
+          name: "market-research",
+          rootPath: symlinkPath,
+          skillFilePath: join(symlinkPath, "SKILL.md"),
+          skillId: "market-research",
+          sourceId: "skills/market-research/SKILL.md",
+        },
+      ]);
+    });
   });
 });

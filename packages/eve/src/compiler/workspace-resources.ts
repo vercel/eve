@@ -109,7 +109,7 @@ async function materializeSkill(input: {
   const skillRoot = join(input.nodeRoot, RESOURCE_SKILLS_DIRECTORY, input.skill.name);
 
   if (input.skill.sourceKind === "skill-package") {
-    await cp(input.skill.rootPath, skillRoot, { recursive: true });
+    await cp(input.skill.rootPath, skillRoot, { dereference: true, recursive: true });
     return;
   }
 

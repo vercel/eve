@@ -67,7 +67,7 @@ A declared subagent inherits nothing from the root's authored slots. Discovery t
 | Channels     | Root-only                     | Root-only                              |
 | Schedules    | Root-only                     | Root-only                              |
 
-For a declared subagent this means duplicating anything the child needs. When two subagents need the same procedure, copy the markdown under each `skills/` directory, or share typed helpers via `lib/`. The sandbox does not inherit from the parent; it falls back to the framework default unless the subagent authors `subagents/<id>/sandbox.ts` or seeds files via `subagents/<id>/sandbox/workspace/`.
+For a declared subagent this means explicitly placing anything the child needs in its own authored slots. When two subagents need the same procedure, copy the markdown or symlink the shared skill file/package into each `skills/` directory; eve dereferences linked skill contents into self-contained compile artifacts. Share typed helpers via `lib/`. The sandbox does not inherit from the parent; it falls back to the framework default unless the subagent authors `subagents/<id>/sandbox.ts` or seeds files via `subagents/<id>/sandbox/workspace/`.
 
 The built-in `agent` tool is the exception. Its children share the parent's sandbox and tools because they are copies of the same agent working on the same files.
 
