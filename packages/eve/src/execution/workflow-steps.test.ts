@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
-import type { DeliverPayload, SubagentInputRequestHookPayload } from "#channel/types.js";
+import type {
+  DeliverPayload,
+  SubagentAuthorizationRequiredHookPayload,
+  SubagentInputRequestHookPayload,
+} from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { AuthKey, ContinuationTokenKey, ModeKey, SessionIdKey } from "#context/keys.js";
@@ -24,6 +28,7 @@ import { createTurnWorkflowInput } from "#execution/durable-session-migrations/t
 import { projectToDurableSession } from "#execution/session.js";
 import { createExecutionNodeStep } from "#execution/node-step.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
+import { runProxyAuthorizationEventStep } from "#execution/subagent-auth-proxy-step.js";
 import {
   dispatchTurnStep,
   emitTerminalSessionFailureStep,
@@ -1189,6 +1194,28 @@ describe("runProxyInputRequestStep", () => {
     };
   }
 
+  function buildAuthorizationRequiredPayload(): SubagentAuthorizationRequiredHookPayload {
+    return {
+      callId: "call-1",
+      childContinuationToken: "subagent:parent-session:call-1",
+      childSessionId: "child-session",
+      event: {
+        authorization: {
+          displayName: "Weather",
+          url: "https://idp.example/authorize?redirect_uri=child",
+        },
+        description: "Sign in to continue.",
+        name: "weather",
+        sequence: 2,
+        stepIndex: 1,
+        turnId: "child-turn",
+        webhookUrl: "https://eve.example/eve/v1/connections/weather/callback/child-session:auth",
+      },
+      kind: "subagent-authorization-required",
+      subagentName: "linear",
+    };
+  }
+
   it("persists adapter-state mutations from the input.requested handler onto the returned serializedContext", async () => {
     // The stub adapter mirrors Slack's contract: its `input.requested`
     // handler writes a `pendingRequests` entry onto `adapterCtx.state`
@@ -1286,6 +1313,59 @@ describe("runProxyInputRequestStep", () => {
 
     expect(result.sessionState.continuationToken).toBe("http:proxy-rekeyed");
     expect(result.serializedContext[ContinuationTokenKey.name]).toBe("http:proxy-rekeyed");
+  });
+
+  it("proxies authorization.required through the parent adapter and preserves the child callback URL", async () => {
+    const cachingAdapter: ChannelAdapter = {
+      kind: "thread-context",
+      async "authorization.required"(data, adapterCtx) {
+        adapterCtx.state.pendingAuth = {
+          name: data.name,
+          webhookUrl: data.webhookUrl,
+        };
+      },
+    };
+
+    const session: HarnessSession = createStubSession({
+      continuationToken: "http:proxy-test",
+      sessionId: "parent-session",
+    });
+    installSessionStoreMocks([session]);
+
+    const sessionState = createStubSessionState({
+      sessionId: "parent-session",
+      continuationToken: "http:proxy-test",
+    });
+
+    const result = await runProxyAuthorizationEventStep({
+      hookPayload: buildAuthorizationRequiredPayload(),
+      parentWritable: createTestWritable(),
+      serializedContext: buildSerializedContextForAdapter(cachingAdapter),
+      sessionState,
+    });
+
+    const channel = result.serializedContext[ChannelKey.name] as {
+      kind: string;
+      state: { pendingAuth?: { name: string; webhookUrl: string } };
+    };
+    expect(channel.kind).toBe("thread-context");
+    expect(channel.state.pendingAuth).toEqual({
+      name: "weather",
+      webhookUrl: "https://eve.example/eve/v1/connections/weather/callback/child-session:auth",
+    });
+
+    expect(result.sessionState.hasProxyInputRequests).toBe(false);
+
+    const writes = workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE) ?? [];
+    expect(writes).toHaveLength(1);
+    const event = JSON.parse(new TextDecoder().decode(writes[0] as Uint8Array).trim()) as {
+      data: { webhookUrl?: string };
+      type: string;
+    };
+    expect(event.type).toBe("authorization.required");
+    expect(event.data.webhookUrl).toBe(
+      "https://eve.example/eve/v1/connections/weather/callback/child-session:auth",
+    );
   });
 });
 

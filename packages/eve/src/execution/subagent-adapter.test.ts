@@ -8,7 +8,17 @@ import { ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import { SUBAGENT_ADAPTER } from "#execution/subagent-adapter.js";
 
+const SUBAGENT_AUTHORIZATION_COMPLETED = SUBAGENT_ADAPTER["authorization.completed"];
+const SUBAGENT_AUTHORIZATION_REQUIRED = SUBAGENT_ADAPTER["authorization.required"];
 const SUBAGENT_INPUT_REQUESTED = SUBAGENT_ADAPTER["input.requested"];
+
+if (SUBAGENT_AUTHORIZATION_COMPLETED === undefined) {
+  throw new Error("SUBAGENT_ADAPTER is missing its authorization.completed handler.");
+}
+
+if (SUBAGENT_AUTHORIZATION_REQUIRED === undefined) {
+  throw new Error("SUBAGENT_ADAPTER is missing its authorization.required handler.");
+}
 
 if (SUBAGENT_INPUT_REQUESTED === undefined) {
   throw new Error("SUBAGENT_ADAPTER is missing its input.requested handler.");
@@ -53,6 +63,86 @@ function sampleRequest(): InputRequest {
     requestId: "req-1",
   };
 }
+
+describe("SUBAGENT_ADAPTER authorization.required handler", () => {
+  it("forwards the child's authorization request via resumeHook", async () => {
+    resumeHookMock.mockClear();
+    const ctx = makeContext();
+
+    await SUBAGENT_AUTHORIZATION_REQUIRED(
+      {
+        authorization: {
+          displayName: "Weather",
+          url: "https://idp.example/authorize?redirect_uri=child",
+        },
+        description: "Sign in to continue.",
+        name: "weather",
+        sequence: 2,
+        stepIndex: 1,
+        turnId: "turn-auth",
+        webhookUrl: "https://eve.example/eve/v1/connections/weather/callback/child-session:auth",
+      },
+      ctx,
+    );
+
+    expect(resumeHookMock).toHaveBeenCalledTimes(1);
+    expect(resumeHookMock).toHaveBeenCalledWith("parent-token", {
+      callId: "call-123",
+      childContinuationToken: "child-token",
+      childSessionId: "child-session",
+      event: {
+        authorization: {
+          displayName: "Weather",
+          url: "https://idp.example/authorize?redirect_uri=child",
+        },
+        description: "Sign in to continue.",
+        name: "weather",
+        sequence: 2,
+        stepIndex: 1,
+        turnId: "turn-auth",
+        webhookUrl: "https://eve.example/eve/v1/connections/weather/callback/child-session:auth",
+      },
+      kind: "subagent-authorization-required",
+      subagentName: "linear",
+    });
+  });
+});
+
+describe("SUBAGENT_ADAPTER authorization.completed handler", () => {
+  it("forwards the child's authorization completion via resumeHook", async () => {
+    resumeHookMock.mockClear();
+    const ctx = makeContext();
+
+    await SUBAGENT_AUTHORIZATION_COMPLETED(
+      {
+        authorization: { displayName: "Weather" },
+        name: "weather",
+        outcome: "authorized",
+        sequence: 3,
+        stepIndex: 2,
+        turnId: "turn-auth",
+      },
+      ctx,
+    );
+
+    expect(resumeHookMock).toHaveBeenCalledTimes(1);
+    expect(resumeHookMock).toHaveBeenCalledWith("parent-token", {
+      callId: "call-123",
+      childContinuationToken: "child-token",
+      childSessionId: "child-session",
+      event: {
+        authorization: { displayName: "Weather" },
+        name: "weather",
+        outcome: "authorized",
+        sequence: 3,
+        stepIndex: 2,
+        turnId: "turn-auth",
+      },
+      kind: "subagent-authorization-completed",
+      subagentName: "linear",
+    });
+  });
+});
 
 describe("SUBAGENT_ADAPTER input.requested handler", () => {
   it("forwards the child's HITL batch via resumeHook", async () => {
@@ -157,6 +247,7 @@ describe("SUBAGENT_ADAPTER forward failure logging", () => {
       childContinuationToken: "child-token",
       childSessionId: "child-session",
       errorId: expect.any(String),
+      eventKind: "subagent-input-request",
       parentContinuationToken: "parent-token",
       subagentName: "linear",
       error: expect.objectContaining({

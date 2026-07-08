@@ -10,6 +10,7 @@ import {
   type TurnWorkflowInput,
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
+import { runProxyAuthorizationEventStep } from "#execution/subagent-auth-proxy-step.js";
 import { runProxyInputRequestStep, turnStep } from "#execution/workflow-steps.js";
 
 const resumeHookMock = vi.fn();
@@ -26,6 +27,10 @@ vi.mock("#compiled/@workflow/core/runtime.js", () => ({
 
 vi.mock("./route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
+}));
+
+vi.mock("./subagent-auth-proxy-step.js", () => ({
+  runProxyAuthorizationEventStep: vi.fn(),
 }));
 
 vi.mock("./workflow-steps.js", () => ({
@@ -527,6 +532,119 @@ describe("turnWorkflow", () => {
         payloads: [{ inputResponses: [{ optionId: "approve", requestId: "approval-1" }] }],
         sessionState: proxyState,
       }),
+    );
+  });
+
+  it("proxies child authorization lifecycle events while awaiting the child result", async () => {
+    const pendingState = createSessionState();
+    const authRequiredState = createSessionState();
+    const authCompletedState = createSessionState();
+    const completedState = createSessionState();
+    const requiredPayload = {
+      callId: "call-1",
+      childContinuationToken: "subagent:parent:call-1",
+      childSessionId: "child-session",
+      event: {
+        authorization: {
+          displayName: "Weather",
+          url: "https://idp.example/authorize?redirect_uri=child",
+        },
+        description: "Sign in to continue.",
+        name: "weather",
+        sequence: 2,
+        stepIndex: 1,
+        turnId: "child-turn",
+        webhookUrl: "https://eve.example/eve/v1/connections/weather/callback/child-session:auth",
+      },
+      kind: "subagent-authorization-required" as const,
+      subagentName: "delegate",
+    };
+    const completedPayload = {
+      callId: "call-1",
+      childContinuationToken: "subagent:parent:call-1",
+      childSessionId: "child-session",
+      event: {
+        authorization: { displayName: "Weather" },
+        name: "weather",
+        outcome: "authorized" as const,
+        sequence: 3,
+        stepIndex: 2,
+        turnId: "child-turn",
+      },
+      kind: "subagent-authorization-completed" as const,
+      subagentName: "delegate",
+    };
+    installInbox([
+      requiredPayload,
+      completedPayload,
+      {
+        kind: "runtime-action-result",
+        results: [
+          {
+            callId: "call-1",
+            kind: "subagent-result",
+            output: "authorized child output",
+            subagentName: "delegate",
+          },
+        ],
+      },
+    ]);
+    vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
+      results: [],
+      sessionState: pendingState,
+    });
+    vi.mocked(runProxyAuthorizationEventStep)
+      .mockResolvedValueOnce({
+        serializedContext: { state: "auth-required" },
+        sessionState: authRequiredState,
+      })
+      .mockResolvedValueOnce({
+        serializedContext: { state: "auth-completed" },
+        sessionState: authCompletedState,
+      });
+    vi.mocked(turnStep)
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
+        serializedContext: { state: "pending" },
+        sessionState: pendingState,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "done",
+        serializedContext: { state: "done" },
+        sessionState: completedState,
+      });
+
+    const { input, parentWritable } = createInput({
+      driverCapabilities: { turnInbox: true },
+      mode: "task",
+      sessionState: pendingState,
+    });
+    await turnWorkflow(input);
+
+    expect(runProxyAuthorizationEventStep).toHaveBeenCalledTimes(2);
+    expect(runProxyAuthorizationEventStep).toHaveBeenNthCalledWith(1, {
+      hookPayload: requiredPayload,
+      parentWritable,
+      serializedContext: { state: "pending" },
+      sessionState: pendingState,
+    });
+    expect(runProxyAuthorizationEventStep).toHaveBeenNthCalledWith(2, {
+      hookPayload: completedPayload,
+      parentWritable,
+      serializedContext: { state: "auth-required" },
+      sessionState: authRequiredState,
+    });
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toEqual({
+      kind: "runtime-action-result",
+      results: [expect.objectContaining({ callId: "call-1", output: "authorized child output" })],
+    });
+    expect(resumeHookMock).not.toHaveBeenCalledWith(
+      "turn-token",
+      expect.objectContaining({ kind: "turn-delivery-request" }),
     );
   });
 

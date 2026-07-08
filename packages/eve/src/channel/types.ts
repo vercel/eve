@@ -163,11 +163,39 @@ export interface SubagentInputRequestHookPayload {
 }
 
 /**
+ * Authorization event emitted by a descendant subagent while the parent is
+ * parked on the delegated runtime-action result.
+ */
+export interface SubagentAuthorizationRequiredHookPayload {
+  readonly callId: string;
+  readonly childContinuationToken: string;
+  readonly childSessionId: string;
+  readonly event: Extract<HandleMessageStreamEvent, { type: "authorization.required" }>["data"];
+  readonly kind: "subagent-authorization-required";
+  readonly subagentName: string;
+}
+
+/**
+ * Authorization completion emitted by a descendant subagent after its callback
+ * resumes. Proxied to the parent so channel UI can clear pending auth state.
+ */
+export interface SubagentAuthorizationCompletedHookPayload {
+  readonly callId: string;
+  readonly childContinuationToken: string;
+  readonly childSessionId: string;
+  readonly event: Extract<HandleMessageStreamEvent, { type: "authorization.completed" }>["data"];
+  readonly kind: "subagent-authorization-completed";
+  readonly subagentName: string;
+}
+
+/**
  * Serializable payload sent through the workflow `resumeHook`.
  */
 export type HookPayload =
   | DeliverHookPayload
   | RuntimeActionResultHookPayload
+  | SubagentAuthorizationCompletedHookPayload
+  | SubagentAuthorizationRequiredHookPayload
   | SubagentInputRequestHookPayload;
 
 /**

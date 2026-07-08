@@ -1,4 +1,9 @@
-import type { DeliverPayload, SubagentInputRequestHookPayload } from "#channel/types.js";
+import type {
+  DeliverPayload,
+  SubagentAuthorizationCompletedHookPayload,
+  SubagentAuthorizationRequiredHookPayload,
+  SubagentInputRequestHookPayload,
+} from "#channel/types.js";
 import {
   emitTurnEpilogue,
   getHarnessEmissionState,
@@ -9,7 +14,11 @@ import {
   toProxyInputRequestEntries,
 } from "#harness/proxy-input-requests.js";
 import type { HarnessEmitFn, HarnessSession, SessionStateMap } from "#harness/types.js";
-import { createInputRequestedEvent } from "#protocol/message.js";
+import {
+  createAuthorizationCompletedEvent,
+  createAuthorizationRequiredEvent,
+  createInputRequestedEvent,
+} from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { InputResponse } from "#runtime/input/types.js";
 
@@ -52,6 +61,29 @@ export async function emitProxiedInputRequest(input: {
     entries: toProxyInputRequestEntries(input.hookPayload),
     session: nextSession,
   };
+}
+
+/**
+ * Emits a descendant subagent's authorization request through the parent
+ * channel. The event preserves the child's callback URL so OAuth completion
+ * resumes the child session that owns the pending authorization.
+ */
+export async function emitProxiedAuthorizationRequired(input: {
+  readonly emit: HarnessEmitFn;
+  readonly hookPayload: SubagentAuthorizationRequiredHookPayload;
+}): Promise<void> {
+  await input.emit(createAuthorizationRequiredEvent(input.hookPayload.event));
+}
+
+/**
+ * Emits a descendant subagent's authorization completion through the parent
+ * channel so UI adapters can clear pending auth state.
+ */
+export async function emitProxiedAuthorizationCompleted(input: {
+  readonly emit: HarnessEmitFn;
+  readonly hookPayload: SubagentAuthorizationCompletedHookPayload;
+}): Promise<void> {
+  await input.emit(createAuthorizationCompletedEvent(input.hookPayload.event));
 }
 
 // ---------------------------------------------------------------------------
