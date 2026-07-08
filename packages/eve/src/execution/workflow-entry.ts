@@ -12,6 +12,7 @@ import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { notifyDelegatedParentStep } from "#execution/delegated-parent-notification.js";
+import { createDeliveryBuffers, type DeliveryBuffers } from "#execution/delivery-buffers.js";
 import {
   createDelegatedSubagentErrorResult,
   createDelegatedSubagentSuccessResult,
@@ -164,8 +165,8 @@ async function runDriverLoop(input: {
   const nextTurnControlToken = (): string =>
     `${input.sessionState.sessionId}:turn-control:${String(turnDispatchIndex++)}`;
 
-  const bufferedDeliveries: DeliverHookPayload[] = [];
-  const deliveryHook = createSessionDeliveryHook(bufferedDeliveries);
+  const deliveryBuffers = createDeliveryBuffers();
+  const deliveryHook = createSessionDeliveryHook(deliveryBuffers);
 
   try {
     if (input.sessionState.continuationToken) {
@@ -173,9 +174,9 @@ async function runDriverLoop(input: {
     }
 
     let action: NextDriverAction = await dispatchAndAwaitTurn({
-      bufferedDeliveries,
       capabilities: input.capabilities,
       controlToken: nextTurnControlToken(),
+      deliveryBuffers,
       delivery: input.initialInput,
       deliveryHook,
       mode: input.mode,
@@ -225,9 +226,9 @@ async function runDriverLoop(input: {
         }
 
         action = await dispatchAndAwaitTurn({
-          bufferedDeliveries,
           capabilities: input.capabilities,
           controlToken: nextTurnControlToken(),
+          deliveryBuffers,
           delivery: {
             kind: "deliver",
             payloads: allPayloads,
@@ -242,7 +243,7 @@ async function runDriverLoop(input: {
       }
 
       const nextDeliver = await waitForNextDeliver({
-        bufferedDeliveries,
+        deliveryBuffers,
         deliveryHook,
       });
 
@@ -263,9 +264,9 @@ async function runDriverLoop(input: {
       }
 
       action = await dispatchAndAwaitTurn({
-        bufferedDeliveries,
         capabilities: input.capabilities,
         controlToken: nextTurnControlToken(),
+        deliveryBuffers,
         delivery: {
           auth: nextDeliver.auth,
           kind: "deliver",
@@ -311,54 +312,34 @@ async function finalizeDone(input: {
 }
 
 async function waitForNextDeliver(input: {
-  readonly bufferedDeliveries: DeliverHookPayload[];
+  readonly deliveryBuffers: DeliveryBuffers;
   readonly deliveryHook: SessionDeliveryHook;
 }): Promise<DeliverHookPayload | null> {
-  if (input.bufferedDeliveries.length > 0) {
-    return coalesceDeliveries(input.bufferedDeliveries.splice(0));
-  }
-
   while (true) {
-    const first = await input.deliveryHook.next();
-    input.deliveryHook.consumeNext();
+    await input.deliveryHook.drainReady();
+    const buffered = takeBufferedDeliveryBatch(input.deliveryBuffers);
+    if (buffered !== undefined) return buffered;
 
-    if (first.done) {
-      return null;
-    }
-
-    if (first.value.kind !== "deliver") {
-      continue;
-    }
-
-    let coalesced = first.value;
-
-    while (true) {
-      const ready = await takeReadyPayload(input.deliveryHook.next());
-
-      if (ready === NO_READY_MESSAGE) {
-        break;
-      }
-
-      input.deliveryHook.consumeNext();
-
-      if (ready.done) {
-        break;
-      }
-
-      if (ready.value.kind !== "deliver") {
-        continue;
-      }
-
-      coalesced = coalesceDeliveries([coalesced, ready.value]);
-    }
-
-    return coalesced;
+    const result = await input.deliveryHook.bufferNext();
+    if (result === "closed") return null;
   }
 }
 
-const NO_READY_MESSAGE = Symbol("no-ready-message");
+function takeBufferedDeliveryBatch(buffers: DeliveryBuffers): DeliverHookPayload | undefined {
+  const turnDeliveries = buffers.turnDeliveries.splice(0);
+  if (turnDeliveries.length > 0) {
+    return coalesceDeliveries(turnDeliveries);
+  }
 
-async function takeReadyPayload<T>(promise: Promise<T>): Promise<T | typeof NO_READY_MESSAGE> {
-  await Promise.resolve();
-  return await Promise.race([promise, Promise.resolve(NO_READY_MESSAGE)]);
+  const currentHookDeliveries = buffers.currentHookDeliveries.splice(0);
+  if (currentHookDeliveries.length > 0) {
+    return coalesceDeliveries(currentHookDeliveries);
+  }
+
+  const replacedHookDeliveries = buffers.replacedHookDeliveries.splice(0);
+  if (replacedHookDeliveries.length > 0) {
+    return coalesceDeliveries(replacedHookDeliveries);
+  }
+
+  return undefined;
 }

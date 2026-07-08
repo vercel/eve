@@ -1,6 +1,7 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
-import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
+import type { HookPayload } from "#channel/types.js";
+import { bufferHookDelivery, type DeliveryBuffers } from "#execution/delivery-buffers.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
 
 interface HookRead {
@@ -17,11 +18,14 @@ interface SessionDeliveryHookState {
   pending: boolean;
   retired: boolean;
   resolved?: HookRead;
+  superseded: boolean;
 }
 
 /** Reads and rekeys the public delivery hook for one session driver. */
 export interface SessionDeliveryHook {
+  bufferNext(): Promise<"buffered" | "closed">;
   consumeNext(): void;
+  drainReady(): Promise<void>;
   next(): Promise<IteratorResult<HookPayload>>;
   rekey(token: string): Promise<void>;
 }
@@ -40,7 +44,7 @@ export interface SessionDeliveryHookHandle extends SessionDeliveryHook {
  * to `hook_disposed` and receives `HookNotFoundError` from the Workflow SDK.
  */
 export function createSessionDeliveryHook(
-  bufferedDeliveries: DeliverHookPayload[],
+  deliveryBuffers: DeliveryBuffers,
 ): SessionDeliveryHookHandle {
   let active: SessionDeliveryHookState | undefined;
   const retired: SessionDeliveryHookState[] = [];
@@ -98,6 +102,34 @@ export function createSessionDeliveryHook(
     if (state.resolved !== undefined) enqueue(state.resolved);
   };
 
+  const consumeRead = (read: HookRead): void => {
+    read.state.pending = false;
+    read.state.resolved = undefined;
+
+    if (read.result.done) {
+      read.state.closed = true;
+    } else if (read.result.value.kind === "deliver") {
+      bufferHookDelivery(
+        deliveryBuffers,
+        read.result.value,
+        read.state.superseded ? "replaced-hook" : "current-hook",
+      );
+    }
+
+    arm(read.state);
+  };
+
+  const consumeOffered = (): HookRead => {
+    if (offeredRead === undefined) {
+      throw new Error("Cannot consume a public delivery before it resolves.");
+    }
+
+    const read = offeredRead;
+    offeredRead = undefined;
+    offered = null;
+    return read;
+  };
+
   const drainReady = async (): Promise<void> => {
     // A caller may already be racing this read against turn control. Leave
     // that promise intact: the losing race ignores it, and the next call to
@@ -108,31 +140,35 @@ export function createSessionDeliveryHook(
 
     while (ready.length > 0) {
       const read = ready.shift()!;
-      read.state.pending = false;
-      read.state.resolved = undefined;
-
-      if (read.result.done) {
-        read.state.closed = true;
-      } else if (read.result.value.kind === "deliver") {
-        bufferedDeliveries.push(read.result.value);
-      }
-
-      arm(read.state);
+      consumeRead(read);
       await Promise.resolve();
     }
   };
 
   return {
+    async bufferNext(): Promise<"buffered" | "closed"> {
+      await this.next();
+      const read = consumeOffered();
+      consumeRead(read);
+      return read.result.done ? "closed" : "buffered";
+    },
+
     consumeNext(): void {
-      if (offeredRead === undefined) {
-        throw new Error("Cannot consume a public delivery before it resolves.");
+      const read = consumeOffered();
+      read.state.pending = false;
+      read.state.resolved = undefined;
+      if (read.result.done) read.state.closed = true;
+    },
+
+    async drainReady(): Promise<void> {
+      if (active === undefined) {
+        throw new Error("Cannot read deliveries before a continuation token is available.");
       }
 
-      offeredRead.state.pending = false;
-      offeredRead.state.resolved = undefined;
-      if (offeredRead.result.done) offeredRead.state.closed = true;
-      offeredRead = undefined;
-      offered = null;
+      arm(active);
+      for (const state of retired) arm(state);
+
+      await drainReady();
     },
 
     async dispose(): Promise<void> {
@@ -187,6 +223,7 @@ export function createSessionDeliveryHook(
         iterator: candidateHook[Symbol.asyncIterator](),
         pending: false,
         retired: false,
+        superseded: false,
       };
 
       if (active === undefined) {
@@ -200,6 +237,7 @@ export function createSessionDeliveryHook(
       arm(previous);
       arm(candidate);
       await claimHookOwnership(candidate.hook);
+      previous.superseded = true;
       enable(candidate);
       await drainReady();
 

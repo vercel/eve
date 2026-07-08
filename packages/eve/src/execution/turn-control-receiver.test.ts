@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
+import { createDeliveryBuffers, type DeliveryBuffers } from "#execution/delivery-buffers.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import type { SessionDeliveryHook } from "#execution/session-delivery-hook.js";
@@ -30,16 +31,17 @@ describe("TurnControlReceiver", () => {
       { kind: "turn-delivery-accepted", requestId: "req-1" },
       parkResult(),
     ]);
-    const bufferedDeliveries: DeliverHookPayload[] = [delivery];
+    const deliveryBuffers = createDeliveryBuffers();
+    deliveryBuffers.turnDeliveries.push(delivery);
 
-    const action = await runReceiver(bufferedDeliveries);
+    const action = await runReceiver(deliveryBuffers);
 
     expect(forwardTurnDeliveryStep).toHaveBeenCalledWith({
       inboxToken: "turn-inbox",
       payload: { delivery, kind: "driver-delivery", requestId: "req-1" },
     });
     expect(action.kind).toBe("park");
-    expect(bufferedDeliveries).toEqual([]);
+    expect(deliveryBuffers.turnDeliveries).toEqual([]);
   });
 
   it("re-buffers the outstanding delivery when the turn cancels its request", async () => {
@@ -49,13 +51,14 @@ describe("TurnControlReceiver", () => {
       { kind: "turn-delivery-cancelled", requestId: "req-1" },
       parkResult(),
     ]);
-    const bufferedDeliveries: DeliverHookPayload[] = [delivery];
+    const deliveryBuffers = createDeliveryBuffers();
+    deliveryBuffers.turnDeliveries.push(delivery);
 
-    const action = await runReceiver(bufferedDeliveries);
+    const action = await runReceiver(deliveryBuffers);
 
     expect(forwardTurnDeliveryStep).toHaveBeenCalledOnce();
     expect(action.kind).toBe("park");
-    expect(bufferedDeliveries).toEqual([delivery]);
+    expect(deliveryBuffers.turnDeliveries).toEqual([delivery]);
   });
 
   it("re-buffers an unresolved forwarded delivery when the turn terminates", async () => {
@@ -67,41 +70,71 @@ describe("TurnControlReceiver", () => {
         kind: "turn-result",
       },
     ]);
-    const bufferedDeliveries: DeliverHookPayload[] = [delivery];
+    const deliveryBuffers = createDeliveryBuffers();
+    deliveryBuffers.turnDeliveries.push(delivery);
 
-    const action = await runReceiver(bufferedDeliveries);
+    const action = await runReceiver(deliveryBuffers);
 
     expect(action).toMatchObject({ kind: "done", output: "bye" });
-    expect(bufferedDeliveries).toEqual([delivery]);
+    expect(deliveryBuffers.turnDeliveries).toEqual([delivery]);
   });
 
   it("hands the turn's remainders back ahead of existing buffered deliveries", async () => {
     const earlier: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "earlier" }] };
     const handBack: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "from-turn" }] };
     installControlHook([{ ...parkResult(), bufferedDeliveries: [handBack] }]);
-    const bufferedDeliveries: DeliverHookPayload[] = [earlier];
+    const deliveryBuffers = createDeliveryBuffers();
+    deliveryBuffers.turnDeliveries.push(earlier);
 
-    await runReceiver(bufferedDeliveries);
+    await runReceiver(deliveryBuffers);
 
-    expect(bufferedDeliveries.map((item) => item.payloads[0]?.message)).toEqual([
+    expect(deliveryBuffers.turnDeliveries.map((item) => item.payloads[0]?.message)).toEqual([
       "from-turn",
       "earlier",
     ]);
   });
 
+  it("drains current-hook deliveries before serving replaced-hook backlog", async () => {
+    const stale: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "stale" }] };
+    const fresh: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "fresh" }] };
+    installControlHook([
+      deliveryRequest("req-1"),
+      { kind: "turn-delivery-accepted", requestId: "req-1" },
+      parkResult(),
+    ]);
+    const deliveryBuffers = createDeliveryBuffers();
+    deliveryBuffers.replacedHookDeliveries.push(stale);
+    const deliveryHook = createDeliveryHook({
+      drainReady: vi.fn(async () => {
+        if (deliveryBuffers.currentHookDeliveries.length === 0) {
+          deliveryBuffers.currentHookDeliveries.push(fresh);
+        }
+      }),
+    });
+
+    await runReceiver(deliveryBuffers, deliveryHook);
+
+    expect(forwardTurnDeliveryStep).toHaveBeenCalledWith({
+      inboxToken: "turn-inbox",
+      payload: { delivery: fresh, kind: "driver-delivery", requestId: "req-1" },
+    });
+    expect(deliveryBuffers.replacedHookDeliveries).toEqual([stale]);
+  });
+
   it("rethrows a rebuilt error when the turn reports a failure", async () => {
     installControlHook([{ error: { message: "boom", name: "TurnError" }, kind: "turn-error" }]);
 
-    await expect(runReceiver([])).rejects.toThrow("boom");
+    await expect(runReceiver(createDeliveryBuffers())).rejects.toThrow("boom");
   });
 });
 
 function runReceiver(
-  bufferedDeliveries: DeliverHookPayload[],
+  deliveryBuffers: DeliveryBuffers,
+  deliveryHook: SessionDeliveryHook = createDeliveryHook(),
 ): ReturnType<TurnControlReceiver["waitForAction"]> {
   const receiver = new TurnControlReceiver({
-    bufferedDeliveries,
-    deliveryHook: createDeliveryHook(),
+    deliveryBuffers,
+    deliveryHook,
     token: "turn-control",
   });
   return receiver.waitForAction().finally(() => receiver.dispose());
@@ -125,7 +158,9 @@ function parkResult(): Extract<TurnControlPayload, { readonly kind: "turn-result
 
 function createDeliveryHook(overrides: Partial<SessionDeliveryHook> = {}): SessionDeliveryHook {
   return {
+    bufferNext: vi.fn(async (): Promise<"buffered" | "closed"> => "buffered"),
     consumeNext: vi.fn(),
+    drainReady: vi.fn(async () => {}),
     next: vi.fn(() => new Promise<IteratorResult<HookPayload>>(() => {})),
     rekey: vi.fn(),
     ...overrides,
