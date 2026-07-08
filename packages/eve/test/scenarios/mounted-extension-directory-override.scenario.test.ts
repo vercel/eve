@@ -16,7 +16,7 @@ const scenarioApp = useScenarioApp();
  * loader to exercise directory discovery and override precedence deterministically.
  */
 describe("mounted extension via directory form with override", () => {
-  it("binds base config and lets a co-located override shadow a tool", async () => {
+  it("binds base config and lets a co-located override shadow or disable a tool", async () => {
     const app = await scenarioApp({
       name: "mounted-extension-directory-override",
       installDependencies: true,
@@ -38,6 +38,12 @@ describe("mounted extension via directory form with override", () => {
           '    return { status: "consumer-status" };',
           "  },",
           "});",
+          "",
+        ].join("\n"),
+        // Co-located override: opts out of the extension's own crm_legacy.
+        "agent/extensions/crm/tools/crm_legacy.mjs": [
+          'import { disableTool } from "eve/tools";',
+          "export default disableTool();",
           "",
         ].join("\n"),
         "node_modules/@acme/crm/package.json": `${JSON.stringify({
@@ -75,6 +81,17 @@ describe("mounted extension via directory form with override", () => {
           "});",
           "",
         ].join("\n"),
+        "node_modules/@acme/crm/ext/tools/crm_legacy.mjs": [
+          'import { defineTool } from "eve/tools";',
+          "export default defineTool({",
+          '  description: "A legacy tool the consumer opts out of.",',
+          "  inputSchema: { type: 'object', properties: {}, additionalProperties: false },",
+          "  async execute() {",
+          "    return { legacy: true };",
+          "  },",
+          "});",
+          "",
+        ].join("\n"),
       },
     });
 
@@ -98,5 +115,8 @@ describe("mounted extension via directory form with override", () => {
     await expect(status?.execute?.({}, { messages: [], toolCallId: "call_2" })).resolves.toEqual({
       status: "consumer-status",
     });
+
+    const legacy = graph.root.agent.tools.find((entry) => entry.name === "crm__crm_legacy");
+    expect(legacy).toBeUndefined();
   });
 });

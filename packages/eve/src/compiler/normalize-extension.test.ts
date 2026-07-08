@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyOverrideDisables,
   type CompiledExtensionContributions,
   mergeContributions,
 } from "#compiler/normalize-extension.js";
@@ -66,5 +67,51 @@ describe("mergeContributions", () => {
 
     expect(merged.hooks).toEqual([{ slug: "crm__before" }, { slug: "crm__after" }]);
     expect(merged.instructionFragments).toEqual(["override fragment", "extension fragment"]);
+  });
+});
+
+describe("applyOverrideDisables", () => {
+  it("removes the disabled extension tool while keeping the rest", () => {
+    const merged = contributions({
+      tools: [
+        { name: "crm__search", logicalPath: "extension" },
+        { name: "crm__list", logicalPath: "extension" },
+      ] as never,
+    });
+
+    const result = applyOverrideDisables({
+      merged,
+      disables: [{ name: "crm__search", logicalPath: "tools/search.ts" }],
+      extensionToolNames: new Set(["crm__search", "crm__list"]),
+      namespace: "crm",
+    });
+
+    expect(result.tools).toEqual([{ name: "crm__list", logicalPath: "extension" }]);
+  });
+
+  it("throws, listing available tools, when the disable targets no extension tool", () => {
+    expect(() =>
+      applyOverrideDisables({
+        merged: contributions({
+          tools: [{ name: "crm__list", logicalPath: "extension" }] as never,
+        }),
+        disables: [{ name: "crm__search", logicalPath: "tools/search.ts" }],
+        extensionToolNames: new Set(["crm__list"]),
+        namespace: "crm",
+      }),
+    ).toThrow(/no tool named "search"[\s\S]*It contributes: list/);
+  });
+
+  it("returns the merged set unchanged when nothing is disabled", () => {
+    const merged = contributions({ tools: [{ name: "crm__list" }] as never });
+
+    expect(
+      applyOverrideDisables({
+        merged,
+        disables: [],
+        extensionToolNames: new Set(["crm__list"]),
+        namespace: "crm",
+      }),
+    ).toBe(merged);
   });
 });

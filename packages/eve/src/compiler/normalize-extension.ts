@@ -59,10 +59,11 @@ export async function compileExtensionContributions(input: {
     consumerAgentRoot,
     options,
     sourceIdScope: `ext:${mount.namespace}`,
+    role: "extension",
   });
 
   if (mount.overrides === undefined) {
-    return base;
+    return base.contributions;
   }
 
   // Overrides are consumer-authored files, so they are NOT extension-scoped. The
@@ -75,11 +76,68 @@ export async function compileExtensionContributions(input: {
     consumerAgentRoot,
     options,
     sourceIdScope: `ext-override:${mount.namespace}`,
+    role: "override",
   });
 
   // Consumer overrides win: list them first so first-registration-wins dedup
   // keeps the override over the extension's same-named contribution.
-  return mergeContributions(overrides, base);
+  const merged = mergeContributions(overrides.contributions, base.contributions);
+
+  return applyOverrideDisables({
+    merged,
+    disables: overrides.disabledToolTargets,
+    extensionToolNames: new Set(base.contributions.tools.map((tool) => tool.name)),
+    namespace: mount.namespace,
+  });
+}
+
+export interface DisabledToolTarget {
+  /** Namespaced target, e.g. `crm__search`. */
+  readonly name: string;
+  /** Override-relative authored path, e.g. `tools/search.ts`, for diagnostics. */
+  readonly logicalPath: string;
+}
+
+interface ComposedContributions {
+  readonly contributions: CompiledExtensionContributions;
+  readonly disabledToolTargets: readonly DisabledToolTarget[];
+}
+
+/**
+ * Removes the extension tools an override slot opted out of with `disableTool()`.
+ * A disable that targets no contributed tool throws rather than silently
+ * disabling nothing — the failure mode this guards against.
+ *
+ * Exported for unit testing.
+ */
+export function applyOverrideDisables(input: {
+  readonly merged: CompiledExtensionContributions;
+  readonly disables: readonly DisabledToolTarget[];
+  readonly extensionToolNames: ReadonlySet<string>;
+  readonly namespace: string;
+}): CompiledExtensionContributions {
+  if (input.disables.length === 0) {
+    return input.merged;
+  }
+  const prefixLength = input.namespace.length + 2; // strip the `<ns>__` prefix
+  const removed = new Set<string>();
+  for (const disable of input.disables) {
+    if (!input.extensionToolNames.has(disable.name)) {
+      const available = [...input.extensionToolNames]
+        .map((name) => name.slice(prefixLength))
+        .sort();
+      throw new Error(
+        `The override "agent/extensions/${input.namespace}/${disable.logicalPath}" calls disableTool(), ` +
+          `but the "${input.namespace}" extension contributes no tool named "${disable.name.slice(prefixLength)}". ` +
+          `It contributes: ${available.length > 0 ? available.join(", ") : "(no tools)"}.`,
+      );
+    }
+    removed.add(disable.name);
+  }
+  return {
+    ...input.merged,
+    tools: input.merged.tools.filter((tool) => !removed.has(tool.name)),
+  };
 }
 
 interface ComposeOptions {
@@ -97,8 +155,9 @@ async function composeManifestContributions(input: {
   readonly consumerAgentRoot: string;
   readonly options: ComposeOptions;
   readonly sourceIdScope: string;
-}): Promise<CompiledExtensionContributions> {
-  const { manifest, namespace, consumerAgentRoot, options, sourceIdScope } = input;
+  readonly role: "extension" | "override";
+}): Promise<ComposedContributions> {
+  const { manifest, namespace, consumerAgentRoot, options, sourceIdScope, role } = input;
   const sourceRoot = manifest.agentRoot;
   const prefix = `${namespace}__`;
   const scopeSourceId = (sourceId: string): string => `${sourceIdScope}:${sourceId}`;
@@ -107,6 +166,7 @@ async function composeManifestContributions(input: {
 
   const tools: CompiledToolDefinition[] = [];
   const dynamicTools: CompiledDynamicToolDefinition[] = [];
+  const disabledToolTargets: DisabledToolTarget[] = [];
   for (const source of manifest.tools) {
     const entry = await compileToolEntry(sourceRoot, source, options);
     if (entry.kind === "tool") {
@@ -124,6 +184,18 @@ async function composeManifestContributions(input: {
         sourceId: scopeSourceId(entry.definition.sourceId),
         logicalPath: rebase(entry.definition.logicalPath),
       });
+    } else if (entry.kind === "enable-workflow") {
+      throw new Error(
+        `${describeExtensionSource(role, namespace, source.logicalPath)} enables the Workflow tool, ` +
+          `but the Workflow tool is the consuming agent's to enable, not an extension's. Remove it.`,
+      );
+    } else if (role === "extension") {
+      throw new Error(
+        `${describeExtensionSource(role, namespace, source.logicalPath)} calls disableTool(), ` +
+          `but an extension cannot disable framework tools — that is the consuming agent's to own. Remove it.`,
+      );
+    } else {
+      disabledToolTargets.push({ name: `${prefix}${entry.name}`, logicalPath: source.logicalPath });
     }
   }
 
@@ -188,15 +260,28 @@ async function composeManifestContributions(input: {
   }
 
   return {
-    tools,
-    dynamicTools,
-    hooks,
-    skills,
-    dynamicSkills,
-    dynamicInstructions,
-    connections,
-    instructionFragments,
+    contributions: {
+      tools,
+      dynamicTools,
+      hooks,
+      skills,
+      dynamicSkills,
+      dynamicInstructions,
+      connections,
+      instructionFragments,
+    },
+    disabledToolTargets,
   };
+}
+
+function describeExtensionSource(
+  role: "extension" | "override",
+  namespace: string,
+  logicalPath: string,
+): string {
+  return role === "override"
+    ? `The override "agent/extensions/${namespace}/${logicalPath}"`
+    : `The "${namespace}" extension's "${logicalPath}"`;
 }
 
 /**
