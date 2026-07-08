@@ -9,6 +9,11 @@ let cachedPackageInfo: InstalledPackageInfo | undefined;
 // The package build stamps the published version into `dist` so bundled
 // deployments can still report package metadata without resolving package.json.
 const BUNDLED_FALLBACK_PACKAGE_VERSION: string = "__EVE_PACKAGE_VERSION__";
+const WORKFLOW_MODULE_ALIASES = {
+  "workflow/errors": "src/compiled/@workflow/errors/index.js",
+  "workflow/internal/private": "src/compiled/@workflow/core/private.js",
+} as const;
+
 function resolveFallbackPackageVersion(): string {
   // Detect an unstamped build by the token's `__` shape — spelling the token
   // out in a comparison would get rewritten by the stamp itself.
@@ -156,6 +161,24 @@ export function resolvePackageDependencyPath(specifier: string): string {
   return require.resolve(specifier);
 }
 
+/**
+ * Resolves one vendored compiled asset from the current eve installation.
+ */
+export function resolvePackageCompiledFilePath(relativeCompiledPath: string): string {
+  const packageBuildRoot = resolvePackageBuildRoot();
+
+  if (packageBuildRoot !== null) {
+    return join(packageBuildRoot, relativeCompiledPath);
+  }
+
+  return join(
+    resolvePackageRoot(),
+    ".generated",
+    "compiled",
+    relativeCompiledPath.replace(/^src\/compiled\//, ""),
+  );
+}
+
 function normalizeInstalledPackageInfo(value: unknown): InstalledPackageInfo | undefined {
   const packageJson = value as {
     name?: unknown;
@@ -249,13 +272,10 @@ export function resolveWorkflowModulePath(specifier: string): string {
     return resolvePackageSourceFilePath("src/internal/workflow/builtins.ts");
   }
 
-  if (specifier === "workflow/errors") {
-    return require.resolve("@workflow/errors");
-  }
+  const alias = WORKFLOW_MODULE_ALIASES[specifier as keyof typeof WORKFLOW_MODULE_ALIASES];
 
-  if (specifier === "workflow/internal/private") {
-    const workflowCoreRoot = findNearestPackageRoot(dirname(require.resolve("@workflow/core")));
-    return join(workflowCoreRoot, "dist", "private.js");
+  if (alias !== undefined) {
+    return resolvePackageCompiledFilePath(alias);
   }
 
   return require.resolve(specifier);

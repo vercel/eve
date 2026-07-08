@@ -5,7 +5,7 @@ import { createSessionDeliveryHook } from "#execution/session-delivery-hook.js";
 
 const createHookMock = vi.fn();
 
-vi.mock("@workflow/core", () => ({
+vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
 }));
 

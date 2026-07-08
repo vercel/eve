@@ -16,12 +16,12 @@ import { turnStep } from "#execution/workflow-steps.js";
 const resumeHookMock = vi.fn();
 const createHookMock = vi.fn();
 
-vi.mock("@workflow/core", () => ({
+vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
   getWorkflowMetadata: vi.fn(() => ({ url: "https://eve.example.com" })),
 }));
 
-vi.mock("@workflow/core/runtime", () => ({
+vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
 }));
 

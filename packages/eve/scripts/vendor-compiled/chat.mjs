@@ -24,7 +24,6 @@ import {
 export default {
   packageName: "chat",
   compiledPath: "chat",
-  external: ["@workflow/serde"],
   copyDeclarations: createDeclarationCopier({
     rewrites: {
       "@workflow/serde": {

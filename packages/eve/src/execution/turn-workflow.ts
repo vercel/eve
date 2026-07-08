@@ -1,4 +1,4 @@
-import { createHook, getWorkflowMetadata } from "@workflow/core";
+import { createHook, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import { sendTurnControlStep, type TurnInboxPayload } from "#execution/turn-control-protocol.js";

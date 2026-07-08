@@ -7,7 +7,10 @@ import { describe, it } from "vitest";
 const SOURCE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 const DISALLOWED_ENTRYPOINT_PREFIXES = ["channel/", "harness/"];
-const WORKFLOW_PRIMITIVE_SPECIFIERS = new Set(["@workflow/core", "@workflow/core/runtime"]);
+const WORKFLOW_PRIMITIVE_SPECIFIERS = new Set([
+  "#compiled/@workflow/core/index.js",
+  "#compiled/@workflow/core/runtime.js",
+]);
 // Existing reachability debt through ContextKey serialization. This set should only shrink.
 const WORKFLOW_REACHABILITY_ALLOWLIST = new Set([
   "harness/attachment-staging.ts",

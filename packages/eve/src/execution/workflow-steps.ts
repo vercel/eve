@@ -121,7 +121,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   // Populate the callback base URL so getHookUrl() works during tool
   // execution, preferring eve's active local origin over metadata fallback.
   try {
-    const { getWorkflowMetadata } = await import("@workflow/core");
+    const { getWorkflowMetadata } = await import("#compiled/@workflow/core/index.js");
     const metadata = getWorkflowMetadata();
     if (typeof metadata.url === "string") {
       ctx.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl(metadata.url));

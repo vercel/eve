@@ -1,4 +1,4 @@
-import type { Hook } from "@workflow/core";
+import type { Hook } from "#compiled/@workflow/core/index.js";
 
 export async function claimHookOwnership<T>(hook: Hook<T>): Promise<void> {
   let conflict: Awaited<ReturnType<Hook<T>["getConflict"]>>;

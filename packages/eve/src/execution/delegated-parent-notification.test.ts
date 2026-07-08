@@ -13,7 +13,7 @@ vi.mock("../runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: vi.fn(),
 }));
 
-vi.mock("@workflow/core/runtime", () => ({
+vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   resumeHook: vi.fn(),
 }));
 

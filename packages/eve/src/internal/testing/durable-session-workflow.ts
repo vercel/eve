@@ -5,7 +5,7 @@
  */
 import type { ModelMessage } from "ai";
 
-import { getStepMetadata, getWorkflowMetadata } from "@workflow/core";
+import { getStepMetadata, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import {
   createDurableSessionState,

@@ -9,7 +9,7 @@ import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 
 const createHookMock = vi.fn();
 
-vi.mock("@workflow/core", () => ({
+vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
 }));
 

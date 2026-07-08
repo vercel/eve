@@ -65,7 +65,10 @@ vi.mock("../../application/package.js", () => ({
       .replace(/\.[cm]?tsx?$/, ".js")
       .replaceAll("/", "\\")}`,
   resolveWorkflowModulePath: (specifier: string) =>
-    `G:\\projects\\test-eve\\node_modules\\.pnpm\\eve@0.3.0\\node_modules\\eve\\dist\\src\\internal\\workflow\\${specifier === "workflow/runtime" ? "runtime" : "index"}.js`,
+    `G:\\projects\\test-eve\\node_modules\\.pnpm\\eve@0.3.0\\node_modules\\eve\\dist\\src\\compiled\\${specifier
+      .replace(/^workflow\/(?:api|runtime)$/, "@workflow\\core\\runtime")
+      .replace(/^workflow\/internal\/private$/, "@workflow\\core\\private")
+      .replaceAll("/", "\\")}.js`,
 }));
 
 vi.mock("../../workflow-bundle/builder.js", () => ({
@@ -268,7 +271,7 @@ describe("configureNitroRoutes", () => {
       'import "../../.eve/compiled-artifacts-workflow-world.mjs";',
     );
     expect(workflowHandlerSource).toContain(
-      'import { getWorld as __eveGetWorkflowWorld } from "file:///G:/projects/test-eve/node_modules/.pnpm/eve@0.3.0/node_modules/eve/dist/src/internal/workflow/runtime.js";',
+      'import { getWorld as __eveGetWorkflowWorld } from "file:///G:/projects/test-eve/node_modules/.pnpm/eve@0.3.0/node_modules/eve/dist/src/compiled/@workflow/core/runtime.js";',
     );
     expect(workflowHandlerSource).toContain(
       "const __eveWorkflowWorld = await __eveGetWorkflowWorld();",

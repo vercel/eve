@@ -11,7 +11,7 @@ export default {
         kind: "vendored",
         compiledPath: "@standard-schema/spec",
       },
-      "@workflow/serde": { kind: "external" },
+      "@workflow/serde": { kind: "vendored", compiledPath: "@workflow/serde" },
       "eventsource-parser/stream": {
         kind: "vendored",
         compiledPath: "eventsource-parser/stream",

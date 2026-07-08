@@ -1,4 +1,4 @@
-import { createHook, getWorkflowMetadata, getWritable } from "@workflow/core";
+import { createHook, getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 
 import type {
   DeliverHookPayload,

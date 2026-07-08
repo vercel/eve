@@ -15,11 +15,15 @@ describe("createWorkflowWorldPluginSource", () => {
     expect(source).toContain("setWorld(await createWorldFromModule(workflowWorldModule));");
   });
 
-  it("selects Workflow's installed local and Vercel world packages by environment", () => {
-    expect(createWorkflowWorldPluginSource(undefined)).toContain("@workflow/world-local");
+  it("selects vendored local and Vercel world packages with Workflow's selector", () => {
+    expect(createWorkflowWorldPluginSource(undefined)).toContain(
+      "/compiled/@workflow/world-local/index.js",
+    );
 
     process.env.VERCEL_DEPLOYMENT_ID = "deployment-id";
 
-    expect(createWorkflowWorldPluginSource(undefined)).toContain("@workflow/world-vercel");
+    expect(createWorkflowWorldPluginSource(undefined)).toContain(
+      "/compiled/@workflow/world-vercel/index.js",
+    );
   });
 });

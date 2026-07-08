@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createHook } from "@workflow/core";
+import { createHook } from "#compiled/@workflow/core/index.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 
 import type { HookPayload } from "#channel/types.js";
@@ -11,7 +11,7 @@ import { workflowEntry } from "#execution/workflow-entry.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { dispatchTurnStep } from "#execution/workflow-steps.js";
 
-vi.mock("@workflow/core", () => ({
+vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: vi.fn(),
   getWorkflowMetadata: vi.fn(() => ({
     url: "https://eve.example.com",
@@ -25,7 +25,7 @@ vi.mock("@workflow/core", () => ({
   ),
 }));
 
-vi.mock("@workflow/core/runtime", () => ({
+vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   resumeHook: vi.fn(),
 }));
 

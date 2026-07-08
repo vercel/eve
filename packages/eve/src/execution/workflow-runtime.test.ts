@@ -17,7 +17,7 @@ const getRunMock = vi.fn();
 const resumeHookMock = vi.fn();
 const startMock = vi.fn();
 
-vi.mock("@workflow/core/runtime", () => ({
+vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   getRun: (...args: unknown[]) => getRunMock(...args),
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
   start: (...args: unknown[]) => startMock(...args),
@@ -61,7 +61,7 @@ describe("createWorkflowRuntime#deliver", () => {
   }
 
   it("normalizes `HookNotFoundError` into `RuntimeNoActiveSessionError`", async () => {
-    const { HookNotFoundError } = await import("@workflow/errors");
+    const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
     resumeHookMock.mockRejectedValue(new HookNotFoundError(NOT_FOUND_TOKEN));
 
     const runtime = buildRuntime();

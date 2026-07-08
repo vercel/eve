@@ -1,4 +1,4 @@
-import { HookNotFoundError } from "@workflow/errors";
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 
 import type {
   DeliverInput,

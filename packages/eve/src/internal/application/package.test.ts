@@ -12,7 +12,7 @@ describe("resolveWorkflowModulePath", () => {
       /\/src\/internal\/workflow\/builtins\.ts$/,
     );
     expect(resolveWorkflowModulePath("workflow/internal/private")).toMatch(
-      /\/node_modules\/@workflow\/core\/dist\/private\.js$/,
+      /\/\.generated\/compiled\/@workflow\/core\/private\.js$/,
     );
     expect(resolveWorkflowModulePath("workflow/runtime")).toMatch(
       /\/src\/internal\/workflow\/runtime\.ts$/,
