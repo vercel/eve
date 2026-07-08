@@ -16,10 +16,15 @@ describe("createWorkflowWorldPluginSource", () => {
 
     expect(source).toContain('import "/app/.eve/compile/compiled-artifacts-bootstrap.mjs";');
     expect(source).toContain('import * as workflowWorldModule from "@acme/eve-world";');
+    expect(source).toContain("import { validateWorkflowWorld } from ");
     expect(source).toContain(
       "const workflowWorld = await createWorldFromModule(workflowWorldModule);",
     );
+    expect(source).toContain(
+      'validateWorkflowWorld({ packageName: "@acme/eve-world", world: workflowWorld });',
+    );
     expect(source).toContain("setWorld(workflowWorld);");
+    expect(source).toContain("await getWorld();");
     expect(source).toContain("await workflowWorld.start?.();");
   });
 
