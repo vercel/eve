@@ -7,8 +7,13 @@ import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
-import { chatSdkChannel, type ChatSdkChannelState } from "#public/channels/chat-sdk/index.js";
-import type { RouteHandlerArgs, SendFn } from "#public/definitions/defineChannel.js";
+import {
+  chatSdkChannel,
+  isNotImplemented,
+  messageToUserContent,
+  type ChatSdkChannelState,
+} from "#public/channels/chat-sdk/index.js";
+import type { RouteHandlerArgs, SendFn } from "#public/definitions/channel.js";
 import type {
   Adapter,
   AdapterPostableMessage,
@@ -139,7 +144,7 @@ describe("chatSdkChannel", () => {
 
     expect(
       bridge.channel.routes.map((route) => ({ method: route.method, path: route.path })),
-    ).toEqual([{ method: "POST", path: "/eve/v1/chat/test" }]);
+    ).toEqual([{ method: "POST", path: "/eve/v1/test" }]);
   });
 
   it("hands Chat SDK mentions to Eve through bridge.send", async () => {
@@ -155,7 +160,7 @@ describe("chatSdkChannel", () => {
       await bridge.send(message.text, { auth: AUTH, thread, title: "mention" });
     });
 
-    const { response, send } = await firePost(bridge.channel, "/eve/v1/chat/test", {
+    const { response, send } = await firePost(bridge.channel, "/eve/v1/test", {
       text: "@bot hello",
     });
 
@@ -232,7 +237,7 @@ describe("chatSdkChannel", () => {
     });
   });
 
-  it("posts completed Eve messages through the stored Chat SDK thread", async () => {
+  it("posts completed Eve messages as markdown through the stored Chat SDK thread", async () => {
     const adapter = testAdapter();
     const bridge = chatSdkChannel({
       adapters: { test: adapter },
@@ -258,10 +263,175 @@ describe("chatSdkChannel", () => {
 
     expect(adapter.posted).toEqual([
       {
-        message: "done",
+        message: { markdown: "done" },
         threadId: THREAD_ID,
       },
     ]);
+  });
+
+  it("does not throw when the adapter's startTyping is not implemented", async () => {
+    const adapter = testAdapter();
+    adapter.startTypingError = new NotImplementedError("startTyping");
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const channelAdapter = withState(getAdapter(bridge.channel), {
+      thread: serializedThread(),
+    });
+    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+
+    await expect(
+      callEvent(channelAdapter, makeEvent("turn.started", { sequence: 0, turnId: "turn-1" }), ctx),
+    ).resolves.toBeDefined();
+    expect(adapter.typingStatuses).toEqual(["Working..."]);
+  });
+
+  it("streams assistant deltas by posting an anchor then editing it", async () => {
+    const adapter = testAdapter();
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      state: memoryState(),
+      streamingEditIntervalMs: 0,
+      userName: "bot",
+    });
+    const state: ChatSdkChannelState = { thread: serializedThread() };
+    const channelAdapter = withState(getAdapter(bridge.channel), state);
+    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+
+    await callEvent(
+      channelAdapter,
+      makeEvent("message.appended", {
+        messageDelta: "Hel",
+        messageSoFar: "Hel",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+    expect(adapter.posted).toEqual([{ message: { markdown: "Hel" }, threadId: THREAD_ID }]);
+    expect(state.anchorMessageId).toBe("posted-1");
+
+    await callEvent(
+      channelAdapter,
+      makeEvent("message.appended", {
+        messageDelta: "lo",
+        messageSoFar: "Hello",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+    expect(adapter.edited).toEqual([
+      { message: { markdown: "Hello" }, messageId: "posted-1", threadId: THREAD_ID },
+    ]);
+  });
+
+  it("falls back to a fresh post when streaming edits are not implemented", async () => {
+    const adapter = testAdapter();
+    adapter.editError = new NotImplementedError("editMessage");
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const state: ChatSdkChannelState = {
+      anchorMessageId: "posted-1",
+      editSupported: true,
+      streamStepIndex: 0,
+      thread: serializedThread(),
+    };
+    const channelAdapter = withState(getAdapter(bridge.channel), state);
+    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+
+    await callEvent(
+      channelAdapter,
+      makeEvent("message.completed", {
+        finishReason: "stop",
+        message: "final answer",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+
+    expect(adapter.posted).toEqual([
+      { message: { markdown: "final answer" }, threadId: THREAD_ID },
+    ]);
+    expect(state.editSupported).toBe(false);
+  });
+
+  it("finalizes the streamed anchor when a step completes with tool-calls", async () => {
+    const adapter = testAdapter();
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const state: ChatSdkChannelState = {
+      anchorMessageId: "posted-1",
+      editSupported: true,
+      streamStepIndex: 0,
+      thread: serializedThread(),
+    };
+    const channelAdapter = withState(getAdapter(bridge.channel), state);
+    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+
+    await callEvent(
+      channelAdapter,
+      makeEvent("message.completed", {
+        finishReason: "tool-calls",
+        message: "Let me check that.\nlooking now",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+
+    expect(adapter.edited).toEqual([
+      {
+        message: { markdown: "Let me check that.\nlooking now" },
+        messageId: "posted-1",
+        threadId: THREAD_ID,
+      },
+    ]);
+    expect(adapter.posted).toEqual([]);
+    expect(state.pendingToolCallMessage).toBe("Let me check that.");
+    expect(state.anchorMessageId).toBeNull();
+  });
+
+  it("does not post intermediate tool-call narration when streaming is off", async () => {
+    const adapter = testAdapter();
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      state: memoryState(),
+      streaming: false,
+      userName: "bot",
+    });
+    const state: ChatSdkChannelState = { thread: serializedThread() };
+    const channelAdapter = withState(getAdapter(bridge.channel), state);
+    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+
+    await callEvent(
+      channelAdapter,
+      makeEvent("message.completed", {
+        finishReason: "tool-calls",
+        message: "Let me check that.",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+
+    expect(adapter.posted).toEqual([]);
+    expect(adapter.edited).toEqual([]);
+    expect(state.pendingToolCallMessage).toBe("Let me check that.");
   });
 
   it("renders input requests as Chat SDK cards and resumes on button actions", async () => {
@@ -326,7 +496,7 @@ describe("chatSdkChannel", () => {
       type: "card",
     });
 
-    const { send } = await firePost(bridge.channel, "/eve/v1/chat/test", {
+    const { send } = await firePost(bridge.channel, "/eve/v1/test", {
       actionId: "eve_input:request-1:approve",
       kind: "action",
       value: "approve",
@@ -348,8 +518,102 @@ describe("chatSdkChannel", () => {
   });
 });
 
+describe("messageToUserContent", () => {
+  it("returns the plain text when there are no attachments", () => {
+    expect(messageToUserContent(message("just text"))).toBe("just text");
+  });
+
+  it("builds text and file parts when attachments have URLs", () => {
+    const withAttachment = new Message({
+      attachments: [
+        {
+          mimeType: "application/pdf",
+          name: "a.pdf",
+          type: "file",
+          url: "https://example.com/a.pdf",
+        },
+      ],
+      author: author(),
+      formatted: parseMarkdown("see attached"),
+      id: "message-2",
+      isMention: true,
+      metadata: metadata(),
+      raw: { text: "see attached" },
+      text: "see attached",
+      threadId: THREAD_ID,
+    });
+
+    const content = messageToUserContent(withAttachment);
+    expect(Array.isArray(content)).toBe(true);
+    const parts = content as Exclude<typeof content, string>;
+    expect(parts[0]).toEqual({ text: "see attached", type: "text" });
+    expect(parts[1]).toMatchObject({
+      filename: "a.pdf",
+      mediaType: "application/pdf",
+      type: "file",
+    });
+    expect((parts[1] as { data: URL }).data.href).toBe("https://example.com/a.pdf");
+  });
+
+  it("skips attachments without a URL, keeping the text part", () => {
+    const withUrllessAttachment = new Message({
+      attachments: [{ name: "pasted", type: "image" }],
+      author: author(),
+      formatted: parseMarkdown("no url"),
+      id: "message-3",
+      isMention: true,
+      metadata: metadata(),
+      raw: { text: "no url" },
+      text: "no url",
+      threadId: THREAD_ID,
+    });
+
+    expect(messageToUserContent(withUrllessAttachment)).toEqual([{ text: "no url", type: "text" }]);
+  });
+
+  it("falls back to text when there are no usable parts", () => {
+    const emptyWithUrllessAttachment = new Message({
+      attachments: [{ name: "pasted", type: "image" }],
+      author: author(),
+      formatted: parseMarkdown(""),
+      id: "message-4",
+      isMention: true,
+      metadata: metadata(),
+      raw: { text: "" },
+      text: "",
+      threadId: THREAD_ID,
+    });
+
+    expect(messageToUserContent(emptyWithUrllessAttachment)).toBe("");
+  });
+});
+
+describe("isNotImplemented", () => {
+  it("matches errors by name and by code", () => {
+    expect(isNotImplemented(new NotImplementedError("startTyping"))).toBe(true);
+    expect(isNotImplemented(Object.assign(new Error("nope"), { code: "NOT_IMPLEMENTED" }))).toBe(
+      true,
+    );
+  });
+
+  it("ignores unrelated errors and non-errors", () => {
+    expect(isNotImplemented(new Error("boom"))).toBe(false);
+    expect(isNotImplemented("NOT_IMPLEMENTED")).toBe(false);
+    expect(isNotImplemented(null)).toBe(false);
+  });
+});
+
 function testAdapter(): TestAdapter & Adapter {
   return new TestAdapter() as TestAdapter & Adapter;
+}
+
+class NotImplementedError extends Error {
+  readonly code = "NOT_IMPLEMENTED";
+
+  constructor(feature: string) {
+    super(`${feature} is not implemented`);
+    this.name = "NotImplementedError";
+  }
 }
 
 class TestAdapter {
@@ -357,6 +621,10 @@ class TestAdapter {
   readonly userName = "bot";
   chat: ChatInstance | null = null;
   posted: Array<{ message: AdapterPostableMessage; threadId: string }> = [];
+  edited: Array<{ message: AdapterPostableMessage; messageId: string; threadId: string }> = [];
+  typingStatuses: Array<string | undefined> = [];
+  startTypingError: Error | null = null;
+  editError: Error | null = null;
 
   async initialize(chat: ChatInstance): Promise<void> {
     this.chat = chat;
@@ -449,9 +717,11 @@ class TestAdapter {
 
   async editMessage(
     threadId: string,
-    _messageId: string,
+    messageId: string,
     posted: AdapterPostableMessage,
   ): Promise<RawMessage> {
+    if (this.editError) throw this.editError;
+    this.edited.push({ message: posted, messageId, threadId });
     return {
       id: "edited",
       raw: posted,
@@ -462,7 +732,10 @@ class TestAdapter {
   async addReaction(): Promise<void> {}
   async deleteMessage(): Promise<void> {}
   async removeReaction(): Promise<void> {}
-  async startTyping(): Promise<void> {}
+  async startTyping(_threadId: string, status?: string): Promise<void> {
+    this.typingStatuses.push(status);
+    if (this.startTypingError) throw this.startTypingError;
+  }
 }
 
 function message(text: string): Message {

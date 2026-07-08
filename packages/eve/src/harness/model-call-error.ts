@@ -1,5 +1,6 @@
 import { isObject } from "#shared/guards.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
+import { toError } from "#shared/errors.js";
 import { isTurnCancellation } from "#harness/turn-cancellation.js";
 
 const RESPONSE_BODY_SNIPPET_LIMIT = 1_000;
@@ -268,6 +269,21 @@ export class EmptyModelResponseError extends Error {
 }
 
 /**
+ * Coerces a streamed provider failure into an Error while retaining the raw
+ * payload so provider discriminators remain visible to error classification.
+ */
+export function normalizeModelStreamError(raw: unknown): Error {
+  const error = toError(raw);
+  if (error === raw) return error;
+
+  Object.defineProperty(error, "cause", {
+    configurable: true,
+    value: raw,
+  });
+  return error;
+}
+
+/**
  * True when the error (or any error in its cause chain) is the AI SDK's
  * `NoOutputGeneratedError`. Since `ai@7.0.0-canary.169` (vercel/ai#15938)
  * a model stream that ends after metadata without any output or finish
@@ -490,7 +506,7 @@ function readObjectField(value: unknown, key: string): Record<string, unknown> |
 }
 
 function isRetryableGatewayType(type: string | undefined): boolean {
-  return type === "rate_limit_exceeded" || type === "timeout_error";
+  return type === "overloaded_error" || type === "rate_limit_exceeded" || type === "timeout_error";
 }
 
 function isTerminalGatewayType(type: string | undefined): boolean {

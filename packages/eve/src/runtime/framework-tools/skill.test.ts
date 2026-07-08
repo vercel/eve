@@ -36,7 +36,9 @@ describe("load_skill executor", () => {
     if (execute === undefined) throw new Error("load_skill tool is missing an execute function");
 
     await expect(
-      contextStorage.run(ctx, () => execute({ skill: "talk-like-a-dog" })),
+      contextStorage.run(ctx, () =>
+        execute({ skill: "talk-like-a-dog" }, { messages: [], toolCallId: "call_1" }),
+      ),
     ).rejects.toThrow("Available skills: custom__bark, custom__talk-like-a-dog.");
   });
 
@@ -57,7 +59,11 @@ describe("load_skill executor", () => {
     const execute = SKILL_TOOL_DEFINITION.execute;
     if (execute === undefined) throw new Error("load_skill tool is missing an execute function");
 
-    await expect(contextStorage.run(ctx, () => execute({ skill: "linear" }))).rejects.toThrow(
+    await expect(
+      contextStorage.run(ctx, () =>
+        execute({ skill: "linear" }, { messages: [], toolCallId: "call_1" }),
+      ),
+    ).rejects.toThrow(
       '"linear" is an installed connection, not a skill. Use connection_search with connection "linear" to find its tools.',
     );
   });

@@ -6,7 +6,7 @@ import type {
   CompiledChannelDefinition,
   CompiledChannelEntry,
   CompiledConnectionDefinition,
-  CompiledInstructions,
+  CompiledInstructionsDefinition,
   CompiledScheduleDefinition,
   CompiledSkillDefinition,
   CompiledSubagentNode,
@@ -113,7 +113,9 @@ function isActiveChannel(entry: CompiledChannelEntry): entry is CompiledChannelD
   return entry.kind === "channel";
 }
 
-function toInstructionsEntry(instructions: CompiledInstructions): VercelEveInstructionsEntry {
+function toInstructionsEntry(
+  instructions: CompiledInstructionsDefinition,
+): VercelEveInstructionsEntry {
   return {
     logicalPath: instructions.logicalPath,
     sourceKind: instructions.sourceKind,

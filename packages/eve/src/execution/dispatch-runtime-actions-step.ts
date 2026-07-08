@@ -92,6 +92,11 @@ export async function dispatchRuntimeActionsStep(input: {
 
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const delegationLimit = resolveSubagentDelegationLimit(session);
+  // Split the parent's remaining token quota across the batch's local
+  // subagent calls, the children that actually receive an enforced cap.
+  // Remote agents run on their own deployment under their own limits and
+  // do not dilute the local shares.
+  const fanoutSize = batch.actions.filter((action) => action.kind === "subagent-call").length;
 
   let nextSession = session;
   const results: RuntimeSubagentResultActionResult[] = [];
@@ -132,6 +137,7 @@ export async function dispatchRuntimeActionsStep(input: {
             batchEvent: batch.event,
             capabilities,
             channelMetadata,
+            fanoutSize,
             initiatorAuth,
             parentContinuationToken: input.parentContinuationToken,
             session,

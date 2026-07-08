@@ -74,7 +74,7 @@ export function Chat() {
 
 Most chat UIs only need `data.messages` and `status`. Drop down to `events` when you need the authoritative wire events directly, for example to persist an audit log or build a custom projection.
 
-`data.messages` are `EveMessage[]` following the AI SDK `UIMessage` convention, so they drop straight into any AI SDK UI primitive that accepts a `UIMessage[]`. Parts include user text, assistant text, reasoning, tool calls, tool results, input requests, and connection authorization prompts.
+`data.messages` are `EveMessage[]` following the AI SDK `UIMessage` convention, so they drop straight into any AI SDK UI primitive that accepts a `UIMessage[]`. Parts include user text, user file attachments, assistant text, reasoning, tool calls, tool results, input requests, and connection authorization prompts.
 
 ## Sending and streaming
 
@@ -97,6 +97,10 @@ await agent.send({
 ```
 
 Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and `status` moves from `ready` to `submitted` to `streaming` and back. Call `stop()` to abort the active request, and `reset()` to clear local state so the next send starts a fresh durable session.
+
+After eve confirms an attachment turn with `message.received`, the default reducer projects each
+received attachment as a `file` part on the user message. The part includes `mediaType`, optional
+`filename` and `size`, and a `url` only when the original attachment was browser-resolvable.
 
 ## Human-in-the-loop prompts
 

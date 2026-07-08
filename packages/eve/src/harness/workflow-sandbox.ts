@@ -26,6 +26,7 @@ export async function applyWorkflowTool(input: {
   readonly continuationSecurity: WorkflowSandboxContinuationSecurity;
   readonly harnessTools: HarnessToolMap;
   readonly lifecycle?: WorkflowSandboxLifecycle;
+  readonly maxSubagents?: number;
   readonly tools: ToolSet;
 }): Promise<WorkflowToolSet> {
   const hostTools = createWorkflowHostTools(input.harnessTools, Object.keys(input.tools));
@@ -40,7 +41,9 @@ export async function applyWorkflowTool(input: {
     lifecycle: input.lifecycle,
   });
   const generated = typeof workflowTool.description === "string" ? workflowTool.description : "";
-  const framing = workflowToolDescription(Object.keys(hostTools));
+  const framing = workflowToolDescription(Object.keys(hostTools), {
+    maxSubagents: input.maxSubagents,
+  });
   const apiReference = workflowApiReference(generated);
   const modelTools: Record<string, ToolSet[string]> = { ...input.tools };
   modelTools[WORKFLOW_TOOL_NAME] = {

@@ -1,6 +1,7 @@
 import type { HandleMessageStreamEvent } from "../../protocol/message.js";
 import type { SessionContext } from "./callback-context.js";
 import type { ExactDefinition } from "./exact.js";
+import type { GenericHookDefinition, GenericStreamEventHooks } from "#shared/hook-definition.js";
 
 /**
  * Every hook handler receives this context.
@@ -34,13 +35,7 @@ export type StreamEventHook<TEvent> = (event: TEvent, ctx: HookContext) => void 
  * `*` matches every accepted runtime stream event and runs after the
  * typed handler for that event (if any).
  */
-export type StreamEventHooks = {
-  readonly "*"?: StreamEventHook<HandleMessageStreamEvent>;
-} & {
-  readonly [K in HandleMessageStreamEvent["type"]]?: StreamEventHook<
-    Extract<HandleMessageStreamEvent, { type: K }>
-  >;
-};
+export type StreamEventHooks = GenericStreamEventHooks<HandleMessageStreamEvent, HookContext>;
 
 /**
  * Public hook definition authored in `agent/hooks/*.ts`.
@@ -51,9 +46,7 @@ export type StreamEventHooks = {
  * contribute runtime model messages, use `defineDynamic` +
  * `defineInstructions` in `agent/instructions/`.
  */
-export interface HookDefinition {
-  readonly events?: StreamEventHooks;
-}
+export type HookDefinition = GenericHookDefinition<HandleMessageStreamEvent, HookContext>;
 
 /**
  * Identity-with-types helper. Returns the passed definition unchanged

@@ -32,7 +32,6 @@ import {
 } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
-import { toError } from "#shared/errors.js";
 import type { JsonObject } from "#shared/json.js";
 import {
   createRuntimeToolResultFromStepResult,
@@ -43,6 +42,7 @@ import {
   createRuntimeActionRequestFromToolCall,
   resolveToolCallInputObject,
 } from "#harness/runtime-actions.js";
+import { createInvalidToolCallInputError } from "#harness/tool-call-input-errors.js";
 import type {
   RuntimeActionRequest,
   RuntimeToolResultActionResult,
@@ -51,6 +51,7 @@ import { isAuthorizationSignal, isPendingAuthorizationToolOutput } from "#harnes
 import { contextStorage } from "#context/container.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
 import { createProviderStreamActionBatch } from "#harness/stream-actions.js";
+import { normalizeModelStreamError } from "#harness/model-call-error.js";
 import type {
   HarnessEmitFn,
   HarnessSession,
@@ -332,6 +333,7 @@ export function normalizeAssistantStepFinishReason(
 interface EmittedStreamContent {
   readonly emittedActionCallIds: ReadonlySet<string>;
   readonly handledInlineToolResultCallIds: ReadonlySet<string>;
+  readonly invalidInputToolCallIds: ReadonlySet<string>;
   readonly inlineAuthorizationResults: readonly TypedToolResult<ToolSet>[];
   readonly inlineToolResultParts: readonly InlineToolResultPart[];
   readonly trailingInlineToolResultParts: readonly InlineToolResultPart[];
@@ -366,6 +368,7 @@ export async function emitStreamContent(
   const providerToolCallIdsSeen = new Set<string>();
   const providerActionBatch = createProviderStreamActionBatch({ emitFn, state });
   const handledInlineToolResultCallIds = new Set<string>();
+  const invalidInputToolCallIds = new Set<string>();
   const inlineAuthorizationResults: TypedToolResult<ToolSet>[] = [];
   const inlineToolResultParts: InlineToolResultPart[] = [];
   const trailingInlineToolResultParts: InlineToolResultPart[] = [];
@@ -467,10 +470,15 @@ export async function emitStreamContent(
         }),
       );
     } catch (error) {
-      // A malformed tool call can arrive before the SDK marks its final call
-      // invalid. Let the SDK's recovery path handle it instead of failing the
-      // whole step while projecting UI events.
       if (error instanceof TypeError) {
+        const toolError = createInvalidToolCallInputError({ error, toolCall });
+        invalidInputToolCallIds.add(toolCall.toolCallId);
+        if (currentMessage.trim().length > 0) {
+          await flushCurrentMessage();
+        }
+        await emitActionResult(createRuntimeToolResultFromToolError(toolError));
+        handledInlineToolResultCallIds.add(toolCall.toolCallId);
+        trailingInlineToolResultParts.push(createToolResultMessagePartFromToolError(toolError));
         return;
       }
       throw error;
@@ -611,7 +619,7 @@ export async function emitStreamContent(
         // so plain-object shapes (structured-clone survivors, typed
         // gateway payloads) keep their `message`, `name`, `stack`, and
         // `cause` instead of degrading to `new Error("[object Object]")`.
-        streamError = toError(part.error);
+        streamError = normalizeModelStreamError(part.error);
         break;
       case "abort":
         // The SDK does not resolve step results for aborted in-flight steps.
@@ -666,6 +674,7 @@ export async function emitStreamContent(
   return {
     emittedActionCallIds,
     handledInlineToolResultCallIds,
+    invalidInputToolCallIds,
     inlineAuthorizationResults,
     inlineToolResultParts,
     trailingInlineToolResultParts,

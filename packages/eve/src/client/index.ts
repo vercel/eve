@@ -95,6 +95,7 @@ export type {
   InputRequestedStreamEvent,
   MessageAppendedStreamEvent,
   MessageCompletedStreamEvent,
+  MessageReceivedPart,
   MessageReceivedStreamEvent,
   ReasoningAppendedStreamEvent,
   ReasoningCompletedStreamEvent,

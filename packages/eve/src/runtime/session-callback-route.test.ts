@@ -66,6 +66,112 @@ describe("session callback route", () => {
       ],
     });
   });
+
+  it("projects reported usage onto the resumed result", async () => {
+    resumeHookMock.mockResolvedValue(undefined);
+
+    const response = await handleSessionCallbackRequest(
+      new Request("https://app.example.com/eve/v1/callback/tok123", {
+        body: JSON.stringify({
+          callId: "call-1",
+          kind: "session.completed",
+          output: "done",
+          sessionId: "remote-session",
+          subagentName: "research",
+          usage: { cacheReadTokens: 10, cacheWriteTokens: 5, inputTokens: 100, outputTokens: 50 },
+        }),
+        method: "POST",
+      }),
+      createRouteContext({ token: "tok123" }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(resumeHookMock).toHaveBeenCalledWith("tok123", {
+      kind: "runtime-action-result",
+      results: [
+        {
+          callId: "call-1",
+          kind: "subagent-result",
+          output: "done",
+          subagentName: "research",
+          usage: { cacheReadTokens: 10, cacheWriteTokens: 5, inputTokens: 100, outputTokens: 50 },
+        },
+      ],
+    });
+  });
+
+  it("strips unknown usage keys from a newer callee", async () => {
+    resumeHookMock.mockResolvedValue(undefined);
+
+    const response = await handleSessionCallbackRequest(
+      new Request("https://app.example.com/eve/v1/callback/tok123", {
+        body: JSON.stringify({
+          callId: "call-1",
+          kind: "session.completed",
+          output: "done",
+          sessionId: "remote-session",
+          subagentName: "research",
+          usage: {
+            cacheReadTokens: 10,
+            cacheWriteTokens: 5,
+            inputTokens: 100,
+            outputTokens: 50,
+            reasoningOutputTokens: 7,
+          },
+        }),
+        method: "POST",
+      }),
+      createRouteContext({ token: "tok123" }),
+    );
+
+    expect(response.status).toBe(202);
+    const payload = resumeHookMock.mock.calls[0]?.[1] as {
+      results: readonly { usage?: unknown }[];
+    };
+    expect(payload.results[0]?.usage).toEqual({
+      cacheReadTokens: 10,
+      cacheWriteTokens: 5,
+      inputTokens: 100,
+      outputTokens: 50,
+    });
+  });
+
+  it("drops malformed usage but still resumes the result", async () => {
+    resumeHookMock.mockResolvedValue(undefined);
+
+    const response = await handleSessionCallbackRequest(
+      new Request("https://app.example.com/eve/v1/callback/tok123", {
+        body: JSON.stringify({
+          callId: "call-1",
+          kind: "session.completed",
+          output: "done",
+          sessionId: "remote-session",
+          subagentName: "research",
+          usage: {
+            cacheReadTokens: 10,
+            cacheWriteTokens: 5,
+            inputTokens: "lots",
+            outputTokens: 50,
+          },
+        }),
+        method: "POST",
+      }),
+      createRouteContext({ token: "tok123" }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(resumeHookMock).toHaveBeenCalledWith("tok123", {
+      kind: "runtime-action-result",
+      results: [
+        {
+          callId: "call-1",
+          kind: "subagent-result",
+          output: "done",
+          subagentName: "research",
+        },
+      ],
+    });
+  });
 });
 
 function createRouteContext(params: Record<string, string>): RouteContext {

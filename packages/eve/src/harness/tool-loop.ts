@@ -14,6 +14,7 @@ import {
   ToolLoopAgent,
   type ToolSet,
   type TypedToolCall,
+  type TypedToolError,
   type TypedToolResult,
 } from "ai";
 import { isScheduleAppAuth } from "#channel/schedule-auth.js";
@@ -29,6 +30,7 @@ import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { contextStorage } from "#context/container.js";
 import { AuthKey, ParentSessionKey } from "#context/keys.js";
 import { buildDynamicInstructionMessages } from "#context/dynamic-instruction-lifecycle.js";
+import { getActiveDynamicModelSelection } from "#context/dynamic-model-lifecycle.js";
 import { buildDynamicTools } from "#context/build-dynamic-tools.js";
 import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -38,6 +40,7 @@ import {
   createCompactionRequestedEvent,
   createInputRequestedEvent,
   createResultCompletedEvent,
+  createStepStartedEvent,
 } from "#protocol/message.js";
 import type { InstrumentationDefinition } from "#public/instrumentation/index.js";
 import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
@@ -69,13 +72,14 @@ import {
 } from "#harness/compaction.js";
 import {
   accumulateTurnUsage,
-  getSessionTokenLimitViolation,
-  getSessionTokenUsage,
   getTurnUsageState,
   setTurnUsageState,
-  type SessionTokenLimitViolation,
   type TokenUsageDelta,
 } from "#harness/turn-tag-state.js";
+import {
+  applySessionLimitContinuation,
+  enforceSessionTokenLimit,
+} from "#harness/session-limit-enforcement.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import {
   advanceStep,
@@ -92,6 +96,7 @@ import {
   extractQuestionInputRequests,
   extractToolApprovalInputRequests,
 } from "#harness/input-extraction.js";
+import { createToolResultMessagePartFromToolError } from "#harness/action-result-helpers.js";
 import { buildTelemetryRuntimeContext } from "#harness/instrumentation-runtime-context.js";
 import {
   consumeDeferredStepInput,
@@ -143,6 +148,7 @@ import {
   resolvePendingRuntimeActions,
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
+import { getInvalidToolCallInputError } from "#harness/tool-call-input-errors.js";
 import {
   buildStepHooks,
   emitStepActions,
@@ -164,6 +170,7 @@ import {
   buildFinalOutputTool,
   FINAL_OUTPUT_TOOL_NAME,
 } from "#runtime/framework-tools/final-output.js";
+import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type {
   CompactionConfig,
@@ -279,6 +286,81 @@ function buildGatewayAttributionHeaders(
   if (title) headers["x-title"] = title;
   if (referer) headers["http-referer"] = referer;
   return headers;
+}
+
+async function resolveActiveRuntimeModel(input: {
+  readonly config: ToolLoopHarnessConfig;
+  readonly ctx: ReturnType<typeof contextStorage.getStore>;
+  readonly session: HarnessSession;
+}): Promise<{
+  readonly model: LanguageModel;
+  readonly session: HarnessSession;
+}> {
+  if (input.ctx === undefined) {
+    return {
+      model: await input.config.resolveModel(input.session.agent.modelReference),
+      session: input.session,
+    };
+  }
+
+  const fallback =
+    input.session.agent.dynamicModelDefaultReference ?? input.session.agent.modelReference;
+  const selected = getActiveDynamicModelSelection(input.ctx);
+
+  if (selected === null) {
+    return {
+      model: await input.config.resolveModel(fallback),
+      session: updateSessionModelReference(input.session, fallback),
+    };
+  }
+
+  return {
+    model:
+      selected.model !== undefined
+        ? selected.model
+        : await input.config.resolveModel(selected.reference),
+    session: updateSessionModelReference(input.session, selected.reference),
+  };
+}
+
+function updateSessionModelReference(
+  session: HarnessSession,
+  modelReference: RuntimeModelReference,
+): HarnessSession {
+  // Rescale from the reference the current threshold was computed against;
+  // rescaling from the static fallback would compound the threshold per step.
+  const priorReference = session.agent.modelReference;
+  return {
+    ...session,
+    agent: {
+      ...session.agent,
+      modelReference,
+    },
+    compaction: updateCompactionThresholdForModelReference({
+      compaction: session.compaction,
+      modelReference,
+      priorReference,
+    }),
+  };
+}
+
+function updateCompactionThresholdForModelReference(input: {
+  readonly compaction: CompactionConfig;
+  readonly modelReference: RuntimeModelReference;
+  readonly priorReference: RuntimeModelReference;
+}): CompactionConfig {
+  if (
+    input.modelReference.contextWindowTokens === undefined ||
+    input.priorReference.contextWindowTokens === undefined
+  ) {
+    return input.compaction;
+  }
+
+  const thresholdPercent = input.compaction.threshold / input.priorReference.contextWindowTokens;
+  return {
+    ...input.compaction,
+    threshold: Math.max(1, Math.floor(input.modelReference.contextWindowTokens * thresholdPercent)),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -488,6 +570,20 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     session = pending.session;
     let messages: ModelMessage[] = pending.messages;
 
+    // A resolved session-limit continuation prompt grants a fresh token
+    // budget or ends the session; see session-limit-enforcement.
+    const continuation = await applySessionLimitContinuation({
+      config,
+      emit,
+      emissionState,
+      limitContinuation: pending.limitContinuation,
+      session,
+    });
+    if (continuation.result !== null) {
+      return continuation.result;
+    }
+    session = continuation.session;
+
     if (stepInput.input?.context !== undefined) {
       for (const entry of stepInput.input.context) {
         messages.push({ content: entry, role: "user" });
@@ -510,7 +606,27 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     // --- Model + tools ------------------------------------------------------
 
-    const model = await config.resolveModel(session.agent.modelReference);
+    // Direct harness unit tests may run without an ambient context.
+    const ctx = contextStorage.getStore();
+    if (ctx !== undefined && config.dispatchDynamicModelEvent !== undefined) {
+      await config.dispatchDynamicModelEvent({
+        ctx,
+        event: createStepStartedEvent({
+          sequence: emissionState.sequence,
+          stepIndex: emissionState.stepIndex,
+          turnId: emissionState.turnId,
+        }),
+        fallback: session.agent.dynamicModelDefaultReference ?? session.agent.modelReference,
+        messages,
+      });
+    }
+    const resolvedModel = await resolveActiveRuntimeModel({
+      config,
+      ctx,
+      session,
+    });
+    session = resolvedModel.session;
+    const model = resolvedModel.model;
     const cachePath = detectPromptCachePath(model);
     const marker = cachePath.kind === "anthropic-direct" ? getAnthropicCacheMarker() : undefined;
 
@@ -535,8 +651,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     const approvedTools = getApprovedTools(session);
 
-    // Direct harness unit tests may run without an ambient context.
-    const ctx = contextStorage.getStore();
     const emptyDeliveryEnabled =
       session.outputSchema === undefined &&
       ctx !== undefined &&
@@ -616,20 +730,22 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
      * Assembles the effective toolset and ToolLoopAgent for one attempt
      * of this step, then runs the model call.
      *
-     * Re-invoked by both recovery stages. The unsupported-provider-tool
-     * retry passes `disabledProviderTools` to drop the offending tool and
-     * `extraSystemNote` to tell the model why a capability was removed.
-     * The empty-response reissue passes `retryReason` to label the retried
-     * call's telemetry.
+     * Re-invoked for every transient attempt so an earlier stream cannot
+     * resolve the retry's one-shot step hooks with stale partial output.
+     * Recovery stages also use it to alter the call shape: unsupported-tool
+     * recovery drops the offending tool, while empty-response recovery adds
+     * its retry telemetry and follow-up note.
      */
-    const runOneModelCall = async (opts: {
+    type ModelCallOptions = {
       disabledProviderTools?: ReadonlySet<string>;
       extraSystemNote?: string;
       preparedInput?: ReturnType<typeof prepareModelCallInput>;
       retryReason?: "empty-response";
       suppressStepStartedEmission?: boolean;
       trailingUserNote?: string;
-    }): Promise<HarnessStepResult> => {
+    };
+
+    const runSingleModelCall = async (opts: ModelCallOptions): Promise<HarnessStepResult> => {
       const { instructions, telemetryRuntimeContext = {} } =
         opts.preparedInput ?? prepareModelCallInput(opts.extraSystemNote);
       // Label the reissued call's telemetry; without this a retry is only
@@ -688,7 +804,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
               })
           : undefined;
       const workflowConfig =
-        config.workflow === true ? { lifecycle: workflowLifecycle } : undefined;
+        config.workflow === true
+          ? { lifecycle: workflowLifecycle, maxSubagents: config.workflowMaxSubagents }
+          : undefined;
 
       const advertisedModelTools = await getAdvertisedTools({
         modelTools: flatTools,
@@ -757,6 +875,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           const {
             emittedActionCallIds,
             handledInlineToolResultCallIds,
+            invalidInputToolCallIds,
             inlineAuthorizationResults,
             inlineToolResultParts,
             trailingInlineToolResultParts,
@@ -776,6 +895,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           }
           await emitStepActions(emit, emissionState, stepResult, {
             emittedActionCallIds,
+            excludedActionCallIds: invalidInputToolCallIds,
             excludedActionToolNames,
             handledInlineToolResultCallIds,
             tools: advertisedHarnessTools,
@@ -820,6 +940,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
               text: stepResult.text,
               toolCalls: stepResult.toolCalls,
               toolResults: [...toolResultsByCallId.values()],
+              invalidInputToolCallIds,
               usage: stepResult.usage,
             };
           }
@@ -834,15 +955,23 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         return stepResult;
       };
 
-      return runModelCallWithRetries(
-        () => executeModelCall().catch(rethrowNoOutputAsEmptyResponse),
+      return executeModelCall().catch(rethrowNoOutputAsEmptyResponse);
+    };
+
+    const runOneModelCall = async (opts: ModelCallOptions): Promise<HarnessStepResult> =>
+      runModelCallWithRetries(
+        (attempt) =>
+          runSingleModelCall({
+            ...opts,
+            preparedInput: attempt === 1 ? opts.preparedInput : undefined,
+            suppressStepStartedEmission: attempt === 1 ? opts.suppressStepStartedEmission : true,
+          }),
         {
           sessionId: session.sessionId,
           turnId: emissionState.turnId,
         },
         config.abortSignal,
       );
-    };
 
     // Resolve first-attempt instrumentation before step.started dispatch
     // allows dynamic tool resolvers to update the effective toolset.
@@ -868,15 +997,15 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       return pendingWorkflowInterrupt;
     }
 
-    const tokenLimitViolation = getSessionTokenLimitViolation(session);
-    if (tokenLimitViolation !== null) {
-      return failSessionTokenLimit({
-        config,
-        emit,
-        emissionState,
-        session,
-        violation: tokenLimitViolation,
-      });
+    const limitResult = await enforceSessionTokenLimit({
+      config,
+      emit,
+      emissionState,
+      messages,
+      session,
+    });
+    if (limitResult !== null) {
+      return limitResult;
     }
 
     let result: HarnessStepResult;
@@ -1021,10 +1150,26 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         }
 
         if (config.mode === "task") {
+          if (
+            classification === "recoverable" &&
+            !(finalError instanceof EmptyModelResponseError)
+          ) {
+            // Task runs cannot park for user-driven recovery. Let the durable
+            // step retry from committed session state, but only for errors
+            // that did not already consume the in-process transient budget or
+            // the dedicated empty-response reissue.
+            log.warn(
+              requestSummary?.message ??
+                "model call failed recoverably in task mode — rethrowing for durable step retry",
+              modelCallLogFields,
+            );
+            throw finalError;
+          }
+
           // A task run cannot park for a user retry (turnWorkflow rejects
-          // `next: null` in task mode), so the failure is the task's
-          // terminal result, mirroring finishTaskTurn's unfulfilled-schema
-          // shape.
+          // `next: null` in task mode). Classified transient errors arrive
+          // here only after their bounded in-process retries are exhausted;
+          // empty responses already received their specialized reissue.
           log.error(
             requestSummary?.message ?? "model call failed; failing the task run",
             modelCallLogFields,
@@ -1112,8 +1257,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
   return runStep;
 }
 
-const SESSION_TOKEN_LIMIT_REACHED_CODE = "SESSION_TOKEN_LIMIT_REACHED";
-
 function extractTokenUsageDelta(input: {
   readonly costUsd: number | undefined;
   readonly usage: HarnessStepResult["usage"] | undefined;
@@ -1150,46 +1293,6 @@ function readGatewayMetadata(
 ): ProviderMetadata[string] | undefined {
   const gateway = providerMetadata?.gateway;
   return gateway && typeof gateway === "object" && !Array.isArray(gateway) ? gateway : undefined;
-}
-
-function formatSessionTokenLimitMessage(kind: SessionTokenLimitViolation["kind"]): string {
-  return `The session reached its configured ${kind} token limit.`;
-}
-
-async function failSessionTokenLimit(input: {
-  readonly config: ToolLoopHarnessConfig;
-  readonly emit?: ToolLoopHarnessConfig["handleEvent"];
-  readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
-  readonly session: HarnessSession;
-  readonly violation: SessionTokenLimitViolation;
-}): Promise<StepResult> {
-  const usage = getSessionTokenUsage(input.session);
-  const message = formatSessionTokenLimitMessage(input.violation.kind);
-  const details = {
-    inputTokens: usage.inputTokens,
-    kind: input.violation.kind,
-    limit: input.violation.limit,
-    outputTokens: usage.outputTokens,
-    usedTokens: input.violation.usedTokens,
-  };
-
-  if (input.emit) {
-    await emitFailedStep(input.emit, input.emissionState, {
-      code: SESSION_TOKEN_LIMIT_REACHED_CODE,
-      details,
-      message,
-      sessionId: input.session.sessionId,
-    });
-  }
-
-  return {
-    next: {
-      done: true,
-      isError: input.config.mode === "task" ? true : undefined,
-      output: input.config.mode === "task" ? message : "",
-    },
-    session: input.session,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1380,6 +1483,25 @@ function insertInlineToolResultMessages(input: {
     ...input.responseMessages,
     ...(append.length > 0 ? [{ role: "tool" as const, content: [...append] }] : []),
   ] satisfies StepResponseMessage[];
+}
+
+function getInvalidToolCallInputErrors(input: {
+  readonly toolCalls: readonly TypedToolCall<ToolSet>[];
+}): readonly TypedToolError<ToolSet>[] {
+  const errors: TypedToolError<ToolSet>[] = [];
+
+  for (const toolCall of input.toolCalls) {
+    if (toolCall.toolName === FINAL_OUTPUT_TOOL_NAME) {
+      continue;
+    }
+
+    const toolError = getInvalidToolCallInputError({ toolCall });
+    if (toolError !== undefined) {
+      errors.push(toolError);
+    }
+  }
+
+  return errors;
 }
 
 function extractToolResultCallIds(messages: readonly StepResponseMessage[]): ReadonlySet<string> {
@@ -1597,7 +1719,22 @@ async function handleStepResult(input: {
     result.finishReason !== "tool-calls" &&
     result.toolCalls.length === 0 &&
     hasEmptyDeliverySentinel(resolvedStepOutput);
-  const rawResponseMessages = emptyDelivery ? [] : result.response.messages;
+  const invalidInputToolErrors = getInvalidToolCallInputErrors({
+    toolCalls: result.toolCalls as TypedToolCall<ToolSet>[],
+  });
+  const invalidInputToolCallIds = new Set([
+    ...(result.invalidInputToolCallIds ?? []),
+    ...invalidInputToolErrors.map((toolError) => toolError.toolCallId),
+  ]);
+  const rawResponseMessages = emptyDelivery
+    ? []
+    : insertInlineToolResultMessages({
+        append: invalidInputToolErrors.map((toolError) =>
+          createToolResultMessagePartFromToolError(toolError),
+        ),
+        prepend: [],
+        responseMessages: result.response.messages,
+      });
   const stepOutput = emptyDelivery ? null : resolvedStepOutput;
 
   const providerExecutedOutcomeIds = new Set<string>();
@@ -1642,11 +1779,14 @@ async function handleStepResult(input: {
     }
   }
 
-  const approvalRequests = extractToolApprovalInputRequests({ content: result.content ?? [] });
+  const approvalRequests = extractToolApprovalInputRequests({
+    content: result.content ?? [],
+    excludedCallIds: invalidInputToolCallIds,
+  });
   const approvalRequestCallIds = new Set(approvalRequests.map((request) => request.action.callId));
   const questionRequests = extractQuestionInputRequests({
     toolCalls: result.toolCalls,
-    excludedCallIds: approvalRequestCallIds,
+    excludedCallIds: new Set([...invalidInputToolCallIds, ...approvalRequestCallIds]),
   });
   const inputRequests: InputRequest[] = [...approvalRequests, ...questionRequests];
   const advertisedRuntimeActionTools = getAdvertisedTools({
@@ -1655,6 +1795,7 @@ async function handleStepResult(input: {
   });
   const pendingRuntimeActions = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
     .filter((toolCall) => !isInvalidToolCall(toolCall))
+    .filter((toolCall) => !invalidInputToolCallIds.has(toolCall.toolCallId))
     .filter((toolCall) => config.tools.get(toolCall.toolName)?.runtimeAction !== undefined)
     .filter((toolCall) => {
       if (advertisedRuntimeActionTools.get(toolCall.toolName)?.runtimeAction !== undefined) {
@@ -2242,14 +2383,14 @@ function resolveApprovalKeyFromTools(
  * transient.
  */
 async function runModelCallWithRetries<T>(
-  fn: () => Promise<T>,
+  fn: (attempt: number) => Promise<T>,
   diag: { readonly sessionId: string; readonly turnId: string },
   abortSignal?: AbortSignal,
 ): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     throwIfTurnAborted(abortSignal);
     try {
-      return await fn();
+      return await fn(attempt);
     } catch (error) {
       throwIfTurnAborted(abortSignal);
       if (attempt === MODEL_CALL_MAX_ATTEMPTS || classifyModelCallError(error) !== "retry") {

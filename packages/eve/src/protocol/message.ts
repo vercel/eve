@@ -1,6 +1,12 @@
-import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
-import type { ProviderMetadata, UserContent } from "ai";
+import type { FileUIPart, ProviderMetadata, TextUIPart, UserContent } from "ai";
 
+import {
+  deserializeUrlFilePart,
+  hasInternalRefScheme,
+  isSerializedUrlFilePart,
+} from "#internal/attachments/url-refs.js";
+import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
+import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
@@ -10,7 +16,7 @@ export const EVE_STREAM_FORMAT_HEADER = "x-eve-stream-format";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "17";
+export const EVE_MESSAGE_STREAM_VERSION = "18";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -94,6 +100,7 @@ export interface RuntimeIdentity {
     readonly gitBranch?: string;
     readonly gitSha?: string;
   };
+  /** Configured model id; dynamic-model agents report `dynamic:<fallback id>`. */
   readonly modelId: string;
 }
 
@@ -156,15 +163,35 @@ export interface TurnStartedStreamEvent {
 
 /**
  * Stream event emitted when the runtime receives one normalized user message.
+ *
+ * `message` is the existing flattened text summary. `parts` carries the
+ * structured projection current emitters provide for clients that render
+ * attachments.
  */
 export interface MessageReceivedStreamEvent {
   data: {
     message: string;
+    parts?: readonly MessageReceivedPart[];
     sequence: number;
     turnId: string;
   };
   type: "message.received";
 }
+
+/**
+ * One structured part of a received user message.
+ *
+ * This mirrors the AI SDK UI text/file part surface, narrowed to renderable
+ * metadata only. Raw bytes and framework-internal sandbox paths are never
+ * projected; `url` is optional because it is present only for client-resolvable
+ * `http(s)` and `data:` URLs.
+ */
+export type MessageReceivedPart =
+  | Readonly<Pick<TextUIPart, "text" | "type">>
+  | (Readonly<Pick<FileUIPart, "filename" | "mediaType" | "type">> & {
+      readonly size?: number;
+      readonly url?: FileUIPart["url"];
+    });
 
 /**
  * Stream event emitted when the model requests one or more actions.
@@ -669,6 +696,7 @@ export function createMessageReceivedEvent(input: {
   return {
     data: {
       message: summarizeUserContent(input.message),
+      parts: projectUserContentParts(input.message),
       sequence: input.sequence,
       turnId: input.turnId,
     },
@@ -693,6 +721,172 @@ function summarizeUserContent(message: string | UserContent): string {
     }
   }
   return pieces.join("\n");
+}
+
+const PROJECTED_PART_FALLBACK_MEDIA_TYPE = "application/octet-stream";
+
+function projectUserContentParts(message: string | UserContent): readonly MessageReceivedPart[] {
+  if (typeof message === "string") {
+    return [{ text: message, type: "text" }];
+  }
+
+  const parts: MessageReceivedPart[] = [];
+  for (const part of message) {
+    if (part.type === "text") {
+      parts.push({ text: part.text, type: "text" });
+    } else if (part.type === "file") {
+      parts.push(projectFileLikePart(part.data, part.mediaType, part.filename));
+    } else if (part.type === "image") {
+      parts.push(
+        projectFileLikePart(
+          part.image,
+          part.mediaType ?? PROJECTED_PART_FALLBACK_MEDIA_TYPE,
+          undefined,
+        ),
+      );
+    }
+  }
+  return parts;
+}
+
+function projectFileLikePart(
+  data: unknown,
+  mediaType: string,
+  filename: string | undefined,
+): MessageReceivedPart {
+  if (isSandboxRefUrl(data)) {
+    const ref = decodeSandboxRef(data);
+    return createProjectedFilePart({
+      filename: basenameOf(filename ?? ref.path),
+      mediaType: ref.mediaType,
+      size: ref.size,
+    });
+  }
+
+  const tagged = projectTaggedFileData(data, mediaType, filename);
+  if (tagged !== undefined) {
+    return tagged;
+  }
+
+  const size = byteLengthOf(data);
+  if (size !== undefined) {
+    return createProjectedFilePart({ filename, mediaType, size });
+  }
+
+  return createProjectedFilePart({ filename, mediaType, ...clientUrlFragment(data) });
+}
+
+function projectTaggedFileData(
+  data: unknown,
+  mediaType: string,
+  filename: string | undefined,
+): MessageReceivedPart | undefined {
+  if (!isTaggedFileData(data)) {
+    return undefined;
+  }
+
+  switch (data.type) {
+    case "data": {
+      const size = byteLengthOf(data.data);
+      return size === undefined
+        ? createProjectedFilePart({ filename, mediaType })
+        : createProjectedFilePart({ filename, mediaType, size });
+    }
+    case "reference":
+    case "text":
+      return createProjectedFilePart({ filename, mediaType });
+    case "url":
+      return createProjectedFilePart({ filename, mediaType, ...clientUrlFragment(data.url) });
+  }
+}
+
+function createProjectedFilePart(input: {
+  readonly filename?: string;
+  readonly mediaType: string;
+  readonly size?: number;
+  readonly url?: string;
+}): MessageReceivedPart {
+  const part: {
+    filename?: string;
+    mediaType: string;
+    size?: number;
+    type: "file";
+    url?: string;
+  } = {
+    mediaType: input.mediaType,
+    type: "file",
+  };
+  if (input.filename !== undefined) {
+    part.filename = input.filename;
+  }
+  if (input.size !== undefined) {
+    part.size = input.size;
+  }
+  if (input.url !== undefined) {
+    part.url = input.url;
+  }
+  return part;
+}
+
+function isTaggedFileData(
+  data: unknown,
+): data is
+  | { readonly type: "data"; readonly data: unknown }
+  | { readonly type: "reference"; readonly reference: unknown }
+  | { readonly type: "text"; readonly text: unknown }
+  | { readonly type: "url"; readonly url: unknown } {
+  if (data === null || typeof data !== "object") {
+    return false;
+  }
+  const type = (data as { readonly type?: unknown }).type;
+  return type === "data" || type === "reference" || type === "text" || type === "url";
+}
+
+function byteLengthOf(data: unknown): number | undefined {
+  if (data instanceof Uint8Array || data instanceof ArrayBuffer) {
+    return data.byteLength;
+  }
+  return undefined;
+}
+
+function clientUrlFragment(data: unknown): { readonly url?: string } {
+  if (isSerializedUrlFilePart(data)) {
+    try {
+      const url = deserializeUrlFilePart(data);
+      return isClientResolvableUrl(url) ? { url: url.href } : {};
+    } catch {
+      return {};
+    }
+  }
+
+  if (data instanceof URL) {
+    return isClientResolvableUrl(data) ? { url: data.href } : {};
+  }
+
+  if (typeof data !== "string" || hasInternalRefScheme(data)) {
+    return {};
+  }
+
+  if (data.startsWith("data:")) {
+    return { url: data };
+  }
+
+  try {
+    const url = new URL(data);
+    return isClientResolvableUrl(url) ? { url: url.href } : {};
+  } catch {
+    return {};
+  }
+}
+
+function isClientResolvableUrl(url: URL): boolean {
+  return url.protocol === "http:" || url.protocol === "https:" || url.protocol === "data:";
+}
+
+function basenameOf(path: string): string {
+  const normalized = path.replaceAll("\\", "/");
+  const segment = normalized.slice(normalized.lastIndexOf("/") + 1);
+  return segment.length > 0 ? segment : path;
 }
 
 /**

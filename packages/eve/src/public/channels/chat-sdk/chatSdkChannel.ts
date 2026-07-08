@@ -22,6 +22,7 @@ import {
   Message,
   ThreadImpl,
 } from "#compiled/chat/index.js";
+import { isNotImplemented } from "#public/channels/chat-sdk/notImplemented.js";
 import {
   defineChannel,
   POST,
@@ -31,11 +32,13 @@ import {
   type SendFn,
   type SendOptions,
   type Session,
-} from "#public/definitions/defineChannel.js";
+} from "#public/definitions/channel.js";
 
 const log = createLogger("chat-sdk.channel");
-const DEFAULT_ROUTE = "/eve/v1/chat";
+const DEFAULT_ROUTE = "/eve/v1";
 const DEFAULT_INPUT_ACTION_PREFIX = "eve_input:";
+const DEFAULT_STREAMING_EDIT_INTERVAL_MS = 1_000;
+const MAX_TYPING_STATUS = 80;
 
 type ChatSdkAdapters = Record<string, Adapter>;
 type ChatSdkSendInput = Parameters<SendFn<ChatSdkChannelState>>[0];
@@ -51,10 +54,25 @@ const ActiveWebhookKey = new ContextKey<ActiveWebhookContext>("chat-sdk.active-w
 /**
  * Durable channel state used by `chatSdkChannel`. Stores the last Chat SDK
  * thread for the Eve session so event handlers can post replies without
- * depending on hidden Chat SDK subscription state.
+ * depending on hidden Chat SDK subscription state, plus the bookkeeping the
+ * default handlers use to stream assistant output and surface typing status.
  */
 export interface ChatSdkChannelState extends Record<string, unknown> {
   thread: SerializedThread | null;
+  /** Message id of the in-flight streamed assistant post (edit fallback). */
+  anchorMessageId?: string | null;
+  /**
+   * Whether `adapter.editMessage` works for this session. Set to `false` once
+   * an edit throws {@link isNotImplemented}, which disables streaming edits for
+   * the rest of the session.
+   */
+  editSupported?: boolean;
+  /** Epoch ms of the last streaming edit, used to throttle edits. */
+  lastEditAtMs?: number | null;
+  /** Buffered first line of a tool-call message, surfaced as typing status. */
+  pendingToolCallMessage?: string | null;
+  /** Step index the current stream anchor belongs to (resets per step). */
+  streamStepIndex?: number | null;
 }
 
 /**
@@ -87,6 +105,10 @@ export interface ChatSdkChannelContext<TAdapters extends ChatSdkAdapters = ChatS
   readonly bot: Chat<TAdapters>;
   readonly thread: Thread | null;
   state: ChatSdkChannelState;
+  /** Whether streamed deltas are delivered via a post+edit fallback. */
+  readonly streaming: boolean;
+  /** Minimum interval between streaming edits, in ms. */
+  readonly streamingEditIntervalMs: number;
 }
 
 /** Event-handler context for `chatSdkChannel`, including Eve session helpers. */
@@ -128,8 +150,8 @@ export interface ChatSdkChannelConfig<
   /** Map of Chat SDK adapter name to adapter instance. */
   readonly adapters: TAdapters;
   /**
-   * Base route for generated adapter webhooks. Defaults to `/eve/v1/chat`, so
-   * an adapter named `slack` mounts at `/eve/v1/chat/slack`.
+   * Base route for generated adapter webhooks. Defaults to `/eve/v1`, so an
+   * adapter named `slack` mounts at `/eve/v1/slack`.
    */
   readonly route?: string;
   /**
@@ -154,6 +176,18 @@ export interface ChatSdkChannelConfig<
   readonly resolveInputAuth?: (
     event: ActionEvent,
   ) => SessionAuthContext | null | Promise<SessionAuthContext | null>;
+  /**
+   * Whether the default handlers stream assistant output by posting an initial
+   * message and editing it as deltas arrive. Defaults to `true`. Set to `false`
+   * for adapters that only deliver a single message per turn (e.g. email), so
+   * replies post once on completion.
+   */
+  readonly streaming?: boolean;
+  /**
+   * Minimum interval between streaming edits, in ms. Defaults to `1000`. Only
+   * used when `streaming` is enabled and the adapter supports editing.
+   */
+  readonly streamingEditIntervalMs?: number;
 }
 
 /** Concrete channel value returned on `bridge.channel`. */
@@ -204,6 +238,9 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
 ): ChatSdkChannelBridge<TAdapters> {
   const bot = new Chat<TAdapters>(config as ChatConfig<TAdapters>);
   const inputActionPrefix = config.inputActionPrefix ?? DEFAULT_INPUT_ACTION_PREFIX;
+  const streaming = config.streaming ?? true;
+  const streamingEditIntervalMs =
+    config.streamingEditIntervalMs ?? DEFAULT_STREAMING_EDIT_INTERVAL_MS;
   const mergedEvents: ChatSdkChannelEvents<TAdapters> = {
     ...defaultEvents<TAdapters>(inputActionPrefix),
     ...config.events,
@@ -240,6 +277,8 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       return {
         bot,
         state,
+        streaming,
+        streamingEditIntervalMs,
         thread: threadFromState(bot, state),
       };
     },
@@ -283,15 +322,69 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
 ): ChatSdkChannelEvents<TAdapters> {
   return {
     async "turn.started"(_event, channel, _ctx) {
-      await channel.thread?.startTyping("Working...");
+      channel.state.pendingToolCallMessage = null;
+      clearStream(channel.state);
+      await safeStartTyping(channel.thread, "Working...");
+    },
+    async "actions.requested"(event, channel, _ctx) {
+      const buffered = channel.state.pendingToolCallMessage;
+      channel.state.pendingToolCallMessage = null;
+      if (buffered) {
+        await safeStartTyping(channel.thread, truncate(buffered));
+        return;
+      }
+      const labels = event.actions.map((action) =>
+        action.kind === "tool-call" ? action.toolName : action.kind,
+      );
+      await safeStartTyping(channel.thread, truncate(`Running ${labels.join(", ")}...`));
+    },
+    async "message.appended"(event, channel, _ctx) {
+      if (!channel.thread || !event.messageSoFar || !canStream(channel)) return;
+      const anchor = channel.state.anchorMessageId;
+      if (!anchor || channel.state.streamStepIndex !== event.stepIndex) {
+        const sent = await channel.thread.post({ markdown: event.messageSoFar });
+        channel.state.anchorMessageId = sent.id;
+        channel.state.streamStepIndex = event.stepIndex;
+        channel.state.lastEditAtMs = Date.now();
+        return;
+      }
+      const lastEdit = channel.state.lastEditAtMs ?? 0;
+      if (Date.now() - lastEdit < channel.streamingEditIntervalMs) return;
+      try {
+        await editMessage(channel.thread, anchor, event.messageSoFar);
+        channel.state.lastEditAtMs = Date.now();
+      } catch (error) {
+        if (!isNotImplemented(error)) throw error;
+        channel.state.editSupported = false;
+        clearStream(channel.state);
+      }
     },
     async "input.requested"(event, channel, _ctx) {
       if (!channel.thread || event.requests.length === 0) return;
       await channel.thread.post(renderInputRequests(event.requests, inputActionPrefix));
     },
     async "message.completed"(event, channel, _ctx) {
-      if (event.finishReason === "tool-calls" || !event.message || !channel.thread) return;
-      await channel.thread.post(event.message);
+      if (event.finishReason === "tool-calls") {
+        channel.state.pendingToolCallMessage = event.message
+          ? (firstNonEmptyLine(event.message) ?? null)
+          : null;
+        // Finalize the streamed anchor so it shows the complete pre-tool-call
+        // text rather than the last throttled edit. Pass `false` so nothing new
+        // is posted when nothing was streamed — intermediate tool-call narration
+        // must not become a standalone message on non-streaming surfaces.
+        if (event.message) {
+          await finalizeStreamedMessage(channel, event.message, false);
+        } else {
+          clearStream(channel.state);
+        }
+        return;
+      }
+      channel.state.pendingToolCallMessage = null;
+      if (!event.message) {
+        clearStream(channel.state);
+        return;
+      }
+      await finalizeStreamedMessage(channel, event.message, true);
     },
     async "turn.failed"(event, channel, _ctx) {
       await postFailure(channel.thread, "I hit an error while handling your request", event);
@@ -300,6 +393,88 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       await postFailure(channel.thread, "This session could not recover from an error", event);
     },
   };
+}
+
+/**
+ * Posts a typing indicator without failing the turn when the adapter does not
+ * support one. Swallows {@link isNotImplemented} errors (e.g. email adapters)
+ * and rethrows anything else.
+ */
+async function safeStartTyping(thread: Thread | null, status?: string): Promise<void> {
+  if (!thread) return;
+  try {
+    await thread.startTyping(status);
+  } catch (error) {
+    if (!isNotImplemented(error)) throw error;
+  }
+}
+
+/**
+ * Edits a previously posted message in place via the adapter. Rendered as
+ * markdown so streamed edits match the completed-message formatting. Callers
+ * handle {@link isNotImplemented} to fall back to a fresh post.
+ */
+async function editMessage(thread: Thread, messageId: string, markdown: string): Promise<void> {
+  await thread.adapter.editMessage(thread.id, messageId, { markdown });
+}
+
+/**
+ * Finalizes a completed assistant message. When a streamed anchor exists, edits
+ * it in place so it shows the complete text instead of the last throttled
+ * delta. When no anchor was streamed and `postWhenNoAnchor` is `true`, posts the
+ * message fresh (the normal path for a final reply on a non-streaming surface);
+ * when `false`, leaves the surface untouched so intermediate tool-call narration
+ * does not become a standalone message. Clears the stream anchor either way.
+ */
+async function finalizeStreamedMessage(
+  channel: ChatSdkChannelContext,
+  message: string,
+  postWhenNoAnchor: boolean,
+): Promise<void> {
+  const thread = channel.thread;
+  if (!thread) {
+    clearStream(channel.state);
+    return;
+  }
+  const anchor = channel.state.anchorMessageId;
+  if (canStream(channel) && anchor) {
+    try {
+      await editMessage(thread, anchor, message);
+    } catch (error) {
+      if (!isNotImplemented(error)) throw error;
+      channel.state.editSupported = false;
+      if (postWhenNoAnchor) await thread.post({ markdown: message });
+    }
+  } else if (postWhenNoAnchor) {
+    await thread.post({ markdown: message });
+  }
+  clearStream(channel.state);
+}
+
+/** Whether streamed edits are enabled and still supported by the adapter. */
+function canStream(channel: ChatSdkChannelContext): boolean {
+  return channel.streaming && channel.state.editSupported !== false;
+}
+
+/** Resets the streaming anchor so the next step starts a fresh message. */
+function clearStream(state: ChatSdkChannelState): void {
+  state.anchorMessageId = null;
+  state.lastEditAtMs = null;
+  state.streamStepIndex = null;
+}
+
+/** First non-blank line of `text`, used as a compact typing status. */
+function firstNonEmptyLine(text: string): string | undefined {
+  for (const line of text.split(/\r?\n/u)) {
+    const trimmed = line.trim();
+    if (trimmed.length > 0) return trimmed;
+  }
+  return undefined;
+}
+
+/** Caps `text` at `max` characters with a trailing ellipsis. */
+function truncate(text: string, max = MAX_TYPING_STATUS): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1)}\u2026`;
 }
 
 function renderInputRequests(requests: readonly InputRequest[], inputActionPrefix: string) {

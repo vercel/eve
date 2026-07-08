@@ -4,12 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  EVE_NEXT_SERVICE_PREFIX,
-  withEve,
-  type EveNextConfig,
-  type EveNextRewriteSections,
-} from "./index.js";
+import { withEve, type EveNextConfig, type EveNextRewriteSections } from "./index.js";
 
 interface TestConfig extends EveNextConfig {
   readonly basePath?: string;
@@ -38,12 +33,10 @@ describe("withEve Vercel config", () => {
     vi.unstubAllGlobals();
   });
 
-  it("does not create Build Output config when no Vercel project is detected", async () => {
+  it("does not create Build Output config outside Vercel when no Vercel project is detected", async () => {
     const appRoot = await createTempAppRoot();
     process.chdir(appRoot);
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("VERCEL", "1");
-    vi.stubEnv("VERCEL_URL", "preview.example.com");
 
     const config = await resolveConfig(withEve<TestConfig>({}));
     const rewrites = await config.rewrites?.();
@@ -52,9 +45,43 @@ describe("withEve Vercel config", () => {
       readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),
     ).rejects.toThrow();
     expect(getBeforeFiles(rewrites)).toContainEqual({
-      destination: `${EVE_NEXT_SERVICE_PREFIX}/eve/v1/:path+`,
+      destination: "http://127.0.0.1:4274/eve/v1/:path+",
       source: "/eve/v1/:path+",
     });
+  });
+
+  it("writes Build Output config in Vercel even when no linked project is detected", async () => {
+    const appRoot = await createTempAppRoot();
+    process.chdir(appRoot);
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_URL", "preview.example.com");
+
+    const config = await resolveConfig(withEve<TestConfig>({}));
+    const rewrites = await config.rewrites?.();
+    const outputConfig = await readJsonFile(join(appRoot, ".vercel", "output", "config.json"));
+
+    expect(outputConfig).toEqual({
+      routes: [
+        {
+          destination: {
+            service: "eve",
+            type: "service",
+          },
+          src: "^/eve/v1/(.*)$",
+        },
+      ],
+      services: {
+        eve: {
+          buildCommand: "eve build",
+          entrypoint: "package.json",
+          framework: "eve",
+          root: ".",
+        },
+      },
+      version: 3,
+    });
+    expect(rewrites).toBeUndefined();
   });
 
   it("writes Build Output config to the closest existing .vercel directory", async () => {
@@ -73,29 +100,31 @@ describe("withEve Vercel config", () => {
     const outputConfig = await readJsonFile(join(projectRoot, ".vercel", "output", "config.json"));
 
     expect(outputConfig).toEqual({
-      version: 3,
-      experimentalServices: {
+      routes: [
+        {
+          destination: {
+            service: "eve",
+            type: "service",
+          },
+          src: "^/eve/v1/(.*)$",
+        },
+      ],
+      services: {
         eve: {
           buildCommand: "eve build",
-          entrypoint: ".",
+          entrypoint: "package.json",
           framework: "eve",
-          mount: EVE_NEXT_SERVICE_PREFIX,
-          type: "web",
-        },
-        web: {
-          entrypoint: ".",
-          framework: "nextjs",
-          mount: "/",
-          type: "web",
+          root: ".",
         },
       },
+      version: 3,
     });
     await expect(
       readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),
     ).rejects.toThrow();
   });
 
-  it("uses an already configured root eve service prefix", async () => {
+  it("uses an already configured root eve service", async () => {
     const appRoot = await createTempAppRoot();
     process.chdir(appRoot);
     vi.stubEnv("NODE_ENV", "production");
@@ -106,16 +135,11 @@ describe("withEve Vercel config", () => {
       `${JSON.stringify(
         {
           $schema: "https://openapi.vercel.sh/vercel.json",
-          experimentalServices: {
+          services: {
             agent: {
-              entrypoint: "agent",
+              entrypoint: "package.json",
               framework: "eve",
-              routePrefix: "/private/agent",
-            },
-            frontend: {
-              entrypoint: ".",
-              framework: "nextjs",
-              routePrefix: "/",
+              root: "agent",
             },
           },
         },
@@ -130,36 +154,37 @@ describe("withEve Vercel config", () => {
     await expect(
       readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),
     ).rejects.toThrow();
-    expect(getBeforeFiles(rewrites)).toContainEqual({
-      destination: "/private/agent/eve/v1/:path+",
-      source: "/eve/v1/:path+",
-    });
+    expect(rewrites).toBeUndefined();
   });
 
-  it("uses an already configured Build Output eve service prefix", async () => {
+  it("preserves an already configured Build Output eve service and inserts its route", async () => {
     const appRoot = await createTempAppRoot();
     process.chdir(appRoot);
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_URL", "preview.example.com");
     await mkdir(join(appRoot, ".vercel", "output"), { recursive: true });
+    await writeFile(join(appRoot, ".vercel", "project.json"), "{}\n");
     await writeFile(
       join(appRoot, ".vercel", "output", "config.json"),
       `${JSON.stringify(
         {
           version: 3,
-          experimentalServices: {
-            agent: {
-              entrypoint: "agent",
-              framework: "eve",
-              mount: "/private/agent",
-              type: "web",
+          routes: [
+            { handle: "filesystem" },
+            {
+              destination: {
+                service: "agent",
+                type: "service",
+              },
+              src: "^/eve/v1/(.*)$",
             },
-            frontend: {
-              entrypoint: ".",
-              framework: "nextjs",
-              mount: "/",
-              type: "web",
+          ],
+          services: {
+            agent: {
+              entrypoint: "package.json",
+              framework: "eve",
+              root: "agent",
             },
           },
         },
@@ -173,26 +198,26 @@ describe("withEve Vercel config", () => {
     const outputConfig = await readJsonFile(join(appRoot, ".vercel", "output", "config.json"));
 
     expect(outputConfig).toEqual({
-      version: 3,
-      experimentalServices: {
-        agent: {
-          entrypoint: "agent",
-          framework: "eve",
-          mount: "/private/agent",
-          type: "web",
+      routes: [
+        {
+          destination: {
+            service: "agent",
+            type: "service",
+          },
+          src: "^/eve/v1/(.*)$",
         },
-        frontend: {
-          entrypoint: ".",
-          framework: "nextjs",
-          mount: "/",
-          type: "web",
+        { handle: "filesystem" },
+      ],
+      services: {
+        agent: {
+          entrypoint: "package.json",
+          framework: "eve",
+          root: "agent",
         },
       },
+      version: 3,
     });
-    expect(getBeforeFiles(rewrites)).toContainEqual({
-      destination: "/private/agent/eve/v1/:path+",
-      source: "/eve/v1/:path+",
-    });
+    expect(rewrites).toBeUndefined();
   });
 
   it("accepts a custom eve service build command", async () => {
@@ -215,7 +240,7 @@ describe("withEve Vercel config", () => {
     const outputConfig = await readJsonFile(join(appRoot, ".vercel", "output", "config.json"));
 
     expect(outputConfig).toMatchObject({
-      experimentalServices: {
+      services: {
         eve: {
           buildCommand: "pnpm build:eve",
         },

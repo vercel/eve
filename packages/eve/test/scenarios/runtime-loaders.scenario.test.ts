@@ -423,13 +423,18 @@ describe("runtime compiled artifact loaders", () => {
         }
       ).default.description,
     ).toBe("Get the weather.");
-    await expect(resolvedAgent.tools[0]?.execute?.({ city: "Brooklyn" })).resolves.toEqual({
+    await expect(
+      resolvedAgent.tools[0]?.execute?.(
+        { city: "Brooklyn" },
+        { messages: [], toolCallId: "call_1" },
+      ),
+    ).resolves.toEqual({
       city: "Brooklyn",
       source: "lib",
     });
     expect(resolvedAgent.instructions).toEqual(manifest.instructions);
     expect(resolvedAgent.workspaceSpec).toEqual({
-      rootEntries: ["skills/"],
+      rootEntries: [],
     });
     expect(Object.keys(moduleMap.nodes)).toEqual([ROOT_COMPILED_AGENT_NODE_ID]);
   });
@@ -547,7 +552,12 @@ describe("runtime compiled artifact loaders", () => {
           (tool as { name?: string }).name?.endsWith("_sandbox"),
       ),
     ).toBe(false);
-    await expect(researcherNode?.agent.tools[0]?.execute?.({ query: "climate" })).resolves.toEqual({
+    await expect(
+      researcherNode?.agent.tools[0]?.execute?.(
+        { query: "climate" },
+        { messages: [], toolCallId: "call_1" },
+      ),
+    ).resolves.toEqual({
       query: "climate",
       source: "subagent-lib",
     });
@@ -576,7 +586,9 @@ describe("runtime compiled artifact loaders", () => {
       throw new Error("Expected the get_weather tool to be available.");
     }
 
-    await expect(getWeatherTool.execute?.({ city: "Brooklyn" })).resolves.toEqual({
+    await expect(
+      getWeatherTool.execute?.({ city: "Brooklyn" }, { messages: [], toolCallId: "call_1" }),
+    ).resolves.toEqual({
       city: "Brooklyn",
       route: "@/ path alias",
       source: "alias-lib",
@@ -605,7 +617,9 @@ describe("runtime compiled artifact loaders", () => {
       throw new Error("Expected one compiled tool before the source update.");
     }
 
-    await expect(firstTool.execute?.({ city: "Brooklyn" })).resolves.toEqual({
+    await expect(
+      firstTool.execute?.({ city: "Brooklyn" }, { messages: [], toolCallId: "call_1" }),
+    ).resolves.toEqual({
       city: "Brooklyn",
       source: "lib",
     });
@@ -631,7 +645,9 @@ describe("runtime compiled artifact loaders", () => {
       throw new Error("Expected one compiled tool after the source update.");
     }
 
-    await expect(secondTool.execute?.({ city: "Brooklyn" })).resolves.toEqual({
+    await expect(
+      secondTool.execute?.({ city: "Brooklyn" }, { messages: [], toolCallId: "call_1" }),
+    ).resolves.toEqual({
       city: "Brooklyn",
       source: "updated-lib",
     });

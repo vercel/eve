@@ -46,8 +46,8 @@ describe("prewarmAppSandboxes", () => {
     expect(events.templateKeys).toHaveLength(2);
     expect(events.seededTemplateCount).toBe(2);
     expect([...events.seededFilePaths].sort()).toEqual([
-      "/workspace/skills/research/SKILL.md",
-      "/workspace/skills/route-weather/SKILL.md",
+      "$HOME/.agents/skills/research/SKILL.md",
+      "$HOME/.agents/skills/route-weather/SKILL.md",
     ]);
     expect([...events.bootstrapCommands].sort()).toEqual([
       "echo child-bootstrap",
@@ -78,8 +78,8 @@ describe("prewarmAppSandboxes", () => {
     expect(new Set(events.runtimeContextAppRoots)).toEqual(new Set([appRoot]));
     expect(events.seededTemplateCount).toBe(2);
     expect([...events.seededFilePaths].sort()).toEqual([
-      "/workspace/skills/research/SKILL.md",
-      "/workspace/skills/route-weather/SKILL.md",
+      "$HOME/.agents/skills/research/SKILL.md",
+      "$HOME/.agents/skills/route-weather/SKILL.md",
     ]);
   });
 
@@ -219,7 +219,7 @@ describe("prewarmAppSandboxes", () => {
     expect(firstEvents.templateKeys).toHaveLength(1);
     expect(secondEvents.templateKeys).toEqual(firstEvents.templateKeys);
     expect(changedEvents.templateKeys[0]).not.toBe(firstEvents.templateKeys[0]);
-    expect(firstEvents.seededFilePaths).toEqual(["/workspace/skills/route-weather/SKILL.md"]);
+    expect(firstEvents.seededFilePaths).toEqual(["$HOME/.agents/skills/route-weather/SKILL.md"]);
   });
 
   it("uses compiled bootstrap revalidation keys across deploy roots without re-evaluating at prewarm", async () => {
@@ -441,8 +441,8 @@ describe("prewarmAppSandboxes", () => {
     expect(events.seededTemplateCount).toBe(1);
     expect([...events.seededFilePaths].sort()).toEqual(
       [
-        "/workspace/skills/route-weather/SKILL.md",
-        "/workspace/skills/route-weather/references/checklist.md",
+        "$HOME/.agents/skills/route-weather/SKILL.md",
+        "$HOME/.agents/skills/route-weather/references/checklist.md",
       ].sort(),
     );
     expect([...events.bootstrapCommands]).toEqual(["echo default-bootstrap"]);

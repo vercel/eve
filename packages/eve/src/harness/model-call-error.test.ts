@@ -6,6 +6,7 @@ import {
   extractModelCallErrorDetails,
   extractUnsupportedProviderToolTypes,
   isNoOutputGeneratedError,
+  normalizeModelStreamError,
   summarizeKnownModelCallConfigError,
   summarizeKnownModelCallRequestError,
 } from "#harness/model-call-error.js";
@@ -117,6 +118,24 @@ describe("EmptyModelResponseError", () => {
   });
 });
 
+describe("normalizeModelStreamError", () => {
+  it("retains a plain provider payload for classification", () => {
+    const raw = { message: "Overloaded", type: "overloaded_error" };
+    const error = normalizeModelStreamError(raw);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe("Overloaded");
+    expect(error.cause).toBe(raw);
+    expect(classifyModelCallError(error)).toBe("retry");
+  });
+
+  it("returns Error instances unchanged", () => {
+    const raw = new Error("stream failed");
+
+    expect(normalizeModelStreamError(raw)).toBe(raw);
+  });
+});
+
 /**
  * Classification is the only behavior this module owns. Error
  * rendering (details payload, OTel span exceptions) is covered in
@@ -142,6 +161,16 @@ describe("classifyModelCallError", () => {
   it("returns retry when the AI SDK marks the error as retryable", () => {
     const err = Object.assign(new Error("upstream flaky"), { isRetryable: true });
     expect(classifyModelCallError(err)).toBe("retry");
+  });
+
+  it("returns retry for Anthropic overloaded stream payloads", () => {
+    const overloaded = {
+      message: "Overloaded",
+      type: "overloaded_error",
+    };
+
+    expect(classifyModelCallError(overloaded)).toBe("retry");
+    expect(classifyModelCallError(new Error("stream failed", { cause: overloaded }))).toBe("retry");
   });
 
   it("returns retry for HTTP statuses the AI SDK treats as retryable", () => {

@@ -1,9 +1,25 @@
 ---
 title: "Dynamic Capabilities"
-description: "Resolve tools, skills, and instructions at runtime with defineDynamic: the resolver events, execution order, and how dynamic tools survive step boundaries."
+description: "Resolve models, tools, skills, and instructions at runtime: dynamic model selection, defineDynamic resolver events, execution order, and durable dynamic tools."
 ---
 
-`defineDynamic` resolves tools, skills, and instructions at runtime from a session event instead of declaring them up front. Reach for it when the right capabilities aren't known until the session starts, because they hinge on who the caller is, what tenant they belong to, feature flags, or external data. The [tools](../tools), [skills](../skills), and [instructions](../instructions) guides each point here for their dynamic form.
+`defineDynamic` resolves the model, tools, skills, and instructions at runtime from a session event instead of declaring them up front. Reach for it when the right capability isn't known until the session starts, because it hinges on who the caller is, what tenant they belong to, feature flags, or external data. The [tools](../tools), [skills](../skills), and [instructions](../instructions) guides each point here for their dynamic form.
+
+## Dynamic models
+
+The `model` field in `agent.ts` accepts `defineDynamic({ fallback, events })`.
+Resolvers run at `session.started`, `turn.started`, or `step.started`
+(precedence: step > turn > session > `fallback`); `null` leaves a scope unset
+and failures degrade to the next scope. Prefer `session.started` — prompt
+caches are per model, so switching mid-session re-ingests the conversation at
+uncached prices. See
+[agent configuration](../agent-config#choose-the-model-dynamically) for the
+full contract.
+
+`fallback` is model-only: the agent always needs exactly one model, and the
+compiled fallback anchors build-time metadata. Tools, skills, and instructions
+default by authoring a static entry (or returning `null`), so `fallback` on
+their `defineDynamic` export is a build error.
 
 ## Dynamic tools
 

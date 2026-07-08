@@ -198,6 +198,27 @@ describe("extractToolApprovalInputRequests", () => {
     expect(result).toEqual([]);
   });
 
+  it("skips approval requests for excluded tool calls before parsing input", () => {
+    const result = extractToolApprovalInputRequests({
+      content: [
+        {
+          input: [],
+          toolCallId: "call-1",
+          toolName: "bash",
+          type: "tool-call",
+        } as never,
+        {
+          approvalId: "approval-1",
+          toolCallId: "call-1",
+          type: "tool-approval-request",
+        } as never,
+      ],
+      excludedCallIds: new Set(["call-1"]),
+    });
+
+    expect(result).toEqual([]);
+  });
+
   it("skips non-approval content parts", () => {
     const result = extractToolApprovalInputRequests({
       content: [

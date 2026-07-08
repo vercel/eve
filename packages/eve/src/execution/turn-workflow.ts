@@ -17,10 +17,11 @@ import {
 } from "#execution/hook-ownership.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
+import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
 import { TurnExecutionCursor } from "#execution/turn-execution-cursor.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
-import { runProxyInputRequestStep, turnStep } from "#execution/workflow-steps.js";
+import { turnStep } from "#execution/workflow-steps.js";
 import { resolveRuntimeActionResultsForKeys } from "#harness/runtime-actions.js";
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
 
@@ -77,7 +78,12 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       if (result.action === "done") {
         await cursor.finish(
           result,
-          { kind: "done", output: result.output ?? "", isError: result.isError },
+          {
+            kind: "done",
+            output: result.output ?? "",
+            isError: result.isError,
+            usage: result.usage,
+          },
           bufferedDeliveries,
         );
         return;
@@ -198,8 +204,8 @@ async function waitForRuntimeActionResults(input: {
       continue;
     }
 
-    if (value.kind === "subagent-input-request") {
-      const proxyResult = await runProxyInputRequestStep({
+    if (value.kind === "subagent-input-request" || value.kind === "subagent-authorization-event") {
+      const proxyResult = await runProxySubagentEventStep({
         hookPayload: value,
         parentWritable: input.cursor.parentWritable,
         serializedContext: input.cursor.serializedContext,
@@ -247,6 +253,7 @@ async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
               isError: result.isError,
               serializedContext: result.serializedContext,
               sessionState: result.sessionState,
+              usage: result.usage,
             },
             kind: "turn-result",
           },

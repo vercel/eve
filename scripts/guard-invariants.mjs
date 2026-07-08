@@ -81,6 +81,7 @@
  *             must go through the `src/internal/workflow/runtime.ts` facade and
  *             `queue-namespace.ts`. The generated agent bootstrap installs the
  *             agent-scoped namespace before queue-producing APIs can run.
+ *   rule 34 — `phase` stays a runtime-only dependency. No file under the Eve\n *             logo renderer's GPU/runtime boundary (render/, shaders/, or the\n *             offline render harness) may import the `phase` package. This keeps\n *             the mechanical separation between the lifecycle layer and the GPU\n *             renderer enforceable.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -798,6 +799,54 @@ async function checkRule32ResearchFrontmatter() {
   return violations;
 }
 
+// ---------- Rule 34: no `phase` imports under GPU/shader boundaries ----------
+
+const PHASE_BOUNDARY_DIRS = [
+  "apps/docs/app/[lang]/(home)/components/eve-logo-shader/render",
+  "apps/docs/app/[lang]/(home)/components/eve-logo-shader/shaders",
+  "apps/docs/scripts/eve-render",
+];
+const PHASE_IMPORT_RE =
+  /(from\s+|import\s+)(?:type\s+)?['"]phase(?:\/[^'"]*)?['"]|require\(\s*['"]phase(?:\/[^'")]*)?['"]\s*\)|import\(\s*['"]phase(?:\/[^'")]*)?['"]\s*\)/;
+
+/**
+ * @returns {Promise<Violation[]>}
+ */
+async function checkRule34PhaseBoundary() {
+  /** @type {Violation[]} */
+  const violations = [];
+  for (const relDir of PHASE_BOUNDARY_DIRS) {
+    const absDir = join(REPO_ROOT, relDir);
+    let stats;
+    try {
+      stats = await lstat(absDir);
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+        continue;
+      }
+      throw error;
+    }
+    if (!stats.isDirectory()) continue;
+    for await (const entry of walkFiles(absDir)) {
+      if (!entry.stat.isFile()) continue;
+      const content = await readFile(entry.absPath, "utf8");
+      const match = content.match(PHASE_IMPORT_RE);
+      if (!match) continue;
+      const before = content.slice(0, match.index ?? 0);
+      const line = before.split(/\r?\n/).length;
+      violations.push({
+        rule: 34,
+        file: entry.relPath,
+        line,
+        message:
+          "imports the `phase` package inside the GPU/shader boundary. Phase must stay in the lifecycle/runtime layer — add lifecycle hooks above render/ and keep render/, shaders/, and scripts/eve-render/ free of `phase` imports.",
+      });
+    }
+  }
+  return violations;
+}
+
+
 /**
  * @returns {Promise<Set<string>>}
  */
@@ -1059,6 +1108,9 @@ async function main() {
 
   // Rule 33
   violations.push(...state.rule33);
+
+  // Rule 34
+  violations.push(...(await checkRule34PhaseBoundary()));
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

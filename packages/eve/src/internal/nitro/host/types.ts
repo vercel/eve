@@ -1,6 +1,6 @@
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import type { ScheduleRegistration } from "#runtime/schedules/register.js";
-import type { ResolvedSchedule } from "#runtime/types.js";
+import type { ResolvedScheduleDefinition } from "#runtime/types.js";
 import type { GeneratedCompiledArtifactsFiles } from "#internal/application/compiled-artifacts.js";
 import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 
@@ -62,6 +62,6 @@ export interface PreparedApplicationHost {
   compileResult: CompileAgentResult;
   compiledArtifacts: GeneratedCompiledArtifactsFiles;
   scheduleRegistrations: readonly ScheduleRegistration[];
-  schedules: readonly ResolvedSchedule[];
+  schedules: readonly ResolvedScheduleDefinition[];
   workflowBuildDir: string;
 }

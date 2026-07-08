@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 
 import { bufferToStream, streamToBuffer } from "#execution/sandbox/stream-utils.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
+import { resolveSandboxSeedFilePath } from "#shared/skill-paths.js";
 import type { SandboxSeedFile } from "#shared/sandbox-backend.js";
 import type {
   InternalSandboxSession,
@@ -111,14 +112,19 @@ export function resolveLocalBackendSessionRootPath(
 }
 
 export async function writeSandboxSeedFiles(
-  session: Pick<SandboxSession, "writeBinaryFile" | "writeTextFile">,
+  session: SandboxSession,
   seedFiles: ReadonlyArray<SandboxSeedFile>,
 ): Promise<void> {
   for (const file of seedFiles) {
+    const path = await resolveSandboxSeedFilePath({
+      path: file.path,
+      sandbox: session,
+    });
+
     if (typeof file.content === "string") {
-      await session.writeTextFile({ content: file.content, path: file.path });
+      await session.writeTextFile({ content: file.content, path });
     } else {
-      await session.writeBinaryFile({ content: file.content, path: file.path });
+      await session.writeBinaryFile({ content: file.content, path });
     }
   }
 }

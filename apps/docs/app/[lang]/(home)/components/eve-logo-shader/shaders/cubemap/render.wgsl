@@ -1,3 +1,5 @@
+import { cube_dir } from "../shared/cube-face.wgsl";
+
 const MAX_ENV_LIGHTS = 16u;
 
 struct EnvLight {
@@ -37,27 +39,6 @@ fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
   // and disagrees with the /cube-camera rasterized capture. Flip v so bake matches read.
   output.uv = vec2f(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5);
   return output;
-}
-
-fn cube_dir(face: f32, uv: vec2f) -> vec3f {
-  let p = uv * 2.0 - vec2f(1.0);
-  // WebGPU cube face order: +X, -X, +Y, -Y, +Z, -Z.
-  if (face < 0.5) {
-    return normalize(vec3f(1.0, -p.y, -p.x));
-  }
-  if (face < 1.5) {
-    return normalize(vec3f(-1.0, -p.y, p.x));
-  }
-  if (face < 2.5) {
-    return normalize(vec3f(p.x, 1.0, p.y));
-  }
-  if (face < 3.5) {
-    return normalize(vec3f(p.x, -1.0, -p.y));
-  }
-  if (face < 4.5) {
-    return normalize(vec3f(p.x, -p.y, 1.0));
-  }
-  return normalize(vec3f(-p.x, -p.y, -1.0));
 }
 
 fn spot(dir: vec3f, center: vec3f, radius: f32, softness: f32, luminance: f32, color: vec3f, intensity: f32) -> vec3f {

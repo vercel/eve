@@ -198,6 +198,40 @@ describe("buildToolSet", () => {
     expect(receivedSignal?.aborted).toBe(false);
   });
 
+  it("passes the AI SDK toolCallId to the authored tool context as callId", async () => {
+    let receivedCallId: string | undefined;
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "observe_call_id",
+        {
+          description: "Observe the tool call id.",
+          execute: createToolExecuteWithAuth({
+            execute(_input, ctx) {
+              receivedCallId = (ctx as ToolContext).callId;
+              return { ok: true };
+            },
+            scope: "observe_call_id",
+          }),
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "observe_call_id",
+        },
+      ],
+    ]);
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: "session-1",
+      turn: { id: "turn-1", sequence: 0 },
+    });
+
+    const result = buildToolSet({ tools });
+    await contextStorage.run(ctx, () =>
+      executeSdkTool({ tool: result.observe_call_id, toolCallId: "call_observe" }),
+    );
+
+    expect(receivedCallId).toBe("call_observe");
+  });
+
   it("passes through the input schema to the SDK tool", () => {
     const schema = {
       properties: { city: { type: "string" } },
@@ -813,6 +847,30 @@ describe("buildToolSet", () => {
       await resolveApproval(result, "vercel__list_projects", toolInput);
 
       expect(capturedInput).toEqual(toolInput);
+    });
+
+    it("passes the callId from the AI SDK into approval", async () => {
+      let capturedCallId: string | undefined;
+      const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+        [
+          "vercel__list_projects",
+          {
+            description: "List projects in the team.",
+            execute: async () => "ok",
+            inputSchema: jsonSchema({}),
+            name: "vercel__list_projects",
+            approval: (ctx) => {
+              capturedCallId = ctx.callId;
+              return "user-approval";
+            },
+          },
+        ],
+      ]);
+
+      const result = buildToolSet({ tools });
+      await resolveApproval(result, "vercel__list_projects", {});
+
+      expect(capturedCallId).toBe("call_1");
     });
 
     it("passes the active caller and session context into approval", async () => {

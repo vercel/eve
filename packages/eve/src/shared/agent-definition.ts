@@ -2,6 +2,11 @@ import type { CallSettings, LanguageModel } from "ai";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
+import {
+  isDynamicSentinel,
+  type DynamicResolveContext,
+  type DynamicSentinel,
+} from "#shared/dynamic-tool-definition.js";
 
 /**
  * Optional overrides that eve forwards to the AI SDK model runtime call for
@@ -46,11 +51,55 @@ export type InternalAgentModelDefinition = {
 };
 
 /**
- * The model handle you assign to an agent's `model` field. This is the AI SDK
- * `LanguageModel` value (for example, the result of a provider or gateway
- * model call), not an eve-authored definition object.
+ * A concrete model handle: an AI Gateway model id string or an AI SDK
+ * `LanguageModel` instance.
  */
-export type PublicAgentModelDefinition = LanguageModel;
+export type PublicAgentStaticModelDefinition = string | LanguageModel;
+
+/** Context passed to dynamic model event handlers; the shared dynamic resolver context. */
+export type AgentModelResolveContext = DynamicResolveContext;
+
+export interface PublicAgentModelSelectionDefinition {
+  readonly model: PublicAgentStaticModelDefinition;
+  /** Context window of the selected model, in tokens; never inherited from the fallback. */
+  readonly modelContextWindowTokens?: number;
+  /** Provider options for the selected model; defaults to the agent-level `modelOptions`. */
+  readonly modelOptions?: AgentModelOptionsDefinition;
+}
+
+export type PublicAgentDynamicModelResult =
+  | PublicAgentStaticModelDefinition
+  | PublicAgentModelSelectionDefinition
+  | null;
+
+export type AgentModelResolver = (
+  event: unknown,
+  ctx: AgentModelResolveContext,
+) => PublicAgentDynamicModelResult | Promise<PublicAgentDynamicModelResult>;
+
+export type PublicAgentDynamicModelDefinition = DynamicSentinel<
+  PublicAgentDynamicModelResult,
+  PublicAgentStaticModelDefinition
+>;
+
+export interface PublicAgentDynamicModelDefinitionInput {
+  /** Compiled static model: build-time metadata and the active model when no scope is set. */
+  readonly fallback: PublicAgentStaticModelDefinition;
+  readonly events: DynamicSentinel<PublicAgentDynamicModelResult>["events"];
+}
+
+export function isDynamicModelDefinition(
+  value: unknown,
+): value is PublicAgentDynamicModelDefinition {
+  return isDynamicSentinel(value) && "fallback" in value;
+}
+
+/**
+ * The model handle you assign to an agent's `model` field.
+ */
+export type PublicAgentModelDefinition =
+  | PublicAgentStaticModelDefinition
+  | PublicAgentDynamicModelDefinition;
 
 export interface InternalAgentCompactionDefinition {
   /**
@@ -87,7 +136,7 @@ export interface PublicAgentCompactionDefinition {
    *
    * When omitted, eve uses the active turn model for the summary call.
    */
-  readonly model?: PublicAgentModelDefinition;
+  readonly model?: PublicAgentStaticModelDefinition;
   /**
    * Fraction of the primary model context window that triggers compaction.
    *
@@ -106,9 +155,28 @@ export interface AgentLimitsDefinition {
    * Root sessions are depth 0. A `maxSubagentDepth` of 3 allows child sessions at
    * depths 1, 2, and 3; sessions already at depth 3 cannot delegate again.
    *
+   * Delegated subagent sessions resolve this against the cap inherited from
+   * the delegating parent; the tighter value wins.
+   *
    * @default 3
    */
   readonly maxSubagentDepth?: number;
+  /**
+   * Maximum number of subagent calls one `Workflow` tool invocation may
+   * dispatch.
+   *
+   * Applies to the opt-in `Workflow` orchestration tool: a single
+   * model-authored workflow program may spawn at most this many subagent or
+   * remote-agent calls, counted across the whole program (sequential and
+   * parallel calls alike). Calls beyond the limit fail with an error result
+   * instead of starting a child session.
+   *
+   * Delegated subagent sessions resolve this against the cap inherited from
+   * the delegating parent; the tighter value wins.
+   *
+   * @default 100
+   */
+  readonly maxSubagents?: number;
   /**
    * Maximum provider-reported input tokens accumulated by one durable session.
    *
@@ -116,17 +184,26 @@ export interface AgentLimitsDefinition {
    * the limit is allowed to finish because providers only report exact usage
    * after the call completes; later model calls in the same session are blocked.
    *
-   * @default 40_000_000 for root sessions; 5_000_000 for delegated subagent sessions
+   * `false` disables the limit: the session is uncapped.
+   *
+   * Delegated subagent sessions default to the delegating parent's remaining
+   * quota at dispatch time, and the parent's remaining quota always caps an
+   * authored child limit — a child can never outspend its parent's budget.
+   *
+   * @default 40_000_000 for root sessions; the parent's remaining quota for delegated subagent sessions
    */
-  readonly maxInputTokensPerSession?: number;
+  readonly maxInputTokensPerSession?: number | false;
   /**
    * Maximum provider-reported output tokens accumulated by one durable session.
    *
    * eve checks this before starting each model call. The model call that crosses
    * the limit is allowed to finish because providers only report exact usage
    * after the call completes; later model calls in the same session are blocked.
+   *
+   * `false` disables the limit. Unset by default; delegated subagent sessions
+   * inherit the parent's remaining output quota when the parent has one.
    */
-  readonly maxOutputTokensPerSession?: number;
+  readonly maxOutputTokensPerSession?: number | false;
 }
 
 /**
@@ -220,8 +297,9 @@ export type PublicAgentDefinition = {
    */
   readonly experimental?: AgentExperimentalDefinition;
   /**
-   * Language model used for agent turns. Accepts an AI Gateway model ID or any
-   * AI SDK-compatible language model.
+   * Language model used for agent turns. Accepts an AI Gateway model ID, any AI
+   * SDK-compatible language model, or `defineDynamic({ fallback, events })` for
+   * scoped dynamic model selection.
    */
   readonly model: PublicAgentModelDefinition;
   /**

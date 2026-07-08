@@ -1,5 +1,60 @@
 # eve
 
+## 0.22.1
+
+### Patch Changes
+
+- 9c63a4e: Export `callSlackApi` and `resolveSlackBotToken` from `eve/channels/slack`. Code running outside a webhook-side handler — schedules resolving reactions or reading history, for example — has no `ctx.slack` handle; these were the internal primitives behind `slack.request`, already public-shaped and documented, and are now importable so apps stop hand-rolling `fetch` against the Slack Web API.
+- 210f097: Session sandboxes are now keyed per durable session instead of per deployment, so redeploying no longer discards a session's `/workspace` state. A session gets a fresh sandbox only when the sandbox definition itself changes (authored sandbox source, workspace seed content, or `revalidationKey`), and `onSession` runs again on the replacement sandbox.
+- a3efd4b: Render Slack HITL button prompts as card blocks, move approval tool input into collapsible containers, and keep answered-card updates scoped to the answered request so sibling batched approval buttons remain clickable.
+- 3c6abbf: Surface authorization prompts and completion updates from local subagents on the parent channel, including through nested delegation chains, while keeping the authorization callback scoped to the child session.
+
+## 0.22.0
+
+### Minor Changes
+
+- 2958abf: feat(eve): add `konsistent` with initial config to enforce structural conventions
+
+### Patch Changes
+
+- b7d1089: Add `defineDynamic({ fallback, events })` support for scoped dynamic agent model selection. Agents can choose a model once per session, once per turn, or per model step while keeping a compiled fallback for metadata and unset scopes.
+- bd287b1: fix(eve): pass error messages when tool call input is invalid back to model instead of throwing so that it can try again
+
+## 0.21.1
+
+### Patch Changes
+
+- 0b42ba1: `eve eval` now shuts down tracked sandbox handles after a local one-shot eval run completes. This prevents local sandbox compute, including microsandbox sessions, from outliving the eval process.
+
+## 0.21.0
+
+### Minor Changes
+
+- 79e9959: Expand the Chat SDK channel (`chatSdkChannel`): post completed assistant messages as markdown, stream replies via post-then-edit (configurable with `streaming` and `streamingEditIntervalMs`), surface typing status on turn start and tool calls, and degrade optional adapter operations (`startTyping`, `editMessage`) gracefully when an adapter does not implement them. Add the `messageToUserContent` inbound helper and export `isNotImplemented`. The default adapter webhook route is now `/eve/v1/{adapter}`.
+- 73a9bf9: feat(eve): write skills into `$HOME/.agents/skills` instead of the workspace directory
+
+### Patch Changes
+
+- 99c2380: Subagents now report their token usage back to the caller — local, runtime, and remote alike. A completed turn carries the session's token totals (`inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`) on its terminal result; remote agents transport the same totals over the session callback. The parent's turn emits one `invoke_agent` span per usage-bearing result (`gen_ai.operation.name=invoke_agent`, `gen_ai.agent.name`, `gen_ai.usage.*`, per the OpenTelemetry GenAI semantic conventions) in the caller's trace. Remote usage requires both sides to run this version; collection stays best-effort everywhere.
+- c5cddb6: `message.received` events now include structured `parts` with text and file metadata so clients can render user attachments without parsing the flattened message summary. The default message reducer projects those attachments as `file` message parts while keeping raw bytes and internal sandbox paths off the stream.
+- 5ef4ec6: Reintroduce the `ExperimentalWorkflow` opt-in marker in `eve/tools`. Re-exporting it from `agent/tools/workflow.ts` enables the `Workflow` orchestration tool, which can spawn the agent's subagents from model-authored JavaScript. Workflow-spawned subagent calls are now capped per program by the new `limits.maxSubagents` agent setting (default 100) — calls beyond the budget resolve with a `WORKFLOW_SUBAGENT_LIMIT_REACHED` error result instead of starting a child session — and the tool stays root-only, so delegated subagent sessions never receive it.
+- 61745d5: Slack channel posts that combine Markdown and file uploads now send the Markdown message first and upload files as a threaded follow-up. This preserves Slack's full Markdown rendering, including tables, instead of downgrading the response into a file upload comment.
+- d408d0b: Reaching a session token limit no longer fails interactive sessions outright. The harness now pauses and sends a deterministic HITL continuation prompt; answering "Continue" grants a fresh budget window of the configured size, while "Stop" ends the session gracefully with `session.completed`. Task-mode sessions keep the structured `SESSION_TOKEN_LIMIT_REACHED` failure so parent tool calls receive an error result.
+- da2ec6c: Delegated subagent sessions now receive a share of the parent's remaining token quota at dispatch time — the remainder split across the batch's delegated calls — instead of a fixed 5M input-token cap, and a completed child's usage counts against the parent's quota, so a delegation tree can never outspend the budget configured at its root. Session token limits also accept `false` to uncap a session explicitly. Delegated children likewise inherit the parent's delegation caps (`limits.maxSubagentDepth` and `limits.maxSubagents`); on every inherited axis the tighter of the configured and inherited value wins.
+
+## 0.20.0
+
+### Minor Changes
+
+- 6f9364a: Sandboxes are now stopped when the eve server shuts down. Self-hosted production servers stop every open sandbox (microsandbox VMs, Docker containers, Vercel sandboxes, just-bash interpreters) on `SIGTERM`/`SIGINT`, matching the cleanup `eve dev` already performs, and sessions reattach from persisted state on the next start. Breaking change for custom sandbox backends: `SandboxBackendHandle` gains a required `shutdown()` and the unused `dispose()` is removed.
+
+### Patch Changes
+
+- 7699e98: `eve eval` now prints a clear, actionable message when it finds no evals but detects `*.eval.ts` files placed inside `agent/`. Instead of the generic "No evals found", it names the offending directories and reminds you that eval files belong in the top-level `evals/` directory (a sibling of `agent/`).
+- f3a05c5: `ToolContext` and `ApprovalContext` now expose `callId`, the tool call id carried by the call's stream events, so approval-gated tools can key records to one identity across proposal, rejection, and execution.
+- f9621b6: Resuming a durable session whose history references a file attachment no longer fails the turn when the staged bytes are gone (for example after a redeploy pointed the session at a fresh sandbox). The missing attachment degrades to a `FileNotFound` text notice the model can interpret, so the run continues instead of ending in `session.failed`.
+- c233a6a: The turn harness now propagates a cooperative `AbortSignal` end to end: model calls, retries, recovery, compaction, and tool executions all honor it, and an aborted turn settles with a canonical `TurnCancelledError` that is never retried or misclassified as a failure. Authored tools receive the signal as `ctx.abortSignal` (and via the AI SDK execute options), and framework tools forward it into sandbox commands, file I/O, `web_fetch`, and MCP/OpenAPI connection calls. This is the lowest layer of turn cancellation — no trigger exists yet, so runtime behavior is unchanged until the cancellation API ships.
+
 ## 0.19.0
 
 ### Minor Changes

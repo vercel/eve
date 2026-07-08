@@ -5,6 +5,7 @@ import type { CompiledChannel } from "#channel/compiled-channel.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { HeadersValue } from "#client/types.js";
 import type { DiscoverDiagnosticsSummary } from "#discover/diagnostics.js";
+import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { ChannelRouteMethod, RouteContext } from "#public/definitions/channel.js";
 import type { RouteHandler, WebSocketRouteHandler } from "#channel/routes.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
@@ -32,6 +33,7 @@ import type {
 } from "#shared/source-ref.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
 import type { InternalAgentDefinition } from "#shared/agent-definition.js";
+import type { RuntimeDynamicModelReference } from "#runtime/agent/bootstrap.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
 import type { SandboxBackend } from "#shared/sandbox-backend.js";
 import type { SandboxBootstrapContext, SandboxSessionContext } from "#shared/sandbox-definition.js";
@@ -49,7 +51,7 @@ export type ResolvedModuleSourceRef = Readonly<ModuleSourceRef>;
  * the resulting markdown is captured here. Runtime never re-evaluates
  * the module.
  */
-export type ResolvedInstructions = Readonly<
+export type ResolvedInstructionsDefinition = Readonly<
   SourceRef & {
     name: string;
     markdown: string;
@@ -76,7 +78,7 @@ export type ResolvedSkillDefinition = Readonly<
  * a {@link ScheduleHandlerArgs}-shaped argument; for the markdown form
  * the dispatcher synthesizes a channel-less SCHEDULE_ADAPTER run.
  */
-export type ResolvedSchedule = Readonly<
+export type ResolvedScheduleDefinition = Readonly<
   SourceRef & {
     readonly cron: string;
     readonly name: string;
@@ -207,7 +209,7 @@ export interface ResolvedHookDefinition extends ResolvedModuleSourceRef {
    * wildcard if declared. Unknown keys are accepted at resolve time
    * and ignored at dispatch time.
    */
-  readonly events: Readonly<Record<string, StreamEventHook<unknown>>>;
+  readonly events: Readonly<Record<string, StreamEventHook<HandleMessageStreamEvent>>>;
 }
 
 /**
@@ -301,6 +303,7 @@ export type ResolvedRuntimeDelegationNode =
  */
 export type ResolvedAgentDefinition = Readonly<
   Omit<InternalAgentDefinition, "build" | "source"> & {
+    dynamicModel?: RuntimeDynamicModelReference;
     source?: Readonly<NonNullable<InternalAgentDefinition["source"]>>;
   }
 >;
@@ -390,7 +393,7 @@ export interface ResolvedAgent {
    * `instructions.{ts,...}`, or `undefined` when the agent does not
    * declare one.
    */
-  readonly instructions?: ResolvedInstructions;
+  readonly instructions?: ResolvedInstructionsDefinition;
   /**
    * Authored sandbox override for this agent, when one exists. `null`
    * means the agent uses the framework default sandbox unchanged.

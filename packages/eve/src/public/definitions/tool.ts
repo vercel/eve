@@ -15,10 +15,18 @@ import {
   DYNAMIC_SENTINEL_KIND,
   TOOL_BRAND,
   type DynamicEvents,
+  type DynamicEventsWithFallback,
   type DynamicSentinel,
 } from "#shared/dynamic-tool-definition.js";
 
 type ApprovalContextInput<TInput> = unknown extends TInput ? Record<string, unknown> : TInput;
+type DynamicEventMapHandler<TEvents extends DynamicEvents> = Extract<
+  NonNullable<TEvents[keyof TEvents]>,
+  (...args: never[]) => unknown
+>;
+type DynamicEventMapResult<TEvents extends DynamicEvents> = Awaited<
+  ReturnType<DynamicEventMapHandler<TEvents>>
+>;
 
 export type { ToolModelOutput } from "#shared/tool-definition.js";
 
@@ -74,6 +82,11 @@ export interface ToolAuthOptions {
 export type ToolContext = SessionContext & {
   /** Aborts when the active turn is cancelled. */
   readonly abortSignal: AbortSignal;
+  /**
+   * Id of the current tool call — the same `callId` carried by the call's
+   * stream events and its {@link ApprovalContext}.
+   */
+  readonly callId: string;
   /**
    * Resolves the bearer token for an inline provider. This accepts the same
    * auth shapes as a connection's `auth` field, including `connect("...")`
@@ -257,11 +270,25 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
  * whose name matches an authored one overrides it; two dynamic resolvers
  * emitting the same name is an error.
  */
-export function defineDynamic(definition: { readonly events: DynamicEvents }): DynamicSentinel {
-  const sentinel: DynamicSentinel = {
+export function defineDynamic<const TEvents extends DynamicEvents>(definition: {
+  readonly events: TEvents;
+}): DynamicSentinel<DynamicEventMapResult<TEvents>>;
+export function defineDynamic<
+  const TEvents extends DynamicEventsWithFallback,
+  TFallback = unknown,
+>(definition: {
+  readonly fallback: TFallback;
+  readonly events: TEvents;
+}): DynamicSentinel<Exclude<DynamicEventMapResult<TEvents>, undefined>, TFallback>;
+export function defineDynamic<TResult = unknown, TFallback = unknown>(definition: {
+  readonly fallback?: TFallback;
+  readonly events: DynamicEvents<TResult>;
+}): DynamicSentinel<TResult, TFallback> {
+  const sentinel = {
     kind: DYNAMIC_SENTINEL_KIND,
     events: definition.events,
-  };
+    ...(Object.hasOwn(definition, "fallback") ? { fallback: definition.fallback } : {}),
+  } as DynamicSentinel<TResult, TFallback>;
   stampDefinitionKey(sentinel, `dynamic:${Object.keys(definition.events).join(",")}`);
   return sentinel;
 }
@@ -299,5 +326,54 @@ export function isDisabledToolSentinel(value: unknown): value is DisabledToolSen
     typeof value === "object" &&
     value !== null &&
     (value as { kind?: unknown }).kind === DISABLED_TOOL_SENTINEL_KIND
+  );
+}
+
+/**
+ * Marker discriminator written into the {@link ExperimentalWorkflow} opt-in
+ * sentinel.
+ */
+const ENABLE_WORKFLOW_TOOL_SENTINEL_KIND = "eve:enable-workflow-tool";
+
+/**
+ * Marker value re-exported as the default export of a file in `agent/tools/`
+ * (conventionally `agent/tools/workflow.ts`) to enable the framework `Workflow`
+ * orchestration tool. The tool is off unless this marker is present,
+ * mirroring the {@link disableTool} opt-out in reverse.
+ */
+export interface EnableWorkflowToolSentinel {
+  readonly kind: typeof ENABLE_WORKFLOW_TOOL_SENTINEL_KIND;
+}
+
+/**
+ * Opt-in marker for the framework `Workflow` tool, an isolated JavaScript sandbox whose
+ * only callable operations are this agent's subagents and remote agents, for
+ * orchestrating them from model-authored JavaScript. Re-export it as the
+ * default export of `agent/tools/workflow.ts`:
+ *
+ * ```ts
+ * export { ExperimentalWorkflow as default } from "eve/tools";
+ * ```
+ *
+ * Only the root session sees the `Workflow` tool — delegated subagent sessions
+ * never get it — and one Workflow program may dispatch at most
+ * `limits.maxSubagents` subagent calls (default 100).
+ *
+ * The capability is experimental. The resulting model-facing tool is still
+ * called `Workflow`.
+ */
+export const ExperimentalWorkflow: EnableWorkflowToolSentinel = Object.freeze({
+  kind: ENABLE_WORKFLOW_TOOL_SENTINEL_KIND,
+});
+
+/**
+ * Type guard: returns whether `value` is the {@link ExperimentalWorkflow}
+ * opt-in sentinel.
+ */
+export function isEnableWorkflowToolSentinel(value: unknown): value is EnableWorkflowToolSentinel {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { kind?: unknown }).kind === ENABLE_WORKFLOW_TOOL_SENTINEL_KIND
   );
 }

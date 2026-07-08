@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { defineAgent } from "#public/definitions/agent.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel, defaultEveAuth } from "#public/channels/eve.js";
-import { defineChannel, POST } from "#public/definitions/defineChannel.js";
-import { defineHook } from "#public/definitions/hook.js";
+import { defineChannel, POST } from "#public/definitions/channel.js";
+import { defineHook, type StreamEventHook } from "#public/definitions/hook.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineInstrumentation } from "#public/definitions/instrumentation.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
@@ -20,6 +20,7 @@ describe("definition helper exact inputs", () => {
         maxInputTokensPerSession: 200_000,
         maxOutputTokensPerSession: 20_000,
         maxSubagentDepth: 4,
+        maxSubagents: 6,
       },
       model: "anthropic/claude-sonnet-5",
     });
@@ -33,6 +34,7 @@ describe("definition helper exact inputs", () => {
     expect(agent.limits.maxInputTokensPerSession).toBe(200_000);
     expect(agent.limits.maxOutputTokensPerSession).toBe(20_000);
     expect(agent.limits.maxSubagentDepth).toBe(4);
+    expect(agent.limits.maxSubagents).toBe(6);
     expect(schedule.cron).toBe("0 9 * * *");
   });
 });
@@ -147,6 +149,18 @@ function typeOnlyFixtures(): void {
         void _data;
         void _channel;
       },
+    },
+  });
+
+  const unknownStreamEventHook: StreamEventHook<unknown> = (event, ctx) => {
+    const sessionId: string = ctx.session.id;
+    const value: unknown = event;
+    void sessionId;
+    void value;
+  };
+  defineHook({
+    events: {
+      "*": unknownStreamEventHook,
     },
   });
 

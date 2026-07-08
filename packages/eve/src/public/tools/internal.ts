@@ -8,9 +8,10 @@ import type { ToolDefinition } from "#public/definitions/tool.js";
  * {@link ResolvedToolDefinition} so it can be re-exported as a public
  * {@link ToolDefinition}.
  *
- * Framework tools have the internal `(input) => output` signature.
+ * Framework tools have the internal `(input, options) => output` signature.
  * The public {@link ToolDefinition.execute} expects `(input, ctx)`.
- * This wrapper bridges the gap — `ctx` is trailing and omitted.
+ * This wrapper bridges the gap — the public `ctx` is mapped back onto the
+ * internal execute options.
  */
 export function toPublicToolDefinition(definition: ResolvedToolDefinition): ToolDefinition {
   if (!definition.execute) {
@@ -21,7 +22,14 @@ export function toPublicToolDefinition(definition: ResolvedToolDefinition): Tool
   const inputSchema = definition.inputSchema;
   const publicDefinition: ToolDefinition = {
     description: definition.description,
-    execute: (input) => internalExecute(input),
+    execute: (input, ctx) =>
+      internalExecute(input, {
+        abortSignal: ctx.abortSignal,
+        // The public context carries no model history, so the bridged
+        // options cannot reproduce the AI SDK's `messages`.
+        messages: [],
+        toolCallId: ctx.callId,
+      }),
     inputSchema: (inputSchema ?? {}) as unknown as StandardJSONSchemaV1<unknown>,
     outputSchema: definition.outputSchema,
   };

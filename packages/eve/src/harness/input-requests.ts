@@ -6,8 +6,12 @@ import type {
 } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import { resolveTextToResponses } from "#channel/resolve-text.js";
-import { parseJsonObject } from "#shared/json.js";
+import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
+import {
+  isSessionLimitContinuationRequest,
+  resolveSessionLimitContinuation,
+} from "#harness/session-limit-continuation.js";
 import type { HarnessSession, SessionStateMap, StepInput } from "#harness/types.js";
 
 const PENDING_INPUT_BATCH_KEY = "eve.runtime.pendingInputBatch";
@@ -180,6 +184,11 @@ export function resolvePendingInput(input: {
     };
   }
 
+  const limitContinuation = resolveSessionLimitContinuation({
+    requests: pendingBatch.requests,
+    responses,
+  });
+
   // Record approved tools before clearing the batch.
   session = recordApprovedTools({
     pendingBatch,
@@ -213,6 +222,7 @@ export function resolvePendingInput(input: {
     return {
       consumedMessage: resolvedStepInput?.messageConsumed,
       deferredMessage: true,
+      limitContinuation,
       outcome: "resolved",
       messages,
       rejectedActions,
@@ -222,6 +232,7 @@ export function resolvePendingInput(input: {
 
   return {
     consumedMessage: resolvedStepInput?.messageConsumed,
+    limitContinuation,
     outcome: "resolved",
     messages,
     rejectedActions,
@@ -297,6 +308,12 @@ function hasUnansweredApproval(input: {
 type ResolvePendingInputResult = {
   readonly consumedMessage?: boolean;
   readonly deferredMessage?: boolean;
+  /**
+   * Present when the resolved batch answered a session-limit continuation
+   * prompt. The tool loop grants a fresh token budget window or terminates
+   * the session based on `granted`.
+   */
+  readonly limitContinuation?: { readonly granted: boolean };
   readonly outcome: "resolved" | "continue" | "unresolved";
   readonly messages: ModelMessage[];
   readonly rejectedActions?: RejectedActionBatch;
@@ -551,6 +568,16 @@ function buildToolResponsePartsForRequest(
   request: InputRequest,
   response: InputResponse | undefined,
 ): ToolResponsePart[] {
+  // A session-limit continuation prompt is harness-authored: no matching
+  // tool call exists in model history, so resolving it must not append a
+  // tool message the provider would reject as unmatched. This is currently
+  // the only harness-authored request type; if another appears, replace this
+  // toolName predicate with a generic synthetic-request marker instead of
+  // stacking a second special case here.
+  if (isSessionLimitContinuationRequest(request)) {
+    return [];
+  }
+
   if (isApprovalRequest(request)) {
     const { approved, reason } = resolveApprovalOutcome(response);
     const parts: ToolResponsePart[] = [
@@ -621,16 +648,30 @@ export function createRuntimeToolCallActionFromToolCall(input: {
 }): RuntimeToolCallActionRequest {
   return {
     callId: input.toolCall.toolCallId,
-    input: resolveToolCallInputObject(input.toolCall.input),
+    input: resolveToolCallInputObject(input.toolCall.input, {
+      callId: input.toolCall.toolCallId,
+      toolName: input.toolCall.toolName,
+    }),
     kind: "tool-call",
     toolName: input.toolCall.toolName,
   };
 }
 
-function resolveToolCallInputObject(value: unknown) {
+function resolveToolCallInputObject(
+  value: unknown,
+  context: { readonly callId: string; readonly toolName: string },
+): JsonObject {
   if (value === undefined || value === null) {
     return {};
   }
 
-  return parseJsonObject(value);
+  try {
+    return parseJsonObject(value);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new TypeError(
+      `Failed to parse tool-call arguments for "${context.toolName}" (${context.callId}): ${detail}`,
+      { cause: error },
+    );
+  }
 }

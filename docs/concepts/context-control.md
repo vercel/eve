@@ -52,13 +52,13 @@ When the task is novel or ambiguous, gather evidence first, then answer with the
 remaining uncertainty.
 ```
 
-Packaged skills are useful when you also want sibling files such as `references/`, `assets/`, or `scripts/` under the same skill directory. Those paths show up under the runtime workspace root, so the model can inspect them with the normal file or shell tools instead of pasting their content into the prompt.
+Packaged skills are useful when you also want sibling files such as `references/`, `assets/`, or `scripts/` under the same skill directory. Those files are available under the runtime skill root, normally `$HOME/.agents/skills/<skill>/`. Relative references inside a `SKILL.md` resolve from that specific skill directory, so `references/checklist.md` means `$HOME/.agents/skills/<skill>/references/checklist.md` unless eve has fallen back to `/workspace/skills/<skill>/`.
 
 See [Skills](../skills) for the full authoring model and install notes.
 
 ## Put runtime files in the workspace, not the prompt
 
-eve does not inline the entire authored surface into the prompt. Instead, it gives the model a shallow workspace hint and runtime tools to inspect deeper when needed. Skill files are available under the active workspace root, and the model inspects them with the shared `bash` tool, which keeps prompts smaller and makes file and command work explicit.
+eve does not inline the entire authored surface into the prompt. Instead, it gives the model a shallow workspace hint, a separate skill-root hint, and runtime tools to inspect deeper when needed. Skill package files are outside `/workspace` in the normal case, and the model inspects them with the shared `bash` tool, which keeps prompts smaller and makes file and command work explicit.
 
 See [Sandbox](../sandbox) for the workspace and sandbox model.
 

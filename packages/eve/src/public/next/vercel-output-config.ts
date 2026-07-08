@@ -9,6 +9,8 @@ import {
 const VERCEL_JSON_FILE_NAME = "vercel.json";
 const VERCEL_OUTPUT_CONFIG_FILE_NAME = ".vercel/output/config.json";
 const VERCEL_BUILD_OUTPUT_VERSION = 3;
+const EVE_SERVICE_NAME = "eve";
+const EVE_SERVICE_ROUTE_SRC = "^/eve/v1/(.*)$";
 
 interface VercelServiceMount {
   readonly path?: string;
@@ -21,11 +23,25 @@ interface VercelServiceConfig {
   readonly framework?: string;
   readonly mount?: string | VercelServiceMount;
   readonly routePrefix?: string;
+  readonly root?: string;
   readonly type?: string;
 }
 
+interface VercelServiceRouteDestination {
+  readonly service?: string;
+  readonly type?: string;
+}
+
+interface VercelRouteConfig {
+  readonly destination?: string | VercelServiceRouteDestination;
+  readonly handle?: string;
+  readonly src?: string;
+  readonly [key: string]: unknown;
+}
+
 interface VercelServicesConfig {
-  readonly experimentalServices?: Record<string, VercelServiceConfig>;
+  readonly routes?: readonly VercelRouteConfig[];
+  readonly services?: Record<string, VercelServiceConfig>;
   readonly [key: string]: unknown;
 }
 
@@ -83,7 +99,7 @@ async function resolveVercelOutputConfigLocation(nextRoot: string): Promise<{
   }
 
   return {
-    canWriteGeneratedOutput: false,
+    canWriteGeneratedOutput: Boolean(process.env.VERCEL),
     outputConfigPath: join(nextRoot, VERCEL_OUTPUT_CONFIG_FILE_NAME),
     projectRoot,
   };
@@ -94,10 +110,16 @@ function normalizeVercelServicesConfig(value: unknown, fileName: string): Vercel
     throw new Error(`${fileName} must contain a JSON object.`);
   }
 
-  const experimentalServices = value.experimentalServices;
+  const services = value.services;
 
-  if (experimentalServices !== undefined && !isRecord(experimentalServices)) {
-    throw new Error(`${fileName} experimentalServices must be a JSON object.`);
+  if (services !== undefined && !isRecord(services)) {
+    throw new Error(`${fileName} services must be a JSON object.`);
+  }
+
+  const routes = value.routes;
+
+  if (routes !== undefined && !Array.isArray(routes)) {
+    throw new Error(`${fileName} routes must be an array.`);
   }
 
   return value as VercelServicesConfig;
@@ -125,7 +147,16 @@ function findServiceByFramework(
   services: Record<string, VercelServiceConfig>,
   framework: string,
 ): VercelServiceConfig | undefined {
-  return Object.values(services).find((service) => service.framework === framework);
+  return findServiceEntryByFramework(services, framework)?.service;
+}
+
+function findServiceEntryByFramework(
+  services: Record<string, VercelServiceConfig>,
+  framework: string,
+): { readonly name: string; readonly service: VercelServiceConfig } | undefined {
+  return Object.entries(services)
+    .map(([name, service]) => ({ name, service }))
+    .find((entry) => entry.service.framework === framework);
 }
 
 function resolveServicePrefix(service: VercelServiceConfig | undefined): string | undefined {
@@ -160,20 +191,62 @@ function resolveConfiguredServicePrefix(input: {
   return resolveServicePrefix(configuredEveService) ?? input.servicePrefix;
 }
 
-function assertRootServicesAreComplete(input: {
+function assertRootServicesIncludeEve(input: {
   readonly services: Record<string, VercelServiceConfig>;
   readonly servicePrefix: string;
 }): string {
   const configuredEveService = findServiceByFramework(input.services, "eve");
-  const configuredNextService = findServiceByFramework(input.services, "nextjs");
 
-  if (configuredEveService !== undefined && configuredNextService !== undefined) {
+  if (configuredEveService !== undefined) {
     return resolveServicePrefix(configuredEveService) ?? input.servicePrefix;
   }
 
   throw new Error(
-    `${VERCEL_JSON_FILE_NAME} already defines experimentalServices, so withEve cannot add generated services through ${VERCEL_OUTPUT_CONFIG_FILE_NAME}. Add both the Next.js and eve services to ${VERCEL_JSON_FILE_NAME}, or remove experimentalServices from ${VERCEL_JSON_FILE_NAME}.`,
+    `${VERCEL_JSON_FILE_NAME} already defines services, so withEve cannot add a generated eve service through ${VERCEL_OUTPUT_CONFIG_FILE_NAME}. Add the eve service to ${VERCEL_JSON_FILE_NAME}, or remove services from ${VERCEL_JSON_FILE_NAME}.`,
   );
+}
+
+function isEveServiceRoute(route: VercelRouteConfig, serviceName: string): boolean {
+  const destination = route.destination;
+
+  return (
+    route.src === EVE_SERVICE_ROUTE_SRC &&
+    isRecord(destination) &&
+    destination.type === "service" &&
+    destination.service === serviceName
+  );
+}
+
+function createEveServiceRoute(serviceName: string): VercelRouteConfig {
+  return {
+    destination: {
+      service: serviceName,
+      type: "service",
+    },
+    src: EVE_SERVICE_ROUTE_SRC,
+  };
+}
+
+function insertEveServiceRoute(
+  routes: readonly VercelRouteConfig[],
+  serviceName: string,
+): readonly VercelRouteConfig[] {
+  const existingRoute = routes.find((route) => isEveServiceRoute(route, serviceName));
+  const routesWithoutEveRoute = routes.filter((route) => !isEveServiceRoute(route, serviceName));
+  const filesystemRouteIndex = routesWithoutEveRoute.findIndex(
+    (route) => route.handle === "filesystem",
+  );
+  const eveRoute = existingRoute ?? createEveServiceRoute(serviceName);
+
+  if (filesystemRouteIndex === -1) {
+    return [eveRoute, ...routesWithoutEveRoute];
+  }
+
+  return [
+    ...routesWithoutEveRoute.slice(0, filesystemRouteIndex),
+    eveRoute,
+    ...routesWithoutEveRoute.slice(filesystemRouteIndex),
+  ];
 }
 
 export async function ensureEveVercelOutputConfig(input: {
@@ -188,11 +261,11 @@ export async function ensureEveVercelOutputConfig(input: {
     join(projectRoot, VERCEL_JSON_FILE_NAME),
     VERCEL_JSON_FILE_NAME,
   );
-  const rootServices = rootVercelConfig.experimentalServices;
+  const rootServices = rootVercelConfig.services;
 
   if (hasServices(rootServices)) {
     return {
-      servicePrefix: assertRootServicesAreComplete({
+      servicePrefix: assertRootServicesIncludeEve({
         services: rootServices,
         servicePrefix: input.servicePrefix,
       }),
@@ -203,11 +276,9 @@ export async function ensureEveVercelOutputConfig(input: {
     outputConfigPath,
     VERCEL_OUTPUT_CONFIG_FILE_NAME,
   )) as VercelOutputConfig;
-  const nextEntrypoint = ".";
   const eveEntrypoint = resolveRelativeEntrypoint(input.nextRoot, input.appRoot);
-  const existingServices = existingConfig.experimentalServices ?? {};
-  const configuredEveService = findServiceByFramework(existingServices, "eve");
-  const configuredNextService = findServiceByFramework(existingServices, "nextjs");
+  const existingServices = existingConfig.services ?? {};
+  const configuredEveServiceEntry = findServiceEntryByFramework(existingServices, "eve");
   const servicePrefix = resolveConfiguredServicePrefix({
     services: existingServices,
     servicePrefix: input.servicePrefix,
@@ -219,33 +290,27 @@ export async function ensureEveVercelOutputConfig(input: {
     };
   }
 
-  const experimentalServices: Record<string, VercelServiceConfig> = {
+  const services: Record<string, VercelServiceConfig> = {
     ...existingServices,
   };
+  let eveServiceName = configuredEveServiceEntry?.name ?? EVE_SERVICE_NAME;
 
-  if (configuredNextService === undefined) {
-    experimentalServices.web = {
-      entrypoint: nextEntrypoint,
-      framework: "nextjs",
-      mount: "/",
-      type: "web",
-    };
-  }
-
-  if (configuredEveService === undefined) {
-    experimentalServices.eve = {
+  if (configuredEveServiceEntry === undefined) {
+    services[EVE_SERVICE_NAME] = {
       buildCommand: input.eveBuildCommand,
-      entrypoint: eveEntrypoint,
+      entrypoint: "package.json",
       framework: "eve",
-      mount: servicePrefix,
-      type: "web",
+      root: eveEntrypoint,
     };
+    eveServiceName = EVE_SERVICE_NAME;
   }
 
+  const { services: _services, ...configWithoutLegacyServices } = existingConfig;
   const vercelConfig: VercelOutputConfig = {
-    ...existingConfig,
+    ...configWithoutLegacyServices,
+    routes: insertEveServiceRoute(existingConfig.routes ?? [], eveServiceName),
+    services,
     version: VERCEL_BUILD_OUTPUT_VERSION,
-    experimentalServices,
   };
 
   if (JSON.stringify(existingConfig) !== JSON.stringify(vercelConfig)) {

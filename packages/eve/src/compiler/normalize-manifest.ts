@@ -5,7 +5,7 @@ import {
   type CompiledDynamicInstructionsDefinition,
   type CompiledDynamicSkillDefinition,
   type CompiledDynamicToolDefinition,
-  type CompiledInstructions,
+  type CompiledInstructionsDefinition,
   type CompiledSkillDefinition,
   type CompiledToolDefinition,
   createCompiledAgentManifest,
@@ -134,7 +134,7 @@ async function compileAgentNodeManifest(
       compileInstructionsEntry(manifest.agentRoot, source, { externalDependencies }),
     ),
   );
-  const staticInstructions: CompiledInstructions[] = [];
+  const staticInstructions: CompiledInstructionsDefinition[] = [];
   const dynamicInstructions: CompiledDynamicInstructionsDefinition[] = [];
 
   for (const entry of compiledInstructionsEntries) {
@@ -145,7 +145,7 @@ async function compileAgentNodeManifest(
     }
   }
 
-  const composedInstructions: CompiledInstructions | undefined =
+  const composedInstructions: CompiledInstructionsDefinition | undefined =
     staticInstructions.length === 0
       ? undefined
       : staticInstructions.length === 1

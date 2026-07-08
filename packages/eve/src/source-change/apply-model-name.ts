@@ -105,7 +105,7 @@ export async function applyModelNameToSource(
     return {
       kind: "bail",
       reason:
-        "`model` is absent or is not a string literal (e.g. an env reference, a template, or an inlined SDK model)",
+        "`model` is absent or is not a string literal (e.g. an env reference, a template, an inlined SDK model, or a defineDynamic() dynamic model)",
       line: lineAt(sourceText, object.start ?? 0),
     };
   }

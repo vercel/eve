@@ -15,7 +15,7 @@ import type {
 } from "#client/message-reducer-types.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
-import type { AuthorizationCompletedStreamEvent } from "#protocol/message.js";
+import type { AuthorizationCompletedStreamEvent, MessageReceivedPart } from "#protocol/message.js";
 
 export type {
   EveAuthorizationChallenge,
@@ -96,7 +96,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
           status: "complete",
           turnId: event.data.turnId,
         },
-        parts: [{ type: "text", text: event.data.message, state: "done" }],
+        parts: projectReceivedParts(event.data.parts, event.data.message),
         role: "user",
       });
 
@@ -496,12 +496,33 @@ function findToolPartByApprovalId(
   return undefined;
 }
 
+function projectReceivedParts(
+  parts: readonly MessageReceivedPart[] | undefined,
+  message: string,
+): readonly EveMessagePart[] {
+  return (
+    parts?.map((part) =>
+      part.type === "text"
+        ? { state: "done", text: part.text, type: "text" }
+        : {
+            filename: part.filename,
+            mediaType: part.mediaType,
+            size: part.size,
+            type: "file",
+            url: part.url,
+          },
+    ) ?? [{ state: "done", text: message, type: "text" }]
+  );
+}
+
 function partKey(part: EveMessagePart): string {
   switch (part.type) {
     case "text":
       return `text:${part.stepIndex ?? 0}`;
     case "reasoning":
       return `reasoning:${part.stepIndex ?? 0}`;
+    case "file":
+      return `file:${part.stepIndex ?? 0}:${part.filename ?? part.url ?? part.mediaType}`;
     case "step-start":
       return "step-start";
     case "authorization":

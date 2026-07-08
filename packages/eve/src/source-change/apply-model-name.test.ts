@@ -89,6 +89,26 @@ describe("applyModelNameToSource", () => {
     expect(result.kind).toBe("bail");
   });
 
+  it("bails on a defineDynamic model without touching the fallback literal", async () => {
+    const source = `import { defineAgent, defineDynamic } from "eve";
+
+export default defineAgent({
+  model: defineDynamic({
+    fallback: "anthropic/claude-sonnet-5",
+    events: {
+      "session.started": () => "anthropic/claude-opus-4.6",
+    },
+  }),
+});
+`;
+    const result = await applyModelNameToSource(source, "c/d");
+
+    expect(result.kind).toBe("bail");
+    if (result.kind !== "bail") return;
+    // The fallback string inside defineDynamic must never be rewritten.
+    expect(result.reason).toContain("defineDynamic");
+  });
+
   it("bails when there is no defineAgent call", async () => {
     const result = await applyModelNameToSource(`export const x = 1;\n`, "c/d");
 

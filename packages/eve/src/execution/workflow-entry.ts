@@ -29,7 +29,7 @@ import {
   createSessionDeliveryHook,
   type SessionDeliveryHook,
 } from "#execution/session-delivery-hook.js";
-import { readSerializedSubagentSessionDepth } from "#harness/subagent-depth.js";
+import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
 
 // workflow-entry.ts is the durable workflow body — the bundler rejects
 // node built-ins here, so `internal/logging.ts` cannot be imported.
@@ -42,6 +42,7 @@ import { readSerializedSubagentSessionDepth } from "#harness/subagent-depth.js";
  */
 export interface WorkflowEntryInput {
   readonly input: RunInput["input"];
+  readonly limits?: RunInput["limits"];
   readonly serializedContext: Record<string, unknown>;
 }
 
@@ -87,19 +88,17 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     // Derived once and reused for createSession + tag emission so the
     // chain-root id can never drift between persisted session and tags.
     const rootSessionIdFromParent = readRootSessionId(input.serializedContext);
-    const { subagentDepth, subagentMaxDepth } = readSerializedSubagentSessionDepth(
-      input.serializedContext,
-    );
+    const subagentDepth = readSerializedSubagentDepth(input.serializedContext);
 
     const { state: sessionState } = await createSessionStep({
       compiledArtifactsSource: serializedBundle.source,
       continuationToken,
+      inheritedLimits: input.limits,
       nodeId: serializedBundle.nodeId,
       outputSchema: input.input.outputSchema,
       rootSessionId: rootSessionIdFromParent,
       sessionId,
       subagentDepth,
-      subagentMaxDepth,
     });
 
     return await runDriverLoop({
@@ -299,12 +298,14 @@ async function finalizeDone(input: {
     output: failed ? undefined : output,
     serializedContext,
     status: failed ? "failed" : "completed",
+    usage: failed ? undefined : input.action.usage,
   });
   await notifyDelegatedParentStep({
     result: failed
       ? createDelegatedSubagentErrorResult(serializedContext, output)
       : createDelegatedSubagentSuccessResult(serializedContext, output),
     serializedContext,
+    usage: failed ? undefined : input.action.usage,
   });
   return { output };
 }

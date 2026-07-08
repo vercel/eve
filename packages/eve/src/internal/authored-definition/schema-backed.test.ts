@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { z } from "#compiled/zod/index.js";
 
-import { defineTool, defineDynamic, disableTool } from "#public/definitions/tool.js";
+import {
+  defineTool,
+  defineDynamic,
+  disableTool,
+  ExperimentalWorkflow,
+} from "#public/definitions/tool.js";
 import { once } from "#public/tools/approval/approval-helpers.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
 
@@ -35,11 +40,8 @@ describe("normalizeToolDefinition", () => {
     expect(entry).toEqual({ kind: "disabled" });
   });
 
-  it("returns an enable-workflow entry for the internal workflow marker shape", () => {
-    const entry = normalizeToolDefinition(
-      Object.freeze({ kind: "eve:enable-workflow-tool" }),
-      FAILURE_MESSAGE,
-    );
+  it("returns an enable-workflow entry for the ExperimentalWorkflow marker", () => {
+    const entry = normalizeToolDefinition(ExperimentalWorkflow, FAILURE_MESSAGE);
 
     expect(entry).toEqual({ kind: "enable-workflow" });
   });
@@ -209,6 +211,19 @@ describe("normalizeToolDefinition", () => {
     expect(entry.kind).toBe("dynamic-tool");
     if (entry.kind !== "dynamic-tool") throw new Error("expected dynamic-tool");
     expect(entry.eventNames).toEqual(["session.started"]);
+  });
+
+  it("rejects a defineDynamic tool export carrying a fallback", () => {
+    const dynamicTools = defineDynamic({
+      fallback: "not-supported-here",
+      events: {
+        "session.started": async () => ({}),
+      },
+    });
+
+    expect(() => normalizeToolDefinition(dynamicTools, FAILURE_MESSAGE)).toThrow(
+      '"fallback" is only supported on a dynamic agent model',
+    );
   });
 
   it("handles defineDynamic with multiple events", () => {

@@ -11,7 +11,11 @@ import {
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
-import { isDynamicSentinel, type DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
+import {
+  isDynamicSentinel,
+  rejectDynamicSentinelFallback,
+  type DynamicToolEventName,
+} from "#shared/dynamic-tool-definition.js";
 
 /**
  * Compiled skill entry produced from one authored `skills/*` file.
@@ -72,6 +76,10 @@ export async function compileSkillSource(
   });
 
   if (isDynamicSentinel(exportValue)) {
+    rejectDynamicSentinelFallback(
+      exportValue,
+      `Expected the skill export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
+    );
     const slug = stripLogicalPathExtension(source.logicalPath).replace(/^skills\//, "");
     return {
       kind: "dynamic-skill",

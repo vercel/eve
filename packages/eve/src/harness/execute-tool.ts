@@ -22,7 +22,7 @@ export type HarnessRuntimeActionDefinition = {
 export interface HarnessToolDefinition {
   readonly approvalKey?: (toolInput: Readonly<Record<string, unknown>>) => string;
   readonly description: string;
-  readonly execute?: (input: any, options?: ToolExecuteOptions) => any;
+  readonly execute?: (input: any, options: ToolExecuteOptions) => any;
   readonly inputSchema: FlexibleSchema;
   readonly name: string;
   readonly approval?: Approval;

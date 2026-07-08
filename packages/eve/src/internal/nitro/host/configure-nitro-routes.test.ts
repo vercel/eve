@@ -37,6 +37,7 @@ interface PreparedApplicationHostStub {
   };
   compiledArtifacts: {
     bootstrapPath: string;
+    workflowWorldPluginPath: string;
   };
   scheduleRegistrations: [];
   schedules: [];
@@ -117,6 +118,7 @@ function createPreparedHost(
   } = {},
 ): PreparedApplicationHost {
   const appRoot = input.appRoot ?? "G:\\projects\\test-eve";
+  const pathSeparator = appRoot.includes("\\") ? "\\" : "/";
 
   const preparedHost: PreparedApplicationHostStub = {
     appRoot,
@@ -139,6 +141,7 @@ function createPreparedHost(
     },
     compiledArtifacts: {
       bootstrapPath: `${appRoot}\\.eve\\compiled-artifacts-bootstrap.mjs`,
+      workflowWorldPluginPath: `${appRoot}${pathSeparator}.eve${pathSeparator}compiled-artifacts-workflow-world.mjs`,
     },
     scheduleRegistrations: [],
     schedules: [],
@@ -264,6 +267,9 @@ describe("configureNitroRoutes", () => {
     const workflowHandlerSource = readWriteFileSourceMatching("/workflow/workflows-handler.mjs");
 
     expect(workflowHandlerSource).toContain('import { POST } from "./workflows.mjs";');
+    expect(workflowHandlerSource).toContain(
+      'import "../../.eve/compiled-artifacts-workflow-world.mjs";',
+    );
     expect(workflowHandlerSource).toContain(
       'import { getWorld as __eveGetWorkflowWorld } from "file:///G:/projects/test-eve/node_modules/.pnpm/eve@0.3.0/node_modules/eve/dist/src/compiled/@workflow/core/runtime.js";',
     );

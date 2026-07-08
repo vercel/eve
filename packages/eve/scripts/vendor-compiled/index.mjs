@@ -24,6 +24,8 @@ import workflowCore from "./@workflow/core.mjs";
 import workflowErrors from "./@workflow/errors.mjs";
 import workflowSerde from "./@workflow/serde.mjs";
 import workflowWorld from "./@workflow/world.mjs";
+import workflowWorldLocal from "./@workflow/world-local.mjs";
+import workflowWorldVercel from "./@workflow/world-vercel.mjs";
 
 import chat from "./chat.mjs";
 import chokidar from "./chokidar.mjs";
@@ -72,6 +74,8 @@ export const MODULES = [
   workflowErrors,
   workflowSerde,
   workflowWorld,
+  workflowWorldLocal,
+  workflowWorldVercel,
   zod,
   zodValidationError,
 ];

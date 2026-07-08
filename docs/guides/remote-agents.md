@@ -60,4 +60,5 @@ Both failure paths surface to the parent as a failed tool result, so the caller 
 ## What to read next
 
 - Local delegation and the isolation boundary → [Subagents](../subagents)
+- Have the model orchestrate remote agents programmatically → [Dynamic workflows](./dynamic-workflows)
 - Securing the receiving deployment → [Auth & route protection](./auth-and-route-protection)
