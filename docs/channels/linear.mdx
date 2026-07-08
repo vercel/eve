@@ -1,12 +1,44 @@
 ---
 title: "Linear"
-description: "Reach your agent through Linear Agent Sessions, with native Agent Activities for progress, questions, and responses."
+description: "Reach your agent through Linear Agent Sessions, with native Agent Activities for progress, questions, and responses, and Vercel Connect credentials."
 type: integration
 ---
 
-The Linear channel uses Linear's Agent Session surface rather than ordinary comments. Users delegate work to the agent from Linear, eve receives `AgentSessionEvent` webhooks at `/eve/v1/linear`, and the channel replies with native Agent Activities, including `thought`, `action`, `elicitation`, `response`, and `error`. See [Channels](./overview) for the contract this builds on.
+The Linear channel uses Linear's Agent Session surface rather than ordinary comments. Users delegate work to the agent from Linear, eve receives `AgentSessionEvent` webhooks at `/eve/v1/linear`, and the channel replies with native Agent Activities, including `thought`, `action`, `elicitation`, `response`, and `error`. Credentials can run through [Vercel Connect](../guides/auth-and-route-protection), which manages the Linear app, its access token, and inbound webhook verification, so there's no API key or webhook secret for you to hold. See [Channels](./overview) for the contract this builds on.
+
+## Set up Connect
+
+Create a Linear Connect client and copy its UID (e.g. `linear/my-agent`), then attach this project as the trigger destination at eve's Linear route:
+
+```bash
+npm install -g vercel@latest
+vercel connect create linear --triggers
+vercel connect detach <uid> --yes
+vercel connect attach <uid> --triggers --trigger-path /eve/v1/linear --yes
+```
+
+The `create` step provisions the Linear app — with the `app:assignable` and `app:mentionable` scopes the agent surface needs — and a trigger destination at the default Connect path. `detach` then `attach --trigger-path /eve/v1/linear` re-points the trigger at the eve Linear route, since eve does not serve the default Connect path. `--triggers` makes Connect receive Linear's webhooks, verify them, and forward them to your deployment. During registration, subscribe to the `AgentSessionEvent` webhook category — the managed app defaults to `Comment` and `Issue` — so Linear sends `created` events when the agent is delegated or mentioned and `prompted` events when the user continues the session. You can also create the client from the [Connect dashboard](https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Go+to+Connect).
 
 ## Add the channel
+
+```bash
+npm install @vercel/connect
+```
+
+```ts title="agent/channels/linear.ts"
+import { connectLinearCredentials } from "@vercel/connect/eve";
+import { linearChannel } from "eve/channels/linear";
+
+export default linearChannel({
+  credentials: connectLinearCredentials("linear/my-agent"),
+});
+```
+
+`connectLinearCredentials` returns `{ accessToken, webhookVerifier }`: eve uses the Connect-managed app token for Linear GraphQL calls and verifies Connect-forwarded webhooks by their Vercel OIDC signature instead of a Linear webhook secret. Token rotation, refresh, and multi-workspace tenancy stay inside Connect, so there is no `LINEAR_AGENT_ACCESS_TOKEN` or `LINEAR_WEBHOOK_SECRET` to manage.
+
+### Bring your own Linear app
+
+To run a Linear OAuth app you manage yourself, pass its credentials directly instead:
 
 ```ts title="agent/channels/linear.ts"
 import { linearChannel } from "eve/channels/linear";
@@ -26,9 +58,7 @@ LINEAR_WEBHOOK_SECRET=...             # verifies Linear-Signature
 
 The sample passes credentials explicitly. To rely on env vars instead, drop the `credentials` block: the access token falls back to `LINEAR_AGENT_ACCESS_TOKEN`, `LINEAR_ACCESS_TOKEN`, `LINEAR_API_KEY`, or `LINEAR_API_TOKEN`, and the webhook secret falls back to `LINEAR_WEBHOOK_SECRET`. Both fields also accept lazy resolver functions.
 
-## Configure Linear
-
-Create a Linear OAuth app, enable Agent Session events, and point the webhook URL at:
+Create the Linear OAuth app, enable Agent Session events, and point the webhook URL at:
 
 ```text
 https://<deployment>/eve/v1/linear

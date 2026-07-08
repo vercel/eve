@@ -11,13 +11,13 @@ The Slack channel puts your agent inside a workspace. It answers `@mentions` and
 Create a Slack Connect client and copy its UID (e.g. `slack/my-agent`), then attach this project as the trigger destination at eve's Slack route:
 
 ```bash
-npm install -g vercel@latest && export FF_CONNECT_ENABLED=1
+npm install -g vercel@latest
 vercel connect create slack --triggers
 vercel connect detach <uid> --yes
 vercel connect attach <uid> --triggers --trigger-path /eve/v1/slack --yes
 ```
 
-`FF_CONNECT_ENABLED=1` turns on the Connect commands, which are feature-flagged in the Vercel CLI today. The `create` step provisions a destination at the default Connect path. `detach` then `attach --trigger-path /eve/v1/slack` re-points the trigger at the eve Slack route, since eve does not serve the default Connect path. `--triggers` turns on Slack Event Subscriptions; without it, Slack never delivers `app_mention` or `message.im`. You can also create the client from the [Connect dashboard](https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Go+to+Connect).
+The `create` step provisions a destination at the default Connect path. `detach` then `attach --trigger-path /eve/v1/slack` re-points the trigger at the eve Slack route, since eve does not serve the default Connect path. `--triggers` turns on Slack Event Subscriptions; without it, Slack never delivers `app_mention` or `message.im`. You can also create the client from the [Connect dashboard](https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Go+to+Connect).
 
 ## Add the channel
 

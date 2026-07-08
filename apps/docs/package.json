@@ -44,6 +44,7 @@
     "nanoid": "5.1.11",
     "next": "catalog:",
     "next-themes": "0.4.6",
+    "phase": "catalog:",
     "radix-ui": "1.4.3",
     "react": "catalog:",
     "react-dom": "catalog:",

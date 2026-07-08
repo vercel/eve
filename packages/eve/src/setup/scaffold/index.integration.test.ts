@@ -706,7 +706,7 @@ describe("listAuthoredChannels", () => {
 });
 
 describe("scaffoldBaseProject", () => {
-  test("writes a base eve project with explicit versions", async () => {
+  test("writes a base eve project with the catalog TypeScript version", async () => {
     const targetDirectory = await createTempDir();
     const projectRoot = await scaffoldBaseProject({
       projectName: "demo-agent",
@@ -716,7 +716,6 @@ describe("scaffoldBaseProject", () => {
       aiPackageVersion: "7.0.0",
       connectPackageVersion: "0.2.2",
       zodPackageVersion: "4.4.3",
-      typescriptPackageVersion: "7.0.1-rc",
     });
 
     const agentSource = await readFile(join(projectRoot, "agent/agent.ts"), "utf8");
@@ -728,6 +727,12 @@ describe("scaffoldBaseProject", () => {
     // running `eve dev`) import @vercel/connect; init ships it so a later
     // channel add never introduces a missing dependency.
     expect(packageJson).toContain('"@vercel/connect": "0.2.2"');
+    // The default path used by `eve init` must carry the stable toolchain
+    // version captured from the workspace catalog into generated projects.
+    expect(JSON.parse(packageJson)).toMatchObject({
+      devDependencies: { typescript: "7.0.2" },
+      engines: { node: "24.x" },
+    });
     // Every scaffold ships @types/node plus tsconfig `types: ["node"]` so agent
     // code touching `process`/`fs` typechecks out of the box, matching the eve
     // agent fixtures (without the `types` entry, NodeNext resolution does not
@@ -737,9 +742,6 @@ describe("scaffoldBaseProject", () => {
       compilerOptions: { types?: string[] };
     };
     expect(tsconfig.compilerOptions.types).toEqual(["node"]);
-    // Pinned to a single major so Vercel builds on a supported Node regardless
-    // of the project's dashboard Node pin.
-    expect(JSON.parse(packageJson)).toMatchObject({ engines: { node: "24.x" } });
     await expect(readFile(join(projectRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
       PNPM_WORKSPACE_CONTENT,
     );
@@ -774,7 +776,7 @@ describe("scaffoldBaseProject", () => {
         evePackage: TEST_EVE_PACKAGE,
         aiPackageVersion: "7.0.0",
         zodPackageVersion: "4.4.3",
-        typescriptPackageVersion: "7.0.1-rc",
+        typescriptPackageVersion: "7.0.2",
       });
 
       await expect(readFile(join(projectRoot, "package.json"), "utf8")).resolves.toContain(
@@ -817,7 +819,7 @@ describe("scaffoldBaseProject", () => {
       aiPackageVersion: "7.0.0",
       connectPackageVersion: "0.2.2",
       zodPackageVersion: "4.4.3",
-      typescriptPackageVersion: "7.0.1-rc",
+      typescriptPackageVersion: "7.0.2",
     });
 
     await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
@@ -860,7 +862,7 @@ describe("scaffoldBaseProject", () => {
       aiPackageVersion: "7.0.0",
       connectPackageVersion: "0.2.2",
       zodPackageVersion: "4.4.3",
-      typescriptPackageVersion: "7.0.1-rc",
+      typescriptPackageVersion: "7.0.2",
     });
 
     await expect(pathExists(join(projectRoot, "pnpm-workspace.yaml"))).resolves.toBe(false);
@@ -915,7 +917,7 @@ describe("scaffoldBaseProject", () => {
         aiPackageVersion: "7.0.0",
         connectPackageVersion: "0.2.2",
         zodPackageVersion: "4.4.3",
-        typescriptPackageVersion: "7.0.1-rc",
+        typescriptPackageVersion: "7.0.2",
       });
 
       const projectPackageJson = JSON.parse(
@@ -973,7 +975,7 @@ describe("scaffoldBaseProject", () => {
         aiPackageVersion: "7.0.0",
         connectPackageVersion: "0.2.2",
         zodPackageVersion: "4.4.3",
-        typescriptPackageVersion: "7.0.1-rc",
+        typescriptPackageVersion: "7.0.2",
       });
 
       const projectPackageJson = JSON.parse(
@@ -1010,7 +1012,7 @@ describe("scaffoldBaseProject", () => {
       evePackage: TEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
       zodPackageVersion: "4.4.3",
-      typescriptPackageVersion: "7.0.1-rc",
+      typescriptPackageVersion: "7.0.2",
     });
 
     const agentSource = await readFile(join(projectRoot, "agent/agent.ts"), "utf8");
@@ -1033,7 +1035,7 @@ describe("scaffoldBaseProject", () => {
       evePackage: TEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
       zodPackageVersion: "4.4.3",
-      typescriptPackageVersion: "7.0.1-rc",
+      typescriptPackageVersion: "7.0.2",
     });
 
     const agentSource = await readFile(join(projectRoot, "agent/agent.ts"), "utf8");
@@ -1051,7 +1053,7 @@ describe("scaffoldBaseProject", () => {
       evePackage: { version: "0.25.0", nodeEngine: ">=24.5.0" },
       aiPackageVersion: "7.0.0",
       zodPackageVersion: "4.4.3",
-      typescriptPackageVersion: "7.0.1-rc",
+      typescriptPackageVersion: "7.0.2",
     });
 
     const packageJson = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8")) as {
@@ -1071,7 +1073,7 @@ describe("scaffoldBaseProject", () => {
       evePackage: LATEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
       zodPackageVersion: "4.4.3",
-      typescriptPackageVersion: "7.0.1-rc",
+      typescriptPackageVersion: "7.0.2",
     });
 
     await expect(readFile(join(projectRoot, "package.json"), "utf8")).resolves.toContain(
@@ -1088,7 +1090,7 @@ describe("scaffoldBaseProject", () => {
       evePackage: TEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
       zodPackageVersion: "4.4.3",
-      typescriptPackageVersion: "7.0.1-rc",
+      typescriptPackageVersion: "7.0.2",
     });
 
     const channelPath = join(projectRoot, "agent/channels/eve.ts");
@@ -1112,7 +1114,7 @@ describe("scaffoldBaseProject", () => {
         evePackage: TEST_EVE_PACKAGE,
         aiPackageVersion: "7.0.0",
         zodPackageVersion: "4.4.3",
-        typescriptPackageVersion: "7.0.1-rc",
+        typescriptPackageVersion: "7.0.2",
       }),
     ).rejects.toThrow(/Use an empty directory/);
 
@@ -1127,7 +1129,7 @@ describe("scaffoldBaseProject", () => {
       evePackage: TEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
       zodPackageVersion: "4.4.3",
-      typescriptPackageVersion: "7.0.1-rc",
+      typescriptPackageVersion: "7.0.2",
     });
 
     expect(projectRoot).toBe(targetDirectory);
