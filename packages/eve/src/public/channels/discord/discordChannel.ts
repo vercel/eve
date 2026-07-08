@@ -674,8 +674,8 @@ function mergeCredentials(
 ): DiscordChannelCredentials {
   const merged: DiscordChannelCredentials = {
     applicationId: state.applicationId ?? credentials?.applicationId,
-    botToken: credentials?.botToken,
-    publicKey: credentials?.publicKey,
+    botToken: credentials?.botToken ?? (() => process.env.DISCORD_BOT_TOKEN!),
+    publicKey: credentials?.publicKey ?? (() => process.env.DISCORD_PUBLIC_KEY!),
     webhookVerifier: credentials?.webhookVerifier,
   };
   return merged;

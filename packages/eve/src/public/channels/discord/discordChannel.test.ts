@@ -164,6 +164,7 @@ function commandBody(overrides?: Record<string, unknown>): string {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("discordChannel() inbound route", () => {
@@ -492,6 +493,43 @@ describe("discordChannel() default event handlers", () => {
         interactionToken: null,
       },
     });
+  });
+});
+
+describe("discordChannel() credential resolution", () => {
+  it("reads DISCORD_BOT_TOKEN from env when no credentials are provided", async () => {
+    vi.stubEnv("DISCORD_BOT_TOKEN", "env-bot-token");
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = withState(getAdapter(discordChannel()), { channelId: "C01" });
+    const { accessor } = captureAccessor("discord:C01:I01");
+    const ctx = buildAdapterContext(adapter, accessor);
+
+    await callEvent(adapter, makeEvent("turn.started", {}), ctx);
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(new Headers((init as RequestInit).headers).get("authorization")).toBe(
+      "Bot env-bot-token",
+    );
+  });
+
+  it("explicit botToken credential takes priority over DISCORD_BOT_TOKEN env var", async () => {
+    vi.stubEnv("DISCORD_BOT_TOKEN", "env-bot-token");
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = withState(
+      getAdapter(discordChannel({ credentials: { botToken: "explicit-token" } })),
+      { channelId: "C01" },
+    );
+    const { accessor } = captureAccessor("discord:C01:I01");
+    const ctx = buildAdapterContext(adapter, accessor);
+
+    await callEvent(adapter, makeEvent("turn.started", {}), ctx);
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(new Headers((init as RequestInit).headers).get("authorization")).toBe(
+      "Bot explicit-token",
+    );
   });
 });
 
