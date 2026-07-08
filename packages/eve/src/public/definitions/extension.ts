@@ -7,10 +7,9 @@ const CONFIG_REGISTRY = Symbol.for("eve.extension-config-registry");
 
 /**
  * Ambient namespace set by the dev/eval loader around a mount module's
- * evaluation. A mount imports its extension package cross-package, so the handle
- * loads unbundled and the bundler's scope shim never runs on it; reading this
- * ambient value lets the mount still bind under the package namespace. The
- * shim's explicit argument always takes precedence over this fallback.
+ * evaluation. A mount loads the handle unbundled (cross-package), so the
+ * bundler's scope shim never runs on it; this fallback lets the mount still bind
+ * under the package namespace. The shim's explicit argument takes precedence.
  */
 const EXT_CONFIG_SCOPE = Symbol.for("eve.ext-config-scope");
 
@@ -67,9 +66,9 @@ export interface NoConfigExtensionHandle {
 }
 
 /**
- * Validates and parses consumer-supplied config through the extension's Standard
- * Schema, applying declared defaults. Binding is synchronous (it runs while the
- * mount module evaluates), so an async validation is rejected.
+ * Validates consumer config through the extension's Standard Schema, applying
+ * defaults. Binding runs while the mount module evaluates, so async validation
+ * is rejected.
  */
 function validateConfig(
   schema: StandardSchemaV1 | undefined,
@@ -136,10 +135,9 @@ export function defineExtension(
   namespace?: string,
 ): ExtensionHandle | NoConfigExtensionHandle {
   const schema = options?.config;
-  // The bundler shim passes the package-derived namespace explicitly for the
-  // extension's own bundled modules; a mount loads the handle cross-package
-  // (unshimmed) and falls back to the ambient scope the loader sets around the
-  // mount evaluation.
+  // The bundler shim passes the namespace explicitly for the extension's own
+  // bundled modules; an unshimmed cross-package mount falls back to the ambient
+  // scope the loader sets around the mount evaluation.
   const resolvedNamespace = namespace ?? ambientConfigScope();
 
   const handle = ((values?: unknown): MountedExtension => {

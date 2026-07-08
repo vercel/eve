@@ -5,12 +5,8 @@ import {
   mergeContributions,
 } from "#compiler/normalize-extension.js";
 
-/**
- * Builds a {@link CompiledExtensionContributions} set from partial entries.
- * `mergeContributions` only reads the model-facing identifier of each named
- * contribution for dedup and otherwise preserves entries verbatim, so minimal
- * fixtures are enough to exercise the precedence rule.
- */
+// mergeContributions only reads each named contribution's identifier for dedup,
+// so minimal partial fixtures suffice.
 function contributions(
   overrides: Partial<CompiledExtensionContributions>,
 ): CompiledExtensionContributions {

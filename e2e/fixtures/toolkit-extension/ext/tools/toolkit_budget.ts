@@ -4,8 +4,8 @@ import { z } from "zod";
 
 import { PROVIDER } from "../lib/brand.js";
 
-// A bare "budget" name that eve namespaces to the mount when composed, so it
-// cannot collide with another extension's identically-named state.
+// Bare "budget" name — eve namespaces it per package so it can't collide with
+// another extension's identically-named state.
 const budget = defineState("budget", () => ({ count: 0 }));
 
 export default defineTool({

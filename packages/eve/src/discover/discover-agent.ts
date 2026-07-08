@@ -304,10 +304,8 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
       });
       diagnostics.push(...extensionResult.diagnostics);
 
-      // The mount directory is itself an agent-shaped source: its override
-      // slots (`tools/`, `connections/`, …) discover exactly like an
-      // extension's own tree, and its `extension.<ext>` declaration matches
-      // no slot so it is silently ignored.
+      // The mount directory's override slots discover as an agent-shaped source;
+      // its `extension.<ext>` declaration matches no slot, so it is ignored here.
       let overrides: AgentSourceManifest | undefined;
       if (descriptor.overridesRoot !== undefined) {
         const overridesResult = await discoverAgent({

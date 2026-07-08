@@ -48,8 +48,7 @@ describe("createExtensionScopePlugin (path containment)", () => {
 describe("createFixedNamespaceScopePlugin (dev per-module)", () => {
   it("scopes every non-virtual importer to the fixed namespace", () => {
     const plugin = createFixedNamespaceScopePlugin("acme-crm");
-    // The importer path is irrelevant in fixed mode — the loader already knows
-    // the whole bundle is extension-owned.
+    // The importer path is irrelevant in fixed mode.
     expect(plugin.resolveId("eve/context", "/anywhere/on/disk/tool.ts")).toBe(
       "\0eve-ext-scope:context:acme-crm",
     );

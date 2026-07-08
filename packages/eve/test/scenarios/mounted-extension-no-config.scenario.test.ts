@@ -10,10 +10,9 @@ import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 const scenarioApp = useScenarioApp();
 
 /**
- * A no-config extension declares `defineExtension()` with no schema and is
- * mounted with a bare re-export (`export { default } from "pkg"`) — no factory
- * call. Its tools still compose under the mount namespace and run. Proves config
- * is optional end to end through the dev/eval loader.
+ * A no-config extension (`defineExtension()`, no schema) mounted with a bare
+ * re-export — no factory call. Proves config is optional end to end through the
+ * dev/eval loader.
  */
 describe("mounted extension without config", () => {
   it("composes and runs a no-config extension mounted via re-export", async () => {
@@ -30,8 +29,6 @@ describe("mounted extension without config", () => {
           eve: { extension: "ext" },
           exports: { ".": "./ext/extension.mjs" },
         })}\n`,
-        // No config: `defineExtension()` with no schema. Nothing to bind; the
-        // consumer mounts it with a bare re-export.
         "node_modules/@acme/widget/ext/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
           "export default defineExtension();",

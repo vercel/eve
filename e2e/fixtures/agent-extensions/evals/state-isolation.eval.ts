@@ -1,9 +1,7 @@
 import { defineEval } from "eve/evals";
 
-// Both extensions author defineState("budget"). eve scopes each to its own
-// package namespace, so bumping toolkit's budget twice leaves gizmo's budget at
-// 1 — the counters do not share one durable slot. If scoping regressed, the two
-// would collapse onto one bare "budget" slot and gizmo would read 3, not 1.
+// Both extensions author defineState("budget"). If package scoping regressed,
+// the counters would collapse onto one slot and gizmo would read 3, not 1.
 export default defineEval({
   description: "Two extensions' identically-named defineState do not collide within a session.",
   async test(t) {

@@ -2,8 +2,8 @@ import { defineState } from "eve/context";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
-// Same bare "budget" name as toolkit-extension. eve namespaces each to its own
-// package, so the two counters stay independent within one session.
+// Same bare "budget" name as toolkit-extension; eve scopes each per package so
+// the counters stay independent.
 const budget = defineState("budget", () => ({ count: 0 }));
 
 export default defineTool({

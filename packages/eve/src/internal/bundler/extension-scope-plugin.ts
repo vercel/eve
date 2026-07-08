@@ -50,10 +50,9 @@ function isUnder(path: string, root: string): boolean {
 function shimSource(kind: "context" | "extension", namespace: string): string {
   const ns = JSON.stringify(namespace);
   if (kind === "context") {
-    // `eve/context`'s only runtime export is `defineState`; the rest are types.
-    // Re-export it wrapped so the durable key is prefixed with the extension's
-    // namespace, baked into the bundle rather than read from evaluation-order-
-    // sensitive global state.
+    // Wrap `defineState` (the only runtime export) so the durable key is
+    // prefixed with the namespace baked into the bundle, not read from
+    // evaluation-order-sensitive global state.
     return [
       `import { defineState as __eveScopedDefineState } from "eve/context";`,
       `export function defineState(name, initial) {`,
@@ -62,10 +61,9 @@ function shimSource(kind: "context" | "extension", namespace: string): string {
       "",
     ].join("\n");
   }
-  // `eve/extension`'s only runtime export is `defineExtension`; the rest are
-  // types. Re-export it wrapped so the handle bakes the extension's namespace —
-  // both the mount binding and the handle's `config` reader resolve to the same
-  // scope, from any module in the extension.
+  // Wrap `defineExtension` (the only runtime export) so the handle bakes the
+  // namespace — both the mount binding and the handle's `config` reader resolve
+  // to the same scope from any module in the extension.
   return [
     `import { defineExtension as __eveScopedDefineExtension } from "eve/extension";`,
     `export function defineExtension(options, namespace) {`,

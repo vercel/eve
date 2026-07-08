@@ -10,11 +10,9 @@ import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 const scenarioApp = useScenarioApp();
 
 /**
- * Reproduces the runtime path `eve eval` / `eve dev` take: the module map is
- * hydrated from authored source (not the pre-bundled `module-map.mjs`), so the
- * extension-scope bundler plugin must bind config across the separately-bundled
- * mount and tool modules. This guards the config-binding regression the e2e
- * caught, from a deterministic tier.
+ * Runs the `eve eval` / `eve dev` path: the module map is hydrated from authored
+ * source, so the extension-scope plugin must bind config across separately-bundled
+ * mount and tool modules. Deterministic guard for the config-binding regression.
  */
 describe("mounted extension via authored-source loader", () => {
   it("binds mounted config so a composed tool reads it", async () => {
@@ -37,8 +35,7 @@ describe("mounted extension via authored-source loader", () => {
         })}\n`,
         "node_modules/@acme/crm/ext/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
-          // A minimal Standard Schema (pass-through validate) — the scenario
-          // exercises binding + read, not validation.
+          // Minimal pass-through Standard Schema — this scenario tests binding, not validation.
           "const config = { '~standard': { version: 1, vendor: 'scenario', validate: (value) => ({ value }) } };",
           "export default defineExtension({ config });",
           "",

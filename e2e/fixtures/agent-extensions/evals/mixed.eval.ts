@@ -1,8 +1,5 @@
 import { defineEval } from "eve/evals";
 
-// The consumer's own tool and a second extension's tool are both callable in
-// one turn, each under its own name (local_ping is the agent's; gizmo__gizmo_search
-// is namespaced by the gizmo mount).
 export default defineEval({
   description: "Consumer-authored and mounted-extension tools coexist and both run in one turn.",
   async test(t) {

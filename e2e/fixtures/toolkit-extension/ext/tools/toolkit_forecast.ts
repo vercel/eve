@@ -3,10 +3,8 @@ import { z } from "zod";
 
 import { stamp } from "../lib/brand.js";
 
-// A dynamic capability authored inside an extension: the resolver registers a
-// tool at session start, and it composes and runs like any other extension
-// contribution once mounted. The token is built from the shared `ext/lib/brand`
-// helper, so this proves ext/lib modules bundle into an extension's tools.
+// Dynamic capability authored inside an extension: the resolver registers a tool
+// at session start that composes and runs once mounted.
 export default defineDynamic({
   events: {
     "session.started": async () => ({

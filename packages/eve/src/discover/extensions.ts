@@ -34,9 +34,8 @@ export const DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED =
 
 /**
  * Emitted when a consumer's agent-root contribution (e.g. `agent/tools/crm__x.ts`)
- * uses a mounted extension's `<ns>__` composed-name prefix. That prefix is
- * reserved for the extension and its co-located overrides; overriding from the
- * agent root would shadow the extension from outside its mount directory.
+ * uses a mounted extension's `<ns>__` prefix. That prefix is reserved for the
+ * extension and its co-located overrides, not the agent root.
  */
 export const DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT =
   "discover/extension-override-outside-mount";
@@ -136,10 +135,8 @@ export async function locateExtensionMount(input: {
   readonly appRoot: string;
   readonly mount: ExtensionSourceRef;
   /**
-   * Mount namespace the caller derived from the mount path. Passed in rather
-   * than re-derived here because the file form (`extensions/crm.ts`) and the
-   * directory form (`extensions/crm/extension.ts`) name the namespace at
-   * different path positions.
+   * Mount namespace the caller derived from the mount path — passed in because
+   * the file and directory mount forms name it at different path positions.
    */
   readonly namespace: string;
 }): Promise<{ location?: ExtensionMountLocation; diagnostics: DiscoverDiagnostic[] }> {

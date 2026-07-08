@@ -10,14 +10,10 @@ import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 const scenarioApp = useScenarioApp();
 
 /**
- * The directory mount form (`agent/extensions/crm/extension.mjs`) with a
- * co-located override slot (`agent/extensions/crm/tools/crm_status.mjs`). The
- * extension's own tools still compose and bind config, while a consumer
- * override of the same name shadows the extension's contribution. Runs through
- * the dev/eval authored-source loader — the path the e2e config-binding
- * regression surfaced on — so directory discovery, override precedence, and the
- * module map reaching a consumer-located override file are all exercised
- * deterministically.
+ * The directory mount form with a co-located override slot. The extension's own
+ * tools compose and bind config, while a consumer override of the same name
+ * shadows the extension's contribution. Runs through the dev/eval authored-source
+ * loader to exercise directory discovery and override precedence deterministically.
  */
 describe("mounted extension via directory form with override", () => {
   it("binds base config and lets a co-located override shadow a tool", async () => {
@@ -32,8 +28,7 @@ describe("mounted extension via directory form with override", () => {
           'export default crm({ apiKey: "sk-dir" });',
           "",
         ].join("\n"),
-        // Co-located override: composes as crm__crm_status and shadows the
-        // extension's own crm_status.
+        // Co-located override: shadows the extension's own crm_status.
         "agent/extensions/crm/tools/crm_status.mjs": [
           'import { defineTool } from "eve/tools";',
           "export default defineTool({",

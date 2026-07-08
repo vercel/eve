@@ -4,8 +4,7 @@ import { z } from "zod";
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import { defineExtension } from "#public/definitions/extension.js";
 
-// Each test uses a distinct namespace because the config registry the runtime
-// binds config into is process-global.
+// Each test uses a distinct namespace because the config registry is process-global.
 
 describe("defineExtension", () => {
   it("exposes the declared schema", () => {
@@ -86,8 +85,7 @@ describe("defineExtension", () => {
     );
     ext({ apiKey: "k" });
 
-    // Compile-time assertions (checked by `tsc`): required + defaulted fields
-    // are present and typed from the schema.
+    // Compile-time assertions (checked by `tsc`).
     const apiKey: string = ext.config.apiKey;
     const tier: string = ext.config.tier;
     // @ts-expect-error apiKey is a string, not a number

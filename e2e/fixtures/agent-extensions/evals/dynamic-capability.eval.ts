@@ -1,12 +1,6 @@
 import { defineEval } from "eve/evals";
 
-// A defineDynamic resolver authored inside the extension registers a forecast
-// tool at session start; it resolves and runs once mounted. The tool the
-// resolver produces is namespaced by the mount just like the extension's static
-// tools, so it surfaces as toolkit__toolkit_forecast.
-// The token is built by the extension's shared `ext/lib/brand` `stamp()` helper,
-// imported by the forecast tool — so this eval also proves an extension's
-// `ext/lib/` modules bundle into its tools.
+// Token built by the extension's shared `ext/lib/brand` stamp() helper.
 const TOOLKIT_FORECAST_TOKEN = "toolkit-forecast-ok-9F4Q";
 
 export default defineEval({

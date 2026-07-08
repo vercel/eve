@@ -175,12 +175,8 @@ async function compileAgentNodeManifest(
     ),
   );
 
-  // Compose mounted extensions, sorted by mount namespace for deterministic
-  // ordering. Contributions merge into this node under their namespaced names;
-  // instruction fragments append after the consumer's own instructions.
-  // Consumer-authored files shadow an extension contribution of the same name,
-  // and an earlier-sorted extension shadows a later one, so the first
-  // registration of a name wins.
+  // Sorted by namespace so first-registration-wins dedup is deterministic when
+  // two extensions contribute the same composed name.
   const toolNames = new Set(tools.map((tool) => tool.name));
   const dynamicToolSlugs = new Set(dynamicTools.map((tool) => tool.slug));
   const connectionNames = new Set(connections.map((connection) => connection.connectionName));

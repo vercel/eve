@@ -71,7 +71,6 @@ describe("extension build", () => {
     const outDir = await buildExtensionPackage(root, config!);
 
     const toolsIndex = await readFile(join(outDir, "tools", "index.mjs"), "utf8");
-    // The binding is a valid JS identifier; the source path keeps the kebab name.
     expect(toolsIndex).toContain(
       'export { default as get_weather } from "../../ext/tools/get-weather.mjs"',
     );

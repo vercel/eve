@@ -1,2 +1,2 @@
-// gizmo takes no config, so it mounts with a bare re-export — no factory call.
+// No config: mounted with a bare re-export.
 export { default } from "gizmo-extension";

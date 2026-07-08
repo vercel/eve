@@ -65,12 +65,10 @@ export async function compileExtensionContributions(input: {
     return base;
   }
 
-  // Overrides are consumer-authored files under the consumer's agent root, so —
-  // like the base contributions when consumer files shadow them — they are NOT
-  // extension-scoped. The `ext-override:` prefix keeps their module-map keys
-  // distinct from the extension's own `ext:<ns>:` modules without matching the
-  // loader's `^ext:<ns>:` scope pattern, so dev and prod treat them identically
-  // (unscoped): an override that needs the extension's config is out of scope.
+  // Overrides are consumer-authored files, so they are NOT extension-scoped. The
+  // `ext-override:` prefix keeps their module-map keys distinct from the
+  // extension's own `ext:<ns>:` modules while deliberately not matching the
+  // loader's `^ext:<ns>:` scope pattern, so dev and prod both treat them unscoped.
   const overrides = await composeManifestContributions({
     manifest: mount.overrides,
     namespace: mount.namespace,
@@ -79,9 +77,8 @@ export async function compileExtensionContributions(input: {
     sourceIdScope: `ext-override:${mount.namespace}`,
   });
 
-  // Consumer overrides win: list them first so the first-registration-wins
-  // dedup in `compileAgentManifest` keeps the override and drops the
-  // extension's same-named contribution.
+  // Consumer overrides win: list them first so first-registration-wins dedup
+  // keeps the override over the extension's same-named contribution.
   return mergeContributions(overrides, base);
 }
 
