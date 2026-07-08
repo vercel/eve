@@ -13,12 +13,20 @@
 ## 프로토타입 실행
 
 ```sh
-# 방법 1: 파일로 바로 열기
+# 방법 1: 단일 파일 배포본 — 파일 하나로 어디서든 동작 (고객 전달용 권장)
+open lawsign/frontend/lawsign-standalone.html
+
+# 방법 2: 개발 소스 그대로 열기
 open lawsign/frontend/index.html
 
-# 방법 2: 로컬 서버 (권장)
+# 방법 3: 로컬 서버
 npx serve lawsign/frontend
 ```
+
+단일 파일 배포본은 CSS를 JS에서 주입하므로 `<style>` 태그를 제거하는
+뷰어·새니타이저 환경에서도 디자인이 깨지지 않습니다. 소스 수정 후에는
+`node lawsign/scripts/build-standalone.mjs` 로 재생성합니다.
+업그레이드 이력은 [`docs/UPGRADE_PLAN.md`](./docs/UPGRADE_PLAN.md) 참조.
 
 ## 구현된 화면
 

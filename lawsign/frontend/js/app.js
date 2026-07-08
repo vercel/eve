@@ -89,16 +89,24 @@
 
   // ── 토스트 & 모달 ─────────────────────────────────────────────────
   function toast(msg, opts) {
+    opts = opts || {};
     const root = $('#toast-root');
     const el = document.createElement('div');
     el.className = 'toast';
     el.innerHTML = msg;
+    if (opts.action) {
+      const b = document.createElement('button');
+      b.className = 'undo';
+      b.textContent = opts.action.label;
+      b.addEventListener('click', () => { el.remove(); opts.action.onClick(); });
+      el.appendChild(b);
+    }
     root.appendChild(el);
     setTimeout(() => {
       el.style.transition = 'opacity 0.3s';
       el.style.opacity = '0';
       setTimeout(() => el.remove(), 320);
-    }, (opts && opts.ms) || 2600);
+    }, opts.ms || (opts.action ? 5000 : 2600));
     return el;
   }
 
@@ -116,6 +124,13 @@
     const b = $('.modal-backdrop');
     if (b) b.remove();
   }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
+  function emptyState(title, desc, ctaHtml) {
+    return (
+      '<div class="empty-state"><div class="art">' + icons.doc.replace('width="16" height="16"', 'width="30" height="30"') + '</div>' +
+      '<b>' + title + '</b><p>' + desc + '</p>' + (ctaHtml || '') + '</div>');
+  }
   LS.ui = { esc, $, $$, debounce, relTime, fmtDate, fmtDateTime, toast, openModal, closeModal, statusBadge, STATUS, staleDays };
 
   // ── SVG 꺾은선 차트 (외부 라이브러리 없이 렌더) ──────────────────
@@ -132,16 +147,41 @@
     }).join('');
     const labels = points.filter((_, i) => i % 7 === 0).map((p, i) => '<text x="' + (padX + i * 7 * stepX) + '" y="' + (Hh - 4) + '" font-size="10" fill="var(--text-3)" text-anchor="middle">' + esc(p.date) + '</text>').join('');
     const last = xy[xy.length - 1];
-    return (
+    const svg =
       '<svg viewBox="0 0 ' + W + ' ' + Hh + '" preserveAspectRatio="none" role="img" aria-label="최근 30일 서명 완료 추이">' +
       '<defs><linearGradient id="lg-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--brand-500)" stop-opacity="0.22"/><stop offset="1" stop-color="var(--brand-500)" stop-opacity="0"/></linearGradient></defs>' +
       gridY +
       '<path d="' + area + '" fill="url(#lg-fill)"/>' +
       '<path d="' + path + '" fill="none" stroke="var(--brand-600)" stroke-width="2.5" stroke-linejoin="round"/>' +
+      '<circle class="chart-cursor" r="4" fill="var(--brand-600)" stroke="#fff" stroke-width="1.5" opacity="0"/>' +
       '<circle cx="' + last[0] + '" cy="' + last[1] + '" r="4" fill="var(--brand-600)"/>' +
       labels +
-      '</svg>'
-    );
+      '</svg>';
+    return { svg, xy, W, H: Hh };
+  }
+
+  /** 차트 호버/터치 툴팁 — 뷰포트 좌표 → 최근접 데이터 포인트 매핑 */
+  function bindChartTooltip(wrap, chart, points) {
+    const tip = document.createElement('div');
+    tip.className = 'chart-tip';
+    wrap.appendChild(tip);
+    const svg = $('svg', wrap);
+    const cursor = $('.chart-cursor', wrap);
+    const hide = () => { tip.style.display = 'none'; cursor.setAttribute('opacity', '0'); };
+    wrap.addEventListener('pointermove', (e) => {
+      const r = svg.getBoundingClientRect();
+      const fx = (e.clientX - r.left) / r.width; // 0..1
+      const i = Math.max(0, Math.min(points.length - 1, Math.round(((fx * chart.W) - chart.xy[0][0]) / ((chart.xy[1][0] - chart.xy[0][0]) || 1))));
+      const [vx, vy] = chart.xy[i];
+      cursor.setAttribute('cx', vx);
+      cursor.setAttribute('cy', vy);
+      cursor.setAttribute('opacity', '1');
+      tip.style.display = 'block';
+      tip.style.left = (vx / chart.W) * r.width + (r.left - wrap.getBoundingClientRect().left) + 'px';
+      tip.style.top = (vy / chart.H) * r.height + (r.top - wrap.getBoundingClientRect().top) + 'px';
+      tip.innerHTML = '완료 ' + points[i].completed + '건<small>' + esc(points[i].date) + '</small>';
+    });
+    wrap.addEventListener('pointerleave', hide);
   }
 
   // ── 의사 QR (검증 URL 시각화 · 프로토타입 표기) ──────────────────
@@ -184,7 +224,12 @@
     const view = routes[path] || routes.dashboard;
     $$('.lnb-item, .bottom-nav a').forEach((a) => a.classList.toggle('active', a.dataset.route === path));
     const main = $('#app-main');
-    main.innerHTML = '<div class="page dim" style="padding:40px 0;text-align:center">불러오는 중…</div>';
+    // 스켈레톤 로딩 — 텍스트 대신 실제 레이아웃 형태를 미리 그려 CLS 제거
+    main.innerHTML =
+      '<div class="page" aria-busy="true">' +
+      '<div class="skeleton" style="height:34px;width:280px;margin-bottom:18px"></div>' +
+      '<div class="skel-grid">' + '<div class="skeleton" style="height:86px"></div>'.repeat(4) + '</div>' +
+      '<div class="skel-row"><div class="skeleton" style="height:280px"></div><div class="skeleton" style="height:280px"></div></div></div>';
     try {
       await view(main, params);
     } catch (e) {
@@ -208,9 +253,13 @@
     ];
     const tpls = await LS.api.listTemplates();
 
+    const today = new Date();
+    const todayLabel = today.getFullYear() + '년 ' + (today.getMonth() + 1) + '월 ' + today.getDate() + '일 (' + '일월화수목금토'[today.getDay()] + ')';
+    const chart = lineChart(sum.trend);
     main.innerHTML =
       '<div class="page">' +
-      '<div class="dash-head"><div><h1>' + esc(LS.workspace.name) + ' 님, 환영합니다</h1>' +
+      '<div class="dash-head"><div><div class="dim" style="font-size:12px;font-weight:700;letter-spacing:0.02em">' + todayLabel + '</div>' +
+      '<h1>' + esc(LS.workspace.name) + ' 님, 환영합니다</h1>' +
       '<div class="sub">' + icons.warn + ' 오늘 처리해야 할 요주의 문서가 ' + (c.NEED_MY_SIGN + sum.urgent.length) + '건 있습니다.</div></div>' +
       '<button class="btn primary" id="dash-new">' + icons.pen + ' 새 서명 요청 시작하기</button></div>' +
 
@@ -222,7 +271,7 @@
 
       '<div class="dash-grid">' +
       '<section class="card card-pad"><div class="section-title">' + icons.grid + ' 서명 파이프라인 현황 <span class="badge gray">최근 30일</span></div>' +
-      '<div class="chart-wrap">' + lineChart(sum.trend) + '</div></section>' +
+      '<div class="chart-wrap" id="dash-chart">' + chart.svg + '</div></section>' +
 
       '<section class="card card-pad"><div class="section-title" style="color:var(--red-600)">' + icons.warn + ' 마감 임박 · 요주의 문서</div>' +
       (sum.urgent.length ? sum.urgent.map((d) =>
@@ -240,6 +289,7 @@
       '</div>';
 
     $('#dash-new').addEventListener('click', () => nav('request'));
+    bindChartTooltip($('#dash-chart'), chart, sum.trend);
     $$('.stat', main).forEach((el) => el.addEventListener('click', () => nav('documents', { status: el.dataset.status, view: 'kanban' })));
     $$('[data-tpl]', main).forEach((el) => el.addEventListener('click', () => nav('request', { tpl: el.dataset.tpl })));
     $$('[data-remind]', main).forEach((el) =>
@@ -313,7 +363,7 @@
             '<td class="hide-m">' + (d.label ? '<span class="badge brand">' + esc(d.label) + '</span>' : '<span class="dim">—</span>') + '</td>' +
             '<td class="dim">' + relTime(d.lastActivityAt) + '</td>' +
             '<td><button class="menu-btn btn ghost sm" data-menu="' + d.id + '">' + icons.dots + '</button></td></tr>').join('')
-            : '<tr><td colspan="6" class="dim" style="text-align:center;padding:34px">조건에 맞는 문서가 없습니다.</td></tr>') +
+            : '<tr><td colspan="6">' + emptyState('조건에 맞는 문서가 없습니다', state.q ? '「' + esc(state.q) + '」 검색어를 바꾸거나 필터를 해제해 보세요.' : '첫 서명 요청을 시작해 보세요.', '<button class="btn primary sm" onclick="LS.nav(\'request\')">' + icons.pen + ' 새 서명 요청</button>') + '</td></tr>') +
           '</tbody></table></div>' +
           '<p class="dim" style="margin-top:10px;font-size:12px">총 ' + res.total.toLocaleString() + '건 · 표시 ' + res.items.length + '건 — 대용량 목록은 커서 기반 페이지네이션 + 가상 스크롤로 렌더링</p>';
         bindRowMenus(body);
@@ -368,9 +418,19 @@
           if (target === 'PENDING_OTHERS') {
             openSendConfirm(id, () => { from.prepend(dragged); });
           } else {
+            const prevStatus = (await LS.api.getDocument(id)).status;
             try {
               await LS.api.updateDocumentStatus(id, target);
-              toast('상태를 「' + STATUS[target].label + '」(으)로 변경했습니다.');
+              toast('상태를 「' + STATUS[target].label + '」(으)로 변경했습니다.', {
+                action: {
+                  label: '실행취소',
+                  onClick: async () => {
+                    await LS.api.updateDocumentStatus(id, prevStatus);
+                    from.prepend(dragged);
+                    toast('↩️ 이동을 취소했습니다.');
+                  },
+                },
+              });
             } catch (err) {
               from.prepend(dragged); // 롤백
               toast('⚠️ 상태 변경 실패 — 원위치로 복구했습니다.');
@@ -543,6 +603,10 @@
       { route: 'validator', label: '검증 포털', ic: icons.shield },
     ];
     document.body.innerHTML =
+      '<header class="top-appbar"><div class="lnb-logo"><span class="mark">L</span><span><span class="law">Law</span>Sign</span></div>' +
+      '<div class="actions"><button class="icon-btn" id="appbar-theme" aria-label="테마 전환">' + icons.sun + '</button>' +
+      '<button class="icon-btn" id="appbar-new" aria-label="새 서명 요청" style="color:var(--brand-600)">' + icons.pen + '</button>' +
+      '<span class="avatar" style="width:27px;height:27px;font-size:11px">청</span></div></header>' +
       '<div class="app-shell">' +
       '<nav class="lnb"><div class="lnb-logo"><span class="mark">L</span><span><span class="law">Law</span>Sign</span></div>' +
       '<button class="lnb-cta" id="lnb-new">' + icons.pen + ' 새 서명 요청</button>' +
@@ -561,11 +625,14 @@
     const saved = store.get('ls-theme');
     if (saved) document.documentElement.dataset.theme = saved;
     else if (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.dataset.theme = 'dark';
-    $('#theme-toggle').addEventListener('click', () => {
+    const flipTheme = () => {
       const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
       document.documentElement.dataset.theme = next;
       store.set('ls-theme', next);
-    });
+    };
+    $('#theme-toggle').addEventListener('click', flipTheme);
+    $('#appbar-theme').addEventListener('click', flipTheme);
+    $('#appbar-new').addEventListener('click', () => nav('request'));
     render();
   }
 

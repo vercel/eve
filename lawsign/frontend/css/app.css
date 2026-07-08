@@ -419,6 +419,57 @@ table.doc-table { width: 100%; border-collapse: collapse; }
 .bg-progress .bar { height: 6px; border-radius: 6px; background: var(--surface-2); overflow: hidden; margin-top: 9px; }
 .bg-progress .bar i { display: block; height: 100%; background: var(--brand-600); transition: width 0.25s; }
 
+/* ── 접근성: 포커스 링 & 모션 축소 ────────────── */
+:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 2px; border-radius: 4px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* ── 마이크로 인터랙션 ────────────────────────── */
+.btn:active, .tpl-card:active, .stat:active { transform: scale(0.985); }
+
+/* ── 스켈레톤 로딩 ────────────────────────────── */
+.skeleton { position: relative; overflow: hidden; background: var(--surface-2); border-radius: 10px; }
+.skeleton::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.5), transparent);
+  animation: shimmer 1.3s infinite;
+}
+:root[data-theme="dark"] .skeleton::after {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.07), transparent);
+}
+@keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+.skel-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+.skel-row { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; }
+
+/* ── Empty State ──────────────────────────────── */
+.empty-state { text-align: center; padding: 44px 20px; color: var(--text-3); }
+.empty-state .art { margin: 0 auto 14px; width: 72px; height: 72px; border-radius: 20px; background: var(--surface-2); display: grid; place-items: center; color: var(--text-3); }
+.empty-state b { display: block; color: var(--text-2); font-size: 14px; margin-bottom: 4px; }
+.empty-state p { font-size: 12.5px; margin-bottom: 14px; }
+
+/* ── 차트 호버 툴팁 ───────────────────────────── */
+.chart-wrap { position: relative; }
+.chart-tip {
+  position: absolute; z-index: 20; pointer-events: none; display: none;
+  background: var(--text); color: var(--bg); border-radius: 8px;
+  padding: 6px 10px; font-size: 11.5px; font-weight: 700; white-space: nowrap;
+  transform: translate(-50%, calc(-100% - 10px)); box-shadow: var(--shadow-md);
+}
+.chart-tip small { display: block; font-weight: 500; opacity: 0.7; }
+.chart-cursor { pointer-events: none; }
+
+/* ── 토스트 액션 버튼 (실행취소) ──────────────── */
+.toast button.undo {
+  background: rgba(255, 255, 255, 0.16); color: inherit; border-radius: 7px;
+  padding: 3px 10px; font-weight: 700; font-size: 12px;
+}
+:root[data-theme="dark"] .toast button.undo { background: rgba(0, 0, 0, 0.18); }
+.toast button.undo:hover { background: rgba(255, 255, 255, 0.28); }
+
+/* ── 모바일 상단 앱바 ─────────────────────────── */
+.top-appbar { display: none; }
+
 /* ── 하단 모바일 내비게이션 ───────────────────── */
 .bottom-nav { display: none; }
 
@@ -431,7 +482,20 @@ table.doc-table { width: 100%; border-collapse: collapse; }
 
 @media (max-width: 768px) {
   .lnb { display: none; }
+  .top-appbar {
+    display: flex; position: sticky; top: 0; z-index: 55;
+    align-items: center; justify-content: space-between; gap: 10px;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 10px 14px calc(10px);
+  }
+  .top-appbar .lnb-logo { padding: 0; font-size: 17px; }
+  .top-appbar .lnb-logo .mark { width: 27px; height: 27px; font-size: 13px; }
+  .top-appbar .actions { display: flex; align-items: center; gap: 6px; }
+  .top-appbar .icon-btn { padding: 7px; border-radius: 9px; color: var(--text-2); display: grid; place-items: center; }
+  .top-appbar .icon-btn:active { background: var(--surface-2); }
   .main { padding: 16px 14px 96px; }
+  .skel-grid { grid-template-columns: repeat(2, 1fr); }
+  .skel-row { grid-template-columns: 1fr; }
   .kanban { display: flex; }
   .kanban-col { min-width: 240px; flex: none; width: 78vw; max-width: 300px; }
   .editor-layout { grid-template-columns: 1fr; }
