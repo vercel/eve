@@ -127,7 +127,8 @@ export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
  * authored definition omits `backend`. The unauthored case is filled
  * in by `defaultSandbox()` (which itself selects between
  * `vercel()`, `docker()`, `microsandbox()`, and `justbash()` based on the current
- * environment).
+ * environment), and also supports pinned Vercel-compatible providers
+ * such as `islo()`.
  */
 export type ResolvedSandboxDefinition = ResolvedModuleSourceRef & {
   readonly bootstrap?: (input: SandboxBootstrapContext) => Promise<void> | void;

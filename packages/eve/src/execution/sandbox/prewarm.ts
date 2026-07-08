@@ -364,7 +364,7 @@ function formatPrewarmFailureForEnvironment(input: {
     `The ${input.backendName} sandbox backend is not available when deploying on Vercel. ` +
       "Vercel build containers cannot run local Docker containers or microsandbox VMs. " +
       "Use defaultBackend() so eve selects Vercel Sandbox on Vercel, or configure a " +
-      "Vercel-compatible backend explicitly, such as vercel(). " +
+      "Vercel-compatible backend explicitly, such as vercel() or islo(). " +
       `Original ${input.backendName} error: ${toErrorMessage(input.error)}`,
     { cause: input.error },
   );

@@ -61,7 +61,7 @@ const PRODUCTION_PROBES: DefaultSandboxProbes = {
  * The selection is cached for the process lifetime. To pin a backend
  * unconditionally, configure its factory directly (`docker()`,
  * `microsandbox()`, `justbash()`,
- * `vercel()`).
+ * `vercel()`, or `islo()`).
  */
 export function defaultSandbox(opts?: DefaultSandboxOptions): SandboxBackend {
   return lazyBackend(() => selectDefaultSandbox(opts, PRODUCTION_PROBES));

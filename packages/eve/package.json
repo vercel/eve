@@ -146,6 +146,11 @@
       "import": "./dist/src/public/sandbox/microsandbox.js",
       "default": "./dist/src/public/sandbox/microsandbox.js"
     },
+    "./sandbox/islo": {
+      "types": "./dist/src/public/sandbox/islo.d.ts",
+      "import": "./dist/src/public/sandbox/islo.js",
+      "default": "./dist/src/public/sandbox/islo.js"
+    },
     "./sandbox/vercel": {
       "types": "./dist/src/public/sandbox/vercel.d.ts",
       "import": "./dist/src/public/sandbox/vercel.js",

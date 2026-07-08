@@ -95,7 +95,7 @@ export default defineSandbox({
 
 Leave `backend` off and eve falls back to `defaultBackend()`, which picks the Vercel backend on hosted builds and the local backend everywhere else. One definition, both environments.
 
-For a self-deployed process, leave `defaultBackend()` in place or choose an explicit non-Vercel backend such as Docker or microsandbox. If those do not match your infrastructure, write a custom `SandboxBackend` adapter that creates sessions in your own container, VM, or isolation service. Do not pin `vercel()` unless that process should create hosted Vercel sandboxes.
+For a self-deployed process, leave `defaultBackend()` in place or choose an explicit backend that matches your infrastructure, such as Docker, microsandbox, or the hosted Islo provider (`islo()`). If none match, write a custom `SandboxBackend` adapter that creates sessions in your own container, VM, or isolation service. Do not pin `vercel()` unless that process should create hosted Vercel sandboxes.
 
 ## 5. Build-time sandbox prewarm
 

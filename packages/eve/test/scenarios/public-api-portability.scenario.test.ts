@@ -44,6 +44,7 @@ const PORTABILITY_CASES: readonly PortabilityCase[] = [
       files: {
         "agent/sandbox.ts": `import { defaultBackend, defineSandbox } from "eve/sandbox";
 import { docker } from "eve/sandbox/docker";
+import { islo } from "eve/sandbox/islo";
 import { justbash } from "eve/sandbox/just-bash";
 import { microsandbox } from "eve/sandbox/microsandbox";
 import { vercel } from "eve/sandbox/vercel";
@@ -56,6 +57,7 @@ const fallback = defaultBackend({
 });
 
 void docker;
+void islo;
 void justbash;
 void microsandbox;
 
@@ -69,6 +71,7 @@ export default defineSandbox({
     include: [
       "src/public/sandbox/index.ts",
       "src/public/sandbox/docker.ts",
+      "src/public/sandbox/islo.ts",
       "src/public/sandbox/just-bash.ts",
       "src/public/sandbox/microsandbox.ts",
       "src/public/sandbox/vercel.ts",
@@ -80,6 +83,9 @@ export default defineSandbox({
       },
       "./sandbox/docker": {
         types: "./dist/src/public/sandbox/docker.d.ts",
+      },
+      "./sandbox/islo": {
+        types: "./dist/src/public/sandbox/islo.d.ts",
       },
       "./sandbox/just-bash": {
         types: "./dist/src/public/sandbox/just-bash.d.ts",

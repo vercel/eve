@@ -35,8 +35,10 @@ async function getVercelSandboxGetOptions(input: {
   readonly sandboxName: string;
 }): Promise<VercelGetOptions> {
   const baseOptions = {
+    fetch: getVercelSandboxFetch(input.createOptions),
     name: input.sandboxName,
     resume: false,
+    signal: input.createOptions.signal,
   };
 
   try {
@@ -44,8 +46,6 @@ async function getVercelSandboxGetOptions(input: {
     return {
       ...baseOptions,
       ...credentials,
-      fetch: getVercelSandboxFetch(input.createOptions),
-      signal: input.createOptions.signal,
     } as VercelGetOptions;
   } catch {
     return baseOptions;

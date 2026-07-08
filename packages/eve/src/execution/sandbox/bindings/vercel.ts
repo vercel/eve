@@ -50,9 +50,11 @@ import type {
 } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 
 export interface CreateVercelSandboxInput {
+  readonly backendName?: string;
   readonly createSandbox?: CreateVercelSandbox;
   readonly createOptions?: VercelCreateOptions;
   readonly loadSandboxModule?: () => Promise<VercelModule>;
+  readonly providerName?: string;
 }
 /**
  * Creates the Vercel-backed sandbox backend.
@@ -65,8 +67,10 @@ export interface CreateVercelSandboxInput {
 export function createVercelSandbox(
   input: CreateVercelSandboxInput = {},
 ): SandboxBackend<VercelSandboxBootstrapUseOptions, VercelSandboxSessionUseOptions> {
+  const backendName = input.backendName ?? "vercel";
   const loadSandboxModule =
     input.loadSandboxModule ?? (async () => await import("#compiled/@vercel/sandbox/index.js"));
+  const providerName = input.providerName ?? "Vercel";
   const createOptions: VercelCreateOptions = {
     timeout: DEFAULT_SANDBOX_TIMEOUT_MS,
     ...input.createOptions,
@@ -75,7 +79,7 @@ export function createVercelSandbox(
   const prewarmedTemplates = new Map<string, VercelSandboxTemplateRecord>();
 
   return {
-    name: "vercel",
+    name: backendName,
     async create(
       createInput: SandboxBackendCreateInput,
     ): Promise<SandboxBackendHandle<VercelSandboxSessionUseOptions>> {
@@ -87,6 +91,7 @@ export function createVercelSandbox(
         createInput.templateKey === null
           ? null
           : await readTemplateForCreate({
+              backendName,
               createOptions,
               loadSandboxModule,
               prewarmedTemplates,
@@ -118,7 +123,7 @@ export function createVercelSandbox(
           });
           await staleTemplate?.delete();
           throw new SandboxTemplateNotProvisionedError({
-            backendName: "vercel",
+            backendName,
             templateKey: template.templateKey,
           });
         }
@@ -133,7 +138,7 @@ export function createVercelSandbox(
         await applyInitialVercelNetworkPolicy(session.sandbox, createOptions.networkPolicy);
       }
 
-      return createHandle(session.sandbox, createInput.sessionKey);
+      return createHandle(session.sandbox, createInput.sessionKey, backendName);
     },
     async prewarm(
       prewarmInput: SandboxBackendPrewarmInput<VercelSandboxBootstrapUseOptions>,
@@ -151,7 +156,7 @@ export function createVercelSandbox(
         });
       } catch (error) {
         throw new Error(
-          `Failed to prewarm Vercel sandbox template "${prewarmInput.templateKey}": ${errorMessage(error)}`,
+          `Failed to prewarm ${providerName} sandbox template "${prewarmInput.templateKey}": ${errorMessage(error)}`,
           { cause: error },
         );
       }
@@ -200,6 +205,7 @@ async function ensureTemplateWithUnavailableRetry(
 }
 
 async function readTemplate(input: {
+  readonly backendName: string;
   readonly createOptions: VercelCreateOptions;
   readonly loadSandboxModule: () => Promise<VercelModule>;
   readonly prewarmedTemplates: ReadonlyMap<string, VercelSandboxTemplateRecord>;
@@ -219,7 +225,7 @@ async function readTemplate(input: {
 
   if (sandbox === null || typeof sandbox.currentSnapshotId !== "string") {
     throw new SandboxTemplateNotProvisionedError({
-      backendName: "vercel",
+      backendName: input.backendName,
       templateKey: input.templateKey,
     });
   }
@@ -232,6 +238,7 @@ async function readTemplate(input: {
 }
 
 async function readTemplateForCreate(input: {
+  readonly backendName: string;
   readonly createOptions: VercelCreateOptions;
   readonly loadSandboxModule: () => Promise<VercelModule>;
   readonly prewarmedTemplates: ReadonlyMap<string, VercelSandboxTemplateRecord>;
@@ -433,6 +440,7 @@ function withBaseSetupNetworkPolicy(
 function createHandle(
   sandbox: VercelSandbox,
   sessionKey: string,
+  backendName: string,
 ): SandboxBackendHandle<VercelSandboxSessionUseOptions> {
   return {
     session: buildSandboxSession(
@@ -450,7 +458,7 @@ function createHandle(
     },
     async captureState() {
       return {
-        backendName: "vercel",
+        backendName,
         metadata: { sandboxName: sandbox.name },
         sessionKey,
       };

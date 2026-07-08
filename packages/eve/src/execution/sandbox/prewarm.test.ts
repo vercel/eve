@@ -115,7 +115,9 @@ describe("prewarmAppSandboxes", () => {
         ),
       ]);
       expect(messages[1]).toContain("Use defaultBackend()");
-      expect(messages[1]).toContain("Vercel-compatible backend explicitly, such as vercel()");
+      expect(messages[1]).toContain(
+        "Vercel-compatible backend explicitly, such as vercel() or islo()",
+      );
       expect(messages[1]).toContain("Original");
       expect(messages[1]).toContain(cause.message);
     },

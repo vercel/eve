@@ -130,10 +130,9 @@ export interface SandboxBackendPrewarmResult {
  * A `SandboxBackend` is a value an author attaches to a
  * {@link SandboxDefinition} to choose which underlying runtime hosts the
  * sandbox. eve ships built-in backends (`docker()`,
- * `justbash()`, `microsandbox()`,
- * `vercel()`, and the availability-aware
- * `defaultSandbox()`), but the interface is public so authors can write
- * their own.
+ * `islo()`, `justbash()`, `microsandbox()`,
+ * `vercel()`, and the availability-aware `defaultSandbox()`), but the
+ * interface is public so authors can write their own.
  *
  * A backend implements the full two-phase lifecycle:
  * {@link SandboxBackend.prewarm} captures reusable template state at

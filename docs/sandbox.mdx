@@ -112,17 +112,18 @@ export default defineSandbox({
 
 ## Backends
 
-The backend decides where the sandbox runs. eve ships four pinned factories from nested `eve/sandbox/*` imports plus an availability-aware default from `eve/sandbox`:
+The backend decides where the sandbox runs. eve ships five pinned factories from nested `eve/sandbox/*` imports plus an availability-aware default from `eve/sandbox`:
 
 | Backend            | Runs the sandbox                                                                               |
 | ------------------ | ---------------------------------------------------------------------------------------------- |
 | `vercel()`         | on [Vercel Sandbox](https://vercel.com/docs/sandbox).                                          |
+| `islo()`           | on [Islo Sandbox](https://docs.islo.dev), via its Vercel-compatible provider API.              |
 | `docker()`         | locally in a Docker container, driven through the `docker` CLI.                                |
 | `microsandbox()`   | locally in a lightweight [microsandbox](https://www.npmjs.com/package/microsandbox) VM.        |
 | `justbash()`       | locally in the pure-JS `just-bash` interpreter (no daemon or VM, but no real binaries either). |
 | `defaultBackend()` | picks the best available: Vercel Sandbox on hosted Vercel → Docker → microsandbox → just-bash. |
 
-Configuring a pinned factory uses that backend unconditionally. `docker()` always requires a reachable Docker daemon, and `vercel()` always creates hosted sandboxes (including from local dev, with Vercel credentials).
+Configuring a pinned factory uses that backend unconditionally. `docker()` always requires a reachable Docker daemon. `vercel()` always creates hosted Vercel sandboxes (including from local dev, with Vercel credentials). `islo()` always targets Islo's hosted provider API (defaults to `https://api.islo.dev`).
 
 With `backend` omitted, eve uses `defaultBackend()`, which resolves on first use in priority order:
 
