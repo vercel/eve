@@ -9,10 +9,18 @@ describe("createWorkflowWorldPluginSource", () => {
   });
 
   it("imports a configured world package and delegates its construction to Workflow", () => {
-    const source = createWorkflowWorldPluginSource("@acme/eve-world");
+    const source = createWorkflowWorldPluginSource(
+      "@acme/eve-world",
+      "/app/.eve/compile/compiled-artifacts-bootstrap.mjs",
+    );
 
+    expect(source).toContain('import "/app/.eve/compile/compiled-artifacts-bootstrap.mjs";');
     expect(source).toContain('import * as workflowWorldModule from "@acme/eve-world";');
-    expect(source).toContain("setWorld(await createWorldFromModule(workflowWorldModule));");
+    expect(source).toContain(
+      "const workflowWorld = await createWorldFromModule(workflowWorldModule);",
+    );
+    expect(source).toContain("setWorld(workflowWorld);");
+    expect(source).toContain("await workflowWorld.start?.();");
   });
 
   it("selects vendored local and Vercel world packages with Workflow's selector", () => {

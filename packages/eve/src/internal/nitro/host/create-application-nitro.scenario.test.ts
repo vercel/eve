@@ -153,6 +153,22 @@ describe("createApplicationNitro", () => {
     delete process.env.VERCEL;
   });
 
+  it("installs compiled artifacts before constructing the Workflow world", async () => {
+    const nitroStub = createNitroStub();
+    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
+
+    const { createApplicationNitro } =
+      await import("#internal/nitro/host/create-application-nitro.js");
+    const preparedHost = createPreparedHost();
+    await createApplicationNitro(preparedHost, true);
+
+    const plugins = createNitroMock.mock.calls[0]?.[0].plugins as string[];
+
+    expect(plugins.indexOf(preparedHost.compiledArtifacts.bootstrapPath)).toBeLessThan(
+      plugins.indexOf(preparedHost.compiledArtifacts.workflowWorldPluginPath),
+    );
+  });
+
   it("preserves workflow bundle side effects and skips workflow transform for cached bundles", async () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
