@@ -259,6 +259,37 @@ function enrichTelemetry(
   };
 }
 
+function mergeSystemInstructions(
+  instructions: readonly SystemModelMessage[],
+): SystemModelMessage | undefined {
+  if (instructions.length === 0) {
+    return undefined;
+  }
+
+  if (instructions.length === 1) {
+    return { ...instructions[0]! };
+  }
+
+  let providerOptions: SystemModelMessage["providerOptions"] | undefined;
+  for (const instruction of instructions) {
+    if (instruction.providerOptions !== undefined) {
+      providerOptions = {
+        ...providerOptions,
+        ...instruction.providerOptions,
+      };
+    }
+  }
+
+  const merged: SystemModelMessage = {
+    role: "system",
+    content: instructions.map((instruction) => instruction.content).join("\n\n"),
+  };
+  if (providerOptions !== undefined) {
+    merged.providerOptions = providerOptions;
+  }
+  return merged;
+}
+
 /**
  * Builds AI Gateway app attribution headers when the model is gateway-routed.
  *
@@ -705,10 +736,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         systemMessages.length > 0 || extraSystemEntry.length > 0
           ? [...extraSystemEntry, ...baseSystemEntry, ...systemMessages]
           : undefined;
-      const instructions =
+      const markedInstructions =
         rawInstructions !== undefined && marker
           ? applySystemCacheBreakpoint(rawInstructions, marker)
-          : (rawInstructions ?? session.agent.system ?? undefined);
+          : rawInstructions;
+      const instructions =
+        markedInstructions !== undefined
+          ? mergeSystemInstructions(markedInstructions)
+          : (session.agent.system ?? undefined);
 
       return {
         instructions,
