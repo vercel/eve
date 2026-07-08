@@ -251,6 +251,104 @@ function servedFromCache(usage: readonly TurnUsage[]): number {
   return read / (read + uncached);
 }
 
+/** Fraction of previously seen prompt tokens served from cache: read / (read + input). */
+function inputCacheRate(usage: readonly TurnUsage[]): number {
+  let read = 0;
+  let input = 0;
+  for (const turn of usage) {
+    read += turn.cacheRead;
+    input += turn.input;
+  }
+  return read / (read + input);
+}
+
+// ---------------------------------------------------------------------------
+// Grep-heavy coding session
+// ---------------------------------------------------------------------------
+
+/**
+ * Deterministic grep-shaped output: `path:line: code` match lines, the way a
+ * search tool floods a coding agent's context. These are the largest tool
+ * results in practice, which makes them the costliest content to leave
+ * outside the final cache breakpoint.
+ */
+function grepOutput(query: string, matches: number): string {
+  const lines: string[] = [];
+  for (let i = 0; i < matches; i++) {
+    lines.push(
+      `src/module-${i % 23}/file-${i % 7}.ts:${100 + i}:  ` +
+        `const ${query}Result${i} = resolve${i % 5}(${query}, ctx.session);`,
+    );
+  }
+  return lines.join("\n");
+}
+
+/** One tool message carrying one or more tool results (parallel calls). */
+function grepResultsMessage(outputs: readonly string[]): ModelMessage {
+  return {
+    role: "tool",
+    content: outputs.map((text, index) => ({
+      type: "tool-result",
+      toolCallId: `call-${index}`,
+      toolName: "grep",
+      output: { type: "text", value: text },
+    })),
+  };
+}
+
+interface GrepStep {
+  /** Assistant commentary + tool-call framing preceding the results. */
+  readonly commentary: number;
+  /** Grep outputs returned by this step's tool call(s). */
+  readonly results: readonly string[];
+}
+
+const GREP_SESSION: readonly GrepStep[] = [
+  { commentary: 140, results: [grepOutput("applyConversationCacheControl", 80)] },
+  // A broad query floods the context, the classic coding-agent step.
+  { commentary: 130, results: [grepOutput("cacheControl", 340)] },
+  // Parallel fan-out: three greps land in one tool message.
+  {
+    commentary: 160,
+    results: [
+      grepOutput("providerOptions", 200),
+      grepOutput("ephemeral", 190),
+      grepOutput("breakpoint", 210),
+    ],
+  },
+  { commentary: 120, results: [grepOutput("prepareStep", 130)] },
+  { commentary: 150, results: [grepOutput("toolResult", 760)] },
+];
+
+const GREP_BASE_TOKENS = 3200;
+const GREP_TASK_TOKENS = 900;
+
+function replayGrepSession(strategy: BreakpointStrategy): TurnUsage[] {
+  const marker = getAnthropicCacheMarker();
+  const accounting = new PrefixCacheAccounting(0);
+  const history: ModelMessage[] = [userMessage(GREP_TASK_TOKENS)];
+  const usage: TurnUsage[] = [];
+
+  for (const step of GREP_SESSION) {
+    usage.push(accounting.request(GREP_BASE_TOKENS, strategy(history, marker)));
+    history.push(assistantMessage(step.commentary), grepResultsMessage(step.results));
+  }
+
+  // Final step: the model reads the last grep results and answers.
+  usage.push(accounting.request(GREP_BASE_TOKENS, strategy(history, marker)));
+  return usage;
+}
+
+function totalGrepTokens(): number {
+  let total = 0;
+  for (const step of GREP_SESSION) {
+    for (const text of step.results) {
+      total += text.length;
+    }
+  }
+  return total;
+}
+
 // ---------------------------------------------------------------------------
 // The proof
 // ---------------------------------------------------------------------------
@@ -323,4 +421,47 @@ describe("prompt cache accounting replayed from benchmark traces", () => {
       });
     });
   }
+});
+
+describe("grep-heavy coding session", () => {
+  it("legacy placement bills every grep result at the uncached rate exactly once", () => {
+    const usage = replayGrepSession(legacyApplyConversationCacheControl);
+
+    const uncached = usage.reduce((sum, turn) => sum + turn.input, 0);
+    expect(uncached).toBe(totalGrepTokens());
+  });
+
+  it("legacy placement caps the input-cache rate near 50%", () => {
+    const rate = inputCacheRate(replayGrepSession(legacyApplyConversationCacheControl));
+
+    expect(rate).toBeGreaterThan(0.4);
+    expect(rate).toBeLessThan(0.6);
+  });
+
+  it("fixed placement never bills a grep result uncached", () => {
+    const usage = replayGrepSession(applyConversationCacheControl);
+
+    for (const turn of usage) {
+      expect(turn.input).toBe(0);
+    }
+    // Mirrors the agent-prompt-cache e2e gate.
+    expect(inputCacheRate(usage)).toBeGreaterThan(0.99);
+  });
+
+  it("fixed placement covers parallel tool results with one trailing breakpoint", () => {
+    // Reads always chain: read(t) equals everything cached through t-1, so
+    // the multi-result fan-out step is fully re-read, never re-billed.
+    const usage = replayGrepSession(applyConversationCacheControl);
+    for (let i = 1; i < usage.length; i++) {
+      expect(usage[i]!.cacheRead).toBe(usage[i - 1]!.cacheRead + usage[i - 1]!.cacheWrite);
+    }
+
+    const finalRequestTokens =
+      GREP_BASE_TOKENS +
+      GREP_TASK_TOKENS +
+      GREP_SESSION.reduce((sum, step) => sum + step.commentary, 0) +
+      totalGrepTokens();
+    const totalWrites = usage.reduce((sum, turn) => sum + turn.cacheWrite, 0);
+    expect(totalWrites).toBe(finalRequestTokens);
+  });
 });
