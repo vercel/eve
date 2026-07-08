@@ -344,6 +344,18 @@ interface StreamActionEmissionOptions {
   readonly tools: HarnessToolMap;
 }
 
+/** Keeps provider discriminators reachable after coercing a plain stream error. */
+function normalizeModelStreamError(raw: unknown): Error {
+  const error = toError(raw);
+  if (error === raw) return error;
+
+  Object.defineProperty(error, "cause", {
+    configurable: true,
+    value: raw,
+  });
+  return error;
+}
+
 /**
  * Consumes the AI SDK `fullStream` and emits real-time text and reasoning
  * events.
@@ -619,7 +631,7 @@ export async function emitStreamContent(
         // so plain-object shapes (structured-clone survivors, typed
         // gateway payloads) keep their `message`, `name`, `stack`, and
         // `cause` instead of degrading to `new Error("[object Object]")`.
-        streamError = toError(part.error);
+        streamError = normalizeModelStreamError(part.error);
         break;
       case "abort":
         // The SDK does not resolve step results for aborted in-flight steps.

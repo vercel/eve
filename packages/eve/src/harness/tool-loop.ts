@@ -730,20 +730,22 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
      * Assembles the effective toolset and ToolLoopAgent for one attempt
      * of this step, then runs the model call.
      *
-     * Re-invoked by both recovery stages. The unsupported-provider-tool
-     * retry passes `disabledProviderTools` to drop the offending tool and
-     * `extraSystemNote` to tell the model why a capability was removed.
-     * The empty-response reissue passes `retryReason` to label the retried
-     * call's telemetry.
+     * Re-invoked for every transient attempt so an earlier stream cannot
+     * resolve the retry's one-shot step hooks with stale partial output.
+     * Recovery stages also use it to alter the call shape: unsupported-tool
+     * recovery drops the offending tool, while empty-response recovery adds
+     * its retry telemetry and follow-up note.
      */
-    const runOneModelCall = async (opts: {
+    type ModelCallOptions = {
       disabledProviderTools?: ReadonlySet<string>;
       extraSystemNote?: string;
       preparedInput?: ReturnType<typeof prepareModelCallInput>;
       retryReason?: "empty-response";
       suppressStepStartedEmission?: boolean;
       trailingUserNote?: string;
-    }): Promise<HarnessStepResult> => {
+    };
+
+    const runSingleModelCall = async (opts: ModelCallOptions): Promise<HarnessStepResult> => {
       const { instructions, telemetryRuntimeContext = {} } =
         opts.preparedInput ?? prepareModelCallInput(opts.extraSystemNote);
       // Label the reissued call's telemetry; without this a retry is only
@@ -953,15 +955,23 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         return stepResult;
       };
 
-      return runModelCallWithRetries(
-        () => executeModelCall().catch(rethrowNoOutputAsEmptyResponse),
+      return executeModelCall().catch(rethrowNoOutputAsEmptyResponse);
+    };
+
+    const runOneModelCall = async (opts: ModelCallOptions): Promise<HarnessStepResult> =>
+      runModelCallWithRetries(
+        (attempt) =>
+          runSingleModelCall({
+            ...opts,
+            preparedInput: attempt === 1 ? opts.preparedInput : undefined,
+            suppressStepStartedEmission: attempt === 1 ? opts.suppressStepStartedEmission : true,
+          }),
         {
           sessionId: session.sessionId,
           turnId: emissionState.turnId,
         },
         config.abortSignal,
       );
-    };
 
     // Resolve first-attempt instrumentation before step.started dispatch
     // allows dynamic tool resolvers to update the effective toolset.
@@ -2357,14 +2367,14 @@ function resolveApprovalKeyFromTools(
  * transient.
  */
 async function runModelCallWithRetries<T>(
-  fn: () => Promise<T>,
+  fn: (attempt: number) => Promise<T>,
   diag: { readonly sessionId: string; readonly turnId: string },
   abortSignal?: AbortSignal,
 ): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     throwIfTurnAborted(abortSignal);
     try {
-      return await fn();
+      return await fn(attempt);
     } catch (error) {
       throwIfTurnAborted(abortSignal);
       if (attempt === MODEL_CALL_MAX_ATTEMPTS || classifyModelCallError(error) !== "retry") {

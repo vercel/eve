@@ -111,6 +111,8 @@ Do not rely on subagent delegation by itself as an approval boundary. Put sensit
 
 Each delegated subagent spins up its own child session and stream. The parent stream carries the control-plane events `subagent.called` and `subagent.completed`, plus interactive `input.requested`, `authorization.required`, and `authorization.completed` events proxied from descendants so the root channel can prompt the user. To follow the child's other progress, read `subagent.called.data.childSessionId` and subscribe at `GET /eve/v1/session/:childSessionId/stream`.
 
+Subagent model calls automatically retry transient provider failures, including overload errors delivered after a stream starts. A retry repeats only the current uncommitted model call, so completed earlier steps, tool results, and sandbox work remain available to the child.
+
 ## When to split
 
 Split out a subagent when the task needs a different prompt or specialist role, a narrower tool surface, or its own runtime context. Don't reach for one when a [skill](./skills) would do. If the agent can keep its identity and needs only an optional procedure, a skill is the lighter choice.

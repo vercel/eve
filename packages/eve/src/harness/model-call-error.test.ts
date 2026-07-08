@@ -144,6 +144,16 @@ describe("classifyModelCallError", () => {
     expect(classifyModelCallError(err)).toBe("retry");
   });
 
+  it("returns retry for Anthropic overloaded stream payloads", () => {
+    const overloaded = {
+      message: "Overloaded",
+      type: "overloaded_error",
+    };
+
+    expect(classifyModelCallError(overloaded)).toBe("retry");
+    expect(classifyModelCallError(new Error("stream failed", { cause: overloaded }))).toBe("retry");
+  });
+
   it("returns retry for HTTP statuses the AI SDK treats as retryable", () => {
     for (const statusCode of [408, 409, 429]) {
       const err = Object.assign(new Error("retryable"), { statusCode });

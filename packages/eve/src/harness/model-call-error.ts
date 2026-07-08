@@ -490,7 +490,7 @@ function readObjectField(value: unknown, key: string): Record<string, unknown> |
 }
 
 function isRetryableGatewayType(type: string | undefined): boolean {
-  return type === "rate_limit_exceeded" || type === "timeout_error";
+  return type === "overloaded_error" || type === "rate_limit_exceeded" || type === "timeout_error";
 }
 
 function isTerminalGatewayType(type: string | undefined): boolean {
