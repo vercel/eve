@@ -162,12 +162,33 @@ export interface SubagentInputRequestHookPayload {
   readonly subagentName: string;
 }
 
+/** Authorization lifecycle event forwarded from a delegated child. */
+export type SubagentAuthorizationEvent = Extract<
+  HandleMessageStreamEvent,
+  { type: "authorization.required" | "authorization.completed" }
+>;
+
+/**
+ * Proxy payload sent from a child subagent while it waits for authorization.
+ *
+ * Runtime-internal. The parent re-emits the unchanged event through its own
+ * channel; the authorization callback continues to target the child directly.
+ */
+export interface SubagentAuthorizationEventHookPayload {
+  readonly callId: string;
+  readonly childSessionId: string;
+  readonly event: SubagentAuthorizationEvent;
+  readonly kind: "subagent-authorization-event";
+  readonly subagentName: string;
+}
+
 /**
  * Serializable payload sent through the workflow `resumeHook`.
  */
 export type HookPayload =
   | DeliverHookPayload
   | RuntimeActionResultHookPayload
+  | SubagentAuthorizationEventHookPayload
   | SubagentInputRequestHookPayload;
 
 /**
