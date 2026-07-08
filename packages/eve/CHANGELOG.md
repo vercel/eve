@@ -1,5 +1,16 @@
 # eve
 
+## 0.22.2
+
+### Patch Changes
+
+- 4da4d86: Fixed Anthropic prompt caching placing the final cache breakpoint one message too early. Fresh tool results were billed as uncached input every turn and only entered the cache on the following request, capping the effective cache hit rate near 50%; the breakpoint now sits on the last message of each request, so agentic tool loops get near-full prefix hits.
+- 4446f96: Update the vendored Workflow SDK packages to the latest 5.0 beta releases. eve now delegates world target selection and construction to the upstream SDK instead of maintaining parallel factory and compatibility logic, and no longer disables stable Workflow Turbo mode.
+- 3da5def: Retry transient provider overload errors delivered inside model streams. Classified transient failures get at most three fresh model-call attempts, while other recoverable task-mode errors fall back to Workflow's durable step retries without multiplying retry budgets.
+- 2afed3b: Update `withEve()` to generate Vercel Build Output service routes for eve instead of the legacy Next.js rewrite setup. The generated output now uses the stable `services` field and service routes, including in hosted Vercel builds where no local `.vercel/project.json` exists, so Vercel builds the eve service without Next.js rewrites.
+- 3983d36: The Slack channel's default typing indicator for `actions.requested` now shows the action's contents instead of a generic `Running <tool>...` label: the tool name plus its most telling argument (`grep useEveAgent`, `read_file agent/agent.ts`), the subagent or remote-agent name for dispatched calls, and `+N more` for batches. The label helpers are exported from `eve/channels/slack` as `describeActionRequest` and `describeActionRequests` for use in custom handlers.
+- 15309f3: New projects created with `eve init` now use stable TypeScript 7.0.2 instead of the release candidate.
+
 ## 0.22.1
 
 ### Patch Changes
