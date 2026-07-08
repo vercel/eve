@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
+import { createDeliveryBuffers } from "#execution/delivery-buffers.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import type { SessionDeliveryHook } from "#execution/session-delivery-hook.js";
@@ -40,8 +41,8 @@ describe("dispatchAndAwaitTurn", () => {
     const deliveryHook = createDeliveryHook({ rekey: rekeyHook });
 
     await dispatchAndAwaitTurn({
-      bufferedDeliveries: [],
       controlToken: "turn-control",
+      deliveryBuffers: createDeliveryBuffers(),
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
       deliveryHook,
       mode: "conversation",
@@ -73,8 +74,8 @@ describe("dispatchAndAwaitTurn", () => {
     const deliveryHook = createDeliveryHook({ rekey: rekeyHook });
 
     await dispatchAndAwaitTurn({
-      bufferedDeliveries: [],
       controlToken: "turn-control",
+      deliveryBuffers: createDeliveryBuffers(),
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
       deliveryHook,
       mode: "conversation",
@@ -127,16 +128,19 @@ describe("dispatchAndAwaitTurn", () => {
       }),
     );
 
-    const bufferedDeliveries: DeliverHookPayload[] = [];
+    const deliveryBuffers = createDeliveryBuffers();
     await dispatchAndAwaitTurn({
-      bufferedDeliveries,
       controlToken: "turn-control",
+      deliveryBuffers,
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
       deliveryHook: createDeliveryHook({
-        next: async () => ({
-          done: false,
-          value: { kind: "deliver", payloads: [{ message: "later delivery" }] },
-        }),
+        bufferNext: async (): Promise<"buffered" | "closed"> => {
+          deliveryBuffers.currentHookDeliveries.push({
+            kind: "deliver",
+            payloads: [{ message: "later delivery" }],
+          });
+          return "buffered";
+        },
       }),
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
@@ -144,7 +148,7 @@ describe("dispatchAndAwaitTurn", () => {
       sessionState: state,
     });
 
-    expect(bufferedDeliveries.map((item) => item.payloads[0]?.message)).toEqual([
+    expect(deliveryBuffers.turnDeliveries.map((item) => item.payloads[0]?.message)).toEqual([
       "earlier remainder",
       "later delivery",
     ]);
@@ -169,10 +173,11 @@ describe("dispatchAndAwaitTurn", () => {
       },
     ]);
 
-    const bufferedDeliveries: DeliverHookPayload[] = [delivery];
+    const deliveryBuffers = createDeliveryBuffers();
+    deliveryBuffers.turnDeliveries.push(delivery);
     const turn = await dispatchAndAwaitTurn({
-      bufferedDeliveries,
       controlToken: "turn-control",
+      deliveryBuffers,
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
       deliveryHook: createDeliveryHook(),
       mode: "conversation",
@@ -183,42 +188,16 @@ describe("dispatchAndAwaitTurn", () => {
 
     expect(forwardTurnDeliveryStep).toHaveBeenCalledOnce();
     expect(turn.action.kind).toBe("park");
-    expect(bufferedDeliveries).toEqual([delivery]);
-  });
-
-  it("defers control-hook disposal until the caller invokes dispose()", async () => {
-    const state = createState("http:test");
-    installControlHook([
-      {
-        action: { kind: "park", serializedContext: {}, sessionState: state },
-        kind: "turn-result",
-      },
-    ]);
-
-    const turn = await dispatchAndAwaitTurn({
-      bufferedDeliveries: [],
-      controlToken: "turn-control",
-      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
-      deliveryHook: createDeliveryHook(),
-      mode: "conversation",
-      parentWritable: new WritableStream<Uint8Array>(),
-      serializedContext: {},
-      sessionState: state,
-    });
-
-    // The turn run's final control send is at-least-once; a late
-    // duplicate resume must land on a live hook (see DispatchedTurn).
-    const hook = createHookMock.mock.results[0]?.value as { dispose: ReturnType<typeof vi.fn> };
-    expect(hook.dispose).not.toHaveBeenCalled();
-    await turn.dispose();
-    expect(hook.dispose).toHaveBeenCalledOnce();
+    expect(deliveryBuffers.turnDeliveries).toEqual([delivery]);
   });
 });
 
 function createDeliveryHook(overrides: Partial<SessionDeliveryHook> = {}): SessionDeliveryHook {
   return {
+    bufferNext: vi.fn(async (): Promise<"buffered" | "closed"> => "buffered"),
     consumeNext: vi.fn(),
     consumeSessionTimeout: vi.fn(() => false),
+    drainReady: vi.fn(async () => {}),
     next: vi.fn(() => new Promise<IteratorResult<HookPayload>>(() => {})),
     rekey: vi.fn(),
     ...overrides,

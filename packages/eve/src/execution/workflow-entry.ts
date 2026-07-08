@@ -18,6 +18,10 @@ import {
 } from "#execution/delegated-parent-result.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
+import {
+  createDeliveryBuffers,
+  type DeliveryBuffers,
+} from "#execution/delivery-buffers.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
@@ -210,8 +214,8 @@ async function runDriverLoop(input: {
   const nextTurnControlToken = (): string =>
     `${input.sessionState.sessionId}:turn-control:${String(turnDispatchIndex++)}`;
 
-  const bufferedDeliveries: DeliverHookPayload[] = [];
-  const deliveryHook = createSessionDeliveryHook(bufferedDeliveries);
+  const deliveryBuffers = createDeliveryBuffers();
+  const deliveryHook = createSessionDeliveryHook(deliveryBuffers);
   const sessionTimeout =
     input.sessionTimeoutDeadline === undefined
       ? undefined
@@ -225,10 +229,10 @@ async function runDriverLoop(input: {
     readonly sessionState: DurableSessionState;
   }): Promise<NextDriverAction> => {
     const turn = await dispatchAndAwaitTurn({
-      bufferedDeliveries,
       capabilities: input.capabilities,
       controlToken: nextTurnControlToken(),
       delivery: args.delivery,
+      deliveryBuffers,
       deliveryHook,
       mode: input.mode,
       parentWritable: input.driverWritable,
@@ -321,7 +325,7 @@ async function runDriverLoop(input: {
       }
 
       const nextAction = await waitForNextSessionAction({
-        bufferedDeliveries,
+        deliveryBuffers,
         deliveryHook,
       });
 
@@ -390,66 +394,38 @@ async function runDriverLoop(input: {
 }
 
 async function waitForNextSessionAction(input: {
-  readonly bufferedDeliveries: DeliverHookPayload[];
+  readonly deliveryBuffers: DeliveryBuffers;
   readonly deliveryHook: SessionDeliveryHook;
 }): Promise<NextSessionAction> {
-  if (input.deliveryHook.consumeSessionTimeout()) {
-    return { kind: "expired" };
-  }
-
-  if (input.bufferedDeliveries.length > 0) {
-    return {
-      delivery: coalesceDeliveries(input.bufferedDeliveries.splice(0)),
-      kind: "delivery",
-    };
-  }
+  // Prioritize current-hook deliveries over stale replaced-hook backlog. The
+  // delivery hook buffers `deliver` payloads into DeliveryBuffers (tagged
+  // current-hook or replaced-hook by hook supersession), and tracks
+  // session-timeout hook payloads separately (they are not deliveries).
+  const takeBufferedDeliveryBatch = (buffers: DeliveryBuffers): DeliverHookPayload | undefined => {
+    const turnDeliveries = buffers.turnDeliveries.splice(0);
+    if (turnDeliveries.length > 0) return coalesceDeliveries(turnDeliveries);
+    const currentHookDeliveries = buffers.currentHookDeliveries.splice(0);
+    if (currentHookDeliveries.length > 0) return coalesceDeliveries(currentHookDeliveries);
+    const replacedHookDeliveries = buffers.replacedHookDeliveries.splice(0);
+    if (replacedHookDeliveries.length > 0) return coalesceDeliveries(replacedHookDeliveries);
+    return undefined;
+  };
 
   while (true) {
-    const first = await input.deliveryHook.next();
-    input.deliveryHook.consumeNext();
+    await input.deliveryHook.drainReady();
 
-    if (first.done) {
-      return { delivery: null, kind: "delivery" };
-    }
-
-    if (first.value.kind === "session-timeout") {
+    if (input.deliveryHook.consumeSessionTimeout()) {
       return { kind: "expired" };
     }
 
-    if (first.value.kind !== "deliver") {
-      continue;
+    const buffered = takeBufferedDeliveryBatch(input.deliveryBuffers);
+    if (buffered !== undefined) {
+      return { delivery: buffered, kind: "delivery" };
     }
 
-    let coalesced = first.value;
-
-    while (true) {
-      const ready = await takeReadyPayload(input.deliveryHook.next());
-
-      if (ready === NO_READY_MESSAGE) {
-        break;
-      }
-
-      if (ready.done) {
-        input.deliveryHook.consumeNext();
-        break;
-      }
-
-      // Preserve a timeout queued after a delivery. The delivery committed
-      // first, so its active turn settles before the offered timeout is read.
-      if (ready.value.kind === "session-timeout") {
-        break;
-      }
-
-      input.deliveryHook.consumeNext();
-
-      if (ready.value.kind !== "deliver") {
-        continue;
-      }
-
-      coalesced = coalesceDeliveries([coalesced, ready.value]);
+    if ((await input.deliveryHook.bufferNext()) === "closed") {
+      return { delivery: null, kind: "delivery" };
     }
-
-    return { delivery: coalesced, kind: "delivery" };
   }
 }
 
@@ -497,9 +473,3 @@ async function finalizeDone(input: {
   return { output };
 }
 
-const NO_READY_MESSAGE = Symbol("no-ready-message");
-
-async function takeReadyPayload<T>(promise: Promise<T>): Promise<T | typeof NO_READY_MESSAGE> {
-  await Promise.resolve();
-  return await Promise.race([promise, Promise.resolve(NO_READY_MESSAGE)]);
-}

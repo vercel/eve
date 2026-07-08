@@ -885,6 +885,70 @@ describe("workflowEntry", () => {
     );
   });
 
+  it("dispatches current-hook deliveries before deliveries captured from a replaced hook", async () => {
+    const baseSessionState = createBaseSessionState({ continuationToken: "slack:C01:" });
+    const rekeyedSessionState: DurableSessionState = {
+      ...baseSessionState,
+      continuationToken: "slack:C01:1800000000.123456",
+    };
+
+    vi.mocked(createSessionStep).mockResolvedValue(
+      createSessionStepResultForMock(baseSessionState),
+    );
+
+    installHookMocks({
+      deliveryHooks: [
+        {
+          token: "slack:C01:",
+          values: [
+            {
+              kind: "deliver",
+              payloads: [{ message: "trigger rekey" }],
+            },
+            {
+              kind: "deliver",
+              payloads: [{ message: "stale old hook" }],
+            },
+          ],
+        },
+        {
+          token: "slack:C01:1800000000.123456",
+          values: [
+            {
+              kind: "deliver",
+              payloads: [{ message: "fresh reopened request" }],
+            },
+          ],
+        },
+      ],
+      turnControls: [
+        turnResult({ action: "park", sessionState: baseSessionState }),
+        turnResult({ action: "park", sessionState: rekeyedSessionState }),
+        turnResult({ action: "done", output: "ok", sessionState: rekeyedSessionState }),
+      ],
+    });
+
+    const result = await workflowEntry({
+      input: { message: "hello" },
+      serializedContext: createSerializedContext({
+        "eve.channel": { kind: "slack", state: {} },
+        "eve.continuationToken": "slack:C01:",
+      }),
+    });
+
+    expect(result).toEqual({ output: "ok" });
+    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
+      kind: "deliver",
+      payloads: [{ message: "trigger rekey" }],
+    });
+    expect(vi.mocked(dispatchTurnStep).mock.calls[2]?.[0].delivery).toEqual({
+      auth: undefined,
+      kind: "deliver",
+      payloads: [{ message: "fresh reopened request" }],
+      requestId: undefined,
+    });
+  });
+
   it("disposes the workflow hook after the loop exits", async () => {
     const sessionState = createBaseSessionState();
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
@@ -1064,27 +1128,40 @@ function createMockHook<T>(input: {
   const getConflict = input.getConflict ?? vi.fn(async () => null);
   const symbolDispose = input.symbolDispose ?? vi.fn();
   const iteratorReturn = input.return;
+  const next =
+    input.next ??
+    async function next(): Promise<IteratorResult<T>> {
+      const value = values.shift();
+      if (value === undefined) {
+        return { done: true, value: undefined };
+      }
+      return { done: false, value };
+    };
 
-  return Object.assign(Promise.resolve(undefined), {
+  return {
     [Symbol.asyncIterator]() {
       return {
-        next:
-          input.next ??
-          async function next(): Promise<IteratorResult<T>> {
-            const value = values.shift();
-            if (value === undefined) {
-              return { done: true, value: undefined };
-            }
-            return { done: false, value };
-          },
+        next,
         return: iteratorReturn,
       };
     },
     [Symbol.dispose]: symbolDispose,
     dispose,
     getConflict,
+    // eslint-disable-next-line unicorn/no-thenable -- a Workflow Hook is itself a thenable
+    then<TResult1 = T, TResult2 = never>(
+      onFulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | null,
+      onRejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+    ): Promise<TResult1 | TResult2> {
+      const value = values.shift();
+      const settled =
+        value === undefined
+          ? Promise.reject(Object.assign(new Error("hook disposed"), { name: "HookNotFoundError" }))
+          : Promise.resolve(value);
+      return settled.then(onFulfilled, onRejected);
+    },
     token: input.token,
-  });
+  };
 }
 
 function createIteratorReturn(): () => Promise<IteratorResult<HookPayload>> {

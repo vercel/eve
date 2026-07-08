@@ -25,6 +25,7 @@ interface SessionDeliveryHookState {
 export interface SessionDeliveryHook {
   bufferNext(): Promise<"buffered" | "closed">;
   consumeNext(): void;
+  consumeSessionTimeout(): boolean;
   drainReady(): Promise<void>;
   next(): Promise<IteratorResult<HookPayload>>;
   rekey(token: string): Promise<void>;
@@ -52,6 +53,7 @@ export function createSessionDeliveryHook(
   let nextOrder = 0;
   let offered: Promise<IteratorResult<HookPayload>> | null = null;
   let offeredRead: HookRead | undefined;
+  let sessionTimedOut = false;
   let wake: (() => void) | undefined;
 
   const enqueue = (read: HookRead): void => {
@@ -114,6 +116,8 @@ export function createSessionDeliveryHook(
         read.result.value,
         read.state.superseded ? "replaced-hook" : "current-hook",
       );
+    } else if (read.result.value.kind === "session-timeout") {
+      sessionTimedOut = true;
     }
 
     arm(read.state);
@@ -170,6 +174,12 @@ export function createSessionDeliveryHook(
       read.state.pending = false;
       read.state.resolved = undefined;
       if (read.result.done) read.state.closed = true;
+    },
+
+    consumeSessionTimeout(): boolean {
+      const timedOut = sessionTimedOut;
+      sessionTimedOut = false;
+      return timedOut;
     },
 
     async drainReady(): Promise<void> {
