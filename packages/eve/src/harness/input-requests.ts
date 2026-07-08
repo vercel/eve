@@ -1,4 +1,4 @@
-import type { ModelMessage } from "ai";
+import type { ModelMessage, ToolSet, TypedToolCall } from "ai";
 
 import type {
   RuntimeToolCallActionRequest,
@@ -6,9 +6,8 @@ import type {
 } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
 import { resolveTextToResponses } from "#channel/resolve-text.js";
-import { classifyInputRequest, isApprovalRequest } from "#harness/input-request-class.js";
+import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
-import { resolveToolCallInputObject } from "#harness/runtime-actions.js";
 import {
   isSessionLimitContinuationRequest,
   resolveSessionLimitContinuation,
@@ -122,13 +121,13 @@ export function hasDeferredStepInput(session: HarnessSession): boolean {
 /**
  * Resolves pending input at the start of a harness step.
  *
- * Each pending request is either `"required"` or `"dismissable"` — see
- * {@link classifyInputRequest}. While a required request is unanswered,
- * follow-up input is deferred instead of dismissing and recreating the
- * request; {@link consumeDeferredStepInput} replays it on the subsequent
- * step. Tool approval responses additionally resolve in isolation because
- * AI SDK cannot process an approval response and a new user message in the
- * same request.
+ * When the pending batch contains tool-approval requests and the step input
+ * also carries follow-up user input, that input is deferred to the next
+ * internal harness step rather than appended to the current turn. This is
+ * necessary because AI SDK cannot process tool-approval responses and a new
+ * user/context message in the same request -- the approval must be resolved in
+ * isolation first, and the follow-up input replayed on the subsequent step via
+ * {@link consumeDeferredStepInput}.
  */
 export function resolvePendingInput(input: {
   readonly history?: readonly ModelMessage[];
@@ -150,21 +149,22 @@ export function resolvePendingInput(input: {
   // Pending batch exists -- only resolve if we have actual responses.
   const resolvedStepInput = resolveTextMessageInput(pendingBatch, stepInput);
   const responses = resolvedStepInput?.inputResponses ?? [];
-  const resolvesApprovalBatch = pendingBatch.requests.some((request) => isApprovalRequest(request));
 
   if (responses.length === 0 && resolvedStepInput?.message === undefined) {
     return { outcome: "unresolved", messages: baseHistory, session };
   }
 
-  if (hasUnansweredRequiredRequest({ pendingBatch, responses })) {
+  const resolvesApprovalBatch = pendingBatch.requests.some((request) => isApprovalRequest(request));
+
+  if (resolvesApprovalBatch && hasUnansweredApproval({ pendingBatch, responses })) {
     session = queueDeferredStepInput(session, compactStepInput(resolvedStepInput));
     return { deferredMessage: true, outcome: "unresolved", messages: baseHistory, session };
   }
 
   if (responses.length === 0 && resolvedStepInput?.message !== undefined) {
-    // A follow-up message arrived and every pending request is dismissable
-    // (a required one would have deferred above): mark the unanswered
-    // requests ignored so the model can continue with the message.
+    // A follow-up message arrived for question-only input with no explicit
+    // responses. Keep the existing question semantics: mark unanswered
+    // question requests ignored so the model can continue with the message.
     const toolParts = buildToolResponseParts(pendingBatch, []);
     const messages: ModelMessage[] = [...baseHistory, ...pendingBatch.responseMessages];
     if (toolParts.length > 0) {
@@ -208,16 +208,13 @@ export function resolvePendingInput(input: {
   session = clearPendingInputBatch(session);
 
   // AI SDK collects approval responses only from the tail tool message.
-  // Defer channel context and any follow-up message so the approval resolves
-  // in isolation; `consumeDeferredStepInput` replays them on the next step.
+  // Defer follow-up user input from the same channel dispatch so approval
+  // resolution runs in isolation; `consumeDeferredStepInput` replays it on
+  // the next internal step.
   if (resolvesApprovalBatch) {
-    const deferredInput: {
-      context?: StepInput["context"];
-      message?: StepInput["message"];
-    } = {};
-    if ((resolvedStepInput?.context?.length ?? 0) > 0) {
-      deferredInput.context = resolvedStepInput?.context;
-    }
+    const context = resolvedStepInput?.context;
+    const deferredInput: { context?: StepInput["context"]; message?: StepInput["message"] } = {};
+    if (context !== undefined && context.length > 0) deferredInput.context = context;
     if (resolvedStepInput?.message !== undefined) {
       deferredInput.message = resolvedStepInput.message;
     }
@@ -225,16 +222,21 @@ export function resolvePendingInput(input: {
     if (deferredInput.context !== undefined || deferredInput.message !== undefined) {
       session = queueDeferredStepInput(session, deferredInput);
 
-      return {
+      const result = {
         consumedMessage: resolvedStepInput?.messageConsumed,
-        deferredContext: deferredInput.context === undefined ? undefined : true,
-        deferredMessage: deferredInput.message === undefined ? undefined : true,
         limitContinuation,
-        outcome: "resolved",
+        outcome: "resolved" as const,
         messages,
         rejectedActions,
         session,
       };
+      if (deferredInput.context !== undefined) {
+        if (deferredInput.message !== undefined) {
+          return { ...result, deferredContext: true, deferredMessage: true };
+        }
+        return { ...result, deferredContext: true };
+      }
+      return { ...result, deferredMessage: true };
     }
   }
 
@@ -303,37 +305,13 @@ function compactStepInput(
   return result;
 }
 
-/**
- * Drops a pending session-limit continuation prompt from a parked session.
- *
- * A cancelled turn settles with the step's input snapshot, which can
- * resurrect a continuation prompt the user already answered — the decline
- * that cancelled the turn consumed the answer inside the discarded turn
- * state. Left in place, the stale prompt would queue every follow-up
- * message behind an answer that will never come. Harness-authored prompts
- * are deterministically re-raised by the pre-model gate, so dropping is
- * always safe; model-anchored batches (tool approvals, questions) are kept
- * because their tool calls still require resolution.
- */
-export function clearPendingSessionLimitPrompt(session: HarnessSession): HarnessSession {
-  const pendingBatch = getPendingInputBatch(session.state);
-  if (pendingBatch === undefined || pendingBatch.requests.length === 0) {
-    return session;
-  }
-  if (!pendingBatch.requests.every((request) => isSessionLimitContinuationRequest(request))) {
-    return session;
-  }
-  return clearPendingInputBatch(session);
-}
-
-function hasUnansweredRequiredRequest(input: {
+function hasUnansweredApproval(input: {
   readonly pendingBatch: PendingInputBatch;
   readonly responses: readonly InputResponse[];
 }): boolean {
   const responseIds = new Set(input.responses.map((response) => response.requestId));
   return input.pendingBatch.requests.some(
-    (request) =>
-      classifyInputRequest(request) === "required" && !responseIds.has(request.requestId),
+    (request) => isApprovalRequest(request) && !responseIds.has(request.requestId),
   );
 }
 
@@ -363,13 +341,6 @@ type ResolvePendingInputResult = {
  */
 export function hasPendingInputBatch(state: SessionStateMap | undefined): boolean {
   return getPendingInputBatch(state) !== undefined;
-}
-
-/**
- * Returns the request IDs in the currently pending HITL batch.
- */
-export function getPendingInputRequestIds(state: SessionStateMap | undefined): ReadonlySet<string> {
-  return new Set(getPendingInputBatch(state)?.requests.map((request) => request.requestId));
 }
 
 function getPendingInputBatch(state: SessionStateMap | undefined): PendingInputBatch | undefined {
@@ -668,6 +639,14 @@ function buildToolResponsePartsForRequest(
   ];
 }
 
+function isApprovalRequest(request: InputRequest): boolean {
+  return (
+    request.options?.length === 2 &&
+    request.options[0]?.id === "approve" &&
+    request.options[1]?.id === "deny"
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Tool call helpers
 // ---------------------------------------------------------------------------
@@ -676,11 +655,7 @@ function buildToolResponsePartsForRequest(
  * Creates a runtime tool-call action shape from an AI SDK tool call.
  */
 export function createRuntimeToolCallActionFromToolCall(input: {
-  readonly toolCall: {
-    readonly input: unknown;
-    readonly toolCallId: string;
-    readonly toolName: string;
-  };
+  readonly toolCall: TypedToolCall<ToolSet>;
 }): RuntimeToolCallActionRequest {
   return {
     callId: input.toolCall.toolCallId,
@@ -691,4 +666,23 @@ export function createRuntimeToolCallActionFromToolCall(input: {
     kind: "tool-call",
     toolName: input.toolCall.toolName,
   };
+}
+
+function resolveToolCallInputObject(
+  value: unknown,
+  context: { readonly callId: string; readonly toolName: string },
+): JsonObject {
+  if (value === undefined || value === null) {
+    return {};
+  }
+
+  try {
+    return parseJsonObject(value);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new TypeError(
+      `Failed to parse tool-call arguments for "${context.toolName}" (${context.callId}): ${detail}`,
+      { cause: error },
+    );
+  }
 }
