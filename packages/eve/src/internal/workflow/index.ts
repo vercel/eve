@@ -1,4 +1,4 @@
-export * from "#compiled/@workflow/core/index.js";
+export * from "@workflow/core";
 
 /**
  * Workflow-safe fetch helper retained for generated or authored workflow code

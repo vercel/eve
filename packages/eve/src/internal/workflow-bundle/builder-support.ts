@@ -228,16 +228,16 @@ export function createEvePackageImportsPlugin(
   return {
     name: "eve-package-imports",
     resolveId(source: string) {
+      if (options.workflowCondition === true && source === "@workflow/core") {
+        return resolveFirstExistingPath([
+          join(workingDir, "src", "internal", "workflow-bundle", "workflow-core-shim.ts"),
+          join(workingDir, "dist", "src", "internal", "workflow-bundle", "workflow-core-shim.js"),
+        ]);
+      }
+
       const compiledSubpath = source.match(/^#compiled\/(.+)$/)?.[1];
 
       if (compiledSubpath !== undefined) {
-        if (options.workflowCondition === true && compiledSubpath === "@workflow/core/index.js") {
-          return resolveFirstExistingPath([
-            join(workingDir, "src", "internal", "workflow-bundle", "workflow-core-shim.ts"),
-            join(workingDir, "dist", "src", "internal", "workflow-bundle", "workflow-core-shim.js"),
-          ]);
-        }
-
         return resolveFirstExistingPath([
           join(workingDir, ".generated", "compiled", compiledSubpath),
           join(workingDir, "dist", "src", "compiled", compiledSubpath),

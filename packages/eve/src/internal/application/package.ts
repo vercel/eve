@@ -9,11 +9,6 @@ let cachedPackageInfo: InstalledPackageInfo | undefined;
 // The package build stamps the published version into `dist` so bundled
 // deployments can still report package metadata without resolving package.json.
 const BUNDLED_FALLBACK_PACKAGE_VERSION: string = "__EVE_PACKAGE_VERSION__";
-const WORKFLOW_MODULE_ALIASES = {
-  "workflow/errors": "src/compiled/@workflow/errors/index.js",
-  "workflow/internal/private": "src/compiled/@workflow/core/private.js",
-} as const;
-
 function resolveFallbackPackageVersion(): string {
   // Detect an unstamped build by the token's `__` shape — spelling the token
   // out in a comparison would get rewritten by the stamp itself.
@@ -161,21 +156,6 @@ export function resolvePackageDependencyPath(specifier: string): string {
   return require.resolve(specifier);
 }
 
-function resolvePackageCompiledFilePath(relativeCompiledPath: string): string {
-  const packageBuildRoot = resolvePackageBuildRoot();
-
-  if (packageBuildRoot !== null) {
-    return join(packageBuildRoot, relativeCompiledPath);
-  }
-
-  return join(
-    resolvePackageRoot(),
-    ".generated",
-    "compiled",
-    relativeCompiledPath.replace(/^src\/compiled\//, ""),
-  );
-}
-
 function normalizeInstalledPackageInfo(value: unknown): InstalledPackageInfo | undefined {
   const packageJson = value as {
     name?: unknown;
@@ -249,63 +229,6 @@ export function resolveInstalledPackageInfo(): InstalledPackageInfo {
   return cachedPackageInfo;
 }
 
-const EXPECTED_WORKFLOW_VERSION_PACKAGE = "@workflow/core";
-
-function readWorkflowVersionFromManifest(value: unknown): string | undefined {
-  const manifest = value as {
-    dependencies?: Record<string, unknown>;
-    devDependencies?: Record<string, unknown>;
-    peerDependencies?: Record<string, unknown>;
-  };
-
-  for (const section of [
-    manifest.devDependencies,
-    manifest.dependencies,
-    manifest.peerDependencies,
-  ]) {
-    const declared = section?.[EXPECTED_WORKFLOW_VERSION_PACKAGE];
-
-    if (typeof declared === "string" && declared.trim().length > 0) {
-      return declared;
-    }
-  }
-
-  return undefined;
-}
-
-/**
- * Resolves the `@workflow/core` version this eve release bundles, read from
- * eve's own `package.json`.
- *
- * This is the single source of truth for the `@workflow/*` line eve targets, so
- * compatibility checks (see `assertWorkflowWorldCompatibility`) never hardcode a
- * version. eve's `package.json` is published with its `devDependencies` intact
- * even though those packages are vendored, so the entry is readable from an
- * installed eve as well as a source checkout. Returns `undefined` when the
- * entry cannot be read so callers can no-op rather than fail.
- */
-export function resolveExpectedWorkflowVersion(): string | undefined {
-  const packageRoot = tryResolvePackageRoot();
-
-  if (packageRoot !== undefined) {
-    try {
-      return readWorkflowVersionFromManifest(
-        JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")),
-      );
-    } catch {
-      // Fall through to module-resolution lookup below.
-    }
-  }
-
-  try {
-    return readWorkflowVersionFromManifest(
-      JSON.parse(readFileSync(require.resolve(`${EVE_PACKAGE_NAME}/package.json`), "utf8")),
-    );
-  } catch {
-    return undefined;
-  }
-}
-
 /**
  * Resolves a Workflow runtime module from eve's narrowed Workflow dependencies.
  *
@@ -326,10 +249,13 @@ export function resolveWorkflowModulePath(specifier: string): string {
     return resolvePackageSourceFilePath("src/internal/workflow/builtins.ts");
   }
 
-  const alias = WORKFLOW_MODULE_ALIASES[specifier as keyof typeof WORKFLOW_MODULE_ALIASES];
+  if (specifier === "workflow/errors") {
+    return require.resolve("@workflow/errors");
+  }
 
-  if (alias !== undefined) {
-    return resolvePackageCompiledFilePath(alias);
+  if (specifier === "workflow/internal/private") {
+    const workflowCoreRoot = findNearestPackageRoot(dirname(require.resolve("@workflow/core")));
+    return join(workflowCoreRoot, "dist", "private.js");
   }
 
   return require.resolve(specifier);

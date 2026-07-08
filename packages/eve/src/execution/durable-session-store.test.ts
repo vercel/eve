@@ -14,7 +14,7 @@ import { projectToDurableSession } from "#execution/session.js";
 
 const getRunMock = vi.hoisted(() => vi.fn());
 
-vi.mock("#compiled/@workflow/core/runtime.js", () => ({
+vi.mock("@workflow/core/runtime", () => ({
   getRun: (...args: unknown[]) => getRunMock(...args),
 }));
 

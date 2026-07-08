@@ -37,6 +37,7 @@ interface PreparedApplicationHostStub {
   };
   compiledArtifacts: {
     bootstrapPath: string;
+    workflowWorldPluginPath: string;
   };
   scheduleRegistrations: [];
   schedules: [];
@@ -64,10 +65,7 @@ vi.mock("../../application/package.js", () => ({
       .replace(/\.[cm]?tsx?$/, ".js")
       .replaceAll("/", "\\")}`,
   resolveWorkflowModulePath: (specifier: string) =>
-    `G:\\projects\\test-eve\\node_modules\\.pnpm\\eve@0.3.0\\node_modules\\eve\\dist\\src\\compiled\\${specifier
-      .replace(/^workflow\/(?:api|runtime)$/, "@workflow\\core\\runtime")
-      .replace(/^workflow\/internal\/private$/, "@workflow\\core\\private")
-      .replaceAll("/", "\\")}.js`,
+    `G:\\projects\\test-eve\\node_modules\\.pnpm\\eve@0.3.0\\node_modules\\eve\\dist\\src\\internal\\workflow\\${specifier === "workflow/runtime" ? "runtime" : "index"}.js`,
 }));
 
 vi.mock("../../workflow-bundle/builder.js", () => ({
@@ -117,6 +115,7 @@ function createPreparedHost(
   } = {},
 ): PreparedApplicationHost {
   const appRoot = input.appRoot ?? "G:\\projects\\test-eve";
+  const pathSeparator = appRoot.includes("\\") ? "\\" : "/";
 
   const preparedHost: PreparedApplicationHostStub = {
     appRoot,
@@ -139,6 +138,7 @@ function createPreparedHost(
     },
     compiledArtifacts: {
       bootstrapPath: `${appRoot}\\.eve\\compiled-artifacts-bootstrap.mjs`,
+      workflowWorldPluginPath: `${appRoot}${pathSeparator}.eve${pathSeparator}compiled-artifacts-workflow-world.mjs`,
     },
     scheduleRegistrations: [],
     schedules: [],
@@ -265,7 +265,10 @@ describe("configureNitroRoutes", () => {
 
     expect(workflowHandlerSource).toContain('import { POST } from "./workflows.mjs";');
     expect(workflowHandlerSource).toContain(
-      'import { getWorld as __eveGetWorkflowWorld } from "file:///G:/projects/test-eve/node_modules/.pnpm/eve@0.3.0/node_modules/eve/dist/src/compiled/@workflow/core/runtime.js";',
+      'import "../../.eve/compiled-artifacts-workflow-world.mjs";',
+    );
+    expect(workflowHandlerSource).toContain(
+      'import { getWorld as __eveGetWorkflowWorld } from "file:///G:/projects/test-eve/node_modules/.pnpm/eve@0.3.0/node_modules/eve/dist/src/internal/workflow/runtime.js";',
     );
     expect(workflowHandlerSource).toContain(
       "const __eveWorkflowWorld = await __eveGetWorkflowWorld();",

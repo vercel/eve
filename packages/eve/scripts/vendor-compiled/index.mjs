@@ -20,11 +20,6 @@ import standardSchemaSpec from "./@standard-schema/spec.mjs";
 import vercelDetectAgent from "./@vercel/detect-agent.mjs";
 import vercelOidc from "./@vercel/oidc.mjs";
 import vercelSandbox from "./@vercel/sandbox.mjs";
-import workflowCore from "./@workflow/core.mjs";
-import workflowErrors from "./@workflow/errors.mjs";
-import workflowSerde from "./@workflow/serde.mjs";
-import workflowWorld from "./@workflow/world.mjs";
-
 import chat from "./chat.mjs";
 import chokidar from "./chokidar.mjs";
 import commander from "./commander.mjs";
@@ -68,10 +63,6 @@ export const MODULES = [
   vercelDetectAgent,
   vercelOidc,
   vercelSandbox,
-  workflowCore,
-  workflowErrors,
-  workflowSerde,
-  workflowWorld,
   zod,
   zodValidationError,
 ];

@@ -14,7 +14,7 @@ import {
 
 const resumeHookMock = vi.fn();
 
-vi.mock("#compiled/@workflow/core/runtime.js", () => ({
+vi.mock("@workflow/core/runtime", () => ({
   resumeHook: (token: string, payload: unknown) => resumeHookMock(token, payload),
 }));
 

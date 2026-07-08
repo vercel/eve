@@ -10,7 +10,7 @@ import { EVE_ATTRIBUTE_VALUE_MAX_BYTES } from "#runtime/attributes/emit.js";
  * `emit.ts` cannot import the constant at runtime (it would drag the
  * full zod validator into the workflow-body bundle — see the doc-comment
  * there), so the value is duplicated. This test imports the real
- * `@workflow/world` export — a devDependency, never bundled — and fails
+ * `@workflow/world` export — an installed upstream dependency — and fails
  * if the two ever disagree.
  *
  * If this test fails after a `@workflow/*` bump: update both

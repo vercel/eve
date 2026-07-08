@@ -106,7 +106,7 @@ vi.mock("../runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: vi.fn(),
 }));
 
-vi.mock("#compiled/@workflow/core/runtime.js", () => ({
+vi.mock("@workflow/core/runtime", () => ({
   getRun: (...args: unknown[]) => getRunMock(...args),
   resumeHook: vi.fn(),
   start: (...args: unknown[]) => startMock(...args),

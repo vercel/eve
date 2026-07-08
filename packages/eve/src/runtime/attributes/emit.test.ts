@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const setAttributesMock = vi.fn();
 
-vi.mock("#compiled/@workflow/core/index.js", () => ({
+vi.mock("@workflow/core", () => ({
   experimental_setAttributes: (...args: unknown[]) => setAttributesMock(...args),
 }));
 

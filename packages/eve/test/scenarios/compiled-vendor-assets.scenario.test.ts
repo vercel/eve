@@ -155,22 +155,10 @@ describe("compiled vendor assets", () => {
     expect(forwardedLogs).toEqual(["warn:eve vendoring warning", "error:dependency build failure"]);
   });
 
-  it("copies @workflow/core declaration files from the installed package", async () => {
-    const [indexDts, createHookDts, workflowDts, workflowIndexDts, runtimeRunDts] =
-      await Promise.all([
-        readFile(join(COMPILED_VENDOR_ROOT, "@workflow/core/index.d.ts"), "utf8"),
-        readFile(join(COMPILED_VENDOR_ROOT, "@workflow/core/create-hook.d.ts"), "utf8"),
-        readFile(join(COMPILED_VENDOR_ROOT, "@workflow/core/workflow.d.ts"), "utf8"),
-        readFile(join(COMPILED_VENDOR_ROOT, "@workflow/core/workflow/index.d.ts"), "utf8"),
-        readFile(join(COMPILED_VENDOR_ROOT, "@workflow/core/runtime/run.d.ts"), "utf8"),
-      ]);
+  it("leaves Workflow SDK packages as installed runtime dependencies", async () => {
+    const entries = await readdir(COMPILED_VENDOR_ROOT, { recursive: true });
 
-    expect(indexDts).toContain("Just the core utilities");
-    expect(indexDts).toContain("from '#compiled/@workflow/errors/index.js'");
-    expect(createHookDts).toContain("Creates a {@link Hook}");
-    expect(workflowDts).toBe(`export * from "./workflow/index.js";\n`);
-    expect(workflowIndexDts).toContain("from '#compiled/@workflow/errors/index.js'");
-    expect(runtimeRunDts).toContain("from '../_workflow-serde.js'");
+    expect(entries.some((entry) => entry.startsWith("@workflow/"))).toBe(false);
   });
 
   it("copies the complete @vercel/sandbox declaration tree from the installed package", async () => {
@@ -250,7 +238,6 @@ describe("compiled vendor assets", () => {
         rewrites: {
           "@ai-sdk/provider": "#compiled/@ai-sdk/provider/index.js",
           "@standard-schema/spec": "#compiled/@standard-schema/spec/index.js",
-          "@workflow/serde": "#compiled/@workflow/serde/index.js",
           "eventsource-parser/stream": "#compiled/eventsource-parser/stream/index.js",
           "zod/v3": "#compiled/zod/index.js",
           "zod/v4": "#compiled/zod/index.js",
@@ -271,14 +258,9 @@ describe("compiled vendor assets", () => {
 
   it("copies AI SDK declaration dependencies from their installed packages", async () => {
     const jsonSchemaRoot = dirname(require.resolve("@types/json-schema/package.json"));
-    const serdeRoot = dirname(dirname(require.resolve("@workflow/serde")));
     const eventSourceParserRoot = dirname(require.resolve("eventsource-parser/package.json"));
     const comparisons = [
       [join(jsonSchemaRoot, "index.d.ts"), join(COMPILED_VENDOR_ROOT, "json-schema/index.d.ts")],
-      [
-        join(serdeRoot, "dist/index.d.ts"),
-        join(COMPILED_VENDOR_ROOT, "@workflow/serde/index.d.ts"),
-      ],
       [
         join(eventSourceParserRoot, "dist/stream.d.ts"),
         join(COMPILED_VENDOR_ROOT, "eventsource-parser/stream/index.d.ts"),

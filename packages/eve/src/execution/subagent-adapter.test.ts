@@ -24,7 +24,7 @@ if (SUBAGENT_AUTHORIZATION_COMPLETED === undefined) {
 
 const resumeHookMock = vi.fn();
 
-vi.mock("#compiled/@workflow/core/runtime.js", () => ({
+vi.mock("@workflow/core/runtime", () => ({
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
 }));
 

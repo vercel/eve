@@ -1,4 +1,4 @@
-import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
+import { createHook, type Hook } from "@workflow/core";
 
 import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";

@@ -65,7 +65,7 @@ export async function setEveAttributes(attrs: Record<string, EveAttributeValue>)
     // compiled core into emit.js's static graph and defeat the dynamic
     // chunking those modules rely on — the build emits an
     // `INEFFECTIVE_DYNAMIC_IMPORT` warning and `bin-build-output` fails.
-    const { experimental_setAttributes } = await import("#compiled/@workflow/core/index.js");
+    const { experimental_setAttributes } = await import("@workflow/core");
     await experimental_setAttributes(normalized, { allowReservedAttributes: true });
   } catch (error) {
     if (!WARNED_ABOUT_TAG_FAILURE) {

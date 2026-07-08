@@ -25,6 +25,7 @@ async function discoverDeclarationFiles({ distDir }) {
 export default {
   packageName: "@vercel/sandbox",
   compiledPath: "@vercel/sandbox",
+  external: ["@workflow/serde"],
   plugins: [createOptionalNativeStubPlugin(["fsevents"])],
   copyDeclarations: createDeclarationCopier({
     files: discoverDeclarationFiles,

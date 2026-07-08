@@ -135,6 +135,7 @@ function createPreparedHost(): PreparedApplicationHost {
     } as unknown as PreparedApplicationHost["compileResult"],
     compiledArtifacts: {
       bootstrapPath: `${appRoot}/.eve/bootstrap.mjs`,
+      workflowWorldPluginPath: `${appRoot}/.eve/workflow-world.mjs`,
     } as PreparedApplicationHost["compiledArtifacts"],
     scheduleRegistrations: [],
     schedules: [],
