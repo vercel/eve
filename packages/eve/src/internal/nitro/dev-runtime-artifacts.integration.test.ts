@@ -225,6 +225,48 @@ describe("development runtime artifact snapshots", () => {
     expect(existsSync(join(snapshot.runtimeAppRoot, "dist"))).toBe(false);
   });
 
+  it("stops source snapshot recursion at nested git repositories", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-nested-git-");
+    const agentRoot = join(appRoot, "agent");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+    const worktreeRoot = join(appRoot, ".claude", "worktrees", "test-wt");
+    const nestedRepoRoot = join(appRoot, "vendor", "nested-repo");
+    const regularVendorRoot = join(appRoot, "vendor", "regular-package");
+
+    await mkdir(agentRoot, { recursive: true });
+    await mkdir(join(worktreeRoot, "agent"), { recursive: true });
+    await mkdir(join(nestedRepoRoot, ".git"), { recursive: true });
+    await mkdir(regularVendorRoot, { recursive: true });
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(join(appRoot, "package.json"), '{"type":"module"}\n');
+    await writeFile(join(agentRoot, "agent.ts"), "export const answer = 42;\n");
+    await writeFile(join(appRoot, ".claude", "notes.txt"), "agent notes\n");
+    await writeFile(join(worktreeRoot, ".git"), "gitdir: ../../../../.git/worktrees/test-wt\n");
+    await writeFile(join(worktreeRoot, "agent", "agent.ts"), "export const copied = false;\n");
+    await writeFile(join(nestedRepoRoot, ".git", "config"), "[core]\n");
+    await writeFile(join(nestedRepoRoot, "index.ts"), "export const copied = false;\n");
+    await writeFile(join(regularVendorRoot, "index.ts"), "export const copied = true;\n");
+    await writeFile(
+      join(compileDirectoryPath, "compiled-agent-manifest.json"),
+      `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`,
+    );
+
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+
+    expect(existsSync(join(snapshot.runtimeAppRoot, "agent", "agent.ts"))).toBe(true);
+    expect(existsSync(join(snapshot.runtimeAppRoot, ".claude", "notes.txt"))).toBe(true);
+    expect(existsSync(join(snapshot.runtimeAppRoot, ".claude", "worktrees", "test-wt"))).toBe(
+      false,
+    );
+    expect(existsSync(join(snapshot.runtimeAppRoot, "vendor", "nested-repo"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "vendor", "regular-package", "index.ts"))).toBe(
+      true,
+    );
+  });
+
   it("prunes stale snapshots while preserving the active and recent snapshots", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-artifacts-prune-");
     const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
