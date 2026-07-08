@@ -1,5 +1,6 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { type AgentDefinition, defineAgent } from "eve";
+import { vercelOidc } from "eve/agents/auth";
 
 /**
  * Prompt-cache e2e fixture.
@@ -16,12 +17,25 @@ import { type AgentDefinition, defineAgent } from "eve";
  * Anthropic-compatible Messages endpoint, which honors `cache_control` and
  * passes `cache_read_input_tokens` / `cache_creation_input_tokens` through
  * unchanged. The same AI Gateway credential as every other fixture is sent
- * as a bearer token: `AI_GATEWAY_API_KEY` takes precedence, with
- * `VERCEL_OIDC_TOKEN` as the fallback.
+ * as a bearer token: `AI_GATEWAY_API_KEY` takes precedence, with request-scoped
+ * Vercel OIDC as the fallback.
  */
+const resolveVercelOidc = vercelOidc();
+
 const anthropic = createAnthropic({
   baseURL: "https://ai-gateway.vercel.sh/v1",
-  authToken: process.env.AI_GATEWAY_API_KEY ?? process.env.VERCEL_OIDC_TOKEN ?? "unset",
+  // The fetch hook replaces this placeholder with a current Gateway credential.
+  authToken: "resolved-per-request",
+  fetch: async (input, init) => {
+    const headers = new Headers(init?.headers);
+    const apiKey = process.env.AI_GATEWAY_API_KEY?.trim();
+    const authorization = apiKey
+      ? `Bearer ${apiKey}`
+      : (await resolveVercelOidc()).headers.authorization;
+
+    headers.set("authorization", authorization);
+    return fetch(input, { ...init, headers });
+  },
 });
 
 const agent: AgentDefinition = defineAgent({
