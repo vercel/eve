@@ -11,13 +11,13 @@ The Linear channel uses Linear's Agent Session surface rather than ordinary comm
 Create a Linear Connect client and copy its UID (e.g. `linear/my-agent`), then attach this project as the trigger destination at eve's Linear route:
 
 ```bash
-npm install -g vercel@latest && export FF_CONNECT_ENABLED=1
+npm install -g vercel@latest
 vercel connect create linear --triggers
 vercel connect detach <uid> --yes
 vercel connect attach <uid> --triggers --trigger-path /eve/v1/linear --yes
 ```
 
-`FF_CONNECT_ENABLED=1` turns on the Connect commands, which are feature-flagged in the Vercel CLI today. The `create` step provisions the Linear app — with the `app:assignable` and `app:mentionable` scopes the agent surface needs — and a trigger destination at the default Connect path. `detach` then `attach --trigger-path /eve/v1/linear` re-points the trigger at the eve Linear route, since eve does not serve the default Connect path. `--triggers` makes Connect receive Linear's webhooks, verify them, and forward them to your deployment. During registration, subscribe to the `AgentSessionEvent` webhook category — the managed app defaults to `Comment` and `Issue` — so Linear sends `created` events when the agent is delegated or mentioned and `prompted` events when the user continues the session. You can also create the client from the [Connect dashboard](https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Go+to+Connect).
+The `create` step provisions the Linear app — with the `app:assignable` and `app:mentionable` scopes the agent surface needs — and a trigger destination at the default Connect path. `detach` then `attach --trigger-path /eve/v1/linear` re-points the trigger at the eve Linear route, since eve does not serve the default Connect path. `--triggers` makes Connect receive Linear's webhooks, verify them, and forward them to your deployment. During registration, subscribe to the `AgentSessionEvent` webhook category — the managed app defaults to `Comment` and `Issue` — so Linear sends `created` events when the agent is delegated or mentioned and `prompted` events when the user continues the session. You can also create the client from the [Connect dashboard](https://vercel.com/d?to=/%5Bteam%5D/~/connect&title=Go+to+Connect).
 
 ## Add the channel
 
