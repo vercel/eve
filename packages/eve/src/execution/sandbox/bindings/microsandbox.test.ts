@@ -164,24 +164,33 @@ describe.skipIf(onWindows)("createMicrosandboxNetworkPlan", () => {
     ]);
   });
 
-  it("keeps brokered header values out of the guest environment", () => {
+  it("keeps brokered secret values out of the guest environment", () => {
     const plan = createMicrosandboxNetworkPlan({
       allow: {
         "github.com": [
           {
-            transform: [{ headers: { Authorization: "Basic real-secret" } }],
+            transform: [
+              {
+                headers: {
+                  Authorization: "Basic real-token",
+                  "X-Api-Key": "real-api-key",
+                },
+              },
+            ],
           },
         ],
       },
     });
 
-    expect(createTransformBrokerEnvironment(plan)).toEqual({
-      GIT_CONFIG_COUNT: "1",
-      GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
-      GIT_CONFIG_VALUE_0: expect.stringMatching(
-        /^Authorization: __EVE_MSB_SECRET_[A-Fa-f0-9]{24}__$/u,
-      ),
-    });
+    const env = createTransformBrokerEnvironment(plan);
+    const rule = plan.transformHeaderRules[0]!;
+
+    expect(env.EVE_MICROSANDBOX_NETWORK_TRANSFORMS).toBeUndefined();
+    expect(env.GIT_CONFIG_COUNT).toBe("1");
+    expect(env.GIT_CONFIG_KEY_0).toBe("http.https://github.com/.extraheader");
+    expect(env.GIT_CONFIG_VALUE_0).toBe(`Authorization: ${rule.placeholderHeaders.Authorization}`);
+    expect(JSON.stringify(env)).not.toContain("Basic real-token");
+    expect(JSON.stringify(env)).not.toContain("real-api-key");
   });
 
   it("serializes policy JSON using microsandbox's native snake-case schema", () => {
