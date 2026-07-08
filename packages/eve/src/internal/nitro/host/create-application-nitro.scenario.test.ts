@@ -23,18 +23,10 @@ import {
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
 import { resolveNitroBuildDirectory } from "#internal/application/paths.js";
-import type {
-  PreparedApplicationHost,
-  PreparedDevelopmentApplicationHost,
-} from "#internal/nitro/host/types.js";
-import {
-  createEveVercelOptions,
-  EVE_WORKFLOW_FLOW_ROUTE_PATH,
-} from "#internal/nitro/host/vercel-build-output-config.js";
+import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
 
-const configureDevelopmentNitroRoutes = vi.fn(async () => undefined);
-const configureProductionNitroRoutes = vi.fn(async () => undefined);
+const configureNitroRoutes = vi.fn(async () => undefined);
 const createNitroMock = vi.fn();
 const registerScheduleTaskHandlers = vi.fn();
 
@@ -47,8 +39,7 @@ vi.mock("./schedule-task-routes.js", () => ({
 }));
 
 vi.mock("./configure-nitro-routes.js", () => ({
-  configureDevelopmentNitroRoutes,
-  configureProductionNitroRoutes,
+  configureNitroRoutes,
 }));
 
 vi.mock("#internal/workflow-bundle/workflow-builders.js", () => ({
@@ -91,7 +82,7 @@ function createNitroStub(input: { buildDir?: string; dev?: boolean } = {}): Nitr
   };
 }
 
-function createPreparedHost(): PreparedDevelopmentApplicationHost {
+function createPreparedHost(): PreparedApplicationHost {
   const appRoot = "/tmp/weather-agent";
   const paths = resolveCompilerArtifactPaths(appRoot);
   const metadata: CompileMetadata = {
@@ -131,7 +122,7 @@ function createPreparedHost(): PreparedDevelopmentApplicationHost {
       diagnostics: [],
       manifest: {
         channels: [],
-        config: { name: "weather-agent" },
+        config: {},
         sandbox: null,
         subagents: [],
       },
@@ -149,34 +140,11 @@ function createPreparedHost(): PreparedDevelopmentApplicationHost {
     } as PreparedApplicationHost["compiledArtifacts"],
     scheduleRegistrations: [],
     schedules: [],
-    generation: {
-      fingerprint: "runtime-fingerprint",
-      runtimeAppRoot: `${appRoot}/.eve/dev-runtime/snapshots/test/source/app`,
-      snapshotRoot: `${appRoot}/.eve/dev-runtime/snapshots/test`,
-      snapshotSourceRoot: `${appRoot}/.eve/dev-runtime/snapshots/test/source`,
-      sourceRoot: appRoot,
-    },
-    workflowBuildDir: `${appRoot}/.eve/dev-hosts/test/workflow`,
-    workspaceExtensions: [],
-    workspace: {
-      artifactsDir: `${appRoot}/.eve/dev-hosts/test/artifacts`,
-      compilerArtifactsDir: `${appRoot}/.eve/dev-hosts/test/compiler`,
-      nitroBuildDir: `${appRoot}/.eve/dev-hosts/test/nitro`,
-      nitroOutputDir: `${appRoot}/.eve/dev-hosts/test/output`,
-      rootDir: `${appRoot}/.eve/dev-hosts/test`,
-      workflowBuildDir: `${appRoot}/.eve/dev-hosts/test/workflow`,
-    },
+    workflowBuildDir: `${appRoot}/.eve/nitro/workflow`,
   };
 }
 
-function createProductionOptions(preparedHost: PreparedApplicationHost) {
-  return {
-    buildDir: resolveNitroBuildDirectory(preparedHost.appRoot),
-    outputDir: join(preparedHost.appRoot, ".output"),
-  };
-}
-
-describe("application Nitro creation", () => {
+describe("createApplicationNitro", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
@@ -186,43 +154,19 @@ describe("application Nitro creation", () => {
     delete process.env.VERCEL;
   });
 
-  it("installs local tracing and compiled artifacts before constructing the Workflow world", async () => {
+  it("installs compiled artifacts before constructing the Workflow world", async () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
-    const { createDevelopmentApplicationNitro } =
+    const { createApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
     const preparedHost = createPreparedHost();
-    await createDevelopmentApplicationNitro(preparedHost);
+    await createApplicationNitro(preparedHost, true);
 
     const plugins = createNitroMock.mock.calls[0]?.[0].plugins as string[];
-    const localTracing = plugins.findIndex((plugin) =>
-      plugin.includes("local-tracing-runtime-plugin.ts"),
-    );
 
-    expect(localTracing).toBeGreaterThanOrEqual(0);
-    expect(localTracing).toBeLessThan(
-      plugins.indexOf(preparedHost.compiledArtifacts.bootstrapPath),
-    );
     expect(plugins.indexOf(preparedHost.compiledArtifacts.bootstrapPath)).toBeLessThan(
       plugins.indexOf(preparedHost.compiledArtifacts.workflowWorldPluginPath),
-    );
-  });
-
-  it("preserves authored instrumentation instead of installing local tracing", async () => {
-    const nitroStub = createNitroStub();
-    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
-    const { createDevelopmentApplicationNitro } =
-      await import("#internal/nitro/host/create-application-nitro.js");
-    const preparedHost = createPreparedHost();
-    preparedHost.compiledArtifacts.instrumentationPluginPath = "/app/instrumentation.mjs";
-
-    await createDevelopmentApplicationNitro(preparedHost);
-
-    const plugins = createNitroMock.mock.calls[0]?.[0].plugins as string[];
-    expect(plugins).toContain("/app/instrumentation.mjs");
-    expect(plugins).not.toEqual(
-      expect.arrayContaining([expect.stringContaining("local-tracing-runtime-plugin.ts")]),
     );
   });
 
@@ -230,10 +174,10 @@ describe("application Nitro creation", () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
-    const { createProductionApplicationNitro } =
+    const { createApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
     const preparedHost = createPreparedHost();
-    await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
+    await createApplicationNitro(preparedHost, false);
 
     const rollupBeforeHooks = nitroStub.hookHandlers.get("rollup:before") ?? [];
     const originalTransform = vi.fn((code: string, id: string) => `${code}:${id}:transformed`);
@@ -300,10 +244,10 @@ describe("application Nitro creation", () => {
     });
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
-    const { createDevelopmentApplicationNitro } =
+    const { createApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
     const preparedHost = createPreparedHost();
-    await createDevelopmentApplicationNitro(preparedHost);
+    await createApplicationNitro(preparedHost, true);
 
     const rollupBeforeHooks = nitroStub.hookHandlers.get("rollup:before") ?? [];
     const existingExternal = vi.fn((id: string) =>
@@ -331,10 +275,10 @@ describe("application Nitro creation", () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
-    const { createDevelopmentApplicationNitro } =
+    const { createApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
     const preparedHost = createPreparedHost();
-    await createDevelopmentApplicationNitro(preparedHost);
+    await createApplicationNitro(preparedHost, true);
 
     expect(createNitroMock).toHaveBeenCalledTimes(1);
     expect(createNitroMock.mock.calls[0]?.[0]).toMatchObject({
@@ -347,10 +291,10 @@ describe("application Nitro creation", () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
-    const { createDevelopmentApplicationNitro } =
+    const { createApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
     const preparedHost = createPreparedHost();
-    await createDevelopmentApplicationNitro(preparedHost);
+    await createApplicationNitro(preparedHost, true);
 
     expect(createNitroMock).toHaveBeenCalledTimes(1);
     expect(createNitroMock.mock.calls[0]?.[0]).toMatchObject({
@@ -360,35 +304,62 @@ describe("application Nitro creation", () => {
     });
   });
 
-  it("sets the eve framework version and flow function rules on Vercel build output config", async () => {
+  it("keeps Rolldown's dev watcher off authored app sources", async () => {
+    const nitroStub = createNitroStub();
+    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
+
+    const { createApplicationNitro } =
+      await import("#internal/nitro/host/create-application-nitro.js");
+    const preparedHost = createPreparedHost();
+    await createApplicationNitro(preparedHost, true);
+
+    expect(createNitroMock).toHaveBeenCalledTimes(1);
+    expect(createNitroMock.mock.calls[0]?.[0]).toMatchObject({
+      rolldownConfig: {
+        watch: {
+          exclude: [preparedHost.appRoot, join(preparedHost.appRoot, "**")],
+        },
+      },
+    });
+  });
+
+  it("disables Nitro config watching in dev mode", async () => {
+    const nitroStub = createNitroStub();
+    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
+
+    const { createApplicationNitro } =
+      await import("#internal/nitro/host/create-application-nitro.js");
+    await createApplicationNitro(createPreparedHost(), true);
+
+    expect(createNitroMock).toHaveBeenCalledTimes(1);
+    expect(createNitroMock.mock.calls[0]?.[1]).toEqual({ watch: false });
+  });
+
+  it("sets the eve framework version on Vercel app-surface build output config", async () => {
     vi.stubEnv("VERCEL", "1");
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
-    const { createProductionApplicationNitro } =
+    const { createApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
-    const preparedHost = createPreparedHost();
-    await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
+    await createApplicationNitro(createPreparedHost(), false, {
+      surface: "app",
+    });
 
     expect(createNitroMock).toHaveBeenCalledWith(
       expect.objectContaining({
         preset: "vercel",
-        vercel: createEveVercelOptions({ agentName: "weather-agent", enabled: true }),
+        vercel: {
+          config: {
+            version: 3,
+            framework: {
+              version: resolveInstalledPackageInfo().version,
+            },
+          },
+        },
       }),
+      undefined,
     );
-
-    const vercelOptions = createNitroMock.mock.calls[0]?.[0].vercel;
-    expect(vercelOptions?.config).toEqual({
-      version: 3,
-      framework: {
-        slug: "eve",
-        version: resolveInstalledPackageInfo().version,
-      },
-    });
-    expect(vercelOptions?.functionRules[EVE_WORKFLOW_FLOW_ROUTE_PATH]).toMatchObject({
-      maxDuration: "max",
-      experimentalTriggers: [expect.objectContaining({ type: "queue/v2beta" })],
-    });
   });
 
   it("enables websockets without overriding the Vercel entry format", async () => {
@@ -396,7 +367,7 @@ describe("application Nitro creation", () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
-    const { createProductionApplicationNitro } =
+    const { createApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
     const preparedHost = createPreparedHost();
     const websocketChannel: CompiledChannelEntry = {
@@ -410,7 +381,9 @@ describe("application Nitro creation", () => {
     };
     preparedHost.compileResult.manifest.channels = [websocketChannel];
 
-    await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
+    await createApplicationNitro(preparedHost, false, {
+      surface: "app",
+    });
 
     const nitroOptions = createNitroMock.mock.calls[0]?.[0];
     expect(nitroOptions).toMatchObject({
@@ -419,9 +392,14 @@ describe("application Nitro creation", () => {
       },
       preset: "vercel",
     });
-    expect(nitroOptions?.vercel).toEqual(
-      createEveVercelOptions({ agentName: "weather-agent", enabled: true }),
-    );
+    expect(nitroOptions?.vercel).toEqual({
+      config: {
+        version: 3,
+        framework: {
+          version: resolveInstalledPackageInfo().version,
+        },
+      },
+    });
   });
 
   it("clears Nitro build cache output from a different eve version", async () => {
@@ -447,9 +425,9 @@ describe("application Nitro creation", () => {
         writeFile(staleBuildOutputPath, "stale\n"),
       ]);
 
-      const { createProductionApplicationNitro } =
+      const { createApplicationNitro } =
         await import("#internal/nitro/host/create-application-nitro.js");
-      await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
+      await createApplicationNitro(preparedHost, false);
 
       await expect(readFile(staleBuildOutputPath, "utf8")).rejects.toThrow();
       await expect(readFile(join(nitroBuildDir, "eve-cache.json"), "utf8")).resolves.toBe(
@@ -470,9 +448,8 @@ describe("application Nitro creation", () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
-    const { createProductionApplicationNitro } = await import("./create-application-nitro.js");
-    const preparedHost = createPreparedHost();
-    await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
+    const { createApplicationNitro } = await import("./create-application-nitro.js");
+    await createApplicationNitro(createPreparedHost(), false);
 
     const rollupBeforeHooks = nitroStub.hookHandlers.get("rollup:before") ?? [];
     const config = {
@@ -519,11 +496,16 @@ describe("application Nitro creation", () => {
     ).toBeNull();
   });
 
-  it("merges framework and configured hosted dependencies", async () => {
-    const nitroStub = createNitroStub();
-    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
+  it("merges default server external packages with configured hosted dependencies", async () => {
+    const allNitroStub = createNitroStub();
+    const appNitroStub = createNitroStub();
+    const flowNitroStub = createNitroStub();
+    createNitroMock
+      .mockResolvedValueOnce(allNitroStub.nitro)
+      .mockResolvedValueOnce(appNitroStub.nitro)
+      .mockResolvedValueOnce(flowNitroStub.nitro);
 
-    const { createProductionApplicationNitro } =
+    const { createApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
     const preparedHost = createPreparedHost();
     preparedHost.compileResult.manifest.config = {
@@ -533,23 +515,31 @@ describe("application Nitro creation", () => {
       },
     } as typeof preparedHost.compileResult.manifest.config;
 
-    await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
+    await createApplicationNitro(preparedHost, false);
+    await createApplicationNitro(preparedHost, false, {
+      surface: "app",
+    });
+    await createApplicationNitro(preparedHost, false, {
+      surface: "flow",
+    });
 
-    const traceDeps = createNitroMock.mock.calls[0]?.[0].traceDeps;
-    expect(traceDeps).toEqual(
-      expect.arrayContaining(["@napi-rs/keyring", "sharp", "fixture-external"]),
-    );
-    expect(traceDeps.filter((dependencyName: string) => dependencyName === "sharp")).toHaveLength(
-      1,
-    );
-    expect(traceDeps).not.toContain("eve");
+    for (const call of createNitroMock.mock.calls.slice(0, 3)) {
+      const traceDeps = call[0].traceDeps;
+      expect(traceDeps).toEqual(
+        expect.arrayContaining(["@napi-rs/keyring", "@prisma/client", "sharp", "fixture-external"]),
+      );
+      expect(traceDeps.filter((dependencyName: string) => dependencyName === "sharp")).toHaveLength(
+        1,
+      );
+      expect(traceDeps).not.toContain("eve");
+    }
   });
 
   it("traces configured hosted dependencies from subagent configs", async () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
-    const { createProductionApplicationNitro } =
+    const { createApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
     const preparedHost = createPreparedHost();
     const subagent: CompiledSubagentNode = {
@@ -578,7 +568,7 @@ describe("application Nitro creation", () => {
     };
     preparedHost.compileResult.manifest.subagents = [subagent];
 
-    await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
+    await createApplicationNitro(preparedHost, false);
 
     const traceDeps = createNitroMock.mock.calls[0]?.[0].traceDeps;
     expect(traceDeps).toEqual(expect.arrayContaining(["subagent-external", "sharp"]));
@@ -587,17 +577,27 @@ describe("application Nitro creation", () => {
     );
   });
 
-  it("leaves Nitro to classify unconfigured hosted dependencies", async () => {
+  it("traces framework and server defaults even when no externals are configured", async () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
-    const { createProductionApplicationNitro } =
+    const { createApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
     const preparedHost = createPreparedHost();
 
-    await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
+    await createApplicationNitro(preparedHost, false);
 
-    expect(createNitroMock.mock.calls[0]?.[0].traceDeps).toEqual(["@napi-rs/keyring"]);
+    expect(createNitroMock.mock.calls[0]?.[0].traceDeps).toEqual(
+      expect.arrayContaining([
+        "@aws-sdk/client-kms",
+        "@aws-sdk/client-sso",
+        "@datadog/flagging-core",
+        "@napi-rs/keyring",
+        "@prisma/client",
+        "@smithy/util-stream",
+        "dd-trace",
+      ]),
+    );
   });
 
   it("includes the Workflow sandbox runtime plugin only when Workflow is enabled", async () => {
@@ -606,15 +606,15 @@ describe("application Nitro creation", () => {
     createNitroMock.mockResolvedValueOnce(directNitroStub.nitro);
     createNitroMock.mockResolvedValueOnce(workflowNitroStub.nitro);
 
-    const { createProductionApplicationNitro } =
+    const { createApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
 
     const directHost = createPreparedHost();
     const workflowHost = createPreparedHost();
-    workflowHost.compileResult.manifest.workflowTool = {};
+    workflowHost.compileResult.manifest.workflowEnabled = true;
 
-    await createProductionApplicationNitro(directHost, createProductionOptions(directHost));
-    await createProductionApplicationNitro(workflowHost, createProductionOptions(workflowHost));
+    await createApplicationNitro(directHost, false);
+    await createApplicationNitro(workflowHost, false);
 
     const directPlugins = createNitroMock.mock.calls[0]?.[0].plugins as string[];
     const workflowPlugins = createNitroMock.mock.calls[1]?.[0].plugins as string[];
@@ -633,12 +633,11 @@ describe("application Nitro creation", () => {
     createNitroMock.mockResolvedValueOnce(productionNitroStub.nitro);
     createNitroMock.mockResolvedValueOnce(devNitroStub.nitro);
 
-    const { createDevelopmentApplicationNitro, createProductionApplicationNitro } =
+    const { createApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
 
-    const productionHost = createPreparedHost();
-    await createProductionApplicationNitro(productionHost, createProductionOptions(productionHost));
-    await createDevelopmentApplicationNitro(createPreparedHost());
+    await createApplicationNitro(createPreparedHost(), false);
+    await createApplicationNitro(createPreparedHost(), true);
 
     const productionPlugins = createNitroMock.mock.calls[0]?.[0].plugins as string[];
     const devPlugins = createNitroMock.mock.calls[1]?.[0].plugins as string[];
@@ -655,7 +654,7 @@ describe("application Nitro creation", () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
-    const { createProductionApplicationNitro } =
+    const { createApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
     const preparedHost = createPreparedHost();
     preparedHost.compileResult.manifest.config = {
@@ -665,7 +664,7 @@ describe("application Nitro creation", () => {
       },
     } as typeof preparedHost.compileResult.manifest.config;
 
-    await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
+    await createApplicationNitro(preparedHost, false);
 
     const traceDeps = createNitroMock.mock.calls[0]?.[0].traceDeps;
     expect(traceDeps).toEqual(
@@ -715,14 +714,11 @@ describe("application Nitro creation", () => {
     ]);
 
     try {
-      const { createProductionApplicationNitro } =
+      const { createApplicationNitro } =
         await import("#internal/nitro/host/create-application-nitro.js");
       const preparedHost = createPreparedHost();
       preparedHost.workflowBuildDir = workflowBuildDir;
-      await createProductionApplicationNitro(preparedHost, {
-        ...createProductionOptions(preparedHost),
-        buildDir: nitroBuildDir,
-      });
+      await createApplicationNitro(preparedHost, false);
 
       const rollupBeforeHooks = nitroStub.hookHandlers.get("rollup:before") ?? [];
       const config = {
