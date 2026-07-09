@@ -55,6 +55,7 @@ export function normalizeAgentDefinition(
       "model",
       "modelContextWindowTokens",
       "modelOptions",
+      "onStepWouldEndTurn",
       "outputSchema",
       "reasoning",
     ],
@@ -105,6 +106,13 @@ export function normalizeAgentDefinition(
 
   if (record.limits !== undefined) {
     definition.limits = normalizeAgentLimitsDefinition(record.limits, message);
+  }
+
+  if (record.onStepWouldEndTurn !== undefined) {
+    definition.onStepWouldEndTurn = expectFunction(
+      record.onStepWouldEndTurn,
+      message,
+    ) as NormalizedAgentDefinition["onStepWouldEndTurn"];
   }
 
   return definition as Readonly<NormalizedAgentDefinition>;

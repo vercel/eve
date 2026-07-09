@@ -56,6 +56,33 @@ describe("compileAgentConfig", () => {
       sourceKind: "module",
     });
   });
+
+  it("preserves the turn continuation hook source", async () => {
+    mocks.loadModuleBackedDefinition.mockResolvedValue({
+      model: "openai/gpt-5.5",
+      onStepWouldEndTurn: () => "continue",
+    });
+
+    const manifest = createAgentSourceManifest({
+      agentId: "app",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      configModule: createModuleSourceRef({
+        logicalPath: "agent.ts",
+        sourceId: "agent-config",
+      }),
+    });
+
+    const compiled = await compileAgentConfig(manifest, {
+      modelCatalog: createModelCatalog(),
+    });
+
+    expect(compiled.onStepWouldEndTurn).toEqual({
+      logicalPath: "agent.ts",
+      sourceId: "agent-config",
+      sourceKind: "module",
+    });
+  });
 });
 
 function createModelCatalog(): ManifestCompileContext["modelCatalog"] {

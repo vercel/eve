@@ -17,6 +17,7 @@ import {
   type TypedToolCall,
   type TypedToolError,
   type TypedToolResult,
+  type UserContent,
 } from "ai";
 import { isScheduleAppAuth } from "#channel/schedule-auth.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
@@ -2094,6 +2095,41 @@ async function handleStepResult(input: {
     return { next: runStep, session: nextSession };
   }
 
+  if (!calledFinalOutput && config.onStepWouldEndTurn !== undefined) {
+    const continuationResult = await config.onStepWouldEndTurn({
+      lastStep: {
+        finishReason: result.finishReason,
+        text: stepOutput,
+        toolCalls: result.toolCalls.map((toolCall) => ({
+          toolCallId: toolCall.toolCallId,
+          toolName: toolCall.toolName,
+        })),
+      },
+      messages: updatedHistory,
+    });
+    throwIfTurnAborted(config.abortSignal);
+    const continuation = normalizeTurnContinuationMessage(continuationResult);
+
+    if (continuation !== null) {
+      const stagedContinuationContent = await stageAttachmentsToSandbox(continuation.content);
+      throwIfTurnAborted(config.abortSignal);
+      const stagedContinuation: ModelMessage = {
+        content: stagedContinuationContent,
+        role: "user",
+      };
+      nextSession = {
+        ...nextSession,
+        history: [...updatedHistory, stagedContinuation],
+      };
+      if (emit) {
+        emissionState = advanceStep(emissionState);
+        nextSession = setHarnessEmissionState(nextSession, emissionState);
+      }
+
+      return { next: runStep, session: nextSession };
+    }
+  }
+
   // `mode` is the fundamental terminal split: a task run must finish (an unmet
   // schema becomes an error), a conversation run may park. Whether a schema is
   // in effect is mode-independent — it is resolved once at the execution layer
@@ -2133,6 +2169,37 @@ function extractFinalOutput(result: HarnessStepResult): JsonValue | undefined {
   return (result.toolCalls ?? []).find(
     (call) => call.toolName === FINAL_OUTPUT_TOOL_NAME && !isInvalidToolCall(call),
   )?.input as JsonValue | undefined;
+}
+
+type TurnContinuationMessage = {
+  readonly content: string | UserContent;
+  readonly role: "user";
+};
+
+function normalizeTurnContinuationMessage(result: unknown): TurnContinuationMessage | null {
+  if (result === null || result === undefined) {
+    return null;
+  }
+
+  if (typeof result === "string" || Array.isArray(result)) {
+    return { content: result as string | UserContent, role: "user" };
+  }
+
+  if (
+    typeof result === "object" &&
+    "role" in result &&
+    (result as { readonly role?: unknown }).role === "user" &&
+    "content" in result
+  ) {
+    return {
+      content: (result as { readonly content: string | UserContent }).content,
+      role: "user",
+    };
+  }
+
+  throw new Error(
+    'Expected onStepWouldEndTurn to return a string, UserContent, { role: "user", content }, null, or undefined.',
+  );
 }
 
 /**

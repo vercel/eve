@@ -42,6 +42,7 @@ export interface RuntimeTurnAgent {
   readonly dynamicModel?: RuntimeDynamicModelReference;
   readonly model: RuntimeModelReference;
   readonly nodeId?: string;
+  readonly onStepWouldEndTurn?: ResolvedAgent["config"]["onStepWouldEndTurn"];
   readonly outputSchema?: ResolvedAgent["config"]["outputSchema"];
   readonly reasoning?: ResolvedAgent["config"]["reasoning"];
   readonly tools: readonly PreparedRuntimeTool[];
@@ -80,6 +81,7 @@ export function createResolvedRuntimeTurnAgent(input: {
     dynamicModel: agent.config.dynamicModel,
     model: agent.config.model,
     nodeId: input.nodeId,
+    onStepWouldEndTurn: agent.config.onStepWouldEndTurn,
     outputSchema: agent.config.outputSchema,
     reasoning: agent.config.reasoning,
     tools: [...input.tools],

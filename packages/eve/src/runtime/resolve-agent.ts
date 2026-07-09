@@ -157,6 +157,7 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
     experimental?: ResolvedAgent["config"]["experimental"];
     model: ResolvedAgent["config"]["model"];
     name: string;
+    onStepWouldEndTurn?: ResolvedAgent["config"]["onStepWouldEndTurn"];
     outputSchema?: ResolvedAgent["config"]["outputSchema"];
     reasoning?: ResolvedAgent["config"]["reasoning"];
     source?: ResolvedAgent["config"]["source"];
@@ -235,6 +236,10 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
 
   if (manifest.config.outputSchema !== undefined) {
     config.outputSchema = manifest.config.outputSchema;
+  }
+
+  if (manifest.config.onStepWouldEndTurn !== undefined) {
+    config.onStepWouldEndTurn = createResolvedModuleSourceRef(manifest.config.onStepWouldEndTurn);
   }
 
   if (manifest.config.reasoning !== undefined) {
