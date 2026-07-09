@@ -41,7 +41,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 34;
+export const COMPILED_AGENT_MANIFEST_VERSION = 35;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -202,6 +202,11 @@ export interface CompiledDynamicToolDefinition extends ModuleSourceRef {
 export interface CompiledDynamicSkillDefinition extends ModuleSourceRef {
   readonly slug: string;
   readonly eventNames: readonly string[];
+  /**
+   * Mount namespace when this resolver comes from an extension. Names of skills
+   * a map resolver produces are prefixed with `${extensionNamespace}__`.
+   */
+  readonly extensionNamespace?: string;
 }
 
 /**
@@ -585,6 +590,7 @@ const compiledDynamicSkillDefinitionSchema: z.ZodType<CompiledDynamicSkillDefini
   .object({
     eventNames: z.array(z.string()).readonly(),
     exportName: z.string().optional(),
+    extensionNamespace: z.string().optional(),
     logicalPath: z.string(),
     slug: z.string(),
     sourceId: z.string(),

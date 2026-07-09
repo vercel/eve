@@ -231,6 +231,7 @@ async function composeManifestContributions(input: {
       dynamicSkills.push({
         ...entry.definition,
         slug: `${prefix}${entry.definition.slug}`,
+        extensionNamespace: namespace,
         sourceId: scopeSourceId(entry.definition.sourceId),
         logicalPath: rebase(entry.definition.logicalPath),
       });

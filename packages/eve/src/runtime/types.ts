@@ -345,6 +345,11 @@ export interface ResolvedDynamicSkillResolver extends Readonly<ModuleSourceRef> 
   readonly events: Readonly<
     Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
   >;
+  /**
+   * Mount namespace when this resolver comes from an extension. Names of skills
+   * a map resolver produces are prefixed with `${extensionNamespace}__`.
+   */
+  readonly extensionNamespace?: string;
 }
 
 /**
