@@ -45,6 +45,35 @@ afterEach(() => {
 });
 
 describe("Client request policy", () => {
+  it("includes host query parameters on every agent request", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json(AGENT_INFO))
+      .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(
+        Response.json({ continuationToken: "eve:test", sessionId: "session_1" }, { status: 202 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`),
+      );
+    const client = new Client({
+      host: "https://eve.test?x-vercel-protection-bypass=secret",
+    });
+
+    await client.info();
+    await client.health();
+    await client.fetch("/custom");
+    await (await client.session().send("hello")).result();
+
+    expect(fetchMock.mock.calls).toHaveLength(5);
+    for (const [request] of fetchMock.mock.calls) {
+      expect(new URL(String(request)).searchParams.get("x-vercel-protection-bypass")).toBe(
+        "secret",
+      );
+    }
+  });
+
   it("enforces its redirect policy for info, health, raw fetch, and sessions", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")

@@ -11,18 +11,20 @@ export function createClientUrl(
   searchParams?: Readonly<Record<string, string>>,
 ): string {
   const normalizedRoute = routePath.startsWith("/") ? routePath : `/${routePath}`;
-  const search = formatSearch(searchParams);
 
   if (isAbsoluteUrl(host)) {
     const url = new URL(host);
     const basePath = trimTrailingSlash(url.pathname);
     url.pathname = `${basePath}${normalizedRoute}`;
-    url.search = search;
+    mergeSearchParams(url.searchParams, searchParams);
     url.hash = "";
     return url.toString();
   }
 
-  return `${trimTrailingSlash(host)}${normalizedRoute}${search}`;
+  const url = new URL(host, "http://eve.local");
+  const basePath = trimTrailingSlash(url.pathname);
+  mergeSearchParams(url.searchParams, searchParams);
+  return `${basePath}${normalizedRoute}${formatSearch(url.searchParams)}`;
 }
 
 function isAbsoluteUrl(value: string): boolean {
@@ -34,10 +36,18 @@ function trimTrailingSlash(value: string): string {
   return value.endsWith("/") ? value.slice(0, -1) : value;
 }
 
-function formatSearch(searchParams: Readonly<Record<string, string>> | undefined): string {
-  if (!searchParams || Object.keys(searchParams).length === 0) {
-    return "";
-  }
+function mergeSearchParams(
+  target: URLSearchParams,
+  searchParams: Readonly<Record<string, string>> | undefined,
+): void {
+  if (searchParams === undefined) return;
 
-  return `?${new URLSearchParams(searchParams).toString()}`;
+  for (const [name, value] of Object.entries(searchParams)) {
+    target.set(name, value);
+  }
+}
+
+function formatSearch(searchParams: URLSearchParams): string {
+  const value = searchParams.toString();
+  return value.length === 0 ? "" : `?${value}`;
 }

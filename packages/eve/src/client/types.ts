@@ -68,7 +68,8 @@ export type ClientRedirectPolicy = NonNullable<RequestInit["redirect"]>;
  */
 export interface ClientOptions {
   /**
-   * Base URL of the eve agent server.
+   * Base URL of the eve agent server. Query parameters are included on every
+   * request; request-specific parameters override parameters with the same name.
    */
   readonly host: string;
 

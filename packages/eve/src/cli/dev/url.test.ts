@@ -5,9 +5,9 @@ import { InvalidArgumentError } from "#compiled/commander/index.js";
 import { parseDevelopmentServerUrl } from "./url.js";
 
 describe("parseDevelopmentServerUrl", () => {
-  it("accepts https remote URLs and strips hash and query", () => {
+  it("accepts https remote URLs, preserves query parameters, and strips the hash", () => {
     expect(parseDevelopmentServerUrl("https://my-app.vercel.app/path?token=1#frag")).toBe(
-      "https://my-app.vercel.app/path",
+      "https://my-app.vercel.app/path?token=1",
     );
   });
 
