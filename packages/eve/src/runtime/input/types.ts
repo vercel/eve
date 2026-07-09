@@ -67,6 +67,10 @@ export const inputRequestSchema = z
       .optional(),
     prompt: z.string().describe("The prompt to present to the user."),
     requestId: z.string().describe("Stable identifier for this request."),
+    responseType: z
+      .enum(["approval", "tool-result"])
+      .describe("Protocol response shape expected when this request is resolved.")
+      .optional(),
   })
   .strict();
 

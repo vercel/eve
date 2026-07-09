@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "#compiled/zod/index.js";
 
 import {
+  defineClientTool,
   defineTool,
   defineDynamic,
   disableTool,
@@ -155,6 +156,68 @@ describe("normalizeToolDefinition", () => {
     });
 
     expect(normalizeToolDefinition(tool, FAILURE_MESSAGE).kind).toBe("tool");
+  });
+
+  it("accepts authored client tools that request input instead of executing", () => {
+    const tool = defineClientTool({
+      description: "Ask which plan to apply.",
+      inputSchema: z.object({ accountId: z.string() }),
+      inputRequest: {
+        allowFreeform: false,
+        display: "select",
+        options: ({ accountId }) => [
+          { id: "basic", label: `Basic for ${accountId}` },
+          { id: "pro", label: "Pro" },
+        ],
+        prompt: ({ accountId }) => `Choose a plan for ${accountId}.`,
+      },
+    });
+
+    const entry = normalizeToolDefinition(tool, FAILURE_MESSAGE);
+
+    expect(entry.kind).toBe("tool");
+    if (entry.kind !== "tool") {
+      throw new Error("expected tool kind");
+    }
+    expect(entry.definition.execute).toBeUndefined();
+    expect(entry.definition.inputRequest).toMatchObject({
+      allowFreeform: false,
+      display: "select",
+    });
+  });
+
+  it("rejects authored tools that declare both execute and inputRequest", () => {
+    expect(() =>
+      normalizeToolDefinition(
+        {
+          description: "Ambiguous.",
+          execute(input: unknown) {
+            return input;
+          },
+          inputRequest: {
+            prompt: "Pick one.",
+          },
+          inputSchema: { type: "object" },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow("Expected only one of execute or inputRequest");
+  });
+
+  it("rejects invalid client tool input request metadata", () => {
+    expect(() =>
+      normalizeToolDefinition(
+        {
+          description: "Ask.",
+          inputRequest: {
+            display: "dropdown",
+            prompt: "Pick one.",
+          },
+          inputSchema: { type: "object" },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('Expected inputRequest.display to be "confirmation", "select", or "text"');
   });
 
   it("rejects the removed needsApproval field", () => {

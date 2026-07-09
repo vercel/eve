@@ -1,9 +1,12 @@
+import { jsonSchema } from "ai";
 import { describe, expect, it } from "vitest";
 
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
   extractQuestionInputRequests,
   extractToolApprovalInputRequests,
 } from "#harness/input-extraction.js";
+import type { HarnessToolMap } from "#harness/types.js";
 
 describe("extractQuestionInputRequests", () => {
   it("extracts a question request from an ask_question tool call", () => {
@@ -38,6 +41,7 @@ describe("extractQuestionInputRequests", () => {
         options: [{ id: "yes", label: "Yes" }],
         prompt: "Continue?",
         requestId: "call-1",
+        responseType: "tool-result",
       },
     ]);
   });
@@ -74,6 +78,66 @@ describe("extractQuestionInputRequests", () => {
     expect(result).toEqual([]);
   });
 
+  it("extracts a request from client-side tool metadata", () => {
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "choose_plan",
+        {
+          description: "Ask the user which plan to apply.",
+          inputRequest: {
+            allowFreeform: false,
+            options: (input) => {
+              const { accountId } = input as { accountId: string };
+              return [
+                { id: "basic", label: `Basic for ${accountId}` },
+                { id: "pro", label: "Pro" },
+              ];
+            },
+            prompt: (input) => {
+              const { accountId } = input as { accountId: string };
+              return `Choose a plan for ${accountId}.`;
+            },
+          },
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "choose_plan",
+        },
+      ],
+    ]);
+
+    const result = extractQuestionInputRequests({
+      excludedCallIds: new Set(),
+      toolCalls: [
+        {
+          input: { accountId: "acct_1" },
+          toolCallId: "call-1",
+          toolName: "choose_plan",
+          type: "tool-call",
+        },
+      ],
+      tools,
+    });
+
+    expect(result).toEqual([
+      {
+        action: {
+          callId: "call-1",
+          input: { accountId: "acct_1" },
+          kind: "tool-call",
+          toolName: "choose_plan",
+        },
+        allowFreeform: false,
+        display: "select",
+        options: [
+          { id: "basic", label: "Basic for acct_1" },
+          { id: "pro", label: "Pro" },
+        ],
+        prompt: "Choose a plan for acct_1.",
+        requestId: "call-1",
+        responseType: "tool-result",
+      },
+    ]);
+  });
+
   it("skips tool calls present in the excluded set", () => {
     const result = extractQuestionInputRequests({
       excludedCallIds: new Set(["call-1"]),
@@ -88,6 +152,38 @@ describe("extractQuestionInputRequests", () => {
     });
 
     expect(result).toEqual([]);
+  });
+
+  it("skips invalid client-side tool calls", () => {
+    const tools: HarnessToolMap = new Map([
+      [
+        "choose_plan",
+        {
+          description: "Choose a plan.",
+          inputRequest: { prompt: "Choose a plan." },
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "choose_plan",
+        },
+      ],
+    ]);
+
+    expect(
+      extractQuestionInputRequests({
+        excludedCallIds: new Set(),
+        toolCalls: [
+          {
+            dynamic: true,
+            error: new Error("Invalid input"),
+            input: "not-json",
+            invalid: true,
+            toolCallId: "call-invalid",
+            toolName: "choose_plan",
+            type: "tool-call",
+          },
+        ],
+        tools,
+      }),
+    ).toEqual([]);
   });
 });
 
@@ -125,6 +221,7 @@ describe("extractToolApprovalInputRequests", () => {
         ],
         prompt: "Approve tool call: bash",
         requestId: "approval-1",
+        responseType: "approval",
       },
     ]);
   });
@@ -163,6 +260,7 @@ describe("extractToolApprovalInputRequests", () => {
         ],
         prompt: "Approve tool call: bash",
         requestId: "approval-1",
+        responseType: "approval",
       },
     ]);
   });

@@ -1,6 +1,7 @@
 import type { FlexibleSchema } from "ai";
 
 import type { Approval } from "#public/definitions/approval.js";
+import type { ClientToolInputRequestDefinition } from "#public/definitions/tool.js";
 import type { ToolExecuteOptions } from "#shared/tool-definition.js";
 
 /**
@@ -24,6 +25,7 @@ export interface HarnessToolDefinition {
   readonly description: string;
   readonly execute?: (input: any, options: ToolExecuteOptions) => any;
   readonly inputSchema: FlexibleSchema;
+  readonly inputRequest?: ClientToolInputRequestDefinition;
   readonly name: string;
   readonly approval?: Approval;
   readonly outputSchema?: FlexibleSchema;

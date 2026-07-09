@@ -55,7 +55,9 @@ export function buildToolSet(input: {
   const disabled = input.disabledProviderTools;
 
   for (const definition of input.tools.values()) {
-    if (definition.name === ASK_QUESTION_TOOL_NAME && !canRequestInput) {
+    const isClientInputTool =
+      definition.execute === undefined && definition.inputRequest !== undefined;
+    if ((definition.name === ASK_QUESTION_TOOL_NAME || isClientInputTool) && !canRequestInput) {
       continue;
     }
 

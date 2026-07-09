@@ -4,6 +4,9 @@ import { z } from "zod";
 import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
 import type { InputRequest } from "#runtime/input/types.js";
 import { createRuntimeToolCallActionFromToolCall } from "#harness/input-requests.js";
+import type { HarnessToolMap } from "#harness/types.js";
+import type { ClientToolInputRequestDefinition } from "#public/definitions/tool.js";
+import type { JsonObject } from "#shared/json.js";
 
 // Persisted history parts lose AI SDK typing on the storage round trip. The
 // schemas are the single source for the runtime narrowing and the static
@@ -37,6 +40,7 @@ const ToolApprovalRequestSchema = z.object({
  */
 export function extractQuestionInputRequests(input: {
   readonly excludedCallIds: ReadonlySet<string>;
+  readonly tools?: HarnessToolMap;
   readonly toolCalls: readonly TypedToolCall<ToolSet>[];
 }): InputRequest[] {
   return extractQuestionRequests(input);
@@ -49,49 +53,101 @@ function extractQuestionRequests(input: {
   const requests: InputRequest[] = [];
 
   for (const toolCall of input.toolCalls) {
-    if (toolCall.toolName !== ASK_QUESTION_TOOL_NAME) {
+    if (input.excludedCallIds.has(toolCall.toolCallId) || toolCall.invalid === true) {
       continue;
     }
 
-    if (input.excludedCallIds.has(toolCall.toolCallId)) {
+    if (toolCall.toolName === ASK_QUESTION_TOOL_NAME) {
+      const action = createRuntimeToolCallActionFromToolCall({ toolCall });
+      requests.push(createAskQuestionInputRequest(action));
+      continue;
+    }
+
+    const definition = input.tools?.get(toolCall.toolName)?.inputRequest;
+    if (definition === undefined) {
       continue;
     }
 
     const action = createRuntimeToolCallActionFromToolCall({ toolCall });
-    const toolInput = action.input as {
-      allowFreeform?: boolean;
-      options?: InputRequest["options"];
-      prompt: string;
-    };
-    const request: {
-      action: InputRequest["action"];
-      allowFreeform?: InputRequest["allowFreeform"];
-      display?: InputRequest["display"];
-      kind: InputRequest["kind"];
-      options?: InputRequest["options"];
-      prompt: InputRequest["prompt"];
-      requestId: InputRequest["requestId"];
-    } = {
-      action,
-      display: "text",
-      kind: "question",
-      prompt: String(toolInput.prompt),
-      requestId: action.callId,
-    };
-
-    if (toolInput.allowFreeform !== undefined) {
-      request.allowFreeform = toolInput.allowFreeform;
-    }
-
-    if (toolInput.options !== undefined) {
-      request.options = toolInput.options;
-      request.display = "select";
-    }
-
-    requests.push(request);
+    requests.push(createClientToolInputRequest(action, definition));
   }
 
   return requests;
+}
+
+function createAskQuestionInputRequest(action: InputRequest["action"]): InputRequest {
+  const toolInput = action.input as {
+    allowFreeform?: boolean;
+    options?: InputRequest["options"];
+    prompt: string;
+  };
+  const request: {
+    action: InputRequest["action"];
+    allowFreeform?: InputRequest["allowFreeform"];
+    display?: InputRequest["display"];
+    options?: InputRequest["options"];
+    prompt: InputRequest["prompt"];
+    requestId: InputRequest["requestId"];
+    responseType: InputRequest["responseType"];
+  } = {
+    action,
+    display: "text",
+    prompt: String(toolInput.prompt),
+    requestId: action.callId,
+    responseType: "tool-result",
+  };
+
+  if (toolInput.allowFreeform !== undefined) {
+    request.allowFreeform = toolInput.allowFreeform;
+  }
+
+  if (toolInput.options !== undefined) {
+    request.options = toolInput.options;
+    request.display = "select";
+  }
+
+  return request;
+}
+
+function createClientToolInputRequest(
+  action: InputRequest["action"],
+  definition: ClientToolInputRequestDefinition,
+): InputRequest {
+  const toolInput = action.input as JsonObject;
+  const options = resolveInputRequestValue(definition.options, toolInput);
+  const allowFreeform = resolveInputRequestValue(definition.allowFreeform, toolInput);
+  const request: {
+    action: InputRequest["action"];
+    allowFreeform?: InputRequest["allowFreeform"];
+    display?: InputRequest["display"];
+    options?: InputRequest["options"];
+    prompt: InputRequest["prompt"];
+    requestId: InputRequest["requestId"];
+    responseType: InputRequest["responseType"];
+  } = {
+    action,
+    display: definition.display ?? (options === undefined ? "text" : "select"),
+    prompt: String(resolveInputRequestValue(definition.prompt, toolInput)),
+    requestId: action.callId,
+    responseType: "tool-result",
+  };
+
+  if (allowFreeform !== undefined) {
+    request.allowFreeform = allowFreeform;
+  }
+
+  if (options !== undefined) {
+    request.options = [...options];
+  }
+
+  return request;
+}
+
+function resolveInputRequestValue<T>(
+  value: T | ((input: JsonObject) => T) | undefined,
+  input: JsonObject,
+): T | undefined {
+  return typeof value === "function" ? (value as (input: JsonObject) => T)(input) : value;
 }
 
 /**
@@ -164,7 +220,8 @@ function extractApprovalRequests(input: {
         { id: "deny", label: "No" },
       ],
       prompt: `Approve tool call: ${toolCall.toolName}`,
-      requestId: approval.approvalId,
+      requestId: approvalRequest.approvalId,
+      responseType: "approval",
     });
   }
 

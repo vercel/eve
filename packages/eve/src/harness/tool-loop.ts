@@ -1937,8 +1937,9 @@ async function handleStepResult(input: {
   });
   const approvalRequestCallIds = new Set(approvalRequests.map((request) => request.action.callId));
   const questionRequests = extractQuestionInputRequests({
-    toolCalls: result.toolCalls,
     excludedCallIds: new Set([...invalidInputToolCallIds, ...approvalRequestCallIds]),
+    toolCalls: result.toolCalls,
+    tools: config.tools,
   });
   const inputRequests: InputRequest[] = [...approvalRequests, ...questionRequests];
   const advertisedRuntimeActionTools = getAdvertisedTools({

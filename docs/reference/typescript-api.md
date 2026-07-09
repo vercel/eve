@@ -34,6 +34,7 @@ export default defineTool({
 | ----------------------------------------------------- | --------------------------------------------- | ------------------------------------ | ------------------------------------------------------ |
 | `defineAgent`                                         | `eve`                                         | `agent/agent.ts`                     | [agent.ts](../agent-config)                            |
 | `defineTool`                                          | `eve/tools`                                   | `agent/tools/<name>.ts`              | [Tools](../tools)                                      |
+| `defineClientTool`                                    | `eve/tools`                                   | `agent/tools/<name>.ts`              | [Human-in-the-loop](/docs/human-in-the-loop)           |
 | `defineDynamic`                                       | `eve/tools`, `eve/skills`, `eve/instructions` | `agent/{tools,skills,instructions}/` | [Dynamic capabilities](../guides/dynamic-capabilities) |
 | `defineMcpClientConnection`                           | `eve/connections`                             | `agent/connections/<name>.ts`        | [MCP connections](../connections/mcp)                  |
 | `defineOpenAPIConnection`                             | `eve/connections`                             | `agent/connections/<name>.ts`        | [OpenAPI connections](../connections/openapi)          |
@@ -68,32 +69,32 @@ A few non-`define*` helpers round out the set: `disableTool` and `experimental_w
 
 ## Imports at a glance
 
-| Import                                                      | Holds                                                                 |
-| ----------------------------------------------------------- | --------------------------------------------------------------------- |
-| `eve`                                                       | `defineAgent`, `defineRemoteAgent`, agent config types                |
-| `eve/tools`                                                 | `defineTool`, `defineDynamic`, `disableTool`, `experimental_workflow` |
-| `eve/tools/defaults`                                        | the built-in tools as plain values                                    |
-| `eve/tools/approval`                                        | `always`, `once`, `never`                                             |
-| `eve/connections`                                           | `defineMcpClientConnection`, `defineOpenAPIConnection`                |
-| `eve/channels`                                              | `defineChannel`, route verbs                                          |
-| `eve/channels/eve`                                          | `eveChannel`                                                          |
-| `eve/channels/auth`                                         | `localDev`, `vercelOidc`, `placeholderAuth`                           |
-| `eve/channels/{slack,discord,teams,telegram,twilio,github}` | platform channel factories                                            |
-| `eve/hooks`                                                 | `defineHook`                                                          |
-| `eve/schedules`                                             | `defineSchedule`                                                      |
-| `eve/skills`                                                | `defineSkill`, `defineDynamic`                                        |
-| `eve/instructions`                                          | `defineInstructions`, `defineDynamic`                                 |
-| `eve/context`                                               | `defineState`, session and state types                                |
-| `eve/sandbox`                                               | `defineSandbox`, backends                                             |
-| `eve/instrumentation`                                       | `defineInstrumentation`, `isChannel`                                  |
-| `eve/models/openai`                                         | `experimental_chatgpt`                                                |
-| `eve/evals`                                                 | `defineEval`, `defineEvalConfig`, `mockModel`, eval types             |
-| `eve/evals/expect`                                          | `includes`, `equals`, `matches`, `similarity`                         |
-| `eve/evals/reporters`                                       | `Braintrust`, `JUnit`, `EvalReporter`                                 |
-| `eve/evals/loaders`                                         | `loadJson`, `loadYaml`                                                |
-| `eve/react`, `eve/vue`, `eve/svelte`                        | `useEveAgent`                                                         |
-| `eve/next`, `eve/nuxt`, `eve/sveltekit`                     | framework bundler plugins                                             |
-| [`eve/client`](../guides/client/overview)                   | `Client`, `ClientSession`                                             |
+| Import                                                      | Holds                                                                                    |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `eve`                                                       | `defineAgent`, `defineRemoteAgent`, agent config types                                   |
+| `eve/tools`                                                 | `defineTool`, `defineClientTool`, `defineDynamic`, `disableTool`, `ExperimentalWorkflow` |
+| `eve/tools/defaults`                                        | the built-in tools as plain values                                                       |
+| `eve/tools/approval`                                        | `always`, `once`, `never`                                                                |
+| `eve/connections`                                           | `defineMcpClientConnection`, `defineOpenAPIConnection`                                   |
+| `eve/channels`                                              | `defineChannel`, route verbs                                                             |
+| `eve/channels/eve`                                          | `eveChannel`                                                                             |
+| `eve/channels/auth`                                         | `localDev`, `vercelOidc`, `placeholderAuth`                                              |
+| `eve/channels/{slack,discord,teams,telegram,twilio,github}` | platform channel factories                                                               |
+| `eve/hooks`                                                 | `defineHook`                                                                             |
+| `eve/schedules`                                             | `defineSchedule`                                                                         |
+| `eve/skills`                                                | `defineSkill`, `defineDynamic`                                                           |
+| `eve/instructions`                                          | `defineInstructions`, `defineDynamic`                                                    |
+| `eve/context`                                               | `defineState`, session and state types                                                   |
+| `eve/sandbox`                                               | `defineSandbox`, backends                                                                |
+| `eve/instrumentation`                                       | `defineInstrumentation`, `isChannel`                                                     |
+| `eve/models/openai`                                         | `experimental_chatgpt`                                                                   |
+| `eve/evals`                                                 | `defineEval`, `defineEvalConfig`, `mockModel`, eval types                                |
+| `eve/evals/expect`                                          | `includes`, `equals`, `matches`, `similarity`                                            |
+| `eve/evals/reporters`                                       | `Braintrust`, `JUnit`, `EvalReporter`                                                    |
+| `eve/evals/loaders`                                         | `loadJson`, `loadYaml`                                                                   |
+| `eve/react`, `eve/vue`, `eve/svelte`                        | `useEveAgent`                                                                            |
+| `eve/next`, `eve/nuxt`, `eve/sveltekit`                     | framework bundler plugins                                                                |
+| [`eve/client`](../guides/client/overview)                   | `Client`, `ClientSession`                                                                |
 
 Exported types ship from the same entrypoint as the helper they describe (for example `ToolDefinition` and `ToolContext` from `eve/tools`). For the exhaustive list, read `packages/eve/src/public/index.ts`.
 

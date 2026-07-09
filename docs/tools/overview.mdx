@@ -68,6 +68,8 @@ export default defineTool({
 
 Approval is one half of eve's [human-in-the-loop](./human-in-the-loop) model — the page covers the `always/once/never` helpers, input-dependent policies, and how a gated call pauses and resumes durably.
 
+When the model should call a named, typed action that is fulfilled by your UI instead of app-runtime code, use `defineClientTool` from `eve/tools`. Client-side tools expose the same model-facing `description` and `inputSchema`, but replace `execute` with `inputRequest` metadata. The call becomes an `input.requested` pause and resumes with a normal JSON tool result. See [Human-in-the-loop](./human-in-the-loop#client-side-tools) for an example.
+
 ## Shape what the model sees with `toModelOutput`
 
 By default the model sees the full `execute` return. When a tool returns rich data a channel needs for rendering but the model only needs the gist, project it down with `toModelOutput`:
