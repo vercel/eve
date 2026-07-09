@@ -20,23 +20,29 @@ const DEFAULT_ISLO_API_BASE_URL = "https://api.islo.dev";
 export function islo(
   opts?: IsloSandboxCreateOptions,
 ): SandboxBackend<IsloSandboxBootstrapUseOptions, IsloSandboxSessionUseOptions> {
-  const { apiBaseUrl, fetch: fetchOverride, token, ...rest } = opts ?? {};
+  const { apiBaseUrl, fetch: fetchOverride, ...rest } = opts ?? {};
   const resolvedToken =
-    token ??
+    rest.token ??
     readNonEmptyEnvironmentVariable("ISLO_TOKEN") ??
     readNonEmptyEnvironmentVariable("ISLO_API_KEY");
   const resolvedApiBaseUrl = normalizeApiBaseUrl(apiBaseUrl);
 
+  const createOptions = {
+    ...rest,
+    fetch: createIsloFetch({
+      apiBaseUrl: resolvedApiBaseUrl,
+      fetch: fetchOverride ?? globalThis.fetch,
+    }),
+  };
+  if (resolvedToken === undefined) {
+    delete createOptions.token;
+  } else {
+    createOptions.token = resolvedToken;
+  }
+
   return createVercelSandbox({
     backendName: "islo",
-    createOptions: {
-      ...rest,
-      ...(resolvedToken === undefined ? {} : { token: resolvedToken }),
-      fetch: createIsloFetch({
-        apiBaseUrl: resolvedApiBaseUrl,
-        fetch: fetchOverride ?? globalThis.fetch,
-      }),
-    },
+    createOptions,
     providerName: "Islo",
   });
 }
