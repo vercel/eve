@@ -6,7 +6,15 @@ import { Device } from "@vgpu/core";
 import { createRenderPipeline, RenderPass } from "@vgpu/render";
 import { compile } from "@vgpu/wgsl";
 import eveCubemapWgsl from "../shaders/cubemap/render.wgsl";
-import { CUBE_FACE_COUNT, CUBE_FORMAT, CUBE_LIGHT_FLOAT_COUNT, CUBE_MAX_LIGHTS, CUBE_PARAMS_BYTE_SIZE, CUBE_PARAMS_FLOAT_COUNT, CUBE_SIZE } from "./constants";
+import {
+  CUBE_FACE_COUNT,
+  CUBE_FORMAT,
+  CUBE_LIGHT_FLOAT_COUNT,
+  CUBE_MAX_LIGHTS,
+  CUBE_PARAMS_BYTE_SIZE,
+  CUBE_PARAMS_FLOAT_COUNT,
+  CUBE_SIZE,
+} from "./constants";
 import type { EnvLightConfig, StudioCubemap, Vec3 } from "./types";
 
 export function createStudioCubemap(
@@ -84,7 +92,11 @@ export function renderStudioCubemap(
   }
 }
 
-export function cubeParamsData(face: number, lights: readonly EnvLightConfig[], globalIntensity: number) {
+export function cubeParamsData(
+  face: number,
+  lights: readonly EnvLightConfig[],
+  globalIntensity: number,
+) {
   if (lights.length > CUBE_MAX_LIGHTS) {
     throw new Error(
       `Studio cubemap supports up to ${CUBE_MAX_LIGHTS} lights, received ${lights.length}`,

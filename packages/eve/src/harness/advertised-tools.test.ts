@@ -9,41 +9,66 @@ import { buildToolSet } from "#harness/tools.js";
 import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 
 describe("getAdvertisedTools", () => {
-  it("keeps subagent tools below the subagent depth limit", () => {
+  it("keeps the recursive agent tool in the root session", () => {
+    const tools = new Map([
+      ["add", createTool("add")],
+      ["agent", createRecursiveAgentTool()],
+    ]) satisfies HarnessToolMap;
+
+    const advertisedTools = getAdvertisedTools({ session: {}, tools });
+
+    expect([...advertisedTools.keys()]).toEqual(["add", "agent"]);
+  });
+
+  it("keeps declared subagent tools at any subagent depth", () => {
     const tools = new Map([
       ["add", createTool("add")],
       ["delegate", createSubagentTool("delegate")],
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({
-      session: { subagentDepth: DEFAULT_SUBAGENT_MAX_DEPTH - 1 },
+      session: { subagentDepth: DEFAULT_SUBAGENT_MAX_DEPTH },
       tools,
     });
 
     expect([...advertisedTools.keys()]).toEqual(["add", "delegate"]);
   });
 
-  it("removes subagent tools at the subagent depth limit", () => {
+  it("removes the recursive agent tool from delegated sessions", () => {
     const tools = new Map([
       ["add", createTool("add")],
-      ["delegate", createSubagentTool("delegate")],
+      ["agent", createRecursiveAgentTool()],
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({
-      session: { subagentDepth: DEFAULT_SUBAGENT_MAX_DEPTH },
+      session: { rootSessionId: "root-session", subagentDepth: 1 },
       tools,
     });
 
     expect([...advertisedTools.keys()]).toEqual(["add"]);
   });
 
-  it("removes the built-in agent tool at the subagent depth limit", () => {
+  it("keeps a declared subagent named agent in delegated sessions", () => {
     const tools = new Map([
       ["add", createTool("add")],
       ["agent", createSubagentTool("agent")],
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({
+      session: { rootSessionId: "root-session", subagentDepth: 1 },
+      tools,
+    });
+
+    expect([...advertisedTools.keys()]).toEqual(["add", "agent"]);
+  });
+
+  it("removes the built-in agent tool at the subagent depth limit", () => {
+    const tools = new Map([
+      ["add", createTool("add")],
+      ["agent", createRecursiveAgentTool()],
+    ]) satisfies HarnessToolMap;
+
+    const advertisedTools = getAdvertisedTools({
       session: { subagentDepth: DEFAULT_SUBAGENT_MAX_DEPTH },
       tools,
     });
@@ -51,34 +76,17 @@ describe("getAdvertisedTools", () => {
     expect([...advertisedTools.keys()]).toEqual(["add"]);
   });
 
-  it("uses the session-specific subagent max depth when configured", () => {
-    const tools = new Map([
-      ["add", createTool("add")],
-      ["delegate", createSubagentTool("delegate")],
-    ]) satisfies HarnessToolMap;
-    const maxDepth = DEFAULT_SUBAGENT_MAX_DEPTH + 1;
-
-    const belowCustomLimit = getAdvertisedTools({
-      session: { subagentDepth: DEFAULT_SUBAGENT_MAX_DEPTH, subagentMaxDepth: maxDepth },
-      tools,
-    });
-    const atCustomLimit = getAdvertisedTools({
-      session: { subagentDepth: maxDepth, subagentMaxDepth: maxDepth },
-      tools,
-    });
-
-    expect([...belowCustomLimit.keys()]).toEqual(["add", "delegate"]);
-    expect([...atCustomLimit.keys()]).toEqual(["add"]);
-  });
-
-  it("keeps direct subagent tools in runtime subagent sessions below the depth limit", () => {
+  it("keeps declared subagent tools in runtime subagent sessions", () => {
     const tools = new Map([
       ["add", createTool("add")],
       ["delegate", createSubagentTool("delegate")],
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({
-      session: { rootSessionId: "root-session", subagentDepth: 1 },
+      session: {
+        rootSessionId: "root-session",
+        subagentDepth: DEFAULT_SUBAGENT_MAX_DEPTH,
+      },
       tools,
     });
 
@@ -118,13 +126,13 @@ describe("getAdvertisedTools", () => {
 });
 
 describe("getAdvertisedTools for definition arrays", () => {
-  it("removes subagent tool definitions at the subagent depth limit", () => {
+  it("removes recursive agent tool definitions from delegated sessions", () => {
     const advertisedTools = getAdvertisedTools({
-      session: { subagentDepth: DEFAULT_SUBAGENT_MAX_DEPTH },
-      tools: [createTool("add"), createSubagentTool("delegate")],
+      session: { rootSessionId: "root-session", subagentDepth: 1 },
+      tools: [createTool("add"), createSubagentTool("delegate"), createRecursiveAgentTool()],
     });
 
-    expect(advertisedTools.map((tool) => tool.name)).toEqual(["add"]);
+    expect(advertisedTools.map((tool) => tool.name)).toEqual(["add", "delegate"]);
   });
 });
 
@@ -143,6 +151,18 @@ function createSubagentTool(name: string): HarnessToolDefinition {
       kind: "subagent-call",
       nodeId: "workers",
       subagentName: name,
+    },
+  };
+}
+
+function createRecursiveAgentTool(): HarnessToolDefinition {
+  return {
+    ...createSubagentTool("agent"),
+    runtimeAction: {
+      kind: "subagent-call",
+      nodeId: "root",
+      recursive: true,
+      subagentName: "agent",
     },
   };
 }

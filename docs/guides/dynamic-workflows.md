@@ -66,7 +66,7 @@ export default defineAgent({
 });
 ```
 
-**Root-only, one level of orchestration.** Only the root session ever sees the `Workflow` tool. The subagents a workflow spawns are ordinary delegated child sessions: they never receive the `Workflow` tool themselves, so a workflow cannot recursively spawn more workflows. Direct (non-workflow) delegation by those children stays subject to the usual `limits.maxSubagentDepth` cap (see [Subagents](../subagents)).
+**Root-only, one level of orchestration.** Only the root session ever sees the `Workflow` tool. The subagents a workflow spawns are ordinary delegated child sessions: they never receive the `Workflow` tool themselves, so a workflow cannot recursively spawn more workflows. They also never receive the built-in recursive `agent` tool. Declared children may still call their own nested declared subagents directly (see [Subagents](../subagents)).
 
 ## Where the JavaScript runs
 

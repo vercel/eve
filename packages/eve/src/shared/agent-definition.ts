@@ -150,14 +150,13 @@ export interface PublicAgentCompactionDefinition {
  */
 export interface AgentLimitsDefinition {
   /**
-   * Maximum number of delegated child-session levels from the root session.
+   * Legacy recursive subagent depth limit.
    *
-   * Root sessions are depth 0. A `maxSubagentDepth` of 3 allows child sessions at
-   * depths 1, 2, and 3; sessions already at depth 3 cannot delegate again.
+   * The built-in recursive `agent` tool is now root-only and declared
+   * subagent chains are not depth-limited, so the root-only boundary
+   * supersedes this value.
    *
-   * Delegated subagent sessions resolve this against the cap inherited from
-   * the delegating parent; the tighter value wins.
-   *
+   * @deprecated The recursive `agent` tool is hard-limited to the root session.
    * @default 3
    */
   readonly maxSubagentDepth?: number;

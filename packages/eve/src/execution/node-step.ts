@@ -14,7 +14,7 @@ import {
   type RuntimeModelResolutionScope,
 } from "#runtime/agent/resolve-model.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
+import { ROOT_RUNTIME_AGENT_NODE_ID, type ResolvedRuntimeAgentNode } from "#runtime/graph.js";
 
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
@@ -182,7 +182,7 @@ export function createNodeHarnessTools(input: {
     }
   }
 
-  if (!tools.has("agent")) {
+  if (input.node.nodeId === ROOT_RUNTIME_AGENT_NODE_ID && !tools.has("agent")) {
     tools.set("agent", {
       description: BUILT_IN_AGENT_TOOL_DESCRIPTION,
       inputSchema: jsonSchema(SUBAGENT_TOOL_INPUT_SCHEMA),
@@ -190,6 +190,7 @@ export function createNodeHarnessTools(input: {
       runtimeAction: {
         kind: "subagent-call",
         nodeId: input.node.nodeId,
+        recursive: true,
         subagentName: "agent",
       },
     });
