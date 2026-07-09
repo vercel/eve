@@ -239,6 +239,8 @@ export interface ChannelEvents<TCtx = void> {
   readonly "turn.started"?: ChannelEventHandler<"turn.started", TCtx>;
   readonly "actions.requested"?: ChannelEventHandler<"actions.requested", TCtx>;
   readonly "action.result"?: ChannelEventHandler<"action.result", TCtx>;
+  readonly "subagent.called"?: ChannelEventHandler<"subagent.called", TCtx>;
+  readonly "subagent.completed"?: ChannelEventHandler<"subagent.completed", TCtx>;
   readonly "message.completed"?: ChannelEventHandler<"message.completed", TCtx>;
   readonly "message.appended"?: ChannelEventHandler<"message.appended", TCtx>;
   readonly "reasoning.appended"?: ChannelEventHandler<"reasoning.appended", TCtx>;
@@ -253,6 +255,26 @@ export interface ChannelEvents<TCtx = void> {
   readonly "authorization.required"?: ChannelEventHandler<"authorization.required", TCtx>;
   readonly "authorization.completed"?: ChannelEventHandler<"authorization.completed", TCtx>;
 }
+
+const CHANNEL_EVENT_TYPES = [
+  "turn.started",
+  "actions.requested",
+  "action.result",
+  "subagent.called",
+  "subagent.completed",
+  "message.completed",
+  "message.appended",
+  "reasoning.appended",
+  "reasoning.completed",
+  "input.requested",
+  "turn.failed",
+  "turn.completed",
+  "session.failed",
+  "session.completed",
+  "session.waiting",
+  "authorization.required",
+  "authorization.completed",
+] as const satisfies readonly (keyof ChannelEvents<any>)[];
 
 /**
  * Input passed to a channel's `receive` callback when another channel or
@@ -373,7 +395,7 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
   let hasEventHandlers = false;
 
   const events = definition.events;
-  for (const eventType of eventTypes) {
+  for (const eventType of CHANNEL_EVENT_TYPES) {
     const userHandler = events?.[eventType];
     if (userHandler) {
       hasEventHandlers = true;

@@ -32,6 +32,7 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
   readonly sessionState: DurableSessionState;
 }): Promise<{
   readonly results: readonly RuntimeSubagentResultActionResult[];
+  readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }> {
   "use step";
@@ -97,6 +98,9 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
 
   return {
     results: [...dispatched.results, ...blockedResults],
+    ...(dispatched.serializedContext === undefined
+      ? {}
+      : { serializedContext: dispatched.serializedContext }),
     sessionState: dispatched.sessionState,
   };
 }

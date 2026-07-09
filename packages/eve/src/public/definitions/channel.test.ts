@@ -7,9 +7,19 @@ import type { InferReceiveTarget } from "#channel/receive-target.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import type { ContextAccessor } from "#context/key.js";
 import { SessionKey, type Session } from "#context/keys.js";
-import type { slackChannel, SlackInstrumentationMetadata } from "#public/channels/slack/index.js";
+import type { DiscordChannelEvents } from "#public/channels/discord/index.js";
+import type { GitHubChannelEvents } from "#public/channels/github/index.js";
+import type { LinearChannelEvents } from "#public/channels/linear/index.js";
+import type {
+  slackChannel,
+  SlackChannelEvents,
+  SlackInstrumentationMetadata,
+} from "#public/channels/slack/index.js";
+import type { TeamsChannelEvents } from "#public/channels/teams/index.js";
+import type { TelegramChannelEvents } from "#public/channels/telegram/index.js";
 import type {
   twilioChannel,
+  TwilioChannelEvents,
   TwilioInstrumentationMetadata,
 } from "#public/channels/twilio/index.js";
 import { POST, WS, defineChannel, type InferChannelMetadata } from "#public/definitions/channel.js";
@@ -22,6 +32,11 @@ type IsEqual<TLeft, TRight> =
     : false;
 
 type Assert<T extends true> = T;
+type HasSubagentLifecycleEvents<TEvents> = "subagent.called" extends keyof TEvents
+  ? "subagent.completed" extends keyof TEvents
+    ? true
+    : false
+  : false;
 
 /**
  * `defineChannel` returns a `CompiledChannel`. Tests narrow through it
@@ -246,6 +261,39 @@ describe("defineChannel", () => {
 
     const assertions: [SlackAssertion, TwilioAssertion] = [true, true];
     void assertions;
+  });
+
+  it("types built-in channel configs with subagent lifecycle handlers", () => {
+    type Assertions = [
+      Assert<HasSubagentLifecycleEvents<DiscordChannelEvents>>,
+      Assert<HasSubagentLifecycleEvents<GitHubChannelEvents>>,
+      Assert<HasSubagentLifecycleEvents<LinearChannelEvents>>,
+      Assert<HasSubagentLifecycleEvents<SlackChannelEvents>>,
+      Assert<HasSubagentLifecycleEvents<TeamsChannelEvents>>,
+      Assert<HasSubagentLifecycleEvents<TelegramChannelEvents>>,
+      Assert<HasSubagentLifecycleEvents<TwilioChannelEvents>>,
+    ];
+
+    const assertions: Assertions = [true, true, true, true, true, true, true];
+    const githubEvents: GitHubChannelEvents = {
+      "subagent.called"(data, channel, ctx) {
+        const childSessionId: string = data.childSessionId;
+        const callId: string = data.callId;
+        const sessionId: string = ctx.session.id;
+        void childSessionId;
+        void callId;
+        void channel.thread;
+        void sessionId;
+      },
+      "subagent.completed"(data) {
+        const output: string = data.output;
+        const subagentName: string = data.subagentName;
+        void output;
+        void subagentName;
+      },
+    };
+    void assertions;
+    void githubEvents;
   });
 
   it("type-checks channel metadata projections against the declared shape", () => {
@@ -494,6 +542,90 @@ describe("defineChannel", () => {
     expect(completedData).toMatchObject({
       reasoning: "Need to inspect the repo.",
       turnId: "turn-1",
+    });
+    expect(typeof capturedChannel.continuationToken).toBe("string");
+    expect(capturedCtx.session.id).toBe("sess-channel-test");
+  });
+
+  it("registers subagent lifecycle event handlers with channel and session context", async () => {
+    let calledData: unknown;
+    let completedData: unknown;
+    let capturedChannel: any;
+    let capturedCtx: any;
+    const channel = defineChannel({
+      routes: [POST("/x", async () => new Response("ok"))],
+      events: {
+        "subagent.called": (data, ch, ctx) => {
+          const childSessionId: string = data.childSessionId;
+          calledData = { childSessionId, callId: data.callId, name: data.name };
+          capturedChannel = ch;
+          capturedCtx = ctx;
+        },
+        "subagent.completed": (data) => {
+          const output: string = data.output;
+          completedData = { output, subagentName: data.subagentName };
+        },
+      },
+    });
+
+    const adapter = getAdapter(channel);
+    const session: Session = {
+      auth: { current: null, initiator: null },
+      sessionId: "sess-channel-test",
+      turn: { id: "turn-1", sequence: 0 },
+    };
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, session);
+
+    const accessor: ContextAccessor = {
+      get: (key) => ctx.get(key as any),
+      has: (key) => ctx.has(key as any),
+      require: (key) => ctx.require(key as any),
+      set: (key, value) => ctx.set(key as any, value),
+      ensure: (key, create) => ctx.ensure(key as any, create),
+    };
+    const adapterCtx = buildAdapterContext(adapter, accessor);
+
+    await contextStorage.run(ctx, async () => {
+      await callAdapterEventHandler(
+        adapter,
+        {
+          type: "subagent.called",
+          data: {
+            callId: "call-1",
+            childSessionId: "child-session",
+            sessionId: "sess-channel-test",
+            sequence: 1,
+            name: "reviewer",
+            toolName: "reviewer",
+            turnId: "turn-1",
+            workflowId: "workflow-1",
+          },
+        },
+        adapterCtx,
+      );
+      await callAdapterEventHandler(
+        adapter,
+        {
+          type: "subagent.completed",
+          data: {
+            callId: "call-1",
+            output: "Looks clean.",
+            subagentName: "reviewer",
+          },
+        },
+        adapterCtx,
+      );
+    });
+
+    expect(calledData).toEqual({
+      callId: "call-1",
+      childSessionId: "child-session",
+      name: "reviewer",
+    });
+    expect(completedData).toEqual({
+      output: "Looks clean.",
+      subagentName: "reviewer",
     });
     expect(typeof capturedChannel.continuationToken).toBe("string");
     expect(capturedCtx.session.id).toBe("sess-channel-test");
