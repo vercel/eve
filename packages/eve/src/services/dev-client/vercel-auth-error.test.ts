@@ -64,6 +64,16 @@ describe("isVercelAuthChallenge", () => {
     );
   });
 
+  it("detects Vercel's credentialed deployment-protection rejection", () => {
+    expect(
+      isVercelAuthChallenge(
+        new ClientError(401, "You must sign in\n\nUNAUTHORIZED\n\niad1::request-id\n", {
+          "x-vercel-error": "UNAUTHORIZED",
+        }),
+      ),
+    ).toBe(true);
+  });
+
   it("requires HTTP 401 and the complete legacy HTML challenge signature", () => {
     expect(isVercelAuthChallenge(new ClientError(500, VERCEL_SSO_CHALLENGE_BODY))).toBe(false);
     expect(

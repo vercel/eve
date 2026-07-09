@@ -190,6 +190,16 @@ describe("createRemoteConnectionController", () => {
       },
     },
     {
+      name: "Vercel's credentialed Deployment Protection rejection",
+      error: new ClientError(401, "You must sign in\n\nUNAUTHORIZED\n\niad1::request-id\n", {
+        "x-vercel-error": "UNAUTHORIZED",
+      }),
+      expected: {
+        state: "auth-required",
+        challenge: { kind: "vercel-deployment-protection" },
+      },
+    },
+    {
       name: "a 403 Trusted Sources environment mismatch",
       error: new ClientError(403, TRUSTED_SOURCES_MISMATCH),
       expected: {

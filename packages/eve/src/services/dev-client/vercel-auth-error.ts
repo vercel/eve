@@ -72,6 +72,18 @@ function isVercelSsoRedirect(
   return false;
 }
 
+function isVercelUnauthorized(
+  status: number,
+  headers: Readonly<Record<string, unknown>> | undefined,
+): boolean {
+  if (status !== 401 || headers === undefined) return false;
+
+  for (const [name, value] of Object.entries(headers)) {
+    if (name.toLowerCase() === "x-vercel-error" && value === "UNAUTHORIZED") return true;
+  }
+  return false;
+}
+
 function bodyLooksLikeStructuredVercelAuthChallenge(body: string): boolean {
   let payload: unknown;
   try {
@@ -114,6 +126,7 @@ export function isVercelAuthChallenge(error: unknown): boolean {
   const headers = isObject(candidate.headers) ? candidate.headers : undefined;
   return (
     isVercelSsoRedirect(candidate.status, headers) ||
+    isVercelUnauthorized(candidate.status, headers) ||
     (candidate.status === 401 &&
       (bodyLooksLikeVercelAuthChallenge(candidate.body) ||
         bodyLooksLikeStructuredVercelAuthChallenge(candidate.body)))
