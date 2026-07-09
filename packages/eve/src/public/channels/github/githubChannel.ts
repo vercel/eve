@@ -46,7 +46,13 @@ import {
 } from "#public/channels/github/state.js";
 import type { GitHubPullRequestContextConfig } from "#public/channels/github/pr-context.js";
 import { verifyGitHubRequest } from "#public/channels/github/verify.js";
-import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
+import {
+  composeChannelEvents,
+  defineChannel,
+  POST,
+  type Channel,
+  type ChannelEventConfigMap,
+} from "#public/definitions/channel.js";
 import { readNonEmptyString } from "#shared/guards.js";
 
 const log = createLogger("github.channel");
@@ -124,14 +130,8 @@ type GitHubSessionFailedHandler = (
   channel: GitHubEventContext,
 ) => void | Promise<void>;
 
-/**
- * Event handlers for `githubChannel({ events })`. The channel installs built-in
- * handlers for `turn.started` (eyes reaction plus repo checkout),
- * `message.completed` (posts the reply), and `session.failed`/`turn.failed`
- * (posts an error comment). A handler supplied here replaces the built-in for
- * that key rather than running alongside it.
- */
-export interface GitHubChannelEvents {
+/** Raw GitHub channel event-handler signatures before composition wrappers are applied. */
+export interface GitHubChannelEventHandlers {
   readonly "action.result"?: GitHubEventHandler<"action.result">;
   readonly "actions.requested"?: GitHubEventHandler<"actions.requested">;
   readonly "authorization.completed"?: GitHubEventHandler<"authorization.completed">;
@@ -147,6 +147,16 @@ export interface GitHubChannelEvents {
   readonly "turn.failed"?: GitHubEventHandler<"turn.failed">;
   readonly "turn.started"?: GitHubEventHandler<"turn.started">;
 }
+
+/**
+ * Event handlers for `githubChannel({ events })`. The channel installs built-in
+ * handlers for `turn.started` (eyes reaction plus repo checkout),
+ * `message.completed` (posts the reply), and `session.failed`/`turn.failed`
+ * (posts an error comment). A bare handler composes after the built-in handler
+ * for the same key. Use `beforeDefault(handler)` to run first or
+ * `replaceDefault(handler)` to explicitly replace the built-in handler.
+ */
+export type GitHubChannelEvents = ChannelEventConfigMap<GitHubChannelEventHandlers>;
 
 /** Configuration for {@link githubChannel}. */
 export interface GitHubChannelConfig {
@@ -219,14 +229,14 @@ export interface GitHubChannel extends Channel<GitHubChannelState, GitHubReceive
 export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
   const botName = config.botName ?? process.env.GITHUB_APP_SLUG;
   const dispatchOptions = { botName };
-  const mergedEvents: GitHubChannelEvents = {
-    ...createDefaultEvents({
+  const mergedEvents = composeChannelEvents(
+    createDefaultEvents({
       api: config.api,
       credentials: config.credentials,
       progress: config.progress,
     }),
-    ...config.events,
-  };
+    config.events,
+  );
 
   const channel = defineChannel<GitHubChannelState, GitHubChannelContext, GitHubReceiveTarget>({
     kindHint: "github",

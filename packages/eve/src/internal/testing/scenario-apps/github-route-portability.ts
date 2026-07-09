@@ -4,12 +4,17 @@ export const GITHUB_ROUTE_PORTABILITY_DESCRIPTOR: ScenarioAppDescriptor = {
   files: {
     "agent/channels/github.ts": `import {
   githubChannel,
+  type GitHubChannelEventHandlers,
   type GitHubCheckRunEvent,
   type GitHubCheckSuiteEvent,
   type GitHubWorkflowRunEvent,
 } from "eve/channels/github";
 
 const ignore = <T>(_event: T): null => null;
+const customEvents: GitHubChannelEventHandlers = {
+  "turn.started": () => undefined,
+};
+void customEvents;
 
 export default githubChannel({
   botName: "testbot",

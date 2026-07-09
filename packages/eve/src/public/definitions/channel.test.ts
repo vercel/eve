@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
@@ -12,7 +12,16 @@ import type {
   twilioChannel,
   TwilioInstrumentationMetadata,
 } from "#public/channels/twilio/index.js";
-import { POST, WS, defineChannel, type InferChannelMetadata } from "#public/definitions/channel.js";
+import {
+  POST,
+  WS,
+  afterDefault,
+  beforeDefault,
+  composeChannelEvents,
+  defineChannel,
+  replaceDefault,
+  type InferChannelMetadata,
+} from "#public/definitions/channel.js";
 
 type IsEqual<TLeft, TRight> =
   (<T>() => T extends TLeft ? 1 : 2) extends <T>() => T extends TRight ? 1 : 2
@@ -33,6 +42,107 @@ function getAdapter(channel: unknown): ChannelAdapter<any> {
   }
   return channel.adapter;
 }
+
+describe("composeChannelEvents", () => {
+  interface Events {
+    readonly completed?: (value: string) => void | Promise<void>;
+    readonly optional?: (value: string) => void | Promise<void>;
+  }
+
+  it("runs bare and explicit after-default handlers after the default", async () => {
+    const calls: string[] = [];
+    const defaults: Events = {
+      completed() {
+        calls.push("default");
+      },
+    };
+
+    const bare = composeChannelEvents(defaults, {
+      completed() {
+        calls.push("bare");
+      },
+    });
+    await bare.completed?.("value");
+
+    const explicit = composeChannelEvents(defaults, {
+      completed: afterDefault(() => {
+        calls.push("explicit");
+      }),
+    });
+    await explicit.completed?.("value");
+
+    expect(calls).toEqual(["default", "bare", "default", "explicit"]);
+  });
+
+  it("supports before-default ordering and complete replacement", async () => {
+    const calls: string[] = [];
+    const defaults: Events = {
+      completed() {
+        calls.push("default");
+      },
+    };
+
+    const before = composeChannelEvents(defaults, {
+      completed: beforeDefault(() => {
+        calls.push("before");
+      }),
+    });
+    await before.completed?.("value");
+
+    const replacement = composeChannelEvents(defaults, {
+      completed: replaceDefault(() => {
+        calls.push("replacement");
+      }),
+    });
+    await replacement.completed?.("value");
+
+    expect(calls).toEqual(["before", "default", "replacement"]);
+  });
+
+  it("uses the configured handler when no default exists", async () => {
+    const handler = vi.fn();
+    const events = composeChannelEvents<Events>({}, { optional: beforeDefault(handler) });
+
+    await events.optional?.("value");
+
+    expect(handler).toHaveBeenCalledWith("value");
+  });
+
+  it("awaits the first handler before starting the second", async () => {
+    let releaseFirst!: () => void;
+    const firstFinished = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const second = vi.fn();
+    const events = composeChannelEvents<Events>(
+      { completed: async () => await firstFinished },
+      { completed: second },
+    );
+
+    const pending = events.completed?.("value");
+    await Promise.resolve();
+    expect(second).not.toHaveBeenCalled();
+
+    releaseFirst();
+    await pending;
+    expect(second).toHaveBeenCalledOnce();
+  });
+
+  it("does not run the second handler when the first throws", async () => {
+    const second = vi.fn();
+    const events = composeChannelEvents<Events>(
+      {
+        completed() {
+          throw new Error("default failed");
+        },
+      },
+      { completed: second },
+    );
+
+    await expect(events.completed?.("value")).rejects.toThrow("default failed");
+    expect(second).not.toHaveBeenCalled();
+  });
+});
 
 describe("defineChannel", () => {
   it("returns the bare passthrough adapter when nothing is configured", () => {

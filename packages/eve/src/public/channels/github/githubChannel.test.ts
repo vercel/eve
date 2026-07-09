@@ -16,6 +16,7 @@ import { defaultGitHubAuth } from "#public/channels/github/defaults.js";
 import { githubChannel } from "#public/channels/github/githubChannel.js";
 import { type GitHubChannelState } from "#public/channels/github/state.js";
 import { signGitHubWebhookBody } from "#public/channels/github/verify.js";
+import { replaceDefault } from "#public/definitions/channel.js";
 
 const SECRET = "github-secret";
 
@@ -774,6 +775,49 @@ describe("githubChannel", () => {
     );
   });
 
+  it("runs custom message.completed handlers after posting the default reply", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 77 })));
+    const customHandler = vi.fn(async () => {});
+    const adapter = withState(
+      getAdapter(
+        githubChannel({
+          api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
+          credentials: {
+            appId: "test-app",
+            webhookSecret: SECRET,
+          },
+          events: {
+            "message.completed": customHandler,
+          },
+        }),
+      ),
+      {
+        conversationKind: "issue",
+        installationId: 55,
+        issueNumber: 5,
+        owner: "vercel",
+        repo: "eve",
+        repositoryId: 123,
+      },
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("message.completed", {
+        finishReason: "stop",
+        message: "Final answer",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(customHandler).toHaveBeenCalledTimes(1);
+  });
+
   it("turn.started adds an eyes reaction to the triggering comment", async () => {
     const fetchMock = vi
       .fn()
@@ -863,5 +907,102 @@ describe("githubChannel", () => {
     expect(sandbox.commandLog).toContain(
       `cd '/workspace' && GIT_TERMINAL_PROMPT=0 git fetch --depth 1 origin '${headSha}'`,
     );
+  });
+
+  it("runs custom turn.started handlers without replacing checkout by default", async () => {
+    const headSha = "b".repeat(40);
+    const sandbox = mockSandbox({
+      run(options) {
+        if (options.command.includes("git rev-parse HEAD 2>/dev/null")) {
+          return { exitCode: 128, stderr: "", stdout: "" };
+        }
+        if (options.command.includes("git rev-parse HEAD")) {
+          return { exitCode: 0, stderr: "", stdout: `${headSha}\n` };
+        }
+        return { exitCode: 0, stderr: "", stdout: "" };
+      },
+    });
+    const customHandler = vi.fn(async () => {});
+    const adapter = withState(
+      getAdapter(
+        githubChannel({
+          credentials: {
+            appId: "test-app",
+            webhookSecret: SECRET,
+          },
+          events: {
+            "turn.started": customHandler,
+          },
+        }),
+      ),
+      {
+        conversationKind: "issue",
+        headSha,
+        installationId: 55,
+        issueNumber: 5,
+        owner: "vercel",
+        repo: "eve",
+        repositoryId: 123,
+      },
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("turn.started", {
+        sequence: 0,
+        turnId: "t1",
+      }),
+      ctx,
+      sandbox,
+    );
+
+    expect(ctx.state.checkoutPath).toBe("/workspace");
+    expect(customHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows explicit turn.started replacement", async () => {
+    const headSha = "c".repeat(40);
+    const sandbox = mockSandbox();
+    const customHandler = vi.fn(async (_event: unknown, channel: { state: GitHubChannelState }) => {
+      channel.state.checkoutPath = "/custom";
+    });
+    const adapter = withState(
+      getAdapter(
+        githubChannel({
+          credentials: {
+            appId: "test-app",
+            webhookSecret: SECRET,
+          },
+          events: {
+            "turn.started": replaceDefault(customHandler),
+          },
+        }),
+      ),
+      {
+        conversationKind: "issue",
+        headSha,
+        installationId: 55,
+        issueNumber: 5,
+        owner: "vercel",
+        repo: "eve",
+        repositoryId: 123,
+      },
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("turn.started", {
+        sequence: 0,
+        turnId: "t1",
+      }),
+      ctx,
+      sandbox,
+    );
+
+    expect(ctx.state.checkoutPath).toBe("/custom");
+    expect(customHandler).toHaveBeenCalledTimes(1);
+    expect(sandbox.commandLog).toEqual([]);
   });
 });
