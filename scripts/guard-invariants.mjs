@@ -82,6 +82,11 @@
  *             `queue-namespace.ts`. The generated agent bootstrap installs the
  *             agent-scoped namespace before queue-producing APIs can run.
  *   rule 34 — `phase` stays a runtime-only dependency. No file under the Eve\n *             logo renderer's GPU/runtime boundary (render/, shaders/, or the\n *             offline render harness) may import the `phase` package. This keeps\n *             the mechanical separation between the lifecycle layer and the GPU\n *             renderer enforceable.
+ *   rule 35 — No direct `#compiled/gray-matter` imports outside the
+ *             `internal/helpers/gray-matter.ts` wrapper. gray-matter's default
+ *             engines `eval()` a `---js` frontmatter fence, so every call must
+ *             route through `parseFrontmatter`, which is safe by default. A
+ *             direct import lets untrusted input reach an evaluating engine.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -170,6 +175,7 @@ function isTsLike(relPath) {
  *   rule27: Violation[];
  *   rule28: Violation[];
  *   rule33: Violation[];
+ *   rule35: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -197,6 +203,7 @@ async function scanRepo(state) {
     checkRule27(posix, lines, state.rule27);
     checkRule28(posix, lines, state.rule28);
     checkRule33(posix, lines, state.rule33);
+    checkRule35(posix, lines, state.rule35);
   }
 }
 
@@ -285,6 +292,33 @@ function checkRule33(posix, lines, violations) {
         file: posix,
         line: idx + 1,
         message: `writes WORKFLOW_QUEUE_NAMESPACE outside the canonical namespace module. Use installEveWorkflowQueueNamespace() so every queue surface derives the same agent-scoped value.`,
+      });
+    }
+  });
+}
+
+// ---------- Rule 35: direct gray-matter imports ----------
+
+const GRAY_MATTER_SPECIFIER_RE = /["']#compiled\/gray-matter(?:\/[^"']+)?["']/;
+const GRAY_MATTER_FACADE = "packages/eve/src/internal/helpers/gray-matter.ts";
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule35(posix, lines, violations) {
+  if (posix === GRAY_MATTER_FACADE) return;
+  lines.forEach((line, idx) => {
+    const isImport =
+      /^(?:import|export)\b|^}\s*from\b|\b(?:import|require)\s*\(/.test(line.trimStart()) &&
+      GRAY_MATTER_SPECIFIER_RE.test(line);
+    if (isImport) {
+      violations.push({
+        rule: 35,
+        file: posix,
+        line: idx + 1,
+        message: `imports "#compiled/gray-matter" directly. gray-matter's default engines eval() a \`---js\` frontmatter fence, so parse through parseFrontmatter() from "#internal/helpers/gray-matter.js" instead — it is safe by default and takes an explicit { allowCodeEngines: true } opt-in for trusted input.`,
       });
     }
   });
@@ -846,7 +880,6 @@ async function checkRule34PhaseBoundary() {
   return violations;
 }
 
-
 /**
  * @returns {Promise<Set<string>>}
  */
@@ -1024,6 +1057,7 @@ async function main() {
     rule27: /** @type {Violation[]} */ ([]),
     rule28: /** @type {Violation[]} */ ([]),
     rule33: /** @type {Violation[]} */ ([]),
+    rule35: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1111,6 +1145,9 @@ async function main() {
 
   // Rule 34
   violations.push(...(await checkRule34PhaseBoundary()));
+
+  // Rule 35
+  violations.push(...state.rule35);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");
