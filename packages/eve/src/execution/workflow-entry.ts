@@ -49,6 +49,7 @@ const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
  * and deserialized at each `"use step"` boundary.
  */
 export interface WorkflowEntryInput {
+  readonly forwardedSubagentStream?: RunInput["forwardedSubagentStream"];
   readonly input: RunInput["input"];
   readonly limits?: RunInput["limits"];
   readonly sessionTimeoutMs?: number | false;
@@ -130,6 +131,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     const outcome = await runDriverLoop({
       capabilities,
       driverWritable,
+      forwardedSubagentStream: input.forwardedSubagentStream,
       initialInput: {
         kind: "deliver",
         payloads: [
@@ -190,6 +192,7 @@ function createSafeOuterWorkflowError(): Error {
 async function runDriverLoop(input: {
   readonly capabilities?: SessionCapabilities;
   readonly driverWritable: WritableStream<Uint8Array>;
+  readonly forwardedSubagentStream?: RunInput["forwardedSubagentStream"];
   readonly initialInput: HookPayload;
   readonly mode: RunMode;
   readonly serializedContext: Record<string, unknown>;
@@ -248,6 +251,10 @@ async function runDriverLoop(input: {
 
     let action: NextDriverAction = await runTurn({
       delivery: input.initialInput,
+      deliveryHook,
+      mode: input.mode,
+      parentWritable: input.driverWritable,
+      forwardedSubagentStream: input.forwardedSubagentStream,
       serializedContext: input.serializedContext,
       sessionState: input.sessionState,
     });
@@ -314,6 +321,10 @@ async function runDriverLoop(input: {
             kind: "deliver",
             payloads: allPayloads,
           },
+          deliveryHook,
+          mode: input.mode,
+          parentWritable: input.driverWritable,
+          forwardedSubagentStream: input.forwardedSubagentStream,
           serializedContext: action.serializedContext,
           sessionState: action.sessionState,
         });
@@ -374,6 +385,10 @@ async function runDriverLoop(input: {
           payloads: [routed.remainder],
           requestId: nextDeliver.requestId,
         },
+        deliveryHook,
+        mode: input.mode,
+        parentWritable: input.driverWritable,
+        forwardedSubagentStream: input.forwardedSubagentStream,
         serializedContext: action.serializedContext,
         sessionState: action.sessionState,
       });

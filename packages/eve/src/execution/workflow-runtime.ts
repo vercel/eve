@@ -156,10 +156,21 @@ export function createWorkflowRuntime(config: {
 
       let run: Awaited<ReturnType<typeof startWorkflowPreferLatest>>;
       try {
-        run = await startWorkflowPreferLatest(workflowEntryReference, [workflowInput], {
-          allowReservedAttributes: true,
-          attributes: normalizeEveAttributes(attributes),
-        });
+        run = await startWorkflowPreferLatest(
+          workflowEntryReference,
+          [
+            {
+              forwardedSubagentStream: input.forwardedSubagentStream,
+              input: input.input,
+              limits: input.limits,
+              serializedContext,
+            },
+          ],
+          {
+            allowReservedAttributes: true,
+            attributes: normalizeEveAttributes(attributes),
+          },
+        );
       } catch (error) {
         logError(log, "failed to start workflow run", error, {
           continuationToken: input.continuationToken,

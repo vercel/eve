@@ -142,7 +142,14 @@ export async function dispatchRuntimeActionsStep(input: {
             source,
           });
           try {
-            const handle = await childRuntime.run(runInput);
+            const handle = await childRuntime.run({
+              ...runInput,
+              forwardedSubagentStream: {
+                callId: action.callId,
+                parentWritable: input.parentWritable,
+                subagentName: action.subagentName,
+              },
+            });
             childSessionId = handle.sessionId;
           } catch (error) {
             logError(log, "local subagent start failed", error, {

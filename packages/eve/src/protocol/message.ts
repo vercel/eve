@@ -1101,6 +1101,24 @@ export function createSubagentCalledEvent(input: {
 }
 
 /**
+ * Creates a `subagent.event` wrapper around one child stream event.
+ */
+export function createSubagentChildEvent(input: {
+  readonly callId: string;
+  readonly event: HandleMessageStreamEvent;
+  readonly subagentName: string;
+}): SubagentChildEventStreamEvent {
+  return {
+    data: {
+      callId: input.callId,
+      event: input.event,
+      subagentName: input.subagentName,
+    },
+    type: "subagent.event",
+  };
+}
+
+/**
  * Creates the `message.appended` event for one streamed assistant text delta.
  */
 export function createMessageAppendedEvent(input: {

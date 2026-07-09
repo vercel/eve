@@ -78,6 +78,19 @@ export interface SessionParent {
   readonly turn: SessionTurn;
 }
 
+/**
+ * Framework-internal stream forwarding target for delegated subagent sessions.
+ *
+ * When present on a child run, the runtime appends each child stream event to
+ * the child's own durable stream and also appends a wrapped `subagent.event`
+ * to the immediate parent's durable stream.
+ */
+export interface ForwardedSubagentStream {
+  readonly callId: string;
+  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly subagentName: string;
+}
+
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
@@ -330,6 +343,7 @@ export interface RunInput {
   };
   readonly mode: RunMode;
   readonly parent?: SessionParent;
+  readonly forwardedSubagentStream?: ForwardedSubagentStream;
   /**
    * Runtime-supplied session limits. Delegated local subagents use this to
    * carry the parent's remaining quota and delegation caps with the same limit

@@ -67,6 +67,7 @@ import {
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
 import { recordSubagentUsageSpans } from "#execution/subagent-usage-span.js";
+import { writeSessionEvent } from "#execution/subagent-stream-forwarding.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
 import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-attributes.js";
@@ -291,9 +292,12 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const emit = async (event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent> => {
     const toEmit = await callAdapterEventHandler(adapter, event, adapterCtx);
     setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
-    const stamped = stampMessageStreamEvent(toEmit);
-    await writer.write(encodeMessageStreamEvent(stamped));
-    return stamped;
+    await writeSessionEvent({
+      event: toEmit,
+      forwardedSubagentStream: input.forwardedSubagentStream,
+      writer,
+    });
+    return toEmit;
   };
 
   const handleEvent = async (

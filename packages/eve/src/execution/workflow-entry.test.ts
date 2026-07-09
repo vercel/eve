@@ -473,6 +473,56 @@ describe("workflowEntry", () => {
     });
   });
 
+  it("keeps delegated parent result notification unchanged when stream forwarding is active", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    const serializedContext = createSerializedContext({
+      "eve.channel": {
+        kind: "subagent",
+        state: {
+          callId: "call-1",
+          parentContinuationToken: "parent-token",
+          parentSessionId: "parent-session",
+          subagentName: "researcher",
+        },
+      },
+    });
+    installHookMocks({
+      turnControls: [
+        turnResult({
+          action: "done",
+          output: "final child result",
+          serializedContext,
+          sessionState,
+        }),
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        forwardedSubagentStream: {
+          callId: "call-1",
+          parentWritable: new WritableStream<Uint8Array>(),
+          subagentName: "researcher",
+        },
+        input: { message: "delegate" },
+        serializedContext,
+      }),
+    ).resolves.toEqual({ output: "final child result" });
+
+    expect(notifyDelegatedParentStep).toHaveBeenCalledOnce();
+    expect(notifyDelegatedParentStep).toHaveBeenCalledWith({
+      result: {
+        callId: "call-1",
+        kind: "subagent-result",
+        output: "final child result",
+        subagentName: "researcher",
+      },
+      serializedContext,
+      usage: undefined,
+    });
+  });
+
   it("passes the resumed channel request id to the next turn", async () => {
     const sessionState = createBaseSessionState();
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
