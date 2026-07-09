@@ -201,7 +201,7 @@ describe("applyConversationCacheControl", () => {
     });
   });
 
-  it("marks both the last user and last assistant in a multi-turn history", () => {
+  it("marks the last message and the most recent assistant before it", () => {
     const messages: ModelMessage[] = [
       { role: "user", content: "hi" },
       { role: "assistant", content: "yo" },
@@ -211,12 +211,12 @@ describe("applyConversationCacheControl", () => {
     const out = applyConversationCacheControl(messages, marker);
 
     expect(out[0]).toEqual({ role: "user", content: "hi" });
-    expect(out[1]).toEqual({ role: "assistant", content: "yo" });
-    expect(out[2]).toEqual({
-      role: "user",
-      content: "hi2",
+    expect(out[1]).toEqual({
+      role: "assistant",
+      content: "yo",
       providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
     });
+    expect(out[2]).toEqual({ role: "user", content: "hi2" });
     expect(out[3]).toEqual({
       role: "assistant",
       content: "yo2",
@@ -224,7 +224,7 @@ describe("applyConversationCacheControl", () => {
     });
   });
 
-  it("skips tool-result messages and still marks the last user and assistant", () => {
+  it("marks a trailing tool-result message so fresh tool results enter the cache", () => {
     const messages: ModelMessage[] = [
       { role: "user", content: "do the thing" },
       {
@@ -245,18 +245,18 @@ describe("applyConversationCacheControl", () => {
     ];
     const out = applyConversationCacheControl(messages, marker);
 
-    // Tool-result is not marked.
-    expect(out[2]).toEqual(messages[2]);
+    // The trailing tool-result message carries the final breakpoint.
+    expect((out[2] as { providerOptions?: unknown }).providerOptions).toEqual({
+      anthropic: { cacheControl: { type: "ephemeral" } },
+    });
 
-    // The last assistant (index 1) is marked.
+    // The most recent assistant (index 1) is the advancement anchor.
     expect((out[1] as { providerOptions?: unknown }).providerOptions).toEqual({
       anthropic: { cacheControl: { type: "ephemeral" } },
     });
 
-    // The last user (index 0) is marked.
-    expect((out[0] as { providerOptions?: unknown }).providerOptions).toEqual({
-      anthropic: { cacheControl: { type: "ephemeral" } },
-    });
+    // The user message is untouched.
+    expect(out[0]).toEqual(messages[0]);
   });
 
   it("preserves existing providerOptions on marked messages", () => {
@@ -289,7 +289,8 @@ describe("applyConversationCacheControl", () => {
     expect(messages[0]).toBe(originalRef0);
     expect(messages[1]).toBe(originalRef1);
     expect(out).not.toBe(messages);
-    expect(out[0]).not.toBe(originalRef0);
+    // Unmarked messages keep their identity; marked messages are copies.
+    expect(out[0]).toBe(originalRef0);
     expect(out[1]).not.toBe(originalRef1);
   });
 });

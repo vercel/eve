@@ -157,17 +157,26 @@ export function applySystemCacheBreakpoint(
 }
 
 /**
- * Walks backward through `messages` and attaches the Anthropic cache marker
- * to the most recent `assistant` and most recent `user` message. Returns a
- * new array; does not mutate the input.
+ * Attaches the Anthropic cache marker to the last message in `messages`
+ * (whatever its role) and, as a stable mid-history anchor, to the most
+ * recent `assistant` message before it. Returns a new array; does not
+ * mutate the input.
  *
- * This implements the "automatic cache advancement" pattern: each turn the
- * breakpoints move forward, and the prior turn's breakpoints still warm the
- * cache prefix, so the new breakpoints just extend the cached region.
+ * The final breakpoint must sit on the very last message so that the
+ * newest content — typically a `tool` message carrying fresh tool
+ * results — is written to the cache in the same request that pays for
+ * it. Placing it any earlier (e.g. on the last assistant message) leaves
+ * the trailing tool results outside the cached region: they get billed
+ * as uncached input every turn and only enter the cache one request
+ * later, capping the effective hit rate near 50%. The AI SDK Anthropic
+ * provider maps a message-level marker on a `tool` message to its last
+ * tool-result content block.
  *
- * Tool-result messages (`role: "tool"`) are intentionally skipped — the
- * adjacent assistant message's cache marker already covers the prefix
- * through any preceding tool results.
+ * The assistant anchor implements "automatic cache advancement": it
+ * guarantees a breakpoint from the prior request survives into the next
+ * one, so cache lookups always find the previous prefix even when a step
+ * appends more content blocks than Anthropic's backward boundary scan
+ * covers.
  */
 export function applyConversationCacheControl(
   messages: readonly ModelMessage[],
@@ -178,33 +187,27 @@ export function applyConversationCacheControl(
   }
 
   const out = [...messages];
-  let foundAssistant = false;
-  let foundUser = false;
 
-  for (let i = out.length - 1; i >= 0 && (!foundAssistant || !foundUser); i--) {
-    const message = out[i];
+  const mark = (index: number): void => {
+    const message = out[index];
     if (message === undefined) {
-      continue;
+      return;
     }
+    out[index] = {
+      ...message,
+      providerOptions: {
+        ...message.providerOptions,
+        ...marker,
+      },
+    };
+  };
 
-    if (!foundAssistant && message.role === "assistant") {
-      out[i] = {
-        ...message,
-        providerOptions: {
-          ...message.providerOptions,
-          ...marker,
-        },
-      };
-      foundAssistant = true;
-    } else if (!foundUser && message.role === "user") {
-      out[i] = {
-        ...message,
-        providerOptions: {
-          ...message.providerOptions,
-          ...marker,
-        },
-      };
-      foundUser = true;
+  mark(out.length - 1);
+
+  for (let i = out.length - 2; i >= 0; i--) {
+    if (out[i]?.role === "assistant") {
+      mark(i);
+      break;
     }
   }
 

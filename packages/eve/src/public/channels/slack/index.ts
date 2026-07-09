@@ -53,6 +53,11 @@ export {
 export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
 
 export {
+  describeActionRequest,
+  describeActionRequests,
+} from "#public/channels/slack/action-status.js";
+
+export {
   loadThreadContextMessages,
   type LoadThreadContextMessagesOptions,
   type ThreadContextSince,

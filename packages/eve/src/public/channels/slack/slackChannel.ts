@@ -169,7 +169,7 @@ export interface SlackChannelState {
    * Buffered text from a `message.completed` event whose `finishReason`
    * was `"tool-calls"`. The default `actions.requested` handler uses the
    * first non-empty line as the next typing indicator, surfacing the
-   * model's pre-tool narration instead of "Running ...". Cleared at
+   * model's pre-tool narration instead of the action label. Cleared at
    * `turn.started` and after use.
    */
   pendingToolCallMessage?: string | null;
