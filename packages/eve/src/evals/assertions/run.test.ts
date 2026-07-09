@@ -162,6 +162,28 @@ describe("run assertions", () => {
     expect((await Run.calledTool("missing").evaluate(result)).score).toBe(0);
   });
 
+  it("calledTool accepts a predicate over the matching call count", async () => {
+    const result = makeResult({
+      derived: {
+        toolCalls: [completedToolCall("get_weather"), completedToolCall("get_weather")],
+        toolCallCount: 2,
+      },
+    });
+
+    expect(
+      (await Run.calledTool("get_weather", { count: (count) => count >= 2 }).evaluate(result))
+        .score,
+    ).toBe(1);
+    expect(
+      (await Run.calledTool("missing", { count: (count) => count === 0 }).evaluate(result)).score,
+    ).toBe(1);
+    const failed = await Run.calledTool("get_weather", {
+      count: (count) => count > 2,
+    }).evaluate(result);
+    expect(failed.score).toBe(0);
+    expect(failed.message).toContain("count predicate");
+  });
+
   it("calledTool defaults to completed while notCalledTool rejects every lifecycle state", async () => {
     const result = makeResult({
       derived: {
@@ -180,6 +202,9 @@ describe("run assertions", () => {
 
   it("validates exact-count options", () => {
     expect(() => Run.calledTool("search", { count: -1 })).toThrow(/non-negative integer/);
+    expect(() => Run.calledTool("search", { count: "1" as never })).toThrow(
+      /non-negative integer or predicate/,
+    );
     expect(() => Run.calledSubagent("child", { count: 1.5 })).toThrow(/non-negative integer/);
     expect(() => Run.typedEvent({ type: "turn.completed", count: Number.NaN })).toThrow(
       /non-negative integer/,
@@ -208,6 +233,17 @@ describe("run assertions", () => {
     expect(
       (await Run.calledSubagent("child", { status: "completed", count: 2 }).evaluate(result)).score,
     ).toBe(0);
+    expect(
+      (
+        await Run.calledSubagent("child", {
+          count: (count) => count >= 4,
+          status: "pending",
+        }).evaluate(result)
+      ).score,
+    ).toBe(0);
+    expect(
+      (await Run.calledSubagent("child", { count: (count) => count === 1 }).evaluate(result)).score,
+    ).toBe(1);
   });
 
   it("toolOrder checks request order", async () => {
@@ -291,12 +327,37 @@ describe("run assertions", () => {
         }).evaluate(result)
       ).score,
     ).toBe(1);
+    expect(
+      (
+        await Run.typedEvent({
+          type: "subagent.called",
+          data: { name: "child" },
+          count: (count) => count >= 2,
+        }).evaluate(result)
+      ).score,
+    ).toBe(1);
     expect((await Run.notEvent({ type: "turn.failed" }).evaluate(result)).score).toBe(1);
     expect(
       (
         await Run.eventOrder([
           { type: "subagent.called", data: { name: "child" }, count: 2 },
           { type: "subagent.completed", data: { subagentName: "child" } },
+        ]).evaluate(result)
+      ).score,
+    ).toBe(1);
+    expect(
+      (
+        await Run.eventOrder([
+          {
+            type: "subagent.called",
+            data: { name: "child" },
+            count: (count) => count >= 2,
+          },
+          {
+            type: "subagent.completed",
+            data: { subagentName: "child" },
+            count: (count) => count >= 1,
+          },
         ]).evaluate(result)
       ).score,
     ).toBe(1);

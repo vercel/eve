@@ -6,6 +6,7 @@ import {
   subagentCallMatches,
   testRegExp,
   toolCallMatches,
+  type EveEvalCountMatcher,
   type EveEvalSkillLoadMatchOptions,
   type EveEvalSubagentCallMatchOptions,
   type EveEvalToolCallMatchOptions,
@@ -85,7 +86,8 @@ export function messageIncludes(token: string | RegExp): RunAssertion {
 /**
  * Asserts a completed tool call with `name` happened. Options constrain the
  * call further: `input` partial-deep-matches, `output` matches the result,
- * `status` overrides the lifecycle state, and `count` requires an exact count.
+ * `status` overrides the lifecycle state, and `count` constrains the number of
+ * matches with either an exact number or a predicate.
  */
 export function calledTool(name: string, options: EveEvalToolCallMatchOptions = {}): RunAssertion {
   validateCount(options.count);
@@ -94,18 +96,21 @@ export function calledTool(name: string, options: EveEvalToolCallMatchOptions = 
     evaluate(result) {
       const named = result.derived.toolCalls.filter((call) => call.name === name);
       const matching = named.filter((call) => toolCallMatches(call, options));
-      const passed =
-        options.count !== undefined ? matching.length === options.count : matching.length > 0;
+      const passed = matchesCount(options.count, matching.length);
       if (passed) return { score: 1, metadata: { matchingCalls: matching.length } };
 
       const observed =
         named.length > 0
           ? `observed ${name} calls: ${named.map((call) => truncate(JSON.stringify(call.input))).join(", ")}`
           : `observed tools: [${result.derived.toolCalls.map((call) => call.name).join(", ")}]`;
-      const expectation =
-        options.count !== undefined
-          ? `expected exactly ${options.count} matching call(s), found ${matching.length}`
-          : `expected a matching call to "${name}"`;
+      let expectation: string;
+      if (options.count === undefined) {
+        expectation = `expected a matching call to "${name}"`;
+      } else if (typeof options.count === "number") {
+        expectation = `expected exactly ${options.count} matching call(s), found ${matching.length}`;
+      } else {
+        expectation = `expected matching call count to satisfy the count predicate, found ${matching.length}`;
+      }
       return fail(`${expectation}; ${observed}`);
     },
   };
@@ -233,8 +238,7 @@ export function calledSubagent(
     evaluate(result) {
       const named = result.derived.subagentCalls.filter((call) => call.name === name);
       const matching = named.filter((call) => subagentCallMatches(call, options));
-      const passed =
-        options.count === undefined ? matching.length > 0 : matching.length === options.count;
+      const passed = matchesCount(options.count, matching.length);
       if (passed) return { score: 1, metadata: { matchingCalls: matching.length } };
 
       if (named.length === 0) {
@@ -270,17 +274,16 @@ export function eventsSatisfy(
   };
 }
 
-/** Asserts a typed stream event exists, optionally with an exact count. */
+/** Asserts a typed stream event exists, optionally constraining its count. */
 export function typedEvent(matcher: EveEvalEventMatch): RunAssertion {
   validateCount(matcher.count);
   return {
     name: `event(${matcher.type})`,
     evaluate(result) {
       const matching = result.events.filter((entry) => eventMatches(entry, matcher));
-      const passed =
-        matcher.count === undefined ? matching.length > 0 : matching.length === matcher.count;
+      const passed = matchesCount(matcher.count, matching.length);
       if (passed) return { score: 1, metadata: { matchingEvents: matching.length } };
-      const expected = matcher.count === undefined ? "at least one" : `exactly ${matcher.count}`;
+      const expected = describeCount(matcher.count);
       return fail(
         `expected ${expected} matching ${matcher.type} event(s), found ${matching.length}; observed: [${result.events.map((entry) => entry.type).join(", ")}]`,
       );
@@ -312,11 +315,9 @@ export function eventOrder(matchers: readonly EveEvalEventMatch[]): RunAssertion
         const indexes = result.events.flatMap((entry, index) =>
           eventMatches(entry, matcher) ? [index] : [],
         );
-        const countPassed =
-          matcher.count === undefined ? indexes.length > 0 : indexes.length === matcher.count;
+        const countPassed = matchesCount(matcher.count, indexes.length);
         if (!countPassed) {
-          const expected =
-            matcher.count === undefined ? "at least one" : `exactly ${matcher.count}`;
+          const expected = describeCount(matcher.count);
           return fail(
             `expected ${expected} matching ${matcher.type} event(s), found ${indexes.length}`,
           );
@@ -433,9 +434,22 @@ function formatUnknown(value: unknown): string | undefined {
   }
 }
 
-function validateCount(count: number | undefined): void {
-  if (count !== undefined && (!Number.isInteger(count) || count < 0)) {
-    throw new TypeError(`Assertion count must be a non-negative integer; received ${count}.`);
+function matchesCount(matcher: EveEvalCountMatcher | undefined, count: number): boolean {
+  if (matcher === undefined) return count > 0;
+  return typeof matcher === "function" ? matcher(count) : count === matcher;
+}
+
+function describeCount(matcher: EveEvalCountMatcher | undefined): string {
+  if (matcher === undefined) return "at least one";
+  return typeof matcher === "function" ? "a count satisfying the predicate" : `exactly ${matcher}`;
+}
+
+function validateCount(count: unknown): void {
+  if (count === undefined || typeof count === "function") return;
+  if (typeof count !== "number" || !Number.isInteger(count) || count < 0) {
+    throw new TypeError(
+      `Assertion count must be a non-negative integer or predicate; received ${String(count)}.`,
+    );
   }
 }
 

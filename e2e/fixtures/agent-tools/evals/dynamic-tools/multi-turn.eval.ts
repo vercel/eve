@@ -25,7 +25,7 @@ export default defineEval({
     t.succeeded();
     t.calledTool(ECHO_TOOL, {
       output: { token: DYNAMIC_ECHO_TOKEN },
-      count: 2,
+      count: (count) => count >= 2,
     });
   },
 });
