@@ -150,6 +150,27 @@ An override targets one slot, matched by name and kind: a static file replaces t
 
 Overrides only work here — the `<namespace>__` prefix is reserved, so an agent-root contribution named `crm__…` is a build error and an extension can't be shadowed from outside its mount.
 
+### Typed tool results
+
+A consuming agent can narrow a mounted extension's tool result in a hook: import the tool from the extension's `./tools` export and pass it to [`toolResultFrom`](/guides/hooks#narrowing-tool-results). It matches the namespaced result (`crm__search`) because identity keys off the tool definition, not its name.
+
+```ts title="agent/hooks/narrow-crm.ts"
+import { defineHook } from "eve/hooks";
+import { toolResultFrom } from "eve/tools";
+import { search } from "@acme/crm/tools";
+
+export default defineHook({
+  events: {
+    "action.result"(event) {
+      const match = toolResultFrom(event.data.result, search);
+      if (match) console.log(match.output); // typed as search's output
+    },
+  },
+});
+```
+
+Matching keys off the tool's description, so keep extension tool descriptions distinct — one shared with another tool makes the identity ambiguous and `toolResultFrom` stops matching.
+
 ## Limits
 
 An extension cannot declare a `sandbox`, agent config, schedules, or limits, and cannot mount other extensions — those are the consuming agent's to own (background scheduling, for instance, runs on the agent's deployment under its limits). An extension's tools run within the consuming agent's per-session limits.
