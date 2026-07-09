@@ -1,4 +1,4 @@
-import { constants as fsConstants, existsSync } from "node:fs";
+import { constants as fsConstants, existsSync, lstatSync, readFileSync } from "node:fs";
 import { cp, lstat, mkdir, readFile, readdir, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
@@ -30,14 +30,26 @@ const SNAPSHOT_SKIP_NAMES = new Set([
 const SNAPSHOT_APP_ROOT_SKIP_NAMES = new Set(["build", "dist"]);
 const SNAPSHOT_COPY_MODE = fsConstants.COPYFILE_FICLONE;
 
+type SnapshotSourceFilter = (sourcePath: string) => boolean;
+
+interface SnapshotGitIgnoreRule {
+  readonly anchored: boolean;
+  readonly directoryOnly: boolean;
+  readonly hasSlash: boolean;
+  readonly negated: boolean;
+  readonly pattern: RegExp;
+}
+
 export async function copyDevelopmentSourceSnapshot(
   plan: DevelopmentSourceSnapshotPlan,
 ): Promise<void> {
   await mkdir(plan.snapshotSourceRoot, { recursive: true });
+  const shouldSkipSource = createSnapshotSourceFilter(plan);
 
   for (const sourceRoot of plan.copyRoots) {
     await copySnapshotPath({
       plan,
+      shouldSkipSource,
       sourcePath: sourceRoot,
       targetPath: toSnapshotPathForPlan(plan, sourceRoot),
     });
@@ -50,6 +62,7 @@ export async function copyDevelopmentSourceSnapshot(
 
     await copySnapshotPath({
       plan,
+      shouldSkipSource,
       sourcePath,
       targetPath: toSnapshotPathForPlan(plan, sourcePath),
     });
@@ -63,6 +76,7 @@ export async function copyDevelopmentSourceSnapshot(
 
 async function copySnapshotPath(input: {
   readonly plan: DevelopmentSourceSnapshotPlan;
+  readonly shouldSkipSource: SnapshotSourceFilter;
   readonly sourcePath: string;
   readonly targetPath: string;
 }): Promise<void> {
@@ -88,6 +102,7 @@ async function copySnapshotPath(input: {
 
 async function copySnapshotDirectory(input: {
   readonly plan: DevelopmentSourceSnapshotPlan;
+  readonly shouldSkipSource: SnapshotSourceFilter;
   readonly sourcePath: string;
   readonly targetPath: string;
 }): Promise<void> {
@@ -96,21 +111,28 @@ async function copySnapshotDirectory(input: {
   for (const entry of await readdir(input.sourcePath, { withFileTypes: true })) {
     const sourcePath = join(input.sourcePath, entry.name);
 
-    if (shouldSkipSnapshotSource(input.plan, sourcePath)) {
+    if (input.shouldSkipSource(sourcePath)) {
       continue;
     }
 
     await cp(sourcePath, join(input.targetPath, entry.name), {
-      filter: (source) => !shouldSkipSnapshotSource(input.plan, source),
+      filter: (source) => !input.shouldSkipSource(source),
       mode: SNAPSHOT_COPY_MODE,
       recursive: true,
     });
   }
 }
 
+function createSnapshotSourceFilter(plan: DevelopmentSourceSnapshotPlan): SnapshotSourceFilter {
+  const gitIgnoreMatches = createSnapshotGitIgnoreMatcher(plan);
+
+  return (sourcePath) => shouldSkipSnapshotSource(plan, sourcePath, gitIgnoreMatches);
+}
+
 function shouldSkipSnapshotSource(
   plan: DevelopmentSourceSnapshotPlan,
   sourcePath: string,
+  gitIgnoreMatches: (sourcePath: string) => boolean,
 ): boolean {
   const relativePath = relative(plan.sourceRoot, sourcePath);
   if (relativePath.length === 0) {
@@ -129,10 +151,280 @@ function shouldSkipSnapshotSource(
     return true;
   }
 
+  if (gitIgnoreMatches(sourcePath)) {
+    return true;
+  }
+
   return isDirectAppRootSkipPath({
     appRoot: plan.appRoot,
     sourcePath,
   });
+}
+
+function createSnapshotGitIgnoreMatcher(
+  plan: DevelopmentSourceSnapshotPlan,
+): (sourcePath: string) => boolean {
+  const rulesByDirectoryPath = new Map<string, readonly SnapshotGitIgnoreRule[]>();
+  const ignoreRoot = plan.appRoot;
+
+  return (sourcePath) => {
+    if (!isPathInsideOrEqual(sourcePath, ignoreRoot)) {
+      return false;
+    }
+
+    const relativePath = relative(ignoreRoot, sourcePath);
+    if (relativePath.length === 0) {
+      return false;
+    }
+
+    const isDirectory = isDirectorySourcePath(sourcePath);
+    let ignored = false;
+
+    for (const directoryPath of getGitIgnoreRuleDirectories({
+      sourcePath,
+      sourceRoot: ignoreRoot,
+    })) {
+      let rules = rulesByDirectoryPath.get(directoryPath);
+
+      if (rules === undefined) {
+        rules = readGitIgnoreRules(directoryPath);
+        rulesByDirectoryPath.set(directoryPath, rules);
+      }
+
+      if (rules.length === 0) {
+        continue;
+      }
+
+      const relativeToIgnoreFile = normalizePathForGitIgnore(relative(directoryPath, sourcePath));
+      if (relativeToIgnoreFile.length === 0 || relativeToIgnoreFile.startsWith("../")) {
+        continue;
+      }
+
+      for (const rule of rules) {
+        if (!matchesGitIgnoreRule(rule, relativeToIgnoreFile, isDirectory)) {
+          continue;
+        }
+
+        ignored = !rule.negated;
+      }
+    }
+
+    return ignored;
+  };
+}
+
+function getGitIgnoreRuleDirectories(input: {
+  readonly sourcePath: string;
+  readonly sourceRoot: string;
+}): string[] {
+  const parentDirectory = dirname(input.sourcePath);
+  const relativeParent = relative(input.sourceRoot, parentDirectory);
+  if (relativeParent.startsWith("..") || isAbsoluteFilePath(relativeParent)) {
+    return [];
+  }
+
+  const directories = [input.sourceRoot];
+  if (relativeParent.length === 0) {
+    return directories;
+  }
+
+  let currentDirectory = input.sourceRoot;
+  for (const part of relativeParent.split(/[\\/]/)) {
+    currentDirectory = join(currentDirectory, part);
+    directories.push(currentDirectory);
+  }
+
+  return directories;
+}
+
+function readGitIgnoreRules(directoryPath: string): readonly SnapshotGitIgnoreRule[] {
+  const gitIgnorePath = join(directoryPath, ".gitignore");
+
+  if (!existsSync(gitIgnorePath)) {
+    return [];
+  }
+
+  try {
+    return readFileSync(gitIgnorePath, "utf8")
+      .split(/\n/)
+      .map(parseGitIgnoreRule)
+      .filter((rule): rule is SnapshotGitIgnoreRule => rule !== undefined);
+  } catch {
+    return [];
+  }
+}
+
+function parseGitIgnoreRule(line: string): SnapshotGitIgnoreRule | undefined {
+  let pattern = stripUnescapedTrailingWhitespace(line.replace(/\r$/, ""));
+
+  if (pattern.length === 0 || pattern.startsWith("#")) {
+    return undefined;
+  }
+
+  let negated = false;
+
+  if (pattern.startsWith("\\#") || pattern.startsWith("\\!")) {
+    pattern = pattern.slice(1);
+  } else if (pattern.startsWith("!")) {
+    negated = true;
+    pattern = pattern.slice(1);
+  }
+
+  if (pattern.length === 0) {
+    return undefined;
+  }
+
+  let anchored = pattern.startsWith("/");
+
+  let directoryOnly = false;
+  while (
+    pattern.endsWith("/") &&
+    pattern.length > 1 &&
+    !isEscapedCharacter(pattern, pattern.length - 1)
+  ) {
+    directoryOnly = true;
+    pattern = pattern.slice(0, -1);
+  }
+
+  while (pattern.startsWith("/")) {
+    pattern = pattern.slice(1);
+  }
+
+  if (pattern.length === 0) {
+    return undefined;
+  }
+
+  const normalizedPattern = normalizePathForGitIgnore(pattern);
+  anchored = anchored || normalizedPattern.includes("/");
+
+  return {
+    anchored,
+    directoryOnly,
+    hasSlash: normalizedPattern.includes("/"),
+    negated,
+    pattern: gitIgnorePatternToRegExp(normalizedPattern),
+  };
+}
+
+function matchesGitIgnoreRule(
+  rule: SnapshotGitIgnoreRule,
+  relativePath: string,
+  sourceIsDirectory: boolean,
+): boolean {
+  if (!rule.hasSlash && !rule.anchored) {
+    const segments = relativePath.split("/");
+    const segmentCount =
+      rule.directoryOnly && !sourceIsDirectory ? segments.length - 1 : segments.length;
+    return segments
+      .slice(0, Math.max(segmentCount, 0))
+      .some((segment) => rule.pattern.test(segment));
+  }
+
+  const candidatePaths = createGitIgnoreCandidatePaths({
+    directoryOnly: rule.directoryOnly,
+    relativePath,
+    sourceIsDirectory,
+  });
+
+  return candidatePaths.some((candidatePath) => rule.pattern.test(candidatePath));
+}
+
+function createGitIgnoreCandidatePaths(input: {
+  readonly directoryOnly: boolean;
+  readonly relativePath: string;
+  readonly sourceIsDirectory: boolean;
+}): string[] {
+  const segments = input.relativePath.split("/");
+  const segmentCount =
+    input.directoryOnly && !input.sourceIsDirectory ? segments.length - 1 : segments.length;
+  const candidates: string[] = [];
+
+  for (let index = 1; index <= segmentCount; index++) {
+    candidates.push(segments.slice(0, index).join("/"));
+  }
+
+  return candidates;
+}
+
+function gitIgnorePatternToRegExp(pattern: string): RegExp {
+  let source = "";
+
+  for (let index = 0; index < pattern.length; index++) {
+    const character = pattern[index];
+    if (character === undefined) {
+      continue;
+    }
+
+    if (character === "\\") {
+      const nextCharacter = pattern[index + 1];
+      if (nextCharacter === undefined) {
+        source += "\\\\";
+      } else {
+        source += escapeRegExp(nextCharacter);
+        index++;
+      }
+      continue;
+    }
+
+    if (character === "*") {
+      if (pattern[index + 1] === "*") {
+        source += ".*";
+        index++;
+      } else {
+        source += "[^/]*";
+      }
+      continue;
+    }
+
+    if (character === "?") {
+      source += "[^/]";
+      continue;
+    }
+
+    source += escapeRegExp(character);
+  }
+
+  return new RegExp(`^${source}$`);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizePathForGitIgnore(path: string): string {
+  return path.replaceAll("\\", "/");
+}
+
+function stripUnescapedTrailingWhitespace(value: string): string {
+  let endIndex = value.length;
+
+  while (
+    endIndex > 0 &&
+    /\s/.test(value[endIndex - 1] ?? "") &&
+    !isEscapedCharacter(value, endIndex - 1)
+  ) {
+    endIndex--;
+  }
+
+  return value.slice(0, endIndex);
+}
+
+function isEscapedCharacter(value: string, index: number): boolean {
+  let slashCount = 0;
+
+  for (let cursor = index - 1; cursor >= 0 && value[cursor] === "\\"; cursor--) {
+    slashCount++;
+  }
+
+  return slashCount % 2 === 1;
+}
+
+function isDirectorySourcePath(sourcePath: string): boolean {
+  try {
+    return lstatSync(sourcePath).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 function isDirectAppRootSkipPath(input: {

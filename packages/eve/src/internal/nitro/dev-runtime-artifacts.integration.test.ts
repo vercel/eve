@@ -245,6 +245,7 @@ describe("development runtime artifact snapshots", () => {
     await writeFile(join(worktreeRoot, "duplicate.ts"), "export const duplicate = true;\n");
     await writeFile(join(nestedRepositoryRoot, "duplicate.ts"), "export const duplicate = true;\n");
     await writeFile(join(regularDirectoryRoot, "source.ts"), "export const copied = true;\n");
+
     await writeFile(
       join(compileDirectoryPath, "compiled-agent-manifest.json"),
       `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`,
@@ -262,6 +263,49 @@ describe("development runtime artifact snapshots", () => {
     expect(
       existsSync(join(snapshot.runtimeAppRoot, "vendor", "regular-directory", "source.ts")),
     ).toBe(true);
+  });
+
+  it("honors gitignored data directories while copying source snapshots", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-gitignored-data-");
+    const agentRoot = join(appRoot, "agent");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+    const ignoredVectorStoreRoot = join(
+      appRoot,
+      "analysts",
+      ".cognee",
+      "system",
+      "databases",
+      "cognee.lancedb",
+    );
+
+    await mkdir(agentRoot, { recursive: true });
+    await mkdir(ignoredVectorStoreRoot, { recursive: true });
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(
+      join(appRoot, ".gitignore"),
+      ["analysts/.cognee/", "*.tmp", "!keep.tmp", "agent/secret-notes.md", ""].join("\n"),
+    );
+    await writeFile(join(appRoot, "package.json"), '{"type":"module"}\n');
+    await writeFile(join(agentRoot, "agent.ts"), "export const answer = 42;\n");
+    await writeFile(join(agentRoot, "secret-notes.md"), "do not copy\n");
+    await writeFile(join(appRoot, "trace.tmp"), "ignored scratch file\n");
+    await writeFile(join(appRoot, "keep.tmp"), "kept by negation\n");
+    await writeFile(join(ignoredVectorStoreRoot, "Entity_name.lance"), "large vector data\n");
+    await writeFile(
+      join(compileDirectoryPath, "compiled-agent-manifest.json"),
+      `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`,
+    );
+
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+
+    expect(existsSync(join(snapshot.runtimeAppRoot, "agent", "agent.ts"))).toBe(true);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "keep.tmp"))).toBe(true);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "analysts", ".cognee"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "trace.tmp"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "agent", "secret-notes.md"))).toBe(false);
   });
 
   it("prunes stale snapshots while preserving the active and recent snapshots", async () => {
@@ -666,6 +710,7 @@ describe("development runtime artifact snapshots", () => {
       join(appRoot, "tsconfig.json"),
       '{ "compilerOptions": { "target": "ES2024" } }\n',
     );
+    await writeFile(join(appRoot, ".gitignore"), "dist\nnode_modules\n");
     await writeFile(
       join(packageRoot, "package.json"),
       JSON.stringify(
