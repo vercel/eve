@@ -8,7 +8,6 @@ import { AuthKey, ContinuationTokenKey, ModeKey, SessionIdKey } from "#context/k
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
 import { setPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
-import { DEFAULT_SUBAGENT_MAX_DEPTH } from "#harness/subagent-depth.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
@@ -283,7 +282,7 @@ describe("dispatchTurnStep", () => {
 });
 
 describe("dispatchRuntimeActionsStep", () => {
-  it("starts a declared subagent named agent at the depth limit", async () => {
+  it("starts a declared subagent named agent in a deeply nested session", async () => {
     vi.stubEnv("VERCEL_ENV", "production");
     const compiledArtifactsSource = {} as never;
     const compiledBundle = {
@@ -345,7 +344,7 @@ describe("dispatchRuntimeActionsStep", () => {
         continuationToken: "http:parent",
         rootSessionId: "root-session",
         sessionId: "parent-session",
-        subagentDepth: DEFAULT_SUBAGENT_MAX_DEPTH,
+        subagentDepth: 99,
       }),
     });
     installSessionStoreMocks([session]);

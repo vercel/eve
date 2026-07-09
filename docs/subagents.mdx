@@ -79,7 +79,7 @@ The root built-in `agent` tool is the exception. Its children share the root's s
 
 eve lowers every subagent visible to the current agent (the root built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, outputSchema? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. Set `outputSchema` to run the child in task mode, returning structured output as the tool result.
 
-Declared subagent delegation is not blocked by accumulated session depth. A declared subagent may call the nested subagents authored in its own directory, and that filesystem graph provides the boundary. The recursive built-in uses the stricter root-only rule above. `limits.maxSubagentDepth` remains accepted for existing configurations, but the root-only boundary supersedes it and declared chains do not use it.
+Declared subagent delegation is not blocked by accumulated session depth. A declared subagent may call the nested subagents authored in its own directory, and that filesystem graph provides the boundary. The recursive built-in uses the stricter root-only rule above. The former `limits.maxSubagentDepth` option has been removed because recursive delegation is always exactly one root-to-copy level.
 
 `Workflow` is root-only. Delegated subagent sessions can still call their own visible declared or remote subagent tools, but they do not receive the `Workflow` orchestration wrapper or the recursive built-in. The number of subagent calls one Workflow program may dispatch is capped separately by `limits.maxSubagents` (default 100); see [Dynamic workflows](./guides/dynamic-workflows).
 

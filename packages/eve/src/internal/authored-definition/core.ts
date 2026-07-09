@@ -185,7 +185,7 @@ function normalizeAgentLimitsDefinition(
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(
     record,
-    ["maxInputTokensPerSession", "maxOutputTokensPerSession", "maxSubagentDepth", "maxSubagents"],
+    ["maxInputTokensPerSession", "maxOutputTokensPerSession", "maxSubagents"],
     message,
   );
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["limits"]>> = {};
@@ -201,9 +201,6 @@ function normalizeAgentLimitsDefinition(
       record.maxOutputTokensPerSession,
       message,
     );
-  }
-  if (record.maxSubagentDepth !== undefined) {
-    normalizedDefinition.maxSubagentDepth = expectPositiveInteger(record.maxSubagentDepth, message);
   }
   if (record.maxSubagents !== undefined) {
     normalizedDefinition.maxSubagents = expectPositiveInteger(record.maxSubagents, message);

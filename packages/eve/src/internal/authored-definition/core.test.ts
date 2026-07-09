@@ -95,7 +95,6 @@ describe("normalizeAgentDefinition", () => {
         limits: {
           maxInputTokensPerSession: 200_000,
           maxOutputTokensPerSession: 20_000,
-          maxSubagentDepth: 4,
           maxSubagents: 6,
         },
       },
@@ -105,7 +104,6 @@ describe("normalizeAgentDefinition", () => {
     expect(definition.limits).toEqual({
       maxInputTokensPerSession: 200_000,
       maxOutputTokensPerSession: 20_000,
-      maxSubagentDepth: 4,
       maxSubagents: 6,
     });
   });
@@ -128,24 +126,12 @@ describe("normalizeAgentDefinition", () => {
     });
   });
 
-  it("rejects false for subagent max depth", () => {
+  it("rejects the removed subagent max depth limit", () => {
     expect(() =>
       normalizeAgentDefinition(
         {
           model: "openai/gpt-5.5",
-          limits: { maxSubagentDepth: false },
-        },
-        FAILURE_MESSAGE,
-      ),
-    ).toThrow(FAILURE_MESSAGE);
-  });
-
-  it.each([0, 1.5, -1, "4"])("rejects invalid subagent max depth %j", (maxSubagentDepth) => {
-    expect(() =>
-      normalizeAgentDefinition(
-        {
-          model: "openai/gpt-5.5",
-          limits: { maxSubagentDepth },
+          limits: { maxSubagentDepth: 4 },
         },
         FAILURE_MESSAGE,
       ),

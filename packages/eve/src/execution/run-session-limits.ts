@@ -25,7 +25,7 @@ export function resolveInheritedTokenLimit(input: {
 /**
  * Resolves a positive integer limit against an inherited parent cap: the
  * tighter value wins; absence means the other side applies. Used for the
- * delegation-count axes (`maxSubagentDepth`, `maxSubagents`).
+ * the Workflow delegation-count axis (`maxSubagents`).
  */
 export function resolveInheritedCountLimit(input: {
   readonly configured?: number;

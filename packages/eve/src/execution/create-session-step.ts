@@ -70,12 +70,6 @@ export async function createSessionStep(input: {
     rootSessionId: input.rootSessionId,
     sessionId: input.sessionId,
     subagentDepth: input.subagentDepth,
-    // Depth is absolute (root = 0), so the tighter cap lets a child stop
-    // delegation earlier in its subtree but never extend past the root's cap.
-    subagentMaxDepth: resolveInheritedCountLimit({
-      configured: bundle.resolvedAgent.config.limits?.maxSubagentDepth,
-      inherited: input.inheritedLimits?.maxSubagentDepth,
-    }),
     turnAgent: bundle.turnAgent,
     // Caps one Workflow invocation's fan-out anywhere in this session.
     workflowMaxSubagents: resolveInheritedCountLimit({

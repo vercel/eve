@@ -79,15 +79,9 @@ export interface HarnessSession {
   readonly state?: SessionStateMap;
   /**
    * Number of local delegated subagent hops from the root session to this
-   * session. Root sessions are depth 0. Used by the harness to cap recursive
-   * subagent delegation.
+   * session. Root sessions are depth 0.
    */
   readonly subagentDepth?: number;
-  /**
-   * Maximum delegated child-session depth for this session. When omitted, the
-   * harness uses the framework default.
-   */
-  readonly subagentMaxDepth?: number;
   /**
    * Effective maximum subagent calls one `Workflow` invocation may dispatch
    * for this session. Resolved at session creation as the tighter of the

@@ -19,7 +19,6 @@ describe("definition helper exact inputs", () => {
       limits: {
         maxInputTokensPerSession: 200_000,
         maxOutputTokensPerSession: 20_000,
-        maxSubagentDepth: 4,
         maxSubagents: 6,
       },
       model: "anthropic/claude-sonnet-5",
@@ -33,13 +32,20 @@ describe("definition helper exact inputs", () => {
     expect(agent.description).toBe("type-test");
     expect(agent.limits.maxInputTokensPerSession).toBe(200_000);
     expect(agent.limits.maxOutputTokensPerSession).toBe(20_000);
-    expect(agent.limits.maxSubagentDepth).toBe(4);
     expect(agent.limits.maxSubagents).toBe(6);
     expect(schedule.cron).toBe("0 9 * * *");
   });
 });
 
 function typeOnlyFixtures(): void {
+  defineAgent({
+    limits: {
+      // @ts-expect-error Recursive delegation is root-only; this limit was removed.
+      maxSubagentDepth: 4,
+    },
+    model: "anthropic/claude-sonnet-5",
+  });
+
   const agentWithName = {
     model: "anthropic/claude-sonnet-5",
     name: "agent-name",

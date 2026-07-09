@@ -2,7 +2,6 @@ import { jsonSchema } from "ai";
 import { describe, expect, it } from "vitest";
 
 import { getAdvertisedTools } from "#harness/advertised-tools.js";
-import { DEFAULT_SUBAGENT_MAX_DEPTH } from "#harness/subagent-depth.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 import { buildToolSet } from "#harness/tools.js";
@@ -27,7 +26,7 @@ describe("getAdvertisedTools", () => {
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({
-      session: { subagentDepth: DEFAULT_SUBAGENT_MAX_DEPTH },
+      session: { subagentDepth: 99 },
       tools,
     });
 
@@ -62,14 +61,14 @@ describe("getAdvertisedTools", () => {
     expect([...advertisedTools.keys()]).toEqual(["add", "agent"]);
   });
 
-  it("removes the built-in agent tool at the subagent depth limit", () => {
+  it("removes the built-in agent tool when depth identifies a delegated session", () => {
     const tools = new Map([
       ["add", createTool("add")],
       ["agent", createRecursiveAgentTool()],
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({
-      session: { subagentDepth: DEFAULT_SUBAGENT_MAX_DEPTH },
+      session: { subagentDepth: 1 },
       tools,
     });
 
@@ -85,7 +84,7 @@ describe("getAdvertisedTools", () => {
     const advertisedTools = getAdvertisedTools({
       session: {
         rootSessionId: "root-session",
-        subagentDepth: DEFAULT_SUBAGENT_MAX_DEPTH,
+        subagentDepth: 99,
       },
       tools,
     });

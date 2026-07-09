@@ -45,7 +45,6 @@ import {
   getSessionTokenUsage,
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
-import { DEFAULT_SUBAGENT_MAX_DEPTH } from "#harness/subagent-depth.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 import {
   CONDITIONAL_DELIVERY_INSTRUCTION,
@@ -783,7 +782,7 @@ describe("createToolLoopHarness", () => {
     expect(third.session.compaction.threshold).toBe(90_000);
   });
 
-  it("keeps declared subagent tools visible at the subagent depth limit", async () => {
+  it("keeps declared subagent tools visible in deeply nested sessions", async () => {
     setupMockAgent({
       finishReason: "stop",
       response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -797,7 +796,7 @@ describe("createToolLoopHarness", () => {
     });
     const runStep = createToolLoopHarness(config);
 
-    await runStep(createTestSession({ subagentDepth: DEFAULT_SUBAGENT_MAX_DEPTH }), {
+    await runStep(createTestSession({ subagentDepth: 99 }), {
       message: "Hi",
     });
 
@@ -807,7 +806,7 @@ describe("createToolLoopHarness", () => {
     expect(agentCall!.tools).toHaveProperty("delegate");
   });
 
-  it("publishes subagent calls from the current run immediately before the depth limit", async () => {
+  it("publishes declared subagent calls from nested sessions", async () => {
     setupMockAgent({
       finishReason: "tool-calls",
       response: {
@@ -842,12 +841,9 @@ describe("createToolLoopHarness", () => {
       createTestConfig("conversation", emit, { tools: createDelegationToolMap() }),
     );
 
-    const result = await runStep(
-      createTestSession({ subagentDepth: DEFAULT_SUBAGENT_MAX_DEPTH - 1 }),
-      {
-        message: "Hi",
-      },
-    );
+    const result = await runStep(createTestSession({ subagentDepth: 98 }), {
+      message: "Hi",
+    });
 
     expect(events.find((event) => event.type === "actions.requested")?.data.actions).toEqual([
       {
@@ -873,7 +869,7 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
-  it("publishes declared subagent calls from the current run at the depth limit", async () => {
+  it("publishes declared subagent calls from deeply nested sessions", async () => {
     setupMockAgent({
       finishReason: "tool-calls",
       response: {
@@ -907,7 +903,7 @@ describe("createToolLoopHarness", () => {
       createTestConfig("conversation", emit, { tools: createDelegationToolMap() }),
     );
 
-    const result = await runStep(createTestSession({ subagentDepth: DEFAULT_SUBAGENT_MAX_DEPTH }), {
+    const result = await runStep(createTestSession({ subagentDepth: 99 }), {
       message: "Hi",
     });
 
@@ -951,7 +947,7 @@ describe("createToolLoopHarness", () => {
     });
     const runStep = createToolLoopHarness(config);
 
-    await runStep(createTestSession({ subagentDepth: DEFAULT_SUBAGENT_MAX_DEPTH }), {
+    await runStep(createTestSession({ subagentDepth: 99 }), {
       message: "Hi",
     });
 

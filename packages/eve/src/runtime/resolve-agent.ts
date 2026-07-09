@@ -244,7 +244,6 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
 
   if (manifest.config.limits !== undefined) {
     config.limits = {
-      maxSubagentDepth: manifest.config.limits.maxSubagentDepth,
       maxSubagents: manifest.config.limits.maxSubagents,
       maxInputTokensPerSession: manifest.config.limits.maxInputTokensPerSession,
       maxOutputTokensPerSession: manifest.config.limits.maxOutputTokensPerSession,

@@ -165,65 +165,6 @@ describe("createSessionStep", () => {
     });
   });
 
-  it("seeds subagent max depth from resolved agent config", async () => {
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
-      resolvedAgent: {
-        config: {
-          limits: { maxSubagentDepth: 4 },
-        },
-      },
-      turnAgent: TestTurnAgent,
-    } as never);
-
-    const { state } = await createSessionStep({
-      compiledArtifactsSource: { kind: "bundled" },
-      continuationToken: "http:test",
-      sessionId: "sess-root",
-    });
-
-    expect(state.snapshot?.session.subagentMaxDepth).toBe(4);
-  });
-
-  it("keeps a tighter configured subagent max depth under the inherited cap", async () => {
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
-      resolvedAgent: {
-        config: {
-          limits: { maxSubagentDepth: 2 },
-        },
-      },
-      turnAgent: TestTurnAgent,
-    } as never);
-
-    const { state } = await createSessionStep({
-      compiledArtifactsSource: { kind: "bundled" },
-      continuationToken: "subagent:test",
-      inheritedLimits: { maxSubagentDepth: 4 },
-      sessionId: "sess-child",
-    });
-
-    expect(state.snapshot?.session.subagentMaxDepth).toBe(2);
-  });
-
-  it("caps configured subagent max depth at the inherited cap", async () => {
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
-      resolvedAgent: {
-        config: {
-          limits: { maxSubagentDepth: 6 },
-        },
-      },
-      turnAgent: TestTurnAgent,
-    } as never);
-
-    const { state } = await createSessionStep({
-      compiledArtifactsSource: { kind: "bundled" },
-      continuationToken: "subagent:test",
-      inheritedLimits: { maxSubagentDepth: 4 },
-      sessionId: "sess-child",
-    });
-
-    expect(state.snapshot?.session.subagentMaxDepth).toBe(4);
-  });
-
   it("keeps a tighter configured workflow max subagents under the inherited cap", async () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       resolvedAgent: {

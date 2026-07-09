@@ -150,17 +150,6 @@ export interface PublicAgentCompactionDefinition {
  */
 export interface AgentLimitsDefinition {
   /**
-   * Legacy recursive subagent depth limit.
-   *
-   * The built-in recursive `agent` tool is now root-only and declared
-   * subagent chains are not depth-limited, so the root-only boundary
-   * supersedes this value.
-   *
-   * @deprecated The recursive `agent` tool is hard-limited to the root session.
-   * @default 3
-   */
-  readonly maxSubagentDepth?: number;
-  /**
    * Maximum number of subagent calls one `Workflow` tool invocation may
    * dispatch.
    *

@@ -1,6 +1,6 @@
 import type { ToolSet } from "ai";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { resolveSubagentDelegationLimit } from "#harness/subagent-depth.js";
+import { resolveSubagentDepth } from "#harness/subagent-depth.js";
 import {
   ensureWorkflowContinuationSecurity,
   getWorkflowContinuationSecurity,
@@ -9,10 +9,7 @@ import { applyWorkflowTool } from "#harness/workflow-sandbox.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 import type { WorkflowSandboxLifecycle } from "#shared/workflow-sandbox.js";
 
-type AdvertisedToolSession = Pick<
-  HarnessSession,
-  "rootSessionId" | "subagentDepth" | "subagentMaxDepth"
->;
+type AdvertisedToolSession = Pick<HarnessSession, "rootSessionId" | "subagentDepth">;
 
 type AdvertisedToolMapInput = {
   readonly session: AdvertisedToolSession;
@@ -140,9 +137,9 @@ function filterWorkflowHostToolsForRootSession(
   session: AdvertisedToolSession,
 ): HarnessToolMap {
   const filteredTools = new Map<string, HarnessToolDefinition>();
-  const delegationLimit = resolveSubagentDelegationLimit(session);
+  const subagentDepth = resolveSubagentDepth(session);
 
-  if (session.rootSessionId !== undefined || delegationLimit.currentDepth > 0) {
+  if (session.rootSessionId !== undefined || subagentDepth.currentDepth > 0) {
     return filteredTools;
   }
 
@@ -167,12 +164,7 @@ function shouldHideDelegationTool(
     return false;
   }
 
-  const delegationLimit = resolveSubagentDelegationLimit(session);
-  return (
-    session.rootSessionId !== undefined ||
-    delegationLimit.currentDepth > 0 ||
-    delegationLimit.reached
-  );
+  return session.rootSessionId !== undefined || resolveSubagentDepth(session).currentDepth > 0;
 }
 
 function isToolDefinitionList(

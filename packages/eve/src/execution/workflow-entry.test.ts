@@ -235,7 +235,7 @@ describe("workflowEntry", () => {
     });
   });
 
-  it("passes delegated subagent depth options to session creation", async () => {
+  it("passes delegated subagent lineage and inherited limits to session creation", async () => {
     const sessionState = createBaseSessionState();
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
     installHookMocks({
@@ -244,7 +244,7 @@ describe("workflowEntry", () => {
 
     await workflowEntry({
       input: { message: "hello there" },
-      limits: { maxSubagentDepth: 4 },
+      limits: { maxSubagents: 4 },
       serializedContext: createSerializedContext({
         [SubagentDepthKey.name]: 3,
       }),
@@ -252,7 +252,7 @@ describe("workflowEntry", () => {
 
     expect(createSessionStep).toHaveBeenCalledWith(
       expect.objectContaining({
-        inheritedLimits: { maxSubagentDepth: 4 },
+        inheritedLimits: { maxSubagents: 4 },
         subagentDepth: 3,
       }),
     );

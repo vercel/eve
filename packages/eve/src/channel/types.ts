@@ -15,7 +15,7 @@ import type { ChannelInstrumentationProjection } from "#channel/instrumentation.
 
 export type RunSessionLimits = Pick<
   AgentLimitsDefinition,
-  "maxInputTokensPerSession" | "maxOutputTokensPerSession" | "maxSubagentDepth" | "maxSubagents"
+  "maxInputTokensPerSession" | "maxOutputTokensPerSession" | "maxSubagents"
 >;
 
 // ---------------------------------------------------------------------------
