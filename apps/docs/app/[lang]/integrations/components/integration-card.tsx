@@ -20,9 +20,7 @@ export const IntegrationCard = ({ integration }: IntegrationCardProps) => {
       href={`/integrations/${integration.slug}`}
     >
       <div className="flex items-center justify-between">
-        {/* Always-light chip: brand marks are drawn for light surfaces, so the
-            logo tile keeps a white background in dark mode too. */}
-        <span className="flex size-10 items-center justify-center rounded-md border bg-white text-black">
+        <span className="flex size-10 items-center justify-center rounded-md border bg-background text-gray-1000">
           <Logo aria-hidden className="size-5" height={20} width={20} />
         </span>
         <div className="flex items-center gap-1.5">
