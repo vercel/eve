@@ -135,14 +135,17 @@ function buildCatalogEntry(
   return entry;
 }
 
-export const CONNECTION_CATALOG: readonly ConnectionCatalogEntry[] = connectionEntries().map(
-  (entry) => {
+// Gallery-only connections (`surfaces.scaffoldable: false`) live in the shared
+// catalog for the docs directory but have no scaffolder auth overlay, so they
+// must not reach `buildCatalogEntry`.
+export const CONNECTION_CATALOG: readonly ConnectionCatalogEntry[] = connectionEntries()
+  .filter((entry) => entry.surfaces.scaffoldable)
+  .map((entry) => {
     if (entry.connection === undefined) {
       throw new Error(`Catalog connection "${entry.slug}" is missing its connection identity.`);
     }
     return buildCatalogEntry(entry.slug, entry.name, entry.connection);
-  },
-);
+  });
 
 const CATALOG_BY_SLUG = new Map(CONNECTION_CATALOG.map((entry) => [entry.slug, entry]));
 
