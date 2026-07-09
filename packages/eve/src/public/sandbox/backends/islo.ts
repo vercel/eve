@@ -71,7 +71,14 @@ function rewriteVercelApiUrl(url: string, apiBaseUrl: URL): string {
     return url;
   }
 
-  const rewritten = new URL(parsed.pathname + parsed.search + parsed.hash, apiBaseUrl);
+  // Preserve any path prefix on the configured base URL (e.g. a
+  // self-hosted `https://host/api/v1`) by joining it with the Vercel
+  // request path rather than letting the absolute request path replace it.
+  const basePath = apiBaseUrl.pathname.replace(/\/+$/, "");
+  const rewritten = new URL(apiBaseUrl);
+  rewritten.pathname = `${basePath}${parsed.pathname}`;
+  rewritten.search = parsed.search;
+  rewritten.hash = parsed.hash;
   return rewritten.toString();
 }
 
@@ -84,7 +91,17 @@ function normalizeApiBaseUrl(apiBaseUrl: string | undefined): string {
     return DEFAULT_ISLO_API_BASE_URL;
   }
   const trimmed = apiBaseUrl.trim();
-  return trimmed.length > 0 ? trimmed : DEFAULT_ISLO_API_BASE_URL;
+  if (trimmed.length === 0) {
+    return DEFAULT_ISLO_API_BASE_URL;
+  }
+  try {
+    return new URL(trimmed).toString();
+  } catch {
+    throw new TypeError(
+      `Invalid \`apiBaseUrl\` passed to islo(): ${JSON.stringify(apiBaseUrl)}. ` +
+        `Provide an absolute URL such as "${DEFAULT_ISLO_API_BASE_URL}".`,
+    );
+  }
 }
 
 function readNonEmptyEnvironmentVariable(key: string): string | undefined {

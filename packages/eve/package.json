@@ -136,6 +136,11 @@
       "import": "./dist/src/public/sandbox/docker.js",
       "default": "./dist/src/public/sandbox/docker.js"
     },
+    "./sandbox/islo": {
+      "types": "./dist/src/public/sandbox/islo.d.ts",
+      "import": "./dist/src/public/sandbox/islo.js",
+      "default": "./dist/src/public/sandbox/islo.js"
+    },
     "./sandbox/just-bash": {
       "types": "./dist/src/public/sandbox/just-bash.d.ts",
       "import": "./dist/src/public/sandbox/just-bash.js",
@@ -145,11 +150,6 @@
       "types": "./dist/src/public/sandbox/microsandbox.d.ts",
       "import": "./dist/src/public/sandbox/microsandbox.js",
       "default": "./dist/src/public/sandbox/microsandbox.js"
-    },
-    "./sandbox/islo": {
-      "types": "./dist/src/public/sandbox/islo.d.ts",
-      "import": "./dist/src/public/sandbox/islo.js",
-      "default": "./dist/src/public/sandbox/islo.js"
     },
     "./sandbox/vercel": {
       "types": "./dist/src/public/sandbox/vercel.d.ts",
