@@ -11,6 +11,7 @@ import {
   createDiscordFollowupMessage,
   discordContinuationToken,
   editDiscordOriginalResponse,
+  resolveDiscordBotToken,
   sendDiscordChannelMessage,
   splitDiscordMessageContent,
   triggerDiscordTypingIndicator,
@@ -674,7 +675,7 @@ function mergeCredentials(
 ): DiscordChannelCredentials {
   const merged: DiscordChannelCredentials = {
     applicationId: state.applicationId ?? credentials?.applicationId,
-    botToken: credentials?.botToken,
+    botToken: credentials?.botToken ?? (() => resolveDiscordBotToken()),
     publicKey: credentials?.publicKey,
     webhookVerifier: credentials?.webhookVerifier,
   };
