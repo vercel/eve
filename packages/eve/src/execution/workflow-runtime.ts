@@ -223,6 +223,27 @@ export function createWorkflowRuntime(config: {
       }
     },
 
+    async cancelSession(input): Promise<{ sessionId: string }> {
+      const hookPayload: Extract<HookPayload, { kind: "cancel-session" }> = {
+        kind: "cancel-session",
+        reason: input.reason,
+      };
+
+      try {
+        const hook = normalizeWorkflowHook(await resumeHook(input.continuationToken, hookPayload));
+        await getRun(hook.runId).cancel();
+        return { sessionId: hook.runId };
+      } catch (error) {
+        if (HookNotFoundError.is(error)) {
+          throw new RuntimeNoActiveSessionError(input.continuationToken);
+        }
+        logError(log, "failed to cancel active session", error, {
+          continuationToken: input.continuationToken,
+        });
+        throw error;
+      }
+    },
+
     async getEventStream(
       sessionId: string,
       options?: GetEventStreamOptions,

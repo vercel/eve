@@ -179,6 +179,8 @@ function createRouteContext(params: Record<string, string>): RouteContext {
     agent: {
       async cancelTurn() {
         throw new Error("unexpected cancelTurn");
+      async cancelSession() {
+        throw new Error("unexpected cancelSession");
       },
       async deliver() {
         throw new Error("unexpected deliver");

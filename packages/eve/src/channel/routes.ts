@@ -2,6 +2,12 @@ import type { UserContent } from "ai";
 
 import type { CrossChannelReceiveFn } from "#channel/cross-channel-receive.js";
 import type { CancelTurnResult, SessionAuthContext, SessionCallback } from "#channel/types.js";
+import type {
+  CancelSessionInput,
+  CancelSessionResult,
+  SessionAuthContext,
+  SessionCallback,
+} from "#channel/types.js";
 import type { InputResponse } from "#runtime/input/types.js";
 import type { Session } from "#channel/session.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -29,6 +35,11 @@ export interface RouteHandlerArgs<TState = undefined> {
   cancel: CancelFn;
   reset: ResetFn;
   getSession: GetSessionFn;
+  /**
+   * Cancels the parked session that currently owns this channel-local
+   * continuation token.
+   */
+  cancelSession: CancelSessionFn;
   /**
    * Starts a session on a different channel to hand off inbound work (e.g. an
    * HTTP webhook routing the conversation onto Slack). The target's authored
@@ -104,6 +115,12 @@ type BaseSendOptions = {
 export type SendOptions<TState = undefined> = [TState] extends [undefined]
   ? BaseSendOptions
   : BaseSendOptions & { state: TState };
+
+export type CancelSessionFn = (
+  input: Omit<CancelSessionInput, "continuationToken"> & {
+    readonly continuationToken: string;
+  },
+) => Promise<CancelSessionResult>;
 
 /**
  * Resolves an existing {@link Session} by id, for example to read its event

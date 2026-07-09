@@ -129,6 +129,7 @@ async function firePost(
     cancel: vi.fn(),
     reset: vi.fn(),
     resolveActiveSession: async () => undefined,
+    cancelSession: vi.fn() as any,
     getSession: vi.fn() as any,
     params: {},
     receive: vi.fn() as any,

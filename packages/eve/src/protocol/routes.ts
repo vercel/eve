@@ -34,6 +34,12 @@ export const EVE_RESET_SESSION_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/session/reset`;
 export const EVE_CONTINUE_SESSION_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/session/:sessionId`;
 
 /**
+ * Stable framework-owned route path for cancelling the run that owns a
+ * continuation token.
+ */
+export const EVE_CANCEL_SESSION_ROUTE_PATH = EVE_CREATE_SESSION_ROUTE_PATH;
+
+/**
  * Stable framework-owned message stream route pattern.
  */
 export const EVE_MESSAGE_STREAM_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/session/:sessionId/stream`;

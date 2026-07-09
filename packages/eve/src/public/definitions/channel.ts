@@ -9,6 +9,8 @@ import type { Session, SessionHandle } from "#channel/session.js";
 import type {
   CancelTurnInput,
   CancelTurnResult,
+  CancelSessionInput,
+  CancelSessionResult,
   DeliverInput,
   DeliverPayload,
   GetEventStreamOptions,
@@ -23,6 +25,11 @@ import type { GenericChannelDefinition, GenericReceiveInput } from "#shared/chan
 declare const CHANNEL_METADATA_TYPE: unique symbol;
 
 export type { CancelTurnInput, CancelTurnResult, GetEventStreamOptions } from "#channel/types.js";
+export type {
+  CancelSessionInput,
+  CancelSessionResult,
+  GetEventStreamOptions,
+} from "#channel/types.js";
 export type { Session, SessionHandle } from "#channel/session.js";
 export type { ChannelCors, ChannelCorsOptions } from "#channel/cors.js";
 export { GET, POST, PUT, PATCH, DELETE, WS } from "#channel/routes.js";
@@ -35,6 +42,7 @@ export type {
   HttpRouteDefinition,
   RouteDefinition,
   RouteHandlerArgs,
+  CancelSessionFn,
   SendFn,
   SendOptions,
   SendPayload,
@@ -130,6 +138,7 @@ export interface Agent {
    * with the same token resume the same session.
    */
   run(input: RunInput): Promise<RunHandle>;
+
   /**
    * Requests cancellation of a session's in-flight turn. A `turnId` limits
    * the request to the turn the caller observed.
@@ -147,6 +156,12 @@ export interface Agent {
    * to `run()` to start a new session.
    */
   deliver(input: DeliverInput): Promise<{ sessionId: string }>;
+
+  /**
+   * Cancels the session that currently owns the supplied continuation token.
+   */
+  cancelSession(input: CancelSessionInput): Promise<CancelSessionResult>;
+
   /**
    * Returns a readable NDJSON-style stream of lifecycle events for an
    * existing session. Used by the framework's HTTP session-stream route and by

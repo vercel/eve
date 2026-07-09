@@ -27,6 +27,8 @@ function createMockRuntime(): Runtime {
     cancelTurn: vi.fn(),
     deliver: vi.fn().mockRejectedValue(new RuntimeNoActiveSessionError("schedule:token")),
     resolveSession: vi.fn(),
+    cancelSession: vi.fn(),
+    deliver: vi.fn().mockRejectedValue(new Error("no parked session")),
     run: vi.fn().mockResolvedValue(createMockRunHandle()),
     getEventStream: vi.fn().mockResolvedValue(new ReadableStream<MessageStreamEvent>()),
     getStreamTailIndex: vi.fn().mockResolvedValue(-1),

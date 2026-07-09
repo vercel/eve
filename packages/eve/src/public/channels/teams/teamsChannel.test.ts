@@ -45,6 +45,7 @@ async function firePost(
       method: "POST",
     }),
     {
+      cancelSession: vi.fn(),
       getSession: vi.fn(),
       resolveActiveSession: overrides.resolveActiveSession ?? vi.fn().mockResolvedValue(undefined),
       cancel: vi.fn(),
