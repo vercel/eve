@@ -5,6 +5,14 @@ import { EVE_CREATE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import type { JsonObject } from "#shared/json.js";
 
 /**
+ * Base URL of a remote eve deployment, either a static string or a function
+ * resolved at runtime. Use the function form to read `process.env` for a URL
+ * known only once the deployment runs. A string is baked into the compiled
+ * manifest; a function is invoked when the runtime resolves the agent graph.
+ */
+export type RemoteAgentUrl = string | (() => string | Promise<string>);
+
+/**
  * Public definition for a remote eve agent. The compiler lowers it to a
  * subagent tool.
  */
@@ -29,9 +37,11 @@ export interface RemoteAgentDefinition {
    */
   readonly path: string;
   /**
-   * Base URL of the remote eve deployment to call.
+   * Base URL of the remote eve deployment to call. Accepts a static string
+   * (baked at compile time) or a function resolved at runtime — use the
+   * function form to read a URL from `process.env`.
    */
-  readonly url: string;
+  readonly url: RemoteAgentUrl;
 }
 
 /**
