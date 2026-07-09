@@ -70,6 +70,7 @@ export async function openStreamBody(
 ): Promise<ReadableStream<Uint8Array>> {
   let lastStatus: number | undefined;
   let lastBody: string | undefined;
+  let lastHeaders: Headers | undefined;
 
   for (let attempt = 0; attempt < STREAM_OPEN_RETRY_ATTEMPTS; attempt += 1) {
     const url = createClientUrl(
@@ -87,16 +88,17 @@ export async function openStreamBody(
 
     if (response.ok) {
       if (!response.body) {
-        throw new ClientError(response.status, "Response body is null.");
+        throw new ClientError(response.status, "Response body is null.", response.headers);
       }
       return response.body;
     }
 
     lastStatus = response.status;
     lastBody = await response.text();
+    lastHeaders = response.headers;
 
     if (!STREAM_OPEN_RETRYABLE_STATUS.has(response.status)) {
-      throw new ClientError(response.status, lastBody);
+      throw new ClientError(response.status, lastBody, response.headers);
     }
 
     if (attempt < STREAM_OPEN_RETRY_ATTEMPTS - 1) {
@@ -104,7 +106,7 @@ export async function openStreamBody(
     }
   }
 
-  throw new ClientError(lastStatus ?? 0, lastBody ?? "Failed to open message stream.");
+  throw new ClientError(lastStatus ?? 0, lastBody ?? "Failed to open message stream.", lastHeaders);
 }
 
 async function sleep(ms: number): Promise<void> {

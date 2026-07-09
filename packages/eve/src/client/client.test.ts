@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentInfoResponseError } from "#client/agent-info-error.js";
 import { Client } from "#client/client.js";
+import { ClientError } from "#client/client-error.js";
 import type { AgentInfoResult } from "#client/types.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
 import { resolveRemoteDevelopmentClientOptions } from "#services/dev-client/client-options.js";
@@ -84,6 +85,23 @@ describe("Client request policy", () => {
     const sent = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
     expect(sent.get("authorization")).toBe("Bearer oidc-tok");
     expect(sent.get("x-vercel-trusted-oidc-idp-token")).toBe("oidc-tok");
+  });
+
+  it("includes response headers in info request errors", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("Redirecting...", {
+        status: 302,
+        headers: { location: "https://vercel.com/sso-api?url=https://eve.test" },
+      }),
+    );
+    const client = new Client({ host: "https://eve.test", redirect: "manual" });
+
+    const error = await client.info().catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(ClientError);
+    expect((error as ClientError).headers.location).toBe(
+      "https://vercel.com/sso-api?url=https://eve.test",
+    );
   });
 
   it("keeps an in-flight remote request on one credential snapshot after rollback", async () => {

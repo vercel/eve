@@ -88,6 +88,12 @@ const VERCEL_SSO_CHALLENGE = `
 <a href="https://vercel.com/sso-api?url=https%3A%2F%2Fvpoke.playground-vercel.tools">
   Vercel Authentication
 </a>`;
+const VERCEL_SSO_URL =
+  "https://vercel.com/sso-api?url=https%3A%2F%2Fvpoke.playground-vercel.tools&nonce=test";
+const VERCEL_PROTECTED_DEPLOYMENT = JSON.stringify({
+  error: { code: "401", message: "Protected deployment" },
+  protection: { vercel_auth_callback: VERCEL_SSO_URL },
+});
 const TRUSTED_SOURCES_MISMATCH = [
   "The caller environment is not permitted.",
   "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH",
@@ -162,6 +168,22 @@ describe("createRemoteConnectionController", () => {
     {
       name: "the Vercel Deployment Protection challenge",
       error: new ClientError(401, VERCEL_SSO_CHALLENGE),
+      expected: {
+        state: "auth-required",
+        challenge: { kind: "vercel-deployment-protection" },
+      },
+    },
+    {
+      name: "the Vercel Deployment Protection redirect",
+      error: new ClientError(302, "Redirecting...", { location: VERCEL_SSO_URL }),
+      expected: {
+        state: "auth-required",
+        challenge: { kind: "vercel-deployment-protection" },
+      },
+    },
+    {
+      name: "the structured Vercel Deployment Protection challenge",
+      error: new ClientError(401, VERCEL_PROTECTED_DEPLOYMENT),
       expected: {
         state: "auth-required",
         challenge: { kind: "vercel-deployment-protection" },
