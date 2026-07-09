@@ -146,10 +146,17 @@ function createFileImportSpecifier(modulePath: string): string {
   return normalizedPath;
 }
 
-async function loadBundledAuthoredModule(
+/**
+ * Bundles one authored entry module to a self-contained ESM string using the
+ * same plugin stack the dev/eval loader uses: `eve/*` and node_modules deps stay
+ * external, relative source is inlined, and (when `extensionScopeNamespace` is
+ * set) `defineState`/`defineExtension` are scoped to that namespace. Shared with
+ * `eve build`'s extension entrypoint compilation so both paths bundle identically.
+ */
+export async function bundleAuthoredModuleCode(
   modulePath: string,
-  options: AuthoredModuleLoadOptions,
-): Promise<unknown> {
+  options: AuthoredModuleLoadOptions = {},
+): Promise<string> {
   const channelCache = getChannelModuleCache();
   const packageRoot = resolveAuthoredPackageRoot(modulePath);
   const tsconfigPath = resolveAuthoredTsConfigPath(packageRoot);
@@ -215,7 +222,6 @@ async function loadBundledAuthoredModule(
     createNodeEsmCompatBannerPlugin({ includeRequire: true }),
     createPackageBoundaryPlugin(packageRoot, externalDependencies),
   ].filter((plugin) => plugin !== null);
-  let outputFile: { readonly code: string };
 
   try {
     const result = await buildWithNitroRolldown({
@@ -234,10 +240,18 @@ async function loadBundledAuthoredModule(
         sourcemap: "inline",
       },
     });
-    outputFile = getSingleRolldownChunk(result, `authored module for "${modulePath}"`);
+    return getSingleRolldownChunk(result, `authored module for "${modulePath}"`).code;
   } catch (error) {
     throw createAuthoredModuleBundleError(modulePath, error);
   }
+}
+
+async function loadBundledAuthoredModule(
+  modulePath: string,
+  options: AuthoredModuleLoadOptions,
+): Promise<unknown> {
+  const code = await bundleAuthoredModuleCode(modulePath, options);
+  const externalDependencies = normalizeExternalDependencies(options.externalDependencies);
 
   const bundleHash = createHash("sha1")
     .update(modulePath)
@@ -246,14 +260,17 @@ async function loadBundledAuthoredModule(
     .update("\0")
     .update(options.extensionScopeNamespace ?? "")
     .update("\0")
-    .update(outputFile.code)
+    .update(code)
     .digest("hex");
-  const bundleDirectoryPath = join(packageRoot, AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH);
+  const bundleDirectoryPath = join(
+    resolveAuthoredPackageRoot(modulePath),
+    AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH,
+  );
   const bundlePath = join(bundleDirectoryPath, `${bundleHash}.mjs`);
 
   if (!existsSync(bundlePath)) {
     mkdirSync(bundleDirectoryPath, { recursive: true });
-    writeFileSync(bundlePath, outputFile.code);
+    writeFileSync(bundlePath, code);
   }
 
   return await import(`${createFileImportSpecifier(bundlePath)}?v=${bundleHash}`);

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -9,30 +9,16 @@ import {
   tryReadExtensionBuildConfig,
 } from "#internal/nitro/host/build-extension.js";
 
-async function createExtensionPackage(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "eve-ext-build-"));
-  await writeFile(
-    join(root, "package.json"),
-    JSON.stringify({ name: "@acme/crm", type: "module", eve: { extension: "ext" } }),
-    "utf8",
-  );
-  await mkdir(join(root, "ext", "tools"), { recursive: true });
-  await writeFile(
-    join(root, "ext", "extension.mjs"),
-    'import { defineExtension } from "eve/extension";\nexport default defineExtension({ config: {} });\n',
-    "utf8",
-  );
-  await writeFile(
-    join(root, "ext", "tools", "crm_search.mjs"),
-    'export default { description: "Search the CRM.", async execute() { return {}; } };\n',
-    "utf8",
-  );
-  return root;
-}
-
-describe("extension build", () => {
+// Reading build config and the pre-bundle validation are pure; the bundling
+// output is covered by build-extension.scenario.test.ts (it invokes rolldown).
+describe("extension build config", () => {
   it("reads eve.extension and derives the short name", async () => {
-    const root = await createExtensionPackage();
+    const root = await mkdtemp(join(tmpdir(), "eve-ext-build-"));
+    await writeFile(
+      join(root, "package.json"),
+      JSON.stringify({ name: "@acme/crm", type: "module", eve: { extension: "ext" } }),
+      "utf8",
+    );
     const config = await tryReadExtensionBuildConfig(root);
     expect(config).not.toBeNull();
     expect(config?.packageName).toBe("@acme/crm");
@@ -43,79 +29,6 @@ describe("extension build", () => {
     const root = await mkdtemp(join(tmpdir(), "eve-app-"));
     await writeFile(join(root, "package.json"), JSON.stringify({ name: "my-agent" }), "utf8");
     expect(await tryReadExtensionBuildConfig(root)).toBeNull();
-  });
-
-  it("generates a package index re-exporting the extension declaration and tools", async () => {
-    const root = await createExtensionPackage();
-    const config = await tryReadExtensionBuildConfig(root);
-    const outDir = await buildExtensionPackage(root, config!);
-
-    const index = await readFile(join(outDir, "index.mjs"), "utf8");
-    expect(index).toContain('export { default } from "../ext/extension.mjs"');
-    expect(index).toContain('export { default as crm } from "../ext/extension.mjs"');
-
-    const toolsIndex = await readFile(join(outDir, "tools", "index.mjs"), "utf8");
-    expect(toolsIndex).toContain(
-      'export { default as crm_search } from "../../ext/tools/crm_search.mjs"',
-    );
-  });
-
-  it("sanitizes kebab-case tool names into valid export bindings", async () => {
-    const root = await createExtensionPackage();
-    await writeFile(
-      join(root, "ext", "tools", "get-weather.mjs"),
-      'export default { description: "Get the weather.", async execute() { return {}; } };\n',
-      "utf8",
-    );
-    const config = await tryReadExtensionBuildConfig(root);
-    const outDir = await buildExtensionPackage(root, config!);
-
-    const toolsIndex = await readFile(join(outDir, "tools", "index.mjs"), "utf8");
-    expect(toolsIndex).toContain(
-      'export { default as get_weather } from "../../ext/tools/get-weather.mjs"',
-    );
-    expect(toolsIndex).not.toContain("as get-weather ");
-  });
-
-  it("fills the package exports map so authors do not hand-list it", async () => {
-    const root = await createExtensionPackage();
-    const config = await tryReadExtensionBuildConfig(root);
-    await buildExtensionPackage(root, config!);
-
-    const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as {
-      exports?: Record<string, string>;
-    };
-    expect(pkg.exports).toEqual({
-      ".": "./dist/index.mjs",
-      "./tools": "./dist/tools/index.mjs",
-    });
-  });
-
-  it("re-exports the declaration for a no-config extension", async () => {
-    const root = await mkdtemp(join(tmpdir(), "eve-ext-noconfig-"));
-    await writeFile(
-      join(root, "package.json"),
-      JSON.stringify({ name: "@acme/gizmo", type: "module", eve: { extension: "ext" } }),
-      "utf8",
-    );
-    await mkdir(join(root, "ext", "tools"), { recursive: true });
-    await writeFile(
-      join(root, "ext", "extension.mjs"),
-      'import { defineExtension } from "eve/extension";\nexport default defineExtension();\n',
-      "utf8",
-    );
-    await writeFile(
-      join(root, "ext", "tools", "gizmo_ping.mjs"),
-      'export default { description: "Ping.", async execute() { return {}; } };\n',
-      "utf8",
-    );
-    const config = await tryReadExtensionBuildConfig(root);
-    const outDir = await buildExtensionPackage(root, config!);
-
-    const index = await readFile(join(outDir, "index.mjs"), "utf8");
-    expect(index).toContain('export { default } from "../ext/extension.mjs"');
-    expect(index).toContain('export { default as gizmo } from "../ext/extension.mjs"');
-    expect(index).not.toContain("mounted-extension");
   });
 
   it("throws when the extension has no declaration module", async () => {
@@ -135,27 +48,5 @@ describe("extension build", () => {
     await expect(buildExtensionPackage(root, config!)).rejects.toThrow(
       /missing an "extension\.<ext>" declaration/,
     );
-  });
-
-  it("leaves a deliberately customized export entry untouched", async () => {
-    const root = await createExtensionPackage();
-    await writeFile(
-      join(root, "package.json"),
-      JSON.stringify({
-        name: "@acme/crm",
-        type: "module",
-        eve: { extension: "ext" },
-        exports: { ".": "./custom/entry.mjs" },
-      }),
-      "utf8",
-    );
-    const config = await tryReadExtensionBuildConfig(root);
-    await buildExtensionPackage(root, config!);
-
-    const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as {
-      exports?: Record<string, string>;
-    };
-    expect(pkg.exports?.["."]).toBe("./custom/entry.mjs");
-    expect(pkg.exports?.["./tools"]).toBe("./dist/tools/index.mjs");
   });
 });
