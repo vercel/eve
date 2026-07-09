@@ -4828,11 +4828,11 @@ describe("createToolLoopHarness", () => {
 
   it("persists the SDK's accumulated approval-resume messages into session history", async () => {
     /*
-     * When a previously-parked tool call is approved, the AI SDK
-     * puts its tool-result in `StreamTextResult.responseMessages` before
-     * re-entering the model call. The result is absent from the final
-     * `StepResult.response.messages`, so durable history must use the
-     * accumulated response rather than reconstructing it from stream events.
+     * The real AI SDK contract is covered in
+     * `ai-sdk-approval-resume.integration.test.ts`. This unit isolates Eve's
+     * side of that contract: durable history must use the call-wide
+     * `responseMessages`, even when event projection does not provide a
+     * reconstructable tool-result.
      */
     const resumedToolResultMessage = {
       content: [
