@@ -1,7 +1,7 @@
 import type { HandleMessageStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
-import { FANOUT_DELAY_SERVER_URL } from "./shared.js";
+import { FANOUT_DELAY_SERVER_URL } from "./shared";
 
 const BASH_TOOL = "bash";
 const MINIMUM_CURL_CALLS = 10;

@@ -1,6 +1,6 @@
 import { defineEval } from "eve/evals";
 
-import { GUARDED_ECHO_TOKEN } from "./shared.js";
+import { GUARDED_ECHO_TOKEN } from "./shared";
 
 /**
  * HITL flow: a plain follow-up message whose text matches an approval option

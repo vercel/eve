@@ -164,7 +164,7 @@ Use the channel's `receive` target to continue an existing Agent Session or crea
 ```ts
 import { defineSchedule } from "eve/schedules";
 
-import linear from "../channels/linear.js";
+import linear from "../channels/linear";
 
 export default defineSchedule({
   cron: "0 14 * * 1",

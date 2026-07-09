@@ -30,7 +30,7 @@ The example below builds one tool per warehouse table. A map return names each t
 ```ts title="agent/tools/query.ts"
 import { defineDynamic, defineTool } from "eve/tools";
 import { z } from "zod";
-import { listTables, runReadOnly } from "../lib/warehouse.js";
+import { listTables, runReadOnly } from "../lib/warehouse";
 
 export default defineDynamic({
   events: {
@@ -89,7 +89,7 @@ A single file can declare handlers for several events, and the most recently fir
 ```ts title="agent/tools/catalog.ts"
 import { defineDynamic, defineTool } from "eve/tools";
 import { z } from "zod";
-import { runReadOnly, searchCatalog } from "../lib/catalog.js";
+import { runReadOnly, searchCatalog } from "../lib/catalog";
 
 export default defineDynamic({
   events: {
@@ -120,7 +120,7 @@ A dynamic skills file resolves which [skill](../skills) a caller can load, keyed
 
 ```ts title="agent/skills/team_playbook.ts"
 import { defineDynamic, defineSkill } from "eve/skills";
-import { PLAYBOOKS } from "../lib/playbooks.js";
+import { PLAYBOOKS } from "../lib/playbooks";
 
 export default defineDynamic({
   events: {

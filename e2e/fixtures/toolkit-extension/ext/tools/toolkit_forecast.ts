@@ -1,7 +1,7 @@
 import { defineDynamic, defineTool } from "eve/tools";
 import { z } from "zod";
 
-import { stamp } from "../lib/brand.js";
+import { stamp } from "../lib/brand";
 
 // Dynamic capability authored inside an extension: the resolver registers a tool
 // at session start that composes and runs once mounted.

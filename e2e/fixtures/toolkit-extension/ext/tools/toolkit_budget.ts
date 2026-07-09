@@ -2,7 +2,7 @@ import { defineState } from "eve/context";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
-import { PROVIDER } from "../lib/brand.js";
+import { PROVIDER } from "../lib/brand";
 
 // Bare "budget" name — eve namespaces it per package so it can't collide with
 // another extension's identically-named state.

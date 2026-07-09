@@ -44,7 +44,7 @@ the caller before eve starts a run, then stamp the tenant onto the session:
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
 import { localDev, type AuthFn } from "eve/channels/auth";
-import { verifyAgentCaller } from "../../lib/app-auth.js";
+import { verifyAgentCaller } from "../../lib/app-auth";
 
 function tenantAppAuth(): AuthFn<Request> {
   return async (request) => {
@@ -92,7 +92,7 @@ cache by that user, and pass the projected principal into `getToken`:
 
 ```ts title="agent/lib/tenant-connection-auth.ts"
 import type { ConnectionPrincipal, NonInteractiveAuthorizationDefinition } from "eve/connections";
-import { tenantCredentials, type TenantService } from "./tenant-credentials.js";
+import { tenantCredentials, type TenantService } from "./tenant-credentials";
 
 function requireTenantPrincipal(principal: ConnectionPrincipal): {
   tenantId: string;
@@ -136,8 +136,8 @@ Derive the tenant inside `execute`, fetch its credential from your application p
 ```ts title="agent/tools/list_invoices.ts"
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { tenantCredentials } from "../lib/tenant-credentials.js";
-import { requireTenantCaller } from "../lib/tenant.js";
+import { tenantCredentials } from "../lib/tenant-credentials";
+import { requireTenantCaller } from "../lib/tenant";
 
 export default defineTool({
   description: "List recent invoices from the current tenant's billing account.",
@@ -167,9 +167,9 @@ receive the token at call time without exposing it to the model:
 
 ```ts title="agent/connections/billing.ts"
 import { defineOpenAPIConnection } from "eve/connections";
-import { tenantCredentials } from "../lib/tenant-credentials.js";
-import { tenantBearerAuth } from "../lib/tenant-connection-auth.js";
-import { requireTenantCaller } from "../lib/tenant.js";
+import { tenantCredentials } from "../lib/tenant-credentials";
+import { tenantBearerAuth } from "../lib/tenant-connection-auth";
+import { requireTenantCaller } from "../lib/tenant";
 
 export default defineOpenAPIConnection({
   spec: "https://billing.example.com/openapi.json",
@@ -193,9 +193,9 @@ MCP connections accept the same callbacks:
 
 ```ts title="agent/connections/support.ts"
 import { defineMcpClientConnection } from "eve/connections";
-import { tenantCredentials } from "../lib/tenant-credentials.js";
-import { tenantBearerAuth } from "../lib/tenant-connection-auth.js";
-import { requireTenantCaller } from "../lib/tenant.js";
+import { tenantCredentials } from "../lib/tenant-credentials";
+import { tenantBearerAuth } from "../lib/tenant-connection-auth";
+import { requireTenantCaller } from "../lib/tenant";
 
 export default defineMcpClientConnection({
   url: "https://support.example.com/mcp",
@@ -220,8 +220,8 @@ tenant API key from `headers` instead:
 
 ```ts title="agent/connections/support.ts"
 import { defineMcpClientConnection } from "eve/connections";
-import { tenantCredentials } from "../lib/tenant-credentials.js";
-import { requireTenantCaller } from "../lib/tenant.js";
+import { tenantCredentials } from "../lib/tenant-credentials";
+import { requireTenantCaller } from "../lib/tenant";
 
 export default defineMcpClientConnection({
   url: "https://support.example.com/mcp",
@@ -274,7 +274,7 @@ export interface TenantCredentialProvider {
   ): Promise<TenantApiKeyCredential>;
 }
 
-export { tenantCredentials } from "../../lib/tenant-credentials.js";
+export { tenantCredentials } from "../../lib/tenant-credentials";
 ```
 
 Implement the provider with the secret system your application already trusts:

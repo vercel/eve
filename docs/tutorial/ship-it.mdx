@@ -98,7 +98,7 @@ Now point the channel at it. Replace the contents of `agent/channels/eve.ts`, wh
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
 import { localDev, vercelOidc, type AuthFn } from "eve/channels/auth";
-import { authenticate } from "../lib/auth.js";
+import { authenticate } from "../lib/auth";
 
 const appAuth: AuthFn<Request> = async (request) => {
   const user = await authenticate(request); // your cookie/session/provider

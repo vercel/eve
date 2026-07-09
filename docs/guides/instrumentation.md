@@ -66,7 +66,7 @@ Use it when the values depend on the current session, turn, step, channel, or mo
 
 ```ts
 import { defineInstrumentation, isChannel } from "eve/instrumentation";
-import supportChannel from "./channels/support.js";
+import supportChannel from "./channels/support";
 
 export default defineInstrumentation({
   events: {

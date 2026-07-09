@@ -18,10 +18,10 @@ An extension is an agent-shaped directory without `agent.ts` or `sandbox` (those
     connections/api.ts
     skills/triage/SKILL.md
     hooks/audit.ts
-    lib/http.ts         # shared helpers, imported as ../lib/http.js
+    lib/http.ts         # shared helpers, imported as ../lib/http
 ```
 
-Name tools and connections for what they do (`search`, not `crm_search`) — the mount supplies the namespace. Shared code goes in `ext/lib/`, imported by relative path.
+Name tools and connections for what they do (`search`, not `crm_search`) — the mount supplies the namespace. Shared code goes in `ext/lib/`, imported by relative path — eve compiles the source, so relative imports need no `.js` extension.
 
 ### Configuration
 
@@ -44,7 +44,7 @@ Config is optional — `defineExtension()` with no schema. Read it off the handl
 ```ts title="ext/tools/search.ts"
 import { defineTool } from "eve/tools";
 
-import extension from "../extension.js";
+import extension from "../extension";
 
 export default defineTool({
   description: "Search the CRM.",
@@ -76,6 +76,21 @@ Point `eve.extension` at the source directory and run `eve build` (wired to `bui
   "peerDependencies": { "eve": "^x" },
   "dependencies": { "zod": "^3" },
   "scripts": { "build": "eve build", "prepare": "eve build" },
+}
+```
+
+Author the source with `moduleResolution: "bundler"` — eve compiles it, so relative imports need no `.js` extension:
+
+```jsonc title="tsconfig.json"
+{
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "types": ["node"],
+  },
+  "include": ["ext/**/*.ts"],
 }
 ```
 

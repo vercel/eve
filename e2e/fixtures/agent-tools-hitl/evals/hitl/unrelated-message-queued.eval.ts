@@ -1,6 +1,6 @@
 import { defineEval } from "eve/evals";
 
-import { GUARDED_ECHO_TOKEN } from "./shared.js";
+import { GUARDED_ECHO_TOKEN } from "./shared";
 
 /**
  * HITL flow: unrelated text sent while an approval is pending must not deny

@@ -1,6 +1,6 @@
 import { defineEval } from "eve/evals";
 
-import { SANDBOX_CLI_NAME, SANDBOX_CLI_TOKEN } from "./shared.js";
+import { SANDBOX_CLI_NAME, SANDBOX_CLI_TOKEN } from "./shared";
 
 // `bootstrap` installed a custom Python CLI onto the PATH. Invoking it by
 // name (no path) through the `bash` tool proves the bootstrap-provisioned

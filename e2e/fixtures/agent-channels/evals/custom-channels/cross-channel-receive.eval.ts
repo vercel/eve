@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-import { postChannel } from "./shared.js";
+import { postChannel } from "./shared";
 
 /**
  * Custom-channel eval for cross-channel `args.receive` handoff.

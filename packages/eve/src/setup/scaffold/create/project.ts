@@ -229,8 +229,8 @@ const SHARED_TEMPLATE_FILES: Record<string, string> = {
   "tsconfig.json": `{
   "compilerOptions": {
     "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "esnext",
+    "moduleResolution": "bundler",
     "types": ["node"],
     "strict": true,
     "esModuleInterop": true,

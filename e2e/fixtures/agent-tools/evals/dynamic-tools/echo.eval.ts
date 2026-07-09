@@ -1,6 +1,6 @@
 import { defineEval } from "eve/evals";
 
-import { DYNAMIC_ECHO_TOKEN, ECHO_TOOL } from "./shared.js";
+import { DYNAMIC_ECHO_TOKEN, ECHO_TOOL } from "./shared";
 
 // defineDynamic resolves at session.started; the tool is called and
 // returns the fixture token.

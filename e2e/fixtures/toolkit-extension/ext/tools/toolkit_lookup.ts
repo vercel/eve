@@ -1,7 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
-import extension from "../extension.js";
+import extension from "../extension";
 
 export default defineTool({
   description:

@@ -1,6 +1,6 @@
 import { defineEval } from "eve/evals";
 
-import { GUARDED_ECHO_TOKEN } from "./shared.js";
+import { GUARDED_ECHO_TOKEN } from "./shared";
 
 /**
  * HITL flow: `once()` approval semantics — a grant persists for the session,
