@@ -8,6 +8,7 @@ import type {
   SessionCapabilities,
 } from "#channel/types.js";
 import type { HarnessSession } from "#harness/types.js";
+import type { AgentInheritanceDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 import type { RuntimeSubagentCallActionRequest } from "#runtime/actions/types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
@@ -25,11 +26,22 @@ interface BatchEventMetadata {
 export type SubagentInputSource =
   | {
       readonly description: string;
+      readonly effectiveSandbox?: EffectiveSandboxSource;
+      readonly inherit?: AgentInheritanceDefinition;
+      readonly parentNodeId?: string;
       readonly type: "local";
     }
   | {
+      readonly effectiveSandbox?: EffectiveSandboxSource;
       readonly type: "runtime";
     };
+
+interface EffectiveSandboxSource {
+  readonly parentSandboxState?: HarnessSession["sandboxState"];
+  readonly sandboxNodeId?: string;
+  readonly sandboxOwnerDynamicSkillNames?: readonly string[];
+  readonly sandboxSessionId?: string;
+}
 
 /**
  * Result of {@link buildSubagentRunInput}.
@@ -94,6 +106,11 @@ export function buildSubagentRunInput(input: {
   // children.
   const rootSessionId = session.rootSessionId ?? session.sessionId;
   const delegationLimit = resolveSubagentDelegationLimit(session);
+  const sharedSandboxState = createSharedSandboxAdapterState({
+    session,
+    source,
+    subagentName: action.subagentName,
+  });
   const inheritedLimits: {
     -readonly [K in keyof RunSessionLimits]: RunSessionLimits[K];
   } = resolveRemainingSessionTokenLimits(session, input.fanoutSize);
@@ -114,9 +131,7 @@ export function buildSubagentRunInput(input: {
         parentContinuationToken: input.parentContinuationToken ?? session.continuationToken,
         parentSessionId: session.sessionId,
         subagentName: action.subagentName,
-        ...(action.subagentName === "agent" && session.sandboxState
-          ? { parentSandboxState: session.sandboxState, sandboxSessionId: session.sessionId }
-          : {}),
+        ...sharedSandboxState,
       },
     },
     auth,
@@ -143,6 +158,84 @@ export function buildSubagentRunInput(input: {
   };
 
   return { childContinuationToken, runInput };
+}
+
+function createSharedSandboxAdapterState(input: {
+  readonly session: HarnessSession;
+  readonly source: SubagentInputSource;
+  readonly subagentName: string;
+}): {
+  readonly parentSandboxState?: HarnessSession["sandboxState"];
+  readonly sandboxNodeId?: string;
+  readonly sandboxOwnerDynamicSkillNames?: readonly string[];
+  readonly sandboxSessionId?: string;
+} {
+  if (input.source.type === "runtime" && input.subagentName === "agent") {
+    const effectiveSandbox = input.source.effectiveSandbox;
+    const parentSandboxState = input.session.sandboxState ?? effectiveSandbox?.parentSandboxState;
+    const sandboxSessionId =
+      effectiveSandbox?.sandboxSessionId ??
+      (parentSandboxState === undefined ? undefined : input.session.sessionId);
+
+    if (sandboxSessionId === undefined) {
+      return {};
+    }
+
+    const state: {
+      parentSandboxState?: HarnessSession["sandboxState"];
+      sandboxNodeId?: string;
+      sandboxOwnerDynamicSkillNames?: readonly string[];
+      sandboxSessionId: string;
+    } = {
+      sandboxSessionId,
+    };
+
+    if (parentSandboxState !== undefined) {
+      state.parentSandboxState = parentSandboxState;
+    }
+    if (effectiveSandbox?.sandboxNodeId !== undefined) {
+      state.sandboxNodeId = effectiveSandbox.sandboxNodeId;
+    }
+    if (
+      effectiveSandbox?.sandboxOwnerDynamicSkillNames !== undefined &&
+      effectiveSandbox.sandboxOwnerDynamicSkillNames.length > 0
+    ) {
+      state.sandboxOwnerDynamicSkillNames = effectiveSandbox.sandboxOwnerDynamicSkillNames;
+    }
+
+    return state;
+  }
+
+  if (input.source.type !== "local" || input.source.inherit?.sandbox !== true) {
+    return {};
+  }
+
+  const effectiveSandbox = input.source.effectiveSandbox;
+  const parentSandboxState = input.session.sandboxState ?? effectiveSandbox?.parentSandboxState;
+  const sandboxNodeId = effectiveSandbox?.sandboxNodeId ?? input.source.parentNodeId;
+  const state: {
+    parentSandboxState?: HarnessSession["sandboxState"];
+    sandboxNodeId?: string;
+    sandboxOwnerDynamicSkillNames?: readonly string[];
+    sandboxSessionId: string;
+  } = {
+    sandboxSessionId: effectiveSandbox?.sandboxSessionId ?? input.session.sessionId,
+  };
+
+  if (parentSandboxState !== undefined) {
+    state.parentSandboxState = parentSandboxState;
+  }
+  if (sandboxNodeId !== undefined) {
+    state.sandboxNodeId = sandboxNodeId;
+  }
+  if (
+    effectiveSandbox?.sandboxOwnerDynamicSkillNames !== undefined &&
+    effectiveSandbox.sandboxOwnerDynamicSkillNames.length > 0
+  ) {
+    state.sandboxOwnerDynamicSkillNames = effectiveSandbox.sandboxOwnerDynamicSkillNames;
+  }
+
+  return state;
 }
 
 /**

@@ -237,38 +237,40 @@ async function collectPrewarmTargets(input: {
   const targets: PrewarmTarget[] = [];
 
   await Promise.all(
-    collectNodeSandboxes(input.graph).map(async ({ definition, nodeId, workspaceResourceRoot }) => {
-      const templatePlan = createRuntimeSandboxTemplatePlan({
-        definition,
-        workspaceResourceRoot,
-      });
-      const templateKey = await createRuntimeSandboxTemplateKey({
-        backendName: definition.backend.name,
-        compiledArtifactsSource: input.compiledArtifactsSource,
-        nodeId,
-        sourceId: definition.sourceId,
-        templatePlan,
-      });
+    collectNodeSandboxes(input.graph).map(
+      async ({ definition, nodeId, workspaceResourceRoot, workspaceResourceRoots }) => {
+        const templatePlan = createRuntimeSandboxTemplatePlan({
+          definition,
+          workspaceResourceRoot,
+        });
+        const templateKey = await createRuntimeSandboxTemplateKey({
+          backendName: definition.backend.name,
+          compiledArtifactsSource: input.compiledArtifactsSource,
+          nodeId,
+          sourceId: definition.sourceId,
+          templatePlan,
+        });
 
-      if (templateKey === null) {
-        return;
-      }
+        if (templateKey === null) {
+          return;
+        }
 
-      targets.push({
-        backend: definition.backend,
-        label: formatLabel(nodeId),
-        input: {
-          bootstrap: definition.bootstrap,
-          seedFiles: await loadResourceRootSeedFiles({
-            compileDirectoryPath,
-            workspaceResourceRoot,
-          }),
-          runtimeContext,
-          templateKey,
-        },
-        signature: `${definition.backend.name}:${nodeId}:${templateKey}`,
-      });
-    }),
+        targets.push({
+          backend: definition.backend,
+          label: formatLabel(nodeId),
+          input: {
+            bootstrap: definition.bootstrap,
+            seedFiles: await loadResourceRootSeedFiles({
+              compileDirectoryPath,
+              workspaceResourceRoots,
+            }),
+            runtimeContext,
+            templateKey,
+          },
+          signature: `${definition.backend.name}:${nodeId}:${templateKey}`,
+        });
+      },
+    ),
   );
 
   // Template keys factor in nodeId (see runtime/sandbox/keys.ts), so each
@@ -286,21 +288,38 @@ async function collectPrewarmTargets(input: {
  */
 async function loadResourceRootSeedFiles(input: {
   readonly compileDirectoryPath: string;
-  readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
+  readonly workspaceResourceRoots: readonly CompiledWorkspaceResourceRoot[];
 }): Promise<readonly SandboxSeedFile[]> {
-  if (
-    input.workspaceResourceRoot.contentHash === undefined &&
-    input.workspaceResourceRoot.rootEntries.length === 0
-  ) {
-    return [];
+  const seedFiles: SandboxSeedFile[] = [];
+  const seedPathSources = new Map<string, string>();
+
+  for (const workspaceResourceRoot of input.workspaceResourceRoots) {
+    if (
+      workspaceResourceRoot.contentHash === undefined &&
+      workspaceResourceRoot.rootEntries.length === 0
+    ) {
+      continue;
+    }
+    const materialized = await materializeWorkspaceDirectory(
+      `${input.compileDirectoryPath}/${workspaceResourceRoot.logicalPath}`,
+    );
+    for (const file of materialized) {
+      const existingSource = seedPathSources.get(file.path);
+      if (existingSource !== undefined) {
+        throw new Error(
+          `Cannot merge inherited sandbox resources because "${existingSource}" and "${workspaceResourceRoot.logicalPath}" both seed "${file.path}". Rename one static skill or avoid inheriting the parent sandbox for this subagent.`,
+        );
+      }
+
+      seedPathSources.set(file.path, workspaceResourceRoot.logicalPath);
+      seedFiles.push({
+        content: file.content,
+        path: file.path,
+      });
+    }
   }
-  const materialized = await materializeWorkspaceDirectory(
-    `${input.compileDirectoryPath}/${input.workspaceResourceRoot.logicalPath}`,
-  );
-  return materialized.map((file) => ({
-    content: file.content,
-    path: file.path,
-  }));
+
+  return seedFiles;
 }
 
 async function loadGraphFromArtifacts(input: {

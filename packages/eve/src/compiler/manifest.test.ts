@@ -112,4 +112,26 @@ describe("compiledAgentManifestSchema", () => {
     expect(parsed.success).toBe(true);
     expect(manifest.config.experimental?.workflow).toEqual({ world: "@acme/eve-world" });
   });
+
+  it("preserves explicit capability inheritance configuration", () => {
+    const manifest = createCompiledAgentManifest({
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      config: {
+        inherit: {
+          connections: true,
+          sandbox: true,
+        },
+        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
+        name: "app",
+      },
+    });
+
+    const parsed = compiledAgentManifestSchema.parse(manifest);
+
+    expect(parsed.config.inherit).toEqual({
+      connections: true,
+      sandbox: true,
+    });
+  });
 });

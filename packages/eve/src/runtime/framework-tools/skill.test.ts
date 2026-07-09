@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { DynamicSkillManifestKey, SandboxKey } from "#context/keys.js";
+import { DynamicSkillManifestKey, SandboxKey, StaticSkillNamesKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { ConnectionRegistry } from "#runtime/connections/types.js";
 import { SKILL_TOOL_DEFINITION } from "#runtime/framework-tools/skill.js";
+
+const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
 
 describe("SKILL_TOOL_DEFINITION", () => {
   it("describes when skill loading should be used", () => {
@@ -22,6 +24,58 @@ describe("SKILL_TOOL_DEFINITION", () => {
 });
 
 describe("load_skill executor", () => {
+  it("loads a static skill visible to the active agent", async () => {
+    const ctx = new ContextContainer();
+    ctx.set(
+      SandboxKey,
+      mockSandbox({
+        commands: {
+          [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+        },
+        initialFiles: {
+          "/home/agent/.agents/skills/parent-only/SKILL.md": "# Parent\n",
+        },
+      }).access,
+    );
+    ctx.set(StaticSkillNamesKey, ["parent-only"]);
+
+    const execute = SKILL_TOOL_DEFINITION.execute;
+    if (execute === undefined) throw new Error("load_skill tool is missing an execute function");
+
+    await expect(
+      contextStorage.run(ctx, () =>
+        execute({ skill: "parent-only" }, { messages: [], toolCallId: "call_1" }),
+      ),
+    ).resolves.toBe("# Parent\n");
+  });
+
+  it("does not load static skills hidden from the active agent", async () => {
+    const ctx = new ContextContainer();
+    ctx.set(
+      SandboxKey,
+      mockSandbox({
+        commands: {
+          [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+        },
+        initialFiles: {
+          "/home/agent/.agents/skills/child-only/SKILL.md": "# Child\n",
+        },
+      }).access,
+    );
+    ctx.set(StaticSkillNamesKey, ["parent-only"]);
+
+    const execute = SKILL_TOOL_DEFINITION.execute;
+    if (execute === undefined) throw new Error("load_skill tool is missing an execute function");
+
+    await expect(
+      contextStorage.run(ctx, () =>
+        execute({ skill: "child-only" }, { messages: [], toolCallId: "call_1" }),
+      ),
+    ).rejects.toThrow(
+      'Skill "child-only" is not available to the active agent. Available skills: parent-only.',
+    );
+  });
+
   it("surfaces dynamic skill names when the requested id is missing", async () => {
     const ctx = new ContextContainer();
     ctx.set(SandboxKey, mockSandbox().access);

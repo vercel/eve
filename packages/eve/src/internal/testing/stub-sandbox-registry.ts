@@ -20,6 +20,12 @@ export function createStubSandboxRegistry(): RuntimeSandboxRegistry {
         logicalPath: "test:stub-sandbox/workspace",
         rootEntries: [],
       },
+      workspaceResourceRoots: [
+        {
+          logicalPath: "test:stub-sandbox/workspace",
+          rootEntries: [],
+        },
+      ],
     },
   };
 }

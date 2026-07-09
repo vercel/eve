@@ -11,6 +11,7 @@ import {
   ModeKey,
   ParentSessionKey,
   SessionCallbackKey,
+  StaticSkillNamesKey,
   SubagentDepthKey,
 } from "#context/keys.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
@@ -27,6 +28,7 @@ export function buildRunContext(input: {
   const auth: SessionAuthContext | null = run.auth;
 
   ctx.set(BundleKey, bundle);
+  ctx.set(StaticSkillNamesKey, bundle.resolvedAgent?.skills?.map((skill) => skill.name) ?? []);
   setChannelContext(ctx, run.adapter, { channelName: run.channelName });
 
   if (run.channelMetadata !== undefined) {

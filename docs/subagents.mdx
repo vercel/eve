@@ -1,6 +1,6 @@
 ---
 title: "Subagents"
-description: "Delegate work to child agents, either a copy of the agent itself or declared specialists with their own sandbox and skills."
+description: "Delegate work to child agents, either a copy of the agent itself or declared specialists with isolated or explicitly inherited capabilities."
 ---
 
 A subagent is a child agent that one agent delegates a focused subtask to. Split work into one to run it in parallel, to give the child a narrower set of tools, or to give a specialist its own identity. There are two kinds, the built-in `agent` tool (a copy of the agent itself) and declared subagents (specialists with their own directory).
@@ -53,25 +53,52 @@ agent/subagents/researcher/
 
 ## The isolation boundary
 
-A declared subagent inherits nothing from the root's authored slots. Discovery treats its directory as its own agent root, so it has only the instructions, tools, connections, skills, sandbox, hooks, and nested subagents authored under `agent/subagents/<id>/`. An absent slot falls back to the framework default, not to the root's version.
+A declared subagent is isolated by default. Discovery treats its directory as its own agent root, so it has only the instructions, tools, connections, skills, sandbox, hooks, and nested subagents authored under `agent/subagents/<id>/`. An absent slot falls back to the framework default, not to the root's version, unless the subagent explicitly opts into one of the supported inherited capabilities.
 
-| Slot         | Built-in `agent` tool         | Declared subagent                      |
-| ------------ | ----------------------------- | -------------------------------------- |
-| Instructions | Inherited (copy of the agent) | Own `instructions.{md,ts}`, optional   |
-| Tools        | Inherited                     | Own `tools/`                           |
-| Connections  | Inherited                     | Own `connections/`                     |
-| Skills       | Inherited                     | Own `skills/`                          |
-| Sandbox      | Shared with parent            | Own `sandbox/`, else framework default |
-| Hooks        | Inherited                     | Own `hooks/`                           |
-| State        | Fresh                         | Fresh                                  |
-| Channels     | Root-only                     | Root-only                              |
-| Schedules    | Root-only                     | Root-only                              |
+| Slot         | Built-in `agent` tool         | Declared subagent                                      |
+| ------------ | ----------------------------- | ------------------------------------------------------ |
+| Instructions | Inherited (copy of the agent) | Own `instructions.{md,ts}`, optional                   |
+| Tools        | Inherited                     | Own `tools/`                                           |
+| Connections  | Inherited                     | Own `connections/`, or explicit inherit                |
+| Skills       | Inherited                     | Own `skills/`                                          |
+| Sandbox      | Shared with parent            | Own `sandbox/`, framework default, or explicit inherit |
+| Hooks        | Inherited                     | Own `hooks/`                                           |
+| State        | Fresh                         | Fresh                                                  |
+| Channels     | Root-only                     | Root-only                                              |
+| Schedules    | Root-only                     | Root-only                                              |
 
-For a declared subagent this means duplicating anything the child needs. When two subagents need the same procedure, copy the markdown under each `skills/` directory, or share typed helpers via `lib/`. The sandbox does not inherit from the parent; it falls back to the framework default unless the subagent authors `subagents/<id>/sandbox.ts` or seeds files via `subagents/<id>/sandbox/workspace/`.
+For a declared subagent this means duplicating anything the child needs unless the capability is intentionally shared. When two subagents need the same procedure, copy the markdown under each `skills/` directory, or share typed helpers via `lib/`. The sandbox does not inherit from the parent by default; it falls back to the framework default unless the subagent authors `subagents/<id>/sandbox.ts`, seeds files via `subagents/<id>/sandbox/workspace/`, or explicitly inherits the parent's live sandbox session.
 
 The built-in `agent` tool is the exception. Its children share the parent's sandbox and tools because they are copies of the same agent working on the same files.
 
 `defineState` is never shared, for either kind. Each child starts with fresh durable state.
+
+## Explicit inheritance for declared subagents
+
+A declared subagent may opt into sharing selected capabilities from its immediate parent with `inherit`. Only `sandbox` and `connections` are supported today:
+
+```ts title="agent/subagents/reviewer/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  description: "Review the current checkout and file focused comments.",
+  model: "anthropic/claude-sonnet-5",
+  inherit: {
+    sandbox: true,
+    connections: true,
+  },
+});
+```
+
+`inherit.sandbox: true` runs the child against the parent's live sandbox session, so files already checked out or written by the parent are visible to the child, and child writes are visible to the parent. The child still keeps its own instructions, tools, skills, hooks, durable state, and nested subagent list.
+
+Because inherited sandboxes merge the parent's and child's static seed files into one live sandbox template, static skill names must not collide across that inherited chain. Rename one of the skills before sharing the sandbox.
+
+`inherit.connections: true` reuses the parent's resolved connection definitions. Authorization still goes through the normal connection flow for the current session and principal; eve does not copy credentials into prompts, compiled manifests, durable JSON, or sandbox files. A subagent that inherits connections cannot also declare a connection with the same name, because the effective tool namespace would be ambiguous.
+
+Inheritance is immediate-parent based. If `researcher` inherits root connections and nested `reviewer` inherits from `researcher`, `reviewer` sees `researcher`'s effective connections. If `reviewer` does not opt in, it stays isolated even when its parent inherited something.
+
+A subagent cannot both inherit the parent sandbox and own a sandbox or sandbox workspace seed. Choose one live filesystem boundary per subagent: inherited parent session, authored subagent sandbox, or the framework default.
 
 ## What the parent sees
 

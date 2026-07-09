@@ -3,6 +3,7 @@ import type {
   CompiledAgentNodeManifest,
   CompiledRemoteAgentNode,
   CompiledSubagentNode,
+  CompiledWorkspaceResourceRoot,
 } from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
@@ -28,7 +29,9 @@ import { createRuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 import type {
+  ResolvedAgent,
   ResolvedChannelDefinition,
+  ResolvedConnectionDefinition,
   ResolvedRuntimeDelegationNode,
   ResolvedRuntimeRemoteAgentNode,
   ResolvedRuntimeSubagentNode,
@@ -108,6 +111,7 @@ interface ResolveRuntimeAgentNodeInput {
   readonly childNodeIdsByParentNodeId: ReadonlyMap<string, readonly string[]>;
   readonly manifest: CompiledAgentNodeManifest;
   readonly moduleMap: CompiledModuleMap;
+  readonly inheritedConnections?: readonly ResolvedConnectionDefinition[];
   readonly nodeId: string;
   readonly nodesByNodeId: Map<string, ResolvedAgentGraphBundle["root"]>;
   readonly sourceId?: string;
@@ -129,10 +133,16 @@ async function resolveRuntimeAgentNode(
     );
   }
 
-  const agent = await resolveAgent({
+  const authoredAgent = await resolveAgent({
     manifest: input.manifest,
     moduleMap: input.moduleMap,
     nodeId: input.nodeId,
+  });
+  const agent = applyInheritedConnections({
+    agent: authoredAgent,
+    inheritedConnections: input.inheritedConnections,
+    nodeId,
+    sourceId: input.sourceId,
   });
   const hasConnections = agent.connections.length > 0;
   const frameworkTools = getFrameworkToolDefinitions({ hasConnections });
@@ -210,6 +220,12 @@ async function resolveRuntimeAgentNode(
   const sandboxRegistry = createRuntimeSandboxRegistry({
     authoredSandbox: agent.sandbox,
     workspaceResourceRoot: agent.workspaceResourceRoot,
+    workspaceResourceRoots: collectInheritedSandboxWorkspaceResourceRoots({
+      childNodeIdsByParentNodeId: input.childNodeIdsByParentNodeId,
+      manifest: input.manifest,
+      nodeId: input.nodeId,
+      subagentNodesById: input.subagentNodesById,
+    }),
   });
   const subagentRegistry = createRuntimeSubagentRegistry({
     reservedToolNames: [
@@ -221,6 +237,7 @@ async function resolveRuntimeAgentNode(
       manifest: input.manifest,
       moduleMap: input.moduleMap,
       nodesByNodeId: input.nodesByNodeId,
+      parentConnections: agent.connections,
       parentNodeId: input.nodeId,
       subagentNodesById: input.subagentNodesById,
     }),
@@ -253,11 +270,74 @@ async function resolveRuntimeAgentNode(
   return node;
 }
 
+function collectInheritedSandboxWorkspaceResourceRoots(input: {
+  readonly childNodeIdsByParentNodeId: ReadonlyMap<string, readonly string[]>;
+  readonly manifest: CompiledAgentNodeManifest;
+  readonly nodeId: string;
+  readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
+}): readonly CompiledWorkspaceResourceRoot[] {
+  const roots: CompiledWorkspaceResourceRoot[] = [input.manifest.workspaceResourceRoot];
+  const childNodeIds = input.childNodeIdsByParentNodeId.get(input.nodeId) ?? [];
+
+  for (const childNodeId of childNodeIds) {
+    const child = input.subagentNodesById.get(childNodeId);
+    if (child?.agent.config.inherit?.sandbox !== true) {
+      continue;
+    }
+
+    roots.push(
+      ...collectInheritedSandboxWorkspaceResourceRoots({
+        childNodeIdsByParentNodeId: input.childNodeIdsByParentNodeId,
+        manifest: child.agent,
+        nodeId: child.nodeId,
+        subagentNodesById: input.subagentNodesById,
+      }),
+    );
+  }
+
+  return roots;
+}
+
+function applyInheritedConnections(input: {
+  readonly agent: ResolvedAgent;
+  readonly inheritedConnections?: readonly ResolvedConnectionDefinition[];
+  readonly nodeId: string;
+  readonly sourceId?: string;
+}): ResolvedAgent {
+  const inheritedConnections = input.inheritedConnections ?? [];
+  if (inheritedConnections.length === 0) {
+    return input.agent;
+  }
+
+  const ownedConnectionNames = new Set(
+    input.agent.connections.map((connection) => connection.connectionName),
+  );
+  const duplicateConnection = inheritedConnections.find((connection) =>
+    ownedConnectionNames.has(connection.connectionName),
+  );
+
+  if (duplicateConnection !== undefined) {
+    throw new ResolveRuntimeAgentGraphError(
+      `Subagent node "${input.nodeId}" inherits connection "${duplicateConnection.connectionName}" but also defines a connection with that name.`,
+      {
+        nodeId: input.nodeId,
+        sourceId: input.sourceId,
+      },
+    );
+  }
+
+  return {
+    ...input.agent,
+    connections: [...inheritedConnections, ...input.agent.connections],
+  };
+}
+
 async function resolveRuntimeSubagents(input: {
   readonly childNodeIdsByParentNodeId: ReadonlyMap<string, readonly string[]>;
   readonly manifest: CompiledAgentNodeManifest;
   readonly moduleMap: CompiledModuleMap;
   readonly nodesByNodeId: Map<string, ResolvedAgentGraphBundle["root"]>;
+  readonly parentConnections: readonly ResolvedConnectionDefinition[];
   readonly parentNodeId: string;
   readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
 }): Promise<readonly ResolvedRuntimeDelegationNode[]> {
@@ -282,6 +362,7 @@ async function resolveRuntimeSubagents(input: {
         childNodeIdsByParentNodeId: input.childNodeIdsByParentNodeId,
         moduleMap: input.moduleMap,
         nodesByNodeId: input.nodesByNodeId,
+        parentConnections: input.parentConnections,
         sourceRef,
         subagentNodesById: input.subagentNodesById,
       }),
@@ -305,11 +386,13 @@ async function resolveRuntimeSubagent(input: {
   readonly childNodeIdsByParentNodeId: ReadonlyMap<string, readonly string[]>;
   readonly moduleMap: CompiledModuleMap;
   readonly nodesByNodeId: Map<string, ResolvedAgentGraphBundle["root"]>;
+  readonly parentConnections: readonly ResolvedConnectionDefinition[];
   readonly sourceRef: CompiledSubagentNode;
   readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
 }): Promise<ResolvedRuntimeSubagentNode> {
   const resolvedSubagent: ResolvedRuntimeSubagentNode = {
     description: input.sourceRef.description,
+    inherit: input.sourceRef.agent.config.inherit,
     kind: "subagent",
     logicalPath: input.sourceRef.logicalPath,
     name: input.sourceRef.name,
@@ -319,6 +402,10 @@ async function resolveRuntimeSubagent(input: {
   };
   await resolveRuntimeAgentNode({
     childNodeIdsByParentNodeId: input.childNodeIdsByParentNodeId,
+    inheritedConnections:
+      input.sourceRef.agent.config.inherit?.connections === true
+        ? input.parentConnections
+        : undefined,
     manifest: input.sourceRef.agent,
     moduleMap: input.moduleMap,
     nodeId: input.sourceRef.nodeId,

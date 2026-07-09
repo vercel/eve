@@ -191,7 +191,9 @@ export function createTestRuntime(descriptor: TestAppDescriptor = {}): TestRunti
     init: RunAsSessionInit | undefined,
     fn: () => Promise<T> | T,
   ): Promise<T> {
-    const sessionInit: ActiveSessionInit = buildActiveSessionContextInit(init);
+    const sessionInit: ActiveSessionInit = buildActiveSessionContextInit(init, {
+      staticSkillNames: skills.map((skill) => skill.name),
+    });
 
     return await run(async () => {
       return await runWithActiveSessionContext(sessionInit, fn);
@@ -243,7 +245,10 @@ export function createTestRuntime(descriptor: TestAppDescriptor = {}): TestRunti
 // Exported for the internal active-session-context helper.
 export { buildActiveSessionContext };
 
-function buildActiveSessionContextInit(init: RunAsSessionInit | undefined): ActiveSessionInit {
+function buildActiveSessionContextInit(
+  init: RunAsSessionInit | undefined,
+  options: { readonly staticSkillNames?: readonly string[] } = {},
+): ActiveSessionInit {
   const sessionId = init?.sessionId ?? "session_test";
   const turn = init?.turn ?? { id: "turn_test_001", sequence: 1 };
   const sandboxAccess = init?.sandboxAccess ?? init?.sandbox?.access;
@@ -254,6 +259,7 @@ function buildActiveSessionContextInit(init: RunAsSessionInit | undefined): Acti
     parent?: SessionParent;
     sandbox?: SandboxAccess;
     channel?: ChannelAdapter;
+    staticSkillNames?: readonly string[];
   } = {
     sessionId,
     turn,
@@ -269,6 +275,10 @@ function buildActiveSessionContextInit(init: RunAsSessionInit | undefined): Acti
 
   if (init?.channel !== undefined) {
     mutable.channel = init.channel;
+  }
+
+  if (options.staticSkillNames !== undefined) {
+    mutable.staticSkillNames = options.staticSkillNames;
   }
 
   return mutable;

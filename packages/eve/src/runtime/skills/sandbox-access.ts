@@ -5,6 +5,11 @@ import { resolveSandboxSkillReadPaths } from "#shared/skill-paths.js";
 
 const FRONTMATTER_PATTERN = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
 
+export interface SandboxSkillAccessOptions {
+  readonly availableSkillNames?: readonly string[];
+  readonly enforceAvailableSkills?: boolean;
+}
+
 /**
  * Validates a skill id before it is used as one path segment under
  * the sandbox skill root.
@@ -37,9 +42,11 @@ export function assertSafeSkillId(id: string): asserts id is string {
 export async function loadSkillFromSandbox(
   access: SandboxAccess,
   id: string,
-  availableNames: readonly string[] = [],
+  options: readonly string[] | SandboxSkillAccessOptions = {},
 ): Promise<string> {
   assertSafeSkillId(id);
+  const accessOptions = normalizeSkillAccessOptions(options);
+  assertSkillIsAvailable(id, accessOptions);
   const sandbox = await requireSandboxSession(access);
   const paths = await resolveSandboxSkillReadPaths({
     name: id,
@@ -54,7 +61,10 @@ export async function loadSkillFromSandbox(
     }
   }
 
-  const hint = availableNames.length > 0 ? ` Available skills: ${availableNames.join(", ")}.` : "";
+  const hint =
+    accessOptions.availableSkillNames.length > 0
+      ? ` Available skills: ${accessOptions.availableSkillNames.join(", ")}.`
+      : "";
   throw new Error(`No skill named "${id}" at ${paths[0]}.${hint}`);
 }
 
@@ -62,8 +72,14 @@ export async function loadSkillFromSandbox(
  * Creates the public runtime skill handle. Existence is checked lazily by
  * each file read against the sandbox.
  */
-export function createSandboxSkillHandle(access: SandboxAccess, id: string): SkillHandle {
+export function createSandboxSkillHandle(
+  access: SandboxAccess,
+  id: string,
+  options: SandboxSkillAccessOptions = {},
+): SkillHandle {
   assertSafeSkillId(id);
+  const accessOptions = normalizeSkillAccessOptions(options);
+  assertSkillIsAvailable(id, accessOptions);
 
   return {
     name: id,
@@ -108,6 +124,35 @@ export function createSandboxSkillHandle(access: SandboxAccess, id: string): Ski
       };
     },
   };
+}
+
+function normalizeSkillAccessOptions(
+  options: readonly string[] | SandboxSkillAccessOptions,
+): Required<SandboxSkillAccessOptions> {
+  if (Array.isArray(options)) {
+    return {
+      availableSkillNames: [...(options as readonly string[])],
+      enforceAvailableSkills: false,
+    };
+  }
+
+  const accessOptions = options as SandboxSkillAccessOptions;
+  return {
+    availableSkillNames: [...(accessOptions.availableSkillNames ?? [])],
+    enforceAvailableSkills: accessOptions.enforceAvailableSkills ?? false,
+  };
+}
+
+function assertSkillIsAvailable(id: string, options: Required<SandboxSkillAccessOptions>): void {
+  if (!options.enforceAvailableSkills || options.availableSkillNames.includes(id)) {
+    return;
+  }
+
+  const hint =
+    options.availableSkillNames.length > 0
+      ? ` Available skills: ${options.availableSkillNames.join(", ")}.`
+      : "";
+  throw new Error(`Skill "${id}" is not available to the active agent.${hint}`);
 }
 
 function assertSafeSkillRelativePath(relativePath: string): void {

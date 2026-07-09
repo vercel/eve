@@ -140,6 +140,53 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow(FAILURE_MESSAGE);
   });
 
+  it("accepts explicit subagent capability inheritance flags", () => {
+    const definition = normalizeAgentDefinition(
+      {
+        model: "openai/gpt-5.5",
+        inherit: {
+          connections: true,
+          sandbox: true,
+        },
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.inherit).toEqual({
+      connections: true,
+      sandbox: true,
+    });
+  });
+
+  it.each([
+    ["connections", "yes"],
+    ["sandbox", 1],
+  ])("rejects non-boolean inheritance flag %s=%j", (key, value) => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          inherit: { [key]: value },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
+  });
+
+  it("rejects unknown inheritance keys", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          inherit: {
+            tools: true,
+          },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('Unknown key "tools"');
+  });
+
   it.each([0, 1.5, -1, "4"])("rejects invalid subagent max depth %j", (maxSubagentDepth) => {
     expect(() =>
       normalizeAgentDefinition(

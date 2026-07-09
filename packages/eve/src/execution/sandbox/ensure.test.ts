@@ -49,6 +49,7 @@ function createTestRegistry(
   definition: Partial<ResolvedSandboxDefinition>,
   backend: SandboxBackend,
 ): RuntimeSandboxRegistry {
+  const workspaceResourceRoot = { logicalPath: "", rootEntries: [] };
   const resolved: ResolvedSandboxDefinition = {
     backend,
     logicalPath: "agent/sandbox/sandbox.ts",
@@ -61,7 +62,8 @@ function createTestRegistry(
   return {
     sandbox: {
       definition: resolved,
-      workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
+      workspaceResourceRoot,
+      workspaceResourceRoots: [workspaceResourceRoot],
     },
   };
 }
@@ -317,6 +319,53 @@ describe("ensureSandboxAccess", () => {
 
     expect(onSession).toHaveBeenCalledTimes(1);
     expect(vi.mocked(backend.create).mock.calls[0]?.[0].existingMetadata).toBeUndefined();
+  });
+
+  it("serializes first creation and onSession for concurrent access to one session key", async () => {
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, createSession());
+    const runOnSession = async (callback: () => Promise<void>) =>
+      await contextStorage.run(ctx, callback);
+    const createEntered = createDeferred<void>();
+    const releaseCreate = createDeferred<void>();
+    const sandbox = mockSandbox({ id: "sbx_shared" });
+    const create = vi.fn(async (input: SandboxBackendCreateInput) => {
+      createEntered.resolve();
+      await releaseCreate.promise;
+      return {
+        captureState: async () => ({
+          backendName: "test",
+          metadata: {},
+          sessionKey: input.sessionKey,
+        }),
+        useSessionFn: async () => sandbox.session,
+        shutdown: async () => {},
+        session: sandbox.session,
+      };
+    });
+    const backend: SandboxBackend = { create, name: "test", prewarm: vi.fn() };
+    const onSession = vi.fn();
+    const registry = createTestRegistry({ onSession }, backend);
+
+    const firstAccess = await ensure({ registry, runOnSession });
+    const secondAccess = await ensure({ registry, runOnSession });
+    const firstGet = firstAccess.get();
+    const secondGet = secondAccess.get();
+
+    await createEntered.promise;
+    await vi.waitFor(() => {
+      expect(create).toHaveBeenCalledTimes(1);
+    });
+    releaseCreate.resolve();
+
+    const [firstSession, secondSession] = await Promise.all([firstGet, secondGet]);
+
+    expect(firstSession).toBe(sandbox.session);
+    expect(secondSession).toBe(sandbox.session);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(onSession).toHaveBeenCalledTimes(1);
+    await expect(firstAccess.captureState()).resolves.toMatchObject({ initialized: true });
+    await expect(secondAccess.captureState()).resolves.toMatchObject({ initialized: true });
   });
 
   it("does not pass bootstrap or seed files to runtime create", async () => {

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import { defaultSandbox } from "#public/sandbox/backends/default.js";
 import type { ResolvedSandboxDefinition } from "#runtime/types.js";
@@ -27,6 +29,7 @@ export const DEFAULT_SANDBOX_SOURCE_ID = "eve:default-sandbox";
 export interface RuntimeRegisteredSandbox {
   readonly definition: ResolvedSandboxDefinition;
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
+  readonly workspaceResourceRoots: readonly CompiledWorkspaceResourceRoot[];
 }
 
 /**
@@ -51,13 +54,57 @@ export interface RuntimeSandboxRegistry {
 export function createRuntimeSandboxRegistry(input: {
   readonly authoredSandbox: ResolvedSandboxDefinition | null;
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
+  readonly workspaceResourceRoots?: readonly CompiledWorkspaceResourceRoot[];
 }): RuntimeSandboxRegistry {
   const definition = input.authoredSandbox ?? createFrameworkSandboxDefinition();
+  const workspaceResourceRoots = input.workspaceResourceRoots ?? [input.workspaceResourceRoot];
   return {
     sandbox: {
       definition,
-      workspaceResourceRoot: input.workspaceResourceRoot,
+      workspaceResourceRoot: mergeWorkspaceResourceRoots(workspaceResourceRoots),
+      workspaceResourceRoots,
     },
+  };
+}
+
+function mergeWorkspaceResourceRoots(
+  roots: readonly CompiledWorkspaceResourceRoot[],
+): CompiledWorkspaceResourceRoot {
+  if (roots.length === 0) {
+    return {
+      logicalPath: "",
+      rootEntries: [],
+    };
+  }
+
+  if (roots.length === 1) {
+    return roots[0]!;
+  }
+
+  const hash = createHash("sha256");
+  const rootEntries = new Set<string>();
+  let hasContent = false;
+
+  hash.update("eve-merged-workspace-resource-root-v1\0");
+  for (const root of roots) {
+    hash.update(root.logicalPath);
+    hash.update("\0");
+    hash.update(root.contentHash ?? "");
+    hash.update("\0");
+    for (const entry of root.rootEntries) {
+      rootEntries.add(entry);
+      hash.update(entry);
+      hash.update("\0");
+    }
+    if (root.contentHash !== undefined || root.rootEntries.length > 0) {
+      hasContent = true;
+    }
+  }
+
+  return {
+    contentHash: hasContent ? hash.digest("hex") : undefined,
+    logicalPath: roots[0]!.logicalPath,
+    rootEntries: [...rootEntries].sort((left, right) => left.localeCompare(right)),
   };
 }
 

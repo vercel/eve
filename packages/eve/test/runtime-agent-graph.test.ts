@@ -641,6 +641,386 @@ describe("resolveRuntimeAgentGraph", () => {
     });
   });
 
+  it("inherits parent connections only when a declared subagent opts in", async () => {
+    const appRoot = "/app";
+    const agentRoot = "/app/agent";
+    const researcherRoot = "/app/agent/subagents/researcher";
+    const reviewerRoot = "/app/agent/subagents/reviewer";
+    const inheritedConnection = {
+      connectionName: "github",
+      description: "Use GitHub",
+      logicalPath: "connections/github.ts",
+      protocol: "mcp" as const,
+      sourceId: "connections/github.ts",
+      sourceKind: "module" as const,
+      url: "https://mcp.github.example",
+    };
+    const researcherManifest = createCompiledAgentNodeManifest({
+      agentRoot: researcherRoot,
+      appRoot,
+      config: {
+        description: "Research with inherited GitHub context.",
+        inherit: {
+          connections: true,
+        },
+        model: {
+          id: TEST_DEFAULT_MODEL_ID,
+          routing: { kind: "gateway", target: "openai" },
+        },
+        name: "researcher",
+      },
+    });
+    const reviewerManifest = createCompiledAgentNodeManifest({
+      agentRoot: reviewerRoot,
+      appRoot,
+      config: {
+        description: "Review without inherited connections.",
+        model: {
+          id: TEST_DEFAULT_MODEL_ID,
+          routing: { kind: "gateway", target: "openai" },
+        },
+        name: "reviewer",
+      },
+    });
+    const manifest = createCompiledAgentManifest({
+      agentRoot,
+      appRoot,
+      config: {
+        model: {
+          id: TEST_DEFAULT_MODEL_ID,
+          routing: { kind: "gateway", target: "openai" },
+        },
+        name: "router",
+      },
+      connections: [inheritedConnection],
+      subagentEdges: [
+        {
+          childNodeId: "subagents/researcher",
+          parentNodeId: ROOT_COMPILED_AGENT_NODE_ID,
+        },
+        {
+          childNodeId: "subagents/reviewer",
+          parentNodeId: ROOT_COMPILED_AGENT_NODE_ID,
+        },
+      ],
+      subagents: [
+        {
+          agent: researcherManifest,
+          description: "Research with inherited GitHub context.",
+          entryPath: researcherRoot,
+          logicalPath: "subagents/researcher",
+          name: "researcher",
+          nodeId: "subagents/researcher",
+          rootPath: researcherRoot,
+          sourceId: "subagents/researcher",
+          sourceKind: "module",
+        },
+        {
+          agent: reviewerManifest,
+          description: "Review without inherited connections.",
+          entryPath: reviewerRoot,
+          logicalPath: "subagents/reviewer",
+          name: "reviewer",
+          nodeId: "subagents/reviewer",
+          rootPath: reviewerRoot,
+          sourceId: "subagents/reviewer",
+          sourceKind: "module",
+        },
+      ],
+    });
+    const graph = await resolveRuntimeAgentGraph({
+      manifest,
+      moduleMap: {
+        nodes: {
+          [ROOT_COMPILED_AGENT_NODE_ID]: {
+            modules: {
+              "connections/github.ts": {
+                default: {
+                  url: "https://mcp.github.example",
+                },
+              },
+            },
+          },
+          "subagents/researcher": {
+            modules: {},
+          },
+          "subagents/reviewer": {
+            modules: {},
+          },
+        },
+      },
+    });
+
+    expect(graph.root.agent.connections.map((connection) => connection.connectionName)).toEqual([
+      "github",
+    ]);
+    expect(
+      graph.nodesByNodeId
+        .get("subagents/researcher")
+        ?.agent.connections.map((connection) => connection.connectionName),
+    ).toEqual(["github"]);
+    expect(
+      graph.nodesByNodeId
+        .get("subagents/reviewer")
+        ?.agent.connections.map((connection) => connection.connectionName),
+    ).toEqual([]);
+    expect(graph.nodesByNodeId.get("subagents/researcher")?.agent.config.inherit).toEqual({
+      connections: true,
+      sandbox: undefined,
+    });
+  });
+
+  it("seeds inherited sandbox templates with inheriting child workspace resources", async () => {
+    const appRoot = "/app";
+    const agentRoot = "/app/agent";
+    const researcherRoot = "/app/agent/subagents/researcher";
+    const auditorRoot = "/app/agent/subagents/researcher/subagents/auditor";
+    const reviewerRoot = "/app/agent/subagents/reviewer";
+    const auditorManifest = createCompiledAgentNodeManifest({
+      agentRoot: auditorRoot,
+      appRoot,
+      config: {
+        description: "Audit inside the research sandbox.",
+        inherit: {
+          sandbox: true,
+        },
+        model: {
+          id: TEST_DEFAULT_MODEL_ID,
+          routing: { kind: "gateway", target: "openai" },
+        },
+        name: "auditor",
+      },
+      workspaceResourceRoot: {
+        contentHash: "auditor-resource-hash",
+        logicalPath: "workspace-resources/subagents/researcher::subagents/auditor",
+        rootEntries: ["audit-notes.md"],
+      },
+    });
+    const researcherManifest = createCompiledAgentNodeManifest({
+      agentRoot: researcherRoot,
+      appRoot,
+      config: {
+        description: "Research in the parent sandbox.",
+        inherit: {
+          sandbox: true,
+        },
+        model: {
+          id: TEST_DEFAULT_MODEL_ID,
+          routing: { kind: "gateway", target: "openai" },
+        },
+        name: "researcher",
+      },
+      workspaceResourceRoot: {
+        contentHash: "researcher-resource-hash",
+        logicalPath: "workspace-resources/subagents/researcher",
+        rootEntries: ["research-notes.md"],
+      },
+    });
+    const reviewerManifest = createCompiledAgentNodeManifest({
+      agentRoot: reviewerRoot,
+      appRoot,
+      config: {
+        description: "Review in an isolated sandbox.",
+        model: {
+          id: TEST_DEFAULT_MODEL_ID,
+          routing: { kind: "gateway", target: "openai" },
+        },
+        name: "reviewer",
+      },
+      workspaceResourceRoot: {
+        contentHash: "reviewer-resource-hash",
+        logicalPath: "workspace-resources/subagents/reviewer",
+        rootEntries: ["review-notes.md"],
+      },
+    });
+    const manifest = createCompiledAgentManifest({
+      agentRoot,
+      appRoot,
+      config: {
+        model: {
+          id: TEST_DEFAULT_MODEL_ID,
+          routing: { kind: "gateway", target: "openai" },
+        },
+        name: "router",
+      },
+      subagentEdges: [
+        {
+          childNodeId: "subagents/researcher",
+          parentNodeId: ROOT_COMPILED_AGENT_NODE_ID,
+        },
+        {
+          childNodeId: "subagents/researcher::subagents/auditor",
+          parentNodeId: "subagents/researcher",
+        },
+        {
+          childNodeId: "subagents/reviewer",
+          parentNodeId: ROOT_COMPILED_AGENT_NODE_ID,
+        },
+      ],
+      subagents: [
+        {
+          agent: researcherManifest,
+          description: "Research in the parent sandbox.",
+          entryPath: researcherRoot,
+          logicalPath: "subagents/researcher",
+          name: "researcher",
+          nodeId: "subagents/researcher",
+          rootPath: researcherRoot,
+          sourceId: "subagents/researcher",
+          sourceKind: "module",
+        },
+        {
+          agent: auditorManifest,
+          description: "Audit inside the research sandbox.",
+          entryPath: auditorRoot,
+          logicalPath: "subagents/auditor",
+          name: "auditor",
+          nodeId: "subagents/researcher::subagents/auditor",
+          rootPath: auditorRoot,
+          sourceId: "subagents/auditor",
+          sourceKind: "module",
+        },
+        {
+          agent: reviewerManifest,
+          description: "Review in an isolated sandbox.",
+          entryPath: reviewerRoot,
+          logicalPath: "subagents/reviewer",
+          name: "reviewer",
+          nodeId: "subagents/reviewer",
+          rootPath: reviewerRoot,
+          sourceId: "subagents/reviewer",
+          sourceKind: "module",
+        },
+      ],
+      workspaceResourceRoot: {
+        contentHash: "root-resource-hash",
+        logicalPath: "workspace-resources/__root__",
+        rootEntries: ["root-notes.md"],
+      },
+    });
+    const graph = await resolveRuntimeAgentGraph({
+      manifest,
+      moduleMap: {
+        nodes: {
+          [ROOT_COMPILED_AGENT_NODE_ID]: { modules: {} },
+          "subagents/researcher": { modules: {} },
+          "subagents/researcher::subagents/auditor": { modules: {} },
+          "subagents/reviewer": { modules: {} },
+        },
+      },
+    });
+
+    expect(
+      graph.root.sandboxRegistry.sandbox?.workspaceResourceRoots.map((root) => root.logicalPath),
+    ).toEqual([
+      "workspace-resources/__root__",
+      "workspace-resources/subagents/researcher",
+      "workspace-resources/subagents/researcher::subagents/auditor",
+    ]);
+    expect(graph.root.sandboxRegistry.sandbox?.workspaceResourceRoot.rootEntries).toEqual([
+      "audit-notes.md",
+      "research-notes.md",
+      "root-notes.md",
+    ]);
+    expect(
+      graph.nodesByNodeId
+        .get("subagents/reviewer")
+        ?.sandboxRegistry.sandbox?.workspaceResourceRoots.map((root) => root.logicalPath),
+    ).toEqual(["workspace-resources/subagents/reviewer"]);
+  });
+
+  it("rejects inherited connections that collide with a subagent-owned connection", async () => {
+    const appRoot = "/app";
+    const agentRoot = "/app/agent";
+    const researcherRoot = "/app/agent/subagents/researcher";
+    const githubConnection = {
+      connectionName: "github",
+      description: "Use GitHub",
+      logicalPath: "connections/github.ts",
+      protocol: "mcp" as const,
+      sourceId: "connections/github.ts",
+      sourceKind: "module" as const,
+      url: "https://mcp.github.example",
+    };
+    const researcherManifest = createCompiledAgentNodeManifest({
+      agentRoot: researcherRoot,
+      appRoot,
+      config: {
+        description: "Research with inherited GitHub context.",
+        inherit: {
+          connections: true,
+        },
+        model: {
+          id: TEST_DEFAULT_MODEL_ID,
+          routing: { kind: "gateway", target: "openai" },
+        },
+        name: "researcher",
+      },
+      connections: [githubConnection],
+    });
+    const manifest = createCompiledAgentManifest({
+      agentRoot,
+      appRoot,
+      config: {
+        model: {
+          id: TEST_DEFAULT_MODEL_ID,
+          routing: { kind: "gateway", target: "openai" },
+        },
+        name: "router",
+      },
+      connections: [githubConnection],
+      subagentEdges: [
+        {
+          childNodeId: "subagents/researcher",
+          parentNodeId: ROOT_COMPILED_AGENT_NODE_ID,
+        },
+      ],
+      subagents: [
+        {
+          agent: researcherManifest,
+          description: "Research with inherited GitHub context.",
+          entryPath: researcherRoot,
+          logicalPath: "subagents/researcher",
+          name: "researcher",
+          nodeId: "subagents/researcher",
+          rootPath: researcherRoot,
+          sourceId: "subagents/researcher",
+          sourceKind: "module",
+        },
+      ],
+    });
+
+    await expect(
+      resolveRuntimeAgentGraph({
+        manifest,
+        moduleMap: {
+          nodes: {
+            [ROOT_COMPILED_AGENT_NODE_ID]: {
+              modules: {
+                "connections/github.ts": {
+                  default: {
+                    url: "https://mcp.github.example",
+                  },
+                },
+              },
+            },
+            "subagents/researcher": {
+              modules: {
+                "connections/github.ts": {
+                  default: {
+                    url: "https://mcp.github.example",
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+    ).rejects.toThrow(
+      'Subagent node "subagents/researcher" inherits connection "github" but also defines a connection with that name.',
+    );
+  });
+
   it("lets an authored tool replace a framework tool by name collision", async () => {
     const manifest = createCompiledAgentManifest({
       agentRoot: "/app/agent",

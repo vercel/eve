@@ -1,6 +1,7 @@
 import { z } from "#compiled/zod/index.js";
 
 import { jsonObjectSchema, jsonValueSchema } from "#shared/json-schemas.js";
+import type { SandboxState } from "#sandbox/state.js";
 import { tokenUsageSchema } from "#shared/token-usage.js";
 
 /**
@@ -136,11 +137,43 @@ export type RuntimeSubagentResultActionResult = z.infer<
 >;
 
 /**
+ * Eve-internal inherited sandbox state carried from an inheriting child back
+ * to its waiting parent. Runtime stream projections strip this before emitting
+ * public `action.result` events.
+ */
+export interface RuntimeInheritedSandboxResult {
+  readonly nodeId?: string;
+  readonly sessionId: string;
+  readonly state: SandboxState;
+}
+
+const runtimeInheritedSandboxResultSchema = z
+  .object({
+    nodeId: z.string().optional(),
+    sessionId: z.string(),
+    state: z
+      .object({
+        initialized: z.boolean(),
+        session: z
+          .object({
+            backendName: z.string(),
+            metadata: z.record(z.string(), z.unknown()),
+            sessionKey: z.string(),
+          })
+          .strict()
+          .nullable(),
+      })
+      .strict(),
+  })
+  .strict();
+
+/**
  * Zod schema for one runtime-owned subagent result action result.
  */
 const runtimeSubagentResultActionResultSchema = z
   .object({
     callId: z.string(),
+    inheritedSandbox: runtimeInheritedSandboxResultSchema.optional(),
     isError: z.boolean().optional(),
     kind: z.literal("subagent-result"),
     output: jsonValueSchema,

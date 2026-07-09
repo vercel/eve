@@ -207,6 +207,27 @@ export interface AgentLimitsDefinition {
 }
 
 /**
+ * Explicit capability inheritance for declared subagents.
+ *
+ * Only subagent configs may use this. Root agents always own their capability
+ * slots directly, while subagents stay isolated unless one of these flags is
+ * set.
+ */
+export interface AgentInheritanceDefinition {
+  /**
+   * Share the immediate parent's live sandbox session with this declared
+   * subagent. The child keeps its own instructions, tools, skills, and state.
+   */
+  readonly sandbox?: boolean;
+  /**
+   * Reuse the immediate parent's resolved connection definitions from this
+   * declared subagent. Auth still resolves through the normal per-session
+   * connection flow; credentials are not copied into prompts or durable state.
+   */
+  readonly connections?: boolean;
+}
+
+/**
  * Experimental, opt-in agent capabilities authored in `agent.ts`.
  *
  * These options are unstable and may change or be removed in any release.
@@ -268,6 +289,7 @@ export type InternalAgentDefinition = {
   build?: AgentBuildDefinition;
   compaction?: InternalAgentCompactionDefinition;
   experimental?: AgentExperimentalDefinition;
+  inherit?: AgentInheritanceDefinition;
   model: InternalAgentModelDefinition;
   outputSchema?: JsonObject;
   reasoning?: AgentReasoningDefinition;
@@ -296,6 +318,14 @@ export type PublicAgentDefinition = {
    * {@link AgentExperimentalDefinition}.
    */
   readonly experimental?: AgentExperimentalDefinition;
+  /**
+   * Explicitly inherit selected capabilities from the immediate parent when
+   * this config is authored under `agent/subagents/<id>/agent.ts`.
+   *
+   * Root agents cannot use this field. Declared subagents remain isolated by
+   * default.
+   */
+  readonly inherit?: AgentInheritanceDefinition;
   /**
    * Language model used for agent turns. Accepts an AI Gateway model ID, any AI
    * SDK-compatible language model, or `defineDynamic({ fallback, events })` for

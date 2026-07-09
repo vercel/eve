@@ -94,6 +94,17 @@ export interface AgentInfoScheduleEntry extends AgentInfoSource {
 export interface AgentInfoSubagentEntry extends AgentInfoSource {
   readonly description: string;
   readonly entryPath: string;
+  readonly effective: {
+    readonly connections: {
+      readonly inherited: boolean;
+      readonly owned: number;
+    };
+    readonly sandbox: "default" | "inherited" | "owned";
+  };
+  readonly inherit: {
+    readonly connections: boolean;
+    readonly sandbox: boolean;
+  };
   readonly name: string;
   readonly nodeId: string;
   readonly rootPath: string;
@@ -483,10 +494,28 @@ function renderSandbox(sandbox: ResolvedSandboxDefinition | null): AgentInfoSand
 }
 
 export function renderSubagent(subagent: CompiledSubagentNode): AgentInfoSubagentEntry {
+  const inheritsSandbox = subagent.agent.config.inherit?.sandbox === true;
+  const inheritsConnections = subagent.agent.config.inherit?.connections === true;
+
   return {
     ...toSource(subagent),
     description: subagent.description,
     entryPath: subagent.entryPath,
+    effective: {
+      connections: {
+        inherited: inheritsConnections,
+        owned: subagent.agent.connections.length,
+      },
+      sandbox: inheritsSandbox
+        ? "inherited"
+        : subagent.agent.sandbox === null && subagent.agent.sandboxWorkspaces.length === 0
+          ? "default"
+          : "owned",
+    },
+    inherit: {
+      connections: inheritsConnections,
+      sandbox: inheritsSandbox,
+    },
     name: subagent.name,
     nodeId: subagent.nodeId,
     rootPath: subagent.rootPath,

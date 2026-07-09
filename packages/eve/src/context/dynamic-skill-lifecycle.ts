@@ -20,7 +20,10 @@ import type { ContextContainer } from "#context/container.js";
 import {
   type DurableDynamicSkillMetadata,
   DynamicSkillManifestKey,
+  InheritedSandboxKey,
   SandboxKey,
+  SandboxOwnerDynamicSkillNamesKey,
+  SandboxOwnerStaticSkillNamesKey,
 } from "#context/keys.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
 import { resolveSandboxSkillRoot } from "#shared/skill-paths.js";
@@ -224,6 +227,12 @@ export async function dispatchDynamicSkillEvent(input: {
       }
     }
 
+    assertInheritedSandboxSkillSafe({
+      ctx,
+      removedSkillNames,
+      updates,
+    });
+
     for (const name of removedSkillNames) {
       await removeSkillPackageFromSandbox({ name, sandbox });
     }
@@ -240,4 +249,34 @@ export async function dispatchDynamicSkillEvent(input: {
     PendingSkillAnnouncementKey,
     await formatDynamicSkillAnnouncement({ ctx, manifest: newManifest }),
   );
+}
+
+function assertInheritedSandboxSkillSafe(input: {
+  readonly ctx: ContextContainer;
+  readonly removedSkillNames: ReadonlySet<string>;
+  readonly updates: readonly DynamicSkillUpdate[];
+}): void {
+  if (input.ctx.get(InheritedSandboxKey) !== true) return;
+
+  const protectedSkillNames = new Set([
+    ...(input.ctx.get(SandboxOwnerStaticSkillNamesKey) ?? []),
+    ...(input.ctx.get(SandboxOwnerDynamicSkillNamesKey) ?? []),
+  ]);
+  if (protectedSkillNames.size === 0) return;
+
+  for (const { skills } of input.updates) {
+    for (const skill of skills) {
+      if (!protectedSkillNames.has(skill.name)) continue;
+      throw new Error(
+        `Dynamic skill "${skill.name}" cannot be written in an inherited sandbox because it collides with a skill already materialized by the sandbox session. Namespace the dynamic skill name before materializing it.`,
+      );
+    }
+  }
+
+  for (const name of input.removedSkillNames) {
+    if (!protectedSkillNames.has(name)) continue;
+    throw new Error(
+      `Dynamic skill "${name}" cannot be removed from an inherited sandbox because it collides with a skill already materialized by the sandbox session. Namespace the dynamic skill name before materializing it.`,
+    );
+  }
 }

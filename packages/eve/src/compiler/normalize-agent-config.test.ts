@@ -56,6 +56,32 @@ describe("compileAgentConfig", () => {
       sourceKind: "module",
     });
   });
+
+  it("preserves explicit capability inheritance config", async () => {
+    mocks.loadModuleBackedDefinition.mockResolvedValue({
+      inherit: { connections: true, sandbox: true },
+      model: "openai/gpt-5.5",
+    });
+
+    const manifest = createAgentSourceManifest({
+      agentId: "research",
+      agentRoot: "/app/agent/subagents/research",
+      appRoot: "/app",
+      configModule: createModuleSourceRef({
+        logicalPath: "agent.ts",
+        sourceId: "subagent-config",
+      }),
+    });
+
+    const compiled = await compileAgentConfig(manifest, {
+      modelCatalog: createModelCatalog(),
+    });
+
+    expect(compiled.inherit).toEqual({
+      connections: true,
+      sandbox: true,
+    });
+  });
 });
 
 function createModelCatalog(): ManifestCompileContext["modelCatalog"] {

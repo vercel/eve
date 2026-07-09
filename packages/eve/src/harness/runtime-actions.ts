@@ -2,7 +2,11 @@ import type { ModelMessage, ToolSet, TypedToolCall } from "ai";
 
 import { createActionResultEvent, type HandleMessageStreamEvent } from "#protocol/message.js";
 import { getRuntimeActionRequestKey, getRuntimeActionResultKey } from "#runtime/actions/keys.js";
-import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
+import type {
+  RuntimeActionRequest,
+  RuntimeActionResult,
+  RuntimeSubagentResultActionResult,
+} from "#runtime/actions/types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { clearProxyInputRequestsForChild } from "#harness/proxy-input-requests.js";
 import {
@@ -258,7 +262,7 @@ export async function resolvePendingRuntimeActions(input: {
 
       await input.emit(
         createActionResultEvent({
-          result,
+          result: toPublicRuntimeActionResult(result),
           sequence: batch.event.sequence,
           stepIndex: batch.event.stepIndex,
           turnId: batch.event.turnId,
@@ -274,6 +278,11 @@ export async function resolvePendingRuntimeActions(input: {
     ...input.session,
     state: Object.keys(state).length > 0 ? state : undefined,
   };
+
+  nextSession = applyInheritedSandboxResults({
+    results: readyResults,
+    session: nextSession,
+  });
 
   // Clear proxy-input entries for completed children so future
   // deliveries don't route responses to a dead child.
@@ -349,6 +358,48 @@ export async function resolvePendingRuntimeActions(input: {
     outcome: "resolved",
     session: nextSession,
   };
+}
+
+function applyInheritedSandboxResults(input: {
+  readonly results: readonly RuntimeActionResult[];
+  readonly session: HarnessSession;
+}): HarnessSession {
+  let nextSession = input.session;
+
+  for (const result of input.results) {
+    if (result.kind !== "subagent-result" || result.inheritedSandbox === undefined) {
+      continue;
+    }
+
+    nextSession = {
+      ...nextSession,
+      sandboxState: result.inheritedSandbox.state,
+    };
+  }
+
+  return nextSession;
+}
+
+function toPublicRuntimeActionResult(result: RuntimeActionResult): RuntimeActionResult {
+  if (result.kind !== "subagent-result" || result.inheritedSandbox === undefined) {
+    return result;
+  }
+
+  const publicResult: RuntimeSubagentResultActionResult = {
+    callId: result.callId,
+    kind: "subagent-result",
+    output: result.output,
+    subagentName: result.subagentName,
+  };
+
+  if (result.isError !== undefined) {
+    publicResult.isError = result.isError;
+  }
+  if (result.usage !== undefined) {
+    publicResult.usage = result.usage;
+  }
+
+  return publicResult;
 }
 
 /**

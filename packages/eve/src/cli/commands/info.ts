@@ -21,6 +21,20 @@ export interface ApplicationInfoJson {
   model: string | null;
   instructions: string | null;
   skills: string[];
+  subagents: {
+    name: string;
+    effective: {
+      connections: {
+        inherited: boolean;
+        owned: number;
+      };
+      sandbox: "default" | "inherited" | "owned";
+    };
+    inherit: {
+      connections: boolean;
+      sandbox: boolean;
+    };
+  }[];
   tools: string[];
   channels: { name: string; kind: string | null; method: string | null; urlPath: string | null }[];
   messaging: { create: string; continue: string; stream: string };
@@ -54,6 +68,28 @@ export function buildApplicationInfoJson(inspection: ApplicationInspection): App
     model: compiledState?.manifest.config.model.id ?? null,
     instructions: compiledState?.manifest.instructions?.logicalPath ?? null,
     skills: (compiledState?.manifest.skills ?? []).map((skill) => skill.name),
+    subagents: (compiledState?.manifest.subagents ?? []).map((subagent) => {
+      const inheritsConnections = subagent.agent.config.inherit?.connections === true;
+      const inheritsSandbox = subagent.agent.config.inherit?.sandbox === true;
+      return {
+        name: subagent.name,
+        effective: {
+          connections: {
+            inherited: inheritsConnections,
+            owned: subagent.agent.connections.length,
+          },
+          sandbox: inheritsSandbox
+            ? "inherited"
+            : subagent.agent.sandbox === null && subagent.agent.sandboxWorkspaces.length === 0
+              ? "default"
+              : "owned",
+        },
+        inherit: {
+          connections: inheritsConnections,
+          sandbox: inheritsSandbox,
+        },
+      };
+    }),
     tools: (compiledState?.manifest.tools ?? []).map((tool) => tool.name),
     channels: (compiledState?.manifest.channels ?? []).map((channel) =>
       channel.kind === "channel"
@@ -90,6 +126,19 @@ function formatDiscoverySummary(errors: number, warnings: number): string {
   return `${pluralize(errors, "error")}, ${pluralize(warnings, "warning")}`;
 }
 
+function formatSubagentCapabilitySummary(
+  subagent: ApplicationInfoJson["subagents"][number],
+): string {
+  const connectionMode = subagent.effective.connections.inherited
+    ? "connections inherited"
+    : "connections isolated";
+  return [
+    `sandbox ${subagent.effective.sandbox}`,
+    connectionMode,
+    pluralize(subagent.effective.connections.owned, "owned connection"),
+  ].join("; ");
+}
+
 function resolveCompileTone(status: string): "danger" | "success" | "warning" {
   switch (status) {
     case "ready":
@@ -118,6 +167,7 @@ export async function printApplicationInfo(
 
   const compiledState = inspection.compiledState;
   const info = inspection.application;
+  const applicationInfoJson = buildApplicationInfoJson(inspection);
   const theme = createCliTheme();
   const applicationRows: CliRow[] = [
     {
@@ -136,6 +186,14 @@ export async function printApplicationInfo(
     },
   ];
   const instructionsRows: CliRow[] = [];
+  const subagentRows: CliRow[] = applicationInfoJson.subagents.map((subagent) => ({
+    label: subagent.name,
+    tone:
+      subagent.effective.sandbox === "inherited" || subagent.effective.connections.inherited
+        ? "subagent"
+        : "muted",
+    value: formatSubagentCapabilitySummary(subagent),
+  }));
 
   if (compiledState !== null) {
     applicationRows.push(
@@ -238,6 +296,15 @@ export async function printApplicationInfo(
             renderCliSection(theme, {
               rows: instructionsRows,
               title: "Instructions",
+            }),
+          ]),
+      ...(compiledState === null || subagentRows.length === 0
+        ? []
+        : [
+            "",
+            renderCliSection(theme, {
+              rows: subagentRows,
+              title: "Subagents",
             }),
           ]),
       "",

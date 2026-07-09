@@ -6,6 +6,7 @@ export {
   type AgentCompactionDefinition,
   type AgentDefinition,
   type AgentExperimentalDefinition,
+  type AgentInheritanceDefinition,
   type AgentLimitsDefinition,
   type AgentModelDefinition,
   type AgentModelOptionsDefinition,

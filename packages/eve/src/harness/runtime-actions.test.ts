@@ -102,4 +102,99 @@ describe("resolvePendingRuntimeActions", () => {
       outputTokens: 100,
     });
   });
+
+  it("backfills inherited sandbox state without exposing internal metadata", async () => {
+    const session = createParkedSession();
+    const events: unknown[] = [];
+    const sandboxState = {
+      initialized: true,
+      session: {
+        backendName: "test-sandbox",
+        metadata: { workspace: "repo" },
+        sessionKey: "sandbox-session-key",
+      },
+    };
+
+    const resolved = await resolvePendingRuntimeActions({
+      emit: async (event) => {
+        events.push(event);
+      },
+      session,
+      stepInput: {
+        runtimeActionResults: [
+          {
+            callId: "call-1",
+            inheritedSandbox: {
+              nodeId: "__root__",
+              sessionId: "test-session",
+              state: sandboxState,
+            },
+            kind: "subagent-result",
+            output: "done",
+            subagentName: "researcher",
+          },
+        ],
+      },
+    });
+
+    const actionResult = events.find(isActionResultEvent);
+
+    expect(resolved.outcome).toBe("resolved");
+    expect(resolved.session.sandboxState).toEqual(sandboxState);
+    expect(actionResult?.data.result).toMatchObject({
+      callId: "call-1",
+      kind: "subagent-result",
+      output: "done",
+      subagentName: "researcher",
+    });
+    expect(actionResult?.data.result).not.toHaveProperty("inheritedSandbox");
+  });
+
+  it("backfills inherited sandbox state from failed subagent results", async () => {
+    const session = createParkedSession();
+    const sandboxState = {
+      initialized: true,
+      session: {
+        backendName: "test-sandbox",
+        metadata: { workspace: "repo" },
+        sessionKey: "sandbox-session-key",
+      },
+    };
+
+    const resolved = await resolvePendingRuntimeActions({
+      session,
+      stepInput: {
+        runtimeActionResults: [
+          {
+            callId: "call-1",
+            inheritedSandbox: {
+              nodeId: "__root__",
+              sessionId: "test-session",
+              state: sandboxState,
+            },
+            isError: true,
+            kind: "subagent-result",
+            output: { code: "SUBAGENT_EXECUTION_FAILED", message: "boom" },
+            subagentName: "researcher",
+          },
+        ],
+      },
+    });
+
+    expect(resolved.outcome).toBe("resolved");
+    expect(resolved.session.sandboxState).toEqual(sandboxState);
+  });
 });
+
+function isActionResultEvent(event: unknown): event is {
+  readonly data: { readonly result: Record<string, unknown> };
+  readonly type: "action.result";
+} {
+  return (
+    typeof event === "object" &&
+    event !== null &&
+    (event as { readonly type?: unknown }).type === "action.result" &&
+    typeof (event as { readonly data?: unknown }).data === "object" &&
+    (event as { readonly data?: unknown }).data !== null
+  );
+}

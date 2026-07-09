@@ -5,7 +5,14 @@ import {
   PendingSkillAnnouncementKey,
   dispatchDynamicSkillEvent,
 } from "#context/dynamic-skill-lifecycle.js";
-import { DynamicSkillManifestKey, SessionIdKey, SandboxKey } from "#context/keys.js";
+import {
+  DynamicSkillManifestKey,
+  InheritedSandboxKey,
+  SandboxKey,
+  SandboxOwnerDynamicSkillNamesKey,
+  SandboxOwnerStaticSkillNamesKey,
+  SessionIdKey,
+} from "#context/keys.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import { defineSkill } from "#public/definitions/skill.js";
@@ -209,6 +216,96 @@ describe("dispatchDynamicSkillEvent", () => {
         w.path.includes("/home/agent/.agents/skills/talk-like-a-dog/SKILL.md"),
       ),
     ).toBe(true);
+  });
+
+  it("rejects dynamic skill writes that would overwrite inherited sandbox owner static skills", async () => {
+    const { ctx, sandbox } = createCtx();
+    ctx.setVirtualContext(InheritedSandboxKey, true);
+    ctx.setVirtualContext(SandboxOwnerStaticSkillNamesKey, ["parent-only"]);
+    const resolver = createResolver("custom", () => ({
+      "parent-only": makeSkill("Dynamic parent collision", "Child content."),
+    }));
+
+    await expect(
+      dispatchDynamicSkillEvent({
+        ctx,
+        event: makeEvent(),
+        messages: [],
+        resolvers: [resolver],
+      }),
+    ).rejects.toThrow(/cannot be written in an inherited sandbox/u);
+
+    expect(sandbox.writes).toEqual([]);
+    expect(ctx.get(DynamicSkillManifestKey)).toBeUndefined();
+  });
+
+  it("rejects dynamic skill removals that would delete inherited sandbox owner static skills", async () => {
+    const { ctx, sandbox } = createCtx();
+    ctx.setVirtualContext(InheritedSandboxKey, true);
+    ctx.setVirtualContext(SandboxOwnerStaticSkillNamesKey, ["parent-only"]);
+    ctx.set(DynamicSkillManifestKey, {
+      custom: [{ description: "Dynamic parent collision", name: "parent-only" }],
+    });
+    const resolver = createResolver("custom", () => null);
+
+    await expect(
+      dispatchDynamicSkillEvent({
+        ctx,
+        event: makeEvent(),
+        messages: [],
+        resolvers: [resolver],
+      }),
+    ).rejects.toThrow(/cannot be removed from an inherited sandbox/u);
+
+    expect(sandbox.removedPaths).toEqual([]);
+    expect(ctx.get(DynamicSkillManifestKey)).toEqual({
+      custom: [{ description: "Dynamic parent collision", name: "parent-only" }],
+    });
+  });
+
+  it("rejects dynamic skill writes that would overwrite inherited sandbox owner dynamic skills", async () => {
+    const { ctx, sandbox } = createCtx();
+    ctx.setVirtualContext(InheritedSandboxKey, true);
+    ctx.setVirtualContext(SandboxOwnerDynamicSkillNamesKey, ["parent-dynamic"]);
+    const resolver = createResolver("custom", () => ({
+      "parent-dynamic": makeSkill("Dynamic parent collision", "Child content."),
+    }));
+
+    await expect(
+      dispatchDynamicSkillEvent({
+        ctx,
+        event: makeEvent(),
+        messages: [],
+        resolvers: [resolver],
+      }),
+    ).rejects.toThrow(/cannot be written in an inherited sandbox/u);
+
+    expect(sandbox.writes).toEqual([]);
+    expect(ctx.get(DynamicSkillManifestKey)).toBeUndefined();
+  });
+
+  it("rejects dynamic skill removals that would delete inherited sandbox owner dynamic skills", async () => {
+    const { ctx, sandbox } = createCtx();
+    ctx.setVirtualContext(InheritedSandboxKey, true);
+    ctx.setVirtualContext(SandboxOwnerDynamicSkillNamesKey, ["parent-dynamic"]);
+    ctx.set(DynamicSkillManifestKey, {
+      custom: [{ description: "Dynamic parent collision", name: "parent-dynamic" }],
+    });
+    const resolver = createResolver("custom", () => null);
+
+    await expect(
+      dispatchDynamicSkillEvent({
+        ctx,
+        event: makeEvent(),
+        messages: [],
+        resolvers: [resolver],
+      }),
+    ).rejects.toThrow(/cannot be removed from an inherited sandbox/u);
+
+    expect(sandbox.removedPaths).toEqual([]);
+    expect(ctx.get(DynamicSkillManifestKey)).toEqual({
+      custom: [{ description: "Dynamic parent collision", name: "parent-dynamic" }],
+    });
   });
 
   it("collapses a directly-returned single defineSkill to the bare slug", async () => {

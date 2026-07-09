@@ -303,6 +303,70 @@ describe("buildSubagentRunInput", () => {
     });
   });
 
+  it("preserves inherited sandbox identity for nested self-delegation", () => {
+    const sandboxState = { initialized: true, session: null };
+    const action: RuntimeSubagentCallActionRequest = {
+      ...makeAction(),
+      subagentName: "agent",
+    };
+    const { runInput } = buildSubagentRunInput({
+      action,
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      session: {
+        ...makeSession(),
+        sessionId: "researcher-session",
+      },
+      source: {
+        effectiveSandbox: {
+          parentSandboxState: sandboxState,
+          sandboxNodeId: "__root__",
+          sandboxOwnerDynamicSkillNames: ["parent-dynamic"],
+          sandboxSessionId: "parent-session",
+        },
+        type: "runtime",
+      },
+    });
+
+    expect(runInput.adapter.state).toMatchObject({
+      parentSandboxState: sandboxState,
+      sandboxNodeId: "__root__",
+      sandboxOwnerDynamicSkillNames: ["parent-dynamic"],
+      sandboxSessionId: "parent-session",
+    });
+  });
+
+  it("shares inherited runtime sandbox identity before state has been captured", () => {
+    const action: RuntimeSubagentCallActionRequest = {
+      ...makeAction(),
+      subagentName: "agent",
+    };
+    const { runInput } = buildSubagentRunInput({
+      action,
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      session: {
+        ...makeSession(),
+        sessionId: "researcher-session",
+      },
+      source: {
+        effectiveSandbox: {
+          sandboxNodeId: "__root__",
+          sandboxSessionId: "parent-session",
+        },
+        type: "runtime",
+      },
+    });
+
+    expect(runInput.adapter.state).toMatchObject({
+      sandboxNodeId: "__root__",
+      sandboxSessionId: "parent-session",
+    });
+    expect(runInput.adapter.state).not.toHaveProperty("parentSandboxState");
+  });
+
   it("does not include sandbox sharing fields for normal subagents", () => {
     const sandboxState = { initialized: true, session: null };
     const session = { ...makeSession(), sandboxState };
@@ -316,5 +380,183 @@ describe("buildSubagentRunInput", () => {
 
     expect(runInput.adapter.state).not.toHaveProperty("parentSandboxState");
     expect(runInput.adapter.state).not.toHaveProperty("sandboxSessionId");
+  });
+
+  it("does not treat a declared agent subagent as self-delegation", () => {
+    const sandboxState = { initialized: true, session: null };
+    const action: RuntimeSubagentCallActionRequest = {
+      ...makeAction(),
+      name: "agent",
+      nodeId: "subagents/agent",
+      subagentName: "agent",
+    };
+    const { runInput } = buildSubagentRunInput({
+      action,
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      session: {
+        ...makeSession(),
+        sessionId: "researcher-session",
+      },
+      source: {
+        description: "Declared local agent subagent.",
+        effectiveSandbox: {
+          parentSandboxState: sandboxState,
+          sandboxNodeId: "__root__",
+          sandboxOwnerDynamicSkillNames: ["parent-dynamic"],
+          sandboxSessionId: "parent-session",
+        },
+        type: "local",
+      },
+    });
+
+    expect(runInput.adapter.state).not.toHaveProperty("parentSandboxState");
+    expect(runInput.adapter.state).not.toHaveProperty("sandboxNodeId");
+    expect(runInput.adapter.state).not.toHaveProperty("sandboxSessionId");
+  });
+
+  it("includes sandbox sharing fields for local subagents that inherit the parent sandbox", () => {
+    const sandboxState = { initialized: true, session: null };
+    const session = { ...makeSession(), sandboxState };
+    const { runInput } = buildSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      session,
+      source: {
+        description: "Use the parent's checkout.",
+        inherit: { sandbox: true },
+        parentNodeId: "__root__",
+        type: "local",
+      },
+    });
+
+    expect(runInput.adapter.state).toMatchObject({
+      parentSandboxState: sandboxState,
+      sandboxNodeId: "__root__",
+      sandboxSessionId: "parent-session",
+    });
+  });
+
+  it("allows a declared agent subagent to explicitly inherit the parent sandbox", () => {
+    const sandboxState = { initialized: true, session: null };
+    const action: RuntimeSubagentCallActionRequest = {
+      ...makeAction(),
+      name: "agent",
+      nodeId: "subagents/agent",
+      subagentName: "agent",
+    };
+    const { runInput } = buildSubagentRunInput({
+      action,
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      session: {
+        ...makeSession(),
+        sessionId: "researcher-session",
+      },
+      source: {
+        description: "Declared local agent subagent.",
+        effectiveSandbox: {
+          parentSandboxState: sandboxState,
+          sandboxNodeId: "__root__",
+          sandboxOwnerDynamicSkillNames: ["parent-dynamic"],
+          sandboxSessionId: "parent-session",
+        },
+        inherit: { sandbox: true },
+        parentNodeId: "__root__",
+        type: "local",
+      },
+    });
+
+    expect(runInput.adapter.state).toMatchObject({
+      parentSandboxState: sandboxState,
+      sandboxNodeId: "__root__",
+      sandboxSessionId: "parent-session",
+    });
+  });
+
+  it("shares the parent sandbox session even before parent state has been captured", () => {
+    const { runInput } = buildSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      session: makeSession(),
+      source: {
+        description: "Use the parent's checkout.",
+        inherit: { sandbox: true },
+        parentNodeId: "subagents/researcher",
+        type: "local",
+      },
+    });
+
+    expect(runInput.adapter.state).toMatchObject({
+      sandboxNodeId: "subagents/researcher",
+      sandboxSessionId: "parent-session",
+    });
+    expect(runInput.adapter.state).not.toHaveProperty("parentSandboxState");
+  });
+
+  it("preserves the effective sandbox identity for nested inherited subagents", () => {
+    const sandboxState = { initialized: true, session: null };
+    const { runInput } = buildSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      session: {
+        ...makeSession(),
+        sessionId: "researcher-session",
+      },
+      source: {
+        description: "Use the original parent's checkout.",
+        effectiveSandbox: {
+          parentSandboxState: sandboxState,
+          sandboxNodeId: "__root__",
+          sandboxOwnerDynamicSkillNames: ["parent-dynamic"],
+          sandboxSessionId: "parent-session",
+        },
+        inherit: { sandbox: true },
+        parentNodeId: "subagents/researcher",
+        type: "local",
+      },
+    });
+
+    expect(runInput.adapter.state).toMatchObject({
+      parentSandboxState: sandboxState,
+      sandboxNodeId: "__root__",
+      sandboxOwnerDynamicSkillNames: ["parent-dynamic"],
+      sandboxSessionId: "parent-session",
+    });
+  });
+
+  it("passes protected dynamic skill names to local subagents that inherit a sandbox", () => {
+    const { runInput } = buildSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      session: makeSession(),
+      source: {
+        description: "Use the parent's checkout.",
+        effectiveSandbox: {
+          sandboxNodeId: "__root__",
+          sandboxOwnerDynamicSkillNames: ["parent-dynamic"],
+          sandboxSessionId: "parent-session",
+        },
+        inherit: { sandbox: true },
+        parentNodeId: "__root__",
+        type: "local",
+      },
+    });
+
+    expect(runInput.adapter.state).toMatchObject({
+      sandboxNodeId: "__root__",
+      sandboxOwnerDynamicSkillNames: ["parent-dynamic"],
+      sandboxSessionId: "parent-session",
+    });
   });
 });

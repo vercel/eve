@@ -74,6 +74,7 @@ export async function compileAgentConfig(
     description?: string;
     dynamicModel?: CompiledAgentDefinition["dynamicModel"];
     experimental?: CompiledAgentDefinition["experimental"];
+    inherit?: CompiledAgentDefinition["inherit"];
     model: CompiledRuntimeModelReference;
     name: string;
     outputSchema?: JsonObject;
@@ -106,6 +107,13 @@ export async function compileAgentConfig(
   const experimental = normalizeExperimentalDefinition(definition.experimental);
   if (experimental !== undefined) {
     compiledConfig.experimental = experimental;
+  }
+
+  if (definition.inherit !== undefined) {
+    compiledConfig.inherit = {
+      connections: definition.inherit.connections,
+      sandbox: definition.inherit.sandbox,
+    };
   }
 
   if (definition.build !== undefined) {

@@ -9,6 +9,7 @@ import type {
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID, type ResolvedAgentGraphBundle } from "#runtime/graph.js";
 import type { ResolvedSandboxDefinition } from "#runtime/types.js";
+import { materializeWorkspaceDirectory } from "#runtime/workspace/seed-files.js";
 
 vi.mock("#execution/sandbox/template-prewarm-lock.js", () => ({
   withSandboxTemplatePrewarmLock: async (_input: unknown, callback: () => Promise<unknown>) =>
@@ -20,6 +21,7 @@ vi.mock("#runtime/workspace/seed-files.js", () => ({
 
 describe("prewarmAppSandboxes", () => {
   afterEach(() => {
+    vi.clearAllMocks();
     vi.unstubAllEnvs();
   });
 
@@ -79,6 +81,98 @@ describe("prewarmAppSandboxes", () => {
 
     expect(inputs).toHaveLength(0);
     expect(signatures).toHaveLength(1);
+  });
+
+  it("seeds every workspace resource root registered to one sandbox", async () => {
+    const appRoot = process.cwd();
+    const inputs: SandboxBackendPrewarmInput[] = [];
+    const rootResource = {
+      contentHash: "root-resource-hash",
+      logicalPath: "workspace-resources/__root__",
+      rootEntries: ["root-notes.md"],
+    };
+    const childResource = {
+      contentHash: "child-resource-hash",
+      logicalPath: "workspace-resources/subagents/researcher",
+      rootEntries: ["research-notes.md"],
+    };
+
+    vi.mocked(materializeWorkspaceDirectory).mockImplementation(async (path) => [
+      {
+        content: Buffer.from(path),
+        path: path.includes("subagents/researcher")
+          ? "$HOME/.agents/skills/researcher/SKILL.md"
+          : "/workspace/root-notes.md",
+      },
+    ]);
+
+    await prewarmAppSandboxes({
+      appRoot,
+      compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(appRoot),
+      dispatch: recordPrewarmInputs(inputs),
+      loadAgentGraph: async () =>
+        createGraph({
+          workspaceResourceRoot: {
+            contentHash: "merged-resource-hash",
+            logicalPath: rootResource.logicalPath,
+            rootEntries: [...rootResource.rootEntries, ...childResource.rootEntries],
+          },
+          workspaceResourceRoots: [rootResource, childResource],
+        }),
+    });
+
+    expect(materializeWorkspaceDirectory).toHaveBeenCalledWith(
+      `${appRoot}/.eve/compile/${rootResource.logicalPath}`,
+    );
+    expect(materializeWorkspaceDirectory).toHaveBeenCalledWith(
+      `${appRoot}/.eve/compile/${childResource.logicalPath}`,
+    );
+    expect(inputs[0]?.seedFiles.map((file) => file.path)).toEqual([
+      "/workspace/root-notes.md",
+      "$HOME/.agents/skills/researcher/SKILL.md",
+    ]);
+  });
+
+  it("rejects duplicate seed paths across inherited workspace resource roots", async () => {
+    const appRoot = process.cwd();
+    const inputs: SandboxBackendPrewarmInput[] = [];
+    const rootResource = {
+      contentHash: "root-resource-hash",
+      logicalPath: "workspace-resources/__root__",
+      rootEntries: ["shared-skill"],
+    };
+    const childResource = {
+      contentHash: "child-resource-hash",
+      logicalPath: "workspace-resources/subagents/researcher",
+      rootEntries: ["shared-skill"],
+    };
+
+    vi.mocked(materializeWorkspaceDirectory).mockResolvedValue([
+      {
+        content: Buffer.from("shared skill"),
+        path: "$HOME/.agents/skills/shared/SKILL.md",
+      },
+    ]);
+
+    await expect(
+      prewarmAppSandboxes({
+        appRoot,
+        compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(appRoot),
+        dispatch: recordPrewarmInputs(inputs),
+        loadAgentGraph: async () =>
+          createGraph({
+            workspaceResourceRoot: {
+              contentHash: "merged-resource-hash",
+              logicalPath: rootResource.logicalPath,
+              rootEntries: [...rootResource.rootEntries, ...childResource.rootEntries],
+            },
+            workspaceResourceRoots: [rootResource, childResource],
+          }),
+      }),
+    ).rejects.toThrow(
+      'Cannot merge inherited sandbox resources because "workspace-resources/__root__" and "workspace-resources/subagents/researcher" both seed "$HOME/.agents/skills/shared/SKILL.md".',
+    );
+    expect(inputs).toHaveLength(0);
   });
 
   it.each(["docker", "microsandbox"])(
@@ -142,6 +236,11 @@ function createGraph(
       readonly logicalPath: string;
       readonly rootEntries: readonly string[];
     };
+    readonly workspaceResourceRoots?: readonly {
+      readonly contentHash?: string;
+      readonly logicalPath: string;
+      readonly rootEntries: readonly string[];
+    }[];
   } = {},
 ): ResolvedAgentGraphBundle {
   const backend: SandboxBackend = {
@@ -171,6 +270,12 @@ function createGraph(
           logicalPath: "",
           rootEntries: [],
         },
+        workspaceResourceRoots: input.workspaceResourceRoots ?? [
+          input.workspaceResourceRoot ?? {
+            logicalPath: "",
+            rootEntries: [],
+          },
+        ],
       },
     },
   };

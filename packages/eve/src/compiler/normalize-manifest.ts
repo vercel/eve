@@ -75,13 +75,27 @@ async function compileAgentNodeManifest(
   context: ManifestCompileContext,
   options: {
     readonly externalDependencies?: readonly string[];
+    readonly allowInheritanceConfig?: boolean;
     readonly allowWorkflowConfig?: boolean;
   } = {},
 ): Promise<CompiledAgentNodeManifest> {
   const rawConfig = await compileAgentConfig(manifest, context);
+  if (options.allowInheritanceConfig !== true && rawConfig.inherit !== undefined) {
+    throw new Error(
+      `Capability inheritance is only supported on declared subagent configs. Remove "inherit" from "${manifest.agentId}".`,
+    );
+  }
   if (options.allowWorkflowConfig === false && rawConfig.experimental?.workflow !== undefined) {
     throw new Error(
       `Workflow runtime configuration is only supported on the root agent config. Remove "experimental.workflow" from "${manifest.agentId}".`,
+    );
+  }
+  if (
+    rawConfig.inherit?.sandbox === true &&
+    (manifest.sandbox !== null || manifest.sandboxWorkspaces.length > 0)
+  ) {
+    throw new Error(
+      `Subagent "${manifest.agentId}" cannot both inherit the parent sandbox and define its own sandbox. Remove "inherit.sandbox" or the subagent sandbox entries.`,
     );
   }
   const externalDependencies = mergeExternalDependencies(

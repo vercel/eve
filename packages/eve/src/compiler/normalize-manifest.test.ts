@@ -77,11 +77,129 @@ describe("compileAgentManifest", () => {
       'Remove "experimental.workflow" from "research"',
     );
   });
+
+  it("rejects capability inheritance on root agent configs", async () => {
+    const manifest = createAgentSourceManifest({
+      agentId: "root",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+    });
+
+    mocks.compileAgentConfig.mockResolvedValue(
+      createConfig({
+        inherit: {
+          connections: true,
+        },
+        name: "root",
+      }),
+    );
+
+    await expect(compileAgentManifest(manifest)).rejects.toThrow(
+      'Capability inheritance is only supported on declared subagent configs. Remove "inherit" from "root".',
+    );
+  });
+
+  it("preserves capability inheritance on declared subagent configs", async () => {
+    const subagentManifest = createAgentSourceManifest({
+      agentId: "research",
+      agentRoot: "/app/agent/subagents/research",
+      appRoot: "/app",
+      configModule: createModuleSourceRef({
+        logicalPath: "agent.ts",
+      }),
+    });
+    const manifest = createAgentSourceManifest({
+      agentId: "root",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      subagents: [
+        createLocalSubagentSourceRef({
+          entryPath: "subagents/research/agent.ts",
+          logicalPath: "subagents/research",
+          manifest: subagentManifest,
+          rootPath: "/app/agent/subagents/research",
+          subagentId: "research",
+        }),
+      ],
+    });
+
+    mocks.compileAgentConfig.mockImplementation(async (input: AgentSourceManifest) =>
+      input.agentId === "research"
+        ? createConfig({
+            description: "Research subagent",
+            inherit: {
+              connections: true,
+              sandbox: true,
+            },
+            name: "research",
+          })
+        : createConfig({ name: "root" }),
+    );
+    mocks.loadModuleBackedDefinition.mockResolvedValue({
+      description: "Research subagent",
+      model: "openai/gpt-5.5",
+    });
+
+    const compiled = await compileAgentManifest(manifest);
+
+    expect(compiled.subagents[0]?.agent.config.inherit).toEqual({
+      connections: true,
+      sandbox: true,
+    });
+  });
+
+  it("rejects subagents that inherit and own a sandbox", async () => {
+    const subagentManifest = createAgentSourceManifest({
+      agentId: "research",
+      agentRoot: "/app/agent/subagents/research",
+      appRoot: "/app",
+      configModule: createModuleSourceRef({
+        logicalPath: "agent.ts",
+      }),
+      sandbox: createModuleSourceRef({
+        logicalPath: "sandbox/sandbox.ts",
+      }),
+    });
+    const manifest = createAgentSourceManifest({
+      agentId: "root",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      subagents: [
+        createLocalSubagentSourceRef({
+          entryPath: "subagents/research/agent.ts",
+          logicalPath: "subagents/research",
+          manifest: subagentManifest,
+          rootPath: "/app/agent/subagents/research",
+          subagentId: "research",
+        }),
+      ],
+    });
+
+    mocks.compileAgentConfig.mockImplementation(async (input: AgentSourceManifest) =>
+      input.agentId === "research"
+        ? createConfig({
+            description: "Research subagent",
+            inherit: {
+              sandbox: true,
+            },
+            name: "research",
+          })
+        : createConfig({ name: "root" }),
+    );
+    mocks.loadModuleBackedDefinition.mockResolvedValue({
+      description: "Research subagent",
+      model: "openai/gpt-5.5",
+    });
+
+    await expect(compileAgentManifest(manifest)).rejects.toThrow(
+      'Subagent "research" cannot both inherit the parent sandbox and define its own sandbox.',
+    );
+  });
 });
 
 function createConfig(
   input: Pick<CompiledAgentDefinition, "name"> &
-    Partial<Pick<CompiledAgentDefinition, "description" | "experimental">>,
+    Partial<Pick<CompiledAgentDefinition, "description" | "experimental" | "inherit">>,
 ): CompiledAgentDefinition {
   const config: CompiledAgentDefinition = {
     model: {
@@ -96,6 +214,9 @@ function createConfig(
   }
   if (input.experimental !== undefined) {
     config.experimental = input.experimental;
+  }
+  if (input.inherit !== undefined) {
+    config.inherit = input.inherit;
   }
 
   return config;

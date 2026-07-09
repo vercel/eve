@@ -1,6 +1,7 @@
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { SkillHandle } from "#execution/skills/types.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
+import { getAvailableSkillNames } from "#context/available-skills.js";
 import { createSandboxSkillHandle } from "#runtime/skills/sandbox-access.js";
 import { loadContext } from "#context/container.js";
 import { SandboxKey, SessionKey } from "#context/keys.js";
@@ -47,7 +48,10 @@ export function buildCallbackContext(): SessionContext {
             "Call ctx.getSkill() only from authored runtime functions such as tools, hooks, and channel events.",
         );
       }
-      return createSandboxSkillHandle(access, identifier);
+      return createSandboxSkillHandle(access, identifier, {
+        availableSkillNames: getAvailableSkillNames(ctx),
+        enforceAvailableSkills: true,
+      });
     },
   };
 }

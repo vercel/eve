@@ -24,6 +24,7 @@ import type {
   InternalAgentModelDefinition,
   InternalAgentCompactionDefinition,
   AgentBuildDefinition,
+  AgentInheritanceDefinition,
   ModelRouting,
 } from "#shared/agent-definition.js";
 import type { InternalToolDefinition } from "#shared/tool-definition.js";
@@ -120,6 +121,8 @@ type CompiledAgentBuildDefinition = AgentBuildDefinition;
 type CompiledAgentCompactionDefinition = Omit<InternalAgentCompactionDefinition, "model"> & {
   model?: CompiledRuntimeModelReference;
 };
+
+type CompiledAgentInheritanceDefinition = AgentInheritanceDefinition;
 
 /**
  * Normalized additive agent configuration preserved in the compiled manifest.
@@ -401,6 +404,13 @@ const compiledAgentLimitsDefinitionSchema = z
   })
   .strict();
 
+const compiledAgentInheritanceDefinitionSchema: z.ZodType<CompiledAgentInheritanceDefinition> = z
+  .object({
+    connections: z.boolean().optional(),
+    sandbox: z.boolean().optional(),
+  })
+  .strict();
+
 const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
   .object({
     build: compiledAgentBuildDefinitionSchema.optional(),
@@ -413,6 +423,7 @@ const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
       })
       .strict()
       .optional(),
+    inherit: compiledAgentInheritanceDefinitionSchema.optional(),
     model: compiledRuntimeModelReferenceSchema,
     name: z.string(),
     outputSchema: jsonObjectSchema.optional(),
@@ -804,6 +815,13 @@ export function createCompiledAgentNodeManifest(input: {
                       world: input.config.experimental.workflow.world,
                     },
             },
+      inherit:
+        input.config.inherit === undefined
+          ? undefined
+          : {
+              connections: input.config.inherit.connections,
+              sandbox: input.config.inherit.sandbox,
+            },
       model: cloneCompiledRuntimeModelReference(input.config.model),
       name: input.config.name,
       outputSchema: input.config.outputSchema,
@@ -916,6 +934,7 @@ export function createCompiledAgentManifest(input: {
   readonly instructions?: CompiledInstructionsDefinition;
   readonly tools?: readonly CompiledToolDefinition[];
   readonly extensionMounts?: readonly CompiledExtensionMount[];
+  readonly workspaceResourceRoot?: CompiledWorkspaceResourceRoot;
 }): CompiledAgentManifest {
   return {
     ...createCompiledAgentNodeManifest(input),

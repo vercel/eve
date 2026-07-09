@@ -88,6 +88,34 @@ export const SessionCallbackKey = new ContextKey<SessionCallback>("eve.sessionCa
 export const SessionKey = new ContextKey<Session>("eve.session");
 export const SandboxKey = new ContextKey<SandboxAccess>("eve.sandbox");
 
+/**
+ * True when the active session is writing to a sandbox owned by an ancestor or
+ * different runtime node. Used by framework internals to avoid corrupting the
+ * owner's filesystem-level resources while preserving ordinary owned-sandbox
+ * behavior.
+ */
+export const InheritedSandboxKey = new ContextKey<boolean>("eve.inheritedSandbox");
+
+/**
+ * Static skill names seeded into the sandbox being used.
+ *
+ * This may differ from the active agent's {@link StaticSkillNamesKey} when a
+ * subagent inherits its parent's sandbox because the inherited sandbox can
+ * merge static skill files from multiple descendants.
+ */
+export const SandboxOwnerStaticSkillNamesKey = new ContextKey<readonly string[]>(
+  "eve.sandboxOwnerStaticSkillNames",
+);
+
+/**
+ * Dynamic skill names already materialized in an inherited sandbox before the
+ * active session started using it. The active session may manage its own
+ * dynamic skills, but must not overwrite or remove inherited ones.
+ */
+export const SandboxOwnerDynamicSkillNamesKey = new ContextKey<readonly string[]>(
+  "eve.sandboxOwnerDynamicSkillNames",
+);
+
 // ---------------------------------------------------------------------------
 // Dynamic model keys
 // ---------------------------------------------------------------------------
@@ -158,6 +186,15 @@ export const LiveStepToolsKey = new ContextKey<
 // ---------------------------------------------------------------------------
 // Dynamic skill keys
 // ---------------------------------------------------------------------------
+
+/**
+ * Static skill names visible to the active agent node.
+ *
+ * Seeded from the compiled runtime bundle when the run context is created so
+ * callback/harness code can enforce skill visibility without importing
+ * runtime-tier bundle keys.
+ */
+export const StaticSkillNamesKey = new ContextKey<readonly string[]>("eve.staticSkillNames");
 
 /**
  * Durable metadata for one session-scoped dynamic skill.

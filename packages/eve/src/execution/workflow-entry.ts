@@ -83,6 +83,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
   input.serializedContext["eve.sessionId"] = sessionId;
 
   const driverWritable = getWritable<Uint8Array>();
+  let sessionStateForFailure: DurableSessionState | undefined;
 
   try {
     // Derived once and reused for createSession + tag emission so the
@@ -100,6 +101,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       sessionId,
       subagentDepth,
     });
+    sessionStateForFailure = sessionState;
 
     return await runDriverLoop({
       capabilities,
@@ -116,6 +118,9 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
         requestId: readChannelRequestId(input.serializedContext),
       },
       mode,
+      onSessionStateChange: (state) => {
+        sessionStateForFailure = state;
+      },
       serializedContext: input.serializedContext,
       sessionState,
     });
@@ -134,10 +139,19 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       serializedContext: input.serializedContext,
       status: "failed",
     });
-    await notifyDelegatedParentStep({
-      result: createDelegatedSubagentErrorResult(input.serializedContext, error),
-      serializedContext: input.serializedContext,
-    });
+    const delegatedResult = createDelegatedSubagentErrorResult(input.serializedContext, error);
+    if (sessionStateForFailure === undefined) {
+      await notifyDelegatedParentStep({
+        result: delegatedResult,
+        serializedContext: input.serializedContext,
+      });
+    } else {
+      await notifyDelegatedParentStep({
+        result: delegatedResult,
+        serializedContext: input.serializedContext,
+        sessionState: sessionStateForFailure,
+      });
+    }
     throw error;
   }
 }
@@ -147,6 +161,7 @@ async function runDriverLoop(input: {
   readonly driverWritable: WritableStream<Uint8Array>;
   readonly initialInput: HookPayload;
   readonly mode: RunMode;
+  readonly onSessionStateChange?: (state: DurableSessionState) => void;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<WorkflowEntryResult> {
@@ -183,6 +198,7 @@ async function runDriverLoop(input: {
       serializedContext: input.serializedContext,
       sessionState: input.sessionState,
     });
+    input.onSessionStateChange?.(action.sessionState);
 
     while (true) {
       if (action.kind === "done") {
@@ -238,6 +254,7 @@ async function runDriverLoop(input: {
           serializedContext: action.serializedContext,
           sessionState: action.sessionState,
         });
+        input.onSessionStateChange?.(action.sessionState);
         continue;
       }
 
@@ -278,6 +295,7 @@ async function runDriverLoop(input: {
         serializedContext: action.serializedContext,
         sessionState: action.sessionState,
       });
+      input.onSessionStateChange?.(action.sessionState);
     }
   } finally {
     await deliveryHook.dispose();
@@ -305,6 +323,7 @@ async function finalizeDone(input: {
       ? createDelegatedSubagentErrorResult(serializedContext, output)
       : createDelegatedSubagentSuccessResult(serializedContext, output),
     serializedContext,
+    sessionState: input.action.sessionState,
     usage: failed ? undefined : input.action.usage,
   });
   return { output };

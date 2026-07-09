@@ -302,7 +302,57 @@ describe("workflowEntry", () => {
         subagentName: "researcher",
       },
       serializedContext,
+      sessionState,
     });
+  });
+
+  it("notifies a delegated parent with the latest parked state when a later turn throws", async () => {
+    const initialState = createBaseSessionState({
+      emissionState: { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "initial" },
+    });
+    const parkedState = createBaseSessionState({
+      emissionState: { sequence: 7, sessionStarted: true, stepIndex: 3, turnId: "parked" },
+    });
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(initialState));
+    installHookMocks({
+      deliveryHooks: [
+        {
+          token: "http:test",
+          values: [{ kind: "deliver", payloads: [{ message: "resume after park" }] }],
+        },
+      ],
+      turnControls: [
+        turnResult({ action: "park", sessionState: parkedState }),
+        {
+          error: { message: "later turn failed", name: "Error" },
+          kind: "turn-error",
+        },
+      ],
+    });
+    const serializedContext = createSerializedContext({
+      "eve.channel": {
+        kind: "subagent",
+        state: {
+          callId: "call-1",
+          parentContinuationToken: "parent-token",
+          sandboxSessionId: "parent-session",
+          subagentName: "researcher",
+        },
+      },
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "delegate" },
+        serializedContext,
+      }),
+    ).rejects.toThrow("later turn failed");
+
+    expect(notifyDelegatedParentStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionState: parkedState,
+      }),
+    );
   });
 
   it("passes the resumed channel request id to the next turn", async () => {

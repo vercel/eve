@@ -37,6 +37,26 @@ describe("loadSkillFromSandbox", () => {
     await expect(loadSkillFromSandbox(sandbox.access, "research")).resolves.toBe("# Research\n");
   });
 
+  it("rejects physically present skills outside an enforced active allowlist", async () => {
+    const sandbox = mockSandbox({
+      commands: {
+        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
+      },
+      initialFiles: {
+        "/home/agent/.agents/skills/child-only/SKILL.md": "# Child\n",
+      },
+    });
+
+    await expect(
+      loadSkillFromSandbox(sandbox.access, "child-only", {
+        availableSkillNames: ["parent-only"],
+        enforceAvailableSkills: true,
+      }),
+    ).rejects.toThrow(
+      'Skill "child-only" is not available to the active agent. Available skills: parent-only.',
+    );
+  });
+
   it("does not read an ordinary workspace skills subtree when HOME is usable", async () => {
     const sandbox = mockSandbox({
       commands: {
@@ -98,6 +118,19 @@ describe("createSandboxSkillHandle", () => {
     await expect(handle.file("references/catalog.yml").text()).resolves.toBe("entities: []\n");
     await expect(handle.file("references/catalog.yml").bytes()).resolves.toEqual(
       Buffer.from("entities: []\n"),
+    );
+  });
+
+  it("rejects handles outside an enforced active allowlist", () => {
+    const sandbox = mockSandbox();
+
+    expect(() =>
+      createSandboxSkillHandle(sandbox.access, "child-only", {
+        availableSkillNames: ["parent-only"],
+        enforceAvailableSkills: true,
+      }),
+    ).toThrow(
+      'Skill "child-only" is not available to the active agent. Available skills: parent-only.',
     );
   });
 });

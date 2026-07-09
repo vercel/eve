@@ -13,6 +13,7 @@ import {
   AuthKey,
   CapabilitiesKey,
   ChannelInstrumentationKey,
+  DynamicSkillManifestKey,
   InitiatorAuthKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -35,6 +36,7 @@ import {
   type DurableSessionState,
   readDurableSession,
 } from "#execution/durable-session-store.js";
+import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import {
   resolveRemoteAgentForAction,
   startRemoteAgentSession,
@@ -51,6 +53,7 @@ import {
   resolveSubagentDelegationLimit,
   type SubagentDelegationLimit,
 } from "#harness/subagent-depth.js";
+import type { HarnessSession } from "#harness/types.js";
 
 const log = createLogger("execution.dispatch-runtime-actions");
 
@@ -87,6 +90,9 @@ export async function dispatchRuntimeActionsStep(input: {
   const auth = ctx.get(AuthKey) ?? null;
   const capabilities = ctx.get(CapabilitiesKey);
   const channelMetadata = ctx.get(ChannelInstrumentationKey);
+  const currentDynamicSkillNames = resolveCurrentDynamicSkillNames(
+    ctx.get(DynamicSkillManifestKey),
+  );
   const initiatorAuth = ctx.get(InitiatorAuthKey) ?? null;
   const writer = input.parentWritable.getWriter();
 
@@ -123,10 +129,30 @@ export async function dispatchRuntimeActionsStep(input: {
       switch (action.kind) {
         case "subagent-call": {
           const registered = bundle.subagentRegistry.subagentsByNodeId.get(action.nodeId);
+          const parentNodeId = bundle.nodeId ?? ROOT_RUNTIME_AGENT_NODE_ID;
           const source: SubagentInputSource =
             registered?.definition.kind === "subagent"
-              ? { description: registered.definition.description, type: "local" }
-              : { type: "runtime" };
+              ? {
+                  description: registered.definition.description,
+                  effectiveSandbox: createEffectiveSandboxSource({
+                    adapterState: adapter.state,
+                    parentNodeId,
+                    protectedDynamicSkillNames: currentDynamicSkillNames,
+                    session,
+                  }),
+                  inherit: registered.definition.inherit,
+                  parentNodeId,
+                  type: "local",
+                }
+              : {
+                  effectiveSandbox: createEffectiveSandboxSource({
+                    adapterState: adapter.state,
+                    parentNodeId,
+                    protectedDynamicSkillNames: currentDynamicSkillNames,
+                    session,
+                  }),
+                  type: "runtime",
+                };
           const childRuntime = createWorkflowRuntime({
             compiledArtifactsSource: bundle.compiledArtifactsSource,
             nodeId: action.nodeId,
@@ -215,6 +241,81 @@ export async function dispatchRuntimeActionsStep(input: {
       : createDurableSessionState({ session: nextSession });
 
   return { results, sessionState: nextState };
+}
+
+function createEffectiveSandboxSource(input: {
+  readonly adapterState?: Record<string, unknown>;
+  readonly parentNodeId: string;
+  readonly protectedDynamicSkillNames?: readonly string[];
+  readonly session: HarnessSession;
+}): Extract<SubagentInputSource, { readonly type: "local" }>["effectiveSandbox"] {
+  const inheritedSandboxNodeId = input.adapterState?.sandboxNodeId;
+  const inheritedSandboxSessionId = input.adapterState?.sandboxSessionId;
+  const parentSandboxState = input.adapterState?.parentSandboxState as
+    | HarnessSession["sandboxState"]
+    | undefined;
+  const effectiveSandbox: {
+    parentSandboxState?: HarnessSession["sandboxState"];
+    sandboxNodeId: string;
+    sandboxOwnerDynamicSkillNames?: readonly string[];
+    sandboxSessionId: string;
+  } = {
+    sandboxNodeId:
+      typeof inheritedSandboxNodeId === "string" ? inheritedSandboxNodeId : input.parentNodeId,
+    sandboxSessionId:
+      typeof inheritedSandboxSessionId === "string"
+        ? inheritedSandboxSessionId
+        : input.session.sessionId,
+  };
+
+  if (parentSandboxState !== undefined) {
+    effectiveSandbox.parentSandboxState = parentSandboxState;
+  }
+  const protectedDynamicSkillNames = resolveProtectedDynamicSkillNames({
+    adapterState: input.adapterState,
+    localDynamicSkillNames: input.protectedDynamicSkillNames ?? [],
+  });
+  if (protectedDynamicSkillNames.length > 0) {
+    effectiveSandbox.sandboxOwnerDynamicSkillNames = protectedDynamicSkillNames;
+  }
+
+  return effectiveSandbox;
+}
+
+function resolveCurrentDynamicSkillNames(
+  manifest: Record<string, readonly { readonly name?: unknown }[]> | undefined,
+): readonly string[] {
+  if (manifest === undefined || manifest === null || typeof manifest !== "object") {
+    return [];
+  }
+  const names = new Set<string>();
+  for (const skills of Object.values(
+    manifest as Record<string, readonly { readonly name?: unknown }[]>,
+  )) {
+    if (!Array.isArray(skills)) continue;
+    for (const skill of skills) {
+      if (typeof skill.name === "string" && skill.name.length > 0) {
+        names.add(skill.name);
+      }
+    }
+  }
+  return [...names].sort((left, right) => left.localeCompare(right));
+}
+
+function resolveProtectedDynamicSkillNames(input: {
+  readonly adapterState?: Record<string, unknown>;
+  readonly localDynamicSkillNames: readonly string[];
+}): readonly string[] {
+  const names = new Set(input.localDynamicSkillNames);
+  const inheritedNames = input.adapterState?.sandboxOwnerDynamicSkillNames;
+  if (Array.isArray(inheritedNames)) {
+    for (const name of inheritedNames) {
+      if (typeof name === "string" && name.length > 0) {
+        names.add(name);
+      }
+    }
+  }
+  return [...names].sort((left, right) => left.localeCompare(right));
 }
 
 function createRemoteAgentStartFailureResult(input: {

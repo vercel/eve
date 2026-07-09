@@ -67,6 +67,17 @@ const schedule = entry.extend({
 const subagent = entry.extend({
   description: z.string(),
   entryPath: z.string(),
+  effective: z.object({
+    connections: z.object({
+      inherited: z.boolean(),
+      owned: z.number(),
+    }),
+    sandbox: z.enum(["default", "inherited", "owned"]),
+  }),
+  inherit: z.object({
+    connections: z.boolean(),
+    sandbox: z.boolean(),
+  }),
   nodeId: z.string(),
   rootPath: z.string(),
   summary: z.object({

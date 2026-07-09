@@ -30,10 +30,15 @@ export interface EnsureSandboxAccessInput {
   readonly nodeId: string;
   readonly registry: RuntimeSandboxRegistry;
   readonly sessionId: string;
-  readonly runOnSession?: (callback: () => Promise<void>) => Promise<void>;
+  readonly runOnSession?: (
+    callback: () => Promise<void>,
+    handle: SandboxBackendHandle,
+  ) => Promise<void>;
   readonly state: SandboxState | null;
   readonly tags?: SandboxBackendTags;
 }
+
+const sandboxSessionInitializationLocks = new Map<string, Promise<SandboxBackendHandle>>();
 
 /**
  * Creates or reattaches the live sandbox from the compiled agent bundle's
@@ -128,37 +133,76 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
       templateKey: keys.templateKey,
     };
 
-    const handle = await withDevelopmentSandboxProgress(
-      `eve: opening sandbox session "${formatNodeLabel(input.nodeId)}" on backend "${backend.name}"...`,
-      `eve: opening sandbox session "${formatNodeLabel(input.nodeId)}" on backend "${backend.name}"`,
-      async () =>
-        await createBackendHandleWithPrewarmRetry({
-          appRoot,
-          backend,
-          compiledArtifactsSource: input.compiledArtifactsSource,
-          createInput,
-        }),
-    );
-    markDevelopmentSandboxBackendInitialized(backend.name);
-    trackActiveSandboxHandle({
-      backendName: backend.name,
-      handle,
-      sessionKey: keys.sessionKey,
-    });
-
-    if (!initialized) {
-      await runOnSession(async () => {
-        await definition.onSession?.({ ctx: buildCallbackContext(), use: handle.useSessionFn });
+    async function openHandle(): Promise<SandboxBackendHandle> {
+      const handle = await withDevelopmentSandboxProgress(
+        `eve: opening sandbox session "${formatNodeLabel(input.nodeId)}" on backend "${backend.name}"...`,
+        `eve: opening sandbox session "${formatNodeLabel(input.nodeId)}" on backend "${backend.name}"`,
+        async () =>
+          await createBackendHandleWithPrewarmRetry({
+            appRoot,
+            backend,
+            compiledArtifactsSource: input.compiledArtifactsSource,
+            createInput,
+          }),
+      );
+      markDevelopmentSandboxBackendInitialized(backend.name);
+      trackActiveSandboxHandle({
+        backendName: backend.name,
+        handle,
+        sessionKey: keys.sessionKey,
       });
-      initialized = true;
+      return handle;
     }
 
-    return handle;
+    async function openAndInitializeHandle(): Promise<SandboxBackendHandle> {
+      const handle = await openHandle();
+
+      if (!initialized) {
+        await runOnSession(async () => {
+          await definition.onSession?.({
+            ctx: buildCallbackContext(),
+            use: handle.useSessionFn,
+          });
+        }, handle);
+        initialized = true;
+      }
+
+      return handle;
+    }
+
+    if (initialized) {
+      return await openHandle();
+    }
+
+    const lockKey = createSandboxSessionInitializationLockKey({
+      appRoot,
+      backendName: backend.name,
+      sessionKey: keys.sessionKey,
+    });
+    const existingLock = sandboxSessionInitializationLocks.get(lockKey);
+    if (existingLock !== undefined) {
+      const handle = await existingLock;
+      initialized = true;
+      return handle;
+    }
+
+    const lock = openAndInitializeHandle();
+    sandboxSessionInitializationLocks.set(lockKey, lock);
+    try {
+      return await lock;
+    } finally {
+      if (sandboxSessionInitializationLocks.get(lockKey) === lock) {
+        sandboxSessionInitializationLocks.delete(lockKey);
+      }
+    }
   }
 
-  async function runOnSession(callback: () => Promise<void>): Promise<void> {
+  async function runOnSession(
+    callback: () => Promise<void>,
+    handle: SandboxBackendHandle,
+  ): Promise<void> {
     if (input.runOnSession !== undefined) {
-      await input.runOnSession(callback);
+      await input.runOnSession(callback, handle);
       return;
     }
     await callback();
@@ -183,6 +227,14 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
       return handle?.session ?? null;
     },
   };
+}
+
+function createSandboxSessionInitializationLockKey(input: {
+  readonly appRoot: string;
+  readonly backendName: string;
+  readonly sessionKey: string;
+}): string {
+  return `${input.backendName}\0${input.appRoot}\0${input.sessionKey}`;
 }
 
 async function createBackendHandleWithPrewarmRetry(input: {

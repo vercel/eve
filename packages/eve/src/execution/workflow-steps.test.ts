@@ -4,7 +4,13 @@ import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js"
 import type { DeliverPayload, SubagentInputRequestHookPayload } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import { AuthKey, ContinuationTokenKey, ModeKey, SessionIdKey } from "#context/keys.js";
+import {
+  AuthKey,
+  ContinuationTokenKey,
+  DynamicSkillManifestKey,
+  ModeKey,
+  SessionIdKey,
+} from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
 import { setPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
@@ -408,6 +414,108 @@ describe("dispatchRuntimeActionsStep", () => {
           input: {
             message: expect.not.stringContaining("Runtime action event description."),
           },
+        }),
+      ],
+      expect.any(Object),
+    );
+  });
+
+  it("passes protected dynamic skill names to inherited sandbox children", async () => {
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {
+        subagentsByNodeId: new Map([
+          [
+            "subagents/delegate",
+            {
+              definition: {
+                description: "Local delegate child description.",
+                inherit: { sandbox: true },
+                kind: "subagent",
+              },
+            },
+          ],
+        ]),
+      },
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    startMock.mockResolvedValue({ runId: "child-run" });
+    getRunMock.mockReturnValue({
+      getReadable: () =>
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.close();
+          },
+        }),
+    });
+
+    const session = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "call-1",
+          description: "Runtime action event description.",
+          input: { message: "investigate latest routing" },
+          kind: "subagent-call",
+          name: "delegate",
+          nodeId: "subagents/delegate",
+          subagentName: "delegate",
+        },
+      ],
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createStubSession({
+        continuationToken: "http:parent",
+        sessionId: "parent-session",
+      }),
+    });
+    installSessionStoreMocks([session]);
+
+    const serializedContext = createSerializedContext();
+    serializedContext[DynamicSkillManifestKey.name] = {
+      tenant: [{ description: "Tenant policy", name: "tenant-policy" }],
+    };
+    (serializedContext[ChannelKey.name] as { state: Record<string, unknown> }).state = {
+      sandboxOwnerDynamicSkillNames: ["upstream-policy"],
+    };
+
+    await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createTestWritable(),
+      serializedContext,
+      sessionState: createStubSessionState({
+        continuationToken: "http:parent",
+        sessionId: "parent-session",
+      }),
+    });
+
+    expect(startMock).toHaveBeenCalledWith(
+      workflowEntryReference,
+      [
+        expect.objectContaining({
+          serializedContext: expect.objectContaining({
+            "eve.channel": expect.objectContaining({
+              kind: "subagent",
+              state: expect.objectContaining({
+                sandboxNodeId: "__root__",
+                sandboxOwnerDynamicSkillNames: ["tenant-policy", "upstream-policy"],
+                sandboxSessionId: "parent-session",
+              }),
+            }),
+          }),
         }),
       ],
       expect.any(Object),

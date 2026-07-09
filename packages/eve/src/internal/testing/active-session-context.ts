@@ -6,6 +6,7 @@ import {
   SessionKey,
   type SessionParent,
   type SessionTurn,
+  StaticSkillNamesKey,
 } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import type { SandboxAccess } from "#sandbox/state.js";
@@ -23,6 +24,12 @@ export interface ActiveSessionInit {
   readonly turn: SessionTurn;
   readonly parent?: SessionParent;
   readonly sandbox?: SandboxAccess;
+  /**
+   * Static skills visible to the active authored agent. The production runtime
+   * seeds this from the compiled bundle in `runtime-context.ts`; tests that
+   * bypass the full run context need to provide the same boundary explicitly.
+   */
+  readonly staticSkillNames?: readonly string[];
   /**
    * Optional channel adapter to bind in the active channel context. Used by
    * staging-layer integration tests that exercise the attachment ref
@@ -45,6 +52,10 @@ export function buildActiveSessionContext(init: ActiveSessionInit): ContextConta
 
   if (init.sandbox !== undefined) {
     ctx.set(SandboxKey, init.sandbox);
+  }
+
+  if (init.staticSkillNames !== undefined) {
+    ctx.set(StaticSkillNamesKey, init.staticSkillNames);
   }
 
   if (init.channel !== undefined) {
