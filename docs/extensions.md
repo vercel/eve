@@ -79,11 +79,11 @@ Point `eve.extension` at the source directory and run `eve build` (wired to `bui
 }
 ```
 
-`eve build` generates the mount factory (`dist/index.mjs`) and tool re-exports for overrides (`dist/tools`), and fills the package `exports` map — you never hand-list it. Local and workspace packages work without publishing.
+`eve build` compiles the package's entry points to plain JavaScript with type declarations — the mount factory (`dist/index.mjs`) and the tool re-exports overrides use (`dist/tools`) — and fills the `exports` map so you never hand-list it. Compiling is what lets an installed extension load directly; local and workspace packages also work without publishing.
 
 ### Dependencies
 
-`eve` is a **peer** dependency: one eve lives in the consuming app and the extension's `eve/*` imports resolve to it. Declare the eve versions your extension supports as the peer range (`"eve": "^1"`) — eve enforces it when the extension is mounted, failing the build with a clear error if the app's eve is out of range, rather than surfacing a confusing compile break. Everything else the extension imports (SDKs, `zod`, …) goes in `dependencies`; each extension resolves its own versions. Because the consumer recompiles the extension from source, `files` must include `ext/`.
+`eve` is a **peer** dependency: one eve lives in the consuming app and the extension's `eve/*` imports resolve to it. Declare the eve versions your extension supports as the peer range (`"eve": "^1"`) — eve enforces it when the extension is mounted, failing the build with a clear error if the app's eve is out of range, rather than surfacing a confusing compile break. Everything else the extension imports (SDKs, `zod`, …) goes in `dependencies`; each extension resolves its own versions. The consumer recompiles the extension's contributions from source, so `files` must ship both `ext/` (that source) and `dist/` (the compiled entry points).
 
 Those deps resolve from `node_modules` under `eve dev`/`eve eval` and are bundled into the deployable by `eve build`. A dependency that can't be bundled (a native addon) must be listed in the **consuming agent's** `build.externalDependencies` — an extension can't declare build config, so note it in your README.
 
