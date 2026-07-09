@@ -47,6 +47,7 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `message.received`        | An inbound user message was accepted; carries flattened text plus structured text/file parts.                    |
 | `step.started`            | A model step began.                                                                                              |
 | `actions.requested`       | The model requested one or more actions, including tool calls; calls stream before execution.                    |
+| `action.invalid`          | A model-emitted tool call failed validation before it could be requested or executed.                            |
 | `action.result`           | A tool call returned.                                                                                            |
 | `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or `ask_question`); carries `requests`. |
 | `subagent.called`         | A subagent was delegated; carries `childSessionId` to attach to.                                                 |

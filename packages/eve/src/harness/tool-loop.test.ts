@@ -61,6 +61,9 @@ import {
 } from "#shared/empty-delivery.js";
 
 vi.mock("ai", () => ({
+  NoSuchToolError: {
+    isInstance: vi.fn(() => false),
+  },
   ToolLoopAgent: vi.fn(),
   gateway: {
     tools: {
@@ -2514,9 +2517,22 @@ describe("createToolLoopHarness", () => {
     // Must not throw.
     await expect(runStep(createTestSession(), { message: "Do it" })).resolves.toBeDefined();
 
-    // The invalid call must be absent from the action event stream.
+    // The invalid call must be absent from the executable action lifecycle,
+    // while still leaving a durable invalid-action breadcrumb.
     expect(events.some((event) => event.type === "actions.requested")).toBe(false);
     expect(events.some((event) => event.type === "action.result")).toBe(false);
+    const invalidEvents = events.filter((event) => event.type === "action.invalid");
+    expect(invalidEvents).toHaveLength(1);
+    expect(invalidEvents[0]?.data).toEqual({
+      callId: "call-bad",
+      errorText: "SyntaxError: Unexpected token in JSON",
+      input: '{"answer": "...", "keyObservations": \n- bullet',
+      reason: "invalid-input",
+      sequence: 0,
+      stepIndex: 0,
+      toolName: "add",
+      turnId: "turn_0",
+    });
 
     // The recoverable-failure path must not fire — the step completes
     // normally so the next turn can feed the SDK's tool-error back to
@@ -2762,6 +2778,13 @@ describe("createToolLoopHarness", () => {
       stepIndex: 0,
       turnId: "turn_0",
     });
+    expect(events.find((event) => event.type === "action.invalid")?.data).toMatchObject({
+      callId: "call-bad",
+      errorText: "SyntaxError",
+      input: '{"bad":',
+      reason: "invalid-input",
+      toolName: "add",
+    });
 
     const actionResults = events.filter((event) => event.type === "action.result");
     expect(actionResults).toHaveLength(1);
@@ -2831,6 +2854,12 @@ describe("createToolLoopHarness", () => {
     // dropped so the AI SDK's tool-error feedback drives the next step.
     expect(result.session.state?.["eve.runtime.pendingActionBatch"]).toBeUndefined();
     expect(events.some((event) => event.type === "actions.requested")).toBe(false);
+    expect(events.find((event) => event.type === "action.invalid")?.data).toMatchObject({
+      callId: "call-subagent-bad",
+      input: '{"malformed',
+      reason: "invalid-input",
+      toolName: "delegate",
+    });
     expect(events.some((event) => event.type === "turn.failed")).toBe(false);
   });
 

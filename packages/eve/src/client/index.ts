@@ -87,6 +87,8 @@ export type {
 // ---------------------------------------------------------------------------
 
 export type {
+  ActionInvalidReason,
+  ActionInvalidStreamEvent,
   ActionResultStreamEvent,
   ActionsRequestedStreamEvent,
   AssistantStepFinishReason,

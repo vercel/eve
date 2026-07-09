@@ -5,6 +5,7 @@ import { encodeSandboxRef } from "#internal/attachments/sandbox-refs.js";
 import { serializeUrlFilePart } from "#internal/attachments/url-refs.js";
 import {
   EVE_MESSAGE_STREAM_VERSION,
+  createActionInvalidEvent,
   createActionResultEvent,
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
@@ -38,6 +39,33 @@ describe("message stream protocol", () => {
     expect(createTurnCancelledEvent({ sequence: 2, turnId: "turn_2" })).toEqual({
       data: { sequence: 2, turnId: "turn_2" },
       type: "turn.cancelled",
+    });
+  });
+
+  it("creates action.invalid events", () => {
+    expect(
+      createActionInvalidEvent({
+        callId: "call-bad",
+        errorText: "Model tried to call unavailable tool 'missing'.",
+        input: { city: "Vienna" },
+        reason: "no-such-tool",
+        sequence: 2,
+        stepIndex: 1,
+        toolName: "missing",
+        turnId: "turn_2",
+      }),
+    ).toEqual({
+      data: {
+        callId: "call-bad",
+        errorText: "Model tried to call unavailable tool 'missing'.",
+        input: { city: "Vienna" },
+        reason: "no-such-tool",
+        sequence: 2,
+        stepIndex: 1,
+        toolName: "missing",
+        turnId: "turn_2",
+      },
+      type: "action.invalid",
     });
   });
 
