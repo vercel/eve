@@ -7,12 +7,14 @@
     ".": "./ext/extension.ts"
   },
   "dependencies": {
-    "eve": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "typescript": "catalog:"
+  },
+  "peerDependencies": {
+    "eve": "workspace:*"
   },
   "eve": {
     "extension": "./ext"
