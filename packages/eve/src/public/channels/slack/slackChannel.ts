@@ -451,6 +451,8 @@ export interface SlackChannelEvents {
   readonly "turn.started"?: SlackEventHandler<"turn.started">;
   readonly "actions.requested"?: SlackEventHandler<"actions.requested">;
   readonly "action.result"?: SlackEventHandler<"action.result">;
+  readonly "subagent.called"?: SlackEventHandler<"subagent.called">;
+  readonly "subagent.completed"?: SlackEventHandler<"subagent.completed">;
   readonly "message.completed"?: SlackEventHandler<"message.completed">;
   readonly "message.appended"?: SlackEventHandler<"message.appended">;
   readonly "reasoning.appended"?: SlackEventHandler<"reasoning.appended">;

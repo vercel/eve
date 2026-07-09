@@ -129,6 +129,8 @@ export interface DiscordChannelEvents {
   readonly "turn.started"?: DiscordEventHandler<"turn.started">;
   readonly "actions.requested"?: DiscordEventHandler<"actions.requested">;
   readonly "action.result"?: DiscordEventHandler<"action.result">;
+  readonly "subagent.called"?: DiscordEventHandler<"subagent.called">;
+  readonly "subagent.completed"?: DiscordEventHandler<"subagent.completed">;
   readonly "message.completed"?: DiscordEventHandler<"message.completed">;
   readonly "message.appended"?: DiscordEventHandler<"message.appended">;
   readonly "input.requested"?: DiscordEventHandler<"input.requested">;

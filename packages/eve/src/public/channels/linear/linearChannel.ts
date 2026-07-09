@@ -140,6 +140,8 @@ export interface LinearChannelEvents {
   readonly "turn.started"?: LinearEventHandler<"turn.started">;
   readonly "actions.requested"?: LinearEventHandler<"actions.requested">;
   readonly "action.result"?: LinearEventHandler<"action.result">;
+  readonly "subagent.called"?: LinearEventHandler<"subagent.called">;
+  readonly "subagent.completed"?: LinearEventHandler<"subagent.completed">;
   readonly "message.completed"?: LinearEventHandler<"message.completed">;
   readonly "message.appended"?: LinearEventHandler<"message.appended">;
   readonly "input.requested"?: LinearEventHandler<"input.requested">;
