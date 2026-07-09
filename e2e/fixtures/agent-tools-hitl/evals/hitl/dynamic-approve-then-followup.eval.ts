@@ -4,18 +4,17 @@ const DYNAMIC_GUARDED_ECHO_TOKEN = "dynamic-guarded-echo-ok-L8R6";
 const TOOL_NAME = "dynamic_guarded_echo";
 
 /**
- * Red e2e for https://github.com/vercel/eve/issues/533.
+ * Regression coverage for https://github.com/vercel/eve/issues/533.
  *
- * An always-gated dynamic tool parks, the user approves, the tool executes —
+ * An always-gated dynamic tool parks, the user approves, the tool executes,
  * and then the session must keep working. The follow-up turn replays the
  * durable transcript containing the approval-parked call's `tool_use`,
  * approval request/response parts, and result; on Anthropic that replay is
  * where the reported `tool_use ids were found without tool_result blocks`
  * 400 lands, turning `session.waiting` into a terminal `session.failed`.
- * Expected once fixed: the follow-up turn succeeds.
  */
 export default defineEval({
-  description: "HITL red (#533): a resolved approval park replays cleanly on the next turn.",
+  description: "HITL regression (#533): a resolved approval park replays on the next turn.",
   async test(t) {
     const parked = await t.send(`Call the \`${TOOL_NAME}\` tool with note "replay-probe".`);
     parked.calledTool(TOOL_NAME, { status: "pending", count: 1 });

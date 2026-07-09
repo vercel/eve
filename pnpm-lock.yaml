@@ -864,7 +864,7 @@ importers:
         version: 25.9.1
       typescript:
         specifier: 'catalog:'
-        version: 7.0.1-rc
+        version: 7.0.2
 
   e2e/fixtures/agent-tools-sandbox:
     dependencies:

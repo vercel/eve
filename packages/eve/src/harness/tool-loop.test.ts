@@ -217,17 +217,25 @@ function getPrepareStep<TMessages, TResult>(value: unknown): PrepareStepProbe<TM
 
 function createMockStreamResult(result: Record<string, unknown>): {
   fullStream: AsyncIterable<Record<string, unknown>>;
+  responseMessages: Promise<Record<string, unknown>[]>;
   steps: Promise<Record<string, unknown>[]>;
 } {
   const fullStreamParts = Array.isArray(result.fullStreamParts)
     ? (result.fullStreamParts as Array<Record<string, unknown>>)
     : null;
+  const response = (result.response ?? {}) as { messages?: unknown };
+  const responseMessages = Array.isArray(result.responseMessages)
+    ? (result.responseMessages as Array<Record<string, unknown>>)
+    : Array.isArray(response.messages)
+      ? (response.messages as Array<Record<string, unknown>>)
+      : [];
 
   return {
     fullStream:
       fullStreamParts === null
         ? createMockFullStream(result)
         : createExplicitMockFullStream(fullStreamParts),
+    responseMessages: Promise.resolve(responseMessages),
     steps: Promise.resolve([result]),
   };
 }
@@ -4818,33 +4826,40 @@ describe("createToolLoopHarness", () => {
     });
   });
 
-  it("persists the inline approval-resume tool-result into session history so the next turn replays a balanced tool_use / tool_result pair", async () => {
+  it("persists the SDK's accumulated approval-resume messages into session history", async () => {
     /*
      * When a previously-parked tool call is approved, the AI SDK
-     * enqueues its tool-result onto the parent stream before re-
-     * entering the LLM call. The result is absent from
-     * `stepResult.response.messages` / `toolCalls` / `toolResults`,
-     * so the harness must capture it from the stream and splice it
-     * into persisted history. Without this, the next turn replays a
-     * `tool_use` block with no matching `tool_result` and Anthropic
-     * rejects the request with 400.
+     * puts its tool-result in `StreamTextResult.responseMessages` before
+     * re-entering the model call. The result is absent from the final
+     * `StepResult.response.messages`, so durable history must use the
+     * accumulated response rather than reconstructing it from stream events.
      */
-    setupMockAgent({
-      content: [],
-      finishReason: "stop",
-      fullStreamParts: [
+    const resumedToolResultMessage = {
+      content: [
         {
-          output: { exitCode: 0, stderr: "", stdout: "/workspace\n", truncated: false },
+          output: {
+            type: "json",
+            value: { exitCode: 0, stderr: "", stdout: "/workspace\n", truncated: false },
+          },
           toolCallId: "call-1",
           toolName: "bash",
           type: "tool-result",
         },
+      ],
+      role: "tool",
+    };
+    const assistantMessage = { content: "`/workspace`", role: "assistant" };
+    setupMockAgent({
+      content: [],
+      finishReason: "stop",
+      fullStreamParts: [
         { id: "text-1", text: "`/workspace`", type: "text-delta" },
         { finishReason: "stop", type: "finish-step" },
       ],
       response: {
-        messages: [{ content: "`/workspace`", role: "assistant" }],
+        messages: [assistantMessage],
       },
+      responseMessages: [resumedToolResultMessage, assistantMessage],
       text: "`/workspace`",
       toolCalls: [],
       toolResults: [],
@@ -5711,11 +5726,11 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
-  it("preserves AI-SDK StepResult getter properties when synthesizing the inline tool-result message", async () => {
+  it("preserves AI-SDK StepResult getter properties when storing accumulated messages", async () => {
     /*
      * AI SDK `StepResult` is a class with prototype getters for
-     * `content`, `toolCalls`, `toolResults`, and `text`. The inline
-     * approval-resume repair must read those getters explicitly; rebuilding
+     * `content`, `toolCalls`, `toolResults`, and `text`. The accumulated
+     * response adapter must read those getters explicitly; rebuilding
      * it through object spread would copy only own enumerable properties,
      * silently turning all four getter-backed fields into `undefined`.
      */
@@ -5787,7 +5802,24 @@ describe("createToolLoopHarness", () => {
         if (onStepFinish) {
           void Promise.resolve().then(() => onStepFinish(stepInstance as unknown));
         }
-        return { fullStream, steps: Promise.resolve([stepInstance]) };
+        return {
+          fullStream,
+          responseMessages: Promise.resolve([
+            {
+              content: [
+                {
+                  output: { type: "json", value: { ok: true } },
+                  toolCallId: "call-1",
+                  toolName: "bash",
+                  type: "tool-result",
+                },
+              ],
+              role: "tool",
+            },
+            ...stepInstance.response.messages,
+          ]),
+          steps: Promise.resolve([stepInstance]),
+        };
       });
       this.generate = vi.fn().mockResolvedValue(new FakeStepResult());
       return this as unknown as ToolLoopAgent;

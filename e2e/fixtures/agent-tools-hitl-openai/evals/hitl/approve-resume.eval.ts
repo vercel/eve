@@ -3,18 +3,17 @@ import { defineEval } from "eve/evals";
 const GUARDED_ECHO_OPENAI_TOKEN = "guarded-echo-openai-ok-R2D7";
 
 /**
- * Red e2e for https://github.com/vercel/eve/issues/236.
+ * Regression coverage for https://github.com/vercel/eve/issues/236.
  *
  * An `always()`-gated executable tool on the OpenAI Responses provider:
  * approve-resume must execute the tool and the transcript must replay on a
  * follow-up turn. For local function tools the `tool-approval-response` part
- * is not a provider-level closure — OpenAI rejects any replay containing a
+ * is not a provider-level closure. OpenAI rejects any replay containing a
  * `function_call` without a matching `function_call_output` with
- * `No tool output found for function call call_<id>`. Expected once fixed:
- * approve executes the tool and the follow-up turn succeeds.
+ * `No tool output found for function call call_<id>`.
  */
 export default defineEval({
-  description: "HITL red (#236): approve-resume executes and replays on OpenAI Responses.",
+  description: "HITL regression (#236): approve-resume executes and replays on OpenAI Responses.",
   async test(t) {
     const parked = await t.send('Call the guarded-echo tool with note "openai-approve".');
     parked.calledTool("guarded-echo", { status: "pending", count: 1 });

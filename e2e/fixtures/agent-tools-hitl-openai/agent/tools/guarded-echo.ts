@@ -5,7 +5,7 @@ import { z } from "zod";
 export const GUARDED_ECHO_OPENAI_TOKEN = "guarded-echo-openai-ok-R2D7";
 
 /**
- * Deterministic HITL fixture matching #236's repro: an authored tool with
+ * Deterministic HITL fixture matching #236's repro. It is an authored tool with
  * both a real `execute` and `always()` approval, so every call parks the
  * turn for a human decision.
  */
