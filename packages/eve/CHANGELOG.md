@@ -1,5 +1,32 @@
 # eve
 
+## 0.22.3
+
+### Patch Changes
+
+- 8223498: Start remote authentication when a credentialed Vercel deployment returns an `UNAUTHORIZED` protection response.
+- 79df338: feat(eve): scaffold projects with bundler module resolution
+
+  `eve init` now writes a `tsconfig.json` using `"moduleResolution": "bundler"` (and `"module": "esnext"`), which matches how eve compiles authored agents and extensions. Relative imports in your agent and extension source no longer need `.js` extensions (e.g. `import extension from "../extension"`).
+
+- 173fa5d: Restore the `DISCORD_BOT_TOKEN` environment fallback for proactive Discord messages, typing indicators, and bot-authenticated requests when `discordChannel()` is configured without explicit credentials.
+- 89cd2d6: Eval assertion `count` options now accept predicates, allowing ranges such as “at least two” while preserving exact numeric counts.
+- fdf56ef: feat(eve): mounted extensions
+
+  Package eve capabilities — tools, connections, skills, instructions, hooks — as a reusable package and mount it under `agent/extensions/`, as a file (`crm.ts`) or a directory with co-located override slots that shadow the extension's own contributions. Contributions compose into the agent under a `<namespace>__` prefix. Author with `defineExtension` from `eve/extension`, taking an optional Standard-Schema `config` read via `extension.config`; `defineState` is auto-scoped to the package. `eve build` compiles the package to runnable JavaScript with type declarations and fills its `exports`, so a published extension installs and mounts with no second compiler. `eve` is a peer dependency whose declared range eve enforces at mount; an extension cannot declare a sandbox, agent config, schedules, or limits, or mount other extensions.
+
+- 89f13e0: Hardened frontmatter parsing and OpenAPI connection loading.
+
+  All frontmatter parsing now runs through a single safe-by-default helper with gray-matter's code-capable engines disabled, so a `---js` / `---javascript` fence throws instead of being `eval()`d. Previously only authored markdown (skills, schedules, instructions) was hardened; the eval YAML loader and the OpenAPI spec loader used gray-matter's defaults and would execute such a fence. This closes that path for OpenAPI specs, which are fetched over the network. Parsing untrusted frontmatter as code is now opt-in only, and a direct import of the bundled gray-matter outside the wrapper fails CI.
+
+  OpenAPI spec URLs and the resolved base URL are now required to use `https` (plain `http` is still allowed for loopback hosts during local development), so neither the spec fetch nor the credentialed operation calls run over cleartext; the spec transport is also re-checked after redirects.
+
+- aff35e2: Stop `eve dev` source snapshots from copying nested Git repositories and worktrees, preventing duplicate checkouts from inflating each development snapshot.
+- 9087496: Prevent brokered credential values from being exposed to commands running in Microsandbox. Guest Git configuration continues to use broker-managed placeholders for authenticated requests.
+- 72c58ae: Recover `eve dev <url>` authentication when Vercel Deployment Protection returns an SSO redirect or a structured protected-deployment response.
+- 87688f9: Slack outbound messages now preserve literal bare `@` tokens, including scoped package names, while explicit `<@USER_ID>` mention syntax continues to pass through unchanged.
+- c1c4ee5: Preserve query parameters passed to `eve dev` and send them on every agent request, including session POSTs and streams.
+
 ## 0.22.2
 
 ### Patch Changes
