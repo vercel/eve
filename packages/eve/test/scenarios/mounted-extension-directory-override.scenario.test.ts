@@ -46,6 +46,12 @@ describe("mounted extension via directory form with override", () => {
           "export default disableTool();",
           "",
         ].join("\n"),
+        // Co-located override: opts out of the extension's dynamic crm_pulse.
+        "agent/extensions/crm/tools/crm_pulse.mjs": [
+          'import { disableTool } from "eve/tools";',
+          "export default disableTool();",
+          "",
+        ].join("\n"),
         "node_modules/@acme/crm/package.json": `${JSON.stringify({
           name: "@acme/crm",
           type: "module",
@@ -92,6 +98,22 @@ describe("mounted extension via directory form with override", () => {
           "});",
           "",
         ].join("\n"),
+        "node_modules/@acme/crm/ext/tools/crm_pulse.mjs": [
+          'import { defineDynamic, defineTool } from "eve/tools";',
+          "export default defineDynamic({",
+          "  events: {",
+          '    "session.started": async () =>',
+          "      defineTool({",
+          '        description: "A dynamic tool the consumer opts out of.",',
+          "        inputSchema: { type: 'object', properties: {}, additionalProperties: false },",
+          "        async execute() {",
+          "          return { pulse: true };",
+          "        },",
+          "      }),",
+          "  },",
+          "});",
+          "",
+        ].join("\n"),
       },
     });
 
@@ -118,5 +140,10 @@ describe("mounted extension via directory form with override", () => {
 
     const legacy = graph.root.agent.tools.find((entry) => entry.name === "crm__crm_legacy");
     expect(legacy).toBeUndefined();
+
+    const pulse = graph.root.agent.dynamicToolResolvers.find(
+      (resolver) => resolver.slug === "crm__crm_pulse",
+    );
+    expect(pulse).toBeUndefined();
   });
 });

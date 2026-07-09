@@ -87,6 +87,7 @@ export async function compileExtensionContributions(input: {
     merged,
     disables: overrides.disabledToolTargets,
     extensionToolNames: new Set(base.contributions.tools.map((tool) => tool.name)),
+    extensionDynamicToolSlugs: new Set(base.contributions.dynamicTools.map((tool) => tool.slug)),
     namespace: mount.namespace,
   });
 }
@@ -105,8 +106,9 @@ interface ComposedContributions {
 
 /**
  * Removes the extension tools an override slot opted out of with `disableTool()`.
- * A disable that targets no contributed tool throws rather than silently
- * disabling nothing — the failure mode this guards against.
+ * A `disableTool()` targets a slot by name, so it removes the extension's
+ * same-named static tool or dynamic resolver — whichever kind occupies the slot.
+ * A disable that matches neither throws rather than silently disabling nothing.
  *
  * Exported for unit testing.
  */
@@ -114,6 +116,7 @@ export function applyOverrideDisables(input: {
   readonly merged: CompiledExtensionContributions;
   readonly disables: readonly DisabledToolTarget[];
   readonly extensionToolNames: ReadonlySet<string>;
+  readonly extensionDynamicToolSlugs: ReadonlySet<string>;
   readonly namespace: string;
 }): CompiledExtensionContributions {
   if (input.disables.length === 0) {
@@ -122,8 +125,11 @@ export function applyOverrideDisables(input: {
   const prefixLength = input.namespace.length + 2; // strip the `<ns>__` prefix
   const removed = new Set<string>();
   for (const disable of input.disables) {
-    if (!input.extensionToolNames.has(disable.name)) {
-      const available = [...input.extensionToolNames]
+    if (
+      !input.extensionToolNames.has(disable.name) &&
+      !input.extensionDynamicToolSlugs.has(disable.name)
+    ) {
+      const available = [...input.extensionToolNames, ...input.extensionDynamicToolSlugs]
         .map((name) => name.slice(prefixLength))
         .sort();
       throw new Error(
@@ -137,6 +143,7 @@ export function applyOverrideDisables(input: {
   return {
     ...input.merged,
     tools: input.merged.tools.filter((tool) => !removed.has(tool.name)),
+    dynamicTools: input.merged.dynamicTools.filter((tool) => !removed.has(tool.slug)),
   };
 }
 

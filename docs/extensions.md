@@ -123,6 +123,16 @@ import { always } from "eve/tools/approval";
 export default defineTool({ ...search, approval: always() });
 ```
 
+Or drop it entirely by opting out of the slot with `disableTool()`:
+
+```ts title="agent/extensions/crm/tools/search.ts"
+import { disableTool } from "eve/tools";
+
+export default disableTool();
+```
+
+An override targets one slot, matched by name and kind: a static file replaces the extension's static tool, a dynamic file replaces its dynamic resolver, and `disableTool()` removes whichever the extension put there. Because a dynamic tool wins over a same-named static one at runtime, replace or disable a dynamic tool through its own slot — a static file of the same name won't shadow it.
+
 Overrides only work here — the `<namespace>__` prefix is reserved, so an agent-root contribution named `crm__…` is a build error and an extension can't be shadowed from outside its mount.
 
 ## Limits

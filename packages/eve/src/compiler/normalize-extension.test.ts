@@ -71,7 +71,7 @@ describe("mergeContributions", () => {
 });
 
 describe("applyOverrideDisables", () => {
-  it("removes the disabled extension tool while keeping the rest", () => {
+  it("removes the disabled static extension tool while keeping the rest", () => {
     const merged = contributions({
       tools: [
         { name: "crm__search", logicalPath: "extension" },
@@ -83,23 +83,44 @@ describe("applyOverrideDisables", () => {
       merged,
       disables: [{ name: "crm__search", logicalPath: "tools/search.ts" }],
       extensionToolNames: new Set(["crm__search", "crm__list"]),
+      extensionDynamicToolSlugs: new Set(),
       namespace: "crm",
     });
 
     expect(result.tools).toEqual([{ name: "crm__list", logicalPath: "extension" }]);
   });
 
-  it("throws, listing available tools, when the disable targets no extension tool", () => {
+  it("removes a disabled dynamic resolver slot by slug", () => {
+    const merged = contributions({
+      tools: [{ name: "crm__list", logicalPath: "extension" }] as never,
+      dynamicTools: [{ slug: "crm__search", logicalPath: "extension" }] as never,
+    });
+
+    const result = applyOverrideDisables({
+      merged,
+      disables: [{ name: "crm__search", logicalPath: "tools/search.ts" }],
+      extensionToolNames: new Set(["crm__list"]),
+      extensionDynamicToolSlugs: new Set(["crm__search"]),
+      namespace: "crm",
+    });
+
+    expect(result.dynamicTools).toEqual([]);
+    expect(result.tools).toEqual([{ name: "crm__list", logicalPath: "extension" }]);
+  });
+
+  it("throws, listing static and dynamic slots, when the disable targets neither", () => {
     expect(() =>
       applyOverrideDisables({
         merged: contributions({
           tools: [{ name: "crm__list", logicalPath: "extension" }] as never,
+          dynamicTools: [{ slug: "crm__lookup", logicalPath: "extension" }] as never,
         }),
         disables: [{ name: "crm__search", logicalPath: "tools/search.ts" }],
         extensionToolNames: new Set(["crm__list"]),
+        extensionDynamicToolSlugs: new Set(["crm__lookup"]),
         namespace: "crm",
       }),
-    ).toThrow(/no tool named "search"[\s\S]*It contributes: list/);
+    ).toThrow(/no tool named "search"[\s\S]*It contributes: list, lookup/);
   });
 
   it("returns the merged set unchanged when nothing is disabled", () => {
@@ -110,6 +131,7 @@ describe("applyOverrideDisables", () => {
         merged,
         disables: [],
         extensionToolNames: new Set(["crm__list"]),
+        extensionDynamicToolSlugs: new Set(),
         namespace: "crm",
       }),
     ).toBe(merged);
