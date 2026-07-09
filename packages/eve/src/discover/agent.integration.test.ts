@@ -471,6 +471,33 @@ describe("discoverAgent (memory)", () => {
     ]);
   });
 
+  it("silently ignores generated runtime directories", async () => {
+    const project = buildMemoryAgentProject({
+      agentDirectories: [".eve", ".next", ".output", ".vercel", ".workflow-data", "node_modules"],
+      agentFiles: {
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.manifest.instructions).toEqual([
+      {
+        definition: {
+          markdown: "You are a precise assistant.",
+        },
+        sourceKind: "markdown",
+        logicalPath: "instructions.md",
+        sourceId: "instructions.md",
+      },
+    ]);
+  });
+
   it("rejects authored tool filenames that violate the tool-name charset", async () => {
     const project = buildMemoryAgentProject({
       agentFiles: {

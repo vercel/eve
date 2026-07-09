@@ -6,6 +6,7 @@ import { createNitro } from "nitro/builder";
 import type { Nitro } from "nitro/types";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import {
+  resolvePackageRoot,
   resolvePackageSourceDirectoryPath,
   resolvePackageSourceFilePath,
   resolveWorkflowModulePath,
@@ -318,6 +319,11 @@ async function addNitroStepNoExternals(nitro: Nitro, stepEntrypointPath: string)
 }
 
 function createRelativeTransformFilename(workingDir: string, path: string): string {
+  const packageRelativePath = createPackageRelativeTransformFilename(path);
+  if (packageRelativePath !== undefined) {
+    return packageRelativePath;
+  }
+
   const normalizedWorkingDir = normalizePath(workingDir).replace(/\/$/, "");
   const normalizedPath = normalizePath(path);
   const lowerWorkingDir = normalizedWorkingDir.toLowerCase();
@@ -346,6 +352,27 @@ function createRelativeTransformFilename(workingDir: string, path: string): stri
   }
 
   return relativePath;
+}
+
+function createPackageRelativeTransformFilename(path: string): string | undefined {
+  const normalizedPackageRoot = normalizePath(resolvePackageRoot()).replace(/\/$/, "");
+  const normalizedPath = normalizePath(path);
+  const lowerPackageRoot = normalizedPackageRoot.toLowerCase();
+  const lowerPath = normalizedPath.toLowerCase();
+  const packageSourcePrefix = `${normalizedPackageRoot}/src/`;
+  const lowerPackageSourcePrefix = `${lowerPackageRoot}/src/`;
+  const packageDistSourcePrefix = `${normalizedPackageRoot}/dist/src/`;
+  const lowerPackageDistSourcePrefix = `${lowerPackageRoot}/dist/src/`;
+
+  if (lowerPath.startsWith(lowerPackageSourcePrefix)) {
+    return `src/${normalizedPath.slice(packageSourcePrefix.length)}`;
+  }
+
+  if (lowerPath.startsWith(lowerPackageDistSourcePrefix)) {
+    return `src/${normalizedPath.slice(packageDistSourcePrefix.length)}`;
+  }
+
+  return undefined;
 }
 
 function addWorkflowModuleSideEffectsPlugin(nitro: Nitro, workflowBuildDir: string): void {

@@ -381,6 +381,40 @@ importers:
         specifier: 6.0.3
         version: 6.0.3
 
+  apps/frameworks/next-multi-agent:
+    dependencies:
+      ai:
+        specifier: 'catalog:'
+        version: 7.0.0(zod@4.4.3)
+      eve:
+        specifier: workspace:*
+        version: link:../../../packages/eve
+      next:
+        specifier: 'catalog:'
+        version: 16.2.6(@babel/core@7.29.0)(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      react:
+        specifier: 'catalog:'
+        version: 19.2.6
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.2.6(react@19.2.6)
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.9.1
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.2.15
+      '@types/react-dom':
+        specifier: 'catalog:'
+        version: 19.2.3(@types/react@19.2.15)
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+
   apps/frameworks/nuxt:
     dependencies:
       '@tailwindcss/vite':

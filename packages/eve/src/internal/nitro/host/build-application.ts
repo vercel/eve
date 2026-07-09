@@ -39,6 +39,14 @@ function normalizeEntrypoint(rootDir: string, entrypoint: unknown): string | nul
   return resolve(rootDir, entrypoint);
 }
 
+function normalizeServiceRoot(rootDir: string, service: Record<string, unknown>): string | null {
+  if (typeof service.root === "string" && service.root.trim().length > 0) {
+    return resolve(rootDir, service.root);
+  }
+
+  return normalizeEntrypoint(rootDir, service.entrypoint);
+}
+
 function normalizeServicePrefix(service: Record<string, unknown>): string {
   if (typeof service.routePrefix === "string") {
     return service.routePrefix.trim();
@@ -59,6 +67,20 @@ function normalizeServicePrefix(service: Record<string, unknown>): string {
   return "";
 }
 
+function normalizeServiceCollection(
+  value: unknown,
+): readonly Record<string, unknown>[] | undefined {
+  if (isRecord(value)) {
+    return Object.values(value).filter(isRecord);
+  }
+
+  if (Array.isArray(value)) {
+    return value.filter(isRecord);
+  }
+
+  return undefined;
+}
+
 /**
  * Resolve the route prefix an eve service is mounted under when it is
  * co-deployed behind a host web service (Next.js, Nuxt, SvelteKit etc.).
@@ -68,31 +90,41 @@ function normalizeServicePrefix(service: Record<string, unknown>): string {
  * service) returns `undefined` so its output stays routable at the root.
  */
 function resolveCoDeployedEveServicePrefix(input: {
-  appRoot: string;
+  appRoots: readonly string[];
   configRoot: string;
   config: unknown;
 }): string | undefined {
-  if (!isRecord(input.config) || !isRecord(input.config.experimentalServices)) {
+  if (!isRecord(input.config)) {
+    return undefined;
+  }
+
+  const services =
+    normalizeServiceCollection(input.config.experimentalServices) ??
+    normalizeServiceCollection(input.config.experimentalServicesV2) ??
+    normalizeServiceCollection(input.config.services);
+
+  if (services === undefined) {
     return undefined;
   }
 
   let hasHostService = false;
   let servicePrefix: string | undefined;
 
-  for (const service of Object.values(input.config.experimentalServices)) {
-    if (!isRecord(service)) {
-      continue;
-    }
-
+  for (const service of services) {
     if (service.framework !== "eve") {
       hasHostService = true;
       continue;
     }
 
-    const eveEntrypoint = normalizeEntrypoint(input.configRoot, service.entrypoint);
+    const eveEntrypoint = normalizeServiceRoot(input.configRoot, service);
     const routePrefix = normalizeServicePrefix(service);
 
-    if (eveEntrypoint === input.appRoot && routePrefix.length > 0 && routePrefix !== "/") {
+    if (
+      eveEntrypoint !== null &&
+      input.appRoots.includes(eveEntrypoint) &&
+      routePrefix.length > 0 &&
+      routePrefix !== "/"
+    ) {
       servicePrefix = routePrefix;
     }
   }
@@ -102,7 +134,9 @@ function resolveCoDeployedEveServicePrefix(input: {
 
 async function resolveCoDeployedEveServicePrefixForVercelFunctionOutput(
   appRoot: string,
+  agentRoot: string,
 ): Promise<string | undefined> {
+  const appRoots = Array.from(new Set([resolve(appRoot), resolve(agentRoot)]));
   const outputDirectory = await findClosestVercelOutputDirectory(appRoot);
 
   if (outputDirectory !== undefined) {
@@ -111,8 +145,8 @@ async function resolveCoDeployedEveServicePrefixForVercelFunctionOutput(
         await readFile(join(outputDirectory, "config.json"), "utf8"),
       ) as unknown;
       const servicePrefix = resolveCoDeployedEveServicePrefix({
-        appRoot,
-        configRoot: appRoot,
+        appRoots,
+        configRoot: await resolveVercelOutputConfigRoot(outputDirectory),
         config,
       });
 
@@ -135,10 +169,12 @@ async function resolveCoDeployedEveServicePrefixForVercelFunctionOutput(
     ]) {
       try {
         const config = JSON.parse(await readFile(configPath, "utf8")) as unknown;
-        const configRoot = configPath.endsWith("vercel.json") ? currentDir : appRoot;
+        const configRoot = configPath.endsWith("vercel.json")
+          ? currentDir
+          : await resolveVercelOutputConfigRoot(dirname(configPath));
 
         const servicePrefix = resolveCoDeployedEveServicePrefix({
-          appRoot,
+          appRoots,
           configRoot,
           config,
         });
@@ -174,6 +210,31 @@ async function readVercelServerRuntime(outputDir: string): Promise<string | unde
   } catch {
     return undefined;
   }
+}
+
+async function resolveVercelOutputConfigRoot(outputDirectory: string): Promise<string> {
+  const projectRoot = dirname(dirname(outputDirectory));
+
+  try {
+    const projectConfig = JSON.parse(
+      await readFile(join(projectRoot, ".vercel", "project.json"), "utf8"),
+    ) as unknown;
+
+    if (
+      isRecord(projectConfig) &&
+      isRecord(projectConfig.settings) &&
+      typeof projectConfig.settings.rootDirectory === "string" &&
+      projectConfig.settings.rootDirectory.trim().length > 0
+    ) {
+      return resolve(projectRoot, projectConfig.settings.rootDirectory);
+    }
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+      throw error;
+    }
+  }
+
+  return projectRoot;
 }
 
 async function emitVercelWorkflowFunctions(input: {
@@ -258,6 +319,7 @@ export async function buildApplication(rootDir: string): Promise<string> {
 
   const servicePrefix = await resolveCoDeployedEveServicePrefixForVercelFunctionOutput(
     preparedHost.appRoot,
+    preparedHost.compileResult.project.agentRoot,
   );
   const nitro = await createApplicationNitro(preparedHost, false, {
     surface: "app",

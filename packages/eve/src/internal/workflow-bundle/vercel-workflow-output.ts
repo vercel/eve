@@ -18,7 +18,6 @@ import {
   type RolldownBuild,
 } from "#internal/bundler/nitro-rolldown.js";
 import {
-  applyEveServiceRoutePrefixWrapper,
   EVE_SHARED_SERVER_FUNCTION_PATH,
   isEveVercelFunctionPath,
   normalizeEveVercelRoutes,
@@ -133,9 +132,6 @@ export async function normalizeEveVercelFunctionOutput(
   const sharedFunctionPath = await prepareSharedEveServerFunction(functionsDir);
 
   if (sharedFunctionPath !== null) {
-    if (options.servicePrefix !== undefined) {
-      await applyEveServiceRoutePrefixWrapper(sharedFunctionPath, options.servicePrefix);
-    }
     await repointEveFunctionSymlinksInDirectory(functionsDir, sharedFunctionPath);
   }
   await pruneNonEveFunctionEntries(functionsDir, functionsDir);
