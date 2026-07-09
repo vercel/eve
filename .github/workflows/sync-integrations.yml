@@ -1,0 +1,73 @@
+name: Sync Integrations Catalog
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly, Monday 09:17 UTC (off the hour to avoid the cron thundering herd).
+    - cron: "17 9 * * 1"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: true
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Regenerate catalogs
+        working-directory: apps/docs
+        env:
+          UV_THREADPOOL_SIZE: "64"
+        run: |
+          node scripts/generate-openapi-directory.mjs
+          node scripts/generate-mcp-directory.mjs
+          node scripts/probe-mcp-auth.mjs
+
+      - name: Guard against upstream registry flakiness
+        # A flaky or breaking upstream API must not silently wipe the catalog:
+        # fail if either regenerated catalog lost more than 10% of its records.
+        run: |
+          for catalog in generated-openapi-catalog.json generated-mcp-catalog.json; do
+            path="apps/docs/lib/integrations/$catalog"
+            before=$(git show "HEAD:$path" 2>/dev/null | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>console.log(d.trim()?JSON.parse(d).length:0))')
+            after=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$path','utf8')).length)")
+            echo "$catalog: $before -> $after records"
+            if [ "$before" -gt 0 ] && [ $((after * 10)) -lt $((before * 9)) ]; then
+              echo "::error::$catalog shrank from $before to $after records (>10% deletion); refusing to sync."
+              exit 1
+            fi
+          done
+
+      - name: Open pull request with catalog updates
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git diff --quiet -- apps/docs/lib/integrations; then
+            echo "Catalogs are unchanged; nothing to sync."
+            exit 0
+          fi
+          branch="bot/sync-integrations-$(date -u +%Y%m%d)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add apps/docs/lib/integrations
+          git commit -s -m "chore(docs): sync generated integrations catalogs"
+          git push --force origin "$branch"
+          gh pr create \
+            --title "chore(docs): sync generated integrations catalogs" \
+            --body "Automated weekly refresh of the generated MCP and OpenAPI catalogs from the official MCP registry, the Anthropic MCP directory, and APIs.guru. Review the record-count deltas before merging." \
+            --base main --head "$branch" 2>/dev/null || echo "PR already exists for $branch"

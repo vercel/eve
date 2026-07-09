@@ -2,6 +2,7 @@ import type { MetadataRoute } from "next";
 
 import { source } from "@/lib/geistdocs/source";
 import { getSiteOrigin } from "@/lib/geistdocs/url";
+import { integrations } from "@/lib/integrations/data";
 
 const baseUrl = getSiteOrigin();
 
@@ -26,6 +27,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
     });
   }
 
+  const integrationPages: MetadataRoute.Sitemap = integrations.map((integration) => ({
+    changeFrequency: "weekly" as const,
+    priority: integration.source === "generated" ? 0.3 : 0.6,
+    url: url(`/integrations/${integration.slug}`),
+  }));
+
   return [
     {
       changeFrequency: "monthly",
@@ -37,6 +44,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.5,
       url: url("/resources"),
     },
+    {
+      changeFrequency: "weekly",
+      priority: 0.8,
+      url: url("/integrations"),
+    },
     ...pages,
+    ...integrationPages,
   ];
 }

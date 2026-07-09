@@ -1,4 +1,11 @@
-import { SiDatadog, SiNotion } from "@icons-pack/react-simple-icons";
+import {
+  SiAsana,
+  SiDatadog,
+  SiJira,
+  SiNotion,
+  SiSentry,
+  SiStripe,
+} from "@icons-pack/react-simple-icons";
 import type { ComponentProps } from "react";
 
 type LogoProps = ComponentProps<"svg">;
@@ -123,6 +130,14 @@ export const notionLogo = (props: LogoProps) => <SiNotion {...props} />;
 
 export const datadogLogo = (props: LogoProps) => <SiDatadog color="default" {...props} />;
 
+export const stripeLogo = (props: LogoProps) => <SiStripe color="default" {...props} />;
+
+export const sentryLogo = (props: LogoProps) => <SiSentry color="default" {...props} />;
+
+export const asanaLogo = (props: LogoProps) => <SiAsana color="default" {...props} />;
+
+export const jiraLogo = (props: LogoProps) => <SiJira color="default" {...props} />;
+
 export const honeycombLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
@@ -145,6 +160,10 @@ export const logos = {
   linear: linearLogo,
   notion: notionLogo,
   datadog: datadogLogo,
+  stripe: stripeLogo,
+  sentry: sentryLogo,
+  asana: asanaLogo,
+  jira: jiraLogo,
   honeycomb: honeycombLogo,
 } as const;
 

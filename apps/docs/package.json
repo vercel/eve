@@ -7,6 +7,7 @@
   "scripts": {
     "build": "next build",
     "dev": "next dev --turbo",
+    "generate:integrations": "node scripts/generate-openapi-directory.mjs && node scripts/generate-mcp-directory.mjs",
     "start": "next start",
     "postinstall": "fumadocs-mdx",
     "translate": "npx @vercel/geistdocs translate",

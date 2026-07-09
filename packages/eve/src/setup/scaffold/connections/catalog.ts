@@ -135,14 +135,16 @@ function buildCatalogEntry(
   return entry;
 }
 
-export const CONNECTION_CATALOG: readonly ConnectionCatalogEntry[] = connectionEntries().map(
-  (entry) => {
+// Only scaffoldable connections become CLI catalog entries; gallery-only
+// entries (docs directory) have no scaffolder auth overlay by design.
+export const CONNECTION_CATALOG: readonly ConnectionCatalogEntry[] = connectionEntries()
+  .filter((entry) => entry.surfaces.scaffoldable)
+  .map((entry) => {
     if (entry.connection === undefined) {
       throw new Error(`Catalog connection "${entry.slug}" is missing its connection identity.`);
     }
     return buildCatalogEntry(entry.slug, entry.name, entry.connection);
-  },
-);
+  });
 
 const CATALOG_BY_SLUG = new Map(CONNECTION_CATALOG.map((entry) => [entry.slug, entry]));
 

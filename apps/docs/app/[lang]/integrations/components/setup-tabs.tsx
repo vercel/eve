@@ -16,8 +16,11 @@ const PROTOCOL_PARAM = "protocol";
 const AUTH_PARAM = "auth";
 
 interface SetupTabsProps {
-  protocols: ConnectionProtocol[];
-  authModes: AuthMode[];
+  surfaces: Array<{
+    protocol: ConnectionProtocol;
+    label: string;
+    authModes: AuthMode[];
+  }>;
   variants: Record<string, string>;
 }
 
@@ -51,7 +54,7 @@ const SwitcherRow = <T extends string>({
   </div>
 );
 
-export const SetupTabs = ({ protocols, authModes, variants }: SetupTabsProps) => {
+export const SetupTabs = ({ surfaces, variants }: SetupTabsProps) => {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -61,7 +64,10 @@ export const SetupTabs = ({ protocols, authModes, variants }: SetupTabsProps) =>
     return value && options.includes(value) ? value : options[0];
   };
 
+  const protocols = surfaces.map((surface) => surface.protocol);
   const protocol = fromUrl(PROTOCOL_PARAM, protocols);
+  const activeSurface = surfaces.find((surface) => surface.protocol === protocol) ?? surfaces[0];
+  const authModes = activeSurface?.authModes ?? [];
   const auth = fromUrl(AUTH_PARAM, authModes);
   const variantKey = setupKey(protocol, auth);
   const body = variants[variantKey];
@@ -82,7 +88,10 @@ export const SetupTabs = ({ protocols, authModes, variants }: SetupTabsProps) =>
           {protocols.length > 1 && (
             <SwitcherRow
               active={protocol}
-              label={(value) => protocolLabel[value]}
+              label={(value) =>
+                surfaces.find((surface) => surface.protocol === value)?.label ??
+                protocolLabel[value]
+              }
               onSelect={(value) => setParam(PROTOCOL_PARAM, value)}
               options={protocols}
             />
