@@ -5,7 +5,7 @@ import { Gallery, type GalleryFilter } from "./components/gallery";
 
 const title = "Integrations";
 const description =
-  "Browse the channels, connections, and extensions available to an eve agent, each with install, quick start, and configuration steps.";
+  "Browse the channels, connections, extensions, and instrumentation providers available to an eve agent, each with install, quick start, and configuration steps.";
 
 export const metadata: Metadata = {
   title,
@@ -14,7 +14,14 @@ export const metadata: Metadata = {
 
 export const generateStaticParams = () => Object.keys(translations).map((lang) => ({ lang }));
 
-const galleryFilters: GalleryFilter[] = ["all", "channel", "connection", "extension", "memory"];
+const galleryFilters: GalleryFilter[] = [
+  "all",
+  "channel",
+  "connection",
+  "extension",
+  "instrumentation",
+  "memory",
+];
 
 const IntegrationsPage = async ({ searchParams }: PageProps<"/[lang]/integrations">) => {
   const filterParam = (await searchParams).filter;
@@ -30,8 +37,9 @@ const IntegrationsPage = async ({ searchParams }: PageProps<"/[lang]/integration
           Integrations
         </h1>
         <p className="mt-5 max-w-2xl text-gray-900 text-lg">
-          Add the channels where people reach your agent, connections to external services, and
-          extensions that package reusable capabilities.
+          Add the channels where people reach your agent, connections to external services,
+          extensions that package reusable capabilities, and instrumentation providers that receive
+          traces.
         </p>
       </section>
       <Gallery filter={filter} integrations={integrations} />
