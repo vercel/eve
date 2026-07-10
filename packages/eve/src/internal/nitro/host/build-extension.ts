@@ -228,7 +228,7 @@ async function emitEntrypoint(input: {
 
 /**
  * Rewrites a bundle specifier to the form a `.d.ts` re-export resolves for types,
- * so declarations resolve into the shipped `.ts` source (`../ext/x.ts` → `../ext/x.js`).
+ * so declarations resolve into the shipped `.ts` source (`../extension/x.ts` → `../extension/x.js`).
  */
 function toDeclarationSpecifier(specifier: string): string {
   return specifier

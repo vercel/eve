@@ -728,8 +728,8 @@ describe("scaffoldExtensionProject", () => {
     };
     expect(packageJson).toMatchObject({
       name: "demo-extension",
-      eve: { extension: "./ext" },
-      files: ["ext", "dist"],
+      eve: { extension: "./extension" },
+      files: ["extension", "dist"],
       peerDependencies: { eve: "^0.25.0" },
       dependencies: { zod: "4.4.3" },
       scripts: {
@@ -744,11 +744,11 @@ describe("scaffoldExtensionProject", () => {
     expect(packageJson.dependencies?.ai).toBeUndefined();
     expect(packageJson.scripts?.dev).toBeUndefined();
 
-    const extensionSource = await readFile(join(projectRoot, "ext/extension.ts"), "utf8");
+    const extensionSource = await readFile(join(projectRoot, "extension/extension.ts"), "utf8");
     expect(extensionSource).toContain('from "eve/extension"');
     expect(extensionSource).toContain("defineExtension");
     expect(extensionSource).toContain("apiKey");
-    await expect(pathExists(join(projectRoot, "ext/tools"))).resolves.toBe(false);
+    await expect(pathExists(join(projectRoot, "extension/tools"))).resolves.toBe(false);
     await expect(pathExists(join(projectRoot, "agent"))).resolves.toBe(false);
 
     const tsconfig = JSON.parse(await readFile(join(projectRoot, "tsconfig.json"), "utf8")) as {
@@ -757,7 +757,7 @@ describe("scaffoldExtensionProject", () => {
     };
     expect(tsconfig.compilerOptions.moduleResolution).toBe("bundler");
     expect(tsconfig.compilerOptions.types).toEqual(["node"]);
-    expect(tsconfig.include).toEqual(["ext/**/*.ts"]);
+    expect(tsconfig.include).toEqual(["extension/**/*.ts"]);
 
     const agentsMd = await readFile(join(projectRoot, "AGENTS.md"), "utf8");
     expect(agentsMd).toContain("eve extension");

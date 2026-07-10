@@ -107,7 +107,7 @@ describe("runExtensionInitCommand", () => {
       dependencies?: { zod?: string; ai?: string };
       scripts?: Record<string, string>;
     };
-    expect(packageJson.eve?.extension).toBe("./ext");
+    expect(packageJson.eve?.extension).toBe("./extension");
     expect(packageJson.peerDependencies?.eve).toBe("^0.6.0");
     expect(packageJson.devDependencies?.eve).toBe("^0.6.0");
     expect(packageJson.dependencies?.zod).toBe("4.0.0");
@@ -115,10 +115,10 @@ describe("runExtensionInitCommand", () => {
     expect(packageJson.scripts?.build).toBe("eve extension build");
     expect(packageJson.scripts?.prepare).toBe("eve extension build");
     expect(packageJson.scripts?.dev).toBeUndefined();
-    expect(await readFile(join(projectPath, "ext/extension.ts"), "utf8")).toContain(
+    expect(await readFile(join(projectPath, "extension/extension.ts"), "utf8")).toContain(
       "defineExtension",
     );
-    await expect(pathExists(join(projectPath, "ext/tools"))).resolves.toBe(false);
+    await expect(pathExists(join(projectPath, "extension/tools"))).resolves.toBe(false);
     await expect(pathExists(join(projectPath, "agent"))).resolves.toBe(false);
 
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
@@ -132,7 +132,7 @@ describe("runExtensionInitCommand", () => {
     expect(printed).toContain("Created an eve extension in ");
     expect(printed).toContain(projectPath);
     expect(printed).toContain("Initialized Git repository");
-    expect(printed).toContain("ext/extension.ts");
+    expect(printed).toContain("extension/extension.ts");
     expect(printed).toContain("eve extension build");
     expect(printed).toContain("pnpm run build");
     expect(printed).toContain("agent/extensions/my-crm.ts");
@@ -148,7 +148,7 @@ describe("runExtensionInitCommand", () => {
     await runExtensionInitCommand(output, parentDirectory, "my-crm", deps);
 
     const projectPath = join(parentDirectory, "my-crm");
-    await expect(pathExists(join(projectPath, "ext/extension.ts"))).resolves.toBe(true);
+    await expect(pathExists(join(projectPath, "extension/extension.ts"))).resolves.toBe(true);
     expect(deps.runPackageManagerInstall).toHaveBeenCalled();
     expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
     const printed = output.messages.join("\n");
@@ -165,7 +165,7 @@ describe("runExtensionInitCommand", () => {
 
     await runExtensionInitCommand(output, parentDirectory, undefined, deps);
 
-    await expect(pathExists(join(parentDirectory, "ext"))).resolves.toBe(false);
+    await expect(pathExists(join(parentDirectory, "extension"))).resolves.toBe(false);
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
     expect(deps.tryInitializeGit).not.toHaveBeenCalled();
     const printed = output.messages.join("\n");
@@ -184,7 +184,7 @@ describe("runExtensionInitCommand", () => {
       runExtensionInitCommand(output, parentDirectory, "host-app", deps),
     ).rejects.toThrow("cannot add to an existing project");
 
-    await expect(pathExists(join(projectRoot, "ext"))).resolves.toBe(false);
+    await expect(pathExists(join(projectRoot, "extension"))).resolves.toBe(false);
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
   });
 

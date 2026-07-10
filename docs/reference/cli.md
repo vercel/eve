@@ -47,7 +47,7 @@ After scaffolding, a human terminal usually continues into `eve dev` (or a codin
 
 ## `eve extension`
 
-Commands for reusable [extension](/docs/extensions) packages. An extension is identified by `package.json#eve.extension` (for example `"eve": { "extension": "./ext" }`).
+Commands for reusable [extension](/docs/extensions) packages. An extension is identified by `package.json#eve.extension` (for example `"eve": { "extension": "./extension" }`).
 
 ### `eve extension init`
 

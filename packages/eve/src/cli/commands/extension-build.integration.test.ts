@@ -41,16 +41,16 @@ describe("runExtensionBuildCommand", () => {
         {
           name: "@acme/crm",
           type: "module",
-          eve: { extension: "./ext" },
+          eve: { extension: "./extension" },
         },
         null,
         2,
       )}\n`,
       "utf8",
     );
-    await mkdir(join(root, "ext"), { recursive: true });
+    await mkdir(join(root, "extension"), { recursive: true });
     await writeFile(
-      join(root, "ext", "extension.ts"),
+      join(root, "extension", "extension.ts"),
       [
         'import { defineExtension } from "eve/extension";',
         "export default defineExtension();",

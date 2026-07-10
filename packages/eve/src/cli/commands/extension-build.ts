@@ -16,7 +16,7 @@ const buildLog = createLogger("extension-build");
 
 /**
  * Builds the current package as an eve extension. Requires
- * `package.json#eve.extension` pointing at the source root (e.g. `./ext`).
+ * `package.json#eve.extension` pointing at the source root (e.g. `./extension`).
  */
 export async function runExtensionBuildCommand(
   logger: ExtensionBuildCliLogger,
@@ -25,7 +25,7 @@ export async function runExtensionBuildCommand(
   const config = await tryReadExtensionBuildConfig(appRoot);
   if (config === null) {
     throw new Error(
-      'This package is not an eve extension. Add `"eve": { "extension": "./ext" }` to package.json, ' +
+      'This package is not an eve extension. Add `"eve": { "extension": "./extension" }` to package.json, ' +
         "or run `eve build` for an agent app.",
     );
   }

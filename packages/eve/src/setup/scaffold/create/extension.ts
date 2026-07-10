@@ -53,11 +53,11 @@ function packageJsonTemplate(includeRootOnlyFields: boolean): string {
     version: "0.0.0",
     type: "module",
     eve: {
-      extension: "./ext",
+      extension: "./extension",
     },
-    files: ["ext", "dist"],
+    files: ["extension", "dist"],
     exports: {
-      ".": "./ext/extension.ts",
+      ".": "./extension/extension.ts",
     },
     scripts: {
       build: "eve extension build",
@@ -105,7 +105,7 @@ const TSCONFIG_TEMPLATE = `{
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["ext/**/*.ts"]
+  "include": ["extension/**/*.ts"]
 }
 `;
 
@@ -135,10 +135,10 @@ unavailable, use https://eve.dev/docs/extensions as a fallback.
 
 ## Authoring
 
-- Declare the extension in \`ext/extension.ts\` with \`defineExtension\` from
+- Declare the extension in \`extension/extension.ts\` with \`defineExtension\` from
   \`eve/extension\`. Config is optional; read bound values via the handle's
   \`.config\` in tools and hooks.
-- Add contributions under \`ext/\` the same way as in an agent:
+- Add contributions under \`extension/\` the same way as in an agent:
   \`tools/\`, \`connections/\`, \`skills/\`, \`hooks/\`, and optional instruction
   fragments. Names come from file paths; the mount supplies the namespace, so
   name tools for what they do (\`search\`, not \`crm_search\`).
@@ -149,7 +149,7 @@ unavailable, use https://eve.dev/docs/extensions as a fallback.
 
 \`eve extension build\` (wired to \`build\`/\`prepare\`) compiles the mount factory
 and tool re-exports into \`dist/\` and fills the package \`exports\` map. Ship both
-\`ext/\` (source the consumer recompiles) and \`dist/\`. Keep \`eve\` as a peer
+\`extension/\` (source the consumer recompiles) and \`dist/\`. Keep \`eve\` as a peer
 dependency so the consumer's eve is the one that runs.
 `;
 
@@ -158,7 +158,7 @@ const CLAUDE_MD_TEMPLATE = `@AGENTS.md
 
 function templateFiles(includeRootOnlyPackageJsonFields: boolean): Record<string, string> {
   return {
-    "ext/extension.ts": EXTENSION_DECLARATION_TEMPLATE,
+    "extension/extension.ts": EXTENSION_DECLARATION_TEMPLATE,
     "tsconfig.json": TSCONFIG_TEMPLATE,
     ".gitignore": GITIGNORE_TEMPLATE,
     "AGENTS.md": AGENTS_MD_TEMPLATE,
@@ -209,9 +209,9 @@ export interface ScaffoldExtensionProjectOptions {
 }
 
 /**
- * Scaffolds a standalone eve extension package: `ext/extension.ts`, package
+ * Scaffolds a standalone eve extension package: `extension/extension.ts`, package
  * metadata (`eve.extension`, peer+dev `eve`, zod), and TypeScript config. Does
- * not write sample tools — authors add contributions under `ext/` themselves.
+ * not write sample tools — authors add contributions under `extension/` themselves.
  */
 export async function scaffoldExtensionProject(
   options: ScaffoldExtensionProjectOptions,

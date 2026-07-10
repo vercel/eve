@@ -113,7 +113,7 @@ describe("initExtensionHandoff", () => {
       projectPath: "/tmp/my-crm",
     });
 
-    expect(handoff).toContain("ext/extension.ts");
+    expect(handoff).toContain("extension/extension.ts");
     expect(handoff).toContain("pnpm run build");
     expect(handoff).toContain("eve extension build");
     expect(handoff).toContain('import ext from "my-crm"');
