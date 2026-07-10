@@ -1,5 +1,17 @@
 # eve
 
+## 0.22.5
+
+### Patch Changes
+
+- c8f00aa: Add `experimental_chatgpt` under the new `eve/models/openai` subpath: it returns an AI SDK language model served through the local Codex login (`codex login`), billed to the ChatGPT subscription, and defaults to `gpt-5.6-sol`. Direct provider API request errors now also surface their upstream message when one is available.
+- 640cd8e: Keep provider streams moving while durable event writes are in flight. eve now coalesces only adjacent queued text or reasoning appends behind an ordered writer, preserving event order while avoiding one durable round trip per provider delta.
+- a5b43e7: Add `eve extension init` and `eve extension build` for scaffolding and building extension packages.
+- a325195: `limits.maxSubagentDepth` now defaults to `1` instead of `3`. Agents that rely on deeper default delegation should set `limits: { maxSubagentDepth: 3 }` (or another value) explicitly.
+- 4f86a21: Persist AI SDK approval-resume response messages in session history so approved local tool results survive later provider requests.
+- 3577534: Update the bundled Workflow runtime dependencies to their latest 5.0 beta releases.
+- bd780bd: Update the bundled Workflow runtime to `@workflow/core@5.0.0-beta.30` and align its world packages.
+
 ## 0.22.4
 
 ### Patch Changes
