@@ -150,8 +150,7 @@ unavailable, use https://eve.dev/docs/extensions as a fallback.
 \`eve extension build\` (wired to \`build\`/\`prepare\`) compiles the mount factory
 and tool re-exports into \`dist/\` and fills the package \`exports\` map. Ship both
 \`ext/\` (source the consumer recompiles) and \`dist/\`. Keep \`eve\` as a peer
-dependency so the consumer's eve is the one that runs. Use \`eve build\` only for
-agent apps — not extension packages.
+dependency so the consumer's eve is the one that runs.
 `;
 
 const CLAUDE_MD_TEMPLATE = `@AGENTS.md

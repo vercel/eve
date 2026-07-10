@@ -362,7 +362,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
 
   program
     .command("build")
-    .description("Build the current eve agent application (not extension packages).")
+    .description("Build the current eve application.")
     .action(async () => {
       const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
 

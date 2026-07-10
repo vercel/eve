@@ -73,7 +73,7 @@ Config is bound once when the consumer mounts the extension and stays constant f
 
 ## Publishing
 
-Point `eve.extension` at the source directory and run `eve extension build` (wired to `build`/`prepare`). Do not use `eve build` for extension packages — that command is for agent apps.
+Point `eve.extension` at the source directory and run `eve extension build` (wired to `build`/`prepare`):
 
 ```jsonc title="package.json"
 {

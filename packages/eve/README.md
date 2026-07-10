@@ -135,7 +135,7 @@ npx eve@latest extension init my-crm
 ```
 
 Same install and Git steps; next steps are printed instead of starting `eve dev`.
-Build the package with `eve extension build` (not `eve build`).
+Build the package with `eve extension build`.
 
 CLI commands:
 
@@ -143,7 +143,7 @@ CLI commands:
 - `eve extension init <name>` — create a new extension package
 - `eve extension build` — build an extension package
 - `eve info` — discovery results and compiled artifacts
-- `eve build` — compile `.eve/` and build the host output for an agent
+- `eve build` — compile `.eve/` and build the host output
 - `eve start` — serve the built `.output/` app
 - `eve dev` — start the local runtime and REPL
 

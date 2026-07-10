@@ -17,7 +17,6 @@ const buildLog = createLogger("extension-build");
 /**
  * Builds the current package as an eve extension. Requires
  * `package.json#eve.extension` pointing at the source root (e.g. `./ext`).
- * For agent apps, use `eve build` instead.
  */
 export async function runExtensionBuildCommand(
   logger: ExtensionBuildCliLogger,

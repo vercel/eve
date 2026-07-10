@@ -20,7 +20,7 @@ run:
 
 That scaffolds an `ext/` package with `defineExtension`, installs dependencies,
 and prints authoring/build/mount next steps. It does not start `eve dev`. Build
-with `eve extension build` (or the package `build` script), not `eve build`.
+with `eve extension build` (or the package `build` script).
 
 For an existing app, run `npx eve@latest init .` from its directory. This adds the
 agent and missing dependencies while leaving the existing Git repository and app

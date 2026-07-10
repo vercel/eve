@@ -11,7 +11,7 @@ The `eve` binary (`bin: eve`) runs from your app root, and every command first l
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `eve init [target]`           | Create a new agent, or add an agent to an existing project                                                                                            |
 | `eve info`                    | Print the resolved application, including discovered tools, skills, subagents, schedules, channels, routes, artifact paths, and discovery diagnostics |
-| `eve build`                   | Compile `.eve/` artifacts and build the host output for an agent app; prints the output directory                                                     |
+| `eve build`                   | Compile `.eve/` artifacts and build the host output; prints the output directory                                                                      |
 | `eve start`                   | Serve the built `.output/` app; prints the listening URL                                                                                              |
 | `eve dev`                     | Start the local dev server and open the terminal UI                                                                                                   |
 | `eve dev <url>`               | Connect the UI to an existing server URL (e.g. a remote deployment) instead of booting a local server                                                 |
@@ -78,8 +78,6 @@ eve extension build
 
 Builds the current package as an extension: compiles the mount factory and tool re-exports into `dist/`, and fills the package `exports` map. Requires `package.json#eve.extension`.
 
-Agent apps use `eve build` instead. Running `eve build` in an extension package fails with a pointer to this command.
-
 ## `eve info`
 
 ```bash
@@ -98,7 +96,7 @@ Run this first when something behaves unexpectedly. It confirms a file was disco
 eve build
 ```
 
-No flags. Compiles to `.eve/` and builds the host output for an **agent** app, then prints the built output path. Extension packages must use [`eve extension build`](#eve-extension-build).
+No flags. Compiles to `.eve/` and builds the host output, then prints the built output path.
 
 Useful artifacts written under `.eve/` (preserved even on partial failure):
 
