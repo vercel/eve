@@ -14,7 +14,7 @@ import {
   DEFAULT_PAINT_DIFFUSION_RATE,
   DEFAULT_PAINT_DT,
   PAINT_STROKE_MOVEMENT_EPSILON_CELLS,
-  imprintCellSizeForDevicePixelRatio,
+  imprintGridSizeForLogicalSize,
 } from "./constants";
 import { mix } from "./math";
 import { paintMappingMetrics } from "./pointer-mapping";
@@ -39,10 +39,8 @@ export function createPaintSystem(device: Device, resources: RendererResources, 
     targets = undefined;
   };
 
-  const ensure = (logicalWidth: number, logicalHeight: number, devicePixelRatio?: number) => {
-    const cellSize = imprintCellSizeForDevicePixelRatio(devicePixelRatio);
-    const cols = Math.max(1, Math.ceil(logicalWidth / cellSize));
-    const rows = Math.max(1, Math.ceil(logicalHeight / cellSize));
+  const ensure = (logicalWidth: number, logicalHeight: number, gridScaleMultiplier?: number) => {
+    const { cols, rows } = imprintGridSizeForLogicalSize(logicalWidth, logicalHeight, gridScaleMultiplier);
     if (targets?.cols === cols && targets.rows === rows) return targets;
     dispose();
     const ping = createPaintTexture(device, "eve-5-paint-ping", cols, rows);

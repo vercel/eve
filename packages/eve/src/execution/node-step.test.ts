@@ -86,7 +86,7 @@ function setupMockAgentForToolExecution(toolName: string, args: unknown): void {
       };
 
       if (onStepFinish) await onStepFinish(result);
-      return result;
+      return { ...result, responseMessages: result.response.messages };
     });
 
     return this as unknown as ToolLoopAgent;
@@ -160,7 +160,7 @@ function setupMockAgentForToolCall(toolName: string, args: unknown): void {
         await onStepFinish(result);
       }
 
-      return result;
+      return { ...result, responseMessages: result.response.messages };
     });
 
     return this as unknown as ToolLoopAgent;

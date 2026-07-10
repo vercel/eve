@@ -41,7 +41,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 33;
+export const COMPILED_AGENT_MANIFEST_VERSION = 35;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -185,6 +185,13 @@ export type CompiledToolDefinition = InternalToolDefinition & ModuleSourceRef;
 export interface CompiledDynamicToolDefinition extends ModuleSourceRef {
   readonly slug: string;
   readonly eventNames: readonly string[];
+  /**
+   * Mount namespace when this resolver comes from an extension. The runtime
+   * prefixes the names of tools the resolver produces (`forecast` →
+   * `crm__forecast`) so extension-produced tools are namespaced like every
+   * other extension contribution. Absent for consumer-authored resolvers.
+   */
+  readonly extensionNamespace?: string;
 }
 
 /**
@@ -195,6 +202,11 @@ export interface CompiledDynamicToolDefinition extends ModuleSourceRef {
 export interface CompiledDynamicSkillDefinition extends ModuleSourceRef {
   readonly slug: string;
   readonly eventNames: readonly string[];
+  /**
+   * Mount namespace when this resolver comes from an extension. Names of skills
+   * a map resolver produces are prefixed with `${extensionNamespace}__`.
+   */
+  readonly extensionNamespace?: string;
 }
 
 /**
@@ -566,6 +578,7 @@ const compiledDynamicToolDefinitionSchema: z.ZodType<CompiledDynamicToolDefiniti
   .object({
     eventNames: z.array(z.string()).readonly(),
     exportName: z.string().optional(),
+    extensionNamespace: z.string().optional(),
     logicalPath: z.string(),
     slug: z.string(),
     sourceId: z.string(),
@@ -577,6 +590,7 @@ const compiledDynamicSkillDefinitionSchema: z.ZodType<CompiledDynamicSkillDefini
   .object({
     eventNames: z.array(z.string()).readonly(),
     exportName: z.string().optional(),
+    extensionNamespace: z.string().optional(),
     logicalPath: z.string(),
     slug: z.string(),
     sourceId: z.string(),
@@ -657,12 +671,49 @@ const compiledSubagentEdgeSchema: z.ZodType<CompiledSubagentEdge> = z
   .strict();
 
 /**
+ * One mounted extension recorded on the root compiled manifest. The runtime
+ * evaluates {@link mountLogicalPath} at module-map load so the mount's factory
+ * call binds the extension's config before any tool runs.
+ */
+export interface CompiledExtensionMount {
+  /** Mount-derived namespace that prefixes the extension's tool/skill names. */
+  readonly namespace: string;
+  readonly packageName: string;
+  /**
+   * Package-derived namespace that scopes the extension's durable state keys and
+   * config binding. Distinct from {@link namespace}: state stays keyed to the
+   * package so a consumer renaming the mount file cannot orphan persisted state.
+   */
+  readonly packageNamespace: string;
+  /**
+   * Absolute path to the extension's source root on disk. The extension-scope
+   * bundler plugin treats any module under this root as extension-owned and
+   * rewrites its `eve/context`/`eve/extension` imports to bake in the namespace.
+   */
+  readonly sourceRoot: string;
+  readonly mountSourceId: string;
+  readonly mountLogicalPath: string;
+}
+
+const compiledExtensionMountSchema: z.ZodType<CompiledExtensionMount> = z
+  .object({
+    namespace: z.string(),
+    packageName: z.string(),
+    packageNamespace: z.string(),
+    sourceRoot: z.string(),
+    mountSourceId: z.string(),
+    mountLogicalPath: z.string(),
+  })
+  .strict();
+
+/**
  * Zod schema for the versioned compiled manifest emitted by the compiler.
  */
 export const compiledAgentManifestSchema = z
   .object({
     agentRoot: z.string(),
     appRoot: z.string(),
+    extensionMounts: z.array(compiledExtensionMountSchema).default([]),
     channels: z.array(compiledChannelEntrySchema),
     config: compiledAgentConfigSchema,
     connections: z.array(compiledConnectionDefinitionSchema),
@@ -864,10 +915,12 @@ export function createCompiledAgentManifest(input: {
   readonly subagents?: readonly CompiledSubagentNode[];
   readonly instructions?: CompiledInstructionsDefinition;
   readonly tools?: readonly CompiledToolDefinition[];
+  readonly extensionMounts?: readonly CompiledExtensionMount[];
 }): CompiledAgentManifest {
   return {
     ...createCompiledAgentNodeManifest(input),
     kind: COMPILED_AGENT_MANIFEST_KIND,
+    extensionMounts: [...(input.extensionMounts ?? [])],
     subagentEdges: [...(input.subagentEdges ?? [])],
     subagents: [...(input.subagents ?? [])],
     version: COMPILED_AGENT_MANIFEST_VERSION,

@@ -280,6 +280,7 @@ async function postTurnWithRetry(input: {
   const attempts = input.mustDeliver ? DELIVER_RETRY_ATTEMPTS : 1;
   let lastStatus: number | undefined;
   let lastBody: string | undefined;
+  let lastHeaders: Headers | undefined;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const response = await fetch(input.url, {
@@ -294,9 +295,10 @@ async function postTurnWithRetry(input: {
 
     lastStatus = response.status;
     lastBody = await response.text();
+    lastHeaders = response.headers;
 
     if (!isRetryableDeliveryFailure(response.status, lastBody)) {
-      throw new ClientError(response.status, lastBody);
+      throw new ClientError(response.status, lastBody, response.headers);
     }
 
     if (attempt < attempts - 1) {
@@ -304,7 +306,11 @@ async function postTurnWithRetry(input: {
     }
   }
 
-  throw new ClientError(lastStatus ?? 0, lastBody ?? "Failed to deliver session turn.");
+  throw new ClientError(
+    lastStatus ?? 0,
+    lastBody ?? "Failed to deliver session turn.",
+    lastHeaders,
+  );
 }
 
 function isRetryableDeliveryFailure(status: number, body: string): boolean {

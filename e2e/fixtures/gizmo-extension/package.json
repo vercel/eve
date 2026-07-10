@@ -1,0 +1,22 @@
+{
+  "name": "gizmo-extension",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./ext/extension.ts"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  },
+  "peerDependencies": {
+    "eve": "workspace:*"
+  },
+  "eve": {
+    "extension": "./ext"
+  }
+}

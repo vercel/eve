@@ -11,6 +11,7 @@ allowBuilds:
   cbor-extract: true
   esbuild: true
   node-liblzma: false
+  phase: false
   protobufjs: true
   sharp: true
   simple-git-hooks: true
@@ -33,11 +34,12 @@ catalog:
   "@vercel/sandbox": "2.3.0"
   ai: "^7.0.0"
   next: "16.2.6"
+  phase: "0.0.1"
   picocolors: "1.1.1"
   react: "19.2.6"
   react-dom: "19.2.6"
   streamdown: "2.5.0"
-  typescript: "7.0.1-rc"
+  typescript: "7.0.2"
   vitest: "4.1.7"
   zod: "4.4.3"
 
@@ -61,3 +63,4 @@ minimumReleaseAgeExclude:
   - typescript
   - vercel
   - workflow
+  - phase@0.0.1

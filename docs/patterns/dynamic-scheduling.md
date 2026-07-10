@@ -30,8 +30,8 @@ This is the only authored schedule. It looks up due application-managed rows and
 
 ```ts title="agent/schedules/dynamic.ts"
 import { defineSchedule } from "eve/schedules";
-import slack from "../channels/slack.js";
-import { scheduleStore } from "../lib/schedule-store.js";
+import slack from "../channels/slack";
+import { scheduleStore } from "../lib/schedule-store";
 
 export default defineSchedule({
   cron: "* * * * *",
@@ -119,8 +119,8 @@ Create a one-time schedule with `everyMinutes: null`, or a recurring one with an
 ```ts title="agent/tools/create_schedule.ts"
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { scheduleStore } from "../lib/schedule-store.js";
-import { requireScheduleOwner } from "../lib/tenant.js";
+import { scheduleStore } from "../lib/schedule-store";
+import { requireScheduleOwner } from "../lib/tenant";
 
 export default defineTool({
   description: "Create a one-time or repeating scheduled agent run for this tenant.",
@@ -142,8 +142,8 @@ export default defineTool({
 ```ts title="agent/tools/list_schedules.ts"
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { scheduleStore } from "../lib/schedule-store.js";
-import { requireScheduleOwner } from "../lib/tenant.js";
+import { scheduleStore } from "../lib/schedule-store";
+import { requireScheduleOwner } from "../lib/tenant";
 
 export default defineTool({
   description: "List this tenant's dynamic schedules and their latest status.",
@@ -157,8 +157,8 @@ export default defineTool({
 ```ts title="agent/tools/update_schedule.ts"
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { scheduleStore } from "../lib/schedule-store.js";
-import { requireScheduleOwner } from "../lib/tenant.js";
+import { scheduleStore } from "../lib/schedule-store";
+import { requireScheduleOwner } from "../lib/tenant";
 
 export default defineTool({
   description: "Change, pause, or resume one of this tenant's schedules.",
@@ -183,8 +183,8 @@ export default defineTool({
 import { defineTool } from "eve/tools";
 import { always } from "eve/tools/approval";
 import { z } from "zod";
-import { scheduleStore } from "../lib/schedule-store.js";
-import { requireScheduleOwner } from "../lib/tenant.js";
+import { scheduleStore } from "../lib/schedule-store";
+import { requireScheduleOwner } from "../lib/tenant";
 
 export default defineTool({
   description: "Permanently delete one of this tenant's schedules.",
@@ -232,7 +232,7 @@ export interface ScheduleStore {
   release(job: ClaimedSchedule, failure: { error: unknown; retryAt: Date }): Promise<void>;
 }
 
-export { scheduleStore } from "../../lib/schedule-store.js";
+export { scheduleStore } from "../../lib/schedule-store";
 ```
 
 Implement that adapter with whichever durable store already belongs to your application. It must preserve a few semantics:

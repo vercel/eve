@@ -37,6 +37,9 @@ const ROOTS = [
 const SIDEBAR_EXEMPT_PAGES = new Set([
   // Linked from the global footer instead of the docs sidebar.
   "responsible-use.md",
+  // Reachable at its URL but intentionally kept out of the sidebar for now
+  // while the mounted-extensions feature stabilizes.
+  "extensions.md",
 ]);
 
 // Only the top-level README.md is excluded. Nested READMEs (e.g.

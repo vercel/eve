@@ -269,12 +269,7 @@ export function createTransformBrokerEnvironment(
     });
   }
 
-  return {
-    EVE_MICROSANDBOX_NETWORK_TRANSFORMS: Buffer.from(
-      JSON.stringify(plan.transformHeaderRules),
-    ).toString("base64"),
-    ...gitConfigEnvironment,
-  };
+  return gitConfigEnvironment;
 }
 
 interface VercelNetworkPolicyRule {

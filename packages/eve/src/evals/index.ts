@@ -15,6 +15,7 @@ export type { RuntimeIdentity } from "#protocol/message.js";
 export type { InputRequest } from "#runtime/input/types.js";
 
 export type {
+  EveEvalCountMatcher,
   EveEvalEventMatch,
   EveEvalInputRequestMatchOptions,
   EveEvalValueMatcher,

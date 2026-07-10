@@ -17,6 +17,12 @@ import type { EveEvalSubagentCall, EveEvalToolCall } from "#evals/types.js";
  */
 export type EveEvalValueMatcher<T = JsonValue | undefined> = EveEvalDeepMatcher<T>;
 
+/**
+ * Constraint over an observed assertion count. A number requires an exact
+ * count; a predicate receives the observed count and returns its verdict.
+ */
+export type EveEvalCountMatcher = number | ((count: number) => boolean);
+
 type EveEvalDeepMatcher<T> =
   | RegExp
   | ((value: T) => boolean)
@@ -37,8 +43,8 @@ export interface EveEvalToolCallMatchOptions {
   readonly output?: EveEvalValueMatcher;
   /** Required lifecycle outcome. Defaults to `"completed"`. */
   readonly status?: EveEvalToolCall["status"];
-  /** Exact number of matching calls required. Defaults to "at least one". */
-  readonly count?: number;
+  /** Constraint over the matching call count. Defaults to "at least one". */
+  readonly count?: EveEvalCountMatcher;
 }
 
 /**
@@ -58,8 +64,8 @@ export interface EveEvalSubagentCallMatchOptions {
   readonly output?: EveEvalValueMatcher;
   /** Required lifecycle outcome. Defaults to `"completed"`. */
   readonly status?: EveEvalSubagentCall["status"];
-  /** Exact number of matching delegations required. Defaults to "at least one". */
-  readonly count?: number;
+  /** Constraint over the matching delegation count. Defaults to "at least one". */
+  readonly count?: EveEvalCountMatcher;
 }
 
 /** Constraints accepted by `requireInputRequest`. */
@@ -89,8 +95,8 @@ export type EveEvalEventMatch<
           ? TData
           : never
       >;
-      /** Exact number of matching events required. Defaults to "at least one". */
-      readonly count?: number;
+      /** Constraint over the matching event count. Defaults to "at least one". */
+      readonly count?: EveEvalCountMatcher;
     }
   : never;
 

@@ -1,0 +1,23 @@
+{
+  "name": "extensions",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "eve build",
+    "dev": "eve dev",
+    "start": "eve start",
+    "typecheck": "eve build && tsc",
+    "test:e2e": "eve eval --strict"
+  },
+  "dependencies": {
+    "eve": "workspace:*",
+    "gizmo-extension": "workspace:*",
+    "toolkit-extension": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

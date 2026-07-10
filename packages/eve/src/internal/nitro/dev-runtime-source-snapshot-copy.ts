@@ -125,6 +125,10 @@ function shouldSkipSnapshotSource(
     return true;
   }
 
+  if (existsSync(join(sourcePath, ".git"))) {
+    return true;
+  }
+
   return isDirectAppRootSkipPath({
     appRoot: plan.appRoot,
     sourcePath,

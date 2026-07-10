@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 
-import matter from "#compiled/gray-matter/index.js";
+import { parseFrontmatter } from "#internal/helpers/gray-matter.js";
 
 /**
  * Loads a YAML file and returns its top-level mapping as a plain object.
@@ -26,7 +26,5 @@ export async function loadYaml(filePath: string): Promise<Record<string, unknown
   // we wrap the content so gray-matter sees the entire file as frontmatter.
   const needsWrapper = !raw.trimStart().startsWith("---");
   const input = needsWrapper ? `---\n${raw}\n---` : raw;
-  const parsed = matter(input);
-
-  return (parsed.data ?? {}) as Record<string, unknown>;
+  return parseFrontmatter(input).data;
 }

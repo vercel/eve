@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ChannelAdapterContext } from "#channel/adapter.js";
+import { callAdapterEventHandler, type ChannelAdapterContext } from "#channel/adapter.js";
 import { buildSessionHandle } from "#channel/session.js";
 import { type SubagentAdapterState } from "#execution/subagent-adapter.js";
 import { ContextContainer } from "#context/container.js";
@@ -9,9 +9,17 @@ import type { InputRequest } from "#runtime/input/types.js";
 import { SUBAGENT_ADAPTER } from "#execution/subagent-adapter.js";
 
 const SUBAGENT_INPUT_REQUESTED = SUBAGENT_ADAPTER["input.requested"];
+const SUBAGENT_AUTHORIZATION_REQUIRED = SUBAGENT_ADAPTER["authorization.required"];
+const SUBAGENT_AUTHORIZATION_COMPLETED = SUBAGENT_ADAPTER["authorization.completed"];
 
 if (SUBAGENT_INPUT_REQUESTED === undefined) {
   throw new Error("SUBAGENT_ADAPTER is missing its input.requested handler.");
+}
+if (SUBAGENT_AUTHORIZATION_REQUIRED === undefined) {
+  throw new Error("SUBAGENT_ADAPTER is missing its authorization.required handler.");
+}
+if (SUBAGENT_AUTHORIZATION_COMPLETED === undefined) {
+  throw new Error("SUBAGENT_ADAPTER is missing its authorization.completed handler.");
 }
 
 const resumeHookMock = vi.fn();
@@ -53,6 +61,81 @@ function sampleRequest(): InputRequest {
     requestId: "req-1",
   };
 }
+
+const authorization = {
+  displayName: "Linear",
+  instructions: "Sign in to continue.",
+  url: "https://idp.example/authorize",
+};
+
+describe("SUBAGENT_ADAPTER authorization handlers", () => {
+  it("forwards a required event through each nested subagent adapter hop", async () => {
+    resumeHookMock.mockClear();
+    const data = {
+      authorization,
+      description: "Authorization required for linear",
+      name: "linear",
+      sequence: 2,
+      stepIndex: 3,
+      turnId: "turn-auth",
+      webhookUrl: "https://eve.example/connections/linear/callback/child-session%3Aauth",
+    };
+
+    await callAdapterEventHandler(
+      SUBAGENT_ADAPTER,
+      { data, type: "authorization.required" },
+      makeContext(),
+    );
+
+    expect(resumeHookMock).toHaveBeenCalledWith("parent-token", {
+      callId: "call-123",
+      childSessionId: "child-session",
+      event: { data, type: "authorization.required" },
+      kind: "subagent-authorization-event",
+      subagentName: "linear",
+    });
+  });
+
+  it("forwards authorization.completed unchanged via resumeHook", async () => {
+    resumeHookMock.mockClear();
+    const data = {
+      authorization,
+      name: "linear",
+      outcome: "authorized" as const,
+      sequence: 2,
+      stepIndex: 4,
+      turnId: "turn-auth",
+    };
+
+    await SUBAGENT_AUTHORIZATION_COMPLETED(data, makeContext());
+
+    expect(resumeHookMock).toHaveBeenCalledWith("parent-token", {
+      callId: "call-123",
+      childSessionId: "child-session",
+      event: { data, type: "authorization.completed" },
+      kind: "subagent-authorization-event",
+      subagentName: "linear",
+    });
+  });
+
+  it("skips forwarding when the adapter state is invalid", async () => {
+    resumeHookMock.mockClear();
+    const base = makeContext();
+
+    await SUBAGENT_AUTHORIZATION_REQUIRED(
+      {
+        description: "Authorization required for linear",
+        name: "linear",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn-auth",
+      },
+      { ctx: base.ctx, state: {}, session: base.session },
+    );
+
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+});
 
 describe("SUBAGENT_ADAPTER input.requested handler", () => {
   it("forwards the child's HITL batch via resumeHook", async () => {
@@ -162,6 +245,39 @@ describe("SUBAGENT_ADAPTER forward failure logging", () => {
       error: expect.objectContaining({
         message: expect.stringContaining("parent gone"),
       }),
+    });
+  });
+
+  it("includes the authorization event type when auth forwarding fails", async () => {
+    resumeHookMock.mockClear();
+    resumeHookMock.mockRejectedValueOnce(new Error("parent gone"));
+
+    await expect(
+      SUBAGENT_AUTHORIZATION_REQUIRED(
+        {
+          authorization,
+          description: "Authorization required for linear",
+          name: "linear",
+          sequence: 2,
+          stepIndex: 3,
+          turnId: "turn-auth",
+          webhookUrl: "https://eve.example/connections/linear/callback/child-session%3Aauth",
+        },
+        makeContext(),
+      ),
+    ).rejects.toThrow("parent gone");
+
+    const warnCall = warnSpy.mock.calls.find((call: unknown[]) =>
+      String(call[0]).startsWith("[eve:execution.subagent-adapter]"),
+    );
+    expect(warnCall?.[1]).toMatchObject({
+      callId: "call-123",
+      childSessionId: "child-session",
+      errorId: expect.any(String),
+      eventType: "authorization.required",
+      parentContinuationToken: "parent-token",
+      subagentName: "linear",
+      error: expect.objectContaining({ message: expect.stringContaining("parent gone") }),
     });
   });
 });

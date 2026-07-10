@@ -12,6 +12,7 @@ import {
   mcpServiceHost,
   SUPPORTED_PROTOCOLS,
 } from "./catalog.js";
+import { connectionEntries } from "@vercel/eve-catalog";
 
 describe("catalog integrity", () => {
   test("every entry declares the endpoint for each protocol it lists", () => {
@@ -37,6 +38,14 @@ describe("catalog integrity", () => {
     for (const entry of CONNECTION_CATALOG) {
       expect(entry.auth.kind).toBe("connect");
     }
+  });
+
+  test("gallery-only connections stay out of the scaffolder catalog", () => {
+    const scaffoldable = connectionEntries().filter((entry) => entry.surfaces.scaffoldable);
+    expect(CONNECTION_CATALOG.map((entry) => entry.slug)).toEqual(
+      scaffoldable.map((entry) => entry.slug),
+    );
+    expect(connectionEntries().length).toBeGreaterThan(scaffoldable.length);
   });
 
   test("every Connect entry resolves a `vercel connect create` service", () => {

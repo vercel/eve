@@ -5,7 +5,7 @@ import {
   SESSION_MARKER_TOKEN,
   WORKSPACE_SEED_PATH,
   WORKSPACE_SEED_TOKEN,
-} from "./shared.js";
+} from "./shared";
 
 // Two session-scoped setup surfaces in one bash call:
 //   1. `onSession` wrote SESSION_MARKER_PATH into this live session.

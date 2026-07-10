@@ -1,5 +1,5 @@
 import { defineChannel, POST } from "eve/channels";
-import target from "./target.js";
+import target from "./target";
 
 /**
  * Exercises the cross-channel `args.receive(channel, …)` path: the

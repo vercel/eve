@@ -20,6 +20,14 @@ export const SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS = [
 export const PROJECT_MARKER_FILE_NAMES = ["package.json", "vercel.json"] as const;
 
 const PROJECT_MARKER_FILE_NAME_SET = new Set<string>(PROJECT_MARKER_FILE_NAMES);
+const GENERATED_AGENT_DIRECTORY_NAMES = new Set<string>([
+  ".eve",
+  ".next",
+  ".output",
+  ".vercel",
+  ".workflow-data",
+  "node_modules",
+]);
 
 /**
  * Filesystem entry type used by discovery classifiers.
@@ -33,7 +41,9 @@ export type AgentRootEntryKind =
   | "agent-config-module"
   | "channels-directory"
   | "connections-directory"
+  | "extensions-directory"
   | "hooks-directory"
+  | "ignored-directory"
   | "instructions-directory"
   | "instructions-markdown"
   | "instructions-module"
@@ -54,6 +64,7 @@ export type LocalSubagentEntryKind =
   | "agent-config-module"
   | "connections-directory"
   | "hooks-directory"
+  | "ignored-directory"
   | "instructions-directory"
   | "instructions-markdown"
   | "instructions-module"
@@ -142,12 +153,20 @@ export function classifyAgentRootEntry(
   }
 
   if (entryType === "directory") {
+    if (GENERATED_AGENT_DIRECTORY_NAMES.has(name)) {
+      return "ignored-directory";
+    }
+
     if (name === "channels") {
       return "channels-directory";
     }
 
     if (name === "connections") {
       return "connections-directory";
+    }
+
+    if (name === "extensions") {
+      return "extensions-directory";
     }
 
     if (name === "hooks") {
@@ -218,6 +237,10 @@ export function classifyLocalSubagentEntry(
   }
 
   if (entryType === "directory") {
+    if (GENERATED_AGENT_DIRECTORY_NAMES.has(name)) {
+      return "ignored-directory";
+    }
+
     if (name === "connections") {
       return "connections-directory";
     }

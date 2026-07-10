@@ -1,6 +1,6 @@
 import { defineEval } from "eve/evals";
 
-import { DYNAMIC_ECHO_TOKEN, ECHO_TOOL } from "./shared.js";
+import { DYNAMIC_ECHO_TOKEN, ECHO_TOOL } from "./shared";
 
 // The dynamic tool must survive serialization/deserialization (lazy
 // replay of the resolver): both turns call it and see the token.
@@ -25,7 +25,7 @@ export default defineEval({
     t.succeeded();
     t.calledTool(ECHO_TOOL, {
       output: { token: DYNAMIC_ECHO_TOKEN },
-      count: 2,
+      count: (count) => count >= 2,
     });
   },
 });

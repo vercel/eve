@@ -27,8 +27,8 @@ export const budget = defineState("my-agent.budget", () => ({ count: 0, cap: 25 
 ```ts title="agent/tools/spend.ts"
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { budget } from "../lib/budget.js";
-import { runQuery } from "../lib/warehouse.js";
+import { budget } from "../lib/budget";
+import { runQuery } from "../lib/warehouse";
 
 export default defineTool({
   description: "Run a query, counting it against the session budget.",
@@ -50,7 +50,7 @@ State is durable by default and does not reset between turns. If you want a clea
 
 ```ts title="agent/hooks/reset-budget.ts"
 import { defineHook } from "eve/hooks";
-import { budget } from "../lib/budget.js";
+import { budget } from "../lib/budget";
 
 export default defineHook({
   events: {

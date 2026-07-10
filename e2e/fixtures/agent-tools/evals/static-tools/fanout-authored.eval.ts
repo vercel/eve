@@ -5,7 +5,7 @@ import {
   FANOUT_SIZE,
   fanoutRequestsPrecedeFirstResult,
   fanoutRequestsUseExpectedLabels,
-} from "./fanout.js";
+} from "./fanout";
 
 const TOOL_NAME = "streamed-action";
 const LABELS = [

@@ -5,11 +5,13 @@ import { resumeHook } from "#internal/workflow/runtime.js";
 import type { HookPayload } from "#channel/types.js";
 import { ChannelRequestIdKey, SubagentDepthKey } from "#context/keys.js";
 import { createSessionStep } from "#execution/create-session-step.js";
+import { notifyDelegatedParentStep } from "#execution/delegated-parent-notification.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import { dispatchTurnStep } from "#execution/workflow-steps.js";
+import { dispatchTurnStep, emitTerminalSessionFailureStep } from "#execution/workflow-steps.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: vi.fn(),
@@ -42,6 +44,10 @@ vi.mock("./create-session-step.js", () => ({
 
 vi.mock("./route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn().mockImplementation(async ({ payloads }) => payloads[0]),
+}));
+
+vi.mock("./delegated-parent-notification.js", () => ({
+  notifyDelegatedParentStep: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("./workflow-steps.js", () => ({
@@ -250,6 +256,53 @@ describe("workflowEntry", () => {
         subagentDepth: 3,
       }),
     );
+  });
+
+  it("notifies a delegated parent once when a turn fails terminally", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      turnControls: [
+        {
+          error: { message: "persistent recoverable failure", name: "Error" },
+          kind: "turn-error",
+        },
+      ],
+    });
+    const serializedContext = createSerializedContext({
+      "eve.channel": {
+        kind: "subagent",
+        state: {
+          callId: "call-1",
+          parentContinuationToken: "parent-token",
+          subagentName: "researcher",
+        },
+      },
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "delegate" },
+        serializedContext,
+      }),
+    ).rejects.toThrow("persistent recoverable failure");
+
+    expect(emitTerminalSessionFailureStep).toHaveBeenCalledOnce();
+    expect(fireSessionCallbackStep).toHaveBeenCalledOnce();
+    expect(notifyDelegatedParentStep).toHaveBeenCalledOnce();
+    expect(notifyDelegatedParentStep).toHaveBeenCalledWith({
+      result: {
+        callId: "call-1",
+        isError: true,
+        kind: "subagent-result",
+        output: {
+          code: "SUBAGENT_EXECUTION_FAILED",
+          message: "persistent recoverable failure",
+        },
+        subagentName: "researcher",
+      },
+      serializedContext,
+    });
   });
 
   it("passes the resumed channel request id to the next turn", async () => {

@@ -37,6 +37,8 @@ const REMOTE_VERIFIED_TARGET = await resolveTestVercelTarget({
   projectId: "prj_inbound",
   projectName: "inbound",
 });
+const VERCEL_SSO_URL =
+  "https://vercel.com/sso-api?url=https%3A%2F%2Fvpoke.playground-vercel.tools&nonce=test";
 
 /**
  * Real `Client` whose network-touching methods are replaced by vi spies.
@@ -1404,10 +1406,10 @@ describe("EveTUIRunner remote authentication", () => {
     expect(commandInvocations).toEqual([{ text: "/vc:login", status: undefined }]);
   });
 
-  it("runs /vc:login once at startup after the exact remote auth challenge", async () => {
+  it("runs /vc:login once at startup after Vercel redirects to its SSO challenge", async () => {
     const client = stubClient();
     vi.spyOn(client, "info")
-      .mockRejectedValueOnce(unauthorized())
+      .mockRejectedValueOnce(new ClientError(302, "Redirecting...", { location: VERCEL_SSO_URL }))
       .mockResolvedValueOnce(AGENT_INFO);
     const commandInvocations: Array<{ text: string; status: "failed" | undefined }> = [];
     const flow = successfulAuth();
@@ -1421,6 +1423,7 @@ describe("EveTUIRunner remote authentication", () => {
     });
 
     expect(flow).toHaveBeenCalledOnce();
+    expect(flow).toHaveBeenCalledWith(expect.objectContaining({ configureTrustedSources: true }));
     expect(commandInvocations).toEqual([{ text: "/vc:login", status: undefined }]);
   });
 

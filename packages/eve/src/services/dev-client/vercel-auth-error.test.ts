@@ -19,6 +19,16 @@ const VERCEL_SSO_CHALLENGE_BODY = `<!doctype html><html lang=en><meta charset=ut
 <a href="https://vercel.com/sso-api?url=https%3A%2F%2Fexample.vercel.app">redirect</a>
 <a href="https://vercel.com/security">Vercel Authentication</a>
 </html>`;
+const VERCEL_SSO_URL = "https://vercel.com/sso-api?url=https%3A%2F%2Fexample.vercel.app&nonce=test";
+const VERCEL_PROTECTED_DEPLOYMENT_BODY = JSON.stringify({
+  error: { code: "401", message: "Protected deployment" },
+  protection: {
+    auto_vercel_auth_redirect: true,
+    password_enabled: false,
+    vercel_auth_enabled: true,
+    vercel_auth_callback: VERCEL_SSO_URL,
+  },
+});
 
 describe("isVercelAuthChallenge", () => {
   it("detects a real ClientError carrying the Vercel SSO challenge body", () => {
@@ -32,12 +42,85 @@ describe("isVercelAuthChallenge", () => {
     expect(isVercelAuthChallenge({ body: VERCEL_SSO_CHALLENGE_BODY, status: 401 })).toBe(true);
   });
 
-  it("requires HTTP 401 and the complete Vercel challenge signature", () => {
+  it("detects the manual-redirect response returned by Vercel for GET requests", () => {
+    expect(
+      isVercelAuthChallenge(new ClientError(302, "Redirecting...", { location: VERCEL_SSO_URL })),
+    ).toBe(true);
+    expect(
+      isVercelAuthChallenge({
+        body: "Redirecting...",
+        headers: { Location: VERCEL_SSO_URL },
+        status: 302,
+      }),
+    ).toBe(true);
+  });
+
+  it("detects the structured 401 returned by Vercel for API requests", () => {
+    expect(isVercelAuthChallenge(new ClientError(401, VERCEL_PROTECTED_DEPLOYMENT_BODY))).toBe(
+      true,
+    );
+    expect(isVercelAuthChallenge({ body: VERCEL_PROTECTED_DEPLOYMENT_BODY, status: 401 })).toBe(
+      true,
+    );
+  });
+
+  it("detects Vercel's credentialed deployment-protection rejection", () => {
+    expect(
+      isVercelAuthChallenge(
+        new ClientError(401, "You must sign in\n\nUNAUTHORIZED\n\niad1::request-id\n", {
+          "x-vercel-error": "UNAUTHORIZED",
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("requires HTTP 401 and the complete legacy HTML challenge signature", () => {
     expect(isVercelAuthChallenge(new ClientError(500, VERCEL_SSO_CHALLENGE_BODY))).toBe(false);
     expect(
       isVercelAuthChallenge(new ClientError(401, "<title>Authentication Required</title>")),
     ).toBe(false);
     expect(isVercelAuthChallenge({ body: VERCEL_SSO_CHALLENGE_BODY })).toBe(false);
+  });
+
+  it("requires an exact Vercel SSO destination for redirect challenges", () => {
+    expect(
+      isVercelAuthChallenge(
+        new ClientError(302, "Redirecting...", {
+          location: "https://example.com/sso-api?url=https://eve.test",
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isVercelAuthChallenge(
+        new ClientError(302, "Redirecting...", {
+          location: "https://vercel.com/sso-api",
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isVercelAuthChallenge(new ClientError(200, "Redirecting...", { location: VERCEL_SSO_URL })),
+    ).toBe(false);
+  });
+
+  it("requires the complete structured Vercel challenge signature", () => {
+    expect(
+      isVercelAuthChallenge(
+        new ClientError(
+          401,
+          JSON.stringify({
+            error: { code: "401", message: "Protected deployment" },
+            protection: {
+              vercel_auth_callback: "https://example.com/sso-api?url=https://eve.test",
+            },
+          }),
+        ),
+      ),
+    ).toBe(false);
+    expect(
+      isVercelAuthChallenge(
+        new ClientError(401, JSON.stringify({ error: "Protected deployment" })),
+      ),
+    ).toBe(false);
   });
 
   it("returns false for non-error inputs", () => {

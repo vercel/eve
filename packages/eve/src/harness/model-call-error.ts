@@ -1,5 +1,6 @@
 import { isObject } from "#shared/guards.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
+import { toError } from "#shared/errors.js";
 import { isTurnCancellation } from "#harness/turn-cancellation.js";
 
 const RESPONSE_BODY_SNIPPET_LIMIT = 1_000;
@@ -300,6 +301,21 @@ export class EmptyModelResponseError extends Error {
     super("The model did not return a response. Please try again.", options);
     this.name = "EmptyModelResponseError";
   }
+}
+
+/**
+ * Coerces a streamed provider failure into an Error while retaining the raw
+ * payload so provider discriminators remain visible to error classification.
+ */
+export function normalizeModelStreamError(raw: unknown): Error {
+  const error = toError(raw);
+  if (error === raw) return error;
+
+  Object.defineProperty(error, "cause", {
+    configurable: true,
+    value: raw,
+  });
+  return error;
 }
 
 /**
@@ -610,7 +626,7 @@ function formatApiCallErrorFallback(signals: ModelCallErrorSignals): string | un
 }
 
 function isRetryableGatewayType(type: string | undefined): boolean {
-  return type === "rate_limit_exceeded" || type === "timeout_error";
+  return type === "overloaded_error" || type === "rate_limit_exceeded" || type === "timeout_error";
 }
 
 function isTerminalGatewayType(type: string | undefined): boolean {

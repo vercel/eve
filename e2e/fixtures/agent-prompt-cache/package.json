@@ -1,0 +1,22 @@
+{
+  "name": "agent-prompt-cache",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "eve build",
+    "dev": "eve dev",
+    "start": "eve start",
+    "typecheck": "eve build && tsc",
+    "test:e2e": "eve eval --strict"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "catalog:",
+    "eve": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

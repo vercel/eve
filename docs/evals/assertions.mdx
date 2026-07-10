@@ -77,12 +77,14 @@ Pick the cheapest builder that captures what "correct" means. When exact match i
 
 ## The matcher mini-language
 
-`t.calledTool` and `t.calledSubagent` take matcher objects. Tools accept `{ input, output, status, count }`; subagents accept `{ remoteUrl, output, status, count }`. Calls match `status: "completed"` by default; use `"pending"`, `"failed"`, or `"rejected"` explicitly for lifecycle checks. `count` is the exact number of calls matching every supplied constraint.
+`t.calledTool` and `t.calledSubagent` take matcher objects. Tools accept `{ input, output, status, count }`; subagents accept `{ remoteUrl, output, status, count }`. Calls match `status: "completed"` by default; use `"pending"`, `"failed"`, or `"rejected"` explicitly for lifecycle checks. A numeric `count` requires an exact number of calls matching every supplied constraint. Use a predicate for ranges or other custom count requirements; it receives the observed number of matching calls.
 
 Matcher values accept a literal (objects partial-deep-match), a RegExp, or a predicate function that returns a boolean:
 
 ```ts
 t.calledTool("bash", { input: { command: /^pwd/ }, count: 1 });
+
+t.calledTool("echo", { count: (count) => count >= 2 });
 
 t.calledTool("echo", { output: (value) => String(value).includes(marker) });
 
@@ -108,7 +110,7 @@ const request = session.requireInputRequest({
 
 Beyond the raw `t.events` stream, the runner derives typed facts the assertions read: tool calls (name, input, output, lifecycle status), subagent calls, and HITL input requests. A turn that leaves the session open for a next message is the normal end state of a successful turn; parking on unanswered HITL input is tracked separately.
 
-Typed event matching covers presence, absence, exact counts, partial event data, and ordering:
+Typed event matching covers presence, absence, numeric or predicate counts, partial event data, and ordering:
 
 ```ts
 turn.notEvent("result.completed");

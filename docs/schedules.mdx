@@ -61,7 +61,7 @@ Use a handler when the schedule needs to deliver to a channel, branch on conditi
 ```ts title="agent/schedules/critical-alerts.ts"
 import { defineSchedule } from "eve/schedules";
 
-import slack from "../channels/slack.js";
+import slack from "../channels/slack";
 
 export default defineSchedule({
   cron: "* * * * *",

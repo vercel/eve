@@ -19,5 +19,6 @@ export type { DynamicResolveContext, DynamicSentinel } from "#shared/dynamic-too
 export {
   type RemoteAgentDefinition,
   type RemoteAgentDefinitionInput,
+  type RemoteAgentUrl,
   defineRemoteAgent,
 } from "#public/definitions/remote-agent.js";

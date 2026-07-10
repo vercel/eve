@@ -6,6 +6,7 @@ import { createNitro } from "nitro/builder";
 import type { Nitro } from "nitro/types";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import {
+  resolvePackageRoot,
   resolvePackageSourceDirectoryPath,
   resolvePackageSourceFilePath,
   resolveWorkflowModulePath,
@@ -20,6 +21,7 @@ import {
   type NitroArtifactsConfigInput,
 } from "#internal/nitro/host/artifacts-config.js";
 import { createCompiledSandboxBackendPrunePlugin } from "#internal/nitro/host/compiled-sandbox-backend-prune-plugin.js";
+import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
 import { configureNitroRoutes } from "#internal/nitro/host/configure-nitro-routes.js";
 import { applyEveCronHandlerRoute } from "#internal/nitro/host/cron-handler-route.js";
 import { createNitroBundlerConfig } from "#internal/nitro/host/nitro-bundler-config.js";
@@ -317,6 +319,11 @@ async function addNitroStepNoExternals(nitro: Nitro, stepEntrypointPath: string)
 }
 
 function createRelativeTransformFilename(workingDir: string, path: string): string {
+  const packageRelativePath = createPackageRelativeTransformFilename(path);
+  if (packageRelativePath !== undefined) {
+    return packageRelativePath;
+  }
+
   const normalizedWorkingDir = normalizePath(workingDir).replace(/\/$/, "");
   const normalizedPath = normalizePath(path);
   const lowerWorkingDir = normalizedWorkingDir.toLowerCase();
@@ -345,6 +352,27 @@ function createRelativeTransformFilename(workingDir: string, path: string): stri
   }
 
   return relativePath;
+}
+
+function createPackageRelativeTransformFilename(path: string): string | undefined {
+  const normalizedPackageRoot = normalizePath(resolvePackageRoot()).replace(/\/$/, "");
+  const normalizedPath = normalizePath(path);
+  const lowerPackageRoot = normalizedPackageRoot.toLowerCase();
+  const lowerPath = normalizedPath.toLowerCase();
+  const packageSourcePrefix = `${normalizedPackageRoot}/src/`;
+  const lowerPackageSourcePrefix = `${lowerPackageRoot}/src/`;
+  const packageDistSourcePrefix = `${normalizedPackageRoot}/dist/src/`;
+  const lowerPackageDistSourcePrefix = `${lowerPackageRoot}/dist/src/`;
+
+  if (lowerPath.startsWith(lowerPackageSourcePrefix)) {
+    return `src/${normalizedPath.slice(packageSourcePrefix.length)}`;
+  }
+
+  if (lowerPath.startsWith(lowerPackageDistSourcePrefix)) {
+    return `src/${normalizedPath.slice(packageDistSourcePrefix.length)}`;
+  }
+
+  return undefined;
 }
 
 function addWorkflowModuleSideEffectsPlugin(nitro: Nitro, workflowBuildDir: string): void {
@@ -660,9 +688,16 @@ export async function createApplicationNitro(
       : unconfiguredOptionalEnginePackages
     ).push(packageName);
   }
+  const extensionScopePlugin = createExtensionScopePlugin(
+    (preparedHost.compileResult.manifest.extensionMounts ?? []).map((mount) => ({
+      sourceRoot: mount.sourceRoot,
+      packageNamespace: mount.packageNamespace,
+    })),
+  );
   const nitroBundlerPlugins = [
     compiledSandboxBackendPrunePlugin,
     createOptionalEngineDependencyPlugin(unconfiguredOptionalEnginePackages),
+    extensionScopePlugin,
   ].filter((plugin) => plugin !== null);
   const nitroRolldownConfig = createNitroBundlerConfig(nitroBundlerPlugins);
   const nitroRollupConfig = createNitroBundlerConfig(nitroBundlerPlugins);
@@ -675,6 +710,8 @@ export async function createApplicationNitro(
     includesApplicationSurface(surface) &&
     (dev || manifestHasWebSocketChannel(preparedHost.compileResult.manifest));
   const nitroPlugins: string[] = [];
+  nitroPlugins.push(preparedHost.compiledArtifacts.bootstrapPath);
+  nitroPlugins.push(preparedHost.compiledArtifacts.workflowWorldPluginPath);
   if (!dev) {
     // Stops all tracked sandboxes when the production server shuts
     // down. Dev servers are excluded: the dev CLI parent already stops
@@ -691,7 +728,6 @@ export async function createApplicationNitro(
   if (preparedHost.compiledArtifacts.instrumentationPluginPath !== undefined) {
     nitroPlugins.push(preparedHost.compiledArtifacts.instrumentationPluginPath);
   }
-  nitroPlugins.push(preparedHost.compiledArtifacts.bootstrapPath);
   await prepareEveVersionedCacheDirectory(nitroBuildDir);
   const nitro = await createNitro(
     {

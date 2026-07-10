@@ -7,6 +7,7 @@ import {
   type EveAgentStoreStatus,
   type PrepareSend,
 } from "#client/eve-agent-store.js";
+import { resolveEveAgentHost } from "#client/agent-host.js";
 import { defaultMessageReducer, type EveMessageData } from "#client/message-reducer.js";
 import type { EveAgentReducer } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
@@ -65,6 +66,13 @@ export interface UseEveAgentReturn<TData> {
  */
 export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData> {
   /**
+   * Named agent mounted by a framework integration such as `withEve({ agents })`.
+   *
+   * `agent: "support"` targets same-origin routes under
+   * `/eve/agents/support/eve/v1/...`. Do not combine with `host`.
+   */
+  readonly agent?: string;
+  /**
    * Credentials for the auto-created session. Pass function values to refresh
    * per request. Ignored when `session` is supplied.
    */
@@ -75,7 +83,7 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    */
   readonly headers?: HeadersValue;
   /**
-   * Base URL for eve client requests. Empty targets same-origin eve routes
+   * Base URL for eve client requests. Do not combine with `agent`. Empty targets same-origin eve routes
    * such as `/eve/v1/...`; a same-origin prefix like `/api` routes through an
    * app-owned proxy; an absolute origin hits an eve server directly.
    *
@@ -198,7 +206,7 @@ export function useEveAgent<TData>(
   const store = new EveAgentStore<TData>({
     auth: options.auth,
     headers: options.headers,
-    host: options.host,
+    host: resolveEveAgentHost({ agent: options.agent, host: options.host }),
     initialEvents: options.initialEvents,
     initialSession: options.initialSession,
     maxReconnectAttempts: options.maxReconnectAttempts,

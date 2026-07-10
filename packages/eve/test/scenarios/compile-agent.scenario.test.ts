@@ -559,6 +559,51 @@ describe("compileAgent", () => {
     });
   });
 
+  it("composes a mounted extension's tools into the consuming agent", async () => {
+    const app = await scenarioApp({
+      name: "mounted-extension",
+      installDependencies: true,
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/instructions.md": "You are a precise assistant.\n",
+        "agent/extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        "node_modules/@acme/crm/package.json": `${JSON.stringify({
+          name: "@acme/crm",
+          type: "module",
+          eve: { extension: "ext" },
+          exports: { ".": "./ext/index.mjs" },
+        })}\n`,
+        "node_modules/@acme/crm/ext/index.mjs": "export default {};\n",
+        "node_modules/@acme/crm/ext/instructions/policy.mjs":
+          'export default { markdown: "Prefer the CRM over guessing." };\n',
+        "node_modules/@acme/crm/ext/tools/crm_search.mjs": [
+          'import { defineTool } from "eve/tools";',
+          "",
+          "export default defineTool({",
+          '  description: "Search the CRM.",',
+          '  inputSchema: { type: "object", properties: {}, additionalProperties: false },',
+          "  async execute() {",
+          "    return { ok: true };",
+          "  },",
+          "});",
+          "",
+        ].join("\n"),
+      },
+    });
+
+    const result = await compileAgent({ startPath: app.appRoot });
+
+    expect(result.manifest.tools.map((tool) => tool.name)).toContain("crm__crm_search");
+    const composed = result.manifest.tools.find((tool) => tool.name === "crm__crm_search");
+    expect(composed?.sourceId).toBe("ext:crm:tools/crm_search.mjs");
+    expect(composed?.description).toBe("Search the CRM.");
+    expect(result.manifest.instructions?.markdown).toContain("Prefer the CRM over guessing.");
+
+    const moduleMapText = await readFile(result.paths.moduleMapPath, "utf8");
+    expect(moduleMapText).toContain("@acme/crm/ext/tools/crm_search.mjs");
+    expect(moduleMapText).toContain('"ext:crm:tools/crm_search.mjs"');
+  });
+
   it("compiles extension-variant authored modules from a fixture app", async () => {
     const app = await scenarioApp(EXTENSION_AGENT_DESCRIPTOR);
 
@@ -1033,7 +1078,7 @@ describe("compileAgent", () => {
         "export default {",
         '  kind: "remote",',
         '  description: "Answer weather questions remotely.",',
-        '  url: "https://weather.example.com",',
+        '  url: () => process.env.WEATHER_AGENT_URL ?? "https://weather.example.com",',
         "};",
         "",
       ].join("\n"),
@@ -1074,9 +1119,10 @@ describe("compileAgent", () => {
         nodeId: "subagents/weather.ts",
         path: "/eve/v1/session",
         sourceId: "subagents/weather.ts",
-        url: "https://weather.example.com",
       },
     ]);
+    // A function `url` is resolved at runtime, so nothing is baked here.
+    expect(result.manifest.remoteAgents[0]).not.toHaveProperty("url");
     expect(result.manifest.subagents).toHaveLength(1);
     expect(result.manifest.subagents[0]?.agent.remoteAgents).toMatchObject([
       {

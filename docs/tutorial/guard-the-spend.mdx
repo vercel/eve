@@ -23,8 +23,8 @@ export function estimateScanGb(sql: string): number {
 ```ts title="agent/tools/run_sql.ts"
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { runReadOnlySql } from "../lib/sample-db.js";
-import { estimateScanGb } from "../lib/cost.js";
+import { runReadOnlySql } from "../lib/sample-db";
+import { estimateScanGb } from "../lib/cost";
 
 const THRESHOLD_GB = 50;
 

@@ -131,6 +131,40 @@ export interface SandboxWorkspaceFolderSourceRef {
 export type LibSourceRef = ModuleSourceRef;
 
 /**
+ * Extension mount source reference preserved by the discovery manifest. Each
+ * `agent/extensions/*.ts` file re-exports (and configures) an extension
+ * package; the file basename is the mount namespace.
+ */
+export type ExtensionSourceRef = ModuleSourceRef;
+
+/**
+ * A mounted extension resolved to its package and discovered agent-shaped
+ * source tree. The compiler composes each mount's {@link manifest} into the
+ * consuming agent, prefixing contributions with {@link namespace}.
+ */
+export interface ResolvedExtensionMount {
+  /** Mount namespace derived from the mount filename (e.g. `crm`). */
+  readonly namespace: string;
+  /** Package specifier the mount imports (e.g. `@acme/crm`). */
+  readonly specifier: string;
+  /** Package name from the resolved package.json, used to scope state. */
+  readonly packageName: string;
+  /** Absolute path to the resolved package root. */
+  readonly packageRoot: string;
+  /** Absolute path to the extension's agent-shaped source root. */
+  readonly sourceRoot: string;
+  /** Discovered agent-shaped source manifest for the extension. */
+  readonly manifest: AgentSourceManifest;
+  /**
+   * Consumer-authored overrides discovered in the mount directory form
+   * (`extensions/<ns>/{tools,connections,…}/`). Composed under the same
+   * `<ns>__` namespace as the extension's own contributions but winning on
+   * name collision. Absent for the flat file mount form.
+   */
+  readonly overrides?: AgentSourceManifest;
+}
+
+/**
  * Subagent source reference preserved by the discovery manifest.
  */
 export type SubagentSourceRef = LocalSubagentSourceRef;
@@ -153,6 +187,18 @@ export interface AgentSourceManifest {
   connections: ConnectionSourceRef[];
   configModule?: ModuleSourceRef;
   diagnosticsSummary: DiscoverDiagnosticsSummary;
+  /**
+   * Mounted extension source references discovered under `agent/extensions/`.
+   * Each entry's logical-path basename is the mount namespace the compiler
+   * prefixes onto the extension's composed contributions.
+   */
+  extensions: ExtensionSourceRef[];
+  /**
+   * Mounted extensions resolved to their packages and discovered source trees.
+   * Populated only for the agent root; extension trees do not mount further
+   * extensions (transitive mounting is a non-goal).
+   */
+  resolvedExtensions: ResolvedExtensionMount[];
   hooks: ModuleSourceRef[];
   lib: LibSourceRef[];
   kind: typeof AGENT_SOURCE_MANIFEST_KIND;
@@ -197,6 +243,8 @@ export interface CreateAgentSourceManifestInput {
   connections?: readonly ConnectionSourceRef[];
   configModule?: ModuleSourceRef;
   diagnostics?: readonly DiscoverDiagnostic[];
+  extensions?: readonly ExtensionSourceRef[];
+  resolvedExtensions?: readonly ResolvedExtensionMount[];
   hooks?: readonly ModuleSourceRef[];
   lib?: readonly LibSourceRef[];
   /**
@@ -270,6 +318,8 @@ export function createAgentSourceManifest(
     channels: [...(input.channels ?? [])],
     connections: [...(input.connections ?? [])],
     diagnosticsSummary: summarizeDiscoverDiagnostics(input.diagnostics ?? []),
+    extensions: [...(input.extensions ?? [])],
+    resolvedExtensions: [...(input.resolvedExtensions ?? [])],
     hooks: [...(input.hooks ?? [])],
     instructions: [...(input.instructions ?? [])],
     lib: [...(input.lib ?? [])],

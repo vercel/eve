@@ -54,7 +54,7 @@ export class Client {
 
     if (!response.ok) {
       const body = await response.text();
-      throw new ClientError(response.status, body);
+      throw new ClientError(response.status, body, response.headers);
     }
 
     return (await response.json()) as HealthResult;
@@ -78,7 +78,7 @@ export class Client {
 
     if (!response.ok) {
       const body = await response.text();
-      throw new ClientError(response.status, body);
+      throw new ClientError(response.status, body, response.headers);
     }
 
     let payload: unknown;

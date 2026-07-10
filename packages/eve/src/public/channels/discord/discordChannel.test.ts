@@ -163,6 +163,7 @@ function commandBody(overrides?: Record<string, unknown>): string {
 }
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
 
@@ -412,6 +413,41 @@ describe("discordChannel() default event handlers", () => {
     await expect(
       callAdapterEventHandler(adapter, makeEvent("turn.started", {}), ctx),
     ).resolves.toEqual(makeEvent("turn.started", {}));
+  });
+
+  it("uses the environment bot token for proactive messages", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ channel_id: "C01", id: "M01" }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = withState(getAdapter(discordChannel()), {
+      channelId: "C01",
+      initialResponseSent: true,
+    });
+    const { accessor } = captureAccessor("discord:C01:");
+    const ctx = buildAdapterContext(adapter, accessor);
+    vi.stubEnv("DISCORD_BOT_TOKEN", "environment-token");
+
+    await callEvent(
+      adapter,
+      makeEvent("message.completed", {
+        finishReason: "stop",
+        message: "Hello from the agent",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe("https://discord.com/api/v10/channels/C01/messages");
+    expect(new Headers((init as RequestInit).headers).get("authorization")).toBe(
+      "Bot environment-token",
+    );
   });
 
   it("edits the original response and rekeys the session on the first post", async () => {

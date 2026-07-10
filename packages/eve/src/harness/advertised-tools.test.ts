@@ -78,7 +78,7 @@ describe("getAdvertisedTools", () => {
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({
-      session: { rootSessionId: "root-session", subagentDepth: 1 },
+      session: { rootSessionId: "root-session", subagentDepth: 1, subagentMaxDepth: 2 },
       tools,
     });
 

@@ -137,6 +137,23 @@ describe("eve dev --input", () => {
 });
 
 describe("eve dev --url protocol", () => {
+  it("preserves query parameters on the remote target URL", async () => {
+    const runDevelopmentTui = await runInteractiveDev([
+      "dev",
+      "https://example.com?x-vercel-protection-bypass=secret",
+    ]);
+
+    expect(runDevelopmentTui).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: {
+          kind: "remote",
+          serverUrl: "https://example.com/?x-vercel-protection-bypass=secret",
+          workspaceRoot: process.cwd(),
+        },
+      }),
+    );
+  });
+
   it("lowers URL userinfo to a Basic authorization header and strips it from the target URL", async () => {
     const runDevelopmentTui = await runInteractiveDev([
       "dev",

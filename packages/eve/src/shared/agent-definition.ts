@@ -158,7 +158,7 @@ export interface AgentLimitsDefinition {
    * Delegated subagent sessions resolve this against the cap inherited from
    * the delegating parent; the tighter value wins.
    *
-   * @default 3
+   * @default 1
    */
   readonly maxSubagentDepth?: number;
   /**

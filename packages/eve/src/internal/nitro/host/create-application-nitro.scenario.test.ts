@@ -18,6 +18,7 @@ import {
 } from "#compiler/manifest.js";
 import {
   resolvePackageSourceDirectoryPath,
+  resolvePackageRoot,
   resolveInstalledPackageInfo,
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
@@ -135,6 +136,7 @@ function createPreparedHost(): PreparedApplicationHost {
     } as unknown as PreparedApplicationHost["compileResult"],
     compiledArtifacts: {
       bootstrapPath: `${appRoot}/.eve/bootstrap.mjs`,
+      workflowWorldPluginPath: `${appRoot}/.eve/workflow-world.mjs`,
     } as PreparedApplicationHost["compiledArtifacts"],
     scheduleRegistrations: [],
     schedules: [],
@@ -150,6 +152,22 @@ describe("createApplicationNitro", () => {
 
   afterEach(() => {
     delete process.env.VERCEL;
+  });
+
+  it("installs compiled artifacts before constructing the Workflow world", async () => {
+    const nitroStub = createNitroStub();
+    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
+
+    const { createApplicationNitro } =
+      await import("#internal/nitro/host/create-application-nitro.js");
+    const preparedHost = createPreparedHost();
+    await createApplicationNitro(preparedHost, true);
+
+    const plugins = createNitroMock.mock.calls[0]?.[0].plugins as string[];
+
+    expect(plugins.indexOf(preparedHost.compiledArtifacts.bootstrapPath)).toBeLessThan(
+      plugins.indexOf(preparedHost.compiledArtifacts.workflowWorldPluginPath),
+    );
   });
 
   it("preserves workflow bundle side effects and skips workflow transform for cached bundles", async () => {
@@ -639,6 +657,13 @@ describe("createApplicationNitro", () => {
     const importedModulesDir = join(workflowBuildDir, "imports");
     const stepModulePath = join(importedModulesDir, "step-module.js");
     const bootstrapModulePath = join(importedModulesDir, "bootstrap.mjs");
+    const packageDistStepModulePath = join(
+      resolvePackageRoot(),
+      "dist",
+      "src",
+      "execution",
+      "create-session-step.js",
+    );
 
     await mkdir(importedModulesDir, { recursive: true });
     await Promise.all([
@@ -650,6 +675,7 @@ describe("createApplicationNitro", () => {
           'import "workflow/internal/builtins";',
           'import "./imports/step-module.js";',
           'import "./imports/bootstrap.mjs";',
+          `import ${JSON.stringify(packageDistStepModulePath)};`,
           "export const __steps_registered = true;",
           "",
         ].join("\n"),
@@ -708,6 +734,12 @@ describe("createApplicationNitro", () => {
         code: "transformed-step-module",
         map: null,
       });
+      expect(
+        await stepTransformPlugin.transform("package dist source", packageDistStepModulePath),
+      ).toEqual({
+        code: "transformed-step-module",
+        map: null,
+      });
       await expect(
         stepModuleSideEffectsPlugin.resolveId(
           "./imports/step-module.js",
@@ -744,7 +776,15 @@ describe("createApplicationNitro", () => {
       expect(
         await stepTransformPlugin.transform("other source", "/tmp/not-imported.js"),
       ).toBeNull();
-      expect(applyWorkflowTransform).toHaveBeenCalledTimes(3);
+      expect(applyWorkflowTransform).toHaveBeenCalledTimes(4);
+      expect(applyWorkflowTransform).toHaveBeenNthCalledWith(
+        4,
+        "src/execution/create-session-step.js",
+        "package dist source",
+        "step",
+        packageDistStepModulePath,
+        "/tmp/weather-agent",
+      );
     } finally {
       await rm(workflowBuildDir, { force: true, recursive: true });
       await rm(nitroBuildDir, { force: true, recursive: true });

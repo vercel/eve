@@ -730,20 +730,22 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
      * Assembles the effective toolset and ToolLoopAgent for one attempt
      * of this step, then runs the model call.
      *
-     * Re-invoked by both recovery stages. The unsupported-provider-tool
-     * retry passes `disabledProviderTools` to drop the offending tool and
-     * `extraSystemNote` to tell the model why a capability was removed.
-     * The empty-response reissue passes `retryReason` to label the retried
-     * call's telemetry.
+     * Re-invoked for every transient attempt so an earlier stream cannot
+     * resolve the retry's one-shot step hooks with stale partial output.
+     * Recovery stages also use it to alter the call shape: unsupported-tool
+     * recovery drops the offending tool, while empty-response recovery adds
+     * its retry telemetry and follow-up note.
      */
-    const runOneModelCall = async (opts: {
+    type ModelCallOptions = {
       disabledProviderTools?: ReadonlySet<string>;
       extraSystemNote?: string;
       preparedInput?: ReturnType<typeof prepareModelCallInput>;
       retryReason?: "empty-response";
       suppressStepStartedEmission?: boolean;
       trailingUserNote?: string;
-    }): Promise<HarnessStepResult> => {
+    };
+
+    const runSingleModelCall = async (opts: ModelCallOptions): Promise<HarnessStepResult> => {
       const { instructions, telemetryRuntimeContext = {} } =
         opts.preparedInput ?? prepareModelCallInput(opts.extraSystemNote);
       // Label the reissued call's telemetry; without this a retry is only
@@ -875,17 +877,19 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             handledInlineToolResultCallIds,
             invalidInputToolCallIds,
             inlineAuthorizationResults,
-            inlineToolResultParts,
             trailingInlineToolResultParts,
           } = await emitStreamContent(emit, emissionState, streamResult.fullStream, {
             excludedActionToolNames,
             tools: config.tools,
           });
           throwIfTurnAborted(config.abortSignal);
-          const stepResult = await hooks.stepResult;
+          const [stepResult, accumulatedResponseMessages] = await Promise.all([
+            hooks.stepResult,
+            streamResult.responseMessages,
+          ]);
           if (
             isEmptyModelResponse(stepResult) &&
-            inlineToolResultParts.length === 0 &&
+            extractToolResultCallIds(accumulatedResponseMessages).size === 0 &&
             inlineAuthorizationResults.length === 0 &&
             trailingInlineToolResultParts.length === 0
           ) {
@@ -898,70 +902,58 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             handledInlineToolResultCallIds,
             tools: advertisedHarnessTools,
           });
-          if (
-            inlineToolResultParts.length > 0 ||
-            inlineAuthorizationResults.length > 0 ||
-            trailingInlineToolResultParts.length > 0
-          ) {
-            const existingToolResults = stepResult.toolResults as TypedToolResult<ToolSet>[];
-            const toolResultsByCallId = new Map(
-              existingToolResults.map((toolResult) => [toolResult.toolCallId, toolResult]),
-            );
-            for (const toolResult of inlineAuthorizationResults) {
-              toolResultsByCallId.set(toolResult.toolCallId, toolResult);
-            }
-            /*
-             * AI SDK `StepResult` is a class whose `content`,
-             * `toolCalls`, `toolResults`, and `text` are prototype
-             * getters. Each field is read explicitly here rather than via
-             * spread so the returned plain object carries the values —
-             * spread would copy only own enumerable properties and the
-             * downstream `extractQuestionInputRequests` would crash on
-             * `toolCalls === undefined`.
-             */
-            return {
-              content: stepResult.content,
-              finishReason: stepResult.finishReason,
-              response: {
-                ...stepResult.response,
-                ...(inlineToolResultParts.length > 0 || trailingInlineToolResultParts.length > 0
-                  ? {
-                      messages: insertInlineToolResultMessages({
-                        append: trailingInlineToolResultParts,
-                        prepend: inlineToolResultParts,
-                        responseMessages: stepResult.response.messages,
-                      }),
-                    }
-                  : {}),
-              },
-              providerMetadata: stepResult.providerMetadata,
-              text: stepResult.text,
-              toolCalls: stepResult.toolCalls,
-              toolResults: [...toolResultsByCallId.values()],
-              invalidInputToolCallIds,
-              usage: stepResult.usage,
-            };
+          const existingToolResults = stepResult.toolResults as TypedToolResult<ToolSet>[];
+          const toolResultsByCallId = new Map(
+            existingToolResults.map((toolResult) => [toolResult.toolCallId, toolResult]),
+          );
+          for (const toolResult of inlineAuthorizationResults) {
+            toolResultsByCallId.set(toolResult.toolCallId, toolResult);
           }
-          return stepResult;
+          return withAccumulatedResponseMessages({
+            invalidInputToolCallIds,
+            responseMessages: appendMissingToolResultMessages({
+              append: trailingInlineToolResultParts,
+              responseMessages: accumulatedResponseMessages,
+            }),
+            stepResult,
+            toolResults: [...toolResultsByCallId.values()],
+          });
         }
-        await agent.generate({ abortSignal: config.abortSignal, messages: callMessages });
+        const generateResult = await agent.generate({
+          abortSignal: config.abortSignal,
+          messages: callMessages,
+        });
         throwIfTurnAborted(config.abortSignal);
         const stepResult = await hooks.stepResult;
-        if (isEmptyModelResponse(stepResult)) {
+        if (
+          isEmptyModelResponse(stepResult) &&
+          extractToolResultCallIds(generateResult.responseMessages).size === 0
+        ) {
           throw new EmptyModelResponseError();
         }
-        return stepResult;
+        return withAccumulatedResponseMessages({
+          responseMessages: generateResult.responseMessages,
+          stepResult,
+        });
       };
 
-      return runModelCallWithRetries(
-        () => executeModelCall().catch(rethrowNoOutputAsEmptyResponse),
+      return executeModelCall().catch(rethrowNoOutputAsEmptyResponse);
+    };
+
+    const runOneModelCall = async (opts: ModelCallOptions): Promise<HarnessStepResult> =>
+      runModelCallWithRetries(
+        (attempt) =>
+          runSingleModelCall({
+            ...opts,
+            preparedInput: attempt === 1 ? opts.preparedInput : undefined,
+            suppressStepStartedEmission: attempt === 1 ? opts.suppressStepStartedEmission : true,
+          }),
         {
           sessionId: session.sessionId,
           turnId: emissionState.turnId,
         },
         config.abortSignal,
       );
-    };
 
     // Resolve first-attempt instrumentation before step.started dispatch
     // allows dynamic tool resolvers to update the effective toolset.
@@ -1140,10 +1132,26 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         }
 
         if (config.mode === "task") {
+          if (
+            classification === "recoverable" &&
+            !(finalError instanceof EmptyModelResponseError)
+          ) {
+            // Task runs cannot park for user-driven recovery. Let the durable
+            // step retry from committed session state, but only for errors
+            // that did not already consume the in-process transient budget or
+            // the dedicated empty-response reissue.
+            log.warn(
+              requestSummary?.message ??
+                "model call failed recoverably in task mode — rethrowing for durable step retry",
+              modelCallLogFields,
+            );
+            throw finalError;
+          }
+
           // A task run cannot park for a user retry (turnWorkflow rejects
-          // `next: null` in task mode), so the failure is the task's
-          // terminal result, mirroring finishTaskTurn's unfulfilled-schema
-          // shape.
+          // `next: null` in task mode). Classified transient errors arrive
+          // here only after their bounded in-process retries are exhausted;
+          // empty responses already received their specialized reissue.
           log.error(
             requestSummary?.message ?? "model call failed; failing the task run",
             modelCallLogFields,
@@ -1443,17 +1451,46 @@ type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][numbe
 type ToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 type StepResponseMessage = HarnessStepResult["response"]["messages"][number];
 
-function insertInlineToolResultMessages(input: {
+function withAccumulatedResponseMessages(input: {
+  readonly invalidInputToolCallIds?: ReadonlySet<string>;
+  readonly responseMessages: readonly StepResponseMessage[];
+  readonly stepResult: HarnessStepResult;
+  readonly toolResults?: readonly TypedToolResult<ToolSet>[];
+}): HarnessStepResult {
+  const { stepResult } = input;
+
+  /*
+   * AI SDK `StepResult` fields are prototype getters, so spreading the
+   * instance drops them. Materialize each field while replacing the final
+   * step's messages with the SDK's accumulated response, which also contains
+   * approval-resume results created before the model step.
+   */
+  return {
+    content: stepResult.content,
+    finishReason: stepResult.finishReason,
+    ...(input.invalidInputToolCallIds === undefined
+      ? {}
+      : { invalidInputToolCallIds: input.invalidInputToolCallIds }),
+    providerMetadata: stepResult.providerMetadata,
+    response: {
+      ...stepResult.response,
+      messages: [...input.responseMessages],
+    },
+    text: stepResult.text,
+    toolCalls: stepResult.toolCalls,
+    toolResults: input.toolResults === undefined ? stepResult.toolResults : [...input.toolResults],
+    usage: stepResult.usage,
+  };
+}
+
+function appendMissingToolResultMessages(input: {
   readonly append: readonly ToolResultPart[];
-  readonly prepend: readonly ToolResultPart[];
   readonly responseMessages: readonly StepResponseMessage[];
 }): StepResponseMessage[] {
   const existingCallIds = extractToolResultCallIds(input.responseMessages);
-  const prepend = input.prepend.filter((part) => !existingCallIds.has(part.toolCallId));
   const append = input.append.filter((part) => !existingCallIds.has(part.toolCallId));
 
   return [
-    ...(prepend.length > 0 ? [{ role: "tool" as const, content: [...prepend] }] : []),
     ...input.responseMessages,
     ...(append.length > 0 ? [{ role: "tool" as const, content: [...append] }] : []),
   ] satisfies StepResponseMessage[];
@@ -1702,11 +1739,10 @@ async function handleStepResult(input: {
   ]);
   const rawResponseMessages = emptyDelivery
     ? []
-    : insertInlineToolResultMessages({
+    : appendMissingToolResultMessages({
         append: invalidInputToolErrors.map((toolError) =>
           createToolResultMessagePartFromToolError(toolError),
         ),
-        prepend: [],
         responseMessages: result.response.messages,
       });
   const stepOutput = emptyDelivery ? null : resolvedStepOutput;
@@ -2357,14 +2393,14 @@ function resolveApprovalKeyFromTools(
  * transient.
  */
 async function runModelCallWithRetries<T>(
-  fn: () => Promise<T>,
+  fn: (attempt: number) => Promise<T>,
   diag: { readonly sessionId: string; readonly turnId: string },
   abortSignal?: AbortSignal,
 ): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     throwIfTurnAborted(abortSignal);
     try {
-      return await fn();
+      return await fn(attempt);
     } catch (error) {
       throwIfTurnAborted(abortSignal);
       if (attempt === MODEL_CALL_MAX_ATTEMPTS || classifyModelCallError(error) !== "retry") {

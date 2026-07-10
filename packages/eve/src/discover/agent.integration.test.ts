@@ -1,9 +1,20 @@
+import { resolve } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { buildMemoryAgentProject } from "#internal/testing/memory-agent-source.js";
 import { discoverAgent } from "#discover/discover-agent.js";
 import {
+  DISCOVER_EXTENSION_EVE_INCOMPATIBLE,
+  DISCOVER_EXTENSION_MOUNT_AMBIGUOUS,
+  DISCOVER_EXTENSION_MOUNT_MISSING_DECLARATION,
+  DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED,
+  DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT,
+  DISCOVER_EXTENSION_SCHEDULE_UNSUPPORTED,
+} from "#discover/extensions.js";
+import {
   DISCOVER_DEPRECATED_SYSTEM_SLOT,
+  DISCOVER_EXTENSION_NAME_INVALID,
   DISCOVER_HOOK_NAME_INVALID,
   DISCOVER_MODULE_SLOT_COLLISION,
   DISCOVER_REQUIRED_INSTRUCTIONS_MISSING,
@@ -460,6 +471,33 @@ describe("discoverAgent (memory)", () => {
     ]);
   });
 
+  it("silently ignores generated runtime directories", async () => {
+    const project = buildMemoryAgentProject({
+      agentDirectories: [".eve", ".next", ".output", ".vercel", ".workflow-data", "node_modules"],
+      agentFiles: {
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.manifest.instructions).toEqual([
+      {
+        definition: {
+          markdown: "You are a precise assistant.",
+        },
+        sourceKind: "markdown",
+        logicalPath: "instructions.md",
+        sourceId: "instructions.md",
+      },
+    ]);
+  });
+
   it("rejects authored tool filenames that violate the tool-name charset", async () => {
     const project = buildMemoryAgentProject({
       agentFiles: {
@@ -577,5 +615,481 @@ describe("discoverAgent (memory)", () => {
       DISCOVER_HOOK_NAME_INVALID,
     );
     expect(result.manifest.hooks).toEqual([]);
+  });
+
+  it("discovers extension mounts as flat module sources keyed by the mount namespace", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: "ext" },
+        }),
+        "node_modules/@acme/crm/ext/tools/search.ts": "export default {};\n",
+        "node_modules/@acme/gizmo/package.json": JSON.stringify({
+          name: "@acme/gizmo",
+          eve: { extension: "ext" },
+        }),
+        "node_modules/@acme/gizmo/ext/tools/search.ts": "export default {};\n",
+      },
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        "extensions/gizmo.ts": 'export { default } from "@acme/gizmo";\n',
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.manifest.extensions).toEqual([
+      {
+        sourceKind: "module",
+        logicalPath: "extensions/crm.ts",
+        sourceId: "extensions/crm.ts",
+      },
+      {
+        sourceKind: "module",
+        logicalPath: "extensions/gizmo.ts",
+        sourceId: "extensions/gizmo.ts",
+      },
+    ]);
+    expect(result.manifest.resolvedExtensions.map((mount) => mount.namespace)).toEqual([
+      "crm",
+      "gizmo",
+    ]);
+  });
+
+  it("rejects extension mount filenames that violate the namespace charset", async () => {
+    const project = buildMemoryAgentProject({
+      agentFiles: {
+        "extensions/123-invalid.ts": "export default {};\n",
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      DISCOVER_EXTENSION_NAME_INVALID,
+    );
+    expect(result.manifest.extensions).toEqual([]);
+  });
+
+  it("resolves a mounted extension package to its discovered source tree", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: "ext" },
+        }),
+        "node_modules/@acme/crm/ext/tools/search.ts":
+          'throw new Error("extension modules should not execute during discovery");\n',
+        "node_modules/@acme/crm/ext/instructions/policy.md": "Use the CRM before guessing.",
+      },
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.manifest.resolvedExtensions).toHaveLength(1);
+    const mount = result.manifest.resolvedExtensions[0]!;
+    expect(mount.namespace).toBe("crm");
+    expect(mount.specifier).toBe("@acme/crm");
+    expect(mount.packageName).toBe("@acme/crm");
+    expect(mount.manifest.tools).toEqual([
+      { sourceKind: "module", logicalPath: "tools/search.ts", sourceId: "tools/search.ts" },
+    ]);
+    expect(mount.manifest.instructions.map((entry) => entry.logicalPath)).toEqual([
+      "instructions/policy.md",
+    ]);
+    expect(mount.manifest.resolvedExtensions).toEqual([]);
+  });
+
+  it("rejects an extension package that declares agent config", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: "ext" },
+        }),
+        "node_modules/@acme/crm/ext/agent.ts":
+          'export default { model: "anthropic/claude-sonnet-5" };\n',
+        "node_modules/@acme/crm/ext/tools/search.ts": "export default {};\n",
+      },
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      "discover/extension-agent-config-unsupported",
+    );
+  });
+
+  it("reports an unresolved mount when the extension package is missing", async () => {
+    const project = buildMemoryAgentProject({
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/missing";\n',
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      "discover/extension-mount-unresolved",
+    );
+    expect(result.manifest.resolvedExtensions).toEqual([]);
+  });
+
+  it("resolves a directory-form extension mount and composes the extension's tools", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: "ext" },
+        }),
+        "node_modules/@acme/crm/ext/tools/search.ts":
+          'throw new Error("extension modules should not execute during discovery");\n',
+      },
+      agentFiles: {
+        "extensions/crm/extension.ts": 'export { default } from "@acme/crm";\n',
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.manifest.extensions).toEqual([
+      {
+        sourceKind: "module",
+        logicalPath: "extensions/crm/extension.ts",
+        sourceId: "extensions/crm/extension.ts",
+      },
+    ]);
+    expect(result.manifest.resolvedExtensions).toHaveLength(1);
+    const mount = result.manifest.resolvedExtensions[0]!;
+    expect(mount.namespace).toBe("crm");
+    expect(mount.specifier).toBe("@acme/crm");
+    expect(mount.manifest.tools).toEqual([
+      { sourceKind: "module", logicalPath: "tools/search.ts", sourceId: "tools/search.ts" },
+    ]);
+    // A directory mount always carries an overrides manifest (the mount dir is
+    // itself an agent-shaped source); with no override slots authored it is
+    // empty and composes to nothing.
+    expect(mount.overrides?.agentRoot).toBe(resolve(project.agentRoot, "extensions", "crm"));
+    expect(mount.overrides?.tools).toEqual([]);
+  });
+
+  it("carries a directory-mount override slot that shadows the extension's contribution", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: "ext" },
+        }),
+        "node_modules/@acme/crm/ext/tools/search.ts":
+          'throw new Error("extension modules should not execute during discovery");\n',
+      },
+      agentFiles: {
+        "extensions/crm/extension.ts": 'export { default } from "@acme/crm";\n',
+        "extensions/crm/tools/search.ts":
+          'throw new Error("override modules should not execute during discovery");\n',
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics).toEqual([]);
+    const mount = result.manifest.resolvedExtensions[0]!;
+    // The extension's own tree still carries its `search` tool from the package.
+    expect(mount.manifest.tools).toEqual([
+      { sourceKind: "module", logicalPath: "tools/search.ts", sourceId: "tools/search.ts" },
+    ]);
+    // The consumer's override slot is discovered as an agent-shaped source so
+    // the compiler can compose it under `crm__search` with consumer priority.
+    expect(mount.overrides?.tools).toEqual([
+      { sourceKind: "module", logicalPath: "tools/search.ts", sourceId: "tools/search.ts" },
+    ]);
+    // The override manifest is rooted at the mount directory — that root is
+    // what rebases the override's module to the consumer's file, not the
+    // extension package.
+    expect(mount.overrides?.agentRoot).toBe(resolve(project.agentRoot, "extensions", "crm"));
+  });
+
+  it("reports an ambiguous mount when a namespace is both a file and a directory", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: "ext" },
+        }),
+        "node_modules/@acme/crm/ext/tools/search.ts": "export default {};\n",
+      },
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        "extensions/crm/extension.ts": 'export { default } from "@acme/crm";\n',
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      DISCOVER_EXTENSION_MOUNT_AMBIGUOUS,
+    );
+    // The ambiguous namespace is dropped from both forms rather than resolved.
+    expect(result.manifest.resolvedExtensions).toEqual([]);
+    expect(
+      result.manifest.extensions.some((entry) => entry.logicalPath.startsWith("extensions/crm")),
+    ).toBe(false);
+  });
+
+  it("reports a directory mount missing its extension declaration", async () => {
+    const project = buildMemoryAgentProject({
+      agentFiles: {
+        "extensions/crm/tools/search.ts": "export default {};\n",
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      DISCOVER_EXTENSION_MOUNT_MISSING_DECLARATION,
+    );
+    expect(result.manifest.resolvedExtensions).toEqual([]);
+  });
+
+  it("rejects an agent-root tool that overrides a mounted extension's namespace", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: "ext" },
+        }),
+        "node_modules/@acme/crm/ext/tools/search.ts": "export default {};\n",
+      },
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        // A root tool using the mounted `crm__` prefix would shadow the
+        // extension from outside its mount directory.
+        "tools/crm__search.ts": "export default {};\n",
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    const collision = result.diagnostics.find(
+      (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT,
+    );
+    expect(collision).toBeDefined();
+    expect(collision?.message).toContain("extensions/crm/");
+  });
+
+  it("rejects a mounted extension whose eve peer range the app does not satisfy", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: "ext" },
+          peerDependencies: { eve: "^2" },
+        }),
+        "node_modules/@acme/crm/ext/extension.ts": "export default {};\n",
+        "node_modules/@acme/crm/ext/tools/search.ts": "export default {};\n",
+      },
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+      eveVersion: "1.4.0",
+    });
+
+    const incompatible = result.diagnostics.find(
+      (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_EVE_INCOMPATIBLE,
+    );
+    expect(incompatible).toBeDefined();
+    expect(incompatible?.message).toContain("^2");
+    expect(incompatible?.message).toContain("1.4.0");
+    expect(result.manifest.resolvedExtensions).toEqual([]);
+  });
+
+  it("mounts an extension when the app's eve satisfies its peer range", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: "ext" },
+          peerDependencies: { eve: "^2" },
+        }),
+        "node_modules/@acme/crm/ext/extension.ts": "export default {};\n",
+        "node_modules/@acme/crm/ext/tools/search.ts": "export default {};\n",
+      },
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+      eveVersion: "2.3.0",
+    });
+
+    expect(
+      result.diagnostics.some(
+        (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_EVE_INCOMPATIBLE,
+      ),
+    ).toBe(false);
+    expect(result.manifest.resolvedExtensions).toHaveLength(1);
+  });
+
+  it("rejects an extension that declares schedules", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: "ext" },
+        }),
+        "node_modules/@acme/crm/ext/extension.ts": "export default {};\n",
+        // Background scheduling is the consuming agent's to own, not an extension's.
+        "node_modules/@acme/crm/ext/schedules/sweep.md": '---\ncron: "0 9 * * *"\n---\nSweep.',
+      },
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      DISCOVER_EXTENSION_SCHEDULE_UNSUPPORTED,
+    );
+  });
+
+  it("rejects an extension that mounts another extension", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: "ext" },
+        }),
+        "node_modules/@acme/crm/ext/extension.ts": "export default {};\n",
+        "node_modules/@acme/crm/ext/tools/search.ts": "export default {};\n",
+        // The mounted extension itself tries to mount another extension — not
+        // supported yet, so discovery must reject it rather than drop it.
+        "node_modules/@acme/crm/ext/extensions/inner.ts":
+          'export { default } from "@acme/inner";\n',
+      },
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    const nested = result.diagnostics.find(
+      (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED,
+    );
+    expect(nested).toBeDefined();
+    expect(nested?.message).toContain("extensions/inner");
+  });
+
+  it("allows an agent-root tool whose name does not use a mounted namespace prefix", async () => {
+    const project = buildMemoryAgentProject({
+      appFiles: {
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          eve: { extension: "ext" },
+        }),
+        "node_modules/@acme/crm/ext/tools/search.ts": "export default {};\n",
+      },
+      agentFiles: {
+        "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+        // Not a `crm__` prefix, so it is a normal consumer tool.
+        "tools/crm_helper.ts": "export default {};\n",
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(
+      result.diagnostics.some(
+        (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT,
+      ),
+    ).toBe(false);
   });
 });

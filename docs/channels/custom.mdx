@@ -121,7 +121,7 @@ Route handlers can start a session on a different channel via `args.receive(chan
 
 ```ts
 import { defineChannel, POST } from "eve/channels";
-import slack from "./slack.js";
+import slack from "./slack";
 
 export default defineChannel({
   routes: [
@@ -220,7 +220,7 @@ The `context(state, session)` config option builds the per-step `channel` argume
 ```ts
 import { defineChannel } from "eve/channels";
 
-import { mintRef } from "./refs.js";
+import { mintRef } from "./refs";
 
 defineChannel<{ ref: string | null }>({
   state: { ref: null },

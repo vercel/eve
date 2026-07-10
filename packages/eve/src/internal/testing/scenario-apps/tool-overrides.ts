@@ -80,8 +80,8 @@ export default disableTool();
   "compilerOptions": {
     "target": "ES2024",
     "lib": ["ES2024"],
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "esnext",
+    "moduleResolution": "bundler",
     "moduleDetection": "force",
     "verbatimModuleSyntax": true,
     "noEmit": true,

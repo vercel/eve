@@ -71,6 +71,15 @@ export default defineHook({
 
 Returns `undefined` when the result doesn't match, or when `isError` is `true`. For authored tools the return includes `{ output, toolName, callId }` with `output` typed as the tool's `TOutput`. For connections it includes `{ output, toolName, connectionToolName, callId }` with `output` as `unknown`.
 
+This works for a mounted extension's tools too — import the tool from the extension's `./tools` export and pass it. `toolResultFrom` matches the namespaced result (`crm__search`) because it keys off the tool definition, not the name:
+
+```ts
+import { search } from "@acme/crm/tools";
+
+// inside "action.result":
+const crmSearch = toolResultFrom(event.data.result, search); // typed; matches crm__search
+```
+
 ## Execution order
 
 When a stream event fires, three things happen in order:

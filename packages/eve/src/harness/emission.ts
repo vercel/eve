@@ -9,7 +9,6 @@ import type {
 
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 type InlineToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
-type InlineToolResultJsonValue = Extract<InlineToolResultPart["output"], { type: "json" }>["value"];
 
 import type { AssistantStepFinishReason, RuntimeIdentity } from "#protocol/message.js";
 import {
@@ -32,7 +31,6 @@ import {
 } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
-import { toError } from "#shared/errors.js";
 import type { JsonObject } from "#shared/json.js";
 import {
   createRuntimeToolResultFromStepResult,
@@ -52,6 +50,7 @@ import { isAuthorizationSignal, isPendingAuthorizationToolOutput } from "#harnes
 import { contextStorage } from "#context/container.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
 import { createProviderStreamActionBatch } from "#harness/stream-actions.js";
+import { normalizeModelStreamError } from "#harness/model-call-error.js";
 import type {
   HarnessEmitFn,
   HarnessSession,
@@ -326,16 +325,14 @@ export function normalizeAssistantStepFinishReason(
 /**
  * Result of consuming one step's `fullStream`.
  *
- * Inline results avoid duplicate post-step events. Approval-resume results
- * also repair persisted history or route authorization back to the park
- * detector.
+ * Inline results avoid duplicate post-step events. Approval-resume
+ * authorization results also route back to the park detector.
  */
 interface EmittedStreamContent {
   readonly emittedActionCallIds: ReadonlySet<string>;
   readonly handledInlineToolResultCallIds: ReadonlySet<string>;
   readonly invalidInputToolCallIds: ReadonlySet<string>;
   readonly inlineAuthorizationResults: readonly TypedToolResult<ToolSet>[];
-  readonly inlineToolResultParts: readonly InlineToolResultPart[];
   readonly trailingInlineToolResultParts: readonly InlineToolResultPart[];
 }
 
@@ -370,7 +367,6 @@ export async function emitStreamContent(
   const handledInlineToolResultCallIds = new Set<string>();
   const invalidInputToolCallIds = new Set<string>();
   const inlineAuthorizationResults: TypedToolResult<ToolSet>[] = [];
-  const inlineToolResultParts: InlineToolResultPart[] = [];
   const trailingInlineToolResultParts: InlineToolResultPart[] = [];
 
   const flushCurrentMessage = async (): Promise<void> => {
@@ -583,17 +579,6 @@ export async function emitStreamContent(
         }
         await emitActionResult(createRuntimeToolResultFromStepResult(inlineToolResult));
         handledInlineToolResultCallIds.add(part.toolCallId);
-        // Preserve the SDK's text/json output shape in persisted history.
-        const rawOutput: unknown = inlineToolResult.output;
-        inlineToolResultParts.push({
-          type: "tool-result",
-          toolCallId: inlineToolResult.toolCallId,
-          toolName: inlineToolResult.toolName,
-          output:
-            typeof rawOutput === "string"
-              ? { type: "text", value: rawOutput }
-              : { type: "json", value: (rawOutput ?? null) as InlineToolResultJsonValue },
-        });
         break;
       }
       case "tool-error": {
@@ -619,7 +604,7 @@ export async function emitStreamContent(
         // so plain-object shapes (structured-clone survivors, typed
         // gateway payloads) keep their `message`, `name`, `stack`, and
         // `cause` instead of degrading to `new Error("[object Object]")`.
-        streamError = toError(part.error);
+        streamError = normalizeModelStreamError(part.error);
         break;
       case "abort":
         // The SDK does not resolve step results for aborted in-flight steps.
@@ -676,7 +661,6 @@ export async function emitStreamContent(
     handledInlineToolResultCallIds,
     invalidInputToolCallIds,
     inlineAuthorizationResults,
-    inlineToolResultParts,
     trailingInlineToolResultParts,
   };
 }

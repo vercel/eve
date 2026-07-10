@@ -161,7 +161,10 @@ export function resolvePackageDependencyPath(specifier: string): string {
   return require.resolve(specifier);
 }
 
-function resolvePackageCompiledFilePath(relativeCompiledPath: string): string {
+/**
+ * Resolves one vendored compiled asset from the current eve installation.
+ */
+export function resolvePackageCompiledFilePath(relativeCompiledPath: string): string {
   const packageBuildRoot = resolvePackageBuildRoot();
 
   if (packageBuildRoot !== null) {
@@ -278,11 +281,11 @@ function readWorkflowVersionFromManifest(value: unknown): string | undefined {
  * eve's own `package.json`.
  *
  * This is the single source of truth for the `@workflow/*` line eve targets, so
- * compatibility checks (see `assertWorkflowWorldCompatibility`) never hardcode a
- * version. eve's `package.json` is published with its `devDependencies` intact
- * even though those packages are vendored, so the entry is readable from an
- * installed eve as well as a source checkout. Returns `undefined` when the
- * entry cannot be read so callers can no-op rather than fail.
+ * compatibility checks never hardcode a version. eve's `package.json` is
+ * published with its `devDependencies` intact even though those packages are
+ * vendored, so the entry is readable from an installed eve as well as a source
+ * checkout. Returns `undefined` when the entry cannot be read so callers can
+ * no-op rather than fail.
  */
 export function resolveExpectedWorkflowVersion(): string | undefined {
   const packageRoot = tryResolvePackageRoot();

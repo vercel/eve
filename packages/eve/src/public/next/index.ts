@@ -1,4 +1,4 @@
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 
 import type { NextConfig } from "next";
 
@@ -7,17 +7,16 @@ import { resolveEveDestinationPrefix } from "./server.js";
 import { ensureEveVercelOutputConfig } from "./vercel-output-config.js";
 
 /**
- * Default private route namespace for hosting eve as a separate experimental
- * Vercel service behind the Next.js app. {@link WithEveOptions.servicePrefix}
- * defaults to this value.
+ * Default private route namespace for legacy manually configured Vercel
+ * services. {@link WithEveOptions.servicePrefix} defaults to this value.
  */
 export const EVE_NEXT_SERVICE_PREFIX = "/_eve_internal/eve";
 
 const EVE_NEXT_PRODUCTION_ORIGIN_ENV = "EVE_NEXT_PRODUCTION_ORIGIN";
 const EVE_NEXT_PRODUCTION_PORT_ENV = "EVE_NEXT_PRODUCTION_PORT";
-const DEFAULT_EVE_BUILD_COMMAND = "eve build";
 const DEFAULT_EVE_NEXT_PRODUCTION_PORT = 4274;
-const EVE_PROXY_REWRITE_SOURCES: readonly string[] = [`${EVE_ROUTE_PREFIX}/:path+`];
+const EVE_NAMED_AGENT_ROUTE_PREFIX = "/eve/agents";
+const AGENT_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
 
 type ArrayElement<T> = T extends readonly (infer TElement)[] ? TElement : never;
 type NextRewrites = Awaited<ReturnType<NonNullable<NextConfig["rewrites"]>>>;
@@ -71,6 +70,33 @@ export type EveNextConfigInput<TConfig extends EveNextConfig = EveNextConfig> =
   | TConfig;
 
 /**
+ * Configuration for one named eve agent mounted by {@link withEve}.
+ */
+export interface WithEveAgentOptions {
+  /**
+   * Path to the eve application root, relative to `process.cwd()` unless
+   * absolute.
+   */
+  readonly root: string;
+  /**
+   * Build command for this generated eve Vercel service. Defaults to
+   * {@link WithEveOptions.eveBuildCommand}, then a generated command that runs
+   * the installed eve binary from this agent root.
+   */
+  readonly buildCommand?: string;
+  /**
+   * Private route namespace for this agent's legacy manually configured Vercel
+   * service and non-Vercel production proxying.
+   */
+  readonly servicePrefix?: string;
+}
+
+/**
+ * Map of agent names to roots or per-agent configuration.
+ */
+export type WithEveAgentsConfig = Record<string, string | WithEveAgentOptions>;
+
+/**
  * Options for {@link withEve}.
  */
 export interface WithEveOptions {
@@ -86,19 +112,38 @@ export interface WithEveOptions {
    */
   readonly eveRoot?: string;
   /**
-   * Build command for the generated eve Vercel service. Defaults to `eve build`.
-   * Use this when the eve service needs project-specific prework before the
-   * framework build, without changing the Next.js service build command.
+   * Named eve agents to mount under `/eve/agents/<name>/eve/v1/*`.
+   *
+   * Use this when one Next.js app needs to talk to multiple eve agents. When
+   * set, do not also set {@link eveRoot}; the single-agent form remains the
+   * shorthand for one unnamed agent mounted at `/eve/v1/*`.
+   */
+  readonly agents?: WithEveAgentsConfig;
+  /**
+   * Build command for the generated eve Vercel service. In multi-agent mode
+   * this is the default for agents without their own `buildCommand`.
+   *
+   * When omitted, withEve generates a command that runs the installed eve
+   * binary from the agent root.
    */
   readonly eveBuildCommand?: string;
   /**
-   * Private Vercel service prefix for the eve deployment. Defaults to
-   * {@link EVE_NEXT_SERVICE_PREFIX} (`/_eve_internal/eve`). `withEve` normalizes
-   * the prefix (adds a leading slash, strips trailing slashes) and rejects a
-   * prefix that resolves to the root route. The prefix must match the eve
-   * service's mount in Vercel Build Output config.
+   * Private route namespace for legacy manually configured Vercel services and
+   * non-Vercel production proxying. Defaults to {@link EVE_NEXT_SERVICE_PREFIX}
+   * (`/_eve_internal/eve`). `withEve` normalizes the prefix (adds a leading
+   * slash, strips trailing slashes) and rejects a prefix that resolves to the
+   * root route.
    */
   readonly servicePrefix?: string;
+}
+
+interface ResolvedEveNextAgent {
+  readonly appRoot: string;
+  readonly buildCommand: string;
+  readonly localProductionPortOffset: number;
+  readonly name?: string;
+  readonly publicRoutePrefix: string;
+  readonly servicePrefix: string;
 }
 
 function resolveApplicationRoot(appPath: string | undefined): string {
@@ -136,33 +181,56 @@ function joinRoutePrefix(prefix: string, path: string): string {
   return `${prefix.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
 }
 
+function createNamedAgentRoutePrefix(name: string): string {
+  return joinRoutePrefix(EVE_NAMED_AGENT_ROUTE_PREFIX, name);
+}
+
+function createNamedAgentServicePrefix(basePrefix: string, name: string): string {
+  return joinRoutePrefix(basePrefix, name);
+}
+
+function createAgentRewriteSource(publicRoutePrefix: string): string {
+  return joinRoutePrefix(publicRoutePrefix, `${EVE_ROUTE_PREFIX}/:path+`);
+}
+
 function normalizeOrigin(origin: string): string {
   return new URL(origin.trim()).origin;
 }
 
-function readLocalProductionPort(): number {
+function readLocalProductionPort(portOffset: number): number {
   const configuredPort = process.env[EVE_NEXT_PRODUCTION_PORT_ENV];
 
-  if (configuredPort === undefined || configuredPort.trim().length === 0) {
-    return DEFAULT_EVE_NEXT_PRODUCTION_PORT;
+  const basePort =
+    configuredPort === undefined || configuredPort.trim().length === 0
+      ? DEFAULT_EVE_NEXT_PRODUCTION_PORT
+      : Number.parseInt(configuredPort, 10);
+
+  if (
+    configuredPort !== undefined &&
+    configuredPort.trim().length > 0 &&
+    String(basePort) !== configuredPort.trim()
+  ) {
+    throw new Error(`${EVE_NEXT_PRODUCTION_PORT_ENV} must be an integer between 1 and 65535.`);
   }
 
-  const port = Number.parseInt(configuredPort, 10);
-
-  if (String(port) !== configuredPort.trim() || port < 1 || port > 65_535) {
-    throw new Error(`${EVE_NEXT_PRODUCTION_PORT_ENV} must be an integer between 1 and 65535.`);
+  const port = basePort + portOffset;
+  if (port < 1 || port > 65_535) {
+    throw new Error(`${EVE_NEXT_PRODUCTION_PORT_ENV} plus the eve agent count exceeds 65535.`);
   }
 
   return port;
 }
 
-function resolveProductionDestination(servicePrefix: string): {
+function resolveProductionDestination(input: {
+  readonly localProductionPortOffset: number;
+  readonly servicePrefix: string;
+}): {
   readonly destinationPrefix: string;
   readonly localServerOrigin?: string;
 } {
   if (process.env.VERCEL) {
     return {
-      destinationPrefix: servicePrefix,
+      destinationPrefix: input.servicePrefix,
     };
   }
 
@@ -170,26 +238,28 @@ function resolveProductionDestination(servicePrefix: string): {
 
   if (configuredOrigin !== undefined && configuredOrigin.trim().length > 0) {
     return {
-      destinationPrefix: joinRoutePrefix(normalizeOrigin(configuredOrigin), servicePrefix),
+      destinationPrefix: joinRoutePrefix(normalizeOrigin(configuredOrigin), input.servicePrefix),
     };
   }
 
-  const localServerOrigin = `http://127.0.0.1:${String(readLocalProductionPort())}`;
+  const localServerOrigin = `http://127.0.0.1:${String(
+    readLocalProductionPort(input.localProductionPortOffset),
+  )}`;
   return {
     destinationPrefix: localServerOrigin,
     localServerOrigin,
   };
 }
 
-function createEveRewriteRules(destinationPrefix: string): EveNextRewriteRule[] {
-  return EVE_PROXY_REWRITE_SOURCES.map((source) => {
-    const rule: EveNextRewriteRule = {
-      destination: joinRoutePrefix(destinationPrefix, source),
-      source,
-    };
-
-    return rule;
-  });
+function createEveRewriteRule(input: {
+  readonly destinationPrefix: string;
+  readonly publicRoutePrefix: string;
+}): EveNextRewriteRule {
+  const source = createAgentRewriteSource(input.publicRoutePrefix);
+  return {
+    destination: joinRoutePrefix(input.destinationPrefix, `${EVE_ROUTE_PREFIX}/:path+`),
+    source,
+  };
 }
 
 async function resolveExistingRewrites(
@@ -237,13 +307,91 @@ async function resolveNextConfig<TConfig extends EveNextConfig>(
     : configOrFunction;
 }
 
+function assertValidAgentName(name: string): void {
+  if (!AGENT_NAME_PATTERN.test(name)) {
+    throw new Error(
+      `eve Next.js agent name ${JSON.stringify(
+        name,
+      )} is invalid. Use lowercase letters, numbers, underscores, or hyphens, starting with a letter or number.`,
+    );
+  }
+}
+
+function quoteShellArg(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function toPosixPath(path: string): string {
+  return path.replaceAll("\\", "/");
+}
+
+function createDefaultBuildCommand(input: {
+  readonly agentRoot: string;
+  readonly nextRoot: string;
+}): string {
+  const eveBinaryPath = toPosixPath(
+    relative(input.agentRoot, join(input.nextRoot, "node_modules", "eve", "bin", "eve.js")),
+  );
+  return `node ${quoteShellArg(eveBinaryPath)} build`;
+}
+
+function normalizeAgentsConfig(
+  options: WithEveOptions,
+  nextRoot: string,
+): readonly ResolvedEveNextAgent[] {
+  const servicePrefixBase = normalizeRoutePrefix(options.servicePrefix ?? EVE_NEXT_SERVICE_PREFIX);
+  const resolveBuildCommand = (agentRoot: string, buildCommand: string | undefined) =>
+    buildCommand ?? options.eveBuildCommand ?? createDefaultBuildCommand({ agentRoot, nextRoot });
+
+  if (options.agents === undefined) {
+    const appRoot = resolveApplicationRoot(options.eveRoot);
+    return [
+      {
+        appRoot,
+        buildCommand: resolveBuildCommand(appRoot, undefined),
+        localProductionPortOffset: 0,
+        publicRoutePrefix: "",
+        servicePrefix: servicePrefixBase,
+      },
+    ];
+  }
+
+  if (options.eveRoot !== undefined) {
+    throw new Error("withEve cannot combine eveRoot with agents. Use one configuration form.");
+  }
+
+  const entries = Object.entries(options.agents);
+  if (entries.length === 0) {
+    throw new Error("withEve agents must contain at least one named eve agent.");
+  }
+
+  return entries.map(([name, config], index) => {
+    assertValidAgentName(name);
+
+    const agentConfig = typeof config === "string" ? { root: config } : config;
+    const appRoot = resolveApplicationRoot(agentConfig.root);
+
+    return {
+      appRoot,
+      buildCommand: resolveBuildCommand(appRoot, agentConfig.buildCommand),
+      localProductionPortOffset: index,
+      name,
+      publicRoutePrefix: createNamedAgentRoutePrefix(name),
+      servicePrefix: normalizeRoutePrefix(
+        agentConfig.servicePrefix ?? createNamedAgentServicePrefix(servicePrefixBase, name),
+      ),
+    };
+  });
+}
+
 /**
  * Wraps a Next.js config so same-origin eve endpoints proxy to a separate eve
  * service.
  *
  * In development, starts `eve dev --no-ui --port 0` for the eve app and
  * rewrites eve protocol endpoints to that local URL. In Vercel production,
- * rewrites to the resolved private eve service prefix.
+ * writes Build Output service routes so Vercel sends eve protocol endpoints to
+ * the eve service directly.
  * Outside Vercel production, serves an existing `.output/server/index.mjs` build
  * on a stable local port when present; otherwise set `EVE_NEXT_PRODUCTION_ORIGIN`
  * to the origin serving the eve service namespace.
@@ -253,36 +401,68 @@ export function withEve<TConfig extends EveNextConfig>(
   options: WithEveOptions = {},
 ): EveNextConfigFunction<TConfig> {
   const nextRoot = process.cwd();
-  const appRoot = resolveApplicationRoot(options.eveRoot);
   const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs);
-  const servicePrefixInput = normalizeRoutePrefix(options.servicePrefix ?? EVE_NEXT_SERVICE_PREFIX);
+  const agents = normalizeAgentsConfig(options, nextRoot);
 
   return async function eveNextConfig(phase, context) {
     const nextConfig = await resolveNextConfig(configOrFunction, phase, context);
     const existingRewrites = nextConfig.rewrites;
     const configuredVercel = await ensureEveVercelOutputConfig({
-      appRoot,
-      eveBuildCommand: options.eveBuildCommand ?? DEFAULT_EVE_BUILD_COMMAND,
+      agents: agents.map((agent) => ({
+        appRoot: agent.appRoot,
+        buildCommand: agent.buildCommand,
+        name: agent.name,
+        publicRoutePrefix: agent.publicRoutePrefix,
+        servicePrefix: agent.servicePrefix,
+      })),
       nextRoot,
-      servicePrefix: servicePrefixInput,
     });
-    const productionDestination = resolveProductionDestination(configuredVercel.servicePrefix);
+
+    if (process.env.VERCEL) {
+      return nextConfig;
+    }
+
+    const configuredAgentByName = new Map(
+      configuredVercel.agents.map((agent) => [agent.name, agent] as const),
+    );
+    const agentsWithDestinations = agents.map((agent) => {
+      const configuredAgent = configuredAgentByName.get(agent.name);
+      const productionDestination = resolveProductionDestination({
+        localProductionPortOffset: agent.localProductionPortOffset,
+        servicePrefix: configuredAgent?.servicePrefix ?? agent.servicePrefix,
+      });
+
+      return {
+        ...agent,
+        productionDestination,
+      };
+    });
 
     return {
       ...nextConfig,
       async rewrites() {
-        const [existing, destinationPrefix] = await Promise.all([
+        const [existing, eveRules] = await Promise.all([
           resolveExistingRewrites(existingRewrites),
-          resolveEveDestinationPrefix({
-            appRoot,
-            devServerTimeoutMs,
-            phase,
-            productionDestinationPrefix: productionDestination.destinationPrefix,
-            productionServerOrigin: productionDestination.localServerOrigin,
-          }),
+          Promise.all(
+            agentsWithDestinations.map(async (agent) => {
+              const destinationPrefix = await resolveEveDestinationPrefix({
+                appRoot: agent.appRoot,
+                devServerTimeoutMs,
+                logLabel: agent.name,
+                phase,
+                productionDestinationPrefix: agent.productionDestination.destinationPrefix,
+                productionServerOrigin: agent.productionDestination.localServerOrigin,
+              });
+
+              return createEveRewriteRule({
+                destinationPrefix,
+                publicRoutePrefix: agent.publicRoutePrefix,
+              });
+            }),
+          ),
         ]);
 
-        return mergeRewriteRules(existing, createEveRewriteRules(destinationPrefix));
+        return mergeRewriteRules(existing, eveRules);
       },
     };
   };

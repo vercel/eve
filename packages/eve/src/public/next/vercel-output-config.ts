@@ -9,6 +9,9 @@ import {
 const VERCEL_JSON_FILE_NAME = "vercel.json";
 const VERCEL_OUTPUT_CONFIG_FILE_NAME = ".vercel/output/config.json";
 const VERCEL_BUILD_OUTPUT_VERSION = 3;
+const EVE_SERVICE_NAME = "eve";
+const EVE_SERVICE_ROUTE_SRC = "^/eve/v1/(.*)$";
+const EVE_SERVICE_ROUTE_PATH = "/eve/v1/$1";
 
 interface VercelServiceMount {
   readonly path?: string;
@@ -20,12 +23,50 @@ interface VercelServiceConfig {
   readonly entrypoint?: string;
   readonly framework?: string;
   readonly mount?: string | VercelServiceMount;
+  readonly routes?: readonly VercelRouteConfig[];
   readonly routePrefix?: string;
+  readonly root?: string;
   readonly type?: string;
 }
 
+interface MutableGeneratedVercelServiceConfig {
+  buildCommand: string;
+  framework: "eve";
+  routePrefix?: string;
+  routes: readonly VercelRouteConfig[];
+  root: string;
+}
+
+interface VercelNamedServiceConfig extends VercelServiceConfig {
+  readonly name?: string;
+}
+
+type VercelServicesCollection =
+  | Record<string, VercelServiceConfig>
+  | readonly VercelNamedServiceConfig[];
+
+interface VercelServiceRouteDestination {
+  readonly service?: string;
+  readonly type?: string;
+}
+
+interface VercelRequestPathTransform {
+  readonly args: string;
+  readonly op: "set";
+  readonly type: "request.path";
+}
+
+interface VercelRouteConfig {
+  readonly destination?: string | VercelServiceRouteDestination;
+  readonly handle?: string;
+  readonly src?: string;
+  readonly transforms?: readonly VercelRequestPathTransform[];
+  readonly [key: string]: unknown;
+}
+
 interface VercelServicesConfig {
-  readonly experimentalServices?: Record<string, VercelServiceConfig>;
+  readonly routes?: readonly VercelRouteConfig[];
+  readonly services?: VercelServicesCollection;
   readonly [key: string]: unknown;
 }
 
@@ -34,6 +75,19 @@ interface VercelOutputConfig extends VercelServicesConfig {
 }
 
 export interface EnsureVercelOutputConfigResult {
+  readonly agents: readonly EnsureVercelOutputConfigAgentResult[];
+}
+
+export interface EnsureVercelOutputConfigAgentInput {
+  readonly appRoot: string;
+  readonly buildCommand: string;
+  readonly name?: string;
+  readonly publicRoutePrefix: string;
+  readonly servicePrefix: string;
+}
+
+export interface EnsureVercelOutputConfigAgentResult {
+  readonly name?: string;
   readonly servicePrefix: string;
 }
 
@@ -42,9 +96,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function hasServices(
-  services: Record<string, VercelServiceConfig> | undefined,
-): services is Record<string, VercelServiceConfig> {
-  return services !== undefined && Object.keys(services).length > 0;
+  services: VercelServicesCollection | undefined,
+): services is VercelServicesCollection {
+  return services !== undefined && Object.keys(createServiceConfigRecord(services)).length > 0;
+}
+
+function isNamedServiceConfigArray(
+  services: VercelServicesCollection,
+): services is readonly VercelNamedServiceConfig[] {
+  return Array.isArray(services);
+}
+
+function createServiceConfigRecord(
+  services: VercelServicesCollection | undefined,
+): Record<string, VercelServiceConfig> {
+  if (services === undefined) {
+    return {};
+  }
+
+  if (isNamedServiceConfigArray(services)) {
+    const record: Record<string, VercelServiceConfig> = {};
+
+    for (const service of services) {
+      if (typeof service.name === "string" && service.name.trim().length > 0) {
+        const { name, ...serviceConfig } = service;
+        record[name] = serviceConfig;
+      }
+    }
+
+    return record;
+  }
+
+  return services;
 }
 
 function resolveRelativeEntrypoint(fromRoot: string, toRoot: string): string {
@@ -83,7 +166,7 @@ async function resolveVercelOutputConfigLocation(nextRoot: string): Promise<{
   }
 
   return {
-    canWriteGeneratedOutput: false,
+    canWriteGeneratedOutput: Boolean(process.env.VERCEL),
     outputConfigPath: join(nextRoot, VERCEL_OUTPUT_CONFIG_FILE_NAME),
     projectRoot,
   };
@@ -94,10 +177,26 @@ function normalizeVercelServicesConfig(value: unknown, fileName: string): Vercel
     throw new Error(`${fileName} must contain a JSON object.`);
   }
 
-  const experimentalServices = value.experimentalServices;
+  const services = value.services;
 
-  if (experimentalServices !== undefined && !isRecord(experimentalServices)) {
-    throw new Error(`${fileName} experimentalServices must be a JSON object.`);
+  if (
+    services !== undefined &&
+    !isRecord(services) &&
+    !(
+      Array.isArray(services) &&
+      services.every(
+        (service) =>
+          isRecord(service) && typeof service.name === "string" && service.name.trim().length > 0,
+      )
+    )
+  ) {
+    throw new Error(`${fileName} services must be a JSON object or named service array.`);
+  }
+
+  const routes = value.routes;
+
+  if (routes !== undefined && !Array.isArray(routes)) {
+    throw new Error(`${fileName} routes must be an array.`);
   }
 
   return value as VercelServicesConfig;
@@ -121,11 +220,21 @@ async function readVercelServicesConfig(
   }
 }
 
-function findServiceByFramework(
+function findServiceEntryByFramework(
   services: Record<string, VercelServiceConfig>,
   framework: string,
-): VercelServiceConfig | undefined {
-  return Object.values(services).find((service) => service.framework === framework);
+): { readonly name: string; readonly service: VercelServiceConfig } | undefined {
+  return Object.entries(services)
+    .map(([name, service]) => ({ name, service }))
+    .find((entry) => entry.service.framework === framework);
+}
+
+function findServiceEntryByName(
+  services: Record<string, VercelServiceConfig>,
+  name: string,
+): { readonly name: string; readonly service: VercelServiceConfig } | undefined {
+  const service = services[name];
+  return service === undefined ? undefined : { name, service };
 }
 
 function resolveServicePrefix(service: VercelServiceConfig | undefined): string | undefined {
@@ -153,34 +262,158 @@ function resolveServicePrefix(service: VercelServiceConfig | undefined): string 
 }
 
 function resolveConfiguredServicePrefix(input: {
+  readonly agent: EnsureVercelOutputConfigAgentInput;
   readonly services: Record<string, VercelServiceConfig>;
-  readonly servicePrefix: string;
 }): string {
-  const configuredEveService = findServiceByFramework(input.services, "eve");
-  return resolveServicePrefix(configuredEveService) ?? input.servicePrefix;
+  const configuredEveService = findConfiguredEveServiceEntry(input.services, input.agent)?.service;
+  return resolveServicePrefix(configuredEveService) ?? input.agent.servicePrefix;
 }
 
-function assertRootServicesAreComplete(input: {
-  readonly services: Record<string, VercelServiceConfig>;
-  readonly servicePrefix: string;
-}): string {
-  const configuredEveService = findServiceByFramework(input.services, "eve");
-  const configuredNextService = findServiceByFramework(input.services, "nextjs");
-
-  if (configuredEveService !== undefined && configuredNextService !== undefined) {
-    return resolveServicePrefix(configuredEveService) ?? input.servicePrefix;
+function findConfiguredEveServiceEntry(
+  services: Record<string, VercelServiceConfig>,
+  agent: EnsureVercelOutputConfigAgentInput,
+): { readonly name: string; readonly service: VercelServiceConfig } | undefined {
+  if (agent.name !== undefined) {
+    const namedService = findServiceEntryByName(services, createEveServiceName(agent.name));
+    if (namedService?.service.framework === "eve") {
+      return namedService;
+    }
   }
 
-  throw new Error(
-    `${VERCEL_JSON_FILE_NAME} already defines experimentalServices, so withEve cannot add generated services through ${VERCEL_OUTPUT_CONFIG_FILE_NAME}. Add both the Next.js and eve services to ${VERCEL_JSON_FILE_NAME}, or remove experimentalServices from ${VERCEL_JSON_FILE_NAME}.`,
+  return agent.name === undefined ? findServiceEntryByFramework(services, "eve") : undefined;
+}
+
+function assertRootServicesIncludeEve(input: {
+  readonly agents: readonly EnsureVercelOutputConfigAgentInput[];
+  readonly services: Record<string, VercelServiceConfig>;
+}): readonly EnsureVercelOutputConfigAgentResult[] {
+  const results: EnsureVercelOutputConfigAgentResult[] = [];
+
+  for (const agent of input.agents) {
+    const configuredEveService = findConfiguredEveServiceEntry(input.services, agent)?.service;
+
+    if (configuredEveService === undefined) {
+      throw new Error(
+        `${VERCEL_JSON_FILE_NAME} already defines services, so withEve cannot add generated eve services through ${VERCEL_OUTPUT_CONFIG_FILE_NAME}. Add the eve service for ${agent.name ?? "the default agent"} to ${VERCEL_JSON_FILE_NAME}, or remove services from ${VERCEL_JSON_FILE_NAME}.`,
+      );
+    }
+
+    results.push({
+      name: agent.name,
+      servicePrefix: resolveServicePrefix(configuredEveService) ?? agent.servicePrefix,
+    });
+  }
+
+  return results;
+}
+
+function createEveServiceRouteSrc(publicRoutePrefix: string): string {
+  if (publicRoutePrefix.length === 0) {
+    return EVE_SERVICE_ROUTE_SRC;
+  }
+
+  const normalizedPrefix = publicRoutePrefix.startsWith("/")
+    ? publicRoutePrefix
+    : `/${publicRoutePrefix}`;
+  return `^${escapeRegExp(normalizedPrefix)}/eve/v1/(.*)$`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function createEveServiceName(name: string | undefined): string {
+  return name === undefined ? EVE_SERVICE_NAME : `${EVE_SERVICE_NAME}-${name}`;
+}
+
+function isEveServiceRoute(
+  route: VercelRouteConfig,
+  serviceName: string,
+  routeSrc: string,
+): boolean {
+  const destination = route.destination;
+
+  return (
+    route.src === routeSrc &&
+    isRecord(destination) &&
+    destination.type === "service" &&
+    destination.service === serviceName
   );
 }
 
+function createEveServiceRoute(serviceName: string, routeSrc: string): VercelRouteConfig {
+  return {
+    destination: {
+      service: serviceName,
+      type: "service",
+    },
+    src: routeSrc,
+  };
+}
+
+function isEveServiceRequestPathRoute(route: VercelRouteConfig, routeSrc: string): boolean {
+  return route.src === routeSrc;
+}
+
+function createEveServiceRequestPathRoute(routeSrc: string): VercelRouteConfig {
+  return {
+    src: routeSrc,
+    transforms: [
+      {
+        args: EVE_SERVICE_ROUTE_PATH,
+        op: "set",
+        type: "request.path",
+      },
+    ],
+  };
+}
+
+function insertEveServiceRequestPathRoute(
+  routes: readonly VercelRouteConfig[] | undefined,
+  routeSrc: string,
+): readonly VercelRouteConfig[] {
+  const existingRoutes = routes ?? [];
+  const routesWithoutGeneratedRoute = existingRoutes.filter(
+    (route) => !isEveServiceRequestPathRoute(route, routeSrc),
+  );
+
+  return [createEveServiceRequestPathRoute(routeSrc), ...routesWithoutGeneratedRoute];
+}
+
+function insertEveServiceRoutes(
+  routes: readonly VercelRouteConfig[],
+  eveRoutes: readonly {
+    readonly routeSrc: string;
+    readonly serviceName: string;
+  }[],
+): readonly VercelRouteConfig[] {
+  const routesWithoutEveRoutes = routes.filter(
+    (route) =>
+      !eveRoutes.some((eveRoute) =>
+        isEveServiceRoute(route, eveRoute.serviceName, eveRoute.routeSrc),
+      ),
+  );
+  const filesystemRouteIndex = routesWithoutEveRoutes.findIndex(
+    (route) => route.handle === "filesystem",
+  );
+  const nextEveRoutes = eveRoutes.map((eveRoute) =>
+    createEveServiceRoute(eveRoute.serviceName, eveRoute.routeSrc),
+  );
+
+  if (filesystemRouteIndex === -1) {
+    return [...nextEveRoutes, ...routesWithoutEveRoutes];
+  }
+
+  return [
+    ...routesWithoutEveRoutes.slice(0, filesystemRouteIndex),
+    ...nextEveRoutes,
+    ...routesWithoutEveRoutes.slice(filesystemRouteIndex),
+  ];
+}
+
 export async function ensureEveVercelOutputConfig(input: {
-  readonly appRoot: string;
-  readonly eveBuildCommand: string;
+  readonly agents: readonly EnsureVercelOutputConfigAgentInput[];
   readonly nextRoot: string;
-  readonly servicePrefix: string;
 }): Promise<EnsureVercelOutputConfigResult> {
   const { canWriteGeneratedOutput, outputConfigPath, projectRoot } =
     await resolveVercelOutputConfigLocation(input.nextRoot);
@@ -188,13 +421,13 @@ export async function ensureEveVercelOutputConfig(input: {
     join(projectRoot, VERCEL_JSON_FILE_NAME),
     VERCEL_JSON_FILE_NAME,
   );
-  const rootServices = rootVercelConfig.experimentalServices;
+  const rootServices = rootVercelConfig.services;
 
   if (hasServices(rootServices)) {
     return {
-      servicePrefix: assertRootServicesAreComplete({
-        services: rootServices,
-        servicePrefix: input.servicePrefix,
+      agents: assertRootServicesIncludeEve({
+        agents: input.agents,
+        services: createServiceConfigRecord(rootServices),
       }),
     };
   }
@@ -203,49 +436,69 @@ export async function ensureEveVercelOutputConfig(input: {
     outputConfigPath,
     VERCEL_OUTPUT_CONFIG_FILE_NAME,
   )) as VercelOutputConfig;
-  const nextEntrypoint = ".";
-  const eveEntrypoint = resolveRelativeEntrypoint(input.nextRoot, input.appRoot);
-  const existingServices = existingConfig.experimentalServices ?? {};
-  const configuredEveService = findServiceByFramework(existingServices, "eve");
-  const configuredNextService = findServiceByFramework(existingServices, "nextjs");
-  const servicePrefix = resolveConfiguredServicePrefix({
-    services: existingServices,
-    servicePrefix: input.servicePrefix,
-  });
+  const existingServices = createServiceConfigRecord(existingConfig.services);
+  const agentResults = input.agents.map((agent) => ({
+    name: agent.name,
+    servicePrefix: resolveConfiguredServicePrefix({
+      agent,
+      services: existingServices,
+    }),
+  }));
 
   if (!canWriteGeneratedOutput) {
     return {
-      servicePrefix,
+      agents: agentResults,
     };
   }
 
-  const experimentalServices: Record<string, VercelServiceConfig> = {
+  const services: Record<string, VercelServiceConfig> = {
     ...existingServices,
   };
+  const eveRoutes: {
+    routeSrc: string;
+    serviceName: string;
+  }[] = [];
 
-  if (configuredNextService === undefined) {
-    experimentalServices.web = {
-      entrypoint: nextEntrypoint,
-      framework: "nextjs",
-      mount: "/",
-      type: "web",
-    };
+  for (const agent of input.agents) {
+    const configuredEveServiceEntry = findConfiguredEveServiceEntry(existingServices, agent);
+    const serviceName = configuredEveServiceEntry?.name ?? createEveServiceName(agent.name);
+    const routeSrc = createEveServiceRouteSrc(agent.publicRoutePrefix);
+
+    if (configuredEveServiceEntry === undefined) {
+      const serviceConfig: MutableGeneratedVercelServiceConfig = {
+        buildCommand: agent.buildCommand,
+        framework: "eve",
+        routes: insertEveServiceRequestPathRoute(undefined, routeSrc),
+        root: resolveRelativeEntrypoint(input.nextRoot, agent.appRoot),
+      };
+
+      if (agent.publicRoutePrefix.length > 0) {
+        serviceConfig.routePrefix = agent.publicRoutePrefix;
+      }
+
+      services[serviceName] = serviceConfig;
+    } else {
+      services[serviceName] = {
+        ...configuredEveServiceEntry.service,
+        routes: insertEveServiceRequestPathRoute(
+          configuredEveServiceEntry.service.routes,
+          routeSrc,
+        ),
+      };
+    }
+
+    eveRoutes.push({
+      routeSrc,
+      serviceName,
+    });
   }
 
-  if (configuredEveService === undefined) {
-    experimentalServices.eve = {
-      buildCommand: input.eveBuildCommand,
-      entrypoint: eveEntrypoint,
-      framework: "eve",
-      mount: servicePrefix,
-      type: "web",
-    };
-  }
-
+  const { services: _services, ...configWithoutLegacyServices } = existingConfig;
   const vercelConfig: VercelOutputConfig = {
-    ...existingConfig,
+    ...configWithoutLegacyServices,
+    routes: insertEveServiceRoutes(existingConfig.routes ?? [], eveRoutes),
+    services,
     version: VERCEL_BUILD_OUTPUT_VERSION,
-    experimentalServices,
   };
 
   if (JSON.stringify(existingConfig) !== JSON.stringify(vercelConfig)) {
@@ -254,6 +507,6 @@ export async function ensureEveVercelOutputConfig(input: {
   }
 
   return {
-    servicePrefix,
+    agents: agentResults,
   };
 }

@@ -30,6 +30,8 @@ const VERCEL_AUTH_CHALLENGE_MARKERS: readonly string[] = [
   "vercel.com/sso-api",
   "<title>Authentication Required</title>",
 ];
+const VERCEL_SSO_ORIGIN = "https://vercel.com";
+const VERCEL_SSO_PATH = "/sso-api";
 
 const TRUSTED_SOURCES_ERROR_CODE = /^TRUSTED_SOURCES_[A-Z0-9_]+$/u;
 
@@ -47,24 +49,87 @@ function bodyLooksLikeVercelAuthChallenge(body: string): boolean {
   return body.length > 0 && VERCEL_AUTH_CHALLENGE_MARKERS.every((marker) => body.includes(marker));
 }
 
+function isVercelSsoUrl(value: string): boolean {
+  const url = URL.parse(value);
+  return (
+    url?.origin === VERCEL_SSO_ORIGIN &&
+    url.pathname === VERCEL_SSO_PATH &&
+    url.searchParams.has("url")
+  );
+}
+
+function isVercelSsoRedirect(
+  status: number,
+  headers: Readonly<Record<string, unknown>> | undefined,
+): boolean {
+  if (status < 300 || status >= 400 || headers === undefined) return false;
+
+  for (const [name, value] of Object.entries(headers)) {
+    if (name.toLowerCase() === "location" && typeof value === "string") {
+      return isVercelSsoUrl(value);
+    }
+  }
+  return false;
+}
+
+function isVercelUnauthorized(
+  status: number,
+  headers: Readonly<Record<string, unknown>> | undefined,
+): boolean {
+  if (status !== 401 || headers === undefined) return false;
+
+  for (const [name, value] of Object.entries(headers)) {
+    if (name.toLowerCase() === "x-vercel-error" && value === "UNAUTHORIZED") return true;
+  }
+  return false;
+}
+
+function bodyLooksLikeStructuredVercelAuthChallenge(body: string): boolean {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    return false;
+  }
+  if (!isObject(payload) || !isObject(payload.error) || !isObject(payload.protection)) {
+    return false;
+  }
+
+  const code = payload.error.code;
+  const callback = payload.protection.vercel_auth_callback;
+  return (
+    (code === 401 || code === "401") &&
+    payload.error.message === "Protected deployment" &&
+    typeof callback === "string" &&
+    isVercelSsoUrl(callback)
+  );
+}
+
 /**
- * Returns `true` for an HTTP 401 carrying Vercel's protection challenge.
+ * Returns `true` for a Vercel Deployment Protection challenge.
  *
  * Accepts both real {@link ClientError} instances and structurally
- * compatible duck-typed errors (`{ status: number, body: string }`)
+ * compatible duck-typed errors (`{ status, body, headers }`)
  * so callers can detect the challenge regardless of whether the
  * error survived a network/IPC boundary.
  */
 export function isVercelAuthChallenge(error: unknown): boolean {
-  if (error instanceof ClientError) {
-    return error.status === 401 && bodyLooksLikeVercelAuthChallenge(error.body);
+  const candidate = error instanceof ClientError || isObject(error) ? error : undefined;
+  if (
+    candidate === undefined ||
+    typeof candidate.status !== "number" ||
+    typeof candidate.body !== "string"
+  ) {
+    return false;
   }
 
+  const headers = isObject(candidate.headers) ? candidate.headers : undefined;
   return (
-    isObject(error) &&
-    error.status === 401 &&
-    typeof error.body === "string" &&
-    bodyLooksLikeVercelAuthChallenge(error.body)
+    isVercelSsoRedirect(candidate.status, headers) ||
+    isVercelUnauthorized(candidate.status, headers) ||
+    (candidate.status === 401 &&
+      (bodyLooksLikeVercelAuthChallenge(candidate.body) ||
+        bodyLooksLikeStructuredVercelAuthChallenge(candidate.body)))
   );
 }
 
