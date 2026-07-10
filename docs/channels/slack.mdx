@@ -56,7 +56,7 @@ Inbound hooks decide whether to dispatch a turn and with what `auth`. Return `{ 
 
 eve attaches the triggering Slack user id to the same model message as the message text. This keeps speaker attribution intact when several people use one thread without making profile lookup requests.
 
-You get the triggering mention by default, but not the earlier replies in the thread. Enable `threadContext` to fetch and inject them with every message attributed by stable Slack user id. Use `since: "last-agent-reply"` so repeated mentions inject only what is new:
+You get the triggering mention by default, but not the earlier replies in the thread. Enable `threadContext` to fetch and inject them with every message attributed by stable Slack user id:
 
 ```ts
 import { slackChannel } from "eve/channels/slack";
@@ -64,9 +64,15 @@ import { connectSlackCredentials } from "@vercel/connect/eve";
 
 export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
-  threadContext: { since: "last-agent-reply" },
+  threadContext: { since: "thread-root" },
 });
 ```
+
+`since` sets the boundary for what each mention injects:
+
+- `"thread-root"` (the default): every prior message in the thread, on every mention. `threadContext: {}` behaves the same.
+- `"last-agent-reply"`: only messages after the agent's last reply, so repeated mentions inject just what is new. Known issue: in threads where other Slack apps also post, the boundary currently matches the last message from any bot rather than this agent's own ([#694](https://github.com/vercel/eve/issues/694)), which can silently drop context.
+- A predicate `(message: SlackThreadMessage) => boolean`: only messages after the last one it matches, such as "since the last message that mentioned a particular user".
 
 `threadContext` performs one `conversations.replies` request for each triggering thread reply and requires the matching Slack history scope. Omit it when the agent should see only direct mentions. `loadThreadContextMessages` remains available when you need custom filtering or non-model processing of the raw thread messages.
 
