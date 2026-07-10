@@ -17,6 +17,7 @@ import {
   DEFAULT_ZOD_PACKAGE_VERSION,
   formatEveDependencySpecifier,
   resolveEvePackageContract,
+  ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX,
   type EvePackageContract,
 } from "./project.js";
 
@@ -42,45 +43,44 @@ function renderTemplate(content: string, ctx: ExtensionTemplateContext): string 
     .replaceAll("__EVE_INIT_NODE_ENGINE__", ctx.nodeEngine);
 }
 
+/**
+ * Extension package.json as a plain object so named fields like `exports` stay
+ * structured. Tokens are still substituted by {@link renderTemplate}.
+ */
 function packageJsonTemplate(includeRootOnlyFields: boolean): string {
-  const rootOnlyFields = includeRootOnlyFields
-    ? `,
-  "engines": {
-    "node": "__EVE_INIT_NODE_ENGINE__"
-  }`
-    : "";
-  return `{
-  "name": "__EVE_INIT_APP_NAME__",
-  "version": "0.0.0",
-  "type": "module",
-  "eve": {
-    "extension": "./ext"
-  },
-  "files": [
-    "ext",
-    "dist"
-  ],
-  "exports": {
-    ".": "./ext/extension.ts"
-  },
-  "scripts": {
-    "build": "eve extension build",
-    "prepare": "eve extension build",
-    "typecheck": "tsc"
-  },
-  "dependencies": {
-    "zod": "__EVE_INIT_ZOD_VERSION__"
-  },
-  "devDependencies": {
-    "@types/node": "__EVE_INIT_TYPES_NODE_VERSION__",
-    "eve": "__EVE_INIT_PACKAGE_VERSION__",
-    "typescript": "__EVE_INIT_TYPESCRIPT_VERSION__"
-  },
-  "peerDependencies": {
-    "eve": "__EVE_INIT_PACKAGE_VERSION__"
-  }${rootOnlyFields}
-}
-`;
+  const packageJson = {
+    name: "__EVE_INIT_APP_NAME__",
+    version: "0.0.0",
+    type: "module",
+    eve: {
+      extension: "./ext",
+    },
+    files: ["ext", "dist"],
+    exports: {
+      ".": "./ext/extension.ts",
+    },
+    scripts: {
+      build: "eve extension build",
+      prepare: "eve extension build",
+      typecheck: "tsc",
+    },
+    dependencies: {
+      zod: "__EVE_INIT_ZOD_VERSION__",
+    },
+    devDependencies: {
+      "@types/node": "__EVE_INIT_TYPES_NODE_VERSION__",
+      eve: "__EVE_INIT_PACKAGE_VERSION__",
+      typescript: "__EVE_INIT_TYPESCRIPT_VERSION__",
+    },
+    peerDependencies: {
+      eve: "__EVE_INIT_PACKAGE_VERSION__",
+    },
+  };
+
+  // Same trailing engines block the agent scaffold appends for non-workspace roots.
+  return `${JSON.stringify(packageJson, null, 2).slice(0, -1)}${
+    includeRootOnlyFields ? ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX : ""
+  }}\n`;
 }
 
 const EXTENSION_DECLARATION_TEMPLATE = `import { defineExtension } from "eve/extension";

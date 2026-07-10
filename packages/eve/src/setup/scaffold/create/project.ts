@@ -212,7 +212,8 @@ function packageJsonTemplate(input: {
 `;
 }
 
-const ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX = `,
+/** Trailing fields only written when the scaffold is not a workspace member. */
+export const ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX = `,
   "engines": {
     "node": "__EVE_INIT_NODE_ENGINE__"
   }
