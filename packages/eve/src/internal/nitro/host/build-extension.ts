@@ -193,7 +193,7 @@ interface Reexport {
 /**
  * Emits one Node-facing entrypoint: a self-contained runnable `.mjs` (bundled
  * from the authored source with the extension namespace baked in) and a `.d.ts`
- * barrel whose type re-exports resolve into the shipped `ext/` source.
+ * barrel whose type re-exports resolve into the shipped `extension/` source.
  */
 async function emitEntrypoint(input: {
   readonly entryPath: string;

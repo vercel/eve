@@ -30,17 +30,17 @@ describe("mounted extension via authored-source loader", () => {
         "node_modules/@acme/crm/package.json": `${JSON.stringify({
           name: "@acme/crm",
           type: "module",
-          eve: { extension: "ext" },
-          exports: { ".": "./ext/extension.mjs" },
+          eve: { extension: "extension" },
+          exports: { ".": "./extension/extension.mjs" },
         })}\n`,
-        "node_modules/@acme/crm/ext/extension.mjs": [
+        "node_modules/@acme/crm/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
           // Minimal pass-through Standard Schema — this scenario tests binding, not validation.
           "const config = { '~standard': { version: 1, vendor: 'scenario', validate: (value) => ({ value }) } };",
           "export default defineExtension({ config });",
           "",
         ].join("\n"),
-        "node_modules/@acme/crm/ext/tools/crm_echo.mjs": [
+        "node_modules/@acme/crm/extension/tools/crm_echo.mjs": [
           'import { defineTool } from "eve/tools";',
           'import extension from "../extension.mjs";',
           "export default defineTool({",

@@ -16,7 +16,7 @@ describe("extension build config", () => {
     const root = await mkdtemp(join(tmpdir(), "eve-ext-build-"));
     await writeFile(
       join(root, "package.json"),
-      JSON.stringify({ name: "@acme/crm", type: "module", eve: { extension: "ext" } }),
+      JSON.stringify({ name: "@acme/crm", type: "module", eve: { extension: "extension" } }),
       "utf8",
     );
     const config = await tryReadExtensionBuildConfig(root);
@@ -35,12 +35,12 @@ describe("extension build config", () => {
     const root = await mkdtemp(join(tmpdir(), "eve-ext-nodecl-"));
     await writeFile(
       join(root, "package.json"),
-      JSON.stringify({ name: "@acme/nodecl", type: "module", eve: { extension: "ext" } }),
+      JSON.stringify({ name: "@acme/nodecl", type: "module", eve: { extension: "extension" } }),
       "utf8",
     );
-    await mkdir(join(root, "ext", "tools"), { recursive: true });
+    await mkdir(join(root, "extension", "tools"), { recursive: true });
     await writeFile(
-      join(root, "ext", "tools", "ping.mjs"),
+      join(root, "extension", "tools", "ping.mjs"),
       'export default { description: "Ping.", async execute() { return {}; } };\n',
       "utf8",
     );

@@ -55,16 +55,16 @@ describe("mounted extension via directory form with override", () => {
         "node_modules/@acme/crm/package.json": `${JSON.stringify({
           name: "@acme/crm",
           type: "module",
-          eve: { extension: "ext" },
-          exports: { ".": "./ext/extension.mjs" },
+          eve: { extension: "extension" },
+          exports: { ".": "./extension/extension.mjs" },
         })}\n`,
-        "node_modules/@acme/crm/ext/extension.mjs": [
+        "node_modules/@acme/crm/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
           "const config = { '~standard': { version: 1, vendor: 'scenario', validate: (value) => ({ value }) } };",
           "export default defineExtension({ config });",
           "",
         ].join("\n"),
-        "node_modules/@acme/crm/ext/tools/crm_echo.mjs": [
+        "node_modules/@acme/crm/extension/tools/crm_echo.mjs": [
           'import { defineTool } from "eve/tools";',
           'import extension from "../extension.mjs";',
           "export default defineTool({",
@@ -76,7 +76,7 @@ describe("mounted extension via directory form with override", () => {
           "});",
           "",
         ].join("\n"),
-        "node_modules/@acme/crm/ext/tools/crm_status.mjs": [
+        "node_modules/@acme/crm/extension/tools/crm_status.mjs": [
           'import { defineTool } from "eve/tools";',
           "export default defineTool({",
           '  description: "Report the extension status.",',
@@ -87,7 +87,7 @@ describe("mounted extension via directory form with override", () => {
           "});",
           "",
         ].join("\n"),
-        "node_modules/@acme/crm/ext/tools/crm_legacy.mjs": [
+        "node_modules/@acme/crm/extension/tools/crm_legacy.mjs": [
           'import { defineTool } from "eve/tools";',
           "export default defineTool({",
           '  description: "A legacy tool the consumer opts out of.",',
@@ -98,7 +98,7 @@ describe("mounted extension via directory form with override", () => {
           "});",
           "",
         ].join("\n"),
-        "node_modules/@acme/crm/ext/tools/crm_pulse.mjs": [
+        "node_modules/@acme/crm/extension/tools/crm_pulse.mjs": [
           'import { defineDynamic, defineTool } from "eve/tools";',
           "export default defineDynamic({",
           "  events: {",
