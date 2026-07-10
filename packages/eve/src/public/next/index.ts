@@ -85,6 +85,11 @@ export interface WithEveAgentOptions {
    */
   readonly buildCommand?: string;
   /**
+   * Install command for this generated eve Vercel service. Defaults to
+   * {@link WithEveOptions.eveInstallCommand}.
+   */
+  readonly installCommand?: string;
+  /**
    * Private route namespace for this agent's legacy manually configured Vercel
    * service and non-Vercel production proxying.
    */
@@ -128,6 +133,11 @@ export interface WithEveOptions {
    */
   readonly eveBuildCommand?: string;
   /**
+   * Install command for the generated eve Vercel service. In multi-agent mode
+   * this is the default for agents without their own `installCommand`.
+   */
+  readonly eveInstallCommand?: string;
+  /**
    * Private route namespace for legacy manually configured Vercel services and
    * non-Vercel production proxying. Defaults to {@link EVE_NEXT_SERVICE_PREFIX}
    * (`/_eve_internal/eve`). `withEve` normalizes the prefix (adds a leading
@@ -140,6 +150,7 @@ export interface WithEveOptions {
 interface ResolvedEveNextAgent {
   readonly appRoot: string;
   readonly buildCommand: string;
+  readonly installCommand?: string;
   readonly localProductionPortOffset: number;
   readonly name?: string;
   readonly publicRoutePrefix: string;
@@ -349,6 +360,7 @@ function normalizeAgentsConfig(
       {
         appRoot,
         buildCommand: resolveBuildCommand(appRoot, undefined),
+        installCommand: options.eveInstallCommand,
         localProductionPortOffset: 0,
         publicRoutePrefix: "",
         servicePrefix: servicePrefixBase,
@@ -374,6 +386,7 @@ function normalizeAgentsConfig(
     return {
       appRoot,
       buildCommand: resolveBuildCommand(appRoot, agentConfig.buildCommand),
+      installCommand: agentConfig.installCommand ?? options.eveInstallCommand,
       localProductionPortOffset: index,
       name,
       publicRoutePrefix: createNamedAgentRoutePrefix(name),
@@ -411,6 +424,7 @@ export function withEve<TConfig extends EveNextConfig>(
       agents: agents.map((agent) => ({
         appRoot: agent.appRoot,
         buildCommand: agent.buildCommand,
+        installCommand: agent.installCommand,
         name: agent.name,
         publicRoutePrefix: agent.publicRoutePrefix,
         servicePrefix: agent.servicePrefix,

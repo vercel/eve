@@ -254,7 +254,7 @@ describe("withEve Vercel config", () => {
     expect(rewrites).toBeUndefined();
   });
 
-  it("accepts a custom eve service build command", async () => {
+  it("accepts custom eve service build and install commands", async () => {
     const appRoot = await createTempAppRoot();
     process.chdir(appRoot);
     await mkdir(join(appRoot, ".vercel"), { recursive: true });
@@ -268,6 +268,7 @@ describe("withEve Vercel config", () => {
         {},
         {
           eveBuildCommand: "pnpm build:eve",
+          eveInstallCommand: "pnpm install:eve",
         },
       ),
     );
@@ -277,6 +278,7 @@ describe("withEve Vercel config", () => {
       services: {
         eve: {
           buildCommand: "pnpm build:eve",
+          installCommand: "pnpm install:eve",
         },
       },
     });
@@ -296,11 +298,13 @@ describe("withEve Vercel config", () => {
           agents: {
             billing: {
               buildCommand: "pnpm build:billing-agent",
+              installCommand: "pnpm install:billing-agent",
               root: "./agents/billing",
               servicePrefix: "/_eve_internal/billing",
             },
             support: "./agents/support",
           },
+          eveInstallCommand: "pnpm install:eve",
         },
       ),
     );
@@ -328,6 +332,7 @@ describe("withEve Vercel config", () => {
         "eve-billing": {
           buildCommand: "pnpm build:billing-agent",
           framework: "eve",
+          installCommand: "pnpm install:billing-agent",
           routes: [
             {
               src: "^/eve/agents/billing/eve/v1/(.*)$",
@@ -346,6 +351,7 @@ describe("withEve Vercel config", () => {
         "eve-support": {
           buildCommand: "node '../../node_modules/eve/bin/eve.js' build",
           framework: "eve",
+          installCommand: "pnpm install:eve",
           routes: [
             {
               src: "^/eve/agents/support/eve/v1/(.*)$",
