@@ -919,13 +919,22 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             toolResults: [...toolResultsByCallId.values()],
           });
         }
-        await agent.generate({ abortSignal: config.abortSignal, messages: callMessages });
+        const generateResult = await agent.generate({
+          abortSignal: config.abortSignal,
+          messages: callMessages,
+        });
         throwIfTurnAborted(config.abortSignal);
         const stepResult = await hooks.stepResult;
-        if (isEmptyModelResponse(stepResult)) {
+        if (
+          isEmptyModelResponse(stepResult) &&
+          extractToolResultCallIds(generateResult.responseMessages).size === 0
+        ) {
           throw new EmptyModelResponseError();
         }
-        return stepResult;
+        return withAccumulatedResponseMessages({
+          responseMessages: generateResult.responseMessages,
+          stepResult,
+        });
       };
 
       return executeModelCall().catch(rethrowNoOutputAsEmptyResponse);
