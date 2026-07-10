@@ -13,11 +13,13 @@ interface PendingEmission {
   deltaParts?: string[];
   event: HandleMessageStreamEvent;
   messages?: readonly import("ai").ModelMessage[];
+  sourceEvents: number;
 }
 
 interface OrderedStreamEmitter {
-  drain(): Promise<void>;
+  closeAndDrain(): Promise<void>;
   emit: HarnessEmitFn;
+  readonly failureSignal: AbortSignal;
 }
 
 /**
@@ -37,11 +39,15 @@ export function createOrderedStreamEmitter(
   }
 
   const pending: PendingEmission[] = [];
+  const capacityWaiters = new Set<() => void>();
   const idleWaiters = new Set<() => void>();
+  let closeRequested = false;
   let pendingDeltaCharacters = 0;
+  let pendingSourceEvents = 0;
   let failure: unknown;
   let failed = false;
   let pumping = false;
+  const failureController = new AbortController();
 
   const throwIfFailed = (): void => {
     if (failed) throw failure;
@@ -52,6 +58,15 @@ export function createOrderedStreamEmitter(
     idleWaiters.clear();
   };
 
+  const hasCapacity = (): boolean =>
+    pendingSourceEvents < maxPendingEvents && pendingDeltaCharacters < MAX_PENDING_DELTA_CHARACTERS;
+
+  const settleCapacityWaiters = (): void => {
+    if (!hasCapacity()) return;
+    for (const resolve of capacityWaiters) resolve();
+    capacityWaiters.clear();
+  };
+
   const pump = async (): Promise<void> => {
     if (pumping || failed) return;
     pumping = true;
@@ -60,13 +75,21 @@ export function createOrderedStreamEmitter(
       const next = pending.shift();
       if (next === undefined) break;
       pendingDeltaCharacters -= next.deltaCharacters;
+      pendingSourceEvents -= next.sourceEvents;
+      settleCapacityWaiters();
 
       try {
         await emitFn(materializeEvent(next), next.messages);
       } catch (error) {
-        failure = error;
-        failed = true;
+        if (!failed) {
+          failure = error;
+          failed = true;
+          failureController.abort(error);
+        }
         pending.length = 0;
+        pendingDeltaCharacters = 0;
+        pendingSourceEvents = 0;
+        settleCapacityWaiters();
         break;
       }
     }
@@ -87,13 +110,25 @@ export function createOrderedStreamEmitter(
     throwIfFailed();
   };
 
+  const waitForCapacity = async (): Promise<void> => {
+    if (hasCapacity()) return;
+    await new Promise<void>((resolve) => {
+      capacityWaiters.add(resolve);
+    });
+    throwIfFailed();
+  };
+
   return {
-    async drain() {
+    async closeAndDrain() {
+      closeRequested = true;
       void pump();
       await waitForIdle();
     },
     async emit(event, messages) {
       throwIfFailed();
+      if (closeRequested) {
+        throw new TypeError("Cannot emit after the ordered stream emitter has closed.");
+      }
 
       const lastIndex = pending.length - 1;
       const last = pending[lastIndex];
@@ -103,22 +138,26 @@ export function createOrderedStreamEmitter(
           deltaCharacters: delta?.length ?? 0,
           event,
           messages,
+          sourceEvents: 1,
         });
       } else {
         last.deltaCharacters += delta?.length ?? 0;
+        last.sourceEvents += 1;
       }
       pendingDeltaCharacters += delta?.length ?? 0;
+      pendingSourceEvents += 1;
 
       void pump();
 
       if (
-        pending.length >= maxPendingEvents ||
+        pendingSourceEvents >= maxPendingEvents ||
         pendingDeltaCharacters >= MAX_PENDING_DELTA_CHARACTERS
       ) {
-        await waitForIdle();
+        await waitForCapacity();
       }
       throwIfFailed();
     },
+    failureSignal: failureController.signal,
   };
 }
 
@@ -159,21 +198,21 @@ function materializeEvent(emission: PendingEmission): HandleMessageStreamEvent {
 
   if (emission.event.type === "message.appended") {
     return {
+      ...emission.event,
       data: {
         ...emission.event.data,
         messageDelta: emission.deltaParts.join(""),
       },
-      type: "message.appended",
     };
   }
 
   if (emission.event.type === "reasoning.appended") {
     return {
+      ...emission.event,
       data: {
         ...emission.event.data,
         reasoningDelta: emission.deltaParts.join(""),
       },
-      type: "reasoning.appended",
     };
   }
 

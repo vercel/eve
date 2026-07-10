@@ -37,7 +37,7 @@ function reasoning(delta: string, soFar: string) {
 }
 
 describe("createOrderedStreamEmitter", () => {
-  it("keeps consuming while a write is active and merges adjacent pending text", async () => {
+  it("keeps consuming while a write is active and preserves the latest event metadata", async () => {
     const firstWrite = deferred();
     const events: HandleMessageStreamEvent[] = [];
     const emitFn = vi.fn(async (event: HandleMessageStreamEvent) => {
@@ -47,14 +47,17 @@ describe("createOrderedStreamEmitter", () => {
     const emitter = createOrderedStreamEmitter(emitFn);
 
     await emitter.emit(message("A", "A"));
-    await emitter.emit(message("B", "AB"));
-    await emitter.emit(message("C", "ABC"));
+    await emitter.emit({ ...message("B", "AB"), meta: { at: "2026-07-10T18:00:00.000Z" } });
+    await emitter.emit({ ...message("C", "ABC"), meta: { at: "2026-07-10T18:00:01.000Z" } });
 
     expect(emitFn).toHaveBeenCalledTimes(1);
     firstWrite.resolve();
-    await emitter.drain();
+    await emitter.closeAndDrain();
 
-    expect(events).toEqual([message("A", "A"), message("BC", "ABC")]);
+    expect(events).toEqual([
+      message("A", "A"),
+      { ...message("BC", "ABC"), meta: { at: "2026-07-10T18:00:01.000Z" } },
+    ]);
   });
 
   it("treats other event types and stream coordinates as ordering barriers", async () => {
@@ -81,7 +84,7 @@ describe("createOrderedStreamEmitter", () => {
     await emitter.emit(completed);
 
     firstWrite.resolve();
-    await emitter.drain();
+    await emitter.closeAndDrain();
 
     expect(events).toEqual([
       message("A", "A"),
@@ -92,7 +95,7 @@ describe("createOrderedStreamEmitter", () => {
     ]);
   });
 
-  it("surfaces sink failures from drain and later emissions", async () => {
+  it("surfaces sink failures from close and later emissions", async () => {
     const writeError = new Error("durable write failed");
     const emitter = createOrderedStreamEmitter(async () => {
       throw writeError;
@@ -100,7 +103,41 @@ describe("createOrderedStreamEmitter", () => {
 
     await emitter.emit(message("A", "A"));
 
-    await expect(emitter.drain()).rejects.toBe(writeError);
+    await expect(emitter.closeAndDrain()).rejects.toBe(writeError);
     await expect(emitter.emit(message("B", "AB"))).rejects.toBe(writeError);
+  });
+
+  it("rejects emissions after closing", async () => {
+    const emitter = createOrderedStreamEmitter(async () => {});
+
+    await emitter.closeAndDrain();
+
+    await expect(emitter.emit(message("A", "A"))).rejects.toThrow(/closed/);
+  });
+
+  it("counts merged empty deltas toward the pending-event limit", async () => {
+    const firstWrite = deferred();
+    const events: HandleMessageStreamEvent[] = [];
+    const emitter = createOrderedStreamEmitter(
+      async (event) => {
+        events.push(event);
+        if (events.length === 1) await firstWrite.promise;
+      },
+      { maxPendingEvents: 2 },
+    );
+
+    await emitter.emit(message("A", "A"));
+    await emitter.emit(reasoning("", ""));
+    let accepted = false;
+    const limited = emitter.emit(reasoning("", "")).then(() => {
+      accepted = true;
+    });
+    await Promise.resolve();
+
+    expect(accepted).toBe(false);
+    firstWrite.resolve();
+    await limited;
+    await emitter.closeAndDrain();
+    expect(events).toEqual([message("A", "A"), reasoning("", "")]);
   });
 });
