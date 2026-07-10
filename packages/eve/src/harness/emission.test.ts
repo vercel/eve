@@ -127,32 +127,44 @@ describe("setHarnessEmissionState", () => {
 });
 
 describe("emitStreamContent empty delivery", () => {
-  it("emits each normal text delta before reading the next stream part", async () => {
-    const emit = createEmitStub();
-    let releaseSecondPart!: () => void;
-    const secondPartReady = new Promise<void>((resolve) => {
-      releaseSecondPart = resolve;
+  it("keeps reading provider deltas while the durable emitter is blocked", async () => {
+    let releaseFirstWrite!: () => void;
+    const firstWrite = new Promise<void>((resolve) => {
+      releaseFirstWrite = resolve;
+    });
+    let providerFinished = false;
+    let writes = 0;
+    const emit = vi.fn(async (_event: Parameters<HarnessEmitFn>[0]) => {
+      writes += 1;
+      if (writes === 1) await firstWrite;
     });
     async function* controlledStream(): AsyncIterable<TextStreamPart<ToolSet>> {
-      yield { id: "text-1", text: "first", type: "text-delta" } as TextStreamPart<ToolSet>;
-      await secondPartReady;
-      yield { id: "text-1", text: " second", type: "text-delta" } as TextStreamPart<ToolSet>;
+      yield { id: "text-1", text: "A", type: "text-delta" } as TextStreamPart<ToolSet>;
+      yield { id: "text-1", text: "B", type: "text-delta" } as TextStreamPart<ToolSet>;
+      yield { id: "text-1", text: "C", type: "text-delta" } as TextStreamPart<ToolSet>;
       yield { finishReason: "stop", type: "finish-step" } as TextStreamPart<ToolSet>;
+      providerFinished = true;
     }
 
     const run = emitStreamContent(emit, EMISSION_STATE, controlledStream());
-    try {
-      await vi.waitFor(() => expect(emit).toHaveBeenCalledTimes(1));
-      expect(vi.mocked(emit).mock.calls[0]?.[0]).toEqual(
-        expect.objectContaining({
-          data: expect.objectContaining({ messageDelta: "first", messageSoFar: "first" }),
-          type: "message.appended",
-        }),
-      );
-    } finally {
-      releaseSecondPart();
-      await run;
-    }
+    await vi.waitFor(() => expect(providerFinished).toBe(true));
+    expect(emit).toHaveBeenCalledTimes(1);
+
+    releaseFirstWrite();
+    await run;
+
+    const appended = vi
+      .mocked(emit)
+      .mock.calls.map(([event]) => event)
+      .filter((event) => event.type === "message.appended");
+    expect(appended).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({ messageDelta: "A", messageSoFar: "A" }),
+      }),
+      expect.objectContaining({
+        data: expect.objectContaining({ messageDelta: "BC", messageSoFar: "ABC" }),
+      }),
+    ]);
   });
 
   it("streams a split sentinel immediately and completes with a null message", async () => {

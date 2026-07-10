@@ -51,6 +51,7 @@ import { contextStorage } from "#context/container.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
 import { createProviderStreamActionBatch } from "#harness/stream-actions.js";
 import { normalizeModelStreamError } from "#harness/model-call-error.js";
+import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
 import type {
   HarnessEmitFn,
   HarnessSession,
@@ -350,6 +351,20 @@ interface StreamActionEmissionOptions {
  * without a streamed call resumes a call from an earlier step.
  */
 export async function emitStreamContent(
+  emitFn: HarnessEmitFn,
+  state: HarnessEmissionState,
+  fullStream: AsyncIterable<TextStreamPart<ToolSet>>,
+  options?: StreamActionEmissionOptions,
+): Promise<EmittedStreamContent> {
+  const orderedEmitter = createOrderedStreamEmitter(emitFn);
+  try {
+    return await consumeStreamContent(orderedEmitter.emit, state, fullStream, options);
+  } finally {
+    await orderedEmitter.drain();
+  }
+}
+
+async function consumeStreamContent(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
   fullStream: AsyncIterable<TextStreamPart<ToolSet>>,
