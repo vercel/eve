@@ -10,8 +10,6 @@ The `eve` binary (`bin: eve`) runs from your app root, and every command first l
 | Command                       | Description                                                                                                                                           |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `eve init [target]`           | Create a new agent, or add an agent to an existing project                                                                                            |
-| `eve extension init [target]` | Create a new extension package                                                                                                                        |
-| `eve extension build`         | Build the current package as an extension                                                                                                             |
 | `eve info`                    | Print the resolved application, including discovered tools, skills, subagents, schedules, channels, routes, artifact paths, and discovery diagnostics |
 | `eve build`                   | Compile `.eve/` artifacts and build the host output for an agent app; prints the output directory                                                     |
 | `eve start`                   | Serve the built `.output/` app; prints the listening URL                                                                                              |
@@ -22,6 +20,8 @@ The `eve` binary (`bin: eve`) runs from your app root, and every command first l
 | `eve eval`                    | Run evals against the local app or a remote target                                                                                                    |
 | `eve channels add [kind]`     | Scaffold a channel interactively, or by kind (`slack` \| `web`)                                                                                       |
 | `eve channels list`           | List user-authored channels                                                                                                                           |
+| `eve extension init [target]` | Create a new extension package                                                                                                                        |
+| `eve extension build`         | Build the current package as an extension                                                                                                             |
 
 When `eve build` fails on discovery errors, it prints the full diagnostics report (severity, message, source path) and the diagnostics artifact path.
 
@@ -49,7 +49,7 @@ For reusable packages of tools and skills, use [`eve extension init`](#eve-exten
 
 ## `eve extension`
 
-Commands for reusable extension packages. An extension is identified by `package.json#eve.extension` (for example `"eve": { "extension": "./ext" }`).
+Commands for reusable [extension](/docs/extensions) packages. An extension is identified by `package.json#eve.extension` (for example `"eve": { "extension": "./ext" }`).
 
 ### `eve extension init`
 
