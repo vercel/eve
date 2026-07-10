@@ -4,6 +4,7 @@ import { toError } from "#shared/errors.js";
 import { isTurnCancellation } from "#harness/turn-cancellation.js";
 
 const RESPONSE_BODY_SNIPPET_LIMIT = 1_000;
+const GATEWAY_REQUEST_SUMMARY_DETAIL_LIMIT = 240;
 const GATEWAY_MODEL_REQUEST_REJECTED_MESSAGE =
   "AI Gateway rejected the model request before the agent produced a response.";
 
@@ -133,11 +134,33 @@ export function summarizeKnownModelCallRequestError(
   if (signals.statusCode === 400 && isGatewayErrorSignal(signals)) {
     return {
       name: "AI Gateway model request rejected",
-      message: GATEWAY_MODEL_REQUEST_REJECTED_MESSAGE,
+      message: formatGatewayModelRequestRejectedMessage(signals),
     };
   }
 
   return null;
+}
+
+function formatGatewayModelRequestRejectedMessage(signals: ModelCallErrorSignals): string {
+  const detail = signals.upstreamMessage?.trim();
+  if (detail === undefined || detail.length === 0 || isGenericGatewayRejectionMessage(detail)) {
+    return GATEWAY_MODEL_REQUEST_REJECTED_MESSAGE;
+  }
+
+  return `${GATEWAY_MODEL_REQUEST_REJECTED_MESSAGE} Gateway detail: ${truncateSummaryDetail(
+    detail,
+  )}`;
+}
+
+function isGenericGatewayRejectionMessage(message: string): boolean {
+  return /^(bad request|internal server error)$/i.test(message.trim());
+}
+
+function truncateSummaryDetail(value: string): string {
+  if (value.length <= GATEWAY_REQUEST_SUMMARY_DETAIL_LIMIT) {
+    return value;
+  }
+  return `${value.slice(0, GATEWAY_REQUEST_SUMMARY_DETAIL_LIMIT - 1).trimEnd()}…`;
 }
 
 /**

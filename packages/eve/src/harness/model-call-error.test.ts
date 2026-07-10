@@ -300,6 +300,25 @@ describe("summarizeKnownModelCallRequestError", () => {
       message: "AI Gateway rejected the model request before the agent produced a response.",
     });
   });
+
+  it("keeps specific Gateway 400 rejection details in the summary", () => {
+    const summary = summarizeKnownModelCallRequestError(
+      gatewayModelCallError({
+        gatewayName: "GatewayInvalidRequestError",
+        gatewayType: "invalid_request_error",
+        statusCode: 400,
+        upstreamMessage: "input tokens exceed the model context window",
+        upstreamStatusCode: 400,
+        upstreamType: "invalid_request_error",
+      }),
+    );
+
+    expect(summary).toEqual({
+      name: "AI Gateway model request rejected",
+      message:
+        "AI Gateway rejected the model request before the agent produced a response. Gateway detail: input tokens exceed the model context window",
+    });
+  });
 });
 
 /**
