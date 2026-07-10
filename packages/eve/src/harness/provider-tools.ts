@@ -3,6 +3,7 @@ import { jsonSchema, type JSONSchema7, type ToolSet } from "ai";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import {
   WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA,
+  WEB_SEARCH_EXA_OUTPUT_SCHEMA,
   WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA,
   WEB_SEARCH_OPENAI_OUTPUT_SCHEMA,
   WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA,
@@ -13,7 +14,7 @@ import type { JsonObject } from "#shared/json.js";
 /**
  * The provider backend resolved for one web search tool invocation.
  */
-export type WebSearchBackend = "anthropic" | "google" | "openai" | "parallel";
+export type WebSearchBackend = "anthropic" | "exa" | "google" | "openai" | "parallel";
 
 /**
  * Maps an upstream provider tool type (the literal `type` string the AI SDK
@@ -55,6 +56,8 @@ export function resolveWebSearchOutputSchema(backend: WebSearchBackend): JsonObj
   switch (backend) {
     case "anthropic":
       return WEB_SEARCH_ANTHROPIC_OUTPUT_SCHEMA;
+    case "exa":
+      return WEB_SEARCH_EXA_OUTPUT_SCHEMA;
     case "google":
       return WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA;
     case "openai":
@@ -67,7 +70,7 @@ export function resolveWebSearchOutputSchema(backend: WebSearchBackend): JsonObj
 /**
  * Determines the web search backend for a model reference.
  *
- * - All AI Gateway models: Parallel search via gateway
+ * - All AI Gateway models: Exa search via gateway
  * - Direct/BYO OpenAI models: native OpenAI search
  * - Direct/BYO Anthropic models: native Anthropic search
  * - Direct/BYO Google models: native Google search grounding
@@ -75,7 +78,7 @@ export function resolveWebSearchOutputSchema(backend: WebSearchBackend): JsonObj
  */
 export function resolveWebSearchBackend(modelRef: RuntimeModelReference): WebSearchBackend | null {
   if (modelRef.source === undefined) {
-    return "parallel";
+    return "exa";
   }
 
   const providerId = modelRef.id.split("/")[0] ?? "";
@@ -124,6 +127,10 @@ export async function resolveWebSearchProviderTool(
     case "google": {
       const { google } = await import("#compiled/@ai-sdk/google/index.js");
       return attachWebSearchOutputSchema(google.tools.googleSearch({}) as ToolSet[string], backend);
+    }
+    case "exa": {
+      const { gateway } = await import("ai");
+      return attachWebSearchOutputSchema(gateway.tools.exaSearch() as ToolSet[string], backend);
     }
     case "parallel": {
       const { gateway } = await import("ai");

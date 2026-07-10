@@ -132,6 +132,110 @@ export const WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA: JsonObject = {
 };
 
 /**
+ * Output schema for AI Gateway's provider-managed `exaSearch` tool.
+ */
+export const WEB_SEARCH_EXA_OUTPUT_SCHEMA: JsonObject = {
+  $schema: "http://json-schema.org/draft-07/schema#",
+  anyOf: [
+    {
+      additionalProperties: false,
+      properties: {
+        costDollars: {
+          additionalProperties: false,
+          properties: {
+            search: {
+              additionalProperties: { type: "number" },
+              type: "object",
+            },
+            total: { type: "number" },
+          },
+          type: "object",
+        },
+        requestId: { type: "string" },
+        resolvedSearchType: { type: "string" },
+        results: {
+          items: {
+            additionalProperties: false,
+            properties: {
+              author: {
+                anyOf: [{ type: "string" }, { type: "null" }],
+              },
+              extras: {
+                additionalProperties: false,
+                properties: {
+                  imageLinks: {
+                    items: { type: "string" },
+                    type: "array",
+                  },
+                  links: {
+                    items: { type: "string" },
+                    type: "array",
+                  },
+                },
+                type: "object",
+              },
+              favicon: {
+                anyOf: [{ type: "string" }, { type: "null" }],
+              },
+              highlightScores: {
+                items: { type: "number" },
+                type: "array",
+              },
+              highlights: {
+                items: { type: "string" },
+                type: "array",
+              },
+              id: { type: "string" },
+              image: {
+                anyOf: [{ type: "string" }, { type: "null" }],
+              },
+              publishedDate: {
+                anyOf: [{ type: "string" }, { type: "null" }],
+              },
+              subpages: {
+                items: {},
+                type: "array",
+              },
+              summary: { type: "string" },
+              text: { type: "string" },
+              title: { type: "string" },
+              url: { type: "string" },
+            },
+            required: ["title", "url", "id"],
+            type: "object",
+          },
+          type: "array",
+        },
+        searchType: { type: "string" },
+      },
+      required: ["requestId", "results"],
+      type: "object",
+    },
+    {
+      additionalProperties: false,
+      properties: {
+        error: {
+          enum: [
+            "api_error",
+            "rate_limit",
+            "timeout",
+            "invalid_input",
+            "configuration_error",
+            "execution_error",
+            "unknown",
+          ],
+          type: "string",
+        },
+        message: { type: "string" },
+        statusCode: { type: "number" },
+      },
+      required: ["error", "message"],
+      type: "object",
+    },
+  ],
+};
+
+/**
  * Output schema for AI Gateway's provider-managed `parallelSearch` tool.
  */
 export const WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA: JsonObject = {
