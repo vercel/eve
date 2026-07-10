@@ -1,5 +1,14 @@
 # eve
 
+## 0.22.4
+
+### Patch Changes
+
+- b5aedaf: The shared integrations catalog gains 33 curated MCP connections from the Vercel Connect preset directory (Airtable, Stripe, Sentry, Supabase, Zapier, and more) for the docs integrations gallery, and the connection scaffolder now skips gallery-only catalog entries, so the `eve connections add` picker is unchanged.
+- edc93cc: Keep the mounted extensions guide out of the docs sidebar for now. The page stays at `/docs/extensions`, but the feature isn't surfaced in the nav while its API stabilizes.
+- f00f084: Add named multi-agent routing to `withEve` and `useEveAgent`. Next.js apps can now configure multiple eve roots with `agents`, then target one from the frontend with `useEveAgent({ agent: "name" })`.
+- f83d47d: `defineRemoteAgent` now accepts a function for `url`, resolved at runtime instead of baked at compile time. Return a `string` (or `Promise<string>`) from `() => process.env.MY_SERVICE_URL` to target an endpoint supplied by a runtime env var, known only once the deployment runs.
+
 ## 0.22.3
 
 ### Patch Changes
