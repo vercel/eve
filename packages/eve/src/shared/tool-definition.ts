@@ -83,6 +83,7 @@ export type ToolModelOutput =
         | { readonly type: "text"; readonly text: string }
         | {
             readonly type: "file";
+            /** Base64-encoded file data. */
             readonly data: { readonly type: "data"; readonly data: string };
             readonly mediaType: string;
             readonly filename?: string;

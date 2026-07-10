@@ -285,7 +285,7 @@ function normalizeToolModelContentPart(part: unknown): ToolModelContentPart {
   if (part.type !== "file") {
     throw new TypeError('Expected content model output part type to be "text" or "file".');
   }
-  if (!isObject(part.data) || part.data.type !== "data" || typeof part.data.data !== "string") {
+  if (!isObject(part.data) || part.data.type !== "data" || !isBase64Data(part.data.data)) {
     throw new TypeError("Expected content file part to include base64 string data.");
   }
   if (typeof part.mediaType !== "string") {
@@ -301,6 +301,17 @@ function normalizeToolModelContentPart(part: unknown): ToolModelContentPart {
     mediaType: part.mediaType,
   } as const;
   return part.filename === undefined ? normalized : { ...normalized, filename: part.filename };
+}
+
+function isBase64Data(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+
+  const match = /^([A-Za-z0-9+/]*)(={0,2})$/.exec(value);
+  if (match === null) return false;
+
+  const payloadLength = match[1]!.length;
+  const paddingLength = match[2]!.length;
+  return payloadLength % 4 !== 1 && (paddingLength === 0 || value.length % 4 === 0);
 }
 
 /**

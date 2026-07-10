@@ -98,7 +98,7 @@ toModelOutput(output) {
 },
 ```
 
-Convert file data to a base64 string before returning it from `execute`. Eve checks the content-part structure but does not validate the base64 encoding. File URLs, provider file references, raw byte arrays, and sandbox references are not supported in `toModelOutput`.
+Convert file data to a base64 string before returning it from `execute`. Eve checks the content-part structure and base64 syntax, but does not decode or inspect the file contents. File URLs, data URLs, provider file references, raw byte arrays, and sandbox references are not supported in `toModelOutput`.
 
 Tool outputs must be JSON-serializable. Return plain objects, arrays, strings, numbers, booleans, or `null`; convert values like `Date`, `Map`, `Set`, `NaN`, and cyclic objects before returning them from `execute` or from a `{ type: "json" }` `toModelOutput`.
 

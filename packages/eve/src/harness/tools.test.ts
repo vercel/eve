@@ -751,6 +751,31 @@ describe("buildToolSet", () => {
       "Expected content file part to include base64 string data.",
     ],
     [
+      "a data URL string",
+      [
+        {
+          ...contentFilePart,
+          data: { type: "data", data: "data:image/png;base64,iVBORw0KGgo=" },
+        },
+      ],
+      "Expected content file part to include base64 string data.",
+    ],
+    [
+      "a URL string",
+      [
+        {
+          ...contentFilePart,
+          data: { type: "data", data: "https://example.com/screenshot.png" },
+        },
+      ],
+      "Expected content file part to include base64 string data.",
+    ],
+    [
+      "a non-base64 string",
+      [{ ...contentFilePart, data: { type: "data", data: "not base64 data" } }],
+      "Expected content file part to include base64 string data.",
+    ],
+    [
       "a non-string media type",
       [{ ...contentFilePart, mediaType: 1 }],
       'Expected content file part to include a string "mediaType".',
