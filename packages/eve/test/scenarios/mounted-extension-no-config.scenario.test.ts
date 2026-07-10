@@ -26,15 +26,15 @@ describe("mounted extension without config", () => {
         "node_modules/@acme/widget/package.json": `${JSON.stringify({
           name: "@acme/widget",
           type: "module",
-          eve: { extension: "ext" },
-          exports: { ".": "./ext/extension.mjs" },
+          eve: { extension: "extension" },
+          exports: { ".": "./extension/extension.mjs" },
         })}\n`,
-        "node_modules/@acme/widget/ext/extension.mjs": [
+        "node_modules/@acme/widget/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',
           "export default defineExtension();",
           "",
         ].join("\n"),
-        "node_modules/@acme/widget/ext/tools/widget_ping.mjs": [
+        "node_modules/@acme/widget/extension/tools/widget_ping.mjs": [
           'import { defineTool } from "eve/tools";',
           "export default defineTool({",
           '  description: "Return a fixed widget token.",',

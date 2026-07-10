@@ -447,6 +447,8 @@ async function runInitSteps(input: {
  * A coding agent that omits the target entirely gets the setup guide printed and
  * nothing scaffolded, since a bare `eve init` means it has not yet chosen what to
  * build.
+ *
+ * For extension packages, use `eve extension init` instead.
  */
 export async function runInitCommand(
   logger: InitCliLogger,

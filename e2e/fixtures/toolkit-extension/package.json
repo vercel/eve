@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./ext/extension.ts"
+    ".": "./extension/extension.ts"
   },
   "dependencies": {
     "zod": "catalog:"
@@ -17,6 +17,6 @@
     "eve": "workspace:*"
   },
   "eve": {
-    "extension": "./ext"
+    "extension": "./extension"
   }
 }

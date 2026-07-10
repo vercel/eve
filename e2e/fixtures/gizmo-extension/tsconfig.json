@@ -12,5 +12,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["ext/**/*.ts"]
+  "include": ["extension/**/*.ts"]
 }

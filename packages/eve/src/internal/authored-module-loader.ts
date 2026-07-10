@@ -151,7 +151,7 @@ function createFileImportSpecifier(modulePath: string): string {
  * same plugin stack the dev/eval loader uses: `eve/*` and node_modules deps stay
  * external, relative source is inlined, and (when `extensionScopeNamespace` is
  * set) `defineState`/`defineExtension` are scoped to that namespace. Shared with
- * `eve build`'s extension entrypoint compilation so both paths bundle identically.
+ * `eve extension build`'s entrypoint compilation so both paths bundle identically.
  */
 export async function bundleAuthoredModuleCode(
   modulePath: string,

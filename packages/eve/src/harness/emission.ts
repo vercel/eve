@@ -46,11 +46,11 @@ import type {
   RuntimeActionRequest,
   RuntimeToolResultActionResult,
 } from "#runtime/actions/types.js";
-import { isAuthorizationSignal, isPendingAuthorizationToolOutput } from "#harness/authorization.js";
-import { contextStorage } from "#context/container.js";
-import { readToolInterrupt } from "#harness/tool-interrupts.js";
 import { createProviderStreamActionBatch } from "#harness/stream-actions.js";
 import { normalizeModelStreamError } from "#harness/model-call-error.js";
+import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
+import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
+import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
 import type {
   HarnessEmitFn,
   HarnessSession,
@@ -355,6 +355,35 @@ export async function emitStreamContent(
   fullStream: AsyncIterable<TextStreamPart<ToolSet>>,
   options?: StreamActionEmissionOptions,
 ): Promise<EmittedStreamContent> {
+  const orderedEmitter = createOrderedStreamEmitter(emitFn);
+  const providerActionBatch = createProviderStreamActionBatch({
+    emitFn: orderedEmitter.emit,
+    state,
+  });
+  try {
+    return await consumeStreamContent(
+      orderedEmitter.emit,
+      state,
+      interruptStreamOnFailure(fullStream, orderedEmitter.failureSignal),
+      providerActionBatch,
+      options,
+    );
+  } finally {
+    try {
+      await providerActionBatch.cancel();
+    } finally {
+      await orderedEmitter.closeAndDrain();
+    }
+  }
+}
+
+async function consumeStreamContent(
+  emitFn: HarnessEmitFn,
+  state: HarnessEmissionState,
+  fullStream: AsyncIterable<TextStreamPart<ToolSet>>,
+  providerActionBatch: ReturnType<typeof createProviderStreamActionBatch>,
+  options?: StreamActionEmissionOptions,
+): Promise<EmittedStreamContent> {
   let currentReasoning = "";
   let currentMessage = "";
   let finishReason: AssistantStepFinishReason = "stop";
@@ -363,7 +392,6 @@ export async function emitStreamContent(
   const emittedActionCallIds = new Set<string>();
   const emittedActionResultCallIds = new Set<string>();
   const providerToolCallIdsSeen = new Set<string>();
-  const providerActionBatch = createProviderStreamActionBatch({ emitFn, state });
   const handledInlineToolResultCallIds = new Set<string>();
   const invalidInputToolCallIds = new Set<string>();
   const inlineAuthorizationResults: TypedToolResult<ToolSet>[] = [];
@@ -663,16 +691,4 @@ export async function emitStreamContent(
     inlineAuthorizationResults,
     trailingInlineToolResultParts,
   };
-}
-
-function isInlineAuthorizationToolResult(toolResult: TypedToolResult<ToolSet>): boolean {
-  if (isPendingAuthorizationToolOutput(toolResult.output)) {
-    return true;
-  }
-  const ctx = contextStorage.getStore();
-  if (ctx === undefined) {
-    return false;
-  }
-  const stashed = readToolInterrupt(ctx, toolResult.toolCallId);
-  return stashed !== undefined && isAuthorizationSignal(stashed);
 }
