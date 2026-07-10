@@ -127,7 +127,8 @@ describe("setHarnessEmissionState", () => {
 });
 
 describe("emitStreamContent empty delivery", () => {
-  it("keeps reading provider deltas while the durable emitter is blocked", async () => {
+  it("reduces 368 fine-grained deltas to three dispatches behind a blocked writer", async () => {
+    const deltaCount = 368;
     let releaseFirstWrite!: () => void;
     const firstWrite = new Promise<void>((resolve) => {
       releaseFirstWrite = resolve;
@@ -139,9 +140,9 @@ describe("emitStreamContent empty delivery", () => {
       if (writes === 1) await firstWrite;
     });
     async function* controlledStream(): AsyncIterable<TextStreamPart<ToolSet>> {
-      yield { id: "text-1", text: "A", type: "text-delta" } as TextStreamPart<ToolSet>;
-      yield { id: "text-1", text: "B", type: "text-delta" } as TextStreamPart<ToolSet>;
-      yield { id: "text-1", text: "C", type: "text-delta" } as TextStreamPart<ToolSet>;
+      for (let index = 0; index < deltaCount; index += 1) {
+        yield { id: "text-1", text: "x", type: "text-delta" } as TextStreamPart<ToolSet>;
+      }
       yield { finishReason: "stop", type: "finish-step" } as TextStreamPart<ToolSet>;
       providerFinished = true;
     }
@@ -153,18 +154,14 @@ describe("emitStreamContent empty delivery", () => {
     releaseFirstWrite();
     await run;
 
-    const appended = vi
-      .mocked(emit)
-      .mock.calls.map(([event]) => event)
-      .filter((event) => event.type === "message.appended");
-    expect(appended).toEqual([
-      expect.objectContaining({
-        data: expect.objectContaining({ messageDelta: "A", messageSoFar: "A" }),
-      }),
-      expect.objectContaining({
-        data: expect.objectContaining({ messageDelta: "BC", messageSoFar: "ABC" }),
-      }),
-    ]);
+    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    const appended = events.filter((event) => event.type === "message.appended");
+    expect(events).toHaveLength(3);
+    expect(appended).toHaveLength(2);
+    expect(appended[0]?.data.messageDelta).toBe("x");
+    expect(appended[1]?.data.messageDelta).toBe("x".repeat(deltaCount - 1));
+    expect(appended[1]?.data.messageSoFar).toBe("x".repeat(deltaCount));
+    expect(events.at(-1)?.type).toBe("message.completed");
   });
 
   it("streams a split sentinel immediately and completes with a null message", async () => {
