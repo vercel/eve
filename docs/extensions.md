@@ -13,7 +13,7 @@ Start from a scaffold:
 npx eve@latest extension init my-crm
 ```
 
-This creates the package, installs dependencies, and initializes Git — the same flow as `eve init` for agents, without starting `eve dev`. You get `ext/extension.ts`, TypeScript config, and a `package.json` ready to publish or mount. Add tools, skills, hooks, and connections under `ext/` yourself.
+This creates the package, installs dependencies, and initializes Git. You get `ext/extension.ts`, TypeScript config, and a `package.json` ready to publish or mount. Add tools, skills, hooks, and connections under `ext/` yourself.
 
 An extension is an agent-shaped directory without `agent.ts` or `sandbox` (those belong to the consuming agent). Every slot works as it does in an agent, with names derived from paths.
 

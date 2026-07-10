@@ -88,8 +88,7 @@ export function initExtensionInstructions(): string {
     "prints what was set up and how to author, build, and mount the extension —",
     "it does not start eve dev (extensions are not standalone agents).",
     "",
-    "Build with `eve extension build` (or the package `build` script). Use",
-    "`eve init` only when the user wants a full agent app instead.",
+    "Build with `eve extension build` (or the package `build` script).",
   ].join("\n");
 }
 

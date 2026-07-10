@@ -1,6 +1,6 @@
 ---
 title: "CLI"
-description: "Reference for every eve CLI command: init, extension, info, build, start, dev, link, deploy, eval, and channels."
+description: "Reference for every eve CLI command: init, info, build, start, dev, link, deploy, eval, channels, and extension."
 ---
 
 The `eve` binary (`bin: eve`) runs from your app root, and every command first loads `.env`/`.env.local` from that root. Running `eve` with no command runs `eve dev`.
@@ -55,7 +55,7 @@ Commands for reusable [extension](/docs/extensions) packages. An extension is id
 eve extension init [target]
 ```
 
-Creates a new extension package — same install-and-git flow as agent `eve init`, but the layout is `ext/` instead of `agent/`, and the command prints next steps instead of starting `eve dev`.
+Creates a new extension package, installs dependencies, and initializes Git. Prints next steps instead of starting `eve dev`.
 
 | Target                      | What happens                                                  |
 | --------------------------- | ------------------------------------------------------------- |
@@ -63,8 +63,7 @@ Creates a new extension package — same install-and-git flow as agent `eve init
 | `eve extension init .`      | Scaffold in the current empty directory                       |
 | No target                   | Same as `.` for humans; coding agents get a short setup guide |
 
-- Create-only: cannot target an existing project that already has a `package.json`
-- Does not start `eve dev` or a coding-agent REPL
+Create-only: cannot target an existing project that already has a `package.json`.
 
 See [Extensions](/docs/extensions) for authoring and mount details.
 
