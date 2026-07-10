@@ -128,9 +128,18 @@ development server. Targeting an existing project directory (`eve init .`) adds
 the agent files and missing dependencies instead. It does not create a Vercel
 project or deploy the agent.
 
+To create a reusable extension package instead of an agent:
+
+```bash
+npx eve@latest init --extension my-crm
+```
+
+Same install and Git steps; next steps are printed instead of starting `eve dev`.
+
 CLI commands:
 
 - `eve init <name>` — create a new agent
+- `eve init --extension <name>` — create a new extension package
 - `eve info` — discovery results and compiled artifacts
 - `eve build` — compile `.eve/` and build the host output
 - `eve start` — serve the built `.output/` app

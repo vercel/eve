@@ -9,7 +9,7 @@ The `eve` binary (`bin: eve`) runs from your app root, and every command first l
 
 | Command                   | Description                                                                                                                                           |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eve init [target]`       | Scaffold a new agent, or add one to an existing project directory                                                                                     |
+| `eve init [target]`       | Create a new agent or extension package, or add an agent to an existing project                                                                       |
 | `eve info`                | Print the resolved application, including discovered tools, skills, subagents, schedules, channels, routes, artifact paths, and discovery diagnostics |
 | `eve build`               | Compile `.eve/` artifacts and build the host output; prints the output directory                                                                      |
 | `eve start`               | Serve the built `.output/` app; prints the listening URL                                                                                              |
@@ -26,20 +26,40 @@ When `eve build` fails on discovery errors, it prints the full diagnostics repor
 ## `eve init`
 
 ```bash
-eve init [target] [--channel-web-nextjs]
+eve init [target] [--extension] [--channel-web-nextjs]
 ```
 
-The optional `target` decides the mode:
+Creates a new agent app, adds an agent to an existing app, or (with `--extension`) creates a reusable extension package. Always installs dependencies. New directories also initialize Git.
 
-- A name (`eve init my-agent`) scaffolds a fresh project in a new `my-agent/` directory.
-- An existing directory, including `.` for the current one (`eve init .`), adds an agent to that project. The project needs a `package.json`, the `agent/` files must not exist yet, and the missing `eve`, `ai`, and `zod` dependencies are added without touching anything else.
-- Omitting the target scaffolds or updates the current directory, the same as `eve init .`. The exception is a coding agent (Claude Code, Cursor, and the like): running `eve init` with no target prints a setup guide instead of scaffolding, since a bare invocation means the agent has not chosen what to build yet.
+### Agents
 
-Both scaffold modes install dependencies. A fresh project initializes Git; an existing project keeps its repository and scripts. On an interactive human terminal, when a supported coding-agent CLI (`claude`, `codex`, `cursor-agent`, `droid`, `gemini`, `opencode`, or `pi`) is on `PATH`, `eve init` offers the available REPLs and `eve dev` (the default). Each REPL receives a project-specific prompt that guides the user through building the agent. It also explains that bare `eve dev` starts HMR and the agent's terminal REPL, while `eve dev --no-ui` is the controllable verification path. Without any of those executables, human invocations run `eve dev` through the detected project package manager. Fresh projects inherit a parent workspace manager when one is present; otherwise they use the manager that launched `eve init`. Coding-agent invocations print the same project-specific handoff, and the agent can run that command with `--no-ui` for headless verification.
+| Target                                    | What happens                                                                                                                                             |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `eve init my-agent`                       | New agent project in `my-agent/`                                                                                                                         |
+| `eve init .` (or an existing project dir) | Adds `agent/` plus missing `eve`, `ai`, and `zod` deps. Needs a `package.json` and no `agent/` files yet                                                 |
+| `eve init` with no target                 | Same as `eve init .`, except coding agents (Claude Code, Cursor, and similar) get a setup guide instead of scaffolding — they have not chosen a name yet |
 
-| Flag                   | Type | Default | Description                                                                                                                            |
-| ---------------------- | ---- | ------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `--channel-web-nextjs` | flag | off     | Add the Web Chat application (a Next.js app). Rejected when adding to an existing project; run `eve channels add web` there afterward. |
+After an agent scaffold, a human terminal usually continues into `eve dev` (or a coding-agent REPL if one is on `PATH` and you pick it). Coding-agent launches print the next steps instead of opening the TUI, so the session does not get stuck. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
+
+### Extensions
+
+```bash
+eve init --extension my-crm
+```
+
+Creates a new extension package — the same install-and-git flow as agent init, but the layout is `ext/` instead of `agent/`, and init prints next steps instead of starting `eve dev`.
+
+- Use a new directory name, or an empty directory with `eve init --extension .`
+- Cannot target an existing project that already has a `package.json`
+- Cannot combine with `--channel-web-nextjs`
+- Coding agents with no target get a short setup guide (same rule as agent init)
+
+See [Extensions](/docs/extensions) for authoring, build, and mount details.
+
+| Flag                   | Type | Default | Description                                                                                           |
+| ---------------------- | ---- | ------- | ----------------------------------------------------------------------------------------------------- |
+| `--extension`          | flag | off     | Create an extension package instead of an agent. Cannot combine with `--channel-web-nextjs`.          |
+| `--channel-web-nextjs` | flag | off     | Add the Web Chat app (Next.js). Not for existing projects — run `eve channels add web` there instead. |
 
 ## `eve info`
 

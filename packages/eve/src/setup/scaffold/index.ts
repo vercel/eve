@@ -8,6 +8,11 @@ export {
 } from "./create/project.js";
 
 export {
+  scaffoldExtensionProject,
+  type ScaffoldExtensionProjectOptions,
+} from "./create/extension.js";
+
+export {
   DEFAULT_SLACK_CONNECTOR_SLUG,
   SLACK_CHANNEL_DEFAULT_ROUTE,
   deriveSlackConnectorSlug,

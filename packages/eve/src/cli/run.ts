@@ -309,13 +309,16 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     // Optional: a missing target scaffolds or updates the current directory,
     // matching `eve init .`.
     .command("init [target]")
-    .description("Create a new eve agent, or add one to an existing project directory.")
+    .description(
+      "Create a new eve agent or extension package, or add an agent to an existing project directory.",
+    )
+    .option("--extension", "Scaffold an extension package instead of an agent")
     .option("--channel-web-nextjs", "Add the Web Chat application (Next.js)")
     .option("-y, --yes", "Accepted for compatibility; has no effect")
     .action(
       async (
         target: string | undefined,
-        options: { channelWebNextjs?: boolean; yes?: boolean },
+        options: { channelWebNextjs?: boolean; extension?: boolean; yes?: boolean },
       ) => {
         if (options.yes) {
           logger.error("warning: --yes has no effect for eve init.");
@@ -324,6 +327,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
         const { runInitCommand } = await import("#cli/commands/init.js");
         await runInitCommand(logger, appRoot, target, {
           channelWebNextjs: options.channelWebNextjs,
+          extension: options.extension,
         });
       },
     );
