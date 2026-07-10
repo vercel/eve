@@ -1,37 +1,37 @@
 ---
 title: "CLI"
-description: "Reference for every eve CLI command: init, info, build, start, dev, link, deploy, eval, and channels."
+description: "Reference for every eve CLI command: init, extension, info, build, start, dev, link, deploy, eval, and channels."
 ---
 
 The `eve` binary (`bin: eve`) runs from your app root, and every command first loads `.env`/`.env.local` from that root. Running `eve` with no command runs `eve dev`.
 
 ## Commands
 
-| Command                   | Description                                                                                                                                           |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eve init [target]`       | Create a new agent or extension package, or add an agent to an existing project                                                                       |
-| `eve info`                | Print the resolved application, including discovered tools, skills, subagents, schedules, channels, routes, artifact paths, and discovery diagnostics |
-| `eve build`               | Compile `.eve/` artifacts and build the host output; prints the output directory                                                                      |
-| `eve start`               | Serve the built `.output/` app; prints the listening URL                                                                                              |
-| `eve dev`                 | Start the local dev server and open the terminal UI                                                                                                   |
-| `eve dev <url>`           | Connect the UI to an existing server URL (e.g. a remote deployment) instead of booting a local server                                                 |
-| `eve link`                | Link the directory to a Vercel project and pull AI Gateway credentials                                                                                |
-| `eve deploy`              | Deploy the agent to Vercel production (links first if needed)                                                                                         |
-| `eve eval`                | Run evals against the local app or a remote target                                                                                                    |
-| `eve channels add [kind]` | Scaffold a channel interactively, or by kind (`slack` \| `web`)                                                                                       |
-| `eve channels list`       | List user-authored channels                                                                                                                           |
+| Command                       | Description                                                                                                                                           |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `eve init [target]`           | Create a new agent, or add an agent to an existing project                                                                                            |
+| `eve extension init [target]` | Create a new extension package                                                                                                                        |
+| `eve extension build`         | Build the current package as an extension                                                                                                             |
+| `eve info`                    | Print the resolved application, including discovered tools, skills, subagents, schedules, channels, routes, artifact paths, and discovery diagnostics |
+| `eve build`                   | Compile `.eve/` artifacts and build the host output for an agent app; prints the output directory                                                     |
+| `eve start`                   | Serve the built `.output/` app; prints the listening URL                                                                                              |
+| `eve dev`                     | Start the local dev server and open the terminal UI                                                                                                   |
+| `eve dev <url>`               | Connect the UI to an existing server URL (e.g. a remote deployment) instead of booting a local server                                                 |
+| `eve link`                    | Link the directory to a Vercel project and pull AI Gateway credentials                                                                                |
+| `eve deploy`                  | Deploy the agent to Vercel production (links first if needed)                                                                                         |
+| `eve eval`                    | Run evals against the local app or a remote target                                                                                                    |
+| `eve channels add [kind]`     | Scaffold a channel interactively, or by kind (`slack` \| `web`)                                                                                       |
+| `eve channels list`           | List user-authored channels                                                                                                                           |
 
 When `eve build` fails on discovery errors, it prints the full diagnostics report (severity, message, source path) and the diagnostics artifact path.
 
 ## `eve init`
 
 ```bash
-eve init [target] [--extension] [--channel-web-nextjs]
+eve init [target] [--channel-web-nextjs]
 ```
 
-Creates a new agent app, adds an agent to an existing app, or (with `--extension`) creates a reusable extension package. Always installs dependencies. New directories also initialize Git.
-
-### Agents
+Creates a new agent app or adds an agent to an existing app. Always installs dependencies. New directories also initialize Git.
 
 | Target                                    | What happens                                                                                                                                             |
 | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -39,27 +39,46 @@ Creates a new agent app, adds an agent to an existing app, or (with `--extension
 | `eve init .` (or an existing project dir) | Adds `agent/` plus missing `eve`, `ai`, and `zod` deps. Needs a `package.json` and no `agent/` files yet                                                 |
 | `eve init` with no target                 | Same as `eve init .`, except coding agents (Claude Code, Cursor, and similar) get a setup guide instead of scaffolding — they have not chosen a name yet |
 
-After an agent scaffold, a human terminal usually continues into `eve dev` (or a coding-agent REPL if one is on `PATH` and you pick it). Coding-agent launches print the next steps instead of opening the TUI, so the session does not get stuck. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
+After scaffolding, a human terminal usually continues into `eve dev` (or a coding-agent REPL if one is on `PATH` and you pick it). Coding-agent launches print the next steps instead of opening the TUI, so the session does not get stuck. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
 
-### Extensions
-
-```bash
-eve init --extension my-crm
-```
-
-Creates a new extension package — the same install-and-git flow as agent init, but the layout is `ext/` instead of `agent/`, and init prints next steps instead of starting `eve dev`.
-
-- Use a new directory name, or an empty directory with `eve init --extension .`
-- Cannot target an existing project that already has a `package.json`
-- Cannot combine with `--channel-web-nextjs`
-- Coding agents with no target get a short setup guide (same rule as agent init)
-
-See [Extensions](/docs/extensions) for authoring, build, and mount details.
+For reusable packages of tools and skills, use [`eve extension init`](#eve-extension) instead.
 
 | Flag                   | Type | Default | Description                                                                                           |
 | ---------------------- | ---- | ------- | ----------------------------------------------------------------------------------------------------- |
-| `--extension`          | flag | off     | Create an extension package instead of an agent. Cannot combine with `--channel-web-nextjs`.          |
 | `--channel-web-nextjs` | flag | off     | Add the Web Chat app (Next.js). Not for existing projects — run `eve channels add web` there instead. |
+
+## `eve extension`
+
+Commands for reusable extension packages. An extension is identified by `package.json#eve.extension` (for example `"eve": { "extension": "./ext" }`).
+
+### `eve extension init`
+
+```bash
+eve extension init [target]
+```
+
+Creates a new extension package — same install-and-git flow as agent `eve init`, but the layout is `ext/` instead of `agent/`, and the command prints next steps instead of starting `eve dev`.
+
+| Target                      | What happens                                                  |
+| --------------------------- | ------------------------------------------------------------- |
+| `eve extension init my-crm` | New extension package in `my-crm/`                            |
+| `eve extension init .`      | Scaffold in the current empty directory                       |
+| No target                   | Same as `.` for humans; coding agents get a short setup guide |
+
+- Create-only: cannot target an existing project that already has a `package.json`
+- Does not start `eve dev` or a coding-agent REPL
+
+See [Extensions](/docs/extensions) for authoring and mount details.
+
+### `eve extension build`
+
+```bash
+eve extension build
+```
+
+Builds the current package as an extension: compiles the mount factory and tool re-exports into `dist/`, and fills the package `exports` map. Requires `package.json#eve.extension`.
+
+Agent apps use `eve build` instead. Running `eve build` in an extension package fails with a pointer to this command.
 
 ## `eve info`
 
@@ -79,7 +98,7 @@ Run this first when something behaves unexpectedly. It confirms a file was disco
 eve build
 ```
 
-No flags. Compiles to `.eve/` and builds the host output, then prints the built output path.
+No flags. Compiles to `.eve/` and builds the host output for an **agent** app, then prints the built output path. Extension packages must use [`eve extension build`](#eve-extension-build).
 
 Useful artifacts written under `.eve/` (preserved even on partial failure):
 

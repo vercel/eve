@@ -64,8 +64,8 @@ function packageJsonTemplate(includeRootOnlyFields: boolean): string {
     ".": "./ext/extension.ts"
   },
   "scripts": {
-    "build": "eve build",
-    "prepare": "eve build",
+    "build": "eve extension build",
+    "prepare": "eve extension build",
     "typecheck": "tsc"
   },
   "dependencies": {
@@ -147,10 +147,11 @@ unavailable, use https://eve.dev/docs/extensions as a fallback.
 
 ## Build and publish
 
-\`eve build\` (wired to \`build\`/\`prepare\`) compiles the mount factory and tool
-re-exports into \`dist/\` and fills the package \`exports\` map. Ship both \`ext/\`
-(source the consumer recompiles) and \`dist/\`. Keep \`eve\` as a peer dependency
-so the consumer's eve is the one that runs.
+\`eve extension build\` (wired to \`build\`/\`prepare\`) compiles the mount factory
+and tool re-exports into \`dist/\` and fills the package \`exports\` map. Ship both
+\`ext/\` (source the consumer recompiles) and \`dist/\`. Keep \`eve\` as a peer
+dependency so the consumer's eve is the one that runs. Use \`eve build\` only for
+agent apps — not extension packages.
 `;
 
 const CLAUDE_MD_TEMPLATE = `@AGENTS.md

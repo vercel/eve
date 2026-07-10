@@ -14,10 +14,8 @@ import {
 import {
   ensureChannel,
   scaffoldBaseProject,
-  scaffoldExtensionProject,
   type EnsureChannelOptions,
   type ScaffoldBaseProjectOptions,
-  type ScaffoldExtensionProjectOptions,
 } from "#setup/scaffold/index.js";
 import { pathExists } from "#setup/path-exists.js";
 import { WizardCancelledError } from "#setup/step.js";
@@ -101,16 +99,6 @@ function dependencies(
         merged.evePackage = BASE_VERSIONS.evePackage;
       }
       return scaffoldBaseProject(merged);
-    },
-    scaffoldExtensionProject: (options: ScaffoldExtensionProjectOptions) => {
-      const merged = {
-        ...options,
-        evePackage: options.evePackage ?? BASE_VERSIONS.evePackage,
-        typescriptPackageVersion:
-          options.typescriptPackageVersion ?? BASE_VERSIONS.typescriptPackageVersion,
-        zodPackageVersion: options.zodPackageVersion ?? BASE_VERSIONS.zodPackageVersion,
-      };
-      return scaffoldExtensionProject(merged);
     },
     ensureChannel: (options: EnsureChannelOptions) =>
       ensureChannel({
@@ -1209,140 +1197,5 @@ describe("runInitCommand", () => {
       expect(snapshot.split("\n")).toHaveLength(1);
       expect([...snapshot].length).toBeLessThan(screen.columns);
     }
-  });
-
-  it("scaffolds an extension package and prints next steps without starting eve dev", async () => {
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-extension-"));
-    const output = logger();
-    const deps = dependencies();
-
-    await runInitCommand(output, parentDirectory, "my-crm", { extension: true }, deps);
-
-    const projectPath = join(parentDirectory, "my-crm");
-    const packageJson = JSON.parse(await readFile(join(projectPath, "package.json"), "utf8")) as {
-      eve?: { extension?: string };
-      peerDependencies?: { eve?: string };
-      devDependencies?: { eve?: string; typescript?: string };
-      dependencies?: { zod?: string; ai?: string };
-      scripts?: Record<string, string>;
-    };
-    expect(packageJson.eve?.extension).toBe("./ext");
-    expect(packageJson.peerDependencies?.eve).toBe("^0.6.0");
-    expect(packageJson.devDependencies?.eve).toBe("^0.6.0");
-    expect(packageJson.dependencies?.zod).toBe("4.0.0");
-    expect(packageJson.dependencies?.ai).toBeUndefined();
-    expect(packageJson.scripts?.build).toBe("eve build");
-    expect(packageJson.scripts?.dev).toBeUndefined();
-    expect(await readFile(join(projectPath, "ext/extension.ts"), "utf8")).toContain(
-      "defineExtension",
-    );
-    await expect(pathExists(join(projectPath, "ext/tools"))).resolves.toBe(false);
-    await expect(pathExists(join(projectPath, "agent"))).resolves.toBe(false);
-
-    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
-      "pnpm",
-      projectPath,
-      expect.objectContaining({ bypassMinimumReleaseAge: true }),
-    );
-    expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
-    expect(deps.selectInitHandoff).not.toHaveBeenCalled();
-    expect(deps.spawnCodingAgentRepl).not.toHaveBeenCalled();
-    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
-
-    const printed = output.messages.join("\n");
-    expect(printed).toContain("Created an eve extension in ");
-    expect(printed).toContain(projectPath);
-    expect(printed).toContain("Initialized Git repository");
-    expect(printed).toContain("ext/extension.ts");
-    expect(printed).toContain("pnpm run build");
-    expect(printed).toContain("agent/extensions/my-crm.ts");
-    expect(printed).not.toContain("eve dev");
-  });
-
-  it("scaffolds an extension for a coding agent with a named target and does not spawn eve dev", async () => {
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-extension-agent-"));
-    const output = logger();
-    const deps = dependencies();
-    deps.isCodingAgentLaunch.mockResolvedValue(true);
-
-    await runInitCommand(output, parentDirectory, "my-crm", { extension: true }, deps);
-
-    const projectPath = join(parentDirectory, "my-crm");
-    await expect(pathExists(join(projectPath, "ext/extension.ts"))).resolves.toBe(true);
-    expect(deps.runPackageManagerInstall).toHaveBeenCalled();
-    expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
-    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
-    expect(deps.selectInitHandoff).not.toHaveBeenCalled();
-    const printed = output.messages.join("\n");
-    expect(printed).toContain("Created an eve extension in ");
-    expect(printed).toContain("What we set up:");
-    expect(printed).not.toContain("Set up an eve agent");
-  });
-
-  it("hands a coding agent the extension setup guide when --extension omits the target", async () => {
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-extension-bare-"));
-    const output = logger();
-    const deps = dependencies();
-    deps.isCodingAgentLaunch.mockResolvedValue(true);
-
-    await runInitCommand(output, parentDirectory, undefined, { extension: true }, deps);
-
-    await expect(pathExists(join(parentDirectory, "ext"))).resolves.toBe(false);
-    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
-    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
-    const printed = output.messages.join("\n");
-    expect(printed).toContain("npx eve@latest init --extension <name>");
-    expect(printed).toContain("does not start eve dev");
-  });
-
-  it("rejects --extension with --channel-web-nextjs", async () => {
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-extension-web-"));
-    const output = logger();
-    const deps = dependencies();
-
-    await expect(
-      runInitCommand(
-        output,
-        parentDirectory,
-        "my-crm",
-        { extension: true, channelWebNextjs: true },
-        deps,
-      ),
-    ).rejects.toThrow("`--extension` and `--channel-web-nextjs` cannot be used together");
-
-    await expect(pathExists(join(parentDirectory, "my-crm"))).resolves.toBe(false);
-    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
-  });
-
-  it("rejects --extension against an existing project with package.json", async () => {
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-extension-existing-"));
-    const projectRoot = await createHostProject(parentDirectory);
-    const output = logger();
-    const deps = dependencies();
-
-    await expect(
-      runInitCommand(output, parentDirectory, "host-app", { extension: true }, deps),
-    ).rejects.toThrow("cannot add to an existing project");
-
-    await expect(pathExists(join(projectRoot, "ext"))).resolves.toBe(false);
-    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
-  });
-
-  it("honors EVE_INIT_PACKAGE_SPEC for extension peer and dev eve deps", async () => {
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-extension-spec-"));
-    const output = logger();
-    const deps = dependencies();
-    vi.stubEnv(EVE_INIT_PACKAGE_SPEC_ENV, "file:/tmp/eve-local.tgz");
-
-    await runInitCommand(output, parentDirectory, "my-crm", { extension: true }, deps);
-
-    const packageJson = JSON.parse(
-      await readFile(join(parentDirectory, "my-crm", "package.json"), "utf8"),
-    ) as {
-      peerDependencies?: { eve?: string };
-      devDependencies?: { eve?: string };
-    };
-    expect(packageJson.peerDependencies?.eve).toBe("file:/tmp/eve-local.tgz");
-    expect(packageJson.devDependencies?.eve).toBe("file:/tmp/eve-local.tgz");
   });
 });

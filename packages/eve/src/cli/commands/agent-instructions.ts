@@ -71,7 +71,7 @@ export function initAgentReplPrompt(options: { devCommand: string }): string {
 }
 
 /**
- * Pre-scaffold guide for a coding agent that ran `eve init --extension` with no
+ * Pre-scaffold guide for a coding agent that ran `eve extension init` with no
  * target. Mirrors agent bare-init: collect a package name, then re-run with it.
  */
 export function initExtensionInstructions(): string {
@@ -82,19 +82,19 @@ export function initExtensionInstructions(): string {
     "",
     "Ask the user for a package directory name, then run:",
     "",
-    "    npx eve@latest init --extension <name>",
+    "    npx eve@latest extension init <name>",
     "",
     "That creates the package, installs dependencies, and initializes Git. It",
     "prints what was set up and how to author, build, and mount the extension —",
     "it does not start eve dev (extensions are not standalone agents).",
     "",
-    "Do not run bare `eve init` without `--extension` unless the user wants a",
-    "full agent app instead.",
+    "Build with `eve extension build` (or the package `build` script). Do not use",
+    "`eve init` or `eve build` unless the user wants a full agent app instead.",
   ].join("\n");
 }
 
 /**
- * Post-scaffold handoff after `eve init --extension`. Same text for human and
+ * Post-scaffold handoff after `eve extension init`. Same text for human and
  * coding-agent launches: what was written and what to do next. Never assumes
  * `eve dev`.
  */
@@ -109,7 +109,7 @@ export function initExtensionHandoff(options: {
     "What we set up:",
     "  - package.json with eve.extension → ./ext, peer+dev eve, and zod",
     "  - ext/extension.ts (config schema via defineExtension)",
-    "  - build/prepare scripts → eve build",
+    "  - build/prepare scripts → eve extension build",
     "",
     "Next:",
     "  - Add tools, skills, hooks, or connections under ext/",

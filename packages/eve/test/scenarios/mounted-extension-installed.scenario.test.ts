@@ -49,7 +49,7 @@ const EXT_TREE: Readonly<Record<string, string>> = {
 };
 
 /**
- * Runs `eve build` over a `.ts`-authored extension and returns the built package
+ * Runs the extension package build over a `.ts`-authored extension and returns the built package
  * (compiled `dist/` + source `ext/`) as files to place under the consumer's real
  * `node_modules/`. Placing it there — rather than a workspace symlink — means the
  * mount's `.` entrypoint resolves under `node_modules` and is externalized, so

@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Add `eve init --extension` to scaffold a reusable extension package with `ext/extension.ts`, peer+dev `eve`, and build scripts.
+Add `eve extension init` and `eve extension build` for scaffolding and building extension packages. `eve build` is agent-only and points extension packages at `eve extension build`.

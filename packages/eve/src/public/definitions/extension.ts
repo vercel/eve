@@ -51,7 +51,7 @@ export interface ExtensionHandle<S extends StandardSchemaV1 = StandardSchemaV1> 
   (values: StandardSchemaV1.InferInput<S>): MountedExtension;
   /** The bound configuration, typed from the schema (defaults applied). */
   readonly config: StandardSchemaV1.InferOutput<S>;
-  /** The declared config schema; read by `eve build`. */
+  /** The declared config schema; read by `eve extension build`. */
   readonly schema: S;
 }
 

@@ -25,11 +25,7 @@ import {
 } from "#setup/primitives/index.js";
 import type { ProcessOutputLine } from "#setup/primitives/process-output.js";
 import { addAgentToProject } from "#setup/scaffold/create/add-to-project.js";
-import {
-  ensureChannel,
-  scaffoldBaseProject,
-  scaffoldExtensionProject,
-} from "#setup/scaffold/index.js";
+import { ensureChannel, scaffoldBaseProject } from "#setup/scaffold/index.js";
 import { WizardCancelledError } from "#setup/step.js";
 import type { WorkspaceRootMutation } from "#setup/scaffold/workspace-root.js";
 import {
@@ -41,8 +37,6 @@ import {
   initAgentDevHandoff,
   initAgentInstructions,
   initAgentReplPrompt,
-  initExtensionHandoff,
-  initExtensionInstructions,
 } from "./agent-instructions.js";
 import { tryInitializeGit, type GitInitResult } from "./init-git.js";
 import { selectInitHandoff, spawnCodingAgentRepl, type InitHandoff } from "./init-repl.js";
@@ -55,8 +49,6 @@ export interface InitCliLogger {
 export interface InitCommandOptions {
   /** Add the Web Chat channel (a Next.js app). Set by `--channel-web-nextjs`. */
   channelWebNextjs?: boolean;
-  /** Scaffold an extension package instead of an agent. Set by `--extension`. */
-  extension?: boolean;
 }
 
 export interface InitCommandDependencies {
@@ -68,7 +60,6 @@ export interface InitCommandDependencies {
   now: () => number;
   runPackageManagerInstall: typeof runPackageManagerInstall;
   scaffoldBaseProject: typeof scaffoldBaseProject;
-  scaffoldExtensionProject: typeof scaffoldExtensionProject;
   selectInitHandoff: typeof selectInitHandoff;
   spawnCodingAgentRepl: typeof spawnCodingAgentRepl;
   spawnPackageManager: typeof spawnPackageManager;
@@ -84,7 +75,6 @@ const defaultDependencies: InitCommandDependencies = {
   now: () => performance.now(),
   runPackageManagerInstall,
   scaffoldBaseProject,
-  scaffoldExtensionProject,
   selectInitHandoff,
   spawnCodingAgentRepl,
   spawnPackageManager,
@@ -221,28 +211,18 @@ async function scaffoldProject(
   const workspaceRootMutations: WorkspaceRootMutation[] = [];
   try {
     const stagedProjectName = createInPlace ? basename(projectPath) : projectName;
-    const onWorkspaceRootMutation = (mutation: WorkspaceRootMutation) => {
-      workspaceRootMutations.push(mutation);
+    const scaffoldOptions = {
+      projectName: stagedProjectName,
+      model: DEFAULT_AGENT_MODEL_ID,
+      evePackage,
+      targetDirectory: stagingDirectory,
+      workspaceProbeDirectory: projectPath,
+      packageManager,
+      onWorkspaceRootMutation: (mutation: WorkspaceRootMutation) => {
+        workspaceRootMutations.push(mutation);
+      },
     };
-    const stagedProjectPath =
-      options.extension === true
-        ? await dependencies.scaffoldExtensionProject({
-            projectName: stagedProjectName,
-            evePackage,
-            targetDirectory: stagingDirectory,
-            workspaceProbeDirectory: projectPath,
-            packageManager,
-            onWorkspaceRootMutation,
-          })
-        : await dependencies.scaffoldBaseProject({
-            projectName: stagedProjectName,
-            model: DEFAULT_AGENT_MODEL_ID,
-            evePackage,
-            targetDirectory: stagingDirectory,
-            workspaceProbeDirectory: projectPath,
-            packageManager,
-            onWorkspaceRootMutation,
-          });
+    const stagedProjectPath = await dependencies.scaffoldBaseProject(scaffoldOptions);
 
     if (options.channelWebNextjs === true) {
       await dependencies.ensureChannel({
@@ -251,7 +231,9 @@ async function scaffoldProject(
         packageManager,
         workspaceProbeDirectory: projectPath,
         configureVercelServices: false,
-        onWorkspaceRootMutation,
+        onWorkspaceRootMutation: (mutation: WorkspaceRootMutation) => {
+          workspaceRootMutations.push(mutation);
+        },
       });
     }
 
@@ -286,7 +268,6 @@ type PreparedInitProject =
 type InitResult = {
   agentElapsedMs: number;
   agentLaunched: boolean;
-  extension: boolean;
   installElapsedMs: number;
   packageManager: PackageManagerKind;
   projectPath: string;
@@ -337,14 +318,7 @@ async function runInitSteps(input: {
   progress.update("Preparing project");
 
   try {
-    if (options.extension === true && options.channelWebNextjs === true) {
-      throw new Error(
-        "`--extension` and `--channel-web-nextjs` cannot be used together. Scaffold an extension package, then mount it from a consumer agent.",
-      );
-    }
-
     const agentLaunched = await dependencies.isCodingAgentLaunch();
-    const extension = options.extension === true;
     const rawTarget = target ?? CURRENT_DIRECTORY_PROJECT_NAME;
     const currentDirectoryTarget = isCurrentDirectoryTarget(rawTarget);
     const existingDirectory = currentDirectoryTarget
@@ -354,25 +328,8 @@ async function runInitSteps(input: {
       : await resolveTargetDirectory(parentDirectory, rawTarget);
     const evePackage = resolveInitEvePackageOverride();
 
-    if (extension && existingDirectory !== undefined) {
-      throw new Error(
-        "`--extension` creates a new extension package and cannot add to an existing project. " +
-          "Pass a new directory name, or run from an empty directory with `eve init --extension .`.",
-      );
-    }
-
-    const scaffoldPhase = extension
-      ? "creating extension"
-      : existingDirectory === undefined
-        ? "creating agent"
-        : "adding agent";
-    progress.update(
-      extension
-        ? "Creating extension"
-        : existingDirectory === undefined
-          ? "Creating agent"
-          : "Adding agent",
-    );
+    const scaffoldPhase = existingDirectory === undefined ? "creating agent" : "adding agent";
+    progress.update(existingDirectory === undefined ? "Creating agent" : "Adding agent");
     initLog.debug(scaffoldPhase);
     const agentStartedAt = dependencies.now();
     let project: PreparedInitProject;
@@ -469,32 +426,29 @@ async function runInitSteps(input: {
         ...project,
         agentElapsedMs,
         agentLaunched,
-        extension,
         gitResult: await dependencies.tryInitializeGit(project.projectPath),
         installElapsedMs,
       };
     }
 
-    return { ...project, agentElapsedMs, agentLaunched, extension, installElapsedMs };
+    return { ...project, agentElapsedMs, agentLaunched, installElapsedMs };
   } finally {
     progress.stop();
   }
 }
 
 /**
- * Creates a new eve agent or extension package (`target` is a project name), or
- * adds an agent to an existing project (`target` is a directory), without
- * prompts or external provisioning.
+ * Creates a new eve agent (`target` is a project name), or adds one to an
+ * existing project (`target` is a directory), without prompts or external
+ * provisioning.
  *
- * Agent mode: runs launched by a coding agent get the dev command printed
- * instead of spawned after scaffolding, since the dev TUI would wedge the
- * launching agent. A coding agent that omits the target entirely gets the setup
- * guide printed and nothing scaffolded, since a bare `eve init` means it has
- * not yet chosen what to build.
+ * Runs launched by a coding agent get the dev command printed instead of
+ * spawned after scaffolding, since the dev TUI would wedge the launching agent.
+ * A coding agent that omits the target entirely gets the setup guide printed and
+ * nothing scaffolded, since a bare `eve init` means it has not yet chosen what to
+ * build.
  *
- * Extension mode (`--extension`): always scaffolds when a target is set
- * (including coding-agent launches), then prints what was created and next
- * steps. It never starts `eve dev` or a coding-agent REPL.
+ * For extension packages, use `eve extension init` instead.
  */
 export async function runInitCommand(
   logger: InitCliLogger,
@@ -508,38 +462,11 @@ export async function runInitCommand(
   // explicit target) rather than silently scaffolding the current directory. A
   // human, or an explicit `.`/`<name>`, still scaffolds.
   if (target === undefined && (await dependencies.isCodingAgentLaunch())) {
-    logger.log(options.extension === true ? initExtensionInstructions() : initAgentInstructions());
+    logger.log(initAgentInstructions());
     return;
   }
 
   const result = await runInitSteps({ dependencies, logger, options, parentDirectory, target });
-
-  if (result.extension) {
-    logger.log(
-      `${pc.green("✓")} Created an ${EVE_WORDMARK} extension in ${pc.bold(result.projectPath)} ${pc.dim(`in ${formatElapsed(result.agentElapsedMs)}`)}`,
-    );
-    if (result.kind === "created") {
-      for (const mutation of result.workspaceRootMutations) {
-        logger.log(pc.yellow(`⚠ ${formatWorkspaceRootMutationWarning(mutation)}`));
-      }
-    }
-    logger.log(
-      `${pc.green("✓")} Installed dependencies ${pc.dim(`in ${formatElapsed(result.installElapsedMs)}`)}`,
-    );
-    if (result.kind === "created" && result.gitResult.kind === "failed") {
-      logger.error(pc.yellow(`Git initialization failed: ${result.gitResult.reason}`));
-    } else if (result.kind === "created" && result.gitResult.kind === "initialized") {
-      logger.log(`${pc.green("✓")} Initialized Git repository`);
-    }
-    logger.log(
-      initExtensionHandoff({
-        packageManager: result.packageManager,
-        packageName: basename(result.projectPath),
-        projectPath: result.projectPath,
-      }),
-    );
-    return;
-  }
 
   if (result.kind === "created") {
     logger.log(

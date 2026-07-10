@@ -27,7 +27,7 @@ describe("initAgentInstructions", () => {
     // pre-scaffold guide renders the universal `npx eve dev` through the shared
     // prompt renderer rather than a launcher-specific command.
     expect(instructions).toContain("npx eve@latest init <name>");
-    expect(instructions).toContain("npx eve@latest init --extension <name>");
+    expect(instructions).toContain("npx eve@latest extension init <name>");
     expect(instructions).toContain("full docs are bundled");
     expect(instructions).toContain("node_modules/eve/docs/");
     expect(instructions).toContain("resolve\nthe installed `eve` package location");
@@ -95,10 +95,11 @@ describe("initAgentReplPrompt", () => {
 });
 
 describe("initExtensionInstructions", () => {
-  it("points coding agents at init --extension with a package name", () => {
+  it("points coding agents at extension init with a package name", () => {
     const instructions = initExtensionInstructions();
 
-    expect(instructions).toContain("npx eve@latest init --extension <name>");
+    expect(instructions).toContain("npx eve@latest extension init <name>");
+    expect(instructions).toContain("eve extension build");
     expect(instructions).toContain("does not start eve dev");
     expect(instructions).not.toContain("{{");
   });
@@ -114,6 +115,7 @@ describe("initExtensionHandoff", () => {
 
     expect(handoff).toContain("ext/extension.ts");
     expect(handoff).toContain("pnpm run build");
+    expect(handoff).toContain("eve extension build");
     expect(handoff).toContain('import ext from "my-crm"');
     expect(handoff).toContain("agent/extensions/my-crm.ts");
     expect(handoff).toContain("/tmp/my-crm");

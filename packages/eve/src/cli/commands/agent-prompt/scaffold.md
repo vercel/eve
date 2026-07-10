@@ -16,13 +16,14 @@ the interactive terminal UI.
 For a reusable extension package (tools/skills/hooks mounted into other agents),
 run:
 
-    npx eve@latest init --extension <name>
+    npx eve@latest extension init <name>
 
 That scaffolds an `ext/` package with `defineExtension`, installs dependencies,
-and prints authoring/build/mount next steps. It does not start `eve dev`.
+and prints authoring/build/mount next steps. It does not start `eve dev`. Build
+with `eve extension build` (or the package `build` script), not `eve build`.
 
 For an existing app, run `npx eve@latest init .` from its directory. This adds the
 agent and missing dependencies while leaving the existing Git repository and app
 scripts alone. If init cannot be used, install by hand with
 `npm install eve@latest ai zod`; manual installation does not add package scripts.
-`--extension` cannot add to an existing project — always pass a new name.
+`eve extension init` cannot add to an existing project — always pass a new name.

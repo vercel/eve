@@ -733,8 +733,8 @@ describe("scaffoldExtensionProject", () => {
       peerDependencies: { eve: "^0.25.0" },
       dependencies: { zod: "4.4.3" },
       scripts: {
-        build: "eve build",
-        prepare: "eve build",
+        build: "eve extension build",
+        prepare: "eve extension build",
         typecheck: "tsc",
       },
       engines: { node: "24.x" },

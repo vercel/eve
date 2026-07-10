@@ -57,7 +57,7 @@ interface ManagedExportTarget {
   readonly default: string;
 }
 
-/** Subpath exports `eve build` manages for an extension package. */
+/** Subpath exports `eve extension build` manages for an extension package. */
 const MANAGED_EXTENSION_EXPORTS: Readonly<Record<string, ManagedExportTarget>> = {
   ".": { types: "./dist/index.d.ts", default: "./dist/index.mjs" },
   "./tools": { types: "./dist/tools/index.d.ts", default: "./dist/tools/index.mjs" },
