@@ -6,7 +6,7 @@ import type {
   RuntimeSubagentCallActionRequest,
 } from "#runtime/actions/types.js";
 
-export const DEFAULT_SUBAGENT_MAX_DEPTH = 3;
+export const DEFAULT_SUBAGENT_MAX_DEPTH = 1;
 
 export type DelegatedRuntimeActionRequest =
   | RuntimeRemoteAgentCallActionRequest

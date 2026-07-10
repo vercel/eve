@@ -983,6 +983,7 @@ describe("createToolLoopHarness", () => {
       createTestSession({
         rootSessionId: "root-session",
         subagentDepth: 1,
+        subagentMaxDepth: 2,
       }),
       { message: "Hi" },
     );
