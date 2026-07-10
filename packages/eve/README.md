@@ -140,12 +140,12 @@ Build the package with `eve extension build`.
 CLI commands:
 
 - `eve init <name>` — create a new agent
-- `eve extension init <name>` — create a new extension package
-- `eve extension build` — build an extension package
 - `eve info` — discovery results and compiled artifacts
 - `eve build` — compile `.eve/` and build the host output
 - `eve start` — serve the built `.output/` app
 - `eve dev` — start the local runtime and REPL
+- `eve extension init <name>` — create a new extension package
+- `eve extension build` — build an extension package
 
 ## Deploying
 
