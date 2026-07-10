@@ -31,6 +31,37 @@ interface LocalSandboxMetadata {
   readonly version: typeof LOCAL_SANDBOX_METADATA_VERSION;
 }
 
+/**
+ * Capability options forwarded into just-bash's
+ * `Sandbox.create(SandboxOptions)`. Defined locally (rather than imported
+ * from `just-bash`) because the package is an optional peer dependency —
+ * eve must type-check without it installed. The shape is a structural
+ * subset of just-bash's `SandboxOptions`, so the object assigns directly
+ * into the `Sandbox.create` call.
+ *
+ * Includes the bundled-interpreter capability flags `python` and
+ * `javascript`. These forward through `Sandbox.create` into the internal
+ * `Bash` as of just-bash 3.1.0 (vercel-labs/just-bash#284); on older
+ * just-bash they are silently dropped, which is why eve's peer dependency
+ * floor is `just-bash@^3.1.0`. Both are surfaced as plain booleans,
+ * matching the public `JustBashSandboxCreateOptions` and keeping just-bash's
+ * richer types (`JavaScriptConfig`, `CommandName`, …) off eve's surface.
+ *
+ * The remaining capability flags (`commands`, `customCommands`, `fetch`)
+ * are intentionally NOT surfaced: their just-bash types cannot be honestly
+ * restated as primitives, and importing them would put just-bash's types on
+ * eve's public API — see issue #431.
+ */
+export interface JustBashSandboxOptions {
+  readonly defenseInDepth?: boolean;
+  readonly javascript?: boolean;
+  readonly maxCallDepth?: number;
+  readonly maxCommandCount?: number;
+  readonly maxLoopIterations?: number;
+  readonly python?: boolean;
+  readonly timeoutMs?: number;
+}
+
 export interface BashSandbox {
   captureState(): Promise<Record<string, unknown> | null>;
   dispose(): Promise<void>;
@@ -75,6 +106,7 @@ export async function createBashSandbox(input: {
   readonly appRoot: string;
   readonly autoInstall: boolean;
   readonly rootPath: string;
+  readonly sandboxOptions?: JustBashSandboxOptions;
   readonly sessionKey: string;
 }): Promise<BashSandbox> {
   const { ReadWriteFs, Sandbox } = await loadJustBashModule({
@@ -97,11 +129,20 @@ export async function createBashSandbox(input: {
 
   const sandbox = await Sandbox.create({
     cwd: WORKSPACE_ROOT,
+    // Author-supplied capability options (undefined entries fall back to
+    // just-bash's own defaults, keeping behavior unchanged when omitted).
+    defenseInDepth: input.sandboxOptions?.defenseInDepth,
     env: metadata?.env as Record<string, string> | undefined,
     fs: filesystem,
+    javascript: input.sandboxOptions?.javascript,
+    maxCallDepth: input.sandboxOptions?.maxCallDepth,
+    maxCommandCount: input.sandboxOptions?.maxCommandCount,
+    maxLoopIterations: input.sandboxOptions?.maxLoopIterations,
     network: {
       dangerouslyAllowFullInternetAccess: true,
     },
+    python: input.sandboxOptions?.python,
+    timeoutMs: input.sandboxOptions?.timeoutMs,
   });
 
   return {

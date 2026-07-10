@@ -17,6 +17,7 @@ import {
   createBashSandbox,
   createJustBashHandle,
   justBashSetNetworkPolicyUnsupported,
+  type JustBashSandboxOptions,
 } from "#execution/sandbox/bindings/just-bash-runtime.js";
 import {
   LOCAL_SANDBOX_TEMPLATE_RECENT_WINDOW_MS,
@@ -64,6 +65,19 @@ export function createJustBashSandboxBackend(
   input: CreateJustBashSandboxBackendInput = {},
 ): SandboxBackend {
   const autoInstall = input.createOptions?.autoInstall ?? true;
+  // Capability options forwarded into just-bash's `Sandbox.create`
+  // (everything on the public surface except the eve-only `autoInstall`).
+  // Undefined fields are dropped so each one falls back to just-bash's
+  // own default and behavior stays unchanged when nothing is passed.
+  const sandboxOptions: JustBashSandboxOptions = {
+    defenseInDepth: input.createOptions?.defenseInDepth,
+    javascript: input.createOptions?.javascript,
+    maxCallDepth: input.createOptions?.maxCallDepth,
+    maxCommandCount: input.createOptions?.maxCommandCount,
+    maxLoopIterations: input.createOptions?.maxLoopIterations,
+    python: input.createOptions?.python,
+    timeoutMs: input.createOptions?.timeoutMs,
+  };
   return {
     name: JUST_BASH_BACKEND_NAME,
     async prewarm(prewarmInput: SandboxBackendPrewarmInput): Promise<SandboxBackendPrewarmResult> {
@@ -81,6 +95,7 @@ export function createJustBashSandboxBackend(
         appRoot: prewarmInput.runtimeContext.appRoot,
         autoInstall,
         rootPath: temporaryTemplateRootPath,
+        sandboxOptions,
         sessionKey: prewarmInput.templateKey,
       });
       const templateSession = buildSandboxSession(
@@ -158,6 +173,7 @@ export function createJustBashSandboxBackend(
         appRoot: createInput.runtimeContext.appRoot,
         autoInstall,
         rootPath: sessionRootPath,
+        sandboxOptions,
         sessionKey: createInput.sessionKey,
       });
 
