@@ -24,7 +24,12 @@
     {
       "label": "Next.js projects pin TypeScript 6 for its compiler API",
       "dependencies": ["typescript"],
-      "packages": ["eve-docs", "framework-next", "web-chat-next-template"],
+      "packages": [
+        "eve-docs",
+        "framework-next",
+        "framework-next-better-auth",
+        "web-chat-next-template"
+      ],
       "dependencyTypes": ["dev"],
       "pinVersion": "6.0.3"
     },
