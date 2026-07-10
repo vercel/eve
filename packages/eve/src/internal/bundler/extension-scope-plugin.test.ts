@@ -6,7 +6,7 @@ import {
   type ExtensionScopeBundlerPlugin,
 } from "#internal/bundler/extension-scope-plugin.js";
 
-const SCOPES = [{ sourceRoot: "/pkg/crm/ext", packageNamespace: "acme-crm" }];
+const SCOPES = [{ sourceRoot: "/pkg/crm/extension", packageNamespace: "acme-crm" }];
 
 function pathPlugin(): ExtensionScopeBundlerPlugin {
   const created = createExtensionScopePlugin(SCOPES);
