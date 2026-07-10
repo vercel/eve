@@ -504,7 +504,6 @@ describe("resolveRuntimeAgentGraph", () => {
           rootPath: agentRoot,
           sourceId: "subagents/weather.ts",
           sourceKind: "module",
-          url: "https://weather.example.com",
         },
       ],
       subagentEdges: [
@@ -538,7 +537,7 @@ describe("resolveRuntimeAgentGraph", () => {
                   description: "Answer weather questions remotely.",
                   kind: "remote",
                   path: "/eve/v1/session",
-                  url: "https://weather.example.com",
+                  url: () => "https://weather.example.com",
                 },
               },
             },
@@ -586,6 +585,59 @@ describe("resolveRuntimeAgentGraph", () => {
     expect(nestedRemote?.definition).toMatchObject({
       kind: "remote",
       url: "https://qux.example.com",
+    });
+  });
+
+  it("resolves a remote subagent url function from process.env at runtime", async () => {
+    vi.stubEnv("WEATHER_AGENT_URL", "https://weather.internal.vercel.app");
+    const agentRoot = "/app/agent";
+    const manifest = createCompiledAgentManifest({
+      agentRoot,
+      appRoot: "/app",
+      config: {
+        model: {
+          id: TEST_DEFAULT_MODEL_ID,
+          routing: { kind: "gateway", target: "openai" },
+        },
+        name: "router",
+      },
+      remoteAgents: [
+        {
+          description: "Answer weather questions remotely.",
+          entryPath: `${agentRoot}/subagents/weather.ts`,
+          logicalPath: "subagents/weather.ts",
+          name: "weather",
+          nodeId: "subagents/weather.ts",
+          path: "/eve/v1/session",
+          rootPath: agentRoot,
+          sourceId: "subagents/weather.ts",
+          sourceKind: "module",
+        },
+      ],
+    });
+    const graph = await resolveRuntimeAgentGraph({
+      manifest,
+      moduleMap: {
+        nodes: {
+          [ROOT_COMPILED_AGENT_NODE_ID]: {
+            modules: {
+              "subagents/weather.ts": {
+                default: {
+                  description: "Answer weather questions remotely.",
+                  kind: "remote",
+                  path: "/eve/v1/session",
+                  url: () => process.env.WEATHER_AGENT_URL,
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(graph.root.subagentRegistry.subagentsByName.get("weather")?.definition).toMatchObject({
+      kind: "remote",
+      url: "https://weather.internal.vercel.app",
     });
   });
 

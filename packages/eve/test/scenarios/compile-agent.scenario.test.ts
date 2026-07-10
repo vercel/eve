@@ -1078,7 +1078,7 @@ describe("compileAgent", () => {
         "export default {",
         '  kind: "remote",',
         '  description: "Answer weather questions remotely.",',
-        '  url: "https://weather.example.com",',
+        '  url: () => process.env.WEATHER_AGENT_URL ?? "https://weather.example.com",',
         "};",
         "",
       ].join("\n"),
@@ -1119,9 +1119,10 @@ describe("compileAgent", () => {
         nodeId: "subagents/weather.ts",
         path: "/eve/v1/session",
         sourceId: "subagents/weather.ts",
-        url: "https://weather.example.com",
       },
     ]);
+    // A function `url` is resolved at runtime, so nothing is baked here.
+    expect(result.manifest.remoteAgents[0]).not.toHaveProperty("url");
     expect(result.manifest.subagents).toHaveLength(1);
     expect(result.manifest.subagents[0]?.agent.remoteAgents).toMatchObject([
       {

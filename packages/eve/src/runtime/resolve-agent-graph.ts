@@ -369,7 +369,11 @@ async function resolveRuntimeRemoteAgent(input: {
     path: input.sourceRef.path,
     sourceId: input.sourceRef.sourceId,
     sourceKind: "module",
-    url: input.sourceRef.url,
+    url: await resolveRemoteAgentUrl({
+      bakedUrl: input.sourceRef.url,
+      logicalPath: input.sourceRef.logicalPath,
+      resolvedUrl: resolvedRecord.url,
+    }),
   };
 
   if (typeof resolvedRecord.auth === "function") {
@@ -383,6 +387,28 @@ async function resolveRuntimeRemoteAgent(input: {
   }
 
   return resolvedRemoteAgent;
+}
+
+async function resolveRemoteAgentUrl(input: {
+  readonly bakedUrl: string | undefined;
+  readonly logicalPath: string;
+  readonly resolvedUrl: unknown;
+}): Promise<string> {
+  if (typeof input.resolvedUrl === "function") {
+    const resolved = await (input.resolvedUrl as () => unknown)();
+    if (typeof resolved !== "string" || resolved.length === 0) {
+      throw new Error(
+        `Remote agent "${input.logicalPath}" url function must return a non-empty string.`,
+      );
+    }
+    return resolved;
+  }
+
+  const url = input.bakedUrl ?? (typeof input.resolvedUrl === "string" ? input.resolvedUrl : "");
+  if (url.length === 0) {
+    throw new Error(`Remote agent "${input.logicalPath}" is missing a url.`);
+  }
+  return url;
 }
 
 function resolveRemoteAgentHeaders(value: unknown): HeadersValue | undefined {
