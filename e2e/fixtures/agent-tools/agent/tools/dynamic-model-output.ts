@@ -6,7 +6,7 @@ const RED_SQUARE_BASE64 =
 
 export default defineDynamic({
   events: {
-    "session.started": async () => {
+    "step.started": async () => {
       return {
         check_model_output: defineTool({
           description:
@@ -31,7 +31,7 @@ export default defineDynamic({
                 {
                   type: "file" as const,
                   data: { type: "data" as const, data: RED_SQUARE_BASE64 },
-                  filename: "red-square.png",
+                  filename: "color-swatch.png",
                   mediaType: "image/png",
                 },
               ],
