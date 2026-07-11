@@ -392,6 +392,76 @@ describe("collectInboundFileParts", () => {
     expect((parts[0]!.data as URL).href).toBe("https://files.slack.com/a/b/earlier.png");
   });
 
+  it("collects files from multiple thread messages, newest first", async () => {
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const thread = makeSlackThread({
+      refresh,
+      recentMessages: [
+        {
+          isMe: false,
+          raw: {
+            files: [
+              {
+                id: "F600",
+                mimetype: "text/csv",
+                url_private: "https://files.slack.com/a/b/older.csv",
+              },
+            ],
+          },
+        },
+        {
+          isMe: false,
+          raw: {
+            files: [
+              {
+                id: "F601",
+                mimetype: "image/png",
+                url_private: "https://files.slack.com/a/b/newer.png",
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    const parts = await collectInboundFileParts({
+      mention: emptyMention,
+      thread,
+      policy: DEFAULT_UPLOAD_POLICY,
+    });
+
+    expect(parts).toHaveLength(2);
+    expect((parts[0]!.data as URL).href).toBe("https://files.slack.com/a/b/newer.png");
+    expect((parts[1]!.data as URL).href).toBe("https://files.slack.com/a/b/older.csv");
+  });
+
+  it("caps thread-history collection at 10 file parts", async () => {
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const makeFiles = (prefix: string, count: number) =>
+      Array.from({ length: count }, (_, i) => ({
+        id: `${prefix}${i}`,
+        mimetype: "image/png",
+        url_private: `https://files.slack.com/a/b/${prefix}${i}.png`,
+      }));
+    const thread = makeSlackThread({
+      refresh,
+      recentMessages: [
+        { isMe: false, raw: { files: makeFiles("old", 6) } },
+        { isMe: false, raw: { files: makeFiles("new", 6) } },
+      ],
+    });
+
+    const parts = await collectInboundFileParts({
+      mention: emptyMention,
+      thread,
+      policy: DEFAULT_UPLOAD_POLICY,
+    });
+
+    expect(parts).toHaveLength(10);
+    expect((parts[0]!.data as URL).href).toBe("https://files.slack.com/a/b/new0.png");
+    expect((parts[9]!.data as URL).href).toBe("https://files.slack.com/a/b/old3.png");
+  });
+
   it.each([
     ["'disabled' literal", DISABLED_POLICY],
     ["maxBytes: 0", ZERO_BYTES_POLICY],

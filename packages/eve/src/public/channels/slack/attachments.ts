@@ -67,15 +67,22 @@ function toSlackFilePart(attachment: SlackAttachment, index: number): FilePart |
 }
 
 /**
+ * Upper bound on file parts collected from thread history for a single
+ * turn, keeping model input bounded on long, attachment-heavy threads.
+ */
+const THREAD_LOOKBACK_MAX_FILES = 10;
+
+/**
  * Collects file parts for an inbound mention.
  *
  * Prefers attachments on the triggering mention (the common case: user
  * uploads a file and mentions the bot in the same message). When the
  * mention has none, refreshes the thread via {@link SlackThread.refresh}
- * and picks the attachments of the latest message this app did not
- * author (the thread message `isMe` classification) — covering the case
- * where a user or another bot dropped a file in the thread first, then a
- * user mentioned the bot in a follow-up. Any error during refresh is logged
+ * and collects the attachments of every message this app did not author
+ * (the thread message `isMe` classification), newest first, capped at
+ * {@link THREAD_LOOKBACK_MAX_FILES} — covering the case where a user or
+ * another bot dropped a file in the thread first, then a user mentioned
+ * the bot in a follow-up. Any error during refresh is logged
  * and treated as "no attachments" so the text portion of the mention
  * still gets delivered.
  *
@@ -101,16 +108,16 @@ export async function collectInboundFileParts(input: {
   }
 
   const recent = input.thread.recentMessages;
-  for (let i = recent.length - 1; i >= 0; i -= 1) {
+  const collected: FilePart[] = [];
+  for (let i = recent.length - 1; i >= 0 && collected.length < THREAD_LOOKBACK_MAX_FILES; i -= 1) {
     const candidate = recent[i];
     if (!candidate || candidate.isMe) continue;
     const raw = candidate.raw as { files?: readonly Record<string, unknown>[] } | undefined;
     const attachments = extractAttachmentsFromRaw(raw?.files);
     const parts = collectSlackFileParts(attachments, input.policy);
-    if (parts.length > 0) return parts;
-    return [];
+    collected.push(...parts.slice(0, THREAD_LOOKBACK_MAX_FILES - collected.length));
   }
-  return [];
+  return collected;
 }
 
 function extractAttachmentsFromRaw(
