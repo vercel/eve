@@ -84,6 +84,29 @@ describe("schedule task routes", () => {
     expect(virtualSource).toContain("dispatchScheduleTask(event.name, config)");
   });
 
+  it("registers task handlers without cron entries when registerCronSchedules is false", () => {
+    const nitro = createNitroStub();
+    const registration = makeRegistration({
+      cron: "0 8 * * *",
+      logicalPath: "schedules/daily.md",
+      scheduleId: "daily",
+      sourceId: "schedules/daily.md",
+    });
+
+    registerScheduleTaskHandlers(nitro, {
+      artifactsConfig: ARTIFACTS_CONFIG,
+      dispatchModulePath: DISPATCH_MODULE_PATH,
+      registerCronSchedules: false,
+      registrations: [registration],
+    });
+
+    expect(nitro.options.experimental.tasks).toBe(true);
+    expect(nitro.options.tasks[registration.taskName]).toBeDefined();
+    expect(nitro.options.virtual[`#eve-schedule-task/${registration.taskName}`]).toBeDefined();
+    // No cron entries means Nitro's in-process schedule runner never starts.
+    expect(nitro.options.scheduledTasks).toEqual({});
+  });
+
   it("does nothing when there are no registrations", () => {
     const nitro = createNitroStub();
 
