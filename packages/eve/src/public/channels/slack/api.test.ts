@@ -40,6 +40,11 @@ function buildFetchMock(): { fetch: ReturnType<typeof vi.fn>; calls: FetchCall[]
         { headers: { "content-type": "application/json" } },
       );
     }
+    if (url === "https://slack.com/api/auth.test") {
+      return new Response(JSON.stringify({ ok: true, bot_id: "B01", user_id: "U_BOT" }), {
+        headers: { "content-type": "application/json" },
+      });
+    }
     if (url === "https://slack.com/api/conversations.replies") {
       return new Response(
         JSON.stringify({
@@ -445,6 +450,51 @@ describe("SlackThread.refresh", () => {
     expect("attachments" in firstMessage).toBe(false);
     expect("author" in firstMessage).toBe(false);
     expect("metadata" in firstMessage).toBe(false);
+  });
+
+  it("marks only the agent's own bot messages as isMe, not other apps", async () => {
+    // auth.test resolves our own bot id; a different bot in the thread must
+    // not count as the agent so "last-agent-reply" context isn't cut short.
+    const fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "https://slack.com/api/auth.test") {
+        return new Response(JSON.stringify({ ok: true, bot_id: "B_SELF", user_id: "U_SELF" }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === "https://slack.com/api/conversations.replies") {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            messages: [
+              { text: "hi", ts: "1.000001", thread_ts: "1.000001", user: "U01" },
+              { text: "our reply", ts: "1.000002", thread_ts: "1.000001", bot_id: "B_SELF" },
+              { text: "other bot", ts: "1.000003", thread_ts: "1.000001", bot_id: "B_OTHER" },
+            ],
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetch);
+
+    const { thread } = buildSlackBinding({
+      botToken: "xoxb-test",
+      channelId: "C01",
+      threadTs: "1.000001",
+      teamId: undefined,
+    });
+
+    await thread.refresh();
+
+    expect(thread.recentMessages.map((m) => [m.botId, m.isMe])).toEqual([
+      [undefined, false],
+      ["B_SELF", true],
+      ["B_OTHER", false],
+    ]);
   });
 });
 
