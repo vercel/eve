@@ -162,7 +162,7 @@ EVE_EXTERNAL_CRON=1 eve build
 The build then registers no in-process cron. Instead it:
 
 - mounts the same unguessable token cron route the Vercel preset uses (`POST /eve/v1/cron/<token>`); the path is the credential, and a configured `CRON_SECRET` is additionally enforced as a bearer token, exactly as on Vercel;
-- writes `.output/eve/cron-manifest.json` with the route path and each schedule's name and cron expression — the self-hosted equivalent of the `config.crons[]` Vercel reads from build output. The manifest contains the secret path, so it lives only in build output and is never served.
+- writes `.output/eve/cron-manifest.json` with the route path and one entry per distinct cron expression, each listing the schedules it dispatches — the self-hosted equivalent of the `config.crons[]` Vercel reads from build output. Create one scheduler job per entry: a POST fires every schedule registered for that expression, so one job per schedule would double-dispatch shared expressions. The manifest contains the secret path, so it lives only in build output and is never served.
 
 Your scheduler drives the deployment the same way Vercel Cron does: on each due tick, POST to the route with the cron expression in the `x-vercel-cron-schedule` header:
 

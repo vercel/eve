@@ -33,6 +33,14 @@ const REGISTRATIONS: ScheduleRegistration[] = [
     sourceId: "schedules/heartbeat.md",
     taskName: "eve.schedule.heartbeat",
   },
+  {
+    cron: "*/5 * * * *",
+    description: 'Run eve schedule "sync".',
+    logicalPath: "schedules/sync.md",
+    scheduleId: "sync",
+    sourceId: "schedules/sync.md",
+    taskName: "eve.schedule.sync",
+  },
 ];
 
 describe("applyExternalCronHandlerRoute manifest emission", () => {
@@ -46,7 +54,7 @@ describe("applyExternalCronHandlerRoute manifest emission", () => {
     await rm(outputDir, { force: true, recursive: true });
   });
 
-  it("writes the cron manifest into the output directory on compiled", async () => {
+  it("writes the cron manifest grouped by expression on compiled", async () => {
     const compiledHooks: Array<() => Promise<void> | void> = [];
     const nitro: ExternalCronNitro = {
       hooks: {
@@ -78,8 +86,8 @@ describe("applyExternalCronHandlerRoute manifest emission", () => {
       version: 1,
       cronHandlerRoute: route,
       crons: [
-        { name: "daily", cron: "0 8 * * *" },
-        { name: "heartbeat", cron: "*/5 * * * *" },
+        { cron: "0 8 * * *", schedules: ["daily"] },
+        { cron: "*/5 * * * *", schedules: ["heartbeat", "sync"] },
       ],
     });
   });

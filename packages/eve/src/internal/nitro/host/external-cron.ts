@@ -29,14 +29,18 @@ export const EVE_CRON_MANIFEST_OUTPUT_PATH = join("eve", "cron-manifest.json");
 
 /**
  * Contract of the emitted cron manifest — the self-hosted equivalent of
- * the `config.crons[]` Vercel reads from its build output.
+ * the `config.crons[]` Vercel reads from its build output. `crons` holds
+ * one entry per distinct cron expression, mirroring how the Vercel preset
+ * keys its config on `scheduledTasks`: the dispatch route fires every
+ * schedule registered for the posted expression, so a scheduler that
+ * created one job per schedule would double-dispatch shared expressions.
  */
 export interface EveCronManifest {
   readonly version: 1;
   readonly cronHandlerRoute: string;
   readonly crons: ReadonlyArray<{
-    readonly name: string;
     readonly cron: string;
+    readonly schedules: readonly string[];
   }>;
 }
 
@@ -101,13 +105,16 @@ export function applyExternalCronHandlerRoute(
     `export default async (event) => handleExternalCronRequest(config, event.req);`,
   ].join("\n");
 
+  const schedulesByExpression = new Map<string, string[]>();
+  for (const registration of input.registrations) {
+    const schedules = schedulesByExpression.get(registration.cron) ?? [];
+    schedules.push(registration.scheduleId);
+    schedulesByExpression.set(registration.cron, schedules);
+  }
   const manifest: EveCronManifest = {
     version: 1,
     cronHandlerRoute: route,
-    crons: input.registrations.map((registration) => ({
-      name: registration.scheduleId,
-      cron: registration.cron,
-    })),
+    crons: [...schedulesByExpression].map(([cron, schedules]) => ({ cron, schedules })),
   };
   nitro.hooks.hook("compiled", async () => {
     await writeEveCronManifest(nitro.options.output.dir, manifest);
