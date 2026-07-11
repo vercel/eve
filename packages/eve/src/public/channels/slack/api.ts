@@ -195,6 +195,10 @@ export interface SlackThreadMessage {
   readonly botId: string | undefined;
   readonly ts: string;
   readonly threadTs: string;
+  /**
+   * True only when this message was posted by the agent's own Slack app.
+   * Messages from other bots have `botId` set but are not `isMe`.
+   */
   readonly isMe: boolean;
   readonly raw: Record<string, unknown>;
 }
@@ -343,6 +347,30 @@ export function buildSlackBinding(input: {
     input.onThreadTsChanged?.(ts);
   }
 
+  // Slack thread replies expose only a `bot_id` per message, so telling the
+  // agent's own replies apart from other apps' bots requires knowing our own
+  // bot id. Resolve it once per binding via `auth.test`; on failure we treat
+  // no message as agent-authored (safer to over-include thread context than to
+  // silently cut it at another bot's message).
+  let ownBotIdPromise: Promise<string | undefined> | undefined;
+  function resolveOwnBotId(): Promise<string | undefined> {
+    if (ownBotIdPromise) return ownBotIdPromise;
+    const promise = (async () => {
+      try {
+        const response = await request("auth.test", {});
+        return typeof response.bot_id === "string" ? response.bot_id : undefined;
+      } catch (error) {
+        logError(log, "auth.test threw — cannot identify own bot for thread context", error, {
+          channelId: input.channelId,
+        });
+        ownBotIdPromise = undefined;
+        return undefined;
+      }
+    })();
+    ownBotIdPromise = promise;
+    return promise;
+  }
+
   async function uploadFiles(
     files: readonly FileUpload[],
     options?: SlackUploadFilesOptions,
@@ -441,14 +469,17 @@ export function buildSlackBinding(input: {
       messages.length = 0;
       if (!input.channelId || !currentThreadTs) return;
       try {
-        const response = await fetchSlackThreadReplies({
-          ...createSlackApiOptions(input.botToken),
-          channel: input.channelId,
-          limit: 50,
-          ts: currentThreadTs,
-        });
+        const [response, ownBotId] = await Promise.all([
+          fetchSlackThreadReplies({
+            ...createSlackApiOptions(input.botToken),
+            channel: input.channelId,
+            limit: 50,
+            ts: currentThreadTs,
+          }),
+          resolveOwnBotId(),
+        ]);
         for (const raw of response.messages as Record<string, unknown>[]) {
-          messages.push(parseThreadMessage(raw, currentThreadTs));
+          messages.push(parseThreadMessage(raw, currentThreadTs, ownBotId));
         }
       } catch (error) {
         logError(log, "refresh threw — swallowed", error, { channelId: input.channelId });
@@ -552,6 +583,7 @@ function normalizeFileData(data: FileUpload["data"]): SlackFileUpload["data"] {
 function parseThreadMessage(
   raw: Record<string, unknown>,
   threadRootTs: string,
+  ownBotId: string | undefined,
 ): SlackThreadMessage {
   const text = typeof raw.text === "string" ? raw.text : "";
   const ts = typeof raw.ts === "string" ? raw.ts : "";
@@ -565,7 +597,7 @@ function parseThreadMessage(
     botId,
     ts,
     threadTs,
-    isMe: botId !== undefined,
+    isMe: ownBotId !== undefined && botId === ownBotId,
     raw,
   };
 }
