@@ -1,5 +1,5 @@
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
-import { ContextContainer } from "#context/container.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import {
   AuthKey,
@@ -10,6 +10,7 @@ import {
   InitiatorAuthKey,
   ModeKey,
   ParentSessionKey,
+  ScheduleIdKey,
   SessionCallbackKey,
   SubagentDepthKey,
   SubagentMaxDepthKey,
@@ -49,6 +50,15 @@ export function buildRunContext(input: {
 
   if (run.requestId !== undefined) {
     ctx.set(ChannelRequestIdKey, run.requestId);
+  }
+
+  // Inherited from the ambient scope rather than `RunInput`: sessions a
+  // schedule handler starts through `args.receive(...)` get their RunInput
+  // from the target channel's authored `receive` hook, which cannot thread
+  // the schedule identity through.
+  const scheduleId = contextStorage.getStore()?.get(ScheduleIdKey);
+  if (scheduleId !== undefined) {
+    ctx.set(ScheduleIdKey, scheduleId);
   }
 
   if (run.callback !== undefined) {

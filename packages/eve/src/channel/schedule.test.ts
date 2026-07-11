@@ -9,6 +9,8 @@ import {
   SCHEDULE_APP_AUTH,
   ScheduleDispatcher,
 } from "#channel/schedule.js";
+import { contextStorage } from "#context/container.js";
+import { ScheduleIdKey } from "#context/keys.js";
 import type { RunHandle, Runtime } from "#channel/types.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
@@ -166,6 +168,56 @@ describe("ScheduleDispatcher", () => {
           },
         }),
       ).rejects.toThrow(/not registered in this agent/);
+    });
+  });
+
+  describe("schedule dispatch scope", () => {
+    const activeScheduleId = () => contextStorage.getStore()?.get(ScheduleIdKey);
+
+    it("is active when the markdown run starts, and cleared after the dispatch", async () => {
+      const runtime = createMockRuntime();
+      const observedScheduleIds: Array<string | undefined> = [];
+      runtime.run = vi.fn(async () => {
+        observedScheduleIds.push(activeScheduleId());
+        return createMockRunHandle();
+      });
+      const dispatcher = new ScheduleDispatcher({ runtime, channels: [] });
+
+      await dispatcher.trigger({ scheduleId: "heartbeat", markdown: "Run heartbeat task." });
+
+      expect(observedScheduleIds).toEqual(["heartbeat"]);
+      expect(activeScheduleId()).toBeUndefined();
+    });
+
+    it("is active when a handler starts a session through args.receive()", async () => {
+      const runtime = createMockRuntime();
+      const observedScheduleIds: Array<string | undefined> = [];
+      runtime.run = vi.fn(async () => {
+        observedScheduleIds.push(activeScheduleId());
+        return createMockRunHandle();
+      });
+      vi.stubEnv("SLACK_BOT_TOKEN", "xoxb-test");
+      vi.stubEnv("SLACK_SIGNING_SECRET", "test-secret");
+      try {
+        const { definition, resolved } = makeSlackChannelEntry();
+        const dispatcher = new ScheduleDispatcher({ runtime, channels: [resolved] });
+
+        await dispatcher.trigger({
+          scheduleId: "daily-digest",
+          async run({ receive, appAuth }) {
+            await receive(definition, {
+              message: "post the digest",
+              target: { channelId: "C0123ABC" },
+              auth: appAuth,
+            });
+          },
+        });
+
+        expect(observedScheduleIds).toEqual(["daily-digest"]);
+        expect(activeScheduleId()).toBeUndefined();
+      } finally {
+        vi.unstubAllEnvs();
+      }
     });
   });
 

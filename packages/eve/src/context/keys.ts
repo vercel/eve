@@ -61,6 +61,13 @@ export const InitiatorAuthKey = new ContextKey<SessionAuthContext | null>("eve.i
 export const SessionIdKey = new ContextKey<string>("eve.sessionId");
 export const ContinuationTokenKey = new ContextKey<string>("eve.continuationToken");
 export const ChannelRequestIdKey = new ContextKey<string>("eve.channelRequestId");
+/**
+ * Name of the authored schedule whose dispatch started this run. The
+ * `ScheduleDispatcher` sets it on an ambient context scope around the
+ * dispatch so sessions a handler starts through `args.receive(...)`
+ * carry it too.
+ */
+export const ScheduleIdKey = new ContextKey<string>("eve.scheduleId");
 export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationProjection>(
   "eve.channelInstrumentation",
 );

@@ -11,8 +11,9 @@ import {
   readParentLineage,
   readParentSessionId,
   readRootSessionId,
+  readScheduleId,
 } from "#execution/eve-workflow-attributes.js";
-import { ChannelRequestIdKey } from "#context/keys.js";
+import { ChannelRequestIdKey, ScheduleIdKey } from "#context/keys.js";
 
 const slackChannelCtx = {
   "eve.channel": { kind: "slack", state: { team: "T1" } },
@@ -102,6 +103,22 @@ describe("readChannelRequestId", () => {
   });
 });
 
+describe("readScheduleId", () => {
+  it("returns the schedule name when the context slot is well-formed", () => {
+    expect(
+      readScheduleId({
+        [ScheduleIdKey.name]: "daily-digest",
+      }),
+    ).toBe("daily-digest");
+  });
+
+  it("returns undefined when the slot is missing or malformed", () => {
+    expect(readScheduleId({})).toBeUndefined();
+    expect(readScheduleId({ [ScheduleIdKey.name]: "" })).toBeUndefined();
+    expect(readScheduleId({ [ScheduleIdKey.name]: 42 })).toBeUndefined();
+  });
+});
+
 describe("deriveSessionTitle", () => {
   it("collapses whitespace and trims plain string messages", () => {
     expect(deriveSessionTitle("  hello\n\nworld   ")).toBe("hello world");
@@ -172,6 +189,21 @@ describe("buildSessionAttributes", () => {
     });
 
     expect(attrs["$eve.channel_request_id"]).toBe("req_session");
+  });
+
+  it("emits the schedule name for schedule-dispatched sessions", () => {
+    const attrs = buildSessionAttributes({
+      inputMessage: "post the digest",
+      serializedContext: {
+        ...slackChannelCtx,
+        [ScheduleIdKey.name]: "daily-digest",
+      },
+    });
+
+    // Channel-dispatched sessions keep their channel kind in the trigger;
+    // the schedule attribute carries provenance alongside it.
+    expect(attrs["$eve.trigger"]).toBe("slack");
+    expect(attrs["$eve.schedule"]).toBe("daily-digest");
   });
 });
 

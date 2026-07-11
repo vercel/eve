@@ -129,6 +129,7 @@ Structural tags describe each run's place in the tree:
 - `$eve.subagent`: compiled graph node id (subagent runs only)
 - `$eve.trigger`: the channel kind that started the run
 - `$eve.title`: truncated title derived from the first user message
+- `$eve.schedule`: name of the authored schedule whose dispatch started the session, present only on schedule-dispatched sessions — including sessions a schedule handler starts through `args.receive(...)`, which keep the target channel's kind in `$eve.trigger`
 
 Per-turn usage tags are written on each step of a turn, accumulating cumulative totals (last write wins):
 

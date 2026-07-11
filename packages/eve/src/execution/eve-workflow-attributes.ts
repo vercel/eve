@@ -23,9 +23,11 @@
  * - `$eve.trigger`      — channel adapter kind (session/subagent rows)
  * - `$eve.title`        — truncated session title from the first user message
  * - `$eve.channel_request_id` — inbound channel request id
+ * - `$eve.schedule`     — name of the authored schedule whose dispatch
+ *                         started the session (schedule-dispatched rows only)
  */
 
-import { ChannelRequestIdKey } from "#context/keys.js";
+import { ChannelRequestIdKey, ScheduleIdKey } from "#context/keys.js";
 import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
 import { isNonEmptyString } from "#shared/guards.js";
 
@@ -133,6 +135,17 @@ export function readChannelRequestId(
 }
 
 /**
+ * Reads the schedule name seeded by the schedule dispatch scope.
+ * Returns `undefined` when the run was not started by a schedule
+ * dispatch — including channel-dispatched sessions, which keep their
+ * channel kind in `$eve.trigger` and carry provenance here instead.
+ */
+export function readScheduleId(serializedContext: Record<string, unknown>): string | undefined {
+  const scheduleId = serializedContext[ScheduleIdKey.name];
+  return isNonEmptyString(scheduleId) ? scheduleId : undefined;
+}
+
+/**
  * Maximum visible length (in code points) of a derived `$eve.title`.
  *
  * Titles render as the first column of the dashboard's run table, so
@@ -212,6 +225,7 @@ export function buildSessionAttributes(input: {
     "$eve.type": "session",
     "$eve.trigger": readChannelKind(input.serializedContext),
     "$eve.title": deriveSessionTitle(input.inputMessage),
+    "$eve.schedule": readScheduleId(input.serializedContext),
   };
 }
 
