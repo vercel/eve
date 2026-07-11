@@ -360,6 +360,38 @@ describe("collectInboundFileParts", () => {
     expect((parts[0]!.data as URL).href).toBe("https://files.slack.com/a/b/from-user.csv");
   });
 
+  it("looks past a newer text-only message to find files earlier in the thread", async () => {
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const thread = makeSlackThread({
+      refresh,
+      recentMessages: [
+        {
+          isMe: false,
+          raw: {
+            files: [
+              {
+                id: "F500",
+                name: "earlier.png",
+                mimetype: "image/png",
+                url_private: "https://files.slack.com/a/b/earlier.png",
+              },
+            ],
+          },
+        },
+        { isMe: false, raw: {} },
+      ],
+    });
+
+    const parts = await collectInboundFileParts({
+      mention: emptyMention,
+      thread,
+      policy: DEFAULT_UPLOAD_POLICY,
+    });
+
+    expect(parts).toHaveLength(1);
+    expect((parts[0]!.data as URL).href).toBe("https://files.slack.com/a/b/earlier.png");
+  });
+
   it.each([
     ["'disabled' literal", DISABLED_POLICY],
     ["maxBytes: 0", ZERO_BYTES_POLICY],
