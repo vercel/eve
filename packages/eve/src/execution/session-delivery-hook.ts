@@ -1,6 +1,7 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
-import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
+import type { HookPayload } from "#channel/types.js";
+import { bufferHookDelivery, type DeliveryBuffers } from "#execution/delivery-buffers.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
 
 interface HookRead {
@@ -17,12 +18,14 @@ interface SessionDeliveryHookState {
   pending: boolean;
   retired: boolean;
   resolved?: HookRead;
+  superseded: boolean;
 }
 
 /** Reads and rekeys the public delivery hook for one session driver. */
 export interface SessionDeliveryHook {
+  bufferNext(): Promise<"buffered" | "closed">;
   consumeNext(): void;
-  consumeSessionTimeout(): boolean;
+  drainReady(): Promise<void>;
   next(): Promise<IteratorResult<HookPayload>>;
   rekey(token: string): Promise<void>;
 }
@@ -41,7 +44,7 @@ export interface SessionDeliveryHookHandle extends SessionDeliveryHook {
  * to `hook_disposed` and receives `HookNotFoundError` from the Workflow SDK.
  */
 export function createSessionDeliveryHook(
-  bufferedDeliveries: DeliverHookPayload[],
+  deliveryBuffers: DeliveryBuffers,
 ): SessionDeliveryHookHandle {
   let active: SessionDeliveryHookState | undefined;
   const retired: SessionDeliveryHookState[] = [];
@@ -49,7 +52,6 @@ export function createSessionDeliveryHook(
   let nextOrder = 0;
   let offered: Promise<IteratorResult<HookPayload>> | null = null;
   let offeredRead: HookRead | undefined;
-  let sessionTimedOut = false;
   let wake: (() => void) | undefined;
 
   const enqueue = (read: HookRead): void => {
@@ -100,6 +102,45 @@ export function createSessionDeliveryHook(
     if (state.resolved !== undefined) enqueue(state.resolved);
   };
 
+  const consumeRead = (read: HookRead): void => {
+    read.state.pending = false;
+    read.state.resolved = undefined;
+
+    if (read.result.done) {
+      read.state.closed = true;
+    } else if (read.result.value.kind === "deliver") {
+      bufferHookDelivery(
+        deliveryBuffers,
+        read.result.value,
+        read.state.superseded ? "replaced-hook" : "current-hook",
+      );
+    }
+
+    arm(read.state);
+  };
+
+  const consumeOffered = (): HookRead => {
+    if (offeredRead === undefined) {
+      throw new Error("Cannot consume a public delivery before it resolves.");
+    }
+
+    const read = offeredRead;
+    offeredRead = undefined;
+    offered = null;
+    return read;
+  };
+
+  const consumeObserved = (
+    observed: Promise<IteratorResult<HookPayload>>,
+  ): HookRead | undefined => {
+    // Multiple `bufferNext()` calls may await the same offered read. Only the
+    // caller that still observes that exact offer may consume it; later
+    // observers have already had their delivery buffered by the first caller.
+    if (offered !== observed) return undefined;
+
+    return consumeOffered();
+  };
+
   const drainReady = async (): Promise<void> => {
     // A caller may already be racing this read against turn control. Leave
     // that promise intact: the losing race ignores it, and the next call to
@@ -110,42 +151,36 @@ export function createSessionDeliveryHook(
 
     while (ready.length > 0) {
       const read = ready.shift()!;
-      read.state.pending = false;
-      read.state.resolved = undefined;
-
-      if (read.result.done) {
-        read.state.closed = true;
-      } else if (read.result.value.kind === "deliver") {
-        bufferedDeliveries.push(read.result.value);
-      } else if (read.result.value.kind === "session-timeout") {
-        sessionTimedOut = true;
-      }
-
-      arm(read.state);
+      consumeRead(read);
       await Promise.resolve();
     }
   };
 
   return {
-    consumeNext(): void {
-      if (offeredRead === undefined) {
-        throw new Error("Cannot consume a public delivery before it resolves.");
-      }
-
-      if (!offeredRead.result.done && offeredRead.result.value.kind === "session-timeout") {
-        sessionTimedOut = true;
-      }
-      offeredRead.state.pending = false;
-      offeredRead.state.resolved = undefined;
-      if (offeredRead.result.done) offeredRead.state.closed = true;
-      offeredRead = undefined;
-      offered = null;
+    async bufferNext(): Promise<"buffered" | "closed"> {
+      const observed = this.next();
+      const result = await observed;
+      const read = consumeObserved(observed);
+      if (read !== undefined) consumeRead(read);
+      return result.done ? "closed" : "buffered";
     },
 
-    consumeSessionTimeout(): boolean {
-      const timedOut = sessionTimedOut;
-      sessionTimedOut = false;
-      return timedOut;
+    consumeNext(): void {
+      const read = consumeOffered();
+      read.state.pending = false;
+      read.state.resolved = undefined;
+      if (read.result.done) read.state.closed = true;
+    },
+
+    async drainReady(): Promise<void> {
+      if (active === undefined) {
+        throw new Error("Cannot read deliveries before a continuation token is available.");
+      }
+
+      arm(active);
+      for (const state of retired) arm(state);
+
+      await drainReady();
     },
 
     async dispose(): Promise<void> {
@@ -200,6 +235,7 @@ export function createSessionDeliveryHook(
         iterator: candidateHook[Symbol.asyncIterator](),
         pending: false,
         retired: false,
+        superseded: false,
       };
 
       if (active === undefined) {
@@ -213,6 +249,7 @@ export function createSessionDeliveryHook(
       arm(previous);
       arm(candidate);
       await claimHookOwnership(candidate.hook);
+      previous.superseded = true;
       enable(candidate);
       await drainReady();
 

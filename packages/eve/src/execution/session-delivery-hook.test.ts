@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
+import { createDeliveryBuffers } from "#execution/delivery-buffers.js";
 import { createSessionDeliveryHook } from "#execution/session-delivery-hook.js";
 
 const createHookMock = vi.fn();
@@ -23,7 +24,7 @@ describe("createSessionDeliveryHook", () => {
       token: "replacement",
     });
     installHooks(oldHook, replacementHook);
-    const deliveryHook = createSessionDeliveryHook([]);
+    const deliveryHook = createSessionDeliveryHook(createDeliveryBuffers());
 
     await deliveryHook.rekey("old");
     const pending = deliveryHook.next();
@@ -42,8 +43,29 @@ describe("createSessionDeliveryHook", () => {
     expect(replacementHook.dispose).toHaveBeenCalledOnce();
   });
 
-  it("appends drained rekey deliveries after existing buffered deliveries", async () => {
-    const bufferedDeliveries = [deliveryPayload("existing")];
+  it("buffers a memoized delivery once for concurrent bufferNext observers", async () => {
+    const read = createDeferred<IteratorResult<HookPayload>>();
+    const hook = createMockHook({ reads: [read.promise], token: "active" });
+    installHooks(hook);
+    const deliveryBuffers = createDeliveryBuffers();
+    const deliveryHook = createSessionDeliveryHook(deliveryBuffers);
+
+    await deliveryHook.rekey("active");
+    const first = deliveryHook.bufferNext();
+    const second = deliveryHook.bufferNext();
+
+    read.resolve(delivery("current"));
+
+    await expect(Promise.all([first, second])).resolves.toEqual(["buffered", "buffered"]);
+    expect(deliveryBuffers.currentHookDeliveries).toEqual([deliveryPayload("current")]);
+    expect(deliveryBuffers.replacedHookDeliveries).toEqual([]);
+
+    await deliveryHook.dispose();
+  });
+
+  it("classifies drained rekey deliveries by hook ownership", async () => {
+    const deliveryBuffers = createDeliveryBuffers();
+    deliveryBuffers.turnDeliveries.push(deliveryPayload("existing"));
     const oldHook = createMockHook({
       reads: [Promise.resolve(delivery("old"))],
       token: "old",
@@ -53,50 +75,15 @@ describe("createSessionDeliveryHook", () => {
       token: "replacement",
     });
     installHooks(oldHook, replacementHook);
-    const deliveryHook = createSessionDeliveryHook(bufferedDeliveries);
+    const deliveryHook = createSessionDeliveryHook(deliveryBuffers);
 
     await deliveryHook.rekey("old");
     await deliveryHook.rekey("replacement");
     await deliveryHook.dispose();
 
-    expect(bufferedDeliveries).toEqual([
-      deliveryPayload("existing"),
-      deliveryPayload("old"),
-      deliveryPayload("replacement"),
-    ]);
-  });
-
-  it("latches a timeout consumed while an active turn owns delivery reads", async () => {
-    const hook = createMockHook({
-      reads: [Promise.resolve(sessionTimeout())],
-      token: "active",
-    });
-    installHooks(hook);
-    const deliveryHook = createSessionDeliveryHook([]);
-
-    await deliveryHook.rekey("active");
-    await expect(deliveryHook.next()).resolves.toEqual(sessionTimeout());
-    deliveryHook.consumeNext();
-
-    expect(deliveryHook.consumeSessionTimeout()).toBe(true);
-    expect(deliveryHook.consumeSessionTimeout()).toBe(false);
-    await deliveryHook.dispose();
-  });
-
-  it("latches a timeout drained from a retired hook during rekey", async () => {
-    const oldHook = createMockHook({
-      reads: [Promise.resolve(sessionTimeout())],
-      token: "old",
-    });
-    const replacementHook = createMockHook({ token: "replacement" });
-    installHooks(oldHook, replacementHook);
-    const deliveryHook = createSessionDeliveryHook([]);
-
-    await deliveryHook.rekey("old");
-    await deliveryHook.rekey("replacement");
-
-    expect(deliveryHook.consumeSessionTimeout()).toBe(true);
-    await deliveryHook.dispose();
+    expect(deliveryBuffers.turnDeliveries).toEqual([deliveryPayload("existing")]);
+    expect(deliveryBuffers.replacedHookDeliveries).toEqual([deliveryPayload("old")]);
+    expect(deliveryBuffers.currentHookDeliveries).toEqual([deliveryPayload("replacement")]);
   });
 
   it("disposes a conflicting candidate without releasing the active hook", async () => {
@@ -106,7 +93,7 @@ describe("createSessionDeliveryHook", () => {
       token: "candidate",
     });
     installHooks(oldHook, candidateHook);
-    const deliveryHook = createSessionDeliveryHook([]);
+    const deliveryHook = createSessionDeliveryHook(createDeliveryBuffers());
 
     await deliveryHook.rekey("old");
     await expect(deliveryHook.rekey("candidate")).rejects.toMatchObject({
@@ -121,6 +108,32 @@ describe("createSessionDeliveryHook", () => {
     expect(oldHook.dispose).toHaveBeenCalledOnce();
   });
 
+  it("keeps the active hook current when a candidate claim fails", async () => {
+    const deliveryBuffers = createDeliveryBuffers();
+    const oldHook = createMockHook({
+      reads: [Promise.resolve(delivery("still-active"))],
+      token: "old",
+    });
+    const candidateHook = createMockHook({
+      conflict: { runId: "wrun_owner" },
+      token: "candidate",
+    });
+    installHooks(oldHook, candidateHook);
+    const deliveryHook = createSessionDeliveryHook(deliveryBuffers);
+
+    await deliveryHook.rekey("old");
+    await expect(deliveryHook.rekey("candidate")).rejects.toMatchObject({
+      name: "HookConflictError",
+      token: "candidate",
+    });
+    await deliveryHook.drainReady();
+
+    expect(deliveryBuffers.currentHookDeliveries).toEqual([deliveryPayload("still-active")]);
+    expect(deliveryBuffers.replacedHookDeliveries).toEqual([]);
+
+    await deliveryHook.dispose();
+  });
+
   it("preserves an old-hook disposal failure while cleaning the candidate", async () => {
     const failure = new Error("old hook disposal failed");
     const oldHook = createMockHook({
@@ -131,7 +144,7 @@ describe("createSessionDeliveryHook", () => {
     });
     const candidateHook = createMockHook({ token: "candidate" });
     installHooks(oldHook, candidateHook);
-    const deliveryHook = createSessionDeliveryHook([]);
+    const deliveryHook = createSessionDeliveryHook(createDeliveryBuffers());
 
     await deliveryHook.rekey("old");
     await expect(deliveryHook.rekey("candidate")).rejects.toBe(failure);
@@ -145,13 +158,13 @@ describe("createSessionDeliveryHook", () => {
     // the armed iterator read). Re-arming the retired hook awaits the exhausted
     // cursor, which rejects; the delivery must surface exactly once and the
     // rejection must not throw or resurrect it across later drain cycles.
-    const bufferedDeliveries: DeliverHookPayload[] = [];
+    const deliveryBuffers = createDeliveryBuffers();
     installHooks(
       createCursorHook({ committed: [deliveryPayload("old")], token: "old" }),
       createCursorHook({ committed: [], token: "replacement" }),
       createCursorHook({ committed: [], token: "third" }),
     );
-    const deliveryHook = createSessionDeliveryHook(bufferedDeliveries);
+    const deliveryHook = createSessionDeliveryHook(deliveryBuffers);
 
     await deliveryHook.rekey("old");
     await deliveryHook.rekey("replacement");
@@ -160,13 +173,14 @@ describe("createSessionDeliveryHook", () => {
     await deliveryHook.rekey("third");
     await deliveryHook.dispose();
 
-    expect(bufferedDeliveries).toEqual([deliveryPayload("old")]);
+    expect(deliveryBuffers.replacedHookDeliveries).toEqual([deliveryPayload("old")]);
+    expect(deliveryBuffers.currentHookDeliveries).toEqual([]);
   });
 
   it("disposes without closing or settling a pending read", async () => {
     const hook = createMockHook({ token: "active" });
     installHooks(hook);
-    const deliveryHook = createSessionDeliveryHook([]);
+    const deliveryHook = createSessionDeliveryHook(createDeliveryBuffers());
 
     await deliveryHook.rekey("active");
     void deliveryHook.next();
@@ -266,10 +280,6 @@ function delivery(message: string): IteratorResult<HookPayload> {
 
 function deliveryPayload(message: string): DeliverHookPayload {
   return { kind: "deliver", payloads: [{ message }] };
-}
-
-function sessionTimeout(): IteratorResult<HookPayload> {
-  return { done: false, value: { kind: "session-timeout" } };
 }
 
 function createDeferred<T>(): { readonly promise: Promise<T>; resolve(value: T): void } {
