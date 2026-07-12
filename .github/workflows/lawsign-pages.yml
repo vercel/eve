@@ -1,0 +1,40 @@
+name: Deploy LawSign beta to GitHub Pages
+
+on:
+  push:
+    branches: [claude/lawsign-frontend-design-yx3hc6]
+    paths:
+      - "lawsign/**"
+      - ".github/workflows/lawsign-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: lawsign-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build standalone bundle
+        run: |
+          node lawsign/scripts/build-standalone.mjs
+          mkdir -p _site
+          cp lawsign/frontend/lawsign-standalone.html _site/index.html
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
