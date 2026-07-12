@@ -15,10 +15,10 @@
 <body>
   <div id="ls-boot"><div style="text-align:center"><div class="spin"></div>로싸인을 불러오는 중…</div></div>
   <script>
-    // 자산은 공개 GitHub 저장소의 고정 커밋에서 로드한다 (내용 불변 보장).
+    // 자산은 공개 GitHub 저장소의 브랜치 최신 커밋에서 로드한다 (푸시 후 CDN 캐시로 최대 5분 내 반영).
     (function () {
       'use strict';
-      var BASE = 'https://raw.githubusercontent.com/shinkang888-code/eve/debb4cb8b802ec9302072d4a6d5f474a584fba27/lawsign/frontend/';
+      var BASE = 'https://raw.githubusercontent.com/shinkang888-code/eve/refs/heads/claude/lawsign-frontend-design-yx3hc6/lawsign/frontend/';
       var FILES = ['css/app.css', 'js/api.js', 'js/app.js', 'js/request.js'];
 
       Promise.all(FILES.map(function (f) {
