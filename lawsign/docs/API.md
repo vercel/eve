@@ -135,7 +135,18 @@
 - `POST /bulk-requests` — `{templateId, recipients[], options}` → 202 + `{jobId}`
 - `GET /bulk-requests/{jobId}` — 진행률 폴링 or SSE. 실 발송은 큐 컨슈머(Worker)가 병렬 처리.
 
-### 2.5 위변조 검증 (비인증 공개 API)
+### 2.5 AI 어시스턴트 (RAG + Qwen Max)
+
+| Method | Path | 프로토타입 함수 | 비고 |
+|---|---|---|---|
+| POST | `/ai/chat` | `LS.ai.chat(text, history)` | 서버가 RAG 검색 후 OpenRouter(Qwen Max) 호출 → `{text, sources[]}`. 키는 서버 환경변수 보관 |
+| POST | `/ai/draft` | `LS.ai.draftMessage(doc, channel)` | 채널별(EMAIL/KAKAO) 발신문 초안 생성 |
+| GET | `/ai/usage` | — | 워크스페이스 월 사용량·한도 (과금 가드) |
+
+- 프로토타입은 브라우저에서 OpenRouter를 직접 호출하며 키는 localStorage에만
+  저장된다(코드·저장소 포함 금지). 상세 설계는 [AI_PLAN.md](./AI_PLAN.md) 참조.
+
+### 2.6 위변조 검증 (비인증 공개 API)
 
 `POST /verify` → `api.verifyHash(hex)`
 

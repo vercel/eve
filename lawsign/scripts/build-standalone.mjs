@@ -19,7 +19,7 @@ const FRONTEND = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '
 const read = (p) => readFile(path.join(FRONTEND, p), 'utf8');
 
 const css = await read('css/app.css');
-const js = [await read('js/api.js'), await read('js/app.js'), await read('js/request.js')].join('\n');
+const js = [await read('js/api.js'), await read('js/app.js'), await read('js/request.js'), await read('js/ai.js')].join('\n');
 
 if (css.includes('</script') || js.includes('</script')) {
   throw new Error('소스에 "</script" 시퀀스가 포함되어 인라인 삽입이 불가합니다.');

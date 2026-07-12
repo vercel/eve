@@ -19,7 +19,7 @@
     (function () {
       'use strict';
       var BASE = 'https://raw.githubusercontent.com/shinkang888-code/eve/refs/heads/claude/lawsign-frontend-design-yx3hc6/lawsign/frontend/';
-      var FILES = ['css/app.css', 'js/api.js', 'js/app.js', 'js/request.js'];
+      var FILES = ['css/app.css', 'js/api.js', 'js/app.js', 'js/request.js', 'js/ai.js'];
 
       Promise.all(FILES.map(function (f) {
         return fetch(BASE + f).then(function (r) {

@@ -77,6 +77,7 @@
     chat: I('<path d="M21 12a8 8 0 0 1-8 8H4l2.5-3A8 8 0 1 1 21 12Z"/>'),
     link: I('<path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5"/>'),
     upload: I('<path d="M12 16V5"/><path d="m7 9 5-5 5 5"/><path d="M5 20h14"/>'),
+    spark: I('<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8Z"/><path d="M19 15l0.9 2.1L22 18l-2.1 0.9L19 21l-0.9-2.1L16 18l2.1-0.9Z"/>'),
   };
   LS.icons = icons;
 
@@ -760,6 +761,7 @@
       '<div><label class="field-label">메시지</label><textarea class="input" id="cmp-body" rows="5">' + esc(defaultBody) + '</textarea></div>' +
       '<div class="dim" id="cmp-account" style="font-size:12px"></div></div>' +
       '<div class="toolbar-row" style="margin-top:16px;justify-content:flex-end">' +
+      '<button class="btn" id="cmp-ai">✦ AI 초안</button>' +
       '<button class="btn" id="cmp-cancel">취소</button><button class="btn primary" id="cmp-send">' + icons.send + ' 발신하기</button></div></div>',
       { wide: true });
 
@@ -771,6 +773,15 @@
         : '발신 프로필: <b>' + acc.kakao.profile + '</b> <span class="badge amber">알림톡 승인 템플릿</span> — 카카오 비즈메시지 경유';
     }
     LS.ui.$$('.chan-pill', m).forEach((b) => b.addEventListener('click', () => { chan = b.dataset.chan; paint(); }));
+    LS.ui.$('#cmp-ai', m).addEventListener('click', async () => {
+      const b = LS.ui.$('#cmp-ai', m);
+      b.disabled = true;
+      b.textContent = '✦ 작성 중…';
+      LS.ui.$('#cmp-body', m).value = await LS.ai.draftMessage(d, chan);
+      b.disabled = false;
+      b.textContent = '✦ AI 초안';
+      toast('✦ AI가 발신문 초안을 작성했습니다. 검토 후 발신하세요.');
+    });
     LS.ui.$('#cmp-cancel', m).addEventListener('click', closeModal);
     LS.ui.$('#cmp-send', m).addEventListener('click', async () => {
       const btn = LS.ui.$('#cmp-send', m);
@@ -895,6 +906,7 @@
       { route: 'dashboard', label: '홈', ic: icons.home },
       { route: 'documents', label: '메일함', ic: icons.mail },
       { route: 'request', label: '서명 요청', ic: icons.pen },
+      { route: 'assistant', label: 'AI 비서', ic: icons.spark },
       { route: 'validator', label: '검증 포털', ic: icons.shield },
     ];
     document.body.innerHTML =
