@@ -1,5 +1,14 @@
 # eve
 
+## 0.22.6
+
+### Patch Changes
+
+- 5035812: Vercel deployments now emit `framework: { slug: "eve" }` alongside the version in the Build Output API config. Vercel's build-output deserializer drops the entire `framework` object when `slug` is absent, so this restores framework attribution end to end — `framework_slug` and `framework_version` are now populated in AI Gateway routing and access logs.
+- 9cd5c99: chatSdkChannel now mounts both GET and POST on each adapter's webhook route, so adapters that verify with a GET challenge like X's CRC check work through the bridge. POST-only adapters are unaffected.
+- caa0c17: `eve dev` now keeps Nitro build inputs outside prunable runtime snapshots. Long-running development servers no longer fail structural rebuilds with stale import errors after snapshot cleanup.
+- 01f0345: Resume active local workflow runs on the agent-scoped queue after restarting the eve server.
+
 ## 0.22.5
 
 ### Patch Changes
