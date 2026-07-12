@@ -43,6 +43,11 @@ import type { SandboxBootstrapContext, SandboxSessionContext } from "#shared/san
  */
 export type ResolvedModuleSourceRef = Readonly<ModuleSourceRef>;
 
+/** Runtime source reference for one authored static-skill visibility resolver. */
+export interface ResolvedStaticSkillVisibilityReference extends ResolvedModuleSourceRef {
+  readonly eventNames: readonly ("session.started" | "turn.started")[];
+}
+
 /**
  * Authored instructions prompt resolved from `instructions.md` or
  * `instructions.{ts,...}`.
@@ -302,8 +307,9 @@ export type ResolvedRuntimeDelegationNode =
  * Runtime-owned additive agent configuration resolved from `agent.ts`.
  */
 export type ResolvedAgentDefinition = Readonly<
-  Omit<InternalAgentDefinition, "build" | "source"> & {
+  Omit<InternalAgentDefinition, "build" | "source" | "staticSkillVisibility"> & {
     dynamicModel?: RuntimeDynamicModelReference;
+    staticSkillVisibility?: ResolvedStaticSkillVisibilityReference;
     source?: Readonly<NonNullable<InternalAgentDefinition["source"]>>;
   }
 >;

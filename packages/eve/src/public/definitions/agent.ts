@@ -17,6 +17,8 @@ export type {
   PublicAgentModelDefinition as AgentModelDefinition,
   PublicAgentStaticModelDefinition as AgentStaticModelDefinition,
   PublicAgentCompactionDefinition as AgentCompactionDefinition,
+  PublicAgentStaticSkillVisibilityDefinition as AgentStaticSkillVisibilityDefinition,
+  StaticSkillVisibility,
 } from "#shared/agent-definition.js";
 
 /**

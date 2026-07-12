@@ -56,6 +56,7 @@ export function normalizeAgentDefinition(
       "modelOptions",
       "outputSchema",
       "reasoning",
+      "staticSkillVisibility",
     ],
     message,
   );
@@ -100,6 +101,33 @@ export function normalizeAgentDefinition(
 
   if (record.reasoning !== undefined) {
     definition.reasoning = normalizeAgentReasoningDefinition(record.reasoning, message);
+  }
+
+  if (record.staticSkillVisibility !== undefined) {
+    if (!isDynamicSentinel(record.staticSkillVisibility)) {
+      throw new Error(`${message} "staticSkillVisibility" must be created with defineDynamic.`);
+    }
+    const visibility = expectObjectRecord(record.staticSkillVisibility, message);
+    expectOnlyKnownKeys(visibility, ["events", "kind"], message);
+    if (visibility.events === undefined || "fallback" in visibility) {
+      throw new Error(`${message} "staticSkillVisibility" does not support a fallback.`);
+    }
+    const events = expectObjectRecord(visibility.events, message);
+    const normalizedEvents: MutableDynamicEvents = {};
+    for (const [eventName, handler] of Object.entries(events)) {
+      if (eventName !== "session.started" && eventName !== "turn.started") {
+        throw new Error(
+          `${message} "staticSkillVisibility" only supports "session.started" and "turn.started" handlers.`,
+        );
+      }
+      normalizedEvents[eventName] = expectFunction(handler, message) as NonNullable<
+        DynamicEvents[DynamicToolEventName]
+      >;
+    }
+    definition.staticSkillVisibility = {
+      events: normalizedEvents,
+      kind: "eve:dynamic",
+    } as NonNullable<NormalizedAgentDefinition["staticSkillVisibility"]>;
   }
 
   if (record.limits !== undefined) {

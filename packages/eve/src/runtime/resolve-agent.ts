@@ -156,6 +156,7 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
     name: string;
     outputSchema?: ResolvedAgent["config"]["outputSchema"];
     reasoning?: ResolvedAgent["config"]["reasoning"];
+    staticSkillVisibility?: ResolvedAgent["config"]["staticSkillVisibility"];
     source?: ResolvedAgent["config"]["source"];
     limits?: ResolvedAgent["config"]["limits"];
   } = {
@@ -218,6 +219,13 @@ function createResolvedAgentConfig(manifest: CompiledAgentNodeManifest): Resolve
     config.dynamicModel = {
       ...createResolvedModuleSourceRef(manifest.config.dynamicModel),
       eventNames: [...manifest.config.dynamicModel.eventNames],
+    };
+  }
+
+  if (manifest.config.staticSkillVisibility !== undefined) {
+    config.staticSkillVisibility = {
+      ...createResolvedModuleSourceRef(manifest.config.staticSkillVisibility),
+      eventNames: [...manifest.config.staticSkillVisibility.eventNames],
     };
   }
 

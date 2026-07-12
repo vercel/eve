@@ -70,6 +70,32 @@ describe("compiledAgentManifestSchema", () => {
     });
   });
 
+  it("preserves static skill visibility resolver source", () => {
+    const manifest = createCompiledAgentManifest({
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      config: {
+        model: { id: "openai/gpt-5.5", routing: classifyModelRouting("openai/gpt-5.5") },
+        name: "app",
+        staticSkillVisibility: {
+          eventNames: ["session.started", "turn.started"],
+          logicalPath: "agent.ts",
+          sourceId: "agent-config",
+          sourceKind: "module",
+        },
+      },
+    });
+
+    const parsed = compiledAgentManifestSchema.parse(manifest);
+
+    expect(parsed.config.staticSkillVisibility).toEqual({
+      eventNames: ["session.started", "turn.started"],
+      logicalPath: "agent.ts",
+      sourceId: "agent-config",
+      sourceKind: "module",
+    });
+  });
+
   it("preserves uncapped (false) session token limits", () => {
     const manifest = createCompiledAgentManifest({
       agentRoot: "/app/agent",

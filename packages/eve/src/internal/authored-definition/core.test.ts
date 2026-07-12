@@ -42,6 +42,42 @@ describe("normalizeAgentDefinition", () => {
     expect(typeof (definition.model as typeof model).events["session.started"]).toBe("function");
   });
 
+  it("accepts static skill visibility handlers at session and turn boundaries", () => {
+    const visibility = defineDynamic({
+      events: {
+        "session.started": () => "all",
+        "turn.started": () => ["support"],
+      },
+    });
+
+    const definition = normalizeAgentDefinition(
+      { model: "openai/gpt-5.5", staticSkillVisibility: visibility },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.staticSkillVisibility).toMatchObject({ kind: "eve:dynamic" });
+    expect(Object.keys(definition.staticSkillVisibility?.events ?? {})).toEqual([
+      "session.started",
+      "turn.started",
+    ]);
+  });
+
+  it("rejects step-scoped static skill visibility", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          staticSkillVisibility: defineDynamic({
+            events: { "step.started": () => ["support"] },
+          }),
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(
+      '"staticSkillVisibility" only supports "session.started" and "turn.started" handlers.',
+    );
+  });
+
   it("rejects a dynamic model without a fallback", () => {
     expect(() =>
       normalizeAgentDefinition(

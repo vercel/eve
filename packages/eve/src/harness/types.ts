@@ -220,6 +220,16 @@ export type HandleEventFn = (
 ) => Promise<void>;
 
 /**
+ * Refresh hook for lifecycle state that must affect the prompt before the
+ * harness emits a turn preamble event.
+ */
+export type BeforeTurnEventFn = (input: {
+  readonly event: HandleMessageStreamEvent;
+  readonly messages?: readonly ModelMessage[];
+  readonly session: HarnessSession;
+}) => Promise<HarnessSession> | HarnessSession;
+
+/**
  * Dependencies injected into the tool-loop harness at construction time.
  */
 export interface ToolLoopHarnessConfig {
@@ -248,6 +258,7 @@ export interface ToolLoopHarnessConfig {
    */
   readonly workflowMaxSubagents?: number;
   readonly handleEvent?: HandleEventFn;
+  readonly beforeTurnEvent?: BeforeTurnEventFn;
   /**
    * Execution mode for the current harness.
    *

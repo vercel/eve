@@ -499,6 +499,16 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const stepInput = consumeDeferredStepInput({ input, session });
     session = stepInput.session;
 
+    const emitTurnEvent = async (
+      event: Parameters<NonNullable<typeof emit>>[0],
+      messages?: readonly ModelMessage[],
+    ): Promise<void> => {
+      if (config.beforeTurnEvent !== undefined) {
+        session = await config.beforeTurnEvent({ event, messages, session });
+      }
+      await emit?.(event, messages);
+    };
+
     const resolvedRuntimeActions = await resolvePendingRuntimeActions({
       emit,
       session,
@@ -518,7 +528,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (pending.outcome === "unresolved") {
       if (emit && pending.deferredMessage === true && hasStepInput(input)) {
         emissionState = await emitTurnPreamble(
-          emit,
+          emitTurnEvent,
           input ?? {},
           emissionState,
           config.runtimeIdentity,
@@ -551,11 +561,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       }
     }
 
+    session = pending.session;
+
     // --- Turn preamble ------------------------------------------------------
 
     if (emit && hasStepInput(input)) {
       emissionState = await emitTurnPreamble(
-        emit,
+        emitTurnEvent,
         input ?? {},
         emissionState,
         config.runtimeIdentity,
@@ -567,7 +579,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       }
     }
 
-    session = pending.session;
     let messages: ModelMessage[] = pending.messages;
 
     // A resolved session-limit continuation prompt grants a fresh token

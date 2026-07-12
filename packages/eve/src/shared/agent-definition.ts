@@ -82,6 +82,12 @@ export type PublicAgentDynamicModelDefinition = DynamicSentinel<
   PublicAgentStaticModelDefinition
 >;
 
+/** Static skill names visible to one session or turn. */
+export type StaticSkillVisibility = "all" | readonly string[];
+
+/** Dynamic resolver shape for the agent's compiled static skill visibility. */
+export type PublicAgentStaticSkillVisibilityDefinition = DynamicSentinel<StaticSkillVisibility>;
+
 export interface PublicAgentDynamicModelDefinitionInput {
   /** Compiled static model: build-time metadata and the active model when no scope is set. */
   readonly fallback: PublicAgentStaticModelDefinition;
@@ -273,6 +279,7 @@ export type InternalAgentDefinition = {
   reasoning?: AgentReasoningDefinition;
   source?: ModuleSourceRef;
   limits?: AgentLimitsDefinition;
+  staticSkillVisibility?: PublicAgentStaticSkillVisibilityDefinition;
 };
 
 /**
@@ -321,6 +328,12 @@ export type PublicAgentDefinition = {
    * Framework-owned runtime limits for this agent's runs.
    */
   readonly limits?: AgentLimitsDefinition;
+  /**
+   * Optional session/turn resolver for compiled static skills. Handlers return
+   * `"all"` or a list of path-derived skill names; without this field all
+   * static skills remain available.
+   */
+  readonly staticSkillVisibility?: PublicAgentStaticSkillVisibilityDefinition;
   /**
    * Optional structured return type used when this agent runs in task mode
    * (for example as a subagent, schedule, or remote job). Interactive

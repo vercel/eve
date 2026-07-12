@@ -85,6 +85,35 @@ selection object, or `null` to leave the scope unset.
   from the fallback's — it is never inherited. Omitted `modelOptions` reuses
   the agent-level `modelOptions`.
 
+### Limit static skills dynamically
+
+`staticSkillVisibility` controls which compiled static skills a session or turn
+may see and load. Packages remain materialized, so sibling files such as
+`references/` remain available to a visible skill, but hidden skill names are
+omitted from the prompt and rejected by `load_skill`:
+
+```ts title="agent/agent.ts"
+import { defineAgent, defineDynamic } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  staticSkillVisibility: defineDynamic({
+    events: {
+      "session.started": (_event, ctx) =>
+        ctx.session.auth.initiator?.attributes.plan === "enterprise" ? "all" : ["support"],
+      "turn.started": (_event, ctx) =>
+        ctx.session.auth.initiator?.attributes.plan === "enterprise" ? "all" : ["support"],
+    },
+  }),
+});
+```
+
+Handlers may return `"all"` or a list of path-derived static skill names.
+Unknown, duplicate, malformed, or thrown results fail closed to an empty
+static-skill set. Omitting `staticSkillVisibility` preserves the default where
+all static skills are available. The resolved set is durable for replay and is
+replaced by `turn.started`; prompt variants change when the set changes.
+
 Runtime identity reports a dynamic agent's model as `dynamic:<fallback id>`.
 
 ## Reasoning effort

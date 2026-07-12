@@ -4,7 +4,7 @@ import type { Runtime, SessionCapabilities } from "#channel/types.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
-import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
+import type { BeforeTurnEventFn, HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
@@ -62,6 +62,7 @@ export interface CreateExecutionNodeStepInput {
    */
   readonly createRuntime: CreateRuntime;
   readonly handleEvent?: HandleEventFn;
+  readonly beforeTurnEvent?: BeforeTurnEventFn;
   readonly mode: RunMode;
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
@@ -93,6 +94,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     workflow: input.node.agent.workflowEnabled === true,
     workflowMaxSubagents: input.workflowMaxSubagents,
     handleEvent: input.handleEvent,
+    beforeTurnEvent: input.beforeTurnEvent,
     mode: input.mode,
     onCompaction: preserveFrameworkStateOnCompaction,
     dispatchDynamicModelEvent: dispatchModelEvent,

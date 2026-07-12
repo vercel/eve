@@ -73,6 +73,7 @@ export async function compileAgentConfig(
     };
     description?: string;
     dynamicModel?: CompiledAgentDefinition["dynamicModel"];
+    staticSkillVisibility?: CompiledAgentDefinition["staticSkillVisibility"];
     experimental?: CompiledAgentDefinition["experimental"];
     model: CompiledRuntimeModelReference;
     name: string;
@@ -96,6 +97,21 @@ export async function compileAgentConfig(
     }
     compiledConfig.dynamicModel = {
       eventNames: Object.keys(definition.model.events) as DynamicToolEventName[],
+      exportName: configModule.exportName,
+      sourceKind: "module",
+      logicalPath: configModule.logicalPath,
+      sourceId: configModule.sourceId,
+    };
+  }
+
+  if (definition.staticSkillVisibility !== undefined) {
+    if (configModule === undefined) {
+      throw new Error("Expected static skill visibility definitions to be authored in agent.ts.");
+    }
+    compiledConfig.staticSkillVisibility = {
+      eventNames: Object.keys(definition.staticSkillVisibility.events) as Array<
+        "session.started" | "turn.started"
+      >,
       exportName: configModule.exportName,
       sourceKind: "module",
       logicalPath: configModule.logicalPath,

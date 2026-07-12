@@ -1,6 +1,10 @@
 import { loadContext } from "#context/container.js";
 import { DynamicSkillManifestKey, SandboxKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
+import {
+  getVisibleStaticSkillNames,
+  StaticSkillVisibilityKey,
+} from "#context/static-skill-visibility.js";
 import { loadSkillFromSandbox } from "#runtime/skills/sandbox-access.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import type { JsonObject } from "#shared/json.js";
@@ -31,6 +35,22 @@ async function executeLoadSkillTool(args: LoadSkillInput): Promise<unknown> {
 
   const { skill } = args;
   const availableSkills = availableSkillNames(ctx);
+  const visibleStaticSkills = ctx.get(StaticSkillVisibilityKey);
+  if (visibleStaticSkills !== undefined && !availableSkills.includes(skill)) {
+    const connectionName = ctx
+      .get(ConnectionRegistryKey)
+      ?.getConnectionNames()
+      .find((name) => name.toLowerCase() === skill.toLowerCase());
+    if (connectionName !== undefined) {
+      throw new Error(
+        `"${connectionName}" is an installed connection, not a skill. ` +
+          `Use connection_search with connection "${connectionName}" to find its tools.`,
+      );
+    }
+    const hint =
+      availableSkills.length > 0 ? ` Available skills: ${availableSkills.join(", ")}.` : "";
+    throw new Error(`Skill "${skill}" is not available in this run.${hint}`);
+  }
   try {
     return await loadSkillFromSandbox(sandbox, skill, availableSkills);
   } catch (error) {
@@ -53,10 +73,11 @@ async function executeLoadSkillTool(args: LoadSkillInput): Promise<unknown> {
 // importing the bundle (for authored skills) would cycle through the
 // framework-tools barrel.
 function availableSkillNames(ctx: ReturnType<typeof loadContext>): string[] {
+  const staticSkills = getVisibleStaticSkillNames(ctx) ?? [];
   const dynamic = Object.values(ctx.get(DynamicSkillManifestKey) ?? {})
     .flat()
     .map((s) => s.name);
-  return [...new Set(dynamic)].sort();
+  return [...new Set([...staticSkills, ...dynamic])].sort();
 }
 
 // ---------------------------------------------------------------------------

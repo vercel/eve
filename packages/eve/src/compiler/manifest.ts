@@ -124,11 +124,19 @@ type CompiledAgentCompactionDefinition = Omit<InternalAgentCompactionDefinition,
 /**
  * Normalized additive agent configuration preserved in the compiled manifest.
  */
-export type CompiledAgentDefinition = Omit<InternalAgentDefinition, "model" | "compaction"> & {
+export type CompiledAgentDefinition = Omit<
+  InternalAgentDefinition,
+  "model" | "compaction" | "staticSkillVisibility"
+> & {
   model: CompiledRuntimeModelReference;
   compaction?: CompiledAgentCompactionDefinition;
   dynamicModel?: CompiledDynamicModelDefinition;
+  staticSkillVisibility?: CompiledStaticSkillVisibilityDefinition;
 };
+
+export interface CompiledStaticSkillVisibilityDefinition extends ModuleSourceRef {
+  readonly eventNames: readonly ("session.started" | "turn.started")[];
+}
 
 /**
  * Normalized authored instructions prompt preserved in the compiled
@@ -289,6 +297,17 @@ const compiledDynamicModelDefinitionSchema: z.ZodType<CompiledDynamicModelDefini
   })
   .strict();
 
+const compiledStaticSkillVisibilityDefinitionSchema: z.ZodType<CompiledStaticSkillVisibilityDefinition> =
+  z
+    .object({
+      eventNames: z.array(z.enum(["session.started", "turn.started"])).readonly(),
+      exportName: z.string().optional(),
+      sourceKind: z.literal("module"),
+      logicalPath: z.string(),
+      sourceId: z.string(),
+    })
+    .strict();
+
 const channelMethodSchema = z.union([
   z.literal("GET"),
   z.literal("POST"),
@@ -407,6 +426,7 @@ const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z
     compaction: compiledAgentCompactionDefinitionSchema.optional(),
     description: z.string().optional(),
     dynamicModel: compiledDynamicModelDefinitionSchema.optional(),
+    staticSkillVisibility: compiledStaticSkillVisibilityDefinitionSchema.optional(),
     experimental: z
       .object({
         workflow: compiledAgentWorkflowDefinitionSchema.optional(),
@@ -792,6 +812,13 @@ export function createCompiledAgentNodeManifest(input: {
           ? undefined
           : {
               ...input.config.dynamicModel,
+            },
+      staticSkillVisibility:
+        input.config.staticSkillVisibility === undefined
+          ? undefined
+          : {
+              ...input.config.staticSkillVisibility,
+              eventNames: [...input.config.staticSkillVisibility.eventNames],
             },
       experimental:
         input.config.experimental === undefined

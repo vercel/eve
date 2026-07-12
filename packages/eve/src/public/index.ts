@@ -10,6 +10,8 @@ export {
   type AgentModelDefinition,
   type AgentModelOptionsDefinition,
   type AgentReasoningDefinition,
+  type AgentStaticSkillVisibilityDefinition,
+  type StaticSkillVisibility,
   type AgentWorkflowDefinition,
   type AgentWorkflowWorldDefinition,
   defineAgent,

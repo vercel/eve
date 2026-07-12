@@ -56,6 +56,39 @@ describe("compileAgentConfig", () => {
       sourceKind: "module",
     });
   });
+
+  it("compiles static skill visibility with session and turn events", async () => {
+    mocks.loadModuleBackedDefinition.mockResolvedValue({
+      model: "openai/gpt-5.5",
+      staticSkillVisibility: defineDynamic({
+        events: {
+          "session.started": () => "all",
+          "turn.started": () => ["support"],
+        },
+      }),
+    });
+
+    const manifest = createAgentSourceManifest({
+      agentId: "app",
+      agentRoot: "/app/agent",
+      appRoot: "/app",
+      configModule: createModuleSourceRef({
+        logicalPath: "agent.ts",
+        sourceId: "agent-config",
+      }),
+    });
+
+    const compiled = await compileAgentConfig(manifest, {
+      modelCatalog: createModelCatalog(),
+    });
+
+    expect(compiled.staticSkillVisibility).toEqual({
+      eventNames: ["session.started", "turn.started"],
+      logicalPath: "agent.ts",
+      sourceId: "agent-config",
+      sourceKind: "module",
+    });
+  });
 });
 
 function createModelCatalog(): ManifestCompileContext["modelCatalog"] {

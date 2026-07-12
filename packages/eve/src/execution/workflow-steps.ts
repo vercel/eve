@@ -6,6 +6,12 @@ import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-li
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
 import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
 import { dispatchDynamicToolEvent } from "#context/dynamic-tool-lifecycle.js";
+import {
+  dispatchStaticSkillVisibilityEvent,
+  filterVisibleStaticSkills,
+  initializeStaticSkillVisibility,
+  StaticSkillVisibilityKey,
+} from "#context/static-skill-visibility.js";
 import { AuthKey, CapabilitiesKey, ModeKey } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { runStep } from "#context/run-step.js";
@@ -117,6 +123,10 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const ctx = await deserializeContext(input.serializedContext);
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
+  initializeStaticSkillVisibility(
+    ctx,
+    bundle.turnAgent.availableSkills?.map((skill) => skill.name) ?? [],
+  );
 
   // Populate the callback base URL so getHookUrl() works during tool
   // execution, preferring eve's active local origin over metadata fallback.
@@ -326,9 +336,16 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       lifecycleSession: HarnessSession,
       stepInput: StepInput | undefined,
     ): Promise<StepResult> => {
+      const turnAgent = {
+        ...bundle.turnAgent,
+        availableSkills: filterVisibleStaticSkills(
+          bundle.turnAgent.availableSkills,
+          ctx.get(StaticSkillVisibilityKey),
+        ),
+      };
       const skillRoot = await resolveSessionSkillRoot({
         ctx,
-        turnAgent: bundle.turnAgent,
+        turnAgent,
       });
       const refreshedSession = refreshSessionFromTurnAgent({
         compactionOverrides: {
@@ -336,13 +353,42 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         },
         session: lifecycleSession,
         skillRoot,
-        turnAgent: bundle.turnAgent,
+        turnAgent,
       });
 
       const step = createExecutionNodeStep({
         abortSignal: input.abortSignal,
         capabilities,
         createRuntime: createWorkflowRuntime,
+        beforeTurnEvent: async ({ event, messages, session }) => {
+          await dispatchStaticSkillVisibilityEvent({
+            ctx,
+            event,
+            messages: messages ?? [],
+            resolver: bundle.resolvedAgent.config.staticSkillVisibility,
+            scope: {
+              moduleMap: bundle.moduleMap,
+              nodeId: bundle.nodeId,
+            },
+            staticSkillNames: bundle.turnAgent.availableSkills?.map((skill) => skill.name) ?? [],
+          });
+
+          const resolvedTurnAgent = {
+            ...bundle.turnAgent,
+            availableSkills: filterVisibleStaticSkills(
+              bundle.turnAgent.availableSkills,
+              ctx.get(StaticSkillVisibilityKey),
+            ),
+          };
+          return refreshSessionFromTurnAgent({
+            compactionOverrides: {
+              thresholdPercent: bundle.resolvedAgent.config.compaction?.thresholdPercent,
+            },
+            session,
+            skillRoot,
+            turnAgent: resolvedTurnAgent,
+          });
+        },
         handleEvent,
         mode,
         modelResolutionScope: {
