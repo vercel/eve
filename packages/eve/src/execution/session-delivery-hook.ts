@@ -130,6 +130,17 @@ export function createSessionDeliveryHook(
     return read;
   };
 
+  const consumeObserved = (
+    observed: Promise<IteratorResult<HookPayload>>,
+  ): HookRead | undefined => {
+    // Multiple `bufferNext()` calls may await the same offered read. Only the
+    // caller that still observes that exact offer may consume it; later
+    // observers have already had their delivery buffered by the first caller.
+    if (offered !== observed) return undefined;
+
+    return consumeOffered();
+  };
+
   const drainReady = async (): Promise<void> => {
     // A caller may already be racing this read against turn control. Leave
     // that promise intact: the losing race ignores it, and the next call to
@@ -147,10 +158,11 @@ export function createSessionDeliveryHook(
 
   return {
     async bufferNext(): Promise<"buffered" | "closed"> {
-      await this.next();
-      const read = consumeOffered();
-      consumeRead(read);
-      return read.result.done ? "closed" : "buffered";
+      const observed = this.next();
+      const result = await observed;
+      const read = consumeObserved(observed);
+      if (read !== undefined) consumeRead(read);
+      return result.done ? "closed" : "buffered";
     },
 
     consumeNext(): void {

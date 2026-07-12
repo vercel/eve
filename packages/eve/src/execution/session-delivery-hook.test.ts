@@ -43,6 +43,26 @@ describe("createSessionDeliveryHook", () => {
     expect(replacementHook.dispose).toHaveBeenCalledOnce();
   });
 
+  it("buffers a memoized delivery once for concurrent bufferNext observers", async () => {
+    const read = createDeferred<IteratorResult<HookPayload>>();
+    const hook = createMockHook({ reads: [read.promise], token: "active" });
+    installHooks(hook);
+    const deliveryBuffers = createDeliveryBuffers();
+    const deliveryHook = createSessionDeliveryHook(deliveryBuffers);
+
+    await deliveryHook.rekey("active");
+    const first = deliveryHook.bufferNext();
+    const second = deliveryHook.bufferNext();
+
+    read.resolve(delivery("current"));
+
+    await expect(Promise.all([first, second])).resolves.toEqual(["buffered", "buffered"]);
+    expect(deliveryBuffers.currentHookDeliveries).toEqual([deliveryPayload("current")]);
+    expect(deliveryBuffers.replacedHookDeliveries).toEqual([]);
+
+    await deliveryHook.dispose();
+  });
+
   it("classifies drained rekey deliveries by hook ownership", async () => {
     const deliveryBuffers = createDeliveryBuffers();
     deliveryBuffers.turnDeliveries.push(deliveryPayload("existing"));
