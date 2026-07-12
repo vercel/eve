@@ -1,0 +1,122 @@
+---
+title: "AgentPhone"
+description: "Reach your agent over SMS, iMessage, and voice calls with AgentPhone."
+type: integration
+---
+
+The AgentPhone channel connects your agent to phone numbers that support SMS, MMS, iMessage, and voice calls. Inbound text messages and voice transcriptions arrive as webhooks. Voice webhooks deliver real-time speech transcripts so your agent can participate in live phone calls. Every request is verified with HMAC-SHA256 and a 5-minute replay window before anything else runs. The raw continuation token is `From:To`. See [Channels](./overview) for the contract this builds on.
+
+## Add the channel
+
+```ts title="agent/channels/agentphone.ts"
+import { agentphoneChannel } from "eve/channels/agentphone";
+
+export default agentphoneChannel({
+  allowFrom: "+15551234567",
+  messaging: { from: "+15557654321" },
+});
+```
+
+```bash
+AGENTPHONE_API_KEY=...            # required for outbound messages and calls
+AGENTPHONE_WEBHOOK_SECRET=...     # required for inbound signature verification
+```
+
+To skip env vars, pass the same values via `credentials: { apiKey, webhookSecret }`. The channel mounts one route:
+
+- `POST /eve/v1/agentphone/webhooks`: all inbound webhook events
+
+Point your AgentPhone agent's webhook URL at `/eve/v1/agentphone/webhooks`.
+
+## How the channel handles messages
+
+### Dispatch
+
+`allowFrom` is required. It gates who can reach the inbound hooks. Pass a single number, a list, an async resolver, or `"*"`. The wildcard is dangerous; only use it with an explicit check inside `onText`/`onVoice`.
+
+```ts
+export default agentphoneChannel({ allowFrom: ["+15551234567", "+15557654321"] });
+```
+
+`onText` decides dispatch and `auth` for SMS, MMS, and iMessage messages. Return `{ auth }` to proceed, or `null` to drop the message. `onVoice` fires for real-time voice transcripts during a call. `onCallEnded` fires when a call completes and delivers the full transcript and summary.
+
+```ts
+export default agentphoneChannel({
+  allowFrom: ["+15551234567"],
+  onText: (ctx, message) => ({
+    auth: {
+      principalId: message.from,
+      principalType: "user",
+      authenticator: "agentphone",
+      attributes: { channel: message.channel },
+    },
+  }),
+});
+```
+
+### Delivery
+
+The default `message.completed` handler sends the reply as SMS through AgentPhone's Messages API. A reply to an inbound message can reuse the webhook's `to` as the sender, but a proactive send has nothing to reuse, so it needs `messaging.from` or `messaging.numberId`. AgentPhone automatically routes via iMessage when available and falls back to SMS.
+
+### Channels supported
+
+| Channel  | Inbound | Outbound |
+| -------- | ------- | -------- |
+| SMS      | Yes     | Yes      |
+| MMS      | Yes     | Yes      |
+| iMessage | Yes     | Yes      |
+| Voice    | Yes     | Yes      |
+
+### Human-in-the-loop (HITL)
+
+SMS and voice have no native button or card affordance, so HITL prompts do not render as interactive controls. The agent's `input.requested` event reaches your `events["input.requested"]` handler if you declare one. Handle it by sending the prompt as text and mapping the caller's reply back to the input request yourself.
+
+### Proactive sessions
+
+Start a session without an inbound message through `receive(agentphone, { message, target, auth })` from a schedule `run` handler, or `args.receive(agentphone, ...)` from another channel. `target.phoneNumber` is required, and the channel needs `messaging.from` or `messaging.numberId` for the outbound sender.
+
+### Making outbound calls
+
+Use the `agentphone` handle to initiate calls programmatically:
+
+```ts
+export default agentphoneChannel({
+  allowFrom: "*",
+  events: {
+    async "message.completed"(event, channel) {
+      // Example: make a call from a tool result
+      if (event.finishReason === "tool-calls") {
+        await channel.agentphone.makeCall({
+          agentId: "agt_abc123",
+          initialGreeting: "Hello, this is your AI assistant calling.",
+        });
+      }
+    },
+  },
+});
+```
+
+### Voice webhook responses
+
+When a voice transcript arrives (`agent.message` with `channel: "voice"`), AgentPhone expects a JSON response telling the agent what to say next. The `onVoice` hook can return `{ text, hangup }` to control the response. The transcript is also dispatched to the eve session so your agent can process it like any other message.
+
+### Attachments
+
+Inbound MMS and iMessage media URLs are available via `message.mediaUrl`. Outbound media is supported through `sendMessage` options:
+
+```ts
+await channel.agentphone.sendMessage("Check out this image", {
+  mediaUrls: ["https://example.com/photo.jpg"],
+});
+```
+
+## Disclaimer
+
+As the deployer, it is your responsibility to ensure your agent complies with applicable laws.
+
+For outbound SMS or calls you initiate, you may be required to get prior express consent, honor STOP/opt-out and quiet-hour rules, and complete required carrier registration. For voice calls, you may be required to inform callers that calls are processed by an automated AI system and obtain consent where required.
+
+## What to read next
+
+- [Channels overview](./overview): the channel contract and every built-in channel
+- [Auth & route protection](../guides/auth-and-route-protection): authenticating inbound traffic

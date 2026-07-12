@@ -63,6 +63,7 @@ export interface ChannelMetadataMap {
   readonly "channel:chat-sdk": import("#public/channels/chat-sdk/chatSdkChannel.js").ChatSdkInstrumentationMetadata;
   readonly "channel:discord": import("#public/channels/discord/index.js").DiscordInstrumentationMetadata;
   readonly "channel:twilio": import("#public/channels/twilio/twilioChannel.js").TwilioInstrumentationMetadata;
+  readonly "channel:agentphone": import("#public/channels/agentphone/agentphoneChannel.js").AgentPhoneInstrumentationMetadata;
   readonly "channel:teams": import("#public/channels/teams/index.js").TeamsInstrumentationMetadata;
   readonly "channel:telegram": import("#public/channels/telegram/index.js").TelegramInstrumentationMetadata;
   readonly "channel:linear": import("#public/channels/linear/index.js").LinearInstrumentationMetadata;
@@ -88,6 +89,7 @@ export interface ChannelReferenceMap {
   readonly "channel:chat-sdk": import("#public/channels/chat-sdk/chatSdkChannel.js").ChatSdkChannel;
   readonly "channel:discord": import("#public/channels/discord/discordChannel.js").DiscordChannel;
   readonly "channel:twilio": import("#public/channels/twilio/twilioChannel.js").TwilioChannel;
+  readonly "channel:agentphone": import("#public/channels/agentphone/agentphoneChannel.js").AgentPhoneChannel;
   readonly "channel:teams": import("#public/channels/teams/teamsChannel.js").TeamsChannel;
   readonly "channel:telegram": import("#public/channels/telegram/telegramChannel.js").TelegramChannel;
   readonly "channel:linear": import("#public/channels/linear/linearChannel.js").LinearChannel;
