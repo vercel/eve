@@ -524,6 +524,11 @@ table.doc-table { width: 100%; border-collapse: collapse; }
 .cal-chip.done { background: var(--green-100); color: var(--green-600); }
 .cal-chip.wait { background: var(--amber-100); color: var(--amber-600); }
 
+/* 대시보드 미니 캘린더: 셀을 낮추고 칩을 가로로 흘려 한 화면에 담는다 */
+.cal-grid.mini .cal-cell { min-height: 46px; padding: 4px 5px; gap: 2px; }
+.cal-grid.mini .cal-chips { flex-direction: row; flex-wrap: wrap; }
+.cal-grid.mini .cal-chip { font-size: 10px; padding: 0 4px; }
+
 /* ── 요청 방식 선택 카드 ──────────────────────── */
 .method-grid { display: grid; gap: 10px; margin-top: 12px; }
 .method-card { display: flex; align-items: center; gap: 14px; text-align: left; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; background: var(--surface); transition: border-color 0.12s, transform 0.12s, box-shadow 0.12s; }
@@ -571,6 +576,9 @@ table.doc-table { width: 100%; border-collapse: collapse; }
   .tool-palette { position: fixed; left: 0; right: 0; bottom: 62px; top: auto; z-index: 60; flex-direction: row; overflow-x: auto; background: var(--surface); border-top: 1px solid var(--border); padding: 9px 10px; gap: 8px; }
   .tool-btn { width: auto; flex: none; }
   .doc-table .hide-m { display: none; }
+  .cal-cell { min-height: 58px; padding: 4px; }
+  .cal-chip { font-size: 9.5px; padding: 0 4px; }
+  .cal-grid.mini .cal-cell { min-height: 40px; }
   .bottom-nav {
     display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 65;
     background: var(--surface); border-top: 1px solid var(--border);

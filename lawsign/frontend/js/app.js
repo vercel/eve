@@ -256,10 +256,57 @@
       { k: '예약 발송', v: c.SCHEDULED, color: 'var(--violet-600)', status: 'SCHEDULED' },
     ];
     const tpls = await LS.api.listTemplates();
+    const docs = (await LS.api.listDocuments({ size: 500 })).items;
 
     const today = new Date();
     const todayLabel = today.getFullYear() + '년 ' + (today.getMonth() + 1) + '월 ' + today.getDate() + '일 (' + '일월화수목금토'[today.getDay()] + ')';
     const chart = lineChart(sum.trend);
+
+    // 이번 달 미니 캘린더: 일자별 ①발송약정 ②서명됨 ③서명대기 집계 (메일함 캘린더 뷰와 동일 규칙)
+    const calY = today.getFullYear();
+    const calM = today.getMonth();
+    const calByDay = {};
+    const calSlot = (day) => (calByDay[day] = calByDay[day] || { sent: 0, signed: 0, waiting: 0 });
+    docs.forEach((d) => {
+      const c = new Date(d.createdAt);
+      if (c.getFullYear() === calY && c.getMonth() === calM) {
+        const s = calSlot(c.getDate());
+        s.sent++;
+        if (d.status === 'PENDING_OTHERS' || d.status === 'NEED_MY_SIGN' || d.status === 'SCHEDULED') s.waiting++;
+      }
+      if (d.completedAt) {
+        const e = new Date(d.completedAt);
+        if (e.getFullYear() === calY && e.getMonth() === calM) calSlot(e.getDate()).signed++;
+      }
+    });
+    const calFirst = new Date(calY, calM, 1).getDay();
+    const calDays = new Date(calY, calM + 1, 0).getDate();
+    let calCells = '';
+    for (let i = 0; i < calFirst; i++) calCells += '<div class="cal-cell off"></div>';
+    for (let day = 1; day <= calDays; day++) {
+      const s = calByDay[day];
+      calCells +=
+        '<div class="cal-cell' + (day === today.getDate() ? ' today' : '') + (s ? ' has' : '') + '" data-day="' + day + '">' +
+        '<span class="d">' + day + '</span>' +
+        (s
+          ? '<span class="cal-chips">' +
+            (s.sent ? '<span class="cal-chip send" title="발송약정">📤 ' + s.sent + '</span>' : '') +
+            (s.signed ? '<span class="cal-chip done" title="서명됨">✅ ' + s.signed + '</span>' : '') +
+            (s.waiting ? '<span class="cal-chip wait" title="서명대기">⏳ ' + s.waiting + '</span>' : '') +
+            '</span>'
+          : '') +
+        '</div>';
+    }
+    const calHtml =
+      '<section class="card card-pad" style="margin-top:16px" id="dash-cal">' +
+      '<div class="toolbar-row" style="justify-content:space-between;margin-bottom:10px">' +
+      '<div class="section-title" style="margin:0">' + icons.calendar + ' ' + (calM + 1) + '월 발송·체결 캘린더 <span class="badge gold">' + icons.check + ' Google Calendar 연동됨</span></div>' +
+      '<button class="btn sm" id="dash-cal-full">전체 캘린더 보기 ›</button></div>' +
+      '<div class="toolbar-row" style="gap:12px;margin-bottom:8px;font-size:12px">' +
+      '<span class="cal-chip send">📤 발송약정</span><span class="cal-chip done">✅ 서명됨</span><span class="cal-chip wait">⏳ 서명대기</span></div>' +
+      '<div class="cal-week">' + ['일', '월', '화', '수', '목', '금', '토'].map((w) => '<span>' + w + '</span>').join('') + '</div>' +
+      '<div class="cal-grid mini">' + calCells + '</div></section>';
+
     main.innerHTML =
       '<div class="page">' +
       '<div class="dash-head"><div><div class="dim" style="font-size:12px;font-weight:700;letter-spacing:0.02em">' + todayLabel + '</div>' +
@@ -285,6 +332,8 @@
         : '<p class="dim" style="margin-top:12px">지연 중인 문서가 없습니다. 👍</p>') +
       '</section></div>' +
 
+      calHtml +
+
       '<section class="card card-pad" style="margin-top:16px"><div class="section-title">⚡ 퀵 템플릿 — 자주 쓰는 양식으로 바로 시작</div>' +
       '<div class="tpl-grid">' + tpls.map((t) =>
         '<button class="tpl-card" data-tpl="' + t.id + '"><span class="ic">' + icons.doc + '</span><b>' + esc(t.title) + '</b>' +
@@ -293,6 +342,8 @@
       '</div>';
 
     $('#dash-new').addEventListener('click', () => nav('request'));
+    $('#dash-cal-full').addEventListener('click', () => nav('documents', { view: 'calendar' }));
+    $$('#dash-cal .cal-cell.has', main).forEach((cell) => cell.addEventListener('click', () => nav('documents', { view: 'calendar' })));
     bindChartTooltip($('#dash-chart'), chart, sum.trend);
     $$('.stat', main).forEach((el) => el.addEventListener('click', () => nav('documents', { status: el.dataset.status, view: 'kanban' })));
     $$('[data-tpl]', main).forEach((el) => el.addEventListener('click', () => nav('request', { tpl: el.dataset.tpl })));
