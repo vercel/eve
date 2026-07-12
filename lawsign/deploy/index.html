@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>로싸인 LawSign — 법무 특화 전자서명 워크스페이스 (베타)</title>
+  <meta name="description" content="법무법인·기업 법무팀을 위한 차세대 전자계약 클라우드 워크스페이스 — 베타 배포" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233348e0'/%3E%3Ctext x='16' y='22' font-size='17' font-weight='800' font-family='sans-serif' fill='white' text-anchor='middle'%3EL%3C/text%3E%3C/svg%3E" />
+  <style>
+    #ls-boot { font-family: sans-serif; display: grid; place-items: center; min-height: 100vh; color: #565e75; }
+    #ls-boot .spin { width: 34px; height: 34px; border: 3px solid #e4e8fd; border-top-color: #3348e0; border-radius: 50%; margin: 0 auto 14px; animation: r 0.8s linear infinite; }
+    @keyframes r { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="ls-boot"><div style="text-align:center"><div class="spin"></div>로싸인을 불러오는 중…</div></div>
+  <script>
+    // 자산은 공개 GitHub 저장소의 고정 커밋에서 로드한다 (내용 불변 보장).
+    (function () {
+      'use strict';
+      var BASE = 'https://raw.githubusercontent.com/shinkang888-code/eve/debb4cb8b802ec9302072d4a6d5f474a584fba27/lawsign/frontend/';
+      var FILES = ['css/app.css', 'js/api.js', 'js/app.js', 'js/request.js'];
+
+      Promise.all(FILES.map(function (f) {
+        return fetch(BASE + f).then(function (r) {
+          if (!r.ok) throw new Error(f + ' HTTP ' + r.status);
+          return r.text();
+        });
+      })).then(function (texts) {
+        var style = document.createElement('style');
+        style.textContent = texts[0];
+        document.head.appendChild(style);
+        // 스크립트는 선언 순서대로 동기 주입 (api → app → request)
+        for (var i = 1; i < texts.length; i++) {
+          var s = document.createElement('script');
+          s.textContent = texts[i];
+          document.head.appendChild(s);
+        }
+        // 딥링크(#/documents 등) 접속 시 전체 라우트 등록 후 재렌더 보장
+        window.dispatchEvent(new HashChangeEvent('hashchange'));
+      }).catch(function (e) {
+        document.getElementById('ls-boot').innerHTML =
+          '<div style="text-align:center;max-width:420px"><b>로싸인을 불러오지 못했습니다.</b><br>' +
+          '네트워크 연결을 확인한 뒤 새로고침해 주세요.<br><small style="color:#8b93aa">' +
+          String(e && e.message ? e.message : e).replace(/[<>&]/g, '') + '</small></div>';
+      });
+    })();
+  </script>
+</body>
+</html>
