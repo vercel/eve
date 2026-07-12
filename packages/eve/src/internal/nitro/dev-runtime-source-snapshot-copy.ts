@@ -367,7 +367,10 @@ function gitIgnorePatternToRegExp(pattern: string): RegExp {
     }
 
     if (character === "*") {
-      if (pattern[index + 1] === "*") {
+      if (pattern.startsWith("**/", index) && (index === 0 || pattern[index - 1] === "/")) {
+        source += "(?:.*/)?";
+        index += 2;
+      } else if (pattern[index + 1] === "*") {
         source += ".*";
         index++;
       } else {

@@ -308,6 +308,55 @@ describe("development runtime artifact snapshots", () => {
     expect(existsSync(join(snapshot.runtimeAppRoot, "agent", "secret-notes.md"))).toBe(false);
   });
 
+  it("honors globstar-slash gitignore rules at zero and nested directory depth", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-gitignore-globstar-");
+    const agentRoot = join(appRoot, "agent");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+
+    await mkdir(join(appRoot, "nested"), { recursive: true });
+    await mkdir(join(appRoot, "assets", "generated"), { recursive: true });
+    await mkdir(join(appRoot, "assets", "nested", "generated"), { recursive: true });
+    await mkdir(join(appRoot, "assets", "keep", "generated"), { recursive: true });
+    await mkdir(agentRoot, { recursive: true });
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(
+      join(appRoot, ".gitignore"),
+      ["**/*.tmp", "!keep.tmp", "assets/**/generated/", "!assets/keep/generated/", ""].join("\n"),
+    );
+    await writeFile(join(appRoot, "package.json"), '{"type":"module"}\n');
+    await writeFile(join(agentRoot, "agent.ts"), "export const answer = 42;\n");
+    await writeFile(join(appRoot, "ignored.tmp"), "ignore top-level file\n");
+    await writeFile(join(appRoot, "nested", "ignored.tmp"), "ignore nested file\n");
+    await writeFile(join(appRoot, "keep.tmp"), "keep top-level file\n");
+    await writeFile(join(appRoot, "assets", "generated", "direct.txt"), "ignore direct child\n");
+    await writeFile(
+      join(appRoot, "assets", "nested", "generated", "deep.txt"),
+      "ignore nested child\n",
+    );
+    await writeFile(
+      join(appRoot, "assets", "keep", "generated", "preserved.txt"),
+      "keep negated directory\n",
+    );
+    await writeFile(
+      join(compileDirectoryPath, "compiled-agent-manifest.json"),
+      `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`,
+    );
+
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+
+    expect(existsSync(join(snapshot.runtimeAppRoot, "ignored.tmp"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "nested", "ignored.tmp"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "keep.tmp"))).toBe(true);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "assets", "generated"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "assets", "nested", "generated"))).toBe(false);
+    expect(
+      existsSync(join(snapshot.runtimeAppRoot, "assets", "keep", "generated", "preserved.txt")),
+    ).toBe(true);
+  });
+
   it("prunes stale snapshots while preserving the active and recent snapshots", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-artifacts-prune-");
     const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
