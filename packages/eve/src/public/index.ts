@@ -11,10 +11,13 @@ export {
   type AgentModelOptionsDefinition,
   type AgentReasoningDefinition,
   type AgentStaticSkillVisibilityDefinition,
+  type StaticSkillVisibilityEventName,
+  type StaticSkillVisibilityEvents,
   type StaticSkillVisibility,
   type AgentWorkflowDefinition,
   type AgentWorkflowWorldDefinition,
   defineAgent,
+  defineStaticSkillVisibility,
 } from "#public/definitions/agent.js";
 export { defineDynamic } from "#public/definitions/tool.js";
 export type { DynamicResolveContext, DynamicSentinel } from "#shared/dynamic-tool-definition.js";

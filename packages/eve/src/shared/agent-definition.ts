@@ -3,6 +3,7 @@ import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index
 import type { JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import {
+  DYNAMIC_SENTINEL_KIND,
   isDynamicSentinel,
   type DynamicResolveContext,
   type DynamicSentinel,
@@ -85,8 +86,24 @@ export type PublicAgentDynamicModelDefinition = DynamicSentinel<
 /** Static skill names visible to one session or turn. */
 export type StaticSkillVisibility = "all" | readonly string[];
 
-/** Dynamic resolver shape for the agent's compiled static skill visibility. */
-export type PublicAgentStaticSkillVisibilityDefinition = DynamicSentinel<StaticSkillVisibility>;
+/** Lifecycle boundaries supported by the static skill visibility resolver. */
+export type StaticSkillVisibilityEventName = "session.started" | "turn.started";
+
+/** Event map accepted by the static skill visibility resolver. */
+export type StaticSkillVisibilityEvents = {
+  readonly [K in StaticSkillVisibilityEventName]?: (
+    event: unknown,
+    ctx: DynamicResolveContext,
+  ) => StaticSkillVisibility | Promise<StaticSkillVisibility>;
+} & {
+  readonly "step.started"?: never;
+};
+
+/** Dedicated sentinel shape for the agent's compiled static skill visibility. */
+export type PublicAgentStaticSkillVisibilityDefinition = {
+  readonly kind: typeof DYNAMIC_SENTINEL_KIND;
+  readonly events: StaticSkillVisibilityEvents;
+};
 
 export interface PublicAgentDynamicModelDefinitionInput {
   /** Compiled static model: build-time metadata and the active model when no scope is set. */

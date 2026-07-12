@@ -10,6 +10,7 @@ import { defineInstrumentation } from "#public/definitions/instrumentation.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
 import { defineSkill } from "#public/definitions/skill.js";
+import { defineStaticSkillVisibility } from "#public/definitions/agent.js";
 import { defineTool } from "#public/definitions/tool.js";
 
 describe("definition helper exact inputs", () => {
@@ -75,6 +76,36 @@ function typeOnlyFixtures(): void {
         return { runtimeContext: { "test.session_id": sessionId } };
       },
     },
+  });
+
+  defineAgent({
+    model: "anthropic/claude-sonnet-5",
+    staticSkillVisibility: defineStaticSkillVisibility({
+      events: {
+        "session.started": () => "all",
+        "turn.started": () => ["support"],
+      },
+    }),
+  });
+
+  defineAgent({
+    model: "anthropic/claude-sonnet-5",
+    staticSkillVisibility: defineStaticSkillVisibility({
+      events: {
+        // @ts-expect-error Static skill visibility is limited to session.started and turn.started.
+        "step.started": () => ["support"],
+      },
+    }),
+  });
+
+  defineAgent({
+    model: "anthropic/claude-sonnet-5",
+    staticSkillVisibility: defineStaticSkillVisibility({
+      events: {
+        // @ts-expect-error Static skill visibility rejects tool lifecycle handlers.
+        "tool.started": () => ["support"],
+      },
+    }),
   });
 
   defineInstrumentation({

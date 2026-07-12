@@ -93,11 +93,11 @@ may see and load. Packages remain materialized, so sibling files such as
 omitted from the prompt and rejected by `load_skill`:
 
 ```ts title="agent/agent.ts"
-import { defineAgent, defineDynamic } from "eve";
+import { defineAgent, defineStaticSkillVisibility } from "eve";
 
 export default defineAgent({
   model: "anthropic/claude-opus-4.8",
-  staticSkillVisibility: defineDynamic({
+  staticSkillVisibility: defineStaticSkillVisibility({
     events: {
       "session.started": (_event, ctx) =>
         ctx.session.auth.initiator?.attributes.plan === "enterprise" ? "all" : ["support"],
@@ -109,6 +109,9 @@ export default defineAgent({
 ```
 
 Handlers may return `"all"` or a list of path-derived static skill names.
+Use `defineStaticSkillVisibility` for this slot; unlike general-purpose
+`defineDynamic`, its authoring type only permits `session.started` and
+`turn.started` handlers.
 Unknown, duplicate, malformed, or thrown results fail closed to an empty
 static-skill set. Omitting `staticSkillVisibility` preserves the default where
 all static skills are available. The resolved set is durable for replay and is

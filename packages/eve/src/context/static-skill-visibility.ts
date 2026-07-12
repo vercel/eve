@@ -26,11 +26,22 @@ export function initializeStaticSkillVisibility(
   ctx: AlsContext,
   staticSkillNames: readonly string[],
 ): void {
-  if (ctx.get(StaticSkillVisibilityKey) !== undefined) return;
-  ctx.set(StaticSkillVisibilityKey, {
-    kind: "all",
-    names: [...staticSkillNames],
-  });
+  const currentNames = [...staticSkillNames];
+  const currentNameSet = new Set(currentNames);
+  const existing = ctx.get(StaticSkillVisibilityKey);
+
+  if (existing?.kind === "subset") {
+    ctx.set(StaticSkillVisibilityKey, {
+      kind: "subset",
+      names: existing.names.filter((name) => currentNameSet.has(name)),
+    });
+    return;
+  }
+
+  // `all` is an authorization mode, not a cached inventory. Refreshing its
+  // names keeps prompt projection and load_skill authorization aligned when a
+  // durable continuation encounters a changed compiled skill catalog.
+  ctx.set(StaticSkillVisibilityKey, { kind: "all", names: currentNames });
 }
 
 export function filterVisibleStaticSkills<T extends { readonly name: string }>(

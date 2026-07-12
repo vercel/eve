@@ -21,9 +21,11 @@ turn, and the exact same resolved selection controls both the model's
 
 ## Public contract
 
-`AgentDefinition.staticSkillVisibility` accepts the existing `defineDynamic`
-sentinel. Its handlers may run only at `session.started` and `turn.started`
-and return either:
+`AgentDefinition.staticSkillVisibility` accepts Eve's dedicated
+`defineStaticSkillVisibility({ events })` sentinel, which retains the same
+event-handler ergonomics while giving this public slot an exact lifecycle
+type. Its handlers may run only at `session.started` and `turn.started` and
+return either:
 
 - `"all"` — all compiled static skills;
 - a readonly string array — exactly those compiled static skill names, including

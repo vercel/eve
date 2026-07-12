@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createAgentSourceManifest, createModuleSourceRef } from "#discover/manifest.js";
+import { defineStaticSkillVisibility } from "#public/definitions/agent.js";
 import { defineDynamic } from "#public/definitions/tool.js";
 import { compileAgentConfig } from "#compiler/normalize-agent-config.js";
 import type { ManifestCompileContext } from "#compiler/normalize-helpers.js";
@@ -60,7 +61,7 @@ describe("compileAgentConfig", () => {
   it("compiles static skill visibility with session and turn events", async () => {
     mocks.loadModuleBackedDefinition.mockResolvedValue({
       model: "openai/gpt-5.5",
-      staticSkillVisibility: defineDynamic({
+      staticSkillVisibility: defineStaticSkillVisibility({
         events: {
           "session.started": () => "all",
           "turn.started": () => ["support"],

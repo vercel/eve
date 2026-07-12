@@ -1,4 +1,9 @@
-import type { PublicAgentDefinition } from "#shared/agent-definition.js";
+import { DYNAMIC_SENTINEL_KIND } from "#shared/dynamic-tool-definition.js";
+import type {
+  PublicAgentDefinition,
+  PublicAgentStaticSkillVisibilityDefinition,
+  StaticSkillVisibilityEvents,
+} from "#shared/agent-definition.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
 
 export type {
@@ -18,6 +23,7 @@ export type {
   PublicAgentStaticModelDefinition as AgentStaticModelDefinition,
   PublicAgentCompactionDefinition as AgentCompactionDefinition,
   PublicAgentStaticSkillVisibilityDefinition as AgentStaticSkillVisibilityDefinition,
+  StaticSkillVisibilityEvents,
   StaticSkillVisibility,
 } from "#shared/agent-definition.js";
 
@@ -46,4 +52,20 @@ export function defineAgent<TAgent extends AgentDefinition>(
   definition: ExactDefinition<TAgent, AgentDefinition>,
 ): TAgent {
   return definition;
+}
+
+/**
+ * Defines the session/turn-only resolver used by `agent.ts` static skill
+ * visibility. The dedicated wrapper keeps unsupported lifecycle keys out of
+ * the public slot while retaining the `defineDynamic({ events })` shape.
+ */
+export function defineStaticSkillVisibility<
+  const TEvents extends StaticSkillVisibilityEvents,
+>(definition: {
+  readonly events: ExactDefinition<TEvents, StaticSkillVisibilityEvents>;
+}): PublicAgentStaticSkillVisibilityDefinition {
+  return {
+    events: definition.events,
+    kind: DYNAMIC_SENTINEL_KIND,
+  };
 }

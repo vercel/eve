@@ -62,6 +62,29 @@ describe("load_skill executor", () => {
     ).resolves.toBe("Dynamic instructions.");
   });
 
+  it("lets a dynamic skill override a same-named hidden static skill", async () => {
+    const sandbox = mockSandbox({
+      initialFiles: {
+        "/home/agent/.agents/skills/shared/SKILL.md": "Dynamic replacement.",
+      },
+    });
+    const ctx = new ContextContainer();
+    ctx.set(SandboxKey, sandbox.access);
+    ctx.set(StaticSkillVisibilityKey, { kind: "subset", names: [] });
+    ctx.set(DynamicSkillManifestKey, {
+      resolver: [{ description: "Dynamic replacement", name: "shared" }],
+    });
+
+    const execute = SKILL_TOOL_DEFINITION.execute;
+    if (execute === undefined) throw new Error("load_skill tool is missing an execute function");
+
+    await expect(
+      contextStorage.run(ctx, () =>
+        execute({ skill: "shared" }, { messages: [], toolCallId: "call_shared" }),
+      ),
+    ).resolves.toBe("Dynamic replacement.");
+  });
+
   it("retains sibling assets for a selected packaged static skill", async () => {
     const sandbox = mockSandbox({
       initialFiles: {

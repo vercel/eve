@@ -4,6 +4,7 @@ import {
   normalizeAgentDefinition,
   normalizeScheduleDefinition,
 } from "#internal/authored-definition/core.js";
+import { defineStaticSkillVisibility } from "#public/definitions/agent.js";
 import { defineDynamic } from "#public/definitions/tool.js";
 
 const FAILURE_MESSAGE = "Expected the agent config to match the public eve shape.";
@@ -43,7 +44,7 @@ describe("normalizeAgentDefinition", () => {
   });
 
   it("accepts static skill visibility handlers at session and turn boundaries", () => {
-    const visibility = defineDynamic({
+    const visibility = defineStaticSkillVisibility({
       events: {
         "session.started": () => "all",
         "turn.started": () => ["support"],
@@ -67,9 +68,10 @@ describe("normalizeAgentDefinition", () => {
       normalizeAgentDefinition(
         {
           model: "openai/gpt-5.5",
-          staticSkillVisibility: defineDynamic({
+          staticSkillVisibility: {
             events: { "step.started": () => ["support"] },
-          }),
+            kind: "eve:dynamic",
+          },
         },
         FAILURE_MESSAGE,
       ),
