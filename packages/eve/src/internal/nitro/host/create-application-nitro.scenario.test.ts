@@ -322,6 +322,7 @@ describe("createApplicationNitro", () => {
           config: {
             version: 3,
             framework: {
+              slug: "eve",
               version: resolveInstalledPackageInfo().version,
             },
           },
@@ -365,6 +366,7 @@ describe("createApplicationNitro", () => {
       config: {
         version: 3,
         framework: {
+          slug: "eve",
           version: resolveInstalledPackageInfo().version,
         },
       },
