@@ -298,7 +298,7 @@
         '</div>';
     }
     const calHtml =
-      '<section class="card card-pad" style="margin-top:16px" id="dash-cal">' +
+      '<section class="card card-pad" id="dash-cal">' +
       '<div class="toolbar-row" style="justify-content:space-between;margin-bottom:10px">' +
       '<div class="section-title" style="margin:0">' + icons.calendar + ' ' + (calM + 1) + '월 발송·체결 캘린더 <span class="badge gold">' + icons.check + ' Google Calendar 연동됨</span></div>' +
       '<button class="btn sm" id="dash-cal-full">전체 캘린더 보기 ›</button></div>' +
@@ -321,8 +321,7 @@
       '</div>' +
 
       '<div class="dash-grid">' +
-      '<section class="card card-pad"><div class="section-title">' + icons.grid + ' 서명 파이프라인 현황 <span class="badge gray">최근 30일</span></div>' +
-      '<div class="chart-wrap" id="dash-chart">' + chart.svg + '</div></section>' +
+      calHtml +
 
       '<section class="card card-pad"><div class="section-title" style="color:var(--red-600)">' + icons.warn + ' 마감 임박 · 요주의 문서</div>' +
       (sum.urgent.length ? sum.urgent.map((d) =>
@@ -332,13 +331,14 @@
         : '<p class="dim" style="margin-top:12px">지연 중인 문서가 없습니다. 👍</p>') +
       '</section></div>' +
 
-      calHtml +
-
       '<section class="card card-pad" style="margin-top:16px"><div class="section-title">⚡ 퀵 템플릿 — 자주 쓰는 양식으로 바로 시작</div>' +
       '<div class="tpl-grid">' + tpls.map((t) =>
         '<button class="tpl-card" data-tpl="' + t.id + '"><span class="ic">' + icons.doc + '</span><b>' + esc(t.title) + '</b>' +
         '<span class="dim" style="font-size:11.5px">입력 필드 ' + t.fields + '개 · ' + t.usedCount + '회 사용</span></button>').join('') +
       '<button class="tpl-card add">' + icons.plus + ' 내 템플릿 추가</button></div></section>' +
+
+      '<section class="card card-pad" style="margin-top:16px"><div class="section-title">' + icons.grid + ' 서명 파이프라인 현황 <span class="badge gray">최근 30일</span></div>' +
+      '<div class="chart-wrap" id="dash-chart">' + chart.svg + '</div></section>' +
       '</div>';
 
     $('#dash-new').addEventListener('click', () => nav('request'));
