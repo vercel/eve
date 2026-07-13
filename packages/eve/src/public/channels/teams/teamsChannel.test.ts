@@ -27,6 +27,7 @@ async function firePost(
 
   const send = vi.fn(async (_input: unknown, _options: unknown) => ({
     continuationToken: "TOKEN",
+    getEventSnapshot: async () => ({ events: [], nextStreamIndex: 0 }),
     getEventStream: async () => new ReadableStream(),
     id: "SESSION",
   }));
@@ -149,6 +150,7 @@ describe("teamsChannel", () => {
     });
     const send = vi.fn(async (_input: unknown, _options: unknown) => ({
       continuationToken: "TOKEN",
+      getEventSnapshot: async () => ({ events: [], nextStreamIndex: 0 }),
       getEventStream: async () => new ReadableStream(),
       id: "SESSION",
     }));

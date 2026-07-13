@@ -100,6 +100,9 @@ async function firePost(
   const send = vi.fn<SendFn<ChatSdkChannelState>>().mockResolvedValue({
     continuationToken: "chat-sdk:test",
     id: "session-1",
+    async getEventSnapshot() {
+      return { events: [], nextStreamIndex: 0 };
+    },
     async getEventStream() {
       return new ReadableStream();
     },
@@ -240,6 +243,9 @@ describe("chatSdkChannel", () => {
     const send = vi.fn<SendFn<ChatSdkChannelState>>().mockResolvedValue({
       continuationToken: "chat-sdk:test",
       id: "session-1",
+      async getEventSnapshot() {
+        return { events: [], nextStreamIndex: 0 };
+      },
       async getEventStream() {
         return new ReadableStream();
       },

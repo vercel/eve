@@ -131,6 +131,63 @@ describe("createWorkflowRuntime#deliver", () => {
   });
 });
 
+describe("createWorkflowRuntime#getEventSnapshot", () => {
+  it.each([
+    {
+      events: [
+        { data: { message: "ready" }, type: "message.completed" },
+        { data: { wait: "next-user-message" }, type: "session.waiting" },
+      ],
+      expectedNextStreamIndex: 12,
+      name: "captured suffix",
+      startIndex: 10,
+      tailIndex: 11,
+    },
+    {
+      events: [],
+      expectedNextStreamIndex: 12,
+      name: "cursor already beyond the tail",
+      startIndex: 12,
+      tailIndex: 11,
+    },
+  ])("returns the finite $name", async (testCase) => {
+    const encoder = new TextEncoder();
+    let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+    let cancelled = false;
+    const readable = new ReadableStream<Uint8Array>({
+      start(streamController) {
+        controller = streamController;
+      },
+      cancel() {
+        cancelled = true;
+      },
+    }) as ReadableStream<Uint8Array> & { getTailIndex(): Promise<number> };
+    readable.getTailIndex = vi.fn(async () => {
+      for (const event of testCase.events) {
+        controller?.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+      }
+      return testCase.tailIndex;
+    });
+    const getReadable = vi.fn(() => readable);
+    getRunMock.mockReturnValue({ getReadable });
+    const runtime = createWorkflowRuntime({
+      compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource,
+    });
+
+    await expect(
+      runtime.getEventSnapshot("driver-run", { startIndex: testCase.startIndex }),
+    ).resolves.toEqual({
+      events: testCase.events,
+      nextStreamIndex: testCase.expectedNextStreamIndex,
+    });
+
+    expect(getRunMock).toHaveBeenCalledWith("driver-run");
+    expect(getReadable).toHaveBeenCalledWith({ startIndex: testCase.startIndex });
+    expect(readable.getTailIndex).toHaveBeenCalledTimes(1);
+    expect(cancelled).toBe(testCase.events.length > 0);
+  });
+});
+
 describe("createWorkflowRuntime#run", () => {
   const adapter: ChannelAdapter = { kind: "http" };
 

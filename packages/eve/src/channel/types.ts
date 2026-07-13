@@ -388,6 +388,19 @@ export interface Runtime {
     sessionId: string,
     options?: GetEventStreamOptions,
   ): Promise<ReadableStream<HandleMessageStreamEvent>>;
+
+  /**
+   * Returns the durable event suffix through a tail captured at invocation.
+   * Unlike {@link getEventStream}, this operation is finite even when the
+   * session remains parked for a future turn.
+   */
+  getEventSnapshot(sessionId: string, options?: GetEventStreamOptions): Promise<EventSnapshot>;
+}
+
+/** A finite durable-event suffix and its exclusive next cursor. */
+export interface EventSnapshot {
+  readonly events: readonly HandleMessageStreamEvent[];
+  readonly nextStreamIndex: number;
 }
 
 /**

@@ -154,6 +154,9 @@ describe("dispatchChannelRequest", () => {
     const targetReceive = vi.fn().mockResolvedValue({
       id: "sess_target",
       continuationToken: "tok",
+      async getEventSnapshot() {
+        return { events: [], nextStreamIndex: 0 };
+      },
       async getEventStream() {
         return new ReadableStream();
       },
@@ -227,6 +230,7 @@ describe("dispatchChannelRequest", () => {
   it("tags route sends with Vercel's request id", async () => {
     const runtimeForTest: Runtime = {
       deliver: vi.fn().mockResolvedValue({ sessionId: "sess_route" }),
+      getEventSnapshot: vi.fn().mockResolvedValue({ events: [], nextStreamIndex: 0 }),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
       run: vi.fn(),
     };
@@ -272,6 +276,7 @@ describe("dispatchChannelRequest", () => {
   it("does not invent a channel request id when Vercel did not send one", async () => {
     const runtimeForTest: Runtime = {
       deliver: vi.fn().mockResolvedValue({ sessionId: "sess_route" }),
+      getEventSnapshot: vi.fn().mockResolvedValue({ events: [], nextStreamIndex: 0 }),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
       run: vi.fn(),
     };
@@ -312,6 +317,7 @@ describe("dispatchChannelRequest", () => {
   it("does not mutate route-owned run and deliver inputs", async () => {
     const runtimeForTest: Runtime = {
       deliver: vi.fn().mockResolvedValue({ sessionId: "sess_deliver" }),
+      getEventSnapshot: vi.fn().mockResolvedValue({ events: [], nextStreamIndex: 0 }),
       getEventStream: vi.fn().mockResolvedValue(new ReadableStream()),
       run: vi.fn().mockResolvedValue({
         continuationToken: "route-token",

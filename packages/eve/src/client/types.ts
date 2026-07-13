@@ -186,6 +186,26 @@ export interface StreamOptions {
 }
 
 /**
+ * Options for {@link ClientSession.snapshot}.
+ */
+export interface SnapshotOptions {
+  /**
+   * Number of durable events already consumed. Defaults to the session's
+   * stored stream cursor.
+   */
+  readonly startIndex?: number;
+}
+
+/**
+ * One finite durable-event suffix and the exclusive cursor after its captured
+ * tail.
+ */
+export interface SessionSnapshot {
+  readonly events: HandleMessageStreamEvent[];
+  readonly state: SessionState;
+}
+
+/**
  * Aggregated result of one message turn, returned by
  * {@link MessageResponse.result}.
  */

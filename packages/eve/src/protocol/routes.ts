@@ -33,6 +33,11 @@ export const EVE_CONTINUE_SESSION_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/session/:
 export const EVE_MESSAGE_STREAM_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/session/:sessionId/stream`;
 
 /**
+ * Stable framework-owned finite event snapshot route pattern.
+ */
+export const EVE_SESSION_SNAPSHOT_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/session/:sessionId/snapshot`;
+
+/**
  * Framework-owned route pattern for dispatching one authored schedule
  * exactly once from the dev server.
  *
@@ -101,6 +106,13 @@ export const EVE_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/callback/:token`;
  */
 export function createEveMessageStreamRoutePath(sessionId: string): string {
   return `${EVE_ROUTE_PREFIX}/session/${encodeURIComponent(sessionId)}/stream`;
+}
+
+/**
+ * Creates the stable framework-owned finite event snapshot route path.
+ */
+export function createEveSessionSnapshotRoutePath(sessionId: string): string {
+  return `${EVE_ROUTE_PREFIX}/session/${encodeURIComponent(sessionId)}/snapshot`;
 }
 
 /**

@@ -13,7 +13,7 @@ import {
   EVE_STREAM_FORMAT_HEADER,
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/message.js";
-import { EVE_INFO_ROUTE_PATH } from "#protocol/routes.js";
+import { EVE_INFO_ROUTE_PATH, EVE_SESSION_SNAPSHOT_ROUTE_PATTERN } from "#protocol/routes.js";
 import { type InputResponse, isInputResponse } from "#runtime/input/types.js";
 import { type AuthFn, routeAuth } from "#public/channels/auth.js";
 import {
@@ -347,6 +347,39 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         } catch {
           return Response.json({ error: "Session not found.", ok: false }, { status: 404 });
         }
+      }),
+
+      GET(EVE_SESSION_SNAPSHOT_ROUTE_PATTERN, async (req, { getSession, params }) => {
+        const authResult = await routeAuth(req, input.auth);
+        if (authResult instanceof Response) return authResult;
+
+        const sessionId = params.sessionId;
+        if (!sessionId) {
+          return Response.json({ error: "Missing session id.", ok: false }, { status: 400 });
+        }
+
+        const startIndex = parseStartIndex(req);
+        if (startIndex instanceof Response) return startIndex;
+
+        let session;
+        try {
+          session = getSession(sessionId);
+        } catch {
+          return Response.json({ error: "Session not found.", ok: false }, { status: 404 });
+        }
+
+        const snapshot = await session.getEventSnapshot({ startIndex });
+        return Response.json(
+          {
+            events: snapshot.events,
+            state: {
+              continuationToken: session.continuationToken,
+              sessionId,
+              streamIndex: snapshot.nextStreamIndex,
+            },
+          },
+          { headers: { "cache-control": "no-store" } },
+        );
       }),
     ],
     events: input.events,

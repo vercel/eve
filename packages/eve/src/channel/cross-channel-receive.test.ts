@@ -11,6 +11,7 @@ import type { Runtime } from "#channel/types.js";
 function makeRuntime(): Runtime {
   return {
     deliver: vi.fn(),
+    getEventSnapshot: vi.fn(),
     getEventStream: vi.fn(),
     run: vi.fn(),
   };
@@ -20,6 +21,9 @@ function makeSession(): Session {
   return {
     id: "sess_1",
     continuationToken: "tok",
+    async getEventSnapshot() {
+      return { events: [], nextStreamIndex: 0 };
+    },
     async getEventStream() {
       return new ReadableStream();
     },

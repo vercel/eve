@@ -51,6 +51,8 @@ export type {
   SendTurnInput,
   SendTurnPayload,
   SessionState,
+  SessionSnapshot,
+  SnapshotOptions,
   StreamOptions,
   TokenValue,
 } from "#client/types.js";

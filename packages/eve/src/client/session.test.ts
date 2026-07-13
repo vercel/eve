@@ -265,4 +265,152 @@ describe("ClientSession", () => {
 
     expect(result.inputRequests.map((request) => request.requestId)).toEqual(["approval_1"]);
   });
+
+  it("snapshots the current durable tail without waiting for a continuable session", async () => {
+    const events = [
+      {
+        type: "message.completed",
+        data: {
+          message: "Ready for the next question.",
+          sequence: 2,
+          stepIndex: 0,
+          turnId: "turn_1",
+        },
+      },
+      { type: "session.waiting", data: { wait: "next-user-message" } },
+    ];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      Response.json({
+        events,
+        state: {
+          continuationToken: "eve:test",
+          sessionId: "session_1",
+          streamIndex: 12,
+        },
+      }),
+    );
+    const session = createSession({
+      continuationToken: "eve:test",
+      sessionId: "session_1",
+      streamIndex: 10,
+    });
+
+    const snapshot = await session.snapshot({ startIndex: 10 });
+
+    expect(snapshot).toEqual({
+      events,
+      state: {
+        continuationToken: "eve:test",
+        sessionId: "session_1",
+        streamIndex: 12,
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      "/eve/v1/session/session_1/snapshot?startIndex=10",
+    );
+  });
+
+  it("preserves client continuation custody while advancing from a server snapshot", async () => {
+    const events = [
+      { type: "message.completed", data: { message: "first" } },
+      { type: "session.waiting", data: { wait: "next-user-message" } },
+    ];
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      Response.json({
+        events,
+        state: {
+          sessionId: "session_1",
+          streamIndex: 12,
+        },
+      }),
+    );
+    const session = createSession({
+      continuationToken: "eve:client-owned",
+      sessionId: "session_1",
+      streamIndex: 10,
+    });
+
+    const snapshot = await session.snapshot();
+
+    expect(snapshot).toEqual({
+      events,
+      state: {
+        continuationToken: "eve:client-owned",
+        sessionId: "session_1",
+        streamIndex: 12,
+      },
+    });
+    expect(session.state).toEqual(snapshot.state);
+  });
+
+  it("streams one live turn and settles while the parent remains continuable", async () => {
+    const encoder = new TextEncoder();
+    let cancelled = false;
+    const events = [
+      {
+        type: "message.completed",
+        data: {
+          message: "Ready for the next question.",
+          sequence: 2,
+          stepIndex: 0,
+          turnId: "turn_1",
+        },
+      },
+      { type: "session.waiting", data: { wait: "next-user-message" } },
+    ];
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const event of events) {
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        }
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(body));
+    const session = createSession({
+      continuationToken: "eve:test",
+      sessionId: "session_1",
+      streamIndex: 10,
+    });
+
+    const received = [];
+    for await (const event of session.streamTurn({ startIndex: 10 })) {
+      received.push(event);
+    }
+
+    expect(received).toEqual(events);
+    expect(cancelled).toBe(true);
+    expect(session.state).toEqual({
+      continuationToken: "eve:test",
+      sessionId: "session_1",
+      streamIndex: 12,
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      "/eve/v1/session/session_1/stream?startIndex=10",
+    );
+  });
+
+  it("rejects a live turn that disconnects before its boundary without advancing the cursor", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      createStreamResponse([{ type: "turn.started", data: { sequence: 1, turnId: "turn_1" } }]),
+    );
+    const initialState = {
+      continuationToken: "eve:test",
+      sessionId: "session_1",
+      streamIndex: 10,
+    };
+    const session = createSession(initialState);
+
+    await expect(
+      (async () => {
+        for await (const _event of session.streamTurn({ startIndex: 10 })) {
+          void _event;
+        }
+      })(),
+    ).rejects.toThrow(/boundary/i);
+    expect(session.state).toEqual(initialState);
+  });
 });

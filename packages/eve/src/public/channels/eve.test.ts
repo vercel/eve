@@ -5,7 +5,7 @@ import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { createJsonMessageRequest } from "#internal/testing/route-harness.js";
-import { type AuthFn, none } from "#public/channels/auth.js";
+import { type AuthFn, none, SessionNotReadyError } from "#public/channels/auth.js";
 import { eveChannel, defaultEveAuth, type EveChannelInput } from "#public/channels/eve.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { RouteHandlerArgs, SendFn, SendOptions, SendPayload } from "#channel/routes.js";
@@ -60,6 +60,9 @@ function createEveCreateHandler(input: EveChannelInput) {
   const mockSend = vi.fn<SendFn>().mockResolvedValue({
     id: "test-session-id",
     continuationToken: "eve:test",
+    async getEventSnapshot() {
+      return { events: [], nextStreamIndex: 0 };
+    },
     async getEventStream() {
       return new ReadableStream();
     },
@@ -95,6 +98,9 @@ function createEveContinueHandler(input: EveChannelInput) {
   const mockSession: ChannelSession = {
     id: "test-session-id",
     continuationToken: "eve:test",
+    async getEventSnapshot() {
+      return { events: [], nextStreamIndex: 0 };
+    },
     async getEventStream() {
       return new ReadableStream();
     },
@@ -277,6 +283,51 @@ describe("eveChannel — events", () => {
     });
 
     expect(observed).toEqual(["done", "eve:continuation", "sess-eve-event"]);
+  });
+});
+
+describe("eveChannel — stream session", () => {
+  it("returns retryable auth readiness without looking up or opening the session", async () => {
+    const channel = eveChannel({
+      auth: () => {
+        throw new SessionNotReadyError();
+      },
+    });
+    const streamRoute = channel.routes.find(
+      (route) => route.method === "GET" && route.path === "/eve/v1/session/:sessionId/stream",
+    );
+    if (!streamRoute) throw new Error("No session stream route found");
+
+    const getEventStream = vi.fn(async () => new ReadableStream());
+    const getSession = vi.fn(() => ({
+      continuationToken: "eve:test",
+      getEventSnapshot: vi.fn(async () => ({ events: [], nextStreamIndex: 0 })),
+      getEventStream,
+      id: "test-session-id",
+    }));
+    const args: RouteHandlerArgs = {
+      getSession,
+      params: { sessionId: "test-session-id" },
+      receive: vi.fn() as any,
+      requestIp: "127.0.0.1",
+      send: vi.fn() as any,
+      waitUntil: () => undefined,
+    };
+
+    const response = await (streamRoute as any).handler(
+      new Request("https://example.com/eve/v1/session/test-session-id/stream"),
+      args,
+    );
+
+    expect(response.status).toBe(425);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      code: "session_not_ready",
+      error: "Session is not ready.",
+      ok: false,
+    });
+    expect(getSession).not.toHaveBeenCalled();
+    expect(getEventStream).not.toHaveBeenCalled();
   });
 });
 

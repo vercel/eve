@@ -3,6 +3,7 @@ import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/mes
 import {
   EVE_CREATE_SESSION_ROUTE_PATH,
   createEveContinueSessionRoutePath,
+  createEveSessionSnapshotRoutePath,
 } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
 import { MessageResponse } from "#client/message-response.js";
@@ -16,6 +17,8 @@ import type {
   SendTurnInput,
   SendTurnPayload,
   SessionState,
+  SessionSnapshot,
+  SnapshotOptions,
   StreamOptions,
 } from "#client/types.js";
 
@@ -99,6 +102,67 @@ export class ClientSession {
     return this.#streamAndAdvance(sessionId, options);
   }
 
+  /**
+   * Reattaches to the current live turn and settles after Eve's first session
+   * boundary. The underlying conversation stream may remain open for future
+   * turns; this iterable does not.
+   */
+  streamTurn(options?: StreamOptions): AsyncIterable<HandleMessageStreamEvent> {
+    const currentState = this.#state;
+    const sessionId = currentState.sessionId;
+    if (!sessionId) {
+      throw new Error("Session has no session ID. Send a message first.");
+    }
+
+    const initialState: SessionState = {
+      ...currentState,
+      streamIndex: options?.startIndex ?? currentState.streamIndex,
+    };
+    return this.#createEventStream(sessionId, initialState.continuationToken, initialState, {
+      requireBoundary: true,
+      signal: options?.signal,
+    });
+  }
+
+  /**
+   * Reads the durable event suffix through a tail fixed by the server at
+   * request time. Unlike {@link stream}, this operation is finite even when
+   * the parent session is waiting for a future turn.
+   */
+  async snapshot(options?: SnapshotOptions): Promise<SessionSnapshot> {
+    const initialState = this.#state;
+    const sessionId = initialState.sessionId;
+    if (!sessionId) {
+      throw new Error("Session has no session ID. Send a message first.");
+    }
+
+    const startIndex = options?.startIndex ?? initialState.streamIndex;
+    const url = createClientUrl(
+      this.#context.host,
+      createEveSessionSnapshotRoutePath(sessionId),
+      startIndex > 0 ? { startIndex: String(startIndex) } : undefined,
+    );
+    const response = await fetch(url, {
+      headers: await this.#context.resolveHeaders(),
+      redirect: this.#context.redirect,
+    });
+    const body = await response.text();
+    if (!response.ok) {
+      throw new ClientError(response.status, body, response.headers);
+    }
+    const responseSnapshot = JSON.parse(body) as SessionSnapshot;
+    const snapshot: SessionSnapshot = {
+      events: responseSnapshot.events,
+      state: {
+        continuationToken: initialState.continuationToken,
+        sessionId,
+        streamIndex: responseSnapshot.state.streamIndex,
+      },
+    };
+    this.#state = snapshot.state;
+    return snapshot;
+  }
+
   // ---------------------------------------------------------------------------
   // Internal: POST to message route
   // ---------------------------------------------------------------------------
@@ -158,9 +222,14 @@ export class ClientSession {
     sessionId: string,
     continuationToken: string | undefined,
     initialState: SessionState,
-    input: SendTurnPayload,
+    input: {
+      readonly headers?: Readonly<Record<string, string>>;
+      readonly requireBoundary?: boolean;
+      readonly signal?: AbortSignal;
+    },
   ): AsyncGenerator<HandleMessageStreamEvent> {
     const events: HandleMessageStreamEvent[] = [];
+    let reachedBoundary = false;
 
     try {
       let currentStreamIndex = initialState.sessionId === sessionId ? initialState.streamIndex : 0;
@@ -184,6 +253,7 @@ export class ClientSession {
 
             if (isCurrentTurnBoundaryEvent(event)) {
               foundBoundary = true;
+              reachedBoundary = true;
               break;
             }
           }
@@ -210,13 +280,22 @@ export class ClientSession {
         remainingReconnectAttempts -= 1;
       }
     } finally {
-      this.#state = advanceSession({
-        continuationToken,
-        events,
-        preserveCompletedSessions: this.#context.preserveCompletedSessions,
-        sessionId,
-        session: initialState,
-      });
+      if (!input.requireBoundary || reachedBoundary) {
+        this.#state = advanceSession({
+          continuationToken,
+          events,
+          preserveCompletedSessions: this.#context.preserveCompletedSessions,
+          sessionId,
+          session: initialState,
+        });
+      }
+    }
+
+    if (input.requireBoundary && !reachedBoundary) {
+      if (input.signal?.aborted) {
+        throw new DOMException("Eve session turn stream aborted.", "AbortError");
+      }
+      throw new Error("Eve session turn stream ended without a turn boundary.");
     }
   }
 

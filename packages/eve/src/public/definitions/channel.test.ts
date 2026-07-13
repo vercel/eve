@@ -543,6 +543,9 @@ describe("defineChannel", () => {
         return {
           id: channelId,
           continuationToken: channelId,
+          async getEventSnapshot() {
+            return { events: [], nextStreamIndex: 0 };
+          },
           async getEventStream() {
             return new ReadableStream();
           },

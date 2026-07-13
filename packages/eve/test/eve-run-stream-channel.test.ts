@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import type { HandleMessageStreamEvent } from "../src/protocol/message.js";
 import type { RouteHandlerArgs, GetSessionFn } from "../src/channel/routes.js";
 import type { Session } from "../src/channel/session.js";
-import { EVE_MESSAGE_STREAM_ROUTE_PATTERN } from "../src/protocol/routes.js";
+import {
+  EVE_MESSAGE_STREAM_ROUTE_PATTERN,
+  EVE_SESSION_SNAPSHOT_ROUTE_PATTERN,
+} from "../src/protocol/routes.js";
 import { none } from "../src/public/channels/auth.js";
 import { eveChannel } from "../src/public/channels/eve.js";
 
@@ -24,6 +27,15 @@ function createGetHandler() {
     (r) => r.method === "GET" && r.path === EVE_MESSAGE_STREAM_ROUTE_PATTERN,
   );
   if (!getRoute) throw new Error("No stream GET route found");
+  return getRoute;
+}
+
+function createSnapshotHandler() {
+  const channel = eveChannel({ auth: none() });
+  const getRoute = channel.routes.find(
+    (route) => route.method === "GET" && route.path === EVE_SESSION_SNAPSHOT_ROUTE_PATTERN,
+  );
+  if (!getRoute) throw new Error("No snapshot GET route found");
   return getRoute;
 }
 
@@ -154,6 +166,58 @@ describe("eveChannel GET stream", () => {
   });
 });
 
+describe("eveChannel GET snapshot", () => {
+  it("returns the captured durable tail without opening the continuable live stream", async () => {
+    const events: HandleMessageStreamEvent[] = [
+      {
+        type: "message.completed",
+        data: {
+          finishReason: "stop",
+          message: "ready",
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn-1",
+        },
+      },
+      { type: "session.waiting", data: { wait: "next-user-message" } },
+    ];
+    const liveStream = new ReadableStream<HandleMessageStreamEvent>({
+      start(controller) {
+        for (const event of events) controller.enqueue(event);
+        // The durable parent remains open for a future turn.
+      },
+    });
+    const getEventStream = vi.fn().mockResolvedValue(liveStream);
+    const getEventSnapshot = vi.fn().mockResolvedValue({ events, nextStreamIndex: 12 });
+    const getSession = vi.fn<GetSessionFn>().mockReturnValue({
+      continuationToken: "eve:test",
+      getEventSnapshot,
+      getEventStream,
+      id: "session_xyz",
+    } as unknown as Session);
+    const getRoute = createSnapshotHandler();
+
+    const response = await (getRoute as any).handler(
+      new Request("https://example.com/eve/v1/session/session_xyz/snapshot?startIndex=10", {
+        method: "GET",
+      }),
+      createArgs({ getSession, params: { sessionId: "session_xyz" } }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      events,
+      state: {
+        continuationToken: "eve:test",
+        sessionId: "session_xyz",
+        streamIndex: 12,
+      },
+    });
+    expect(getEventSnapshot).toHaveBeenCalledWith({ startIndex: 10 });
+    expect(getEventStream).not.toHaveBeenCalled();
+  });
+});
+
 function createEvents(
   events: readonly HandleMessageStreamEvent[],
 ): ReadableStream<HandleMessageStreamEvent> {
@@ -171,6 +235,9 @@ function createMockGetSession(events: ReadableStream<HandleMessageStreamEvent>) 
   return vi.fn<GetSessionFn>().mockReturnValue({
     id: "session_xyz",
     continuationToken: "",
+    async getEventSnapshot() {
+      return { events: [], nextStreamIndex: 0 };
+    },
     async getEventStream() {
       return events;
     },

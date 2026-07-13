@@ -481,6 +481,32 @@ export class ForbiddenError extends Error {
 }
 
 /**
+ * Error thrown by auth callbacks when an otherwise valid request targets a
+ * session whose authorization state is not ready yet. `routeAuth` maps it to
+ * a structured, non-cacheable 425 response so Eve clients can retry the same
+ * request without treating readiness as an authentication failure.
+ */
+export class SessionNotReadyError extends Error {
+  readonly response: Response;
+
+  constructor(message = "Session is not ready.") {
+    super(message);
+    this.name = "SessionNotReadyError";
+    this.response = Response.json(
+      {
+        code: "session_not_ready",
+        error: message,
+        ok: false,
+      },
+      {
+        headers: { "cache-control": "no-store" },
+        status: 425,
+      },
+    );
+  }
+}
+
+/**
  * Route auth callback. Returned value semantics inside {@link routeAuth}:
  *
  * - A {@link SessionAuthContext} accepts the request and halts the walk.

@@ -2,6 +2,7 @@ import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 
 import type {
   DeliverInput,
+  EventSnapshot,
   GetEventStreamOptions,
   HookPayload,
   RunHandle,
@@ -187,6 +188,39 @@ export function createWorkflowRuntime(config: {
       return parseNdjsonStream<HandleMessageStreamEvent>(() =>
         getRun(sessionId).getReadable({ startIndex: options?.startIndex }),
       );
+    },
+
+    async getEventSnapshot(
+      sessionId: string,
+      options?: GetEventStreamOptions,
+    ): Promise<EventSnapshot> {
+      const startIndex = options?.startIndex ?? 0;
+      const readable = getRun(sessionId).getReadable({ startIndex });
+      const tailIndex = await readable.getTailIndex();
+      if (tailIndex < startIndex) {
+        return { events: [], nextStreamIndex: startIndex };
+      }
+
+      const expectedCount = tailIndex - startIndex + 1;
+      const parsed = parseNdjsonStream<HandleMessageStreamEvent>(() => readable);
+      const reader = parsed.getReader();
+      const events: HandleMessageStreamEvent[] = [];
+      try {
+        while (events.length < expectedCount) {
+          const result = await reader.read();
+          if (result.done) {
+            throw new Error(
+              `Durable event stream ended before captured tail ${tailIndex} for session ${sessionId}.`,
+            );
+          }
+          events.push(result.value);
+        }
+      } finally {
+        await reader.cancel();
+        reader.releaseLock();
+      }
+
+      return { events, nextStreamIndex: tailIndex + 1 };
     },
   };
 }

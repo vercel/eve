@@ -95,6 +95,9 @@ function createCapturingRuntime(captured: CapturedRun[]): Runtime {
     async deliver() {
       throw new Error("deliver should not be called in this scenario");
     },
+    async getEventSnapshot() {
+      return { events: [], nextStreamIndex: 0 };
+    },
     async getEventStream() {
       return new ReadableStream();
     },

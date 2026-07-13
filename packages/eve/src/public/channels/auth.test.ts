@@ -17,6 +17,7 @@ import {
   none,
   placeholderAuth,
   routeAuth,
+  SessionNotReadyError,
   UnauthenticatedError,
   vercelOidc,
   vercelSubject,
@@ -471,6 +472,29 @@ describe("routeAuth", () => {
       await expect(result.json()).resolves.toEqual({
         code: "forbidden",
         error: "custom auth rejection",
+        ok: false,
+      });
+    }
+    expect(never).not.toHaveBeenCalled();
+  });
+
+  it("returns a retryable readiness response immediately and stops the walk", async () => {
+    const never = vi.fn(() => SAMPLE_CONTEXT);
+
+    const result = await routeAuth(makeRequest(), [
+      () => {
+        throw new SessionNotReadyError();
+      },
+      never,
+    ]);
+
+    expect(result).toBeInstanceOf(Response);
+    if (result instanceof Response) {
+      expect(result.status).toBe(425);
+      expect(result.headers.get("cache-control")).toBe("no-store");
+      await expect(result.json()).resolves.toEqual({
+        code: "session_not_ready",
+        error: "Session is not ready.",
         ok: false,
       });
     }

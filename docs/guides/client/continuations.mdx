@@ -115,6 +115,27 @@ for await (const event of session.stream()) {
 
 `stream()` attaches to an existing run; to send new user input, use `send()`. For overriding the cursor with `startIndex` and the full reconnection model, see [Streaming](./streaming#open-a-stream-manually).
 
+## Read a finite durable snapshot
+
+Use `session.snapshot()` when a request or hook must reconcile persisted events
+and then settle. Eve captures the durable tail when the request begins, returns
+the ordered suffix through that tail, and advances the session to the exclusive
+next cursor:
+
+```ts
+const session = client.session(savedState);
+const snapshot = await session.snapshot();
+
+await persistEvents(snapshot.events);
+await saveSessionState(snapshot.state);
+```
+
+Unlike `session.stream()`, `snapshot()` does not stay attached while a
+continuable session waits for a future turn. The `ClientSession` remains the
+owner of its continuation token; the snapshot response advances only the
+durable stream cursor. Pass `startIndex` only when intentionally overriding the
+cursor for that read.
+
 ## What to read next
 
 - [Streaming](./streaming): stream events and reconnect by index
