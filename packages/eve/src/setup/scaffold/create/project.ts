@@ -238,7 +238,7 @@ const SHARED_TEMPLATE_FILES: Record<string, string> = {
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["agent/**/*.ts", "evals/**/*.ts", ".eve/**/*.d.ts"]
+  "include": ["agent/**/*.ts", "evals/**/*.ts"]
 }
 `,
   ".gitignore": `node_modules
