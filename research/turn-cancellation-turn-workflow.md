@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/483
 status: in-review
-last_updated: "2026-07-08"
+last_updated: "2026-07-13"
 ---
 
 # Turn cancellation, layer 1: turn-workflow ownership
@@ -182,6 +182,14 @@ re-validated with standalone spike repros before filing:
   same correlation id; both attempts run concurrently in-process and both
   flush side effects (only one `step_completed` is recorded). Standalone
   repro deterministic (4/4). Complement to workflow#2777/#2778.
+  **Fixed** by [workflow#2848](https://github.com/vercel/workflow/pull/2848)
+  (`@workflow/core` 5.0.0-beta.30): inline steps are stamped with the
+  owning queue message id, wake replays schedule a delayed backstop
+  (lease-bounded) instead of immediately re-dispatching an in-flight step,
+  and an upstream in-process single-flight collapses racing attempts. The
+  residual is the queue's ordinary at-least-once envelope (redelivery of
+  the owning message while the step is alive; cross-instance duplicates
+  post-lease).
 - **[workflow#2781](https://github.com/vercel/workflow/issues/2781)** —
   a `resumeHook` racing hook disposal is accepted and journaled after
   `hook_disposed`; the owning run's replay then deterministically diverges
@@ -191,6 +199,14 @@ re-validated with standalone spike repros before filing:
   timing-dependent (a simplified standalone repro produced the duplicate
   resume but landed it after disposal enforcement); the journal-level
   evidence is unambiguous.
+  **Fixed** by [workflow#2808](https://github.com/vercel/workflow/pull/2808)
+  (`@workflow/world-local` 5.0.0-beta.24): `hook_received` acceptance is
+  serialized against the per-hook dispose lock and re-validated before
+  the event append, so a resume ordering after disposal is rejected with
+  `HookNotFoundError` instead of corrupting the owner's replay. Two
+  caveats: the fix is acceptance-side only (a bad order already journaled
+  before it still diverges on replay), and it ships in world-local — the
+  hosted Vercel world's parity is unconfirmed.
 - **Not filed — falsified in isolation**: an earlier hypothesis that
   reaching `abort()` behind a promise-race winner corrupts the event log
   did not reproduce standalone (5/5 clean); every corruption we observed
@@ -200,19 +216,46 @@ re-validated with standalone spike repros before filing:
   replay, and the duplicate `abrt` `hook_received` we logged under wake
   storms adds wakes that feed #2780's preconditions.
 
-Because of #2780/#2781, layer 2's cancel trigger must single-flight cancel
-resumes per turn (resume the hook at most once; treat "already
-resumed/disposed" as success), and turn control hooks stay on deferred
-disposal.
+Upstream status (all four findings are now fixed in the runtime this
+branch vendors — `@workflow/core` 5.0.0-beta.31, `@workflow/world-local`
+5.0.0-beta.27):
 
-Upstream status: [workflow#2779](https://github.com/vercel/workflow/pull/2779)
-fixes #2777/#2778 (suspension-handler per-token ordering; world-local claim
-release). It narrows #2781 (no more late acceptance via event-log
-resurrection) but leaves its accept-before-lock journal race and the replay
-divergence open, and does not touch #2780 — so none of layer 1's
-mitigations become removable when it lands, and per-turn cancel tokens
-remain preferred over a stable session-scoped token even though #2779 would
-make the stable-token shape claimable.
+- [workflow#2779](https://github.com/vercel/workflow/pull/2779) fixed
+  #2777/#2778 (suspension-handler per-token ordering; world-local claim
+  release).
+- [workflow#2808](https://github.com/vercel/workflow/pull/2808) closed
+  #2781's remaining acceptance window (world-local).
+- [workflow#2848](https://github.com/vercel/workflow/pull/2848) fixed
+  #2780 (inline step message ownership).
+
+Consequences for layer 1's mitigations:
+
+- The `settleCancelledTurnStep` in-process single-flight is now redundant
+  with the upstream one for the wake-driven duplication it was written
+  against; it stays as cheap insurance for the queue's residual
+  at-least-once envelope, with its comment updated to say so.
+- Deferred control-hook disposal stays: `sendTurnControlStep` does not
+  treat `HookNotFoundError` as benign, so a rare crash-retry duplicate of
+  the final control send against an already-disposed hook would surface
+  as a turn error, and hosted-world parity for the #2808 acceptance fix
+  is unconfirmed. Both are addressable in a follow-up if immediate
+  disposal is worth it.
+- The driver-owned epilogue, the pure `cancelled` marker, the
+  abort-in-hook-continuation shape, and dispose-only teardown all stand
+  on rationale independent of the fixed bugs (wake-source isolation,
+  at-least-once side-effect hygiene, replay determinism, async-generator
+  semantics) and are unchanged.
+
+Consequences for layer 2 (relaxations from the earlier guidance):
+
+- Strict per-turn single-flighting of cancel resumes is no longer
+  required: a duplicate resume neither spawns a concurrent step attempt
+  (#2848) nor corrupts replay when racing disposal (#2808). Treating
+  "already resumed/disposed" as success is sufficient.
+- A stable session-scoped cancel token is now viable (#2779 makes the
+  claim shape safe; #2808 removes the disposal race). Per-turn tokens
+  remain the shipped layer-1 shape; the layer-2 trigger design should
+  choose deliberately between them.
 
 ## Invariants (pinned by tests)
 

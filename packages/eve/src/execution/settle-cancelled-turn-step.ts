@@ -32,12 +32,13 @@ export interface CancelledTurnSettleResult {
 }
 
 /**
- * In-process single-flight for {@link settleCancelledTurnStep}: a wake
- * landing while the settle step is in flight can re-dispatch it under
- * the runtime's at-least-once execution
- * (https://github.com/vercel/workflow/issues/2780), and racing attempts
- * share this event loop. Rejected flights are evicted so a genuine
- * failure retries; settled entries expire well past the duplicate window.
+ * In-process single-flight for {@link settleCancelledTurnStep}. Upstream
+ * fixed wake-driven re-dispatch of in-flight steps
+ * (https://github.com/vercel/workflow/pull/2848), so this now guards only
+ * the queue's residual at-least-once envelope (a redelivery of the owning
+ * message while the step is alive) when the duplicate lands in the same
+ * process. Rejected flights are evicted so a genuine failure retries;
+ * settled entries expire well past the duplicate window.
  */
 const cancelledTurnSettleFlights = new Map<string, Promise<CancelledTurnSettleResult>>();
 const CANCELLED_TURN_FLIGHT_TTL_MS = 60_000;
