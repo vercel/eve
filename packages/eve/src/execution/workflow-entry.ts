@@ -168,8 +168,7 @@ async function runDriverLoop(input: {
   const bufferedDeliveries: DeliverHookPayload[] = [];
   const deliveryHook = createSessionDeliveryHook(bufferedDeliveries);
 
-  // Disposal of a settled turn's control hook is deferred until the next
-  // turn settles (or the session ends) — see {@link DispatchedTurn}.
+  // Control-hook disposal is deferred one turn — see DispatchedTurn.
   let disposeSettledTurnControl: (() => Promise<void>) | undefined;
   const runTurn = async (args: {
     readonly delivery: HookPayload;
@@ -219,9 +218,6 @@ async function runDriverLoop(input: {
       }
 
       if (action.cancelled === true) {
-        // A cancelled turn parks with unsettled state: the epilogue and
-        // pending-state cleanup run here in the driver, whose wake
-        // sources exclude the cancel hook — see settleCancelledTurnStep.
         const settled = await settleCancelledTurnStep({
           parentWritable: input.driverWritable,
           serializedContext: action.serializedContext,

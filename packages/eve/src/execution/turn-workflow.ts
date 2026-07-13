@@ -33,12 +33,10 @@ export type { TurnWorkflowInput };
  * Runs one complete logical turn, including child-agent waits when supported.
  *
  * The turn-owned path also owns turn cancellation: resuming the
- * session-scoped cancel hook (`{sessionId}:cancel`) mid-turn aborts a
- * durable signal serialized into every `turnStep` and settles the turn as
- * `turn.cancelled` → `session.waiting` — never as a failure. The payload
- * may carry a `turnId` guard scoping the cancel to the turn the caller
- * observed; resuming after the turn settled (or with a stale guard) is a
- * benign no-op.
+ * session-scoped cancel hook (`{sessionId}:cancel`) mid-turn aborts the
+ * signal serialized into every `turnStep` and settles the turn as
+ * `turn.cancelled` → `session.waiting` — never as a failure. A late or
+ * guard-mismatched cancel is a benign no-op.
  */
 export async function turnWorkflow(rawInput: unknown): Promise<void> {
   "use workflow";
@@ -87,8 +85,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
     // contends for the session cancel token. Gated on the pinned driver
     // settling `park + cancelled` and on the session being parkable —
     // cancellation settles as a park, and an unparkable session would
-    // fail instead. A conflict on the stable token (a crashed prior
-    // turn's unswept claim) degrades this turn to uncancellable.
+    // fail instead.
     if (
       input.driverCapabilities?.cancelledTurnSettle === true &&
       (input.mode === "conversation" || input.stepInput.sessionState.continuationToken !== "")
@@ -100,15 +97,12 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
     }
 
     while (true) {
-      // No race needed: the runtime delivers the abort to the in-flight
-      // step attempt, which settles itself as `cancelled`.
       const result = await turnStep(cursor.createStepInput(nextStepInput, cancellation?.signal));
 
       if (result.action === "cancelled") {
-        // The epilogue must not run as a step in this run: queued cancel
-        // wakes can re-dispatch in-flight steps here and double-emit it.
-        // The driver runs `settleCancelledTurnStep` instead; the `canPark`
-        // gate below is bypassed on purpose.
+        // The epilogue runs in the driver (`settleCancelledTurnStep`), not
+        // as a step in this run, where queued cancel wakes could
+        // re-dispatch it. The `canPark` gate below is bypassed on purpose.
         await cancellation?.dispose();
         await cursor.finish(
           { sessionState: cursor.sessionState },
@@ -167,9 +161,8 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
           pendingActionKeys,
         });
         if (results === "cancelled") {
-          // The signal is aborted; the next turnStep settles through the
-          // `cancelled` arm above. Descendants are not cascaded to
-          // (layer 3); their late results are dropped.
+          // The next turnStep observes the aborted signal and settles
+          // through the `cancelled` arm above.
           nextStepInput = undefined;
           continue;
         }
@@ -206,10 +199,9 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
   } finally {
     // Dispose-only teardown: `iterator.return()` would await a pending
     // durable read that never settles, leaving this run `running` forever
-    // and its hooks unswept by the world. The cancel token is session-
-    // scoped, so its disposal happens *before* the turn result publishes
-    // (in each terminal arm above) — the next turn's claim must never
-    // race this run's teardown; this backstop covers the error path.
+    // and its hooks unswept. The cancel token is disposed *before* each
+    // terminal result publishes so the next turn's claim never races this
+    // run's teardown; this backstop covers the error path.
     if (cancellation !== undefined) await cancellation.dispose();
     if (ownsInbox) await disposeHook(inbox);
   }

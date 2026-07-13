@@ -31,15 +31,9 @@ export interface CancelledTurnSettleResult {
   readonly sessionState: DurableSessionState;
 }
 
-/**
- * In-process single-flight for {@link settleCancelledTurnStep}. Upstream
- * fixed wake-driven re-dispatch of in-flight steps
- * (https://github.com/vercel/workflow/pull/2848), so this now guards only
- * the queue's residual at-least-once envelope (a redelivery of the owning
- * message while the step is alive) when the duplicate lands in the same
- * process. Rejected flights are evicted so a genuine failure retries;
- * settled entries expire well past the duplicate window.
- */
+// In-process single-flight guarding the queue's at-least-once envelope
+// (a redelivery of the owning message while the step is alive). Rejected
+// flights are evicted so a genuine failure retries.
 const cancelledTurnSettleFlights = new Map<string, Promise<CancelledTurnSettleResult>>();
 const CANCELLED_TURN_FLIGHT_TTL_MS = 60_000;
 
@@ -65,14 +59,10 @@ function settleCancelledTurnOnce(
 }
 
 /**
- * Settles one cancelled turn: emits `turn.cancelled` → `session.waiting`
- * through the channel adapter and durable stream, drops pending
- * runtime-action state (replaying it would re-dispatch the actions next
- * turn), and persists the between-turns session.
- *
- * Runs in the *driver* run, not the turn's own run: turn-run steps can be
- * re-dispatched by queued cancel-payload wakes and would double-emit,
- * while the driver's wake sources exclude the cancel hook.
+ * Settles one cancelled turn: emits `turn.cancelled` → `session.waiting`,
+ * drops pending runtime-action state, and persists the between-turns
+ * session. Runs in the *driver* run, whose wake sources exclude the
+ * cancel hook, so a queued cancel wake cannot re-dispatch it.
  */
 export async function settleCancelledTurnStep(input: {
   readonly parentWritable: WritableStream<Uint8Array>;
@@ -81,8 +71,8 @@ export async function settleCancelledTurnStep(input: {
 }): Promise<CancelledTurnSettleResult> {
   "use step";
 
-  // Keyed by session + emission sequence: identical across re-dispatched
-  // attempts of the same cancelled turn, unique across turns.
+  // Identical across re-dispatched attempts of the same cancelled turn,
+  // unique across turns.
   const flightKey = `${input.sessionState.sessionId}:turn-cancelled:${String(
     input.sessionState.emissionState.sequence,
   )}`;

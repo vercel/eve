@@ -1301,9 +1301,7 @@ export function createTurnFailedEvent(input: {
   };
 }
 
-/**
- * Creates the `turn.cancelled` event for one cancelled turn.
- */
+/** Creates the `turn.cancelled` event for one cancelled turn. */
 export function createTurnCancelledEvent(input: {
   readonly sequence: number;
   readonly turnId: string;

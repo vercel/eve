@@ -8,11 +8,9 @@ import type { HarnessEmissionState } from "#harness/emission.js";
  * Emits the cancelled-turn epilogue: `turn.cancelled` → `session.waiting`
  * (never a failure event) and returns the between-turns emission state.
  *
- * `state` is the last *persisted* emission state. When the cancelled step
- * began the turn, the preamble already streamed `session.started` and
- * `turn.started` but never persisted its state update, so the turn id is
- * reconstructed via {@link activeTurnId} (the same `turn_${sequence}`
- * formula) and `sessionStarted` is stamped `true`.
+ * `state` is the last *persisted* emission state, which may predate the
+ * cancelled turn's preamble — the turn id is reconstructed via
+ * {@link activeTurnId} and `sessionStarted` is stamped `true`.
  */
 export async function emitCancelledTurn(
   emitFn: HarnessEmitFn,

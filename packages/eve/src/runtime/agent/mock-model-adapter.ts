@@ -209,12 +209,9 @@ const SUBAGENT_DELEGATION_DIRECTIVE = /\bdelegate\s+to\s+a\s+subagent\s*:\s*(.+)
 
 /**
  * Emits one built-in `agent` tool call when the current user message uses
- * the explicit directive `Delegate to a subagent: <message>`. The `agent`
- * tool is excluded from name-based matching (see {@link findRelevantTool}),
- * so tests that need a real runtime-action wait — e.g. turn cancellation
- * during an in-flight subagent — opt in with this directive instead. Fires
- * only before the delegated call resolves: once its tool result is in
- * history, the reply path takes over.
+ * the explicit directive `Delegate to a subagent: <message>`, letting
+ * tests exercise a real runtime-action wait. Fires only before the
+ * delegated call resolves; then the reply path takes over.
  */
 function createSubagentDelegationResult(
   options: BootstrapGenerateOptions,

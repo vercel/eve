@@ -12,17 +12,10 @@ export interface DispatchedTurn {
   /**
    * Disposes the turn's control hook. Deferred until the *next* turn
    * settles (or the session ends): the turn run's final control send is
-   * at-least-once under the queue's redelivery envelope, and a late
-   * duplicate resume must land on a live hook — `sendTurnControlStep`
-   * does not treat `HookNotFoundError` as benign, so a resume against a
-   * disposed hook would surface as a turn error. (The original hazards —
-   * wake-driven duplicate sends and replay corruption from a resume
-   * racing disposal — were fixed upstream by
-   * https://github.com/vercel/workflow/pull/2848 and
-   * https://github.com/vercel/workflow/pull/2808; the world-local fix's
-   * hosted-world parity is unconfirmed, so deferral stays as cheap
-   * insurance.) By the next settle, the previous run has completed and
-   * can no longer re-send.
+   * at-least-once, and `sendTurnControlStep` does not treat
+   * `HookNotFoundError` as benign, so a late duplicate resume must land
+   * on a live hook. By the next settle, the previous run has completed
+   * and can no longer re-send.
    */
   dispose(): Promise<void>;
 }

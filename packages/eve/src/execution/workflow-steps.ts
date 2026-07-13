@@ -78,8 +78,7 @@ import { resumeHook } from "#internal/workflow/runtime.js";
  *
  * `cancelled` converts the harness's cancellation throw into a *returned*
  * result so workflow-core never classifies the abort as a step failure or
- * retries it. It is a pure marker (context/state echo the step input);
- * the epilogue runs in `settleCancelledTurnStep`.
+ * retries it; the epilogue runs in `settleCancelledTurnStep`.
  */
 export type DurableStepResult =
   | {
@@ -315,10 +314,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     stepResult = await runTurnHarnessStep();
   } catch (error) {
     if (!isTurnCancellation(error)) throw error;
-    // Settle as a returned result, not a throw: a thrown step error would
-    // be retried, and any side effect here could duplicate when the
-    // runtime supersedes an aborted attempt with a re-dispatched one. The
-    // epilogue runs in `settleCancelledTurnStep`.
     writer.releaseLock();
     return {
       action: "cancelled",

@@ -211,10 +211,8 @@ describe("turn cancellation integration", () => {
 
         const cancelledTurn = await stream.nextTurn();
 
-        // A duplicate cancel after the turn settled is a benign no-op: it
-        // lands on a consumed/disposed hook and must not disturb the
-        // session. No trigger-side single-flighting is required
-        // (workflow#2848/#2808); "already resumed/disposed" is success.
+        // A duplicate cancel after the turn settled lands on a
+        // consumed/disposed hook and must not disturb the session.
         await resumeHook(cancelToken, {}).catch(() => undefined);
 
         expect(cancelledTurn.at(-1)?.type).toBe("session.waiting");
@@ -540,13 +538,10 @@ describe("turn cancellation integration", () => {
         });
         expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
 
-        // The turn run's teardown must not await the cancel hook's
-        // outstanding read: a turn run that never returns stays
-        // `running` forever and its hooks (inbox, cancel, durable-abort)
-        // are never swept — one leaked run and three leaked hooks per
-        // turn, and O(live hooks) token scans slow every resume. The
-        // session cancel token is disposed at each settle, so with the
-        // session parked no cancel hook may remain in the world.
+        // Teardown must not await the cancel hook's outstanding read: a
+        // turn run that never returns stays `running` forever and its
+        // hooks are never swept. With the session parked, no cancel hook
+        // may remain in the world.
         const world = await getWorld();
         const deadline = Date.now() + 15_000;
         let completedTurnRuns = 0;
