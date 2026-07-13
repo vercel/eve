@@ -460,9 +460,8 @@ describe("runCli", () => {
     }
 
     expect(thrownError.message).toContain("Discovery failed with 1 error(s) and 0 warning(s).");
-    expect(thrownError.message).toContain(
-      `Diagnostics artifact: ${join(resolvedWorkspaceRoot, ".eve", "discovery", "diagnostics.json")}`,
-    );
+    expect(thrownError.message).not.toContain("Diagnostics artifact:");
+    expect(thrownError.message).not.toContain(`${join(resolvedWorkspaceRoot, ".eve", "builds")}/`);
     expect(thrownError.message).toContain("Discovery diagnostics:");
     expect(thrownError.message).toContain(
       'Expected authored instructions at "instructions.md", "instructions.ts", "instructions.cts", "instructions.mts", "instructions.js", "instructions.cjs", "instructions.mjs", or "instructions/" directory.',

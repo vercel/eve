@@ -16,6 +16,8 @@ import type { CompiledAgentManifest } from "#compiler/manifest.js";
  * discovery artifacts.
  */
 export interface CompileAgentInput {
+  artifactsRoot?: string;
+  includeDiagnosticsArtifactPath?: boolean;
   /**
    * Optional {@link ProjectSource} used for discovery reads. Defaults to a
    * disk-backed source so production callers keep their current behaviour.
@@ -43,11 +45,17 @@ export interface CompileAgentResult {
 export class CompileAgentError extends Error {
   readonly result: CompileAgentResult;
 
-  constructor(result: CompileAgentResult) {
+  constructor(
+    result: CompileAgentResult,
+    options: { readonly includeDiagnosticsArtifactPath?: boolean } = {},
+  ) {
     super(
       formatCompileAgentErrorMessage({
         diagnostics: result.diagnostics,
-        diagnosticsPath: result.paths.diagnosticsPath,
+        diagnosticsPath:
+          options.includeDiagnosticsArtifactPath === false
+            ? undefined
+            : result.paths.diagnosticsPath,
       }),
     );
     this.name = "CompileAgentError";
@@ -65,6 +73,7 @@ export async function compileAgent(input: CompileAgentInput = {}): Promise<Compi
   const discoveryResult = await discoverAgent({ ...project, source });
   const writtenArtifacts = await writeCompilerArtifacts({
     appRoot: project.appRoot,
+    artifactsRoot: input.artifactsRoot,
     diagnostics: discoveryResult.diagnostics,
     manifest: discoveryResult.manifest,
   });
@@ -77,7 +86,9 @@ export async function compileAgent(input: CompileAgentInput = {}): Promise<Compi
   };
 
   if (hasDiscoverErrors(discoveryResult.diagnostics)) {
-    throw new CompileAgentError(result);
+    throw new CompileAgentError(result, {
+      includeDiagnosticsArtifactPath: input.includeDiagnosticsArtifactPath,
+    });
   }
 
   reportDiscoverWarnings(discoveryResult.diagnostics);

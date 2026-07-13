@@ -1,6 +1,10 @@
 import { compileAgent } from "#compiler/compile-agent.js";
 import { createScheduleRegistrations } from "#runtime/schedules/register.js";
-import { loadResolvedCompiledSchedules } from "#runtime/schedules/resolve-schedule.js";
+import {
+  loadResolvedCompiledSchedules,
+  resolveSchedules,
+} from "#runtime/schedules/resolve-schedule.js";
+import type { ApplicationBuildWorkspace } from "#internal/application/build-workspace.js";
 import {
   type BuiltInWorkflowWorldTarget,
   writeCompiledArtifactsFiles,
@@ -24,18 +28,29 @@ export async function prepareApplicationHost(
   startPath: string,
   options: {
     readonly dev?: boolean;
+    readonly workspace?: Pick<
+      ApplicationBuildWorkspace,
+      "compilerArtifactsRoot" | "hostArtifactsDir" | "workflowBuildDir"
+    >;
   } = {},
 ): Promise<PreparedApplicationHost> {
   const compileResult = await compileAgent({
+    artifactsRoot: options.workspace?.compilerArtifactsRoot,
+    includeDiagnosticsArtifactPath: options.workspace === undefined,
     startPath,
   });
-  const schedules = await loadResolvedCompiledSchedules({
-    compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
-      compileResult.project.appRoot,
-    ),
-  });
+  const schedules =
+    options.workspace === undefined
+      ? await loadResolvedCompiledSchedules({
+          compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
+            compileResult.project.appRoot,
+          ),
+        })
+      : await resolveSchedules({ manifest: compileResult.manifest });
   const scheduleRegistrations = createScheduleRegistrations(schedules);
-  const workflowBuildDir = resolveWorkflowBuildDirectory(compileResult.project.appRoot);
+  const workflowBuildDir =
+    options.workspace?.workflowBuildDir ??
+    resolveWorkflowBuildDirectory(compileResult.project.appRoot);
   const runtimeArtifactsSnapshot =
     options.dev === true
       ? await stageDevelopmentRuntimeArtifactsSnapshot(compileResult)
@@ -43,7 +58,9 @@ export async function prepareApplicationHost(
   const compiledArtifacts = await writeCompiledArtifactsFiles({
     compileResult,
     defaultWorkflowWorld: resolveDefaultWorkflowWorld(options),
-    outDir: resolveApplicationHostArtifactsDirectory(compileResult.project.appRoot),
+    outDir:
+      options.workspace?.hostArtifactsDir ??
+      resolveApplicationHostArtifactsDirectory(compileResult.project.appRoot),
   });
   if (runtimeArtifactsSnapshot !== undefined) {
     await activateDevelopmentRuntimeArtifactsSnapshot({

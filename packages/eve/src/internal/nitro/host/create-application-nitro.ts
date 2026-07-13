@@ -649,13 +649,12 @@ function patchWorkflowTransformExcludePath(nitro: Nitro, workflowBuildDir: strin
  * hosting of an eve application.
  *
  * `surface` narrows the mounted routes for isolated production builds.
- * `outputDir` lets callers stage those isolated builds into separate Nitro
- * output roots before assembling the final hosted deployment.
  */
 export async function createApplicationNitro(
   preparedHost: PreparedApplicationHost,
   dev: boolean,
   options: {
+    buildDir?: string;
     outputDir?: string;
     surface?: NitroBuildSurface;
   } = {},
@@ -705,7 +704,8 @@ export async function createApplicationNitro(
     preparedHost,
     configuredOptionalEnginePackages,
   );
-  const nitroBuildDir = resolveNitroBuildDirectory(preparedHost.appRoot, surface);
+  const nitroBuildDir =
+    options.buildDir ?? resolveNitroBuildDirectory(preparedHost.appRoot, surface);
   const websocketEnabled =
     includesApplicationSurface(surface) &&
     (dev || manifestHasWebSocketChannel(preparedHost.compileResult.manifest));

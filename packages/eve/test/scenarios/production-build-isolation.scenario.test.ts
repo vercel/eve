@@ -1,0 +1,500 @@
+import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { createHash } from "node:crypto";
+import { watch, type FSWatcher } from "node:fs";
+import { lstat, mkdir, readFile, readdir, readlink, realpath, writeFile } from "node:fs/promises";
+import { join, relative } from "node:path";
+import type { Readable } from "node:stream";
+
+import { describe, expect, it } from "vitest";
+
+import { EVE_HEALTH_ROUTE_PATH } from "../../src/protocol/routes.js";
+import { WEATHER_AGENT_DESCRIPTOR } from "../../src/internal/testing/scenario-apps/weather-agent.js";
+import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
+
+const scenarioApp = useScenarioApp();
+const PROCESS_DEADLINE_MS = 180_000;
+const SCENARIO_DEADLINE_MS = 360_000;
+
+interface ProcessResult {
+  readonly code: number | null;
+  readonly signal: NodeJS.Signals | null;
+  readonly stderr: string;
+  readonly stdout: string;
+}
+
+interface RunningProcess {
+  readonly child: ChildProcessByStdio<null, Readable, Readable>;
+  readonly result: Promise<ProcessResult>;
+  readonly stderr: () => string;
+  readonly stdout: () => string;
+  stop(): Promise<void>;
+}
+
+interface RunningDevServer extends RunningProcess {
+  readonly url: string;
+}
+
+function startEveProcess(input: {
+  readonly appRoot: string;
+  readonly args: readonly string[];
+}): RunningProcess {
+  const eveBinPath = join(input.appRoot, "node_modules", "eve", "bin", "eve.js");
+  const child = spawn(process.execPath, [eveBinPath, ...input.args], {
+    cwd: input.appRoot,
+    env: {
+      ...process.env,
+      NODE_ENV: "test",
+      VERCEL: "",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stderr = "";
+  let stdout = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk: string) => {
+    stderr += chunk;
+  });
+
+  const result = new Promise<ProcessResult>((resolvePromise, reject) => {
+    const deadline = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(
+        new Error(
+          [
+            `Timed out waiting for eve ${input.args.join(" ")}.`,
+            `stdout:\n${stdout}`,
+            `stderr:\n${stderr}`,
+          ].join("\n\n"),
+        ),
+      );
+    }, PROCESS_DEADLINE_MS);
+
+    child.once("error", (error) => {
+      clearTimeout(deadline);
+      reject(error);
+    });
+    child.once("exit", (code, signal) => {
+      clearTimeout(deadline);
+      resolvePromise({ code, signal, stderr, stdout });
+    });
+  });
+
+  return {
+    child,
+    result,
+    stderr: () => stderr,
+    stdout: () => stdout,
+    async stop() {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        await result.catch(() => undefined);
+        return;
+      }
+
+      await new Promise<void>((resolvePromise) => {
+        const deadline = setTimeout(() => {
+          child.kill("SIGKILL");
+          resolvePromise();
+        }, 10_000);
+        child.once("exit", () => {
+          clearTimeout(deadline);
+          resolvePromise();
+        });
+        child.kill("SIGTERM");
+      });
+      await result.catch(() => undefined);
+    },
+  };
+}
+
+function stripAnsi(text: string): string {
+  return text
+    .split("\u001b[")
+    .map((segment, index) => (index === 0 ? segment : segment.replace(/^[0-9;]*m/, "")))
+    .join("");
+}
+
+function parseServerUrl(stdout: string): string | undefined {
+  return /server listening at (https?:\/\/\S+)/.exec(stripAnsi(stdout))?.[1];
+}
+
+async function startEveDev(appRoot: string): Promise<RunningDevServer> {
+  const processHandle = startEveProcess({
+    appRoot,
+    args: ["dev", "--no-ui", "--host", "127.0.0.1", "--port", "0"],
+  });
+  const url = await new Promise<string>((resolvePromise, reject) => {
+    let settled = false;
+    const deadline = setTimeout(() => {
+      settleReject(
+        new Error(
+          [
+            "Timed out waiting for eve dev readiness.",
+            `stdout:\n${processHandle.stdout()}`,
+            `stderr:\n${processHandle.stderr()}`,
+          ].join("\n\n"),
+        ),
+      );
+    }, 120_000);
+
+    const cleanup = () => {
+      clearTimeout(deadline);
+      processHandle.child.stdout.off("data", checkOutput);
+      processHandle.child.stderr.off("data", checkOutput);
+      processHandle.child.off("exit", handleExit);
+    };
+    const settleResolve = (serverUrl: string) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolvePromise(serverUrl);
+    };
+    function settleReject(error: unknown) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      reject(error);
+    }
+    function checkOutput() {
+      const serverUrl = parseServerUrl(processHandle.stdout());
+      if (serverUrl !== undefined) {
+        settleResolve(serverUrl);
+      }
+    }
+    function handleExit(code: number | null, signal: NodeJS.Signals | null) {
+      settleReject(
+        new Error(
+          [
+            `eve dev exited before readiness (code ${String(code)}, signal ${String(signal)}).`,
+            `stdout:\n${processHandle.stdout()}`,
+            `stderr:\n${processHandle.stderr()}`,
+          ].join("\n\n"),
+        ),
+      );
+    }
+
+    processHandle.child.stdout.on("data", checkOutput);
+    processHandle.child.stderr.on("data", checkOutput);
+    processHandle.child.once("exit", handleExit);
+    checkOutput();
+  }).catch(async (error: unknown) => {
+    await processHandle.stop();
+    throw error;
+  });
+
+  return { ...processHandle, url };
+}
+
+async function expectHealthy(server: RunningDevServer): Promise<void> {
+  const response = await fetch(new URL(EVE_HEALTH_ROUTE_PATH, server.url), {
+    signal: AbortSignal.timeout(5_000),
+  });
+  const body = await response.text();
+  expect(
+    response.status,
+    [
+      `Expected ${EVE_HEALTH_ROUTE_PATH} to remain healthy.`,
+      `response:\n${body}`,
+      `stdout:\n${server.stdout()}`,
+      `stderr:\n${server.stderr()}`,
+    ].join("\n\n"),
+  ).toBe(200);
+}
+
+async function observeConcurrentBuildWorkspaces(input: {
+  readonly appRoot: string;
+  readonly builds: readonly RunningProcess[];
+}): Promise<readonly string[]> {
+  const buildsRoot = join(input.appRoot, ".eve", "builds");
+  await mkdir(buildsRoot, { recursive: true });
+
+  return await new Promise<readonly string[]>((resolvePromise, reject) => {
+    let settled = false;
+    let checking = false;
+    const deadline = setTimeout(() => {
+      settleReject(
+        new Error(
+          [
+            "Timed out waiting for two invocation-owned build workspaces.",
+            ...input.builds.flatMap((build, index) => [
+              `build ${index + 1} stdout:\n${build.stdout()}`,
+              `build ${index + 1} stderr:\n${build.stderr()}`,
+            ]),
+          ].join("\n\n"),
+        ),
+      );
+    }, 120_000);
+    const watcher = watch(buildsRoot, () => {
+      void check();
+    });
+    const cleanup = () => {
+      clearTimeout(deadline);
+      watcher.close();
+      for (const build of input.builds) {
+        build.child.off("exit", checkAfterExit);
+      }
+    };
+    const settleResolve = (workspaces: readonly string[]) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolvePromise(workspaces);
+    };
+    function settleReject(error: unknown) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      reject(error);
+    }
+    async function check() {
+      if (settled || checking) {
+        return;
+      }
+      checking = true;
+      try {
+        const workspaces = (
+          await readdir(buildsRoot, {
+            withFileTypes: true,
+          })
+        )
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => entry.name)
+          .sort();
+        if (workspaces.length >= 2) {
+          settleResolve(workspaces);
+          return;
+        }
+        if (
+          input.builds.every(
+            (build) => build.child.exitCode !== null || build.child.signalCode !== null,
+          )
+        ) {
+          settleReject(
+            new Error(
+              [
+                `Both builds exited before two workspaces overlapped; observed ${workspaces.length}.`,
+                ...input.builds.flatMap((build, index) => [
+                  `build ${index + 1} stdout:\n${build.stdout()}`,
+                  `build ${index + 1} stderr:\n${build.stderr()}`,
+                ]),
+              ].join("\n\n"),
+            ),
+          );
+        }
+      } catch (error) {
+        settleReject(error);
+      } finally {
+        checking = false;
+      }
+    }
+    function checkAfterExit() {
+      void check();
+    }
+
+    for (const build of input.builds) {
+      build.child.on("exit", checkAfterExit);
+    }
+    void check();
+  });
+}
+
+async function watchStableDevBuildSurfaces(appRoot: string): Promise<{
+  readonly events: readonly string[];
+  close(): void;
+}> {
+  const installedEveRoot = await realpath(join(appRoot, "node_modules", "eve"));
+  const candidates = [
+    join(appRoot, ".eve", "compile"),
+    join(appRoot, ".eve", "host"),
+    join(appRoot, ".eve", "nitro"),
+    join(installedEveRoot, ".eve", "workflow-cache"),
+  ];
+  const paths: string[] = [];
+  const missingPaths: string[] = [];
+  for (const path of candidates) {
+    try {
+      if ((await lstat(path)).isDirectory()) {
+        paths.push(path);
+      }
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+        missingPaths.push(path);
+      } else {
+        throw error;
+      }
+    }
+  }
+  if (missingPaths.length > 0) {
+    throw new Error(
+      `Expected eve dev to prepare every stable build surface before readiness:\n${missingPaths.join("\n")}`,
+    );
+  }
+  const events: string[] = [];
+  const watchers: FSWatcher[] = paths.map((path) =>
+    watch(path, { recursive: true }, (eventType, filename) => {
+      events.push(`${relative(appRoot, path)}:${eventType}:${filename?.toString() ?? ""}`);
+    }),
+  );
+
+  return {
+    events,
+    close() {
+      for (const watcher of watchers) {
+        watcher.close();
+      }
+    },
+  };
+}
+
+async function hashPath(path: string): Promise<string> {
+  const hash = createHash("sha256");
+
+  async function visit(currentPath: string, logicalPath: string): Promise<void> {
+    const stats = await lstat(currentPath);
+    if (stats.isSymbolicLink()) {
+      hash.update(`link:${logicalPath}:${await readlink(currentPath)}\0`);
+      return;
+    }
+    if (stats.isDirectory()) {
+      hash.update(`directory:${logicalPath}\0`);
+      const entries = await readdir(currentPath);
+      entries.sort();
+      for (const entry of entries) {
+        await visit(join(currentPath, entry), join(logicalPath, entry));
+      }
+      return;
+    }
+    hash.update(`file:${logicalPath}:${stats.mode}\0`);
+    hash.update(await readFile(currentPath));
+    hash.update("\0");
+  }
+
+  await visit(path, ".");
+  return hash.digest("hex");
+}
+
+async function listBuildWorkspaces(appRoot: string): Promise<readonly string[]> {
+  try {
+    return await readdir(join(appRoot, ".eve", "builds"));
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+}
+
+describe("production build isolation", () => {
+  it(
+    "keeps a real dev server healthy while two real builds overlap in invocation-owned workspaces",
+    async () => {
+      const app = await scenarioApp(WEATHER_AGENT_DESCRIPTOR);
+      const server = await startEveDev(app.appRoot);
+      const processes: RunningProcess[] = [];
+      let continueProbing = false;
+      let healthProbe: Promise<number> | undefined;
+      let stableSurfaceWatcher: Awaited<ReturnType<typeof watchStableDevBuildSurfaces>> | undefined;
+
+      try {
+        await expectHealthy(server);
+        stableSurfaceWatcher = await watchStableDevBuildSurfaces(app.appRoot);
+        const builds = [
+          startEveProcess({ appRoot: app.appRoot, args: ["build"] }),
+          startEveProcess({ appRoot: app.appRoot, args: ["build"] }),
+        ];
+        processes.push(...builds);
+        continueProbing = true;
+        healthProbe = (async () => {
+          let healthChecks = 0;
+          while (continueProbing) {
+            await expectHealthy(server);
+            healthChecks += 1;
+            await new Promise<void>((resolvePromise) => setImmediate(resolvePromise));
+          }
+          return healthChecks;
+        })();
+
+        const [workspaces, results] = await Promise.race([
+          Promise.all([
+            observeConcurrentBuildWorkspaces({
+              appRoot: app.appRoot,
+              builds,
+            }),
+            Promise.all(builds.map((build) => build.result)),
+          ]),
+          healthProbe.then(() => {
+            throw new Error("Health probing stopped before the builds completed.");
+          }),
+        ]);
+        continueProbing = false;
+        const healthChecks = await healthProbe;
+        stableSurfaceWatcher.close();
+
+        expect(workspaces).toHaveLength(2);
+        expect(results.map((result) => result.code)).toEqual([0, 0]);
+        expect(results.map((result) => result.signal)).toEqual([null, null]);
+        expect(healthChecks).toBeGreaterThan(0);
+        expect(stableSurfaceWatcher.events).toEqual([]);
+        expect(await listBuildWorkspaces(app.appRoot)).toEqual([]);
+        await expectHealthy(server);
+      } finally {
+        continueProbing = false;
+        await healthProbe?.catch(() => undefined);
+        stableSurfaceWatcher?.close();
+        await Promise.all(processes.map((processHandle) => processHandle.stop()));
+        await server.stop();
+      }
+    },
+    SCENARIO_DEADLINE_MS,
+  );
+
+  it(
+    "preserves the byte-for-byte last-good output when a later real bundle fails",
+    async () => {
+      const app = await scenarioApp(WEATHER_AGENT_DESCRIPTOR);
+      const successfulBuild = startEveProcess({ appRoot: app.appRoot, args: ["build"] });
+      const successfulResult = await successfulBuild.result;
+      expect(successfulResult.code).toBe(0);
+      expect(successfulResult.signal).toBeNull();
+
+      const outputDir = join(app.appRoot, ".output");
+      const summaryPath = join(app.appRoot, ".eve", "agent-summary.json");
+      const lastGoodOutputHash = await hashPath(outputDir);
+      const lastGoodSummaryHash = await hashPath(summaryPath);
+      await writeFile(
+        join(app.appRoot, "agent", "tools", "broken.ts"),
+        [
+          'import { missing } from "./does-not-exist";',
+          "export default {",
+          '  description: "Force the production bundle to fail.",',
+          '  inputSchema: { type: "object", properties: {}, required: [] },',
+          "  execute: async () => missing,",
+          "};",
+          "",
+        ].join("\n"),
+      );
+
+      const failedBuild = startEveProcess({ appRoot: app.appRoot, args: ["build"] });
+      const failedResult = await failedBuild.result;
+
+      expect(failedResult.code).toBe(1);
+      expect(failedResult.signal).toBeNull();
+      expect(failedResult.stderr).toContain("does-not-exist");
+      expect(await hashPath(outputDir)).toBe(lastGoodOutputHash);
+      expect(await hashPath(summaryPath)).toBe(lastGoodSummaryHash);
+      expect(await listBuildWorkspaces(app.appRoot)).toEqual([]);
+    },
+    SCENARIO_DEADLINE_MS,
+  );
+});

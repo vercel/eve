@@ -1,5 +1,8 @@
+import { join } from "node:path";
+
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
+import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "#internal/application/runtime-compiled-artifacts-source.js";
 import type {
   SandboxBackend,
@@ -9,6 +12,7 @@ import type {
 } from "#public/definitions/sandbox-backend.js";
 import {
   createBundledRuntimeCompiledArtifactsSource,
+  createDiskRuntimeCompiledArtifactsSource,
   getRuntimeCompiledArtifactsSandboxAppRoot,
   type RuntimeCompiledArtifactsSource,
   type RuntimeDiskCompiledArtifactsSource,
@@ -51,6 +55,7 @@ export type SandboxBackendPrewarmDispatch = (input: {
 
 interface PrewarmSandboxesInput {
   readonly appRoot: string;
+  readonly compileDirectoryPath?: string;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly graph: ResolvedAgentGraphBundle;
   readonly log?: (message: string) => void;
@@ -145,6 +150,7 @@ export async function prewarmSandboxes(input: PrewarmSandboxesInput): Promise<vo
  */
 export async function prewarmAppSandboxes(input: {
   readonly appRoot: string;
+  readonly compileDirectoryPath?: string;
   readonly compiledArtifactsSource?: RuntimeCompiledArtifactsSource;
   readonly loadAgentGraph?: (
     input: Readonly<{
@@ -168,6 +174,7 @@ export async function prewarmAppSandboxes(input: {
 
   await prewarmSandboxes({
     appRoot: getRuntimeCompiledArtifactsSandboxAppRoot(compiledArtifactsSource) ?? input.appRoot,
+    compileDirectoryPath: input.compileDirectoryPath,
     compiledArtifactsSource,
     dispatch: input.dispatch,
     graph,
@@ -186,7 +193,11 @@ export async function prewarmBuiltAppSandboxes(input: {
   readonly log?: (message: string) => void;
   readonly dispatch?: SandboxBackendPrewarmDispatch;
 }): Promise<void> {
-  const authoredSource = createAuthoredSourceRuntimeCompiledArtifactsSource(input.appRoot);
+  const builtArtifactsRoot = join(input.appRoot, ".output");
+  const authoredSource = createDiskRuntimeCompiledArtifactsSource(builtArtifactsRoot, {
+    moduleMapLoaderPath: resolvePackageSourceFilePath("src/internal/authored-module-map-loader.ts"),
+    sandboxAppRoot: input.appRoot,
+  });
   const [metadata, manifest, moduleMap] = await Promise.all([
     loadCompileMetadata({
       compiledArtifactsSource: authoredSource,
@@ -215,6 +226,8 @@ export async function prewarmBuiltAppSandboxes(input: {
 
       await prewarmSandboxes({
         appRoot: input.appRoot,
+        compileDirectoryPath:
+          resolveRuntimeCompilerArtifactPaths(builtArtifactsRoot).compileDirectoryPath,
         compiledArtifactsSource,
         dispatch: input.dispatch,
         graph,
@@ -226,12 +239,13 @@ export async function prewarmBuiltAppSandboxes(input: {
 
 async function collectPrewarmTargets(input: {
   readonly appRoot: string;
+  readonly compileDirectoryPath?: string;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly graph: ResolvedAgentGraphBundle;
 }): Promise<readonly PrewarmTarget[]> {
-  const compileDirectoryPath = resolveRuntimeCompilerArtifactPaths(
-    input.appRoot,
-  ).compileDirectoryPath;
+  const compileDirectoryPath =
+    input.compileDirectoryPath ??
+    resolveRuntimeCompilerArtifactPaths(input.appRoot).compileDirectoryPath;
   const runtimeContext = { appRoot: input.appRoot };
 
   const targets: PrewarmTarget[] = [];

@@ -6,6 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import {
+  createApplicationBuildWorkspace,
+  removeApplicationBuildWorkspace,
+} from "#internal/application/build-workspace.js";
+import {
   pruneDevelopmentRuntimeArtifactsSnapshots,
   resolveDevelopmentRuntimeArtifactsPointerPath,
 } from "#internal/nitro/dev-runtime-artifacts.js";
@@ -49,6 +53,35 @@ describe("prepareApplicationHost", () => {
 
     expect(workflowWorldPlugin).toContain("/compiled/@workflow/world-vercel/index.js");
     expect(workflowWorldPlugin).not.toContain("/compiled/@workflow/world-local/index.js");
+  });
+
+  it("keeps production compiler and host writes inside one invocation workspace", async () => {
+    const { agentRoot, appRoot } = await createAppRoot("eve-production-host-workspace-", {
+      files: {
+        "agent/instructions.md": "Use the configured model.",
+      },
+      packageName: "production-host-workspace",
+    });
+    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    const workspace = await createApplicationBuildWorkspace(appRoot);
+
+    try {
+      const preparedHost = await prepareApplicationHost(appRoot, { workspace });
+
+      expect(preparedHost.compileResult.paths.compileDirectoryPath).toBe(
+        join(workspace.compilerArtifactsRoot, "compile"),
+      );
+      expect(preparedHost.compiledArtifacts.bootstrapPath).toBe(
+        join(workspace.hostArtifactsDir, "compiled-artifacts-bootstrap.mjs"),
+      );
+      expect(preparedHost.workflowBuildDir).toBe(workspace.workflowBuildDir);
+      expect(existsSync(join(appRoot, ".eve", "compile"))).toBe(false);
+      expect(existsSync(join(appRoot, ".eve", "host"))).toBe(false);
+    } finally {
+      await removeApplicationBuildWorkspace(workspace);
+    }
+
+    expect(existsSync(workspace.rootDir)).toBe(false);
   });
 
   it("keeps Nitro host inputs stable when their runtime snapshot is pruned", async () => {

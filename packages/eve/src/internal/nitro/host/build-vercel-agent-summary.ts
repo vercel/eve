@@ -96,12 +96,13 @@ export async function emitVercelAgentSummary(input: {
   manifest: CompiledAgentManifest;
   appRoot: string;
   generatorVersion?: string;
+  outputPath?: string;
 }): Promise<string> {
   const summary = buildVercelAgentSummary({
     generatorVersion: input.generatorVersion,
     manifest: input.manifest,
   });
-  const filePath = join(input.appRoot, VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH);
+  const filePath = input.outputPath ?? join(input.appRoot, VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH);
 
   await mkdir(dirname(filePath), { recursive: true });
   await writeFile(filePath, `${JSON.stringify(summary, null, 2)}\n`);

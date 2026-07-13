@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { compileAgent } from "#compiler/compile-agent.js";
+import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import { createNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { publishDevelopmentRuntimeArtifactsSnapshot } from "#internal/nitro/dev-runtime-artifacts.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
@@ -13,6 +14,7 @@ import type {
   SandboxBackendPrewarmResult,
 } from "#public/definitions/sandbox-backend.js";
 import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
+import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
 const createScratchDirectory = useTemporaryDirectories();
 
@@ -20,6 +22,37 @@ describe("prewarmAppSandboxes", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
+  });
+
+  it("loads workspace seeds from an invocation-owned compiler directory", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_isolated_build_prewarm");
+
+    const appRoot = await createScenarioAppRoot();
+    const compilerAppRoot = join(appRoot, ".eve", "builds", "isolated", "compiler");
+    const compileResult = await compileAgent({
+      artifactsRoot: join(compilerAppRoot, ".eve"),
+      startPath: appRoot,
+    });
+    const events = createPrewarmEvents();
+
+    await prewarmAppSandboxes({
+      appRoot,
+      compileDirectoryPath: compileResult.paths.compileDirectoryPath,
+      compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(compilerAppRoot, {
+        moduleMapLoaderPath: resolvePackageSourceFilePath(
+          "src/internal/authored-module-map-loader.ts",
+        ),
+        sandboxAppRoot: appRoot,
+      }),
+      dispatch: createRecordingDispatch(events),
+    });
+
+    expect(events.seededTemplateCount).toBe(2);
+    expect([...events.seededFilePaths].sort()).toEqual([
+      "$HOME/.agents/skills/research/SKILL.md",
+      "$HOME/.agents/skills/route-weather/SKILL.md",
+    ]);
   });
 
   it("prewarms the root and subagent sandbox templates with per-agent skill seeds", async () => {
