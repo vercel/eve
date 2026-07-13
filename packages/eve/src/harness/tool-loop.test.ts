@@ -52,14 +52,6 @@ import {
   EMPTY_DELIVERY_SENTINEL,
 } from "#shared/empty-delivery.js";
 
-declare module "#public/channels/index.js" {
-  interface ChannelMetadataMap {
-    readonly "channel:support": {
-      readonly triggeringUserId: string | null;
-    } & Readonly<Record<string, unknown>>;
-  }
-}
-
 vi.mock("ai", () => ({
   ToolLoopAgent: vi.fn(),
   gateway: {
@@ -8385,7 +8377,10 @@ describe("createToolLoopHarness", () => {
         return {
           runtimeContext: {
             "eve.session.id": "user-override",
-            "slack.user_id": input.channel.metadata.triggeringUserId ?? "",
+            "slack.user_id":
+              typeof input.channel.metadata["triggeringUserId"] === "string"
+                ? input.channel.metadata["triggeringUserId"]
+                : "",
             "turn.id": input.turn.id,
           },
         };

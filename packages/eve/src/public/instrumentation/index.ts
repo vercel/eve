@@ -14,8 +14,6 @@ import type { JsonObject } from "#shared/json.js";
 // imports continue to work. The canonical home is `eve/channels`.
 export {
   isChannel,
-  type ChannelMetadataMap,
-  type ChannelReferenceMap,
   type InstrumentationChannel,
   type InstrumentationChannelForChannel,
   type InstrumentationChannelForKind,

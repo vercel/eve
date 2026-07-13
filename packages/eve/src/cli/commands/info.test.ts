@@ -80,7 +80,6 @@ function makeCompiledState(): CompileAgentResult {
     },
     paths: {
       appRoot: APP_ROOT,
-      channelInstrumentationTypesPath: `${APP_ROOT}/.eve/compile/channel-instrumentation.d.ts`,
       compiledManifestPath: `${APP_ROOT}/.eve/compile/compiled-agent-manifest.json`,
       compileDirectoryPath: `${APP_ROOT}/.eve/compile`,
       compileMetadataPath: `${APP_ROOT}/.eve/compile/compile-metadata.json`,
