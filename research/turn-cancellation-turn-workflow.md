@@ -72,10 +72,13 @@ resuming the cancel hook, which tests do directly.
   reached history; replaying them would re-dispatch the actions).
   Descendants are _not_ cascaded to (layer 3); their late results land on
   the dead turn inbox and are dropped.
-- **Cancel after the turn settled (or before it starts)**: benign no-op.
-  Duplicate cancels _after_ the settle are no-ops. Same-instant duplicates
-  are the trigger's concern: layer 2 must single-flight cancel resumes per
-  turn (see "Runtime findings" below).
+- **Cancel after the turn settled (or before it starts)**: benign no-op —
+  the settle disposed the session cancel hook, so a late resume rejects
+  with `HookNotFoundError`. Duplicate and same-instant cancels are also
+  safe without trigger-side single-flighting: a duplicate resume neither
+  re-dispatches the in-flight step (workflow#2848) nor corrupts replay
+  when racing disposal (workflow#2808). Layer 2 only needs to treat
+  "already resumed/disposed" as success.
 - **Partial content is kept.** Whatever the harness emitted before the abort
   stays on the stream, and durable history persists exactly what the harness
   had settled at abort time — no rollback, no synthesis.
@@ -140,7 +143,10 @@ through the same cancelled arm.
 ## Where the shipped design deviates from the proposal
 
 Integration against the real runtime (vendored `@workflow/core`
-5.0.0-beta.26) surfaced behaviors that reshaped the epilogue path:
+5.0.0-beta.26) surfaced behaviors that reshaped the epilogue path. This
+section is historical: the runtime defects cited below (#2780, #2781)
+have since been fixed upstream — see "Runtime findings" for the fixes
+and which mitigations remain load-bearing:
 
 1. **No workflow-side race; abort in the hook-read continuation.** The
    durable `abort()` writes a hook event, and the upstream contract

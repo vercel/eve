@@ -213,7 +213,8 @@ describe("turn cancellation integration", () => {
 
         // A duplicate cancel after the turn settled is a benign no-op: it
         // lands on a consumed/disposed hook and must not disturb the
-        // session. (Layer 2's trigger serializes same-instant duplicates.)
+        // session. No trigger-side single-flighting is required
+        // (workflow#2848/#2808); "already resumed/disposed" is success.
         await resumeHook(cancelToken, {}).catch(() => undefined);
 
         expect(cancelledTurn.at(-1)?.type).toBe("session.waiting");
