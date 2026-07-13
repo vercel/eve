@@ -26,6 +26,7 @@ export function createSendFn<TState = undefined>(
     const state = (options as { state?: TState }).state;
     const title = (options as { title?: string }).title;
     const rawToken = (options as { continuationToken: string }).continuationToken;
+    const resumeOnly = (options as { resumeOnly?: boolean }).resumeOnly ?? false;
     const continuationToken = `${channelName}:${rawToken}`;
 
     const {
@@ -47,6 +48,10 @@ export function createSendFn<TState = undefined>(
 
       return createSession(sessionId, rawToken, runtime);
     } catch (error) {
+      if (resumeOnly) {
+        throw error;
+      }
+
       // No-active-session is the expected resume-or-start signal. The
       // failure itself is logged in `deliver`; this only records the fallback.
       if (!isRuntimeNoActiveSessionError(error)) {

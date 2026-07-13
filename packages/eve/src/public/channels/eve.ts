@@ -15,7 +15,8 @@ import {
 } from "#protocol/message.js";
 import { EVE_INFO_ROUTE_PATH, EVE_SESSION_SNAPSHOT_ROUTE_PATTERN } from "#protocol/routes.js";
 import { type InputResponse, isInputResponse } from "#runtime/input/types.js";
-import { type AuthFn, routeAuth } from "#public/channels/auth.js";
+import { type AuthFn, routeAuth, SessionNotReadyError } from "#public/channels/auth.js";
+import { isRuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import {
   collectUploadPolicyViolations,
   formatUploadPolicyViolation,
@@ -286,18 +287,27 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           dispatchAuth = messageResult.auth;
         }
 
-        const session = await send(
-          {
-            inputResponses: body.inputResponses,
-            message: body.message,
-            context,
-            outputSchema: body.outputSchema,
-          },
-          {
-            auth: dispatchAuth,
-            continuationToken: body.continuationToken,
-          },
-        );
+        let session: Awaited<ReturnType<typeof send>>;
+        try {
+          session = await send(
+            {
+              inputResponses: body.inputResponses,
+              message: body.message,
+              context,
+              outputSchema: body.outputSchema,
+            },
+            {
+              auth: dispatchAuth,
+              continuationToken: body.continuationToken,
+              resumeOnly: true,
+            },
+          );
+        } catch (error) {
+          if (isRuntimeNoActiveSessionError(error)) {
+            return new SessionNotReadyError().response;
+          }
+          throw error;
+        }
 
         return Response.json(
           {

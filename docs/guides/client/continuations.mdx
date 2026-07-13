@@ -35,7 +35,7 @@ interface SessionState {
 
 The continuation token resumes the conversation. The session ID and stream index let the client reconnect to the right stream position without replaying events it already consumed.
 
-`SessionState` is a cursor, not a chat transcript. If your app shows historical messages, persist the stream events separately and store them under your own chat or thread ID. On reload, pass the saved `SessionState` back to `client.session(savedState)` or `useEveAgent({ initialSession })`, and pass the saved events to your renderer or `useEveAgent({ initialEvents })`.
+`SessionState` is a cursor, not a chat transcript. If your app shows historical messages, persist the stream events separately and store them under your own chat or thread ID. On reload, create one `ClientSession` from the saved state and pass that same object to every operation for the chat, including `useEveAgent({ session })` and manual replay. Pass saved events to your renderer or `useEveAgent({ initialEvents })`.
 
 ## Resume a saved session
 
@@ -59,6 +59,10 @@ const session = client.session(continuationToken);
 const response = await session.send("Continue where we left off.");
 await response.result();
 ```
+
+Keep that `ClientSession` as the chat-level lifecycle owner. Do not create one
+session object for stream replay and another for sending: replay advances the
+cursor and continuation state that the next send must use.
 
 The shorthand can send a follow-up, but it doesn't know the previous stream cursor. Prefer full `SessionState` when you control persistence.
 

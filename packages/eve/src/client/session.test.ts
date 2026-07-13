@@ -88,6 +88,54 @@ describe("ClientSession", () => {
     });
   });
 
+  it("bounded-retries continuation readiness without changing session identity", async () => {
+    const requests: Array<{ body: unknown; url: string }> = [];
+    let attempt = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      requests.push({
+        body: JSON.parse(String(init?.body)),
+        url:
+          typeof request === "string"
+            ? request
+            : request instanceof URL
+              ? request.href
+              : request.url,
+      });
+      attempt += 1;
+      if (attempt === 1) {
+        return Response.json(
+          { code: "session_not_ready", error: "Session is not ready.", ok: false },
+          { headers: { "cache-control": "no-store" }, status: 425 },
+        );
+      }
+      return Response.json({ ok: true, sessionId: "session_1" });
+    });
+    const session = createSession({
+      continuationToken: "eve:existing",
+      sessionId: "session_1",
+      streamIndex: 7,
+    });
+
+    const response = await session.send("follow-up");
+
+    expect(response.sessionId).toBe("session_1");
+    expect(session.state).toEqual({
+      continuationToken: "eve:existing",
+      sessionId: "session_1",
+      streamIndex: 7,
+    });
+    expect(requests).toEqual([
+      {
+        body: { continuationToken: "eve:existing", message: "follow-up" },
+        url: "https://eve.test/eve/v1/session/session_1",
+      },
+      {
+        body: { continuationToken: "eve:existing", message: "follow-up" },
+        url: "https://eve.test/eve/v1/session/session_1",
+      },
+    ]);
+  });
+
   it("rejects clientContext-only sends", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createAcceptedResponse());
     const session = createSession({

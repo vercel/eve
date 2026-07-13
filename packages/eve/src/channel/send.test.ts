@@ -49,6 +49,22 @@ describe("createSendFn", () => {
     warn.mockRestore();
   });
 
+  it("never starts a duplicate session when resume-only delivery finds no active session", async () => {
+    const noSession = new RuntimeNoActiveSessionError("test:token");
+    const runtime = createRuntime(noSession);
+    const send = createSendFn(runtime, ADAPTER, "test");
+
+    await expect(
+      send("follow-up", {
+        auth: null,
+        continuationToken: "token",
+        resumeOnly: true,
+      }),
+    ).rejects.toBe(noSession);
+    expect(runtime.deliver).toHaveBeenCalledTimes(1);
+    expect(runtime.run).not.toHaveBeenCalled();
+  });
+
   it("warns and falls back to a new session when delivery fails unexpectedly", async () => {
     const runtime = createRuntime(new Error("boom"));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

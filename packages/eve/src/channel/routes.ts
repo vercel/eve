@@ -67,6 +67,11 @@ type BaseSendOptions = {
   continuationToken: string;
   mode?: RunMode;
   /**
+   * Requires delivery to an existing parked session. When delivery cannot
+   * resume, propagate the runtime error instead of starting a new session.
+   */
+  resumeOnly?: boolean;
+  /**
    * Human-readable title for a newly started workflow session. Defaults to
    * the first user message and is ignored when resuming an existing session.
    */

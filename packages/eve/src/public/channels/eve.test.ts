@@ -11,6 +11,7 @@ import type { SessionAuthContext } from "#channel/types.js";
 import type { RouteHandlerArgs, SendFn, SendOptions, SendPayload } from "#channel/routes.js";
 import type { Session as ChannelSession } from "#channel/session.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { RuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import type { ContextAccessor } from "#context/key.js";
 import {
   ContinuationTokenKey,
@@ -328,6 +329,47 @@ describe("eveChannel — stream session", () => {
     });
     expect(getSession).not.toHaveBeenCalled();
     expect(getEventStream).not.toHaveBeenCalled();
+  });
+});
+
+describe("eveChannel — continue session", () => {
+  it("dispatches the built-in continuation route as resume-only", async () => {
+    const handler = createEveContinueHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({
+        continuationToken: "http:existing",
+        message: "follow-up",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(handler.send).toHaveBeenCalledTimes(1);
+    expect(handler.send.mock.calls[0]?.[1]).toMatchObject({
+      continuationToken: "http:existing",
+      resumeOnly: true,
+    });
+  });
+
+  it("returns retryable readiness when resume-only delivery has no active session", async () => {
+    const handler = createEveContinueHandler({ auth: none() });
+    handler.send.mockRejectedValueOnce(new RuntimeNoActiveSessionError("eve:http:existing"));
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({
+        continuationToken: "http:existing",
+        message: "follow-up",
+      }),
+    );
+
+    expect(response.status).toBe(425);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      code: "session_not_ready",
+      error: "Session is not ready.",
+      ok: false,
+    });
+    expect(handler.send).toHaveBeenCalledTimes(1);
   });
 });
 

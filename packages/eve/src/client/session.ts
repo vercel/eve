@@ -192,6 +192,7 @@ export class ClientSession {
       body: JSON.stringify(body),
       headers,
       mustDeliver: (input.inputResponses?.length ?? 0) > 0,
+      retryNotReady: session.sessionId !== undefined,
       redirect: this.#context.redirect,
       signal: input.signal,
       url,
@@ -352,11 +353,12 @@ async function postTurnWithRetry(input: {
   readonly body: string;
   readonly headers: Headers;
   readonly mustDeliver: boolean;
+  readonly retryNotReady: boolean;
   readonly redirect?: ClientRedirectPolicy;
   readonly signal?: AbortSignal;
   readonly url: string;
 }): Promise<Response> {
-  const attempts = input.mustDeliver ? DELIVER_RETRY_ATTEMPTS : 1;
+  const attempts = input.mustDeliver || input.retryNotReady ? DELIVER_RETRY_ATTEMPTS : 1;
   let lastStatus: number | undefined;
   let lastBody: string | undefined;
   let lastHeaders: Headers | undefined;
@@ -393,7 +395,10 @@ async function postTurnWithRetry(input: {
 }
 
 function isRetryableDeliveryFailure(status: number, body: string): boolean {
-  return status === 500 && /target session was not found/i.test(body);
+  return (
+    (status === 425 && /session_not_ready/i.test(body)) ||
+    (status === 500 && /target session was not found/i.test(body))
+  );
 }
 
 async function sleep(ms: number): Promise<void> {
