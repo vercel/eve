@@ -15,6 +15,11 @@ vi.mock("#internal/nitro/host/dispatch-schedule-in-dev.js", async () => {
 });
 
 const APP_ROOT = "/tmp/eve-test";
+const ARTIFACTS_CONFIG = {
+  appRoot: APP_ROOT,
+  dev: true,
+  moduleMapLoaderPath: "/tmp/eve-test/module-map-loader.js",
+};
 
 async function importHandler() {
   return await import("#internal/nitro/routes/dev-schedule-dispatch.js");
@@ -25,7 +30,7 @@ async function postSchedule(scheduleIdInUrl: string): Promise<Response> {
   const request = new Request(`http://localhost:3000/eve/v1/dev/schedules/${scheduleIdInUrl}`, {
     method: "POST",
   });
-  return await handleDevScheduleDispatchRequest({ appRoot: APP_ROOT }, request);
+  return await handleDevScheduleDispatchRequest(ARTIFACTS_CONFIG, request);
 }
 
 describe("handleDevScheduleDispatchRequest", () => {
@@ -44,7 +49,7 @@ describe("handleDevScheduleDispatchRequest", () => {
       sessionIds: ["sess-1", "sess-2"],
     });
     expect(mocks.dispatchScheduleInDev).toHaveBeenCalledWith({
-      appRoot: APP_ROOT,
+      artifactsConfig: ARTIFACTS_CONFIG,
       scheduleId: "heartbeat",
     });
   });
@@ -59,7 +64,7 @@ describe("handleDevScheduleDispatchRequest", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.dispatchScheduleInDev).toHaveBeenCalledWith({
-      appRoot: APP_ROOT,
+      artifactsConfig: ARTIFACTS_CONFIG,
       scheduleId: "weird/name",
     });
   });
