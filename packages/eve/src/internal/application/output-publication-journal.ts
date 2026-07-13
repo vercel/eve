@@ -1,5 +1,8 @@
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+
+import { atomicWriteFile } from "#shared/atomic-write-file.js";
+import { isErrnoCode } from "#shared/guards.js";
 
 export type OutputPublicationPhase = "acquired" | "prepared" | "backed-up" | "committed";
 
@@ -12,6 +15,7 @@ export interface OutputPublicationJournal {
   readonly outputBackupPath: string;
   phase: OutputPublicationPhase;
   readonly pid: number;
+  readonly scratchDir: string;
   readonly stagedOutputDir: string;
   readonly stagedSummaryPath: string;
   readonly summaryBackupPath: string;
@@ -27,7 +31,7 @@ export async function writeOutputPublicationJournal(
   lockPath: string,
   journal: OutputPublicationJournal,
 ): Promise<void> {
-  await writeJournal(lockPath, journal, journal.token);
+  await writeJournal(lockPath, journal);
 }
 
 export async function readOutputPublicationJournal(
@@ -41,7 +45,7 @@ export async function writeRecoveryLeaseJournal(
   leasePath: string,
   journal: RecoveryLeaseJournal,
 ): Promise<void> {
-  await writeJournal(leasePath, journal, journal.token);
+  await writeJournal(leasePath, journal);
 }
 
 export async function readRecoveryLeaseJournal(
@@ -51,18 +55,24 @@ export async function readRecoveryLeaseJournal(
   return isRecoveryLeaseJournal(value) ? value : undefined;
 }
 
-async function writeJournal(path: string, journal: unknown, token: string): Promise<void> {
-  const journalPath = join(path, "owner.json");
-  const temporaryPath = `${journalPath}.${token}.tmp`;
-  await writeFile(temporaryPath, `${JSON.stringify(journal, null, 2)}\n`);
-  await rename(temporaryPath, journalPath);
+/**
+ * Resolves the journal file inside a lock or lease directory. Exposed so
+ * the lock module can heartbeat the file's mtime while a publication or
+ * recovery is in flight.
+ */
+export function resolveJournalFilePath(path: string): string {
+  return join(path, "owner.json");
+}
+
+async function writeJournal(path: string, journal: unknown): Promise<void> {
+  await atomicWriteFile(resolveJournalFilePath(path), `${JSON.stringify(journal, null, 2)}\n`);
 }
 
 async function readJournal(path: string): Promise<unknown> {
   try {
-    return JSON.parse(await readFile(join(path, "owner.json"), "utf8")) as unknown;
+    return JSON.parse(await readFile(resolveJournalFilePath(path), "utf8")) as unknown;
   } catch (error) {
-    if (isNodeErrorWithCode(error, "ENOENT") || error instanceof SyntaxError) {
+    if (isErrnoCode(error, "ENOENT") || error instanceof SyntaxError) {
       return undefined;
     }
     throw error;
@@ -83,6 +93,7 @@ function isOutputPublicationJournal(value: unknown): value is OutputPublicationJ
     typeof journal.outputBackupPath === "string" &&
     ["acquired", "prepared", "backed-up", "committed"].includes(journal.phase ?? "") &&
     typeof journal.pid === "number" &&
+    typeof journal.scratchDir === "string" &&
     typeof journal.stagedOutputDir === "string" &&
     typeof journal.stagedSummaryPath === "string" &&
     typeof journal.summaryBackupPath === "string" &&
@@ -96,8 +107,4 @@ function isRecoveryLeaseJournal(value: unknown): value is RecoveryLeaseJournal {
   }
   const journal = value as Partial<RecoveryLeaseJournal>;
   return typeof journal.pid === "number" && typeof journal.token === "string";
-}
-
-function isNodeErrorWithCode(error: unknown, code: string): boolean {
-  return error instanceof Error && "code" in error && error.code === code;
 }

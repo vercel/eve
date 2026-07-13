@@ -12,8 +12,8 @@ import {
 } from "#internal/application/cache-metadata.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import { runQueuedWorkflowBuild } from "#internal/workflow-bundle/build-queue.js";
+import { atomicWriteFile } from "#shared/atomic-write-file.js";
 import {
-  atomicWriteFile,
   bundleFinalWorkflowOutput,
   collectWorkflowInputFiles,
   convertClassesManifest,

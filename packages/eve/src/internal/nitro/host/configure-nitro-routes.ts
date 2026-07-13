@@ -268,18 +268,6 @@ function addFrameworkVirtualHandler(
   ].join("\n");
 }
 
-function createSerializedWorkflowArtifactSync(
-  buildWorkflowArtifacts: () => Promise<void>,
-): () => Promise<void> {
-  let previousBuild: Promise<void> = Promise.resolve();
-
-  return async () => {
-    const nextBuild = previousBuild.then(buildWorkflowArtifacts, buildWorkflowArtifacts);
-    previousBuild = nextBuild;
-    await nextBuild;
-  };
-}
-
 async function registerWorkflowArtifactBuildHook(
   nitro: Nitro,
   syncWorkflowArtifacts: () => Promise<void>,
@@ -375,6 +363,11 @@ async function registerWorkflowRoute(
   });
 }
 
+/**
+ * Wires eve's package-owned app, channel, workflow inspection, dev-control,
+ * and Workflow SDK endpoints into the watch-mode Nitro host, rebuilding
+ * workflow bundles on reload.
+ */
 export async function configureDevelopmentNitroRoutes(
   nitro: Nitro,
   preparedHost: PreparedApplicationHost,
@@ -388,12 +381,14 @@ export async function configureDevelopmentNitroRoutes(
     rootDir: resolvePackageRoot(),
     watch: true,
   });
-  const syncWorkflowArtifacts = createSerializedWorkflowArtifactSync(async () => {
+  // Overlapping `build:before` and `dev:reload` syncs are serialized by
+  // `builder.build`'s per-output-directory queue.
+  const syncWorkflowArtifacts = async () => {
     await builder.build({
       nitroStepOutfile: join(workflowBuildDirectory, "steps.mjs"),
       nitroWorkflowOutfile: join(workflowBuildDirectory, "workflows.mjs"),
     });
-  });
+  };
 
   await registerWorkflowArtifactBuildHook(nitro, syncWorkflowArtifacts);
   nitro.hooks.hook("dev:reload", syncWorkflowArtifacts);
@@ -411,6 +406,10 @@ export async function configureDevelopmentNitroRoutes(
   nitro.routing.sync();
 }
 
+/**
+ * Wires the subset of eve's package-owned endpoints that belong to the given
+ * build surface into a production Nitro host.
+ */
 export async function configureProductionNitroRoutes(
   nitro: Nitro,
   preparedHost: PreparedApplicationHost,
@@ -425,11 +424,11 @@ export async function configureProductionNitroRoutes(
       rootDir: resolvePackageRoot(),
       watch: false,
     });
-    const syncWorkflowArtifacts = createSerializedWorkflowArtifactSync(async () => {
+    const syncWorkflowArtifacts = async () => {
       await builder.build({
         nitroStepOutfile: join(resolveNitroWorkflowBuildDirectory(nitro), "steps.mjs"),
       });
-    });
+    };
     await registerWorkflowArtifactBuildHook(nitro, syncWorkflowArtifacts);
   }
 

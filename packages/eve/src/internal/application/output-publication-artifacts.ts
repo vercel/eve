@@ -2,6 +2,7 @@ import { mkdir, rename, rm, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import type { OutputPublicationJournal } from "#internal/application/output-publication-journal.js";
+import { pathExists } from "#shared/path-exists.js";
 
 export async function assertStagedPublicationExists(
   journal: OutputPublicationJournal,
@@ -95,20 +96,4 @@ async function rollbackArtifact(input: {
     await mkdir(dirname(input.stagedPath), { recursive: true });
     await rename(input.finalPath, input.stagedPath);
   }
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch (error) {
-    if (isNodeErrorWithCode(error, "ENOENT")) {
-      return false;
-    }
-    throw error;
-  }
-}
-
-function isNodeErrorWithCode(error: unknown, code: string): boolean {
-  return error instanceof Error && "code" in error && error.code === code;
 }

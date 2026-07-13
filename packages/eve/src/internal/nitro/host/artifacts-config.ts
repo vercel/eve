@@ -5,6 +5,11 @@ import type {
   ProductionNitroArtifactsConfig,
 } from "#internal/nitro/routes/runtime-artifacts.js";
 
+/**
+ * Runtime-artifacts wiring for the dev server: routes read compiled
+ * artifacts from the authored app root via the snapshot pointer so hot
+ * reload can swap them.
+ */
 export function createDevelopmentNitroArtifactsConfig(input: {
   readonly appRoot: string;
 }): DevelopmentNitroArtifactsConfig {
@@ -16,6 +21,10 @@ export function createDevelopmentNitroArtifactsConfig(input: {
   };
 }
 
+/**
+ * Runtime-artifacts wiring for built output: routes require the artifacts
+ * bundled into the server at build time and never touch the filesystem.
+ */
 export function createProductionNitroArtifactsConfig(): ProductionNitroArtifactsConfig {
   return {
     kind: "production",

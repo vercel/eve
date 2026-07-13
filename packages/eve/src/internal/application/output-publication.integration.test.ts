@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, rename, stat, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -11,6 +11,21 @@ import {
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 
 const createScratchDirectory = useTemporaryDirectories();
+
+interface StagedBuild {
+  readonly scratchDir: string;
+  readonly stagedOutputDir: string;
+  readonly stagedSummaryPath: string;
+}
+
+function stagedBuild(appRoot: string, buildName: string): StagedBuild {
+  const scratchDir = join(appRoot, ".eve", "builds", buildName);
+  return {
+    scratchDir,
+    stagedOutputDir: join(scratchDir, "output"),
+    stagedSummaryPath: join(scratchDir, "summary.json"),
+  };
+}
 
 async function writePublication(input: {
   readonly outputDir: string;
@@ -40,12 +55,16 @@ async function expectPublication(input: {
   await expect(readFile(input.summaryPath, "utf8")).resolves.toBe(`${input.summaryMarker}\n`);
 }
 
+async function expectMissing(path: string): Promise<void> {
+  await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" });
+}
+
 async function interruptPublicationAfterBackup(input: {
   readonly appRoot: string;
   readonly finalOutputDir: string;
   readonly finalSummaryPath: string;
-  readonly stagedOutputDir: string;
-  readonly stagedSummaryPath: string;
+  readonly interrupted: StagedBuild;
+  readonly pid?: number;
 }): Promise<void> {
   const token = "interrupted-owner";
   const outputBackupPath = `${input.finalOutputDir}.eve-backup-${token}`;
@@ -57,10 +76,10 @@ async function interruptPublicationAfterBackup(input: {
     summaryPath: input.finalSummaryPath,
   });
   await writePublication({
-    outputDir: input.stagedOutputDir,
+    outputDir: input.interrupted.stagedOutputDir,
     outputMarker: "interrupted",
     summaryMarker: "interrupted",
-    summaryPath: input.stagedSummaryPath,
+    summaryPath: input.interrupted.stagedSummaryPath,
   });
   await Promise.all([
     rename(input.finalOutputDir, outputBackupPath),
@@ -78,9 +97,10 @@ async function interruptPublicationAfterBackup(input: {
       liveness: "active",
       outputBackupPath,
       phase: "backed-up",
-      pid: 2_147_483_647,
-      stagedOutputDir: input.stagedOutputDir,
-      stagedSummaryPath: input.stagedSummaryPath,
+      pid: input.pid ?? 2_147_483_647,
+      scratchDir: input.interrupted.scratchDir,
+      stagedOutputDir: input.interrupted.stagedOutputDir,
+      stagedSummaryPath: input.interrupted.stagedSummaryPath,
       summaryBackupPath,
       token,
     })}\n`,
@@ -92,8 +112,7 @@ describe("build output publication", () => {
     const appRoot = await createScratchDirectory("eve-output-publication-");
     const finalOutputDir = join(appRoot, ".output");
     const finalSummaryPath = join(appRoot, ".eve", "agent-summary.json");
-    const stagedOutputDir = join(appRoot, ".eve", "builds", "next", "output");
-    const stagedSummaryPath = join(appRoot, ".eve", "builds", "next", "summary.json");
+    const next = stagedBuild(appRoot, "next");
     await writePublication({
       outputDir: finalOutputDir,
       outputMarker: "previous",
@@ -101,18 +120,17 @@ describe("build output publication", () => {
       summaryPath: finalSummaryPath,
     });
     await writePublication({
-      outputDir: stagedOutputDir,
+      outputDir: next.stagedOutputDir,
       outputMarker: "next",
       summaryMarker: "next",
-      summaryPath: stagedSummaryPath,
+      summaryPath: next.stagedSummaryPath,
     });
 
     await publishApplicationBuildArtifacts({
       appRoot,
       finalOutputDir,
       finalSummaryPath,
-      stagedOutputDir,
-      stagedSummaryPath,
+      ...next,
     });
 
     await expectPublication({
@@ -127,8 +145,7 @@ describe("build output publication", () => {
     const appRoot = await createScratchDirectory("eve-output-publication-rollback-");
     const finalOutputDir = join(appRoot, ".output");
     const finalSummaryPath = join(appRoot, ".eve", "agent-summary.json");
-    const stagedOutputDir = join(appRoot, ".eve", "builds", "failed", "output");
-    const stagedSummaryPath = join(appRoot, ".eve", "builds", "failed", "summary.json");
+    const failed = stagedBuild(appRoot, "failed");
     await writePublication({
       outputDir: finalOutputDir,
       outputMarker: "last-good",
@@ -136,10 +153,10 @@ describe("build output publication", () => {
       summaryPath: finalSummaryPath,
     });
     await writePublication({
-      outputDir: stagedOutputDir,
+      outputDir: failed.stagedOutputDir,
       outputMarker: "failed",
       summaryMarker: "failed",
-      summaryPath: stagedSummaryPath,
+      summaryPath: failed.stagedSummaryPath,
     });
 
     await expect(
@@ -148,8 +165,7 @@ describe("build output publication", () => {
           appRoot,
           finalOutputDir,
           finalSummaryPath,
-          stagedOutputDir,
-          stagedSummaryPath,
+          ...failed,
         },
         {
           async afterBackup() {},
@@ -168,10 +184,70 @@ describe("build output publication", () => {
       summaryPath: finalSummaryPath,
     });
     await expectPublication({
-      outputDir: stagedOutputDir,
+      outputDir: failed.stagedOutputDir,
       outputMarker: "failed",
       summaryMarker: "failed",
-      summaryPath: stagedSummaryPath,
+      summaryPath: failed.stagedSummaryPath,
+    });
+  });
+
+  it("rolls back when the committed journal record cannot be written", async () => {
+    const appRoot = await createScratchDirectory("eve-output-publication-uncommitted-");
+    const finalOutputDir = join(appRoot, ".output");
+    const finalSummaryPath = join(appRoot, ".eve", "agent-summary.json");
+    const next = stagedBuild(appRoot, "next");
+    await writePublication({
+      outputDir: finalOutputDir,
+      outputMarker: "last-good",
+      summaryMarker: "last-good",
+      summaryPath: finalSummaryPath,
+    });
+    await writePublication({
+      outputDir: next.stagedOutputDir,
+      outputMarker: "next",
+      summaryMarker: "next",
+      summaryPath: next.stagedSummaryPath,
+    });
+    const lockPath = resolveOutputPublicationLockPath(appRoot);
+
+    try {
+      await expect(
+        publishApplicationBuildArtifactsWithObserver(
+          {
+            appRoot,
+            finalOutputDir,
+            finalSummaryPath,
+            ...next,
+          },
+          {
+            async afterBackup() {},
+            async afterOutputInstall() {
+              await chmod(lockPath, 0o500);
+            },
+            async onContention() {},
+          },
+        ),
+      ).rejects.toThrow();
+    } finally {
+      // The failed release may have renamed the read-only lock directory;
+      // restore permissions on whatever is left so teardown can remove it.
+      const locksDir = join(appRoot, ".eve", "locks");
+      for (const entry of await readdir(locksDir)) {
+        await chmod(join(locksDir, entry), 0o700).catch(() => undefined);
+      }
+    }
+
+    await expectPublication({
+      outputDir: finalOutputDir,
+      outputMarker: "last-good",
+      summaryMarker: "last-good",
+      summaryPath: finalSummaryPath,
+    });
+    await expectPublication({
+      outputDir: next.stagedOutputDir,
+      outputMarker: "next",
+      summaryMarker: "next",
+      summaryPath: next.stagedSummaryPath,
     });
   });
 
@@ -179,34 +255,31 @@ describe("build output publication", () => {
     const appRoot = await createScratchDirectory("eve-output-publication-lock-");
     const finalOutputDir = join(appRoot, ".output");
     const finalSummaryPath = join(appRoot, ".eve", "agent-summary.json");
-    const firstOutputDir = join(appRoot, ".eve", "builds", "first", "output");
-    const firstSummaryPath = join(appRoot, ".eve", "builds", "first", "summary.json");
-    const secondOutputDir = join(appRoot, ".eve", "builds", "second", "output");
-    const secondSummaryPath = join(appRoot, ".eve", "builds", "second", "summary.json");
+    const first = stagedBuild(appRoot, "first");
+    const second = stagedBuild(appRoot, "second");
     await writePublication({
-      outputDir: firstOutputDir,
+      outputDir: first.stagedOutputDir,
       outputMarker: "first",
       summaryMarker: "first",
-      summaryPath: firstSummaryPath,
+      summaryPath: first.stagedSummaryPath,
     });
     await writePublication({
-      outputDir: secondOutputDir,
+      outputDir: second.stagedOutputDir,
       outputMarker: "second",
       summaryMarker: "second",
-      summaryPath: secondSummaryPath,
+      summaryPath: second.stagedSummaryPath,
     });
     const firstEntered = Promise.withResolvers<void>();
     const releaseFirst = Promise.withResolvers<void>();
     const secondObservedContention = Promise.withResolvers<void>();
     const entered: string[] = [];
 
-    const first = publishApplicationBuildArtifactsWithObserver(
+    const firstPublish = publishApplicationBuildArtifactsWithObserver(
       {
         appRoot,
         finalOutputDir,
         finalSummaryPath,
-        stagedOutputDir: firstOutputDir,
-        stagedSummaryPath: firstSummaryPath,
+        ...first,
       },
       {
         async afterBackup() {
@@ -219,13 +292,12 @@ describe("build output publication", () => {
       },
     );
     await firstEntered.promise;
-    const second = publishApplicationBuildArtifactsWithObserver(
+    const secondPublish = publishApplicationBuildArtifactsWithObserver(
       {
         appRoot,
         finalOutputDir,
         finalSummaryPath,
-        stagedOutputDir: secondOutputDir,
-        stagedSummaryPath: secondSummaryPath,
+        ...second,
       },
       {
         async afterBackup() {
@@ -241,7 +313,7 @@ describe("build output publication", () => {
     await secondObservedContention.promise;
     expect(entered).toEqual(["first"]);
     releaseFirst.resolve();
-    await Promise.all([first, second]);
+    await Promise.all([firstPublish, secondPublish]);
 
     expect(entered).toEqual(["first", "second"]);
     await expectPublication({
@@ -256,22 +328,19 @@ describe("build output publication", () => {
     const appRoot = await createScratchDirectory("eve-output-publication-recovery-");
     const finalOutputDir = join(appRoot, ".output");
     const finalSummaryPath = join(appRoot, ".eve", "agent-summary.json");
-    const interruptedOutputDir = join(appRoot, ".eve", "builds", "interrupted", "output");
-    const interruptedSummaryPath = join(appRoot, ".eve", "builds", "interrupted", "summary.json");
-    const nextOutputDir = join(appRoot, ".eve", "builds", "next", "output");
-    const nextSummaryPath = join(appRoot, ".eve", "builds", "next", "summary.json");
+    const interrupted = stagedBuild(appRoot, "interrupted");
+    const next = stagedBuild(appRoot, "next");
     await interruptPublicationAfterBackup({
       appRoot,
       finalOutputDir,
       finalSummaryPath,
-      stagedOutputDir: interruptedOutputDir,
-      stagedSummaryPath: interruptedSummaryPath,
+      interrupted,
     });
     await writePublication({
-      outputDir: nextOutputDir,
+      outputDir: next.stagedOutputDir,
       outputMarker: "next",
       summaryMarker: "next",
-      summaryPath: nextSummaryPath,
+      summaryPath: next.stagedSummaryPath,
     });
     await expect(
       publishApplicationBuildArtifactsWithObserver(
@@ -279,8 +348,7 @@ describe("build output publication", () => {
           appRoot,
           finalOutputDir,
           finalSummaryPath,
-          stagedOutputDir: nextOutputDir,
-          stagedSummaryPath: nextSummaryPath,
+          ...next,
         },
         {
           async afterBackup() {
@@ -298,36 +366,116 @@ describe("build output publication", () => {
       summaryMarker: "last-good",
       summaryPath: finalSummaryPath,
     });
+    await expectMissing(interrupted.scratchDir);
+  });
+
+  it("recovers an interrupted publication whose owner pid is alive but whose journal went stale", async () => {
+    const appRoot = await createScratchDirectory("eve-output-publication-stale-");
+    const finalOutputDir = join(appRoot, ".output");
+    const finalSummaryPath = join(appRoot, ".eve", "agent-summary.json");
+    const interrupted = stagedBuild(appRoot, "interrupted");
+    const next = stagedBuild(appRoot, "next");
+    await interruptPublicationAfterBackup({
+      appRoot,
+      finalOutputDir,
+      finalSummaryPath,
+      interrupted,
+      // The test's own live pid simulates pid reuse: the recorded owner is
+      // gone, but `process.kill(pid, 0)` still succeeds.
+      pid: process.pid,
+    });
+    const journalFilePath = join(resolveOutputPublicationLockPath(appRoot), "owner.json");
+    const staleTime = new Date(Date.now() - 60_000);
+    await utimes(journalFilePath, staleTime, staleTime);
+    await writePublication({
+      outputDir: next.stagedOutputDir,
+      outputMarker: "next",
+      summaryMarker: "next",
+      summaryPath: next.stagedSummaryPath,
+    });
+
+    await publishApplicationBuildArtifacts({
+      appRoot,
+      finalOutputDir,
+      finalSummaryPath,
+      ...next,
+    });
+
+    await expectPublication({
+      outputDir: finalOutputDir,
+      outputMarker: "next",
+      summaryMarker: "next",
+      summaryPath: finalSummaryPath,
+    });
+  });
+
+  it("recovers an interrupted publication that targeted a different output directory", async () => {
+    const appRoot = await createScratchDirectory("eve-output-publication-target-");
+    const vercelOutputDir = join(appRoot, ".vercel", "output");
+    const vercelSummaryPath = join(appRoot, ".vercel", "agent-summary.json");
+    const finalOutputDir = join(appRoot, ".output");
+    const finalSummaryPath = join(appRoot, ".eve", "agent-summary.json");
+    const interrupted = stagedBuild(appRoot, "interrupted");
+    const next = stagedBuild(appRoot, "next");
+    await interruptPublicationAfterBackup({
+      appRoot,
+      finalOutputDir: vercelOutputDir,
+      finalSummaryPath: vercelSummaryPath,
+      interrupted,
+    });
+    await writePublication({
+      outputDir: next.stagedOutputDir,
+      outputMarker: "next",
+      summaryMarker: "next",
+      summaryPath: next.stagedSummaryPath,
+    });
+
+    await publishApplicationBuildArtifacts({
+      appRoot,
+      finalOutputDir,
+      finalSummaryPath,
+      ...next,
+    });
+
+    await expectPublication({
+      outputDir: finalOutputDir,
+      outputMarker: "next",
+      summaryMarker: "next",
+      summaryPath: finalSummaryPath,
+    });
+    await expectPublication({
+      outputDir: vercelOutputDir,
+      outputMarker: "last-good",
+      summaryMarker: "last-good",
+      summaryPath: vercelSummaryPath,
+    });
+    await expectMissing(interrupted.scratchDir);
   });
 
   it("retains interrupted publication state when recovery itself fails", async () => {
     const appRoot = await createScratchDirectory("eve-output-publication-recovery-retry-");
     const finalOutputDir = join(appRoot, ".output");
     const finalSummaryPath = join(appRoot, ".eve", "agent-summary.json");
-    const interruptedOutputDir = join(appRoot, ".eve", "builds", "interrupted", "output");
-    const interruptedSummaryPath = join(appRoot, ".eve", "builds", "interrupted", "summary.json");
-    const firstOutputDir = join(appRoot, ".eve", "builds", "first", "output");
-    const firstSummaryPath = join(appRoot, ".eve", "builds", "first", "summary.json");
-    const retryOutputDir = join(appRoot, ".eve", "builds", "retry", "output");
-    const retrySummaryPath = join(appRoot, ".eve", "builds", "retry", "summary.json");
+    const interrupted = stagedBuild(appRoot, "interrupted");
+    const first = stagedBuild(appRoot, "first");
+    const retry = stagedBuild(appRoot, "retry");
     await interruptPublicationAfterBackup({
       appRoot,
       finalOutputDir,
       finalSummaryPath,
-      stagedOutputDir: interruptedOutputDir,
-      stagedSummaryPath: interruptedSummaryPath,
+      interrupted,
     });
     await writePublication({
-      outputDir: firstOutputDir,
+      outputDir: first.stagedOutputDir,
       outputMarker: "first",
       summaryMarker: "first",
-      summaryPath: firstSummaryPath,
+      summaryPath: first.stagedSummaryPath,
     });
     await writePublication({
-      outputDir: retryOutputDir,
+      outputDir: retry.stagedOutputDir,
       outputMarker: "retry",
       summaryMarker: "retry",
-      summaryPath: retrySummaryPath,
+      summaryPath: retry.stagedSummaryPath,
     });
     try {
       await chmod(appRoot, 0o500);
@@ -336,8 +484,7 @@ describe("build output publication", () => {
           appRoot,
           finalOutputDir,
           finalSummaryPath,
-          stagedOutputDir: firstOutputDir,
-          stagedSummaryPath: firstSummaryPath,
+          ...first,
         }),
       ).rejects.toThrow();
     } finally {
@@ -350,8 +497,7 @@ describe("build output publication", () => {
           appRoot,
           finalOutputDir,
           finalSummaryPath,
-          stagedOutputDir: retryOutputDir,
-          stagedSummaryPath: retrySummaryPath,
+          ...retry,
         },
         {
           async afterBackup() {
@@ -375,8 +521,7 @@ describe("build output publication", () => {
     const appRoot = await createScratchDirectory("eve-output-publication-cleanup-");
     const finalOutputDir = join(appRoot, ".output");
     const finalSummaryPath = join(appRoot, ".eve", "agent-summary.json");
-    const stagedOutputDir = join(appRoot, ".eve", "builds", "next", "output");
-    const stagedSummaryPath = join(appRoot, ".eve", "builds", "next", "summary.json");
+    const next = stagedBuild(appRoot, "next");
     await writePublication({
       outputDir: finalOutputDir,
       outputMarker: "last-good",
@@ -384,10 +529,10 @@ describe("build output publication", () => {
       summaryPath: finalSummaryPath,
     });
     await writePublication({
-      outputDir: stagedOutputDir,
+      outputDir: next.stagedOutputDir,
       outputMarker: "next",
       summaryMarker: "next",
-      summaryPath: stagedSummaryPath,
+      summaryPath: next.stagedSummaryPath,
     });
 
     try {
@@ -397,8 +542,7 @@ describe("build output publication", () => {
             appRoot,
             finalOutputDir,
             finalSummaryPath,
-            stagedOutputDir,
-            stagedSummaryPath,
+            ...next,
           },
           {
             async afterBackup() {},
@@ -423,20 +567,18 @@ describe("build output publication", () => {
       readFile(join(resolveOutputPublicationLockPath(appRoot), "owner.json"), "utf8"),
     ).resolves.toContain('"phase": "committed"');
 
-    const recoveredOutputDir = join(appRoot, ".eve", "builds", "recovered", "output");
-    const recoveredSummaryPath = join(appRoot, ".eve", "builds", "recovered", "summary.json");
+    const recovered = stagedBuild(appRoot, "recovered");
     await writePublication({
-      outputDir: recoveredOutputDir,
+      outputDir: recovered.stagedOutputDir,
       outputMarker: "recovered",
       summaryMarker: "recovered",
-      summaryPath: recoveredSummaryPath,
+      summaryPath: recovered.stagedSummaryPath,
     });
     await publishApplicationBuildArtifacts({
       appRoot,
       finalOutputDir,
       finalSummaryPath,
-      stagedOutputDir: recoveredOutputDir,
-      stagedSummaryPath: recoveredSummaryPath,
+      ...recovered,
     });
 
     await expectPublication({

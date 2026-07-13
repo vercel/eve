@@ -26,6 +26,11 @@ import {
 } from "#internal/nitro/dev-runtime-artifacts.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 
+/**
+ * Compiles one authored app in place and stages the package-owned artifacts
+ * the dev-server Nitro host needs, activating a fresh runtime-artifacts
+ * snapshot for hot reload.
+ */
 export async function prepareDevelopmentApplicationHost(
   startPath: string,
 ): Promise<PreparedApplicationHost> {
@@ -53,6 +58,13 @@ export async function prepareDevelopmentApplicationHost(
   return preparedHost;
 }
 
+/**
+ * Compiles one authored app into an invocation-owned build workspace and
+ * stages the package-owned artifacts the production Nitro build needs.
+ * Compiler artifacts are written inside the workspace but their recorded
+ * locations point at the published output (`<finalDir>/.eve`), where
+ * publication later installs them.
+ */
 export async function prepareProductionApplicationHost(
   workspace: ApplicationBuildWorkspace,
 ): Promise<PreparedApplicationHost> {

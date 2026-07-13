@@ -34,6 +34,12 @@ export interface ApplicationBuildWorkspace {
   };
 }
 
+/**
+ * Creates the invocation-owned directory tree under `.eve/builds/<id>` that
+ * one production build compiles, bundles, and stages into. Every path a
+ * build touches lives here until publication renames the staged output into
+ * place, so concurrent builds and a running dev server never interfere.
+ */
 export async function createApplicationBuildWorkspace(
   appRoot: string,
 ): Promise<ApplicationBuildWorkspace> {

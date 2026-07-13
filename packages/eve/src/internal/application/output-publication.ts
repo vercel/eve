@@ -14,6 +14,7 @@ import { writeOutputPublicationJournal } from "#internal/application/output-publ
 import {
   acquireOutputPublicationLock,
   resolveOutputPublicationLockPath,
+  startPublicationJournalHeartbeat,
 } from "#internal/application/output-publication-lock.js";
 
 export { resolveOutputPublicationLockPath };
@@ -22,8 +23,22 @@ export interface OutputPublicationInput {
   readonly appRoot: string;
   readonly finalOutputDir: string;
   readonly finalSummaryPath: string;
+  /** Invocation-owned directory containing the staged paths; recovery removes it. */
+  readonly scratchDir: string;
   readonly stagedOutputDir: string;
   readonly stagedSummaryPath: string;
+}
+
+/**
+ * A publication failure that retained the lock journal on disk. The staged
+ * artifacts (and the scratch directory containing them) must outlive this
+ * invocation so a later build can finish the interrupted publication.
+ */
+export class RecoverablePublicationError extends AggregateError {
+  constructor(errors: readonly unknown[], message: string, options?: ErrorOptions) {
+    super(errors, message, options);
+    this.name = "RecoverablePublicationError";
+  }
 }
 
 interface OutputPublicationObserver {
@@ -38,6 +53,13 @@ const DEFAULT_OBSERVER: OutputPublicationObserver = {
   async onContention() {},
 };
 
+/**
+ * Atomically installs a build's staged output and summary as the app's
+ * published artifacts: backs up the previous publication, renames the staged
+ * paths into place, and rolls back to the backup on failure. A journaled,
+ * cross-process lock serializes publishers and lets the next build finish an
+ * interrupted publication.
+ */
 export async function publishApplicationBuildArtifacts(
   input: OutputPublicationInput,
 ): Promise<void> {
@@ -53,7 +75,9 @@ export async function publishApplicationBuildArtifactsWithObserver(
 
   const lockPath = resolveOutputPublicationLockPath(input.appRoot);
   const release = await acquireOutputPublicationLock(lockPath, journal, observer.onContention);
+  const stopHeartbeat = startPublicationJournalHeartbeat(lockPath);
 
+  let committedJournalWritten = false;
   try {
     await prepareOutputPublication(journal);
     journal.phase = "prepared";
@@ -67,9 +91,14 @@ export async function publishApplicationBuildArtifactsWithObserver(
     await installOutputPublication(journal, observer.afterOutputInstall);
     journal.phase = "committed";
     await writeOutputPublicationJournal(lockPath, journal);
+    committedJournalWritten = true;
     await removeOutputPublicationBackups(journal);
   } catch (error) {
-    if (journal.phase === "committed") {
+    // Only a durably recorded commit counts: if the journal write itself
+    // failed, the on-disk phase still says "backed-up" and a later recovery
+    // would roll the new output back out — so roll back now and report the
+    // publication as failed.
+    if (committedJournalWritten) {
       await throwRecoverablePublicationError({
         errors: [error],
         journal,
@@ -89,6 +118,8 @@ export async function publishApplicationBuildArtifactsWithObserver(
     }
     await release();
     throw error;
+  } finally {
+    stopHeartbeat();
   }
 
   await release();
@@ -107,6 +138,7 @@ function createOutputPublicationJournal(input: OutputPublicationInput): OutputPu
     outputBackupPath: `${finalOutputDir}.eve-backup-${token}`,
     phase: "acquired",
     pid: process.pid,
+    scratchDir: resolve(input.scratchDir),
     stagedOutputDir: resolve(input.stagedOutputDir),
     stagedSummaryPath: resolve(input.stagedSummaryPath),
     summaryBackupPath: `${finalSummaryPath}.eve-backup-${token}`,
@@ -124,9 +156,9 @@ async function throwRecoverablePublicationError(input: {
   try {
     await writeOutputPublicationJournal(input.lockPath, input.journal);
   } catch (journalWriteError) {
-    throw new AggregateError([...input.errors, journalWriteError], input.message, {
+    throw new RecoverablePublicationError([...input.errors, journalWriteError], input.message, {
       cause: input.errors[0],
     });
   }
-  throw new AggregateError(input.errors, input.message, { cause: input.errors[0] });
+  throw new RecoverablePublicationError(input.errors, input.message, { cause: input.errors[0] });
 }

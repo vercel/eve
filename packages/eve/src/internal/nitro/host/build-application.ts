@@ -14,7 +14,10 @@ import {
   removeApplicationBuildWorkspace,
   type ApplicationBuildWorkspace,
 } from "#internal/application/build-workspace.js";
-import { publishApplicationBuildArtifacts } from "#internal/application/output-publication.js";
+import {
+  publishApplicationBuildArtifacts,
+  RecoverablePublicationError,
+} from "#internal/application/output-publication.js";
 import { stageProductionCompilerArtifacts } from "#internal/application/production-compiler-artifacts.js";
 import { WorkflowBundleBuilder } from "#internal/workflow-bundle/builder.js";
 import { normalizeEveVercelFunctionOutput } from "#internal/workflow-bundle/vercel-workflow-output.js";
@@ -321,10 +324,19 @@ export async function buildApplication(
   const project = await resolveDiscoveryProject(rootDir);
   const workspace = await createApplicationBuildWorkspace(project.appRoot);
 
+  // A recoverable publication failure leaves the lock journal pointing at
+  // staged artifacts inside this workspace; the next build's recovery
+  // consumes and then removes it. Deleting it now would strand the journal.
+  let preserveWorkspaceForRecovery = false;
   try {
     return await buildApplicationInWorkspace(workspace, options);
+  } catch (error) {
+    preserveWorkspaceForRecovery = error instanceof RecoverablePublicationError;
+    throw error;
   } finally {
-    await removeApplicationBuildWorkspace(workspace);
+    if (!preserveWorkspaceForRecovery) {
+      await removeApplicationBuildWorkspace(workspace);
+    }
   }
 }
 
@@ -424,6 +436,7 @@ async function publishCompletedApplicationBuild(
     appRoot: workspace.appRoot,
     finalOutputDir: workspace.publication.output.finalDir,
     finalSummaryPath: workspace.publication.summary.finalPath,
+    scratchDir: workspace.rootDir,
     stagedOutputDir: workspace.publication.output.stagedDir,
     stagedSummaryPath: workspace.publication.summary.stagedPath,
   });

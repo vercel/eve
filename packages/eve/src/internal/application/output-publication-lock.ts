@@ -1,6 +1,6 @@
 import { watch } from "node:fs";
-import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { mkdir, readdir, rename, rm, stat, utimes } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import {
   removeOutputPublicationBackups,
@@ -9,14 +9,19 @@ import {
 import {
   readOutputPublicationJournal,
   readRecoveryLeaseJournal,
+  resolveJournalFilePath,
   type OutputPublicationJournal,
   type RecoveryLeaseJournal,
   writeOutputPublicationJournal,
   writeRecoveryLeaseJournal,
 } from "#internal/application/output-publication-journal.js";
+import { isErrnoCode } from "#shared/guards.js";
+import { pathExists } from "#shared/path-exists.js";
 
 const PUBLICATION_LOCK_TIMEOUT_MS = 60_000;
 const INCOMPLETE_LOCK_STALE_MS = 5_000;
+const PUBLICATION_JOURNAL_HEARTBEAT_MS = 1_000;
+const ACTIVE_JOURNAL_STALE_MS = 15_000;
 
 interface RecoveryLease {
   complete(): Promise<void>;
@@ -25,6 +30,24 @@ interface RecoveryLease {
 
 export function resolveOutputPublicationLockPath(appRoot: string): string {
   return join(resolve(appRoot), ".eve", "locks", "output-publication.lock");
+}
+
+/**
+ * Keeps a held lock's (or lease's) journal mtime fresh while its owner works.
+ * Liveness cannot rest on `process.kill(pid, 0)` alone — journals survive
+ * reboots, so a recycled pid (or an unrelated process answering `EPERM`)
+ * would make a dead owner look alive forever. Returns a stop function.
+ */
+export function startPublicationJournalHeartbeat(journalDirectoryPath: string): () => void {
+  const journalFilePath = resolveJournalFilePath(journalDirectoryPath);
+  const heartbeat = setInterval(() => {
+    const now = new Date();
+    void utimes(journalFilePath, now, now).catch(() => undefined);
+  }, PUBLICATION_JOURNAL_HEARTBEAT_MS);
+  heartbeat.unref();
+  return () => {
+    clearInterval(heartbeat);
+  };
 }
 
 export async function acquireOutputPublicationLock(
@@ -68,7 +91,7 @@ export async function acquireOutputPublicationLock(
         try {
           await rename(lockPath, releasedPath);
         } catch (error) {
-          if (isNodeErrorWithCode(error, "ENOENT")) {
+          if (isErrnoCode(error, "ENOENT")) {
             return;
           }
           throw error;
@@ -76,7 +99,7 @@ export async function acquireOutputPublicationLock(
         await rm(releasedPath, { force: true, recursive: true });
       };
     } catch (error) {
-      if (!isNodeErrorWithCode(error, "EEXIST")) {
+      if (!isErrnoCode(error, "EEXIST")) {
         throw error;
       }
     }
@@ -99,13 +122,15 @@ async function recoverStalePublication(
     return false;
   }
 
+  const stopLeaseHeartbeat = startPublicationJournalHeartbeat(join(recoveryPath, "lease"));
   let preserveRecovery = false;
   try {
     const existingJournal = await readOutputPublicationJournal(lockPath);
     if (
       existingJournal !== undefined &&
       existingJournal.liveness === "active" &&
-      isProcessAlive(existingJournal.pid)
+      isProcessAlive(existingJournal.pid) &&
+      !(await isJournalStale(lockPath))
     ) {
       return false;
     }
@@ -119,7 +144,7 @@ async function recoverStalePublication(
         await rename(lockPath, recoveringJournalPath);
         preserveRecovery = true;
       } catch (error) {
-        if (!isNodeErrorWithCode(error, "ENOENT")) {
+        if (!isErrnoCode(error, "ENOENT")) {
           throw error;
         }
       }
@@ -133,11 +158,12 @@ async function recoverStalePublication(
       if (!entry.isDirectory() || !entry.name.startsWith("owner-")) {
         continue;
       }
-      await finishInterruptedPublication(join(recoveryPath, entry.name), recoveryJournal);
+      await finishInterruptedPublication(join(recoveryPath, entry.name));
     }
     preserveRecovery = false;
     return true;
   } finally {
+    stopLeaseHeartbeat();
     if (preserveRecovery) {
       await releaseRecoveryLease.release();
     } else {
@@ -173,7 +199,7 @@ async function acquireRecoveryLease(
           try {
             await rename(recoveryPath, releasedPath);
           } catch (error) {
-            if (isNodeErrorWithCode(error, "ENOENT")) {
+            if (isErrnoCode(error, "ENOENT")) {
               return;
             }
             throw error;
@@ -189,7 +215,7 @@ async function acquireRecoveryLease(
           try {
             await rename(leasePath, releasedPath);
           } catch (error) {
-            if (isNodeErrorWithCode(error, "ENOENT")) {
+            if (isErrnoCode(error, "ENOENT")) {
               return;
             }
             throw error;
@@ -198,13 +224,22 @@ async function acquireRecoveryLease(
         },
       };
     } catch (error) {
-      if (!isNodeErrorWithCode(error, "EEXIST")) {
+      // ENOENT: a concurrent recoverer completed and renamed the recovery
+      // directory away, so recovery is done — report contention, not failure.
+      if (isErrnoCode(error, "ENOENT")) {
+        return undefined;
+      }
+      if (!isErrnoCode(error, "EEXIST")) {
         throw error;
       }
     }
 
     const currentJournal = await readRecoveryLeaseJournal(leasePath);
-    if (currentJournal !== undefined && isProcessAlive(currentJournal.pid)) {
+    if (
+      currentJournal !== undefined &&
+      isProcessAlive(currentJournal.pid) &&
+      !(await isJournalStale(leasePath))
+    ) {
       return undefined;
     }
     if (currentJournal === undefined && !(await isPathStale(leasePath))) {
@@ -215,7 +250,7 @@ async function acquireRecoveryLease(
     try {
       await rename(leasePath, staleLeasePath);
     } catch (error) {
-      if (isNodeErrorWithCode(error, "ENOENT")) {
+      if (isErrnoCode(error, "ENOENT")) {
         continue;
       }
       throw error;
@@ -224,38 +259,51 @@ async function acquireRecoveryLease(
   }
 }
 
-async function finishInterruptedPublication(
-  journalPath: string,
-  recoveryJournal: OutputPublicationJournal,
-): Promise<void> {
+/**
+ * Recovery is driven entirely by the stale journal's own recorded paths: the
+ * interrupted publication may have targeted a different output directory than
+ * the recovering build (`.vercel/output` vs `.output`), and refusing to touch
+ * it would wedge every later publication behind the retained recovery dir.
+ */
+async function finishInterruptedPublication(journalPath: string): Promise<void> {
   const staleJournal = await readOutputPublicationJournal(journalPath);
-  if (staleJournal === undefined) {
+  if (staleJournal === undefined || !hasTokenDerivedBackupPaths(staleJournal)) {
     await rm(journalPath, { force: true, recursive: true });
     return;
   }
-  assertMatchingPublicationTarget(staleJournal, recoveryJournal);
   if (staleJournal.phase === "committed") {
     await removeOutputPublicationBackups(staleJournal);
   } else {
     await rollbackOutputPublication(staleJournal);
   }
+  await removePublicationScratchDirectory(staleJournal);
   await rm(journalPath, { force: true, recursive: true });
 }
 
-function assertMatchingPublicationTarget(
-  staleJournal: OutputPublicationJournal,
-  recoveryJournal: OutputPublicationJournal,
-): void {
+/**
+ * Backup paths that do not match the token derivation mean the journal is
+ * corrupt or tampered with; discard it without renaming anything it names.
+ */
+function hasTokenDerivedBackupPaths(journal: OutputPublicationJournal): boolean {
+  return (
+    journal.outputBackupPath === `${journal.finalOutputDir}.eve-backup-${journal.token}` &&
+    journal.summaryBackupPath === `${journal.finalSummaryPath}.eve-backup-${journal.token}`
+  );
+}
+
+// The scratch directory is the failed build's preserved workspace; removing
+// it after recovery is what keeps `.eve/builds` from accumulating orphans.
+// The containment check stops a forged journal from deleting arbitrary paths.
+async function removePublicationScratchDirectory(journal: OutputPublicationJournal): Promise<void> {
+  const relativeStagedPath = relative(journal.scratchDir, journal.stagedOutputDir);
   if (
-    staleJournal.finalOutputDir !== recoveryJournal.finalOutputDir ||
-    staleJournal.finalSummaryPath !== recoveryJournal.finalSummaryPath ||
-    staleJournal.outputBackupPath !==
-      `${staleJournal.finalOutputDir}.eve-backup-${staleJournal.token}` ||
-    staleJournal.summaryBackupPath !==
-      `${staleJournal.finalSummaryPath}.eve-backup-${staleJournal.token}`
+    relativeStagedPath === "" ||
+    relativeStagedPath.startsWith("..") ||
+    isAbsolute(relativeStagedPath)
   ) {
-    throw new Error("Refusing to recover a build publication for a different output target.");
+    return;
   }
+  await rm(journal.scratchDir, { force: true, recursive: true });
 }
 
 async function waitForPublicationLockChange(lockPath: string, deadline: number): Promise<void> {
@@ -336,20 +384,20 @@ async function isPathStale(path: string): Promise<boolean> {
   try {
     return Date.now() - (await stat(path)).mtimeMs >= INCOMPLETE_LOCK_STALE_MS;
   } catch (error) {
-    if (isNodeErrorWithCode(error, "ENOENT")) {
+    if (isErrnoCode(error, "ENOENT")) {
       return true;
     }
     throw error;
   }
 }
 
-async function pathExists(path: string): Promise<boolean> {
+async function isJournalStale(journalDirectoryPath: string): Promise<boolean> {
   try {
-    await stat(path);
-    return true;
+    const journalStats = await stat(resolveJournalFilePath(journalDirectoryPath));
+    return Date.now() - journalStats.mtimeMs >= ACTIVE_JOURNAL_STALE_MS;
   } catch (error) {
-    if (isNodeErrorWithCode(error, "ENOENT")) {
-      return false;
+    if (isErrnoCode(error, "ENOENT")) {
+      return true;
     }
     throw error;
   }
@@ -360,10 +408,6 @@ function isProcessAlive(pid: number): boolean {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    return !isNodeErrorWithCode(error, "ESRCH");
+    return !isErrnoCode(error, "ESRCH");
   }
-}
-
-function isNodeErrorWithCode(error: unknown, code: string): boolean {
-  return error instanceof Error && "code" in error && error.code === code;
 }

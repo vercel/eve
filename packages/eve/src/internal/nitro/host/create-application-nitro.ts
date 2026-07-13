@@ -743,6 +743,11 @@ function externalizeDevelopmentWorkflowBundle(
   });
 }
 
+/**
+ * Creates the watch-mode Nitro host for `eve dev`: all route surfaces on one
+ * instance, live virtual modules, and hot-reload hooks wired to the authored
+ * source.
+ */
 export async function createDevelopmentApplicationNitro(
   preparedHost: PreparedApplicationHost,
 ): Promise<Nitro> {
@@ -794,6 +799,13 @@ interface ProductionApplicationNitroOptions {
   readonly surface: NitroBuildSurface;
 }
 
+/**
+ * Creates a build-mode Nitro host for one production surface. `surface`
+ * narrows which route groups are registered ("all" for self-hosted output;
+ * "app"/"flow" for the separately bundled Vercel functions), and `buildDir`/
+ * `outputDir` place all bundler state inside the invocation-owned build
+ * workspace.
+ */
 export async function createProductionApplicationNitro(
   preparedHost: PreparedApplicationHost,
   options: ProductionApplicationNitroOptions,

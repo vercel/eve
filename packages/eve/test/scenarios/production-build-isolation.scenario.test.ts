@@ -1,7 +1,17 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { createHash } from "node:crypto";
 import { watch, type FSWatcher } from "node:fs";
-import { lstat, mkdir, readFile, readdir, readlink, realpath, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  readlink,
+  realpath,
+  rename,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { join, relative } from "node:path";
 import type { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
@@ -533,6 +543,70 @@ describe("production build isolation", () => {
       expect(await hashPath(outputDir)).toBe(lastGoodOutputHash);
       expect(await hashPath(summaryPath)).toBe(lastGoodSummaryHash);
       expect(await listBuildWorkspaces(app.appRoot)).toEqual([]);
+    },
+    SCENARIO_DEADLINE_MS,
+  );
+
+  it(
+    "recovers a crashed publication through a real build while a real dev server stays healthy",
+    async () => {
+      const app = await scenarioApp(WEATHER_AGENT_DESCRIPTOR);
+      const firstBuild = startEveProcess({ appRoot: app.appRoot, args: ["build"] });
+      await expect(firstBuild.result).resolves.toMatchObject({ code: 0, signal: null });
+
+      const outputDir = join(app.appRoot, ".output");
+      const summaryPath = join(app.appRoot, ".eve", "agent-summary.json");
+      const token = "crashed-publisher";
+      const outputBackupPath = `${outputDir}.eve-backup-${token}`;
+      const summaryBackupPath = `${summaryPath}.eve-backup-${token}`;
+      const crashedWorkspace = join(app.appRoot, ".eve", "builds", "crashed");
+      const crashedStagedOutputDir = join(crashedWorkspace, "output");
+      const crashedStagedSummaryPath = join(crashedWorkspace, "agent-summary.json");
+      await mkdir(crashedStagedOutputDir, { recursive: true });
+      await writeFile(join(crashedStagedOutputDir, "marker.txt"), "crashed\n");
+      await writeFile(crashedStagedSummaryPath, "crashed\n");
+      await rename(outputDir, outputBackupPath);
+      await rename(summaryPath, summaryBackupPath);
+      const lockPath = join(app.appRoot, ".eve", "locks", "output-publication.lock");
+      await mkdir(lockPath, { recursive: true });
+      const journalPath = join(lockPath, "owner.json");
+      await writeFile(
+        journalPath,
+        `${JSON.stringify({
+          finalOutputDir: outputDir,
+          finalSummaryPath: summaryPath,
+          hadOutput: true,
+          hadSummary: true,
+          liveness: "active",
+          outputBackupPath,
+          phase: "backed-up",
+          // This test's own live pid simulates pid reuse after a crash: only
+          // the stale journal mtime marks the recorded owner as dead.
+          pid: process.pid,
+          scratchDir: crashedWorkspace,
+          stagedOutputDir: crashedStagedOutputDir,
+          stagedSummaryPath: crashedStagedSummaryPath,
+          summaryBackupPath,
+          token,
+        })}\n`,
+      );
+      const staleTime = new Date(Date.now() - 60_000);
+      await utimes(journalPath, staleTime, staleTime);
+
+      const server = await startEveDev(app.appRoot);
+      try {
+        await expectHealthy(server);
+        const recoveringBuild = startEveProcess({ appRoot: app.appRoot, args: ["build"] });
+        await expect(recoveringBuild.result).resolves.toMatchObject({ code: 0, signal: null });
+        await expectHealthy(server);
+      } finally {
+        await server.stop();
+      }
+
+      expect(await readdir(join(app.appRoot, ".eve", "locks"))).toEqual([]);
+      expect(await listBuildWorkspaces(app.appRoot)).toEqual([]);
+      await expect(lstat(outputBackupPath)).rejects.toMatchObject({ code: "ENOENT" });
+      expect((await lstat(join(outputDir, "server", "index.mjs"))).isFile()).toBe(true);
     },
     SCENARIO_DEADLINE_MS,
   );
