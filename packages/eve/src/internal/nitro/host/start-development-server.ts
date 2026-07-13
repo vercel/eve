@@ -37,6 +37,7 @@ import type {
 } from "#internal/nitro/host/types.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { pruneDevelopmentRuntimeArtifactsSnapshotsInBackground } from "#internal/nitro/dev-runtime-artifacts.js";
+import { pruneWorkflowLocalDataInBackground } from "#internal/nitro/dev-workflow-data.js";
 import {
   DEFAULT_DEVELOPMENT_SERVER_PORT,
   MAX_DEVELOPMENT_SERVER_PORT_ATTEMPTS,
@@ -473,6 +474,7 @@ async function startNitroDevelopmentServer(
       compiledArtifactsSource,
     });
     pruneLocalSandboxTemplatesInBackground(preparedHost.appRoot);
+    pruneWorkflowLocalDataInBackground(preparedHost.appRoot);
     const activeNitro = await devBootPhase(
       "creating dev server",
       () => createApplicationNitro(preparedHost, true),
