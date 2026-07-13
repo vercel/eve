@@ -54,6 +54,10 @@ export function resolveNitroBuildDirectory(
   return join(rootDirectory, surface);
 }
 
+export function resolveApplicationHostArtifactsDirectory(appRoot: string): string {
+  return join(appRoot, ".eve", "host");
+}
+
 /**
  * Resolves the staged Nitro output directory for one isolated build surface.
  */

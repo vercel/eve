@@ -7,10 +7,6 @@ import { summarizeDiscoverDiagnostics } from "#discover/diagnostics.js";
 import { normalizeLogicalPath } from "#discover/filesystem.js";
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import {
-  CHANNEL_INSTRUMENTATION_TYPES_FILE_NAME,
-  createChannelInstrumentationTypesSource,
-} from "#compiler/channel-instrumentation-types.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
@@ -41,7 +37,6 @@ export const COMPILE_METADATA_VERSION = 5;
  */
 export interface CompilerArtifactPaths {
   appRoot: string;
-  channelInstrumentationTypesPath: string;
   compiledManifestPath: string;
   compileDirectoryPath: string;
   compileMetadataPath: string;
@@ -121,10 +116,6 @@ export function resolveCompilerArtifactPaths(appRoot: string): CompilerArtifactP
 
   return {
     appRoot: resolvedAppRoot,
-    channelInstrumentationTypesPath: join(
-      compileDirectoryPath,
-      CHANNEL_INSTRUMENTATION_TYPES_FILE_NAME,
-    ),
     compiledManifestPath: join(compileDirectoryPath, "compiled-agent-manifest.json"),
     compileDirectoryPath,
     compileMetadataPath: join(compileDirectoryPath, "compile-metadata.json"),
@@ -214,10 +205,6 @@ export async function writeCompilerArtifacts(
     manifest: compiledManifest,
     moduleMapPath: paths.moduleMapPath,
   });
-  const channelInstrumentationTypesSource = createChannelInstrumentationTypesSource({
-    manifest: compiledManifest,
-    typesPath: paths.channelInstrumentationTypesPath,
-  });
   const metadata = createCompileMetadata({
     appRoot: input.appRoot,
     diagnosticsArtifactJson,
@@ -238,7 +225,6 @@ export async function writeCompilerArtifacts(
     writeFile(paths.compiledManifestPath, compiledManifestJson),
     writeFile(paths.diagnosticsPath, diagnosticsArtifactJson),
     writeFile(paths.discoveryManifestPath, discoveryManifestJson),
-    writeFile(paths.channelInstrumentationTypesPath, channelInstrumentationTypesSource),
     writeFile(paths.moduleMapPath, moduleMapSource),
     writeFile(paths.compileMetadataPath, metadataJson),
   ]);

@@ -22,6 +22,6 @@
     "allowJs": true,
     "rootDir": "."
   },
-  "include": ["agent/**/*", "evals/**/*", ".eve/**/*.d.ts"],
+  "include": ["agent/**/*", "evals/**/*"],
   "exclude": ["node_modules", "dist", "build", ".turbo", ".vercel"]
 }

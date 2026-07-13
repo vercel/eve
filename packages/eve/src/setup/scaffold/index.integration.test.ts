@@ -203,6 +203,10 @@ describe("ensureChannel", () => {
     expect(packageJson).toContain('"dev:eve": "eve dev"');
     expect(packageJson).toContain('"start:eve": "eve start"');
     expect(JSON.parse(packageJson)).toMatchObject({ engines: { node: "24.x" } });
+    const tsconfig = JSON.parse(await readFile(join(projectRoot, "tsconfig.json"), "utf8")) as {
+      include?: string[];
+    };
+    expect(tsconfig.include).not.toContain(".eve/**/*.d.ts");
     await expect(readFile(join(projectRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
       PNPM_WORKSPACE_CONTENT,
     );
@@ -801,8 +805,10 @@ describe("scaffoldBaseProject", () => {
     expect(packageJson).toContain('"@types/node": "24.x"');
     const tsconfig = JSON.parse(await readFile(join(projectRoot, "tsconfig.json"), "utf8")) as {
       compilerOptions: { types?: string[] };
+      include?: string[];
     };
     expect(tsconfig.compilerOptions.types).toEqual(["node"]);
+    expect(tsconfig.include).toEqual(["agent/**/*.ts", "evals/**/*.ts"]);
     await expect(readFile(join(projectRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
       PNPM_WORKSPACE_CONTENT,
     );

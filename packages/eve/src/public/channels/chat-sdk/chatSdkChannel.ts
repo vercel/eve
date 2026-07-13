@@ -25,10 +25,12 @@ import {
 import { isNotImplemented } from "#public/channels/chat-sdk/notImplemented.js";
 import {
   defineChannel,
+  GET,
   POST,
   type Channel,
   type ChannelEvents,
   type ChannelSessionOps,
+  type RouteHandlerArgs,
   type SendFn,
   type SendOptions,
   type Session,
@@ -282,8 +284,15 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
         thread: threadFromState(bot, state),
       };
     },
-    routes: adapterNames(config.adapters).map((adapterName) =>
-      POST<ChatSdkChannelState>(routeForAdapter(adapterName, config), async (request, args) => {
+    // Register both methods on each adapter's webhook path. Providers such as X
+    // verify ownership with a GET challenge (CRC) and deliver events via POST;
+    // the adapter dispatches on request.method, so one handler serves both.
+    routes: adapterNames(config.adapters).flatMap((adapterName) => {
+      const path = routeForAdapter(adapterName, config);
+      const handler = async (
+        request: Request,
+        args: RouteHandlerArgs<ChatSdkChannelState>,
+      ): Promise<Response> => {
         const webhook = bot.webhooks[adapterName];
         const ctx = new ContextContainer();
         ctx.setVirtualContext(ActiveWebhookKey, { send: args.send });
@@ -295,8 +304,12 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
             },
           }),
         );
-      }),
-    ),
+      };
+      return [
+        GET<ChatSdkChannelState>(path, handler),
+        POST<ChatSdkChannelState>(path, handler),
+      ];
+    }),
     async receive(input, { send }) {
       const thread = serializeReceiveTarget(bot, input.target);
       return send(input.message, {
