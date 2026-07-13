@@ -305,7 +305,10 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
           }),
         );
       };
-      return [GET<ChatSdkChannelState>(path, handler), POST<ChatSdkChannelState>(path, handler)];
+      return [
+        GET<ChatSdkChannelState>(path, handler),
+        POST<ChatSdkChannelState>(path, handler),
+      ];
     }),
     async receive(input, { send }) {
       const thread = serializeReceiveTarget(bot, input.target);
