@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -257,6 +257,76 @@ describe("build output publication", () => {
       outputDir: finalOutputDir,
       outputMarker: "last-good",
       summaryMarker: "last-good",
+      summaryPath: finalSummaryPath,
+    });
+  });
+
+  it("retains a recoverable lock when committed backup cleanup fails", async () => {
+    const appRoot = await createScratchDirectory("eve-output-publication-cleanup-");
+    const finalOutputDir = join(appRoot, ".output");
+    const finalSummaryPath = join(appRoot, ".eve", "agent-summary.json");
+    const stagedOutputDir = join(appRoot, ".eve", "builds", "next", "output");
+    const stagedSummaryPath = join(appRoot, ".eve", "builds", "next", "summary.json");
+    await writePublication({
+      outputDir: finalOutputDir,
+      outputMarker: "last-good",
+      summaryMarker: "last-good",
+      summaryPath: finalSummaryPath,
+    });
+    await writePublication({
+      outputDir: stagedOutputDir,
+      outputMarker: "next",
+      summaryMarker: "next",
+      summaryPath: stagedSummaryPath,
+    });
+
+    try {
+      await expect(
+        publishApplicationBuildArtifacts({
+          appRoot,
+          finalOutputDir,
+          finalSummaryPath,
+          stagedOutputDir,
+          stagedSummaryPath,
+          async onAfterOutputInstall() {
+            await chmod(appRoot, 0o500);
+          },
+        }),
+      ).rejects.toThrow();
+    } finally {
+      await chmod(appRoot, 0o700);
+    }
+
+    await expectPublication({
+      outputDir: finalOutputDir,
+      outputMarker: "next",
+      summaryMarker: "next",
+      summaryPath: finalSummaryPath,
+    });
+    await expect(
+      readFile(join(resolveOutputPublicationLockPath(appRoot), "owner.json"), "utf8"),
+    ).resolves.toContain('"phase": "committed"');
+
+    const recoveredOutputDir = join(appRoot, ".eve", "builds", "recovered", "output");
+    const recoveredSummaryPath = join(appRoot, ".eve", "builds", "recovered", "summary.json");
+    await writePublication({
+      outputDir: recoveredOutputDir,
+      outputMarker: "recovered",
+      summaryMarker: "recovered",
+      summaryPath: recoveredSummaryPath,
+    });
+    await publishApplicationBuildArtifacts({
+      appRoot,
+      finalOutputDir,
+      finalSummaryPath,
+      stagedOutputDir: recoveredOutputDir,
+      stagedSummaryPath: recoveredSummaryPath,
+    });
+
+    await expectPublication({
+      outputDir: finalOutputDir,
+      outputMarker: "recovered",
+      summaryMarker: "recovered",
       summaryPath: finalSummaryPath,
     });
   });

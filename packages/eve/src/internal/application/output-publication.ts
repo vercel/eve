@@ -62,7 +62,7 @@ export async function publishApplicationBuildArtifacts(input: {
     onContention: input.onLockContention,
     owner,
   });
-  let committed = false;
+  let releaseLock = false;
 
   try {
     owner.hadOutput = await pathExists(owner.finalOutputDir);
@@ -92,27 +92,51 @@ export async function publishApplicationBuildArtifacts(input: {
 
     owner.phase = "committed";
     await writePublicationOwner(lockPath, owner);
-    committed = true;
+    await removePublicationBackups(owner);
+    releaseLock = true;
   } catch (error) {
+    if (owner.phase === "committed") {
+      await throwRecoverablePublicationError({
+        errors: [error],
+        lockPath,
+        message: "Build output was committed but backup cleanup failed.",
+        owner,
+      });
+    }
     try {
       await rollbackOutputPublication(owner);
     } catch (rollbackError) {
-      owner.pid = 0;
-      await writePublicationOwner(lockPath, owner).catch(() => undefined);
-      throw new AggregateError(
-        [error, rollbackError],
-        "Build output publication failed and could not fully restore the previous output.",
-        { cause: error },
-      );
+      await throwRecoverablePublicationError({
+        errors: [error, rollbackError],
+        lockPath,
+        message: "Build output publication failed and could not fully restore the previous output.",
+        owner,
+      });
     }
+    releaseLock = true;
     throw error;
   } finally {
-    if (committed || owner.pid !== 0) {
+    if (releaseLock) {
       await release();
     }
   }
+}
 
-  await removePublicationBackups(owner).catch(() => undefined);
+async function throwRecoverablePublicationError(input: {
+  readonly errors: readonly unknown[];
+  readonly lockPath: string;
+  readonly message: string;
+  readonly owner: OutputPublicationOwner;
+}): Promise<never> {
+  input.owner.pid = 0;
+  try {
+    await writePublicationOwner(input.lockPath, input.owner);
+  } catch (ownerWriteError) {
+    throw new AggregateError([...input.errors, ownerWriteError], input.message, {
+      cause: input.errors[0],
+    });
+  }
+  throw new AggregateError(input.errors, input.message, { cause: input.errors[0] });
 }
 
 export function resolveOutputPublicationLockPath(appRoot: string): string {
