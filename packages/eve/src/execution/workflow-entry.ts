@@ -315,16 +315,7 @@ async function waitForNextDeliver(input: {
   readonly deliveryHook: SessionDeliveryHook;
 }): Promise<DeliverHookPayload | null> {
   if (input.bufferedDeliveries.length > 0) {
-    const first = input.bufferedDeliveries[0]!;
-    let count = 1;
-    while (
-      count < input.bufferedDeliveries.length &&
-      !hasInputResponses(first) &&
-      !hasInputResponses(input.bufferedDeliveries[count]!)
-    ) {
-      count += 1;
-    }
-    return coalesceDeliveries(input.bufferedDeliveries.splice(0, count));
+    return coalesceDeliveries(input.bufferedDeliveries.splice(0));
   }
 
   while (true) {
@@ -357,20 +348,12 @@ async function waitForNextDeliver(input: {
       if (ready.value.kind !== "deliver") {
         continue;
       }
-      if (hasInputResponses(coalesced) || hasInputResponses(ready.value)) {
-        input.bufferedDeliveries.push(ready.value);
-        break;
-      }
 
       coalesced = coalesceDeliveries([coalesced, ready.value]);
     }
 
     return coalesced;
   }
-}
-
-function hasInputResponses(delivery: DeliverHookPayload): boolean {
-  return delivery.payloads.some((payload) => (payload.inputResponses?.length ?? 0) > 0);
 }
 
 const NO_READY_MESSAGE = Symbol("no-ready-message");

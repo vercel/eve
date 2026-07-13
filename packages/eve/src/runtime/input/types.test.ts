@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  formatApprovalInput,
   inputRequestSchema,
   inputResponseSchema,
-  isApprovalInputRequest,
   isInputRequest,
   isInputResponse,
 } from "#runtime/input/types.js";
@@ -28,28 +26,8 @@ describe("inputRequestSchema", () => {
       requestId: "approval-1",
     };
 
-    const request = inputRequestSchema.parse(value);
-    expect(request).toEqual(value);
+    expect(inputRequestSchema.parse(value)).toEqual(value);
     expect(isInputRequest(value)).toBe(true);
-    expect(isApprovalInputRequest(request)).toBe(true);
-    expect(formatApprovalInput(request)).toContain('"command": "pwd"');
-  });
-
-  it("does not classify confirmations with extra options as approvals", () => {
-    const value = inputRequestSchema.parse({
-      action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "bash" },
-      display: "confirmation",
-      options: [
-        { id: "approve", label: "Approve" },
-        { id: "deny", label: "Deny" },
-        { id: "later", label: "Later" },
-      ],
-      prompt: "Approve?",
-      requestId: "approval-1",
-    });
-
-    expect(isApprovalInputRequest(value)).toBe(false);
-    expect(formatApprovalInput(value)).toBeUndefined();
   });
 
   it("accepts a select request (question with options)", () => {

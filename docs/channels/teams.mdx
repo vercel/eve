@@ -26,15 +26,15 @@ By default the channel mounts at `POST /eve/v1/teams`. Point your Azure Bot or T
 
 ### Dispatch
 
-The default `onMessage` handles two cases: personal-chat messages, and channel or group-chat messages that mention the bot directly. Ambient resource-specific-consent messages are dropped unless you override it. Before dispatch, eve strips the mention, adds a `<teams_context>` block, and scopes channel and group threads by the `;messageid=` root in `conversation.id`, then `replyToId`, then the activity id.
+The default `onMessage` handles two cases: personal-chat messages, and channel or group-chat messages that mention the bot directly. Ambient resource-specific-consent messages are dropped unless you override it. Before dispatch, eve strips the mention, adds a `<teams_context>` block, and scopes channel and group threads by root activity id (`replyToId ?? id`).
 
 ```ts
-import { teamsChannel } from "eve/channels/teams";
+import { defaultTeamsAuth, teamsChannel } from "eve/channels/teams";
 
 export default teamsChannel({
-  onMessage(_ctx, message) {
+  onMessage(ctx, message) {
     if (message.scope !== "personal" && !message.isBotMentioned) return null;
-    return {};
+    return { auth: defaultTeamsAuth(message) };
   },
 });
 ```
@@ -45,28 +45,9 @@ Replies post as Markdown (`textFormat: "markdown"`), with oversized text split a
 
 ### Human-in-the-loop (HITL)
 
-A human-in-the-loop (HITL) `input.requested` event renders as an Adaptive Card. Tool approvals show the tool arguments in the card and fallback text. Buttons and options map to `Action.Submit`, selects to `Input.ChoiceSet`, and freeform to `Input.Text`. Teams may return a card submission as either a message or an invoke. eve handles both forms before the normal message mention gate and resumes the thread recorded in the card.
+A human-in-the-loop (HITL) `input.requested` event renders as an Adaptive Card. Approval cards show the tool input in the card and fallback text. Buttons and options map to `Action.Submit`, selects to `Input.ChoiceSet`, and freeform to `Input.Text`. Teams may return a submission as a message or invoke; eve handles both before the normal message mention gate and resumes the thread recorded in the card.
 
-By default, messages and card submissions use the submitting Teams user's auth, including `from.aadObjectId` as `subject` when Teams provides it. Use `authorizeActivity` for allowlists and other identity policy. The same policy runs for both paths, and returning `null` rejects the activity.
-
-```ts
-import { defaultTeamsAuth, teamsChannel } from "eve/channels/teams";
-
-function isAllowed(aadObjectId: string | undefined) {
-  return aadObjectId === process.env.TEAMS_APPROVER_AAD_OBJECT_ID;
-}
-
-export default teamsChannel({
-  authorizeActivity(_ctx, activity) {
-    if (!isAllowed(activity.from.aadObjectId)) return null;
-    return { auth: defaultTeamsAuth(activity) };
-  },
-});
-```
-
-`onMessage` now controls mention gating and extra model context, not authentication. If you previously returned `auth` from `onMessage`, move that logic to `authorizeActivity`. To prevent an existing message allowlist from silently leaving approvals open, eve rejects HITL submissions when you customize `onMessage` without also configuring `authorizeActivity`.
-
-HITL cards carry a signed route back to the parked session. eve uses `credentials.appPassword` as the signing secret by default. Set `credentials.hitlSecret` when you use `tokenProvider`, a custom webhook verifier without an app password, or a separate rotated secret. Cards created before this version have no signed route and fail closed with an expiration message. Ask the agent to create a new card.
+By default, submissions use the Teams identity of the user who clicked the card. If you customize `onMessage` for an allowlist, configure the same policy in `onInputResponse`; eve otherwise rejects HITL submissions rather than bypassing the message gate.
 
 For invokes that aren't HITL, handle them in `onInvoke(ctx, activity)`.
 

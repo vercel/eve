@@ -1,23 +1,16 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import { createDefaultTeamsEvents } from "#public/channels/teams/defaults.js";
+import { defaultEvents } from "#public/channels/teams/defaults.js";
 import type { TeamsChannelState, TeamsEventContext } from "#public/channels/teams/teamsChannel.js";
 
 const sessionCtx = {} as SessionContext;
-const defaultEvents = createDefaultTeamsEvents({
-  adaptiveCardVersion: "1.5",
-  resolveHitlSecret: () => "test-secret",
-});
-
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
 
 function buildChannelStub(state: Partial<TeamsChannelState> = {}) {
   const post = vi.fn().mockResolvedValue({ id: "act1" });
   const update = vi.fn().mockResolvedValue(undefined);
   const channel = {
+    adaptiveCardVersion: "1.5",
     thread: { post, update } as Partial<TeamsEventContext["thread"]>,
     state: {
       bot: null,

@@ -2,13 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
-import {
-  renderInputRequestMessage,
-  teamsChannel,
-  type TeamsChannelState,
-} from "#public/channels/teams/index.js";
-
-const HITL_SECRET = "test-secret";
+import { teamsChannel, type TeamsChannelState } from "#public/channels/teams/index.js";
 
 function asCompiled<T = unknown>(channel: unknown): CompiledChannel<T> {
   if (!isCompiledChannel(channel)) {
@@ -75,7 +69,7 @@ describe("teamsChannel", () => {
   it("dispatches verified personal messages with Teams state", async () => {
     const channel = teamsChannel({
       credentials: { webhookVerifier: () => true },
-      authorizeActivity() {
+      onMessage() {
         return {
           auth: {
             attributes: {},
@@ -114,8 +108,8 @@ describe("teamsChannel", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("handles Adaptive Card invoke HITL responses with approver auth", async () => {
-    const channel = teamsChannel({ credentials: testCredentials() });
+  it("resumes invoke HITL responses with the clicker's auth and recorded thread", async () => {
+    const channel = teamsChannel({ credentials: { webhookVerifier: () => true } });
     const { response, send } = await firePost(channel, {
       ...baseActivity({ conversationType: "channel" }),
       from: { aadObjectId: "AAD_USER", id: "USER", name: "Ada" },
@@ -125,9 +119,9 @@ describe("teamsChannel", () => {
         action: {
           data: {
             eve_input: {
+              replyToActivityId: "THREAD_ROOT",
               requestId: "REQ",
               optionId: "approve",
-              route: hitlRoute(),
             },
           },
         },
@@ -138,129 +132,10 @@ describe("teamsChannel", () => {
     expect(send).toHaveBeenCalledWith(
       { inputResponses: [{ optionId: "approve", requestId: "REQ" }] },
       expect.objectContaining({
-        auth: expect.objectContaining({
-          attributes: expect.objectContaining({ aad_object_id: "AAD_USER" }),
-          principalId: "teams:TENANT:USER",
-          subject: "AAD_USER",
-        }),
+        auth: expect.objectContaining({ subject: "AAD_USER" }),
         continuationToken: "TENANT:CONV:THREAD_ROOT",
       }),
     );
-  });
-
-  it("does not let approval submissions bypass a legacy message allowlist", async () => {
-    const channel = teamsChannel({
-      credentials: testCredentials(),
-      onMessage: () => null,
-    });
-    const { send } = await firePost(channel, {
-      ...baseActivity({ conversationType: "channel" }),
-      name: "adaptiveCard/action",
-      type: "invoke",
-      value: {
-        action: {
-          data: {
-            eve_input: {
-              requestId: "REQ",
-              optionId: "approve",
-              route: hitlRoute(),
-            },
-          },
-        },
-      },
-    });
-
-    expect(send).not.toHaveBeenCalled();
-  });
-
-  it("rejects tampered HITL continuation tokens", async () => {
-    const channel = teamsChannel({ credentials: testCredentials() });
-    const { send } = await firePost(channel, {
-      ...baseActivity({ conversationType: "channel" }),
-      name: "adaptiveCard/action",
-      type: "invoke",
-      value: {
-        action: {
-          data: {
-            eve_input: {
-              requestId: "REQ",
-              optionId: "approve",
-              route: {
-                ...hitlRoute(),
-                continuationToken: "TENANT:OTHER_CONVERSATION:THREAD_ROOT",
-              },
-            },
-          },
-        },
-      },
-    });
-
-    expect(send).not.toHaveBeenCalled();
-  });
-
-  it("rejects unsigned legacy approval cards", async () => {
-    const channel = teamsChannel({ credentials: testCredentials() });
-    const { response, send } = await firePost(channel, {
-      ...baseActivity({ conversationType: "channel" }),
-      name: "adaptiveCard/action",
-      type: "invoke",
-      value: {
-        action: {
-          data: {
-            eve_input: { requestId: "REQ", optionId: "approve" },
-          },
-        },
-      },
-    });
-
-    expect(await response.json()).toMatchObject({ value: expect.stringMatching(/expired/i) });
-    expect(send).not.toHaveBeenCalled();
-  });
-
-  it("forwards unrelated invokes that contain eve_input data", async () => {
-    const onInvoke = vi.fn(() => ({ handled: true }));
-    const channel = teamsChannel({
-      credentials: { webhookVerifier: () => true },
-      onInvoke,
-    });
-    const { response, send } = await firePost(channel, {
-      ...baseActivity({ conversationType: "channel" }),
-      name: "composeExtension/query",
-      type: "invoke",
-      value: {
-        action: {
-          data: {
-            eve_input: { requestId: "REQ", optionId: "approve" },
-          },
-        },
-      },
-    });
-
-    expect(await response.json()).toEqual({ handled: true });
-    expect(onInvoke).toHaveBeenCalledTimes(1);
-    expect(send).not.toHaveBeenCalled();
-  });
-
-  it("drops HITL responses rejected by the shared activity authorizer", async () => {
-    const channel = teamsChannel({
-      authorizeActivity: () => null,
-      credentials: testCredentials(),
-    });
-    const { response, send } = await firePost(channel, {
-      ...baseActivity({ conversationType: "channel" }),
-      name: "adaptiveCard/action",
-      type: "invoke",
-      value: {
-        action: {
-          data: {
-            eve_input: { requestId: "REQ", optionId: "approve", route: hitlRoute() },
-          },
-        },
-      },
-    });
-
-    expect(await response.json()).toMatchObject({ statusCode: 200 });
-    expect(send).not.toHaveBeenCalled();
   });
 
   it("handles unmentioned message-form HITL responses before the mention gate", async () => {
@@ -268,24 +143,16 @@ describe("teamsChannel", () => {
     const raw = messageActivity({ conversationType: "channel" });
     raw.entities = [];
     raw.text = "";
-    raw.replyToId = "THREAD_ROOT";
     raw.value = {
       eve_input: {
+        replyToActivityId: "THREAD_ROOT",
         requestId: "REQ",
         optionId: "deny",
-        route: hitlRoute(),
       },
     };
     const channel = teamsChannel({
-      authorizeActivity: () => ({
-        auth: {
-          attributes: {},
-          authenticator: "teams-approval",
-          principalId: "USER",
-          principalType: "user",
-        },
-      }),
-      credentials: testCredentials(),
+      credentials: { webhookVerifier: () => true },
+      onInputResponse: () => ({ auth: null }),
       onMessage,
     });
 
@@ -298,34 +165,45 @@ describe("teamsChannel", () => {
     );
   });
 
-  it("normalizes channel continuation tokens across suffixed message conversations and invokes", async () => {
+  it("rejects HITL responses when a custom message gate has no input gate", async () => {
     const channel = teamsChannel({
       credentials: { webhookVerifier: () => true },
-      authorizeActivity: () => ({
-        auth: {
-          attributes: {},
-          authenticator: "test",
-          principalId: "USER",
-          principalType: "user",
+      onMessage: () => ({ auth: null }),
+    });
+    const { send } = await firePost(channel, {
+      ...baseActivity({ conversationType: "channel" }),
+      name: "adaptiveCard/action",
+      type: "invoke",
+      value: {
+        action: {
+          data: {
+            eve_input: {
+              replyToActivityId: "THREAD_ROOT",
+              requestId: "REQ",
+              optionId: "approve",
+            },
+          },
         },
-      }),
-      onMessage: () => ({}),
+      },
+    });
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("normalizes suffixed channel conversation ids", async () => {
+    const channel = teamsChannel({
+      credentials: { webhookVerifier: () => true },
+      onMessage: () => ({ auth: null }),
     });
     const raw = messageActivity({ conversationType: "channel" });
-    raw.conversation = {
-      conversationType: "channel",
-      id: "CONV;messageid=THREAD_ROOT",
-    };
+    raw.conversation = { conversationType: "channel", id: "CONV;messageid=THREAD_ROOT" };
     raw.replyToId = "VOLATILE_ACTIVITY";
 
     const { send } = await firePost(channel, raw);
 
     expect(send.mock.calls[0]![1]).toMatchObject({
       continuationToken: "TENANT:CONV:THREAD_ROOT",
-      state: {
-        conversationId: "CONV;messageid=THREAD_ROOT",
-        replyToActivityId: "THREAD_ROOT",
-      },
+      state: { replyToActivityId: "THREAD_ROOT" },
     });
   });
 
@@ -371,39 +249,6 @@ describe("teamsChannel", () => {
     });
   });
 });
-
-function testCredentials() {
-  return { hitlSecret: HITL_SECRET, webhookVerifier: () => true };
-}
-
-function hitlRoute(): Record<string, unknown> {
-  const body = renderInputRequestMessage(
-    {
-      action: { callId: "TC", input: {}, kind: "tool-call", toolName: "deploy" },
-      display: "confirmation",
-      options: [
-        { id: "approve", label: "Approve" },
-        { id: "deny", label: "Deny" },
-      ],
-      prompt: "Approve deploy?",
-      requestId: "REQ",
-    },
-    {
-      continuationToken: "TENANT:CONV:THREAD_ROOT",
-      conversationId: "CONV",
-      secret: HITL_SECRET,
-      tenantId: "TENANT",
-    },
-  );
-  const card = body.attachments?.[0]?.content as {
-    actions?: Array<{ data?: Record<string, unknown> }>;
-  };
-  const payload = card.actions?.[0]?.data?.eve_input;
-  if (!payload || typeof payload !== "object" || !("route" in payload)) {
-    throw new Error("Expected rendered Teams HITL route.");
-  }
-  return payload.route as Record<string, unknown>;
-}
 
 function messageActivity(input: { readonly conversationType: string }): Record<string, unknown> {
   return {

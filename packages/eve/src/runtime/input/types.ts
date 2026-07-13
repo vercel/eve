@@ -82,23 +82,6 @@ export function isInputRequest(value: unknown): value is InputRequest {
   return inputRequestSchema.safeParse(value).success;
 }
 
-/** Returns true when an input request is the canonical approve/deny confirmation. */
-export function isApprovalInputRequest(request: InputRequest): boolean {
-  return (
-    request.display === "confirmation" &&
-    request.options?.length === 2 &&
-    request.options[0]?.id === "approve" &&
-    request.options[1]?.id === "deny"
-  );
-}
-
-/** Returns pretty-printed tool input for an approval, excluding empty objects. */
-export function formatApprovalInput(request: InputRequest): string | undefined {
-  if (!isApprovalInputRequest(request)) return undefined;
-  const json = JSON.stringify(request.action.input, null, 2);
-  return json === "{}" ? undefined : json;
-}
-
 /**
  * Returns true when a value matches the input response contract.
  */
