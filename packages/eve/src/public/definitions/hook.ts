@@ -17,6 +17,8 @@ export interface HookContext extends SessionContext {
   readonly channel: {
     readonly kind?: string;
     readonly continuationToken?: string;
+    /** Channel-local token accepted by `send`, without Eve's channel namespace. */
+    readonly rawContinuationToken?: string;
   };
 }
 

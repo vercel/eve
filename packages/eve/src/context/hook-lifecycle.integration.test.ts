@@ -53,6 +53,40 @@ function hook(slug: string, hooks: Partial<ResolvedHookDefinition>): ResolvedHoo
 }
 
 describe("dispatchStreamEventHooks", () => {
+  it("exposes the raw continuation token while retaining the runtime namespace", async () => {
+    const observed: Array<{ continuationToken?: string; rawContinuationToken?: string }> = [];
+    const registry = createRuntimeHookRegistry([
+      hook("token-custody", {
+        events: {
+          "session.completed": async (_event, ctx) => {
+            observed.push({
+              continuationToken: ctx.channel.continuationToken,
+              rawContinuationToken: ctx.channel.rawContinuationToken,
+            });
+          },
+        },
+      }),
+    ]);
+    const ctx = buildCtx();
+    ctx.set(ContinuationTokenKey, "eve:eve:client-token");
+    ctx.set(ChannelKey, { kind: "eve" } as never);
+
+    await contextStorage.run(ctx, () =>
+      dispatchStreamEventHooks({
+        ctx,
+        registry,
+        event: { type: "session.completed" } satisfies HandleMessageStreamEvent,
+      }),
+    );
+
+    expect(observed).toEqual([
+      {
+        continuationToken: "eve:eve:client-token",
+        rawContinuationToken: "eve:client-token",
+      },
+    ]);
+  });
+
   it("invokes typed then wildcard subscribers and propagates errors", async () => {
     const calls: string[] = [];
     const registry = createRuntimeHookRegistry([

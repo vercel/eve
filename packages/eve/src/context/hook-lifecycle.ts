@@ -1,4 +1,5 @@
 import { getAdapterKind } from "#channel/adapter.js";
+import { toRawContinuationToken } from "#channel/session.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { HookContext } from "#public/definitions/hook.js";
 import type { RuntimeHookRegistry } from "#runtime/hooks/registry.js";
@@ -51,6 +52,8 @@ function buildHookContext(ctx: ContextContainer): HookContext {
     channel: {
       kind,
       continuationToken,
+      rawContinuationToken:
+        continuationToken === undefined ? undefined : toRawContinuationToken(continuationToken),
     },
   };
 }

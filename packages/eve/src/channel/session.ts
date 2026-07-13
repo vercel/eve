@@ -74,7 +74,7 @@ export function buildSessionHandle(accessor: ContextAccessor): SessionHandle {
       return accessor.get(ContinuationTokenKey) ?? "";
     },
     get rawContinuationToken() {
-      return removeContinuationTokenNamespace(accessor.get(ContinuationTokenKey) ?? "");
+      return toRawContinuationToken(accessor.get(ContinuationTokenKey) ?? "");
     },
     get auth(): SessionAuth {
       return {
@@ -96,7 +96,7 @@ export function buildSessionHandle(accessor: ContextAccessor): SessionHandle {
   };
 }
 
-function removeContinuationTokenNamespace(token: string): string {
+export function toRawContinuationToken(token: string): string {
   const separatorIndex = token.indexOf(":");
   return separatorIndex < 0 ? token : token.slice(separatorIndex + 1);
 }
