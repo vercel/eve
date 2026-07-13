@@ -4,7 +4,7 @@ status: in-review
 last_updated: "2026-07-13"
 ---
 
-# Dev revision isolation
+# Dev generation isolation
 
 ## Summary
 
@@ -18,9 +18,11 @@ runtime source, Nitro build inputs, routes, the running worker, and Workflow dat
 not share one commit point. A rebuild can therefore publish some new state before another step
 fails, leaving the server with a mixture of old and new behavior.
 
-The goal is to treat one compiled version of an agent as a single immutable revision. A revision is
-prepared privately and becomes visible only after everything needed to run it is ready. If any step
-fails, the last working revision remains fully active.
+The goal is to prepare one complete immutable generation of an agent privately and expose it only
+after everything needed to run it is ready. New turns use the latest successfully promoted
+generation. A turn already in progress stays on the generation selected when its child Workflow
+started, including queue retries and resumptions, but a parked session is not pinned to historical
+authored code.
 
 ## Problems being solved
 
@@ -42,54 +44,58 @@ long-lived Nitro host. Structural changes such as channel routes or instrumentat
 worker rebuild. Today the runtime pointer, host inputs, routes, and worker lifecycle are not one
 transaction, so a late failure can leave earlier mutations active.
 
-A runtime-only edit should publish a complete revision without replacing the worker. A structural
+A runtime-only edit should publish a complete generation without replacing the worker. A structural
 edit should keep serving the old worker until a replacement has built and reported ready. Failure
 at any point should leave the old pointer, routes, worker, and watcher state unchanged.
 
-### A revision is not yet a complete executable unit
+### A generation is not yet a complete executable unit
 
 A copied runtime snapshot can still depend on authored files or packages outside the snapshot. If
-those originals change or disappear, an older request or durable run may no longer be able to load
-the behavior it started with. Dependency resolution must also follow the same Node ESM rules used
+those originals change or disappear, an admitted request or active turn may no longer be able to
+load the behavior it selected. Dependency resolution must also follow the same Node ESM rules used
 when the code executes.
 
-Each revision therefore needs the complete authored module and dependency closure required to run
+Each generation therefore needs the complete authored module and dependency closure required to run
 that version, including workspace resources, instrumentation, configured externals, and transitive
-packages. Framework and deployment runtime packages remain outside the authored revision.
+packages. Framework and deployment runtime packages remain outside the authored generation.
 
 ### Worker replacement can interrupt live traffic
 
 The current dev listener proxies to a reloadable Nitro worker. Replacing that worker can reset an
-admitted HTTP request, interrupt a stream, or briefly make a dev control endpoint unavailable. It
-also makes cancellation and shutdown ownership unclear.
+admitted HTTP request, interrupt a stream, or briefly make a dev control or Workflow queue endpoint
+unavailable. It also makes cancellation and shutdown ownership unclear.
 
-A stable parent server should own the listener and dev control endpoints. It admits each request to
-one worker and one revision, keeps that ownership until the request finishes or disconnects, and
-does not retire the old worker while admitted work still depends on it.
+A stable parent server should own the listener, local Workflow World, queue ingress, and dev control
+endpoints. It admits each request or queue delivery to one worker and generation, keeps that
+ownership until the operation finishes or disconnects, and does not retire the old worker while
+admitted work still depends on it.
 
-### Revision pruning lacks complete ownership information
+### Parked sessions and active turns need different lifetimes
 
-A revision may still be needed by the active worker, an in-flight request, a candidate worker, or a
-durable Workflow run. Age and retention-count heuristics cannot prove that deletion is safe. Nitro
-also retains some host inputs for the lifetime of the dev server; those inputs must never live under
-a directory that revision pruning can remove.
+Production resolves `latest` when a Workflow starts and then records the selected deployment on
+that run. The local World instead exposes one package-version deployment identity and currently
+registers queue handlers from the reloadable worker. It cannot reliably route separate child
+Workflows to the generations they selected.
 
-Pruning should use explicit references. A revision is removable only when it is not active,
-candidate, last-good, leased by a request or worker, or referenced by a durable run. Until those
-references are available, revisions are retained conservatively.
+The long-lived session driver should remain generation-neutral. Each child turn Workflow resolves
+the latest promoted generation once, and all of that run's workflow, step, retry, and resume
+deliveries return to the recorded generation. When the child Workflow becomes terminal, it releases
+that reference; the next turn in the same session resolves latest again.
 
 ## Goals
 
 - Preserve the fast path that already works: tools, connections, skills, instructions, and similar
   runtime behavior reload without replacing the Nitro worker.
-- Make an authored revision complete and immutable so one request or durable run never observes a
-  mixture of versions.
+- Make an authored generation complete and immutable so one request or active child Workflow never
+  observes a mixture of versions.
+- Keep parked sessions on the latest successful authored behavior without changing an active turn
+  during replay, retry, or suspension.
 - Keep the last working server available while a structural candidate is prepared and discard the
   candidate cleanly if preparation fails.
-- Give requests, streams, workers, and Workflow runs explicit revision ownership so shutdown and
-  pruning decisions are safe.
-- Keep parent-owned dev endpoints available through reloads and prevent planned worker replacement
-  from surfacing connection resets.
+- Give requests, queue deliveries, workers, and active child Workflows explicit generation
+  ownership so shutdown and pruning decisions are safe.
+- Keep parent-owned dev and Workflow endpoints available through reloads and prevent planned worker
+  replacement from surfacing connection resets.
 - Preserve Nitro's selected route identity, including overlapping static and parameter routes.
 
 ## Ownership model
@@ -98,24 +104,28 @@ references are available, revisions are retained conservatively.
 authored edit
     │
     ▼
-immutable revision ── runtime-only ─────────► publish revision pointer
+immutable generation ── runtime-only ─────────► publish latest pointer
     │
     └── structural ─► ready Nitro candidate ─► atomically swap pointer, routes, and worker
 
 stable parent server
-    ├── owns the listener and dev control endpoints
-    ├── leases one worker and revision per admitted request
-    └── retires old workers and revisions only after their references are released
+    ├── owns the listener, local World, queue ingress, and dev control endpoints
+    ├── leases one worker and generation per admitted request or queue delivery
+    └── retires old workers and generations only after their references are released
+
+generation-neutral session driver
+    └── starts child turn with latest ─► generation G for that child Workflow only
 ```
 
-A revision contains the complete executable authored dependency closure. Nitro host inputs retained
-for the server lifetime live outside the prunable revision store. The stable parent does not
-reinterpret which authored channel matched a request; it preserves the route Nitro selected and
-dispatches that route against the leased revision.
+A generation contains the complete executable authored dependency closure. Nitro host inputs
+retained for the server lifetime live outside the prunable generation store. The stable parent does
+not reinterpret which authored channel matched a request; it preserves the route Nitro selected and
+dispatches that route against the leased generation.
 
-Durable Workflow runs retain the revision they started with. Pruning removes a revision only when
-it is not active, a candidate, last-good, leased by a request or worker, or referenced by a durable
-run. Until those references exist, revisions are retained conservatively.
+The parent starts exactly one local World. Workers use an eve-owned private World transport rather
+than starting competing Worlds or replacing a global direct queue handler. The parent records the
+resolved generation on each child Workflow and routes later deliveries by that structured run
+record. Public requests cannot select or spoof the generation.
 
 ## Delivery
 
@@ -123,21 +133,22 @@ run. Until those references exist, revisions are retained conservatively.
    private compiler, host, Nitro, Workflow, and output workspaces, then serialize only final
    publication. This prevents concurrent or failed builds from disturbing each other, the running
    dev server, or the last-good output. This is the current PR.
-2. **Immutable revisions — make one version of an agent runnable on its own.** Materialize the
-   complete authored behavior and dependency closure into a path-independent revision. This keeps
-   older requests and runs executable after source files, tools, or packages are changed or removed.
-3. **Parent worker transport — separate the stable server from reloadable workers.** Put readiness,
-   request and revision leases, cancellation, trusted client metadata, and bounded shutdown behind
-   a parent-owned listener. This prevents planned worker replacement from resetting admitted
-   requests, interrupting control endpoints, or leaking workers and revisions.
+2. **Immutable generations — make one version of an agent runnable on its own.** Materialize the
+   complete authored behavior and dependency closure into a path-independent generation. This keeps
+   admitted requests and active turns executable after source files, tools, or packages are changed
+   or removed.
+3. **Parent worker and World transport — separate stable ownership from reloadable workers.** Put
+   readiness, request and generation leases, queue delivery, cancellation, trusted client metadata,
+   and bounded shutdown behind a parent-owned listener. This prevents planned worker replacement
+   from resetting admitted traffic or leaving the local World bound to a retired worker.
 4. **Transactional dev rebuilds — make a reload one complete promotion.** Connect the watcher,
-   revision pointer, routes, and candidate worker through one coordinator with complete rollback.
+   generation pointer, routes, and candidate worker through one coordinator with complete rollback.
    This preserves fast runtime-only reloads while preventing failed structural changes from leaving
    mixed routes, pointers, handlers, fingerprints, or workers active.
-5. **Durable Workflow and pruning — keep long-running work on the code it started with.** Resolve an
-   existing run from its recorded revision and prune only from explicit references. This prevents a
-   promoted revision from changing an older run and prevents cleanup from deleting behavior that an
-   active run still needs.
+5. **Latest-turn Workflow delivery and pruning — select latest at each child Workflow boundary.**
+   Keep the parked session driver generation-neutral, record one generation for each active child
+   Workflow, route its retries and resumptions consistently, and prune from structured active-run
+   references once the child becomes terminal.
 
 Each stage remains independently valid and does not expose a partially connected lifecycle.
 
@@ -150,18 +161,19 @@ Each stage remains independently valid and does not expose a partially connected
 - Structural reloads move new traffic only after the replacement worker is ready. Existing requests
   and streams finish on their original worker; disconnect and shutdown cancellation follow an
   explicit owned lifecycle.
-- Parent-owned dev endpoints remain available during reload and do not depend on the worker being
-  replaced.
+- Parent-owned dev and Workflow queue endpoints remain available during reload.
 - Channel changes preserve the route Nitro selected, including overlapping routes.
-- Advancing and pruning a runtime revision cannot remove Nitro inputs retained by the dev server.
-- Existing Workflow runs continue with their original tools and instructions after newer edits and
-  pruning, while new runs use the promoted revision.
+- Advancing and pruning a runtime generation cannot remove Nitro inputs retained by the dev server.
+- An active child Workflow completes on its selected generation after a promotion. Once the session
+  parks, its next turn uses the newly promoted generation.
 
 ## Non-goals
 
 - Replacing Nitro as eve's development or production bundler.
 - Restarting the worker for every authored edit.
-- Making an in-flight request switch behavior when a newer revision is promoted.
-- Keeping every historical revision forever once no owner can reference it.
+- Pinning a parked session to the authored generation that originally created it.
+- Switching an active child Workflow to newer code during retry, replay, or suspension.
+- Keeping every historical generation after no request, worker, candidate, or active child Workflow
+  can reference it.
 
 The gray-matter vendoring change is independent of this lifecycle work.
