@@ -129,7 +129,7 @@ turnWorkflow                    execution/turn-workflow.ts
 workflowEntry driver            execution/workflow-entry.ts
   settleCancelledTurnStep       execution/settle-cancelled-turn-step.ts
     emits turn.cancelled → session.waiting, clears pending batch/interrupt,
-    persists the between-turns session; in-process single-flight
+    persists the between-turns session
   then the normal park playbook: rekey, await the next message
 ```
 
@@ -176,13 +176,7 @@ and which mitigations remain load-bearing:
    `dispatchAndAwaitTurn` now returns a deferred `dispose()` that
    the driver invokes when the _next_ turn settles (or the session ends),
    by which time the previous turn's run has completed and cannot re-send.
-5. **The settle step is single-flighted in-process.** A wake landing while
-   the settle step is in flight can re-dispatch it; racing attempts share
-   the process, so a module-level single-flight keyed by
-   `{sessionId}:turn-cancelled:{sequence}` collapses them. A distributed
-   re-execution (crash recovery on another instance) can still duplicate
-   the epilogue; see upstream notes.
-6. **Turn-run teardown is dispose-only — never `iterator.return()`.** The
+5. **Turn-run teardown is dispose-only — never `iterator.return()`.** The
    cancel hook always has an outstanding durable read (the abort
    continuation), and an async generator honors `return()` only after its
    in-flight `await` settles — never, for a turn that wasn't cancelled.
@@ -253,10 +247,10 @@ branch vendors — `@workflow/core` 5.0.0-beta.31, `@workflow/world-local`
 
 Consequences for layer 1's mitigations:
 
-- The `settleCancelledTurnStep` in-process single-flight is now redundant
-  with the upstream one for the wake-driven duplication it was written
-  against; it stays as cheap insurance for the queue's residual
-  at-least-once envelope, with its comment updated to say so.
+- The `settleCancelledTurnStep` in-process single-flight it originally
+  carried became redundant with the upstream one and was removed; the
+  queue's residual at-least-once envelope can duplicate the epilogue,
+  like every stream emission under crash retry.
 - Deferred control-hook disposal stays: `sendTurnControlStep` does not
   treat `HookNotFoundError` as benign, so a rare crash-retry duplicate of
   the final control send against an already-disposed hook would surface
@@ -291,8 +285,8 @@ Consequences for layer 2 (relaxations from the earlier guidance):
    `step_failed`/`step_retrying` events and at most one `step_completed`
    per correlation id.
 2. `turn.cancelled` is emitted once per cancelled turn under normal
-   operation (single-flighted against duplicate step dispatch; at-least-once
-   under crash retry, like every stream emission), always followed by
+   operation (at-least-once under crash retry, like every stream
+   emission), always followed by
    `session.waiting`; zero failure events on the cancelled path; the aborted
    tool executes once; the cancelled turn streams one `step.started`.
 3. The cancel hook token is session-scoped and never doubly live: each

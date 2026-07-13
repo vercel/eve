@@ -6,7 +6,6 @@ import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.j
 import type { SessionDeliveryHook } from "#execution/session-delivery-hook.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
-import { dispatchTurnStep } from "#execution/workflow-steps.js";
 
 const createHookMock = vi.fn();
 
@@ -213,31 +212,6 @@ describe("dispatchAndAwaitTurn", () => {
     expect(hook.dispose).not.toHaveBeenCalled();
     await turn.dispose();
     expect(hook.dispose).toHaveBeenCalledOnce();
-  });
-
-  it("advertises cancelled-park settlement to the turn workflow", async () => {
-    const state = createState("http:test");
-    installControlHook([
-      {
-        action: { kind: "park", serializedContext: {}, sessionState: state },
-        kind: "turn-result",
-      },
-    ]);
-
-    await dispatchAndAwaitTurn({
-      bufferedDeliveries: [],
-      controlToken: "turn-control",
-      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
-      deliveryHook: createDeliveryHook(),
-      mode: "conversation",
-      parentWritable: new WritableStream<Uint8Array>(),
-      serializedContext: {},
-      sessionState: state,
-    });
-
-    expect(vi.mocked(dispatchTurnStep)).toHaveBeenCalledWith(
-      expect.objectContaining({ driverCancelledTurnSettle: true }),
-    );
   });
 });
 

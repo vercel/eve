@@ -31,33 +31,6 @@ export interface CancelledTurnSettleResult {
   readonly sessionState: DurableSessionState;
 }
 
-// In-process single-flight guarding the queue's at-least-once envelope
-// (a redelivery of the owning message while the step is alive). Rejected
-// flights are evicted so a genuine failure retries.
-const cancelledTurnSettleFlights = new Map<string, Promise<CancelledTurnSettleResult>>();
-const CANCELLED_TURN_FLIGHT_TTL_MS = 60_000;
-
-function settleCancelledTurnOnce(
-  key: string,
-  run: () => Promise<CancelledTurnSettleResult>,
-): Promise<CancelledTurnSettleResult> {
-  const existing = cancelledTurnSettleFlights.get(key);
-  if (existing !== undefined) return existing;
-
-  const flight = run();
-  cancelledTurnSettleFlights.set(key, flight);
-  flight
-    .then(() => {
-      const timer = setTimeout(
-        () => cancelledTurnSettleFlights.delete(key),
-        CANCELLED_TURN_FLIGHT_TTL_MS,
-      );
-      timer.unref?.();
-    })
-    .catch(() => cancelledTurnSettleFlights.delete(key));
-  return flight;
-}
-
 /**
  * Settles one cancelled turn: emits `turn.cancelled` → `session.waiting`,
  * drops pending runtime-action state, and persists the between-turns
@@ -71,19 +44,6 @@ export async function settleCancelledTurnStep(input: {
 }): Promise<CancelledTurnSettleResult> {
   "use step";
 
-  // Identical across re-dispatched attempts of the same cancelled turn,
-  // unique across turns.
-  const flightKey = `${input.sessionState.sessionId}:turn-cancelled:${String(
-    input.sessionState.emissionState.sequence,
-  )}`;
-  return settleCancelledTurnOnce(flightKey, () => runSettleCancelledTurn(input));
-}
-
-async function runSettleCancelledTurn(input: {
-  readonly parentWritable: WritableStream<Uint8Array>;
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}): Promise<CancelledTurnSettleResult> {
   const durableSession = await readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   const adapter = ctx.require(ChannelKey);

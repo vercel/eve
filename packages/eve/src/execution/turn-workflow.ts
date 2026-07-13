@@ -212,10 +212,10 @@ async function waitForRuntimeActionResults(input: {
   readonly cancellation: TurnCancellationControl | undefined;
   readonly cursor: TurnExecutionCursor;
   readonly inboxToken: string;
+  readonly initialResults: readonly RuntimeActionResult[];
   readonly iterator: AsyncIterator<TurnInboxPayload>;
   readonly nextDeliveryRequestId: () => string;
   readonly pendingActionKeys: readonly string[];
-  readonly initialResults: readonly RuntimeActionResult[];
 }): Promise<readonly RuntimeActionResult[] | "cancelled"> {
   let pendingDeliveryRequest: string | undefined;
   const results: RuntimeActionResult[] = [...input.initialResults];
@@ -248,14 +248,14 @@ async function waitForRuntimeActionResults(input: {
     }
 
     const nextPromise = input.iterator.next();
-    const settled = nextPromise.then(
-      () => "payload" as const,
-      () => "payload" as const,
-    );
-    const winner = await (input.cancellation === undefined
-      ? settled
-      : Promise.race([settled, input.cancellation.requested]));
-    if (winner === "cancel") {
+    // When a cancel wins the race, the dangling inbox `next()` is dropped
+    // by disposal in teardown; pre-attach a handler so a late rejection
+    // never surfaces as unhandled.
+    nextPromise.catch(() => {});
+    const next = await (input.cancellation === undefined
+      ? nextPromise
+      : Promise.race([nextPromise, input.cancellation.requested]));
+    if (next === "cancel") {
       if (pendingDeliveryRequest !== undefined) {
         // Release the raced public input back to the driver so it stays
         // available for the next turn.
@@ -264,11 +264,8 @@ async function waitForRuntimeActionResults(input: {
           requestId: pendingDeliveryRequest,
         });
       }
-      // The dangling inbox `next()` is dropped by disposal in teardown.
       return "cancelled";
     }
-
-    const next = await nextPromise;
     if (next.done) throw new Error("Turn inbox closed before runtime actions completed.");
 
     const value = next.value;

@@ -311,19 +311,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     // runtime-action wait) must settle before the park-resume stages run,
     // or the pending batch would re-park and later re-dispatch.
     throwIfTurnAborted(input.abortSignal);
-    stepResult = await runTurnHarnessStep();
-  } catch (error) {
-    if (!isTurnCancellation(error)) throw error;
-    writer.releaseLock();
-    return {
-      action: "cancelled",
-      serializedContext: input.serializedContext,
-      sessionState: input.sessionState,
-    };
-  }
-
-  async function runTurnHarnessStep(): Promise<StepResult> {
-    return runStep(ctx, initialSession, async (enrichedSession) => {
+    stepResult = await runStep(ctx, initialSession, async (enrichedSession) => {
       const schemaSession = resolveEffectiveOutputSchema({
         agentOutputSchema: bundle.turnAgent.outputSchema,
         input: resolved,
@@ -383,6 +371,14 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
 
       return runHarnessStep(schemaSession, resolved);
     });
+  } catch (error) {
+    if (!isTurnCancellation(error)) throw error;
+    writer.releaseLock();
+    return {
+      action: "cancelled",
+      serializedContext: input.serializedContext,
+      sessionState: input.sessionState,
+    };
   }
 
   // Re-stamp the in-memory session's continuation token in case a
