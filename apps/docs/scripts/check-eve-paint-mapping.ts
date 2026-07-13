@@ -68,11 +68,7 @@ const dpr1SameBuffer = mapClientPointToPaintCell({
 });
 assert(dpr1SameBuffer);
 assert.equal(dpr1SameBuffer.insideLogicalBounds, true);
-assertAlmost(
-  dpr1SameBuffer.gridScale,
-  center.gridScale * 2,
-  "dpr1 same-buffer grid scale doubles",
-);
+assertAlmost(dpr1SameBuffer.gridScale, center.gridScale * 2, "dpr1 same-buffer grid scale doubles");
 assertAlmost(
   dpr1SameBuffer.brushCell[0] - dpr1SameBuffer.originCell[0],
   (center.brushCell[0] - center.originCell[0]) * 2,
