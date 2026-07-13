@@ -4,6 +4,7 @@ import { watch, type FSWatcher } from "node:fs";
 import { lstat, mkdir, readFile, readdir, readlink, realpath, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import type { Readable } from "node:stream";
+import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
@@ -395,6 +396,44 @@ async function listBuildWorkspaces(appRoot: string): Promise<readonly string[]> 
   }
 }
 
+interface PublishedCompilationState {
+  readonly sourceGraphHash: string;
+}
+
+async function readPublishedCompilationState(appRoot: string): Promise<PublishedCompilationState> {
+  const metadataPath = join(appRoot, ".output", ".eve", "compile", "compile-metadata.json");
+  const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as {
+    compile: { moduleMap: { path: string } };
+    discovery: {
+      diagnostics: { path: string };
+      manifest: { path: string };
+      sourceGraphHash: string;
+    };
+  };
+  const artifactPaths = [
+    metadata.compile.moduleMap.path,
+    metadata.discovery.diagnostics.path,
+    metadata.discovery.manifest.path,
+  ];
+  for (const artifactPath of artifactPaths) {
+    expect(artifactPath).not.toContain(".eve/builds/");
+    expect((await lstat(join(appRoot, artifactPath))).isFile()).toBe(true);
+  }
+
+  const moduleMapPath = join(appRoot, metadata.compile.moduleMap.path);
+  const moduleMap = (await import(`${pathToFileURL(moduleMapPath).href}?test=${Date.now()}`)) as {
+    moduleMap: { nodes: Record<string, unknown> };
+  };
+  expect(Object.keys(moduleMap.moduleMap.nodes)).not.toHaveLength(0);
+
+  const serverSource = await readFile(join(appRoot, ".output", "server", "index.mjs"), "utf8");
+  expect(serverSource).not.toContain("__eveInstallCompiledArtifactsStep");
+
+  return {
+    sourceGraphHash: metadata.discovery.sourceGraphHash,
+  };
+}
+
 describe("production build isolation", () => {
   it(
     "keeps a real dev server healthy while two real builds overlap in invocation-owned workspaces",
@@ -493,6 +532,25 @@ describe("production build isolation", () => {
       expect(failedResult.stderr).toContain("does-not-exist");
       expect(await hashPath(outputDir)).toBe(lastGoodOutputHash);
       expect(await hashPath(summaryPath)).toBe(lastGoodSummaryHash);
+      expect(await listBuildWorkspaces(app.appRoot)).toEqual([]);
+    },
+    SCENARIO_DEADLINE_MS,
+  );
+
+  it(
+    "publishes relocatable compiler artifacts without workspace-derived step ids",
+    async () => {
+      const app = await scenarioApp(WEATHER_AGENT_DESCRIPTOR);
+
+      const firstBuild = startEveProcess({ appRoot: app.appRoot, args: ["build"] });
+      await expect(firstBuild.result).resolves.toMatchObject({ code: 0, signal: null });
+      const firstCompilation = await readPublishedCompilationState(app.appRoot);
+
+      const secondBuild = startEveProcess({ appRoot: app.appRoot, args: ["build"] });
+      await expect(secondBuild.result).resolves.toMatchObject({ code: 0, signal: null });
+      const secondCompilation = await readPublishedCompilationState(app.appRoot);
+
+      expect(secondCompilation).toEqual(firstCompilation);
       expect(await listBuildWorkspaces(app.appRoot)).toEqual([]);
     },
     SCENARIO_DEADLINE_MS,

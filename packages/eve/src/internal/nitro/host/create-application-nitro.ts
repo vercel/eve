@@ -16,10 +16,7 @@ import {
   writeEveVersionedCacheMetadata,
 } from "#internal/application/cache-metadata.js";
 import { resolveNitroBuildDirectory } from "#internal/application/paths.js";
-import {
-  createProductionNitroArtifactsConfig,
-  type NitroArtifactsConfigInput,
-} from "#internal/nitro/host/artifacts-config.js";
+import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { createCompiledSandboxBackendPrunePlugin } from "#internal/nitro/host/compiled-sandbox-backend-prune-plugin.js";
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
 import {
@@ -746,7 +743,6 @@ function externalizeDevelopmentWorkflowBundle(
   });
 }
 
-/** Creates the watch-enabled Nitro host used by `eve dev`. */
 export async function createDevelopmentApplicationNitro(
   preparedHost: PreparedApplicationHost,
 ): Promise<Nitro> {
@@ -798,7 +794,6 @@ interface ProductionApplicationNitroOptions {
   readonly surface: NitroBuildSurface;
 }
 
-/** Creates one workspace-owned Nitro host for a production build surface. */
 export async function createProductionApplicationNitro(
   preparedHost: PreparedApplicationHost,
   options: ProductionApplicationNitroOptions,
@@ -848,9 +843,7 @@ export async function createProductionApplicationNitro(
     preparedHost.scheduleRegistrations.length > 0
   ) {
     applyEveCronHandlerRoute(nitro);
-    const artifactsConfig: NitroArtifactsConfigInput = createProductionNitroArtifactsConfig({
-      appRoot: preparedHost.appRoot,
-    });
+    const artifactsConfig = createProductionNitroArtifactsConfig();
     registerScheduleTaskHandlers(nitro, {
       artifactsConfig,
       dispatchModulePath: resolvePackageSourceFilePath(

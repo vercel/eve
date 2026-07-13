@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   publishApplicationBuildArtifacts,
+  publishApplicationBuildArtifactsWithObserver,
   resolveOutputPublicationLockPath,
 } from "#internal/application/output-publication.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
@@ -37,6 +38,53 @@ async function expectPublication(input: {
     `${input.outputMarker}\n`,
   );
   await expect(readFile(input.summaryPath, "utf8")).resolves.toBe(`${input.summaryMarker}\n`);
+}
+
+async function interruptPublicationAfterBackup(input: {
+  readonly appRoot: string;
+  readonly finalOutputDir: string;
+  readonly finalSummaryPath: string;
+  readonly stagedOutputDir: string;
+  readonly stagedSummaryPath: string;
+}): Promise<void> {
+  const token = "interrupted-owner";
+  const outputBackupPath = `${input.finalOutputDir}.eve-backup-${token}`;
+  const summaryBackupPath = `${input.finalSummaryPath}.eve-backup-${token}`;
+  await writePublication({
+    outputDir: input.finalOutputDir,
+    outputMarker: "last-good",
+    summaryMarker: "last-good",
+    summaryPath: input.finalSummaryPath,
+  });
+  await writePublication({
+    outputDir: input.stagedOutputDir,
+    outputMarker: "interrupted",
+    summaryMarker: "interrupted",
+    summaryPath: input.stagedSummaryPath,
+  });
+  await Promise.all([
+    rename(input.finalOutputDir, outputBackupPath),
+    rename(input.finalSummaryPath, summaryBackupPath),
+  ]);
+  const lockPath = resolveOutputPublicationLockPath(input.appRoot);
+  await mkdir(lockPath, { recursive: true });
+  await writeFile(
+    join(lockPath, "owner.json"),
+    `${JSON.stringify({
+      finalOutputDir: input.finalOutputDir,
+      finalSummaryPath: input.finalSummaryPath,
+      hadOutput: true,
+      hadSummary: true,
+      liveness: "active",
+      outputBackupPath,
+      phase: "backed-up",
+      pid: 2_147_483_647,
+      stagedOutputDir: input.stagedOutputDir,
+      stagedSummaryPath: input.stagedSummaryPath,
+      summaryBackupPath,
+      token,
+    })}\n`,
+  );
 }
 
 describe("build output publication", () => {
@@ -95,16 +143,22 @@ describe("build output publication", () => {
     });
 
     await expect(
-      publishApplicationBuildArtifacts({
-        appRoot,
-        finalOutputDir,
-        finalSummaryPath,
-        stagedOutputDir,
-        stagedSummaryPath,
-        onAfterOutputInstall() {
-          throw new Error("injected publication failure");
+      publishApplicationBuildArtifactsWithObserver(
+        {
+          appRoot,
+          finalOutputDir,
+          finalSummaryPath,
+          stagedOutputDir,
+          stagedSummaryPath,
         },
-      }),
+        {
+          async afterBackup() {},
+          async afterOutputInstall() {
+            throw new Error("injected publication failure");
+          },
+          async onContention() {},
+        },
+      ),
     ).rejects.toThrow("injected publication failure");
 
     await expectPublication({
@@ -146,32 +200,43 @@ describe("build output publication", () => {
     const secondObservedContention = Promise.withResolvers<void>();
     const entered: string[] = [];
 
-    const first = publishApplicationBuildArtifacts({
-      appRoot,
-      finalOutputDir,
-      finalSummaryPath,
-      stagedOutputDir: firstOutputDir,
-      stagedSummaryPath: firstSummaryPath,
-      async onAfterBackup() {
-        entered.push("first");
-        firstEntered.resolve();
-        await releaseFirst.promise;
+    const first = publishApplicationBuildArtifactsWithObserver(
+      {
+        appRoot,
+        finalOutputDir,
+        finalSummaryPath,
+        stagedOutputDir: firstOutputDir,
+        stagedSummaryPath: firstSummaryPath,
       },
-    });
+      {
+        async afterBackup() {
+          entered.push("first");
+          firstEntered.resolve();
+          await releaseFirst.promise;
+        },
+        async afterOutputInstall() {},
+        async onContention() {},
+      },
+    );
     await firstEntered.promise;
-    const second = publishApplicationBuildArtifacts({
-      appRoot,
-      finalOutputDir,
-      finalSummaryPath,
-      stagedOutputDir: secondOutputDir,
-      stagedSummaryPath: secondSummaryPath,
-      onLockContention() {
-        secondObservedContention.resolve();
+    const second = publishApplicationBuildArtifactsWithObserver(
+      {
+        appRoot,
+        finalOutputDir,
+        finalSummaryPath,
+        stagedOutputDir: secondOutputDir,
+        stagedSummaryPath: secondSummaryPath,
       },
-      onAfterBackup() {
-        entered.push("second");
+      {
+        async afterBackup() {
+          entered.push("second");
+        },
+        async afterOutputInstall() {},
+        async onContention() {
+          secondObservedContention.resolve();
+        },
       },
-    });
+    );
 
     await secondObservedContention.promise;
     expect(entered).toEqual(["first"]);
@@ -195,20 +260,12 @@ describe("build output publication", () => {
     const interruptedSummaryPath = join(appRoot, ".eve", "builds", "interrupted", "summary.json");
     const nextOutputDir = join(appRoot, ".eve", "builds", "next", "output");
     const nextSummaryPath = join(appRoot, ".eve", "builds", "next", "summary.json");
-    const interruptedToken = "interrupted-owner";
-    const outputBackupPath = `${finalOutputDir}.eve-backup-${interruptedToken}`;
-    const summaryBackupPath = `${finalSummaryPath}.eve-backup-${interruptedToken}`;
-    await writePublication({
-      outputDir: finalOutputDir,
-      outputMarker: "last-good",
-      summaryMarker: "last-good",
-      summaryPath: finalSummaryPath,
-    });
-    await writePublication({
-      outputDir: interruptedOutputDir,
-      outputMarker: "interrupted",
-      summaryMarker: "interrupted",
-      summaryPath: interruptedSummaryPath,
+    await interruptPublicationAfterBackup({
+      appRoot,
+      finalOutputDir,
+      finalSummaryPath,
+      stagedOutputDir: interruptedOutputDir,
+      stagedSummaryPath: interruptedSummaryPath,
     });
     await writePublication({
       outputDir: nextOutputDir,
@@ -216,42 +273,95 @@ describe("build output publication", () => {
       summaryMarker: "next",
       summaryPath: nextSummaryPath,
     });
-    await Promise.all([
-      rename(finalOutputDir, outputBackupPath),
-      rename(finalSummaryPath, summaryBackupPath),
-    ]);
-    const lockPath = resolveOutputPublicationLockPath(appRoot);
-    await mkdir(lockPath, { recursive: true });
-    await writeFile(
-      join(lockPath, "owner.json"),
-      `${JSON.stringify({
-        finalOutputDir,
-        finalSummaryPath,
-        hadOutput: true,
-        hadSummary: true,
-        outputBackupPath,
-        phase: "backed-up",
-        pid: 2_147_483_647,
-        stagedOutputDir: interruptedOutputDir,
-        stagedSummaryPath: interruptedSummaryPath,
-        startedAt: new Date(0).toISOString(),
-        summaryBackupPath,
-        token: interruptedToken,
-      })}\n`,
-    );
+    await expect(
+      publishApplicationBuildArtifactsWithObserver(
+        {
+          appRoot,
+          finalOutputDir,
+          finalSummaryPath,
+          stagedOutputDir: nextOutputDir,
+          stagedSummaryPath: nextSummaryPath,
+        },
+        {
+          async afterBackup() {
+            throw new Error("stop after recovery");
+          },
+          async afterOutputInstall() {},
+          async onContention() {},
+        },
+      ),
+    ).rejects.toThrow("stop after recovery");
+
+    await expectPublication({
+      outputDir: finalOutputDir,
+      outputMarker: "last-good",
+      summaryMarker: "last-good",
+      summaryPath: finalSummaryPath,
+    });
+  });
+
+  it("retains interrupted publication state when recovery itself fails", async () => {
+    const appRoot = await createScratchDirectory("eve-output-publication-recovery-retry-");
+    const finalOutputDir = join(appRoot, ".output");
+    const finalSummaryPath = join(appRoot, ".eve", "agent-summary.json");
+    const interruptedOutputDir = join(appRoot, ".eve", "builds", "interrupted", "output");
+    const interruptedSummaryPath = join(appRoot, ".eve", "builds", "interrupted", "summary.json");
+    const firstOutputDir = join(appRoot, ".eve", "builds", "first", "output");
+    const firstSummaryPath = join(appRoot, ".eve", "builds", "first", "summary.json");
+    const retryOutputDir = join(appRoot, ".eve", "builds", "retry", "output");
+    const retrySummaryPath = join(appRoot, ".eve", "builds", "retry", "summary.json");
+    await interruptPublicationAfterBackup({
+      appRoot,
+      finalOutputDir,
+      finalSummaryPath,
+      stagedOutputDir: interruptedOutputDir,
+      stagedSummaryPath: interruptedSummaryPath,
+    });
+    await writePublication({
+      outputDir: firstOutputDir,
+      outputMarker: "first",
+      summaryMarker: "first",
+      summaryPath: firstSummaryPath,
+    });
+    await writePublication({
+      outputDir: retryOutputDir,
+      outputMarker: "retry",
+      summaryMarker: "retry",
+      summaryPath: retrySummaryPath,
+    });
+    try {
+      await chmod(appRoot, 0o500);
+      await expect(
+        publishApplicationBuildArtifacts({
+          appRoot,
+          finalOutputDir,
+          finalSummaryPath,
+          stagedOutputDir: firstOutputDir,
+          stagedSummaryPath: firstSummaryPath,
+        }),
+      ).rejects.toThrow();
+    } finally {
+      await chmod(appRoot, 0o700);
+    }
 
     await expect(
-      publishApplicationBuildArtifacts({
-        appRoot,
-        finalOutputDir,
-        finalSummaryPath,
-        stagedOutputDir: nextOutputDir,
-        stagedSummaryPath: nextSummaryPath,
-        onAfterBackup() {
-          throw new Error("stop after recovery");
+      publishApplicationBuildArtifactsWithObserver(
+        {
+          appRoot,
+          finalOutputDir,
+          finalSummaryPath,
+          stagedOutputDir: retryOutputDir,
+          stagedSummaryPath: retrySummaryPath,
         },
-      }),
-    ).rejects.toThrow("stop after recovery");
+        {
+          async afterBackup() {
+            throw new Error("stop after recovery retry");
+          },
+          async afterOutputInstall() {},
+          async onContention() {},
+        },
+      ),
+    ).rejects.toThrow("stop after recovery retry");
 
     await expectPublication({
       outputDir: finalOutputDir,
@@ -282,16 +392,22 @@ describe("build output publication", () => {
 
     try {
       await expect(
-        publishApplicationBuildArtifacts({
-          appRoot,
-          finalOutputDir,
-          finalSummaryPath,
-          stagedOutputDir,
-          stagedSummaryPath,
-          async onAfterOutputInstall() {
-            await chmod(appRoot, 0o500);
+        publishApplicationBuildArtifactsWithObserver(
+          {
+            appRoot,
+            finalOutputDir,
+            finalSummaryPath,
+            stagedOutputDir,
+            stagedSummaryPath,
           },
-        }),
+          {
+            async afterBackup() {},
+            async afterOutputInstall() {
+              await chmod(appRoot, 0o500);
+            },
+            async onContention() {},
+          },
+        ),
       ).rejects.toThrow();
     } finally {
       await chmod(appRoot, 0o700);

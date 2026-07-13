@@ -31,7 +31,10 @@ describe("prewarmAppSandboxes", () => {
     const appRoot = await createScenarioAppRoot();
     const compilerAppRoot = join(appRoot, ".eve", "builds", "isolated", "compiler");
     await compileAgentInBuildWorkspace({
-      compilerArtifactsRoot: join(compilerAppRoot, ".eve"),
+      artifactLocations: {
+        publishedRoot: join(compilerAppRoot, ".eve"),
+        writeRoot: join(compilerAppRoot, ".eve"),
+      },
       startPath: appRoot,
     });
     const events = createPrewarmEvents();

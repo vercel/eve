@@ -86,12 +86,17 @@ export interface CompileMetadata {
   version: typeof COMPILE_METADATA_VERSION;
 }
 
+export interface CompilerArtifactLocations {
+  readonly publishedRoot: string;
+  readonly writeRoot: string;
+}
+
 /**
  * Input for writing compiler-owned discovery artifacts.
  */
 interface WriteCompilerArtifactsInput {
   appRoot: string;
-  artifactsRoot: string;
+  artifactLocations: CompilerArtifactLocations;
   diagnostics: readonly DiscoverDiagnostic[];
   manifest: AgentSourceManifest;
 }
@@ -193,11 +198,15 @@ export function createCompileMetadata(input: {
   };
 }
 
-/** Writes compiler-owned discovery artifacts to the specified artifact root. */
+/** Writes compiler-owned artifacts and records their stable published locations. */
 export async function writeCompilerArtifacts(
   input: WriteCompilerArtifactsInput,
 ): Promise<WriteCompilerArtifactsResult> {
-  const paths = resolveCompilerArtifactPathsAt(input.appRoot, input.artifactsRoot);
+  const paths = resolveCompilerArtifactPathsAt(input.appRoot, input.artifactLocations.writeRoot);
+  const publishedPaths = resolveCompilerArtifactPathsAt(
+    input.appRoot,
+    input.artifactLocations.publishedRoot,
+  );
   const diagnosticsArtifact = createDiscoveryDiagnosticsArtifact(input.diagnostics);
   const compiledManifest = await materializeWorkspaceResources({
     compileDirectoryPath: paths.compileDirectoryPath,
@@ -208,7 +217,7 @@ export async function writeCompilerArtifacts(
   const diagnosticsArtifactJson = serializeArtifactJson(diagnosticsArtifact);
   const moduleMapSource = createCompiledModuleMapSource({
     manifest: compiledManifest,
-    moduleMapPath: paths.moduleMapPath,
+    moduleMapPath: publishedPaths.moduleMapPath,
   });
   const metadata = createCompileMetadata({
     appRoot: input.appRoot,
@@ -216,7 +225,7 @@ export async function writeCompilerArtifacts(
     diagnosticsSummary: diagnosticsArtifact.summary,
     discoveryManifestJson,
     moduleMapSource,
-    paths,
+    paths: publishedPaths,
   });
   const metadataJson = serializeArtifactJson(metadata);
 

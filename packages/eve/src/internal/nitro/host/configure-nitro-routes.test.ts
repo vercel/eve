@@ -4,8 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PreparedApplicationHost } from "./types.js";
 
 interface NitroStub {
+  hookHandlers: Map<string, Array<() => unknown>>;
   hooks: {
-    hook(): void;
+    hook(name: string, handler: () => unknown): void;
   };
   options: {
     buildDir: string;
@@ -90,10 +91,14 @@ const { EVE_HEALTH_ROUTE_PATH, EVE_INFO_ROUTE_PATH } = await import("#protocol/r
 
 function createNitroStub(
   input: { buildDir?: string; dev?: boolean; rootDir?: string } = {},
-): Nitro {
+): Nitro & Pick<NitroStub, "hookHandlers"> {
+  const hookHandlers = new Map<string, Array<() => unknown>>();
   const nitro: NitroStub = {
+    hookHandlers,
     hooks: {
-      hook() {},
+      hook(name, handler) {
+        hookHandlers.set(name, [...(hookHandlers.get(name) ?? []), handler]);
+      },
     },
     options: {
       buildDir: input.buildDir ?? "G:\\projects\\test-eve\\.eve\\nitro",
@@ -107,7 +112,7 @@ function createNitroStub(
     },
   };
 
-  return nitro as never as Nitro;
+  return nitro as never as Nitro & Pick<NitroStub, "hookHandlers">;
 }
 
 function createPreparedHost(
@@ -251,6 +256,24 @@ describe("Nitro route configuration", () => {
     expect(nitro.options.virtual["#eve-workflow/workflows"]).toBeUndefined();
   });
 
+  it("reports a failed workflow sync and runs the next queued sync", async () => {
+    workflowBuilderMocks.build
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("injected workflow sync failure"))
+      .mockResolvedValueOnce(undefined);
+    const nitro = createNitroStub({ dev: true });
+
+    await configureDevelopmentNitroRoutes(nitro, createPreparedHost());
+    const reload = nitro.hookHandlers.get("dev:reload")?.[0];
+    if (reload === undefined) {
+      throw new Error("Expected the workflow reload hook to be registered.");
+    }
+
+    await expect(reload()).rejects.toThrow("injected workflow sync failure");
+    await expect(reload()).resolves.toBeUndefined();
+    expect(workflowBuilderMocks.build).toHaveBeenCalledTimes(3);
+  });
+
   it("registers direct workflow queue handlers in dev mode so the worker bypasses HTTP dispatch", async () => {
     const root = "/tmp/eve-nitro-direct-handlers";
     const buildDir = `${root}/nitro`;
@@ -319,10 +342,10 @@ describe("Nitro route configuration", () => {
     });
     expect(
       devNitro.options.virtual[`#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`],
-    ).toContain('"dev":true');
+    ).toContain('"kind":"development"');
     expect(
       prodNitro.options.virtual[`#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`],
-    ).toContain('"dev":false');
+    ).toContain('"kind":"production"');
     expect(
       devNitro.options.virtual[`#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`],
     ).toContain("dispatchChannelRequest");

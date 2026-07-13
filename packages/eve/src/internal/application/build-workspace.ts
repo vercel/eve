@@ -7,17 +7,31 @@ import { VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH } from "#internal/vercel-agent-sum
 
 export interface ApplicationBuildWorkspace {
   readonly appRoot: string;
-  readonly compilerAppRoot: string;
-  readonly compilerArtifactsRoot: string;
-  readonly finalOutputDir: string;
-  readonly finalSummaryPath: string;
-  readonly hostArtifactsDir: string;
-  readonly nitroBuildDir: string;
-  readonly nitroOutputDir: string;
-  readonly outputDir: string;
+  readonly compiler: {
+    readonly artifactsDir: string;
+    readonly rootDir: string;
+  };
+  readonly host: {
+    readonly artifactsDir: string;
+  };
+  readonly nitro: {
+    readonly buildDir: string;
+    readonly surfaceOutputDir: string;
+  };
+  readonly publication: {
+    readonly output: {
+      readonly finalDir: string;
+      readonly stagedDir: string;
+    };
+    readonly summary: {
+      readonly finalPath: string;
+      readonly stagedPath: string;
+    };
+  };
   readonly rootDir: string;
-  readonly summaryPath: string;
-  readonly workflowBuildDir: string;
+  readonly workflow: {
+    readonly buildDir: string;
+  };
 }
 
 export async function createApplicationBuildWorkspace(
@@ -26,20 +40,34 @@ export async function createApplicationBuildWorkspace(
   const resolvedAppRoot = resolve(appRoot);
   const buildId = `${Date.now().toString(36)}-${randomUUID()}`;
   const rootDir = join(resolvedAppRoot, ".eve", "builds", buildId);
-  const compilerAppRoot = join(rootDir, "compiler");
+  const compilerRootDir = join(rootDir, "compiler");
   const workspace: ApplicationBuildWorkspace = {
     appRoot: resolvedAppRoot,
-    compilerAppRoot,
-    compilerArtifactsRoot: join(compilerAppRoot, ".eve"),
-    finalOutputDir: resolveOutputDirectory(resolvedAppRoot),
-    finalSummaryPath: join(resolvedAppRoot, VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH),
-    hostArtifactsDir: join(rootDir, "host"),
-    nitroBuildDir: join(rootDir, "nitro"),
-    nitroOutputDir: join(rootDir, "nitro-output"),
-    outputDir: join(rootDir, "output"),
+    compiler: {
+      artifactsDir: join(compilerRootDir, ".eve"),
+      rootDir: compilerRootDir,
+    },
+    host: {
+      artifactsDir: join(rootDir, "host"),
+    },
+    nitro: {
+      buildDir: join(rootDir, "nitro"),
+      surfaceOutputDir: join(rootDir, "nitro-output"),
+    },
+    publication: {
+      output: {
+        finalDir: resolveOutputDirectory(resolvedAppRoot),
+        stagedDir: join(rootDir, "output"),
+      },
+      summary: {
+        finalPath: join(resolvedAppRoot, VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH),
+        stagedPath: join(rootDir, "agent-summary.json"),
+      },
+    },
     rootDir,
-    summaryPath: join(rootDir, "agent-summary.json"),
-    workflowBuildDir: join(rootDir, "workflow"),
+    workflow: {
+      buildDir: join(rootDir, "workflow"),
+    },
   };
 
   await mkdir(rootDir, { recursive: true });

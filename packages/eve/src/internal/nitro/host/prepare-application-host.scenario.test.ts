@@ -36,6 +36,7 @@ describe("application host preparation", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
+
   it("keeps production compiler and host writes inside one invocation workspace", async () => {
     const { agentRoot, appRoot } = await createAppRoot("eve-production-host-workspace-", {
       files: {
@@ -50,12 +51,12 @@ describe("application host preparation", () => {
       const preparedHost = await prepareProductionApplicationHost(workspace);
 
       expect(preparedHost.compileResult.paths.compileDirectoryPath).toBe(
-        join(workspace.compilerArtifactsRoot, "compile"),
+        join(workspace.compiler.artifactsDir, "compile"),
       );
       expect(preparedHost.compiledArtifacts.bootstrapPath).toBe(
-        join(workspace.hostArtifactsDir, "compiled-artifacts-bootstrap.mjs"),
+        join(workspace.host.artifactsDir, "compiled-artifacts-bootstrap.mjs"),
       );
-      expect(preparedHost.workflowBuildDir).toBe(workspace.workflowBuildDir);
+      expect(preparedHost.workflowBuildDir).toBe(workspace.workflow.buildDir);
       expect(existsSync(join(appRoot, ".eve", "compile"))).toBe(false);
       expect(existsSync(join(appRoot, ".eve", "host"))).toBe(false);
     } finally {

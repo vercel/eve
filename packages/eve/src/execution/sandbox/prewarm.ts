@@ -194,19 +194,19 @@ export async function prewarmBuiltAppSandboxes(input: {
   readonly dispatch?: SandboxBackendPrewarmDispatch;
 }): Promise<void> {
   const builtArtifactsRoot = join(input.appRoot, ".output");
-  const authoredSource = createDiskRuntimeCompiledArtifactsSource(builtArtifactsRoot, {
+  const builtArtifactsSource = createDiskRuntimeCompiledArtifactsSource(builtArtifactsRoot, {
     moduleMapLoaderPath: resolvePackageSourceFilePath("src/internal/authored-module-map-loader.ts"),
     sandboxAppRoot: input.appRoot,
   });
   const [metadata, manifest, moduleMap] = await Promise.all([
     loadCompileMetadata({
-      compiledArtifactsSource: authoredSource,
+      compiledArtifactsSource: builtArtifactsSource,
     }),
     loadCompiledManifest({
-      compiledArtifactsSource: authoredSource,
+      compiledArtifactsSource: builtArtifactsSource,
     }),
     loadCompiledModuleMapFromAuthoredSource({
-      compiledArtifactsSource: authoredSource,
+      compiledArtifactsSource: builtArtifactsSource,
     }),
   ]);
 

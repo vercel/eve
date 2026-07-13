@@ -10,6 +10,7 @@ import {
 } from "#runtime/schedules/resolve-schedule.js";
 import type { ResolvedScheduleDefinition } from "#runtime/types.js";
 import type { ApplicationBuildWorkspace } from "#internal/application/build-workspace.js";
+import { join } from "node:path";
 import {
   type BuiltInWorkflowWorldTarget,
   writeCompiledArtifactsFiles,
@@ -25,7 +26,6 @@ import {
 } from "#internal/nitro/dev-runtime-artifacts.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 
-/** Compiles and activates the stable artifacts consumed by a development host. */
 export async function prepareDevelopmentApplicationHost(
   startPath: string,
 ): Promise<PreparedApplicationHost> {
@@ -53,12 +53,14 @@ export async function prepareDevelopmentApplicationHost(
   return preparedHost;
 }
 
-/** Prepares a production host without writing outside its invocation workspace. */
 export async function prepareProductionApplicationHost(
   workspace: ApplicationBuildWorkspace,
 ): Promise<PreparedApplicationHost> {
   const compileResult = await compileAgentInBuildWorkspace({
-    compilerArtifactsRoot: workspace.compilerArtifactsRoot,
+    artifactLocations: {
+      publishedRoot: join(workspace.publication.output.finalDir, ".eve"),
+      writeRoot: workspace.compiler.artifactsDir,
+    },
     startPath: workspace.appRoot,
   });
   const schedules = await resolveSchedules({ manifest: compileResult.manifest });
@@ -66,9 +68,9 @@ export async function prepareProductionApplicationHost(
   return await materializeApplicationHost({
     compileResult,
     defaultWorkflowWorld: resolveProductionWorkflowWorldTarget(),
-    hostArtifactsDir: workspace.hostArtifactsDir,
+    hostArtifactsDir: workspace.host.artifactsDir,
     schedules,
-    workflowBuildDir: workspace.workflowBuildDir,
+    workflowBuildDir: workspace.workflow.buildDir,
   });
 }
 
@@ -96,5 +98,9 @@ async function materializeApplicationHost(input: {
 }
 
 function resolveProductionWorkflowWorldTarget(): BuiltInWorkflowWorldTarget {
-  return process.env.VERCEL ? "vercel" : "local";
+  if (process.env.VERCEL) {
+    return "vercel";
+  }
+
+  return "local";
 }

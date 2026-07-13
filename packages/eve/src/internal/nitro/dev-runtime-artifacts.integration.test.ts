@@ -504,8 +504,8 @@ describe("development runtime artifact snapshots", () => {
     expect(
       resolveNitroCompiledArtifactsSource({
         appRoot,
-        dev: true,
         devRuntimeArtifactsPointerPath: resolveDevelopmentRuntimeArtifactsPointerPath(appRoot),
+        kind: "development",
         moduleMapLoaderPath: "/package/src/internal/authored-module-map-loader.ts",
       }),
     ).toMatchObject({

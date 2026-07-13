@@ -9,6 +9,7 @@ import { createDiskProjectSource, type ProjectSource } from "#discover/project-s
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import {
   type CompileMetadata,
+  type CompilerArtifactLocations,
   type CompilerArtifactPaths,
   writeCompilerArtifacts,
 } from "#compiler/artifacts.js";
@@ -74,18 +75,21 @@ export class CompileAgentError extends Error {
  */
 export async function compileAgent(input: CompileAgentInput = {}): Promise<CompileAgentResult> {
   const discovered = await discoverAgentForCompilation(input);
-  const result = await writeAgentCompilation(discovered, join(discovered.project.appRoot, ".eve"));
+  const artifactsRoot = join(discovered.project.appRoot, ".eve");
+  const result = await writeAgentCompilation(discovered, {
+    publishedRoot: artifactsRoot,
+    writeRoot: artifactsRoot,
+  });
 
   return finishAgentCompilation(result, CompileAgentError.fromDurableArtifacts);
 }
 
-/** Compiles one app entirely within an invocation-owned production build workspace. */
 export async function compileAgentInBuildWorkspace(input: {
-  readonly compilerArtifactsRoot: string;
+  readonly artifactLocations: CompilerArtifactLocations;
   readonly startPath: string;
 }): Promise<CompileAgentResult> {
   const discovered = await discoverAgentForCompilation({ startPath: input.startPath });
-  const result = await writeAgentCompilation(discovered, input.compilerArtifactsRoot);
+  const result = await writeAgentCompilation(discovered, input.artifactLocations);
 
   return finishAgentCompilation(result, CompileAgentError.fromTransientArtifacts);
 }
@@ -112,11 +116,11 @@ async function discoverAgentForCompilation(
 
 async function writeAgentCompilation(
   discovered: DiscoveredAgentCompilation,
-  artifactsRoot: string,
+  artifactLocations: CompilerArtifactLocations,
 ): Promise<CompileAgentResult> {
   const writtenArtifacts = await writeCompilerArtifacts({
     appRoot: discovered.project.appRoot,
-    artifactsRoot,
+    artifactLocations,
     diagnostics: discovered.diagnostics,
     manifest: discovered.manifest,
   });

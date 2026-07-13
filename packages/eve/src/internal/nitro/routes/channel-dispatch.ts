@@ -142,8 +142,7 @@ async function withDevelopmentVercelOidcContext<T>(
   request: Request,
   callback: () => Promise<T>,
 ): Promise<T> {
-  const appRoot = config.appRoot;
-  if (config.dev !== true || appRoot === undefined) {
+  if (config.kind !== "development") {
     return await callback();
   }
 
@@ -151,7 +150,7 @@ async function withDevelopmentVercelOidcContext<T>(
     {
       request,
       resolveCurrentProject: async () => {
-        const link = await readVercelProjectLink(appRoot);
+        const link = await readVercelProjectLink(config.appRoot);
         return link === undefined
           ? undefined
           : { environment: "development", projectId: link.projectId };

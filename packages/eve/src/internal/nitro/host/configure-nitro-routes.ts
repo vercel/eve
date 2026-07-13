@@ -21,8 +21,11 @@ import { WorkflowBundleBuilder } from "#internal/workflow-bundle/builder.js";
 import {
   createDevelopmentNitroArtifactsConfig,
   createProductionNitroArtifactsConfig,
-  type NitroArtifactsConfigInput,
 } from "#internal/nitro/host/artifacts-config.js";
+import type {
+  DevelopmentNitroArtifactsConfig,
+  NitroArtifactsConfig,
+} from "#internal/nitro/routes/runtime-artifacts.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
 import {
   computeChannelRouteRegistrations,
@@ -271,8 +274,8 @@ function createSerializedWorkflowArtifactSync(
   let previousBuild: Promise<void> = Promise.resolve();
 
   return async () => {
-    const nextBuild = previousBuild.then(buildWorkflowArtifacts);
-    previousBuild = nextBuild.catch(() => {});
+    const nextBuild = previousBuild.then(buildWorkflowArtifacts, buildWorkflowArtifacts);
+    previousBuild = nextBuild;
     await nextBuild;
   };
 }
@@ -297,7 +300,7 @@ async function registerWorkflowArtifactBuildHook(
 function registerApplicationRoutes(
   nitro: Nitro,
   preparedHost: PreparedApplicationHost,
-  artifactsConfig: NitroArtifactsConfigInput,
+  artifactsConfig: NitroArtifactsConfig,
 ): void {
   addFrameworkVirtualHandler(nitro, {
     args: JSON.stringify({
@@ -323,7 +326,7 @@ function registerApplicationRoutes(
 
 function registerDevelopmentControlRoutes(
   nitro: Nitro,
-  artifactsConfig: NitroArtifactsConfigInput,
+  artifactsConfig: DevelopmentNitroArtifactsConfig,
 ): void {
   addFrameworkVirtualHandler(nitro, {
     args: JSON.stringify({ appRoot: artifactsConfig.appRoot }),
@@ -372,7 +375,6 @@ async function registerWorkflowRoute(
   });
 }
 
-/** Wires development-only application and Workflow routes into a Nitro host. */
 export async function configureDevelopmentNitroRoutes(
   nitro: Nitro,
   preparedHost: PreparedApplicationHost,
@@ -409,7 +411,6 @@ export async function configureDevelopmentNitroRoutes(
   nitro.routing.sync();
 }
 
-/** Wires production application and Workflow routes for one build surface. */
 export async function configureProductionNitroRoutes(
   nitro: Nitro,
   preparedHost: PreparedApplicationHost,
@@ -433,11 +434,7 @@ export async function configureProductionNitroRoutes(
   }
 
   if (includesApplicationRoutes(surface)) {
-    registerApplicationRoutes(
-      nitro,
-      preparedHost,
-      createProductionNitroArtifactsConfig({ appRoot: preparedHost.appRoot }),
-    );
+    registerApplicationRoutes(nitro, preparedHost, createProductionNitroArtifactsConfig());
   }
 
   if (includesWorkflowRoute(surface)) {

@@ -11,6 +11,7 @@ import {
   writeEveVersionedCacheMetadata,
 } from "#internal/application/cache-metadata.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
+import { runQueuedWorkflowBuild } from "#internal/workflow-bundle/build-queue.js";
 import {
   atomicWriteFile,
   bundleFinalWorkflowOutput,
@@ -50,10 +51,6 @@ import {
 } from "#internal/workflow-bundle/workflow-builders.js";
 import { deriveEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
 
-// Serialize same-output builds so parallel Vercel surfaces never read
-// `workflows.mjs` between the workflow wrapper write and literal rewrite pass.
-const workflowBundleBuildLocks = new Map<string, Promise<void>>();
-
 export class WorkflowBundleBuilder {
   readonly #agentName: string;
   readonly #compiledArtifactsBootstrapPath: string;
@@ -86,13 +83,7 @@ export class WorkflowBundleBuilder {
   async build(
     options: { nitroStepOutfile?: string; nitroWorkflowOutfile?: string } = {},
   ): Promise<void> {
-    const previous = workflowBundleBuildLocks.get(this.#outDir) ?? Promise.resolve();
-    const next = previous.then(() => this.#performBuild(options));
-    workflowBundleBuildLocks.set(
-      this.#outDir,
-      next.catch(() => {}),
-    );
-    await next;
+    await runQueuedWorkflowBuild(this.#outDir, async () => this.#performBuild(options));
   }
 
   async #performBuild(options: {
@@ -132,6 +123,7 @@ export class WorkflowBundleBuilder {
       outfile: stepsOutfile,
       preferAbsoluteFileImports: true,
       projectRoot: this.config.projectRoot ?? this.config.workingDir,
+      sideEffectFiles: [this.#compiledArtifactsBootstrapPath],
       workingDir: this.config.workingDir,
     });
     const nitroStepOutfile = options.nitroStepOutfile;
@@ -143,6 +135,7 @@ export class WorkflowBundleBuilder {
         outfile: nitroStepOutfile,
         preferAbsoluteFileImports: true,
         projectRoot: this.config.projectRoot ?? this.config.workingDir,
+        sideEffectFiles: [this.#compiledArtifactsBootstrapPath],
         workingDir: this.config.workingDir,
       });
     }
@@ -453,8 +446,7 @@ export class WorkflowBundleBuilder {
   }
 
   async #getBuildInputFiles(): Promise<string[]> {
-    const inputFiles = await this.getInputFiles();
-    return [...inputFiles, this.#compiledArtifactsBootstrapPath];
+    return await this.getInputFiles();
   }
 
   async #patchVercelFunctionConfig(
