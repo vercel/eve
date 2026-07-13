@@ -423,6 +423,74 @@ describe("development runtime artifact snapshots", () => {
     expect(existsSync(staleSnapshotRoot)).toBe(false);
   });
 
+  it("only reads the run store when collecting protected snapshots", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-artifacts-run-store-");
+    const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
+    const runReferencedSnapshotRoot = join(snapshotsRoot, "referenced-by-run");
+    const eventReferencedSnapshotRoot = join(snapshotsRoot, "referenced-by-event");
+    const oldSnapshotTime = new Date(1_000);
+    const now = 1_000_000;
+
+    for (const snapshotRoot of [runReferencedSnapshotRoot, eventReferencedSnapshotRoot]) {
+      await mkdir(snapshotRoot, { recursive: true });
+      await writeFile(join(snapshotRoot, "marker.txt"), snapshotRoot);
+      await utimes(snapshotRoot, oldSnapshotTime, oldSnapshotTime);
+    }
+
+    const workflowDataRoot = join(appRoot, ".workflow-data", "default");
+    await mkdir(join(workflowDataRoot, "runs"), { recursive: true });
+    await mkdir(join(workflowDataRoot, "events"), { recursive: true });
+
+    // A non-terminal run holds the only reference that should protect a snapshot.
+    await writeFile(
+      join(workflowDataRoot, "runs", "running-turn.json"),
+      `${JSON.stringify(
+        {
+          status: "running",
+          input: {
+            serializedContext: {
+              "eve.bundle": {
+                source: {
+                  appRoot: join(runReferencedSnapshotRoot, "source", "app").replaceAll("\\", "/"),
+                },
+              },
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    // The event store is the bulk of a real `.workflow-data` (an observed store was ~78% events)
+    // and never carries a snapshot reference, so the pruner must not spend a read on it. Writing
+    // a snapshot path here proves the directory is skipped: if it were still scanned, this
+    // snapshot would be protected and survive the prune.
+    await writeFile(
+      join(workflowDataRoot, "events", "turn-event.json"),
+      `${JSON.stringify(
+        {
+          eventType: "turn.completed",
+          payload: {
+            appRoot: join(eventReferencedSnapshotRoot, "source", "app").replaceAll("\\", "/"),
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    await pruneDevelopmentRuntimeArtifactsSnapshots({
+      appRoot,
+      now,
+      recentWindowMs: 0,
+      retainCount: 0,
+    });
+
+    expect(existsSync(runReferencedSnapshotRoot)).toBe(true);
+    expect(existsSync(eventReferencedSnapshotRoot)).toBe(false);
+  });
+
   it("removes a partially staged snapshot when staging fails", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-artifacts-failed-stage-");
     const agentRoot = join(appRoot, "agent");
