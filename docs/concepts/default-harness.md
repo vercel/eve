@@ -1,9 +1,9 @@
 ---
 title: "The Harness"
-description: "The out-of-the-box eve agent loop and the built-in tools every agent ships with, plus how to override or disable them."
+description: "The out-of-the-box eve agent loop and its built-in tools, including root-only and conditional capabilities."
 ---
 
-The default harness is what every eve agent ships with. It includes the framework-owned agent loop plus a set of built-in tools the model can call without you writing a line. You extend it with capabilities specific to your agent. The loop itself, how a turn runs and checkpoints and resumes, lives in [Execution model and durability](./execution-model-and-durability).
+The default harness is what every eve agent ships with. It includes the framework-owned agent loop plus built-in tools made available according to the agent and session. You extend it with capabilities specific to your agent. The loop itself, how a turn runs and checkpoints and resumes, lives in [Execution model and durability](./execution-model-and-durability).
 
 ## Compaction
 
@@ -22,7 +22,7 @@ Compaction also preserves the framework's own tool state automatically. It reset
 
 ## Built-in tools
 
-These ship with every agent, no imports. The harness shows the model the tool descriptors first, then executes only what the model actually calls; discovery never runs them. The shell and file tools (`bash`, `read_file`, `write_file`, `glob`, `grep`) live in the app runtime and proxy their work into the agent's single [sandbox](../sandbox); the rest run in the app runtime. The "Where it runs" column below names where each tool's effect lands.
+These are framework-provided and require no imports. Availability depends on the session: `agent` is root-only, while `load_skill`, `connection_search`, `ask_question`, and `web_search` depend on authored capabilities or runtime support. The harness shows the model only the available tool descriptors, then executes what the model actually calls; discovery never runs them. The shell and file tools (`bash`, `read_file`, `write_file`, `glob`, `grep`) live in the app runtime and proxy their work into the agent's single [sandbox](../sandbox); the rest run in the app runtime. The "Where it runs" column below names where each tool's effect lands.
 
 | Tool                | Does                                                                                                                                                                                                                | Where it runs |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
@@ -35,13 +35,13 @@ These ship with every agent, no imports. The harness shows the model the tool de
 | `web_search`        | Search the web (provider-managed; resolved from the model provider).                                                                                                                                                | Provider      |
 | `todo`              | Maintain a durable per-session todo list.                                                                                                                                                                           | App runtime   |
 | `ask_question`      | Ask the user a clarifying question or a choice mid-turn and park until they answer. No `execute`; the model calls it with `{ prompt, options?, allowFreeform? }`. See [Human-in-the-loop](/docs/human-in-the-loop). | App runtime   |
-| `agent`             | Delegate a subtask to a copy of itself (shares the parent sandbox + tools, fresh history/state).                                                                                                                    | App runtime   |
+| `agent`             | Root-only. Delegate a subtask to a fresh copy of the root agent (shared sandbox, fresh history/state).                                                                                                              | App runtime   |
 | `load_skill`        | Pull an on-demand [skill](../skills)'s instructions into the current turn. Present only when the agent declares skills.                                                                                             | App runtime   |
 | `connection_search` | Discover tools across declared [connections](../connections); matched tools become directly callable. Present only when the agent declares connections.                                                             | App runtime   |
 
 Notes:
 
-- **`agent`** runs a copy of the current agent on a focused task. It inherits the same tools, connections, and instructions, but starts with fresh conversation history and fresh [state](../guides/state). The child shares the parent's sandbox filesystem, so anything it writes is visible to the parent. See [Subagents](../subagents).
+- **`agent`** is available only to the root session and runs a fresh copy of the root agent on a focused task. The copy inherits the root's instructions, tools, and connections, but it does not receive the root-only `agent` or `Workflow` tools. It starts with fresh conversation history and fresh [state](../guides/state), while sharing the root's sandbox filesystem so its writes are visible to the root. Declared subagents never receive this built-in; see [Subagents](../subagents).
 - **`load_skill`** only pulls instructions into context. It adds no new execution surface, because behavior still comes from the tools the agent already has.
 - **`connection_search`** surfaces a connection's tools by their qualified name (e.g. `linear__list_issues`), which the model can then call directly. It's registered only when the agent has connections.
 - **`web_search`** has no local executor; the provider runs it. To supply your own implementation, override it with `defineTool()`.
