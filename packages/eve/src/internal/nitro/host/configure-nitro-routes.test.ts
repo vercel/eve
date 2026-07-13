@@ -84,7 +84,8 @@ vi.mock("../../application/paths.js", () => ({
   isVercelBuildEnvironment: () => Boolean(process.env.VERCEL),
 }));
 
-const { configureNitroRoutes } = await import("./configure-nitro-routes.js");
+const { configureDevelopmentNitroRoutes, configureProductionNitroRoutes } =
+  await import("./configure-nitro-routes.js");
 const { EVE_HEALTH_ROUTE_PATH, EVE_INFO_ROUTE_PATH } = await import("#protocol/routes.js");
 
 function createNitroStub(
@@ -151,7 +152,7 @@ function createPreparedHost(
   return preparedHost as never as PreparedApplicationHost;
 }
 
-describe("configureNitroRoutes", () => {
+describe("Nitro route configuration", () => {
   beforeEach(() => {
     fsMocks.mkdir.mockClear();
     fsMocks.writeFile.mockClear();
@@ -164,9 +165,7 @@ describe("configureNitroRoutes", () => {
   it("registers package-owned route files through file-url virtual handlers", async () => {
     const nitro = createNitroStub();
 
-    await configureNitroRoutes(nitro, createPreparedHost(), {
-      surface: "app",
-    });
+    await configureProductionNitroRoutes(nitro, createPreparedHost(), "app");
 
     const healthHandler = nitro.options.handlers.find(
       (handler) => handler.route === EVE_HEALTH_ROUTE_PATH && handler.method === "GET",
@@ -183,9 +182,11 @@ describe("configureNitroRoutes", () => {
   it("bakes the agent name into the home page route", async () => {
     const nitro = createNitroStub();
 
-    await configureNitroRoutes(nitro, createPreparedHost({ agentName: "support-agent" }), {
-      surface: "app",
-    });
+    await configureProductionNitroRoutes(
+      nitro,
+      createPreparedHost({ agentName: "support-agent" }),
+      "app",
+    );
 
     const homeHandler = nitro.options.handlers.find(
       (handler) => handler.route === "/" && handler.method === "GET",
@@ -200,9 +201,7 @@ describe("configureNitroRoutes", () => {
   it("registers the health route for HEAD so load balancers probing with HEAD see 200", async () => {
     const nitro = createNitroStub();
 
-    await configureNitroRoutes(nitro, createPreparedHost(), {
-      surface: "app",
-    });
+    await configureProductionNitroRoutes(nitro, createPreparedHost(), "app");
 
     const healthMethods = nitro.options.handlers
       .filter((handler) => handler.route === EVE_HEALTH_ROUTE_PATH)
@@ -227,15 +226,12 @@ describe("configureNitroRoutes", () => {
     const workflowBuildDir = `${root}/workflow-cache`;
     const nitro = createNitroStub({ buildDir, dev: true, rootDir: root });
 
-    await configureNitroRoutes(
+    await configureDevelopmentNitroRoutes(
       nitro,
       createPreparedHost({
         appRoot: root,
         workflowBuildDir,
       }),
-      {
-        surface: "flow",
-      },
     );
 
     const workflowHandler = nitro.options.handlers.find(
@@ -260,9 +256,7 @@ describe("configureNitroRoutes", () => {
     const buildDir = `${root}/nitro`;
     const nitro = createNitroStub({ buildDir, dev: true, rootDir: root });
 
-    await configureNitroRoutes(nitro, createPreparedHost({ appRoot: root }), {
-      surface: "all",
-    });
+    await configureDevelopmentNitroRoutes(nitro, createPreparedHost({ appRoot: root }));
 
     const workflowHandlerSource = readWriteFileSourceMatching("/workflow/workflows-handler.mjs");
 
@@ -286,12 +280,8 @@ describe("configureNitroRoutes", () => {
     const devNitro = createNitroStub({ dev: true });
     const prodNitro = createNitroStub({ dev: false });
 
-    await configureNitroRoutes(devNitro, createPreparedHost(), {
-      surface: "app",
-    });
-    await configureNitroRoutes(prodNitro, createPreparedHost(), {
-      surface: "app",
-    });
+    await configureDevelopmentNitroRoutes(devNitro, createPreparedHost());
+    await configureProductionNitroRoutes(prodNitro, createPreparedHost(), "app");
 
     expect(devNitro.options.handlers).toContainEqual({
       handler: "#eve-route/eve/v1/dev/runtime-artifacts",
@@ -314,12 +304,8 @@ describe("configureNitroRoutes", () => {
     const devNitro = createNitroStub({ dev: true });
     const prodNitro = createNitroStub({ dev: false });
 
-    await configureNitroRoutes(devNitro, createPreparedHost(), {
-      surface: "app",
-    });
-    await configureNitroRoutes(prodNitro, createPreparedHost(), {
-      surface: "app",
-    });
+    await configureDevelopmentNitroRoutes(devNitro, createPreparedHost());
+    await configureProductionNitroRoutes(prodNitro, createPreparedHost(), "app");
 
     expect(devNitro.options.handlers).toContainEqual({
       handler: `#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`,
@@ -355,16 +341,14 @@ describe("configureNitroRoutes", () => {
     const workflowBuildDir = `${root}/workflow-cache`;
     const nitro = createNitroStub({ buildDir, dev: false, rootDir: root });
 
-    await configureNitroRoutes(
+    await configureProductionNitroRoutes(
       nitro,
       createPreparedHost({
         appRoot: root,
         workflowBuildDir,
         workflowWorld: "@workflow/world-postgres",
       }),
-      {
-        surface: "all",
-      },
+      "all",
     );
 
     const workflowHandlerSource = readWriteFileSourceMatching("/workflow/workflows-handler.mjs");
@@ -383,16 +367,14 @@ describe("configureNitroRoutes", () => {
     const workflowBuildDir = `${root}/workflow-cache`;
     const nitro = createNitroStub({ buildDir, dev: false, rootDir: root });
 
-    await configureNitroRoutes(
+    await configureProductionNitroRoutes(
       nitro,
       createPreparedHost({
         appRoot: root,
         workflowBuildDir,
         workflowWorld: "@workflow/world-postgres",
       }),
-      {
-        surface: "all",
-      },
+      "all",
     );
 
     const workflowHandlerSource = readWriteFileSourceMatching("/workflow/workflows-handler.mjs");
@@ -415,9 +397,11 @@ describe("configureNitroRoutes", () => {
     const workflowBuildDir = `${root}/workflow-cache`;
     const nitro = createNitroStub({ buildDir, dev: false, rootDir: root });
 
-    await configureNitroRoutes(nitro, createPreparedHost({ appRoot: root, workflowBuildDir }), {
-      surface: "all",
-    });
+    await configureProductionNitroRoutes(
+      nitro,
+      createPreparedHost({ appRoot: root, workflowBuildDir }),
+      "all",
+    );
 
     const workflowHandlerSource = readWriteFileSourceMatching("/workflow/workflows-handler.mjs");
 

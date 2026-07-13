@@ -40,7 +40,7 @@ async function expectPublication(input: {
 }
 
 describe("build output publication", () => {
-  it("publishes one completed output and its matching summary", async () => {
+  it("publishes matching output and summary", async () => {
     const appRoot = await createScratchDirectory("eve-output-publication-");
     const finalOutputDir = join(appRoot, ".output");
     const finalSummaryPath = join(appRoot, ".eve", "agent-summary.json");

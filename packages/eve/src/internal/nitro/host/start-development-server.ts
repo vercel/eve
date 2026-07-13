@@ -6,7 +6,7 @@ import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install
 import { build as buildNitro, createDevServer, prepare } from "nitro/builder";
 import type { Nitro } from "nitro/types";
 
-import { createApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
+import { createDevelopmentApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
 import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import type { AuthoredSourceWatcherHandle } from "#internal/nitro/host/dev-authored-source-watcher.js";
 import { prepareDevelopmentApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
@@ -474,7 +474,7 @@ async function startNitroDevelopmentServer(
     pruneLocalSandboxTemplatesInBackground(preparedHost.appRoot);
     const activeNitro = await devBootPhase(
       "creating dev server",
-      () => createApplicationNitro(preparedHost, true),
+      () => createDevelopmentApplicationNitro(preparedHost),
       options.onBootProgress,
     );
     nitro = activeNitro;

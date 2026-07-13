@@ -18,7 +18,7 @@ import { publishApplicationBuildArtifacts } from "#internal/application/output-p
 import { stageProductionStartArtifacts } from "#internal/application/production-start-artifacts.js";
 import { WorkflowBundleBuilder } from "#internal/workflow-bundle/builder.js";
 import { normalizeEveVercelFunctionOutput } from "#internal/workflow-bundle/vercel-workflow-output.js";
-import { createApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
+import { createProductionApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
 import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-summary.js";
 import { tryReadExtensionBuildConfig } from "#internal/nitro/host/build-extension.js";
 import { prepareProductionApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
@@ -289,7 +289,7 @@ async function buildVercelNitroSurface(
   workspace: ApplicationBuildWorkspace,
   surface: Exclude<NitroBuildSurface, "all">,
 ): Promise<string> {
-  const nitro = await createApplicationNitro(preparedHost, false, {
+  const nitro = await createProductionApplicationNitro(preparedHost, {
     buildDir: join(workspace.nitroBuildDir, surface),
     outputDir: join(workspace.nitroOutputDir, surface),
     surface,
@@ -335,9 +335,10 @@ async function buildApplicationInWorkspace(
   const preparedHost = await prepareProductionApplicationHost(workspace);
 
   if (!process.env.VERCEL) {
-    const nitro = await createApplicationNitro(preparedHost, false, {
+    const nitro = await createProductionApplicationNitro(preparedHost, {
       buildDir: workspace.nitroBuildDir,
       outputDir: workspace.outputDir,
+      surface: "all",
     });
 
     try {
@@ -362,7 +363,7 @@ async function buildApplicationInWorkspace(
     preparedHost.appRoot,
     preparedHost.compileResult.project.agentRoot,
   );
-  const nitro = await createApplicationNitro(preparedHost, false, {
+  const nitro = await createProductionApplicationNitro(preparedHost, {
     buildDir: join(workspace.nitroBuildDir, "app"),
     outputDir: workspace.outputDir,
     surface: "app",
