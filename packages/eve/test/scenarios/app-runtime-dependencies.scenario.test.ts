@@ -12,9 +12,16 @@ import {
 import { buildApplication } from "../../src/internal/nitro/host.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 
+vi.mock("../../src/internal/nitro/host/vercel-build-prewarm.js", () => ({
+  runVercelBuildPrewarm: async () => true,
+}));
+
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 const EVE_PACKAGE_ROOT = resolvePackageRoot();
 const createScratchDirectory = useTemporaryDirectories();
+const DEPLOYABLE_BUILD_OPTIONS = {
+  skipVercelSandboxPrewarm: false,
+} as const;
 
 async function readJavaScriptModulesRecursively(rootDirectory: string): Promise<string> {
   // `withFileTypes` so directories named like modules (for example the
@@ -145,7 +152,7 @@ describe("app runtime dependency tracing", () => {
       ].join("\n"),
     );
 
-    const outputDir = await buildApplication(appRoot);
+    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
     const tracedServerPackageJson = await readTracedServerPackageJson(outputDir);
     const serverModuleDirectory = join(outputDir, "server");
     const serverModuleEntries = await readdir(serverModuleDirectory, {
@@ -249,7 +256,7 @@ describe("app runtime dependency tracing", () => {
       ].join("\n"),
     );
 
-    const outputDir = await buildApplication(appRoot);
+    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
     const serverModuleDirectory = join(outputDir, "server");
     const serverModuleEntries = await readdir(serverModuleDirectory, {
       recursive: true,
@@ -336,6 +343,7 @@ describe("app runtime dependency tracing", () => {
 
     const disabledOutputDir = await buildApplication(
       await createWorkflowAssetsApp("disabled", false),
+      DEPLOYABLE_BUILD_OPTIONS,
     );
     const disabledTracedPackageJson = await readTracedServerPackageJson(disabledOutputDir);
     const disabledServerSource = await readJavaScriptModulesRecursively(
@@ -344,7 +352,10 @@ describe("app runtime dependency tracing", () => {
 
     expect(disabledServerSource).not.toContain("[Unprintable QuickJS value]");
 
-    const enabledOutputDir = await buildApplication(await createWorkflowAssetsApp("enabled", true));
+    const enabledOutputDir = await buildApplication(
+      await createWorkflowAssetsApp("enabled", true),
+      DEPLOYABLE_BUILD_OPTIONS,
+    );
     const tracedServerPackageJson = await readTracedServerPackageJson(enabledOutputDir);
     const enabledServerSource = await readJavaScriptModulesRecursively(
       join(enabledOutputDir, "server"),
@@ -410,6 +421,7 @@ describe("app runtime dependency tracing", () => {
     // opt-in — nothing of just-bash may reach the hosted output.
     const dockerOutputDir = await buildApplication(
       await createMinimalApp({ justBashEngine: false, label: "docker" }),
+      DEPLOYABLE_BUILD_OPTIONS,
     );
     const dockerTraced = await readTracedServerPackageJson(dockerOutputDir);
     expect(dockerTraced.dependencies).not.toHaveProperty("just-bash");
@@ -424,6 +436,7 @@ describe("app runtime dependency tracing", () => {
     // externalized and traced so the output stays self-contained.
     const justBashOutputDir = await buildApplication(
       await createMinimalApp({ justBashEngine: true, label: "just-bash" }),
+      DEPLOYABLE_BUILD_OPTIONS,
     );
     const justBashTraced = await readTracedServerPackageJson(justBashOutputDir);
     expect(justBashTraced.dependencies).toHaveProperty("just-bash");
@@ -512,7 +525,7 @@ describe("app runtime dependency tracing", () => {
       ].join("\n"),
     );
 
-    const outputDir = await buildApplication(appRoot);
+    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
     const serverModuleDirectory = join(outputDir, "server");
     const serverModuleEntries = await readdir(serverModuleDirectory, {
       recursive: true,
@@ -617,7 +630,7 @@ describe("app runtime dependency tracing", () => {
       ].join("\n"),
     );
 
-    const outputDir = await buildApplication(appRoot);
+    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
     const serverModuleDirectory = join(outputDir, "server");
     const serverModuleEntries = await readdir(serverModuleDirectory, {
       recursive: true,
@@ -677,7 +690,7 @@ describe("app runtime dependency tracing", () => {
       ["---", "description: Weather help.", "---", ""].join("\n"),
     );
 
-    const outputDir = await buildApplication(appRoot);
+    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
     const serverFunctionDirectory = join(outputDir, "functions", "__server.func");
     const functionEntries = await readdir(join(outputDir, "functions"), {
       recursive: true,
@@ -715,7 +728,7 @@ describe("app runtime dependency tracing", () => {
     expect(serverModuleSource).toContain("URL must start with http:// or https://");
   }, 30_000);
 
-  it("does not bundle dev-only watcher handling into hosted Vercel server output", async () => {
+  it("does not bundle local-only runtime infrastructure into hosted Vercel output", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "");
 
@@ -745,7 +758,7 @@ describe("app runtime dependency tracing", () => {
       "Verify deployed runtime contents.\n",
     );
 
-    const outputDir = await buildApplication(appRoot);
+    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
     const vercelFunctionsSource = await readJavaScriptModulesRecursively(
       join(outputDir, "functions"),
     );
@@ -754,6 +767,8 @@ describe("app runtime dependency tracing", () => {
     expect(vercelFunctionsSource).not.toContain("chokidar");
     expect(vercelFunctionsSource).not.toContain("[eve:dev]");
     expect(vercelFunctionsSource).not.toContain("rollup:reload");
+    expect(vercelFunctionsSource).not.toContain("WORKFLOW_LOCAL_DATA_DIR");
+    expect(vercelFunctionsSource).not.toContain("DataDirAccessError");
   }, 30_000);
 
   it("loads instrumentation runtime dependencies from hosted Vercel output", async () => {
@@ -864,7 +879,7 @@ describe("app runtime dependency tracing", () => {
       ].join("\n"),
     );
 
-    const outputDir = await buildApplication(appRoot);
+    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
     const serverFunctionDirectory = join(outputDir, "functions", "__server.func");
     const serverEntries = await readdir(serverFunctionDirectory, {
       recursive: true,

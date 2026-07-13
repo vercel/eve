@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import {
@@ -26,6 +26,31 @@ async function readDevelopmentRuntimePointer(appRoot: string): Promise<Developme
 }
 
 describe("prepareApplicationHost", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("selects the Vercel Workflow world for a prebuilt production host", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "");
+    const { agentRoot, appRoot } = await createAppRoot("eve-vercel-production-world-", {
+      files: {
+        "agent/instructions.md": "Use the configured model.",
+      },
+      packageName: "vercel-production-world",
+    });
+    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+
+    const preparedHost = await prepareApplicationHost(appRoot);
+    const workflowWorldPlugin = await readFile(
+      preparedHost.compiledArtifacts.workflowWorldPluginPath,
+      "utf8",
+    );
+
+    expect(workflowWorldPlugin).toContain("/compiled/@workflow/world-vercel/index.js");
+    expect(workflowWorldPlugin).not.toContain("/compiled/@workflow/world-local/index.js");
+  });
+
   it("keeps Nitro host inputs stable when their runtime snapshot is pruned", async () => {
     const { agentRoot, appRoot } = await createAppRoot("eve-stable-dev-host-artifacts-", {
       files: {

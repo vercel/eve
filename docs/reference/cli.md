@@ -93,7 +93,7 @@ Run this first when something behaves unexpectedly. It confirms a file was disco
 eve build
 ```
 
-No flags. Compiles to `.eve/` and builds the host output, then prints the built output path.
+Compiles to `.eve/` and builds the host output, then prints the built output path.
 
 Useful artifacts written under `.eve/` (preserved even on partial failure):
 

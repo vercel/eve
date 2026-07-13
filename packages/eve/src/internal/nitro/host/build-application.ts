@@ -17,7 +17,11 @@ import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-
 import { tryReadExtensionBuildConfig } from "#internal/nitro/host/build-extension.js";
 import { prepareApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
 import { runVercelBuildPrewarm } from "#internal/nitro/host/vercel-build-prewarm.js";
-import type { NitroBuildSurface, PreparedApplicationHost } from "#internal/nitro/host/types.js";
+import type {
+  ApplicationBuildOptions,
+  NitroBuildSurface,
+  PreparedApplicationHost,
+} from "#internal/nitro/host/types.js";
 import { findClosestVercelOutputDirectory } from "#shared/vercel-output-directory.js";
 
 function trimTrailingSlash(path: string): string {
@@ -291,7 +295,10 @@ async function buildVercelNitroSurface(
 /**
  * Builds the production Nitro output for an eve application.
  */
-export async function buildApplication(rootDir: string): Promise<string> {
+export async function buildApplication(
+  rootDir: string,
+  options: ApplicationBuildOptions,
+): Promise<string> {
   // Extension packages use `eve extension build`. Keep agent `eve build` agent-only
   // so a mistaken run fails with a clear redirect instead of a half-Nitro path.
   const extensionBuild = await tryReadExtensionBuildConfig(rootDir);
@@ -331,12 +338,14 @@ export async function buildApplication(rootDir: string): Promise<string> {
     // Run sandbox prewarm before emitting the workflow functions so a
     // prewarm failure aborts the build before we spend time bundling
     // function output that we would never deploy.
-    await runVercelBuildPrewarm({
-      appRoot: preparedHost.appRoot,
-      log(message) {
-        console.log(message);
-      },
-    });
+    if (!options.skipVercelSandboxPrewarm) {
+      await runVercelBuildPrewarm({
+        appRoot: preparedHost.appRoot,
+        log(message) {
+          console.log(message);
+        },
+      });
+    }
     const flowNitroOutputDir = await buildVercelNitroSurface(preparedHost, "flow");
     await emitVercelWorkflowFunctions({
       agentName: preparedHost.compileResult.manifest.config.name,

@@ -1,7 +1,10 @@
 import { compileAgent } from "#compiler/compile-agent.js";
 import { createScheduleRegistrations } from "#runtime/schedules/register.js";
 import { loadResolvedCompiledSchedules } from "#runtime/schedules/resolve-schedule.js";
-import { writeCompiledArtifactsFiles } from "#internal/application/compiled-artifacts.js";
+import {
+  type BuiltInWorkflowWorldTarget,
+  writeCompiledArtifactsFiles,
+} from "#internal/application/compiled-artifacts.js";
 import {
   resolveApplicationHostArtifactsDirectory,
   resolveWorkflowBuildDirectory,
@@ -39,6 +42,7 @@ export async function prepareApplicationHost(
       : undefined;
   const compiledArtifacts = await writeCompiledArtifactsFiles({
     compileResult,
+    defaultWorkflowWorld: resolveDefaultWorkflowWorld(options),
     outDir: resolveApplicationHostArtifactsDirectory(compileResult.project.appRoot),
   });
   if (runtimeArtifactsSnapshot !== undefined) {
@@ -56,4 +60,14 @@ export async function prepareApplicationHost(
     schedules,
     workflowBuildDir,
   };
+}
+
+function resolveDefaultWorkflowWorld(options: {
+  readonly dev?: boolean;
+}): BuiltInWorkflowWorldTarget {
+  if (options.dev === true) {
+    return "local";
+  }
+
+  return process.env.VERCEL ? "vercel" : "local";
 }

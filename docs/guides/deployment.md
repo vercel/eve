@@ -99,9 +99,9 @@ For a self-deployed process, leave `defaultBackend()` in place or choose an expl
 
 ## 5. Build-time sandbox prewarm
 
-During hosted builds, eve prewarms reusable Vercel sandbox templates so the first session doesn't pay the cold-start cost:
+During Vercel-targeted builds, eve prewarms reusable Vercel sandbox templates so the first session doesn't pay the cold-start cost. This includes hosted builds and local `vercel build` runs:
 
-- Prewarm runs only when both `VERCEL` and `VERCEL_DEPLOYMENT_ID` are present.
+- Prewarm runs for hosted Vercel builds and linked local `vercel build` runs.
 - A sandbox with no `bootstrap()` and no workspace seed files gets skipped.
 - Seed-only templates are keyed by skills and workspace file contents, so unchanged seeds reuse a template across deploys.
 - Templates with a `bootstrap()` are keyed by the optional resolved `revalidationKey()` plus the authored sandbox source and seed contents, so matching inputs reuse a template across deploys.
@@ -109,7 +109,7 @@ During hosted builds, eve prewarms reusable Vercel sandbox templates so the firs
 - Prewarming only covers template construction. `onSession()` still runs at runtime, once per session.
 - **If build-time prewarm fails, the build fails.**
 
-If `VERCEL` is set but `VERCEL_DEPLOYMENT_ID` is missing, eve warns that it skipped prewarming. Do not deploy that build with `vercel deploy --prebuilt`; its output may reference sandbox templates that were never provisioned. Run `vercel deploy` instead so Vercel builds the source in its hosted build environment.
+Local builds must be linked to a Vercel project with credentials that can provision Vercel Sandbox templates. If authentication or template provisioning fails, eve fails the build rather than emitting output that would fail after deployment.
 
 ## 6. Auth
 

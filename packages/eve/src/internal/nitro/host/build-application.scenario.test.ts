@@ -93,6 +93,7 @@ vi.mock("../../workflow-bundle/builder.js", () => ({
 }));
 
 const createScratchDirectory = useTemporaryDirectories();
+const DEPLOYABLE_BUILD_OPTIONS = { skipVercelSandboxPrewarm: false } as const;
 
 function createPreparedHost(appRoot: string): PreparedApplicationHost {
   const agentRoot = join(appRoot, "agent");
@@ -166,7 +167,7 @@ describe("buildApplication", () => {
     ]);
 
     const { buildApplication } = await import("#internal/nitro/host/build-application.js");
-    const builtOutputDir = await buildApplication(appRoot);
+    const builtOutputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
 
     expect(builtOutputDir).toBe(outputDir);
     expect(createApplicationNitroMock).toHaveBeenCalledTimes(1);
@@ -250,7 +251,7 @@ describe("buildApplication", () => {
     );
 
     const { buildApplication } = await import("#internal/nitro/host/build-application.js");
-    const outputDir = await buildApplication(appRoot);
+    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
 
     expect(outputDir).toBe(join(appRoot, ".vercel", "output"));
     expect(createApplicationNitroMock).toHaveBeenCalledTimes(2);
@@ -318,6 +319,35 @@ describe("buildApplication", () => {
     expect((summary.agent as { name: string }).name).toBe("scenario-test-agent");
   });
 
+  it("skips Vercel sandbox prewarm only when the build opts out", async () => {
+    vi.stubEnv("VERCEL", "1");
+    const appRoot = await createScratchDirectory("eve-build-application-skip-prewarm-");
+
+    prepareApplicationHostMock.mockResolvedValueOnce(createPreparedHost(appRoot));
+    createApplicationNitroMock.mockImplementation(
+      async (
+        _preparedHost: PreparedApplicationHost,
+        _dev: boolean,
+        options: { outputDir?: string; surface?: string } = {},
+      ) => {
+        if (options.surface === "app") {
+          return createNitroStub(join(appRoot, ".vercel", "output"));
+        }
+
+        return createNitroStub(options.outputDir ?? join(appRoot, ".output"));
+      },
+    );
+
+    const { buildApplication } = await import("#internal/nitro/host/build-application.js");
+    const outputDir = await buildApplication(appRoot, {
+      skipVercelSandboxPrewarm: true,
+    });
+
+    expect(outputDir).toBe(join(appRoot, ".vercel", "output"));
+    expect(runVercelBuildPrewarmMock).not.toHaveBeenCalled();
+    expect(workflowBuilderBuildVercelOutputMock).toHaveBeenCalledTimes(1);
+  });
+
   it("normalizes eve function output behind a non-Next host service", async () => {
     vi.stubEnv("VERCEL", "1");
     const appRoot = await createScratchDirectory("eve-build-application-vercel-nuxt-");
@@ -361,7 +391,7 @@ describe("buildApplication", () => {
     );
 
     const { buildApplication } = await import("#internal/nitro/host/build-application.js");
-    await buildApplication(appRoot);
+    await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
 
     const sharedFunctionStats = await lstat(
       join(appRoot, ".vercel", "output", "functions", "eve", "__server.func"),
@@ -426,7 +456,7 @@ describe("buildApplication", () => {
     );
 
     const { buildApplication } = await import("#internal/nitro/host/build-application.js");
-    await buildApplication(appRoot);
+    await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
 
     const vercelConfig = JSON.parse(
       await readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),
@@ -489,7 +519,7 @@ describe("buildApplication", () => {
     );
 
     const { buildApplication } = await import("#internal/nitro/host/build-application.js");
-    await buildApplication(appRoot);
+    await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
 
     const vercelConfig = JSON.parse(
       await readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),
@@ -547,7 +577,7 @@ describe("buildApplication", () => {
     ]);
 
     const { buildApplication } = await import("#internal/nitro/host/build-application.js");
-    const outputDir = await buildApplication(appRoot);
+    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
 
     expect(outputDir).toBe(join(appRoot, ".vercel", "output"));
     const vercelConfig = JSON.parse(
@@ -581,7 +611,7 @@ describe("buildApplication", () => {
     );
 
     const { buildApplication } = await import("#internal/nitro/host/build-application.js");
-    await buildApplication(appRoot);
+    await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
 
     const rootFunctionStats = await lstat(
       join(appRoot, ".vercel", "output", "functions", "index.func"),

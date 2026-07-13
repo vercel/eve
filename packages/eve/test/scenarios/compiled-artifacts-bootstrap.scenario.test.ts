@@ -36,6 +36,7 @@ describe("writeCompiledArtifactsFiles", () => {
     });
     const generatedArtifacts = await writeCompiledArtifactsFiles({
       compileResult,
+      defaultWorkflowWorld: "local",
       outDir,
     });
     const bootstrapSource = await readFile(generatedArtifacts.bootstrapPath, "utf8");
@@ -78,6 +79,7 @@ describe("writeCompiledArtifactsFiles", () => {
     });
     const generatedArtifacts = await writeCompiledArtifactsFiles({
       compileResult,
+      defaultWorkflowWorld: "local",
       outDir,
     });
     const bootstrapSource = await readFile(generatedArtifacts.bootstrapPath, "utf8");
@@ -129,6 +131,7 @@ describe("writeCompiledArtifactsFiles", () => {
     });
     const generatedArtifacts = await writeCompiledArtifactsFiles({
       compileResult,
+      defaultWorkflowWorld: "local",
       outDir,
     });
     const instrumentationPluginPath = generatedArtifacts.instrumentationPluginPath;
@@ -175,6 +178,7 @@ describe("writeCompiledArtifactsFiles", () => {
     });
     const generatedArtifacts = await writeCompiledArtifactsFiles({
       compileResult,
+      defaultWorkflowWorld: "local",
       outDir,
     });
 
