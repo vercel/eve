@@ -59,7 +59,7 @@ const mocks = vi.hoisted(() => {
     listenerServer,
     mkdir: vi.fn(async () => undefined),
     nitro,
-    prepareApplicationHost: vi.fn(async () => ({ appRoot: "/tmp/eve-test" })),
+    prepareDevelopmentApplicationHost: vi.fn(async () => ({ appRoot: "/tmp/eve-test" })),
     prepareNitro: vi.fn(async () => undefined),
     readFile: vi.fn(async (path: string) => {
       if (
@@ -129,7 +129,7 @@ vi.mock("./dev-authored-source-watcher.js", () => ({
 }));
 
 vi.mock("./prepare-application-host.js", () => ({
-  prepareApplicationHost: mocks.prepareApplicationHost,
+  prepareDevelopmentApplicationHost: mocks.prepareDevelopmentApplicationHost,
 }));
 
 vi.mock("#discover/project.js", () => ({
@@ -368,7 +368,7 @@ describe("createDevelopmentServer", () => {
 
     const server = await startDevelopmentServer("/tmp/eve-test");
 
-    expect(mocks.prepareApplicationHost).toHaveBeenCalledWith("/tmp/eve-test", { dev: true });
+    expect(mocks.prepareDevelopmentApplicationHost).toHaveBeenCalledWith("/tmp/eve-test");
     expect(mocks.pruneDevelopmentRuntimeArtifactsSnapshotsInBackground).toHaveBeenCalledWith(
       "/tmp/eve-test",
     );

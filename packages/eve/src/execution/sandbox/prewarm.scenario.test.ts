@@ -3,9 +3,9 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { compileAgent } from "#compiler/compile-agent.js";
+import { compileAgent, compileAgentInBuildWorkspace } from "#compiler/compile-agent.js";
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
-import { createNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
+import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { publishDevelopmentRuntimeArtifactsSnapshot } from "#internal/nitro/dev-runtime-artifacts.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
@@ -30,15 +30,14 @@ describe("prewarmAppSandboxes", () => {
 
     const appRoot = await createScenarioAppRoot();
     const compilerAppRoot = join(appRoot, ".eve", "builds", "isolated", "compiler");
-    const compileResult = await compileAgent({
-      artifactsRoot: join(compilerAppRoot, ".eve"),
+    await compileAgentInBuildWorkspace({
+      compilerArtifactsRoot: join(compilerAppRoot, ".eve"),
       startPath: appRoot,
     });
     const events = createPrewarmEvents();
 
     await prewarmAppSandboxes({
       appRoot,
-      compileDirectoryPath: compileResult.paths.compileDirectoryPath,
       compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(compilerAppRoot, {
         moduleMapLoaderPath: resolvePackageSourceFilePath(
           "src/internal/authored-module-map-loader.ts",
@@ -102,7 +101,7 @@ describe("prewarmAppSandboxes", () => {
     await prewarmAppSandboxes({
       appRoot,
       compiledArtifactsSource: resolveNitroCompiledArtifactsSource(
-        createNitroArtifactsConfig({ appRoot, dev: true }),
+        createDevelopmentNitroArtifactsConfig({ appRoot }),
       ),
       dispatch: createRecordingDispatch(events),
     });

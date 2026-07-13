@@ -12,7 +12,7 @@ import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roo
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { createRuntimeSession, withRuntimeSession } from "#runtime/sessions/runtime-session.js";
-import { createNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
+import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import {
   activateDevelopmentRuntimeArtifactsSnapshot,
   pruneDevelopmentRuntimeArtifactsSnapshots,
@@ -529,7 +529,7 @@ describe("development runtime artifact snapshots", () => {
     await withRuntimeSession(createRuntimeSession("next-imports-regression"), async () => {
       const bundle = await getCompiledRuntimeAgentBundle({
         compiledArtifactsSource: resolveNitroCompiledArtifactsSource(
-          createNitroArtifactsConfig({ appRoot, dev: true }),
+          createDevelopmentNitroArtifactsConfig({ appRoot }),
         ),
       });
       const agentModule = bundle.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules["agent.ts"];

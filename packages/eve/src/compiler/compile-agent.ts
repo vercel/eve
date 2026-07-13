@@ -1,9 +1,12 @@
+import { join } from "node:path";
+
 import type { DiscoverDiagnostic } from "#discover/diagnostics.js";
 import { hasDiscoverErrors, summarizeDiscoverDiagnostics } from "#discover/diagnostics.js";
 import { discoverAgent } from "#discover/discover-agent.js";
 import type { ResolvedDiscoveryProject } from "#discover/project.js";
 import { resolveDiscoveryProject } from "#discover/project.js";
 import { createDiskProjectSource, type ProjectSource } from "#discover/project-source.js";
+import type { AgentSourceManifest } from "#discover/manifest.js";
 import {
   type CompileMetadata,
   type CompilerArtifactPaths,
@@ -16,8 +19,6 @@ import type { CompiledAgentManifest } from "#compiler/manifest.js";
  * discovery artifacts.
  */
 export interface CompileAgentInput {
-  artifactsRoot?: string;
-  includeDiagnosticsArtifactPath?: boolean;
   /**
    * Optional {@link ProjectSource} used for discovery reads. Defaults to a
    * disk-backed source so production callers keep their current behaviour.
@@ -45,21 +46,25 @@ export interface CompileAgentResult {
 export class CompileAgentError extends Error {
   readonly result: CompileAgentResult;
 
-  constructor(
-    result: CompileAgentResult,
-    options: { readonly includeDiagnosticsArtifactPath?: boolean } = {},
-  ) {
-    super(
-      formatCompileAgentErrorMessage({
-        diagnostics: result.diagnostics,
-        diagnosticsPath:
-          options.includeDiagnosticsArtifactPath === false
-            ? undefined
-            : result.paths.diagnosticsPath,
-      }),
-    );
+  private constructor(result: CompileAgentResult, message: string) {
+    super(message);
     this.name = "CompileAgentError";
     this.result = result;
+  }
+
+  static fromDurableArtifacts(result: CompileAgentResult): CompileAgentError {
+    const [summary, ...diagnostics] = formatCompileAgentErrorLines(result.diagnostics);
+    return new CompileAgentError(
+      result,
+      [summary, `Diagnostics artifact: ${result.paths.diagnosticsPath}`, ...diagnostics].join("\n"),
+    );
+  }
+
+  static fromTransientArtifacts(result: CompileAgentResult): CompileAgentError {
+    return new CompileAgentError(
+      result,
+      formatCompileAgentErrorLines(result.diagnostics).join("\n"),
+    );
   }
 }
 
@@ -68,30 +73,72 @@ export class CompileAgentError extends Error {
  * produced errors.
  */
 export async function compileAgent(input: CompileAgentInput = {}): Promise<CompileAgentResult> {
+  const discovered = await discoverAgentForCompilation(input);
+  const result = await writeAgentCompilation(discovered, join(discovered.project.appRoot, ".eve"));
+
+  return finishAgentCompilation(result, CompileAgentError.fromDurableArtifacts);
+}
+
+/** Compiles one app entirely within an invocation-owned production build workspace. */
+export async function compileAgentInBuildWorkspace(input: {
+  readonly compilerArtifactsRoot: string;
+  readonly startPath: string;
+}): Promise<CompileAgentResult> {
+  const discovered = await discoverAgentForCompilation({ startPath: input.startPath });
+  const result = await writeAgentCompilation(discovered, input.compilerArtifactsRoot);
+
+  return finishAgentCompilation(result, CompileAgentError.fromTransientArtifacts);
+}
+
+interface DiscoveredAgentCompilation {
+  readonly diagnostics: DiscoverDiagnostic[];
+  readonly manifest: AgentSourceManifest;
+  readonly project: ResolvedDiscoveryProject;
+}
+
+async function discoverAgentForCompilation(
+  input: CompileAgentInput,
+): Promise<DiscoveredAgentCompilation> {
   const source = input.source ?? createDiskProjectSource();
   const project = await resolveDiscoveryProject(input.startPath, { source });
   const discoveryResult = await discoverAgent({ ...project, source });
-  const writtenArtifacts = await writeCompilerArtifacts({
-    appRoot: project.appRoot,
-    artifactsRoot: input.artifactsRoot,
+
+  return {
     diagnostics: discoveryResult.diagnostics,
     manifest: discoveryResult.manifest,
+    project,
+  };
+}
+
+async function writeAgentCompilation(
+  discovered: DiscoveredAgentCompilation,
+  artifactsRoot: string,
+): Promise<CompileAgentResult> {
+  const writtenArtifacts = await writeCompilerArtifacts({
+    appRoot: discovered.project.appRoot,
+    artifactsRoot,
+    diagnostics: discovered.diagnostics,
+    manifest: discovered.manifest,
   });
-  const result: CompileAgentResult = {
-    diagnostics: discoveryResult.diagnostics,
+
+  return {
+    diagnostics: discovered.diagnostics,
     manifest: writtenArtifacts.compiledManifest,
     metadata: writtenArtifacts.metadata,
     paths: writtenArtifacts.paths,
-    project,
+    project: discovered.project,
   };
+}
 
-  if (hasDiscoverErrors(discoveryResult.diagnostics)) {
-    throw new CompileAgentError(result, {
-      includeDiagnosticsArtifactPath: input.includeDiagnosticsArtifactPath,
-    });
+function finishAgentCompilation(
+  result: CompileAgentResult,
+  createError: (result: CompileAgentResult) => CompileAgentError,
+): CompileAgentResult {
+  if (hasDiscoverErrors(result.diagnostics)) {
+    throw createError(result);
   }
 
-  reportDiscoverWarnings(discoveryResult.diagnostics);
+  reportDiscoverWarnings(result.diagnostics);
 
   return result;
 }
@@ -108,31 +155,24 @@ function reportDiscoverWarnings(diagnostics: readonly DiscoverDiagnostic[]): voi
   }
 }
 
-function formatCompileAgentErrorMessage(input: {
-  diagnostics: readonly DiscoverDiagnostic[];
-  diagnosticsPath?: string;
-}): string {
-  const summary = summarizeDiscoverDiagnostics(input.diagnostics);
+function formatCompileAgentErrorLines(diagnostics: readonly DiscoverDiagnostic[]): string[] {
+  const summary = summarizeDiscoverDiagnostics(diagnostics);
   const lines: string[] = [
     `Discovery failed with ${summary.errors} error(s) and ${summary.warnings} warning(s).`,
   ];
 
-  if (input.diagnosticsPath !== undefined) {
-    lines.push(`Diagnostics artifact: ${input.diagnosticsPath}`);
-  }
-
-  if (input.diagnostics.length === 0) {
-    return lines.join("\n");
+  if (diagnostics.length === 0) {
+    return lines;
   }
 
   lines.push("Discovery diagnostics:");
 
-  for (const diagnostic of input.diagnostics) {
+  for (const diagnostic of diagnostics) {
     lines.push(`- ${formatDiagnosticSeverity(diagnostic.severity)}: ${diagnostic.message}`);
     lines.push(`  source: ${diagnostic.sourcePath}`);
   }
 
-  return lines.join("\n");
+  return lines;
 }
 
 function formatDiagnosticSeverity(severity: DiscoverDiagnostic["severity"]): string {

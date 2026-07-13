@@ -17,7 +17,7 @@ import {
 } from "#internal/application/cache-metadata.js";
 import { resolveNitroBuildDirectory } from "#internal/application/paths.js";
 import {
-  createNitroArtifactsConfig,
+  createProductionNitroArtifactsConfig,
   type NitroArtifactsConfigInput,
 } from "#internal/nitro/host/artifacts-config.js";
 import { createCompiledSandboxBackendPrunePlugin } from "#internal/nitro/host/compiled-sandbox-backend-prune-plugin.js";
@@ -837,9 +837,8 @@ export async function createApplicationNitro(
     // use (e.g. dev mode), where the cron route is never registered.
     applyEveCronHandlerRoute(nitro);
 
-    const artifactsConfig: NitroArtifactsConfigInput = createNitroArtifactsConfig({
+    const artifactsConfig: NitroArtifactsConfigInput = createProductionNitroArtifactsConfig({
       appRoot: preparedHost.appRoot,
-      dev: nitro.options.dev,
     });
     registerScheduleTaskHandlers(nitro, {
       artifactsConfig,

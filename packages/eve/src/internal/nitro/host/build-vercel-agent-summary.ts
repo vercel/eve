@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 
 import type {
   CompiledAgentManifest,
@@ -23,7 +23,6 @@ import {
   type VercelEveSubagentEntry,
   type VercelEveToolEntry,
   VERCEL_EVE_AGENT_SUMMARY_KIND,
-  VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH,
   VERCEL_EVE_AGENT_SUMMARY_VERSION,
   normalizeChannelKindForDisplay,
 } from "#internal/vercel-agent-summary.js";
@@ -73,12 +72,6 @@ export function buildVercelAgentSummary(input: {
  * Writes the agent summary file. Returns the absolute path of the
  * written file.
  *
- * The file is written to {@link VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH}
- * relative to {@link input.appRoot} — i.e.
- * `<appRoot>/.eve/agent-summary.json`. Lives outside `.vercel/output/`
- * by design, so it is not part of the Build Output API surface and is
- * never served on the deployment URL.
- *
  * On Vercel deployments, the build container's
  * `upload-eve-agent-summary.ts` helper picks up this file from
  * `rootPath` (which equals `appRoot` for the project being built) and
@@ -94,20 +87,17 @@ export function buildVercelAgentSummary(input: {
  */
 export async function emitVercelAgentSummary(input: {
   manifest: CompiledAgentManifest;
-  appRoot: string;
   generatorVersion?: string;
-  outputPath?: string;
+  outputPath: string;
 }): Promise<string> {
   const summary = buildVercelAgentSummary({
     generatorVersion: input.generatorVersion,
     manifest: input.manifest,
   });
-  const filePath = input.outputPath ?? join(input.appRoot, VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH);
+  await mkdir(dirname(input.outputPath), { recursive: true });
+  await writeFile(input.outputPath, `${JSON.stringify(summary, null, 2)}\n`);
 
-  await mkdir(dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(summary, null, 2)}\n`);
-
-  return filePath;
+  return input.outputPath;
 }
 
 function isActiveChannel(entry: CompiledChannelEntry): entry is CompiledChannelDefinition {

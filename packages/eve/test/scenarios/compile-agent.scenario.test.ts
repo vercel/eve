@@ -129,6 +129,7 @@ describe("compiler artifacts", () => {
 
     const writtenArtifacts = await writeCompilerArtifacts({
       appRoot,
+      artifactsRoot: join(appRoot, ".eve"),
       diagnostics: [
         createDiscoverWarningDiagnostic({
           code: "discover/unsupported-directory",
@@ -391,6 +392,7 @@ describe("compiler artifacts", () => {
 
     const writtenArtifacts = await writeCompilerArtifacts({
       appRoot,
+      artifactsRoot: join(appRoot, ".eve"),
       diagnostics: [],
       manifest,
     });

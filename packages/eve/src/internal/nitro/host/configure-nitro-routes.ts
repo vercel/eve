@@ -19,7 +19,8 @@ import {
 } from "#internal/application/package.js";
 import { WorkflowBundleBuilder } from "#internal/workflow-bundle/builder.js";
 import {
-  createNitroArtifactsConfig,
+  createDevelopmentNitroArtifactsConfig,
+  createProductionNitroArtifactsConfig,
   type NitroArtifactsConfigInput,
 } from "#internal/nitro/host/artifacts-config.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
@@ -323,10 +324,12 @@ export async function configureNitroRoutes(
     }
   }
 
-  const artifactsConfig: NitroArtifactsConfigInput = createNitroArtifactsConfig({
-    appRoot: preparedHost.appRoot,
-    dev: nitro.options.dev,
-  });
+  let artifactsConfig: NitroArtifactsConfigInput;
+  if (nitro.options.dev) {
+    artifactsConfig = createDevelopmentNitroArtifactsConfig({ appRoot: preparedHost.appRoot });
+  } else {
+    artifactsConfig = createProductionNitroArtifactsConfig({ appRoot: preparedHost.appRoot });
+  }
 
   if (includesApplicationRoutes(input.surface)) {
     addFrameworkVirtualHandler(nitro, {

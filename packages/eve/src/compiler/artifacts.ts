@@ -91,7 +91,7 @@ export interface CompileMetadata {
  */
 interface WriteCompilerArtifactsInput {
   appRoot: string;
-  artifactsRoot?: string;
+  artifactsRoot: string;
   diagnostics: readonly DiscoverDiagnostic[];
   manifest: AgentSourceManifest;
 }
@@ -107,10 +107,14 @@ interface WriteCompilerArtifactsResult {
   paths: CompilerArtifactPaths;
 }
 
-/** Resolves compiler-owned artifact paths for one application root. */
-export function resolveCompilerArtifactPaths(
+/** Resolves stable compiler-owned artifact paths for one application root. */
+export function resolveCompilerArtifactPaths(appRoot: string): CompilerArtifactPaths {
+  return resolveCompilerArtifactPathsAt(appRoot, join(resolve(appRoot), ".eve"));
+}
+
+function resolveCompilerArtifactPathsAt(
   appRoot: string,
-  artifactsRoot: string = join(resolve(appRoot), ".eve"),
+  artifactsRoot: string,
 ): CompilerArtifactPaths {
   const resolvedAppRoot = resolve(appRoot);
   const resolvedArtifactsRoot = resolve(artifactsRoot);
@@ -189,13 +193,11 @@ export function createCompileMetadata(input: {
   };
 }
 
-/**
- * Writes the compiler-owned discovery artifacts under `.eve/`.
- */
+/** Writes compiler-owned discovery artifacts to the specified artifact root. */
 export async function writeCompilerArtifacts(
   input: WriteCompilerArtifactsInput,
 ): Promise<WriteCompilerArtifactsResult> {
-  const paths = resolveCompilerArtifactPaths(input.appRoot, input.artifactsRoot);
+  const paths = resolveCompilerArtifactPathsAt(input.appRoot, input.artifactsRoot);
   const diagnosticsArtifact = createDiscoveryDiagnosticsArtifact(input.diagnostics);
   const compiledManifest = await materializeWorkspaceResources({
     compileDirectoryPath: paths.compileDirectoryPath,

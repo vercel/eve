@@ -55,7 +55,7 @@ export type SandboxBackendPrewarmDispatch = (input: {
 
 interface PrewarmSandboxesInput {
   readonly appRoot: string;
-  readonly compileDirectoryPath?: string;
+  readonly compileDirectoryPath: string;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly graph: ResolvedAgentGraphBundle;
   readonly log?: (message: string) => void;
@@ -150,7 +150,6 @@ export async function prewarmSandboxes(input: PrewarmSandboxesInput): Promise<vo
  */
 export async function prewarmAppSandboxes(input: {
   readonly appRoot: string;
-  readonly compileDirectoryPath?: string;
   readonly compiledArtifactsSource?: RuntimeCompiledArtifactsSource;
   readonly loadAgentGraph?: (
     input: Readonly<{
@@ -174,7 +173,8 @@ export async function prewarmAppSandboxes(input: {
 
   await prewarmSandboxes({
     appRoot: getRuntimeCompiledArtifactsSandboxAppRoot(compiledArtifactsSource) ?? input.appRoot,
-    compileDirectoryPath: input.compileDirectoryPath,
+    compileDirectoryPath: resolveRuntimeCompilerArtifactPaths(compiledArtifactsSource.appRoot)
+      .compileDirectoryPath,
     compiledArtifactsSource,
     dispatch: input.dispatch,
     graph,
@@ -239,13 +239,10 @@ export async function prewarmBuiltAppSandboxes(input: {
 
 async function collectPrewarmTargets(input: {
   readonly appRoot: string;
-  readonly compileDirectoryPath?: string;
+  readonly compileDirectoryPath: string;
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly graph: ResolvedAgentGraphBundle;
 }): Promise<readonly PrewarmTarget[]> {
-  const compileDirectoryPath =
-    input.compileDirectoryPath ??
-    resolveRuntimeCompilerArtifactPaths(input.appRoot).compileDirectoryPath;
   const runtimeContext = { appRoot: input.appRoot };
 
   const targets: PrewarmTarget[] = [];
@@ -274,7 +271,7 @@ async function collectPrewarmTargets(input: {
         input: {
           bootstrap: definition.bootstrap,
           seedFiles: await loadResourceRootSeedFiles({
-            compileDirectoryPath,
+            compileDirectoryPath: input.compileDirectoryPath,
             workspaceResourceRoot,
           }),
           runtimeContext,

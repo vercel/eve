@@ -1,4 +1,4 @@
-import { createNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
+import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "#internal/application/runtime-compiled-artifacts-source.js";
 import { createScheduleRegistrations } from "#runtime/schedules/register.js";
 import { loadResolvedCompiledSchedules } from "#runtime/schedules/resolve-schedule.js";
@@ -69,9 +69,8 @@ export async function dispatchScheduleInDev(input: {
   }
 
   const { dispatchScheduleTask } = await import("#internal/nitro/routes/schedule-task.js");
-  const artifactsConfig = createNitroArtifactsConfig({
+  const artifactsConfig = createDevelopmentNitroArtifactsConfig({
     appRoot: input.appRoot,
-    dev: true,
   });
   const result = await dispatchScheduleTask(registration.taskName, artifactsConfig);
 
