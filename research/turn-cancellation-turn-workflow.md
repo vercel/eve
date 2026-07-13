@@ -27,21 +27,35 @@ last_updated: "2026-07-13"
 
 Layer 0 (#494) made the harness honor an `AbortSignal` end to end but left
 `TurnStepInput.abortSignal` unpopulated. Layer 1 makes the turn cancellable
-in-process: the turn-owned `turnWorkflow` registers a durable per-turn cancel
-hook and a durable `AbortController`, and resuming the hook mid-turn settles
-the turn as `turn.cancelled` → `session.waiting` — never as a failure. No
-HTTP route, client API, or channel surface exists yet (layer 2); the only
-trigger is resuming the cancel hook, which tests do directly.
+in-process: the turn-owned `turnWorkflow` claims a durable session-scoped
+cancel hook (`{sessionId}:cancel`) and a durable `AbortController`, and
+resuming the hook mid-turn settles the turn as `turn.cancelled` →
+`session.waiting` — never as a failure. The payload's optional `turnId`
+guard scopes a cancel to the turn the caller observed. No HTTP route,
+client API, or channel surface exists yet (layer 2); the only trigger is
+resuming the cancel hook, which tests do directly.
 
 ## Cancellation semantics (as shipped)
 
-- **Trigger**: `resumeHook("${completionToken}:cancel", {})`. The completion
-  token is already per-turn indexed (`{sessionId}:turn-control:{n}`), so the
-  cancel token needs no new discovery machinery in this layer; layer 2 owns
-  resolving it from a session id. The hook payload carries no caller-supplied
+- **Trigger**: `resumeHook("${sessionId}:cancel", { turnId? })`. The cancel
+  token is **session-scoped and stable**, so a layer-2 trigger derives it
+  from the session id alone — no per-turn token discovery, no client-carried
+  hook token. Each turn workflow run creates and claims the token at turn
+  start and disposes it before publishing its turn result, so at most one
+  live cancel hook exists per session and the next turn's claim never races
+  the prior run's teardown. A claim conflict (residue of a crashed prior
+  turn whose hooks are not yet swept) degrades that turn to uncancellable
+  rather than failing it. The hook payload carries no caller-supplied
   reason: layer 1 uses one canonical cancellation reason (the layer-0
   `TurnCancelledError`), and caller reasons arrive with the trigger surface
   in layer 2.
+- **Turn guard**: the payload's optional `turnId` scopes the cancel to the
+  turn the caller observed (every stream event is stamped with its
+  `turnId`). A guard naming any other turn is consumed as a benign no-op —
+  a cancel that races a turn boundary can never kill a turn the caller
+  never saw. Omitting `turnId` cancels whatever turn is currently running,
+  the right default for a plain stop button. Guard reads are durable hook
+  reads, so the skip sequence replays deterministically.
 - **Cancel during model/tool work**: the durable signal (threaded through
   `TurnStepInput.abortSignal`, the layer-0 seam) aborts the in-flight harness
   work in real time. The turn settles with `turn.cancelled` followed by
@@ -90,10 +104,13 @@ trigger is resuming the cancel hook, which tests do directly.
 ## Data flow (as shipped)
 
 ```text
-test / (layer 2 route)          resumeHook(`${completionToken}:cancel`)
+test / (layer 2 route)          resumeHook(`${sessionId}:cancel`, { turnId? })
         │
 turnWorkflow                    execution/turn-workflow.ts
-  control = createTurnCancellationControl(completionToken)
+  control = createTurnCancellationControl({ sessionId, expectedTurnId })
+        │  claims the stable session token; a conflict (stale prior-turn
+        │  claim) degrades the turn to uncancellable instead of failing
+        │  mismatched turnId guards are consumed as durable no-op reads
         │  the hook-read continuation aborts the durable controller —
         │  replay-deterministic (keyed to the hook_received event), no
         │  promise race decides whether abort() runs
@@ -252,10 +269,14 @@ Consequences for layer 2 (relaxations from the earlier guidance):
   required: a duplicate resume neither spawns a concurrent step attempt
   (#2848) nor corrupts replay when racing disposal (#2808). Treating
   "already resumed/disposed" as success is sufficient.
-- A stable session-scoped cancel token is now viable (#2779 makes the
-  claim shape safe; #2808 removes the disposal race). Per-turn tokens
-  remain the shipped layer-1 shape; the layer-2 trigger design should
-  choose deliberately between them.
+- These fixes made a stable session-scoped cancel token viable (#2779
+  makes the dispose-then-recreate claim shape safe across consecutive
+  runs; #2808 removes the disposal race), and layer 1 **adopted it**:
+  the shipped token is `{sessionId}:cancel` with an optional `turnId`
+  payload guard. Layer 2's route is therefore pure derivation —
+  `POST /eve/v1/session/:id/cancel` resumes `{sessionId}:cancel`,
+  forwards the caller's optional `turnId`, and maps `HookNotFoundError`
+  (no turn in flight) to a "nothing to cancel" success.
 
 ## Invariants (pinned by tests)
 
@@ -268,8 +289,11 @@ Consequences for layer 2 (relaxations from the earlier guidance):
    under crash retry, like every stream emission), always followed by
    `session.waiting`; zero failure events on the cancelled path; the aborted
    tool executes once; the cancelled turn streams one `step.started`.
-3. The cancel hook token is never reused: one hook per turn workflow run,
-   derived from the already-indexed completion token.
+3. The cancel hook token is session-scoped and never doubly live: each
+   turn workflow run claims `{sessionId}:cancel` at turn start and
+   disposes it before publishing its turn result, so the next turn's
+   claim never races the prior run's teardown. A conflicting stale claim
+   degrades the turn to uncancellable, never to a failure.
 4. A cancelled subagent wait is not re-dispatched: the next turn runs
    normally with no `subagent.called`.
 5. With no cancel resumption, behavior is unchanged (all pre-existing unit
@@ -279,21 +303,27 @@ Consequences for layer 2 (relaxations from the earlier guidance):
 
 - **Integration** (`execution/turn-cancellation.integration.test.ts`): real
   `workflowEntry` + `turnWorkflow` over world-local with a hanging
-  `wait_for_cancel` tool; covers mid-tool cancel + follow-up turn, cancel
-  during an in-flight subagent wait (via the mock model's
-  `Delegate to a subagent: …` directive) + no re-dispatch, late/duplicate
-  cancel no-ops, and the no-retry canary.
-- **Unit**: cancelled-turn arm of `turnWorkflow` (park + `cancelled` marker,
-  `canPark` bypass, signal threading), deferred control-hook disposal,
-  `emitCancelledTurn` (event order, turn-id reconstruction, state advance),
-  `createTurnCancelledEvent`, stream-version pin (17).
+  `wait_for_cancel` tool; covers mid-tool cancel (with a matching `turnId`
+  guard) + follow-up turn, a stale-guard cancel consumed as a no-op with
+  the turn still cancellable afterwards, cancel during an in-flight
+  subagent wait (via the mock model's `Delegate to a subagent: …`
+  directive) + no re-dispatch, late/duplicate cancel no-ops, the no-retry
+  canary, and cancel-hook sweep after each settle.
+- **Unit**: `createTurnCancellationControl` (token derivation, claim
+  conflict → uncancellable, guard matching and stale-guard skip,
+  idempotent disposal), cancelled-turn arm of `turnWorkflow` (park +
+  `cancelled` marker, `canPark` bypass, signal threading,
+  dispose-before-result ordering), deferred control-hook disposal,
+  `activeTurnId`, `emitCancelledTurn` (event order, turn-id
+  reconstruction, state advance), `createTurnCancelledEvent`,
+  stream-version pin.
 - **E2E stays shelved** until layer 2 provides an HTTP trigger.
 
 ## Out of scope
 
-- `POST /eve/v1/session/:id/cancel`, cancel-token discovery from a session
-  id, caller-supplied cancellation reasons, channel/client/eval APIs
-  (layers 2 and 4).
+- `POST /eve/v1/session/:id/cancel`, caller-supplied cancellation reasons,
+  channel/client/eval APIs (layers 2 and 4). No token discovery is needed:
+  the route derives `{sessionId}:cancel` directly.
 - Descendant cascade — local subagent inbox propagation and remote cancel
   (layer 3). Layer 1 only discards their late results.
 - Cancelling parked sessions or session-scoped cancellation

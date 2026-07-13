@@ -270,6 +270,9 @@ describe("turnWorkflow", () => {
     await turnWorkflow(input);
 
     expect(vi.mocked(turnStep).mock.calls[0]?.[0].abortSignal).toBeInstanceOf(AbortSignal);
+    // The cancel token is session-scoped so a trigger can derive it from
+    // the session id alone.
+    expect(cancelHookTokens()).toEqual(["wrun_test_123:cancel"]);
     // The cancelled result is a pure marker: the control payload carries
     // the cursor's last settled state, not the aborted step's echo.
     expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
@@ -282,6 +285,61 @@ describe("turnWorkflow", () => {
       kind: "turn-result",
     });
     expect(resumeHookMock.mock.calls.filter((call) => call[1]?.kind === "turn-error")).toEqual([]);
+  });
+
+  it("runs uncancellable when the session cancel token is claimed by another run", async () => {
+    const sessionState = createSessionState();
+    installInbox([], { cancelConflict: { runId: "wrun_stale_prior_turn" } });
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "done",
+      output: "ok",
+      serializedContext: { state: "done" },
+      sessionState,
+    });
+
+    const { input } = createInput({
+      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+      sessionState,
+    });
+    await turnWorkflow(input);
+
+    // The stale claim degrades cancellation instead of failing the turn.
+    expect(vi.mocked(turnStep).mock.calls[0]?.[0].abortSignal).toBeUndefined();
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "turn-token",
+      expect.objectContaining({ kind: "turn-result" }),
+    );
+    expect(resumeHookMock.mock.calls.filter((call) => call[1]?.kind === "turn-error")).toEqual([]);
+  });
+
+  it("disposes the session cancel hook before publishing the turn result", async () => {
+    const sessionState = createSessionState();
+    installInbox([]);
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "done",
+      output: "ok",
+      serializedContext: { state: "done" },
+      sessionState,
+    });
+
+    const { input } = createInput({
+      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+      sessionState,
+    });
+    await turnWorkflow(input);
+
+    // The token is stable across turns: the next turn's claim must never
+    // race this run's teardown, so disposal precedes the terminal send.
+    const cancelHook = createHookMock.mock.results.find(
+      (result) => (result.value as { token?: string }).token === "wrun_test_123:cancel",
+    )?.value as { dispose: ReturnType<typeof vi.fn> };
+    const resultCall = resumeHookMock.mock.calls.findIndex(
+      (call) => call[1]?.kind === "turn-result",
+    );
+    expect(cancelHook.dispose).toHaveBeenCalled();
+    expect(cancelHook.dispose.mock.invocationCallOrder[0]).toBeLessThan(
+      resumeHookMock.mock.invocationCallOrder[resultCall]!,
+    );
   });
 
   it("registers no cancel hook when the driver cannot settle cancelled parks", async () => {
@@ -824,24 +882,38 @@ interface InboxMock {
 function installInbox(
   values: readonly unknown[],
   options: {
+    readonly cancelConflict?: { readonly runId: string } | null;
+    readonly cancelPayloads?: readonly unknown[];
     readonly claimError?: unknown;
     readonly conflict?: { readonly runId: string } | null;
   } = {},
 ): InboxMock {
   const inbox = createInboxMock(values, options);
-  installHookDispatch([inbox]);
+  installHookDispatch([inbox], {
+    conflict: options.cancelConflict ?? null,
+    payloads: options.cancelPayloads ?? [],
+  });
   return inbox;
 }
 
 /**
  * Routes inbox tokens to the queued inbox mocks and `:cancel` tokens to
- * inert cancel hooks (their reads never resolve, so no cancellation is
- * ever observed unless a test wires its own cancel mock).
+ * cancel hooks (inert by default — their reads never resolve, so no
+ * cancellation is ever observed unless a test provides payloads or a
+ * claim conflict via `cancelOptions`).
  */
-function installHookDispatch(inboxes: readonly InboxMock[]): void {
+function installHookDispatch(
+  inboxes: readonly InboxMock[],
+  cancelOptions: {
+    readonly conflict?: { readonly runId: string } | null;
+    readonly payloads?: readonly unknown[];
+  } = {},
+): void {
   const queue = [...inboxes];
   createHookMock.mockImplementation((input: { token: string }) =>
-    input.token.endsWith(":cancel") ? createCancelHookMock(input.token) : queue.shift()?.hook,
+    input.token.endsWith(":cancel")
+      ? createCancelHookMock(input.token, cancelOptions)
+      : queue.shift()?.hook,
   );
 }
 
@@ -851,13 +923,26 @@ function cancelHookTokens(): string[] {
     .filter((token) => token.endsWith(":cancel"));
 }
 
-function createCancelHookMock(token: string): unknown {
+function createCancelHookMock(
+  token: string,
+  options: {
+    readonly conflict?: { readonly runId: string } | null;
+    readonly payloads?: readonly unknown[];
+  } = {},
+): unknown {
+  const queue = [...(options.payloads ?? [])];
   return {
     token,
+    getConflict: vi.fn(async () => options.conflict ?? null),
     dispose: vi.fn(),
     [Symbol.asyncIterator](): AsyncIterator<unknown> {
       return {
-        next: () => new Promise<IteratorResult<unknown>>(() => {}),
+        next: () => {
+          const value = queue.shift();
+          return value === undefined
+            ? new Promise<IteratorResult<unknown>>(() => {})
+            : Promise.resolve({ done: false, value });
+        },
         return: vi.fn(async () => ({ done: true, value: undefined })),
       };
     },

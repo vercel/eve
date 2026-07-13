@@ -10,18 +10,19 @@ import {
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { turnCancelHookToken } from "#execution/turn-cancellation-control.js";
+import { sessionCancelHookToken } from "#execution/turn-cancellation-control.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
 import type { ToolContext } from "#public/definitions/tool.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 
 /**
- * Layer-1 turn cancellation: resuming a turn's `{completionToken}:cancel`
+ * Layer-1 turn cancellation: resuming a session's `{sessionId}:cancel`
  * hook mid-turn settles the turn as `turn.cancelled` → `session.waiting`
  * with zero failure events, no step retries, and a session that accepts
- * the next message normally. (The HTTP trigger arrives in layer 2; these
- * tests resume the hook directly.)
+ * the next message normally. The payload may carry a `turnId` guard
+ * scoping the cancel to one observed turn. (The HTTP trigger arrives in
+ * layer 2; these tests resume the hook directly.)
  */
 
 const FAILURE_EVENT_TYPES = ["step.failed", "turn.failed", "session.failed"] as const;
@@ -46,20 +47,22 @@ function buildSerializedContext(overrides: {
  * aborts, then rejects with the signal's reason — the deterministic
  * mid-turn anchor for cancellation tests.
  */
-function buildWaitForCancelTool(onStart: () => void): ResolvedToolDefinition {
+function buildWaitForCancelTool(onStart: () => void, onAbort: () => void): ResolvedToolDefinition {
   return {
     description: "Waits until the turn is cancelled.",
     execute: (_input: unknown, rawCtx: unknown) => {
       const ctx = rawCtx as ToolContext;
       onStart();
       return new Promise((_resolve, reject) => {
-        if (ctx.abortSignal.aborted) {
+        const abort = (): void => {
+          onAbort();
           reject(ctx.abortSignal.reason);
+        };
+        if (ctx.abortSignal.aborted) {
+          abort();
           return;
         }
-        ctx.abortSignal.addEventListener("abort", () => reject(ctx.abortSignal.reason), {
-          once: true,
-        });
+        ctx.abortSignal.addEventListener("abort", abort, { once: true });
       });
     },
     inputSchema: { additionalProperties: false, properties: {}, type: "object" },
@@ -73,19 +76,26 @@ function buildWaitForCancelTool(onStart: () => void): ResolvedToolDefinition {
 interface WaitToolFixture {
   readonly runtime: TestRuntime;
   readonly toolStarted: Promise<void>;
+  toolAborts(): number;
   toolStarts(): number;
 }
 
 function createWaitToolRuntime(agentName: string): WaitToolFixture {
+  let aborts = 0;
   let starts = 0;
   let resolveStarted: (() => void) | undefined;
   const toolStarted = new Promise<void>((resolve) => {
     resolveStarted = resolve;
   });
-  const waitTool = buildWaitForCancelTool(() => {
-    starts += 1;
-    resolveStarted?.();
-  });
+  const waitTool = buildWaitForCancelTool(
+    () => {
+      starts += 1;
+      resolveStarted?.();
+    },
+    () => {
+      aborts += 1;
+    },
+  );
   const runtime = createTestRuntime({ agent: { name: agentName }, tools: [waitTool] });
   const manifestTool = runtime.manifest.tools.find((tool) => tool.name === WAIT_TOOL_NAME);
   if (manifestTool === undefined) {
@@ -94,12 +104,7 @@ function createWaitToolRuntime(agentName: string): WaitToolFixture {
   runtime.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[manifestTool.sourceId] = {
     default: { execute: waitTool.execute },
   };
-  return { runtime, toolStarted, toolStarts: () => starts };
-}
-
-/** First-turn cancel token for a session driven by `workflowEntry`. */
-function firstTurnCancelToken(sessionId: string): string {
-  return turnCancelHookToken(`${sessionId}:turn-control:0`);
+  return { runtime, toolStarted, toolAborts: () => aborts, toolStarts: () => starts };
 }
 
 /** Polls the world until the given run reaches `completed`. */
@@ -197,10 +202,12 @@ describe("turn cancellation integration", () => {
       const stream = captureTurnEvents(run);
 
       try {
-        const cancelToken = firstTurnCancelToken(run.runId);
+        const cancelToken = sessionCancelHookToken(run.runId);
         const cancelHook = await waitForHookByToken(cancelToken);
         await fixture.toolStarted;
-        await resumeHook(cancelToken, {});
+        // A matching turn guard cancels the observed turn (the first
+        // turn's id is `turn_0`).
+        await resumeHook(cancelToken, { turnId: "turn_0" });
 
         const cancelledTurn = await stream.nextTurn();
 
@@ -274,7 +281,7 @@ describe("turn cancellation integration", () => {
         // tool, holding the parent in `waitForRuntimeActionResults`.
         await fixture.toolStarted;
 
-        const cancelToken = firstTurnCancelToken(run.runId);
+        const cancelToken = sessionCancelHookToken(run.runId);
         await waitForHookByToken(cancelToken);
         await resumeHook(cancelToken, {});
 
@@ -290,7 +297,7 @@ describe("turn cancellation integration", () => {
         const childSessionId = filterEventsByType(cancelledTurn, "subagent.called")[0]?.data
           .childSessionId;
         expect(childSessionId).toBeDefined();
-        const childCancelToken = firstTurnCancelToken(childSessionId ?? "");
+        const childCancelToken = sessionCancelHookToken(childSessionId ?? "");
         await waitForHookByToken(childCancelToken);
         await resumeHook(childCancelToken, {}).catch(() => undefined);
 
@@ -354,7 +361,7 @@ describe("turn cancellation integration", () => {
           .childSessionId;
         expect(childSessionId).toBeDefined();
 
-        const cancelToken = firstTurnCancelToken(run.runId);
+        const cancelToken = sessionCancelHookToken(run.runId);
         const cancelHook = await waitForHookByToken(cancelToken);
         await resumeHook(cancelToken, {});
         // Barrier: the answer must not race the cancel — a delivery that
@@ -407,6 +414,53 @@ describe("turn cancellation integration", () => {
     });
   }, 60_000);
 
+  it("consumes a cancel with a stale turn guard as a no-op and keeps the turn running", async () => {
+    const fixture = createWaitToolRuntime("turn-cancel-stale-guard");
+    const continuationToken = "http:turn-cancel-stale-guard";
+
+    await fixture.runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: `Use the ${WAIT_TOOL_NAME} tool.` },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        const cancelToken = sessionCancelHookToken(run.runId);
+        await waitForHookByToken(cancelToken);
+        await fixture.toolStarted;
+
+        // A guard naming a turn the session has never run: the payload is
+        // consumed as a no-op — the caller's cancel must never leak onto
+        // a turn they did not observe.
+        await resumeHook(cancelToken, { turnId: "turn_99" });
+
+        // The turn must still be cancellable afterwards: the skip loop
+        // re-arms the durable read rather than consuming the hook.
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        expect(fixture.toolAborts()).toBe(0);
+
+        await resumeHook(cancelToken, { turnId: "turn_0" });
+
+        const cancelledTurn = await stream.nextTurn();
+
+        expect(cancelledTurn.at(-1)?.type).toBe("session.waiting");
+        expect(filterEventsByType(cancelledTurn, "turn.cancelled")).toHaveLength(1);
+        expectNoFailureEvents(cancelledTurn);
+        expect(fixture.toolAborts()).toBe(1);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+
   it("treats a cancel after the turn settled as a benign no-op", async () => {
     const runtime = createTestRuntime({ agent: { name: "turn-cancel-late" } });
     const continuationToken = "http:turn-cancel-late";
@@ -431,7 +485,7 @@ describe("turn cancellation integration", () => {
 
         // The turn workflow has settled and disposed its cancel hook; a
         // late cancel either rejects (hook gone) or lands unconsumed.
-        await resumeHook(firstTurnCancelToken(run.runId), {}).catch(() => undefined);
+        await resumeHook(sessionCancelHookToken(run.runId), {}).catch(() => undefined);
 
         await waitForHook({ runId: run.runId }, { token: continuationToken });
         await resumeHook(continuationToken, {
@@ -489,13 +543,15 @@ describe("turn cancellation integration", () => {
         // outstanding read: a turn run that never returns stays
         // `running` forever and its hooks (inbox, cancel, durable-abort)
         // are never swept — one leaked run and three leaked hooks per
-        // turn, and O(live hooks) token scans slow every resume.
+        // turn, and O(live hooks) token scans slow every resume. The
+        // session cancel token is disposed at each settle, so with the
+        // session parked no cancel hook may remain in the world.
         const world = await getWorld();
         const deadline = Date.now() + 15_000;
         let completedTurnRuns = 0;
         let cancelHooks = 0;
         while (Date.now() < deadline) {
-          const cancelToken0 = firstTurnCancelToken(run.runId);
+          const cancelToken0 = sessionCancelHookToken(run.runId);
           const cancelHook0 = await world.hooks.getByToken(cancelToken0).catch(() => null);
           cancelHooks = cancelHook0 === null ? 0 : 1;
 
