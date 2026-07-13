@@ -1,0 +1,21 @@
+# dependencies and build output
+/node_modules
+/.next
+/.eve
+/.output
+/.swc
+/.turbo
+/.workflow-data
+*.tsbuildinfo
+next-env.d.ts
+
+# local configuration and auth data
+.env*
+!.env.example
+/.data
+
+# misc
+.DS_Store
+*.log
+*.pem
+/.vercel

@@ -1,0 +1,31 @@
+{
+  "name": "framework-next-better-auth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "auth:migrate": "node scripts/migrate-auth.ts",
+    "build": "pnpm --filter eve build && pnpm build:next",
+    "build:eve": "eve build",
+    "build:next": "next build",
+    "dev": "next dev",
+    "dev:eve": "eve dev",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "better-auth": "^1.6.23",
+    "better-sqlite3": "^12.11.1",
+    "eve": "workspace:*",
+    "next": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "typescript": "6.0.3"
+  }
+}

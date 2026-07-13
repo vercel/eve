@@ -79,7 +79,7 @@ export default function Page() {
 
 The scaffold's channel ships with `placeholderAuth()`, which fails closed. It rejects production traffic so an unauthenticated app can't go live by accident. Swap it for your app's real auth before you deploy.
 
-Your auth lives in one module that turns a request into a user. Create `agent/lib/auth.ts` and wire your real provider (a cookie session, Auth.js, Clerk) in here. The stub below returns a fixed user so the page compiles and runs end to end:
+Your auth lives in one module that turns a request into a user. Create `agent/lib/auth.ts` and wire your real provider (a cookie session, Better Auth, Auth.js, Clerk, etc.) in here. The stub below returns a fixed user so the page compiles and runs end to end:
 
 ```ts title="agent/lib/auth.ts"
 export interface AppUser {
