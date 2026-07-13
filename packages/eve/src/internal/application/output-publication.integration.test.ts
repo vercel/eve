@@ -1,7 +1,7 @@
-import { chmod, mkdir, readdir, readFile, rename, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, stat, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   publishApplicationBuildArtifacts,
@@ -11,6 +11,55 @@ import {
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 
 const createScratchDirectory = useTemporaryDirectories();
+
+const fileSystemFaults = vi.hoisted(() => ({
+  atomicWrite: undefined as ((targetPath: string) => Error | undefined) | undefined,
+  rename: undefined as
+    | ((sourcePath: string, destinationPath: string) => Error | undefined)
+    | undefined,
+  rm: undefined as ((path: string) => Error | undefined) | undefined,
+}));
+
+vi.mock("#shared/atomic-write-file.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("#shared/atomic-write-file.js")>();
+  return {
+    ...original,
+    async atomicWriteFile(...input: Parameters<typeof original.atomicWriteFile>) {
+      const error = fileSystemFaults.atomicWrite?.(input[0]);
+      if (error !== undefined) {
+        throw error;
+      }
+      return original.atomicWriteFile(...input);
+    },
+  };
+});
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const original = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...original,
+    async rename(...input: Parameters<typeof original.rename>) {
+      const error = fileSystemFaults.rename?.(String(input[0]), String(input[1]));
+      if (error !== undefined) {
+        throw error;
+      }
+      return original.rename(...input);
+    },
+    async rm(...input: Parameters<typeof original.rm>) {
+      const error = fileSystemFaults.rm?.(String(input[0]));
+      if (error !== undefined) {
+        throw error;
+      }
+      return original.rm(...input);
+    },
+  };
+});
+
+afterEach(() => {
+  fileSystemFaults.atomicWrite = undefined;
+  fileSystemFaults.rename = undefined;
+  fileSystemFaults.rm = undefined;
+});
 
 interface StagedBuild {
   readonly scratchDir: string;
@@ -210,32 +259,29 @@ describe("build output publication", () => {
     });
     const lockPath = resolveOutputPublicationLockPath(appRoot);
 
-    try {
-      await expect(
-        publishApplicationBuildArtifactsWithObserver(
-          {
-            appRoot,
-            finalOutputDir,
-            finalSummaryPath,
-            ...next,
+    await expect(
+      publishApplicationBuildArtifactsWithObserver(
+        {
+          appRoot,
+          finalOutputDir,
+          finalSummaryPath,
+          ...next,
+        },
+        {
+          async afterBackup() {},
+          async afterOutputInstall() {
+            fileSystemFaults.atomicWrite = (targetPath) => {
+              if (targetPath !== join(lockPath, "owner.json")) {
+                return undefined;
+              }
+              fileSystemFaults.atomicWrite = undefined;
+              return new Error("injected committed journal failure");
+            };
           },
-          {
-            async afterBackup() {},
-            async afterOutputInstall() {
-              await chmod(lockPath, 0o500);
-            },
-            async onContention() {},
-          },
-        ),
-      ).rejects.toThrow();
-    } finally {
-      // The failed release may have renamed the read-only lock directory;
-      // restore permissions on whatever is left so teardown can remove it.
-      const locksDir = join(appRoot, ".eve", "locks");
-      for (const entry of await readdir(locksDir)) {
-        await chmod(join(locksDir, entry), 0o700).catch(() => undefined);
-      }
-    }
+          async onContention() {},
+        },
+      ),
+    ).rejects.toThrow("injected committed journal failure");
 
     await expectPublication({
       outputDir: finalOutputDir,
@@ -477,19 +523,27 @@ describe("build output publication", () => {
       summaryMarker: "retry",
       summaryPath: retry.stagedSummaryPath,
     });
-    try {
-      await chmod(appRoot, 0o500);
-      await expect(
-        publishApplicationBuildArtifacts({
-          appRoot,
-          finalOutputDir,
-          finalSummaryPath,
-          ...first,
-        }),
-      ).rejects.toThrow();
-    } finally {
-      await chmod(appRoot, 0o700);
-    }
+    fileSystemFaults.rename = (sourcePath, destinationPath) => {
+      if (
+        destinationPath !== finalOutputDir ||
+        !sourcePath.startsWith(`${finalOutputDir}.eve-backup-`)
+      ) {
+        return undefined;
+      }
+      fileSystemFaults.rename = undefined;
+      return new Error("injected recovery failure");
+    };
+    await expect(
+      publishApplicationBuildArtifacts({
+        appRoot,
+        finalOutputDir,
+        finalSummaryPath,
+        ...first,
+      }),
+    ).rejects.toMatchObject({
+      errors: [expect.objectContaining({ message: "injected recovery failure" })],
+      message: "Failed to restore the previous build publication.",
+    });
 
     await expect(
       publishApplicationBuildArtifactsWithObserver(
@@ -535,27 +589,31 @@ describe("build output publication", () => {
       summaryPath: next.stagedSummaryPath,
     });
 
-    try {
-      await expect(
-        publishApplicationBuildArtifactsWithObserver(
-          {
-            appRoot,
-            finalOutputDir,
-            finalSummaryPath,
-            ...next,
-          },
-          {
-            async afterBackup() {},
-            async afterOutputInstall() {
-              await chmod(appRoot, 0o500);
-            },
-            async onContention() {},
-          },
-        ),
-      ).rejects.toThrow();
-    } finally {
-      await chmod(appRoot, 0o700);
-    }
+    fileSystemFaults.rm = (path) => {
+      if (!path.startsWith(`${finalOutputDir}.eve-backup-`)) {
+        return undefined;
+      }
+      fileSystemFaults.rm = undefined;
+      return new Error("injected backup cleanup failure");
+    };
+    await expect(
+      publishApplicationBuildArtifactsWithObserver(
+        {
+          appRoot,
+          finalOutputDir,
+          finalSummaryPath,
+          ...next,
+        },
+        {
+          async afterBackup() {},
+          async afterOutputInstall() {},
+          async onContention() {},
+        },
+      ),
+    ).rejects.toMatchObject({
+      errors: [expect.objectContaining({ message: "injected backup cleanup failure" })],
+      message: "Build output was committed but backup cleanup failed.",
+    });
 
     await expectPublication({
       outputDir: finalOutputDir,
