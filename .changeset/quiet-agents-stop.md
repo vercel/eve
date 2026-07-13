@@ -2,4 +2,4 @@
 "eve": minor
 ---
 
-Restrict the built-in recursive `agent` tool to the root session while keeping explicitly declared subagent chains available at any depth. Recursive children and declared subagents no longer receive the built-in self-delegation tool, and the obsolete `limits.maxSubagentDepth` option has been removed.
+Make the built-in `agent` tool root-only, so copies created by it cannot delegate recursively. Declared subagents can still call their own nested subagents, and `limits.maxSubagentDepth` has been removed.
