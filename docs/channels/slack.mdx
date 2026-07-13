@@ -68,6 +68,12 @@ export default slackChannel({
 });
 ```
 
+`since` sets the boundary for what each mention injects and accepts three values:
+
+- `"thread-root"` (the default): every prior message in the thread, on every mention. `threadContext: {}` behaves the same.
+- `"last-agent-reply"`: only messages after the agent's last reply, keeping repeated mentions incremental.
+- A predicate `(message: SlackThreadMessage) => boolean`: only messages after the last one it matches, such as "since the last message that mentioned a particular user".
+
 `threadContext` performs one `conversations.replies` request for each triggering thread reply and requires the matching Slack history scope. Omit it when the agent should see only direct mentions. `loadThreadContextMessages` remains available when you need custom filtering or non-model processing of the raw thread messages.
 
 ### Slack API calls outside a handler

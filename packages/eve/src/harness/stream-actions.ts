@@ -9,6 +9,7 @@ interface ActionEventCoordinates {
 }
 
 interface ProviderStreamActionBatch {
+  cancel(): Promise<void>;
   flush(): Promise<void>;
   observe(action: RuntimeToolCallActionRequest): void;
 }
@@ -22,9 +23,14 @@ export function createProviderStreamActionBatch(input: {
   let actionFlush: Promise<void> = Promise.resolve();
   let actionFlushError: unknown;
   let actionFlushTimer: ReturnType<typeof setTimeout> | undefined;
+  let cancelled = false;
   let resolveActionFlushTimer: (() => void) | undefined;
 
   const emitPendingActions = async (): Promise<void> => {
+    if (cancelled) {
+      pendingActions.clear();
+      return;
+    }
     if (pendingActions.size === 0) return;
 
     const actions = [...pendingActions.values()];
@@ -40,6 +46,7 @@ export function createProviderStreamActionBatch(input: {
   };
 
   const scheduleFlush = (): void => {
+    if (cancelled) return;
     if (actionFlushTimer !== undefined) return;
 
     let resolveTimer: (() => void) | undefined;
@@ -60,19 +67,31 @@ export function createProviderStreamActionBatch(input: {
       });
   };
 
+  const releaseFlushTimer = (): void => {
+    if (actionFlushTimer === undefined) return;
+
+    clearTimeout(actionFlushTimer);
+    actionFlushTimer = undefined;
+    const resolveTimer = resolveActionFlushTimer;
+    resolveActionFlushTimer = undefined;
+    resolveTimer?.();
+  };
+
   return {
+    async cancel() {
+      cancelled = true;
+      pendingActions.clear();
+      releaseFlushTimer();
+      await actionFlush;
+    },
     observe(action) {
+      if (cancelled) return;
       pendingActions.set(action.callId, action);
       scheduleFlush();
     },
     async flush() {
-      if (actionFlushTimer !== undefined) {
-        clearTimeout(actionFlushTimer);
-        actionFlushTimer = undefined;
-        const resolveTimer = resolveActionFlushTimer;
-        resolveActionFlushTimer = undefined;
-        resolveTimer?.();
-      }
+      if (cancelled) return;
+      releaseFlushTimer();
 
       await actionFlush;
       if (actionFlushError !== undefined) throw actionFlushError;

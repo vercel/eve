@@ -1,10 +1,32 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./vercel-output-config.js", () => ({
-  ensureEveVercelOutputConfig: vi.fn(async (input: { readonly servicePrefix: string }) => ({
-    servicePrefix: input.servicePrefix,
-  })),
+  ensureEveVercelOutputConfig: vi.fn(
+    async (input: {
+      readonly agents: readonly {
+        readonly name?: string;
+        readonly servicePrefix: string;
+      }[];
+    }) => ({
+      agents: input.agents.map((agent) => ({
+        name: agent.name,
+        servicePrefix: agent.servicePrefix,
+      })),
+    }),
+  ),
 }));
+
+const { ensureEveVercelOutputConfig } = await import("./vercel-output-config.js");
+
+vi.mock("./server.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./server.js")>();
+  return {
+    ...original,
+    resolveEveDestinationPrefix: vi.fn(original.resolveEveDestinationPrefix),
+  };
+});
+
+const { resolveEveDestinationPrefix } = await import("./server.js");
 
 import {
   EVE_NEXT_SERVICE_PREFIX,
@@ -25,6 +47,8 @@ async function resolveConfig(config: ReturnType<typeof withEve<TestConfig>>): Pr
 
 describe("withEve", () => {
   afterEach(() => {
+    vi.mocked(resolveEveDestinationPrefix).mockClear();
+    vi.mocked(ensureEveVercelOutputConfig).mockClear();
     vi.unstubAllEnvs();
   });
 
@@ -274,6 +298,117 @@ describe("withEve", () => {
       destination: "http://127.0.0.1:51234/eve/v1/:path+",
       source: "/eve/v1/:path+",
     });
+  });
+
+  it("adds named agent rewrites with derived and per-agent service prefixes", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EVE_NEXT_PRODUCTION_ORIGIN", "https://agent.example.com");
+
+    const config = await resolveConfig(
+      withEve<TestConfig>(
+        {},
+        {
+          agents: {
+            billing: {
+              buildCommand: "pnpm build:billing-agent",
+              root: "./agents/billing",
+              servicePrefix: "/_eve_internal/billing",
+            },
+            support: "./agents/support",
+          },
+        },
+      ),
+    );
+    const rewrites = await config.rewrites?.();
+
+    expect(getBeforeFiles(rewrites)).toEqual(
+      expect.arrayContaining([
+        {
+          destination: `https://agent.example.com${EVE_NEXT_SERVICE_PREFIX}/support/eve/v1/:path+`,
+          source: "/eve/agents/support/eve/v1/:path+",
+        },
+        {
+          destination: "https://agent.example.com/_eve_internal/billing/eve/v1/:path+",
+          source: "/eve/agents/billing/eve/v1/:path+",
+        },
+      ]),
+    );
+    expect(ensureEveVercelOutputConfig).toHaveBeenCalledWith({
+      agents: [
+        {
+          appRoot: expect.stringContaining("/agents/billing"),
+          buildCommand: "pnpm build:billing-agent",
+          name: "billing",
+          publicRoutePrefix: "/eve/agents/billing",
+          servicePrefix: "/_eve_internal/billing",
+        },
+        {
+          appRoot: expect.stringContaining("/agents/support"),
+          buildCommand: "node '../../node_modules/eve/bin/eve.js' build",
+          name: "support",
+          publicRoutePrefix: "/eve/agents/support",
+          servicePrefix: `${EVE_NEXT_SERVICE_PREFIX}/support`,
+        },
+      ],
+      nextRoot: process.cwd(),
+    });
+  });
+
+  it("uses adjacent stable local production ports for named agents", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+
+    const config = await withEve<TestConfig>(
+      {},
+      {
+        agents: {
+          billing: "./agents/billing",
+          support: "./agents/support",
+        },
+      },
+    )("phase-production-build", {
+      defaultConfig: {},
+    });
+    const rewrites = await config.rewrites?.();
+
+    expect(getBeforeFiles(rewrites)).toEqual(
+      expect.arrayContaining([
+        {
+          destination: "http://127.0.0.1:4274/eve/v1/:path+",
+          source: "/eve/agents/billing/eve/v1/:path+",
+        },
+        {
+          destination: "http://127.0.0.1:4275/eve/v1/:path+",
+          source: "/eve/agents/support/eve/v1/:path+",
+        },
+      ]),
+    );
+  });
+
+  it("rejects eveRoot when named agents are configured", () => {
+    expect(() =>
+      withEve<TestConfig>(
+        {},
+        {
+          agents: {
+            support: "./agents/support",
+          },
+          eveRoot: "./agent",
+        },
+      ),
+    ).toThrow("withEve cannot combine eveRoot with agents");
+  });
+
+  it("rejects invalid named agent route segments", () => {
+    expect(() =>
+      withEve<TestConfig>(
+        {},
+        {
+          agents: {
+            Support: "./agents/support",
+          },
+        },
+      ),
+    ).toThrow("eve Next.js agent name");
   });
 });
 

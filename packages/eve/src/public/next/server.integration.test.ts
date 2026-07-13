@@ -39,6 +39,7 @@ function createMockChildProcess(): MockChildProcess {
 describe("resolveEveDestinationPrefix", () => {
   afterEach(async () => {
     spawnMock.mockReset();
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
     await Promise.all(
       tempRoots.splice(0).map((root) =>
@@ -54,10 +55,21 @@ describe("resolveEveDestinationPrefix", () => {
     vi.stubEnv("NODE_ENV", "development");
     const appRoot = await createTempAppRoot();
     const child = createMockChildProcess();
+    const stderrWrites: string[] = [];
+    const stdoutWrites: string[] = [];
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      stderrWrites.push(String(chunk));
+      return true;
+    });
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      stdoutWrites.push(String(chunk));
+      return true;
+    });
     spawnMock.mockReturnValue(child);
 
     const destination = resolveEveDestinationPrefix({
       appRoot,
+      logLabel: "support",
       phase: "phase-development-server",
       productionDestinationPrefix: "/internal/eve",
     });
@@ -74,6 +86,46 @@ describe("resolveEveDestinationPrefix", () => {
 
     await expect(destination).resolves.toBe("http://127.0.0.1:33449");
     await expect(readRegisteredOrigin(appRoot)).resolves.toBe("http://127.0.0.1:33449");
+    expect(stdoutWrites).toContain(
+      '[eve:dev:support] dependency metadata: "homepage": "https://rolldown.rs/"\n',
+    );
+    expect(stderrWrites).toContain(
+      "[eve:dev:support] server listening at http://127.0.0.1:33449\n",
+    );
+  });
+
+  it("suppresses low-signal eve dev startup output", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    const appRoot = await createTempAppRoot();
+    const child = createMockChildProcess();
+    const stdoutWrites: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      stdoutWrites.push(String(chunk));
+      return true;
+    });
+    spawnMock.mockReturnValue(child);
+
+    const destination = resolveEveDestinationPrefix({
+      appRoot,
+      logLabel: "billing",
+      phase: "phase-development-server",
+      productionDestinationPrefix: "/internal/eve",
+    });
+
+    await vi.waitFor(() => {
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+    });
+    child.stdout.emit(
+      "data",
+      Buffer.from(
+        "☰eve  v0.0.0\nCONFIGURATION_FIELD_CONFLICT\n\u001b[33m[CONFIGURATION_FIELD_CONFLICT] \u001b[0mnoisy\n[dev] server listening at http://127.0.0.1:33450\n",
+      ),
+    );
+
+    await expect(destination).resolves.toBe("http://127.0.0.1:33450");
+    expect(stdoutWrites).toEqual([
+      "[eve:dev:billing] server listening at http://127.0.0.1:33450\n",
+    ]);
   });
 });
 

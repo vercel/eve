@@ -471,6 +471,33 @@ describe("discoverAgent (memory)", () => {
     ]);
   });
 
+  it("silently ignores generated runtime directories", async () => {
+    const project = buildMemoryAgentProject({
+      agentDirectories: [".eve", ".next", ".output", ".vercel", ".workflow-data", "node_modules"],
+      agentFiles: {
+        "instructions.md": "You are a precise assistant.",
+      },
+    });
+
+    const result = await discoverAgent({
+      agentRoot: project.agentRoot,
+      appRoot: project.appRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.manifest.instructions).toEqual([
+      {
+        definition: {
+          markdown: "You are a precise assistant.",
+        },
+        sourceKind: "markdown",
+        logicalPath: "instructions.md",
+        sourceId: "instructions.md",
+      },
+    ]);
+  });
+
   it("rejects authored tool filenames that violate the tool-name charset", async () => {
     const project = buildMemoryAgentProject({
       agentFiles: {
@@ -595,14 +622,14 @@ describe("discoverAgent (memory)", () => {
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "ext" },
+          eve: { extension: "extension" },
         }),
-        "node_modules/@acme/crm/ext/tools/search.ts": "export default {};\n",
+        "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
         "node_modules/@acme/gizmo/package.json": JSON.stringify({
           name: "@acme/gizmo",
-          eve: { extension: "ext" },
+          eve: { extension: "extension" },
         }),
-        "node_modules/@acme/gizmo/ext/tools/search.ts": "export default {};\n",
+        "node_modules/@acme/gizmo/extension/tools/search.ts": "export default {};\n",
       },
       agentFiles: {
         "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
@@ -661,11 +688,11 @@ describe("discoverAgent (memory)", () => {
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "ext" },
+          eve: { extension: "extension" },
         }),
-        "node_modules/@acme/crm/ext/tools/search.ts":
+        "node_modules/@acme/crm/extension/tools/search.ts":
           'throw new Error("extension modules should not execute during discovery");\n',
-        "node_modules/@acme/crm/ext/instructions/policy.md": "Use the CRM before guessing.",
+        "node_modules/@acme/crm/extension/instructions/policy.md": "Use the CRM before guessing.",
       },
       agentFiles: {
         "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
@@ -699,11 +726,11 @@ describe("discoverAgent (memory)", () => {
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "ext" },
+          eve: { extension: "extension" },
         }),
-        "node_modules/@acme/crm/ext/agent.ts":
+        "node_modules/@acme/crm/extension/agent.ts":
           'export default { model: "anthropic/claude-sonnet-5" };\n',
-        "node_modules/@acme/crm/ext/tools/search.ts": "export default {};\n",
+        "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
       },
       agentFiles: {
         "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
@@ -747,9 +774,9 @@ describe("discoverAgent (memory)", () => {
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "ext" },
+          eve: { extension: "extension" },
         }),
-        "node_modules/@acme/crm/ext/tools/search.ts":
+        "node_modules/@acme/crm/extension/tools/search.ts":
           'throw new Error("extension modules should not execute during discovery");\n',
       },
       agentFiles: {
@@ -791,9 +818,9 @@ describe("discoverAgent (memory)", () => {
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "ext" },
+          eve: { extension: "extension" },
         }),
-        "node_modules/@acme/crm/ext/tools/search.ts":
+        "node_modules/@acme/crm/extension/tools/search.ts":
           'throw new Error("extension modules should not execute during discovery");\n',
       },
       agentFiles: {
@@ -832,9 +859,9 @@ describe("discoverAgent (memory)", () => {
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "ext" },
+          eve: { extension: "extension" },
         }),
-        "node_modules/@acme/crm/ext/tools/search.ts": "export default {};\n",
+        "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
       },
       agentFiles: {
         "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
@@ -884,9 +911,9 @@ describe("discoverAgent (memory)", () => {
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "ext" },
+          eve: { extension: "extension" },
         }),
-        "node_modules/@acme/crm/ext/tools/search.ts": "export default {};\n",
+        "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
       },
       agentFiles: {
         "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
@@ -915,11 +942,11 @@ describe("discoverAgent (memory)", () => {
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "ext" },
+          eve: { extension: "extension" },
           peerDependencies: { eve: "^2" },
         }),
-        "node_modules/@acme/crm/ext/extension.ts": "export default {};\n",
-        "node_modules/@acme/crm/ext/tools/search.ts": "export default {};\n",
+        "node_modules/@acme/crm/extension/extension.ts": "export default {};\n",
+        "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
       },
       agentFiles: {
         "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
@@ -948,11 +975,11 @@ describe("discoverAgent (memory)", () => {
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "ext" },
+          eve: { extension: "extension" },
           peerDependencies: { eve: "^2" },
         }),
-        "node_modules/@acme/crm/ext/extension.ts": "export default {};\n",
-        "node_modules/@acme/crm/ext/tools/search.ts": "export default {};\n",
+        "node_modules/@acme/crm/extension/extension.ts": "export default {};\n",
+        "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
       },
       agentFiles: {
         "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
@@ -980,11 +1007,12 @@ describe("discoverAgent (memory)", () => {
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "ext" },
+          eve: { extension: "extension" },
         }),
-        "node_modules/@acme/crm/ext/extension.ts": "export default {};\n",
+        "node_modules/@acme/crm/extension/extension.ts": "export default {};\n",
         // Background scheduling is the consuming agent's to own, not an extension's.
-        "node_modules/@acme/crm/ext/schedules/sweep.md": '---\ncron: "0 9 * * *"\n---\nSweep.',
+        "node_modules/@acme/crm/extension/schedules/sweep.md":
+          '---\ncron: "0 9 * * *"\n---\nSweep.',
       },
       agentFiles: {
         "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
@@ -1008,13 +1036,13 @@ describe("discoverAgent (memory)", () => {
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "ext" },
+          eve: { extension: "extension" },
         }),
-        "node_modules/@acme/crm/ext/extension.ts": "export default {};\n",
-        "node_modules/@acme/crm/ext/tools/search.ts": "export default {};\n",
+        "node_modules/@acme/crm/extension/extension.ts": "export default {};\n",
+        "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
         // The mounted extension itself tries to mount another extension — not
         // supported yet, so discovery must reject it rather than drop it.
-        "node_modules/@acme/crm/ext/extensions/inner.ts":
+        "node_modules/@acme/crm/extension/extensions/inner.ts":
           'export { default } from "@acme/inner";\n',
       },
       agentFiles: {
@@ -1041,9 +1069,9 @@ describe("discoverAgent (memory)", () => {
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
-          eve: { extension: "ext" },
+          eve: { extension: "extension" },
         }),
-        "node_modules/@acme/crm/ext/tools/search.ts": "export default {};\n",
+        "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
       },
       agentFiles: {
         "extensions/crm.ts": 'export { default } from "@acme/crm";\n',

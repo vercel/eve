@@ -73,9 +73,20 @@ describe("withEve Vercel config", () => {
       ],
       services: {
         eve: {
-          buildCommand: "eve build",
-          entrypoint: "package.json",
+          buildCommand: "node 'node_modules/eve/bin/eve.js' build",
           framework: "eve",
+          routes: [
+            {
+              src: "^/eve/v1/(.*)$",
+              transforms: [
+                {
+                  args: "/eve/v1/$1",
+                  op: "set",
+                  type: "request.path",
+                },
+              ],
+            },
+          ],
           root: ".",
         },
       },
@@ -111,9 +122,20 @@ describe("withEve Vercel config", () => {
       ],
       services: {
         eve: {
-          buildCommand: "eve build",
-          entrypoint: "package.json",
+          buildCommand: "node 'node_modules/eve/bin/eve.js' build",
           framework: "eve",
+          routes: [
+            {
+              src: "^/eve/v1/(.*)$",
+              transforms: [
+                {
+                  args: "/eve/v1/$1",
+                  op: "set",
+                  type: "request.path",
+                },
+              ],
+            },
+          ],
           root: ".",
         },
       },
@@ -212,6 +234,18 @@ describe("withEve Vercel config", () => {
         agent: {
           entrypoint: "package.json",
           framework: "eve",
+          routes: [
+            {
+              src: "^/eve/v1/(.*)$",
+              transforms: [
+                {
+                  args: "/eve/v1/$1",
+                  op: "set",
+                  type: "request.path",
+                },
+              ],
+            },
+          ],
           root: "agent",
         },
       },
@@ -246,6 +280,209 @@ describe("withEve Vercel config", () => {
         },
       },
     });
+  });
+
+  it("writes one Build Output service and route for each named agent", async () => {
+    const appRoot = await createTempAppRoot();
+    process.chdir(appRoot);
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_URL", "preview.example.com");
+
+    const config = await resolveConfig(
+      withEve<TestConfig>(
+        {},
+        {
+          agents: {
+            billing: {
+              buildCommand: "pnpm build:billing-agent",
+              root: "./agents/billing",
+              servicePrefix: "/_eve_internal/billing",
+            },
+            support: "./agents/support",
+          },
+        },
+      ),
+    );
+    const rewrites = await config.rewrites?.();
+    const outputConfig = await readJsonFile(join(appRoot, ".vercel", "output", "config.json"));
+
+    expect(outputConfig).toEqual({
+      routes: [
+        {
+          destination: {
+            service: "eve-billing",
+            type: "service",
+          },
+          src: "^/eve/agents/billing/eve/v1/(.*)$",
+        },
+        {
+          destination: {
+            service: "eve-support",
+            type: "service",
+          },
+          src: "^/eve/agents/support/eve/v1/(.*)$",
+        },
+      ],
+      services: {
+        "eve-billing": {
+          buildCommand: "pnpm build:billing-agent",
+          framework: "eve",
+          routes: [
+            {
+              src: "^/eve/agents/billing/eve/v1/(.*)$",
+              transforms: [
+                {
+                  args: "/eve/v1/$1",
+                  op: "set",
+                  type: "request.path",
+                },
+              ],
+            },
+          ],
+          root: "agents/billing",
+          routePrefix: "/eve/agents/billing",
+        },
+        "eve-support": {
+          buildCommand: "node '../../node_modules/eve/bin/eve.js' build",
+          framework: "eve",
+          routes: [
+            {
+              src: "^/eve/agents/support/eve/v1/(.*)$",
+              transforms: [
+                {
+                  args: "/eve/v1/$1",
+                  op: "set",
+                  type: "request.path",
+                },
+              ],
+            },
+          ],
+          root: "agents/support",
+          routePrefix: "/eve/agents/support",
+        },
+      },
+      version: 3,
+    });
+    expect(rewrites).toBeUndefined();
+  });
+
+  it("normalizes existing Build Output service arrays before adding named agents", async () => {
+    const appRoot = await createTempAppRoot();
+    process.chdir(appRoot);
+    await mkdir(join(appRoot, ".vercel", "output"), { recursive: true });
+    await writeFile(join(appRoot, ".vercel", "project.json"), "{}\n");
+    await writeFile(join(appRoot, ".vercel", "output", "builds.json"), "{}\n");
+    await writeFile(
+      join(appRoot, ".vercel", "output", "config.json"),
+      `${JSON.stringify(
+        {
+          version: 3,
+          routes: [
+            {
+              destination: {
+                service: "eve-billing",
+                type: "service",
+              },
+              src: "^/eve/agents/billing/eve/v1/(.*)$",
+            },
+            { handle: "filesystem" },
+          ],
+          services: [
+            {
+              buildCommand: "eve build:support",
+              entrypoint: "package.json",
+              framework: "eve",
+              name: "eve-support",
+              root: "agents/support",
+              routePrefix: "/eve/agents/support",
+              schema: "experimentalServicesV2",
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_URL", "preview.example.com");
+
+    const config = await resolveConfig(
+      withEve<TestConfig>(
+        {},
+        {
+          agents: {
+            billing: "./agents/billing",
+            support: "./agents/support",
+          },
+        },
+      ),
+    );
+    const rewrites = await config.rewrites?.();
+    const outputConfig = await readJsonFile(join(appRoot, ".vercel", "output", "config.json"));
+
+    expect(outputConfig).toEqual({
+      routes: [
+        {
+          destination: {
+            service: "eve-billing",
+            type: "service",
+          },
+          src: "^/eve/agents/billing/eve/v1/(.*)$",
+        },
+        {
+          destination: {
+            service: "eve-support",
+            type: "service",
+          },
+          src: "^/eve/agents/support/eve/v1/(.*)$",
+        },
+        { handle: "filesystem" },
+      ],
+      services: {
+        "eve-billing": {
+          buildCommand: "node '../../node_modules/eve/bin/eve.js' build",
+          framework: "eve",
+          routes: [
+            {
+              src: "^/eve/agents/billing/eve/v1/(.*)$",
+              transforms: [
+                {
+                  args: "/eve/v1/$1",
+                  op: "set",
+                  type: "request.path",
+                },
+              ],
+            },
+          ],
+          root: "agents/billing",
+          routePrefix: "/eve/agents/billing",
+        },
+        "eve-support": {
+          buildCommand: "eve build:support",
+          entrypoint: "package.json",
+          framework: "eve",
+          routes: [
+            {
+              src: "^/eve/agents/support/eve/v1/(.*)$",
+              transforms: [
+                {
+                  args: "/eve/v1/$1",
+                  op: "set",
+                  type: "request.path",
+                },
+              ],
+            },
+          ],
+          root: "agents/support",
+          routePrefix: "/eve/agents/support",
+          schema: "experimentalServicesV2",
+        },
+      },
+      version: 3,
+    });
+    expect(rewrites).toBeUndefined();
   });
 
   it("does not start a local eve build while Next.js is building", async () => {

@@ -254,7 +254,7 @@ const agent = useEveAgent({
 
 Store the full `session` object (`sessionId`, `continuationToken`, `streamIndex`), not a single field. The session cursor lets eve continue the durable conversation; the event log lets your UI render historical messages without replaying the whole stream. A database-backed chat app should usually persist stream events as they arrive with `onEvent` and then save a final snapshot in `onFinish`.
 
-For multiple chat threads, keep one saved event log and session cursor per thread. `host`, `reducer`, `session`, `initialEvents`, `initialSession`, `auth`, `headers`, `maxReconnectAttempts`, and `optimistic` are read when the hook creates its store, so remount the chat component when switching threads, for example with `key={chat.id}`.
+For multiple chat threads, keep one saved event log and session cursor per thread. `agent`, `host`, `reducer`, `session`, `initialEvents`, `initialSession`, `auth`, `headers`, `maxReconnectAttempts`, and `optimistic` are read when the hook creates its store, so remount the chat component when switching threads, for example with `key={chat.id}`.
 
 If the user can refresh or navigate immediately after pressing send, create your app-level chat row and store the pending user message before calling `send()`. After the request starts, persist the session state as soon as it contains a `sessionId`, then reconnect an interrupted in-flight turn with `session.stream({ startIndex: savedEvents.length })` from the lower-level client.
 
@@ -269,6 +269,12 @@ const agent = useEveAgent({
     bearer: async () => await getAccessToken(),
   },
 });
+```
+
+When a framework integration mounts multiple named agents, pass `agent` instead of `host`:
+
+```tsx
+const support = useEveAgent({ agent: "support" });
 ```
 
 ## Per-framework integration

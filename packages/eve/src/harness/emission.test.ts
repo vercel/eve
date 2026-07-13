@@ -127,32 +127,45 @@ describe("setHarnessEmissionState", () => {
 });
 
 describe("emitStreamContent empty delivery", () => {
-  it("emits each normal text delta before reading the next stream part", async () => {
-    const emit = createEmitStub();
-    let releaseSecondPart!: () => void;
-    const secondPartReady = new Promise<void>((resolve) => {
-      releaseSecondPart = resolve;
+  it("reduces 368 saturated deltas to eight bounded dispatches", async () => {
+    const deltaCount = 368;
+    const writeReleases: Array<() => void> = [];
+    let providerDeltas = 0;
+    let providerFinished = false;
+    const emit = vi.fn(async (_event: Parameters<HarnessEmitFn>[0]) => {
+      await new Promise<void>((resolve) => {
+        writeReleases.push(resolve);
+      });
     });
     async function* controlledStream(): AsyncIterable<TextStreamPart<ToolSet>> {
-      yield { id: "text-1", text: "first", type: "text-delta" } as TextStreamPart<ToolSet>;
-      await secondPartReady;
-      yield { id: "text-1", text: " second", type: "text-delta" } as TextStreamPart<ToolSet>;
+      for (let index = 0; index < deltaCount; index += 1) {
+        providerDeltas += 1;
+        yield { id: "text-1", text: "x", type: "text-delta" } as TextStreamPart<ToolSet>;
+      }
       yield { finishReason: "stop", type: "finish-step" } as TextStreamPart<ToolSet>;
+      providerFinished = true;
     }
 
     const run = emitStreamContent(emit, EMISSION_STATE, controlledStream());
-    try {
-      await vi.waitFor(() => expect(emit).toHaveBeenCalledTimes(1));
-      expect(vi.mocked(emit).mock.calls[0]?.[0]).toEqual(
-        expect.objectContaining({
-          data: expect.objectContaining({ messageDelta: "first", messageSoFar: "first" }),
-          type: "message.appended",
-        }),
-      );
-    } finally {
-      releaseSecondPart();
-      await run;
+    await vi.waitFor(() => expect(providerDeltas).toBe(65));
+    expect(providerFinished).toBe(false);
+    expect(emit).toHaveBeenCalledTimes(1);
+
+    for (let writeIndex = 0; writeIndex < 8; writeIndex += 1) {
+      await vi.waitFor(() => expect(writeReleases.length).toBe(writeIndex + 1));
+      writeReleases[writeIndex]?.();
     }
+    await run;
+
+    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    const appended = events.filter((event) => event.type === "message.appended");
+    expect(providerFinished).toBe(true);
+    expect(events).toHaveLength(8);
+    expect(appended.map((event) => event.data.messageDelta.length)).toEqual([
+      1, 64, 64, 64, 64, 64, 47,
+    ]);
+    expect(appended.at(-1)?.data.messageSoFar).toBe("x".repeat(deltaCount));
+    expect(events.at(-1)?.type).toBe("message.completed");
   });
 
   it("streams a split sentinel immediately and completes with a null message", async () => {
@@ -237,6 +250,35 @@ describe("emitStreamContent empty delivery", () => {
 });
 
 describe("emitStreamContent action requests", () => {
+  it("cancels a pending provider action batch when the stream aborts", async () => {
+    vi.useFakeTimers();
+    const emit = createEmitStub();
+
+    try {
+      await expect(
+        emitStreamContent(
+          emit,
+          EMISSION_STATE,
+          streamOf([
+            {
+              input: { query: "eve" },
+              providerExecuted: true,
+              toolCallId: "search-1",
+              toolName: "web_search",
+              type: "tool-call",
+            },
+            { reason: "cancelled", type: "abort" },
+          ] as TextStreamPart<ToolSet>[]),
+        ),
+      ).rejects.toMatchObject({ name: "AbortError" });
+
+      await vi.runAllTimersAsync();
+      expect(emit).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("emits a provider action batch before any provider result arrives", async () => {
     const events: Parameters<HarnessEmitFn>[0][] = [];
     const emit: HarnessEmitFn = async (event) => {
@@ -558,6 +600,48 @@ describe("emitStreamContent action requests", () => {
 });
 
 describe("emitStreamContent error-part handling", () => {
+  it("interrupts a stalled provider pull when the durable emitter fails", async () => {
+    const writeError = new Error("durable write failed");
+    let rejectWrite!: (error: unknown) => void;
+    const firstWrite = new Promise<void>((_resolve, reject) => {
+      rejectWrite = reject;
+    });
+    let providerCancelled = false;
+    let stalledReadStarted = false;
+    const firstPart = {
+      id: "text-1",
+      text: "A",
+      type: "text-delta",
+    } as TextStreamPart<ToolSet>;
+    const stalledStream: AsyncIterable<TextStreamPart<ToolSet>> = {
+      [Symbol.asyncIterator]() {
+        let reads = 0;
+        return {
+          next(): Promise<IteratorResult<TextStreamPart<ToolSet>>> {
+            reads += 1;
+            if (reads === 1) {
+              return Promise.resolve({ done: false, value: firstPart });
+            }
+            stalledReadStarted = true;
+            return new Promise(() => {});
+          },
+          return(): Promise<IteratorResult<TextStreamPart<ToolSet>>> {
+            providerCancelled = true;
+            return Promise.resolve({ done: true, value: undefined });
+          },
+        };
+      },
+    };
+    const run = emitStreamContent(async () => firstWrite, EMISSION_STATE, stalledStream);
+    const rejected = expect(run).rejects.toBe(writeError);
+    await vi.waitFor(() => expect(stalledReadStarted).toBe(true));
+
+    rejectWrite(writeError);
+
+    await rejected;
+    expect(providerCancelled).toBe(true);
+  });
+
   it("preserves the original Error instance when the stream emits one", async () => {
     const original = new TypeError("upstream rejected");
 

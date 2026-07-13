@@ -1,10 +1,18 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { existsSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 
 import { describe, expect, it } from "vitest";
 
 import { EVE_HEALTH_ROUTE_PATH } from "../../src/protocol/routes.js";
+import {
+  pruneDevelopmentRuntimeArtifactsSnapshots,
+  readDevelopmentRuntimeArtifactsSnapshotRoot,
+  resolveDevelopmentRuntimeArtifactsPointerPath,
+} from "../../src/internal/nitro/dev-runtime-artifacts.js";
+import { STRUCTURAL_RELOAD_LOG_LINE } from "../../src/internal/nitro/host/dev-watcher-log.js";
 import { WEATHER_AGENT_DESCRIPTOR } from "../../src/internal/testing/scenario-apps/weather-agent.js";
 import {
   type ScenarioAppDescriptor,
@@ -59,6 +67,7 @@ function hasUnsupportedWindowsEsmImport(text: string): boolean {
 function hasKnownDevBundlingFailure(text: string): boolean {
   return (
     hasUnsupportedWindowsEsmImport(text) ||
+    text.includes("UNRESOLVED_IMPORT") ||
     (text.includes("ERR_MODULE_NOT_FOUND") && text.includes("authored-module-map-loader"))
   );
 }
@@ -73,6 +82,21 @@ async function wait(ms: number): Promise<void> {
   await new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+async function waitForCondition(
+  condition: () => boolean,
+  failureMessage: string,
+  timeoutMs: number = 60_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (!condition()) {
+    if (Date.now() >= deadline) {
+      throw new Error(failureMessage);
+    }
+    await wait(100);
+  }
 }
 
 async function waitForServerUrl(input: {
@@ -234,7 +258,7 @@ async function startEveDev(appRoot: string): Promise<RunningEveDev> {
 
 describe("eve dev server", () => {
   it(
-    "boots the packaged development server and completes a streamed turn",
+    "rebuilds after pruning its startup runtime snapshot and completes a streamed turn",
     async () => {
       const app = await scenarioApp(DEV_SERVER_AGENT_DESCRIPTOR);
       const server = await startEveDev(app.appRoot);
@@ -256,6 +280,45 @@ describe("eve dev server", () => {
           ok: true,
           status: "ready",
         });
+
+        const pointerPath = resolveDevelopmentRuntimeArtifactsPointerPath(app.appRoot);
+        const startupRuntimeRoot = readDevelopmentRuntimeArtifactsSnapshotRoot(pointerPath);
+        if (startupRuntimeRoot === undefined) {
+          throw new Error("Expected eve dev to publish an initial runtime snapshot.");
+        }
+
+        await writeFile(
+          join(app.appRoot, "agent", "instructions.md"),
+          "Use the weather tool and answer with the current conditions.\n",
+        );
+        await waitForCondition(() => {
+          const currentRuntimeRoot = readDevelopmentRuntimeArtifactsSnapshotRoot(pointerPath);
+          return currentRuntimeRoot !== undefined && currentRuntimeRoot !== startupRuntimeRoot;
+        }, `Timed out waiting for authored HMR.\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`);
+
+        const authoredRuntimeRoot = readDevelopmentRuntimeArtifactsSnapshotRoot(pointerPath);
+        if (authoredRuntimeRoot === undefined) {
+          throw new Error("Expected authored HMR to publish a runtime snapshot.");
+        }
+
+        await pruneDevelopmentRuntimeArtifactsSnapshots({
+          appRoot: app.appRoot,
+          now: Date.now() + 1_000,
+          recentWindowMs: 0,
+          retainCount: 0,
+        });
+        expect(existsSync(startupRuntimeRoot)).toBe(false);
+
+        await writeFile(join(app.appRoot, ".env.local"), "EVE_SCENARIO_RELOAD=1\n");
+        await waitForCondition(
+          () => server.stdout().includes(STRUCTURAL_RELOAD_LOG_LINE),
+          `Timed out waiting for a structural Nitro reload.\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
+        );
+        await waitForCondition(() => {
+          const currentRuntimeRoot = readDevelopmentRuntimeArtifactsSnapshotRoot(pointerPath);
+          return currentRuntimeRoot !== undefined && currentRuntimeRoot !== authoredRuntimeRoot;
+        }, `Timed out waiting for the structural reload snapshot.\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`);
+        await wait(2_000);
 
         let messageResult: Awaited<ReturnType<typeof sendDevelopmentMessage>>;
         try {

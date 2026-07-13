@@ -273,14 +273,8 @@ describe("buildApplication", () => {
     const vercelConfig = JSON.parse(
       await readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),
     ) as {
-      routes: Array<{ dest?: string; handle?: string; src?: string }>;
+      routes: unknown[];
     };
-    const sharedFunctionConfig = JSON.parse(
-      await readFile(
-        join(appRoot, ".vercel", "output", "functions", "eve", "__server.func", ".vc-config.json"),
-        "utf8",
-      ),
-    ) as { handler?: string };
 
     await expect(
       lstat(join(appRoot, ".vercel", "output", "functions", "index.func")),
@@ -304,30 +298,12 @@ describe("buildApplication", () => {
     ).resolves.toContain("export default");
     expect(vercelConfig.routes).toEqual([
       { handle: "filesystem" },
-      { dest: "/eve/__server", src: "/_eve_internal/eve/eve/v1/health" },
+      { dest: "/eve/__server", src: "/eve/v1/health" },
       {
         dest: "/eve/__server",
-        src: "^/_eve_internal/eve/eve/v1/session/(?<sessionId>[^/]+)/stream$",
+        src: "^/eve/v1/session/(?<sessionId>[^/]+)/stream$",
       },
     ]);
-    expect(sharedFunctionConfig.handler).toBe("index.__eve_service_route_prefix.mjs");
-    const sharedFunctionWrapper = await readFile(
-      join(
-        appRoot,
-        ".vercel",
-        "output",
-        "functions",
-        "eve",
-        "__server.func",
-        "index.__eve_service_route_prefix.mjs",
-      ),
-      "utf8",
-    );
-    expect(sharedFunctionWrapper).toContain('const SERVICE_PREFIX = "/_eve_internal/eve";');
-    expect(sharedFunctionWrapper).toContain('event === "request" || event === "upgrade"');
-    expect(sharedFunctionWrapper).toContain(
-      "export const handleUpgrade = originalModule.handleUpgrade",
-    );
     await expect(readFile(staleFlowOutputPath, "utf8")).rejects.toThrow();
     expect(runVercelBuildPrewarmMock).toHaveBeenCalledWith({
       appRoot,
@@ -399,13 +375,131 @@ describe("buildApplication", () => {
     await expect(
       lstat(join(appRoot, ".vercel", "output", "functions", "index.func")),
     ).rejects.toThrow();
-    const sharedFunctionConfig = JSON.parse(
-      await readFile(
-        join(appRoot, ".vercel", "output", "functions", "eve", "__server.func", ".vc-config.json"),
-        "utf8",
-      ),
-    ) as { handler?: string };
-    expect(sharedFunctionConfig.handler).toBe("index.__eve_service_route_prefix.mjs");
+    const vercelConfig = JSON.parse(
+      await readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),
+    ) as {
+      routes: unknown[];
+    };
+    expect(vercelConfig.routes).toContainEqual({
+      dest: "/eve/__server",
+      src: "/eve/v1/health",
+    });
+  });
+
+  it("normalizes eve function output behind a host service from a service array", async () => {
+    vi.stubEnv("VERCEL", "1");
+    const appRoot = await createScratchDirectory("eve-build-application-vercel-service-array-");
+
+    prepareApplicationHostMock.mockResolvedValueOnce(createPreparedHost(appRoot));
+    createApplicationNitroMock.mockImplementation(
+      async (
+        _preparedHost: PreparedApplicationHost,
+        _dev: boolean,
+        options: { outputDir?: string; surface?: string } = {},
+      ) => createNitroStub(options.outputDir ?? join(appRoot, ".vercel", "output")),
+    );
+    await mkdir(join(appRoot, ".vercel", "output"), { recursive: true });
+    await writeFile(
+      join(appRoot, ".vercel", "output", "config.json"),
+      `${JSON.stringify(
+        {
+          version: 3,
+          services: [
+            {
+              entrypoint: "package.json",
+              framework: "nextjs",
+              name: "web",
+              root: ".",
+            },
+            {
+              entrypoint: "package.json",
+              framework: "eve",
+              name: "eve-support",
+              root: ".",
+              routePrefix: "/eve/agents/support",
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const { buildApplication } = await import("#internal/nitro/host/build-application.js");
+    await buildApplication(appRoot);
+
+    const vercelConfig = JSON.parse(
+      await readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),
+    ) as {
+      routes: unknown[];
+    };
+    expect(vercelConfig.routes).toContainEqual({
+      dest: "/eve/__server",
+      src: "/eve/v1/health",
+    });
+  });
+
+  it("resolves service roots relative to a linked Vercel root directory", async () => {
+    vi.stubEnv("VERCEL", "1");
+    const projectRoot = await createScratchDirectory("eve-build-application-vercel-root-dir-");
+    const appRoot = join(projectRoot, "apps", "web", "agents", "support");
+
+    prepareApplicationHostMock.mockResolvedValueOnce(createPreparedHost(appRoot));
+    createApplicationNitroMock.mockImplementation(
+      async (
+        _preparedHost: PreparedApplicationHost,
+        _dev: boolean,
+        options: { outputDir?: string; surface?: string } = {},
+      ) => createNitroStub(options.outputDir ?? join(appRoot, ".vercel", "output")),
+    );
+    await mkdir(join(projectRoot, ".vercel", "output"), { recursive: true });
+    await writeFile(
+      join(projectRoot, ".vercel", "project.json"),
+      `${JSON.stringify(
+        {
+          settings: {
+            rootDirectory: "apps/web",
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await writeFile(join(projectRoot, ".vercel", "output", "builds.json"), "{}\n");
+    await writeFile(
+      join(projectRoot, ".vercel", "output", "config.json"),
+      `${JSON.stringify(
+        {
+          experimentalServicesV2: {
+            web: {
+              framework: "nextjs",
+              root: ".",
+            },
+            "eve-support": {
+              framework: "eve",
+              root: "agents/support",
+              routePrefix: "/eve/agents/support",
+            },
+          },
+          version: 3,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const { buildApplication } = await import("#internal/nitro/host/build-application.js");
+    await buildApplication(appRoot);
+
+    const vercelConfig = JSON.parse(
+      await readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),
+    ) as {
+      routes: unknown[];
+    };
+    expect(vercelConfig.routes).toContainEqual({
+      dest: "/eve/__server",
+      src: "/eve/v1/health",
+    });
   });
 
   it("builds isolated Vercel Nitro surfaces from legacy root service config", async () => {
@@ -456,27 +550,15 @@ describe("buildApplication", () => {
     const outputDir = await buildApplication(appRoot);
 
     expect(outputDir).toBe(join(appRoot, ".vercel", "output"));
-    const sharedFunctionConfig = JSON.parse(
-      await readFile(
-        join(appRoot, ".vercel", "output", "functions", "eve", "__server.func", ".vc-config.json"),
-        "utf8",
-      ),
-    ) as { handler?: string };
-    expect(sharedFunctionConfig.handler).toBe("index.__eve_service_route_prefix.mjs");
-    await expect(
-      readFile(
-        join(
-          appRoot,
-          ".vercel",
-          "output",
-          "functions",
-          "eve",
-          "__server.func",
-          "index.__eve_service_route_prefix.mjs",
-        ),
-        "utf8",
-      ),
-    ).resolves.toContain('const SERVICE_PREFIX = "/_eve_internal/eve";');
+    const vercelConfig = JSON.parse(
+      await readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),
+    ) as {
+      routes: unknown[];
+    };
+    expect(vercelConfig.routes).toContainEqual({
+      dest: "/eve/__server",
+      src: "/eve/v1/health",
+    });
   });
 
   it("leaves standalone Vercel Nitro output routable at the root", async () => {

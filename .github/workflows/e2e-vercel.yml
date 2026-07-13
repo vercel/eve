@@ -61,7 +61,10 @@ jobs:
     name: e2e-vercel (${{ matrix.name }})
     runs-on: ubuntu-latest
     needs: [changes, discover-fixtures]
-    if: needs.changes.outputs.relevant == 'true'
+    # No job-level `if`: these matrix jobs are required checks under their
+    # expanded names, and a skipped matrix never reports them, leaving PRs
+    # stuck on "Expected - Waiting for status to be reported". Instead every
+    # step is guarded, so an irrelevant diff reports success in seconds.
     strategy:
       fail-fast: false
       matrix:
@@ -76,28 +79,34 @@ jobs:
 
     steps:
       - name: Checkout code
+        if: needs.changes.outputs.relevant == 'true'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
 
       - name: Setup pnpm
+        if: needs.changes.outputs.relevant == 'true'
         uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
 
       - name: Setup Node.js
+        if: needs.changes.outputs.relevant == 'true'
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
           cache: "pnpm"
 
       - name: Install dependencies
+        if: needs.changes.outputs.relevant == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Build eve package
+        if: needs.changes.outputs.relevant == 'true'
         # Full build, not build:js: the deployed/runtime bundles must carry the
         # stamped package version (scripts/stamp-version-tokens.mjs) and docs.
         run: pnpm --filter eve run build
 
       - name: Deploy fixture and run evals
+        if: needs.changes.outputs.relevant == 'true'
         run: |
           set -euo pipefail
           mkdir -p "$EVE_EVAL_JUNIT_DIR"
@@ -145,7 +154,7 @@ jobs:
           fi
 
       - name: Upload eval artifacts
-        if: failure()
+        if: (failure()) && needs.changes.outputs.relevant == 'true'
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v6
         with:
           name: eval-artifacts-vercel-${{ matrix.name }}

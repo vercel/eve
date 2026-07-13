@@ -51,7 +51,7 @@ export interface ExtensionHandle<S extends StandardSchemaV1 = StandardSchemaV1> 
   (values: StandardSchemaV1.InferInput<S>): MountedExtension;
   /** The bound configuration, typed from the schema (defaults applied). */
   readonly config: StandardSchemaV1.InferOutput<S>;
-  /** The declared config schema; read by `eve build`. */
+  /** The declared config schema; read by `eve extension build`. */
   readonly schema: S;
 }
 
@@ -102,19 +102,19 @@ function validateConfig(
  * Schema (e.g. a Zod object) — describing the settings a consuming agent passes
  * at the mount site.
  *
- * The default export of an extension's `ext/extension.ts` is a `defineExtension`
+ * The default export of an extension's `extension/extension.ts` is a `defineExtension`
  * handle. A consuming agent mounts it, calling the handle to bind config
  * (`export default crm({ apiKey })`) or re-exporting it directly when there is no
  * config (`export { default } from "@acme/gizmo"`). The extension's own tools,
  * hooks, and connections read the bound config through the handle:
  *
  * ```ts
- * // ext/extension.ts
+ * // extension/extension.ts
  * import { defineExtension } from "eve/extension";
  * import { z } from "zod";
  * export default defineExtension({ config: z.object({ apiKey: z.string() }) });
  *
- * // ext/tools/search.ts
+ * // extension/tools/search.ts
  * import extension from "../extension.js";
  * const { apiKey } = extension.config;
  * ```

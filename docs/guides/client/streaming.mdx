@@ -42,7 +42,7 @@ for await (const event of response) {
 }
 ```
 
-`message.appended` and `reasoning.appended` are incremental delta events. Their completed forms, `message.completed` and `reasoning.completed`, are the compatibility path for clients that don't render deltas.
+`message.appended` and `reasoning.appended` are incremental delta events. eve may combine adjacent deltas of the same type while a durable stream write is in flight, but preserves their text and event ordering; any different event is a barrier. Their completed forms, `message.completed` and `reasoning.completed`, are the compatibility path for clients that don't render deltas.
 
 ## Handle event types
 

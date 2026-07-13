@@ -275,6 +275,43 @@ describe("useEveAgent", () => {
     });
   });
 
+  it("targets named agent routes when agent is configured", async () => {
+    const startResponse = createDeferred<Response>();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(startResponse.promise)
+      .mockResolvedValueOnce(createEagerStreamResponse([createSessionWaitingEvent()]));
+
+    let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
+
+    function TestComponent() {
+      helpers = useEveAgent({
+        agent: "support",
+      });
+      return null;
+    }
+
+    await act(async () => {
+      create(createElement(TestComponent));
+    });
+
+    let sendPromise: Promise<void> | undefined;
+    await act(async () => {
+      sendPromise = helpers?.send({ message: "Hello" });
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      startResponse.resolve(createStartedMessageResponse("session_1", "http:session_1"));
+      await sendPromise;
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/eve/agents/support/eve/v1/session");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "/eve/agents/support/eve/v1/session/session_1/stream",
+    );
+  });
+
   it("marks an optimistic message as failed when send fails before confirmation", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network failed"));
 

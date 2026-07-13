@@ -61,6 +61,19 @@ type MockAgentConstructor =
     ? (settings: S) => ToolLoopAgent
     : never;
 
+function getMockResponseMessages(result: Record<string, unknown>): unknown[] {
+  const response = result.response;
+  if (
+    typeof response !== "object" ||
+    response === null ||
+    !("messages" in response) ||
+    !Array.isArray(response.messages)
+  ) {
+    throw new Error("Mock ToolLoopAgent result must include response messages.");
+  }
+  return response.messages;
+}
+
 function setupMockAgentSequence(results: readonly Record<string, unknown>[]): void {
   const queue = [...results];
 
@@ -91,7 +104,7 @@ function setupMockAgentSequence(results: readonly Record<string, unknown>[]): vo
         await onStepFinish(result);
       }
 
-      return result;
+      return { ...result, responseMessages: getMockResponseMessages(result) };
     });
 
     this.stream = vi.fn();

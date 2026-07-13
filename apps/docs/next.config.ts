@@ -43,6 +43,15 @@ const config: NextConfig = {
     ],
   },
 
+  async rewrites() {
+    return [
+      {
+        source: "/sitemap.xml",
+        destination: "https://crawled-sitemap.vercel.sh/eve.dev-.xml",
+      },
+    ];
+  },
+
   async redirects() {
     return [
       {

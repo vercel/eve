@@ -51,14 +51,6 @@ import {
   EMPTY_DELIVERY_SENTINEL,
 } from "#shared/empty-delivery.js";
 
-declare module "#public/channels/index.js" {
-  interface ChannelMetadataMap {
-    readonly "channel:support": {
-      readonly triggeringUserId: string | null;
-    } & Readonly<Record<string, unknown>>;
-  }
-}
-
 vi.mock("ai", () => ({
   ToolLoopAgent: vi.fn(),
   gateway: {
@@ -216,6 +208,7 @@ function getPrepareStep<TMessages, TResult>(value: unknown): PrepareStepProbe<TM
 
 function createMockStreamResult(result: Record<string, unknown>): {
   fullStream: AsyncIterable<Record<string, unknown>>;
+  responseMessages: Promise<Record<string, unknown>[]>;
   steps: Promise<Record<string, unknown>[]>;
 } {
   const fullStreamParts = Array.isArray(result.fullStreamParts)
@@ -227,8 +220,24 @@ function createMockStreamResult(result: Record<string, unknown>): {
       fullStreamParts === null
         ? createMockFullStream(result)
         : createExplicitMockFullStream(fullStreamParts),
+    responseMessages: Promise.resolve(getMockResponseMessages(result)),
     steps: Promise.resolve([result]),
   };
+}
+
+function getMockResponseMessages(result: Record<string, unknown>): Record<string, unknown>[] {
+  if (Array.isArray(result.responseMessages)) {
+    return result.responseMessages as Array<Record<string, unknown>>;
+  }
+
+  const response = (result.response ?? {}) as { messages?: unknown };
+  return Array.isArray(response.messages)
+    ? (response.messages as Array<Record<string, unknown>>)
+    : [];
+}
+
+function createMockGenerateResult(result: Record<string, unknown>): Record<string, unknown> {
+  return { ...result, responseMessages: getMockResponseMessages(result) };
 }
 
 async function* createExplicitMockFullStream(
@@ -361,7 +370,7 @@ function setupMockAgent(result: Record<string, unknown>): void {
         });
       }
       if (onStepFinish) await onStepFinish(result);
-      return result;
+      return createMockGenerateResult(result);
     });
 
     this.stream = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
@@ -4811,33 +4820,40 @@ describe("createToolLoopHarness", () => {
     });
   });
 
-  it("persists the inline approval-resume tool-result into session history so the next turn replays a balanced tool_use / tool_result pair", async () => {
+  it("persists the SDK's accumulated approval-resume messages into session history", async () => {
     /*
-     * When a previously-parked tool call is approved, the AI SDK
-     * enqueues its tool-result onto the parent stream before re-
-     * entering the LLM call. The result is absent from
-     * `stepResult.response.messages` / `toolCalls` / `toolResults`,
-     * so the harness must capture it from the stream and splice it
-     * into persisted history. Without this, the next turn replays a
-     * `tool_use` block with no matching `tool_result` and Anthropic
-     * rejects the request with 400.
+     * The real AI SDK contract is covered in
+     * `ai-sdk-approval-resume.integration.test.ts`. This unit isolates Eve's
+     * side of that contract: durable history must use the call-wide
+     * `responseMessages`, even when event projection does not provide a
+     * reconstructable tool-result.
      */
-    setupMockAgent({
-      content: [],
-      finishReason: "stop",
-      fullStreamParts: [
+    const resumedToolResultMessage = {
+      content: [
         {
-          output: { exitCode: 0, stderr: "", stdout: "/workspace\n", truncated: false },
+          output: {
+            type: "json",
+            value: { exitCode: 0, stderr: "", stdout: "/workspace\n", truncated: false },
+          },
           toolCallId: "call-1",
           toolName: "bash",
           type: "tool-result",
         },
+      ],
+      role: "tool",
+    };
+    const assistantMessage = { content: "`/workspace`", role: "assistant" };
+    setupMockAgent({
+      content: [],
+      finishReason: "stop",
+      fullStreamParts: [
         { id: "text-1", text: "`/workspace`", type: "text-delta" },
         { finishReason: "stop", type: "finish-step" },
       ],
       response: {
-        messages: [{ content: "`/workspace`", role: "assistant" }],
+        messages: [assistantMessage],
       },
+      responseMessages: [resumedToolResultMessage, assistantMessage],
       text: "`/workspace`",
       toolCalls: [],
       toolResults: [],
@@ -4880,6 +4896,66 @@ describe("createToolLoopHarness", () => {
       type: "tool-result",
     });
     expect(result.session.history.at(-1)?.role).toBe("assistant");
+  });
+
+  it("persists approved tool results when event handling is disabled", async () => {
+    const resumedToolResultMessage = {
+      content: [
+        {
+          output: { type: "text", value: "/workspace" },
+          toolCallId: "call-1",
+          toolName: "bash",
+          type: "tool-result",
+        },
+      ],
+      role: "tool",
+    };
+    const assistantMessage = { content: "`/workspace`", role: "assistant" };
+
+    // The final step contains only the assistant reply. The call-wide
+    // GenerateTextResult also contains the approved pre-model tool result.
+    setupMockAgent({
+      content: [],
+      finishReason: "stop",
+      response: { messages: [assistantMessage] },
+      responseMessages: [resumedToolResultMessage, assistantMessage],
+      text: "`/workspace`",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const harness = createToolLoopHarness(
+      createTestConfig("conversation", undefined, { tools: new Map() }),
+    );
+    const result = await harness(createPendingBashApprovalSession(), {
+      inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+    });
+
+    const agent = vi.mocked(ToolLoopAgent).mock.results.at(-1)?.value;
+    if (agent === undefined) {
+      throw new Error("ToolLoopAgent mock did not return an instance.");
+    }
+    expect(vi.mocked(agent.generate)).toHaveBeenCalledOnce();
+    expect(vi.mocked(agent.stream)).not.toHaveBeenCalled();
+    const assistantParts = result.session.history.flatMap((message) =>
+      message.role === "assistant" && Array.isArray(message.content) ? message.content : [],
+    );
+    const toolParts = result.session.history.flatMap((message) =>
+      message.role === "tool" ? message.content : [],
+    );
+    const toolCall = assistantParts.find(
+      (part) => part.type === "tool-call" && part.toolCallId === "call-1",
+    );
+    const toolResult = toolParts.find(
+      (part) => part.type === "tool-result" && part.toolCallId === "call-1",
+    );
+    expect([
+      result.session.history[0]?.role,
+      toolCall?.type,
+      toolResult?.type,
+      result.session.history.at(-1)?.role,
+    ]).toEqual(["assistant", "tool-call", "tool-result", "assistant"]);
+    expect(toolResult).toEqual(resumedToolResultMessage.content[0]);
   });
 
   it("does not persist provider-executed deferred tool-results as generic tool messages", async () => {
@@ -5704,11 +5780,11 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
-  it("preserves AI-SDK StepResult getter properties when synthesizing the inline tool-result message", async () => {
+  it("preserves AI-SDK StepResult getter properties when storing accumulated messages", async () => {
     /*
      * AI SDK `StepResult` is a class with prototype getters for
-     * `content`, `toolCalls`, `toolResults`, and `text`. The inline
-     * approval-resume repair must read those getters explicitly; rebuilding
+     * `content`, `toolCalls`, `toolResults`, and `text`. The accumulated
+     * response adapter must read those getters explicitly; rebuilding
      * it through object spread would copy only own enumerable properties,
      * silently turning all four getter-backed fields into `undefined`.
      */
@@ -5780,7 +5856,24 @@ describe("createToolLoopHarness", () => {
         if (onStepFinish) {
           void Promise.resolve().then(() => onStepFinish(stepInstance as unknown));
         }
-        return { fullStream, steps: Promise.resolve([stepInstance]) };
+        return {
+          fullStream,
+          responseMessages: Promise.resolve([
+            {
+              content: [
+                {
+                  output: { type: "json", value: { ok: true } },
+                  toolCallId: "call-1",
+                  toolName: "bash",
+                  type: "tool-result",
+                },
+              ],
+              role: "tool",
+            },
+            ...stepInstance.response.messages,
+          ]),
+          steps: Promise.resolve([stepInstance]),
+        };
       });
       this.generate = vi.fn().mockResolvedValue(new FakeStepResult());
       return this as unknown as ToolLoopAgent;
@@ -6352,6 +6445,9 @@ describe("createToolLoopHarness", () => {
     ) {
       const result = agentResults[instanceIndex];
       instanceIndex += 1;
+      if (result === undefined) {
+        throw new Error("ToolLoopAgent mock exhausted its scripted results.");
+      }
       const { onStepFinish, prepareStep } = settings;
       this.generate = vi.fn().mockImplementation(async (input: { messages: unknown[] }) => {
         if (prepareStep) {
@@ -6365,7 +6461,7 @@ describe("createToolLoopHarness", () => {
         }
         generateCalls.push(input.messages);
         if (onStepFinish) await onStepFinish(result);
-        return result;
+        return createMockGenerateResult(result);
       });
       return this;
     } as MockAgentConstructor);
@@ -6527,7 +6623,7 @@ describe("createToolLoopHarness", () => {
           toolResults: [],
         };
         if (onStepFinish) await onStepFinish(result);
-        return result;
+        return createMockGenerateResult(result);
       });
       return this as unknown as ToolLoopAgent;
     } as unknown as ConstructorParameters<typeof ToolLoopAgent> extends [infer S]
@@ -6665,6 +6761,9 @@ describe("createToolLoopHarness", () => {
     ) {
       const result = agentResults[instanceIndex];
       instanceIndex += 1;
+      if (result === undefined) {
+        throw new Error("ToolLoopAgent mock exhausted its scripted results.");
+      }
       const { onStepFinish, prepareStep } = settings;
       this.generate = vi.fn().mockImplementation(async (input: { messages: unknown[] }) => {
         if (prepareStep) {
@@ -6678,7 +6777,7 @@ describe("createToolLoopHarness", () => {
         }
         generateCalls.push(input.messages as Array<{ role: string; content: unknown }>);
         if (onStepFinish) await onStepFinish(result);
-        return result;
+        return createMockGenerateResult(result);
       });
       return this as unknown as ToolLoopAgent;
     } as unknown as ConstructorParameters<typeof ToolLoopAgent> extends [infer S]
@@ -8270,7 +8369,10 @@ describe("createToolLoopHarness", () => {
         return {
           runtimeContext: {
             "eve.session.id": "user-override",
-            "slack.user_id": input.channel.metadata.triggeringUserId ?? "",
+            "slack.user_id":
+              typeof input.channel.metadata["triggeringUserId"] === "string"
+                ? input.channel.metadata["triggeringUserId"]
+                : "",
             "turn.id": input.turn.id,
           },
         };

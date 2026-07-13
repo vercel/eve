@@ -4,6 +4,7 @@ import { toError } from "#shared/errors.js";
 import { isTurnCancellation } from "#harness/turn-cancellation.js";
 
 const RESPONSE_BODY_SNIPPET_LIMIT = 1_000;
+const API_ERROR_SUMMARY_LIMIT = 800;
 const GATEWAY_MODEL_REQUEST_REJECTED_MESSAGE =
   "AI Gateway rejected the model request before the agent produced a response.";
 
@@ -48,6 +49,8 @@ export interface ModelCallConfigErrorSummary {
 }
 
 interface ModelCallErrorSignals {
+  readonly apiCallError: boolean;
+  readonly apiErrorMessage?: string;
   readonly gatewayName?: string;
   readonly gatewayType?: string;
   readonly generationId?: string;
@@ -130,6 +133,23 @@ export function summarizeKnownModelCallRequestError(
 
   const signals = readModelCallErrorSignals(error);
 
+  // Transient upstream failures (throttles, overloads) keep the generic
+  // retry-exhausted framing; a summary here would read as a terminal
+  // rejection and send users to debug their configuration.
+  if (isTransientHttpStatus(signals.statusCode ?? signals.upstreamStatusCode)) {
+    return null;
+  }
+
+  const apiSummary = signals.apiErrorMessage;
+  if (apiSummary !== undefined) {
+    return {
+      name: isGatewayErrorSignal(signals)
+        ? "AI Gateway model request rejected"
+        : "Model provider API error",
+      message: apiSummary,
+    };
+  }
+
   if (signals.statusCode === 400 && isGatewayErrorSignal(signals)) {
     return {
       name: "AI Gateway model request rejected",
@@ -137,7 +157,21 @@ export function summarizeKnownModelCallRequestError(
     };
   }
 
+  const apiCallSummary = formatApiCallErrorFallback(signals);
+  if (apiCallSummary !== undefined) {
+    return {
+      name: isGatewayErrorSignal(signals)
+        ? "AI Gateway model request rejected"
+        : "Model provider API error",
+      message: apiCallSummary,
+    };
+  }
+
   return null;
+}
+
+function isTransientHttpStatus(status: number | undefined): boolean {
+  return status === 408 || status === 429 || (status !== undefined && status >= 500);
 }
 
 /**
@@ -216,6 +250,7 @@ export function extractModelCallErrorDetails(error: unknown): JsonObject {
   const signals = readModelCallErrorSignals(error);
   const details: Record<string, JsonValue> = {};
 
+  appendJsonField(details, "apiErrorMessage", signals.apiErrorMessage);
   appendJsonField(details, "gatewayName", signals.gatewayName);
   appendJsonField(details, "gatewayType", signals.gatewayType);
   appendJsonField(details, "statusCode", signals.statusCode);
@@ -395,6 +430,10 @@ function readModelCallErrorSignals(error: unknown): ModelCallErrorSignals {
   const upstreamBody = readGatewayErrorBody(upstreamError);
 
   return {
+    apiCallError: upstreamError !== undefined,
+    apiErrorMessage:
+      upstreamBody?.apiErrorMessage ??
+      firstInformativeApiMessage([readErrorMessage(upstreamError)]),
     gatewayName: readErrorName(gatewayError),
     gatewayType: readStringField(gatewayError, "type"),
     generationId: readStringField(gatewayError, "generationId") ?? upstreamBody?.generationId,
@@ -438,6 +477,7 @@ function findUpstreamApiCallError(error: unknown): unknown {
 
 function readGatewayErrorBody(error: unknown):
   | {
+      readonly apiErrorMessage?: string;
       readonly generationId?: string;
       readonly message?: string;
       readonly type?: string;
@@ -462,6 +502,7 @@ function readGatewayErrorBody(error: unknown):
 
 function readGatewayErrorBodyFromValue(value: unknown):
   | {
+      readonly apiErrorMessage?: string;
       readonly generationId?: string;
       readonly message?: string;
       readonly type?: string;
@@ -469,13 +510,20 @@ function readGatewayErrorBodyFromValue(value: unknown):
   | undefined {
   if (!isObject(value)) return undefined;
   const error = readObjectField(value, "error");
-  if (error === undefined) return undefined;
   const generationId = readStringField(value, "generationId");
-  const message = readStringField(error, "message");
-  const type = readStringField(error, "type");
-  return message === undefined && type === undefined && generationId === undefined
+  const message = readStringField(error, "message") ?? readStringField(value, "message");
+  const type = readStringField(error, "type") ?? readStringField(value, "type");
+  const apiErrorMessage = firstInformativeApiMessage([
+    message,
+    ...readNestedApiErrorMessages(error),
+    ...readNestedApiErrorMessages(value),
+  ]);
+  return message === undefined &&
+    type === undefined &&
+    generationId === undefined &&
+    apiErrorMessage === undefined
     ? undefined
-    : { generationId, message, type };
+    : { apiErrorMessage, generationId, message, type };
 }
 
 function readStatusCode(error: unknown): number | undefined {
@@ -503,6 +551,78 @@ function readObjectField(value: unknown, key: string): Record<string, unknown> |
   if (!isObject(value)) return undefined;
   const field = value[key];
   return isObject(field) ? field : undefined;
+}
+
+function readNestedApiErrorMessages(value: unknown): readonly string[] {
+  if (!isObject(value)) return [];
+  const messages: string[] = [];
+  appendString(messages, readStringField(value, "message"));
+  appendString(messages, readStringField(value, "error_description"));
+  appendNestedApiFieldMessages(messages, value.error);
+  // `code` can carry a structured rejection ({ message }) on OpenAI-shaped
+  // bodies. `param` and `status` never hold prose - promoting them surfaced
+  // bare field names ("input") as the user-facing error.
+  appendNestedApiFieldMessages(messages, value.code);
+
+  return messages;
+}
+
+function appendNestedApiFieldMessages(out: string[], value: unknown): void {
+  if (typeof value === "string") {
+    appendString(out, value);
+    return;
+  }
+  if (!isObject(value)) return;
+  appendString(out, readStringField(value, "message"));
+  appendString(out, readStringField(value, "error"));
+  appendString(out, readStringField(value, "description"));
+  appendString(out, readStringField(value, "error_description"));
+  appendNestedApiFieldMessages(out, value.error);
+}
+
+function appendString(out: string[], value: string | undefined): void {
+  if (value !== undefined) out.push(value);
+}
+
+function firstInformativeApiMessage(messages: readonly (string | undefined)[]): string | undefined {
+  for (const message of messages) {
+    if (message !== undefined && isInformativeApiMessage(message)) {
+      return truncateSnippet(message, API_ERROR_SUMMARY_LIMIT);
+    }
+  }
+  return undefined;
+}
+
+function isInformativeApiMessage(message: string): boolean {
+  const normalized = message.trim();
+  return (
+    normalized.length > 0 &&
+    normalized !== "[object Object]" &&
+    normalized !== "AI_APICallError" &&
+    normalized !== "Bad Request" &&
+    normalized !== "Internal Server Error"
+  );
+}
+
+function formatApiCallErrorFallback(signals: ModelCallErrorSignals): string | undefined {
+  if (!signals.apiCallError) return undefined;
+  const status = signals.statusCode ?? signals.upstreamStatusCode;
+  const body = signals.responseBodySnippet;
+  const type =
+    signals.upstreamType !== undefined && isInformativeApiMessage(signals.upstreamType)
+      ? signals.upstreamType
+      : undefined;
+  if (status === undefined && body === undefined && type === undefined) {
+    return undefined;
+  }
+  const qualifiers = [status === undefined ? undefined : `HTTP ${status}`, type]
+    .filter((part): part is string => part !== undefined)
+    .join(", ");
+  const prefix =
+    qualifiers.length === 0
+      ? "Model provider API request failed"
+      : `Model provider API request failed (${qualifiers})`;
+  return body === undefined ? `${prefix}.` : `${prefix}: ${body}`;
 }
 
 function isRetryableGatewayType(type: string | undefined): boolean {

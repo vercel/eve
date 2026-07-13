@@ -62,7 +62,7 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `session.failed`          | The session failed.                                                                                              |
 | `session.completed`       | The session reached a terminal end.                                                                              |
 
-`reasoning.appended` and `message.appended` stream deltas as they arrive, and each one carries both the new delta and the cumulative text for the current block. The finalized block shows up on `message.completed` and `reasoning.completed`, which is the compatibility path for clients that don't render incremental streaming.
+`reasoning.appended` and `message.appended` stream incremental output as it arrives. When the durable stream writer is busy, eve may coalesce adjacent deltas of the same type; the text remains in source order, and any other event forms an ordering barrier. Each append carries both the new delta and the cumulative text for the current block. The finalized block shows up on `message.completed` and `reasoning.completed`, which is the compatibility path for clients that don't render incremental streaming.
 
 Note: consider the privacy, confidentiality, and user-experience implications for displaying, storing, or transmitting reasoning events in your application.
 

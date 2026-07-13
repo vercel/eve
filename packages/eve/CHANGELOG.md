@@ -1,5 +1,35 @@
 # eve
 
+## 0.22.6
+
+### Patch Changes
+
+- 5035812: Vercel deployments now emit `framework: { slug: "eve" }` alongside the version in the Build Output API config. Vercel's build-output deserializer drops the entire `framework` object when `slug` is absent, so this restores framework attribution end to end — `framework_slug` and `framework_version` are now populated in AI Gateway routing and access logs.
+- 9cd5c99: chatSdkChannel now mounts both GET and POST on each adapter's webhook route, so adapters that verify with a GET challenge like X's CRC check work through the bridge. POST-only adapters are unaffected.
+- caa0c17: `eve dev` now keeps Nitro build inputs outside prunable runtime snapshots. Long-running development servers no longer fail structural rebuilds with stale import errors after snapshot cleanup.
+- 01f0345: Resume active local workflow runs on the agent-scoped queue after restarting the eve server.
+
+## 0.22.5
+
+### Patch Changes
+
+- c8f00aa: Add `experimental_chatgpt` under the new `eve/models/openai` subpath: it returns an AI SDK language model served through the local Codex login (`codex login`), billed to the ChatGPT subscription, and defaults to `gpt-5.6-sol`. Direct provider API request errors now also surface their upstream message when one is available.
+- 640cd8e: Keep provider streams moving while durable event writes are in flight. eve now coalesces only adjacent queued text or reasoning appends behind an ordered writer, preserving event order while avoiding one durable round trip per provider delta.
+- a5b43e7: Add `eve extension init` and `eve extension build` for scaffolding and building extension packages.
+- a325195: `limits.maxSubagentDepth` now defaults to `1` instead of `3`. Agents that rely on deeper default delegation should set `limits: { maxSubagentDepth: 3 }` (or another value) explicitly.
+- 4f86a21: Persist AI SDK approval-resume response messages in session history so approved local tool results survive later provider requests.
+- 3577534: Update the bundled Workflow runtime dependencies to their latest 5.0 beta releases.
+- bd780bd: Update the bundled Workflow runtime to `@workflow/core@5.0.0-beta.30` and align its world packages.
+
+## 0.22.4
+
+### Patch Changes
+
+- b5aedaf: The shared integrations catalog gains 33 curated MCP connections from the Vercel Connect preset directory (Airtable, Stripe, Sentry, Supabase, Zapier, and more) for the docs integrations gallery, and the connection scaffolder now skips gallery-only catalog entries, so the `eve connections add` picker is unchanged.
+- edc93cc: Keep the mounted extensions guide out of the docs sidebar for now. The page stays at `/docs/extensions`, but the feature isn't surfaced in the nav while its API stabilizes.
+- f00f084: Add named multi-agent routing to `withEve` and `useEveAgent`. Next.js apps can now configure multiple eve roots with `agents`, then target one from the frontend with `useEveAgent({ agent: "name" })`.
+- f83d47d: `defineRemoteAgent` now accepts a function for `url`, resolved at runtime instead of baked at compile time. Return a `string` (or `Promise<string>`) from `() => process.env.MY_SERVICE_URL` to target an endpoint supplied by a runtime env var, known only once the deployment runs.
+
 ## 0.22.3
 
 ### Patch Changes

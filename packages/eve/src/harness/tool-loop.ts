@@ -877,17 +877,19 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             handledInlineToolResultCallIds,
             invalidInputToolCallIds,
             inlineAuthorizationResults,
-            inlineToolResultParts,
             trailingInlineToolResultParts,
           } = await emitStreamContent(emit, emissionState, streamResult.fullStream, {
             excludedActionToolNames,
             tools: config.tools,
           });
           throwIfTurnAborted(config.abortSignal);
-          const stepResult = await hooks.stepResult;
+          const [stepResult, accumulatedResponseMessages] = await Promise.all([
+            hooks.stepResult,
+            streamResult.responseMessages,
+          ]);
           if (
             isEmptyModelResponse(stepResult) &&
-            inlineToolResultParts.length === 0 &&
+            extractToolResultCallIds(accumulatedResponseMessages).size === 0 &&
             inlineAuthorizationResults.length === 0 &&
             trailingInlineToolResultParts.length === 0
           ) {
@@ -900,59 +902,39 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             handledInlineToolResultCallIds,
             tools: advertisedHarnessTools,
           });
-          if (
-            inlineToolResultParts.length > 0 ||
-            inlineAuthorizationResults.length > 0 ||
-            trailingInlineToolResultParts.length > 0
-          ) {
-            const existingToolResults = stepResult.toolResults as TypedToolResult<ToolSet>[];
-            const toolResultsByCallId = new Map(
-              existingToolResults.map((toolResult) => [toolResult.toolCallId, toolResult]),
-            );
-            for (const toolResult of inlineAuthorizationResults) {
-              toolResultsByCallId.set(toolResult.toolCallId, toolResult);
-            }
-            /*
-             * AI SDK `StepResult` is a class whose `content`,
-             * `toolCalls`, `toolResults`, and `text` are prototype
-             * getters. Each field is read explicitly here rather than via
-             * spread so the returned plain object carries the values —
-             * spread would copy only own enumerable properties and the
-             * downstream `extractQuestionInputRequests` would crash on
-             * `toolCalls === undefined`.
-             */
-            return {
-              content: stepResult.content,
-              finishReason: stepResult.finishReason,
-              response: {
-                ...stepResult.response,
-                ...(inlineToolResultParts.length > 0 || trailingInlineToolResultParts.length > 0
-                  ? {
-                      messages: insertInlineToolResultMessages({
-                        append: trailingInlineToolResultParts,
-                        prepend: inlineToolResultParts,
-                        responseMessages: stepResult.response.messages,
-                      }),
-                    }
-                  : {}),
-              },
-              providerMetadata: stepResult.providerMetadata,
-              text: stepResult.text,
-              toolCalls: stepResult.toolCalls,
-              toolResults: [...toolResultsByCallId.values()],
-              invalidInputToolCallIds,
-              usage: stepResult.usage,
-            };
+          const existingToolResults = stepResult.toolResults as TypedToolResult<ToolSet>[];
+          const toolResultsByCallId = new Map(
+            existingToolResults.map((toolResult) => [toolResult.toolCallId, toolResult]),
+          );
+          for (const toolResult of inlineAuthorizationResults) {
+            toolResultsByCallId.set(toolResult.toolCallId, toolResult);
           }
-          return stepResult;
+          return withAccumulatedResponseMessages({
+            invalidInputToolCallIds,
+            responseMessages: appendMissingToolResultMessages({
+              append: trailingInlineToolResultParts,
+              responseMessages: accumulatedResponseMessages,
+            }),
+            stepResult,
+            toolResults: [...toolResultsByCallId.values()],
+          });
         }
-        await agent.generate({ abortSignal: config.abortSignal, messages: callMessages });
+        const generateResult = await agent.generate({
+          abortSignal: config.abortSignal,
+          messages: callMessages,
+        });
         throwIfTurnAborted(config.abortSignal);
         const stepResult = await hooks.stepResult;
-        if (isEmptyModelResponse(stepResult)) {
+        if (
+          isEmptyModelResponse(stepResult) &&
+          extractToolResultCallIds(generateResult.responseMessages).size === 0
+        ) {
           throw new EmptyModelResponseError();
         }
-        return stepResult;
+        return withAccumulatedResponseMessages({
+          responseMessages: generateResult.responseMessages,
+          stepResult,
+        });
       };
 
       return executeModelCall().catch(rethrowNoOutputAsEmptyResponse);
@@ -1469,17 +1451,46 @@ type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][numbe
 type ToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 type StepResponseMessage = HarnessStepResult["response"]["messages"][number];
 
-function insertInlineToolResultMessages(input: {
+function withAccumulatedResponseMessages(input: {
+  readonly invalidInputToolCallIds?: ReadonlySet<string>;
+  readonly responseMessages: readonly StepResponseMessage[];
+  readonly stepResult: HarnessStepResult;
+  readonly toolResults?: readonly TypedToolResult<ToolSet>[];
+}): HarnessStepResult {
+  const { stepResult } = input;
+
+  /*
+   * AI SDK `StepResult` fields are prototype getters, so spreading the
+   * instance drops them. Materialize each field while replacing the final
+   * step's messages with the SDK's accumulated response, which also contains
+   * approval-resume results created before the model step.
+   */
+  return {
+    content: stepResult.content,
+    finishReason: stepResult.finishReason,
+    ...(input.invalidInputToolCallIds === undefined
+      ? {}
+      : { invalidInputToolCallIds: input.invalidInputToolCallIds }),
+    providerMetadata: stepResult.providerMetadata,
+    response: {
+      ...stepResult.response,
+      messages: [...input.responseMessages],
+    },
+    text: stepResult.text,
+    toolCalls: stepResult.toolCalls,
+    toolResults: input.toolResults === undefined ? stepResult.toolResults : [...input.toolResults],
+    usage: stepResult.usage,
+  };
+}
+
+function appendMissingToolResultMessages(input: {
   readonly append: readonly ToolResultPart[];
-  readonly prepend: readonly ToolResultPart[];
   readonly responseMessages: readonly StepResponseMessage[];
 }): StepResponseMessage[] {
   const existingCallIds = extractToolResultCallIds(input.responseMessages);
-  const prepend = input.prepend.filter((part) => !existingCallIds.has(part.toolCallId));
   const append = input.append.filter((part) => !existingCallIds.has(part.toolCallId));
 
   return [
-    ...(prepend.length > 0 ? [{ role: "tool" as const, content: [...prepend] }] : []),
     ...input.responseMessages,
     ...(append.length > 0 ? [{ role: "tool" as const, content: [...append] }] : []),
   ] satisfies StepResponseMessage[];
@@ -1728,11 +1739,10 @@ async function handleStepResult(input: {
   ]);
   const rawResponseMessages = emptyDelivery
     ? []
-    : insertInlineToolResultMessages({
+    : appendMissingToolResultMessages({
         append: invalidInputToolErrors.map((toolError) =>
           createToolResultMessagePartFromToolError(toolError),
         ),
-        prepend: [],
         responseMessages: result.response.messages,
       });
   const stepOutput = emptyDelivery ? null : resolvedStepOutput;

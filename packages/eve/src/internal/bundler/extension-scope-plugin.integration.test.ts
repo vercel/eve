@@ -27,7 +27,7 @@ const roots: string[] = [];
 function scratchModule(source: string): { modulePath: string; sourceRoot: string } {
   const dir = mkdtempSync(join(tmpdir(), "eve-ext-scope-"));
   roots.push(dir);
-  const sourceRoot = join(dir, "ext");
+  const sourceRoot = join(dir, "extension");
   mkdirSync(join(sourceRoot, "tools"), { recursive: true });
   const modulePath = join(sourceRoot, "tools", "budget.ts");
   writeFileSync(modulePath, source, "utf8");
@@ -72,7 +72,10 @@ describe("extension-scope plugin (bundled)", () => {
     const { modulePath } = scratchModule(STATE_MODULE);
     const code = await bundle(modulePath, [
       createExtensionScopePlugin([
-        { sourceRoot: join(tmpdir(), "some-other-extension", "ext"), packageNamespace: "acme-crm" },
+        {
+          sourceRoot: join(tmpdir(), "some-other-extension", "extension"),
+          packageNamespace: "acme-crm",
+        },
       ]),
       externalizeEvePlugin,
     ]);
