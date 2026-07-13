@@ -182,14 +182,12 @@ describe("buildSubagentRunInput", () => {
       initiatorAuth: null,
       session: {
         ...makeSession(),
-        workflowMaxSubagents: 7,
       },
     });
 
     expect(runInput.limits).toEqual({
       maxInputTokensPerSession: false,
       maxOutputTokensPerSession: false,
-      maxSubagents: 7,
     });
   });
 

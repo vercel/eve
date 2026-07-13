@@ -327,7 +327,7 @@ describe("app runtime dependency tracing", () => {
         await mkdir(join(appRoot, "agent", "tools"), { recursive: true });
         await writeFile(
           join(appRoot, "agent", "tools", "workflow.ts"),
-          'export default { kind: "eve:enable-workflow-tool" };\n',
+          'export default { kind: "eve:enable-workflow-tool", maxSubagents: 6 };\n',
         );
       }
 

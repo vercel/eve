@@ -582,7 +582,7 @@ describe("createApplicationNitro", () => {
 
     const directHost = createPreparedHost();
     const workflowHost = createPreparedHost();
-    workflowHost.compileResult.manifest.workflowEnabled = true;
+    workflowHost.compileResult.manifest.workflowTool = {};
 
     await createApplicationNitro(directHost, false);
     await createApplicationNitro(workflowHost, false);

@@ -4,13 +4,14 @@
 
 export {
   type DisabledToolSentinel,
-  type EnableWorkflowToolSentinel,
+  type ExperimentalWorkflowToolDefinition,
+  type ExperimentalWorkflowToolInput,
   defineDynamic,
   defineTool,
   disableTool,
+  experimental_workflow,
   isDisabledToolSentinel,
-  isEnableWorkflowToolSentinel,
-  ExperimentalWorkflow,
+  isExperimentalWorkflowToolDefinition,
   type ToolAuthOptions,
   type ToolAuthProvider,
   type ToolDefinition,

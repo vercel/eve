@@ -41,7 +41,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 35;
+export const COMPILED_AGENT_MANIFEST_VERSION = 36;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -176,6 +176,13 @@ export type CompiledConnectionDefinition = z.infer<typeof compiledConnectionDefi
  * Normalized authored tool metadata preserved in the compiled manifest.
  */
 export type CompiledToolDefinition = InternalToolDefinition & ModuleSourceRef;
+
+/**
+ * Serializable configuration for the experimental framework `Workflow` tool.
+ */
+export interface CompiledWorkflowToolDefinition {
+  readonly maxSubagents?: number;
+}
 
 /**
  * Compiled dynamic tool resolver entry. The resolver function lives in the
@@ -394,9 +401,14 @@ const sessionTokenLimitSchema = z.union([z.number().int().positive(), z.literal(
 
 const compiledAgentLimitsDefinitionSchema = z
   .object({
-    maxSubagents: z.number().int().positive().optional(),
     maxInputTokensPerSession: sessionTokenLimitSchema.optional(),
     maxOutputTokensPerSession: sessionTokenLimitSchema.optional(),
+  })
+  .strict();
+
+const compiledWorkflowToolDefinitionSchema: z.ZodType<CompiledWorkflowToolDefinition> = z
+  .object({
+    maxSubagents: z.number().int().positive().optional(),
   })
   .strict();
 
@@ -631,7 +643,7 @@ const compiledAgentNodeManifestSchema = z
     connections: z.array(compiledConnectionDefinitionSchema),
     diagnosticsSummary: discoverDiagnosticsSummarySchema,
     disabledFrameworkTools: z.array(z.string()).readonly(),
-    workflowEnabled: z.boolean().default(false),
+    workflowTool: compiledWorkflowToolDefinitionSchema.optional(),
     dynamicInstructions: z.array(compiledDynamicInstructionsDefinitionSchema).default([]),
     dynamicSkills: z.array(compiledDynamicSkillDefinitionSchema).default([]),
     dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
@@ -718,7 +730,7 @@ export const compiledAgentManifestSchema = z
     connections: z.array(compiledConnectionDefinitionSchema),
     diagnosticsSummary: discoverDiagnosticsSummarySchema,
     disabledFrameworkTools: z.array(z.string()).readonly(),
-    workflowEnabled: z.boolean().default(false),
+    workflowTool: compiledWorkflowToolDefinitionSchema.optional(),
     dynamicInstructions: z.array(compiledDynamicInstructionsDefinitionSchema).default([]),
     dynamicSkills: z.array(compiledDynamicSkillDefinitionSchema).default([]),
     dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
@@ -749,7 +761,7 @@ export function createCompiledAgentNodeManifest(input: {
   readonly connections?: readonly CompiledConnectionDefinition[];
   readonly diagnosticsSummary?: DiscoverDiagnosticsSummary;
   readonly disabledFrameworkTools?: readonly string[];
-  readonly workflowEnabled?: boolean;
+  readonly workflowTool?: CompiledWorkflowToolDefinition;
   readonly dynamicInstructions?: readonly CompiledDynamicInstructionsDefinition[];
   readonly dynamicSkills?: readonly CompiledDynamicSkillDefinition[];
   readonly dynamicTools?: readonly CompiledDynamicToolDefinition[];
@@ -813,7 +825,6 @@ export function createCompiledAgentNodeManifest(input: {
           : {
               maxInputTokensPerSession: input.config.limits.maxInputTokensPerSession,
               maxOutputTokensPerSession: input.config.limits.maxOutputTokensPerSession,
-              maxSubagents: input.config.limits.maxSubagents,
             },
       source:
         input.config.source === undefined
@@ -827,7 +838,10 @@ export function createCompiledAgentNodeManifest(input: {
       warnings: 0,
     },
     disabledFrameworkTools: [...(input.disabledFrameworkTools ?? [])],
-    workflowEnabled: input.workflowEnabled ?? false,
+    workflowTool:
+      input.workflowTool === undefined
+        ? undefined
+        : { maxSubagents: input.workflowTool.maxSubagents },
     dynamicInstructions: [...(input.dynamicInstructions ?? [])],
     dynamicSkills: [...(input.dynamicSkills ?? [])],
     dynamicTools: [...(input.dynamicTools ?? [])],
@@ -900,7 +914,7 @@ export function createCompiledAgentManifest(input: {
   readonly connections?: readonly CompiledConnectionDefinition[];
   readonly diagnosticsSummary?: DiscoverDiagnosticsSummary;
   readonly disabledFrameworkTools?: readonly string[];
-  readonly workflowEnabled?: boolean;
+  readonly workflowTool?: CompiledWorkflowToolDefinition;
   readonly dynamicSkills?: readonly CompiledDynamicSkillDefinition[];
   readonly dynamicTools?: readonly CompiledDynamicToolDefinition[];
   readonly hooks?: readonly CompiledHookDefinition[];

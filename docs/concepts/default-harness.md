@@ -91,13 +91,15 @@ Three moves shape the harness. The right one depends on whether the model should
 
 ## The opt-in `Workflow` tool
 
-An experimental `Workflow` tool ships but stays off by default. To turn it on, re-export the opt-in marker from `agent/tools/workflow.ts`:
+An experimental `Workflow` tool ships but stays off by default. To turn it on, export its definition from `agent/tools/workflow.ts`:
 
 ```ts
-export { ExperimentalWorkflow as default } from "eve/tools";
+import { experimental_workflow } from "eve/tools";
+
+export default experimental_workflow({ maxSubagents: 100 });
 ```
 
-With it on, the model can orchestrate the agent's own subagents from model-authored JavaScript, all as one durable step. The tool is root-only — delegated subagent sessions never see it — and one program may dispatch at most `limits.maxSubagents` subagent calls (default 100). See [Dynamic workflows](../guides/dynamic-workflows).
+With it on, the model can orchestrate the agent's own subagents from model-authored JavaScript, all as one durable step. The tool is root-only — delegated subagent sessions never see it — and one program may dispatch at most the configured `maxSubagents` calls (default 100). See [Dynamic workflows](../guides/dynamic-workflows).
 
 ## What to read next
 

@@ -243,7 +243,7 @@ export function buildAgentInfoResponseFromManifest(
     },
     version: 1,
     workflow: {
-      enabled: manifest.workflowEnabled,
+      enabled: manifest.workflowTool !== undefined,
       toolName: WORKFLOW_TOOL_NAME,
     },
     workspace: {

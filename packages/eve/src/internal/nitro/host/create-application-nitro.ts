@@ -103,7 +103,7 @@ function includesWorkflowStepRegistrations(surface: NitroBuildSurface): boolean 
 /** Whether any agent needs the dynamic Workflow sandbox runtime. */
 function manifestEnablesWorkflow(manifest: CompiledAgentManifest): boolean {
   const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
-  return nodes.some((node) => node.workflowEnabled === true);
+  return nodes.some((node) => node.workflowTool !== undefined);
 }
 
 function manifestHasWebSocketChannel(manifest: CompiledAgentManifest): boolean {

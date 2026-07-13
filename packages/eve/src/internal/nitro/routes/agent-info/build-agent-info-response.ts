@@ -285,7 +285,7 @@ export function buildAgentInfoResponse(
     tools,
     version: 1,
     workflow: {
-      enabled: agent.workflowEnabled,
+      enabled: agent.workflowTool !== undefined,
       toolName: WORKFLOW_TOOL_NAME,
     },
     workspace: {
