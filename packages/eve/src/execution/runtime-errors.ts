@@ -19,5 +19,16 @@ export class RuntimeNoActiveSessionError extends Error {
 export function isRuntimeNoActiveSessionError(
   error: unknown,
 ): error is RuntimeNoActiveSessionError {
-  return error instanceof RuntimeNoActiveSessionError;
+  if (error instanceof RuntimeNoActiveSessionError) {
+    return true;
+  }
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  const candidate = error as Record<string, unknown>;
+  return (
+    candidate.name === "RuntimeNoActiveSessionError" &&
+    candidate.code === "NO_ACTIVE_SESSION" &&
+    typeof candidate.continuationToken === "string"
+  );
 }

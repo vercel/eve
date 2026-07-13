@@ -32,6 +32,8 @@ export interface Session {
 export interface SessionHandle {
   readonly id: string;
   readonly continuationToken: string;
+  /** Channel-local token accepted by `send`, without Eve's channel namespace. */
+  readonly rawContinuationToken: string;
   readonly auth: SessionAuth;
   setContinuationToken(rawToken: string): void;
 }
@@ -71,6 +73,9 @@ export function buildSessionHandle(accessor: ContextAccessor): SessionHandle {
     get continuationToken() {
       return accessor.get(ContinuationTokenKey) ?? "";
     },
+    get rawContinuationToken() {
+      return removeContinuationTokenNamespace(accessor.get(ContinuationTokenKey) ?? "");
+    },
     get auth(): SessionAuth {
       return {
         current: accessor.get(AuthKey) ?? null,
@@ -89,6 +94,11 @@ export function buildSessionHandle(accessor: ContextAccessor): SessionHandle {
       accessor.set(ContinuationTokenKey, token);
     },
   };
+}
+
+function removeContinuationTokenNamespace(token: string): string {
+  const separatorIndex = token.indexOf(":");
+  return separatorIndex < 0 ? token : token.slice(separatorIndex + 1);
 }
 
 function namespaceContinuationToken(currentToken: string, rawToken: string): string {

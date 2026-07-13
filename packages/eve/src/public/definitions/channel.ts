@@ -191,6 +191,8 @@ type EventData<T extends HandleMessageStreamEvent["type"]> =
  */
 export interface ChannelSessionOps {
   readonly continuationToken: string;
+  /** Channel-local token accepted by `send`, without Eve's channel namespace. */
+  readonly rawContinuationToken: string;
   setContinuationToken(token: string): void;
 }
 
@@ -357,6 +359,7 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
         const channel = {
           ...adapterCtx,
           continuationToken: adapterCtx.session?.continuationToken ?? "",
+          rawContinuationToken: adapterCtx.session?.rawContinuationToken ?? "",
           setContinuationToken: (token: string) => adapterCtx.session?.setContinuationToken(token),
         };
         if (eventType === "session.failed") {

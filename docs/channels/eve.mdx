@@ -103,6 +103,7 @@ export default eveChannel({
     "message.completed"(eventData, channel, ctx) {
       console.log("eve response completed", {
         continuationToken: channel.continuationToken,
+        clientContinuationToken: channel.rawContinuationToken,
         sessionId: ctx.session.id,
       });
     },

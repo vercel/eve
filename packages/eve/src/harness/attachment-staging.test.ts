@@ -23,6 +23,7 @@ const STUB_ADAPTER_CTX: ChannelAdapterContext = {
   session: {
     id: "",
     continuationToken: "",
+    rawContinuationToken: "",
     auth: { current: null, initiator: null },
     setContinuationToken: () => {},
   },

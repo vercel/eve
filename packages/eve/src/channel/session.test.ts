@@ -39,6 +39,16 @@ describe("buildSessionHandle", () => {
     expect(session.continuationToken).toBe("slack:C1:T1");
   });
 
+  it("exposes the channel-local continuation token without parsing in authored hooks", () => {
+    const ctx = new ContextContainer();
+    ctx.set(ContinuationTokenKey, "eve:eve:client-token");
+
+    const session = buildSessionHandle(ctx);
+
+    expect(session.continuationToken).toBe("eve:eve:client-token");
+    expect(session.rawContinuationToken).toBe("eve:client-token");
+  });
+
   it("namespaces the channel-local token on setContinuationToken", () => {
     const ctx = new ContextContainer();
     ctx.set(ContinuationTokenKey, "slack:C1:");

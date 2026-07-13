@@ -254,6 +254,7 @@ describe("eveChannel — events", () => {
         "message.completed"(data, channel, ctx) {
           observed.push(data.message ?? "");
           observed.push(channel.continuationToken);
+          observed.push(channel.rawContinuationToken);
           observed.push(ctx.session.id);
         },
       },
@@ -265,7 +266,7 @@ describe("eveChannel — events", () => {
       turn: { id: "turn-1", sequence: 1 },
     };
     const ctx = new ContextContainer();
-    ctx.set(ContinuationTokenKey, "eve:continuation");
+    ctx.set(ContinuationTokenKey, "eve:eve:continuation");
     ctx.set(SessionIdKey, "sess-eve-event");
     ctx.set(SessionKey, session);
 
@@ -283,7 +284,12 @@ describe("eveChannel — events", () => {
       );
     });
 
-    expect(observed).toEqual(["done", "eve:continuation", "sess-eve-event"]);
+    expect(observed).toEqual([
+      "done",
+      "eve:eve:continuation",
+      "eve:continuation",
+      "sess-eve-event",
+    ]);
   });
 });
 
