@@ -25,7 +25,14 @@ import {
   createVoronoiNoiseTexture,
   uploadStaticNoiseTexture,
 } from "./textures";
-import type { ImprintRenderOptions, MeshData, PaintRenderOptions, PaintSeed, PaintTargets, RenderControls } from "./types";
+import type {
+  ImprintRenderOptions,
+  MeshData,
+  PaintRenderOptions,
+  PaintSeed,
+  PaintTargets,
+  RenderControls,
+} from "./types";
 
 export function createPaintSystem(device: Device, resources: RendererResources, mesh: MeshData) {
   let targets: PaintTargets | undefined;
@@ -40,12 +47,21 @@ export function createPaintSystem(device: Device, resources: RendererResources, 
   };
 
   const ensure = (logicalWidth: number, logicalHeight: number, gridScaleMultiplier?: number) => {
-    const { cols, rows } = imprintGridSizeForLogicalSize(logicalWidth, logicalHeight, gridScaleMultiplier);
+    const { cols, rows } = imprintGridSizeForLogicalSize(
+      logicalWidth,
+      logicalHeight,
+      gridScaleMultiplier,
+    );
     if (targets?.cols === cols && targets.rows === rows) return targets;
     dispose();
     const ping = createPaintTexture(device, "eve-5-paint-ping", cols, rows);
     const pong = createPaintTexture(device, "eve-5-paint-pong", cols, rows);
-    const staticNoise = createPaintStaticNoiseTexture(device, "eve-5-paint-static-noise", cols, rows);
+    const staticNoise = createPaintStaticNoiseTexture(
+      device,
+      "eve-5-paint-static-noise",
+      cols,
+      rows,
+    );
     const voronoiValue = createVoronoiNoiseTexture(device, "eve-5-ascii-voronoi-value", cols, rows);
     const voronoiEdge = createVoronoiNoiseTexture(device, "eve-5-ascii-voronoi-edge", cols, rows);
     uploadStaticNoiseTexture(device, staticNoise, cols, rows);
@@ -105,7 +121,10 @@ export function createPaintSystem(device: Device, resources: RendererResources, 
     device.gpu.queue.writeTexture(
       { texture: paintTargets.ping },
       seed.values as GPUAllowSharedBufferSource,
-      { bytesPerRow: paintTargets.cols * Float32Array.BYTES_PER_ELEMENT, rowsPerImage: paintTargets.rows },
+      {
+        bytesPerRow: paintTargets.cols * Float32Array.BYTES_PER_ELEMENT,
+        rowsPerImage: paintTargets.rows,
+      },
       { width: paintTargets.cols, height: paintTargets.rows },
     );
   };
