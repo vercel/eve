@@ -119,16 +119,25 @@ run. Until those references exist, revisions are retained conservatively.
 
 ## Delivery
 
-1. **Production build isolation:** give each build private compiler, host, Nitro, Workflow, and
-   output workspaces; serialize only final publication. This is the current PR.
-2. **Immutable revisions:** materialize complete, path-independent authored revisions without
-   changing worker ownership.
-3. **Parent worker transport:** add readiness, request and revision leases, cancellation, trusted
-   client metadata, and bounded shutdown behind a stable listener.
-4. **Transactional dev rebuilds:** connect the watcher, revision pointer, routes, and candidate
-   worker through one promotion coordinator with complete rollback.
-5. **Durable Workflow and pruning:** resolve existing runs from their recorded revision and prune
-   only from explicit references.
+1. **Production build isolation — stop builds from sharing work in progress.** Give each build
+   private compiler, host, Nitro, Workflow, and output workspaces, then serialize only final
+   publication. This prevents concurrent or failed builds from disturbing each other, the running
+   dev server, or the last-good output. This is the current PR.
+2. **Immutable revisions — make one version of an agent runnable on its own.** Materialize the
+   complete authored behavior and dependency closure into a path-independent revision. This keeps
+   older requests and runs executable after source files, tools, or packages are changed or removed.
+3. **Parent worker transport — separate the stable server from reloadable workers.** Put readiness,
+   request and revision leases, cancellation, trusted client metadata, and bounded shutdown behind
+   a parent-owned listener. This prevents planned worker replacement from resetting admitted
+   requests, interrupting control endpoints, or leaking workers and revisions.
+4. **Transactional dev rebuilds — make a reload one complete promotion.** Connect the watcher,
+   revision pointer, routes, and candidate worker through one coordinator with complete rollback.
+   This preserves fast runtime-only reloads while preventing failed structural changes from leaving
+   mixed routes, pointers, handlers, fingerprints, or workers active.
+5. **Durable Workflow and pruning — keep long-running work on the code it started with.** Resolve an
+   existing run from its recorded revision and prune only from explicit references. This prevents a
+   promoted revision from changing an older run and prevents cleanup from deleting behavior that an
+   active run still needs.
 
 Each stage remains independently valid and does not expose a partially connected lifecycle.
 
