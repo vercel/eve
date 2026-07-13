@@ -88,6 +88,12 @@ export type ToolContext = SessionContext & {
    */
   readonly callId: string;
   /**
+   * Final runtime name of the current tool, including any namespace
+   * qualification. This is the same `toolName` carried by stream events and
+   * the tool's {@link ApprovalContext}.
+   */
+  readonly toolName: string;
+  /**
    * Resolves the bearer token for an inline provider. This accepts the same
    * auth shapes as a connection's `auth` field, including `connect("...")`
    * from `@vercel/connect/eve`.
