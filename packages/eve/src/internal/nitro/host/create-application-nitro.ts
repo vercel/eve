@@ -24,6 +24,10 @@ import { createCompiledSandboxBackendPrunePlugin } from "#internal/nitro/host/co
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
 import { configureNitroRoutes } from "#internal/nitro/host/configure-nitro-routes.js";
 import { applyEveCronHandlerRoute } from "#internal/nitro/host/cron-handler-route.js";
+import {
+  applyExternalCronHandlerRoute,
+  isExternalCronEnabled,
+} from "#internal/nitro/host/external-cron.js";
 import { createNitroBundlerConfig } from "#internal/nitro/host/nitro-bundler-config.js";
 import { captureDevLiveVirtualModules } from "#internal/nitro/host/dev-live-virtual-modules.js";
 import {
@@ -837,6 +841,9 @@ export async function createApplicationNitro(
     // use (e.g. dev mode), where the cron route is never registered.
     applyEveCronHandlerRoute(nitro);
 
+    // External cron mode only applies to self-hosted (node preset) builds:
+    // on Vercel the platform already owns the clock through the route above.
+    const externalCron = preset === undefined && isExternalCronEnabled();
     const artifactsConfig: NitroArtifactsConfigInput = createNitroArtifactsConfig({
       appRoot: preparedHost.appRoot,
       dev: nitro.options.dev,
@@ -846,8 +853,15 @@ export async function createApplicationNitro(
       dispatchModulePath: resolvePackageSourceFilePath(
         "src/internal/nitro/routes/schedule-task.ts",
       ),
+      registerCronSchedules: !externalCron,
       registrations: preparedHost.scheduleRegistrations,
     });
+    if (externalCron) {
+      applyExternalCronHandlerRoute(nitro, {
+        artifactsConfig,
+        registrations: preparedHost.scheduleRegistrations,
+      });
+    }
   }
   await configureNitroRoutes(nitro, preparedHost, {
     surface,

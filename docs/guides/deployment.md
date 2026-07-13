@@ -146,10 +146,32 @@ Self-deployed agents should make the Vercel-specific choices explicit:
 - Use `AI_GATEWAY_API_KEY` if you still want Gateway routing from a non-Vercel host.
 - Replace `vercelOidc()` with auth that your host can verify.
 - Use `defaultBackend()`, a pinned non-Vercel sandbox backend such as Docker or microsandbox, or your own `SandboxBackend` adapter.
-- If the agent defines schedules, the default `eve build && eve start` path starts Nitro's schedule runner, and Vercel wires schedules to Vercel Cron automatically. If you adapt the output to a custom HTTP-only host or preset, make sure it also runs Nitro scheduled tasks, or trigger the same work from your own scheduler.
+- If the agent defines schedules, the default `eve build && eve start` path starts Nitro's schedule runner, and Vercel wires schedules to Vercel Cron automatically. If you adapt the output to a custom HTTP-only host or preset, make sure it also runs Nitro scheduled tasks, trigger the same work from your own scheduler, or build with `EVE_EXTERNAL_CRON=1` (below) to hand the clock to an external scheduler.
 - Treat Vercel Cron, Vercel Sandbox prewarm, Vercel Deployment Protection bypass, and the Agent Runs dashboard as Vercel-only conveniences.
 
 The HTTP contract is unchanged: health, session creation, streaming, channels, tools, and subagents use the same routes under `/eve/`, and the workflow dispatch route lives under `/.well-known/workflow/`. A reverse proxy must preserve both prefixes. Any client that can reach and authenticate to those routes can talk to the agent.
+
+### External schedule dispatch
+
+By default a self-hosted build fires schedules from an in-process runner: every replica keeps its own clock, ticks that land while the process is down are lost, and production exposes no endpoint to pause or trigger a schedule. A hosting platform that wants to own the clock — deduplication across replicas, catch-up policies, manual "run now" — can build in external cron mode:
+
+```bash
+EVE_EXTERNAL_CRON=1 eve build
+```
+
+The build then registers no in-process cron. Instead it:
+
+- mounts the same unguessable token cron route the Vercel preset uses (`POST /eve/v1/cron/<token>`); the path is the credential, and a configured `CRON_SECRET` is additionally enforced as a bearer token, exactly as on Vercel;
+- writes `.output/eve/cron-manifest.json` with the route path and one entry per distinct cron expression, each listing the schedules it dispatches — the self-hosted equivalent of the `config.crons[]` Vercel reads from build output. Create one scheduler job per entry: a POST fires every schedule registered for that expression, so one job per schedule would double-dispatch shared expressions. The manifest contains the secret path, so it lives only in build output and is never served.
+
+Your scheduler drives the deployment the same way Vercel Cron does: on each due tick, POST to the route with the cron expression in the `x-vercel-cron-schedule` header:
+
+```bash
+curl -X POST "https://<your-app>$(jq -r .cronHandlerRoute .output/eve/cron-manifest.json)" \
+  -H "x-vercel-cron-schedule: 0 8 * * *"
+```
+
+Every schedule registered for that expression dispatches, and the response lists the sessions each dispatch started. The flag has no effect on Vercel builds, where the platform already owns the clock, or in `eve dev`, where schedules are dispatched through the dev route.
 
 ## 9. Verify the deployment
 

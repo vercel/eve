@@ -26,10 +26,16 @@ interface ScheduleTaskNitro {
  * `dispatchModulePath` is the absolute path of `dispatchScheduleTask`'s
  * module — the synthetic task module imports it and forwards `event.name`
  * along with the baked-in artifacts config.
+ *
+ * `registerCronSchedules: false` registers the task handlers without any
+ * `scheduledTasks` entries, so the node preset's in-process schedule
+ * runner never starts. External-cron builds use this: dispatch happens
+ * through the token cron route instead.
  */
 export interface RegisterScheduleTaskHandlersInput {
   readonly artifactsConfig: NitroArtifactsConfigInput;
   readonly dispatchModulePath: string;
+  readonly registerCronSchedules?: boolean;
   readonly registrations: readonly ScheduleRegistration[];
 }
 
@@ -73,6 +79,7 @@ export function registerScheduleTaskHandlers(
     addScheduleTaskVirtualHandler(nitro, {
       artifactsConfig: input.artifactsConfig,
       dispatchModulePath: input.dispatchModulePath,
+      registerCronSchedule: input.registerCronSchedules ?? true,
       registration,
     });
   }
@@ -148,6 +155,7 @@ function addScheduleTaskVirtualHandler(
   input: {
     artifactsConfig: NitroArtifactsConfigInput;
     dispatchModulePath: string;
+    registerCronSchedule: boolean;
     registration: ScheduleRegistration;
   },
 ): void {
@@ -175,7 +183,9 @@ function addScheduleTaskVirtualHandler(
     `};`,
   ].join("\n");
 
-  appendScheduledTask(nitro, input.registration.cron, input.registration.taskName);
+  if (input.registerCronSchedule) {
+    appendScheduledTask(nitro, input.registration.cron, input.registration.taskName);
+  }
 }
 
 function appendScheduledTask(nitro: ScheduleTaskNitro, cron: string, taskName: string): void {
