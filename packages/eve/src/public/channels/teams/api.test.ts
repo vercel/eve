@@ -6,6 +6,7 @@ import {
   resolveTeamsAccessToken,
   sendTeamsActivity,
   splitTeamsMessageText,
+  normalizeTeamsContinuationAddress,
   teamsContinuationToken,
   triggerTeamsTypingIndicator,
   updateTeamsActivity,
@@ -20,6 +21,24 @@ describe("Teams Connector API wrapper", () => {
         tenantId: "T 1",
       }),
     ).toBe("T%201:19%3Aabc%40thread.skype:A%3A1");
+  });
+
+  it("normalizes channel thread suffixes before building continuation tokens", () => {
+    expect(
+      normalizeTeamsContinuationAddress({
+        conversationId: "19:abc@thread.tacv2;messageid=THREAD_ROOT",
+        replyToActivityId: "VOLATILE_ACTIVITY",
+      }),
+    ).toEqual({
+      conversationId: "19:abc@thread.tacv2",
+      replyToActivityId: "THREAD_ROOT",
+    });
+    expect(
+      teamsContinuationToken({
+        conversationId: "19:abc@thread.tacv2;messageid=THREAD_ROOT",
+        tenantId: "TENANT",
+      }),
+    ).toBe("TENANT:19%3Aabc%40thread.tacv2:THREAD_ROOT");
   });
 
   it("requests and caches Bot Connector access tokens", async () => {

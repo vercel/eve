@@ -16,6 +16,7 @@ import {
 } from "#public/channels/teams/attachments.js";
 import {
   callTeamsConnectorApi,
+  normalizeTeamsContinuationAddress,
   normalizeTeamsPostInput,
   replyToTeamsActivity,
   sendTeamsActivity,
@@ -32,20 +33,24 @@ import {
   type TeamsPostedActivity,
 } from "#public/channels/teams/api.js";
 import {
-  defaultEvents,
+  createDefaultTeamsEvents,
   defaultOnMessage,
+  defaultTeamsAuth,
   teamsMentionUser,
 } from "#public/channels/teams/defaults.js";
 import {
-  deriveTeamsInputResponses,
-  isTeamsInputResponseActivity,
+  resolveTeamsHitlSecret,
+  type TeamsHitlSecret,
+} from "#public/channels/teams/hitl-secret.js";
+import {
+  parseTeamsHitlSubmission,
   teamsInvokeResponse,
+  type TeamsHitlSubmissionParseResult,
 } from "#public/channels/teams/hitl.js";
 import {
   formatTeamsContextBlock,
   parseTeamsActivity,
   teamsThreadRootActivityId,
-  type TeamsActivity,
   type TeamsInboundContext,
   type TeamsInvokeActivity,
   type TeamsMessageActivity,
@@ -67,7 +72,6 @@ export interface TeamsContext {
 
 /** Channel-owned Teams context returned by `context()`. */
 export interface TeamsChannelContext extends TeamsContext {
-  readonly adaptiveCardVersion: string;
   state: TeamsChannelState;
 }
 
@@ -95,6 +99,8 @@ export interface TeamsChannelState {
 
 /** Teams channel credentials. */
 export interface TeamsChannelCredentials extends TeamsCredentials {
+  /** Secret used to sign HITL card routing data. Defaults to the app password. */
+  readonly hitlSecret?: TeamsHitlSecret;
   /** Custom inbound webhook verifier. When supplied, replaces Bot Connector JWT validation. */
   readonly webhookVerifier?: TeamsWebhookVerifier;
 }
@@ -123,13 +129,16 @@ export interface TeamsReceiveTarget {
 }
 
 /** Result of an inbound Teams message hook. Return `null` to acknowledge without dispatching. */
-export type TeamsInboundResult = {
-  readonly auth: SessionAuthContext | null;
-  readonly context?: readonly string[];
-} | null;
+export type TeamsInboundResult = { readonly context?: readonly string[] } | null;
 
 /** Sync or async {@link TeamsInboundResult}. */
 export type TeamsInboundResultOrPromise = TeamsInboundResult | Promise<TeamsInboundResult>;
+
+/** Reason the Teams channel is authorizing an inbound activity. */
+export type TeamsActivityPurpose = "input-response" | "message";
+
+/** Shared authorization hook result. Return `null` to reject the activity. */
+export type TeamsActivityAuthorization = { readonly auth: SessionAuthContext | null } | null;
 
 /** Result of a non-HITL Teams invoke hook. A `Response` returns verbatim, a plain object is JSON-encoded as the body, and `null`/`undefined` yields a 200 OK. */
 export type TeamsInvokeResult = Record<string, unknown> | Response | null | undefined;
@@ -180,7 +189,17 @@ export interface TeamsChannelConfig {
   /** Override the default webhook route path (`/eve/v1/teams`). */
   readonly route?: string;
 
-  /** Inbound message hook. Defaults to user-scoped auth and mention-gated dispatch outside personal chats. */
+  /**
+   * Shared authorization policy for messages and HITL submissions. Defaults to
+   * the activity's Teams user identity. Return `null` to reject the activity.
+   */
+  authorizeActivity?(
+    ctx: TeamsContext,
+    activity: TeamsInvokeActivity | TeamsMessageActivity,
+    purpose: TeamsActivityPurpose,
+  ): TeamsActivityAuthorization | Promise<TeamsActivityAuthorization>;
+
+  /** Message admission and context hook. Mention gating lives here by default. */
   onMessage?(ctx: TeamsContext, message: TeamsMessageActivity): TeamsInboundResultOrPromise;
 
   /** Handler for non-HITL Teams invoke activities. Return a body, a Response, or `null`/`undefined` for a 200 OK. */
@@ -245,8 +264,18 @@ export interface TeamsChannel extends Channel<
 /** Teams channel factory for Bot Framework Activities and proactive messages. */
 export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
   const filesPolicy = normalizeTeamsFilesPolicy(config.files);
+  const authorizeActivity =
+    config.authorizeActivity ??
+    (config.onMessage === undefined ? defaultAuthorizeActivity : authorizeLegacyActivity);
   const onMessage = config.onMessage ?? defaultOnMessage;
-  const mergedEvents: TeamsChannelEvents = { ...defaultEvents, ...config.events };
+  const resolveHitlSecret = () => resolveTeamsHitlSecret(config.credentials ?? {});
+  const mergedEvents: TeamsChannelEvents = {
+    ...createDefaultTeamsEvents({
+      adaptiveCardVersion: config.adaptiveCardVersion ?? "1.5",
+      resolveHitlSecret,
+    }),
+    ...config.events,
+  };
 
   return defineChannel<
     TeamsChannelState,
@@ -282,27 +311,56 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
 
         const activity = parseTeamsActivity(raw);
         if (activity === null) return teamsOk();
+        const submission =
+          activity.type === "conversationUpdate"
+            ? { kind: "none" as const }
+            : await parseTeamsHitlSubmission(activity, resolveHitlSecret);
 
         if (activity.type === "message") {
           waitUntil(
-            dispatchMessage({
-              activity,
-              config,
-              filesPolicy,
-              onMessage,
-              send,
-            }),
+            submission.kind === "valid"
+              ? dispatchInputResponse({
+                  activity,
+                  authorizeActivity,
+                  config,
+                  send,
+                  submission,
+                })
+              : submission.kind === "none"
+                ? dispatchMessage({
+                    activity,
+                    authorizeActivity,
+                    config,
+                    filesPolicy,
+                    onMessage,
+                    send,
+                  })
+                : Promise.resolve(),
           );
           return teamsOk();
         }
 
         if (activity.type === "invoke") {
-          return handleInvoke({
-            activity,
-            config,
-            send,
-            waitUntil,
-          });
+          if (submission.kind === "valid") {
+            waitUntil(
+              dispatchInputResponse({
+                activity,
+                authorizeActivity,
+                config,
+                send,
+                submission,
+              }),
+            );
+            return Response.json(teamsInvokeResponse());
+          }
+          if (submission.kind === "invalid") {
+            return Response.json(
+              teamsInvokeResponse({
+                message: "This approval card has expired. Ask the agent to create a new one.",
+              }),
+            );
+          }
+          return handleInvoke({ activity, config });
         }
 
         return teamsOk();
@@ -371,7 +429,6 @@ function rebuildTeamsContext(
   const binding = buildTeamsBinding({ config, session, state });
   return {
     ...binding,
-    adaptiveCardVersion: config.adaptiveCardVersion ?? "1.5",
     state,
   };
 }
@@ -533,6 +590,7 @@ async function verifyInbound(
 
 async function dispatchMessage(input: {
   readonly activity: TeamsMessageActivity;
+  readonly authorizeActivity: NonNullable<TeamsChannelConfig["authorizeActivity"]>;
   readonly config: TeamsChannelConfig;
   readonly filesPolicy: TeamsFilesPolicy;
   readonly onMessage: NonNullable<TeamsChannelConfig["onMessage"]>;
@@ -541,8 +599,11 @@ async function dispatchMessage(input: {
   const state = stateFromActivity(input.activity);
   const ctx = buildTeamsBinding({ config: input.config, state });
 
+  let authorization: TeamsActivityAuthorization;
   let result: TeamsInboundResult;
   try {
+    authorization = await input.authorizeActivity(ctx, input.activity, "message");
+    if (authorization === null) return;
     result = await input.onMessage(ctx, input.activity);
   } catch (error) {
     log.error("Teams message handler failed", { error });
@@ -572,7 +633,7 @@ async function dispatchMessage(input: {
         context: [formatTeamsContextBlock(inboundContext), ...channelContext],
       },
       {
-        auth: result.auth,
+        auth: authorization.auth,
         continuationToken: stateToken(state),
         state,
       },
@@ -585,19 +646,7 @@ async function dispatchMessage(input: {
 async function handleInvoke(input: {
   readonly activity: TeamsInvokeActivity;
   readonly config: TeamsChannelConfig;
-  readonly send: SendFn<TeamsChannelState>;
-  readonly waitUntil: (task: Promise<unknown>) => void;
 }): Promise<Response> {
-  if (isTeamsInputResponseActivity(input.activity)) {
-    input.waitUntil(
-      dispatchInputResponses({
-        activity: input.activity,
-        send: input.send,
-      }),
-    );
-    return Response.json(teamsInvokeResponse());
-  }
-
   if (input.config.onInvoke === undefined) return teamsOk();
   const ctx = buildTeamsBinding({ config: input.config, state: stateFromActivity(input.activity) });
   const result = await input.config.onInvoke(ctx, input.activity);
@@ -606,19 +655,31 @@ async function handleInvoke(input: {
   return teamsOk();
 }
 
-async function dispatchInputResponses(input: {
+async function dispatchInputResponse(input: {
   readonly activity: TeamsInvokeActivity | TeamsMessageActivity;
+  readonly authorizeActivity: NonNullable<TeamsChannelConfig["authorizeActivity"]>;
+  readonly config: TeamsChannelConfig;
   readonly send: SendFn<TeamsChannelState>;
+  readonly submission: Extract<TeamsHitlSubmissionParseResult, { kind: "valid" }>;
 }): Promise<void> {
-  const inputResponses = deriveTeamsInputResponses(input.activity as TeamsActivity);
-  if (inputResponses.length === 0) return;
   const state = stateFromActivity(input.activity);
+  const ctx = buildTeamsBinding({ config: input.config, state });
+
+  let authorization: TeamsActivityAuthorization;
+  try {
+    authorization = await input.authorizeActivity(ctx, input.activity, "input-response");
+  } catch (error) {
+    log.error("Teams activity authorization failed", { error });
+    return;
+  }
+  if (authorization === null) return;
+
   try {
     await input.send(
-      { inputResponses },
+      { inputResponses: [input.submission.response] },
       {
-        auth: null,
-        continuationToken: stateToken(state),
+        auth: authorization.auth,
+        continuationToken: input.submission.continuationToken,
         state,
       },
     );
@@ -630,18 +691,38 @@ async function dispatchInputResponses(input: {
 function stateFromActivity(
   activity: TeamsMessageActivity | TeamsInvokeActivity,
 ): TeamsChannelState {
+  const address = normalizeTeamsContinuationAddress({
+    conversationId: activity.conversation.id,
+    replyToActivityId: teamsThreadRootActivityId(activity),
+  });
   return {
     bot: activity.recipient,
     channelId: activity.teamsChannelId ?? null,
     conversationId: activity.conversation.id,
     conversationType: activity.conversationType ?? activity.scope,
     pendingAuthActivityId: null,
-    replyToActivityId: teamsThreadRootActivityId(activity),
+    replyToActivityId: address.replyToActivityId,
     serviceUrl: activity.serviceUrl,
     teamId: activity.teamId ?? null,
     tenantId: activity.tenantId ?? null,
     triggeringUser: activity.from,
   };
+}
+
+function defaultAuthorizeActivity(
+  _ctx: TeamsContext,
+  activity: TeamsInvokeActivity | TeamsMessageActivity,
+  _purpose: TeamsActivityPurpose,
+): TeamsActivityAuthorization {
+  return { auth: defaultTeamsAuth(activity) };
+}
+
+function authorizeLegacyActivity(
+  _ctx: TeamsContext,
+  activity: TeamsInvokeActivity | TeamsMessageActivity,
+  purpose: TeamsActivityPurpose,
+): TeamsActivityAuthorization {
+  return purpose === "message" ? { auth: defaultTeamsAuth(activity) } : null;
 }
 
 function initialTeamsState(): TeamsChannelState {

@@ -117,6 +117,47 @@ describe("createRuntimeToolCallActionFromToolCall", () => {
 });
 
 describe("resolvePendingInput", () => {
+  it("drops a stale input response when no request is pending", () => {
+    const session = createHarnessSession();
+
+    const result = resolvePendingInput({
+      session,
+      stepInput: { inputResponses: [{ optionId: "approve", requestId: "stale" }] },
+    });
+
+    expect(result.outcome).toBe("unresolved");
+    expect(result.session).toBe(session);
+  });
+
+  it("keeps a newer question pending when a stale card response arrives", () => {
+    const session = setPendingInputBatch({
+      requests: [
+        {
+          action: {
+            callId: "question-call",
+            input: { prompt: "Pick one." },
+            kind: "tool-call",
+            toolName: "ask_question",
+          },
+          display: "select",
+          options: [{ id: "yes", label: "Yes" }],
+          prompt: "Pick one.",
+          requestId: "question-call",
+        },
+      ],
+      responseMessages: [],
+      session: createHarnessSession(),
+    });
+
+    const result = resolvePendingInput({
+      session,
+      stepInput: { inputResponses: [{ optionId: "approve", requestId: "stale-approval" }] },
+    });
+
+    expect(result.outcome).toBe("unresolved");
+    expect(result.session).toBe(session);
+  });
+
   it("keeps approvals pending when another request is answered first", () => {
     const session = setPendingInputBatch({
       requests: [

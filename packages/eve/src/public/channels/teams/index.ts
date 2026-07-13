@@ -21,6 +21,8 @@ export {
   type TeamsChannelState,
   type TeamsContext,
   type TeamsEventContext,
+  type TeamsActivityAuthorization,
+  type TeamsActivityPurpose,
   type TeamsHandle,
   type TeamsInboundResult,
   type TeamsInboundResultOrPromise,
@@ -80,6 +82,7 @@ export {
 export {
   deriveTeamsInputResponses,
   isTeamsInputResponseActivity,
+  parseTeamsHitlSubmission,
   renderAnsweredInputRequestMessage,
   renderInputRequestAttachment,
   renderInputRequestMessage,
@@ -88,6 +91,7 @@ export {
   TEAMS_HITL_CHOICE_INPUT_ID,
   TEAMS_HITL_DATA_KEY,
   TEAMS_HITL_FREEFORM_INPUT_ID,
+  type TeamsHitlSubmissionParseResult,
 } from "#public/channels/teams/hitl.js";
 
 export {
@@ -105,6 +109,11 @@ export {
   formatConnectionDisplayName,
   teamsMentionUser,
 } from "#public/channels/teams/defaults.js";
+
+export {
+  resolveTeamsHitlSecret,
+  type TeamsHitlSecret,
+} from "#public/channels/teams/hitl-secret.js";
 
 export {
   verifyTeamsJwt,

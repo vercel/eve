@@ -19,7 +19,11 @@ import {
   truncatePlainText,
   truncateSectionText,
 } from "#public/channels/slack/limits.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import {
+  formatApprovalInput,
+  isApprovalInputRequest,
+  type InputRequest,
+} from "#runtime/input/types.js";
 
 /**
  * Wire-format prefix every framework HITL widget mints onto its
@@ -321,7 +325,7 @@ function renderInputRequestCardBlock(
 
 function cardButtonOptions(request: InputRequest): CardButtonOption[] {
   const options = request.options ?? [];
-  if (!isApprovalRequest(request)) return options.map(toCardButtonOption);
+  if (!isApprovalInputRequest(request)) return options.map(toCardButtonOption);
 
   const approve = options.find((option) => option.id === "approve");
   const deny = options.find((option) => option.id === "deny");
@@ -402,10 +406,8 @@ function renderToolInputContainerBlock(request: InputRequest): Record<string, un
 }
 
 function formatToolInputContainerText(request: InputRequest): string | undefined {
-  if (!isApprovalRequest(request)) return undefined;
-
-  const json = JSON.stringify(request.action.input, null, 2);
-  if (json === "{}") return undefined;
+  const json = formatApprovalInput(request);
+  if (json === undefined) return undefined;
 
   const bodyBudget =
     SLACK_SECTION_TEXT_MAX_LENGTH - TOOL_INPUT_CODE_PREFIX.length - TOOL_INPUT_SUFFIX.length;
@@ -414,10 +416,8 @@ function formatToolInputContainerText(request: InputRequest): string | undefined
 }
 
 function formatToolInputDetails(request: InputRequest): string | undefined {
-  if (!isApprovalRequest(request)) return undefined;
-
-  const json = JSON.stringify(request.action.input, null, 2);
-  if (json === "{}") return undefined;
+  const json = formatApprovalInput(request);
+  if (json === undefined) return undefined;
 
   const bodyBudget =
     SLACK_SECTION_TEXT_MAX_LENGTH - TOOL_INPUT_PREFIX.length - TOOL_INPUT_SUFFIX.length;
@@ -429,13 +429,4 @@ function truncateWithEllipsis(value: string, maxLength: number): string {
   if (value.length <= maxLength) return value;
   const sliceLength = Math.max(0, maxLength - 3);
   return `${value.slice(0, sliceLength).trimEnd()}...`;
-}
-
-function isApprovalRequest(request: InputRequest): boolean {
-  return (
-    request.display === "confirmation" &&
-    request.options?.length === 2 &&
-    request.options[0]?.id === "approve" &&
-    request.options[1]?.id === "deny"
-  );
 }

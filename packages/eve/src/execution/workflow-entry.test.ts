@@ -340,6 +340,63 @@ describe("workflowEntry", () => {
     });
   });
 
+  it("keeps concurrent input responses isolated with their actor auth", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    const approver = {
+      attributes: {},
+      authenticator: "teams",
+      principalId: "approver",
+      principalType: "user" as const,
+    };
+    const denier = {
+      attributes: {},
+      authenticator: "teams",
+      principalId: "denier",
+      principalType: "user" as const,
+    };
+    installHookMocks({
+      deliveryHooks: [
+        {
+          token: "http:test",
+          values: [
+            {
+              auth: approver,
+              kind: "deliver",
+              payloads: [{ inputResponses: [{ optionId: "approve", requestId: "REQ" }] }],
+            },
+            {
+              auth: denier,
+              kind: "deliver",
+              payloads: [{ inputResponses: [{ optionId: "deny", requestId: "REQ" }] }],
+            },
+          ],
+        },
+      ],
+      turnControls: [
+        turnResult({ action: "park", sessionState }),
+        turnResult({ action: "park", sessionState }),
+        turnResult({ action: "done", output: "ok", sessionState }),
+      ],
+    });
+
+    await workflowEntry({
+      input: { message: "hello there" },
+      serializedContext: createSerializedContext(),
+    });
+
+    expect(vi.mocked(dispatchTurnStep).mock.calls[1]?.[0].delivery).toEqual({
+      auth: approver,
+      kind: "deliver",
+      payloads: [{ inputResponses: [{ optionId: "approve", requestId: "REQ" }] }],
+    });
+    expect(vi.mocked(dispatchTurnStep).mock.calls[2]?.[0].delivery).toEqual({
+      auth: denier,
+      kind: "deliver",
+      payloads: [{ inputResponses: [{ optionId: "deny", requestId: "REQ" }] }],
+    });
+  });
+
   it("supplies a requested public delivery to the active turn inbox", async () => {
     const sessionState = createBaseSessionState();
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));

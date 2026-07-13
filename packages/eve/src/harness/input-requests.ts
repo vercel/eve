@@ -143,12 +143,17 @@ export function resolvePendingInput(input: {
 
   // No pending batch -- pass through to the model call.
   if (pendingBatch === undefined) {
-    return { outcome: "continue", messages: baseHistory, session };
+    return (stepInput?.inputResponses?.length ?? 0) > 0 && stepInput?.message === undefined
+      ? { outcome: "unresolved", messages: baseHistory, session }
+      : { outcome: "continue", messages: baseHistory, session };
   }
 
   // Pending batch exists -- only resolve if we have actual responses.
   const resolvedStepInput = resolveTextMessageInput(pendingBatch, stepInput);
-  const responses = resolvedStepInput?.inputResponses ?? [];
+  const pendingRequestIds = new Set(pendingBatch.requests.map((request) => request.requestId));
+  const responses = (resolvedStepInput?.inputResponses ?? []).filter((response) =>
+    pendingRequestIds.has(response.requestId),
+  );
 
   if (responses.length === 0 && resolvedStepInput?.message === undefined) {
     return { outcome: "unresolved", messages: baseHistory, session };

@@ -8,6 +8,7 @@ export function coalesceDeliverPayloads(payloads: readonly DeliverPayload[]): De
 
   const merged: Record<string, unknown> = {};
   const inputResponses: InputResponse[] = [];
+  const answeredRequestIds = new Set<string>();
 
   for (const payload of payloads) {
     for (const [key, value] of Object.entries(payload)) {
@@ -16,7 +17,11 @@ export function coalesceDeliverPayloads(payloads: readonly DeliverPayload[]): De
       }
     }
     if (payload.inputResponses !== undefined) {
-      inputResponses.push(...payload.inputResponses);
+      for (const response of payload.inputResponses) {
+        if (answeredRequestIds.has(response.requestId)) continue;
+        answeredRequestIds.add(response.requestId);
+        inputResponses.push(response);
+      }
     }
   }
 
