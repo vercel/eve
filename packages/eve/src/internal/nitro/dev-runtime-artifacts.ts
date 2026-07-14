@@ -14,6 +14,20 @@ const DEV_RUNTIME_SNAPSHOT_RECENT_WINDOW_MS = 15 * 60 * 1000;
 const DEV_RUNTIME_SNAPSHOT_RETAIN_COUNT = 5;
 const DEV_RUNTIME_WORKFLOW_DATA_MAX_SCAN_BYTES = 1024 * 1024;
 const TERMINAL_WORKFLOW_RUN_STATUSES = new Set(["completed", "failed", "cancelled", "canceled"]);
+/**
+ * Stores of `@workflow/world-local` that never reference a dev-runtime snapshot. A snapshot path
+ * only reaches disk through a run's `input.serializedContext["eve.bundle"]`, so these directories
+ * hold nothing the snapshot pruner needs — but they are where nearly all the files live, and each
+ * one was being read in full on every boot.
+ */
+const WORKFLOW_DATA_SNAPSHOTLESS_DIRECTORIES = new Set([
+  ".locks",
+  "events",
+  "hooks",
+  "steps",
+  "streams",
+  "waits",
+]);
 
 interface DevelopmentRuntimeArtifactsPointerV1 {
   readonly appRoot: string;
@@ -316,6 +330,15 @@ async function collectSnapshotPathsFromDirectory(input: {
       const path = join(input.directory, entry.name);
 
       if (entry.isDirectory()) {
+        // Only runs carry a snapshot reference (in `input.serializedContext["eve.bundle"]`), so
+        // descending into the other stores of the local workflow world just burns IO: they are
+        // the bulk of the files (an observed store was ~78% events, ~13% steps, ~4% hooks vs ~5%
+        // runs) and every one of them was being read in full on each boot. Skipping them by name
+        // keeps the scan proportional to runs instead of to everything ever written.
+        if (WORKFLOW_DATA_SNAPSHOTLESS_DIRECTORIES.has(entry.name)) {
+          return;
+        }
+
         await collectSnapshotPathsFromDirectory({
           directory: path,
           snapshotPaths: input.snapshotPaths,
