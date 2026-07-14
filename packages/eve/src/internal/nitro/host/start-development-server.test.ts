@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => {
     discardCandidate: vi.fn(async () => undefined),
     listen: vi.fn(() => listenerServer),
     replaceWorker: vi.fn(async () => undefined),
+    setClientAddressSecret: vi.fn(),
     setControlHandler: vi.fn(),
     upgrade: vi.fn(async (_req: unknown, _socket: unknown, _head: unknown) => undefined),
     waitForActiveRunner: vi.fn(async () => undefined),

@@ -11,6 +11,7 @@ import {
   encodeDevelopmentWorldValue,
   serializeDevelopmentWorldError,
 } from "#internal/workflow/development-world-codec.js";
+import { timingSafeEqualStrings } from "#internal/nitro/dev-client-address.js";
 import {
   DEVELOPMENT_WORKFLOW_DELIVERY_HEADER,
   DEVELOPMENT_WORKFLOW_STREAM_ROUTE,
@@ -27,6 +28,8 @@ import {
 export interface DevelopmentWorkflowGenerationReferences {
   readonly generationIds: ReadonlySet<string>;
   readonly protectAll: boolean;
+  /** Why ownership could not be determined, when `protectAll` is set. */
+  readonly reason?: string;
 }
 
 /**
@@ -65,6 +68,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
   readonly #agentName: string;
   readonly #appRoot: string;
   readonly #dataDir: string;
+  readonly #recentlyEnqueuedGenerations = new Map<string, number>();
   readonly #resolveActiveGenerationId: () => string;
   readonly #transportSecret: string;
   readonly #world: World;
@@ -77,6 +81,9 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     readonly resolveActiveGenerationId: () => string;
     readonly transportSecret: string;
   }) {
+    if (input.transportSecret.length < 16) {
+      throw new Error("Development Workflow transport secret is too short to be trusted.");
+    }
     this.#agentName = input.agentName;
     this.#appRoot = input.appRoot;
     this.#dataDir = join(input.appRoot, ".eve", "workflow-data");
@@ -93,18 +100,31 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
       return;
     }
     const references = await this.collectGenerationReferences();
+    const missingGenerationIds = new Set<string>();
     if (!references.protectAll) {
       for (const generationId of references.generationIds) {
-        this.#assertGenerationExists(generationId);
+        if (!this.#generationExists(generationId)) {
+          missingGenerationIds.add(generationId);
+        }
       }
+    }
+    if (missingGenerationIds.size > 0) {
+      // One poisoned run must not take the rest of the app's active runs
+      // down with it: quarantine its deliveries and keep booting.
+      console.error(
+        `[eve:dev] ${String(missingGenerationIds.size)} active local Workflow run(s) reference development generations that no longer exist ` +
+          `(${[...missingGenerationIds].join(", ")}). Their deliveries are quarantined; ` +
+          `remove ".eve/workflow-data" to discard the app's active local Workflow runs.`,
+      );
     }
     await this.#world.start?.();
     this.#started = true;
-    await reenqueueActiveDevelopmentRuns(
-      this.#world,
-      this.#queue.bind(this),
-      deriveEveWorkflowQueuePrefix(this.#agentName),
-    );
+    await reenqueueActiveDevelopmentRuns({
+      enqueue: this.#queue.bind(this),
+      prefix: deriveEveWorkflowQueuePrefix(this.#agentName),
+      quarantinedGenerationIds: missingGenerationIds,
+      world: this.#world,
+    });
   }
 
   async close(): Promise<void> {
@@ -150,12 +170,31 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
       } while (cursor !== undefined);
       for (const persistedRunId of await this.#readPersistedRunIds()) {
         if (!runIds.has(persistedRunId)) {
-          return { generationIds: new Set(), protectAll: true };
+          return {
+            generationIds: new Set(),
+            protectAll: true,
+            reason: `run record "${persistedRunId}" is unreadable`,
+          };
+        }
+      }
+      // Deliveries enqueued moments ago may not have written a run record
+      // yet (resilient starts persist the record asynchronously), so their
+      // generations are protected for a horizon after enqueue.
+      const horizon = Date.now() - RECENT_ENQUEUE_PROTECTION_MS;
+      for (const [generationId, enqueuedAt] of this.#recentlyEnqueuedGenerations) {
+        if (enqueuedAt < horizon) {
+          this.#recentlyEnqueuedGenerations.delete(generationId);
+        } else {
+          generationIds.add(generationId);
         }
       }
       return { generationIds, protectAll: false };
-    } catch {
-      return { generationIds: new Set(), protectAll: true };
+    } catch (error) {
+      return {
+        generationIds: new Set(),
+        protectAll: true,
+        reason: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 
@@ -198,15 +237,23 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     if (runId === null || name === null) {
       return Response.json({ error: "Workflow stream request is malformed." }, { status: 400 });
     }
-    const startIndex = rawStartIndex === null ? undefined : Number(rawStartIndex);
-    if (startIndex !== undefined && !Number.isInteger(startIndex)) {
+    const startIndex =
+      rawStartIndex === null || rawStartIndex === "" ? undefined : Number(rawStartIndex);
+    if (rawStartIndex === "" || (startIndex !== undefined && !Number.isInteger(startIndex))) {
       return Response.json({ error: "Workflow stream start index is invalid." }, { status: 400 });
     }
-    return new Response(await this.#world.streams.get(runId, name, startIndex));
+    try {
+      return new Response(await this.#world.streams.get(runId, name, startIndex));
+    } catch (error) {
+      return new Response(encodeDevelopmentWorldValue(serializeDevelopmentWorldError(error)), {
+        status: 500,
+      });
+    }
   }
 
   async #queue(...args: Parameters<World["queue"]>): ReturnType<World["queue"]> {
     const [queueName, message, options] = args;
+    this.#recordEnqueuedGeneration(message);
     return await this.#world.queue(queueName, message, {
       ...options,
       headers: {
@@ -280,28 +327,41 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
   }
 
   #isTrusted(request: Request): boolean {
-    return request.headers.get(DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER) === this.#transportSecret;
+    const header = request.headers.get(DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER);
+    return header !== null && timingSafeEqualStrings(header, this.#transportSecret);
   }
 
-  #assertGenerationExists(generationId: string): void {
-    if (basename(generationId) !== generationId) {
-      throw new Error(`Workflow run references invalid development generation "${generationId}".`);
+  #recordEnqueuedGeneration(message: unknown): void {
+    if (!isObject(message) || !isObject(message.runInput)) {
+      return;
     }
-    const manifestPath = join(
-      this.#appRoot,
-      ".eve",
-      "dev-runtime",
-      "snapshots",
-      generationId,
-      "generation.json",
-    );
-    if (!existsSync(manifestPath)) {
-      throw new Error(
-        `Workflow run references missing development generation "${generationId}". ` +
-          `Remove ".eve/workflow-data" to discard the app's active local Workflow runs.`,
-      );
+    const generationId = message.runInput.deploymentId;
+    if (
+      typeof generationId === "string" &&
+      isValidGenerationId(generationId) &&
+      existsSync(join(this.#appRoot, ".eve", "dev-runtime", "snapshots", generationId))
+    ) {
+      this.#recentlyEnqueuedGenerations.set(generationId, Date.now());
     }
   }
+
+  #generationExists(generationId: string): boolean {
+    if (!isValidGenerationId(generationId)) {
+      return false;
+    }
+    return existsSync(
+      join(this.#appRoot, ".eve", "dev-runtime", "snapshots", generationId, "generation.json"),
+    );
+  }
+}
+
+function isValidGenerationId(generationId: string): boolean {
+  return (
+    generationId.length > 0 &&
+    generationId !== "." &&
+    generationId !== ".." &&
+    basename(generationId) === generationId
+  );
 }
 
 function invoke(
@@ -320,21 +380,38 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-async function reenqueueActiveDevelopmentRuns(
-  world: World,
-  enqueue: World["queue"],
-  prefix: string,
-): Promise<void> {
+const RECENT_ENQUEUE_PROTECTION_MS = 30 * 60 * 1000;
+
+async function reenqueueActiveDevelopmentRuns(input: {
+  readonly enqueue: World["queue"];
+  readonly prefix: string;
+  readonly quarantinedGenerationIds: ReadonlySet<string>;
+  readonly world: World;
+}): Promise<void> {
   for (const status of ["pending", "running"] as const) {
     let cursor: string | undefined;
     do {
-      const page = await world.runs.list({
-        pagination: { cursor },
-        resolveData: "none",
-        status,
-      });
+      let page: Awaited<ReturnType<World["runs"]["list"]>>;
+      try {
+        page = await input.world.runs.list({
+          pagination: { cursor },
+          resolveData: "none",
+          status,
+        });
+      } catch (error) {
+        throw new Error(
+          `Failed to read the app's active local Workflow runs. ` +
+            `Remove ".eve/workflow-data" to discard them.`,
+          { cause: error },
+        );
+      }
       for (const run of page.data) {
-        await enqueue(`${prefix}${run.workflowName}` as ValidQueueName, { runId: run.runId });
+        if (input.quarantinedGenerationIds.has(run.deploymentId)) {
+          continue;
+        }
+        await input.enqueue(`${input.prefix}${run.workflowName}` as ValidQueueName, {
+          runId: run.runId,
+        });
       }
       cursor = page.hasMore ? (page.cursor ?? undefined) : undefined;
     } while (cursor !== undefined);

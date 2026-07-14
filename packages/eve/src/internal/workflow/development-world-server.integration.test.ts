@@ -20,6 +20,7 @@ import {
   DEVELOPMENT_WORKER_APP_ROOT_ENV,
   DEVELOPMENT_WORKFLOW_DELIVERY_HEADER,
   DEVELOPMENT_WORKFLOW_SECRET_ENV,
+  DEVELOPMENT_WORKFLOW_STREAM_ROUTE,
   DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER,
   DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
 } from "#internal/workflow/development-world-protocol.js";
@@ -122,7 +123,7 @@ describe("parent development Workflow World", () => {
     }
   });
 
-  it("fails startup when a nonterminal turn references a missing generation", async () => {
+  it("quarantines runs referencing missing generations without refusing to boot", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-missing-generation-");
     await seedGeneration(appRoot, "generation-a");
     const first = createWorld({ activeGenerationId: () => "generation-a", appRoot });
@@ -147,13 +148,110 @@ describe("parent development Workflow World", () => {
     });
 
     const restarted = createWorld({ activeGenerationId: () => "generation-b", appRoot });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
-      await expect(restarted.start()).rejects.toThrow(
-        'Workflow run references missing development generation "generation-a"',
-      );
+      // One poisoned run must not take the app's other active runs down:
+      // boot proceeds, the poisoned run's deliveries are quarantined, and
+      // the failure is reported explicitly.
+      await expect(restarted.start()).resolves.toBeUndefined();
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("generation-a"));
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(".eve/workflow-data"));
     } finally {
+      errorSpy.mockRestore();
       await restarted.close();
     }
+  });
+
+  it("acknowledges and drops a delivery whose generation is permanently missing", async () => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-dropped-delivery-");
+    await seedGeneration(appRoot, "generation-a");
+    const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
+    connectWorkerToWorld(world, appRoot);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      await world.start();
+      const created = await callWorld(world, "events.create", [
+        null,
+        {
+          eventData: {
+            deploymentId: "generation-a",
+            executionContext: {},
+            input: new Uint8Array(),
+            workflowName: turnWorkflowReference.workflowId,
+          },
+          eventType: "run_created",
+          specVersion: 5,
+        },
+      ]);
+      const runId = readCreatedRunId(created);
+      await rm(join(appRoot, ".eve", "dev-runtime", "snapshots", "generation-a"), {
+        force: true,
+        recursive: true,
+      });
+
+      const handled = vi.fn(async () => undefined);
+      const handler = createDevelopmentWorkflowWorld().createQueueHandler(QUEUE_PREFIX, handled);
+      const response = await handler(
+        new Request("http://localhost/.well-known/workflow/v1/flow", {
+          body: JSON.stringify({ runId }),
+          headers: deliveryHeaders({}),
+          method: "POST",
+        }),
+      );
+
+      // A missing generation never heals on retry: the delivery is
+      // acknowledged so the queue stops redelivering, and the handler
+      // never runs.
+      expect(response.status).toBe(200);
+      expect(handled).not.toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("generation-a"));
+    } finally {
+      errorSpy.mockRestore();
+      await world.close();
+    }
+  });
+
+  it("rejects untrusted World requests on the call and stream routes", async () => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-untrusted-");
+    const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
+
+    try {
+      const missingHeader = await world.handleRequest(
+        new Request(`http://localhost${DEVELOPMENT_WORKFLOW_WORLD_ROUTE}`, {
+          body: encodeDevelopmentWorldValue({ arguments: [], operation: "runs.list" }),
+          method: "POST",
+        }),
+      );
+      expect(missingHeader?.status).toBe(401);
+
+      const forgedHeader = await world.handleRequest(
+        new Request(`http://localhost${DEVELOPMENT_WORKFLOW_WORLD_ROUTE}`, {
+          body: encodeDevelopmentWorldValue({ arguments: [], operation: "runs.list" }),
+          headers: { [DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER]: "forged" },
+          method: "POST",
+        }),
+      );
+      expect(forgedHeader?.status).toBe(401);
+
+      const stream = await world.handleRequest(
+        new Request(`http://localhost${DEVELOPMENT_WORKFLOW_STREAM_ROUTE}?runId=r&name=n`),
+      );
+      expect(stream?.status).toBe(401);
+    } finally {
+      await world.close();
+    }
+  });
+
+  it("refuses a transport secret too short to be trusted", () => {
+    expect(() =>
+      createParentDevelopmentWorkflowWorld({
+        agentName: AGENT_NAME,
+        appRoot: "/tmp/eve-test",
+        resolveActiveGenerationId: () => "generation-a",
+        transportSecret: "",
+      }),
+    ).toThrow("too short");
   });
 
   it("protects all generations when a persisted run record is unreadable", async () => {
@@ -163,10 +261,10 @@ describe("parent development Workflow World", () => {
     const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
-      await expect(world.collectGenerationReferences()).resolves.toEqual({
-        generationIds: new Set(),
-        protectAll: true,
-      });
+      const references = await world.collectGenerationReferences();
+      expect(references.protectAll).toBe(true);
+      expect(references.generationIds.size).toBe(0);
+      expect(references.reason).toBeDefined();
     } finally {
       warn.mockRestore();
       await world.close();

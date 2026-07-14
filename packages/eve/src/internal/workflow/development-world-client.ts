@@ -31,8 +31,26 @@ import {
   type DevelopmentWorldOperation,
 } from "#internal/workflow/development-world-protocol.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { timingSafeEqualStrings } from "#internal/nitro/dev-client-address.js";
 
 const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
+
+/**
+ * Raised when a delivery's recorded generation no longer exists on disk.
+ * This never heals on retry, so the queue handler acknowledges and drops
+ * the delivery instead of letting the queue redeliver it for its full
+ * retry budget.
+ */
+export class MissingDevelopmentGenerationError extends Error {
+  constructor(generationId: string, cause?: unknown) {
+    super(
+      `Workflow run references missing development generation "${generationId}". ` +
+        `Remove ".eve/workflow-data" to discard the app's active local Workflow runs.`,
+      cause === undefined ? undefined : { cause },
+    );
+    this.name = "MissingDevelopmentGenerationError";
+  }
+}
 
 async function call<T>(
   operation: DevelopmentWorldOperation,
@@ -150,7 +168,8 @@ function createQueueHandler(
 ): (request: Request) => Promise<Response> {
   return async (request) => {
     const secret = readRequiredEnvironment(DEVELOPMENT_WORKFLOW_SECRET_ENV);
-    if (request.headers.get(DEVELOPMENT_WORKFLOW_DELIVERY_HEADER) !== secret) {
+    const deliveryHeader = request.headers.get(DEVELOPMENT_WORKFLOW_DELIVERY_HEADER);
+    if (deliveryHeader === null || !timingSafeEqualStrings(deliveryHeader, secret)) {
       return Response.json({ error: "Workflow delivery is not trusted." }, { status: 401 });
     }
     const queueName = request.headers.get("x-vqs-queue-name");
@@ -192,16 +211,26 @@ function createQueueHandler(
         result === undefined ? { ok: true } : { timeoutSeconds: result.timeoutSeconds },
       );
     } catch (error) {
+      if (error instanceof MissingDevelopmentGenerationError) {
+        // Retrying cannot bring the generation back; acknowledge the
+        // delivery so the queue stops redelivering, and leave the loud
+        // error for the user to act on.
+        console.error(`[eve:dev] ${error.message}`);
+        return Response.json({ ok: true });
+      }
       return Response.json(String(error), { status: 500 });
     }
   };
 }
 
 /**
- * Resolves the generation a delivery executes against from server-owned
- * state: the run record's recorded deployment id for turn Workflows, and the
- * currently active generation for everything else. Nothing on the delivery
- * request participates in selection.
+ * Resolves the generation a delivery executes against. Selection trusts two
+ * sources: run records owned by the parent World, and — for the first
+ * delivery of a resilient start, which can arrive before its run record is
+ * persisted — the `runInput.deploymentId` carried in the delivery body
+ * itself. The body is trustworthy because deliveries are produced only by
+ * the parent's queue and authenticated with the transport secret; nothing
+ * an untrusted caller controls participates.
  */
 async function resolveDeliveryGenerationId(message: unknown): Promise<string> {
   if (!isRecord(message)) {
@@ -236,7 +265,12 @@ async function readGenerationRuntimeAppRoot(
   appRoot: string,
   generationId: string,
 ): Promise<string> {
-  if (basename(generationId) !== generationId) {
+  if (
+    generationId.length === 0 ||
+    generationId === "." ||
+    generationId === ".." ||
+    basename(generationId) !== generationId
+  ) {
     throw new Error(`Workflow run references invalid development generation "${generationId}".`);
   }
   const metadataPath = join(
@@ -251,11 +285,7 @@ async function readGenerationRuntimeAppRoot(
   try {
     metadata = JSON.parse(await readFile(metadataPath, "utf8"));
   } catch (error) {
-    throw new Error(
-      `Workflow run references missing development generation "${generationId}". ` +
-        `Remove ".eve/workflow-data" to discard the app's active local Workflow runs.`,
-      { cause: error },
-    );
+    throw new MissingDevelopmentGenerationError(generationId, error);
   }
   if (!isRecord(metadata) || typeof metadata.runtimeAppRoot !== "string") {
     throw new Error(`Development generation "${generationId}" has invalid metadata.`);

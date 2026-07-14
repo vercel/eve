@@ -6,6 +6,11 @@ import {
   DrainedNitroDevServer,
   type DrainedDevServerListener,
 } from "#internal/nitro/host/drained-nitro-dev-server.js";
+import {
+  DEVELOPMENT_CLIENT_ADDRESS_HEADER,
+  DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER,
+  readTrustedDevelopmentClientAddress,
+} from "#internal/nitro/dev-client-address.js";
 import type {
   DevelopmentRunner,
   DevelopmentRunnerFactory,
@@ -353,6 +358,43 @@ describe("drained Nitro dev server", () => {
         "Timed out waiting for the failed stream to settle.",
       ),
     ).rejects.toThrow();
+
+    await server.close();
+  });
+
+  it("stamps a signed client address and strips forged copies", async () => {
+    const SECRET = "scenario-transport-secret";
+    const { createRunner } = createRunnerFactory(async (request) =>
+      Response.json({
+        address: request.headers.get(DEVELOPMENT_CLIENT_ADDRESS_HEADER),
+        signature: request.headers.get(DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER),
+      }),
+    );
+    const server = new DrainedNitroDevServer(LOGGER, createRunner);
+    server.setClientAddressSecret(SECRET);
+    const listener = await listen(server);
+    await server.replaceWorker(replacement("/tmp/first.mjs"));
+
+    const response = await fetch(new URL("/", listener.url), {
+      headers: {
+        [DEVELOPMENT_CLIENT_ADDRESS_HEADER]: "203.0.113.7",
+        [DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER]: "forged",
+      },
+    });
+    const body = (await response.json()) as { address: string | null; signature: string | null };
+
+    // The forged public copy is replaced by the socket peer, and the stamped
+    // value carries a signature the worker can verify.
+    expect(body.address).toBe("127.0.0.1");
+    expect(body.signature).not.toBe("forged");
+    const verified = readTrustedDevelopmentClientAddress(
+      new Headers({
+        [DEVELOPMENT_CLIENT_ADDRESS_HEADER]: body.address ?? "",
+        [DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER]: body.signature ?? "",
+      }),
+      SECRET,
+    );
+    expect(verified).toBe("127.0.0.1");
 
     await server.close();
   });

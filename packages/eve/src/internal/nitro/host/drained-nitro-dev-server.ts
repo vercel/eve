@@ -12,6 +12,7 @@ import {
   type DevelopmentRunner,
   type DevelopmentRunnerFactory,
 } from "#internal/nitro/host/dev-runner.js";
+import { stampDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 const RUNNER_READY_TIMEOUT_MS = 60_000;
@@ -63,6 +64,7 @@ export class DrainedNitroDevServer {
   #activeWaiters: Array<() => void> = [];
   #closePromise: Promise<void> | undefined;
   #closed = false;
+  #clientAddressSecret: string | undefined;
   #controlHandler: ((request: Request) => Promise<Response | undefined>) | undefined;
   #pendingSlot: RunnerSlot | undefined;
   #replaceChain: Promise<void> = Promise.resolve();
@@ -78,6 +80,15 @@ export class DrainedNitroDevServer {
 
   setControlHandler(handler: (request: Request) => Promise<Response | undefined>): void {
     this.#controlHandler = handler;
+  }
+
+  /**
+   * Enables signed client-address metadata on requests forwarded to
+   * workers. Without it the worker only ever observes the parent's loopback
+   * hop as the request's peer address.
+   */
+  setClientAddressSecret(secret: string): void {
+    this.#clientAddressSecret = secret;
   }
 
   /**
@@ -363,6 +374,11 @@ export class DrainedNitroDevServer {
     let settle: (() => void) | undefined;
     try {
       const publicRequest = createPublicRequest(request, requestAbort.signal);
+      stampDevelopmentClientAddress(
+        publicRequest.headers,
+        request.socket.remoteAddress ?? undefined,
+        this.#clientAddressSecret,
+      );
       const controlResponse = await this.#controlHandler?.(publicRequest);
       if (controlResponse !== undefined) {
         await writeResponse(response, controlResponse, requestAbort.signal);

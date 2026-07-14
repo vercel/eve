@@ -412,6 +412,7 @@ async function startNitroDevelopmentServer(
     devServer = new DrainedNitroDevServer(activeNitro.logger);
     const activeDevServer = devServer;
     const workflowTransportSecret = randomBytes(32).toString("base64url");
+    activeDevServer.setClientAddressSecret(workflowTransportSecret);
     restoreWorkflowTransportEnvironment = installWorkflowTransportEnvironment(
       project.appRoot,
       workflowTransportSecret,

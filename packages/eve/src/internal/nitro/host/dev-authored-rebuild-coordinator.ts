@@ -80,6 +80,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
   readonly #devServer: DrainedNitroDevServer;
   #prunePromise: Promise<void> | undefined;
   #pruneRequested = false;
+  #reportedProtectAllReason: string | undefined;
   readonly #workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
 
   constructor(input: {
@@ -121,6 +122,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
       // Without a parent-owned World the queue may reference any generation.
       protectAll: true,
     };
+    this.#reportProtectAll(references);
     const protectedGenerationIds = new Set(references.generationIds);
     const active = readActiveDevelopmentRuntimeArtifactsSnapshot(appRoot);
     if (active !== undefined) {
@@ -132,6 +134,25 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
       protectAll: references.protectAll,
       protectedGenerationIds,
     });
+  }
+
+  // Pruning silently retaining everything hides unbounded disk growth, so
+  // a determinable-ownership failure is surfaced once per distinct cause.
+  #reportProtectAll(references: { readonly protectAll: boolean; readonly reason?: string }): void {
+    if (this.#workflowWorld === undefined || !references.protectAll) {
+      this.#reportedProtectAllReason = undefined;
+      return;
+    }
+    const reason = references.reason ?? "generation ownership could not be determined";
+    if (reason === this.#reportedProtectAllReason) {
+      return;
+    }
+    this.#reportedProtectAllReason = reason;
+    console.warn(
+      `[eve:dev] generation pruning is paused (${reason}). ` +
+        `Old generations are retained under ".eve/dev-runtime" until this clears; ` +
+        `removing ".eve/workflow-data" discards the app's active local Workflow runs.`,
+    );
   }
 
   async rebuild(input: {
