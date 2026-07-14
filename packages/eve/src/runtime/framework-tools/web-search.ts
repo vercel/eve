@@ -138,7 +138,6 @@ export const WEB_SEARCH_EXA_OUTPUT_SCHEMA: JsonObject = {
   $schema: "http://json-schema.org/draft-07/schema#",
   anyOf: [
     {
-      additionalProperties: false,
       properties: {
         costDollars: {
           additionalProperties: false,
@@ -206,6 +205,7 @@ export const WEB_SEARCH_EXA_OUTPUT_SCHEMA: JsonObject = {
           },
           type: "array",
         },
+        searchTime: { type: "number" },
         searchType: { type: "string" },
       },
       required: ["requestId", "results"],
