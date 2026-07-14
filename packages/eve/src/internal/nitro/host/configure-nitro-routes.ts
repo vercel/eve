@@ -324,7 +324,11 @@ function registerDevelopmentControlRoutes(
     route: EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH,
   });
   addFrameworkVirtualHandler(nitro, {
-    args: JSON.stringify({ appRoot: artifactsConfig.appRoot }),
+    // The complete config is resolved here, in the unbundled host process,
+    // and baked into the handler: resolving the module-map loader path from
+    // inside the bundled dev server can land on the authored app instead of
+    // the installed eve package (vercel/eve#311).
+    args: JSON.stringify(artifactsConfig),
     handlerExport: "handleDevScheduleDispatchRequest",
     method: "POST",
     modulePath: resolvePackageSourceFilePath("src/internal/nitro/routes/dev-schedule-dispatch.ts"),

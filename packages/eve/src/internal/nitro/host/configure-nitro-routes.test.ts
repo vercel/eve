@@ -87,7 +87,8 @@ vi.mock("../../application/paths.js", () => ({
 
 const { configureDevelopmentNitroRoutes, configureProductionNitroRoutes } =
   await import("./configure-nitro-routes.js");
-const { EVE_HEALTH_ROUTE_PATH, EVE_INFO_ROUTE_PATH } = await import("#protocol/routes.js");
+const { EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN, EVE_HEALTH_ROUTE_PATH, EVE_INFO_ROUTE_PATH } =
+  await import("#protocol/routes.js");
 
 function createNitroStub(
   input: { buildDir?: string; dev?: boolean; rootDir?: string } = {},
@@ -297,6 +298,16 @@ describe("Nitro route configuration", () => {
       '__eveWorkflowWorld.registerHandler("__eve746573742d6167656e74_wkf_workflow_", POST);',
     );
     expect(readWriteFileSourceMatching("/workflow/steps-handler.mjs")).toBeUndefined();
+  });
+
+  it("bakes the module map loader into the dev schedule handler", async () => {
+    const nitro = createNitroStub({ dev: true });
+
+    await configureDevelopmentNitroRoutes(nitro, createPreparedHost());
+
+    const source = nitro.options.virtual[`#eve-route${EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN}`];
+    expect(source).toContain('"moduleMapLoaderPath"');
+    expect(source).toContain("authored-module-map-loader.js");
   });
 
   it("registers the dev runtime artifact revision route only in dev mode", async () => {

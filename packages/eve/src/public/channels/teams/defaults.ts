@@ -7,7 +7,7 @@ import {
   renderAnsweredInputRequestMessage,
   renderInputRequestMessage,
 } from "#public/channels/teams/hitl.js";
-import type { TeamsMessageActivity } from "#public/channels/teams/inbound.js";
+import type { TeamsInvokeActivity, TeamsMessageActivity } from "#public/channels/teams/inbound.js";
 import type {
   TeamsChannelEvents,
   TeamsContext,
@@ -16,7 +16,9 @@ import type {
 import { parseJsonObject } from "#shared/json.js";
 
 /** Default auth projection for Teams message actors. */
-export function defaultTeamsAuth(message: TeamsMessageActivity): SessionAuthContext {
+export function defaultTeamsAuth(
+  message: TeamsMessageActivity | TeamsInvokeActivity,
+): SessionAuthContext {
   const tenantId = message.tenantId;
   const attributes: Record<string, string> = {
     activity_id: message.id,
@@ -69,6 +71,7 @@ export const defaultEvents: TeamsChannelEvents = {
       await channel.thread.post(
         renderInputRequestMessage(request, {
           adaptiveCardVersion: channel.adaptiveCardVersion,
+          replyToActivityId: channel.teams.replyToActivityId,
         }),
       );
     }
