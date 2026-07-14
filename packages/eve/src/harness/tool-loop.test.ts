@@ -7,6 +7,7 @@ import {
   ToolLoopAgent,
   type UserContent,
 } from "ai";
+import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -6750,7 +6751,32 @@ describe("createToolLoopHarness", () => {
       return call.messages;
     };
 
+    const readPreparedMessages = async (index: number) => {
+      const settings = vi.mocked(ToolLoopAgent).mock.calls[index]?.[0];
+      if (settings === undefined) {
+        throw new Error(`ToolLoopAgent mock did not receive settings ${String(index)}.`);
+      }
+      const messages = readGenerateMessages(index);
+      const prepareStep = getPrepareStep<ModelMessage[], { messages?: ModelMessage[] }>(
+        settings.prepareStep,
+      );
+      const prepared = await prepareStep({
+        context: undefined,
+        messages,
+        model: undefined,
+        stepNumber: 0,
+        steps: [],
+      });
+      return prepared.messages ?? [];
+    };
+
     const config = createTestConfig("conversation", undefined, {
+      resolveModel: vi.fn().mockResolvedValue(
+        new MockLanguageModelV3({
+          modelId: "claude-sonnet-4-5",
+          provider: "anthropic.messages",
+        }),
+      ),
       tools: new Map([
         [
           "bash",
@@ -6775,12 +6801,26 @@ describe("createToolLoopHarness", () => {
     expect(typeof firstResult.next).toBe("function");
     expect(firstMessages.at(-1)?.role).toBe("tool");
     expect(firstMessages).not.toContainEqual({ content: context, role: "user" });
+    expect((await readPreparedMessages(0)).at(-1)).toMatchObject({
+      providerOptions: {
+        anthropic: { cacheControl: { type: "ephemeral" } },
+      },
+      role: "tool",
+    });
 
     const secondResult = await harness(firstResult.session);
 
     const secondMessages = readGenerateMessages(1);
     expect(secondResult.next).toBeNull();
+    expect(secondMessages.slice(0, firstMessages.length)).toEqual(firstMessages);
     expect(secondMessages.at(-1)).toEqual({ content: context, role: "user" });
+    expect((await readPreparedMessages(1)).at(-1)).toMatchObject({
+      content: context,
+      providerOptions: {
+        anthropic: { cacheControl: { type: "ephemeral" } },
+      },
+      role: "user",
+    });
   });
 
   it("deferred message lands as last non-system message after explicit approval denial", async () => {
