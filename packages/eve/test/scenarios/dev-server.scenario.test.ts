@@ -1,18 +1,11 @@
-import { spawn, type ChildProcessByStdio } from "node:child_process";
-import { existsSync, watch as watchFileSystem } from "node:fs";
+import { Agent } from "node:http";
+import { existsSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import type { Readable } from "node:stream";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import {
-  EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH,
-  EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH,
-  EVE_HEALTH_ROUTE_PATH,
-  EVE_INFO_ROUTE_PATH,
-} from "../../src/protocol/routes.js";
-import type { AgentInfoResponse } from "../../src/internal/nitro/routes/agent-info/build-agent-info-response.js";
+import { EVE_HEALTH_ROUTE_PATH } from "../../src/protocol/routes.js";
 import {
   readDevelopmentRuntimeArtifactsSnapshotRoot,
   resolveDevelopmentRuntimeArtifactsPointerPath,
@@ -25,6 +18,18 @@ import {
 } from "../../src/internal/testing/scenario-app.js";
 import { sendDevelopmentMessage } from "../dev-client-harness/send-message.js";
 import { createDevelopmentSessionState } from "../dev-client-harness/session.js";
+import {
+  fetchAgentInfo,
+  fetchText,
+  forceDevelopmentRebuild,
+  hasKnownDevServerFailure,
+  readDevelopmentRevision,
+  requestWithAgent,
+  startEveDev,
+  waitForCondition,
+  waitForPath,
+  withinDeadline,
+} from "./dev-server-harness.js";
 
 // Keep the dev TUI's glyph set deterministic across CI hosts so the
 // screen assertions below remain stable.
@@ -60,7 +65,7 @@ const WEBSOCKET_DEV_SERVER_DESCRIPTOR: ScenarioAppDescriptor = {
       "export default defineChannel({",
       '  routes: [WS("/socket", () => ({',
       "    message(peer, message) {",
-      '      const transportHeader = peer.request.headers.has("x-eve-dev-worker-metadata") ? "exposed" : "hidden";',
+      '      const transportHeader = peer.request.headers.has("x-eve-dev-workflow-delivery") ? "exposed" : "hidden";',
       '      peer.send(`${transportHeader}:${peer.remoteAddress ?? "missing"}:${message.text()}`);',
       "    },",
       "  }))],",
@@ -76,6 +81,26 @@ const TRANSACTIONAL_REBUILD_DESCRIPTOR: ScenarioAppDescriptor = {
     "agent/channels/dev-generation.ts": createOverlappingChannelSource(),
     "agent/instrumentation.ts": createInstrumentationSource("one"),
   },
+};
+const SCHEDULE_DISPATCH_DESCRIPTOR: ScenarioAppDescriptor = {
+  ...WEATHER_AGENT_DESCRIPTOR,
+  files: {
+    ...WEATHER_AGENT_DESCRIPTOR.files,
+    "agent/schedules/heartbeat.md": [
+      "---",
+      'cron: "0 0 * * 0"',
+      "---",
+      "",
+      "Report the weather in Lisbon.",
+      "",
+    ].join("\n"),
+  },
+  name: "weather-agent-schedules",
+};
+const NPM_LAYOUT_DESCRIPTOR: ScenarioAppDescriptor = {
+  ...WEATHER_AGENT_DESCRIPTOR,
+  name: "weather-agent-npm",
+  packageManager: "npm",
 };
 const STREAM_PROMOTION_DESCRIPTOR: ScenarioAppDescriptor = {
   ...TRANSACTIONAL_REBUILD_DESCRIPTOR,
@@ -269,168 +294,6 @@ function createBlockedInstrumentationSource(): string {
   ].join("\n");
 }
 
-interface RunningEveDev {
-  crash(): Promise<void>;
-  readonly stderr: () => string;
-  readonly stdout: () => string;
-  readonly url: string;
-  stop(): Promise<void>;
-}
-
-function stripAnsi(text: string): string {
-  return text
-    .split("\u001b[")
-    .map((segment, index) => {
-      if (index === 0) {
-        return segment;
-      }
-
-      return segment.replace(/^[0-9;]*m/, "");
-    })
-    .join("");
-}
-
-function hasUnsupportedWindowsEsmImport(text: string): boolean {
-  return (
-    text.includes("ERR_UNSUPPORTED_ESM_URL_SCHEME") ||
-    text.includes("Received protocol 'g:'") ||
-    text.includes('Received protocol "g:"')
-  );
-}
-
-function hasKnownDevServerFailure(text: string): boolean {
-  return (
-    hasUnsupportedWindowsEsmImport(text) ||
-    text.includes("UNRESOLVED_IMPORT") ||
-    text.includes("ECONNRESET") ||
-    text.includes("socket hang up") ||
-    (text.includes("ERR_MODULE_NOT_FOUND") && text.includes("authored-module-map-loader"))
-  );
-}
-
-function parseServerUrl(stdout: string): string | undefined {
-  const match = /server listening at (https?:\/\/\S+)/.exec(stripAnsi(stdout));
-
-  return match?.[1];
-}
-
-async function wait(ms: number): Promise<void> {
-  await new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
-async function waitForCondition(
-  condition: () => boolean | Promise<boolean>,
-  failureMessage: string,
-  timeoutMs: number = 60_000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-
-  while (!(await condition())) {
-    if (Date.now() >= deadline) {
-      throw new Error(failureMessage);
-    }
-    await wait(100);
-  }
-}
-
-async function waitForServerUrl(input: {
-  readonly child: ChildProcessByStdio<null, Readable, Readable>;
-  readonly getOutput: () => {
-    readonly stderr: string;
-    readonly stdout: string;
-  };
-}): Promise<string> {
-  return await new Promise((resolve, reject) => {
-    let settled = false;
-
-    const timeout = setTimeout(() => {
-      settleReject(
-        new Error(
-          [
-            "Timed out waiting for eve dev to print its server URL.",
-            `stdout:\n${input.getOutput().stdout}`,
-            `stderr:\n${input.getOutput().stderr}`,
-          ].join("\n\n"),
-        ),
-      );
-    }, 120_000);
-
-    const cleanup = () => {
-      clearTimeout(timeout);
-      input.child.stdout.off("data", handleOutput);
-      input.child.stderr.off("data", handleOutput);
-      input.child.off("error", settleReject);
-      input.child.off("exit", handleExit);
-    };
-
-    const settleResolve = (url: string) => {
-      if (settled) {
-        return;
-      }
-
-      settled = true;
-      cleanup();
-      resolve(url);
-    };
-
-    function settleReject(error: unknown) {
-      if (settled) {
-        return;
-      }
-
-      settled = true;
-      cleanup();
-      reject(error);
-    }
-
-    function handleOutput() {
-      const output = input.getOutput();
-      const combinedOutput = `${output.stdout}\n${output.stderr}`;
-
-      if (hasKnownDevServerFailure(combinedOutput)) {
-        settleReject(
-          new Error(
-            [
-              "eve dev emitted a known reload or generated-bundle failure.",
-              `stdout:\n${output.stdout}`,
-              `stderr:\n${output.stderr}`,
-            ].join("\n\n"),
-          ),
-        );
-        return;
-      }
-
-      const url = parseServerUrl(output.stdout);
-
-      if (url !== undefined) {
-        settleResolve(url);
-      }
-    }
-
-    function handleExit(code: number | null, signal: NodeJS.Signals | null) {
-      const output = input.getOutput();
-
-      settleReject(
-        new Error(
-          [
-            `eve dev exited before printing its server URL (code ${String(code)}, signal ${String(signal)}).`,
-            `stdout:\n${output.stdout}`,
-            `stderr:\n${output.stderr}`,
-          ].join("\n\n"),
-        ),
-      );
-    }
-
-    input.child.stdout.on("data", handleOutput);
-    input.child.stderr.on("data", handleOutput);
-    input.child.once("error", settleReject);
-    input.child.once("exit", handleExit);
-    handleOutput();
-  });
-}
-
 async function waitForWebSocketOpen(socket: WebSocket): Promise<void> {
   await waitForWebSocketEvent(socket, "open", () => undefined);
 }
@@ -469,94 +332,6 @@ async function waitForWebSocketEvent<T>(
     socket.addEventListener(eventName, onEvent as EventListener, { once: true });
     socket.addEventListener("error", onError, { once: true });
   });
-}
-
-async function startEveDev(appRoot: string): Promise<RunningEveDev> {
-  return await startEveDevProcess(appRoot, {});
-}
-
-async function startEveDevWithBoundedWorkflowRecovery(appRoot: string): Promise<RunningEveDev> {
-  return await startEveDevProcess(appRoot, {
-    WORKFLOW_INLINE_OWNERSHIP_LEASE_SECONDS: "1",
-  });
-}
-
-async function startEveDevProcess(
-  appRoot: string,
-  environment: Readonly<Record<string, string | undefined>>,
-): Promise<RunningEveDev> {
-  const eveBinPath = join(appRoot, "node_modules", "eve", "bin", "eve.js");
-  const child = spawn(
-    process.execPath,
-    [eveBinPath, "dev", "--no-ui", "--host", "127.0.0.1", "--port", "0"],
-    {
-      cwd: appRoot,
-      env: {
-        ...process.env,
-        ...environment,
-        // Activate the deterministic mock-model adapter in the spawned dev
-        // server so the streamed turn completes without model credentials.
-        NODE_ENV: "test",
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
-  let stderr = "";
-  let stdout = "";
-
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  child.stdout.on("data", (chunk: string) => {
-    stdout += chunk;
-  });
-  child.stderr.on("data", (chunk: string) => {
-    stderr += chunk;
-  });
-
-  const url = await waitForServerUrl({
-    child,
-    getOutput: () => ({
-      stderr,
-      stdout,
-    }),
-  });
-  await waitForPath(join(appRoot, ".eve", "dev-server-state.v1.json"));
-
-  return {
-    async crash() {
-      if (child.exitCode !== null || child.signalCode !== null) {
-        return;
-      }
-      await withinDeadline(
-        new Promise<void>((resolve) => {
-          child.once("exit", () => resolve());
-          child.kill("SIGKILL");
-        }),
-        "Timed out waiting for the dev server process to crash.",
-      );
-    },
-    stderr: () => stderr,
-    stdout: () => stdout,
-    async stop() {
-      if (child.exitCode !== null || child.signalCode !== null) {
-        return;
-      }
-
-      await new Promise<void>((resolve) => {
-        const timeout = setTimeout(() => {
-          child.kill("SIGKILL");
-          resolve();
-        }, 10_000);
-
-        child.once("exit", () => {
-          clearTimeout(timeout);
-          resolve();
-        });
-        child.kill("SIGTERM");
-      });
-    },
-    url,
-  };
 }
 
 describe("eve dev server", () => {
@@ -732,6 +507,39 @@ describe("eve dev server", () => {
         await expect(reader.read()).resolves.toEqual(expect.objectContaining({ done: true }));
         expect(hasKnownDevServerFailure(`${server.stdout()}\n${server.stderr()}`)).toBe(false);
       } finally {
+        await server.stop();
+      }
+    },
+    DEV_SERVER_SCENARIO_TIMEOUT_MS,
+  );
+
+  it(
+    "serves a kept-alive connection across a structural worker replacement",
+    async () => {
+      const app = await scenarioApp(TRANSACTIONAL_REBUILD_DESCRIPTOR);
+      const server = await startEveDev(app.appRoot);
+      const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+
+      try {
+        const first = await requestWithAgent(new URL("/worker-id", server.url).href, agent);
+        expect(first.localPort).toBeDefined();
+
+        await writeFile(
+          join(app.appRoot, "agent", "instrumentation.ts"),
+          createInstrumentationSource("keep-alive-two"),
+        );
+        await forceDevelopmentRebuild(server.url);
+        await waitForCondition(
+          async () => (await fetchText(server.url, "/instrumentation-marker")) === "keep-alive-two",
+          `Timed out waiting for the structural replacement.\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
+        );
+
+        const second = await requestWithAgent(new URL("/worker-id", server.url).href, agent);
+        expect(second.localPort).toBe(first.localPort);
+        expect(second.body).not.toBe(first.body);
+        expect(hasKnownDevServerFailure(`${server.stdout()}\n${server.stderr()}`)).toBe(false);
+      } finally {
+        agent.destroy();
         await server.stop();
       }
     },
@@ -923,7 +731,9 @@ describe("eve dev server", () => {
     "recovers a nonterminal child Workflow on its selected generation after restart",
     async () => {
       const app = await scenarioApp(WORKFLOW_GENERATION_DESCRIPTOR);
-      let server = await startEveDevWithBoundedWorkflowRecovery(app.appRoot);
+      let server = await startEveDev(app.appRoot, {
+        env: { WORKFLOW_INLINE_OWNERSHIP_LEASE_SECONDS: "1" },
+      });
       const turnStartedPath = join(app.appRoot, ".turn-started");
       const restartPath = join(app.appRoot, ".restart-generation-test");
       const recoveredPath = join(app.appRoot, ".recovered-turn-started");
@@ -957,7 +767,9 @@ describe("eve dev server", () => {
         await server.crash();
         await withinDeadline(interruptedTurn, "Interrupted client stream did not settle.");
         await writeFile(restartPath, "restart");
-        server = await startEveDevWithBoundedWorkflowRecovery(app.appRoot);
+        server = await startEveDev(app.appRoot, {
+          env: { WORKFLOW_INLINE_OWNERSHIP_LEASE_SECONDS: "1" },
+        });
         await waitForPath(recoveredPath);
         await expect(
           readFile(recoveredPath, "utf8").then((source) => JSON.parse(source) as unknown),
@@ -967,6 +779,71 @@ describe("eve dev server", () => {
           instrumentation: "two",
           marker: "generation-one-runtime",
         });
+      } finally {
+        await server.stop();
+      }
+    },
+    DEV_SERVER_SCENARIO_TIMEOUT_MS,
+  );
+
+  it(
+    "dispatches an authored schedule through the dev route on its generation",
+    async () => {
+      const app = await scenarioApp(SCHEDULE_DISPATCH_DESCRIPTOR);
+      const server = await startEveDev(app.appRoot);
+
+      try {
+        const response = await fetch(new URL("/eve/v1/dev/schedules/heartbeat", server.url), {
+          method: "POST",
+        });
+        const body = (await response.json()) as {
+          scheduleId?: string;
+          sessionIds?: readonly string[];
+        };
+        expect(
+          response.status,
+          [
+            `Expected the dev schedule dispatch route to succeed: ${JSON.stringify(body)}`,
+            `stdout:\n${server.stdout()}`,
+            `stderr:\n${server.stderr()}`,
+          ].join("\n\n"),
+        ).toBe(200);
+        expect(body.scheduleId).toBe("heartbeat");
+        expect(body.sessionIds).toHaveLength(1);
+
+        const unknown = await fetch(new URL("/eve/v1/dev/schedules/missing", server.url), {
+          method: "POST",
+        });
+        expect(unknown.status).toBe(404);
+        expect(hasKnownDevServerFailure(`${server.stdout()}\n${server.stderr()}`)).toBe(false);
+      } finally {
+        await server.stop();
+      }
+    },
+    DEV_SERVER_SCENARIO_TIMEOUT_MS,
+  );
+
+  it(
+    "serves an npm-installed app with hoisted real-directory dependencies",
+    async () => {
+      const app = await scenarioApp(NPM_LAYOUT_DESCRIPTOR);
+      const server = await startEveDev(app.appRoot);
+
+      try {
+        const messageResult = await sendDevelopmentMessage({
+          message: "What's the weather in Lisbon?",
+          session: createDevelopmentSessionState(),
+          serverUrl: server.url,
+        });
+        expect(
+          messageResult.events.some((event) => event.type === "message.completed"),
+          [
+            "Expected the npm-installed dev server to complete a streamed turn.",
+            `stdout:\n${server.stdout()}`,
+            `stderr:\n${server.stderr()}`,
+          ].join("\n\n"),
+        ).toBe(true);
+        expect(hasKnownDevServerFailure(`${server.stdout()}\n${server.stderr()}`)).toBe(false);
       } finally {
         await server.stop();
       }
@@ -990,86 +867,4 @@ function readCompletedMessages(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-async function fetchText(serverUrl: string, path: string): Promise<string> {
-  const response = await fetch(new URL(path, serverUrl));
-  if (!response.ok) {
-    throw new Error(`Expected ${path} to succeed, received ${String(response.status)}.`);
-  }
-  return await response.text();
-}
-
-async function fetchAgentInfo(serverUrl: string): Promise<AgentInfoResponse> {
-  const response = await fetch(new URL(EVE_INFO_ROUTE_PATH, serverUrl));
-  if (!response.ok) {
-    throw new Error(`Expected agent info to succeed, received ${String(response.status)}.`);
-  }
-  return (await response.json()) as AgentInfoResponse;
-}
-
-async function forceDevelopmentRebuild(serverUrl: string): Promise<void> {
-  const rebuildUrl = new URL(EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH, serverUrl);
-  rebuildUrl.searchParams.set("force", "1");
-  const response = await fetch(rebuildUrl);
-  if (!response.ok) {
-    throw new Error(`Development rebuild failed with status ${String(response.status)}.`);
-  }
-}
-
-async function readDevelopmentRevision(serverUrl: string): Promise<string> {
-  const response = await fetch(new URL(EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH, serverUrl));
-  if (!response.ok) {
-    throw new Error(`Development runtime state failed with status ${String(response.status)}.`);
-  }
-  const body = (await response.json()) as { readonly revision?: unknown };
-  if (typeof body.revision !== "string") {
-    throw new Error("Development runtime state did not include a revision.");
-  }
-  return body.revision;
-}
-
-async function waitForPath(path: string, timeoutMs: number = 60_000): Promise<void> {
-  if (existsSync(path)) {
-    return;
-  }
-  await new Promise<void>((resolve, reject) => {
-    let settled = false;
-    const watcher = watchFileSystem(dirname(path), () => {
-      if (existsSync(path)) {
-        settle(resolve);
-      }
-    });
-    const timeout = setTimeout(() => {
-      settle(() => reject(new Error(`Timed out waiting for ${path}.`)));
-    }, timeoutMs);
-    function settle(complete: () => void) {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timeout);
-      watcher.close();
-      complete();
-    }
-    if (existsSync(path)) {
-      settle(resolve);
-    }
-  });
-}
-
-async function withinDeadline<T>(operation: Promise<T>, failureMessage: string): Promise<T> {
-  let timeout: NodeJS.Timeout | undefined;
-  try {
-    return await Promise.race([
-      operation,
-      new Promise<never>((_resolve, reject) => {
-        timeout = setTimeout(() => reject(new Error(failureMessage)), 60_000);
-      }),
-    ]);
-  } finally {
-    if (timeout !== undefined) {
-      clearTimeout(timeout);
-    }
-  }
 }
