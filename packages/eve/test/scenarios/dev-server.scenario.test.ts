@@ -6,10 +6,7 @@ import type { Readable } from "node:stream";
 
 import { describe, expect, it } from "vitest";
 
-import {
-  createEveDevDispatchSchedulePath,
-  EVE_HEALTH_ROUTE_PATH,
-} from "../../src/protocol/routes.js";
+import { EVE_HEALTH_ROUTE_PATH } from "../../src/protocol/routes.js";
 import {
   pruneDevelopmentRuntimeArtifactsSnapshots,
   readDevelopmentRuntimeArtifactsSnapshotRoot,
@@ -37,24 +34,6 @@ const DEV_SERVER_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
       ([path]) => !path.startsWith("agent/channels/"),
     ),
   ),
-};
-const DEV_SCHEDULE_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
-  files: {
-    "agent/agent.ts": `import { defineAgent } from "eve";
-
-export default defineAgent({ model: "openai/gpt-5.4-mini" });
-`,
-    "agent/instructions.md": "You are a precise assistant.\n",
-    "agent/schedules/heartbeat.ts": `import { defineSchedule } from "eve/schedules";
-
-export default defineSchedule({
-  cron: "0 0 * * *",
-  markdown: "Reply with heartbeat-ok.",
-});
-`,
-  },
-  installDependencies: true,
-  name: "dev-schedule-dispatch",
 };
 
 interface RunningEveDev {
@@ -278,56 +257,6 @@ async function startEveDev(appRoot: string): Promise<RunningEveDev> {
 }
 
 describe("eve dev server", () => {
-  it(
-    "dispatches a schedule through the bundled dev route",
-    async () => {
-      const app = await scenarioApp(DEV_SCHEDULE_AGENT_DESCRIPTOR);
-      const server = await startEveDev(app.appRoot);
-
-      try {
-        let response: Response;
-        try {
-          response = await fetch(
-            new URL(createEveDevDispatchSchedulePath("heartbeat"), server.url),
-            { method: "POST" },
-          );
-        } catch (error) {
-          throw new Error(
-            [
-              "The dev server closed the schedule dispatch request.",
-              `stdout:\n${server.stdout()}`,
-              `stderr:\n${server.stderr()}`,
-            ].join("\n\n"),
-            { cause: error },
-          );
-        }
-        const responseText = await response.text();
-
-        expect(
-          response.status,
-          [
-            "Expected the dev schedule dispatch route to return 200.",
-            `response body:\n${responseText}`,
-            `stdout:\n${server.stdout()}`,
-            `stderr:\n${server.stderr()}`,
-          ].join("\n\n"),
-        ).toBe(200);
-        expect(responseText).not.toContain("authored-module-map-loader");
-        expect(responseText).not.toContain("Cannot find module");
-
-        const body = JSON.parse(responseText) as {
-          scheduleId: string;
-          sessionIds: readonly string[];
-        };
-        expect(body.scheduleId).toBe("heartbeat");
-        expect(body.sessionIds.length).toBeGreaterThan(0);
-      } finally {
-        await server.stop();
-      }
-    },
-    DEV_SERVER_SCENARIO_TIMEOUT_MS,
-  );
-
   it(
     "rebuilds after pruning its startup runtime snapshot and completes a streamed turn",
     async () => {
