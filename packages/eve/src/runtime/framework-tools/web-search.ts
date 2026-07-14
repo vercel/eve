@@ -154,10 +154,22 @@ export const WEB_SEARCH_EXA_OUTPUT_SCHEMA: JsonObject = {
         resolvedSearchType: { type: "string" },
         results: {
           items: {
-            additionalProperties: false,
             properties: {
               author: {
                 anyOf: [{ type: "string" }, { type: "null" }],
+              },
+              entities: {
+                items: {
+                  properties: {
+                    id: { type: "string" },
+                    properties: { type: "object" },
+                    type: { type: "string" },
+                    version: { type: "number" },
+                  },
+                  required: ["id", "type", "version", "properties"],
+                  type: "object",
+                },
+                type: "array",
               },
               extras: {
                 additionalProperties: false,
@@ -191,16 +203,21 @@ export const WEB_SEARCH_EXA_OUTPUT_SCHEMA: JsonObject = {
               publishedDate: {
                 anyOf: [{ type: "string" }, { type: "null" }],
               },
+              score: {
+                anyOf: [{ type: "number" }, { type: "null" }],
+              },
               subpages: {
                 items: {},
                 type: "array",
               },
               summary: { type: "string" },
               text: { type: "string" },
-              title: { type: "string" },
+              title: {
+                anyOf: [{ type: "string" }, { type: "null" }],
+              },
               url: { type: "string" },
             },
-            required: ["title", "url", "id"],
+            required: ["url", "id"],
             type: "object",
           },
           type: "array",
