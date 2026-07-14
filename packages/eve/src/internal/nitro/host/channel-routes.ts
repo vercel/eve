@@ -17,6 +17,24 @@ import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 
 // Must stay under `#nitro/virtual/` — the dev bundler's virtual plugin
 // freezes its resolveId filter at config creation, and that prefix is the
+const UNSAFE_JS_CODE_CHAR_MAP: Record<string, string> = {
+  "<": "\\u003C",
+  ">": "\\u003E",
+  "/": "\\u002F",
+  "\\": "\\\\",
+  "\b": "\\b",
+  "\f": "\\f",
+  "\n": "\\n",
+  "\r": "\\r",
+  "\t": "\\t",
+  "\0": "\\0",
+  "\u2028": "\\u2028",
+  "\u2029": "\\u2029",
+};
+
+function escapeUnsafeJsCodeChars(value: string): string {
+  return value.replace(/[<>\/\\\b\f\n\r\t\0\u2028\u2029]/g, (char) => UNSAFE_JS_CODE_CHAR_MAP[char] ?? char);
+}
 // only pattern under which channel routes added while `eve dev` runs can
 // still resolve (see dev-live-virtual-modules.ts).
 const EVE_CHANNEL_VIRTUAL_ID_PREFIX = "#nitro/virtual/eve-channel/";
@@ -187,7 +205,7 @@ function addChannelVirtualHandler(
       `import { defineWebSocketHandler } from ${nitroModulePath};`,
       `import { dispatchChannelWebSocketRequest } from ${dispatchModulePath};`,
       `const config = ${JSON.stringify(input.artifactsConfig)};`,
-      `export default defineWebSocketHandler((event) => dispatchChannelWebSocketRequest(event, ${JSON.stringify(routeKey)}, config));`,
+      `export default defineWebSocketHandler((event) => dispatchChannelWebSocketRequest(event, ${escapeUnsafeJsCodeChars(JSON.stringify(routeKey))}, config));`,
     ].join("\n");
     return;
   }
@@ -215,12 +233,12 @@ function addChannelVirtualHandler(
     `import { dispatchChannelRequest } from ${dispatchModulePath};`,
     `const config = ${JSON.stringify(input.artifactsConfig)};`,
     input.cors === undefined
-      ? `export default (event) => dispatchChannelRequest(event, ${JSON.stringify(routeKey)}, config);`
+      ? `export default (event) => dispatchChannelRequest(event, ${escapeUnsafeJsCodeChars(JSON.stringify(routeKey))}, config);`
       : [
           `export default (event) => {`,
           `  const corsResponse = handleCors(event, cors);`,
           `  if (corsResponse !== false) return corsResponse;`,
-          `  return dispatchChannelRequest(event, ${JSON.stringify(routeKey)}, config);`,
+          `  return dispatchChannelRequest(event, ${escapeUnsafeJsCodeChars(JSON.stringify(routeKey))}, config);`,
           `};`,
         ].join("\n"),
   ].join("\n");
