@@ -1,7 +1,11 @@
 import type { CompiledConnectionDefinition } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
-import { registerDefinitionSource, stampDefinitionKey } from "#public/tool-result-narrowing.js";
+import {
+  connectionDefinitionKey,
+  registerDefinitionSource,
+  stampDefinitionKey,
+} from "#public/tool-result-narrowing.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type {
   ConnectionAuthResolver,
@@ -49,11 +53,15 @@ export async function resolveConnectionDefinition(
     const sourceKey = `connection-source:${definition.sourceId}`;
     stampDefinitionKey(resolvedRecord, sourceKey);
     registerDefinitionSource(sourceKey, sourceEntry);
-    // Use the compiled `url` (the MCP endpoint or OpenAPI base URL) as
-    // the secondary key so it matches the authoring-time key stamped by
-    // the `define*` factory for both protocols. The live record only
-    // carries `url` for MCP connections.
-    registerDefinitionSource(`connection:${definition.url}`, sourceEntry);
+    // Register the same fallback identity the `define*` factory stamps
+    // (compiled `url` plus `description` for both protocols), so
+    // `toolResultFrom` matches a connection passed as a module export.
+    // Folding in `description` keeps same-host connections distinct
+    // instead of colliding on `connection:<host>`.
+    registerDefinitionSource(
+      connectionDefinitionKey(definition.url, definition.description),
+      sourceEntry,
+    );
 
     const hasAuth = resolvedRecord.auth !== undefined;
     const hasHeaders = resolvedRecord.headers !== undefined;

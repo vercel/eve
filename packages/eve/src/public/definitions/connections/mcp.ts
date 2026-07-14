@@ -6,7 +6,7 @@ import type {
 import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
 import { stampConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import type { Approval } from "#public/definitions/approval.js";
-import { stampDefinitionKey } from "#public/tool-result-narrowing.js";
+import { connectionDefinitionKey, stampDefinitionKey } from "#public/tool-result-narrowing.js";
 
 /**
  * Public definition for an MCP client connection authored in
@@ -96,7 +96,7 @@ export function defineMcpClientConnection(
   if (definition.auth !== undefined && typeof definition.auth !== "function") {
     definition.auth = normalizeAuthorizationSpec(definition.auth, "defineMcpClientConnection:");
   }
-  stampDefinitionKey(definition, `connection:${definition.url}`);
+  stampDefinitionKey(definition, connectionDefinitionKey(definition.url, definition.description));
   stampConnectionProtocol(definition, "mcp");
   return definition;
 }

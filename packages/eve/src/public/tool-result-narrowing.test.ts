@@ -3,6 +3,7 @@ import { z } from "#compiled/zod/index.js";
 
 import type { RuntimeActionResult } from "#runtime/actions/types.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
+import { defineOpenAPIConnection } from "#public/definitions/connections/openapi.js";
 import { defineTool } from "#public/definitions/tool.js";
 import {
   toolResultFrom,
@@ -33,6 +34,16 @@ function subagentResult(): RuntimeActionResult {
   return { callId: "call_2", kind: "subagent-result", output: "done", subagentName: "sub" };
 }
 
+const DEFINITION_KEY = Symbol.for("eve.definition-source-key");
+
+function readStampedKey(definition: object): string {
+  const key = (definition as Record<symbol, string | undefined>)[DEFINITION_KEY];
+  if (key === undefined) {
+    throw new Error("definition was not stamped with an identity key");
+  }
+  return key;
+}
+
 describe("toolResultFrom", () => {
   const weatherTool = defineTool({
     description: "Get the current weather for a city.",
@@ -49,7 +60,7 @@ describe("toolResultFrom", () => {
     kind: "tool",
     name: "get_weather",
   });
-  registerDefinitionSource("connection:https://mcp.linear.app", {
+  registerDefinitionSource(readStampedKey(linearConnection), {
     kind: "connection",
     name: "linear",
   });
@@ -271,5 +282,52 @@ describe("toolResultFrom", () => {
       toolName: "first__search",
     });
     expect(toolResultFrom(toolResult("first__search", []), second)).toBeUndefined();
+  });
+
+  it("matches through same-host OpenAPI connections passed as module exports", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const jira = defineOpenAPIConnection({
+      spec: { openapi: "3.0.0", info: { title: "Jira", version: "1" }, paths: {} },
+      baseUrl: "https://example.atlassian.net",
+      description: "Jira issues API",
+    });
+    const confluence = defineOpenAPIConnection({
+      spec: { openapi: "3.0.0", info: { title: "Confluence", version: "1" }, paths: {} },
+      baseUrl: "https://example.atlassian.net",
+      description: "Confluence pages API",
+    });
+
+    // Mirror resolveConnectionDefinition, which registers the fallback
+    // identity that equals the authoring-time key each `define*` factory
+    // stamps. The authored module exports the caller passes to
+    // `toolResultFrom` carry only that fallback identity, so two same-host
+    // connections must not collide on it.
+    registerDefinitionSource(readStampedKey(jira), {
+      kind: "connection",
+      logicalPath: "connections/jira.ts",
+      name: "jira",
+    });
+    registerDefinitionSource(readStampedKey(confluence), {
+      kind: "connection",
+      logicalPath: "connections/confluence.ts",
+      name: "confluence",
+    });
+
+    expect(warn).not.toHaveBeenCalled();
+
+    expect(toolResultFrom(toolResult("jira__getIssue", { id: 1 }), jira)).toEqual({
+      callId: "call_1",
+      connectionToolName: "getIssue",
+      output: { id: 1 },
+      toolName: "jira__getIssue",
+    });
+    expect(toolResultFrom(toolResult("confluence__getPage", { id: 2 }), confluence)).toEqual({
+      callId: "call_1",
+      connectionToolName: "getPage",
+      output: { id: 2 },
+      toolName: "confluence__getPage",
+    });
+    // A Confluence result must not narrow through the Jira definition.
+    expect(toolResultFrom(toolResult("confluence__getPage", { id: 2 }), jira)).toBeUndefined();
   });
 });
