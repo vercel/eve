@@ -3,7 +3,7 @@
 #
 # A fixture qualifies when it has an `evals/` directory under one of the
 # fixture roots. Emits a JSON array of `{ name, dir }` objects (sorted by dir)
-# to the `matrix` GitHub Actions output for `matrix.include`.
+# to the `matrix` GitHub Actions output for the workflow's `fixture` axis.
 set -euo pipefail
 
 roots=("e2e/fixtures" "apps/fixtures")

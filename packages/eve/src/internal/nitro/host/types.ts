@@ -12,6 +12,10 @@ export type NitroBuildSurface = "all" | "app" | "flow";
 /** Options for one production application build. */
 export interface ApplicationBuildOptions {
   readonly skipVercelSandboxPrewarm: boolean;
+  readonly vercelServiceOutput?: {
+    readonly hostOutputDirectory: string;
+    readonly serviceOutputDirectory: string;
+  };
 }
 
 /** Outcome of starting a Nitro development server the current process owns. */
