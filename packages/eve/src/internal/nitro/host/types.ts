@@ -9,6 +9,11 @@ import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
  */
 export type NitroBuildSurface = "all" | "app" | "flow";
 
+/** Options for one production application build. */
+export interface ApplicationBuildOptions {
+  readonly skipVercelSandboxPrewarm: boolean;
+}
+
 /** Outcome of starting a Nitro development server the current process owns. */
 export interface StartedDevelopmentServer {
   readonly kind: "started";

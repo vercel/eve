@@ -9,10 +9,12 @@ A single turn can already call several subagents, and parallel tool calls dispat
 
 ## Enable the Workflow tool
 
-Re-export the opt-in marker as the default export of `agent/tools/workflow.ts`. The marker name carries the "experimental" warning, but the tool the model actually sees is named `Workflow`.
+Export the experimental Workflow definition from `agent/tools/workflow.ts`. The helper name carries the "experimental" warning, but the tool the model actually sees is named `Workflow`.
 
 ```ts title="agent/tools/workflow.ts"
-export { ExperimentalWorkflow as default } from "eve/tools";
+import { experimental_workflow } from "eve/tools";
+
+export default experimental_workflow();
 ```
 
 Without that file, the `Workflow` tool stays off. It earns its keep only when the agent has subagents (or the built-in `agent`) worth coordinating:
@@ -55,15 +57,12 @@ A workflow reaches only this agent's own agents: the built-in `agent` (a copy of
 
 Workflow orchestration is capped in two independent ways.
 
-**Per-program call budget.** One Workflow program may dispatch at most `limits.maxSubagents` subagent calls in total, counted across the whole program — sequential and parallel calls alike. The default is 100. Calls beyond the budget do not start a child session; they resolve inside the program with a `WORKFLOW_SUBAGENT_LIMIT_REACHED` error result, and the budget is stated in the tool's description so the model sizes its fan-out to fit.
+**Per-program call budget.** One Workflow program may dispatch at most `maxSubagents` subagent calls in total, counted across the whole program — sequential and parallel calls alike. Configure it on `experimental_workflow`; the default is 100. Calls beyond the budget do not start a child session; they resolve inside the program with a `WORKFLOW_SUBAGENT_LIMIT_REACHED` error result, and the budget is stated in the tool's description so the model sizes its fan-out to fit.
 
-```ts title="agent/agent.ts"
-export default defineAgent({
-  model: "anthropic/claude-sonnet-5",
-  limits: {
-    maxSubagents: 4,
-  },
-});
+```ts title="agent/tools/workflow.ts"
+import { experimental_workflow } from "eve/tools";
+
+export default experimental_workflow({ maxSubagents: 4 });
 ```
 
 **Root-only orchestration.** Only the root session receives `Workflow`. Children started by a workflow receive neither `Workflow` nor the built-in `agent`, so Workflow programs cannot recurse. A declared child can still call subagents defined in its own directory (see [Subagents](../subagents)).

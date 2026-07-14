@@ -7,6 +7,7 @@ import {
   ToolLoopAgent,
   type UserContent,
 } from "ai";
+import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -3534,12 +3535,12 @@ describe("createToolLoopHarness", () => {
         const reissueTools = reissueCall!.tools as Record<string, unknown>;
         expect(reissueTools.web_search).toBeUndefined();
         expect(reissueTools.add).toBeDefined();
-        const reissueInstructions = reissueCall!.instructions as Array<{
+        const reissueInstructions = reissueCall!.instructions as {
           role: string;
           content: string;
-        }>;
-        expect(Array.isArray(reissueInstructions)).toBe(true);
-        expect(reissueInstructions[0]?.content).toContain("web_search");
+        };
+        expect(reissueInstructions.role).toBe("system");
+        expect(reissueInstructions.content).toContain("web_search");
         expect(reissueCall!.runtimeContext).toMatchObject({
           "eve.retry.reason": "empty-response",
         });
@@ -3683,7 +3684,7 @@ describe("createToolLoopHarness", () => {
     it("retries with the offending tool dropped and a one-shot system note", async () => {
       const resolveRuntimeContext = vi.fn((input: InstrumentationStepStartedEventInput) => ({
         runtimeContext: {
-          "test.attempt": Array.isArray(input.modelInput.instructions) ? "retry" : "original",
+          "test.attempt": typeof input.modelInput.instructions === "string" ? "original" : "retry",
         },
       }));
       mockGetInstrumentationConfig.mockReturnValue({
@@ -3769,14 +3770,10 @@ describe("createToolLoopHarness", () => {
 
       // The retry's instructions prepend a one-shot system note about
       // the removed capability so the model has explicit context.
-      const retryInstructions = retryCall!.instructions as
-        | string
-        | Array<{ role: string; content: string }>;
-      expect(Array.isArray(retryInstructions)).toBe(true);
-      const noteEntry = (retryInstructions as Array<{ role: string; content: string }>)[0];
-      expect(noteEntry?.role).toBe("system");
-      expect(noteEntry?.content).toContain("web_search");
-      expect(noteEntry?.content).toContain("not available");
+      const retryInstructions = retryCall!.instructions as { role: string; content: string };
+      expect(retryInstructions.role).toBe("system");
+      expect(retryInstructions.content).toContain("web_search");
+      expect(retryInstructions.content).toContain("not available");
       expect(resolveRuntimeContext.mock.calls[1]?.[0].modelInput.instructions).toEqual(
         retryInstructions,
       );
@@ -8760,10 +8757,10 @@ describe("createToolLoopHarness", () => {
       await runStep(session, { message: "Hi" });
 
       const { instructions, messages } = getLastAgentSettings();
-      expect(instructions).toEqual([
-        { role: "system", content: "You are a test assistant." },
-        { role: "system", content: "durable-system" },
-      ]);
+      expect(instructions).toEqual({
+        role: "system",
+        content: "You are a test assistant.\n\ndurable-system",
+      });
       expect(messages.find((m) => m.role === "system")).toBeUndefined();
       expect(messages.at(-1)).toEqual({ role: "user", content: "Hi" });
     });
@@ -8807,10 +8804,10 @@ describe("createToolLoopHarness", () => {
         );
 
         const { instructions } = getLastAgentSettings();
-        expect(instructions).toEqual([
-          { role: "system", content: "You are a test assistant." },
-          { role: "system", content: CONDITIONAL_DELIVERY_INSTRUCTION },
-        ]);
+        expect(instructions).toEqual({
+          role: "system",
+          content: `You are a test assistant.\n\n${CONDITIONAL_DELIVERY_INSTRUCTION}`,
+        });
       },
     );
 
@@ -8883,15 +8880,46 @@ describe("createToolLoopHarness", () => {
       ctx.set(SessionDynamicInstructionsKey, {
         context: [{ role: "system" as const, content: "dynamic-system-instruction" }],
       });
+      const userContent: UserContent = [{ type: "text", text: "Hi" }];
+
+      await contextStorage.run(ctx, () => runStep(session, { message: userContent }));
+
+      const { instructions, messages } = getLastAgentSettings();
+      expect(instructions).toEqual({
+        role: "system",
+        content: "You are a test assistant.\n\ndynamic-system-instruction",
+      });
+      expect(messages.find((m) => m.content === "dynamic-system-instruction")).toBeUndefined();
+      expect(messages.at(-1)?.content).toEqual(userContent);
+    });
+
+    it("preserves the Anthropic system cache breakpoint when merging instructions", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", undefined, {
+          resolveModel: vi.fn().mockResolvedValue(
+            new MockLanguageModelV3({
+              modelId: "claude-sonnet-4-5",
+              provider: "anthropic.messages",
+            }),
+          ),
+        }),
+      );
+      const session = createTestSession();
+      const ctx = new ContextContainer();
+      ctx.set(SessionDynamicInstructionsKey, {
+        context: [{ role: "system" as const, content: "dynamic-system-instruction" }],
+      });
 
       await contextStorage.run(ctx, () => runStep(session, { message: "Hi" }));
 
-      const { instructions, messages } = getLastAgentSettings();
-      expect(instructions).toEqual([
-        { role: "system", content: "You are a test assistant." },
-        { role: "system", content: "dynamic-system-instruction" },
-      ]);
-      expect(messages.find((m) => m.content === "dynamic-system-instruction")).toBeUndefined();
+      expect(getLastAgentSettings().instructions).toEqual({
+        role: "system",
+        content: "You are a test assistant.\n\ndynamic-system-instruction",
+        providerOptions: {
+          anthropic: { cacheControl: { type: "ephemeral" } },
+        },
+      });
     });
 
     it("does not persist dynamic instruction messages to session history", async () => {

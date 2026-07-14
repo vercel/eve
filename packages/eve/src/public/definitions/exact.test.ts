@@ -10,7 +10,7 @@ import { defineInstrumentation } from "#public/definitions/instrumentation.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
 import { defineSkill } from "#public/definitions/skill.js";
-import { defineTool } from "#public/definitions/tool.js";
+import { defineTool, experimental_workflow } from "#public/definitions/tool.js";
 
 describe("definition helper exact inputs", () => {
   it("preserves literal inference for valid definitions", () => {
@@ -19,7 +19,6 @@ describe("definition helper exact inputs", () => {
       limits: {
         maxInputTokensPerSession: 200_000,
         maxOutputTokensPerSession: 20_000,
-        maxSubagents: 6,
       },
       model: "anthropic/claude-sonnet-5",
     });
@@ -32,7 +31,7 @@ describe("definition helper exact inputs", () => {
     expect(agent.description).toBe("type-test");
     expect(agent.limits.maxInputTokensPerSession).toBe(200_000);
     expect(agent.limits.maxOutputTokensPerSession).toBe(20_000);
-    expect(agent.limits.maxSubagents).toBe(6);
+    expect(experimental_workflow({ maxSubagents: 6 }).maxSubagents).toBe(6);
     expect(schedule.cron).toBe("0 9 * * *");
   });
 });
@@ -44,6 +43,19 @@ function typeOnlyFixtures(): void {
       maxSubagentDepth: 4,
     },
     model: "anthropic/claude-sonnet-5",
+  });
+
+  defineAgent({
+    limits: {
+      // @ts-expect-error Workflow fan-out is configured by experimental_workflow.
+      maxSubagents: 6,
+    },
+    model: "anthropic/claude-sonnet-5",
+  });
+
+  experimental_workflow({
+    // @ts-expect-error Workflow maxSubagents must be a number.
+    maxSubagents: "6",
   });
 
   const agentWithName = {

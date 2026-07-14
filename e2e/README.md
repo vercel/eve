@@ -50,7 +50,6 @@ vc link --yes --project "$VERCEL_PROJECT_ID"
 vc env pull --yes --environment=preview
 VERCEL=1 VERCEL_ENV=preview VERCEL_TARGET_ENV=preview \
   VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID" \
-  VERCEL_DEPLOYMENT_ID="dpl_eve_e2e_manual" \
   pnpm exec eve build
 DEPLOYMENT_URL="$(vc deploy --prebuilt --yes --target=preview | tail -n 1)"
 npx eve eval --strict --url "$DEPLOYMENT_URL"

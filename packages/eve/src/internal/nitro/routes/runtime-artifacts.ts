@@ -11,12 +11,18 @@ import { readDevelopmentRuntimeArtifactsSnapshotRoot } from "#internal/nitro/dev
  * package-owned Nitro routes. Passed explicitly from virtual handlers
  * rather than read from a global runtime configuration store.
  */
-export interface NitroArtifactsConfig {
-  readonly appRoot?: string;
-  readonly dev?: boolean;
-  readonly devRuntimeArtifactsPointerPath?: string;
-  readonly moduleMapLoaderPath?: string;
+export interface DevelopmentNitroArtifactsConfig {
+  readonly appRoot: string;
+  readonly devRuntimeArtifactsPointerPath: string;
+  readonly kind: "development";
+  readonly moduleMapLoaderPath: string;
 }
+
+export interface ProductionNitroArtifactsConfig {
+  readonly kind: "production";
+}
+
+export type NitroArtifactsConfig = DevelopmentNitroArtifactsConfig | ProductionNitroArtifactsConfig;
 
 /**
  * Resolves the compiled-artifact source available to package-owned Nitro
@@ -25,21 +31,14 @@ export interface NitroArtifactsConfig {
 export function resolveNitroCompiledArtifactsSource(
   config: NitroArtifactsConfig,
 ): RuntimeCompiledArtifactsSource {
-  const { appRoot, dev: isDevelopment } = config;
-
-  if (isDevelopment && appRoot !== undefined) {
-    if (config.moduleMapLoaderPath === undefined) {
-      throw new Error(
-        'eve Nitro development routes require "moduleMapLoaderPath" in the artifacts config.',
-      );
-    }
-
+  if (config.kind === "development") {
     const runtimeAppRoot =
-      readDevelopmentRuntimeArtifactsSnapshotRoot(config.devRuntimeArtifactsPointerPath) ?? appRoot;
+      readDevelopmentRuntimeArtifactsSnapshotRoot(config.devRuntimeArtifactsPointerPath) ??
+      config.appRoot;
 
     return createDiskRuntimeCompiledArtifactsSource(runtimeAppRoot, {
       moduleMapLoaderPath: config.moduleMapLoaderPath,
-      sandboxAppRoot: appRoot,
+      sandboxAppRoot: config.appRoot,
     });
   }
 
@@ -47,11 +46,5 @@ export function resolveNitroCompiledArtifactsSource(
     return createBundledRuntimeCompiledArtifactsSource();
   }
 
-  if (appRoot !== undefined) {
-    return createDiskRuntimeCompiledArtifactsSource(appRoot);
-  }
-
-  throw new Error(
-    "eve Nitro route requires bundled artifacts or an eve Nitro runtime configuration app root.",
-  );
+  throw new Error("eve Nitro production requires bundled artifacts.");
 }

@@ -253,7 +253,7 @@ describe("workflowEntry", () => {
 
     await workflowEntry({
       input: { message: "hello there" },
-      limits: { maxSubagents: 4 },
+      limits: { maxInputTokensPerSession: 4 },
       serializedContext: createSerializedContext({
         [SubagentDepthKey.name]: 3,
       }),
@@ -261,7 +261,7 @@ describe("workflowEntry", () => {
 
     expect(createSessionStep).toHaveBeenCalledWith(
       expect.objectContaining({
-        inheritedLimits: { maxSubagents: 4 },
+        inheritedLimits: { maxInputTokensPerSession: 4 },
         subagentDepth: 3,
       }),
     );

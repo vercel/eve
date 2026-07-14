@@ -151,8 +151,7 @@ export default defineEval({
 /** Builds the fixture and repoints the alias at the fresh deployment. */
 async function deployToAlias(t: EveEvalContext, alias: string, phase: string): Promise<void> {
   // Mirror the workflow's build env. Sandbox templates key on
-  // VERCEL_PROJECT_ID (already in the environment); the deployment id is
-  // deliberately ignored by sandbox keys but must be present at build.
+  // VERCEL_PROJECT_ID, which is already present in the environment.
   await execFileAsync("pnpm", ["exec", "eve", "build"], {
     ...EXEC_OPTIONS,
     env: {
@@ -160,7 +159,6 @@ async function deployToAlias(t: EveEvalContext, alias: string, phase: string): P
       VERCEL: "1",
       VERCEL_ENV: "preview",
       VERCEL_TARGET_ENV: "preview",
-      VERCEL_DEPLOYMENT_ID: `dpl_eve_e2e_redeploy_${phase}_${Date.now()}`,
     },
   });
 

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createCompiledAgentManifest } from "#compiler/manifest.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import type { ApplicationBuildWorkspace } from "#internal/application/build-workspace.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 import {
@@ -53,10 +54,15 @@ const buildNitroMock = vi.fn(async (nitro: Nitro) => {
   );
 });
 const copyPublicAssetsMock = vi.fn(async () => undefined);
-const createApplicationNitroMock = vi.fn();
-const prepareApplicationHostMock = vi.fn();
+const createProductionApplicationNitroMock = vi.fn();
+const prepareProductionApplicationHostMock = vi.fn();
 const prepareMock = vi.fn(async () => undefined);
 const prerenderMock = vi.fn(async () => undefined);
+const resolveDiscoveryProjectMock = vi.fn(async (appRoot: string) => ({
+  agentRoot: join(appRoot, "agent"),
+  appRoot,
+  layout: "nested" as const,
+}));
 const runVercelBuildPrewarmMock = vi.fn(async () => undefined);
 const workflowBuilderBuildVercelOutputMock = vi.fn(async (_options: unknown) => undefined);
 const workflowBuilderConstructors: unknown[] = [];
@@ -69,11 +75,15 @@ vi.mock("nitro/builder", () => ({
 }));
 
 vi.mock("./create-application-nitro.js", () => ({
-  createApplicationNitro: createApplicationNitroMock,
+  createProductionApplicationNitro: createProductionApplicationNitroMock,
 }));
 
 vi.mock("./prepare-application-host.js", () => ({
-  prepareApplicationHost: prepareApplicationHostMock,
+  prepareProductionApplicationHost: prepareProductionApplicationHostMock,
+}));
+
+vi.mock("#discover/project.js", () => ({
+  resolveDiscoveryProject: resolveDiscoveryProjectMock,
 }));
 
 vi.mock("./vercel-build-prewarm.js", () => ({
@@ -93,6 +103,7 @@ vi.mock("../../workflow-bundle/builder.js", () => ({
 }));
 
 const createScratchDirectory = useTemporaryDirectories();
+const DEPLOYABLE_BUILD_OPTIONS = { skipVercelSandboxPrewarm: false } as const;
 
 function createPreparedHost(appRoot: string): PreparedApplicationHost {
   const agentRoot = join(appRoot, "agent");
@@ -108,6 +119,17 @@ function createPreparedHost(appRoot: string): PreparedApplicationHost {
     appRoot,
     compileResult: {
       manifest,
+      paths: {
+        compileDirectoryPath: join(
+          appRoot,
+          ".eve",
+          "builds",
+          "test",
+          "compiler",
+          ".eve",
+          "compile",
+        ),
+      },
       project: {
         agentRoot,
         appRoot,
@@ -140,6 +162,13 @@ function createNitroStub(outputDir: string): Nitro {
   } as unknown as Nitro;
 }
 
+async function prepareHostBuildWorkspace(
+  workspace: ApplicationBuildWorkspace,
+): Promise<PreparedApplicationHost> {
+  await mkdir(join(workspace.compiler.artifactsDir, "compile"), { recursive: true });
+  return createPreparedHost(workspace.appRoot);
+}
+
 describe("buildApplication", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -151,14 +180,17 @@ describe("buildApplication", () => {
     vi.unstubAllEnvs();
   });
 
-  it("builds a single Nitro host outside Vercel", async () => {
+  it("builds without publishing stable runtime compiler artifacts", async () => {
     vi.stubEnv("VERCEL", "");
     const appRoot = await createScratchDirectory("eve-build-application-single-");
     const outputDir = join(appRoot, ".output");
     const staleOutputPath = join(outputDir, "stale-output.txt");
 
-    prepareApplicationHostMock.mockResolvedValueOnce(createPreparedHost(appRoot));
-    createApplicationNitroMock.mockResolvedValueOnce(createNitroStub(outputDir));
+    prepareProductionApplicationHostMock.mockImplementationOnce(prepareHostBuildWorkspace);
+    createProductionApplicationNitroMock.mockImplementationOnce(
+      async (_preparedHost: PreparedApplicationHost, options: { outputDir: string }) =>
+        createNitroStub(options.outputDir),
+    );
     await mkdir(outputDir, { recursive: true });
     await Promise.all([
       writeFile(join(outputDir, "eve-cache.json"), `${JSON.stringify({ eveVersion: "old" })}\n`),
@@ -166,13 +198,16 @@ describe("buildApplication", () => {
     ]);
 
     const { buildApplication } = await import("#internal/nitro/host/build-application.js");
-    const builtOutputDir = await buildApplication(appRoot);
+    const builtOutputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
 
     expect(builtOutputDir).toBe(outputDir);
-    expect(createApplicationNitroMock).toHaveBeenCalledTimes(1);
-    expect(createApplicationNitroMock).toHaveBeenCalledWith(
+    expect(createProductionApplicationNitroMock).toHaveBeenCalledTimes(1);
+    expect(createProductionApplicationNitroMock).toHaveBeenCalledWith(
       expect.objectContaining({ appRoot }),
-      false,
+      expect.objectContaining({
+        buildDir: expect.stringContaining(join(appRoot, ".eve", "builds")),
+        outputDir: expect.stringContaining(join(appRoot, ".eve", "builds")),
+      }),
     );
     await expect(readFile(staleOutputPath, "utf8")).rejects.toThrow();
     await expect(readFile(join(outputDir, "eve-cache.json"), "utf8")).resolves.toBe(
@@ -186,6 +221,9 @@ describe("buildApplication", () => {
     );
     expect(workflowBuilderBuildVercelOutputMock).not.toHaveBeenCalled();
     expect(runVercelBuildPrewarmMock).not.toHaveBeenCalled();
+    await expect(
+      readFile(join(appRoot, ".eve", "compile", "compiled-agent-manifest.json"), "utf8"),
+    ).rejects.toThrow();
 
     const summary = JSON.parse(
       await readFile(join(appRoot, VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH), "utf8"),
@@ -195,30 +233,60 @@ describe("buildApplication", () => {
     expect((summary.agent as { name: string }).name).toBe("scenario-test-agent");
   });
 
+  it("keeps the last-good output when Nitro mutates its target before failing", async () => {
+    vi.stubEnv("VERCEL", "");
+    const appRoot = await createScratchDirectory("eve-build-application-last-good-");
+    const outputDir = join(appRoot, ".output");
+    const summaryPath = join(appRoot, VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH);
+    prepareProductionApplicationHostMock.mockImplementationOnce(prepareHostBuildWorkspace);
+    createProductionApplicationNitroMock.mockImplementationOnce(
+      async (_preparedHost: PreparedApplicationHost, options: { outputDir: string }) =>
+        createNitroStub(options.outputDir),
+    );
+    buildNitroMock.mockImplementationOnce(async (nitro: Nitro) => {
+      await mkdir(nitro.options.output.dir, { recursive: true });
+      await writeFile(join(nitro.options.output.dir, "marker.txt"), "partial-failed-output\n");
+      throw new Error("injected Nitro build failure");
+    });
+    await Promise.all([
+      mkdir(outputDir, { recursive: true }),
+      mkdir(join(summaryPath, ".."), { recursive: true }),
+    ]);
+    await Promise.all([
+      writeFile(join(outputDir, "marker.txt"), "last-good-output\n"),
+      writeFile(
+        join(outputDir, "eve-cache.json"),
+        `${JSON.stringify({ eveVersion: resolveInstalledPackageInfo().version }, null, 2)}\n`,
+      ),
+      writeFile(summaryPath, "last-good-summary\n"),
+    ]);
+
+    const { buildApplication } = await import("#internal/nitro/host/build-application.js");
+    await expect(buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS)).rejects.toThrow(
+      "injected Nitro build failure",
+    );
+
+    await expect(readFile(join(outputDir, "marker.txt"), "utf8")).resolves.toBe(
+      "last-good-output\n",
+    );
+    await expect(readFile(summaryPath, "utf8")).resolves.toBe("last-good-summary\n");
+  });
+
   it("builds isolated Vercel Nitro surfaces and stitches workflow functions", async () => {
     vi.stubEnv("VERCEL", "1");
     const appRoot = await createScratchDirectory("eve-build-application-vercel-");
-    const flowOutputDir = join(appRoot, ".eve", "nitro-output", "flow");
-    const staleFlowOutputPath = join(flowOutputDir, "stale-flow.txt");
+    const stableFlowOutputDir = join(appRoot, ".eve", "nitro-output", "flow");
+    const staleFlowOutputPath = join(stableFlowOutputDir, "stale-flow.txt");
 
-    prepareApplicationHostMock.mockResolvedValueOnce(createPreparedHost(appRoot));
-    createApplicationNitroMock.mockImplementation(
-      async (
-        _preparedHost: PreparedApplicationHost,
-        _dev: boolean,
-        options: { outputDir?: string; surface?: string } = {},
-      ) => {
-        if (options.surface === "app") {
-          return createNitroStub(join(appRoot, ".vercel", "output"));
-        }
-
-        return createNitroStub(options.outputDir ?? join(appRoot, ".output"));
-      },
+    prepareProductionApplicationHostMock.mockImplementationOnce(prepareHostBuildWorkspace);
+    createProductionApplicationNitroMock.mockImplementation(
+      async (_preparedHost: PreparedApplicationHost, options: { outputDir: string }) =>
+        createNitroStub(options.outputDir),
     );
-    await mkdir(flowOutputDir, { recursive: true });
+    await mkdir(stableFlowOutputDir, { recursive: true });
     await Promise.all([
       writeFile(
-        join(flowOutputDir, "eve-cache.json"),
+        join(stableFlowOutputDir, "eve-cache.json"),
         `${JSON.stringify({ eveVersion: "old" })}\n`,
       ),
       writeFile(staleFlowOutputPath, "stale\n"),
@@ -250,18 +318,21 @@ describe("buildApplication", () => {
     );
 
     const { buildApplication } = await import("#internal/nitro/host/build-application.js");
-    const outputDir = await buildApplication(appRoot);
+    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
 
     expect(outputDir).toBe(join(appRoot, ".vercel", "output"));
-    expect(createApplicationNitroMock).toHaveBeenCalledTimes(2);
-    expect(createApplicationNitroMock.mock.calls.map((call) => call[2]?.surface ?? "all")).toEqual([
-      "app",
-      "flow",
-    ]);
+    expect(createProductionApplicationNitroMock).toHaveBeenCalledTimes(2);
+    expect(createProductionApplicationNitroMock.mock.calls.map((call) => call[1]?.surface)).toEqual(
+      ["app", "flow"],
+    );
+    const flowOutputDir = createProductionApplicationNitroMock.mock.calls.find(
+      (call) => call[1]?.surface === "flow",
+    )?.[1]?.outputDir;
+    expect(flowOutputDir).toEqual(expect.stringContaining(join(appRoot, ".eve", "builds")));
     expect(workflowBuilderConstructors).toHaveLength(1);
     expect(workflowBuilderBuildVercelOutputMock).toHaveBeenCalledWith({
       flowNitroOutputDir: flowOutputDir,
-      outputDir: join(appRoot, ".vercel", "output"),
+      outputDir: expect.stringContaining(join(appRoot, ".eve", "builds")),
       runtime: "nodejs24.x",
     });
     const nestedFunctionStats = await lstat(
@@ -304,11 +375,17 @@ describe("buildApplication", () => {
         src: "^/eve/v1/session/(?<sessionId>[^/]+)/stream$",
       },
     ]);
-    await expect(readFile(staleFlowOutputPath, "utf8")).rejects.toThrow();
-    expect(runVercelBuildPrewarmMock).toHaveBeenCalledWith({
-      appRoot,
-      log: expect.any(Function),
-    });
+    await expect(readFile(staleFlowOutputPath, "utf8")).resolves.toBe("stale\n");
+    expect(runVercelBuildPrewarmMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appRoot,
+        compiledArtifactsSource: expect.objectContaining({
+          kind: "disk",
+          sandboxAppRoot: appRoot,
+        }),
+        log: expect.any(Function),
+      }),
+    );
 
     const summary = JSON.parse(
       await readFile(join(appRoot, VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH), "utf8"),
@@ -318,24 +395,35 @@ describe("buildApplication", () => {
     expect((summary.agent as { name: string }).name).toBe("scenario-test-agent");
   });
 
+  it("skips Vercel sandbox prewarm only when the build opts out", async () => {
+    vi.stubEnv("VERCEL", "1");
+    const appRoot = await createScratchDirectory("eve-build-application-skip-prewarm-");
+
+    prepareProductionApplicationHostMock.mockImplementationOnce(prepareHostBuildWorkspace);
+    createProductionApplicationNitroMock.mockImplementation(
+      async (_preparedHost: PreparedApplicationHost, options: { outputDir: string }) =>
+        createNitroStub(options.outputDir),
+    );
+
+    const { buildApplication } = await import("#internal/nitro/host/build-application.js");
+    const outputDir = await buildApplication(appRoot, {
+      skipVercelSandboxPrewarm: true,
+    });
+
+    expect(outputDir).toBe(join(appRoot, ".vercel", "output"));
+    expect(runVercelBuildPrewarmMock).not.toHaveBeenCalled();
+    expect(workflowBuilderBuildVercelOutputMock).toHaveBeenCalledTimes(1);
+  });
+
   it("normalizes eve function output behind a non-Next host service", async () => {
     vi.stubEnv("VERCEL", "1");
     const appRoot = await createScratchDirectory("eve-build-application-vercel-nuxt-");
     const flowOutputDir = join(appRoot, ".eve", "nitro-output", "flow");
 
-    prepareApplicationHostMock.mockResolvedValueOnce(createPreparedHost(appRoot));
-    createApplicationNitroMock.mockImplementation(
-      async (
-        _preparedHost: PreparedApplicationHost,
-        _dev: boolean,
-        options: { outputDir?: string; surface?: string } = {},
-      ) => {
-        if (options.surface === "app") {
-          return createNitroStub(join(appRoot, ".vercel", "output"));
-        }
-
-        return createNitroStub(options.outputDir ?? join(appRoot, ".output"));
-      },
+    prepareProductionApplicationHostMock.mockImplementationOnce(prepareHostBuildWorkspace);
+    createProductionApplicationNitroMock.mockImplementation(
+      async (_preparedHost: PreparedApplicationHost, options: { outputDir: string }) =>
+        createNitroStub(options.outputDir),
     );
     await mkdir(flowOutputDir, { recursive: true });
     await writeFile(
@@ -361,7 +449,7 @@ describe("buildApplication", () => {
     );
 
     const { buildApplication } = await import("#internal/nitro/host/build-application.js");
-    await buildApplication(appRoot);
+    await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
 
     const sharedFunctionStats = await lstat(
       join(appRoot, ".vercel", "output", "functions", "eve", "__server.func"),
@@ -390,13 +478,10 @@ describe("buildApplication", () => {
     vi.stubEnv("VERCEL", "1");
     const appRoot = await createScratchDirectory("eve-build-application-vercel-service-array-");
 
-    prepareApplicationHostMock.mockResolvedValueOnce(createPreparedHost(appRoot));
-    createApplicationNitroMock.mockImplementation(
-      async (
-        _preparedHost: PreparedApplicationHost,
-        _dev: boolean,
-        options: { outputDir?: string; surface?: string } = {},
-      ) => createNitroStub(options.outputDir ?? join(appRoot, ".vercel", "output")),
+    prepareProductionApplicationHostMock.mockImplementationOnce(prepareHostBuildWorkspace);
+    createProductionApplicationNitroMock.mockImplementation(
+      async (_preparedHost: PreparedApplicationHost, options: { outputDir: string }) =>
+        createNitroStub(options.outputDir),
     );
     await mkdir(join(appRoot, ".vercel", "output"), { recursive: true });
     await writeFile(
@@ -426,7 +511,7 @@ describe("buildApplication", () => {
     );
 
     const { buildApplication } = await import("#internal/nitro/host/build-application.js");
-    await buildApplication(appRoot);
+    await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
 
     const vercelConfig = JSON.parse(
       await readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),
@@ -444,13 +529,10 @@ describe("buildApplication", () => {
     const projectRoot = await createScratchDirectory("eve-build-application-vercel-root-dir-");
     const appRoot = join(projectRoot, "apps", "web", "agents", "support");
 
-    prepareApplicationHostMock.mockResolvedValueOnce(createPreparedHost(appRoot));
-    createApplicationNitroMock.mockImplementation(
-      async (
-        _preparedHost: PreparedApplicationHost,
-        _dev: boolean,
-        options: { outputDir?: string; surface?: string } = {},
-      ) => createNitroStub(options.outputDir ?? join(appRoot, ".vercel", "output")),
+    prepareProductionApplicationHostMock.mockImplementationOnce(prepareHostBuildWorkspace);
+    createProductionApplicationNitroMock.mockImplementation(
+      async (_preparedHost: PreparedApplicationHost, options: { outputDir: string }) =>
+        createNitroStub(options.outputDir),
     );
     await mkdir(join(projectRoot, ".vercel", "output"), { recursive: true });
     await writeFile(
@@ -489,7 +571,7 @@ describe("buildApplication", () => {
     );
 
     const { buildApplication } = await import("#internal/nitro/host/build-application.js");
-    await buildApplication(appRoot);
+    await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
 
     const vercelConfig = JSON.parse(
       await readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),
@@ -507,19 +589,10 @@ describe("buildApplication", () => {
     const appRoot = await createScratchDirectory("eve-build-application-vercel-root-config-");
     const flowOutputDir = join(appRoot, ".eve", "nitro-output", "flow");
 
-    prepareApplicationHostMock.mockResolvedValueOnce(createPreparedHost(appRoot));
-    createApplicationNitroMock.mockImplementation(
-      async (
-        _preparedHost: PreparedApplicationHost,
-        _dev: boolean,
-        options: { outputDir?: string; surface?: string } = {},
-      ) => {
-        if (options.surface === "app") {
-          return createNitroStub(join(appRoot, ".vercel", "output"));
-        }
-
-        return createNitroStub(options.outputDir ?? join(appRoot, ".output"));
-      },
+    prepareProductionApplicationHostMock.mockImplementationOnce(prepareHostBuildWorkspace);
+    createProductionApplicationNitroMock.mockImplementation(
+      async (_preparedHost: PreparedApplicationHost, options: { outputDir: string }) =>
+        createNitroStub(options.outputDir),
     );
     await Promise.all([
       mkdir(flowOutputDir, { recursive: true }),
@@ -547,7 +620,7 @@ describe("buildApplication", () => {
     ]);
 
     const { buildApplication } = await import("#internal/nitro/host/build-application.js");
-    const outputDir = await buildApplication(appRoot);
+    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
 
     expect(outputDir).toBe(join(appRoot, ".vercel", "output"));
     const vercelConfig = JSON.parse(
@@ -565,23 +638,14 @@ describe("buildApplication", () => {
     vi.stubEnv("VERCEL", "1");
     const appRoot = await createScratchDirectory("eve-build-application-vercel-standalone-");
 
-    prepareApplicationHostMock.mockResolvedValueOnce(createPreparedHost(appRoot));
-    createApplicationNitroMock.mockImplementation(
-      async (
-        _preparedHost: PreparedApplicationHost,
-        _dev: boolean,
-        options: { outputDir?: string; surface?: string } = {},
-      ) => {
-        if (options.surface === "app") {
-          return createNitroStub(join(appRoot, ".vercel", "output"));
-        }
-
-        return createNitroStub(options.outputDir ?? join(appRoot, ".output"));
-      },
+    prepareProductionApplicationHostMock.mockImplementationOnce(prepareHostBuildWorkspace);
+    createProductionApplicationNitroMock.mockImplementation(
+      async (_preparedHost: PreparedApplicationHost, options: { outputDir: string }) =>
+        createNitroStub(options.outputDir),
     );
 
     const { buildApplication } = await import("#internal/nitro/host/build-application.js");
-    await buildApplication(appRoot);
+    await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
 
     const rootFunctionStats = await lstat(
       join(appRoot, ".vercel", "output", "functions", "index.func"),

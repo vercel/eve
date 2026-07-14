@@ -132,7 +132,6 @@ jobs:
             VERCEL_ENV=preview \
             VERCEL_TARGET_ENV=preview \
             VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID" \
-            VERCEL_DEPLOYMENT_ID="dpl_eve_e2e_${{ matrix.name }}_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}" \
             pnpm exec eve build
           DEPLOYMENT_URL="$(pnpm exec vc deploy --prebuilt --yes --target=preview "${token_args[@]}" | tail -n 1)"
 

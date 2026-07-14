@@ -61,6 +61,17 @@ export function expectBoolean(value: unknown, message: string): boolean {
 }
 
 /**
+ * Returns one positive integer or throws.
+ */
+export function expectPositiveInteger(value: unknown, message: string): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+    throw new Error(message);
+  }
+
+  return value;
+}
+
+/**
  * Returns the value as a function or throws.
  */
 export function expectFunction<TFunction extends (...args: never[]) => unknown>(

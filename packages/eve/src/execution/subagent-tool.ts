@@ -97,9 +97,6 @@ export function buildSubagentRunInput(input: {
   const inheritedLimits: {
     -readonly [K in keyof RunSessionLimits]: RunSessionLimits[K];
   } = resolveRemainingSessionTokenLimits(session, input.fanoutSize);
-  if (session.workflowMaxSubagents !== undefined) {
-    inheritedLimits.maxSubagents = session.workflowMaxSubagents;
-  }
 
   const runInput: {
     -readonly [K in keyof RunInput]: RunInput[K];

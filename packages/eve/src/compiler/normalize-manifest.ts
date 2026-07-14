@@ -10,6 +10,7 @@ import {
   type CompiledInstructionsDefinition,
   type CompiledSkillDefinition,
   type CompiledToolDefinition,
+  type CompiledWorkflowToolDefinition,
   createCompiledAgentManifest,
   createCompiledAgentNodeManifest,
   ROOT_COMPILED_AGENT_NODE_ID,
@@ -106,15 +107,15 @@ async function compileAgentNodeManifest(
   const tools: CompiledToolDefinition[] = [];
   const dynamicTools: CompiledDynamicToolDefinition[] = [];
   const disabledFrameworkTools: string[] = [];
-  let workflowEnabled = false;
+  let workflowTool: CompiledWorkflowToolDefinition | undefined;
 
   for (const entry of compiledToolEntries) {
     if (entry.kind === "tool") {
       tools.push(entry.definition);
     } else if (entry.kind === "dynamic-tool") {
       dynamicTools.push(entry.definition);
-    } else if (entry.kind === "enable-workflow") {
-      workflowEnabled = true;
+    } else if (entry.kind === "workflow-tool") {
+      workflowTool = { maxSubagents: entry.maxSubagents };
     } else {
       disabledFrameworkTools.push(entry.name);
     }
@@ -246,7 +247,7 @@ async function compileAgentNodeManifest(
     connections,
     diagnosticsSummary: manifest.diagnosticsSummary,
     disabledFrameworkTools,
-    workflowEnabled,
+    workflowTool,
     dynamicSkills,
     dynamicTools,
     hooks,

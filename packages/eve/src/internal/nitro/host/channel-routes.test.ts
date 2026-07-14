@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { registerChannelVirtualHandlers } from "#internal/nitro/host/channel-routes.js";
 
 describe("registerChannelVirtualHandlers", () => {
@@ -12,7 +13,7 @@ describe("registerChannelVirtualHandlers", () => {
     };
 
     registerChannelVirtualHandlers(nitro, {
-      artifactsConfig: { appRoot: "/app", dev: true },
+      artifactsConfig: createDevelopmentNitroArtifactsConfig({ appRoot: "/app" }),
       registrations: [{ cors: {}, method: "POST", route: "/eve/v1/session" }],
     });
 
@@ -48,7 +49,7 @@ describe("registerChannelVirtualHandlers", () => {
     };
 
     registerChannelVirtualHandlers(nitro, {
-      artifactsConfig: { appRoot: "/app", dev: true },
+      artifactsConfig: createDevelopmentNitroArtifactsConfig({ appRoot: "/app" }),
       registrations: [
         { cors: {}, method: "GET", route: "/eve/v1/session/:sessionId/events" },
         { cors: {}, method: "POST", route: "/eve/v1/session/:sessionId/events" },
@@ -72,7 +73,7 @@ describe("registerChannelVirtualHandlers", () => {
     };
 
     registerChannelVirtualHandlers(nitro, {
-      artifactsConfig: { appRoot: "/app", dev: true },
+      artifactsConfig: createDevelopmentNitroArtifactsConfig({ appRoot: "/app" }),
       registrations: [{ method: "WEBSOCKET", route: "/voice" }],
     });
 

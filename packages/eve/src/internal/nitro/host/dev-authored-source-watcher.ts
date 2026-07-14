@@ -5,7 +5,7 @@ import type { Nitro } from "nitro/types";
 import { clearCompiledRuntimeAgentBundleCache } from "#runtime/sessions/compiled-agent-cache.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { resolveTsConfigDependencyPaths } from "#internal/application/tsconfig-dependencies.js";
-import { createNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
+import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { resolveDevelopmentSourceSnapshotWatchPaths } from "#internal/nitro/dev-runtime-source-snapshot.js";
 import { pruneDevelopmentRuntimeArtifactsSnapshotsInBackground } from "#internal/nitro/dev-runtime-artifacts.js";
 import { startDevelopmentSandboxPrewarmInBackground } from "#execution/sandbox/development-prewarm.js";
@@ -13,7 +13,7 @@ import {
   computeChannelRouteRegistrations,
   syncChannelVirtualHandlers,
 } from "#internal/nitro/host/channel-routes.js";
-import { prepareApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
+import { prepareDevelopmentApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 import {
@@ -142,15 +142,10 @@ export async function startAuthoredSourceWatcher(input: {
             loadDevelopmentEnvironmentFiles(previousHost.appRoot);
           }
 
-          const nextHost = await prepareApplicationHost(previousHost.appRoot, {
-            dev: input.nitro.options.dev === true,
-          });
-          if (input.nitro.options.dev === true) {
-            pruneDevelopmentRuntimeArtifactsSnapshotsInBackground(nextHost.appRoot);
-          }
-          const artifactsConfig = createNitroArtifactsConfig({
+          const nextHost = await prepareDevelopmentApplicationHost(previousHost.appRoot);
+          pruneDevelopmentRuntimeArtifactsSnapshotsInBackground(nextHost.appRoot);
+          const artifactsConfig = createDevelopmentNitroArtifactsConfig({
             appRoot: nextHost.appRoot,
-            dev: input.nitro.options.dev === true,
           });
           if (hasSandboxPrewarmChange) {
             startDevelopmentSandboxPrewarmInBackground({
