@@ -6,6 +6,7 @@ import { defineMcpClientConnection } from "#public/definitions/connections/mcp.j
 import { defineOpenAPIConnection } from "#public/definitions/connections/openapi.js";
 import { defineTool } from "#public/definitions/tool.js";
 import {
+  connectionDefinitionKey,
   toolResultFrom,
   registerDefinitionSource,
   stampDefinitionKey,
@@ -329,5 +330,53 @@ describe("toolResultFrom", () => {
     });
     // A Confluence result must not narrow through the Jira definition.
     expect(toolResultFrom(toolResult("confluence__getPage", { id: 2 }), jira)).toBeUndefined();
+  });
+
+  it("matches through baseUrl-less OpenAPI connections passed as module exports", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const petstore = defineOpenAPIConnection({
+      spec: { openapi: "3.0.0", info: { title: "Petstore", version: "1" }, paths: {} },
+      description: "Petstore public API",
+    });
+    const weather = defineOpenAPIConnection({
+      spec: { openapi: "3.0.0", info: { title: "Weather", version: "1" }, paths: {} },
+      description: "Weather public API",
+    });
+
+    // The compiler stores `url = baseUrl ?? ""` and the resolver registers
+    // `connectionDefinitionKey(url, description)`, so a baseUrl-less
+    // connection's authoring-time key must equal `connection: <desc>`
+    // for the module export the caller passes to narrow.
+    expect(readStampedKey(petstore)).toBe(connectionDefinitionKey("", "Petstore public API"));
+    expect(readStampedKey(weather)).toBe(connectionDefinitionKey("", "Weather public API"));
+    registerDefinitionSource(connectionDefinitionKey("", "Petstore public API"), {
+      kind: "connection",
+      logicalPath: "connections/petstore.ts",
+      name: "petstore",
+    });
+    registerDefinitionSource(connectionDefinitionKey("", "Weather public API"), {
+      kind: "connection",
+      logicalPath: "connections/weather.ts",
+      name: "weather",
+    });
+
+    expect(warn).not.toHaveBeenCalled();
+
+    expect(toolResultFrom(toolResult("petstore__listPets", [{ id: 1 }]), petstore)).toEqual({
+      callId: "call_1",
+      connectionToolName: "listPets",
+      output: [{ id: 1 }],
+      toolName: "petstore__listPets",
+    });
+    expect(toolResultFrom(toolResult("weather__getForecast", { tempF: 72 }), weather)).toEqual({
+      callId: "call_1",
+      connectionToolName: "getForecast",
+      output: { tempF: 72 },
+      toolName: "weather__getForecast",
+    });
+    // A Weather result must not narrow through the Petstore definition.
+    expect(
+      toolResultFrom(toolResult("weather__getForecast", { tempF: 72 }), petstore),
+    ).toBeUndefined();
   });
 });

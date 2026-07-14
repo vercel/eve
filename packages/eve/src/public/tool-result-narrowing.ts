@@ -26,12 +26,12 @@ export interface MatchedToolResult<TOutput> {
 
 /**
  * Narrowed tool result returned by {@link toolResultFrom} when the
- * action result matches an MCP connection.
+ * action result matches an MCP or OpenAPI connection.
  *
- * `output` stays `unknown` because MCP tool schemas are remote.
- * `connectionToolName` is the unqualified MCP tool name (e.g.
- * `"list_issues"`) while `toolName` is the full qualified name
- * (e.g. `"linear__list_issues"`).
+ * `output` stays `unknown` because connection tool/operation schemas are
+ * not known statically. `connectionToolName` is the unqualified tool or
+ * operation name (e.g. `"list_issues"`) while `toolName` is the full
+ * qualified name (e.g. `"linear__list_issues"`).
  */
 export interface MatchedConnectionResult {
   readonly callId: string;
