@@ -119,6 +119,37 @@ function createEveContinueHandler(input: EveChannelInput) {
   };
 }
 
+/** Creates a GET handler test harness for the durable session stream route. */
+function createEveStreamHandler(input: EveChannelInput) {
+  const channel = eveChannel(input);
+  const streamRoute = channel.routes.find(
+    (route) => route.method === "GET" && route.path === "/eve/v1/session/:sessionId/stream",
+  );
+  if (!streamRoute) throw new Error("No session stream GET route found");
+
+  const getEventStream = vi.fn().mockResolvedValue(new ReadableStream());
+  const mockGetSession = vi.fn().mockReturnValue({
+    continuationToken: "eve:test",
+    getEventStream,
+    id: "test-session-id",
+  } satisfies ChannelSession);
+
+  return {
+    getEventStream,
+    async fetch(url: string) {
+      const args: RouteHandlerArgs = {
+        send: vi.fn(),
+        getSession: mockGetSession,
+        receive: vi.fn() as any,
+        params: { sessionId: "test-session-id" },
+        waitUntil: () => undefined,
+        requestIp: "127.0.0.1",
+      };
+      return (streamRoute as any).handler(new Request(url), args);
+    },
+  };
+}
+
 function filePartBody(
   overrides: Partial<FilePart> & { data: FilePart["data"] } & { mediaType: FilePart["mediaType"] },
 ): {
@@ -278,6 +309,32 @@ describe("eveChannel — events", () => {
 
     expect(observed).toEqual(["done", "eve:continuation", "sess-eve-event"]);
   });
+});
+
+describe("eveChannel — stream cursor", () => {
+  it("forwards negative tail-relative start indices", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      "https://eve.test/eve/v1/session/test-session-id/stream?startIndex=-1",
+    );
+
+    expect(response.status).toBe(200);
+    expect(handler.getEventStream).toHaveBeenCalledWith({ startIndex: -1 });
+  });
+
+  it.each(["1.5", "1junk", "0x10", "1e2", ""])(
+    "rejects a non-decimal-integer start index %j",
+    async (startIndex) => {
+      const handler = createEveStreamHandler({ auth: none() });
+      const response = await handler.fetch(
+        `https://eve.test/eve/v1/session/test-session-id/stream?startIndex=${encodeURIComponent(startIndex)}`,
+      );
+
+      expect(response.status).toBe(400);
+      expect(handler.getEventStream).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("eveChannel — onMessage", () => {

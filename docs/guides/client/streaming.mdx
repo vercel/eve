@@ -70,7 +70,7 @@ The most common UI events are:
 | `action.result`      | Show tool call results.                                                        |
 | `input.requested`    | Pause the UI for approval or a question answer.                                |
 | `result.completed`   | Read structured output from an [output schema](./output-schema).               |
-| `session.waiting`    | Enable the composer for the next turn.                                         |
+| `session.waiting`    | Enable the composer and read the current `data.continuationToken`.             |
 | `session.completed`  | Mark the conversation terminal.                                                |
 | `session.failed`     | Mark the conversation failed.                                                  |
 
@@ -123,6 +123,19 @@ for await (const event of session.stream({ startIndex: 0 })) {
   console.log(event.type);
 }
 ```
+
+Nonnegative values are absolute event indexes. Negative values read relative to the stream's current tail, so `-1` reads the latest event:
+
+```ts
+for await (const event of session.stream({ startIndex: -1 })) {
+  if (event.type === "session.waiting") {
+    console.log(event.data.continuationToken);
+  }
+  break;
+}
+```
+
+Tail-relative attachments do not automatically reconnect or advance the session's stored absolute `streamIndex`. Break after the event you need when using one as a tail lookup.
 
 `stream()` throws if the session has no `sessionId`, because there's no stream to attach to before the first send.
 

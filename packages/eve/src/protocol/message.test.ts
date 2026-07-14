@@ -10,6 +10,7 @@ import {
   createAuthorizationRequiredEvent,
   createMessageReceivedEvent,
   createResultCompletedEvent,
+  createSessionWaitingEvent,
   createStepStartedEvent,
   encodeMessageStreamEvent,
   timestampHandleMessageStreamEvent,
@@ -18,7 +19,17 @@ import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 
 describe("message stream protocol", () => {
   it("pins the stream version for timed session events", () => {
-    expect(EVE_MESSAGE_STREAM_VERSION).toBe("18");
+    expect(EVE_MESSAGE_STREAM_VERSION).toBe("19");
+  });
+
+  it("publishes the channel-local continuation token on session.waiting", () => {
+    expect(createSessionWaitingEvent("slack:C1:T1")).toEqual({
+      data: {
+        continuationToken: "C1:T1",
+        wait: "next-user-message",
+      },
+      type: "session.waiting",
+    });
   });
 
   it("creates result.completed events", () => {

@@ -174,8 +174,9 @@ export interface SendTurnPayload<TOutput = unknown> {
  */
 export interface StreamOptions {
   /**
-   * Number of events already consumed. The server will skip events before
-   * this index.
+   * Absolute event index to start from. Negative values read relative to the
+   * current tail (`-1` starts at the latest event). Relative-tail streams do
+   * not reconnect automatically because their absolute cursor is unknown.
    */
   readonly startIndex?: number;
 

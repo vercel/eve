@@ -9,6 +9,7 @@ import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox
 import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
 import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 
 export const EVE_SESSION_ID_HEADER = "x-eve-session-id";
@@ -16,7 +17,7 @@ export const EVE_STREAM_FORMAT_HEADER = "x-eve-stream-format";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "18";
+export const EVE_MESSAGE_STREAM_VERSION = "19";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -537,6 +538,8 @@ export interface AuthorizationCompletedStreamEvent {
  */
 export interface SessionWaitingStreamEvent {
   data: {
+    /** Channel-owned resume handle for the next user turn. */
+    continuationToken: string;
     wait: "next-user-message";
   };
   type: "session.waiting";
@@ -1332,9 +1335,12 @@ export function createCompactionCompletedEvent(input: {
  * Creates the `session.waiting` event for the only supported between-turn
  * wait.
  */
-export function createSessionWaitingEvent(): SessionWaitingStreamEvent {
+export function createSessionWaitingEvent(
+  namespacedContinuationToken: string,
+): SessionWaitingStreamEvent {
   return {
     data: {
+      continuationToken: toChannelLocalContinuationToken(namespacedContinuationToken),
       wait: "next-user-message",
     },
     type: "session.waiting",

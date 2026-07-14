@@ -6,7 +6,7 @@ import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#
 
 /**
  * Result of starting or delivering to a session. Exposes the session
- * `id`, its namespaced `continuationToken`, and `getEventStream`, which
+ * `id`, its channel-local `continuationToken`, and `getEventStream`, which
  * resolves to a `ReadableStream` of the session's harness events
  * (optionally from `startIndex`). Returned by {@link SendFn},
  * {@link GetSessionFn}, and a channel's `receive` hook. Unlike the live
@@ -16,6 +16,10 @@ import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#
 export interface Session {
   readonly id: string;
   readonly continuationToken: string;
+  /**
+   * Opens the durable event stream. Negative start indexes read relative to
+   * the current tail (`-1` starts at the latest event).
+   */
   getEventStream(options?: {
     startIndex?: number;
   }): Promise<ReadableStream<HandleMessageStreamEvent>>;

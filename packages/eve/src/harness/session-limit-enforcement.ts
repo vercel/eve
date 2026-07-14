@@ -167,7 +167,12 @@ async function parkOnSessionTokenLimit(input: {
   );
 
   if (input.config.mode === "conversation") {
-    emissionState = await emitTurnEpilogue(input.emit, emissionState, input.config.mode);
+    emissionState = await emitTurnEpilogue(
+      input.emit,
+      emissionState,
+      input.config.mode,
+      parkedSession.continuationToken,
+    );
   }
 
   return {

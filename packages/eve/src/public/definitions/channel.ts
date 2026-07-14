@@ -134,10 +134,10 @@ export interface Agent {
    * existing session. Used by the framework's HTTP session-stream route and by
    * any user-authored route that exposes an event-streaming endpoint.
    *
-   * Pass `options.startIndex` to skip events the caller has already
-   * consumed — the framework HTTP session-stream route uses this to forward
-   * the `startIndex` query parameter so reconnecting clients resume from
-   * the next unread event instead of replaying the session from the start.
+   * Nonnegative `options.startIndex` values skip events the caller has already
+   * consumed. Negative values read relative to the current tail (`-1` starts
+   * at the latest event). The framework HTTP session-stream route forwards
+   * the `startIndex` query parameter unchanged.
    */
   getEventStream(
     sessionId: string,

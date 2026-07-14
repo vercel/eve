@@ -58,7 +58,7 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `step.failed`             | A model step failed; carries `{ code, message, details? }`.                                                      |
 | `turn.completed`          | The turn finished.                                                                                               |
 | `turn.failed`             | The turn failed; carries `{ code, message, details? }`.                                                          |
-| `session.waiting`         | The session parked, waiting for the next input (a message, an answer).                                           |
+| `session.waiting`         | The session parked for the next input; carries the current channel-owned `continuationToken`.                    |
 | `session.failed`          | The session failed.                                                                                              |
 | `session.completed`       | The session reached a terminal end.                                                                              |
 
@@ -74,7 +74,7 @@ A delegated subagent publishes progress on its own child-session stream. The par
 
 ## Send a follow-up message
 
-Once the session is waiting (you'll see `session.waiting`), POST your follow-up to the session endpoint with the stored continuation token:
+Once the session is waiting (you'll see `session.waiting`), POST your follow-up to the session endpoint with `event.data.continuationToken`:
 
 ```bash
 curl -X POST http://127.0.0.1:3000/eve/v1/session/<sessionId> \
@@ -90,11 +90,19 @@ For deterministic ordering, send one follow-up at a time and wait for the next `
 
 ## Reconnect and rewind
 
-The stream is durable. Every event is recorded before a step completes, so the whole stream is replayable. Pass `startIndex` to reconnect by event count and pick up where you dropped off, or rewind to the start:
+The stream is durable. Every event is recorded before a step completes, so the whole stream is replayable. A nonnegative `startIndex` is an absolute event count: use it to pick up where you dropped off or pass `0` to rewind to the start.
 
 ```bash
 curl "http://127.0.0.1:3000/eve/v1/session/<sessionId>/stream?startIndex=<count>"
 ```
+
+A negative `startIndex` reads relative to the stream's current tail. For example, `-1` reads the latest event, which is normally `session.waiting` for a resumable session:
+
+```bash
+curl "http://127.0.0.1:3000/eve/v1/session/<sessionId>/stream?startIndex=-1"
+```
+
+This gives a consumer that only persisted `sessionId` a lightweight way to recover the current `continuationToken`. Because a tail-relative position does not resolve to an absolute consumed-event count, client tail reads do not automatically reconnect or advance the stored cursor.
 
 ## Use the client from TypeScript
 

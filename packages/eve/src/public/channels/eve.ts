@@ -801,10 +801,10 @@ function toClientContextMessage(content: string): string {
 function parseStartIndex(request: Request): number | undefined | Response {
   const raw = new URL(request.url).searchParams.get("startIndex");
   if (raw === null) return undefined;
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+  const parsed = Number(raw);
+  if (!/^-?\d+$/.test(raw) || !Number.isSafeInteger(parsed)) {
     return Response.json(
-      { error: "Expected startIndex to be a non-negative integer.", ok: false },
+      { error: "Expected startIndex to be an integer.", ok: false },
       { status: 400 },
     );
   }
