@@ -16,7 +16,10 @@
  *      — either listed by slug in an ancestor `meta.json#pages`, covered
  *      by a `"..."` token in that array, or explicitly allowed as a
  *      footer-only page. Otherwise the page renders at its URL but never
- *      appears in the sidebar (easy to miss in review).
+ *      appears in the sidebar (easy to miss in review). Conversely, every
+ *      slug a `meta.json#pages` lists must resolve to a real page (file,
+ *      folder index, or content folder), so a nav entry pointing at a
+ *      deleted or never-created page can't dangle the sidebar.
  *
  * Files intentionally not part of the site (the top-level engineer-facing
  * README.md in each root) are skipped via isExcluded().
@@ -185,6 +188,36 @@ for (const root of ROOTS) {
         file: relPath,
         issue:
           "not referenced in any meta.json#pages and not covered by a `...` wildcard — page would be orphaned from the sidebar",
+      });
+    }
+  }
+
+  // Reverse direction: every slug a meta.json#pages lists must resolve to
+  // something the site actually renders. The per-file loop above only proves
+  // the forward direction (files are reachable from nav); a nav entry pointing
+  // at a deleted or never-created page slips through it and dangles the sidebar.
+  if (nav) {
+    const fileSlugs = new Set();
+    const contentDirs = new Set();
+    for (const absPath of allFiles) {
+      const relPath = relative(root.dir, absPath).split("\\").join("/");
+      if (isExcluded(relPath)) continue;
+      fileSlugs.add(relPath.replace(/\.mdx?$/, ""));
+      let dir = relPath.includes("/") ? relPath.slice(0, relPath.lastIndexOf("/")) : "";
+      while (dir) {
+        contentDirs.add(dir);
+        dir = dir.includes("/") ? dir.slice(0, dir.lastIndexOf("/")) : "";
+      }
+    }
+    for (const slug of nav.explicit) {
+      if (fileSlugs.has(slug)) continue; // <slug>.md / <slug>.mdx
+      if (fileSlugs.has(`${slug}/index`)) continue; // folder landing page
+      if (contentDirs.has(slug)) continue; // folder reference (sidebar group)
+      failures.push({
+        root: root.label,
+        file: `${slug} (meta.json#pages)`,
+        issue:
+          "nav entry resolves to no `.md`/`.mdx` file, folder index, or content folder — dangling sidebar link",
       });
     }
   }
