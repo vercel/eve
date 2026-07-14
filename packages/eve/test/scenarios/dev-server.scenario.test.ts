@@ -281,10 +281,22 @@ describe("eve dev server", () => {
       const server = await startEveDev(app.appRoot);
 
       try {
-        const response = await fetch(
-          new URL(createEveDevDispatchSchedulePath("heartbeat"), server.url),
-          { method: "POST" },
-        );
+        let response: Response;
+        try {
+          response = await fetch(
+            new URL(createEveDevDispatchSchedulePath("heartbeat"), server.url),
+            { method: "POST" },
+          );
+        } catch (error) {
+          throw new Error(
+            [
+              "The dev server closed the schedule dispatch request.",
+              `stdout:\n${server.stdout()}`,
+              `stderr:\n${server.stderr()}`,
+            ].join("\n\n"),
+            { cause: error },
+          );
+        }
         const responseText = await response.text();
 
         expect(
