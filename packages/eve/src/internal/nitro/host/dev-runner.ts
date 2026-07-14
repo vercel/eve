@@ -7,7 +7,7 @@ import { resolvePackageCompiledFilePath } from "#internal/application/package.js
 export interface DevelopmentRunner {
   readonly closed: boolean;
   close(cause?: unknown): Promise<void>;
-  fetch(request: Request): Promise<Response>;
+  fetch(request: Request, init?: RequestInit): Promise<Response>;
   onceClosed(listener: (cause?: unknown) => void): void;
   upgrade(input: {
     readonly node: {

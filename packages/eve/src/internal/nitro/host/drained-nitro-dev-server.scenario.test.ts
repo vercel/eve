@@ -20,7 +20,7 @@ interface TestRunner extends DevelopmentRunner {
 }
 
 function createRunnerFactory(
-  fetchHandler: (request: Request, runnerIndex: number) => Promise<Response>,
+  fetchHandler: (request: Request, runnerIndex: number, init?: RequestInit) => Promise<Response>,
   readiness: (runnerIndex: number) => Promise<void> = async () => undefined,
 ): { readonly createRunner: DevelopmentRunnerFactory; readonly runners: TestRunner[] } {
   const runners: TestRunner[] = [];
@@ -49,7 +49,7 @@ function createRunnerFactory(
         closed = true;
         notifyClosed(cause);
       },
-      fetch: async (request) => await fetchHandler(request, runnerIndex),
+      fetch: async (request, init) => await fetchHandler(request, runnerIndex, init),
       onceClosed(listener) {
         if (closed) {
           listener();
@@ -217,6 +217,144 @@ describe("drained Nitro dev server", () => {
     await Promise.all([server.close(), server.close()]);
     await server.close();
     expect(runners[0]?.closeMock).toHaveBeenCalledOnce();
+  });
+
+  it("lets an in-flight replacement win over a crash restart", async () => {
+    let releaseCandidate: (() => void) | undefined;
+    const { createRunner, runners } = createRunnerFactory(
+      async (_request, runnerIndex) => new Response(`runner-${String(runnerIndex)}`),
+      async (runnerIndex) => {
+        if (runnerIndex === 1) {
+          await new Promise<void>((resolve) => {
+            releaseCandidate = resolve;
+          });
+        }
+      },
+    );
+    const server = new DrainedNitroDevServer(LOGGER, createRunner);
+    const listener = await listen(server);
+    const disposeFirst = vi.fn(async () => undefined);
+    await server.replaceWorker(replacement("/tmp/first.mjs", disposeFirst));
+
+    const second = server.replaceWorker(replacement("/tmp/second.mjs"));
+    await withinDeadline(
+      vi.waitFor(() => {
+        expect(releaseCandidate).toBeDefined();
+      }),
+      "Timed out waiting for the candidate to start readiness.",
+    );
+    runners[0]?.crash(new Error("worker exploded"));
+    releaseCandidate?.();
+    await second;
+
+    // The queued crash restart must yield to the replacement that was
+    // already in flight instead of swapping retired code back in.
+    await expect(
+      fetch(new URL("/", listener.url)).then(async (response) => await response.text()),
+    ).resolves.toBe("runner-1");
+    await vi.waitFor(() => {
+      expect(disposeFirst).toHaveBeenCalledOnce();
+    });
+    expect(runners).toHaveLength(2);
+
+    await server.close();
+  });
+
+  it("releases the exchange when a client aborts before response headers", async () => {
+    let sawRequest: (() => void) | undefined;
+    const requestSeen = new Promise<void>((resolve) => {
+      sawRequest = resolve;
+    });
+    const { createRunner, runners } = createRunnerFactory(async (_request, runnerIndex, init) => {
+      if (runnerIndex === 0) {
+        sawRequest?.();
+        return await new Promise<never>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
+            once: true,
+          });
+        });
+      }
+      return new Response("runner-1");
+    });
+    const server = new DrainedNitroDevServer(LOGGER, createRunner);
+    const listener = await listen(server);
+    const disposeFirst = vi.fn(async () => undefined);
+    await server.replaceWorker(replacement("/tmp/first.mjs", disposeFirst));
+
+    const abort = new AbortController();
+    const hung = fetch(new URL("/", listener.url), { signal: abort.signal }).catch(() => undefined);
+    await withinDeadline(requestSeen, "Timed out waiting for the hung request to be admitted.");
+    abort.abort();
+    await hung;
+
+    await server.replaceWorker(replacement("/tmp/second.mjs"));
+    await withinDeadline(
+      vi.waitFor(() => {
+        expect(runners[0]?.closeMock).toHaveBeenCalled();
+        expect(disposeFirst).toHaveBeenCalledOnce();
+      }),
+      "Timed out waiting for the aborted exchange to release the retired worker.",
+    );
+
+    await server.close();
+  });
+
+  it("closes within a bounded interval while a candidate is mid-readiness", async () => {
+    const { createRunner } = createRunnerFactory(
+      async () => new Response("ok"),
+      async (runnerIndex) => {
+        if (runnerIndex === 1) {
+          await new Promise<never>(() => undefined);
+        }
+      },
+    );
+    const server = new DrainedNitroDevServer(LOGGER, createRunner);
+    await listen(server);
+    await server.replaceWorker(replacement("/tmp/first.mjs"));
+
+    const pending = server.replaceWorker(replacement("/tmp/second.mjs"));
+    pending.catch(() => undefined);
+    await withinDeadline(server.close(), "Timed out closing during a pending replacement.");
+    await expect(pending).rejects.toThrow();
+  });
+
+  it("terminates the client connection when a worker response fails mid-stream", async () => {
+    let failStream: (() => void) | undefined;
+    const { createRunner } = createRunnerFactory(async () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("started\n"));
+          failStream = () => controller.error(new Error("worker stream died"));
+        },
+      });
+      return new Response(body);
+    });
+    const server = new DrainedNitroDevServer(LOGGER, createRunner);
+    const listener = await listen(server);
+    await server.replaceWorker(replacement("/tmp/first.mjs"));
+
+    const response = await fetch(new URL("/", listener.url));
+    const reader = response.body?.getReader();
+    await reader?.read();
+    failStream?.();
+
+    // A truncated stream must surface as a client-visible failure, never as
+    // a cleanly terminated response.
+    await expect(
+      withinDeadline(
+        (async () => {
+          for (;;) {
+            const result = await reader?.read();
+            if (result === undefined || result.done) {
+              return;
+            }
+          }
+        })(),
+        "Timed out waiting for the failed stream to settle.",
+      ),
+    ).rejects.toThrow();
+
+    await server.close();
   });
 
   it("answers control requests without admitting them to the worker", async () => {

@@ -64,6 +64,7 @@ export class DrainedNitroDevServer {
   #closePromise: Promise<void> | undefined;
   #closed = false;
   #controlHandler: ((request: Request) => Promise<Response | undefined>) | undefined;
+  #pendingSlot: RunnerSlot | undefined;
   #replaceChain: Promise<void> = Promise.resolve();
   #runnerCounter = 0;
 
@@ -113,11 +114,16 @@ export class DrainedNitroDevServer {
       workerData: replacement.workerData,
     };
 
+    this.#pendingSlot = slot;
     try {
       await slot.runner.waitForReady(RUNNER_READY_TIMEOUT_MS);
     } catch (error) {
       await slot.runner.close(error).catch(() => undefined);
+      // The candidate never served; its workspace has no further use.
+      await this.#disposeSlot(slot);
       throw error;
+    } finally {
+      this.#pendingSlot = undefined;
     }
 
     if (this.#closed) {
@@ -231,6 +237,13 @@ export class DrainedNitroDevServer {
     this.#closed = true;
     this.#wakeActiveWaiters();
 
+    // Terminate a candidate still waiting on readiness so the replace chain
+    // settles within a bounded interval instead of the readiness timeout.
+    await this.#pendingSlot?.runner
+      .close(new Error("Development server is closing."))
+      .catch(() => undefined);
+    await this.#replaceChain.catch(() => undefined);
+
     const listeners = [...this.#listeners];
     const listenerClosePromises = listeners.map((listener) => listener.beginClose());
 
@@ -253,14 +266,19 @@ export class DrainedNitroDevServer {
     }
     slot.released = true;
     await slot.runner.close().catch(() => undefined);
-    if (slot.dispose !== undefined && !slot.disposed) {
-      slot.disposed = true;
-      await slot.dispose().catch((error) => {
-        this.#logger.error(
-          `[eve:dev] failed to dispose a retired dev host: ${toErrorMessage(error)}`,
-        );
-      });
+    await this.#disposeSlot(slot);
+  }
+
+  async #disposeSlot(slot: RunnerSlot): Promise<void> {
+    if (slot.dispose === undefined || slot.disposed) {
+      return;
     }
+    slot.disposed = true;
+    await slot.dispose().catch((error) => {
+      this.#logger.error(
+        `[eve:dev] failed to dispose a retired dev host: ${toErrorMessage(error)}`,
+      );
+    });
   }
 
   async #handleRunnerClose(slot: RunnerSlot): Promise<void> {
@@ -269,16 +287,30 @@ export class DrainedNitroDevServer {
     }
     this.#active = undefined;
     this.#logger.error("[eve:dev] dev worker exited; restarting.");
-    // The crashed worker's workspace must survive for the restart, so the
-    // replacement inherits its dispose and the crashed slot releases nothing.
-    slot.disposed = true;
-    slot.released = true;
-    try {
-      await this.replaceWorker({
-        dispose: slot.dispose,
-        entry: slot.entry,
-        workerData: slot.workerData,
+    const next = this.#replaceChain
+      .catch(() => undefined)
+      .then(async () => {
+        // A replacement that was already in flight when the worker crashed
+        // wins; restarting the crashed entry now would swap retired code back
+        // in over the newer worker.
+        if (this.#closed || this.#active !== undefined) {
+          await this.#releaseSlot(slot);
+          return;
+        }
+        // The crashed worker's workspace must survive for the restart, so the
+        // replacement inherits its dispose and the crashed slot releases
+        // nothing itself.
+        slot.disposed = true;
+        slot.released = true;
+        await this.#replaceWorker({
+          dispose: slot.dispose,
+          entry: slot.entry,
+          workerData: slot.workerData,
+        });
       });
+    this.#replaceChain = next.catch(() => undefined);
+    try {
+      await next;
     } catch (error) {
       this.#logger.error(`[eve:dev] dev worker restart failed: ${toErrorMessage(error)}`);
     }
@@ -343,7 +375,13 @@ export class DrainedNitroDevServer {
         throw new Error("Development worker is unavailable.");
       }
       settle = this.#beginExchange(slot);
-      const workerResponse = await slot.runner.fetch(publicRequest);
+      // The abort signal must ride the proxied request: without it a client
+      // that disconnects before response headers arrive leaves the worker
+      // handler running and the exchange pinned, so a retired worker holding
+      // one would never drain.
+      const workerResponse = await slot.runner.fetch(publicRequest, {
+        signal: requestAbort.signal,
+      });
       await writeResponse(response, workerResponse, requestAbort.signal);
     } catch (error) {
       if (!requestAbort.signal.aborted) {

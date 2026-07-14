@@ -84,10 +84,15 @@ export async function writeResponse(
 }
 
 export function writeRequestError(response: ServerResponse, error: unknown): void {
-  if (!response.headersSent) {
-    response.statusCode = 503;
-    response.setHeader("content-type", "application/json; charset=utf-8");
+  if (response.headersSent) {
+    // The status line is already on the wire; ending now would frame the
+    // truncated body as a complete response. Destroying the socket is the
+    // only way to surface the failure to the client mid-stream.
+    response.destroy();
+    return;
   }
+  response.statusCode = 503;
+  response.setHeader("content-type", "application/json; charset=utf-8");
   if (!response.writableEnded && !response.destroyed) {
     response.end(JSON.stringify({ error: toErrorMessage(error) }));
   }

@@ -549,6 +549,9 @@ async function writeDevelopmentRuntimeArtifactsPointer(input: {
   );
 }
 
+const POINTER_RENAME_ATTEMPTS = 5;
+const POINTER_RENAME_RETRY_DELAY_MS = 50;
+
 async function writeDevelopmentRuntimeArtifactsPointerSource(
   pointerPath: string,
   source: string,
@@ -557,10 +560,39 @@ async function writeDevelopmentRuntimeArtifactsPointerSource(
   await mkdir(dirname(pointerPath), { recursive: true });
   await writeFile(temporaryPointerPath, source);
   try {
-    await rename(temporaryPointerPath, pointerPath);
+    await renameWithWindowsRetry(temporaryPointerPath, pointerPath);
   } catch (error) {
     await rm(temporaryPointerPath, { force: true }).catch(() => {});
     throw error;
+  }
+}
+
+/**
+ * Windows rejects `rename` with EPERM/EBUSY while another handle (a reader
+ * of the pointer, an antivirus scan) briefly holds the destination. Those
+ * failures are transient, so pointer publication retries before surfacing
+ * the activation failure.
+ */
+async function renameWithWindowsRetry(source: string, destination: string): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await rename(source, destination);
+      return;
+    } catch (error) {
+      const code =
+        error instanceof Error && "code" in error
+          ? (error as NodeJS.ErrnoException).code
+          : undefined;
+      if (
+        attempt >= POINTER_RENAME_ATTEMPTS ||
+        (code !== "EPERM" && code !== "EBUSY" && code !== "EACCES")
+      ) {
+        throw error;
+      }
+      await new Promise((resolvePromise) => {
+        setTimeout(resolvePromise, POINTER_RENAME_RETRY_DELAY_MS * attempt);
+      });
+    }
   }
 }
 
