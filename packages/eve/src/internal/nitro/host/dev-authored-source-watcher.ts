@@ -7,7 +7,6 @@ import { toErrorMessage } from "#shared/errors.js";
 import { resolveTsConfigDependencyPaths } from "#internal/application/tsconfig-dependencies.js";
 import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { resolveDevelopmentSourceSnapshotWatchPaths } from "#internal/nitro/dev-runtime-source-snapshot.js";
-import { pruneDevelopmentRuntimeArtifactsSnapshotsInBackground } from "#internal/nitro/dev-runtime-artifacts.js";
 import { startDevelopmentSandboxPrewarmInBackground } from "#execution/sandbox/development-prewarm.js";
 import {
   computeChannelRouteRegistrations,
@@ -143,7 +142,6 @@ export async function startAuthoredSourceWatcher(input: {
           }
 
           const nextHost = await prepareDevelopmentApplicationHost(previousHost.appRoot);
-          pruneDevelopmentRuntimeArtifactsSnapshotsInBackground(nextHost.appRoot);
           const artifactsConfig = createDevelopmentNitroArtifactsConfig({
             appRoot: nextHost.appRoot,
           });

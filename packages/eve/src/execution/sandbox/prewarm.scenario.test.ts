@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { compileAgent, compileAgentInBuildWorkspace } from "#compiler/compile-agent.js";
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
-import { publishDevelopmentRuntimeArtifactsSnapshot } from "#internal/nitro/dev-runtime-artifacts.js";
+import { publishDevelopmentGeneration } from "#internal/nitro/development-generation.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import type {
@@ -99,7 +99,7 @@ describe("prewarmAppSandboxes", () => {
     const compileResult = await compileAgent({
       startPath: appRoot,
     });
-    await publishDevelopmentRuntimeArtifactsSnapshot(compileResult);
+    await publishDevelopmentGeneration(compileResult);
 
     await prewarmAppSandboxes({
       appRoot,

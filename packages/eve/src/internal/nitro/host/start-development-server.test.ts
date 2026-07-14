@@ -83,7 +83,6 @@ const mocks = vi.hoisted(() => {
     startDevelopmentSandboxPrewarmInBackground: vi.fn(() => undefined),
     pruneLocalSandboxTemplatesInBackground: vi.fn(() => undefined),
     stopDevelopmentSandboxResources: vi.fn(async () => undefined),
-    pruneDevelopmentRuntimeArtifactsSnapshotsInBackground: vi.fn(() => undefined),
     resolveDiscoveryProject: vi.fn(async () => ({
       agentRoot: "/tmp/eve-test/agent",
       appRoot: "/tmp/eve-test",
@@ -151,16 +150,6 @@ vi.mock("#execution/sandbox/bindings/local.js", async (importOriginal) => {
     ...actual,
     pruneLocalSandboxTemplatesInBackground: mocks.pruneLocalSandboxTemplatesInBackground,
     stopDevelopmentSandboxResources: mocks.stopDevelopmentSandboxResources,
-  };
-});
-
-vi.mock("#internal/nitro/dev-runtime-artifacts.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("#internal/nitro/dev-runtime-artifacts.js")>();
-
-  return {
-    ...actual,
-    pruneDevelopmentRuntimeArtifactsSnapshotsInBackground:
-      mocks.pruneDevelopmentRuntimeArtifactsSnapshotsInBackground,
   };
 });
 
@@ -369,9 +358,6 @@ describe("createDevelopmentServer", () => {
     const server = await startDevelopmentServer("/tmp/eve-test");
 
     expect(mocks.prepareDevelopmentApplicationHost).toHaveBeenCalledWith("/tmp/eve-test");
-    expect(mocks.pruneDevelopmentRuntimeArtifactsSnapshotsInBackground).toHaveBeenCalledWith(
-      "/tmp/eve-test",
-    );
     expect(mocks.startDevelopmentSandboxPrewarmInBackground).toHaveBeenCalledWith({
       appRoot: "/tmp/eve-test",
       compiledArtifactsSource: {

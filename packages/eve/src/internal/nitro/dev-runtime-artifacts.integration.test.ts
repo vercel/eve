@@ -13,10 +13,10 @@ import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-arti
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { createRuntimeSession, withRuntimeSession } from "#runtime/sessions/runtime-session.js";
 import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
+import { publishDevelopmentGeneration } from "#internal/nitro/development-generation.js";
 import {
   activateDevelopmentRuntimeArtifactsSnapshot,
   pruneDevelopmentRuntimeArtifactsSnapshots,
-  publishDevelopmentRuntimeArtifactsSnapshot,
   readDevelopmentRuntimeArtifactsSnapshotRoot,
   readDevelopmentRuntimeArtifactsRevision,
   resolveDevelopmentRuntimeArtifactsPointerPath,
@@ -112,7 +112,7 @@ async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoo
     }),
   );
 
-  await publishDevelopmentRuntimeArtifactsSnapshot({
+  await publishDevelopmentGeneration({
     paths: { compileDirectoryPath },
     project: { appRoot },
   } as CompileAgentResult);
@@ -294,8 +294,10 @@ describe("development runtime artifact snapshots", () => {
         runtimeAppRoot: join(activeSnapshotRoot, "source", "app"),
         snapshotRoot: activeSnapshotRoot,
         snapshotSourceRoot: join(activeSnapshotRoot, "source"),
+        sourceRoot: appRoot,
       },
     });
+    await utimes(activeSnapshotRoot, oldActiveTime, oldActiveTime);
 
     await pruneDevelopmentRuntimeArtifactsSnapshots({
       appRoot,
@@ -308,6 +310,37 @@ describe("development runtime artifact snapshots", () => {
       expect.arrayContaining(["active", "recent", "retained"]),
     );
     expect(existsSync(staleSnapshotRoot)).toBe(false);
+  });
+
+  it("retains every activated generation until lease-aware pruning exists", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-activated-retention-");
+    const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
+    const firstSnapshotRoot = join(snapshotsRoot, "first");
+    const nextSnapshotRoot = join(snapshotsRoot, "next");
+
+    for (const snapshotRoot of [firstSnapshotRoot, nextSnapshotRoot]) {
+      await mkdir(snapshotRoot, { recursive: true });
+      await utimes(snapshotRoot, new Date(1_000), new Date(1_000));
+      await activateDevelopmentRuntimeArtifactsSnapshot({
+        appRoot,
+        snapshot: {
+          runtimeAppRoot: join(snapshotRoot, "source"),
+          snapshotRoot,
+          snapshotSourceRoot: join(snapshotRoot, "source"),
+          sourceRoot: appRoot,
+        },
+      });
+    }
+
+    await pruneDevelopmentRuntimeArtifactsSnapshots({
+      appRoot,
+      now: 1_000_000,
+      recentWindowMs: 0,
+      retainCount: 0,
+    });
+
+    expect(existsSync(firstSnapshotRoot)).toBe(true);
+    expect(existsSync(nextSnapshotRoot)).toBe(true);
   });
 
   it("preserves snapshots referenced by active durable workflow data", async () => {
@@ -339,6 +372,7 @@ describe("development runtime artifact snapshots", () => {
         runtimeAppRoot: join(activeSnapshotRoot, "source", "app"),
         snapshotRoot: activeSnapshotRoot,
         snapshotSourceRoot: join(activeSnapshotRoot, "source"),
+        sourceRoot: appRoot,
       },
     });
     await mkdir(join(appRoot, ".workflow-data", "default", "runs"), { recursive: true });
@@ -478,10 +512,11 @@ describe("development runtime artifact snapshots", () => {
       )}\n`,
     );
 
-    const snapshot = await publishDevelopmentRuntimeArtifactsSnapshot({
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
       paths: { compileDirectoryPath },
       project: { appRoot },
     } as CompileAgentResult);
+    await activateDevelopmentRuntimeArtifactsSnapshot({ appRoot, snapshot });
 
     await writeFile(toolPath, "export const temperature = 73;\n");
 

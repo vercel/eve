@@ -36,7 +36,6 @@ import type {
   StartedDevelopmentServer,
 } from "#internal/nitro/host/types.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
-import { pruneDevelopmentRuntimeArtifactsSnapshotsInBackground } from "#internal/nitro/dev-runtime-artifacts.js";
 import {
   DEFAULT_DEVELOPMENT_SERVER_PORT,
   MAX_DEVELOPMENT_SERVER_PORT_ATTEMPTS,
@@ -461,7 +460,6 @@ async function startNitroDevelopmentServer(
       () => prepareDevelopmentApplicationHost(project.appRoot),
       options.onBootProgress,
     );
-    pruneDevelopmentRuntimeArtifactsSnapshotsInBackground(preparedHost.appRoot);
     const compiledArtifactsSource = resolveNitroCompiledArtifactsSource(
       createDevelopmentNitroArtifactsConfig({
         appRoot: preparedHost.appRoot,

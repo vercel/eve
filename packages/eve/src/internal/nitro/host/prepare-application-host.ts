@@ -14,6 +14,7 @@ import { join } from "node:path";
 import {
   type BuiltInWorkflowWorldTarget,
   writeCompiledArtifactsFiles,
+  writeDevelopmentCompiledArtifactsFiles,
 } from "#internal/application/compiled-artifacts.js";
 import {
   resolveApplicationHostArtifactsDirectory,
@@ -21,9 +22,10 @@ import {
 } from "#internal/application/paths.js";
 import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "#internal/application/runtime-compiled-artifacts-source.js";
 import {
-  activateDevelopmentRuntimeArtifactsSnapshot,
-  stageDevelopmentRuntimeArtifactsSnapshot,
-} from "#internal/nitro/dev-runtime-artifacts.js";
+  activateDevelopmentGeneration,
+  discardDevelopmentGeneration,
+  stageDevelopmentGeneration,
+} from "#internal/nitro/development-generation.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 
 /**
@@ -42,20 +44,28 @@ export async function prepareDevelopmentApplicationHost(
       compileResult.project.appRoot,
     ),
   });
-  const runtimeArtifactsSnapshot = await stageDevelopmentRuntimeArtifactsSnapshot(compileResult);
-  const preparedHost = await materializeApplicationHost({
-    compileResult,
-    defaultWorkflowWorld: "local",
-    hostArtifactsDir: resolveApplicationHostArtifactsDirectory(compileResult.project.appRoot),
-    schedules,
-    workflowBuildDir: resolveWorkflowBuildDirectory(compileResult.project.appRoot),
-  });
-  await activateDevelopmentRuntimeArtifactsSnapshot({
-    appRoot: compileResult.project.appRoot,
-    snapshot: runtimeArtifactsSnapshot,
-  });
+  const generation = await stageDevelopmentGeneration(compileResult);
 
-  return preparedHost;
+  try {
+    const compiledArtifacts = await writeDevelopmentCompiledArtifactsFiles({
+      compileResult,
+      outDir: resolveApplicationHostArtifactsDirectory(compileResult.project.appRoot),
+      runtimeAppRoot: generation.runtimeAppRoot,
+    });
+    await activateDevelopmentGeneration({
+      appRoot: compileResult.project.appRoot,
+      generation,
+    });
+    return createPreparedApplicationHost({
+      compileResult,
+      compiledArtifacts,
+      schedules,
+      workflowBuildDir: resolveWorkflowBuildDirectory(compileResult.project.appRoot),
+    });
+  } catch (error) {
+    await discardDevelopmentGeneration(generation);
+    throw error;
+  }
 }
 
 /**
@@ -77,32 +87,30 @@ export async function prepareProductionApplicationHost(
   });
   const schedules = await resolveSchedules({ manifest: compileResult.manifest });
 
-  return await materializeApplicationHost({
+  const compiledArtifacts = await writeCompiledArtifactsFiles({
     compileResult,
     defaultWorkflowWorld: resolveProductionWorkflowWorldTarget(),
-    hostArtifactsDir: workspace.host.artifactsDir,
+    outDir: workspace.host.artifactsDir,
+  });
+
+  return createPreparedApplicationHost({
+    compileResult,
+    compiledArtifacts,
     schedules,
     workflowBuildDir: workspace.workflow.buildDir,
   });
 }
 
-async function materializeApplicationHost(input: {
+function createPreparedApplicationHost(input: {
   readonly compileResult: CompileAgentResult;
-  readonly defaultWorkflowWorld: BuiltInWorkflowWorldTarget;
-  readonly hostArtifactsDir: string;
+  readonly compiledArtifacts: PreparedApplicationHost["compiledArtifacts"];
   readonly schedules: readonly ResolvedScheduleDefinition[];
   readonly workflowBuildDir: string;
-}): Promise<PreparedApplicationHost> {
-  const compiledArtifacts = await writeCompiledArtifactsFiles({
-    compileResult: input.compileResult,
-    defaultWorkflowWorld: input.defaultWorkflowWorld,
-    outDir: input.hostArtifactsDir,
-  });
-
+}): PreparedApplicationHost {
   return {
     appRoot: input.compileResult.project.appRoot,
     compileResult: input.compileResult,
-    compiledArtifacts,
+    compiledArtifacts: input.compiledArtifacts,
     scheduleRegistrations: createScheduleRegistrations(input.schedules),
     schedules: input.schedules,
     workflowBuildDir: input.workflowBuildDir,

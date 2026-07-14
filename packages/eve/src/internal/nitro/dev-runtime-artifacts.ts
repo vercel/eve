@@ -8,6 +8,7 @@ import { copyDevelopmentSourceSnapshot } from "#internal/nitro/dev-runtime-sourc
 import { createDevelopmentSourceSnapshotPlan } from "#internal/nitro/dev-runtime-source-snapshot.js";
 
 const DEV_RUNTIME_ARTIFACTS_DIRECTORY = "dev-runtime";
+const DEV_RUNTIME_ARTIFACTS_ACTIVATED_MARKER = "activated";
 const DEV_RUNTIME_ARTIFACTS_POINTER_VERSION = 2;
 const DEV_RUNTIME_SNAPSHOT_RECENT_WINDOW_MS = 15 * 60 * 1000;
 const DEV_RUNTIME_SNAPSHOT_RETAIN_COUNT = 5;
@@ -36,6 +37,7 @@ export interface DevelopmentRuntimeArtifactsSnapshot {
   readonly runtimeAppRoot: string;
   readonly snapshotRoot: string;
   readonly snapshotSourceRoot: string;
+  readonly sourceRoot: string;
 }
 
 /**
@@ -48,20 +50,6 @@ export function resolveDevelopmentRuntimeArtifactsPointerPath(appRoot: string): 
 
 function resolveDevelopmentRuntimeArtifactsSnapshotsDirectory(appRoot: string): string {
   return join(appRoot, ".eve", DEV_RUNTIME_ARTIFACTS_DIRECTORY, "snapshots");
-}
-
-/**
- * Publishes one immutable dev runtime snapshot and points future sessions at it.
- */
-export async function publishDevelopmentRuntimeArtifactsSnapshot(
-  compileResult: CompileAgentResult,
-): Promise<DevelopmentRuntimeArtifactsSnapshot> {
-  const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot(compileResult);
-  await activateDevelopmentRuntimeArtifactsSnapshot({
-    appRoot: compileResult.project.appRoot,
-    snapshot,
-  });
-  return snapshot;
 }
 
 /**
@@ -116,6 +104,7 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
     runtimeAppRoot: sourceSnapshotPlan.runtimeAppRoot,
     snapshotRoot,
     snapshotSourceRoot: sourceSnapshotPlan.snapshotSourceRoot,
+    sourceRoot: sourceSnapshotPlan.sourceRoot,
   };
 }
 
@@ -126,6 +115,7 @@ export async function activateDevelopmentRuntimeArtifactsSnapshot(input: {
   readonly appRoot: string;
   readonly snapshot: DevelopmentRuntimeArtifactsSnapshot;
 }): Promise<void> {
+  await writeFile(join(input.snapshot.snapshotRoot, DEV_RUNTIME_ARTIFACTS_ACTIVATED_MARKER), "");
   await writeDevelopmentRuntimeArtifactsPointer(input);
 }
 
@@ -160,16 +150,6 @@ export function readDevelopmentRuntimeArtifactsRevision(
   return {
     revision: snapshotRoot ?? appRoot,
   };
-}
-
-/**
- * Starts best-effort cleanup for stale dev-runtime snapshots without delaying
- * `eve dev` startup or rebuild handling.
- */
-export function pruneDevelopmentRuntimeArtifactsSnapshotsInBackground(appRoot: string): void {
-  void pruneDevelopmentRuntimeArtifactsSnapshots({ appRoot }).catch((error) => {
-    console.warn(`[eve:dev] failed to prune stale runtime snapshots: ${formatErrorMessage(error)}`);
-  });
 }
 
 export async function pruneDevelopmentRuntimeArtifactsSnapshots(input: {
@@ -217,6 +197,7 @@ export async function pruneDevelopmentRuntimeArtifactsSnapshots(input: {
   await Promise.all(
     snapshots.map(async (snapshot, index) => {
       if (
+        existsSync(join(snapshot.path, DEV_RUNTIME_ARTIFACTS_ACTIVATED_MARKER)) ||
         index < retainCount ||
         now - snapshot.mtimeMs <= recentWindowMs ||
         protectedPaths.some((protectedPath) => pathsOverlap(snapshot.path, protectedPath))
@@ -414,10 +395,6 @@ function escapeRegExp(value: string): string {
 
 function pathsOverlap(left: string, right: string): boolean {
   return isPathInsideOrEqual(left, right) || isPathInsideOrEqual(right, left);
-}
-
-function formatErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 async function rewriteSnapshotCompiledManifest(input: {

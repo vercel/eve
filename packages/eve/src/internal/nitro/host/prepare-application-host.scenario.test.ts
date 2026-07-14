@@ -92,7 +92,7 @@ describe("application host preparation", () => {
     }
   });
 
-  it("keeps Nitro host inputs stable when their runtime snapshot is pruned", async () => {
+  it("keeps Nitro host inputs outside retained runtime generations", async () => {
     const { agentRoot, appRoot } = await createAppRoot("eve-stable-dev-host-artifacts-", {
       files: {
         "agent/instructions.md": "Use the configured model.",
@@ -100,7 +100,9 @@ describe("application host preparation", () => {
       packageName: "stable-dev-host-artifacts",
     });
     const agentModulePath = join(agentRoot, "agent.mjs");
+    const instrumentationModulePath = join(agentRoot, "instrumentation.mjs");
     await writeFile(agentModulePath, 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(instrumentationModulePath, "export default {};\n");
 
     const firstHost = await prepareDevelopmentApplicationHost(appRoot);
     const firstPointer = await readDevelopmentRuntimePointer(appRoot);
@@ -118,9 +120,15 @@ describe("application host preparation", () => {
       join(stableHostDirectory, "compiled-artifacts-workflow-world.mjs"),
     );
     expect(firstHost.compiledArtifacts.bootstrapPath).not.toContain("/.eve/dev-runtime/snapshots/");
-    expect(await readFile(stableBootstrapPath, "utf8")).toContain(
+    expect(firstHost.compiledArtifacts.instrumentationSourcePath).toBe(
+      join(stableHostDirectory, "compiled-artifacts-instrumentation-source.mjs"),
+    );
+    expect(await readFile(stableBootstrapPath, "utf8")).not.toContain(
       normalizeEsmImportSpecifier(agentModulePath),
     );
+    await expect(
+      readFile(firstHost.compiledArtifacts.instrumentationPluginPath!, "utf8"),
+    ).resolves.not.toContain(normalizeEsmImportSpecifier(instrumentationModulePath));
     expect(existsSync(snapshotBootstrapPath)).toBe(false);
 
     await writeFile(
@@ -140,7 +148,7 @@ describe("application host preparation", () => {
       retainCount: 0,
     });
 
-    expect(existsSync(firstPointer.snapshotRoot)).toBe(false);
+    expect(existsSync(firstPointer.snapshotRoot)).toBe(true);
     expect(existsSync(stableBootstrapPath)).toBe(true);
   });
 });

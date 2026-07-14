@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { existsSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 
@@ -8,7 +8,6 @@ import { describe, expect, it } from "vitest";
 
 import { EVE_HEALTH_ROUTE_PATH } from "../../src/protocol/routes.js";
 import {
-  pruneDevelopmentRuntimeArtifactsSnapshots,
   readDevelopmentRuntimeArtifactsSnapshotRoot,
   resolveDevelopmentRuntimeArtifactsPointerPath,
 } from "../../src/internal/nitro/dev-runtime-artifacts.js";
@@ -258,7 +257,7 @@ async function startEveDev(appRoot: string): Promise<RunningEveDev> {
 
 describe("eve dev server", () => {
   it(
-    "rebuilds after pruning its startup runtime snapshot and completes a streamed turn",
+    "rebuilds after its startup runtime generation is force-pruned and completes a streamed turn",
     async () => {
       const app = await scenarioApp(DEV_SERVER_AGENT_DESCRIPTOR);
       const server = await startEveDev(app.appRoot);
@@ -301,12 +300,7 @@ describe("eve dev server", () => {
           throw new Error("Expected authored HMR to publish a runtime snapshot.");
         }
 
-        await pruneDevelopmentRuntimeArtifactsSnapshots({
-          appRoot: app.appRoot,
-          now: Date.now() + 1_000,
-          recentWindowMs: 0,
-          retainCount: 0,
-        });
+        await rm(startupRuntimeRoot, { force: true, recursive: true });
         expect(existsSync(startupRuntimeRoot)).toBe(false);
 
         await writeFile(join(app.appRoot, ".env.local"), "EVE_SCENARIO_RELOAD=1\n");
@@ -318,8 +312,8 @@ describe("eve dev server", () => {
           const currentRuntimeRoot = readDevelopmentRuntimeArtifactsSnapshotRoot(pointerPath);
           return currentRuntimeRoot !== undefined && currentRuntimeRoot !== authoredRuntimeRoot;
         }, `Timed out waiting for the structural reload snapshot.\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`);
+        // Nitro exposes no replacement-ready signal while it owns the public listener.
         await wait(2_000);
-
         let messageResult: Awaited<ReturnType<typeof sendDevelopmentMessage>>;
         try {
           messageResult = await sendDevelopmentMessage({
@@ -347,8 +341,6 @@ describe("eve dev server", () => {
             `stderr:\n${server.stderr()}`,
           ].join("\n\n"),
         ).toBe(true);
-        await wait(1_000);
-
         const output = `${server.stdout()}\n${server.stderr()}`;
         expect(hasKnownDevBundlingFailure(output)).toBe(false);
       } finally {
