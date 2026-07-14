@@ -8892,6 +8892,34 @@ describe("createToolLoopHarness", () => {
       expect(messages.at(-1)?.content).toEqual(userContent);
     });
 
+    it("preserves the Anthropic system cache breakpoint when merging instructions", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", undefined, {
+          resolveModel: vi.fn().mockResolvedValue({
+            modelId: "claude-sonnet-4-5",
+            provider: "anthropic.messages",
+            specificationVersion: "v3",
+          } as unknown as LanguageModel),
+        }),
+      );
+      const session = createTestSession();
+      const ctx = new ContextContainer();
+      ctx.set(SessionDynamicInstructionsKey, {
+        context: [{ role: "system" as const, content: "dynamic-system-instruction" }],
+      });
+
+      await contextStorage.run(ctx, () => runStep(session, { message: "Hi" }));
+
+      expect(getLastAgentSettings().instructions).toEqual({
+        role: "system",
+        content: "You are a test assistant.\n\ndynamic-system-instruction",
+        providerOptions: {
+          anthropic: { cacheControl: { type: "ephemeral" } },
+        },
+      });
+    });
+
     it("does not persist dynamic instruction messages to session history", async () => {
       setupMockAgent(defaultModelResult());
       const runStep = createToolLoopHarness(createTestConfig("conversation"));
