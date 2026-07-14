@@ -116,10 +116,11 @@ When adding e2e coverage:
 then runs one fixture directory. Its matrix crosses every discovered fixture
 with these model entries:
 
-```text
-openai/gpt-5.6-sol
-anthropic/claude-opus-4.8
-```
+- `openai-sol` → `openai/gpt-5.6-sol`
+- `anthropic-opus` → `anthropic/claude-opus-4.8`
+
+The short name is the stable Actions check identifier; the full id selects the
+provider model. Updating a model version does not rename required checks.
 
 Each leg exports the selected id as `EVE_E2E_MODEL` before it runs:
 
