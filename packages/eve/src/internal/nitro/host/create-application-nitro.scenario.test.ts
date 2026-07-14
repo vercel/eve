@@ -23,7 +23,11 @@ import {
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
 import { resolveNitroBuildDirectory } from "#internal/application/paths.js";
-import type { NitroBuildSurface, PreparedApplicationHost } from "#internal/nitro/host/types.js";
+import type {
+  NitroBuildSurface,
+  PreparedApplicationHost,
+  PreparedDevelopmentApplicationHost,
+} from "#internal/nitro/host/types.js";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
 
 const configureDevelopmentNitroRoutes = vi.fn(async () => undefined);
@@ -84,7 +88,7 @@ function createNitroStub(input: { buildDir?: string; dev?: boolean } = {}): Nitr
   };
 }
 
-function createPreparedHost(): PreparedApplicationHost {
+function createPreparedHost(): PreparedDevelopmentApplicationHost {
   const appRoot = "/tmp/weather-agent";
   const paths = resolveCompilerArtifactPaths(appRoot);
   const metadata: CompileMetadata = {
@@ -142,7 +146,22 @@ function createPreparedHost(): PreparedApplicationHost {
     } as PreparedApplicationHost["compiledArtifacts"],
     scheduleRegistrations: [],
     schedules: [],
-    workflowBuildDir: `${appRoot}/.eve/nitro/workflow`,
+    generation: {
+      fingerprint: "runtime-fingerprint",
+      runtimeAppRoot: `${appRoot}/.eve/dev-runtime/snapshots/test/source/app`,
+      snapshotRoot: `${appRoot}/.eve/dev-runtime/snapshots/test`,
+      snapshotSourceRoot: `${appRoot}/.eve/dev-runtime/snapshots/test/source`,
+      sourceRoot: appRoot,
+    },
+    workflowBuildDir: `${appRoot}/.eve/dev-hosts/test/workflow`,
+    workspace: {
+      artifactsDir: `${appRoot}/.eve/dev-hosts/test/artifacts`,
+      compilerArtifactsDir: `${appRoot}/.eve/dev-hosts/test/compiler`,
+      nitroBuildDir: `${appRoot}/.eve/dev-hosts/test/nitro`,
+      nitroOutputDir: `${appRoot}/.eve/dev-hosts/test/output`,
+      rootDir: `${appRoot}/.eve/dev-hosts/test`,
+      workflowBuildDir: `${appRoot}/.eve/dev-hosts/test/workflow`,
+    },
   };
 }
 

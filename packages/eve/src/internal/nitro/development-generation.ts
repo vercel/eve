@@ -4,7 +4,9 @@ import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { materializeAuthoredModules } from "#internal/materialized-authored-modules.js";
 import {
   activateDevelopmentRuntimeArtifactsSnapshot,
+  activateDevelopmentRuntimeArtifactsSnapshotTransaction,
   stageDevelopmentRuntimeArtifactsSnapshot,
+  type DevelopmentRuntimeArtifactsActivation,
   type DevelopmentRuntimeArtifactsSnapshot,
 } from "#internal/nitro/dev-runtime-artifacts.js";
 
@@ -58,6 +60,16 @@ export async function activateDevelopmentGeneration(input: {
   readonly generation: DevelopmentGeneration;
 }): Promise<void> {
   await activateDevelopmentRuntimeArtifactsSnapshot({
+    appRoot: input.appRoot,
+    snapshot: input.generation,
+  });
+}
+
+export async function activateDevelopmentGenerationTransaction(input: {
+  readonly appRoot: string;
+  readonly generation: DevelopmentGeneration;
+}): Promise<DevelopmentRuntimeArtifactsActivation> {
+  return await activateDevelopmentRuntimeArtifactsSnapshotTransaction({
     appRoot: input.appRoot,
     snapshot: input.generation,
   });

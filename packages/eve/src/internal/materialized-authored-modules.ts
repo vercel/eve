@@ -7,6 +7,7 @@ import type { CompiledAgentManifest, CompiledAgentNodeManifest } from "#compiler
 import { COMPILED_AGENT_MANIFEST_KIND, ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { collectModuleRefsForManifest } from "#compiler/module-map.js";
 import { bundleAuthoredModuleForGeneration } from "#internal/authored-module-loader.js";
+import { serializeCompiledManifestForFingerprint } from "#internal/compiled-manifest-fingerprint.js";
 import {
   materializeAuthoredExternalDependencies,
   type ResolvedAuthoredExternalModule,
@@ -38,6 +39,15 @@ export async function materializeAuthoredModules(input: {
   const fingerprint = createHash("sha256");
 
   await mkdir(modulesRoot, { recursive: true });
+  fingerprint
+    .update("manifest\0")
+    .update(
+      serializeCompiledManifestForFingerprint({
+        manifest,
+        runtimeAppRoot: input.runtimeAppRoot,
+      }),
+    )
+    .update("\0");
   for (const node of collectNodeManifests(manifest)) {
     const modules: Record<string, string> = {};
 

@@ -257,22 +257,18 @@ describe("Nitro route configuration", () => {
     expect(nitro.options.virtual["#eve-workflow/workflows"]).toBeUndefined();
   });
 
-  it("reports a failed workflow sync and runs the next queued sync", async () => {
-    workflowBuilderMocks.build
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error("injected workflow sync failure"))
-      .mockResolvedValueOnce(undefined);
+  it("does not retain a workflow reload hook after configuring a candidate", async () => {
     const nitro = createNitroStub({ dev: true });
 
     await configureDevelopmentNitroRoutes(nitro, createPreparedHost());
-    const reload = nitro.hookHandlers.get("dev:reload")?.[0];
-    if (reload === undefined) {
-      throw new Error("Expected the workflow reload hook to be registered.");
+    const build = nitro.hookHandlers.get("build:before")?.[0];
+    if (build === undefined) {
+      throw new Error("Expected the workflow build hook to be registered.");
     }
 
-    await expect(reload()).rejects.toThrow("injected workflow sync failure");
-    await expect(reload()).resolves.toBeUndefined();
-    expect(workflowBuilderMocks.build).toHaveBeenCalledTimes(3);
+    expect(nitro.hookHandlers.has("dev:reload")).toBe(false);
+    await expect(build()).resolves.toBeUndefined();
+    expect(workflowBuilderMocks.build).toHaveBeenCalledOnce();
   });
 
   it("registers direct workflow queue handlers in dev mode so the worker bypasses HTTP dispatch", async () => {

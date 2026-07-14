@@ -16,6 +16,7 @@ import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/arti
 import { publishDevelopmentGeneration } from "#internal/nitro/development-generation.js";
 import {
   activateDevelopmentRuntimeArtifactsSnapshot,
+  activateDevelopmentRuntimeArtifactsSnapshotTransaction,
   pruneDevelopmentRuntimeArtifactsSnapshots,
   readDevelopmentRuntimeArtifactsSnapshotRoot,
   readDevelopmentRuntimeArtifactsRevision,
@@ -153,6 +154,36 @@ describe("development runtime artifact snapshots", () => {
     expect(readDevelopmentRuntimeArtifactsRevision(appRoot)).toEqual({
       revision: snapshot.runtimeAppRoot,
     });
+  });
+
+  it("restores the prior runtime pointer when activation is rolled back", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-activation-rollback-");
+    const agentRoot = join(appRoot, "agent");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+    await mkdir(agentRoot, { recursive: true });
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(join(appRoot, "package.json"), '{"type":"module"}\n');
+    await writeFile(
+      join(compileDirectoryPath, "compiled-agent-manifest.json"),
+      `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`,
+    );
+    const compileResult = {
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult;
+    const first = await stageDevelopmentRuntimeArtifactsSnapshot(compileResult);
+    const second = await stageDevelopmentRuntimeArtifactsSnapshot(compileResult);
+    await activateDevelopmentRuntimeArtifactsSnapshot({ appRoot, snapshot: first });
+
+    const activation = await activateDevelopmentRuntimeArtifactsSnapshotTransaction({
+      appRoot,
+      snapshot: second,
+    });
+    expect(readDevelopmentRuntimeArtifactsRevision(appRoot).revision).toBe(second.runtimeAppRoot);
+    await activation.rollback();
+
+    expect(readDevelopmentRuntimeArtifactsRevision(appRoot).revision).toBe(first.runtimeAppRoot);
+    expect(existsSync(join(second.snapshotRoot, "activated"))).toBe(false);
   });
 
   it("stages package-less flat markdown agents with generated runtime package metadata", async () => {

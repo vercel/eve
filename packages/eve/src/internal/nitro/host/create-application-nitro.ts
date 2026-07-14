@@ -15,7 +15,6 @@ import {
   prepareEveVersionedCacheDirectory,
   writeEveVersionedCacheMetadata,
 } from "#internal/application/cache-metadata.js";
-import { resolveNitroBuildDirectory } from "#internal/application/paths.js";
 import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { createCompiledSandboxBackendPrunePlugin } from "#internal/nitro/host/compiled-sandbox-backend-prune-plugin.js";
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
@@ -25,7 +24,6 @@ import {
 } from "#internal/nitro/host/configure-nitro-routes.js";
 import { applyEveCronHandlerRoute } from "#internal/nitro/host/cron-handler-route.js";
 import { createNitroBundlerConfig } from "#internal/nitro/host/nitro-bundler-config.js";
-import { captureDevLiveVirtualModules } from "#internal/nitro/host/dev-live-virtual-modules.js";
 import {
   createOptionalEngineDependencyPlugin,
   OPTIONAL_ENGINE_PACKAGES_BY_BACKEND_NAME,
@@ -33,7 +31,11 @@ import {
 import { addNitroRoutingImportSpecifierPlugin } from "#internal/nitro/host/nitro-routing-import-specifier-plugin.js";
 import { registerScheduleTaskHandlers } from "#internal/nitro/host/schedule-task-routes.js";
 import { SERVER_EXTERNAL_PACKAGES } from "#internal/nitro/host/server-external-packages.js";
-import type { NitroBuildSurface, PreparedApplicationHost } from "#internal/nitro/host/types.js";
+import type {
+  NitroBuildSurface,
+  PreparedApplicationHost,
+  PreparedDevelopmentApplicationHost,
+} from "#internal/nitro/host/types.js";
 import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output-config.js";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
 import { transformDynamicToolExecute } from "#internal/workflow-bundle/dynamic-tool-transform.js";
@@ -744,15 +746,14 @@ function externalizeDevelopmentWorkflowBundle(
 }
 
 /**
- * Creates the watch-mode Nitro host for `eve dev`: all route surfaces on one
- * instance, live virtual modules, and hot-reload hooks wired to the authored
- * source.
+ * Creates one isolated Nitro host candidate for `eve dev`.
  */
 export async function createDevelopmentApplicationNitro(
-  preparedHost: PreparedApplicationHost,
+  preparedHost: PreparedDevelopmentApplicationHost,
 ): Promise<Nitro> {
-  const nitroBuildDir = resolveNitroBuildDirectory(preparedHost.appRoot);
+  const nitroBuildDir = preparedHost.workspace.nitroBuildDir;
   const bundler = createApplicationNitroBundlerConfiguration(preparedHost, undefined);
+  const plugins = createApplicationNitroPlugins(preparedHost);
 
   await prepareEveVersionedCacheDirectory(nitroBuildDir);
   const nitro = await createNitro(
@@ -762,7 +763,8 @@ export async function createDevelopmentApplicationNitro(
       dev: true,
       features: { websocket: true },
       logLevel: 1,
-      plugins: createApplicationNitroPlugins(preparedHost),
+      output: { dir: preparedHost.workspace.nitroOutputDir },
+      plugins,
       publicAssets: [],
       scanDirs: [resolvePackageSourceDirectoryPath("src/execution")],
       rolldownConfig: bundler.nitroRolldownConfig,
@@ -777,7 +779,6 @@ export async function createDevelopmentApplicationNitro(
   );
   await writeEveVersionedCacheMetadata(nitroBuildDir);
 
-  captureDevLiveVirtualModules(nitro);
   const stepEntrypointPath = join(nitro.options.buildDir, "workflow", "steps.mjs");
   configureSharedApplicationNitro(nitro, preparedHost, "all");
   const clearStepTransformCaches = configureNitroStepPlugins(nitro, stepEntrypointPath);

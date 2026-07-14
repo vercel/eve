@@ -127,6 +127,21 @@ describe("development generation artifacts", () => {
     expect(materializedInstrumentation).not.toContain("/.eve/dev-runtime/snapshots/");
 
     await writeFile(
+      join(app.appRoot, "agent", "instructions.md"),
+      "Use the configured model and explain the result.",
+    );
+    const changedInstructions = await stageDevelopmentGeneration(
+      await compileAgent({ startPath: app.appRoot }),
+    );
+    expect(changedInstructions.fingerprint).not.toBe(first.fingerprint);
+
+    await writeFile(join(app.appRoot, "agent", "instructions.md"), "Use the configured model.");
+    const restoredInstructions = await stageDevelopmentGeneration(
+      await compileAgent({ startPath: app.appRoot }),
+    );
+    expect(restoredInstructions.fingerprint).toBe(first.fingerprint);
+
+    await writeFile(
       join(app.appRoot, "agent", "instrumentation.mjs"),
       'export default { marker: "two" };\n',
     );

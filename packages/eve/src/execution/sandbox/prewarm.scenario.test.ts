@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { compileAgent, compileAgentInBuildWorkspace } from "#compiler/compile-agent.js";
+import { compileAgent, compileAgentInWorkspace } from "#compiler/compile-agent.js";
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { publishDevelopmentGeneration } from "#internal/nitro/development-generation.js";
@@ -30,7 +30,7 @@ describe("prewarmAppSandboxes", () => {
 
     const appRoot = await createScenarioAppRoot();
     const compilerAppRoot = join(appRoot, ".eve", "builds", "isolated", "compiler");
-    await compileAgentInBuildWorkspace({
+    await compileAgentInWorkspace({
       artifactLocations: {
         publishedRoot: join(compilerAppRoot, ".eve"),
         writeRoot: join(compilerAppRoot, ".eve"),
