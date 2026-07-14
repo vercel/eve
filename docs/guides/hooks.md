@@ -42,7 +42,7 @@ interface HookContext {
 
 ### Narrowing tool results
 
-`toolResultFrom` narrows an `action.result` event to a specific authored tool or MCP connection and returns typed output. Import it from `eve/tools`:
+`toolResultFrom` narrows an `action.result` event to a specific authored tool or connection (MCP or OpenAPI) and returns typed output. Import it from `eve/tools`:
 
 ```ts
 import { defineHook } from "eve/hooks";
@@ -59,7 +59,7 @@ export default defineHook({
         console.log(weather.output.temperature);
       }
 
-      // MCP connection: output is unknown, toolName is qualified
+      // Connection (MCP or OpenAPI): output is unknown, toolName is qualified
       const linearResult = toolResultFrom(event.data.result, linear);
       if (linearResult) {
         console.log(linearResult.connectionToolName, linearResult.output);
