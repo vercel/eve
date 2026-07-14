@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync, type Dirent } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { copyDevelopmentSourceSnapshot } from "#internal/nitro/dev-runtime-source-snapshot-copy.js";
 import { createDevelopmentSourceSnapshotPlan } from "#internal/nitro/dev-runtime-source-snapshot.js";
+import { renameWithTransientBusyRetry } from "#shared/rename-with-retry.js";
 
 const DEV_RUNTIME_ARTIFACTS_DIRECTORY = "dev-runtime";
 const DEV_RUNTIME_ARTIFACTS_ACTIVATED_MARKER = "activated";
@@ -549,9 +550,6 @@ async function writeDevelopmentRuntimeArtifactsPointer(input: {
   );
 }
 
-const POINTER_RENAME_ATTEMPTS = 5;
-const POINTER_RENAME_RETRY_DELAY_MS = 50;
-
 async function writeDevelopmentRuntimeArtifactsPointerSource(
   pointerPath: string,
   source: string,
@@ -560,39 +558,10 @@ async function writeDevelopmentRuntimeArtifactsPointerSource(
   await mkdir(dirname(pointerPath), { recursive: true });
   await writeFile(temporaryPointerPath, source);
   try {
-    await renameWithWindowsRetry(temporaryPointerPath, pointerPath);
+    await renameWithTransientBusyRetry(temporaryPointerPath, pointerPath);
   } catch (error) {
     await rm(temporaryPointerPath, { force: true }).catch(() => {});
     throw error;
-  }
-}
-
-/**
- * Windows rejects `rename` with EPERM/EBUSY while another handle (a reader
- * of the pointer, an antivirus scan) briefly holds the destination. Those
- * failures are transient, so pointer publication retries before surfacing
- * the activation failure.
- */
-async function renameWithWindowsRetry(source: string, destination: string): Promise<void> {
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      await rename(source, destination);
-      return;
-    } catch (error) {
-      const code =
-        error instanceof Error && "code" in error
-          ? (error as NodeJS.ErrnoException).code
-          : undefined;
-      if (
-        attempt >= POINTER_RENAME_ATTEMPTS ||
-        (code !== "EPERM" && code !== "EBUSY" && code !== "EACCES")
-      ) {
-        throw error;
-      }
-      await new Promise((resolvePromise) => {
-        setTimeout(resolvePromise, POINTER_RENAME_RETRY_DELAY_MS * attempt);
-      });
-    }
   }
 }
 

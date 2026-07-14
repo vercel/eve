@@ -1,5 +1,5 @@
 import { watch } from "node:fs";
-import { mkdir, readdir, rename, rm, stat, utimes } from "node:fs/promises";
+import { mkdir, readdir, rm, stat, utimes } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import {
@@ -17,6 +17,7 @@ import {
 } from "#internal/application/output-publication-journal.js";
 import { isErrnoCode } from "#shared/guards.js";
 import { pathExists } from "#shared/path-exists.js";
+import { renameWithTransientBusyRetry } from "#shared/rename-with-retry.js";
 
 const PUBLICATION_LOCK_TIMEOUT_MS = 60_000;
 const INCOMPLETE_LOCK_STALE_MS = 5_000;
@@ -89,7 +90,7 @@ export async function acquireOutputPublicationLock(
         }
         const releasedPath = `${lockPath}.released-${journal.token}`;
         try {
-          await rename(lockPath, releasedPath);
+          await renameWithTransientBusyRetry(lockPath, releasedPath);
         } catch (error) {
           if (isErrnoCode(error, "ENOENT")) {
             return;
@@ -141,7 +142,7 @@ async function recoverStalePublication(
     if (await pathExists(lockPath)) {
       const recoveringJournalPath = join(recoveryPath, `owner-${recoveryJournal.token}`);
       try {
-        await rename(lockPath, recoveringJournalPath);
+        await renameWithTransientBusyRetry(lockPath, recoveringJournalPath);
         preserveRecovery = true;
       } catch (error) {
         if (!isErrnoCode(error, "ENOENT")) {
@@ -197,7 +198,7 @@ async function acquireRecoveryLease(
           }
           const releasedPath = `${recoveryPath}.released-${token}`;
           try {
-            await rename(recoveryPath, releasedPath);
+            await renameWithTransientBusyRetry(recoveryPath, releasedPath);
           } catch (error) {
             if (isErrnoCode(error, "ENOENT")) {
               return;
@@ -213,7 +214,7 @@ async function acquireRecoveryLease(
           }
           const releasedPath = `${leasePath}.released-${token}`;
           try {
-            await rename(leasePath, releasedPath);
+            await renameWithTransientBusyRetry(leasePath, releasedPath);
           } catch (error) {
             if (isErrnoCode(error, "ENOENT")) {
               return;
@@ -248,7 +249,7 @@ async function acquireRecoveryLease(
 
     const staleLeasePath = `${leasePath}.stale-${token}`;
     try {
-      await rename(leasePath, staleLeasePath);
+      await renameWithTransientBusyRetry(leasePath, staleLeasePath);
     } catch (error) {
       if (isErrnoCode(error, "ENOENT")) {
         continue;
