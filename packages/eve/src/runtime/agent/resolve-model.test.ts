@@ -95,6 +95,35 @@ describe("dynamic runtime model resolution", () => {
       }),
     ).toThrowError(/unknown key\(s\): contextWindowTokens/);
   });
+
+  it("carries a per-selection reasoning onto the reference", () => {
+    const resolved = normalizeDynamicRuntimeModelResult({
+      fallback: { id: "openai/gpt-5.5", reasoning: "xhigh" },
+      result: { model: "openai/gpt-5.5-mini", reasoning: "low" },
+    });
+
+    expect(resolved.reference.reasoning).toBe("low");
+  });
+
+  it("leaves reasoning unset when the selection omits it", () => {
+    const resolved = normalizeDynamicRuntimeModelResult({
+      fallback: { id: "openai/gpt-5.5", reasoning: "xhigh" },
+      result: "openai/gpt-5.5-mini",
+    });
+
+    // Never inherited from the fallback; the model-call site falls back to the
+    // agent-level reasoning.
+    expect(resolved.reference.reasoning).toBeUndefined();
+  });
+
+  it("rejects a selection with an invalid reasoning value", () => {
+    expect(() =>
+      normalizeDynamicRuntimeModelResult({
+        fallback: { id: "openai/gpt-5.5" },
+        result: { model: "openai/gpt-5.5-mini", reasoning: "turbo" } as never,
+      }),
+    ).toThrowError(/invalid reasoning value/);
+  });
 });
 
 function createModuleMap(moduleNamespace: Record<string, unknown>): CompiledModuleMap {

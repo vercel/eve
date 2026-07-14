@@ -110,7 +110,13 @@ export function normalizeAgentDefinition(
   return definition as Readonly<NormalizedAgentDefinition>;
 }
 
-function normalizeAgentReasoningDefinition(
+/**
+ * Validates a reasoning-effort value against the enum the agent-level
+ * `reasoning` field accepts, returning the narrowed value or throwing
+ * `message`. Shared so authored and dynamic (per-selection) reasoning validate
+ * identically.
+ */
+export function normalizeAgentReasoningDefinition(
   value: unknown,
   message: string,
 ): NonNullable<NormalizedAgentDefinition["reasoning"]> {

@@ -1019,6 +1019,32 @@ describe("createToolLoopHarness", () => {
     expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0]).toMatchObject({ reasoning: "high" });
   });
 
+  it("lets a per-selection reasoning override the agent reasoning effort", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const runStep = createToolLoopHarness(createTestConfig());
+    const session = createTestSession({
+      agent: {
+        // A dynamic selection downshifts to a cheap model and drops reasoning
+        // to `low`, overriding the agent-level `high`.
+        modelReference: { id: "test-model", reasoning: "low" },
+        reasoning: "high",
+        system: "You are a test assistant.",
+        tools: [],
+      },
+    });
+
+    await runStep(session, { message: "Classify quickly" });
+
+    expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0]).toMatchObject({ reasoning: "low" });
+  });
+
   it("accumulates provider-reported token usage across the session", async () => {
     setupMockAgent({
       finishReason: "stop",

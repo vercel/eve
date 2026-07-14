@@ -48,6 +48,12 @@ export type InternalAgentModelDefinition = {
   contextWindowTokens?: number;
   source?: ModuleSourceRef;
   providerOptions?: Record<string, JsonObject>;
+  /**
+   * Per-selection reasoning effort carried by a dynamic model selection. Unset
+   * for the compiled agent-level model; when a dynamic selection sets it, it
+   * overrides the agent-level `reasoning` for that selection's model calls.
+   */
+  reasoning?: AgentReasoningDefinition;
 };
 
 /**
@@ -65,6 +71,11 @@ export interface PublicAgentModelSelectionDefinition {
   readonly modelContextWindowTokens?: number;
   /** Provider options for the selected model; defaults to the agent-level `modelOptions`. */
   readonly modelOptions?: AgentModelOptionsDefinition;
+  /**
+   * Reasoning effort for the selected model; overrides the agent-level
+   * `reasoning`. Defaults to the agent-level `reasoning` when omitted.
+   */
+  readonly reasoning?: AgentReasoningDefinition;
 }
 
 export type PublicAgentDynamicModelResult =
