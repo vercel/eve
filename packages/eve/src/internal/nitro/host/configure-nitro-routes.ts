@@ -33,8 +33,23 @@ function includesApplicationRoutes(surface: NitroBuildSurface): boolean {
   return surface === "all" || surface === "app";
 }
 
-function includesWorkflowBundles(surface: NitroBuildSurface): boolean {
-  return includesWorkflowRoute(surface);
+const INLINE_JS_UNSAFE_CHAR_MAP: Record<string, string> = {
+  "<": "\\u003C",
+  ">": "\\u003E",
+  "/": "\\u002F",
+  "\\": "\\\\",
+  "\b": "\\b",
+  "\f": "\\f",
+  "\n": "\\n",
+  "\r": "\\r",
+  "\t": "\\t",
+  "\0": "\\0",
+  "\u2028": "\\u2028",
+  "\u2029": "\\u2029",
+};
+
+function escapeUnsafeCharsForInlineJs(value: string): string {
+  return value.replace(/[<>\/\\\b\f\n\r\t\0\u2028\u2029]/g, (char) => INLINE_JS_UNSAFE_CHAR_MAP[char] ?? char);
 }
 
 function includesWorkflowRoute(surface: NitroBuildSurface): boolean {
@@ -204,6 +219,10 @@ function buildWorkflowFileHandlerSource(input: {
       lines.push(`import ${JSON.stringify(input.workflowWorldPluginImportSpecifier)};`);
     }
 
+    // NOTE: The generated handler intentionally uses top-level `await`.
+    // This requires the emitted module to stay ESM (for example `.mjs`) and be
+    // loaded/transpiled by tooling that supports top-level await. Changing the
+    // extension/loader pipeline to CommonJS or non-TLA environments will fail at load time.
     lines.push(
       `import { getWorld as __eveGetWorkflowWorld } from ${JSON.stringify(input.runtimeImportSpecifier)};`,
       "",
@@ -226,7 +245,7 @@ function buildWorkflowFileHandlerSource(input: {
     );
   }
 
-  lines.push("", "export default async ({ req }) => {", "  return await POST(req);", "};", "");
+  lines.push("", "export default async ({ req }) => {", "  return POST(req);", "};", "");
 
   return lines.join("\n");
 }
@@ -252,6 +271,7 @@ function addFrameworkVirtualHandler(
 ): void {
   const virtualId = `#eve-route${input.route}`;
   const modulePath = stringifyEsmImportSpecifier(input.modulePath);
+  const escapedArgs = escapeUnsafeCharsForInlineJs(input.args);
 
   nitro.options.handlers.push({
     handler: virtualId,
@@ -260,7 +280,7 @@ function addFrameworkVirtualHandler(
   });
   nitro.options.virtual[virtualId] = [
     `import { ${input.handlerExport} } from ${modulePath};`,
-    `export default async (event) => ${input.handlerExport}(${input.args}, event.req);`,
+    `export default async (event) => ${input.handlerExport}(${escapedArgs}, event.req);`,
   ].join("\n");
 }
 
