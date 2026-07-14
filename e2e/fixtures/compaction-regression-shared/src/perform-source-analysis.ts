@@ -23,7 +23,8 @@ export default defineTool({
       },
       ctx,
     );
-    const result = {
+
+    return {
       modelFamily: input.modelFamily,
       completed: true,
       completionMarker,
@@ -33,7 +34,5 @@ export default defineTool({
       approach: input.approach,
       evidencePadding: "source analysis evidence ".repeat(100),
     };
-
-    return result;
   },
 });

@@ -1,6 +1,6 @@
 import type { EveEvalContext } from "eve/evals";
 
-export type ModelFamily = "gpt-5.6" | "opus-4.8" | "sonnet-5";
+import type { ModelFamily } from "./agent";
 
 export async function testRedundantToolCalls(
   t: EveEvalContext,

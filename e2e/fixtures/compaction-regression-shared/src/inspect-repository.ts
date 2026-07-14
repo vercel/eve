@@ -16,7 +16,8 @@ export default defineTool({
   async execute(input) {
     const attempt = invocationCount.get() + 1;
     invocationCount.update(() => attempt);
-    const result = {
+
+    return {
       modelFamily: input.modelFamily,
       completed: true,
       completionMarker,
@@ -25,7 +26,5 @@ export default defineTool({
       attempt,
       evidencePadding: "repository inspection evidence ".repeat(100),
     };
-
-    return result;
   },
 });
