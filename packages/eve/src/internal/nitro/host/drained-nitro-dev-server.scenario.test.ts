@@ -304,6 +304,100 @@ describe("drained Nitro dev server", () => {
     await server.close();
   });
 
+  it("releases the retired worker when a client aborts a request body", async () => {
+    let sawBody: (() => void) | undefined;
+    const bodySeen = new Promise<void>((resolve) => {
+      sawBody = resolve;
+    });
+    const { createRunner, runners } = createRunnerFactory(async (request, runnerIndex) => {
+      if (runnerIndex === 0) {
+        sawBody?.();
+        // Consuming the body only completes when the client finishes or
+        // aborts the upload; an abort must reject this read.
+        await request.text();
+        return new Response("unreachable");
+      }
+      return new Response("runner-1");
+    });
+    const server = new DrainedNitroDevServer(LOGGER, createRunner);
+    const listener = await listen(server);
+    const disposeFirst = vi.fn(async () => undefined);
+    await server.replaceWorker(replacement("/tmp/first.mjs", disposeFirst));
+
+    const abort = new AbortController();
+    let releaseChunks: (() => void) | undefined;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("partial-upload"));
+        releaseChunks = () => controller.close();
+      },
+    });
+    const upload = fetch(new URL("/", listener.url), {
+      body,
+      duplex: "half",
+      method: "POST",
+      signal: abort.signal,
+    } as RequestInit).catch(() => undefined);
+    await withinDeadline(bodySeen, "Timed out waiting for the upload to be admitted.");
+    abort.abort();
+    await upload;
+    releaseChunks?.();
+
+    await server.replaceWorker(replacement("/tmp/second.mjs"));
+    await withinDeadline(
+      vi.waitFor(() => {
+        expect(runners[0]?.closeMock).toHaveBeenCalled();
+        expect(disposeFirst).toHaveBeenCalledOnce();
+      }),
+      "Timed out waiting for the aborted upload to release the retired worker.",
+    );
+
+    await server.close();
+  });
+
+  it("releases the retired worker when a client cancels its streamed response", async () => {
+    const { createRunner, runners } = createRunnerFactory(async (_request, runnerIndex) => {
+      if (runnerIndex === 0) {
+        // A response held open indefinitely: only client cancellation or
+        // worker retirement can end it.
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("started\n"));
+          },
+        });
+        return new Response(body);
+      }
+      return new Response("runner-1");
+    });
+    const server = new DrainedNitroDevServer(LOGGER, createRunner);
+    const listener = await listen(server);
+    const disposeFirst = vi.fn(async () => undefined);
+    await server.replaceWorker(replacement("/tmp/first.mjs", disposeFirst));
+
+    const streaming = await fetch(new URL("/", listener.url));
+    const reader = streaming.body?.getReader();
+    await reader?.read();
+
+    await server.replaceWorker(replacement("/tmp/second.mjs"));
+    await expect(
+      fetch(new URL("/", listener.url)).then(async (response) => await response.text()),
+    ).resolves.toBe("runner-1");
+    expect(disposeFirst).not.toHaveBeenCalled();
+
+    // Client-side cancellation of the retired worker's stream must release
+    // its last exchange and retire it.
+    await reader?.cancel();
+    await withinDeadline(
+      vi.waitFor(() => {
+        expect(runners[0]?.closeMock).toHaveBeenCalled();
+        expect(disposeFirst).toHaveBeenCalledOnce();
+      }),
+      "Timed out waiting for the cancelled stream to release the retired worker.",
+    );
+
+    await server.close();
+  });
+
   it("closes within a bounded interval while a candidate is mid-readiness", async () => {
     const { createRunner } = createRunnerFactory(
       async () => new Response("ok"),
