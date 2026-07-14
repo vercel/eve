@@ -53,6 +53,7 @@ export function createCompactionRegressionAgent(input: {
         ? {
             toolCalls: [
               {
+                id: `inspect-repository-${attempt}`,
                 input: { modelFamily: input.modelFamily, scope: "repository" },
                 name: "inspect-repository",
               },
@@ -61,6 +62,7 @@ export function createCompactionRegressionAgent(input: {
         : {
             toolCalls: [
               {
+                id: `perform-source-analysis-${attempt}`,
                 input: { approach: `attempt-${attempt}`, modelFamily: input.modelFamily },
                 name: "perform-source-analysis",
               },
