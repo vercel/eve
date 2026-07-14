@@ -425,7 +425,7 @@ importers:
         version: link:../../../packages/eve
       nuxt:
         specifier: ^4.0.0
-        version: 4.4.6(@babel/plugin-syntax-jsx@7.29.7(@babel/core@7.29.0))(@babel/plugin-syntax-typescript@7.29.7(@babel/core@7.29.0))(@parcel/watcher@2.5.6)(@types/node@25.9.1)(@vercel/blob@2.4.0)(@vercel/functions@3.7.5(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.0))(@vue/compiler-sfc@3.5.39)(cac@6.7.14)(db0@0.3.4)(esbuild@0.27.7)(eslint@10.4.0(jiti@2.7.0))(ioredis@5.11.1)(lightningcss@1.32.0)(magicast@0.5.3)(optionator@0.9.4)(oxlint@1.73.0)(rolldown@1.1.0)(rollup-plugin-visualizer@7.0.1(rolldown@1.1.0)(rollup@4.62.2))(rollup@4.62.2)(srvx@0.11.21)(terser@5.49.0)(tsx@4.21.0)(typescript@6.0.3)(vite@8.0.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.0)
+        version: 4.4.6(@babel/plugin-syntax-jsx@7.29.7(@babel/core@7.29.0))(@babel/plugin-syntax-typescript@7.29.7(@babel/core@7.29.0))(@parcel/watcher@2.5.6)(@types/node@25.9.1)(@vercel/blob@2.4.0)(@vercel/functions@3.7.5(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.0))(@vue/compiler-sfc@3.5.39)(cac@6.7.14)(db0@0.3.4)(esbuild@0.27.7)(eslint@10.4.0(jiti@2.7.0))(ioredis@5.11.1)(lightningcss@1.32.0)(magicast@0.5.3)(optionator@0.9.4)(oxlint@1.73.0)(rolldown@1.1.0)(rollup-plugin-visualizer@7.0.1(rolldown@1.1.0)(rollup@4.62.2))(rollup@4.62.2)(srvx@0.11.22)(terser@5.49.0)(tsx@4.21.0)(typescript@6.0.3)(vite@8.0.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.0)
       vue:
         specifier: ^3.5.0
         version: 3.5.35(typescript@6.0.3)
@@ -1049,8 +1049,8 @@ importers:
         specifier: 1.28.1
         version: 1.28.1
       '@workflow/core':
-        specifier: 5.0.0-beta.31
-        version: 5.0.0-beta.31(@opentelemetry/api@1.9.1)(ws@8.21.0)
+        specifier: 5.0.0-beta.34
+        version: 5.0.0-beta.34(@opentelemetry/api@1.9.1)(ws@8.21.0)
       '@workflow/errors':
         specifier: 5.0.0-beta.10
         version: 5.0.0-beta.10
@@ -1061,14 +1061,14 @@ importers:
         specifier: 5.0.0-beta.6
         version: 5.0.0-beta.6
       '@workflow/world':
-        specifier: 5.0.0-beta.19
-        version: 5.0.0-beta.19
+        specifier: 5.0.0-beta.20
+        version: 5.0.0-beta.20
       '@workflow/world-local':
-        specifier: 5.0.0-beta.27
-        version: 5.0.0-beta.27(@opentelemetry/api@1.9.1)
+        specifier: 5.0.0-beta.28
+        version: 5.0.0-beta.28(@opentelemetry/api@1.9.1)
       '@workflow/world-vercel':
-        specifier: 5.0.0-beta.27
-        version: 5.0.0-beta.27(@opentelemetry/api@1.9.1)
+        specifier: 5.0.0-beta.30
+        version: 5.0.0-beta.30(@opentelemetry/api@1.9.1)
       ai:
         specifier: 'catalog:'
         version: 7.0.26(zod@4.4.3)
@@ -7535,8 +7535,8 @@ packages:
   '@webgpu/types@0.1.71':
     resolution: {integrity: sha512-mMy8/ODcKhab808co15eW+yN+HgXoQxRQHTiBV9Mrvl1r0ufnid7YOcI+gi4eUWSWl9ezD6TW2KXccrL8HCh2A==}
 
-  '@workflow/core@5.0.0-beta.31':
-    resolution: {integrity: sha512-stSzrKGpweBPyAt+mG5qlzTh6+YRWIbY46olMfBibfGXFtEXNWVMhqYXUlFzmcz9bIQSlpE0oackYjKbXWPNcg==}
+  '@workflow/core@5.0.0-beta.34':
+    resolution: {integrity: sha512-he5Pv++/asRCQ0HSikgxlJpx/5ZT0VpBzJyLlvlBMVTPQOzM5jGfdHh4Kw6fflQDU+SGkfsifb+Bj1u+HwcALQ==}
     peerDependencies:
       '@opentelemetry/api': '1'
     peerDependenciesMeta:
@@ -7558,24 +7558,24 @@ packages:
   '@workflow/utils@5.0.0-beta.6':
     resolution: {integrity: sha512-YMZqvtRMzlmWkgshURp4ilvcY8VMrNxwXxDEXQ/gkppKWhJ1xdJBpq3plZLf8LWS7JHXd32Wqll/UvQeARu93Q==}
 
-  '@workflow/world-local@5.0.0-beta.27':
-    resolution: {integrity: sha512-qDNZKLl4jE3c2r/M3kqu7svBLPS76G3peuLSgML2Gk2dwxLqNUjTWg8eVYuEq6JNocSOlo50qFkVmJATms0gbw==}
+  '@workflow/world-local@5.0.0-beta.28':
+    resolution: {integrity: sha512-p0MpcuiU8I4Jxme22gyIwM6y3dPsi1VTkiMv0PezctQXauAXavwDWXIMPLltQwAfGWboskw4gYYUDZrnY2S7dQ==}
     peerDependencies:
       '@opentelemetry/api': '1'
     peerDependenciesMeta:
       '@opentelemetry/api':
         optional: true
 
-  '@workflow/world-vercel@5.0.0-beta.27':
-    resolution: {integrity: sha512-siCjadbGpXl5CyqHbuxFeAZS9grKIU0Sowq5Fo/ye58pDSvwXz0L0srfhPX/iGNuW2bjq0PgVdVMmDZbmptJ3Q==}
+  '@workflow/world-vercel@5.0.0-beta.30':
+    resolution: {integrity: sha512-G1NDkVKNP4bMCb9C1vEjbU37OC0c85cDgEDlImBU5Qui6pudsedNiGVpBbv+MoBKrNUQWY2ITda17df9t6tXQA==}
     peerDependencies:
       '@opentelemetry/api': '1'
     peerDependenciesMeta:
       '@opentelemetry/api':
         optional: true
 
-  '@workflow/world@5.0.0-beta.19':
-    resolution: {integrity: sha512-L2D3ceE7VpV6Xncrhf4OHRLQpinHEwTOPSByYnrQZKfPjrrPjzLqk+5BAEfDwSagCWTJy5TEyBj/eTCn+8ANaw==}
+  '@workflow/world@5.0.0-beta.20':
+    resolution: {integrity: sha512-ajFvqEXW8VBiHOsgFq+WNeaBOPysJV5fYmhyrgJ9JdZXyWy+FfTnoIm3ScIoPCewZKc/1tz+FMjkWUgZ5CKUlw==}
 
   abbrev@3.0.1:
     resolution: {integrity: sha512-AO2ac6pjRB3SJmGJo+v5/aK6Omggp6fsLrs6wN9bd35ulu4cCwaAU9+7ZhXjeqHVkaHThLuzH0nZr0YpCDhygg==}
@@ -10871,11 +10871,6 @@ packages:
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
-  nanoid@3.3.15:
-    resolution: {integrity: sha512-y7Wygv/7mEOvxTuEQDB8StXdMRBWf1kR/tlhAzBRUFkB2jfcLOAxO/SHmOO2zgz1pVgK29/kyupn059/bCHdjA==}
-    engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
-    hasBin: true
-
   nanoid@3.3.16:
     resolution: {integrity: sha512-bzlKTyNJ7+LdGIIwy8ijFpIqEQIvafahV7eYykJ8Cvh42EdJeODoJ6gUJXpQJvej1BddH8OqTXZNE/KfbWAu8Q==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
@@ -11662,10 +11657,6 @@ packages:
     resolution: {integrity: sha512-FfR8sjd4em2T6fb3I2MwAJU7HWVMr9zba+enmQeeWFfCbm+UOC/0X4DS8XtpUTMwWMGbjKYP7xjfNekzyGmB3A==}
     engines: {node: ^10 || ^12 || >=14}
 
-  postcss@8.5.17:
-    resolution: {integrity: sha512-J7EF+8X+CzRPaJPOv9Ck2wNWJvGnnl3PcNPAdGg6GTLjyVpyQ0yATMSXRFRV01BviT/9Gwuc3rjEyJbDJG9a4w==}
-    engines: {node: ^10 || ^12 || >=14}
-
   powershell-utils@0.1.0:
     resolution: {integrity: sha512-dM0jVuXJPsDN6DvRpea484tCUaMiXWjuCn++HGTqUWzGDjv5tZkEZldAJ/UMlqRYGFrD/etByo4/xOuC/snX2A==}
     engines: {node: '>=20'}
@@ -12375,11 +12366,6 @@ packages:
 
   srvx@0.11.16:
     resolution: {integrity: sha512-bp07zRuycfTY43IjAvvTFnmnJi8ikW0VFiHwOhhYcVW/L4xQ1XY4PAd4Nuum1rsA17C39zL7x+CDhrn5AL32Rw==}
-    engines: {node: '>=20.16.0'}
-    hasBin: true
-
-  srvx@0.11.21:
-    resolution: {integrity: sha512-GWTHjKMeekX8CwJf4VU9Oo6mJpSGaflGMddbCvR+Cmmh9sslRMiGbAoqqZacE0r1ncARh6buCEETr2W52F8b1w==}
     engines: {node: '>=20.16.0'}
     hasBin: true
 
@@ -15042,7 +15028,7 @@ snapshots:
       https-proxy-agent: 7.0.6
       node-fetch: 2.7.0
       nopt: 8.1.0
-      semver: 7.8.5
+      semver: 7.8.4
       tar: 7.5.15
     transitivePeerDependencies:
       - encoding
@@ -15306,7 +15292,7 @@ snapshots:
       magicast: 0.5.3
       pathe: 2.0.3
       pkg-types: 2.3.1
-      semver: 7.8.5
+      semver: 7.8.4
 
   '@nuxt/devtools@3.2.4(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))(vue@3.5.35(typescript@6.0.3))':
     dependencies:
@@ -15333,7 +15319,7 @@ snapshots:
       pathe: 2.0.3
       perfect-debounce: 2.1.0
       pkg-types: 2.3.1
-      semver: 7.8.5
+      semver: 7.8.4
       simple-git: 3.36.0
       sirv: 3.0.2
       structured-clone-es: 2.0.0
@@ -15375,7 +15361,7 @@ snapshots:
       pathe: 2.0.3
       perfect-debounce: 2.1.0
       pkg-types: 2.3.1
-      semver: 7.8.5
+      semver: 7.8.4
       simple-git: 3.36.0
       sirv: 3.0.2
       structured-clone-es: 2.0.0
@@ -15416,7 +15402,7 @@ snapshots:
     transitivePeerDependencies:
       - magicast
 
-  '@nuxt/nitro-server@4.4.6(4de82cd832aaebe02adef2654de42996)':
+  '@nuxt/nitro-server@4.4.6(2699b4f001706ddcda7414a146543997)':
     dependencies:
       '@nuxt/devalue': 2.0.2
       '@nuxt/kit': 4.4.6(magicast@0.5.3)
@@ -15433,8 +15419,8 @@ snapshots:
       impound: 1.1.5(esbuild@0.27.7)(rolldown@1.1.0)(rollup@4.62.2)(vite@8.0.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
       klona: 2.0.6
       mocked-exports: 0.1.1
-      nitropack: 2.13.4(@vercel/blob@2.4.0)(@vercel/functions@3.7.5(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.0))(oxc-parser@0.131.0)(rolldown@1.1.0)(srvx@0.11.21)(vite@8.0.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
-      nuxt: 4.4.6(@babel/plugin-syntax-jsx@7.29.7(@babel/core@7.29.0))(@babel/plugin-syntax-typescript@7.29.7(@babel/core@7.29.0))(@parcel/watcher@2.5.6)(@types/node@25.9.1)(@vercel/blob@2.4.0)(@vercel/functions@3.7.5(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.0))(@vue/compiler-sfc@3.5.39)(cac@6.7.14)(db0@0.3.4)(esbuild@0.27.7)(eslint@10.4.0(jiti@2.7.0))(ioredis@5.11.1)(lightningcss@1.32.0)(magicast@0.5.3)(optionator@0.9.4)(oxlint@1.73.0)(rolldown@1.1.0)(rollup-plugin-visualizer@7.0.1(rolldown@1.1.0)(rollup@4.62.2))(rollup@4.62.2)(srvx@0.11.21)(terser@5.49.0)(tsx@4.21.0)(typescript@6.0.3)(vite@8.0.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.0)
+      nitropack: 2.13.4(@vercel/blob@2.4.0)(@vercel/functions@3.7.5(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.0))(oxc-parser@0.131.0)(rolldown@1.1.0)(srvx@0.11.22)(vite@8.0.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
+      nuxt: 4.4.6(@babel/plugin-syntax-jsx@7.29.7(@babel/core@7.29.0))(@babel/plugin-syntax-typescript@7.29.7(@babel/core@7.29.0))(@parcel/watcher@2.5.6)(@types/node@25.9.1)(@vercel/blob@2.4.0)(@vercel/functions@3.7.5(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.0))(@vue/compiler-sfc@3.5.39)(cac@6.7.14)(db0@0.3.4)(esbuild@0.27.7)(eslint@10.4.0(jiti@2.7.0))(ioredis@5.11.1)(lightningcss@1.32.0)(magicast@0.5.3)(optionator@0.9.4)(oxlint@1.73.0)(rolldown@1.1.0)(rollup-plugin-visualizer@7.0.1(rolldown@1.1.0)(rollup@4.62.2))(rollup@4.62.2)(srvx@0.11.22)(terser@5.49.0)(tsx@4.21.0)(typescript@6.0.3)(vite@8.0.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.0)
       nypm: 0.6.8
       ohash: 2.0.11
       pathe: 2.0.3
@@ -15652,7 +15638,7 @@ snapshots:
       - yaml
     optional: true
 
-  '@nuxt/vite-builder@4.4.6(dfa46ec6872f1016f3452a810ad737a8)':
+  '@nuxt/vite-builder@4.4.6(9c86413fe1ca51fc9b9c634bbf622117)':
     dependencies:
       '@nuxt/kit': 4.4.6(magicast@0.5.3)
       '@rollup/plugin-replace': 6.0.3(rollup@4.62.2)
@@ -15670,7 +15656,7 @@ snapshots:
       magic-string: 0.30.21
       mlly: 1.8.2
       mocked-exports: 0.1.1
-      nuxt: 4.4.6(@babel/plugin-syntax-jsx@7.29.7(@babel/core@7.29.0))(@babel/plugin-syntax-typescript@7.29.7(@babel/core@7.29.0))(@parcel/watcher@2.5.6)(@types/node@25.9.1)(@vercel/blob@2.4.0)(@vercel/functions@3.7.5(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.0))(@vue/compiler-sfc@3.5.39)(cac@6.7.14)(db0@0.3.4)(esbuild@0.27.7)(eslint@10.4.0(jiti@2.7.0))(ioredis@5.11.1)(lightningcss@1.32.0)(magicast@0.5.3)(optionator@0.9.4)(oxlint@1.73.0)(rolldown@1.1.0)(rollup-plugin-visualizer@7.0.1(rolldown@1.1.0)(rollup@4.62.2))(rollup@4.62.2)(srvx@0.11.21)(terser@5.49.0)(tsx@4.21.0)(typescript@6.0.3)(vite@8.0.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.0)
+      nuxt: 4.4.6(@babel/plugin-syntax-jsx@7.29.7(@babel/core@7.29.0))(@babel/plugin-syntax-typescript@7.29.7(@babel/core@7.29.0))(@parcel/watcher@2.5.6)(@types/node@25.9.1)(@vercel/blob@2.4.0)(@vercel/functions@3.7.5(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.0))(@vue/compiler-sfc@3.5.39)(cac@6.7.14)(db0@0.3.4)(esbuild@0.27.7)(eslint@10.4.0(jiti@2.7.0))(ioredis@5.11.1)(lightningcss@1.32.0)(magicast@0.5.3)(optionator@0.9.4)(oxlint@1.73.0)(rolldown@1.1.0)(rollup-plugin-visualizer@7.0.1(rolldown@1.1.0)(rollup@4.62.2))(rollup@4.62.2)(srvx@0.11.22)(terser@5.49.0)(tsx@4.21.0)(typescript@6.0.3)(vite@8.0.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.0)
       nypm: 0.6.8
       pathe: 2.0.3
       pkg-types: 2.3.1
@@ -19091,7 +19077,7 @@ snapshots:
       '@typescript-eslint/visitor-keys': 8.59.4
       debug: 4.4.3
       minimatch: 10.2.5
-      semver: 7.8.5
+      semver: 7.8.4
       tinyglobby: 0.2.17
       ts-api-utils: 2.5.0(typescript@6.0.3)
       typescript: 6.0.3
@@ -20014,7 +20000,7 @@ snapshots:
 
   '@webgpu/types@0.1.71': {}
 
-  '@workflow/core@5.0.0-beta.31(@opentelemetry/api@1.9.1)(ws@8.21.0)':
+  '@workflow/core@5.0.0-beta.34(@opentelemetry/api@1.9.1)(ws@8.21.0)':
     dependencies:
       '@aws-sdk/credential-provider-web-identity': 3.972.49
       '@jridgewell/trace-mapping': 0.3.31
@@ -20024,9 +20010,9 @@ snapshots:
       '@workflow/errors': 5.0.0-beta.10
       '@workflow/serde': 5.0.0-beta.2
       '@workflow/utils': 5.0.0-beta.6
-      '@workflow/world': 5.0.0-beta.19
-      '@workflow/world-local': 5.0.0-beta.27(@opentelemetry/api@1.9.1)
-      '@workflow/world-vercel': 5.0.0-beta.27(@opentelemetry/api@1.9.1)
+      '@workflow/world': 5.0.0-beta.20
+      '@workflow/world-local': 5.0.0-beta.28(@opentelemetry/api@1.9.1)
+      '@workflow/world-vercel': 5.0.0-beta.30(@opentelemetry/api@1.9.1)
       debug: 4.4.3
       devalue: 5.8.1
       ms: 2.1.3
@@ -20056,12 +20042,12 @@ snapshots:
     dependencies:
       ms: 2.1.3
 
-  '@workflow/world-local@5.0.0-beta.27(@opentelemetry/api@1.9.1)':
+  '@workflow/world-local@5.0.0-beta.28(@opentelemetry/api@1.9.1)':
     dependencies:
       '@vercel/queue': 0.4.0(@opentelemetry/api@1.9.1)
       '@workflow/errors': 5.0.0-beta.10
       '@workflow/utils': 5.0.0-beta.6
-      '@workflow/world': 5.0.0-beta.19
+      '@workflow/world': 5.0.0-beta.20
       async-sema: 3.1.1
       ulid: 3.0.2
       undici: 7.28.0
@@ -20069,19 +20055,20 @@ snapshots:
     optionalDependencies:
       '@opentelemetry/api': 1.9.1
 
-  '@workflow/world-vercel@5.0.0-beta.27(@opentelemetry/api@1.9.1)':
+  '@workflow/world-vercel@5.0.0-beta.30(@opentelemetry/api@1.9.1)':
     dependencies:
       '@vercel/oidc': 3.2.0
       '@vercel/queue': 0.4.0(@opentelemetry/api@1.9.1)
       '@workflow/errors': 5.0.0-beta.10
-      '@workflow/world': 5.0.0-beta.19
+      '@workflow/world': 5.0.0-beta.20
       cbor-x: 1.6.0
+      ulid: 3.0.2
       undici: 7.28.0
       zod: 4.3.6
     optionalDependencies:
       '@opentelemetry/api': 1.9.1
 
-  '@workflow/world@5.0.0-beta.19':
+  '@workflow/world@5.0.0-beta.20':
     dependencies:
       ulid: 3.0.2
       zod: 4.3.6
@@ -20844,10 +20831,6 @@ snapshots:
   crossws@0.3.5:
     dependencies:
       uncrypto: 0.1.3
-
-  crossws@0.4.10(srvx@0.11.21):
-    optionalDependencies:
-      srvx: 0.11.21
 
   crossws@0.4.10(srvx@0.11.22):
     optionalDependencies:
@@ -22993,7 +22976,7 @@ snapshots:
 
   is-bun-module@2.0.0:
     dependencies:
-      semver: 7.8.5
+      semver: 7.8.4
 
   is-callable@1.2.7: {}
 
@@ -23379,29 +23362,6 @@ snapshots:
       cheminfo-types: 1.15.0
       ml-matrix: 6.12.2
       ml-spectra-processing: 14.29.0
-
-  listhen@1.10.0(srvx@0.11.21):
-    dependencies:
-      '@parcel/watcher': 2.5.6
-      '@parcel/watcher-wasm': 2.5.6
-      citty: 0.2.2
-      consola: 3.4.2
-      crossws: 0.4.10(srvx@0.11.21)
-      defu: 6.1.7
-      get-port-please: 3.2.0
-      h3: 1.15.11
-      http-shutdown: 1.2.2
-      jiti: 2.7.0
-      mlly: 1.8.2
-      node-forge: 1.4.0
-      pathe: 2.0.3
-      std-env: 4.2.0
-      tinyclip: 0.1.15
-      ufo: 1.6.4
-      untun: 0.1.3
-      uqr: 0.1.3
-    transitivePeerDependencies:
-      - srvx
 
   listhen@1.10.0(srvx@0.11.22):
     dependencies:
@@ -24222,8 +24182,6 @@ snapshots:
 
   nanoid@3.3.12: {}
 
-  nanoid@3.3.15: {}
-
   nanoid@3.3.16: {}
 
   nanoid@5.1.11: {}
@@ -24330,117 +24288,6 @@ snapshots:
       - sqlite3
       - uploadthing
 
-  nitropack@2.13.4(@vercel/blob@2.4.0)(@vercel/functions@3.7.5(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.0))(oxc-parser@0.131.0)(rolldown@1.1.0)(srvx@0.11.21)(vite@8.0.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)):
-    dependencies:
-      '@cloudflare/kv-asset-handler': 0.4.2
-      '@rollup/plugin-alias': 6.0.0(rollup@4.62.2)
-      '@rollup/plugin-commonjs': 29.0.3(rollup@4.62.2)
-      '@rollup/plugin-inject': 5.0.5(rollup@4.62.2)
-      '@rollup/plugin-json': 6.1.0(rollup@4.62.2)
-      '@rollup/plugin-node-resolve': 16.0.3(rollup@4.62.2)
-      '@rollup/plugin-replace': 6.0.3(rollup@4.62.2)
-      '@rollup/plugin-terser': 1.0.0(rollup@4.62.2)
-      '@vercel/nft': 1.10.2(rollup@4.62.2)
-      archiver: 7.0.1
-      c12: 3.3.4(magicast@0.5.3)
-      chokidar: 5.0.0
-      citty: 0.2.2
-      compatx: 0.2.0
-      confbox: 0.2.4
-      consola: 3.4.2
-      cookie-es: 2.0.1
-      croner: 10.0.1
-      crossws: 0.3.5
-      db0: 0.3.4
-      defu: 6.1.7
-      destr: 2.0.5
-      dot-prop: 10.1.0
-      esbuild: 0.28.1
-      escape-string-regexp: 5.0.0
-      etag: 1.8.1
-      exsolve: 1.1.0
-      globby: 16.2.1
-      gzip-size: 7.0.0
-      h3: 1.15.11
-      hookable: 5.5.3
-      httpxy: 0.5.5
-      ioredis: 5.11.1
-      jiti: 2.7.0
-      klona: 2.0.6
-      knitwork: 1.3.0
-      listhen: 1.10.0(srvx@0.11.21)
-      magic-string: 0.30.21
-      magicast: 0.5.3
-      mime: 4.1.0
-      mlly: 1.8.2
-      node-fetch-native: 1.6.7
-      node-mock-http: 1.0.4
-      ofetch: 1.5.1
-      ohash: 2.0.11
-      pathe: 2.0.3
-      perfect-debounce: 2.1.0
-      pkg-types: 2.3.1
-      pretty-bytes: 7.1.0
-      radix3: 1.1.2
-      rollup: 4.62.2
-      rollup-plugin-visualizer: 7.0.1(rolldown@1.1.0)(rollup@4.62.2)
-      scule: 1.3.0
-      semver: 7.8.5
-      serve-placeholder: 2.0.2
-      serve-static: 2.2.1
-      source-map: 0.7.6
-      std-env: 4.2.0
-      ufo: 1.6.4
-      ultrahtml: 1.7.0
-      uncrypto: 0.1.3
-      unctx: 2.5.0
-      unenv: 2.0.0-rc.24
-      unimport: 6.3.0(esbuild@0.28.1)(oxc-parser@0.131.0)(rolldown@1.1.0)(rollup@4.62.2)(vite@8.0.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
-      unplugin-utils: 0.3.2
-      unstorage: 1.17.5(@vercel/blob@2.4.0)(@vercel/functions@3.7.5(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.0))(db0@0.3.4)(ioredis@5.11.1)
-      untyped: 2.0.0
-      unwasm: 0.5.3
-      youch: 4.1.1
-      youch-core: 0.3.3
-    transitivePeerDependencies:
-      - '@azure/app-configuration'
-      - '@azure/cosmos'
-      - '@azure/data-tables'
-      - '@azure/identity'
-      - '@azure/keyvault-secrets'
-      - '@azure/storage-blob'
-      - '@capacitor/preferences'
-      - '@deno/kv'
-      - '@electric-sql/pglite'
-      - '@farmfe/core'
-      - '@libsql/client'
-      - '@netlify/blobs'
-      - '@planetscale/database'
-      - '@rspack/core'
-      - '@upstash/redis'
-      - '@vercel/blob'
-      - '@vercel/functions'
-      - '@vercel/kv'
-      - aws4fetch
-      - bare-abort-controller
-      - bare-buffer
-      - better-sqlite3
-      - bun-types-no-globals
-      - drizzle-orm
-      - encoding
-      - idb-keyval
-      - mysql2
-      - oxc-parser
-      - react-native-b4a
-      - rolldown
-      - sqlite3
-      - srvx
-      - supports-color
-      - unloader
-      - uploadthing
-      - vite
-      - webpack
-
   nitropack@2.13.4(@vercel/blob@2.4.0)(@vercel/functions@3.7.5(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.0))(oxc-parser@0.131.0)(rolldown@1.1.0)(srvx@0.11.22)(vite@7.3.3(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)):
     dependencies:
       '@cloudflare/kv-asset-handler': 0.4.2
@@ -24496,7 +24343,7 @@ snapshots:
       rollup: 4.62.2
       rollup-plugin-visualizer: 7.0.1(rolldown@1.1.0)(rollup@4.62.2)
       scule: 1.3.0
-      semver: 7.8.5
+      semver: 7.8.4
       serve-placeholder: 2.0.2
       serve-static: 2.2.1
       source-map: 0.7.6
@@ -24552,6 +24399,117 @@ snapshots:
       - vite
       - webpack
     optional: true
+
+  nitropack@2.13.4(@vercel/blob@2.4.0)(@vercel/functions@3.7.5(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.0))(oxc-parser@0.131.0)(rolldown@1.1.0)(srvx@0.11.22)(vite@8.0.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0)):
+    dependencies:
+      '@cloudflare/kv-asset-handler': 0.4.2
+      '@rollup/plugin-alias': 6.0.0(rollup@4.62.2)
+      '@rollup/plugin-commonjs': 29.0.3(rollup@4.62.2)
+      '@rollup/plugin-inject': 5.0.5(rollup@4.62.2)
+      '@rollup/plugin-json': 6.1.0(rollup@4.62.2)
+      '@rollup/plugin-node-resolve': 16.0.3(rollup@4.62.2)
+      '@rollup/plugin-replace': 6.0.3(rollup@4.62.2)
+      '@rollup/plugin-terser': 1.0.0(rollup@4.62.2)
+      '@vercel/nft': 1.10.2(rollup@4.62.2)
+      archiver: 7.0.1
+      c12: 3.3.4(magicast@0.5.3)
+      chokidar: 5.0.0
+      citty: 0.2.2
+      compatx: 0.2.0
+      confbox: 0.2.4
+      consola: 3.4.2
+      cookie-es: 2.0.1
+      croner: 10.0.1
+      crossws: 0.3.5
+      db0: 0.3.4
+      defu: 6.1.7
+      destr: 2.0.5
+      dot-prop: 10.1.0
+      esbuild: 0.28.1
+      escape-string-regexp: 5.0.0
+      etag: 1.8.1
+      exsolve: 1.1.0
+      globby: 16.2.1
+      gzip-size: 7.0.0
+      h3: 1.15.11
+      hookable: 5.5.3
+      httpxy: 0.5.5
+      ioredis: 5.11.1
+      jiti: 2.7.0
+      klona: 2.0.6
+      knitwork: 1.3.0
+      listhen: 1.10.0(srvx@0.11.22)
+      magic-string: 0.30.21
+      magicast: 0.5.3
+      mime: 4.1.0
+      mlly: 1.8.2
+      node-fetch-native: 1.6.7
+      node-mock-http: 1.0.4
+      ofetch: 1.5.1
+      ohash: 2.0.11
+      pathe: 2.0.3
+      perfect-debounce: 2.1.0
+      pkg-types: 2.3.1
+      pretty-bytes: 7.1.0
+      radix3: 1.1.2
+      rollup: 4.62.2
+      rollup-plugin-visualizer: 7.0.1(rolldown@1.1.0)(rollup@4.62.2)
+      scule: 1.3.0
+      semver: 7.8.4
+      serve-placeholder: 2.0.2
+      serve-static: 2.2.1
+      source-map: 0.7.6
+      std-env: 4.2.0
+      ufo: 1.6.4
+      ultrahtml: 1.7.0
+      uncrypto: 0.1.3
+      unctx: 2.5.0
+      unenv: 2.0.0-rc.24
+      unimport: 6.3.0(esbuild@0.28.1)(oxc-parser@0.131.0)(rolldown@1.1.0)(rollup@4.62.2)(vite@8.0.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
+      unplugin-utils: 0.3.2
+      unstorage: 1.17.5(@vercel/blob@2.4.0)(@vercel/functions@3.7.5(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.0))(db0@0.3.4)(ioredis@5.11.1)
+      untyped: 2.0.0
+      unwasm: 0.5.3
+      youch: 4.1.1
+      youch-core: 0.3.3
+    transitivePeerDependencies:
+      - '@azure/app-configuration'
+      - '@azure/cosmos'
+      - '@azure/data-tables'
+      - '@azure/identity'
+      - '@azure/keyvault-secrets'
+      - '@azure/storage-blob'
+      - '@capacitor/preferences'
+      - '@deno/kv'
+      - '@electric-sql/pglite'
+      - '@farmfe/core'
+      - '@libsql/client'
+      - '@netlify/blobs'
+      - '@planetscale/database'
+      - '@rspack/core'
+      - '@upstash/redis'
+      - '@vercel/blob'
+      - '@vercel/functions'
+      - '@vercel/kv'
+      - aws4fetch
+      - bare-abort-controller
+      - bare-buffer
+      - better-sqlite3
+      - bun-types-no-globals
+      - drizzle-orm
+      - encoding
+      - idb-keyval
+      - mysql2
+      - oxc-parser
+      - react-native-b4a
+      - rolldown
+      - sqlite3
+      - srvx
+      - supports-color
+      - unloader
+      - uploadthing
+      - vite
+      - webpack
 
   node-abi@3.92.0:
     dependencies:
@@ -24628,16 +24586,16 @@ snapshots:
     dependencies:
       boolbase: 1.0.0
 
-  nuxt@4.4.6(@babel/plugin-syntax-jsx@7.29.7(@babel/core@7.29.0))(@babel/plugin-syntax-typescript@7.29.7(@babel/core@7.29.0))(@parcel/watcher@2.5.6)(@types/node@25.9.1)(@vercel/blob@2.4.0)(@vercel/functions@3.7.5(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.0))(@vue/compiler-sfc@3.5.39)(cac@6.7.14)(db0@0.3.4)(esbuild@0.27.7)(eslint@10.4.0(jiti@2.7.0))(ioredis@5.11.1)(lightningcss@1.32.0)(magicast@0.5.3)(optionator@0.9.4)(oxlint@1.73.0)(rolldown@1.1.0)(rollup-plugin-visualizer@7.0.1(rolldown@1.1.0)(rollup@4.62.2))(rollup@4.62.2)(srvx@0.11.21)(terser@5.49.0)(tsx@4.21.0)(typescript@6.0.3)(vite@8.0.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.0):
+  nuxt@4.4.6(@babel/plugin-syntax-jsx@7.29.7(@babel/core@7.29.0))(@babel/plugin-syntax-typescript@7.29.7(@babel/core@7.29.0))(@parcel/watcher@2.5.6)(@types/node@25.9.1)(@vercel/blob@2.4.0)(@vercel/functions@3.7.5(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.0))(@vue/compiler-sfc@3.5.39)(cac@6.7.14)(db0@0.3.4)(esbuild@0.27.7)(eslint@10.4.0(jiti@2.7.0))(ioredis@5.11.1)(lightningcss@1.32.0)(magicast@0.5.3)(optionator@0.9.4)(oxlint@1.73.0)(rolldown@1.1.0)(rollup-plugin-visualizer@7.0.1(rolldown@1.1.0)(rollup@4.62.2))(rollup@4.62.2)(srvx@0.11.22)(terser@5.49.0)(tsx@4.21.0)(typescript@6.0.3)(vite@8.0.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.0):
     dependencies:
       '@dxup/nuxt': 0.4.1(magicast@0.5.3)(typescript@6.0.3)
       '@nuxt/cli': 3.36.1(@nuxt/schema@4.4.6)(cac@6.7.14)(magicast@0.5.3)
       '@nuxt/devtools': 3.2.4(vite@8.0.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))(vue@3.5.35(typescript@6.0.3))
       '@nuxt/kit': 4.4.6(magicast@0.5.3)
-      '@nuxt/nitro-server': 4.4.6(4de82cd832aaebe02adef2654de42996)
+      '@nuxt/nitro-server': 4.4.6(2699b4f001706ddcda7414a146543997)
       '@nuxt/schema': 4.4.6
       '@nuxt/telemetry': 2.8.0(@nuxt/kit@4.4.6(magicast@0.5.3))
-      '@nuxt/vite-builder': 4.4.6(dfa46ec6872f1016f3452a810ad737a8)
+      '@nuxt/vite-builder': 4.4.6(9c86413fe1ca51fc9b9c634bbf622117)
       '@unhead/vue': 2.1.15(vue@3.5.35(typescript@6.0.3))
       '@vue/shared': 3.5.39
       chokidar: 5.0.0
@@ -24672,7 +24630,7 @@ snapshots:
       pkg-types: 2.3.1
       rou3: 0.8.1
       scule: 1.3.0
-      semver: 7.8.5
+      semver: 7.8.4
       std-env: 4.2.0
       tinyglobby: 0.2.17
       ufo: 1.6.4
@@ -24808,7 +24766,7 @@ snapshots:
       pkg-types: 2.3.1
       rou3: 0.8.1
       scule: 1.3.0
-      semver: 7.8.5
+      semver: 7.8.4
       std-env: 4.2.0
       tinyglobby: 0.2.17
       ufo: 1.6.4
@@ -25561,19 +25519,13 @@ snapshots:
 
   postcss@8.4.31:
     dependencies:
-      nanoid: 3.3.15
+      nanoid: 3.3.16
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
   postcss@8.5.15:
     dependencies:
       nanoid: 3.3.12
-      picocolors: 1.1.1
-      source-map-js: 1.2.1
-
-  postcss@8.5.17:
-    dependencies:
-      nanoid: 3.3.16
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
@@ -26338,7 +26290,7 @@ snapshots:
       '@vercel/sandbox': 2.1.1
       async-retry: 1.3.3
       debug: 4.4.3
-      zod: 4.1.11
+      zod: 4.4.3
     transitivePeerDependencies:
       - bare-abort-controller
       - react-native-b4a
@@ -26629,9 +26581,6 @@ snapshots:
   sql.js@1.14.1: {}
 
   srvx@0.11.16: {}
-
-  srvx@0.11.21:
-    optional: true
 
   srvx@0.11.22: {}
 
@@ -27788,7 +27737,7 @@ snapshots:
       '@oxc-project/runtime': 0.115.0
       lightningcss: 1.32.0
       picomatch: 4.0.5
-      postcss: 8.5.17
+      postcss: 8.5.15
       rolldown: 1.0.0-rc.9(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)
       tinyglobby: 0.2.17
     optionalDependencies:
