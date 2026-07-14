@@ -26,28 +26,40 @@ export const DEVELOPMENT_WORKFLOW_STREAM_ROUTE = `${DEVELOPMENT_WORKFLOW_WORLD_R
 export const DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER = "x-eve-dev-workflow-transport";
 export const DEVELOPMENT_WORKFLOW_DELIVERY_HEADER = "x-eve-dev-workflow-delivery";
 
-export type DevelopmentWorldOperation =
-  | "events.create"
-  | "events.get"
-  | "events.list"
-  | "events.listByCorrelationId"
-  | "hooks.get"
-  | "hooks.getByToken"
-  | "hooks.list"
-  | "getDeploymentId"
-  | "queue"
-  | "resolveLatestDeploymentId"
-  | "runs.experimentalSetAttributes"
-  | "runs.get"
-  | "runs.list"
-  | "steps.get"
-  | "steps.list"
-  | "streams.close"
-  | "streams.getChunks"
-  | "streams.getInfo"
-  | "streams.list"
-  | "streams.write"
-  | "streams.writeMulti";
+/**
+ * The single source of truth for World operations forwarded over the dev
+ * RPC: the worker client generates its method forwards from this list and
+ * the parent dispatches by walking the same dot-path on the real world, so
+ * adapting to a vendored-world interface change is one entry here. The
+ * members NOT listed are the deliberate exceptions — `streams.get` returns
+ * a live stream over its own route, `createQueueHandler` runs entirely in
+ * the worker, and `start`/`close` belong to the parent's lifecycle.
+ */
+export const DEVELOPMENT_WORLD_OPERATIONS = [
+  "events.create",
+  "events.get",
+  "events.list",
+  "events.listByCorrelationId",
+  "hooks.get",
+  "hooks.getByToken",
+  "hooks.list",
+  "getDeploymentId",
+  "queue",
+  "resolveLatestDeploymentId",
+  "runs.experimentalSetAttributes",
+  "runs.get",
+  "runs.list",
+  "steps.get",
+  "steps.list",
+  "streams.close",
+  "streams.getChunks",
+  "streams.getInfo",
+  "streams.list",
+  "streams.write",
+  "streams.writeMulti",
+] as const;
+
+export type DevelopmentWorldOperation = (typeof DEVELOPMENT_WORLD_OPERATIONS)[number];
 
 export interface DevelopmentWorldCall {
   readonly arguments: readonly unknown[];

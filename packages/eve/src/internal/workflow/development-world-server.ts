@@ -17,6 +17,7 @@ import {
   DEVELOPMENT_WORKFLOW_STREAM_ROUTE,
   DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER,
   DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
+  DEVELOPMENT_WORLD_OPERATIONS,
   type DevelopmentWorldCall,
 } from "#internal/workflow/development-world-protocol.js";
 
@@ -268,62 +269,33 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
       throw new Error("Development Workflow World call is malformed.");
     }
     const args = [...call.arguments];
-    switch (call.operation) {
-      case "getDeploymentId":
-      case "resolveLatestDeploymentId":
-        return this.#resolveActiveGenerationId();
-      case "queue":
-        return await this.#queue(...(args as Parameters<World["queue"]>));
-      case "runs.get":
-        return await invoke(this.#world.runs.get, args, this.#world.runs);
-      case "runs.list":
-        return await invoke(this.#world.runs.list, args, this.#world.runs);
-      case "runs.experimentalSetAttributes": {
-        const operation = this.#world.runs.experimentalSetAttributes;
-        if (operation === undefined) {
-          return undefined;
-        }
-        return await invoke(operation, args, this.#world.runs);
-      }
-      case "steps.get":
-        return await invoke(this.#world.steps.get, args, this.#world.steps);
-      case "steps.list":
-        return await invoke(this.#world.steps.list, args, this.#world.steps);
-      case "events.create":
-        return await invoke(this.#world.events.create, args, this.#world.events);
-      case "events.get":
-        return await invoke(this.#world.events.get, args, this.#world.events);
-      case "events.list":
-        return await invoke(this.#world.events.list, args, this.#world.events);
-      case "events.listByCorrelationId":
-        return await invoke(this.#world.events.listByCorrelationId, args, this.#world.events);
-      case "hooks.get":
-        return await invoke(this.#world.hooks.get, args, this.#world.hooks);
-      case "hooks.getByToken":
-        return await invoke(this.#world.hooks.getByToken, args, this.#world.hooks);
-      case "hooks.list":
-        return await invoke(this.#world.hooks.list, args, this.#world.hooks);
-      case "streams.write":
-        return await invoke(this.#world.streams.write, args, this.#world.streams);
-      case "streams.writeMulti": {
-        const operation = this.#world.streams.writeMulti;
-        if (operation === undefined) {
-          for (const chunk of args[2] as readonly (string | Uint8Array)[]) {
-            await this.#world.streams.write(args[0] as string, args[1] as string, chunk);
-          }
-          return undefined;
-        }
-        return await invoke(operation, args, this.#world.streams);
-      }
-      case "streams.close":
-        return await invoke(this.#world.streams.close, args, this.#world.streams);
-      case "streams.list":
-        return await invoke(this.#world.streams.list, args, this.#world.streams);
-      case "streams.getChunks":
-        return await invoke(this.#world.streams.getChunks, args, this.#world.streams);
-      case "streams.getInfo":
-        return await invoke(this.#world.streams.getInfo, args, this.#world.streams);
+    // Deployment identity and enqueueing carry eve semantics (generation
+    // resolution, the delivery header); everything else forwards to the
+    // vendored world by the dot-path the shared operation table names.
+    if (call.operation === "getDeploymentId" || call.operation === "resolveLatestDeploymentId") {
+      return this.#resolveActiveGenerationId();
     }
+    if (call.operation === "queue") {
+      return await this.#queue(...(args as Parameters<World["queue"]>));
+    }
+    if (call.operation === "streams.writeMulti" && this.#world.streams.writeMulti === undefined) {
+      for (const chunk of args[2] as readonly (string | Uint8Array)[]) {
+        await this.#world.streams.write(args[0] as string, args[1] as string, chunk);
+      }
+      return undefined;
+    }
+    const separator = call.operation.indexOf(".");
+    const receiver: unknown = this.#world[call.operation.slice(0, separator) as keyof World];
+    const operation =
+      typeof receiver === "object" && receiver !== null
+        ? (receiver as Record<string, unknown>)[call.operation.slice(separator + 1)]
+        : undefined;
+    if (typeof operation !== "function") {
+      // Optional interface members (e.g. runs.experimentalSetAttributes)
+      // no-op rather than fail a caller probing for support.
+      return undefined;
+    }
+    return await Reflect.apply(operation, receiver, args);
   }
 
   #isTrusted(request: Request): boolean {
@@ -364,16 +336,15 @@ function isValidGenerationId(generationId: string): boolean {
   );
 }
 
-function invoke(
-  operation: (...args: never[]) => unknown,
-  args: readonly unknown[],
-  receiver: unknown,
-): Promise<unknown> | unknown {
-  return Reflect.apply(operation, receiver, args);
-}
+const DEVELOPMENT_WORLD_OPERATION_SET: ReadonlySet<string> = new Set(DEVELOPMENT_WORLD_OPERATIONS);
 
 function isDevelopmentWorldCall(value: unknown): value is DevelopmentWorldCall {
-  return isObject(value) && typeof value.operation === "string" && Array.isArray(value.arguments);
+  return (
+    isObject(value) &&
+    typeof value.operation === "string" &&
+    DEVELOPMENT_WORLD_OPERATION_SET.has(value.operation) &&
+    Array.isArray(value.arguments)
+  );
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

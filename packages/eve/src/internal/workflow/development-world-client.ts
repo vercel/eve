@@ -27,6 +27,7 @@ import {
   DEVELOPMENT_WORKFLOW_STREAM_ROUTE,
   DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER,
   DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
+  DEVELOPMENT_WORLD_OPERATIONS,
   type DevelopmentWorldCall,
   type DevelopmentWorldOperation,
 } from "#internal/workflow/development-world-protocol.js";
@@ -85,6 +86,7 @@ async function call<T>(
  * delivery gets pinned to the generation its run started on.
  */
 export function createDevelopmentWorkflowWorld(): World {
+  const forwarded = buildForwardedOperations();
   const world = {
     specVersion: 5 as SpecVersion,
     processExitTriggersQueueRedelivery: false,
@@ -96,39 +98,18 @@ export function createDevelopmentWorkflowWorld(): World {
         getDevelopmentWorkflowGeneration()?.generationId ?? (await call<string>("getDeploymentId"))
       );
     },
-    async resolveLatestDeploymentId() {
-      return await call<string>("resolveLatestDeploymentId");
-    },
-    async queue(...args: Parameters<World["queue"]>) {
-      return await call<Awaited<ReturnType<World["queue"]>>>("queue", args);
-    },
+    resolveLatestDeploymentId: forwarded.topLevel
+      .resolveLatestDeploymentId as World["resolveLatestDeploymentId"],
+    queue: forwarded.topLevel.queue as World["queue"],
     createQueueHandler,
-    runs: {
-      get: async (...args: unknown[]) => await call("runs.get", args),
-      list: async (...args: unknown[]) => await call("runs.list", args),
-      experimentalSetAttributes: async (...args: unknown[]) =>
-        await call("runs.experimentalSetAttributes", args),
-    } as World["runs"],
-    steps: {
-      get: async (...args: unknown[]) => await call("steps.get", args),
-      list: async (...args: unknown[]) => await call("steps.list", args),
-    } as World["steps"],
-    events: {
-      create: async (...args: unknown[]) => await call("events.create", args),
-      get: async (...args: unknown[]) => await call("events.get", args),
-      list: async (...args: unknown[]) => await call("events.list", args),
-      listByCorrelationId: async (...args: unknown[]) =>
-        await call("events.listByCorrelationId", args),
-    } as World["events"],
-    hooks: {
-      get: async (...args: unknown[]) => await call("hooks.get", args),
-      getByToken: async (...args: unknown[]) => await call("hooks.getByToken", args),
-      list: async (...args: unknown[]) => await call("hooks.list", args),
-    } as World["hooks"],
+    runs: forwarded.groups.runs as World["runs"],
+    steps: forwarded.groups.steps as World["steps"],
+    events: forwarded.groups.events as World["events"],
+    hooks: forwarded.groups.hooks as World["hooks"],
     streams: {
-      write: async (...args: unknown[]) => await call("streams.write", args),
-      writeMulti: async (...args: unknown[]) => await call("streams.writeMulti", args),
-      close: async (...args: unknown[]) => await call("streams.close", args),
+      ...forwarded.groups.streams,
+      // A live stream cannot ride the value codec; it flows through a
+      // dedicated route as a raw response body.
       get: async (runId: string, name: string, startIndex?: number) => {
         const url = new URL(resolveDevelopmentWorldBaseUrl());
         url.pathname = DEVELOPMENT_WORKFLOW_STREAM_ROUTE;
@@ -143,15 +124,36 @@ export function createDevelopmentWorkflowWorld(): World {
         }
         return response.body;
       },
-      list: async (...args: unknown[]) => await call("streams.list", args),
-      getChunks: async (...args: unknown[]) => await call("streams.getChunks", args),
-      getInfo: async (...args: unknown[]) => await call("streams.getInfo", args),
     } as World["streams"],
     async start() {},
     async close() {},
   } satisfies World;
 
   return world;
+}
+
+type ForwardedOperation = (...args: unknown[]) => Promise<unknown>;
+
+/**
+ * Generates one forwarding method per entry in the shared operation table,
+ * so the client's surface tracks the table instead of hand-written stubs.
+ */
+function buildForwardedOperations(): {
+  readonly groups: Readonly<Record<string, Readonly<Record<string, ForwardedOperation>>>>;
+  readonly topLevel: Readonly<Record<string, ForwardedOperation>>;
+} {
+  const groups: Record<string, Record<string, ForwardedOperation>> = {};
+  const topLevel: Record<string, ForwardedOperation> = {};
+  for (const operation of DEVELOPMENT_WORLD_OPERATIONS) {
+    const forward: ForwardedOperation = async (...args) => await call(operation, args);
+    const separator = operation.indexOf(".");
+    if (separator === -1) {
+      topLevel[operation] = forward;
+    } else {
+      (groups[operation.slice(0, separator)] ??= {})[operation.slice(separator + 1)] = forward;
+    }
+  }
+  return { groups, topLevel };
 }
 
 function createQueueHandler(
