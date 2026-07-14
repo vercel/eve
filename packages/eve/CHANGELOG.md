@@ -1,5 +1,13 @@
 # eve
 
+## 0.24.2
+
+### Patch Changes
+
+- 72ccdc0: Compaction now reserves room for its checkpoint prompt before reaching the configured threshold. The prompt asks the compaction model to distinguish completed work from remaining work, and later compactions receive the previous checkpoint intact instead of truncating it with ordinary transcript text.
+- 2c12460: Tool approvals now resolve before channel context is added to the next model request, so approving a tool from channels such as Linear executes the tool instead of leaving a dangling tool call.
+- d810570: Keep generated eve service builds isolated from a colocated Next.js Build Output and preserve host middleware mappings when Vercel collects the generated service.
+
 ## 0.24.1
 
 ### Patch Changes
