@@ -10,11 +10,10 @@ import { renameWithTransientBusyRetry } from "#shared/rename-with-retry.js";
 
 const DEV_RUNTIME_ARTIFACTS_DIRECTORY = "dev-runtime";
 const DEV_RUNTIME_ARTIFACTS_ACTIVATED_MARKER = "activated";
+const DEV_RUNTIME_ARTIFACTS_GENERATION_METADATA = "generation.json";
 const DEV_RUNTIME_ARTIFACTS_POINTER_VERSION = 2;
 const DEV_RUNTIME_SNAPSHOT_RECENT_WINDOW_MS = 15 * 60 * 1000;
 const DEV_RUNTIME_SNAPSHOT_RETAIN_COUNT = 5;
-const DEV_RUNTIME_WORKFLOW_DATA_MAX_SCAN_BYTES = 1024 * 1024;
-const TERMINAL_WORKFLOW_RUN_STATUSES = new Set(["completed", "failed", "cancelled", "canceled"]);
 
 interface DevelopmentRuntimeArtifactsPointerV1 {
   readonly appRoot: string;
@@ -39,6 +38,12 @@ export interface DevelopmentRuntimeArtifactsSnapshot {
   readonly snapshotRoot: string;
   readonly snapshotSourceRoot: string;
   readonly sourceRoot: string;
+}
+
+export interface ActivatedDevelopmentRuntimeArtifactsGeneration {
+  readonly id: string;
+  readonly runtimeAppRoot: string;
+  readonly snapshotRoot: string;
 }
 
 export interface ActiveDevelopmentRuntimeArtifactsSnapshot {
@@ -106,6 +111,10 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
       ),
       runtimeAppRoot: sourceSnapshotPlan.runtimeAppRoot,
     });
+    await writeFile(
+      join(snapshotRoot, DEV_RUNTIME_ARTIFACTS_GENERATION_METADATA),
+      `${JSON.stringify({ runtimeAppRoot: sourceSnapshotPlan.runtimeAppRoot })}\n`,
+    );
   } catch (error) {
     await rm(snapshotRoot, { force: true, recursive: true }).catch(() => {});
     throw error;
@@ -117,6 +126,67 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
     snapshotSourceRoot: sourceSnapshotPlan.snapshotSourceRoot,
     sourceRoot: sourceSnapshotPlan.sourceRoot,
   };
+}
+
+export async function readActivatedDevelopmentRuntimeArtifactGenerations(
+  appRoot: string,
+): Promise<readonly ActivatedDevelopmentRuntimeArtifactsGeneration[]> {
+  const snapshotsDirectory = resolveDevelopmentRuntimeArtifactsSnapshotsDirectory(appRoot);
+  let entries: Dirent<string>[];
+  try {
+    entries = await readdir(snapshotsDirectory, { withFileTypes: true });
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+  const generations = await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory())
+      .map(async (entry): Promise<ActivatedDevelopmentRuntimeArtifactsGeneration | undefined> => {
+        const snapshotRoot = join(snapshotsDirectory, entry.name);
+        if (!existsSync(join(snapshotRoot, DEV_RUNTIME_ARTIFACTS_ACTIVATED_MARKER))) {
+          return undefined;
+        }
+        const metadataSource = await readGenerationMetadata(snapshotRoot);
+        if (metadataSource === undefined) {
+          return undefined;
+        }
+        const metadata = parseJsonObject(metadataSource);
+        if (metadata === undefined || typeof metadata.runtimeAppRoot !== "string") {
+          throw new Error(`Activated development generation "${entry.name}" has invalid metadata.`);
+        }
+        if (
+          !isPathInsideOrEqual(metadata.runtimeAppRoot, snapshotRoot) ||
+          !existsSync(
+            join(metadata.runtimeAppRoot, ".eve", "compile", "compiled-agent-manifest.json"),
+          )
+        ) {
+          throw new Error(`Activated development generation "${entry.name}" is incomplete.`);
+        }
+        return {
+          id: entry.name,
+          runtimeAppRoot: metadata.runtimeAppRoot,
+          snapshotRoot,
+        };
+      }),
+  );
+  return generations.filter(
+    (generation): generation is ActivatedDevelopmentRuntimeArtifactsGeneration =>
+      generation !== undefined,
+  );
+}
+
+async function readGenerationMetadata(snapshotRoot: string): Promise<string | undefined> {
+  try {
+    return await readFile(join(snapshotRoot, DEV_RUNTIME_ARTIFACTS_GENERATION_METADATA), "utf8");
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
 }
 
 /**
@@ -223,17 +293,19 @@ export function readDevelopmentRuntimeArtifactsRevision(
 export async function pruneDevelopmentRuntimeArtifactsSnapshots(input: {
   readonly appRoot: string;
   readonly now?: number;
+  readonly protectAll?: boolean;
+  readonly protectedGenerationIds?: ReadonlySet<string>;
   readonly recentWindowMs?: number;
   readonly retainCount?: number;
 }): Promise<void> {
+  if (input.protectAll === true) {
+    return;
+  }
   const snapshotsDirectory = resolveDevelopmentRuntimeArtifactsSnapshotsDirectory(input.appRoot);
   const pointer = readDevelopmentRuntimeArtifactsPointer(
     resolveDevelopmentRuntimeArtifactsPointerPath(input.appRoot),
   );
-  const protectedPaths = [
-    ...collectProtectedSnapshotPaths(pointer),
-    ...(await collectWorkflowDataSnapshotPaths({ appRoot: input.appRoot, snapshotsDirectory })),
-  ];
+  const protectedPaths = collectProtectedSnapshotPaths(pointer);
   const now = input.now ?? Date.now();
   const recentWindowMs = input.recentWindowMs ?? DEV_RUNTIME_SNAPSHOT_RECENT_WINDOW_MS;
   const retainCount = input.retainCount ?? DEV_RUNTIME_SNAPSHOT_RETAIN_COUNT;
@@ -255,6 +327,7 @@ export async function pruneDevelopmentRuntimeArtifactsSnapshots(input: {
         .map(async (entry) => {
           const path = join(snapshotsDirectory, entry.name);
           return {
+            name: entry.name,
             path,
             mtimeMs: (await stat(path)).mtimeMs,
           };
@@ -265,7 +338,7 @@ export async function pruneDevelopmentRuntimeArtifactsSnapshots(input: {
   await Promise.all(
     snapshots.map(async (snapshot, index) => {
       if (
-        existsSync(join(snapshot.path, DEV_RUNTIME_ARTIFACTS_ACTIVATED_MARKER)) ||
+        input.protectedGenerationIds?.has(snapshot.name) === true ||
         index < retainCount ||
         now - snapshot.mtimeMs <= recentWindowMs ||
         protectedPaths.some((protectedPath) => pathsOverlap(snapshot.path, protectedPath))
@@ -346,104 +419,6 @@ function collectProtectedSnapshotPaths(
   return [pointer.runtimeAppRoot, pointer.snapshotRoot];
 }
 
-async function collectWorkflowDataSnapshotPaths(input: {
-  readonly appRoot: string;
-  readonly snapshotsDirectory: string;
-}): Promise<readonly string[]> {
-  const workflowDataDirectory = join(input.appRoot, ".workflow-data");
-  const snapshotPaths = new Set<string>();
-
-  await collectSnapshotPathsFromDirectory({
-    directory: workflowDataDirectory,
-    snapshotPaths,
-    snapshotsDirectory: input.snapshotsDirectory,
-  });
-
-  return [...snapshotPaths];
-}
-
-async function collectSnapshotPathsFromDirectory(input: {
-  readonly directory: string;
-  readonly snapshotPaths: Set<string>;
-  readonly snapshotsDirectory: string;
-}): Promise<void> {
-  let entries: Dirent<string>[];
-
-  try {
-    entries = await readdir(input.directory, { withFileTypes: true });
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return;
-    }
-
-    throw error;
-  }
-
-  await Promise.all(
-    entries.map(async (entry) => {
-      const path = join(input.directory, entry.name);
-
-      if (entry.isDirectory()) {
-        await collectSnapshotPathsFromDirectory({
-          directory: path,
-          snapshotPaths: input.snapshotPaths,
-          snapshotsDirectory: input.snapshotsDirectory,
-        });
-        return;
-      }
-
-      if (!entry.isFile()) {
-        return;
-      }
-
-      const fileStats = await stat(path);
-      // Local workflow run payloads are small; keep this best-effort scan cheap.
-      if (fileStats.size > DEV_RUNTIME_WORKFLOW_DATA_MAX_SCAN_BYTES) {
-        return;
-      }
-
-      const source = await readFile(path, "utf8");
-      if (!shouldScanWorkflowDataSource(source)) {
-        return;
-      }
-
-      for (const snapshotPath of collectSnapshotPathsFromText(source, input.snapshotsDirectory)) {
-        input.snapshotPaths.add(snapshotPath);
-      }
-    }),
-  );
-}
-
-function collectSnapshotPathsFromText(
-  source: string,
-  snapshotsDirectory: string,
-): readonly string[] {
-  const snapshotPaths = new Set<string>();
-  const normalizedSnapshotsDirectory = snapshotsDirectory.replaceAll("\\", "/");
-  const pattern = new RegExp(`${escapeRegExp(normalizedSnapshotsDirectory)}/([^/"'\\s]+)`, "gu");
-  const normalizedSource = source.replaceAll("\\\\", "/").replaceAll("\\", "/");
-
-  for (const match of normalizedSource.matchAll(pattern)) {
-    const snapshotName = match[1];
-
-    if (snapshotName !== undefined && snapshotName.length > 0) {
-      snapshotPaths.add(join(snapshotsDirectory, snapshotName));
-    }
-  }
-
-  return [...snapshotPaths];
-}
-
-function shouldScanWorkflowDataSource(source: string): boolean {
-  const value = parseJsonObject(source);
-  if (value === undefined) {
-    return true;
-  }
-
-  const status = value.status;
-  return typeof status !== "string" || !TERMINAL_WORKFLOW_RUN_STATUSES.has(status);
-}
-
 function parseJsonObject(source: string): Record<string, unknown> | undefined {
   try {
     const value = JSON.parse(source) as unknown;
@@ -455,10 +430,6 @@ function parseJsonObject(source: string): Record<string, unknown> | undefined {
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 function pathsOverlap(left: string, right: string): boolean {

@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
+import { loadDeclaration } from "../_shared.mjs";
+
 const require = createRequire(import.meta.url);
 
 function resolveWorkflowWorldLocalVersion() {
@@ -53,5 +55,6 @@ export default {
   packageName: "@workflow/world-local",
   compiledPath: "@workflow/world-local",
   chunkGroup: "workflow",
+  declaration: await loadDeclaration("workflow-world-local.d.ts"),
   plugins: [workflowWorldLocalVersionPlugin],
 };

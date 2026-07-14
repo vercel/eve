@@ -400,9 +400,11 @@ export async function configureDevelopmentNitroRoutes(
   registerDevelopmentControlRoutes(nitro, artifactsConfig);
 
   const workflowBundlePath = join(workflowBuildDirectory, "workflows.mjs");
-  await registerWorkflowRoute(nitro, preparedHost, workflowBundlePath, [
-    createWorkflowDirectHandlerEntry(preparedHost, workflowBundlePath),
-  ]);
+  const directHandlers: WorkflowDirectHandlerEntry[] = [];
+  if (preparedHost.compileResult.manifest.config.experimental?.workflow?.world !== undefined) {
+    directHandlers.push(createWorkflowDirectHandlerEntry(preparedHost, workflowBundlePath));
+  }
+  await registerWorkflowRoute(nitro, preparedHost, workflowBundlePath, directHandlers);
   nitro.routing.sync();
 }
 

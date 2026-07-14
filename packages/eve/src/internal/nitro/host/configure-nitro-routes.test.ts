@@ -271,7 +271,7 @@ describe("Nitro route configuration", () => {
     expect(workflowBuilderMocks.build).toHaveBeenCalledOnce();
   });
 
-  it("registers direct workflow queue handlers in dev mode so the worker bypasses HTTP dispatch", async () => {
+  it("leaves development queue dispatch to the stable parent", async () => {
     const root = "/tmp/eve-nitro-direct-handlers";
     const buildDir = `${root}/nitro`;
     const nitro = createNitroStub({ buildDir, dev: true, rootDir: root });
@@ -281,19 +281,25 @@ describe("Nitro route configuration", () => {
     const workflowHandlerSource = readWriteFileSourceMatching("/workflow/workflows-handler.mjs");
 
     expect(workflowHandlerSource).toContain('import { POST } from "./workflows.mjs";');
-    expect(workflowHandlerSource).toContain(
-      'import "../../.eve/compiled-artifacts-workflow-world.mjs";',
+    expect(workflowHandlerSource).not.toContain("registerHandler");
+    expect(workflowHandlerSource).not.toContain("__eveGetWorkflowWorld");
+    expect(readWriteFileSourceMatching("/workflow/steps-handler.mjs")).toBeUndefined();
+  });
+
+  it("keeps configured development World queue dispatch inside the worker", async () => {
+    const root = "/tmp/eve-nitro-configured-world-handlers";
+    const nitro = createNitroStub({ buildDir: `${root}/nitro`, dev: true, rootDir: root });
+
+    await configureDevelopmentNitroRoutes(
+      nitro,
+      createPreparedHost({ appRoot: root, workflowWorld: "@workflow/world-postgres" }),
     );
-    expect(workflowHandlerSource).toContain(
-      'import { getWorld as __eveGetWorkflowWorld } from "file:///G:/projects/test-eve/node_modules/.pnpm/eve@0.3.0/node_modules/eve/dist/src/compiled/@workflow/core/runtime.js";',
-    );
+
+    const workflowHandlerSource = readWriteFileSourceMatching("/workflow/workflows-handler.mjs");
     expect(workflowHandlerSource).toContain(
       "const __eveWorkflowWorld = await __eveGetWorkflowWorld();",
     );
-    expect(workflowHandlerSource).toContain(
-      '__eveWorkflowWorld.registerHandler("__eve746573742d6167656e74_wkf_workflow_", POST);',
-    );
-    expect(readWriteFileSourceMatching("/workflow/steps-handler.mjs")).toBeUndefined();
+    expect(workflowHandlerSource).toContain("__eveWorkflowWorld.registerHandler");
   });
 
   it("bakes the module map loader into the dev schedule handler", async () => {

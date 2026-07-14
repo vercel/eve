@@ -18,6 +18,15 @@ const mocks = vi.hoisted(() => {
     flush: vi.fn(async () => undefined),
     rebuild: vi.fn(async () => undefined),
   };
+  const mocksWorldInstance = {
+    close: vi.fn(async () => undefined),
+    collectGenerationReferences: vi.fn(async () => ({
+      generationIds: new Set<string>(),
+      protectAll: false,
+    })),
+    handleRequest: vi.fn(async () => undefined),
+    start: vi.fn(async () => undefined),
+  };
   const listenerServer = {
     close: vi.fn(async () => undefined),
     ready: vi.fn(async () => undefined),
@@ -73,6 +82,9 @@ const mocks = vi.hoisted(() => {
     nitro,
     prepareDevelopmentApplicationHost: vi.fn(async () => ({
       appRoot: "/tmp/eve-test",
+      compileResult: {
+        manifest: { config: { name: "test-agent" } },
+      },
       generation: {
         fingerprint: "test",
         runtimeAppRoot: "/tmp/eve-test/.eve/dev-runtime/snapshots/test/source/app",
@@ -90,6 +102,8 @@ const mocks = vi.hoisted(() => {
       },
     })),
     activateDevelopmentGeneration: vi.fn(async () => undefined),
+    createParentDevelopmentWorkflowWorld: vi.fn(() => mocksWorldInstance),
+    worldInstance: mocksWorldInstance,
     discardDevelopmentGeneration: vi.fn(async () => undefined),
     removeDevelopmentHostWorkspace: vi.fn(async () => undefined),
     readFile: vi.fn(async (path: string) => {
@@ -158,6 +172,10 @@ vi.mock("./dev-authored-rebuild-coordinator.js", () => ({
 
 vi.mock("./dev-host-workspace.js", () => ({
   removeDevelopmentHostWorkspace: mocks.removeDevelopmentHostWorkspace,
+}));
+
+vi.mock("#internal/workflow/development-world-server.js", () => ({
+  createParentDevelopmentWorkflowWorld: mocks.createParentDevelopmentWorkflowWorld,
 }));
 
 vi.mock("#internal/nitro/development-generation.js", () => ({
@@ -379,6 +397,12 @@ describe("createDevelopmentServer", () => {
       },
     });
     expect(mocks.pruneLocalSandboxTemplatesInBackground).toHaveBeenCalledWith("/tmp/eve-test");
+    expect(mocks.createParentDevelopmentWorkflowWorld).toHaveBeenCalledWith(
+      expect.objectContaining({ agentName: "test-agent", appRoot: "/tmp/eve-test" }),
+    );
+    expect(mocks.worldInstance.start).toHaveBeenCalledOnce();
+    expect(process.env.EVE_DEV_WORKFLOW_TRANSPORT_SECRET).toEqual(expect.any(String));
+    expect(process.env.EVE_DEV_WORKER_APP_ROOT).toBe("/tmp/eve-test");
     expect(process.env.WORKFLOW_LOCAL_BASE_URL).toBe("http://127.0.0.1:42123");
     expect(process.env.PORT).toBe("42123");
 
@@ -391,7 +415,32 @@ describe("createDevelopmentServer", () => {
     });
     expect(process.env.WORKFLOW_LOCAL_BASE_URL).toBeUndefined();
     expect(process.env.PORT).toBeUndefined();
+    expect(process.env.EVE_DEV_WORKFLOW_TRANSPORT_SECRET).toBeUndefined();
+    expect(process.env.EVE_DEV_WORKER_APP_ROOT).toBeUndefined();
     expect(process.env.EVE_DEVELOPMENT_SANDBOX_RUN_ID).toBeUndefined();
+    expect(mocks.worldInstance.close).toHaveBeenCalledOnce();
+  });
+
+  it("keeps an explicitly configured Workflow World inside the worker", async () => {
+    const preparedHost = await mocks.prepareDevelopmentApplicationHost();
+    mocks.prepareDevelopmentApplicationHost.mockClear();
+    mocks.prepareDevelopmentApplicationHost.mockResolvedValueOnce({
+      ...preparedHost,
+      compileResult: {
+        manifest: {
+          config: {
+            experimental: { workflow: { world: "@workflow/world-postgres" } },
+            name: "test-agent",
+          },
+        },
+      },
+    } as never);
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+
+    const server = await startDevelopmentServer("/tmp/eve-test");
+
+    expect(mocks.createParentDevelopmentWorkflowWorld).not.toHaveBeenCalled();
+    await server.close();
   });
 
   it("uses Eve's default port when no port is requested", async () => {

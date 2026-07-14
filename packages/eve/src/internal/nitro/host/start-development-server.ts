@@ -51,38 +51,22 @@ import {
   activateDevelopmentGeneration,
   discardDevelopmentGeneration,
 } from "#internal/nitro/development-generation.js";
+import { randomBytes } from "node:crypto";
+import {
+  createDevelopmentWorkflowWorld,
+  installWorkflowLocalQueueEnvironment,
+  installWorkflowTransportEnvironment,
+} from "#internal/nitro/host/dev-workflow-world-setup.js";
+import type { ParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-server.js";
+import {
+  DEFAULT_DEVELOPMENT_SERVER_HOST,
+  normalizeDevelopmentServerClientUrl,
+} from "#internal/nitro/host/dev-server-url.js";
 
 const MAX_ALLOWED_DEVELOPMENT_SERVER_PORT = 65_535;
-const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
 const PORT_ENV = "PORT";
-const DEFAULT_DEVELOPMENT_SERVER_HOST = "127.0.0.1";
-const IPV6_LOOPBACK_HOSTNAME = "[::1]";
 
-/**
- * Hostnames Nitro/srvx surface when listening on an IPv6 wildcard interface.
- * They are valid bind targets but invalid as connect targets.
- */
-const IPV6_WILDCARD_LISTEN_HOSTNAMES: ReadonlySet<string> = new Set(["[::]", "::"]);
-
-/**
- * Rewrites a server URL whose hostname is a wildcard listen address into a
- * loopback URL on the same address family.
- */
-export function normalizeDevelopmentServerClientUrl(serverUrl: string): string {
-  const url = new URL(serverUrl);
-
-  if (IPV6_WILDCARD_LISTEN_HOSTNAMES.has(url.hostname)) {
-    url.hostname = IPV6_LOOPBACK_HOSTNAME;
-    return url.toString();
-  }
-
-  if (url.hostname === "0.0.0.0") {
-    url.hostname = DEFAULT_DEVELOPMENT_SERVER_HOST;
-    return url.toString();
-  }
-
-  return serverUrl;
-}
+export { normalizeDevelopmentServerClientUrl };
 
 /**
  * Returns whether a supplied URL identifies this app's healthy local development
@@ -209,37 +193,17 @@ function resolveDevelopmentServerPorts(input: {
   return ports as [number, ...number[]];
 }
 
-function installWorkflowLocalQueueEnvironment(serverUrl: string): () => void {
-  const previousWorkflowLocalBaseUrl = process.env[WORKFLOW_LOCAL_BASE_URL_ENV];
-  const previousPort = process.env[PORT_ENV];
-  const url = new URL(normalizeDevelopmentServerClientUrl(serverUrl));
-
-  process.env[WORKFLOW_LOCAL_BASE_URL_ENV] = url.origin;
-  if (url.port) {
-    process.env[PORT_ENV] = url.port;
-  }
-
-  return () => {
-    if (previousWorkflowLocalBaseUrl === undefined) {
-      delete process.env[WORKFLOW_LOCAL_BASE_URL_ENV];
-    } else {
-      process.env[WORKFLOW_LOCAL_BASE_URL_ENV] = previousWorkflowLocalBaseUrl;
-    }
-
-    if (previousPort === undefined) {
-      delete process.env[PORT_ENV];
-    } else {
-      process.env[PORT_ENV] = previousPort;
-    }
-  };
-}
-
 function addDevelopmentRuntimeArtifactsRebuildHandler(input: {
   readonly appRoot: string;
   readonly devServer: DrainedNitroDevServer;
   readonly watcher: AuthoredSourceWatcherHandle;
+  readonly workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
 }): void {
   input.devServer.setControlHandler(async (request) => {
+    const worldResponse = await input.workflowWorld?.handleRequest(request);
+    if (worldResponse !== undefined) {
+      return worldResponse;
+    }
     const url = new URL(request.url);
     if (url.pathname === EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH && request.method === "GET") {
       return handleDevRuntimeArtifactsRequest({ appRoot: input.appRoot });
@@ -261,6 +225,7 @@ async function closeDevelopmentServerResources(input: {
   readonly devServer: NitroDevelopmentServer | undefined;
   readonly developmentSandboxRunId: string;
   readonly nitro: Nitro | undefined;
+  readonly workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
 }): Promise<{ readonly errors: readonly unknown[]; readonly listenerClosed: boolean }> {
   const errors: unknown[] = [];
   const attempt = async (operation: () => Promise<void>): Promise<boolean> => {
@@ -279,6 +244,10 @@ async function closeDevelopmentServerResources(input: {
   }
   const devServer = input.devServer;
   const listenerClosed = devServer === undefined ? true : await attempt(() => devServer.close());
+  const workflowWorld = input.workflowWorld;
+  if (workflowWorld !== undefined) {
+    await attempt(() => workflowWorld.close());
+  }
   const nitro = input.nitro;
   if (nitro !== undefined) {
     await attempt(() => nitro.close());
@@ -410,6 +379,8 @@ async function startNitroDevelopmentServer(
   let nitro: Nitro | undefined;
   let devServer: NitroDevelopmentServer | undefined;
   let restoreWorkflowLocalQueueEnvironment: (() => void) | undefined;
+  let restoreWorkflowTransportEnvironment: (() => void) | undefined;
+  let workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
   let authoredSourceWatcher: AuthoredSourceWatcherHandle | undefined;
   let preparedDevelopmentHost: PreparedDevelopmentApplicationHost | undefined;
   let initialGenerationPublished = false;
@@ -436,6 +407,16 @@ async function startNitroDevelopmentServer(
     nitro = activeNitro;
     devServer = new DrainedNitroDevServer(activeNitro.logger);
     const activeDevServer = devServer;
+    const workflowTransportSecret = randomBytes(32).toString("base64url");
+    restoreWorkflowTransportEnvironment = installWorkflowTransportEnvironment(
+      project.appRoot,
+      workflowTransportSecret,
+    );
+    workflowWorld = createDevelopmentWorkflowWorld({
+      appRoot: project.appRoot,
+      preparedHost,
+      transportSecret: workflowTransportSecret,
+    });
     const hostname =
       options.host ?? activeNitro.options.devServer.hostname ?? DEFAULT_DEVELOPMENT_SERVER_HOST;
     const retryOnAddressInUse = requestedPort === undefined;
@@ -480,6 +461,7 @@ async function startNitroDevelopmentServer(
       },
       options.onBootProgress,
     );
+    await workflowWorld?.start();
     startDevelopmentSandboxPrewarmInBackground({
       appRoot: preparedHost.appRoot,
       compiledArtifactsSource,
@@ -488,6 +470,7 @@ async function startNitroDevelopmentServer(
     const rebuildCoordinator = await createDevelopmentAuthoredRebuildCoordinator({
       devServer: activeDevServer,
       initialHost: preparedHost,
+      workflowWorld,
     });
 
     authoredSourceWatcher = await devBootPhase(
@@ -506,6 +489,7 @@ async function startNitroDevelopmentServer(
       appRoot: project.appRoot,
       devServer: activeDevServer,
       watcher: authoredSourceWatcher,
+      workflowWorld,
     });
     await state.write(serverUrl);
     const restoreWorkflowLocalQueueEnvironmentOnClose = restoreWorkflowLocalQueueEnvironment;
@@ -515,6 +499,8 @@ async function startNitroDevelopmentServer(
 
     const authoredSourceWatcherOnClose = authoredSourceWatcher;
     const devServerOnClose = devServer;
+    const workflowWorldOnClose = workflowWorld;
+    const restoreWorkflowTransportEnvironmentOnClose = restoreWorkflowTransportEnvironment;
     let closePromise: Promise<void> | undefined;
     const close = (): Promise<void> => {
       closePromise ??= (async () => {
@@ -523,6 +509,7 @@ async function startNitroDevelopmentServer(
           devServer: devServerOnClose,
           developmentSandboxRunId,
           nitro: undefined,
+          workflowWorld: workflowWorldOnClose,
         });
         if (cleanup.listenerClosed) {
           await state.remove().catch(() => {});
@@ -536,6 +523,7 @@ async function startNitroDevelopmentServer(
         } finally {
           clearInitializedDevelopmentSandboxBackendNames(developmentSandboxRunId);
           restoreWorkflowLocalQueueEnvironmentOnClose();
+          restoreWorkflowTransportEnvironmentOnClose?.();
           restoreDevelopmentSandboxRunId(previousDevelopmentSandboxRunId);
         }
       })();
@@ -551,6 +539,7 @@ async function startNitroDevelopmentServer(
       devServer,
       developmentSandboxRunId,
       nitro,
+      workflowWorld,
     });
     const cleanupErrors = [...cleanup.errors];
     if (preparedDevelopmentHost !== undefined && !initialGenerationPublished) {
@@ -568,6 +557,7 @@ async function startNitroDevelopmentServer(
       );
     }
     restoreWorkflowLocalQueueEnvironment?.();
+    restoreWorkflowTransportEnvironment?.();
     clearInitializedDevelopmentSandboxBackendNames(developmentSandboxRunId);
     if (cleanup.listenerClosed) {
       await state.remove().catch(() => {});

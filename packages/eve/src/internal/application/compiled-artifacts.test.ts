@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { createWorkflowWorldPluginSource } from "#internal/application/compiled-artifacts.js";
+import {
+  createDevelopmentWorkflowWorldPluginSource,
+  createWorkflowWorldPluginSource,
+} from "#internal/application/compiled-artifacts.js";
 
 describe("createWorkflowWorldPluginSource", () => {
   it("imports a configured world package and delegates its construction to Workflow", () => {
@@ -39,5 +42,29 @@ describe("createWorkflowWorldPluginSource", () => {
         defaultWorld: "vercel",
       }),
     ).toContain("/compiled/@workflow/world-vercel/index.js");
+  });
+});
+
+describe("createDevelopmentWorkflowWorldPluginSource", () => {
+  it("installs the parent-backed World without starting a local World in the worker", () => {
+    const source = createDevelopmentWorkflowWorldPluginSource({
+      compiledArtifactsBootstrapPath: "/app/.eve/host/bootstrap.mjs",
+      configuredWorld: undefined,
+    });
+
+    expect(source).toContain("createDevelopmentWorkflowWorld");
+    expect(source).toContain("setWorld(createDevelopmentWorkflowWorld());");
+    expect(source).not.toContain("@workflow/world-local");
+    expect(source).not.toContain("workflowWorld.start");
+  });
+
+  it("keeps explicitly configured remote Worlds inside the worker", () => {
+    const source = createDevelopmentWorkflowWorldPluginSource({
+      compiledArtifactsBootstrapPath: "/app/.eve/host/bootstrap.mjs",
+      configuredWorld: "@acme/eve-world",
+    });
+
+    expect(source).toContain('import * as workflowWorldModule from "@acme/eve-world";');
+    expect(source).toContain("await workflowWorld.start?.();");
   });
 });

@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { lstat, mkdir, readdir, readFile, symlink, utimes, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -18,6 +18,7 @@ import {
   activateDevelopmentRuntimeArtifactsSnapshot,
   activateDevelopmentRuntimeArtifactsSnapshotTransaction,
   pruneDevelopmentRuntimeArtifactsSnapshots,
+  readActivatedDevelopmentRuntimeArtifactGenerations,
   readDevelopmentRuntimeArtifactsSnapshotRoot,
   readDevelopmentRuntimeArtifactsRevision,
   resolveDevelopmentRuntimeArtifactsPointerPath,
@@ -154,6 +155,45 @@ describe("development runtime artifact snapshots", () => {
     expect(readDevelopmentRuntimeArtifactsRevision(appRoot)).toEqual({
       revision: snapshot.runtimeAppRoot,
     });
+  });
+
+  it("restores complete activated generations and ignores snapshots from older formats", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-generation-registry-");
+    const compileDirectoryPath = join(appRoot, ".eve", "compile");
+    await mkdir(compileDirectoryPath, { recursive: true });
+    await writeFile(join(appRoot, "package.json"), '{"type":"module"}\n');
+    await writeFile(
+      join(compileDirectoryPath, "compiled-agent-manifest.json"),
+      `${JSON.stringify({ agentRoot: appRoot, appRoot })}\n`,
+    );
+    const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+    await activateDevelopmentRuntimeArtifactsSnapshot({ appRoot, snapshot });
+    const nextSnapshot = await stageDevelopmentRuntimeArtifactsSnapshot({
+      paths: { compileDirectoryPath },
+      project: { appRoot },
+    } as CompileAgentResult);
+    await activateDevelopmentRuntimeArtifactsSnapshot({ appRoot, snapshot: nextSnapshot });
+    const legacySnapshotRoot = join(appRoot, ".eve", "dev-runtime", "snapshots", "legacy");
+    await mkdir(legacySnapshotRoot, { recursive: true });
+    await writeFile(join(legacySnapshotRoot, "activated"), "");
+
+    const generations = await readActivatedDevelopmentRuntimeArtifactGenerations(appRoot);
+    expect(generations).toHaveLength(2);
+    expect(generations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: basename(snapshot.snapshotRoot),
+          runtimeAppRoot: snapshot.runtimeAppRoot,
+        }),
+        expect.objectContaining({
+          id: basename(nextSnapshot.snapshotRoot),
+          runtimeAppRoot: nextSnapshot.runtimeAppRoot,
+        }),
+      ]),
+    );
   });
 
   it("restores the prior runtime pointer when activation is rolled back", async () => {
@@ -343,7 +383,7 @@ describe("development runtime artifact snapshots", () => {
     expect(existsSync(staleSnapshotRoot)).toBe(false);
   });
 
-  it("retains every activated generation until lease-aware pruning exists", async () => {
+  it("prunes an inactive generation after its leases and durable references are released", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-activated-retention-");
     const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
     const firstSnapshotRoot = join(snapshotsRoot, "first");
@@ -351,7 +391,6 @@ describe("development runtime artifact snapshots", () => {
 
     for (const snapshotRoot of [firstSnapshotRoot, nextSnapshotRoot]) {
       await mkdir(snapshotRoot, { recursive: true });
-      await utimes(snapshotRoot, new Date(1_000), new Date(1_000));
       await activateDevelopmentRuntimeArtifactsSnapshot({
         appRoot,
         snapshot: {
@@ -361,6 +400,7 @@ describe("development runtime artifact snapshots", () => {
           sourceRoot: appRoot,
         },
       });
+      await utimes(snapshotRoot, new Date(1_000), new Date(1_000));
     }
 
     await pruneDevelopmentRuntimeArtifactsSnapshots({
@@ -370,11 +410,11 @@ describe("development runtime artifact snapshots", () => {
       retainCount: 0,
     });
 
-    expect(existsSync(firstSnapshotRoot)).toBe(true);
+    expect(existsSync(firstSnapshotRoot)).toBe(false);
     expect(existsSync(nextSnapshotRoot)).toBe(true);
   });
 
-  it("preserves snapshots referenced by active durable workflow data", async () => {
+  it("preserves generations explicitly referenced by nonterminal Workflow records", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-artifacts-prune-durable-");
     const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
     const activeSnapshotRoot = join(snapshotsRoot, "active");
@@ -406,77 +446,10 @@ describe("development runtime artifact snapshots", () => {
         sourceRoot: appRoot,
       },
     });
-    await mkdir(join(appRoot, ".workflow-data", "default", "runs"), { recursive: true });
-    await writeFile(
-      join(appRoot, ".workflow-data", "default", "runs", "parked-turn.json"),
-      `${JSON.stringify(
-        {
-          status: "running",
-          input: {
-            serializedContext: {
-              "eve.bundle": {
-                source: {
-                  appRoot: join(posixParkedTurnSnapshotRoot, "source", "app").replaceAll("\\", "/"),
-                  kind: "disk",
-                },
-              },
-            },
-          },
-          workflowId: "workflow//eve//turnWorkflow",
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    await writeFile(
-      join(appRoot, ".workflow-data", "default", "runs", "parked-turn-windows.json"),
-      `${JSON.stringify(
-        {
-          status: "running",
-          input: {
-            serializedContext: {
-              "eve.bundle": {
-                source: {
-                  appRoot: join(windowsParkedTurnSnapshotRoot, "source", "app").replaceAll(
-                    "/",
-                    "\\",
-                  ),
-                  kind: "disk",
-                },
-              },
-            },
-          },
-          workflowId: "workflow//eve//turnWorkflow",
-        },
-        null,
-        2,
-      )}\n`,
-    );
-
-    await writeFile(
-      join(appRoot, ".workflow-data", "default", "runs", "completed-turn.json"),
-      `${JSON.stringify(
-        {
-          status: "completed",
-          input: {
-            serializedContext: {
-              "eve.bundle": {
-                source: {
-                  appRoot: join(completedTurnSnapshotRoot, "source", "app").replaceAll("\\", "/"),
-                  kind: "disk",
-                },
-              },
-            },
-          },
-          workflowId: "workflow//eve//turnWorkflow",
-        },
-        null,
-        2,
-      )}\n`,
-    );
     await pruneDevelopmentRuntimeArtifactsSnapshots({
       appRoot,
       now,
+      protectedGenerationIds: new Set(["parked-turn-posix", "parked-turn-windows"]),
       recentWindowMs: 0,
       retainCount: 0,
     });
