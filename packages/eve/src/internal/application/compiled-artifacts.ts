@@ -166,11 +166,6 @@ export async function createCompiledArtifactsBootstrapSource(input: {
     "  // Already installed on import above.",
     "}",
     "",
-    "export async function __eveInstallCompiledArtifactsStep() {",
-    '  "use step";',
-    "  return null;",
-    "}",
-    "",
   ].join("\n");
 }
 

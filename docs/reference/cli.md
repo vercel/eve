@@ -93,9 +93,11 @@ Run this first when something behaves unexpectedly. It confirms a file was disco
 eve build
 ```
 
-Compiles to `.eve/` and builds the host output, then prints the built output path.
+Compiles and bundles in an invocation-owned directory under `.eve/builds/`, then publishes the completed host output and prints its path. Scratch workspaces are removed after success or failure.
 
-Useful artifacts written under `.eve/` (preserved even on partial failure):
+Production builds do not write through the stable compiler, host, Nitro, or Workflow files owned by `eve dev`, so builds can run while a local dev server is active. A failed build leaves the last successful `.output/` and agent summary untouched. Concurrent completed builds serialize only the final publication window.
+
+Useful stable artifacts written by inspection and development flows under `.eve/` include:
 
 | Artifact                                       | Description                                          |
 | ---------------------------------------------- | ---------------------------------------------------- |

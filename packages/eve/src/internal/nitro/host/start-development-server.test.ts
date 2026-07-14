@@ -50,7 +50,7 @@ const mocks = vi.hoisted(() => {
   return {
     authoredSourceWatcher,
     buildNitro: vi.fn(async () => undefined),
-    createApplicationNitro: vi.fn(async () => nitro),
+    createDevelopmentApplicationNitro: vi.fn(async () => nitro),
     createDevServer: vi.fn(() => devServer),
     devServer,
     fetch: vi.fn(async () => new Response(null, { status: 200 })),
@@ -59,7 +59,7 @@ const mocks = vi.hoisted(() => {
     listenerServer,
     mkdir: vi.fn(async () => undefined),
     nitro,
-    prepareApplicationHost: vi.fn(async () => ({ appRoot: "/tmp/eve-test" })),
+    prepareDevelopmentApplicationHost: vi.fn(async () => ({ appRoot: "/tmp/eve-test" })),
     prepareNitro: vi.fn(async () => undefined),
     readFile: vi.fn(async (path: string) => {
       if (
@@ -121,7 +121,7 @@ vi.mock("nitro/builder", () => ({
 }));
 
 vi.mock("./create-application-nitro.js", () => ({
-  createApplicationNitro: mocks.createApplicationNitro,
+  createDevelopmentApplicationNitro: mocks.createDevelopmentApplicationNitro,
 }));
 
 vi.mock("./dev-authored-source-watcher.js", () => ({
@@ -129,7 +129,7 @@ vi.mock("./dev-authored-source-watcher.js", () => ({
 }));
 
 vi.mock("./prepare-application-host.js", () => ({
-  prepareApplicationHost: mocks.prepareApplicationHost,
+  prepareDevelopmentApplicationHost: mocks.prepareDevelopmentApplicationHost,
 }));
 
 vi.mock("#discover/project.js", () => ({
@@ -368,7 +368,7 @@ describe("createDevelopmentServer", () => {
 
     const server = await startDevelopmentServer("/tmp/eve-test");
 
-    expect(mocks.prepareApplicationHost).toHaveBeenCalledWith("/tmp/eve-test", { dev: true });
+    expect(mocks.prepareDevelopmentApplicationHost).toHaveBeenCalledWith("/tmp/eve-test");
     expect(mocks.pruneDevelopmentRuntimeArtifactsSnapshotsInBackground).toHaveBeenCalledWith(
       "/tmp/eve-test",
     );
@@ -564,7 +564,7 @@ describe("createDevelopmentServer", () => {
 
     await expect(startDevelopmentServer("/tmp/eve-test")).rejects.toThrow("permission denied");
 
-    expect(mocks.createApplicationNitro).not.toHaveBeenCalled();
+    expect(mocks.createDevelopmentApplicationNitro).not.toHaveBeenCalled();
   });
 
   it("reports a healthy recorded server when starting another server", async () => {
@@ -577,7 +577,7 @@ describe("createDevelopmentServer", () => {
         "To connect to the existing instance, run: pnpm exec eve dev http://localhost:2000/",
       ].join("\n"),
     );
-    expect(mocks.createApplicationNitro).not.toHaveBeenCalled();
+    expect(mocks.createDevelopmentApplicationNitro).not.toHaveBeenCalled();
   });
 
   it("reuses the active server recorded for the same app root when requested", async () => {
@@ -594,7 +594,7 @@ describe("createDevelopmentServer", () => {
 
     expect(attached.kind).toBe("existing");
     expect(attached.url).toBe(owner.url);
-    expect(mocks.createApplicationNitro).toHaveBeenCalledOnce();
+    expect(mocks.createDevelopmentApplicationNitro).toHaveBeenCalledOnce();
     expect(mocks.fetch).toHaveBeenCalledWith("http://localhost:2000/eve/v1/health", {
       redirect: "error",
       signal: expect.any(AbortSignal),
@@ -690,7 +690,7 @@ describe("createDevelopmentServer", () => {
     await expect(
       startDevelopmentServer("/tmp/eve-test", { existing: "attach-if-unconfigured" }),
     ).rejects.toThrow("A dev server is already running for this eve agent.");
-    expect(mocks.createApplicationNitro).not.toHaveBeenCalled();
+    expect(mocks.createDevelopmentApplicationNitro).not.toHaveBeenCalled();
     expect(mocks.fetch).toHaveBeenCalledOnce();
   });
 
@@ -702,7 +702,7 @@ describe("createDevelopmentServer", () => {
     await expect(
       startDevelopmentServer("/tmp/eve-test", { existing: "attach-if-unconfigured" }),
     ).rejects.toThrow("A dev server is already running for this eve agent.");
-    expect(mocks.createApplicationNitro).not.toHaveBeenCalled();
+    expect(mocks.createDevelopmentApplicationNitro).not.toHaveBeenCalled();
     expect(mocks.fetch).toHaveBeenCalledOnce();
   });
 
@@ -720,7 +720,7 @@ describe("createDevelopmentServer", () => {
       signal: expect.any(AbortSignal),
     });
     expect(mocks.fetch).toHaveBeenCalledOnce();
-    expect(mocks.createApplicationNitro).toHaveBeenCalledOnce();
+    expect(mocks.createDevelopmentApplicationNitro).toHaveBeenCalledOnce();
     expect(readStateRecord()).toEqual({ url: "http://localhost:2000/" });
 
     await server.close();
@@ -735,7 +735,7 @@ describe("createDevelopmentServer", () => {
     });
 
     expect(mocks.fetch).not.toHaveBeenCalled();
-    expect(mocks.createApplicationNitro).toHaveBeenCalledOnce();
+    expect(mocks.createDevelopmentApplicationNitro).toHaveBeenCalledOnce();
 
     await server.close();
   });
@@ -754,7 +754,7 @@ describe("createDevelopmentServer", () => {
     });
 
     expect(server.url).toBe("http://localhost:2000/");
-    expect(mocks.createApplicationNitro).toHaveBeenCalledOnce();
+    expect(mocks.createDevelopmentApplicationNitro).toHaveBeenCalledOnce();
 
     if (server.kind !== "started") {
       throw new Error("Expected to start the server for the requested app root.");

@@ -1,4 +1,4 @@
-import type { NitroArtifactsConfigInput } from "#internal/nitro/host/artifacts-config.js";
+import type { DevelopmentNitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { createScheduleRegistrations } from "#runtime/schedules/register.js";
 import { loadResolvedCompiledSchedules } from "#runtime/schedules/resolve-schedule.js";
@@ -57,11 +57,11 @@ export class UnknownDevScheduleError extends Error {
  * resolve relative to the app instead of the installed eve package.
  */
 export async function dispatchScheduleInDev(input: {
-  readonly artifactsConfig: NitroArtifactsConfigInput;
+  readonly artifactsConfig: DevelopmentNitroArtifactsConfig;
   readonly scheduleId: string;
 }): Promise<DispatchScheduleInDevResult> {
   const { appRoot, moduleMapLoaderPath } = input.artifactsConfig;
-  if (appRoot === undefined || moduleMapLoaderPath === undefined) {
+  if (!appRoot || !moduleMapLoaderPath) {
     throw new Error(
       'Dev schedule dispatch requires "appRoot" and "moduleMapLoaderPath" in the artifacts config.',
     );

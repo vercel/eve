@@ -6,10 +6,10 @@ import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install
 import { build as buildNitro, createDevServer, prepare } from "nitro/builder";
 import type { Nitro } from "nitro/types";
 
-import { createApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
-import { createNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
+import { createDevelopmentApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
+import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import type { AuthoredSourceWatcherHandle } from "#internal/nitro/host/dev-authored-source-watcher.js";
-import { prepareApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
+import { prepareDevelopmentApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
 import { EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH } from "#protocol/routes.js";
 import { resolveDiscoveryProject } from "#discover/project.js";
 import { DevelopmentServerState } from "#internal/nitro/host/dev-server-state.js";
@@ -458,14 +458,13 @@ async function startNitroDevelopmentServer(
   try {
     const preparedHost = await devBootPhase(
       "compiling agent",
-      () => prepareApplicationHost(project.appRoot, { dev: true }),
+      () => prepareDevelopmentApplicationHost(project.appRoot),
       options.onBootProgress,
     );
     pruneDevelopmentRuntimeArtifactsSnapshotsInBackground(preparedHost.appRoot);
     const compiledArtifactsSource = resolveNitroCompiledArtifactsSource(
-      createNitroArtifactsConfig({
+      createDevelopmentNitroArtifactsConfig({
         appRoot: preparedHost.appRoot,
-        dev: true,
       }),
     );
     startDevelopmentSandboxPrewarmInBackground({
@@ -475,7 +474,7 @@ async function startNitroDevelopmentServer(
     pruneLocalSandboxTemplatesInBackground(preparedHost.appRoot);
     const activeNitro = await devBootPhase(
       "creating dev server",
-      () => createApplicationNitro(preparedHost, true),
+      () => createDevelopmentApplicationNitro(preparedHost),
       options.onBootProgress,
     );
     nitro = activeNitro;

@@ -4,18 +4,27 @@ import { dirname, join, resolve } from "node:path";
 import { build as buildNitro, copyPublicAssets, prepare, prerender } from "nitro/builder";
 import type { Nitro } from "nitro/types";
 
-import { resolvePackageRoot } from "#internal/application/package.js";
+import { resolvePackageRoot, resolvePackageSourceFilePath } from "#internal/application/package.js";
 import {
   prepareEveVersionedCacheDirectory,
   writeEveVersionedCacheMetadata,
 } from "#internal/application/cache-metadata.js";
-import { resolveNitroSurfaceOutputDirectory } from "#internal/application/paths.js";
+import {
+  createApplicationBuildWorkspace,
+  removeApplicationBuildWorkspace,
+  type ApplicationBuildWorkspace,
+} from "#internal/application/build-workspace.js";
+import {
+  publishApplicationBuildArtifacts,
+  RecoverablePublicationError,
+} from "#internal/application/output-publication.js";
+import { stageProductionCompilerArtifacts } from "#internal/application/production-compiler-artifacts.js";
 import { WorkflowBundleBuilder } from "#internal/workflow-bundle/builder.js";
 import { normalizeEveVercelFunctionOutput } from "#internal/workflow-bundle/vercel-workflow-output.js";
-import { createApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
+import { createProductionApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
 import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-summary.js";
 import { tryReadExtensionBuildConfig } from "#internal/nitro/host/build-extension.js";
-import { prepareApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
+import { prepareProductionApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
 import { runVercelBuildPrewarm } from "#internal/nitro/host/vercel-build-prewarm.js";
 import type {
   ApplicationBuildOptions,
@@ -23,6 +32,8 @@ import type {
   PreparedApplicationHost,
 } from "#internal/nitro/host/types.js";
 import { findClosestVercelOutputDirectory } from "#shared/vercel-output-directory.js";
+import { resolveDiscoveryProject } from "#discover/project.js";
+import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
 function trimTrailingSlash(path: string): string {
   return path.replace(/[\\/]+$/, "");
@@ -278,10 +289,12 @@ async function buildNitroOutput(nitro: Nitro): Promise<string> {
 
 async function buildVercelNitroSurface(
   preparedHost: PreparedApplicationHost,
+  workspace: ApplicationBuildWorkspace,
   surface: Exclude<NitroBuildSurface, "all">,
 ): Promise<string> {
-  const nitro = await createApplicationNitro(preparedHost, false, {
-    outputDir: resolveNitroSurfaceOutputDirectory(preparedHost.appRoot, surface),
+  const nitro = await createProductionApplicationNitro(preparedHost, {
+    buildDir: join(workspace.nitro.buildDir, surface),
+    outputDir: join(workspace.nitro.surfaceOutputDir, surface),
     surface,
   });
 
@@ -308,65 +321,123 @@ export async function buildApplication(
     );
   }
 
-  const preparedHost = await prepareApplicationHost(rootDir);
+  const project = await resolveDiscoveryProject(rootDir);
+  const workspace = await createApplicationBuildWorkspace(project.appRoot);
+
+  // A recoverable publication failure leaves the lock journal pointing at
+  // staged artifacts inside this workspace; the next build's recovery
+  // consumes and then removes it. Deleting it now would strand the journal.
+  let preserveWorkspaceForRecovery = false;
+  try {
+    return await buildApplicationInWorkspace(workspace, options);
+  } catch (error) {
+    preserveWorkspaceForRecovery = error instanceof RecoverablePublicationError;
+    throw error;
+  } finally {
+    if (!preserveWorkspaceForRecovery) {
+      await removeApplicationBuildWorkspace(workspace);
+    }
+  }
+}
+
+async function buildApplicationInWorkspace(
+  workspace: ApplicationBuildWorkspace,
+  options: ApplicationBuildOptions,
+): Promise<string> {
+  const preparedHost = await prepareProductionApplicationHost(workspace);
 
   if (!process.env.VERCEL) {
-    const nitro = await createApplicationNitro(preparedHost, false);
+    const nitro = await createProductionApplicationNitro(preparedHost, {
+      buildDir: workspace.nitro.buildDir,
+      outputDir: workspace.publication.output.stagedDir,
+      surface: "all",
+    });
 
     try {
-      const outputDirectory = await buildNitroOutput(nitro);
+      await buildNitroOutput(nitro);
       await emitVercelAgentSummary({
         manifest: preparedHost.compileResult.manifest,
-        appRoot: preparedHost.appRoot,
+        outputPath: workspace.publication.summary.stagedPath,
       });
-      return outputDirectory;
+      await stageProductionCompilerArtifacts({
+        compilerArtifactsRoot: workspace.compiler.artifactsDir,
+        outputDir: workspace.publication.output.stagedDir,
+      });
     } finally {
       await nitro.close();
     }
+
+    await publishCompletedApplicationBuild(workspace);
+    return workspace.publication.output.finalDir;
   }
 
   const servicePrefix = await resolveCoDeployedEveServicePrefixForVercelFunctionOutput(
     preparedHost.appRoot,
     preparedHost.compileResult.project.agentRoot,
   );
-  const nitro = await createApplicationNitro(preparedHost, false, {
+  const nitro = await createProductionApplicationNitro(preparedHost, {
+    buildDir: join(workspace.nitro.buildDir, "app"),
+    outputDir: workspace.publication.output.stagedDir,
     surface: "app",
   });
 
   try {
-    const outputDirectory = await buildNitroOutput(nitro);
+    await buildNitroOutput(nitro);
     // Run sandbox prewarm before emitting the workflow functions so a
     // prewarm failure aborts the build before we spend time bundling
     // function output that we would never deploy.
     if (!options.skipVercelSandboxPrewarm) {
       await runVercelBuildPrewarm({
         appRoot: preparedHost.appRoot,
+        compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(
+          workspace.compiler.rootDir,
+          {
+            moduleMapLoaderPath: resolvePackageSourceFilePath(
+              "src/internal/authored-module-map-loader.ts",
+            ),
+            sandboxAppRoot: preparedHost.appRoot,
+          },
+        ),
         log(message) {
           console.log(message);
         },
       });
     }
-    const flowNitroOutputDir = await buildVercelNitroSurface(preparedHost, "flow");
+    const flowNitroOutputDir = await buildVercelNitroSurface(preparedHost, workspace, "flow");
     await emitVercelWorkflowFunctions({
       agentName: preparedHost.compileResult.manifest.config.name,
       appRoot: preparedHost.appRoot,
       compiledArtifactsBootstrapPath: preparedHost.compiledArtifacts.bootstrapPath,
       flowNitroOutputDir,
-      outputDir: outputDirectory,
-      workflowBuildDir: preparedHost.workflowBuildDir,
+      outputDir: workspace.publication.output.stagedDir,
+      workflowBuildDir: workspace.workflow.buildDir,
     });
     if (servicePrefix !== undefined) {
-      await normalizeEveVercelFunctionOutput(outputDirectory, {
+      await normalizeEveVercelFunctionOutput(workspace.publication.output.stagedDir, {
         servicePrefix,
       });
     }
     await emitVercelAgentSummary({
       manifest: preparedHost.compileResult.manifest,
-      appRoot: preparedHost.appRoot,
+      outputPath: workspace.publication.summary.stagedPath,
     });
-
-    return outputDirectory;
   } finally {
     await nitro.close();
   }
+
+  await publishCompletedApplicationBuild(workspace);
+  return workspace.publication.output.finalDir;
+}
+
+async function publishCompletedApplicationBuild(
+  workspace: ApplicationBuildWorkspace,
+): Promise<void> {
+  await publishApplicationBuildArtifacts({
+    appRoot: workspace.appRoot,
+    finalOutputDir: workspace.publication.output.finalDir,
+    finalSummaryPath: workspace.publication.summary.finalPath,
+    scratchDir: workspace.rootDir,
+    stagedOutputDir: workspace.publication.output.stagedDir,
+    stagedSummaryPath: workspace.publication.summary.stagedPath,
+  });
 }

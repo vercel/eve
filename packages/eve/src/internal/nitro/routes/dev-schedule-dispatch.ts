@@ -2,7 +2,7 @@ import {
   dispatchScheduleInDev,
   UnknownDevScheduleError,
 } from "#internal/nitro/host/dispatch-schedule-in-dev.js";
-import type { NitroArtifactsConfigInput } from "#internal/nitro/host/artifacts-config.js";
+import type { DevelopmentNitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 
 /**
@@ -30,7 +30,7 @@ const DEV_DISPATCH_SCHEDULE_PATH_PATTERN = new RegExp(
  * Auth: none. The dev server is local-only and the route is dev-only.
  */
 export async function handleDevScheduleDispatchRequest(
-  input: NitroArtifactsConfigInput,
+  input: DevelopmentNitroArtifactsConfig,
   request: Request,
 ): Promise<Response> {
   const url = new URL(request.url);

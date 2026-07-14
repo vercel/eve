@@ -77,12 +77,12 @@ export interface InstrumentationStep {
 
 /**
  * Final model input assembled for one model-call attempt, snapshotted for
- * instrumentation. `instructions` is the resolved system prompt (a single
- * string, an array of system messages, or undefined when there is none).
+ * instrumentation. `instructions` is the resolved system prompt (a string,
+ * a system message with provider options, or undefined when there is none).
  * `messages` is the non-system conversation passed to the model.
  */
 export interface InstrumentationModelInput {
-  readonly instructions: string | readonly SystemModelMessage[] | undefined;
+  readonly instructions: string | SystemModelMessage | undefined;
   readonly messages: readonly ModelMessage[];
 }
 

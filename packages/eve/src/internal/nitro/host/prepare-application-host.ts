@@ -1,6 +1,16 @@
-import { compileAgent } from "#compiler/compile-agent.js";
+import {
+  compileAgent,
+  compileAgentInBuildWorkspace,
+  type CompileAgentResult,
+} from "#compiler/compile-agent.js";
 import { createScheduleRegistrations } from "#runtime/schedules/register.js";
-import { loadResolvedCompiledSchedules } from "#runtime/schedules/resolve-schedule.js";
+import {
+  loadResolvedCompiledSchedules,
+  resolveSchedules,
+} from "#runtime/schedules/resolve-schedule.js";
+import type { ResolvedScheduleDefinition } from "#runtime/types.js";
+import type { ApplicationBuildWorkspace } from "#internal/application/build-workspace.js";
+import { join } from "node:path";
 import {
   type BuiltInWorkflowWorldTarget,
   writeCompiledArtifactsFiles,
@@ -17,14 +27,12 @@ import {
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 
 /**
- * Compiles one authored app and stages the package-owned artifacts needed by
- * the Nitro host.
+ * Compiles one authored app in place and stages the package-owned artifacts
+ * the dev-server Nitro host needs, activating a fresh runtime-artifacts
+ * snapshot for hot reload.
  */
-export async function prepareApplicationHost(
+export async function prepareDevelopmentApplicationHost(
   startPath: string,
-  options: {
-    readonly dev?: boolean;
-  } = {},
 ): Promise<PreparedApplicationHost> {
   const compileResult = await compileAgent({
     startPath,
@@ -34,40 +42,77 @@ export async function prepareApplicationHost(
       compileResult.project.appRoot,
     ),
   });
-  const scheduleRegistrations = createScheduleRegistrations(schedules);
-  const workflowBuildDir = resolveWorkflowBuildDirectory(compileResult.project.appRoot);
-  const runtimeArtifactsSnapshot =
-    options.dev === true
-      ? await stageDevelopmentRuntimeArtifactsSnapshot(compileResult)
-      : undefined;
-  const compiledArtifacts = await writeCompiledArtifactsFiles({
+  const runtimeArtifactsSnapshot = await stageDevelopmentRuntimeArtifactsSnapshot(compileResult);
+  const preparedHost = await materializeApplicationHost({
     compileResult,
-    defaultWorkflowWorld: resolveDefaultWorkflowWorld(options),
-    outDir: resolveApplicationHostArtifactsDirectory(compileResult.project.appRoot),
+    defaultWorkflowWorld: "local",
+    hostArtifactsDir: resolveApplicationHostArtifactsDirectory(compileResult.project.appRoot),
+    schedules,
+    workflowBuildDir: resolveWorkflowBuildDirectory(compileResult.project.appRoot),
   });
-  if (runtimeArtifactsSnapshot !== undefined) {
-    await activateDevelopmentRuntimeArtifactsSnapshot({
-      appRoot: compileResult.project.appRoot,
-      snapshot: runtimeArtifactsSnapshot,
-    });
-  }
+  await activateDevelopmentRuntimeArtifactsSnapshot({
+    appRoot: compileResult.project.appRoot,
+    snapshot: runtimeArtifactsSnapshot,
+  });
+
+  return preparedHost;
+}
+
+/**
+ * Compiles one authored app into an invocation-owned build workspace and
+ * stages the package-owned artifacts the production Nitro build needs.
+ * Compiler artifacts are written inside the workspace but their recorded
+ * locations point at the published output (`<finalDir>/.eve`), where
+ * publication later installs them.
+ */
+export async function prepareProductionApplicationHost(
+  workspace: ApplicationBuildWorkspace,
+): Promise<PreparedApplicationHost> {
+  const compileResult = await compileAgentInBuildWorkspace({
+    artifactLocations: {
+      publishedRoot: join(workspace.publication.output.finalDir, ".eve"),
+      writeRoot: workspace.compiler.artifactsDir,
+    },
+    startPath: workspace.appRoot,
+  });
+  const schedules = await resolveSchedules({ manifest: compileResult.manifest });
+
+  return await materializeApplicationHost({
+    compileResult,
+    defaultWorkflowWorld: resolveProductionWorkflowWorldTarget(),
+    hostArtifactsDir: workspace.host.artifactsDir,
+    schedules,
+    workflowBuildDir: workspace.workflow.buildDir,
+  });
+}
+
+async function materializeApplicationHost(input: {
+  readonly compileResult: CompileAgentResult;
+  readonly defaultWorkflowWorld: BuiltInWorkflowWorldTarget;
+  readonly hostArtifactsDir: string;
+  readonly schedules: readonly ResolvedScheduleDefinition[];
+  readonly workflowBuildDir: string;
+}): Promise<PreparedApplicationHost> {
+  const compiledArtifacts = await writeCompiledArtifactsFiles({
+    compileResult: input.compileResult,
+    defaultWorkflowWorld: input.defaultWorkflowWorld,
+    outDir: input.hostArtifactsDir,
+  });
 
   return {
-    appRoot: compileResult.project.appRoot,
-    compileResult,
+    appRoot: input.compileResult.project.appRoot,
+    compileResult: input.compileResult,
     compiledArtifacts,
-    scheduleRegistrations,
-    schedules,
-    workflowBuildDir,
+    scheduleRegistrations: createScheduleRegistrations(input.schedules),
+    schedules: input.schedules,
+    workflowBuildDir: input.workflowBuildDir,
   };
 }
 
-function resolveDefaultWorkflowWorld(options: {
-  readonly dev?: boolean;
-}): BuiltInWorkflowWorldTarget {
-  if (options.dev === true) {
-    return "local";
+function resolveProductionWorkflowWorldTarget(): BuiltInWorkflowWorldTarget {
+  if (process.env.VERCEL) {
+    return "vercel";
   }
 
-  return process.env.VERCEL ? "vercel" : "local";
+  return "local";
 }

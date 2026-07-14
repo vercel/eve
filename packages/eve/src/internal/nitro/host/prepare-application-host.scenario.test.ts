@@ -6,11 +6,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import {
+  createApplicationBuildWorkspace,
+  removeApplicationBuildWorkspace,
+} from "#internal/application/build-workspace.js";
+import {
   pruneDevelopmentRuntimeArtifactsSnapshots,
   resolveDevelopmentRuntimeArtifactsPointerPath,
 } from "#internal/nitro/dev-runtime-artifacts.js";
 import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
-import { prepareApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
+import {
+  prepareDevelopmentApplicationHost,
+  prepareProductionApplicationHost,
+} from "#internal/nitro/host/prepare-application-host.js";
 
 const createAppRoot = useTemporaryAppRoots();
 
@@ -25,9 +32,38 @@ async function readDevelopmentRuntimePointer(appRoot: string): Promise<Developme
   ) as DevelopmentRuntimePointer;
 }
 
-describe("prepareApplicationHost", () => {
+describe("application host preparation", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+  });
+
+  it("keeps production compiler and host writes inside one invocation workspace", async () => {
+    const { agentRoot, appRoot } = await createAppRoot("eve-production-host-workspace-", {
+      files: {
+        "agent/instructions.md": "Use the configured model.",
+      },
+      packageName: "production-host-workspace",
+    });
+    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    const workspace = await createApplicationBuildWorkspace(appRoot);
+
+    try {
+      const preparedHost = await prepareProductionApplicationHost(workspace);
+
+      expect(preparedHost.compileResult.paths.compileDirectoryPath).toBe(
+        join(workspace.compiler.artifactsDir, "compile"),
+      );
+      expect(preparedHost.compiledArtifacts.bootstrapPath).toBe(
+        join(workspace.host.artifactsDir, "compiled-artifacts-bootstrap.mjs"),
+      );
+      expect(preparedHost.workflowBuildDir).toBe(workspace.workflow.buildDir);
+      expect(existsSync(join(appRoot, ".eve", "compile"))).toBe(false);
+      expect(existsSync(join(appRoot, ".eve", "host"))).toBe(false);
+    } finally {
+      await removeApplicationBuildWorkspace(workspace);
+    }
+
+    expect(existsSync(workspace.rootDir)).toBe(false);
   });
 
   it("selects the Vercel Workflow world for a prebuilt production host", async () => {
@@ -40,15 +76,20 @@ describe("prepareApplicationHost", () => {
       packageName: "vercel-production-world",
     });
     await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    const workspace = await createApplicationBuildWorkspace(appRoot);
 
-    const preparedHost = await prepareApplicationHost(appRoot);
-    const workflowWorldPlugin = await readFile(
-      preparedHost.compiledArtifacts.workflowWorldPluginPath,
-      "utf8",
-    );
+    try {
+      const preparedHost = await prepareProductionApplicationHost(workspace);
+      const workflowWorldPlugin = await readFile(
+        preparedHost.compiledArtifacts.workflowWorldPluginPath,
+        "utf8",
+      );
 
-    expect(workflowWorldPlugin).toContain("/compiled/@workflow/world-vercel/index.js");
-    expect(workflowWorldPlugin).not.toContain("/compiled/@workflow/world-local/index.js");
+      expect(workflowWorldPlugin).toContain("/compiled/@workflow/world-vercel/index.js");
+      expect(workflowWorldPlugin).not.toContain("/compiled/@workflow/world-local/index.js");
+    } finally {
+      await removeApplicationBuildWorkspace(workspace);
+    }
   });
 
   it("keeps Nitro host inputs stable when their runtime snapshot is pruned", async () => {
@@ -61,7 +102,7 @@ describe("prepareApplicationHost", () => {
     const agentModulePath = join(agentRoot, "agent.mjs");
     await writeFile(agentModulePath, 'export default { model: "openai/gpt-5.4" };\n');
 
-    const firstHost = await prepareApplicationHost(appRoot, { dev: true });
+    const firstHost = await prepareDevelopmentApplicationHost(appRoot);
     const firstPointer = await readDevelopmentRuntimePointer(appRoot);
     const stableHostDirectory = join(appRoot, ".eve", "host");
     const stableBootstrapPath = join(stableHostDirectory, "compiled-artifacts-bootstrap.mjs");
@@ -86,7 +127,7 @@ describe("prepareApplicationHost", () => {
       agentModulePath,
       'export default { model: "openai/gpt-5.4" };\n// revision two\n',
     );
-    const nextHost = await prepareApplicationHost(appRoot, { dev: true });
+    const nextHost = await prepareDevelopmentApplicationHost(appRoot);
     const nextPointer = await readDevelopmentRuntimePointer(appRoot);
 
     expect(nextHost.compiledArtifacts.bootstrapPath).toBe(stableBootstrapPath);

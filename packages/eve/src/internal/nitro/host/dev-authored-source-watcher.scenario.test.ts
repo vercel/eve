@@ -102,7 +102,7 @@ const mockedWatcher = vi.hoisted(() => {
   };
 });
 
-const prepareApplicationHostMock = vi.hoisted(() => vi.fn());
+const prepareDevelopmentApplicationHostMock = vi.hoisted(() => vi.fn());
 const clearCompiledRuntimeAgentBundleCacheMock = vi.hoisted(() => vi.fn());
 const startDevelopmentSandboxPrewarmInBackgroundMock = vi.hoisted(() => vi.fn());
 const pruneDevelopmentRuntimeArtifactsSnapshotsInBackgroundMock = vi.hoisted(() => vi.fn());
@@ -120,7 +120,7 @@ vi.mock("#compiled/chokidar/index.js", () => ({
 }));
 
 vi.mock("./prepare-application-host.js", () => ({
-  prepareApplicationHost: prepareApplicationHostMock,
+  prepareDevelopmentApplicationHost: prepareDevelopmentApplicationHostMock,
 }));
 
 vi.mock("#execution/sandbox/development-prewarm.js", () => ({
@@ -168,7 +168,7 @@ beforeEach(() => {
   vi.spyOn(console, "log").mockImplementation(() => {});
 
   mockedWatcher.reset();
-  prepareApplicationHostMock.mockReset();
+  prepareDevelopmentApplicationHostMock.mockReset();
   clearCompiledRuntimeAgentBundleCacheMock.mockReset();
   startDevelopmentSandboxPrewarmInBackgroundMock.mockReset();
   pruneDevelopmentRuntimeArtifactsSnapshotsInBackgroundMock.mockReset();
@@ -193,7 +193,7 @@ describe("startAuthoredSourceWatcher", () => {
     const previousHost = createPreparedHost();
     const nextHost = createPreparedHost();
     const nitroStub = createNitroStub();
-    prepareApplicationHostMock.mockResolvedValueOnce(nextHost);
+    prepareDevelopmentApplicationHostMock.mockResolvedValueOnce(nextHost);
 
     const watcher = await startAuthoredSourceWatcher({
       nitro: nitroStub.nitro,
@@ -203,7 +203,7 @@ describe("startAuthoredSourceWatcher", () => {
     try {
       await watcher.rebuild();
 
-      expect(prepareApplicationHostMock).toHaveBeenCalledWith(previousHost.appRoot, { dev: true });
+      expect(prepareDevelopmentApplicationHostMock).toHaveBeenCalledWith(previousHost.appRoot);
       expect(pruneDevelopmentRuntimeArtifactsSnapshotsInBackgroundMock).toHaveBeenCalledWith(
         nextHost.appRoot,
       );
@@ -252,13 +252,13 @@ describe("startAuthoredSourceWatcher", () => {
       mockedWatcher.emit("add", join(DEFAULT_APP_ROOT, "node_modules", "eve"));
       await advanceDebounce();
 
-      expect(prepareApplicationHostMock).not.toHaveBeenCalled();
+      expect(prepareDevelopmentApplicationHostMock).not.toHaveBeenCalled();
 
       mockedWatcher.ready();
       watcher = await watcherPromise;
       await advanceDebounce();
 
-      expect(prepareApplicationHostMock).not.toHaveBeenCalled();
+      expect(prepareDevelopmentApplicationHostMock).not.toHaveBeenCalled();
       expect(getConsoleLogMessages().some((message) => message.includes("change detected"))).toBe(
         false,
       );
@@ -295,7 +295,7 @@ describe("startAuthoredSourceWatcher", () => {
       },
     });
 
-    prepareApplicationHostMock.mockResolvedValueOnce(nextHost);
+    prepareDevelopmentApplicationHostMock.mockResolvedValueOnce(nextHost);
 
     const watcher = await startAuthoredSourceWatcher({
       nitro: nitroStub.nitro,
@@ -305,13 +305,13 @@ describe("startAuthoredSourceWatcher", () => {
     try {
       await triggerChangeEvent();
 
-      expect(prepareApplicationHostMock).toHaveBeenCalledTimes(1);
+      expect(prepareDevelopmentApplicationHostMock).toHaveBeenCalledTimes(1);
       expect(getConsoleLogMessages()).toEqual(
         expect.arrayContaining([
           "[eve:dev] change detected (1 event: change agent/agent.ts), rebuilding authored artifacts...",
         ]),
       );
-      expect(prepareApplicationHostMock).toHaveBeenCalledWith(previousHost.appRoot, { dev: true });
+      expect(prepareDevelopmentApplicationHostMock).toHaveBeenCalledWith(previousHost.appRoot);
       expect(startDevelopmentSandboxPrewarmInBackgroundMock).not.toHaveBeenCalled();
       expect(clearCompiledRuntimeAgentBundleCacheMock).toHaveBeenCalledTimes(1);
       expect(nitroStub.callHook).not.toHaveBeenCalled();
@@ -325,7 +325,7 @@ describe("startAuthoredSourceWatcher", () => {
     const nextHost = createPreparedHost();
     const nitroStub = createNitroStub();
 
-    prepareApplicationHostMock.mockResolvedValue(nextHost);
+    prepareDevelopmentApplicationHostMock.mockResolvedValue(nextHost);
 
     const watcher = await startAuthoredSourceWatcher({
       nitro: nitroStub.nitro,
@@ -363,8 +363,8 @@ describe("startAuthoredSourceWatcher", () => {
     const nextHost = createPreparedHost();
     const nitroStub = createNitroStub();
 
-    prepareApplicationHostMock.mockResolvedValue(nextHost);
-    prepareApplicationHostMock.mockReturnValueOnce(firstRebuild.promise);
+    prepareDevelopmentApplicationHostMock.mockResolvedValue(nextHost);
+    prepareDevelopmentApplicationHostMock.mockReturnValueOnce(firstRebuild.promise);
 
     const watcher = await startAuthoredSourceWatcher({
       nitro: nitroStub.nitro,
@@ -376,7 +376,7 @@ describe("startAuthoredSourceWatcher", () => {
       mockedWatcher.emit("change", join(previousHost.appRoot, "agent", "instructions.md"));
       await advanceDebounce();
 
-      expect(prepareApplicationHostMock).toHaveBeenCalledTimes(1);
+      expect(prepareDevelopmentApplicationHostMock).toHaveBeenCalledTimes(1);
 
       // Further saves while that rebuild is in flight queue behind it.
       mockedWatcher.emit("change", join(previousHost.appRoot, "agent", "tools", "a.ts"));
@@ -384,7 +384,7 @@ describe("startAuthoredSourceWatcher", () => {
       mockedWatcher.emit("change", join(previousHost.appRoot, "agent", "tools", "b.ts"));
       await advanceDebounce();
 
-      expect(prepareApplicationHostMock).toHaveBeenCalledTimes(1);
+      expect(prepareDevelopmentApplicationHostMock).toHaveBeenCalledTimes(1);
 
       firstRebuild.resolve(nextHost);
       await vi.waitFor(() => {
@@ -396,7 +396,7 @@ describe("startAuthoredSourceWatcher", () => {
       await watcher.flush();
 
       // a.ts and b.ts collapse into exactly one additional rebuild.
-      expect(prepareApplicationHostMock).toHaveBeenCalledTimes(2);
+      expect(prepareDevelopmentApplicationHostMock).toHaveBeenCalledTimes(2);
       expect(getConsoleLogMessages()).not.toEqual(
         expect.arrayContaining([
           "[eve:dev] change detected (0 events), rebuilding authored artifacts...",
@@ -421,7 +421,7 @@ describe("startAuthoredSourceWatcher", () => {
     });
     const nitroStub = createNitroStub();
 
-    prepareApplicationHostMock.mockResolvedValueOnce(nextHost);
+    prepareDevelopmentApplicationHostMock.mockResolvedValueOnce(nextHost);
 
     const watcher = await startAuthoredSourceWatcher({
       nitro: nitroStub.nitro,
@@ -468,7 +468,7 @@ describe("startAuthoredSourceWatcher", () => {
     });
     const nitroStub = createNitroStub();
 
-    prepareApplicationHostMock.mockResolvedValueOnce(nextHost);
+    prepareDevelopmentApplicationHostMock.mockResolvedValueOnce(nextHost);
 
     const watcher = await startAuthoredSourceWatcher({
       nitro: nitroStub.nitro,
@@ -721,7 +721,7 @@ describe("startAuthoredSourceWatcher", () => {
     const nextHost = createPreparedHost({ appRoot });
     const nitroStub = createNitroStub();
 
-    prepareApplicationHostMock.mockResolvedValueOnce(nextHost);
+    prepareDevelopmentApplicationHostMock.mockResolvedValueOnce(nextHost);
 
     const watcher = await startAuthoredSourceWatcher({
       nitro: nitroStub.nitro,

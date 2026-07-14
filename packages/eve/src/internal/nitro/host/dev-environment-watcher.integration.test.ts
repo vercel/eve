@@ -54,7 +54,7 @@ const mockedWatcher = vi.hoisted(() => {
   };
 });
 
-const prepareApplicationHostMock = vi.hoisted(() => vi.fn());
+const prepareDevelopmentApplicationHostMock = vi.hoisted(() => vi.fn());
 const clearCompiledRuntimeAgentBundleCacheMock = vi.hoisted(() => vi.fn());
 const startDevelopmentSandboxPrewarmInBackgroundMock = vi.hoisted(() => vi.fn());
 
@@ -63,7 +63,7 @@ vi.mock("#compiled/chokidar/index.js", () => ({
 }));
 
 vi.mock("./prepare-application-host.js", () => ({
-  prepareApplicationHost: prepareApplicationHostMock,
+  prepareDevelopmentApplicationHost: prepareDevelopmentApplicationHostMock,
 }));
 
 vi.mock("#execution/sandbox/development-prewarm.js", () => ({
@@ -94,7 +94,7 @@ beforeEach(() => {
 
   clearEnvironment();
   mockedWatcher.reset();
-  prepareApplicationHostMock.mockReset();
+  prepareDevelopmentApplicationHostMock.mockReset();
   clearCompiledRuntimeAgentBundleCacheMock.mockReset();
   startDevelopmentSandboxPrewarmInBackgroundMock.mockReset();
 });
@@ -141,7 +141,7 @@ describe("startAuthoredSourceWatcher env files", () => {
     const previousHost = createPreparedHost(appRoot);
     const nextHost = createPreparedHost(appRoot);
     const nitroStub = createNitroStub();
-    prepareApplicationHostMock.mockResolvedValueOnce(nextHost);
+    prepareDevelopmentApplicationHostMock.mockResolvedValueOnce(nextHost);
 
     const watcher = await startAuthoredSourceWatcher({
       nitro: nitroStub.nitro,

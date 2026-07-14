@@ -17,9 +17,10 @@ vi.mock("#internal/nitro/host/dispatch-schedule-in-dev.js", async () => {
 const APP_ROOT = "/tmp/eve-test";
 const ARTIFACTS_CONFIG = {
   appRoot: APP_ROOT,
-  dev: true,
+  devRuntimeArtifactsPointerPath: "/tmp/eve-test/.eve/dev-runtime/latest.json",
+  kind: "development",
   moduleMapLoaderPath: "/tmp/eve-test/module-map-loader.js",
-};
+} as const;
 
 async function importHandler() {
   return await import("#internal/nitro/routes/dev-schedule-dispatch.js");
