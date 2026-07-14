@@ -193,10 +193,10 @@ function resolveDevelopmentServerPorts(input: {
   return ports as [number, ...number[]];
 }
 
-function addDevelopmentRuntimeArtifactsRebuildHandler(input: {
+function addDevelopmentControlHandler(input: {
   readonly appRoot: string;
   readonly devServer: DrainedNitroDevServer;
-  readonly watcher: AuthoredSourceWatcherHandle;
+  readonly getWatcher: () => AuthoredSourceWatcherHandle | undefined;
   readonly workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
 }): void {
   input.devServer.setControlHandler(async (request) => {
@@ -211,10 +211,14 @@ function addDevelopmentRuntimeArtifactsRebuildHandler(input: {
     if (url.pathname !== EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH || request.method !== "GET") {
       return undefined;
     }
+    const watcher = input.getWatcher();
+    if (watcher === undefined) {
+      return Response.json({ error: "The development server is still starting." }, { status: 503 });
+    }
     if (url.searchParams.get("force") === "1") {
-      await input.watcher.rebuild();
+      await watcher.rebuild();
     } else {
-      await input.watcher.flush();
+      await watcher.flush();
     }
     return handleDevRuntimeArtifactsRequest({ appRoot: input.appRoot });
   });
@@ -417,6 +421,15 @@ async function startNitroDevelopmentServer(
       preparedHost,
       transportSecret: workflowTransportSecret,
     });
+    // Parent-owned control routes must answer before the World starts: queue
+    // redelivery begins at start(), and a delivery's World calls would
+    // otherwise fall through to the worker and 404.
+    addDevelopmentControlHandler({
+      appRoot: project.appRoot,
+      devServer: activeDevServer,
+      getWatcher: () => authoredSourceWatcher,
+      workflowWorld,
+    });
     const hostname =
       options.host ?? activeNitro.options.devServer.hostname ?? DEFAULT_DEVELOPMENT_SERVER_HOST;
     const retryOnAddressInUse = requestedPort === undefined;
@@ -485,12 +498,6 @@ async function startNitroDevelopmentServer(
       },
       options.onBootProgress,
     );
-    addDevelopmentRuntimeArtifactsRebuildHandler({
-      appRoot: project.appRoot,
-      devServer: activeDevServer,
-      watcher: authoredSourceWatcher,
-      workflowWorld,
-    });
     await state.write(serverUrl);
     const restoreWorkflowLocalQueueEnvironmentOnClose = restoreWorkflowLocalQueueEnvironment;
     if (restoreWorkflowLocalQueueEnvironmentOnClose === undefined) {

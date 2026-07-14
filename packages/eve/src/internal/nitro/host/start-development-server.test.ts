@@ -537,6 +537,19 @@ describe("createDevelopmentServer", () => {
     await server.close();
   });
 
+  it("registers the control handler before the workflow World starts delivering", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    const server = await startDevelopmentServer("/tmp/eve-test");
+
+    const handlerOrder = mocks.devServer.setControlHandler.mock.invocationCallOrder[0];
+    const startOrder = mocks.worldInstance.start.mock.invocationCallOrder[0];
+    expect(handlerOrder).toBeDefined();
+    expect(startOrder).toBeDefined();
+    expect(handlerOrder ?? Infinity).toBeLessThan(startOrder ?? 0);
+
+    await server.close();
+  });
+
   it("registers a host-owned runtime rebuild handler that forces the live watcher", async () => {
     const startDevelopmentServer = await loadStartDevelopmentServer();
     const server = await startDevelopmentServer("/tmp/eve-test");
