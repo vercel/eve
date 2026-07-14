@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCompiledAgentManifest } from "#compiler/manifest.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import type { ApplicationBuildWorkspace } from "#internal/application/build-workspace.js";
-import { EVE_INTERNAL_BUILD_OUTPUT_DIR_ENV } from "#internal/application/paths.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 import {
@@ -271,37 +270,6 @@ describe("buildApplication", () => {
       "last-good-output\n",
     );
     await expect(readFile(summaryPath, "utf8")).resolves.toBe("last-good-summary\n");
-  });
-
-  it("preserves a co-located host's Vercel output", async () => {
-    vi.stubEnv("VERCEL", "1");
-    const appRoot = await createScratchDirectory("eve-build-application-co-located-");
-    const hostOutputDir = join(appRoot, ".vercel", "output");
-    const hostMiddlewarePath = join(
-      hostOutputDir,
-      "functions",
-      "_middleware.func",
-      "middleware.js",
-    );
-    const serviceOutputDir = join(appRoot, "agent", ".vercel", "output");
-    vi.stubEnv(EVE_INTERNAL_BUILD_OUTPUT_DIR_ENV, join("agent", ".vercel", "output"));
-
-    prepareProductionApplicationHostMock.mockImplementationOnce(prepareHostBuildWorkspace);
-    createProductionApplicationNitroMock.mockImplementation(
-      async (_preparedHost: PreparedApplicationHost, options: { outputDir: string }) =>
-        createNitroStub(options.outputDir),
-    );
-    await mkdir(join(hostMiddlewarePath, ".."), { recursive: true });
-    await writeFile(hostMiddlewarePath, "export default function middleware() {}\n");
-
-    const { buildApplication } = await import("#internal/nitro/host/build-application.js");
-    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
-
-    expect(outputDir).toBe(serviceOutputDir);
-    await expect(readFile(hostMiddlewarePath, "utf8")).resolves.toContain("middleware");
-    await expect(readFile(join(serviceOutputDir, "config.json"), "utf8")).resolves.toContain(
-      '"version": 3',
-    );
   });
 
   it("builds isolated Vercel Nitro surfaces and stitches workflow functions", async () => {

@@ -10,6 +10,10 @@ import {
   resolvePackageSourceDirectoryPath,
 } from "#internal/application/package.js";
 
+export const EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY_ENV = "EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY";
+export const EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY_ENV =
+  "EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY";
+
 export interface ApplicationInfo {
   appRoot: string;
   outputDir: string;
@@ -17,9 +21,6 @@ export interface ApplicationInfo {
   workflowBuildDir: string;
   workflowSourceDir: string;
 }
-
-/** Overrides Vercel Build Output placement for an isolated framework service build. */
-export const EVE_INTERNAL_BUILD_OUTPUT_DIR_ENV = "EVE_INTERNAL_BUILD_OUTPUT_DIR";
 
 /**
  * Resolves an application root from the current working directory.
@@ -140,11 +141,6 @@ export function resolveSandboxCacheDirectory(appRoot: string): string {
  */
 export function resolveOutputDirectory(appRoot: string): string {
   if (isVercelBuildEnvironment()) {
-    const override = process.env[EVE_INTERNAL_BUILD_OUTPUT_DIR_ENV]?.trim();
-    if (override) {
-      return resolve(appRoot, override);
-    }
-
     return join(appRoot, ".vercel", "output");
   }
 

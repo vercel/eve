@@ -34,6 +34,8 @@ export interface CreateTarballVercelDeploymentFixtureInput {
   readonly runtimeEnv?: Readonly<Record<string, string>>;
   readonly scope?: string;
   readonly token: string;
+  /** Wait for the deployed eve health route after the Vercel build succeeds. */
+  readonly waitForHealth?: boolean;
 }
 
 /**
@@ -73,9 +75,11 @@ export async function createTarballVercelDeploymentFixture(
       token: input.token,
     });
 
-    await waitForDeploymentReady({
-      deploymentUrl,
-    });
+    if (input.waitForHealth !== false) {
+      await waitForDeploymentReady({
+        deploymentUrl,
+      });
+    }
 
     return {
       appRoot,
@@ -168,7 +172,7 @@ async function deployFixtureToVercel(input: {
   readonly scope?: string;
   readonly token: string;
 }): Promise<string> {
-  const args = ["dlx", VERCEL_CLI_PACKAGE, "deploy", "--json", "--yes", "--token", input.token];
+  const args = ["dlx", VERCEL_CLI_PACKAGE, "deploy", "--json", "--yes"];
 
   if (input.scope !== undefined && input.scope.trim().length > 0) {
     args.push("--scope", input.scope.trim());
@@ -186,6 +190,10 @@ async function deployFixtureToVercel(input: {
   const result = await runPnpmCommand({
     args,
     cwd: input.appRoot,
+    env: {
+      ...process.env,
+      VERCEL_TOKEN: input.token,
+    },
   });
   const deploymentUrl =
     extractDeploymentUrlFromJsonOutput(result.stdout) ??
@@ -205,6 +213,15 @@ async function deployFixtureToVercel(input: {
 }
 
 function extractDeploymentUrlFromJsonOutput(stdout: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(stdout);
+    const deploymentUrl = readDeploymentUrl(parsed);
+
+    if (deploymentUrl !== undefined) {
+      return deploymentUrl;
+    }
+  } catch {}
+
   for (const line of stdout.split(/\r?\n/u).reverse()) {
     const trimmedLine = line.trim();
 
@@ -213,19 +230,40 @@ function extractDeploymentUrlFromJsonOutput(stdout: string): string | undefined 
     }
 
     try {
-      const parsed = JSON.parse(trimmedLine) as {
-        url?: unknown;
-      };
+      const parsed: unknown = JSON.parse(trimmedLine);
+      const deploymentUrl = readDeploymentUrl(parsed);
 
-      if (typeof parsed.url !== "string" || parsed.url.trim().length === 0) {
-        continue;
+      if (deploymentUrl !== undefined) {
+        return deploymentUrl;
       }
-
-      return normalizeDeploymentUrl(parsed.url);
     } catch {}
   }
 
   return undefined;
+}
+
+function readDeploymentUrl(value: unknown): string | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  if (typeof value.url === "string" && value.url.trim().length > 0) {
+    return normalizeDeploymentUrl(value.url);
+  }
+
+  if (
+    isRecord(value.deployment) &&
+    typeof value.deployment.url === "string" &&
+    value.deployment.url.trim().length > 0
+  ) {
+    return normalizeDeploymentUrl(value.deployment.url);
+  }
+
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function extractDeploymentUrlFromText(output: string): string | undefined {

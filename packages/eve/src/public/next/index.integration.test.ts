@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -73,7 +73,8 @@ describe("withEve Vercel config", () => {
       ],
       services: {
         eve: {
-          buildCommand: "node 'node_modules/eve/bin/eve.js' build",
+          buildCommand:
+            "cd '../../..' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='.eve/vercel-services/eve/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='.vercel/output' && node 'node_modules/eve/bin/eve.js' build",
           framework: "eve",
           routes: [
             {
@@ -87,7 +88,7 @@ describe("withEve Vercel config", () => {
               ],
             },
           ],
-          root: ".",
+          root: ".eve/vercel-services/eve",
         },
       },
       version: 3,
@@ -95,25 +96,25 @@ describe("withEve Vercel config", () => {
     expect(rewrites).toBeUndefined();
   });
 
-  it("isolates a co-located eve service from the Next.js Build Output", async () => {
+  it("isolates a colocated generated eve service from the Next.js Build Output", async () => {
     const appRoot = await createTempAppRoot();
-    await mkdir(join(appRoot, "agent"), { recursive: true });
-    await writeFile(join(appRoot, "agent", "instructions.md"), "You are helpful.\n");
     process.chdir(appRoot);
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_URL", "preview.example.com");
 
     await resolveConfig(withEve<TestConfig>({}));
 
+    const serviceRoot = join(appRoot, ".eve", "vercel-services", "eve");
     const outputConfig = await readJsonFile(join(appRoot, ".vercel", "output", "config.json"));
+
+    expect((await stat(serviceRoot)).isDirectory()).toBe(true);
     expect(outputConfig).toMatchObject({
       services: {
         eve: {
           buildCommand:
-            "cd '..' && export EVE_INTERNAL_BUILD_OUTPUT_DIR='agent/.vercel/output' && node 'node_modules/eve/bin/eve.js' build",
-          entrypoint: "agent/instructions.md",
-          framework: "eve",
-          root: ".",
+            "cd '../../..' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='.eve/vercel-services/eve/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='.vercel/output' && node 'node_modules/eve/bin/eve.js' build",
+          root: ".eve/vercel-services/eve",
         },
       },
     });
@@ -146,7 +147,8 @@ describe("withEve Vercel config", () => {
       ],
       services: {
         eve: {
-          buildCommand: "node 'node_modules/eve/bin/eve.js' build",
+          buildCommand:
+            "cd '../../..' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='.eve/vercel-services/eve/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && node 'node_modules/eve/bin/eve.js' build",
           framework: "eve",
           routes: [
             {
@@ -160,7 +162,7 @@ describe("withEve Vercel config", () => {
               ],
             },
           ],
-          root: ".",
+          root: ".eve/vercel-services/eve",
         },
       },
       version: 3,
@@ -300,7 +302,8 @@ describe("withEve Vercel config", () => {
     expect(outputConfig).toMatchObject({
       services: {
         eve: {
-          buildCommand: "pnpm build:eve",
+          buildCommand:
+            "cd '../../..' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='.eve/vercel-services/eve/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='.vercel/output' && pnpm build:eve",
         },
       },
     });
@@ -350,7 +353,8 @@ describe("withEve Vercel config", () => {
       ],
       services: {
         "eve-billing": {
-          buildCommand: "pnpm build:billing-agent",
+          buildCommand:
+            "cd '../../../agents/billing' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-billing/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && pnpm build:billing-agent",
           framework: "eve",
           routes: [
             {
@@ -364,11 +368,12 @@ describe("withEve Vercel config", () => {
               ],
             },
           ],
-          root: "agents/billing",
+          root: ".eve/vercel-services/eve-billing",
           routePrefix: "/eve/agents/billing",
         },
         "eve-support": {
-          buildCommand: "node '../../node_modules/eve/bin/eve.js' build",
+          buildCommand:
+            "cd '../../../agents/support' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-support/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && node '../../node_modules/eve/bin/eve.js' build",
           framework: "eve",
           routes: [
             {
@@ -382,7 +387,7 @@ describe("withEve Vercel config", () => {
               ],
             },
           ],
-          root: "agents/support",
+          root: ".eve/vercel-services/eve-support",
           routePrefix: "/eve/agents/support",
         },
       },
@@ -466,7 +471,8 @@ describe("withEve Vercel config", () => {
       ],
       services: {
         "eve-billing": {
-          buildCommand: "node '../../node_modules/eve/bin/eve.js' build",
+          buildCommand:
+            "cd '../../../agents/billing' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-billing/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && node '../../node_modules/eve/bin/eve.js' build",
           framework: "eve",
           routes: [
             {
@@ -480,7 +486,7 @@ describe("withEve Vercel config", () => {
               ],
             },
           ],
-          root: "agents/billing",
+          root: ".eve/vercel-services/eve-billing",
           routePrefix: "/eve/agents/billing",
         },
         "eve-support": {

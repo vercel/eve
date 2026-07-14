@@ -42,6 +42,7 @@ export interface ApplicationBuildWorkspace {
  */
 export async function createApplicationBuildWorkspace(
   appRoot: string,
+  outputDirectory?: string,
 ): Promise<ApplicationBuildWorkspace> {
   const resolvedAppRoot = resolve(appRoot);
   const buildId = `${Date.now().toString(36)}-${randomUUID()}`;
@@ -62,7 +63,7 @@ export async function createApplicationBuildWorkspace(
     },
     publication: {
       output: {
-        finalDir: resolveOutputDirectory(resolvedAppRoot),
+        finalDir: outputDirectory ?? resolveOutputDirectory(resolvedAppRoot),
         stagedDir: join(rootDir, "output"),
       },
       summary: {
