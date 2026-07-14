@@ -1,25 +1,14 @@
 import { generateText, type LanguageModel, type ModelMessage, type TelemetryOptions } from "ai";
 
+import {
+  COMPACTION_CHECKPOINT_MARKER,
+  COMPACTION_PROMPT_ENVELOPE,
+  createCompactionPrompt,
+} from "#harness/compaction-prompt.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { CompactionConfig, ToolLoopHarnessConfig } from "#harness/types.js";
 
-const COMPACTION_SYSTEM_PROMPT = [
-  "You are a conversation summarizer.",
-  "Write a concise but useful summary for continuing the work.",
-  "Preserve the goal, important instructions, technical decisions, discoveries, open work, and relevant tool results.",
-  "Use the same language as the conversation.",
-  "Prefer short labeled sections such as Goal, Instructions, Discoveries, Accomplished, and Next steps when helpful.",
-  "Do not answer questions or invent facts.",
-].join(" ");
-
 const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
-const COMPACTION_TEXT_LIMIT = 280;
-const COMPACTION_COLLECTION_LIMIT = 3;
-
-interface CompactionTranscriptMessage {
-  readonly content: string;
-  readonly role: ModelMessage["role"];
-}
 
 /**
  * Element type of a non-string `ModelMessage.content` array.
@@ -37,6 +26,11 @@ type ModelMessageContentPart = Exclude<ModelMessage["content"], string>[number];
 export function estimateTokens(value: unknown): number {
   return JSON.stringify(value).length / 4;
 }
+
+const COMPACTION_PROMPT_OVERHEAD_TOKENS = estimateTokens([
+  { content: COMPACTION_PROMPT_ENVELOPE.system, role: "system" },
+  { content: COMPACTION_PROMPT_ENVELOPE.prompt, role: "user" },
+] satisfies ModelMessage[]);
 
 /**
  * Best available input-token count: the model-reported count from the last
@@ -64,13 +58,17 @@ export function getInputTokenCount(
 }
 
 /**
- * Returns true when the message history exceeds the compaction threshold.
+ * Returns true when the message history and fixed compaction-prompt envelope
+ * exceed the compaction threshold.
  */
 export function shouldCompact(
   messages: readonly ModelMessage[],
   config: CompactionConfig,
 ): boolean {
-  return getInputTokenCount(messages, config) > config.threshold;
+  return (
+    messages.length > 0 &&
+    getInputTokenCount(messages, config) + COMPACTION_PROMPT_OVERHEAD_TOKENS > config.threshold
+  );
 }
 
 /**
@@ -113,26 +111,24 @@ export async function compactMessages(
   headers?: Record<string, string>,
   abortSignal?: AbortSignal,
 ): Promise<ModelMessage[]> {
-  let keep = selectRecentWindowSize(messages, config);
+  const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
+  let keep = selectRecentWindowSize(conversation, config);
 
   while (true) {
-    const { older, recent } = splitMessagesForCompaction(messages, keep);
-    if (older.length === 0) {
+    const { older, recent } = splitMessagesForCompaction(conversation, keep);
+    if (older.length === 0 && previousCheckpoint === undefined) {
       return keepNonToolResultMessages(recent);
     }
 
-    const prunedOlder: CompactionTranscriptMessage[] = older.map((message) => ({
-      content: summarizeCompactionMessageContent(message),
-      role: message.role,
-    }));
+    const summaryPrompt = createCompactionPrompt({ messages: older, previousCheckpoint });
 
     const result = await generateText({
       abortSignal,
       headers,
       model,
-      prompt: formatCompactionPrompt(prunedOlder),
+      prompt: summaryPrompt.prompt,
       providerOptions,
-      system: COMPACTION_SYSTEM_PROMPT,
+      system: summaryPrompt.system,
       telemetry: telemetry ? { ...telemetry, functionId: "eve.compaction" } : undefined,
       temperature: 0,
     });
@@ -154,7 +150,7 @@ export async function compactMessages(
         : [];
 
     const compacted: ModelMessage[] = [
-      { content: "Summary of our conversation so far:", role: "user" },
+      { content: COMPACTION_CHECKPOINT_MARKER, role: "user" },
       { content: result.text, role: "assistant" },
       ...keptTail,
       ...trailingAssistantGuard,
@@ -166,6 +162,26 @@ export async function compactMessages(
 
     keep -= 1;
   }
+}
+
+function extractPreviousCheckpoint(messages: readonly ModelMessage[]): {
+  readonly conversation: ModelMessage[];
+  readonly previousCheckpoint: string | undefined;
+} {
+  const marker = messages[0];
+  const checkpoint = messages[1];
+  if (
+    marker?.role !== "user" ||
+    marker.content !== COMPACTION_CHECKPOINT_MARKER ||
+    checkpoint?.role !== "assistant"
+  ) {
+    return { conversation: [...messages], previousCheckpoint: undefined };
+  }
+
+  return {
+    conversation: messages.slice(2),
+    previousCheckpoint: assistantMessageText(checkpoint),
+  };
 }
 
 /**
@@ -268,115 +284,4 @@ function splitMessagesForCompaction(
     older: messages.slice(0, -keep),
     recent: messages.slice(-keep),
   };
-}
-
-function formatCompactionPrompt(messages: readonly CompactionTranscriptMessage[]): string {
-  const sections = messages
-    .filter((message) => message.content.trim().length > 0)
-    .map((message) => `### ${message.role}\n${message.content.trim()}`);
-
-  if (sections.length === 0) {
-    return "Summarize the conversation so far.";
-  }
-
-  return ["Conversation transcript:", ...sections].join("\n\n");
-}
-
-function summarizeCompactionMessageContent(message: ModelMessage): string {
-  if (typeof message.content === "string") {
-    return summarizeText(message.content);
-  }
-
-  return message.content
-    .map((part) => summarizeCompactionContentPart(part))
-    .filter((summary) => summary.length > 0)
-    .join("\n")
-    .trim();
-}
-
-function summarizeCompactionContentPart(part: ModelMessageContentPart): string {
-  switch (part.type) {
-    case "text":
-      return summarizeText(part.text);
-    case "reasoning":
-      return "";
-    case "file":
-      return part.filename
-        ? `Attached file ${part.filename} (${part.mediaType})`
-        : `Attached file attachment (${part.mediaType})`;
-    case "tool-call":
-      return summarizeToolCallPart(part);
-    case "tool-result":
-      return summarizeToolResultPart(part);
-    default:
-      return "";
-  }
-}
-
-function summarizeToolCallPart(part: { toolName: string; input?: unknown }): string {
-  const input = part.input !== undefined ? summarizeCompactValue(part.input) : "";
-  return input ? `Called ${part.toolName} with ${input}` : `Called ${part.toolName}`;
-}
-
-function summarizeToolResultPart(part: {
-  toolName: string;
-  output?: unknown;
-  isError?: boolean;
-}): string {
-  const output = part.output !== undefined ? summarizeCompactValue(part.output) : "";
-  const status = part.isError ? "errored" : "returned";
-  return output ? `Tool ${part.toolName} ${status} ${output}` : `Tool ${part.toolName} ${status}`;
-}
-
-function summarizeCompactValue(value: unknown, depth = 0): string {
-  if (value === null) return "null";
-  if (value === undefined) return "";
-  if (typeof value === "string") return summarizeText(value);
-  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
-    return String(value);
-  }
-
-  if (Array.isArray(value)) {
-    if (value.length === 0) {
-      return "array(0)";
-    }
-
-    if (depth >= 2) {
-      return `array(${value.length})`;
-    }
-
-    const entries = value
-      .slice(0, COMPACTION_COLLECTION_LIMIT)
-      .map((item) => summarizeCompactValue(item, depth + 1));
-    const suffix = value.length > COMPACTION_COLLECTION_LIMIT ? ", …" : "";
-    return `array(${value.length}: ${entries.join(", ")}${suffix})`;
-  }
-
-  if (typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>);
-    if (entries.length === 0) {
-      return "object(0)";
-    }
-
-    if (depth >= 2) {
-      return `object(${entries.length} keys)`;
-    }
-
-    const rendered = entries
-      .slice(0, COMPACTION_COLLECTION_LIMIT)
-      .map(([key, nested]) => `${key}=${summarizeCompactValue(nested, depth + 1)}`);
-    const suffix = entries.length > COMPACTION_COLLECTION_LIMIT ? ", …" : "";
-    return `object(${rendered.join(", ")}${suffix})`;
-  }
-
-  return "";
-}
-
-function summarizeText(value: string): string {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  if (normalized.length <= COMPACTION_TEXT_LIMIT) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, COMPACTION_TEXT_LIMIT).trimEnd()}…`;
 }

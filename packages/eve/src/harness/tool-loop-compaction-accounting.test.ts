@@ -206,7 +206,7 @@ describe("tool-loop structured compaction accounting", () => {
       createTestSession({
         compaction: {
           recentWindowSize: 10,
-          threshold: 101,
+          threshold: 500,
         },
       }),
       { message: "Compute something" },

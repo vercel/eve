@@ -1,6 +1,7 @@
 import type { EveEvalContext } from "eve/evals";
 
 import type { ModelFamily } from "./agent";
+import { SECOND_CHECKPOINT_MARKER } from "./constants";
 
 export async function testRedundantToolCalls(
   t: EveEvalContext,
@@ -22,8 +23,13 @@ export async function testRedundantToolCalls(
     input: { scope: "repository" },
     output: { completed: true, completionMarker: "REPOSITORY_INSPECTION_COMPLETE" },
   });
-  t.event("compaction.completed", { count: (count) => count >= 1 });
+  t.calledTool("advance-checkpoint", {
+    count: 1,
+    output: { checkpointMarker: SECOND_CHECKPOINT_MARKER, completed: true },
+  });
+  t.event("compaction.completed", { count: 2 });
   t.messageIncludes("REPOSITORY_INSPECTION_COMPLETE");
+  t.messageIncludes(SECOND_CHECKPOINT_MARKER);
 }
 
 export async function testStaleTodoWork(
@@ -46,6 +52,11 @@ export async function testStaleTodoWork(
     count: 1,
     output: { completed: true, workUnit: "source-analysis" },
   });
-  t.event("compaction.completed", { count: (count) => count >= 1 });
+  t.calledTool("advance-checkpoint", {
+    count: 1,
+    output: { checkpointMarker: SECOND_CHECKPOINT_MARKER, completed: true },
+  });
+  t.event("compaction.completed", { count: 2 });
   t.messageIncludes("SOURCE_ANALYSIS_COMPLETE");
+  t.messageIncludes(SECOND_CHECKPOINT_MARKER);
 }
