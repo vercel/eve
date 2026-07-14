@@ -3,8 +3,8 @@ import { rm } from "node:fs/promises";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { materializeAuthoredModules } from "#internal/materialized-authored-modules.js";
 import {
-  activateDevelopmentRuntimeArtifactsSnapshot,
   activateDevelopmentRuntimeArtifactsSnapshotTransaction,
+  pruneDevelopmentRuntimeArtifactsSnapshots,
   stageDevelopmentRuntimeArtifactsSnapshot,
   type DevelopmentRuntimeArtifactsActivation,
   type DevelopmentRuntimeArtifactsSnapshot,
@@ -13,6 +13,13 @@ import {
 export interface DevelopmentGeneration extends DevelopmentRuntimeArtifactsSnapshot {
   readonly fingerprint: string;
 }
+
+interface DevelopmentGenerationPruneState {
+  requested: boolean;
+  running: Promise<void> | undefined;
+}
+
+const developmentGenerationPruneStates = new Map<string, DevelopmentGenerationPruneState>();
 
 export async function stageDevelopmentGeneration(
   compileResult: CompileAgentResult,
@@ -59,24 +66,75 @@ export async function activateDevelopmentGeneration(input: {
   readonly appRoot: string;
   readonly generation: DevelopmentGeneration;
 }): Promise<void> {
-  await activateDevelopmentRuntimeArtifactsSnapshot({
-    appRoot: input.appRoot,
-    snapshot: input.generation,
-  });
+  const activation = await activateDevelopmentGenerationTransaction(input);
+  activation.commit();
 }
 
 export async function activateDevelopmentGenerationTransaction(input: {
   readonly appRoot: string;
   readonly generation: DevelopmentGeneration;
 }): Promise<DevelopmentRuntimeArtifactsActivation> {
-  return await activateDevelopmentRuntimeArtifactsSnapshotTransaction({
+  const activation = await activateDevelopmentRuntimeArtifactsSnapshotTransaction({
     appRoot: input.appRoot,
     snapshot: input.generation,
   });
+  let settled = false;
+  return {
+    commit() {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      activation.commit();
+      requestDevelopmentGenerationPrune(input.appRoot);
+    },
+    async rollback() {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      await activation.rollback();
+    },
+  };
 }
 
 export async function discardDevelopmentGeneration(
   generation: DevelopmentGeneration,
 ): Promise<void> {
   await rm(generation.snapshotRoot, { force: true, recursive: true });
+}
+
+function requestDevelopmentGenerationPrune(appRoot: string): void {
+  const state = developmentGenerationPruneStates.get(appRoot) ?? {
+    requested: false,
+    running: undefined,
+  };
+  developmentGenerationPruneStates.set(appRoot, state);
+  state.requested = true;
+  if (state.running === undefined) {
+    startDevelopmentGenerationPruning(appRoot, state);
+  }
+}
+
+function startDevelopmentGenerationPruning(
+  appRoot: string,
+  state: DevelopmentGenerationPruneState,
+): void {
+  state.running = (async () => {
+    while (state.requested) {
+      state.requested = false;
+      await pruneDevelopmentRuntimeArtifactsSnapshots({ appRoot });
+    }
+  })()
+    .catch((error) => {
+      console.warn(`[eve:dev] failed to prune runtime generations: ${String(error)}`);
+    })
+    .finally(() => {
+      state.running = undefined;
+      if (state.requested) {
+        startDevelopmentGenerationPruning(appRoot, state);
+      } else {
+        developmentGenerationPruneStates.delete(appRoot);
+      }
+    });
 }

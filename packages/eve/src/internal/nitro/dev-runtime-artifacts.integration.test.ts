@@ -335,8 +335,8 @@ describe("development runtime artifact snapshots", () => {
 
     await pruneDevelopmentRuntimeArtifactsSnapshots({
       appRoot,
+      gracePeriodMs: 5_000,
       now,
-      recentWindowMs: 5_000,
       retainCount: 2,
     });
 
@@ -346,7 +346,7 @@ describe("development runtime artifact snapshots", () => {
     expect(existsSync(staleSnapshotRoot)).toBe(false);
   });
 
-  it("retains every activated generation until lease-aware pruning exists", async () => {
+  it("records when the active generation is superseded", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-activated-retention-");
     const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
     const firstSnapshotRoot = join(snapshotsRoot, "first");
@@ -354,52 +354,97 @@ describe("development runtime artifact snapshots", () => {
 
     for (const snapshotRoot of [firstSnapshotRoot, nextSnapshotRoot]) {
       await mkdir(snapshotRoot, { recursive: true });
-      await utimes(snapshotRoot, new Date(1_000), new Date(1_000));
-      await activateDevelopmentRuntimeArtifactsSnapshot({
-        appRoot,
-        snapshot: {
-          runtimeAppRoot: join(snapshotRoot, "source"),
-          snapshotRoot,
-          snapshotSourceRoot: join(snapshotRoot, "source"),
-          sourceRoot: appRoot,
-        },
-      });
     }
-
-    await pruneDevelopmentRuntimeArtifactsSnapshots({
-      appRoot,
-      now: 1_000_000,
-      recentWindowMs: 0,
-      retainCount: 0,
+    const createSnapshot = (snapshotRoot: string) => ({
+      runtimeAppRoot: join(snapshotRoot, "source"),
+      snapshotRoot,
+      snapshotSourceRoot: join(snapshotRoot, "source"),
+      sourceRoot: appRoot,
     });
+    await activateDevelopmentRuntimeArtifactsSnapshot({
+      appRoot,
+      snapshot: createSnapshot(firstSnapshotRoot),
+    });
+    const beforeRetirement = Date.now();
+    await activateDevelopmentRuntimeArtifactsSnapshot({
+      appRoot,
+      snapshot: createSnapshot(nextSnapshotRoot),
+    });
+    const afterRetirement = Date.now();
 
-    expect(existsSync(firstSnapshotRoot)).toBe(true);
-    expect(existsSync(nextSnapshotRoot)).toBe(true);
+    const retirement = JSON.parse(
+      await readFile(join(firstSnapshotRoot, "retired.json"), "utf8"),
+    ) as { retiredAt: number };
+    expect(retirement.retiredAt).toBeGreaterThanOrEqual(beforeRetirement);
+    expect(retirement.retiredAt).toBeLessThanOrEqual(afterRetirement);
+    expect(existsSync(join(nextSnapshotRoot, "retired.json"))).toBe(false);
   });
 
-  it("preserves snapshots referenced by active durable workflow data", async () => {
-    const appRoot = await createScratchDirectory("eve-dev-runtime-artifacts-prune-durable-");
+  it("retains the active, five newest retired, and recently retired generations", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-retired-pruning-");
     const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
     const activeSnapshotRoot = join(snapshotsRoot, "active");
-    const posixParkedTurnSnapshotRoot = join(snapshotsRoot, "parked-turn-posix");
-    const windowsParkedTurnSnapshotRoot = join(snapshotsRoot, "parked-turn-windows");
-    const completedTurnSnapshotRoot = join(snapshotsRoot, "completed-turn");
-    const staleSnapshotRoot = join(snapshotsRoot, "stale");
-    const oldSnapshotTime = new Date(1_000);
-    const now = 1_000_000;
+    const withinGraceSnapshotRoot = join(snapshotsRoot, "within-grace");
+    const expiredSnapshotRoots = Array.from({ length: 6 }, (_, index) =>
+      join(snapshotsRoot, `expired-${String(index)}`),
+    );
+    const now = 10_000_000;
+    const gracePeriodMs = 30 * 60 * 1_000;
 
     for (const snapshotRoot of [
       activeSnapshotRoot,
-      posixParkedTurnSnapshotRoot,
-      windowsParkedTurnSnapshotRoot,
-      completedTurnSnapshotRoot,
-      staleSnapshotRoot,
+      withinGraceSnapshotRoot,
+      ...expiredSnapshotRoots,
     ]) {
       await mkdir(snapshotRoot, { recursive: true });
-      await writeFile(join(snapshotRoot, "marker.txt"), snapshotRoot);
-      await utimes(snapshotRoot, oldSnapshotTime, oldSnapshotTime);
+      await writeFile(join(snapshotRoot, "activated"), "");
     }
+    await writeFile(
+      join(withinGraceSnapshotRoot, "retired.json"),
+      `${JSON.stringify({ retiredAt: now - gracePeriodMs + 1 })}\n`,
+    );
+    for (const [index, snapshotRoot] of expiredSnapshotRoots.entries()) {
+      await writeFile(
+        join(snapshotRoot, "retired.json"),
+        `${JSON.stringify({ retiredAt: now - gracePeriodMs - index - 1 })}\n`,
+      );
+    }
+    await activateDevelopmentRuntimeArtifactsSnapshot({
+      appRoot,
+      snapshot: {
+        runtimeAppRoot: join(activeSnapshotRoot, "source"),
+        snapshotRoot: activeSnapshotRoot,
+        snapshotSourceRoot: join(activeSnapshotRoot, "source"),
+        sourceRoot: appRoot,
+      },
+    });
 
+    await pruneDevelopmentRuntimeArtifactsSnapshots({
+      appRoot,
+      now,
+    });
+
+    expect(existsSync(activeSnapshotRoot)).toBe(true);
+    expect(existsSync(withinGraceSnapshotRoot)).toBe(true);
+    for (const snapshotRoot of expiredSnapshotRoots.slice(0, 4)) {
+      expect(existsSync(snapshotRoot)).toBe(true);
+    }
+    for (const snapshotRoot of expiredSnapshotRoots.slice(4)) {
+      expect(existsSync(snapshotRoot)).toBe(false);
+    }
+  });
+
+  it("starts a full grace period for an activated generation from an older format", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-legacy-retirement-");
+    const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
+    const activeSnapshotRoot = join(snapshotsRoot, "active");
+    const legacySnapshotRoot = join(snapshotsRoot, "legacy");
+    const now = 1_000_000;
+
+    for (const snapshotRoot of [activeSnapshotRoot, legacySnapshotRoot]) {
+      await mkdir(snapshotRoot, { recursive: true });
+      await writeFile(join(snapshotRoot, "activated"), "");
+    }
     await activateDevelopmentRuntimeArtifactsSnapshot({
       appRoot,
       snapshot: {
@@ -409,86 +454,67 @@ describe("development runtime artifact snapshots", () => {
         sourceRoot: appRoot,
       },
     });
-    await mkdir(join(appRoot, ".workflow-data", "default", "runs"), { recursive: true });
-    await writeFile(
-      join(appRoot, ".workflow-data", "default", "runs", "parked-turn.json"),
-      `${JSON.stringify(
-        {
-          status: "running",
-          input: {
-            serializedContext: {
-              "eve.bundle": {
-                source: {
-                  appRoot: join(posixParkedTurnSnapshotRoot, "source", "app").replaceAll("\\", "/"),
-                  kind: "disk",
-                },
-              },
-            },
-          },
-          workflowId: "workflow//eve//turnWorkflow",
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    await writeFile(
-      join(appRoot, ".workflow-data", "default", "runs", "parked-turn-windows.json"),
-      `${JSON.stringify(
-        {
-          status: "running",
-          input: {
-            serializedContext: {
-              "eve.bundle": {
-                source: {
-                  appRoot: join(windowsParkedTurnSnapshotRoot, "source", "app").replaceAll(
-                    "/",
-                    "\\",
-                  ),
-                  kind: "disk",
-                },
-              },
-            },
-          },
-          workflowId: "workflow//eve//turnWorkflow",
-        },
-        null,
-        2,
-      )}\n`,
-    );
-
-    await writeFile(
-      join(appRoot, ".workflow-data", "default", "runs", "completed-turn.json"),
-      `${JSON.stringify(
-        {
-          status: "completed",
-          input: {
-            serializedContext: {
-              "eve.bundle": {
-                source: {
-                  appRoot: join(completedTurnSnapshotRoot, "source", "app").replaceAll("\\", "/"),
-                  kind: "disk",
-                },
-              },
-            },
-          },
-          workflowId: "workflow//eve//turnWorkflow",
-        },
-        null,
-        2,
-      )}\n`,
-    );
     await pruneDevelopmentRuntimeArtifactsSnapshots({
       appRoot,
+      gracePeriodMs: 100,
       now,
-      recentWindowMs: 0,
       retainCount: 0,
     });
 
-    await expect(readdir(snapshotsRoot)).resolves.toEqual(
-      expect.arrayContaining(["active", "parked-turn-posix", "parked-turn-windows"]),
+    expect(existsSync(legacySnapshotRoot)).toBe(true);
+    await expect(readFile(join(legacySnapshotRoot, "retired.json"), "utf8")).resolves.toBe(
+      `${JSON.stringify({ retiredAt: now })}\n`,
     );
-    expect(existsSync(completedTurnSnapshotRoot)).toBe(false);
-    expect(existsSync(staleSnapshotRoot)).toBe(false);
+
+    await pruneDevelopmentRuntimeArtifactsSnapshots({
+      appRoot,
+      gracePeriodMs: 100,
+      now: now + 101,
+      retainCount: 0,
+    });
+    expect(existsSync(activeSnapshotRoot)).toBe(true);
+    expect(existsSync(legacySnapshotRoot)).toBe(false);
+  });
+
+  it("applies retirement policy without inspecting local Workflow storage", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-world-independent-pruning-");
+    const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
+    const activeSnapshotRoot = join(snapshotsRoot, "active");
+    const retiredSnapshotRoot = join(snapshotsRoot, "retired");
+
+    for (const snapshotRoot of [activeSnapshotRoot, retiredSnapshotRoot]) {
+      await mkdir(snapshotRoot, { recursive: true });
+      await writeFile(join(snapshotRoot, "activated"), "");
+    }
+    await writeFile(
+      join(retiredSnapshotRoot, "retired.json"),
+      `${JSON.stringify({ retiredAt: 1 })}\n`,
+    );
+    await activateDevelopmentRuntimeArtifactsSnapshot({
+      appRoot,
+      snapshot: {
+        runtimeAppRoot: join(activeSnapshotRoot, "source"),
+        snapshotRoot: activeSnapshotRoot,
+        snapshotSourceRoot: join(activeSnapshotRoot, "source"),
+        sourceRoot: appRoot,
+      },
+    });
+    const runsDirectory = join(appRoot, ".workflow-data", "default", "runs");
+    await mkdir(runsDirectory, { recursive: true });
+    await writeFile(
+      join(runsDirectory, "active-turn.json"),
+      `${JSON.stringify({ snapshotRoot: retiredSnapshotRoot, status: "running" })}\n`,
+    );
+
+    await pruneDevelopmentRuntimeArtifactsSnapshots({
+      appRoot,
+      gracePeriodMs: 0,
+      now: 2,
+      retainCount: 0,
+    });
+
+    expect(existsSync(activeSnapshotRoot)).toBe(true);
+    expect(existsSync(retiredSnapshotRoot)).toBe(false);
   });
 
   it("removes a partially staged snapshot when staging fails", async () => {
