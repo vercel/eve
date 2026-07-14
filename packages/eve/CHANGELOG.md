@@ -1,5 +1,18 @@
 # eve
 
+## 0.24.0
+
+### Minor Changes
+
+- 1f85922: Replace the `ExperimentalWorkflow` marker with `experimental_workflow(options)` and move the per-program `maxSubagents` setting from `defineAgent({ limits })` to that Workflow tool definition.
+
+### Patch Changes
+
+- ce5c06d: `ToolContext` now exposes `toolName`, the final runtime tool name, so executors can share routing, authorization, and observability logic without duplicating path-derived or qualified names.
+- e0f09b4: The `eve dev` schedule dispatch route now reuses the module loader path resolved when the server is built, preventing module resolution failures in the bundled Windows dev server.
+- d194243: Fix Microsoft Teams HITL cards to show tool arguments, resume the recorded channel thread for message and invoke submissions, and authorize submissions as the Teams user who clicked the card.
+- 4649f70: Local `vercel build` runs now select the hosted Workflow runtime and prewarm sandbox templates, so their output can be deployed with `vercel deploy --prebuilt`. Builds that require templates fail with setup guidance when Vercel OIDC credentials are unavailable instead of emitting broken prebuilt output.
+
 ## 0.23.0
 
 ### Minor Changes
