@@ -17,4 +17,10 @@ export const resources: Resource[] = [
       "A Slack agent template with webhook handling, Vercel Connect, a starter agent, and an example tool ready to deploy on Vercel.",
     href: "https://vercel.com/templates/eve/eve-slack-agent",
   },
+  {
+    title: "Weather Agent Fixture",
+    description:
+      "A small representative eve app with agent config, instructions, a typed weather tool, and a markdown skill.",
+    href: "https://github.com/vercel/eve/tree/main/apps/fixtures/weather-agent",
+  },
 ];
