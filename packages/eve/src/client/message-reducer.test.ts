@@ -649,6 +649,134 @@ describe("defaultMessageReducer", () => {
     ]);
   });
 
+  it("keeps text from a resumed step as a separate part", () => {
+    const reducer = defaultMessageReducer();
+    let data = reducer.initial();
+
+    data = reducer.reduce(
+      data,
+      createStepStartedEvent({
+        sequence: 0,
+        stepIndex: 1,
+        turnId: "turn_1",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createReasoningCompletedEvent({
+        reasoning: "Need to fetch email.",
+        sequence: 1,
+        stepIndex: 1,
+        turnId: "turn_1",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createMessageCompletedEvent({
+        message: "I'll use Outlook to list today's messages.",
+        sequence: 2,
+        stepIndex: 1,
+        turnId: "turn_1",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createActionsRequestedEvent({
+        actions: [
+          {
+            callId: "call_1",
+            input: { top: 50 },
+            kind: "tool-call",
+            toolName: "outlook__me_ListMessages",
+          },
+        ],
+        sequence: 3,
+        stepIndex: 1,
+        turnId: "turn_1",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createAuthorizationRequiredEvent({
+        description: "Authorization required for outlook",
+        name: "outlook",
+        sequence: 4,
+        stepIndex: 1,
+        turnId: "turn_1",
+        webhookUrl: "https://agent.example.com/eve/v1/connections/outlook/callback/hook",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createAuthorizationCompletedEvent({
+        name: "outlook",
+        outcome: "authorized",
+        sequence: 5,
+        stepIndex: 1,
+        turnId: "turn_1",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createStepStartedEvent({
+        sequence: 6,
+        stepIndex: 1,
+        turnId: "turn_1",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createReasoningCompletedEvent({
+        reasoning: "Authorization is complete, so fetch the messages.",
+        sequence: 7,
+        stepIndex: 1,
+        turnId: "turn_1",
+      }),
+    );
+    data = reducer.reduce(
+      data,
+      createMessageCompletedEvent({
+        message: "Got it. Now I'll fetch today's messages.",
+        sequence: 8,
+        stepIndex: 1,
+        turnId: "turn_1",
+      }),
+    );
+
+    const assistant = data.messages.find((message) => message.id === "turn_1:assistant");
+    const textParts = assistant?.parts.filter((part) => part.type === "text");
+    const reasoningParts = assistant?.parts.filter((part) => part.type === "reasoning");
+
+    expect(textParts).toEqual([
+      {
+        state: "done",
+        stepIndex: 1,
+        text: "I'll use Outlook to list today's messages.",
+        type: "text",
+      },
+      {
+        state: "done",
+        stepIndex: 1,
+        text: "Got it. Now I'll fetch today's messages.",
+        type: "text",
+      },
+    ]);
+    expect(reasoningParts).toEqual([
+      {
+        state: "done",
+        stepIndex: 1,
+        text: "Need to fetch email.",
+        type: "reasoning",
+      },
+      {
+        state: "done",
+        stepIndex: 1,
+        text: "Authorization is complete, so fetch the messages.",
+        type: "reasoning",
+      },
+    ]);
+  });
+
   it("removes streamed text for a null message completion", () => {
     const reducer = defaultMessageReducer();
     let data = reducer.reduce(
